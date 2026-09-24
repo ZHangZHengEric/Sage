@@ -183,6 +183,12 @@ Skills are loaded lazily from a skill provider. Official filesystem, shell,
 network, and media tools execute only through host-provided sandbox interfaces;
 they do not fall back to unrestricted process or filesystem access.
 
+Tool failure content is model-facing: it retains diagnostic error types, paths,
+and structured provider output. The separate `error.message` is a localized
+host/UI summary. Both the live model ledger and Session replay preserve the
+diagnostics. Only explicitly side-effect-free preflight failures are marked
+`side_effect_state=not_applied`; failures after a write still require reconciliation.
+
 ### Context and history
 
 The Context assembler converts canonical Session history into a provider
@@ -474,6 +480,10 @@ Skill loading is selected through `skill.loading`, independently of the Skill
 catalog/source and `load_skill` tool providers. The built-in
 `sage.skill.loading.lazy` plugin accepts `max_active_tokens` (positive integer,
 default `6000`). This bounds the combined active Skill context, not model output.
+The available-skills catalog keeps every enabled name and its full description,
+including multiline YAML descriptions, without a separate count or character
+cap. Skill bodies are fetched only on load. The overall model context budget
+still applies; an oversized loaded Skill reports its estimated size and limit.
 
 ```yaml
 runtime:

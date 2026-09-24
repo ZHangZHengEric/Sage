@@ -98,6 +98,64 @@ async def test_discovery_and_context_metadata_never_copy_skill_to_workspace():
 
 
 @pytest.mark.asyncio
+async def test_available_skills_catalog_keeps_full_description():
+    long_description = (
+        "Built-in default production strategy when no selected personalized "
+        "Skill covers the full video. Use for a confirmed total duration "
+        "longer than 30 seconds."
+    )
+    assert len(long_description) > 50
+    provider = InMemorySkillProvider(
+        (
+            SkillBundle(
+                descriptor=SkillDescriptor(
+                    name="long-video",
+                    description=long_description,
+                    source_id="test",
+                ),
+                files={"SKILL.md": b"# Long"},
+                content_hash="sha256:" + "a" * 64,
+            ),
+        )
+    )
+
+    segments = await AvailableSkillsContextProvider(provider).segments(
+        command(), run_id="run_1"
+    )
+
+    assert f"<skill_description>{long_description}</skill_description>" in (
+        segments[0].content
+    )
+    assert "..." not in segments[0].content
+
+
+@pytest.mark.asyncio
+async def test_catalog_keeps_all_skills_beyond_old_size_and_count_limits():
+    from xml.etree import ElementTree
+
+    skills = [bundle(f"skill-{index:03}", "# Skill") for index in range(130)]
+    description = "Long <description> & selection guidance. " * 400
+    skills[0] = skills[0].model_copy(
+        update={
+            "descriptor": skills[0].descriptor.model_copy(
+                update={"description": description}
+            )
+        }
+    )
+    provider = InMemorySkillProvider(tuple(reversed(skills)))
+    segments = await AvailableSkillsContextProvider(provider).segments(
+        command(), run_id="run_1"
+    )
+    document = ElementTree.fromstring(f"<root>{segments[0].content}</root>")
+    entries = document.findall("available_skills/skill")
+    assert [entry.findtext("skill_name") for entry in entries] == [
+        skill.descriptor.name for skill in skills
+    ]
+    assert entries[0].findtext("skill_description") == description
+    assert provider.fetches == []
+
+
+@pytest.mark.asyncio
 async def test_only_explicit_load_fetches_and_copies_the_selected_skill_once():
     provider, workspace, _, loader = loader_for(
         bundle("alpha", "# Alpha"), bundle("beta", "# Beta")
@@ -337,6 +395,8 @@ async def test_single_oversized_skill_is_rejected_before_copy_or_activation():
     with pytest.raises(SageV2Error) as caught:
         await loader.load("huge", run_id="run_1")
     assert caught.value.info.code == "skill.active_budget_exceeded"
+    assert caught.value.info.metadata["side_effect_state"] == "not_applied"
+    assert "limit 100" in caught.value.info.message
     assert workspace.materializations == []
     assert await loader.loaded(run_id="run_1") == ()
 
@@ -433,3 +493,48 @@ async def test_inherited_skills_obey_current_grant_and_materialize_for_new_run()
     assert not any(name == "beta" for _, name in provider.fetches)
     loader.catalog = FilteredSkillCatalog(provider, ())
     assert await loader.loaded(run_id="next") == ()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("style", ["plain", "folded", "literal"])
+async def test_filesystem_catalog_preserves_complete_yaml_description(tmp_path, style):
+    root = tmp_path / "long-skill"
+    root.mkdir()
+    first = "selection condition " * 4000
+    second = "Keep the final routing condition."
+    if style == "plain":
+        header = f'description: "{first}{second}"\n'
+        expected = first + second
+    else:
+        indicator = ">-" if style == "folded" else "|-"
+        header = f"description: {indicator}\n  {first}\n  {second}\n"
+        expected = first + (" " if style == "folded" else "\n") + second
+    (root / "SKILL.md").write_text(f"---\n{header}---\n# Body\n", encoding="utf-8")
+    provider = FilesystemSkillProvider((tmp_path,))
+    listed = await provider.list_skills(run_id="run_1")
+    assert listed[0].description == expected
+    assert (
+        await provider.get_skill("long-skill", run_id="run_1")
+    ).description == expected
+
+
+@pytest.mark.asyncio
+async def test_skill_preflight_failure_is_known_but_materialization_failure_is_not():
+    provider, workspace, activations, loader = loader_for(bundle("alpha", "# Alpha"))
+    with pytest.raises(SageV2Error) as missing:
+        await loader.load("missing", run_id="run_1")
+    assert missing.value.info.metadata["side_effect_state"] == "not_applied"
+    assert "missing" in missing.value.info.message
+
+    class InterruptedWorkspace:
+        async def materialize(self, *args, **kwargs):
+            raise RuntimeError("response lost after copying files")
+
+    loader = SkillLoader(
+        catalog=provider,
+        source=provider,
+        workspace=InterruptedWorkspace(),
+        activations=activations,
+    )
+    with pytest.raises(RuntimeError, match="response lost"):
+        await loader.load("alpha", run_id="run_1")

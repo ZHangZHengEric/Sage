@@ -19,6 +19,41 @@ from pathlib import Path
 
 from ..contracts import FileOperation, NetworkMode
 
+_MACOS_DEVELOPER_READ_ROOTS = (
+    "/Library/Developer/CommandLineTools",
+    "/Applications/Xcode.app/Contents/Developer",
+    "/Applications/Xcode-beta.app/Contents/Developer",
+)
+
+
+def _macos_developer_read_roots(
+    *,
+    environ=None,
+    selected_link: Path = Path("/var/db/xcode_select_link"),
+) -> tuple[str, ...]:
+    """Developer trees that /usr/bin/python3 must read through libxcselect."""
+    roots: list[str] = list(_MACOS_DEVELOPER_READ_ROOTS)
+    extra = (os.environ if environ is None else environ).get("DEVELOPER_DIR")
+    if extra:
+        roots.append(str(extra))
+    try:
+        if selected_link.exists() or selected_link.is_symlink():
+            roots.append(str(selected_link.resolve()))
+    except OSError:
+        pass
+    seen: set[str] = set()
+    unique: list[str] = []
+    for path in roots:
+        # Xcode's command shims load frameworks and resources beside Developer
+        # (for example Contents/SharedFrameworks), not only inside that tree.
+        developer = Path(path)
+        if developer.name == "Developer" and developer.parent.name == "Contents":
+            path = str(developer.parent)
+        if path and path not in seen:
+            seen.add(path)
+            unique.append(path)
+    return tuple(unique)
+
 
 # Keep the trampoline in memory. Executing a helper file from a workspace
 # checkout would let a prior command rewrite code that runs BEFORE isolation.
@@ -585,6 +620,9 @@ class LocalResourceBoundary:
 
             reads = [
                 "/System/Library",
+                # Apple-installed frameworks can be symlinked here from
+                # /System/Library (e.g. Xcode's MobileDevice dependency).
+                "/Library/Apple/System/Library",
                 "/usr/bin",
                 "/usr/sbin",
                 "/usr/lib",
@@ -595,7 +633,7 @@ class LocalResourceBoundary:
                 "/bin",
                 "/sbin",
                 "/Library/Frameworks",
-                "/Library/Developer/CommandLineTools",
+                *_macos_developer_read_roots(),
                 "/opt/homebrew/bin",
                 "/opt/homebrew/lib",
                 "/opt/homebrew/libexec",
@@ -614,7 +652,10 @@ class LocalResourceBoundary:
                 "(allow file-read* "
                 + " ".join(f"(subpath {quote(p)})" for p in reads)
                 + ")",
-                '(allow file-read* (literal "/dev/null") (literal "/dev/urandom") (literal "/dev/random"))',
+                '(allow file-read* (literal "/dev/null") (literal "/dev/urandom") (literal "/dev/random") (literal "/var/db/xcode_select_link"))',
+                # xcodebuild checks the host's accepted license before the
+                # system Python shim can resolve its interpreter.
+                '(allow file-read* (literal "/Library/Preferences/com.apple.dt.Xcode.plist"))',
                 '(allow file-write* (literal "/dev/null"))',
             ]
             if not spec.process.read_only and spec.filesystem.allowed_operations & {
