@@ -20,6 +20,7 @@ from sagents.v2.contracts.errors import (
     ErrorCategory,
     RuntimeErrorInfo,
     SageV2Error,
+    errors_before_side_effect,
 )
 
 
@@ -127,7 +128,8 @@ class SkillLoader:
         self, name: str, *, run_id: str, budget_tokens: int | None = None
     ) -> LoadedSkill:
         limit = self.max_active_tokens if budget_tokens is None else budget_tokens
-        descriptor = await self.catalog.get_skill(name, run_id=run_id)
+        with errors_before_side_effect("skill.lookup_failed"):
+            descriptor = await self.catalog.get_skill(name, run_id=run_id)
         existing = {
             value.descriptor.name: value
             for value in await self.activations.list_loaded(run_id=run_id)
@@ -142,31 +144,35 @@ class SkillLoader:
             )
             return existing
 
-        # This is the first operation that is allowed to read the Level-2 bundle.
-        bundle = await self.source.fetch(name, run_id=run_id)
-        if bundle.descriptor.name != descriptor.name:
-            raise self._error(
-                "skill.identity_mismatch", "skill source identity changed"
+        with errors_before_side_effect("skill.load_preflight_failed"):
+            # This is the first operation that is allowed to read the Level-2 bundle.
+            bundle = await self.source.fetch(name, run_id=run_id)
+            if bundle.descriptor.name != descriptor.name:
+                raise self._error(
+                    "skill.identity_mismatch", "skill source identity changed"
+                )
+            destination = f"{self.workspace_root}/skills/{name}"
+            try:
+                instructions = bundle.files["SKILL.md"].decode("utf-8")
+            except UnicodeDecodeError as exc:
+                raise self._error("skill.invalid_utf8", "SKILL.md must be UTF-8") from exc
+            loaded = LoadedSkill(
+                run_id=run_id,
+                descriptor=descriptor,
+                workspace_path=destination,
+                content_hash=bundle.content_hash,
+                instructions=instructions,
+                file_list=tuple(sorted(bundle.files)),
+                loaded_at=utc_now(),
             )
-        destination = f"{self.workspace_root}/skills/{name}"
-        try:
-            instructions = bundle.files["SKILL.md"].decode("utf-8")
-        except UnicodeDecodeError as exc:
-            raise self._error("skill.invalid_utf8", "SKILL.md must be UTF-8") from exc
-        loaded = LoadedSkill(
-            run_id=run_id,
-            descriptor=descriptor,
-            workspace_path=destination,
-            content_hash=bundle.content_hash,
-            instructions=instructions,
-            file_list=tuple(sorted(bundle.files)),
-            loaded_at=utc_now(),
-        )
-        if self.token_estimator(self._context_content(loaded)) > limit:
-            raise self._error(
-                "skill.active_budget_exceeded",
-                "skill instructions exceed the active context budget",
-            )
+            estimated_tokens = self.token_estimator(self._context_content(loaded))
+            if estimated_tokens > limit:
+                raise self._error(
+                    "skill.active_budget_exceeded",
+                    f"skill {name!r} instructions exceed the active context budget "
+                    f"({estimated_tokens} estimated tokens; "
+                    f"limit {limit})",
+                )
         workspace_path = await self.workspace.materialize(
             bundle, run_id=run_id, destination=destination
         )

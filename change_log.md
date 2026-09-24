@@ -2,6 +2,8 @@
 
 面向版本用户的完整说明保存在 [`release_notes/`](release_notes/)；本文件记录持续开发变更。
 
+- **2026-09-24** v2 工具失败保留模型可用的错误类型、路径和结构化返回；历史回放恢复旧错误诊断；网页抓取不再将 HTTP 错误页当作成功结果。Skill 列表完整保留描述并支持多行 YAML，仅加载内容受 active token 预算约束；加载前校验和 Shell 环境参数错误不再误判为未知写入。补齐 macOS 系统 Python 的 Xcode 只读依赖。
+
 - **2026-09-23 22:20** macOS 沙箱只读白名单补上 Xcode Contents/Developer，避免系统 python3 被 libxcselect 拦住。
 
 - **2026-09-23 21:25** v2 available_skills 目录改为完整 skill 描述，不再截成前 50 字。
