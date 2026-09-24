@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Query
 
-from app.server_v2.routers.deps import ServiceDep, AdminUser
+from app.server_v2.routers.deps import AdminDep, ConversationDep, AdminUser
 from app.server_v2.routers.schemas.common import ADMIN_ERRORS, ApiResponse
 from app.server_v2.routers.schemas.admin import AdminModelPublic, AdminThreadPublic
 from app.server_v2.routers.schemas.conversations import ThreadEventPage
@@ -11,18 +11,18 @@ router = APIRouter(prefix="/api/admin", tags=["admin"], responses=ADMIN_ERRORS)
 
 
 @router.get("/users", response_model=ApiResponse[list[UserPublic]])
-async def admin_users(_: AdminUser, service: ServiceDep):
-    return success(await service.admin.list_users())
+async def admin_users(_: AdminUser, service: AdminDep):
+    return success(await service.list_users())
 
 
 @router.get("/threads", response_model=ApiResponse[list[AdminThreadPublic]])
-async def admin_threads(_: AdminUser, service: ServiceDep):
-    return success(await service.admin.list_threads())
+async def admin_threads(_: AdminUser, service: AdminDep):
+    return success(await service.list_threads())
 
 
 @router.get("/models", response_model=ApiResponse[list[AdminModelPublic]])
-async def admin_models(_: AdminUser, service: ServiceDep):
-    return success(await service.admin.list_models())
+async def admin_models(_: AdminUser, service: AdminDep):
+    return success(await service.list_models())
 
 
 @router.get(
@@ -32,7 +32,7 @@ async def admin_models(_: AdminUser, service: ServiceDep):
 async def admin_thread_events(
     thread_id: str,
     user: AdminUser,
-    service: ServiceDep,
+    service: ConversationDep,
     limit: int = Query(default=500, ge=1, le=2000),
     offset: int | None = Query(
         default=None,
@@ -41,7 +41,7 @@ async def admin_thread_events(
     ),
 ):
     return success(
-        await service.conversations.events(
+        await service.events(
             thread_id, user.user_id, limit=limit, offset=offset, admin=True
         )
     )

@@ -30,6 +30,12 @@ class CatalogService:
         self.a2a_plugins = a2a_plugins
         self.skills = skills
 
+    async def get(self, user_id: str):
+        return await self.store.get(user_id)
+
+    async def list_all_models(self, user_ids: list[str]):
+        return await self.store.list_all_models(user_ids)
+
     @asynccontextmanager
     async def _lock(self, user_id: str, section: str):
         key = f"{user_id}\0{section}"

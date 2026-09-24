@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from contextlib import AsyncExitStack
 from dataclasses import dataclass, replace
+from typing import TYPE_CHECKING
 
 from sagents.v2.agent.factory import AgentCompositionFactory
 from sagents.v2.context.components import ContextComponentBundle
@@ -43,12 +44,39 @@ from app.server_v2.runtime.models import (
     create_catalog_provider,
 )
 
+if TYPE_CHECKING:
+    from sagents.v2.application import SAgentApplication
+
+    from app.server_v2.catalog.service import CatalogService
+    from app.server_v2.config.settings import ServerSettings
+    from app.server_v2.identity.context import RequestContexts
+    from app.server_v2.packages.management import ServerAgentManagement
+    from app.server_v2.runtime.execution import ProcessExecution
+    from app.server_v2.runtime.integrations.a2a import A2APluginCache
+    from app.server_v2.runtime.integrations.mcp import McpPluginCache
+    from app.server_v2.skills.service import SkillCatalogService
+    from app.server_v2.storage import ServerPaths
+
 
 @dataclass(frozen=True, slots=True)
 class TenantBinding:
     provider: object
     workspace: object
     external: tuple
+
+
+@dataclass(frozen=True, slots=True)
+class CatalogRunDependencies:
+    settings: ServerSettings
+    paths: ServerPaths
+    catalog: CatalogService
+    skill_catalog: SkillCatalogService
+    execution: ProcessExecution
+    application: SAgentApplication
+    mcp_plugins: McpPluginCache
+    a2a_plugins: A2APluginCache
+    contexts: RequestContexts
+    agent_management: ServerAgentManagement | None
 
 
 def prepare_tenant_binding(
@@ -105,8 +133,10 @@ async def open_model_lease(
     return model, _OwnedModelScope(model)
 
 
-async def compose_catalog_loop(service, command: StartRun, *, user_id: str):
-    catalog = await service.catalog.store.get(user_id)
+async def compose_catalog_loop(
+    service: CatalogRunDependencies, command: StartRun, *, user_id: str
+):
+    catalog = await service.catalog.get(user_id)
     frozen = await _composition(service, command, catalog, user_id=user_id)
     agent, records = frozen.agent, frozen.skills
     names = tuple(record.name for record in records)

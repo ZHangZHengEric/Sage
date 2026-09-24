@@ -27,7 +27,7 @@ class CatalogPackageModel:
 
     @asynccontextmanager
     async def provider(self, binding):
-        catalog = await self.catalog.store.get(self.user_id)
+        catalog = await self.catalog.get(self.user_id)
         route = self.routes.get(binding)
         selected = route.model if route else "default"
         record = package_model_record(catalog, selected)
@@ -208,7 +208,7 @@ class ServerPackageBuilderFactory:
         for registration in self.extensions:
             builder.register(registration)
         records = tuple(await self.skills.list_visible(user_id=user_id, role="user"))
-        catalog = await self.catalog.store.get(user_id)
+        catalog = await self.catalog.get(user_id)
         binding = prepare_tenant_binding(
             self.paths,
             self.mcp_plugins,

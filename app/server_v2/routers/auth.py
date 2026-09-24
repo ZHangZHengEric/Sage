@@ -1,10 +1,9 @@
 from fastapi import APIRouter, Response
 
-from app.server_v2.routers.deps import CurrentUser, ServiceDep
+from app.server_v2.routers.deps import CurrentUser, IdentityDep
 from app.server_v2.routers.schemas.common import AUTH_ERRORS, VALIDATION_ERRORS, ApiResponse, ErrorBody
 from app.server_v2.routers.schemas.identity import LoginBody, RegisterBody, TokenPayload, UserPublic
 from app.server_v2.routers.render import success
-from app.server_v2.identity.jwt import create_access_token
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
@@ -17,8 +16,8 @@ router = APIRouter(prefix="/api/auth", tags=["auth"])
         **VALIDATION_ERRORS,
     },
 )
-async def register(body: RegisterBody, service: ServiceDep):
-    user = await service.identity.register(body.username, body.password)
+async def register(body: RegisterBody, service: IdentityDep):
+    user = await service.register(body.username, body.password)
     return success(user.public_dict())
 
 
@@ -30,15 +29,9 @@ async def register(body: RegisterBody, service: ServiceDep):
         **VALIDATION_ERRORS,
     },
 )
-async def login(body: LoginBody, service: ServiceDep, response: Response):
-    user = await service.identity.authenticate(body.username, body.password)
-    token, expires_in = create_access_token(
-        user_id=user.user_id,
-        username=user.username,
-        role=user.role,
-        secret=service.settings.jwt_secret,
-        expire_hours=service.settings.jwt_expire_hours,
-    )
+async def login(body: LoginBody, service: IdentityDep, response: Response):
+    user = await service.authenticate(body.username, body.password)
+    token, expires_in = service.issue_token(user)
     response.set_cookie(
         "sage_server_v2",
         token,

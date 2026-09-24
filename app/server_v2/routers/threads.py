@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Query, Request
 from fastapi.responses import StreamingResponse
 
-from app.server_v2.routers.deps import ServiceDep, CurrentUser
+from app.server_v2.routers.deps import ConversationDep, CurrentUser
 from app.server_v2.routers.schemas.common import AUTH_ERRORS, ApiResponse
 from app.server_v2.routers.schemas.conversations import ThreadEventPage, ThreadPublic, ThreadResumeBody
 from app.server_v2.routers.render import success
@@ -17,9 +17,9 @@ router = APIRouter(
 
 
 @router.get("", response_model=ApiResponse[list[ThreadPublic]])
-async def list_threads(user: CurrentUser, service: ServiceDep):
+async def list_threads(user: CurrentUser, service: ConversationDep):
     return success(
-        [item.model_dump(mode="json") for item in await service.threads.list_for(user.user_id)]
+        [item.model_dump(mode="json") for item in await service.list_threads(user.user_id)]
     )
 
 
@@ -27,7 +27,7 @@ async def list_threads(user: CurrentUser, service: ServiceDep):
 async def get_thread_events(
     thread_id: str,
     user: CurrentUser,
-    service: ServiceDep,
+    service: ConversationDep,
     limit: int = Query(default=500, ge=1, le=2000),
     offset: int | None = Query(
         default=None,
@@ -36,7 +36,7 @@ async def get_thread_events(
     ),
 ):
     return success(
-        await service.conversations.events(
+        await service.events(
             thread_id, user.user_id, limit=limit, offset=offset
         )
     )
@@ -59,7 +59,7 @@ async def resume_thread(
     body: ThreadResumeBody,
     request: Request,
     user: CurrentUser,
-    service: ServiceDep,
+    service: ConversationDep,
 ):
     """Answer a waiting thread and stream the work the answer releases.
 
@@ -69,7 +69,7 @@ async def resume_thread(
     """
 
     last_event_id = (request.headers.get("last-event-id") or "").strip() or None
-    stream = await service.conversations.resume(
+    stream = await service.resume(
         thread_id,
         run_id=body.runId,
         user_id=user.user_id,
@@ -89,6 +89,6 @@ async def resume_thread(
 
 
 @router.delete("/{thread_id}", response_model=ApiResponse[None])
-async def delete_thread(thread_id: str, user: CurrentUser, service: ServiceDep):
-    await service.conversations.delete(thread_id, user.user_id, admin=user.role == "admin")
+async def delete_thread(thread_id: str, user: CurrentUser, service: ConversationDep):
+    await service.delete(thread_id, user.user_id, admin=user.role == "admin")
     return success()

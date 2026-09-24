@@ -65,7 +65,7 @@ class ServerPackageQueries:
             or await self.users.get_by_id(user_id) is None
         ):
             raise PermissionError("unknown package owner")
-        catalog = await self.catalog.store.get(user_id)
+        catalog = await self.catalog.get(user_id)
         skills = await self.skills.list_visible(user_id=user_id, role="user")
         return {
             **await base_resources(context),
@@ -105,7 +105,7 @@ class ServerPackageQueries:
             )
         if agent_id:
             agent = require_agent(
-                await self.catalog.store.get(context.actor.principal_id), agent_id
+                await self.catalog.get(context.actor.principal_id), agent_id
             )
             data["metadata"].update(id=f"user.{agent.id}", name=agent.name)
             definition = data["agents"]["assistant"]

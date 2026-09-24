@@ -24,10 +24,6 @@ class SageHttpAgent extends HttpAgent {
 }
 
 export function messageForAguiError(event, fallback) {
-  const code = event?.code || fallback?.code
-  if (code === 'server.model_not_configured') {
-    return '请先在「模型」页配置模型后再发送'
-  }
   return event?.message || fallback?.message || fallback || 'run failed'
 }
 

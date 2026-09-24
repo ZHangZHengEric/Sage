@@ -32,7 +32,7 @@ class AdminService:
                 "user_id": user_id,
                 "username": names.get(user_id, user_id),
             }
-            for user_id, model in await self.catalog.store.list_all_models(
+            for user_id, model in await self.catalog.list_all_models(
                 [user.user_id for user in users]
             )
         ]

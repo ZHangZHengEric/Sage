@@ -20,7 +20,7 @@ main.py         应用启动入口
 web/            前端
 ```
 
-业务代码按能力放入对应目录，记录、规则、服务和仓储就近组织；共享的数据库连接和运行时能力分别放在 `database/`、`runtime/`。对外接口统一放在 `routers/`，配置放在 `config/`。HTTP 写入调用所属业务服务；简单只读列表可以直接访问已装配的仓储，不增加纯转发用例。AG-UI 与 A2A 协议实现在 `conversations/agui/`、`conversations/a2a/`，共用 `conversations/admission.py` 受理 Run。catalog 的 Agent、模型、MCP、A2A peer 分列保存，写操作只更新对应列。
+业务代码按能力放入对应目录，记录、规则、服务和仓储就近组织；共享的数据库连接和运行时能力分别放在 `database/`、`runtime/`。对外接口统一放在 `routers/`，配置放在 `config/`。HTTP 接口注入所属业务服务，由服务访问仓储；简单列表从服务读取目录，不暴露仓储给路由。AG-UI 与 A2A 协议实现在 `conversations/agui/`、`conversations/a2a/`，共用 `conversations/admission.py` 受理 Run。catalog 的 Agent、模型、MCP、A2A peer 分列保存，写操作只更新对应列。
 
 生产启动只强制 MySQL：`SAGE_SERVER_MYSQL_URL`。AG-UI 回放读取 Sage Session 的 canonical RuntimeEvent；模型流式 delta 是进程内预览，断线重连通过预览序号续接，进程重启后以持久事件恢复。
 

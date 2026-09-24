@@ -52,7 +52,7 @@ class ServerPackagePolicy:
             )
         if (manifest.policies.budgets.max_steps or 100) > 10000:
             raise PermissionError("max_steps exceeds host ceiling 10000")
-        catalog = await self.catalog.store.get(user_id)
+        catalog = await self.catalog.get(user_id)
         models = {item.id for item in catalog.models} | {"default"}
         for route in manifest.models.values():
             if (
