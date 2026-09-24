@@ -8,10 +8,7 @@ built-in inventory, and implementation-status boundaries.
 Requires Python 3.12 or newer. The legacy Sage runtime remains 3.10+.
 """
 
-from sagents.v2.compat import require_python
 from sagents.v2._lazy import exported_names, resolve_export
-
-require_python()
 
 _EXPORTS = {
     "AgentManagementService": ("sagents.v2.agent.management", "AgentManagementService"),

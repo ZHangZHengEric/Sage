@@ -12,9 +12,10 @@ from sagents.v2.model.contracts import (
 )
 from sagents.v2.testing.plugins import ScriptedModelProvider, ScriptedModelStep
 
-from app.server_v2.bootstrap.app import create_app
-from app.server_v2.core.settings import ServerV2Settings
-from app.server_v2.bootstrap.host import ServerV2Service
+from app.server_v2.main import create_app
+from app.server_v2.core.settings import ServerSettings
+from app.server_v2.bootstrap import HostRepositories, ServerHost
+from app.server_v2.infrastructure.persistence import MemoryApiKeyStore
 from tests.app.server_v2.fakes import (
     MemoryCatalogStore,
     MemorySkillStore,
@@ -23,7 +24,7 @@ from tests.app.server_v2.fakes import (
 )
 
 
-def make_settings(tmp_path: Path, **overrides) -> ServerV2Settings:
+def make_settings(tmp_path: Path, **overrides) -> ServerSettings:
     values = {
         "host": "127.0.0.1",
         "port": 8090,
@@ -35,7 +36,7 @@ def make_settings(tmp_path: Path, **overrides) -> ServerV2Settings:
         "admin_password": "admin12345",
     }
     values.update(overrides)
-    return ServerV2Settings(**values)
+    return ServerSettings(**values)
 
 
 def scripted_hello(steps: int = 1) -> ScriptedModelProvider:
@@ -66,28 +67,31 @@ def make_test_service(
     model_provider=None,
     fallback=True,
     **overrides,
-) -> ServerV2Service:
+) -> ServerHost:
     settings = make_settings(tmp_path, **overrides)
     provider = model_provider
     if provider is None and fallback:
         provider = scripted_hello()
-    return ServerV2Service(
+    return ServerHost(
         settings,
         model_provider=provider,
-        users=MemoryUserStore(),
-        catalog=MemoryCatalogStore(),
-        threads=MemoryThreadIndex(),
-        skills=MemorySkillStore(),
+        repositories=HostRepositories(
+            users=MemoryUserStore(),
+            catalog=MemoryCatalogStore(),
+            threads=MemoryThreadIndex(),
+            skills=MemorySkillStore(),
+            api_keys=MemoryApiKeyStore(),
+        ),
     )
 
 
 @pytest.fixture
-def service(tmp_path: Path) -> ServerV2Service:
+def service(tmp_path: Path) -> ServerHost:
     return make_test_service(tmp_path)
 
 
 @pytest.fixture
-def client(service: ServerV2Service):
+def client(service: ServerHost):
     with TestClient(create_app(service=service)) as test_client:
         yield test_client
 

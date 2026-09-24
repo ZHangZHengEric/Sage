@@ -13,7 +13,7 @@ from app.server_v2.domain.api_keys import (
     revoke,
     split_token,
 )
-from app.server_v2.core.errors import ServerV2Error
+from app.server_v2.core.errors import ServerError
 
 
 class ApiKeyStore(Protocol):
@@ -79,7 +79,7 @@ class DatabaseApiKeyStore:
     async def revoke(self, key_id: str, owner_user_id: str) -> ApiKeyRecord:
         existing = await self.get(key_id)
         if existing is None or existing.owner_user_id != owner_user_id:
-            raise ServerV2Error("not_found", "api key not found")
+            raise ServerError("not_found", "api key not found")
         record = revoke(existing)
         await self._save(record)
         return record
@@ -157,7 +157,7 @@ class MemoryApiKeyStore:
     async def revoke(self, key_id: str, owner_user_id: str) -> ApiKeyRecord:
         existing = self._keys.get(key_id)
         if existing is None or existing.owner_user_id != owner_user_id:
-            raise ServerV2Error("not_found", "api key not found")
+            raise ServerError("not_found", "api key not found")
         record = revoke(existing)
         self._keys[key_id] = record
         return record

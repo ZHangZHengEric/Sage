@@ -1,4 +1,4 @@
-from app.server_v2.core.errors import ServerV2Error, map_sage_error, success
-from app.server_v2.core.settings import ServerV2Settings
+from app.server_v2.core.errors import ServerError, map_sage_error, success
+from app.server_v2.core.settings import ServerSettings
 
-__all__ = ["ServerV2Error", "ServerV2Settings", "map_sage_error", "success"]
+__all__ = ["ServerError", "ServerSettings", "map_sage_error", "success"]

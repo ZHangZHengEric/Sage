@@ -3,7 +3,7 @@ from pathlib import Path
 import pytest
 from sagents.v2.runtime.observability import StdoutLogSink
 
-from app.server_v2.bootstrap.app import create_app
+from app.server_v2.main import create_app
 from app.server_v2.application.manifest import server_v2_manifest
 from tests.app.server_v2.conftest import make_settings, make_test_service
 
@@ -131,14 +131,14 @@ async def test_start_writes_sagents_registration_to_stdout(tmp_path: Path, capsy
 
 @pytest.mark.asyncio
 async def test_server_concurrency_settings_reach_runtime(tmp_path, monkeypatch):
-    from app.server_v2.core.settings import ServerV2Settings
+    from app.server_v2.core.settings import ServerSettings
 
     monkeypatch.setenv("SAGE_SERVER_MYSQL_URL", "mysql://localhost/test")
     monkeypatch.setenv("SAGE_SERVER_MAX_CONCURRENT_RUNS", "24")
     monkeypatch.setenv("SAGE_SERVER_MAX_CONCURRENT_RUNS_PER_USER", "6")
     monkeypatch.setenv("SAGE_SERVER_MAX_PENDING_RUNS", "128")
     monkeypatch.setenv("SAGE_SERVER_MAX_MODEL_CLIENTS", "16")
-    parsed = ServerV2Settings.from_env(data_root=tmp_path)
+    parsed = ServerSettings.from_env(data_root=tmp_path)
     service = make_test_service(
         tmp_path,
         max_concurrent_runs=parsed.max_concurrent_runs,

@@ -5,9 +5,8 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from app.server_v2.bootstrap.app import create_app
-from app.server_v2.core.settings import DEFAULT_JWT_SECRET, ServerV2Settings
-from app.server_v2.main import ENV_FILE, load_env_file, main
+from app.server_v2.core.settings import DEFAULT_JWT_SECRET, ServerSettings
+from app.server_v2.main import create_app, main
 from app.server_v2.infrastructure.persistence import DatabaseUserStore
 from tests.app.server_v2.conftest import make_test_service, register_and_login
 
@@ -19,9 +18,9 @@ def test_default_jwt_secret_meets_hmac_minimum():
 def test_from_env_requires_mysql(tmp_path: Path, monkeypatch):
     monkeypatch.delenv("SAGE_SERVER_MYSQL_URL", raising=False)
     with pytest.raises(ValueError, match="MYSQL"):
-        ServerV2Settings.from_env(data_root=tmp_path)
+        ServerSettings.from_env(data_root=tmp_path)
     monkeypatch.setenv("SAGE_SERVER_MYSQL_URL", "mysql://sage@127.0.0.1/sage")
-    assert ServerV2Settings.from_env(data_root=tmp_path).mysql_url
+    assert ServerSettings.from_env(data_root=tmp_path).mysql_url
 
 
 def test_settings_read_mysql_jaeger_from_env(tmp_path: Path, monkeypatch):
@@ -30,7 +29,7 @@ def test_settings_read_mysql_jaeger_from_env(tmp_path: Path, monkeypatch):
     monkeypatch.setenv("SAGE_SERVER_JAEGER_PUBLIC_URL", "http://127.0.0.1:16686/jaeger")
     monkeypatch.setenv("SAGE_SERVER_LOG_LEVEL", "warning")
     monkeypatch.setenv("SAGE_SERVER_LOG_FORMAT", "json")
-    settings = ServerV2Settings.from_env(data_root=tmp_path)
+    settings = ServerSettings.from_env(data_root=tmp_path)
     assert settings.mysql_url == "mysql://sage@127.0.0.1/sage"
     assert settings.database_url() == "mysql+aiomysql://sage@127.0.0.1/sage"
     assert settings.jaeger_url == "http://sage-jaeger:4317"
@@ -53,23 +52,24 @@ def test_settings_reject_invalid_logging_choices(
     monkeypatch.setenv(name, value)
 
     with pytest.raises(ValueError, match=name):
-        ServerV2Settings.from_env(data_root=tmp_path)
+        ServerSettings.from_env(data_root=tmp_path)
 
 
 def test_main_preserves_server_logging_configuration(monkeypatch, tmp_path: Path):
     monkeypatch.setenv("SAGE_SERVER_MYSQL_URL", "mysql://sage@127.0.0.1/sage")
     monkeypatch.setenv("SAGE_SERVER_LOG_LEVEL", "warning")
     captured = {}
-    monkeypatch.setattr("app.server_v2.main.load_env_file", lambda: None)
-    monkeypatch.setattr("app.server_v2.main._pick_port", lambda host, port: port)
-    monkeypatch.setattr("app.server_v2.bootstrap.app.create_app", lambda settings: object())
+    monkeypatch.setattr("app.server_v2.main.load_dotenv", lambda *args, **kwargs: None)
+    monkeypatch.setattr("app.server_v2.main.create_app", lambda service: object())
 
     def fake_run(application, **kwargs):
         captured.update(kwargs)
 
     monkeypatch.setattr("app.server_v2.main.uvicorn.run", fake_run)
 
-    assert main(["--data-root", str(tmp_path)]) == 0
+    assert main(["--data-root", str(tmp_path), "--host", "0.0.0.0", "--port", "9001"]) == 0
+    assert captured["host"] == "0.0.0.0"
+    assert captured["port"] == 9001
     assert captured["log_level"] == "warning"
     assert captured["log_config"] is None
 
@@ -85,12 +85,18 @@ def test_main_loads_dotenv_from_package_root(tmp_path: Path, monkeypatch):
         ),
         encoding="utf-8",
     )
-    for name in ("SAGE_SERVER_MYSQL_URL",):
-        monkeypatch.delenv(name, raising=False)
-    assert load_env_file(env_file) == env_file
-    ServerV2Settings.from_env(data_root=tmp_path)
-    assert ENV_FILE.name == ".env"
-    assert ENV_FILE.parent.name == "server_v2"
+    monkeypatch.setenv("SAGE_SERVER_MYSQL_URL", "temporary")
+    monkeypatch.delenv("SAGE_SERVER_MYSQL_URL")
+    monkeypatch.setattr("app.server_v2.main.__file__", str(tmp_path / "main.py"))
+    captured = {}
+    monkeypatch.setattr(
+        "app.server_v2.main.create_app",
+        lambda service: captured.setdefault("settings", service.settings),
+    )
+    monkeypatch.setattr("app.server_v2.main.uvicorn.run", lambda *args, **kwargs: None)
+
+    assert main(["--data-root", str(tmp_path)]) == 0
+    assert captured["settings"].mysql_url == "mysql://sage@127.0.0.1/sage"
 
 
 def test_health(client: TestClient):
@@ -167,7 +173,13 @@ def test_create_app_wires_mysql_as_only_required_client(tmp_path: Path, monkeypa
         "SAGE_SERVER_MYSQL_URL", "mysql://root:sage@127.0.0.1:3306/sage_v2"
     )
     monkeypatch.delenv("SAGE_SERVER_JAEGER_URL", raising=False)
-    app = create_app(settings=ServerV2Settings.from_env(data_root=tmp_path))
+    captured = {}
+    monkeypatch.setattr(
+        "app.server_v2.main.uvicorn.run",
+        lambda app, **kwargs: captured.setdefault("app", app),
+    )
+    assert main(["--data-root", str(tmp_path)]) == 0
+    app = captured["app"]
     runtime = app.state.service
     assert runtime.database is not None
     assert runtime.database.name == "database"

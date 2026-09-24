@@ -34,7 +34,7 @@ from a2a.utils.errors import (
 
 from app.server_v2.adapters.a2a.context import key_from
 from app.server_v2.application.a2a import A2AService
-from app.server_v2.core.errors import ServerV2Error
+from app.server_v2.core.errors import ServerError
 
 _ERRORS: dict[str, type[A2AError]] = {
     "not_found": TaskNotFoundError,
@@ -184,7 +184,7 @@ class _translated:
         return None
 
     def __exit__(self, exc_type, exc, traceback) -> bool:
-        if not isinstance(exc, ServerV2Error):
+        if not isinstance(exc, ServerError):
             return False
         factory = _ERRORS.get(exc.reason, InternalError)
         raise factory(message=exc.message) from exc

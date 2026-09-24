@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 
 from pydantic import BaseModel, Field
 
-from app.server_v2.core.errors import ServerV2Error
+from app.server_v2.core.errors import ServerError
 
 
 class ThreadRecord(BaseModel):
@@ -21,7 +21,7 @@ def require_owned_thread(
     record: ThreadRecord | None, user_id: str
 ) -> ThreadRecord:
     if record is None or record.user_id != user_id:
-        raise ServerV2Error("not_found", "thread not found")
+        raise ServerError("not_found", "thread not found")
     return record
 
 

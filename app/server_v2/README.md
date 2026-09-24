@@ -8,7 +8,8 @@ application/    用例：identity、catalog、skills、conversations、packages�
 domain/         记录和纯规则，不读库
 infrastructure/ MySQL 客户端与表、仓储、工作区、模型池、MCP/A2A 客户端
 adapters/       agui/、a2a/ 协议翻译
-bootstrap/      进程装配（create_app、ServerV2Service）
+bootstrap.py    进程宿主（ServerHost、请求上下文）
+main.py         应用装配与启动入口
 core/           配置、错误、JWT、HTTP、观测
 web/            前端
 ```
@@ -25,12 +26,10 @@ Server 只支持单 worker：SessionStore 只接受一个 writer（`multi_proces
 # 后端依赖（仓库根目录，Python 3.12+ 环境）
 python -m pip install -e '.[server-v2]'
 
-cd app/server_v2/web && npm install && npm run build
-cd ../../..
 python -m app.server_v2 --data-root /tmp/sage-server-v2
 ```
 
-开发也可开 Vite：`app/server_v2/web` 的 `npm run dev` 代理到 `8090`。
+Web 单独启动：在 `app/server_v2/web` 执行 `npm install && npm run dev`，Vite 将 API 请求代理到后端 `8090` 端口。构建静态文件可执行 `npm run build`，由独立的静态文件服务部署。
 
 读 `app/server_v2/.env`（进程环境变量优先）。生产必须设置 `SAGE_SERVER_JWT_SECRET`（至少 32 字节）。默认管理员：`admin` / `admin12345`。OpenAPI 在 `/docs`。
 

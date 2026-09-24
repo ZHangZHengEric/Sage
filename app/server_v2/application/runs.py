@@ -9,7 +9,7 @@ from sagents.v2.contracts.commands import CancelRun, ReplyInteraction, ResumeRun
 from sagents.v2.contracts.principals import RequestContext
 from sagents.v2.contracts.run_state import TERMINAL_RUN_STATES, RunState
 
-from app.server_v2.core.errors import ServerV2Error, map_error_info
+from app.server_v2.core.errors import ServerError, map_error_info
 from app.server_v2.infrastructure.models import bind_model_user, reset_model_user
 
 LOGGER = logging.getLogger(__name__)
@@ -75,7 +75,7 @@ class RunService:
 
         run = await self.sessions.get_run(run_id, context)
         if run.state != RunState.SUSPENDED or run.suspension_id is None:
-            raise ServerV2Error(
+            raise ServerError(
                 "conflict", f"run is {run.state.value}, not waiting for input"
             )
         suspension = await self.sessions.get_suspension(run.suspension_id, context)
@@ -97,7 +97,7 @@ class RunService:
             )
             answer = decide(interaction) if decide is not None else None
             if answer is None:
-                raise ServerV2Error(
+                raise ServerError(
                     "validation",
                     "the reply does not answer this interaction; allowed "
                     f"decisions are {', '.join(interaction.allowed_decisions)}",

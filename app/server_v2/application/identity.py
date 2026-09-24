@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from app.server_v2.core.errors import ServerV2Error
+from app.server_v2.core.errors import ServerError
 from app.server_v2.core.jwt import hash_password, verify_password
 from app.server_v2.domain.users import (
     Role,
@@ -26,7 +26,7 @@ class IdentityService:
     async def authenticate(self, username: str, password: str) -> UserRecord:
         user = await self.users.get_by_username(username)
         if user is None or not verify_password(password, user.password_hash):
-            raise ServerV2Error("unauthenticated", "invalid username or password")
+            raise ServerError("unauthenticated", "invalid username or password")
         return user
 
     async def ensure_admin(self, username: str, password: str) -> UserRecord:
@@ -49,7 +49,7 @@ class IdentityService:
         self, username: str, password: str, *, role: Role
     ) -> UserRecord:
         if len(password) < 6:
-            raise ServerV2Error("validation", "password is too short")
+            raise ServerError("validation", "password is too short")
         record = build_user_record(username, hash_password(password), role=role)
         reject_duplicate_username(await self.users.get_by_username(record.username))
         reject_second_admin(role, await self.users.admin())

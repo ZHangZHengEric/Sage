@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import pytest
 
-from app.server_v2.core.errors import ServerV2Error
+from app.server_v2.core.errors import ServerError
 from app.server_v2.domain.catalog import (
     McpServerRecord,
     UserCatalog,
@@ -28,7 +28,7 @@ def _payload(**overrides) -> dict[str, object]:
 
 
 def test_stdio_is_not_a_registrable_transport():
-    with pytest.raises(ServerV2Error) as exc:
+    with pytest.raises(ServerError) as exc:
         upsert_mcp(empty_catalog(), _payload(protocol="stdio", url=None))
 
     assert exc.value.reason == "validation"
@@ -36,7 +36,7 @@ def test_stdio_is_not_a_registrable_transport():
 
 def test_a_network_server_without_a_url_is_rejected_at_save():
     for url in (None, "", "   ", "not-a-url", "file:///etc/passwd"):
-        with pytest.raises(ServerV2Error) as exc:
+        with pytest.raises(ServerError) as exc:
             upsert_mcp(empty_catalog(), _payload(url=url))
         assert exc.value.reason == "validation"
 

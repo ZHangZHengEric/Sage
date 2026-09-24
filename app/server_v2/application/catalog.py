@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 from contextlib import asynccontextmanager
 
-from app.server_v2.core.errors import ServerV2Error
+from app.server_v2.core.errors import ServerError
 from app.server_v2.domain.catalog import (
     AgentRecord,
     ModelRecord,
@@ -23,9 +24,9 @@ from app.server_v2.infrastructure.mcp import discover_mcp_tools, to_mcp_config
 
 
 class CatalogService:
-    def __init__(self, store, locks, *, mcp_plugins, a2a_plugins, skills) -> None:
+    def __init__(self, store, *, mcp_plugins, a2a_plugins, skills) -> None:
         self.store = store
-        self.locks = locks
+        self.locks = tuple(asyncio.Lock() for _ in range(64))
         self.mcp_plugins = mcp_plugins
         self.a2a_plugins = a2a_plugins
         self.skills = skills
@@ -128,7 +129,7 @@ class CatalogService:
                 (item for item in catalog.mcp_servers if item.name == name), None
             )
             if current is None:
-                raise ServerV2Error("not_found", "mcp server not found")
+                raise ServerError("not_found", "mcp server not found")
             tools = await discover_mcp_tools(to_mcp_config(current))
             record = current.model_copy(update={"tools": list(dict.fromkeys(tools))})
             catalog.mcp_servers = [
@@ -170,7 +171,7 @@ class CatalogService:
                 (item for item in catalog.a2a_agents if item.name == name), None
             )
             if current is None:
-                raise ServerV2Error("not_found", "a2a agent not found")
+                raise ServerError("not_found", "a2a agent not found")
             skills = await discover_a2a_skills(to_a2a_config(current))
             record = current.model_copy(
                 update={"skills": list(dict.fromkeys(skills))}

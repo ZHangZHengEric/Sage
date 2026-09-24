@@ -1,3 +1,3 @@
-from app.server_v2.infrastructure.storage.paths import ServerV2Paths, prepare_server_v2_storage
+from app.server_v2.infrastructure.storage.paths import ServerPaths, prepare_server_v2_storage
 
-__all__ = ["ServerV2Paths", "prepare_server_v2_storage"]
+__all__ = ["ServerPaths", "prepare_server_v2_storage"]

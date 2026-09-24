@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from app.server_v2.application.composition import composition_metadata
-from app.server_v2.core.errors import ServerV2Error
+from app.server_v2.core.errors import ServerError
 from app.server_v2.domain.catalog import (
     UserCatalog,
     enabled_a2a_agents,
@@ -46,7 +46,7 @@ class RunAdmission:
     ) -> AdmittedRun:
         existing = await self.threads.find(session_id)
         if existing is not None and existing.user_id != user_id:
-            raise ServerV2Error("not_found", absent)
+            raise ServerError("not_found", absent)
         catalog = await self.catalog.get(user_id)
         requested = (
             resolve_thread_agent_id(existing, agent_id) if pin_existing else agent_id

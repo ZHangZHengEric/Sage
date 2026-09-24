@@ -13,7 +13,7 @@ from app.server_v2.adapters.agui.sse import (
     frame_to_agui_event,
     single_error_sse,
 )
-from app.server_v2.core.errors import ServerV2Error, map_sage_error
+from app.server_v2.core.errors import ServerError, map_sage_error
 from app.server_v2.core.observability.context import get_request_id
 
 
@@ -41,7 +41,7 @@ class ConversationService:
     ):
         record = await self.threads.find(thread_id)
         if record is None or (not admin and record.user_id != user_id):
-            raise ServerV2Error("not_found", "thread not found")
+            raise ServerError("not_found", "thread not found")
         limit = max(1, min(int(limit), 2000))
         context = self.context_for(record.user_id)
         try:
@@ -154,7 +154,7 @@ class ConversationService:
         run_id = validate_agui_id(run_id, field="runId")
         thread = await self.threads.find(thread_id)
         if thread is None or thread.user_id != user_id:
-            raise ServerV2Error("not_found", "thread not found")
+            raise ServerError("not_found", "thread not found")
 
         correlation_id = get_request_id()
         context = self.context_for(user_id, correlation_id=correlation_id)
@@ -164,7 +164,7 @@ class ConversationService:
             raise map_sage_error(exc) from exc
         waiting = [item for item in runs if item.state == RunState.SUSPENDED]
         if not waiting:
-            raise ServerV2Error("conflict", "this thread is not waiting for input")
+            raise ServerError("conflict", "this thread is not waiting for input")
         native = max(waiting, key=lambda item: item.created_at)
         restarted_after = native.last_run_sequence
 
@@ -195,7 +195,7 @@ class ConversationService:
     async def delete(self, thread_id: str, user_id: str, *, admin: bool = False) -> None:
         record = await self.threads.find(thread_id)
         if record is None or (not admin and record.user_id != user_id):
-            raise ServerV2Error("not_found", "thread not found")
+            raise ServerError("not_found", "thread not found")
         try:
             await self.sessions.delete(thread_id, self.context_for(record.user_id))
         except SageV2Error as exc:

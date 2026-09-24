@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from pydantic import BaseModel, Field
 from sagents.v2.contracts.common import new_id
 
-from app.server_v2.core.errors import ServerV2Error
+from app.server_v2.core.errors import ServerError
 
 TOKEN_PREFIX = "sage_a2a"
 
@@ -91,10 +91,10 @@ def normalize_scopes(scopes: list[str] | None) -> list[str]:
     requested = [str(item or "").strip() for item in scopes]
     unknown = [item for item in requested if item and item not in SUPPORTED_SCOPES]
     if unknown:
-        raise ServerV2Error("validation", f"unsupported scope: {unknown[0]}")
+        raise ServerError("validation", f"unsupported scope: {unknown[0]}")
     kept = [item for item in SUPPORTED_SCOPES if item in requested]
     if not kept:
-        raise ServerV2Error("validation", "at least one scope is required")
+        raise ServerError("validation", "at least one scope is required")
     return kept
 
 
@@ -127,13 +127,13 @@ def verify_secret(secret: str, key_hash: str) -> bool:
 
 def require_usable_key(record: ApiKeyRecord | None, secret: str) -> ApiKeyRecord:
     if record is None or record.revoked or not verify_secret(secret, record.key_hash):
-        raise ServerV2Error("unauthenticated", "invalid api key")
+        raise ServerError("unauthenticated", "invalid api key")
     return record
 
 
 def require_scope(record: ApiKeyRecord, scope: str) -> ApiKeyRecord:
     if not record.allows(scope):
-        raise ServerV2Error("forbidden", f"api key is missing scope {scope}")
+        raise ServerError("forbidden", f"api key is missing scope {scope}")
     return record
 
 
