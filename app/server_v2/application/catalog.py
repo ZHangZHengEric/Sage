@@ -10,7 +10,6 @@ from app.server_v2.core.errors import ServerError
 from app.server_v2.domain.catalog import (
     AgentRecord,
     ModelRecord,
-    UserCatalog,
     delete_a2a_agent,
     delete_agent,
     delete_mcp,
@@ -40,24 +39,6 @@ class CatalogService:
         async with self.locks[index]:
             yield
 
-    async def _replace(self, user_id: str, section: str, catalog: UserCatalog) -> None:
-        await self.store.replace_section(user_id, section, catalog)
-
-    async def get(self, user_id: str) -> UserCatalog:
-        return await self.store.get(user_id)
-
-    async def save(self, user_id: str, catalog: UserCatalog) -> UserCatalog:
-        return await self.store.save(user_id, catalog)
-
-    async def list_models(self, user_id: str) -> list[ModelRecord]:
-        return await self.store.list_models(user_id)
-
-    async def list_all_models(self, user_ids: list[str]):
-        return await self.store.list_all_models(user_ids)
-
-    async def default_model(self, user_id: str) -> ModelRecord | None:
-        return await self.store.default_model(user_id)
-
     async def upsert_model(self, user_id: str, payload: dict) -> ModelRecord:
         async with self._lock(user_id, "models"):
             return await self.store.upsert_model(user_id, payload)
@@ -66,14 +47,11 @@ class CatalogService:
         async with self._lock(user_id, "models"):
             await self.store.delete_model(user_id, model_id)
 
-    async def list_agents(self, user_id: str) -> list[AgentRecord]:
-        return (await self.store.get(user_id)).agents
-
     async def create_agent(self, user_id: str, payload: dict) -> AgentRecord:
         async with self._lock(user_id, "agents"):
             catalog = await self.store.get(user_id)
             record, catalog = upsert_agent(catalog, payload)
-            await self._replace(user_id, "agents", catalog)
+            await self.store.replace_section(user_id, "agents", catalog)
             return record
 
     async def get_agent(self, user_id: str, agent_id: str) -> dict:
@@ -91,22 +69,19 @@ class CatalogService:
             require_agent(catalog, agent_id)
             payload = {**payload, "id": agent_id}
             record, catalog = upsert_agent(catalog, payload)
-            await self._replace(user_id, "agents", catalog)
+            await self.store.replace_section(user_id, "agents", catalog)
             return record
 
     async def delete_agent(self, user_id: str, agent_id: str) -> None:
         async with self._lock(user_id, "agents"):
             catalog = await self.store.get(user_id)
-            await self._replace(user_id, "agents", delete_agent(catalog, agent_id))
-
-    async def list_mcp(self, user_id: str):
-        return (await self.store.get(user_id)).mcp_servers
+            await self.store.replace_section(user_id, "agents", delete_agent(catalog, agent_id))
 
     async def create_mcp(self, user_id: str, payload: dict):
         async with self._lock(user_id, "mcp_servers"):
             catalog = await self.store.get(user_id)
             record, catalog = upsert_mcp(catalog, payload)
-            await self._replace(user_id, "mcp_servers", catalog)
+            await self.store.replace_section(user_id, "mcp_servers", catalog)
             return record
 
     async def update_mcp(self, user_id: str, name: str, payload: dict):
@@ -114,13 +89,13 @@ class CatalogService:
             catalog = await self.store.get(user_id)
             payload = {**payload, "name": name}
             record, catalog = upsert_mcp(catalog, payload)
-            await self._replace(user_id, "mcp_servers", catalog)
+            await self.store.replace_section(user_id, "mcp_servers", catalog)
             return record
 
     async def delete_mcp(self, user_id: str, name: str) -> None:
         async with self._lock(user_id, "mcp_servers"):
             catalog = await self.store.get(user_id)
-            await self._replace(user_id, "mcp_servers", delete_mcp(catalog, name))
+            await self.store.replace_section(user_id, "mcp_servers", delete_mcp(catalog, name))
 
     async def refresh_mcp(self, user_id: str, name: str):
         async with self._lock(user_id, "mcp_servers"):
@@ -135,18 +110,15 @@ class CatalogService:
             catalog.mcp_servers = [
                 record if item.name == name else item for item in catalog.mcp_servers
             ]
-            await self._replace(user_id, "mcp_servers", catalog)
+            await self.store.replace_section(user_id, "mcp_servers", catalog)
         self.mcp_plugins.invalidate(user_id)
         return record
-
-    async def list_a2a_agents(self, user_id: str):
-        return (await self.store.get(user_id)).a2a_agents
 
     async def create_a2a_agent(self, user_id: str, payload: dict):
         async with self._lock(user_id, "a2a_agents"):
             catalog = await self.store.get(user_id)
             record, catalog = upsert_a2a_agent(catalog, payload)
-            await self._replace(user_id, "a2a_agents", catalog)
+            await self.store.replace_section(user_id, "a2a_agents", catalog)
             return record
 
     async def update_a2a_agent(self, user_id: str, name: str, payload: dict):
@@ -154,14 +126,14 @@ class CatalogService:
             catalog = await self.store.get(user_id)
             payload = {**payload, "name": name}
             record, catalog = upsert_a2a_agent(catalog, payload)
-            await self._replace(user_id, "a2a_agents", catalog)
+            await self.store.replace_section(user_id, "a2a_agents", catalog)
         self.a2a_plugins.invalidate(user_id)
         return record
 
     async def delete_a2a_agent(self, user_id: str, name: str) -> None:
         async with self._lock(user_id, "a2a_agents"):
             catalog = await self.store.get(user_id)
-            await self._replace(user_id, "a2a_agents", delete_a2a_agent(catalog, name))
+            await self.store.replace_section(user_id, "a2a_agents", delete_a2a_agent(catalog, name))
         self.a2a_plugins.invalidate(user_id)
 
     async def refresh_a2a_agent(self, user_id: str, name: str):
@@ -179,7 +151,7 @@ class CatalogService:
             catalog.a2a_agents = [
                 record if item.name == name else item for item in catalog.a2a_agents
             ]
-            await self._replace(user_id, "a2a_agents", catalog)
+            await self.store.replace_section(user_id, "a2a_agents", catalog)
         self.a2a_plugins.invalidate(user_id)
         return record
 
@@ -192,5 +164,5 @@ class CatalogService:
                 names=names,
                 catalog=catalog,
             )
-            await self._replace(user_id, "agents", catalog)
+            await self.store.replace_section(user_id, "agents", catalog)
             return skills

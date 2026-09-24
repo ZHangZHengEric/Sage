@@ -15,7 +15,7 @@ const messages = computed(() => messagesFromEvents(rawEvents.value))
 
 async function load() {
   const health = await api.health()
-  jaeger.value = health?.backends?.trace === 'otlp'
+  jaeger.value = health?.trace_enabled === true
   users.value = await api.adminUsers()
   threads.value = await api.adminThreads()
   models.value = await api.adminModels()

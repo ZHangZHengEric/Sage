@@ -14,7 +14,6 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.server_v2.api import register_routers
 from app.server_v2.bootstrap import ServerHost
 from app.server_v2.core.http import register_exception_handlers
-from app.server_v2.core.lifecycle import ResourceRegistry
 from app.server_v2.core.observability import (
     LoggingSettings,
     MetricsRegistry,
@@ -28,24 +27,20 @@ from app.server_v2.core.settings import ServerSettings
 def create_app(service: ServerHost) -> FastAPI:
     settings = service.settings
     database = service.database
-    init_logging(
-        LoggingSettings(
-            level=settings.log_level,
-            format=settings.log_format,
-            directory=settings.log_directory,
-        ),
-        service_name="sage-server",
-    )
-    registry = ResourceRegistry(
-        (database,) if database is not None else (),
-        probe_timeout_seconds=1.0,
-        stop_timeout_seconds=10.0,
-    )
+    if service.log_sink is None:
+        service.log_sink = init_logging(
+            LoggingSettings(
+                level=settings.log_level,
+                format=settings.log_format,
+                directory=settings.log_directory,
+            ),
+            service_name="sage-server",
+        )
     metrics = MetricsRegistry("sage-server")
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
-        await registry.start()
+        await database.start()
         try:
             await service.start()
             yield
@@ -53,7 +48,7 @@ def create_app(service: ServerHost) -> FastAPI:
             try:
                 await service.close()
             finally:
-                await registry.stop()
+                await database.stop()
 
     app = FastAPI(
         title="Sage Server v2",
@@ -62,7 +57,6 @@ def create_app(service: ServerHost) -> FastAPI:
         description="Multi-user AG-UI host for sagents.v2.",
     )
     app.state.service = service
-    app.state.resources = registry
     app.add_middleware(
         CORSMiddleware,
         allow_origins=["*"],
@@ -71,7 +65,7 @@ def create_app(service: ServerHost) -> FastAPI:
     )
     app.add_middleware(RequestIdMiddleware)
     register_exception_handlers(app)
-    app.include_router(build_observability_router(resources=registry, metrics=metrics))
+    app.include_router(build_observability_router(service=service, metrics=metrics))
     register_routers(app, jaeger=bool(settings.jaeger_url))
     return app
 

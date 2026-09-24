@@ -9,16 +9,16 @@ performing deletion.
 
 from __future__ import annotations
 
-import logging
 from collections.abc import AsyncIterator, Iterable
 from typing import Protocol
 
 from sagents.v2.contracts.principals import RequestContext
 from sagents.v2.contracts.run_state import EventCursor
 from sagents.v2.runtime.session.contracts import DerivedStateStore, SessionStore
+from sagents.v2.runtime.observability.logs import get_logger
 
 
-LOGGER = logging.getLogger(__name__)
+LOGGER = get_logger(__name__)
 
 
 class SessionStateCleaner(Protocol):
@@ -175,13 +175,15 @@ class AuthorizedSessionAccess:
             for cleaner in self._derived_state_cleaners:
                 try:
                     await cleaner.forget_session(deleted_session_id)
-                except Exception:
+                except Exception as exc:
                     # Canonical deletion is already committed. Derived cleanup must
                     # never turn that acknowledged fact into a client-visible failure.
                     LOGGER.exception(
-                        "failed to clean %s for deleted Session %s",
-                        type(cleaner).__name__,
-                        deleted_session_id,
+                        "session.derived_cleanup.failed",
+                        "failed to clean derived state for deleted Session",
+                        exc,
+                        cleaner=type(cleaner).__name__,
+                        session_id=deleted_session_id,
                     )
 
     async def _authorize(self, session_id: str, context: RequestContext) -> None:

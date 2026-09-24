@@ -61,15 +61,16 @@ def test_agui_run_writes_correlated_json_sagents_logs_to_stdout(tmp_path, capsys
         if '"format_version":"sage.log/v1"' in line
     ]
     events = {row["event"] for row in rows}
-    assert {
+    run_events = {
         "agui.run.started",
         "agui.run.completed",
         "agent.run.started",
         "agent.run.completed",
         "model.request.started",
         "model.request.completed",
-    } <= events
-    run_rows = [row for row in rows if row["event"] != "sagents.registered"]
+    }
+    assert run_events <= events
+    run_rows = [row for row in rows if row["event"] in run_events]
     assert run_rows
     assert {row["correlation_id"] for row in run_rows} == {"request-agui-1"}
 
@@ -192,8 +193,8 @@ def test_catalog_model_is_used_when_dispatcher_drops_contextvar(tmp_path, monkey
     from tests.app.server_v2.conftest import scripted_hello
 
     monkeypatch.setattr(
-        "app.server_v2.domain.catalog.ModelRecord.to_provider",
-        lambda self: scripted_hello(),
+        "app.server_v2.infrastructure.models._build_catalog_provider",
+        lambda record: scripted_hello(),
     )
     service = make_test_service(tmp_path, fallback=False)
     with TestClient(create_app(service=service)) as client:

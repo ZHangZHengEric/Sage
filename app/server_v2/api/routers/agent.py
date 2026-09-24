@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Request
 from fastapi.responses import StreamingResponse
 
-from app.server_v2.api.deps import ConversationDep, CurrentUser, ServiceDep
+from app.server_v2.api.deps import ServiceDep, CurrentUser
 from app.server_v2.api.schemas import AUTH_ERRORS, AgentRunBody, ErrorBody
 
 router = APIRouter(prefix="/api", tags=["agent"], responses=AUTH_ERRORS)
@@ -20,12 +20,13 @@ router = APIRouter(prefix="/api", tags=["agent"], responses=AUTH_ERRORS)
     },
 )
 async def run_agent(
-    body: AgentRunBody, request: Request,     user: CurrentUser,
-    conversations: ConversationDep,
+    body: AgentRunBody,
+    request: Request,
+    user: CurrentUser,
     service: ServiceDep,
 ):
     last_event_id = (request.headers.get("last-event-id") or "").strip() or None
-    stream = await conversations.start(
+    stream = await service.conversations.start(
         body.to_agui(), user_id=user.user_id, last_event_id=last_event_id
     )
     return StreamingResponse(
@@ -34,6 +35,6 @@ async def run_agent(
         headers={
             "Cache-Control": "no-cache",
             "X-Accel-Buffering": "no",
-            "X-Sage-AG-UI-Replay": service.backends()["agui_replay"],
+            "X-Sage-AG-UI-Replay": "session-store",
         },
     )

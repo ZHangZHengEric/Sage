@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import pytest
 from sagents.v2.model.contracts import ModelEventKind, ModelRequest
 
@@ -26,14 +28,15 @@ async def test_host_provider_uses_session_bind_when_contextvar_empty(monkeypatch
     catalog = MemoryCatalogStore()
     await _save_demo_model(catalog)
     monkeypatch.setattr(
-        "app.server_v2.domain.catalog.ModelRecord.to_provider",
-        lambda self: scripted_hello(),
+        "app.server_v2.infrastructure.models._build_catalog_provider",
+        lambda record: scripted_hello(),
     )
 
-    async def session_for_run(run_id: str) -> str | None:
-        return "thread-1" if run_id == "run_sagents" else None
+    async def get_run(run_id: str):
+        assert run_id == "run_sagents"
+        return SimpleNamespace(session_id="thread-1")
 
-    provider = HostModelProvider(catalog, session_for_run=session_for_run)
+    provider = HostModelProvider(catalog, session_store=SimpleNamespace(get_run=get_run))
     provider.bind_session_user("thread-1", "user-1")
 
     events = [

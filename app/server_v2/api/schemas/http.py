@@ -166,7 +166,7 @@ class HealthPayload(BaseModel):
     protocol: str
     protocol_version: str
     runtime: str
-    backends: dict[str, str] = Field(default_factory=dict)
+    trace_enabled: bool
 
 
 class UserPublic(BaseModel):

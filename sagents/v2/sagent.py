@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import asyncio
 import inspect
-import logging
 from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass
 from typing import Protocol
@@ -38,9 +37,10 @@ from sagents.v2.contracts.session_commit import (
 from sagents.v2.runtime.contracts import RuntimePort
 from sagents.v2.memory.service import MemoryService
 from sagents.v2.runtime.session import AuthorizedSessionAccess
+from sagents.v2.runtime.observability.logs import get_logger
 
 
-LOGGER = logging.getLogger(__name__)
+LOGGER = get_logger(__name__)
 
 
 class RunDriver(Protocol):
@@ -494,8 +494,13 @@ class SAgent:
         except asyncio.CancelledError:
             try:
                 await self._close_driver(run_id, driver)
-            except BaseException:
-                LOGGER.exception("failed to close cancelled Run driver %s", run_id)
+            except BaseException as exc:
+                LOGGER.exception(
+                    "agent.driver.close_failed",
+                    "failed to close cancelled Run driver",
+                    exc,
+                    run_id=run_id,
+                )
             raise
         except Exception as exc:
             current = await self.runtime.get_run(run_id)
@@ -517,11 +522,16 @@ class SAgent:
                         if inspect.isawaitable(settled):
                             await settled
                 await self._close_driver(run_id, driver)
-            except BaseException:
+            except BaseException as exc:
                 # Terminal state is already an authoritative durable fact.
                 # Resource cleanup failure must remain diagnostic rather than
                 # changing a completed client outcome into an execution error.
-                LOGGER.exception("failed to close terminal Run driver %s", run_id)
+                LOGGER.exception(
+                    "agent.driver.close_failed",
+                    "failed to close terminal Run driver",
+                    exc,
+                    run_id=run_id,
+                )
         return result
 
     async def _close_driver(self, run_id, driver) -> None:

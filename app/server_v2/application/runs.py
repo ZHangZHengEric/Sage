@@ -3,22 +3,22 @@
 from __future__ import annotations
 
 import asyncio
-import logging
 
 from sagents.v2.contracts.commands import CancelRun, ReplyInteraction, ResumeRun
 from sagents.v2.contracts.principals import RequestContext
 from sagents.v2.contracts.run_state import TERMINAL_RUN_STATES, RunState
 
 from app.server_v2.core.errors import ServerError, map_error_info
+from app.server_v2.core.observability.logging import get_logger
 from app.server_v2.infrastructure.models import bind_model_user, reset_model_user
 
-LOGGER = logging.getLogger(__name__)
+LOGGER = get_logger(__name__)
 
 
 class RunService:
-    def __init__(self, *, runtime, sessions, execution) -> None:
-        self.runtime = runtime
-        self.sessions = sessions
+    def __init__(self, *, application, session_access, execution) -> None:
+        self.application = application
+        self.session_access = session_access
         self.execution = execution
 
     async def cancel_run(
@@ -38,7 +38,7 @@ class RunService:
         fact.
         """
 
-        runtime = self.runtime.entrypoint().runtime
+        runtime = self.application.entrypoint().runtime
         receipt = await runtime.cancel_run(
             CancelRun(
                 run_id=run_id,
@@ -73,13 +73,14 @@ class RunService:
         afterwards could be answering a question that has since changed.
         """
 
-        run = await self.sessions.get_run(run_id, context)
+        access = self.session_access
+        run = await access.get_run(run_id, context)
         if run.state != RunState.SUSPENDED or run.suspension_id is None:
             raise ServerError(
                 "conflict", f"run is {run.state.value}, not waiting for input"
             )
-        suspension = await self.sessions.get_suspension(run.suspension_id, context)
-        runtime = self.runtime.entrypoint().runtime
+        suspension = await access.get_suspension(run.suspension_id, context)
+        runtime = self.application.entrypoint().runtime
         if suspension.interaction_id is None:
             receipt = await runtime.resume_run(
                 ResumeRun(
@@ -92,7 +93,7 @@ class RunService:
                 context,
             )
         else:
-            interaction = await self.sessions.get_interaction(
+            interaction = await access.get_interaction(
                 suspension.interaction_id, context
             )
             answer = decide(interaction) if decide is not None else None
@@ -147,7 +148,7 @@ class RunService:
         already running under a drive that is someone else's.
         """
 
-        agent = self.runtime.entrypoint()
+        agent = self.application.entrypoint()
         run = await agent.runtime.get_run(run_id)
         if run.state != RunState.RESUMING or self.execution.driving(run_id):
             return
@@ -197,7 +198,13 @@ class RunService:
         bound = False
         try:
             bound = self.execution.bind_model(session_id, user_id)
-            stream = await self.runtime.open_run(interface, command, context)
+            application = self.application
+            stream = await application.run_interface(
+                interface,
+                command,
+                context,
+                agent_id=application.resolved_plan.entrypoint_agent_id,
+            )
             run_id = stream.handle.run_id
             if (
                 self.execution.driving(run_id)
@@ -230,7 +237,13 @@ class RunService:
             if on_finished is not None:
                 await on_finished(snapshot)
         except Exception as exc:
-            LOGGER.error("background %s run %s crashed", label, run_id, exc_info=exc)
+            LOGGER.exception(
+                "run.background.failed",
+                "background run crashed",
+                exc,
+                run_id=run_id,
+                label=label,
+            )
         finally:
             try:
                 await stream.detach()
@@ -244,8 +257,12 @@ class RunService:
         try:
             await execution
         except Exception as exc:
-            LOGGER.error(
-                "background %s resume of run %s crashed", label, run_id, exc_info=exc
+            LOGGER.exception(
+                "run.background_resume.failed",
+                "background run resume crashed",
+                exc,
+                run_id=run_id,
+                label=label,
             )
         finally:
             self.execution.unbind_model(session_id)

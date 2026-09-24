@@ -8,7 +8,7 @@ import pytest
 
 from sagents.v2.agent.factory import AgentCompositionFactory
 from sagents.v2.contracts.commands import RunConfig
-from sagents.v2.contracts.errors import SageV2Error
+from sagents.v2.contracts.errors import ErrorCategory, RuntimeErrorInfo, SageV2Error
 from sagents.v2.skill.plugins.session import SessionDerivedSkillActivationRepository
 from sagents.v2.tool.plugins.ephemeral import EphemeralToolPlugin
 
@@ -39,10 +39,18 @@ async def _attach_without_host_sandbox(*args, **kwargs):
 async def test_run_owner_overrides_stale_worker_context_and_unknown_run_is_not_guessed():
     catalog = MemoryCatalogStore()
 
-    async def lookup(run):
-        return "session-b" if run == "run-b" else None
+    async def get_run(run):
+        if run == "run-b":
+            return SimpleNamespace(session_id="session-b")
+        raise SageV2Error(
+            RuntimeErrorInfo(
+                code="session.run_missing",
+                category=ErrorCategory.VALIDATION,
+                message="run missing",
+            )
+        )
 
-    model = HostModelProvider(catalog, session_for_run=lookup)
+    model = HostModelProvider(catalog, session_store=SimpleNamespace(get_run=get_run))
     model.bind_session_user("session-b", "user-b")
     token = bind_model_user("user-a")
     try:
@@ -72,7 +80,7 @@ async def test_overlapping_session_bindings_are_not_removed_by_first_completion(
 
 
 @pytest.mark.asyncio
-async def test_cancelled_sdk_construction_closes_result_and_stays_off_event_loop():
+async def test_cancelled_sdk_construction_closes_result_and_stays_off_event_loop(monkeypatch):
     entered = asyncio.Event()
     release = threading.Event()
     loop = asyncio.get_running_loop()
@@ -89,8 +97,12 @@ async def test_cancelled_sdk_construction_closes_result_and_stays_off_event_loop
         assert release.wait(5)
         return Provider()
 
+    monkeypatch.setattr(
+        "app.server_v2.infrastructure.models._build_catalog_provider",
+        lambda record: create(),
+    )
     task = asyncio.create_task(
-        create_catalog_provider(SimpleNamespace(to_provider=create))
+        create_catalog_provider(SimpleNamespace())
     )
     try:
         await asyncio.wait_for(entered.wait(), 2)
@@ -122,7 +134,7 @@ async def test_dynamic_model_is_closed_after_run_or_composition_failure(
 
     monkeypatch.setattr(provider, "close", close, raising=False)
     monkeypatch.setattr(
-        "app.server_v2.domain.catalog.ModelRecord.to_provider", lambda self: provider
+        "app.server_v2.infrastructure.models._build_catalog_provider", lambda record: provider
     )
     if fail_materialization:
 
@@ -141,7 +153,7 @@ async def test_dynamic_model_is_closed_after_run_or_composition_failure(
             await driver._close_ports()
             await driver._close_ports()
         assert closed == []
-        assert (await service._host_models._pool.snapshot())["active_leases"] == 0
+        assert (await service.execution.model_pool.pool.snapshot())["active_leases"] == 0
     finally:
         await service.close()
     assert closed == [True]
@@ -232,7 +244,7 @@ async def test_catalog_loop_uses_the_skill_versions_accepted_with_the_run(
             "config": RunConfig(
                 enabled_skills=("demo",),
                 metadata=composition_metadata(
-                    agent=require_agent(await service.catalog.get("user"), "main"),
+                    agent=require_agent(await service.catalog.store.get("user"), "main"),
                     skills=accepted,
                     mcp_servers=(),
                 ),
@@ -278,7 +290,7 @@ async def test_catalog_loop_uses_the_agent_config_accepted_with_the_run(
 ):
     service = make_test_service(tmp_path)
     await service.start()
-    catalog = await service.catalog.get("user")
+    catalog = await service.catalog.store.get("user")
     admitted = require_agent(catalog, "main").model_copy(
         update={"instructions": "Admitted instructions"}
     )
@@ -293,7 +305,7 @@ async def test_catalog_loop_uses_the_agent_config_accepted_with_the_run(
         }
     )
     catalog.agents[0].instructions = "Edited after the Run was admitted"
-    await service.catalog.save("user", catalog)
+    await service.catalog.store.save("user", catalog)
     captured = {}
     original = AgentCompositionFactory.create_loop
 

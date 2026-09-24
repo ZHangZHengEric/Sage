@@ -15,6 +15,7 @@ from sagents.v2.testing.plugins import ScriptedModelProvider, ScriptedModelStep
 from app.server_v2.main import create_app
 from app.server_v2.core.settings import ServerSettings
 from app.server_v2.bootstrap import HostRepositories, ServerHost
+from app.server_v2.infrastructure.database import Database, DatabaseSettings
 from app.server_v2.infrastructure.persistence import MemoryApiKeyStore
 from tests.app.server_v2.fakes import (
     MemoryCatalogStore,
@@ -22,6 +23,28 @@ from tests.app.server_v2.fakes import (
     MemoryThreadIndex,
     MemoryUserStore,
 )
+
+
+class FixtureServerHost(ServerHost):
+    """Start the test database for direct host tests; TestClient starts it itself."""
+
+    async def start(self) -> None:
+        self._started_test_database = not await self.database.ready()
+        if self._started_test_database:
+            await self.database.start()
+        try:
+            await super().start()
+        except BaseException:
+            if self._started_test_database:
+                await self.database.stop()
+                self._started_test_database = False
+            raise
+
+    async def close(self) -> None:
+        await super().close()
+        if getattr(self, "_started_test_database", False):
+            await self.database.stop()
+            self._started_test_database = False
 
 
 def make_settings(tmp_path: Path, **overrides) -> ServerSettings:
@@ -72,9 +95,12 @@ def make_test_service(
     provider = model_provider
     if provider is None and fallback:
         provider = scripted_hello()
-    return ServerHost(
+    return FixtureServerHost(
         settings,
         model_provider=provider,
+        database=Database(
+            DatabaseSettings(url=f"sqlite+aiosqlite:///{tmp_path}/host.db")
+        ),
         repositories=HostRepositories(
             users=MemoryUserStore(),
             catalog=MemoryCatalogStore(),

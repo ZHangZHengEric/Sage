@@ -59,10 +59,6 @@ class TaskReducer:
         task.history.extend(history)
         return task
 
-    @property
-    def state(self) -> int:
-        return self._task.status.state
-
     def _status(self, payload: dict) -> None:
         raw = payload.get("status") or {}
         state = _state(raw.get("state"))

@@ -155,6 +155,65 @@ async def test_public_builder_is_the_composition_entrypoint(tmp_path: Path):
 
 
 @pytest.mark.asyncio
+async def test_builder_transfers_host_resources_in_close_order(tmp_path: Path):
+    package = BuiltinPackageFactory.create(
+        "assistant",
+        package_id="test.builder-owned-resources",
+        model="test-model",
+        base_url="https://model.invalid/v1",
+    )
+    closed = []
+
+    class Resource:
+        def __init__(self, name):
+            self.name = name
+
+        async def close(self):
+            closed.append(self.name)
+
+    scheduler = Resource("scheduler")
+    models = Resource("models")
+    application = await (
+        SAgentBuilder()
+        .with_defaults(session_root=tmp_path / "session-store")
+        .with_model_provider(ScriptedModelProvider(()))
+        .with_owned_resources(scheduler, models)
+        .build(package)
+    )
+
+    await application.close()
+    assert closed == ["scheduler", "models"]
+
+
+@pytest.mark.asyncio
+async def test_builder_uses_host_run_driver_factory(tmp_path: Path):
+    package = BuiltinPackageFactory.create(
+        "assistant",
+        package_id="test.builder-host-driver",
+        model="test-model",
+        base_url="https://model.invalid/v1",
+    )
+    driver = object()
+    run_ids = []
+
+    def make_driver(run_id):
+        run_ids.append(run_id)
+        return driver
+
+    application = await (
+        SAgentBuilder()
+        .with_defaults(session_root=tmp_path / "session-store")
+        .with_model_provider(ScriptedModelProvider(()))
+        .with_run_driver_factory(make_driver)
+        .build(package)
+    )
+
+    assert application.entrypoint().driver_factory("run-1") is driver
+    assert run_ids == ["run-1"]
+    await application.close()
+
+
+@pytest.mark.asyncio
 async def test_builder_injects_derived_state_independently_from_session_store(
     tmp_path: Path,
 ):
@@ -1070,6 +1129,45 @@ async def test_builder_injects_host_log_and_diagnostic_sinks(tmp_path: Path):
         application.resolved_plan, "observability.diagnostic-sink"
     ).source == "host"
     await application.close()
+
+
+@pytest.mark.asyncio
+async def test_builder_logs_resolved_application_registration(tmp_path: Path):
+    class RecordingLogSink:
+        format_version = "sage.log/v1"
+
+        def __init__(self):
+            self.records = []
+
+        def write(self, record):
+            self.records.append(record)
+
+        def close(self):
+            pass
+
+    sink = RecordingLogSink()
+    package = BuiltinPackageFactory.create(
+        "assistant",
+        package_id="test.builder-registration",
+        model="test-model",
+        base_url="https://model.invalid/v1",
+    )
+    application = await (
+        SAgentBuilder()
+        .with_defaults(session_root=tmp_path / "session-store")
+        .with_model_provider(ScriptedModelProvider(()))
+        .with_log_sink(sink)
+        .build(package)
+    )
+    try:
+        registration = next(
+            record for record in sink.records if record.event == "sagents.registered"
+        )
+        assert registration.attributes["package_id"] == application.resolved_plan.package_id
+        assert registration.attributes["composition_hash"] == application.composition_hash
+        assert registration.attributes["plugins"]
+    finally:
+        await application.close()
 
 
 @pytest.mark.asyncio

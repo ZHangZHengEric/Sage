@@ -23,7 +23,6 @@ class CatalogStore(Protocol):
     async def replace_section(
         self, user_id: str, section: str, catalog: UserCatalog
     ) -> UserCatalog: ...
-    async def list_models(self, user_id: str) -> list[ModelRecord]: ...
     async def list_all_models(
         self, user_ids: list[str]
     ) -> list[tuple[str, ModelRecord]]: ...
@@ -80,18 +79,15 @@ class DatabaseCatalogStore:
                 setattr(row, section, documents[section])
         return catalog
 
-    async def list_models(self, user_id: str) -> list[ModelRecord]:
-        return (await self.get(user_id)).models
-
     async def list_all_models(self, user_ids: list[str]) -> list[tuple[str, ModelRecord]]:
         return [
             (user_id, model)
             for user_id in user_ids
-            for model in await self.list_models(user_id)
+            for model in (await self.get(user_id)).models
         ]
 
     async def default_model(self, user_id: str) -> ModelRecord | None:
-        models = await self.list_models(user_id)
+        models = (await self.get(user_id)).models
         return next((item for item in models if item.is_default), models[0] if models else None)
 
     async def upsert_model(self, user_id: str, payload: dict[str, object]) -> ModelRecord:

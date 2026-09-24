@@ -20,7 +20,7 @@ from app.server_v2.adapters.a2a.card import agent_card
 from app.server_v2.adapters.a2a.mapping import context_id, to_start_run
 from app.server_v2.adapters.a2a.stream import task_stream
 from app.server_v2.adapters.a2a.task import TaskReducer
-from app.server_v2.core.errors import ServerError, map_sage_error
+from app.server_v2.core.errors import ServerError, map_error_info
 from app.server_v2.core.observability.context import get_request_id
 from app.server_v2.domain.api_keys import (
     SCOPE_INVOKE,
@@ -69,18 +69,18 @@ class A2AService:
         catalog,
         admission,
         runs,
-        sessions,
         execution,
-        runtime,
+        application,
+        session_access,
         context_for,
     ) -> None:
         self._threads = threads
         self._catalog = catalog
         self._admission = admission
         self._runs = runs
-        self._sessions = sessions
         self._execution = execution
-        self._runtime = runtime
+        self._application = application
+        self._session_access = session_access
         self._context_for = context_for
         self._adapter = A2AProtocolAdapter()
 
@@ -249,16 +249,16 @@ class A2AService:
             absent="context not found",
         )
         if not admitted.model_ready:
-            raise ServerError("validation", self._execution.model_missing_message())
+            raise ServerError("validation", self._execution.model_missing)
         command = to_start_run(
             message,
             session_id=session_id,
             agent_id=admitted.agent_id,
-            composition_hash=self._runtime.composition_hash,
+            composition_hash=self._application.composition_hash,
             enabled_skills=tuple(item.name for item in admitted.skills),
             metadata=admitted.metadata,
         )
-        await self._admission.remember(
+        await self._threads.upsert(
             session_id, user_id, title=_title_of(command), agent_id=admitted.agent_id
         )
 
@@ -273,12 +273,12 @@ class A2AService:
                 label="a2a",
             )
         except SageV2Error as exc:
-            raise map_sage_error(exc) from exc
+            raise map_error_info(exc.info) from exc
         return _Started(
             run_id=run_id,
             session_id=session_id,
             context=context,
-            sessions=self._sessions,
+            session_access=self._session_access,
         )
 
     async def _resume(self, message: Message, key: ApiKeyRecord) -> _Started:
@@ -320,7 +320,7 @@ class A2AService:
             run_id=task_id,
             session_id=run.session_id,
             context=context,
-            sessions=self._sessions,
+            session_access=self._session_access,
             after=run.last_run_sequence,
         )
 
@@ -334,7 +334,7 @@ class A2AService:
         resumed: bool = False,
         history_length: int,
     ) -> AsyncIterator[Event]:
-        events = self._sessions.subscribe(
+        events = self._session_access.subscribe_events(
             EventCursor(run_id=run_id, run_sequence=0), context
         )
         async for event in task_stream(
@@ -349,7 +349,7 @@ class A2AService:
 
     async def _run(self, task_id: str, context):
         try:
-            return await self._sessions.get_run(task_id, context)
+            return await self._session_access.get_run(task_id, context)
         except SageV2Error as exc:
             raise _absent(exc) from exc
 
@@ -364,7 +364,7 @@ class A2AService:
 
     async def _list_runs(self, session_id: str, context) -> list:
         try:
-            runs = await self._sessions.list_runs(session_id, context)
+            runs = await self._session_access.list_session_runs(session_id, context)
         except SageV2Error:
             return []
         return sorted(runs, key=lambda run: (run.created_at, run.run_id))
@@ -373,7 +373,7 @@ class A2AService:
         self, run_id: str, session_id: str, context, *, history_length: int
     ) -> Task:
         try:
-            events = await self._sessions.read_run_events(run_id, context)
+            events = await self._session_access.read_events(run_id, context)
         except SageV2Error as exc:
             raise _absent(exc) from exc
         reducer = TaskReducer(run_id, session_id)
@@ -383,7 +383,7 @@ class A2AService:
         return reducer.build(history_length=history_length)
 
     async def _agent_for(self, key: ApiKeyRecord) -> AgentRecord:
-        catalog = await self._catalog.get(key.owner_user_id)
+        catalog = await self._catalog.store.get(key.owner_user_id)
         return require_agent(catalog, key.agent_id or None)
 
 
@@ -401,7 +401,7 @@ class _Started:
     run_id: str
     session_id: str
     context: object
-    sessions: object
+    session_access: object
     after: int = 0
 
     async def finished(self) -> None:
@@ -412,7 +412,7 @@ class _Started:
         this caller does not own the stream, but it can still watch the record.
         """
 
-        events = self.sessions.subscribe(
+        events = self.session_access.subscribe_events(
             EventCursor(run_id=self.run_id, run_sequence=0), self.context
         )
         try:
@@ -566,4 +566,4 @@ def _absent(exc: SageV2Error) -> ServerError:
 
     if exc.info.category == ErrorCategory.AUTHORIZATION:
         return ServerError("not_found", "task not found")
-    return map_sage_error(exc)
+    return map_error_info(exc.info)

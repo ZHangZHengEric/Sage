@@ -21,7 +21,6 @@ from sagents.v2.skill.plugins.session import SessionDerivedSkillActivationReposi
 from sagents.v2.tool.composite import CompositeToolCatalog, CompositeToolExecutor
 from sagents.v2.tool.plugins.skill import SkillToolPlugin
 
-from app.server_v2.application.assembly import skill_ports, tenant_tools
 from app.server_v2.application.composition import (
     RunComposition,
     load_composition,
@@ -29,14 +28,20 @@ from app.server_v2.application.composition import (
     selected_mcp_servers,
 )
 from app.server_v2.application.manifest import server_v2_run_manifest
-from app.server_v2.application.official import attach_official_tools, resolve_agent_tools
+from app.server_v2.application.official import (
+    attach_official_tools,
+    resolve_agent_tools,
+)
 from app.server_v2.domain.catalog import (
     catalog_model,
     enabled_a2a_agents,
     enabled_mcp_servers,
     require_agent,
 )
-from app.server_v2.infrastructure.models import close_model_provider, create_catalog_provider
+from app.server_v2.infrastructure.models import (
+    close_model_provider,
+    create_catalog_provider,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -46,12 +51,33 @@ class TenantBinding:
     external: tuple
 
 
-def prepare_tenant_binding(host, user_id: str, records, mcp_servers, a2a_agents, *, call_depth: int = 0):
+def prepare_tenant_binding(
+    paths,
+    mcp_plugins,
+    a2a_plugins,
+    user_id: str,
+    records,
+    mcp_servers,
+    a2a_agents,
+    *,
+    call_depth: int = 0,
+):
     """Skill ports plus this tenant's MCP and A2A plugins, in catalog order."""
 
-    provider, workspace = skill_ports(host, user_id, records)
+    from app.server_v2.application.skill_runtime import (
+        CatalogSkillProvider,
+        ReadThroughSkillWorkspace,
+    )
+
+    provider = CatalogSkillProvider(records, paths.data_root)
+    workspace = ReadThroughSkillWorkspace(paths.data_root, user_id, records)
     external = tuple(
-        tenant_tools(host, user_id, mcp_servers, a2a_agents, call_depth=call_depth)
+        plugin
+        for plugin in (
+            mcp_plugins.get(user_id, mcp_servers),
+            a2a_plugins.get(user_id, a2a_agents, call_depth=call_depth),
+        )
+        if plugin is not None
     )
     return TenantBinding(provider=provider, workspace=workspace, external=external)
 
@@ -63,20 +89,24 @@ def package_model_record(catalog, selected: str):
     return next((item for item in catalog.models if item.id == selected), None)
 
 
-async def open_model_lease(execution, user_id: str, record, *, allow_standalone: bool = False):
+async def open_model_lease(
+    execution, user_id: str, record, *, allow_standalone: bool = False
+):
     """Borrow a pooled client, or build a one-off provider when chat has no pool."""
 
     if record is None:
         return None, None
-    if execution.model_pool is not None or not allow_standalone:
-        lease = await execution.acquire_model(user_id, record)
+    if execution.model_pool is not None:
+        lease = await execution.model_pool.pool.acquire(user_id, record)
         return lease.provider, lease
+    if not allow_standalone:
+        raise RuntimeError("model pool is not started")
     model = await create_catalog_provider(record)
     return model, _OwnedModelScope(model)
 
 
 async def compose_catalog_loop(service, command: StartRun, *, user_id: str):
-    catalog = await service.catalog.get(user_id)
+    catalog = await service.catalog.store.get(user_id)
     frozen = await _composition(service, command, catalog, user_id=user_id)
     agent, records = frozen.agent, frozen.skills
     names = tuple(record.name for record in records)
@@ -92,7 +122,7 @@ async def compose_catalog_loop(service, command: StartRun, *, user_id: str):
     extra = [model_scope] if model_scope is not None else []
     ports = None
     try:
-        model = _recorded_model(service, service.model_budget.wrap(raw_model))
+        model = _recorded_model(service, service.execution.model_budget.wrap(raw_model))
         ports = await service.application.materialize_agent(
             manifest,
             tenant_id=user_id,
@@ -114,7 +144,9 @@ async def compose_catalog_loop(service, command: StartRun, *, user_id: str):
             ),
         )
         binding = prepare_tenant_binding(
-            service,
+            service.paths,
+            service.mcp_plugins,
+            service.a2a_plugins,
             user_id,
             records,
             selected_mcp_servers(catalog, frozen.mcp_servers),
@@ -145,7 +177,9 @@ async def compose_catalog_loop(service, command: StartRun, *, user_id: str):
         catalogs = [official.catalog]
         executors = [official.executor]
         if service.agent_management is not None:
-            from sagents.v2.tool.plugins.agent_management import AgentManagementToolPlugin
+            from sagents.v2.tool.plugins.agent_management import (
+                AgentManagementToolPlugin,
+            )
 
             management = AgentManagementToolPlugin(service.agent_management)
             catalogs.append(management.catalog)

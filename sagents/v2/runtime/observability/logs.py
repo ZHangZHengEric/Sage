@@ -250,6 +250,36 @@ class StructuredLogger:
         self.log(LogLevel.ERROR, event, message, error=error, **kwargs)
 
 
+class _ProcessLogSink:
+    """Resolve module-level runtime loggers to the host's current sink."""
+
+    format_version = "sage.log/v1"
+
+    def __init__(self) -> None:
+        self.target: LogSink | None = None
+
+    def write(self, record: LogRecord) -> None:
+        if self.target is None:
+            from sagents.v2.runtime.observability.plugins.logging_stdout import StdoutLogSink
+
+            self.target = StdoutLogSink()
+        self.target.write(record)
+
+    def close(self) -> None:
+        return None
+
+
+_PROCESS_LOG_SINK = _ProcessLogSink()
+
+
+def get_logger(component: str) -> StructuredLogger:
+    return StructuredLogger(_PROCESS_LOG_SINK, component)
+
+
+def set_process_log_sink(sink: LogSink) -> None:
+    _PROCESS_LOG_SINK.target = sink
+
+
 def _log_error(error: BaseException | None) -> LogError | None:
     if error is None:
         return None

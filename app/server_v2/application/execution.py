@@ -3,29 +3,31 @@
 from __future__ import annotations
 
 import asyncio
-import logging
 
-LOGGER = logging.getLogger(__name__)
+from sagents.v2.model.provider import ModelProvider
+from sagents.v2.model.middleware.concurrency import ModelConcurrencyBudget
+from app.server_v2.core.observability.logging import get_logger
+
+LOGGER = get_logger(__name__)
 
 
 class ProcessExecution:
     """Owns the drives for this process. Use cases bind models through this."""
 
-    def __init__(self, *, model_missing: str = "") -> None:
+    def __init__(
+        self,
+        *,
+        model_missing: str = "",
+        fallback_model: ModelProvider | None = None,
+    ) -> None:
         self._drives: dict[str, asyncio.Task[None]] = {}
         self._tasks: set[asyncio.Task[None]] = set()
-        self._models = None
-        self._fallback = None
-        self._model_missing = model_missing
-        self._logger = None
+        self.model_pool = None
+        self.model_budget: ModelConcurrencyBudget | None = None
+        self.fallback_model = fallback_model
+        self.model_missing = model_missing
         self.sandbox_provider = None
         self.sandbox_grant_issuer = None
-
-    def attach_models(self, models) -> None:
-        self._models = models
-
-    def attach_logger(self, logger) -> None:
-        self._logger = logger
 
     def driving(self, run_id: str) -> bool:
         return run_id in self._drives
@@ -42,7 +44,12 @@ class ProcessExecution:
                 return
             error = completed.exception()
             if error is not None:
-                LOGGER.error("background task failed", exc_info=error)
+                LOGGER.exception(
+                    "execution.background.failed",
+                    "background task failed",
+                    error,
+                    run_id=run_id,
+                )
 
         task.add_done_callback(_done)
 
@@ -58,37 +65,16 @@ class ProcessExecution:
         self._drives.clear()
 
     def bind_model(self, session_id: str, user_id: str) -> bool:
-        if self._models is None:
+        if self.model_pool is None:
             return False
-        self._models.bind_session_user(session_id, user_id)
+        self.model_pool.bind_session_user(session_id, user_id)
         return True
 
     def unbind_model(self, session_id: str) -> None:
-        if self._models is not None:
-            self._models.unbind_session_user(session_id)
+        if self.model_pool is not None:
+            self.model_pool.unbind_session_user(session_id)
 
     def has_model(self, catalog) -> bool:
-        if self._fallback is not None:
+        if self.fallback_model is not None:
             return True
         return bool(catalog.models)
-
-    def model_missing_message(self) -> str:
-        return self._model_missing
-
-    def sagents_logger(self):
-        if self._logger is None:
-            raise RuntimeError("Server v2 runtime is not started")
-        return self._logger
-
-    @property
-    def fallback_model(self):
-        return self._fallback
-
-    @property
-    def model_pool(self):
-        return self._models
-
-    async def acquire_model(self, user_id: str, record):
-        if self._models is None:
-            raise RuntimeError("model pool is not started")
-        return await self._models.acquire_model(user_id, record)

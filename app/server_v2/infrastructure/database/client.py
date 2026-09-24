@@ -9,7 +9,6 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from typing import Any, TypeVar
 
-from loguru import logger
 from sqlalchemy import event, text
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import (
@@ -18,6 +17,10 @@ from sqlalchemy.ext.asyncio import (
     async_sessionmaker,
     create_async_engine,
 )
+
+from app.server_v2.core.observability.logging import get_logger
+
+logger = get_logger(__name__)
 
 T = TypeVar("T")
 AfterCommitCallback = Callable[[], object]
@@ -129,8 +132,10 @@ class Database:
                 result = callback()
                 if inspect.isawaitable(result):
                     await result
-            except Exception:
-                logger.exception("after-commit callback failed")
+            except Exception as exc:
+                logger.exception(
+                    "database.after_commit.failed", "after-commit callback failed", exc
+                )
 
     def after_commit(
         self,
@@ -162,9 +167,10 @@ class Database:
                     raise
                 delay = delay_base * (2 ** (attempt - 1))
                 logger.warning(
-                    "transaction lock conflict; retrying attempt={} delay={}",
-                    attempt + 1,
-                    delay,
+                    "database.transaction.retry",
+                    "transaction lock conflict; retrying",
+                    attempt=attempt + 1,
+                    delay_seconds=delay,
                 )
                 await sleep(delay)
         raise RuntimeError("unreachable transaction retry state")
@@ -199,11 +205,12 @@ class Database:
                 return
             elapsed_ms = int((time.perf_counter() - started.pop()) * 1000)
             if elapsed_ms >= minimum_ms:
-                logger.bind(flow="database").info(
-                    "sql elapsed_ms={} executemany={} statement={}",
-                    elapsed_ms,
-                    bool(executemany),
-                    " ".join(str(statement).split()),
+                logger.info(
+                    "database.sql.timing",
+                    "sql query completed",
+                    elapsed_ms=elapsed_ms,
+                    executemany=bool(executemany),
+                    statement=" ".join(str(statement).split()),
                 )
 
 

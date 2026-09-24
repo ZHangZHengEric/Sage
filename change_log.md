@@ -2,6 +2,34 @@
 
 面向版本用户的完整说明保存在 [`release_notes/`](release_notes/)；本文件记录持续开发变更。
 
+- **2026-09-24** 清除 server_v2 的纯转发接口：路由直接注入宿主，用例直接访问目录、凭据和 Session 仓储；删除宿主运行时转发、SessionLog、执行对象的取值与挂载方法，以及模型池租约的重复转发。
+
+- **2026-09-24** 收紧 server_v2 目录边界：AG-UI/A2A 协议服务归入 adapters，Run 与协议服务在运行时创建后接收明确依赖，模型客户端创建归入 infrastructure；简单列表直接读宿主仓储，不添加透传用例。
+
+- **2026-09-24** 精简 server_v2 运行链：单数据库直接由应用生命周期管理，删除通用资源状态机；宿主直接提供 Run 入口，Session 读取只保留分页逻辑，租户工具装配移除单用途透传模块；健康检查删除 `backends` 汇总字段，保留直接的追踪开关。
+
+- **2026-09-24** server_v2 模型提供器直接使用 Application 的 SessionStore 查询 Run 所属 Session，移除宿主查询回调；缺模型提示在组装执行对象时直接选择语言，移除一次性辅助方法。
+
+- **2026-09-24** server_v2 宿主强制注入 Database，托管 Agent 管理器直接使用该 Database 构造数据库包存储；移除宿主包管理的 SQLite 文件存储分支。
+
+- **2026-09-24** server_v2 在启动时显式选择托管 Agent 包存储：数据库模式使用 DatabasePackageStore，注入仓储的本地模式使用 AgentPackageStore；ServerAgentManagement 拒绝未指定存储，避免隐式回退到 SQLite。
+
+- **2026-09-24** 拆分 server_v2 托管 Agent 包管理：授权策略、运行 Builder、接口查询和启动恢复分别承担各自职责；管理类只适配 sagents 的服务契约，移除对整个 ServerHost 的依赖，不改变现有 API 和存储结构。
+
+- **2026-09-24** SAgentBuilder 支持在构建 Application 时接管宿主创建的资源；server_v2 在构建前登记调度器和模型池，按调度器、模型池顺序关闭。
+
+- **2026-09-24** 将应用插件注册日志交由 SAgentBuilder 在构建完成时统一记录；server_v2 的 AG-UI 日志直接使用 Application 选定的日志 sink，移除 ProcessExecution 中的日志转发。
+
+- **2026-09-24** 修正 server_v2 模型提供器的目录依赖：宿主保留并传入 `CatalogStore`，避免把 `CatalogService` 当作 DAO 使用。
+
+- **2026-09-24** server_v2 宿主改为启动时创建共享模型预算与调度配额，调度器和模型客户端池交由 Application 管理关闭；仅用于构造服务的线程仓储、API Key 仓储和中间用例对象不再保存为宿主字段。
+
+- **2026-09-24** server_v2 宿主建表仅执行 SQLAlchemy `create_all`，移除启动时对 `threads.agent_id` 的额外检查和补列操作。
+
+- **2026-09-24** SAgentBuilder 支持在构建前注入 Run Driver 工厂，server_v2 不再构建后改写入口 Agent；宿主启动后段失败时清理已创建资源。
+
+- **2026-09-24** 梳理 server_v2 宿主的资源与用例装配顺序；模型后备配置改由 ProcessExecution 直接持有，移除宿主转发属性及对执行对象私有字段的写入。
+
 - **2026-09-24** server_v2 宿主仓储改为完整注入或 MySQL 装配两种明确路径，移除零散可选仓储参数；CatalogService 自行持有目录锁，AdminService 直接使用用户仓储查询用户名。
 
 - **2026-09-24** 简化 server_v2 宿主装配：仓储选择直接在构造处展示，移除仅调用一次的转发函数和未使用的模型检查方法。
@@ -654,3 +682,5 @@
 2026-04-26 13:38:00 修复桌面端视频播放失败：将 VideoRenderer.vue 中的 readFile+Blob 方式替换为 convertFileSrc，使用 asset:// 协议流式加载视频，解决大文件无法播放及 H.265 格式在 WKWebView 中播放失败问题。
 2026-04-26 13:46:00 合并 main 分支（4 commits），解决 VideoRenderer.vue 冲突，保留 main 版本的重构实现。新增桌面端 /api/agent/{id}/file_workspace/stream 接口，支持 HTTP Range 请求；VideoRenderer.vue 改为通过后端 stream 接口流式播放，不再直接访问文件系统。
 2026-04-29 23:45:00 新增运行中会话引导区消息注入、编辑、删除与 SSE 消费回执能力。
+2026-09-24 14:50:00 统一 Server V2 宿主、Uvicorn 与 sagents 日志为 sage.log/v1 记录，复用同一 LogSink 输出到 stdout 与配置的轮转文件，并统一请求关联、级别和格式。
+2026-09-24 14:55:00 将 Server V2 与 sagents/v2 运行时日志调用收敛到 StructuredLogger，保留标准 logging 仅作为 Uvicorn 和第三方日志的输入适配层。

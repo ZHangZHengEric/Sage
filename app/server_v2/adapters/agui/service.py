@@ -5,7 +5,7 @@ from __future__ import annotations
 from sagents.v2.contracts.errors import SageV2Error
 from sagents.v2.contracts.run_state import EventCursor, RunState
 from sagents.v2.interfaces.protocols.ag_ui import AgUiProtocolAdapter
-from sagents.v2.runtime.observability import structured_log_context
+from sagents.v2.runtime.observability import StructuredLogger, structured_log_context
 
 from app.server_v2.adapters.agui.mapping import to_start_run, validate_agui_id
 from app.server_v2.adapters.agui.sse import (
@@ -13,22 +13,24 @@ from app.server_v2.adapters.agui.sse import (
     frame_to_agui_event,
     single_error_sse,
 )
-from app.server_v2.core.errors import ServerError, map_sage_error
+from app.server_v2.application.sessions import page_session_events
+from app.server_v2.core.errors import ServerError, map_error_info
 from app.server_v2.core.observability.context import get_request_id
 
 
 class ConversationService:
-    def __init__(self, *, threads, admission, sessions, runs, execution, runtime, context_for) -> None:
+    def __init__(
+        self, *, threads, admission, runs, execution, application, session_access,
+        log_sink, context_for
+    ) -> None:
         self.threads = threads
         self.admission = admission
-        self.sessions = sessions
         self.runs = runs
         self.execution = execution
-        self.runtime = runtime
+        self.application = application
+        self.session_access = session_access
+        self.log_sink = log_sink
         self.context_for = context_for
-
-    async def list_for(self, user_id: str):
-        return await self.threads.list_for(user_id)
 
     async def events(
         self,
@@ -45,12 +47,13 @@ class ConversationService:
         limit = max(1, min(int(limit), 2000))
         context = self.context_for(record.user_id)
         try:
-            page = await self.sessions.page(
+            page = await page_session_events(
+                self.session_access,
                 thread_id, context, limit=limit, after_sequence=offset
             )
         except SageV2Error as exc:
             if not exc.info.code.endswith("not_found"):
-                raise map_sage_error(exc) from exc
+                raise map_error_info(exc.info) from exc
             return {"events": [], "total": 0, "offset": 0, "limit": limit}
         adapter = AgUiProtocolAdapter(enable_sage_extensions=True)
         frames: list[dict] = []
@@ -82,7 +85,7 @@ class ConversationService:
         enabled = tuple(item.name for item in admitted.skills)
         thread_id, run_id, agent_id, command = to_start_run(
             request,
-            composition_hash=self.runtime.composition_hash,
+            composition_hash=self.application.composition_hash,
             default_agent_id=admitted.agent_id,
             enabled_skills=enabled,
             metadata=admitted.metadata,
@@ -90,12 +93,12 @@ class ConversationService:
         if command.agent_id != admitted.agent_id:
             command = command.model_copy(update={"agent_id": admitted.agent_id})
             agent_id = admitted.agent_id
-        await self.admission.remember(
+        await self.threads.upsert(
             thread_id, user_id, title="", agent_id=admitted.agent_id
         )
         if not admitted.model_ready:
             return single_error_sse(
-                self.execution.model_missing_message(),
+                self.execution.model_missing,
                 code="server.model_not_configured",
             )
 
@@ -118,7 +121,7 @@ class ConversationService:
                         agent_id=agent_id,
                     ),
                 )
-                events = self.sessions.subscribe(
+                events = self.session_access.subscribe_events(
                     EventCursor(run_id=native_run_id, run_sequence=0),
                     context,
                 )
@@ -129,7 +132,7 @@ class ConversationService:
                     last_event_id=last_event_id,
                 )
         except SageV2Error as exc:
-            raise map_sage_error(exc) from exc
+            raise map_error_info(exc.info) from exc
 
     async def resume(
         self,
@@ -159,9 +162,9 @@ class ConversationService:
         correlation_id = get_request_id()
         context = self.context_for(user_id, correlation_id=correlation_id)
         try:
-            runs = await self.sessions.list_runs(thread_id, context)
+            runs = await self.session_access.list_session_runs(thread_id, context)
         except SageV2Error as exc:
-            raise map_sage_error(exc) from exc
+            raise map_error_info(exc.info) from exc
         waiting = [item for item in runs if item.state == RunState.SUSPENDED]
         if not waiting:
             raise ServerError("conflict", "this thread is not waiting for input")
@@ -181,7 +184,7 @@ class ConversationService:
                     else None
                 ),
             )
-            events = self.sessions.subscribe(
+            events = self.session_access.subscribe_events(
                 EventCursor(run_id=native.run_id, run_sequence=0), context
             )
             return canonical_agui_sse(
@@ -197,10 +200,10 @@ class ConversationService:
         if record is None or (not admin and record.user_id != user_id):
             raise ServerError("not_found", "thread not found")
         try:
-            await self.sessions.delete(thread_id, self.context_for(record.user_id))
+            await self.session_access.delete_session(thread_id, self.context_for(record.user_id))
         except SageV2Error as exc:
             if not exc.info.code.endswith("not_found"):
-                raise map_sage_error(exc) from exc
+                raise map_error_info(exc.info) from exc
         await self.threads.remove(thread_id, record.user_id)
 
     def _agui_finished(
@@ -212,7 +215,7 @@ class ConversationService:
         user_id: str,
         agent_id: str,
     ):
-        logger = self.execution.sagents_logger().bind(
+        logger = StructuredLogger(self.log_sink, "server_v2.agui").bind(
             thread_id=thread_id, run_id=client_run_id
         )
         logger.info(

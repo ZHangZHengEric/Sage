@@ -1,26 +1,14 @@
 from __future__ import annotations
 
-from collections.abc import Awaitable
-from typing import Protocol
-
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse, PlainTextResponse
 
 from app.server_v2.core.observability.metrics import MetricsRegistry
 
 
-class ReadinessSnapshot(Protocol):
-    @property
-    def ready(self) -> bool: ...
-
-
-class ReadinessProvider(Protocol):
-    def readiness(self) -> Awaitable[ReadinessSnapshot]: ...
-
-
 def build_observability_router(
     *,
-    resources: ReadinessProvider,
+    service,
     metrics: MetricsRegistry,
 ) -> APIRouter:
     router = APIRouter()
@@ -31,10 +19,10 @@ def build_observability_router(
 
     @router.get("/readyz", include_in_schema=False)
     async def ready() -> JSONResponse:
-        report = await resources.readiness()
+        ready = await service.ready()
         return JSONResponse(
-            status_code=200 if report.ready else 503,
-            content={"status": "ok" if report.ready else "not_ready"},
+            status_code=200 if ready else 503,
+            content={"status": "ok" if ready else "not_ready"},
         )
 
     @router.get("/metrics", include_in_schema=False)

@@ -15,6 +15,114 @@ def test_default_jwt_secret_meets_hmac_minimum():
     assert len(DEFAULT_JWT_SECRET.encode()) >= 32
 
 
+def test_server_host_requires_database(tmp_path: Path):
+    from app.server_v2.bootstrap import ServerHost
+    from tests.app.server_v2.conftest import make_settings
+
+    with pytest.raises(RuntimeError, match="database is required"):
+        ServerHost(make_settings(tmp_path), database=None)
+
+
+@pytest.mark.asyncio
+async def test_start_cleans_up_if_package_management_setup_fails(
+    tmp_path: Path, monkeypatch
+):
+    from app.server_v2.application.packages import ServerAgentManagement
+
+    service = make_test_service(tmp_path)
+
+    def fail_management_setup(self, *args, **kwargs):
+        raise RuntimeError("package management setup failed")
+
+    monkeypatch.setattr(ServerAgentManagement, "__init__", fail_management_setup)
+
+    with pytest.raises(RuntimeError, match="package management setup failed"):
+        await service.start()
+
+    with pytest.raises(RuntimeError, match="not started"):
+        _ = service.application
+    assert service.agent_management is None
+    assert service.execution.model_pool is None
+    await service.close()
+
+
+@pytest.mark.asyncio
+async def test_host_and_managed_agents_share_run_limits(tmp_path: Path):
+    from app.server_v2.infrastructure.persistence.packages import DatabasePackageStore
+
+    service = make_test_service(
+        tmp_path,
+        max_concurrent_runs=3,
+        max_concurrent_runs_per_user=2,
+        max_pending_runs=5,
+    )
+    await service.start()
+    try:
+        management = service.agent_management
+        assert isinstance(management.store, DatabasePackageStore)
+        scheduler = service.application.service("execution.scheduler")
+        assert management.model_budget is service.execution.model_budget
+        assert scheduler in service.package_queries.run_quota.members
+        assert service.package_queries.capacity_snapshot(management.capacity())[
+            "runs"
+        ] == {
+            "active": 0,
+            "pending": 0,
+            "max_active": 3,
+            "max_per_user": 2,
+            "max_pending": 5,
+        }
+    finally:
+        await service.close()
+
+
+@pytest.mark.asyncio
+async def test_host_explicitly_uses_database_package_store(tmp_path: Path):
+    from app.server_v2.bootstrap import ServerHost
+    from app.server_v2.infrastructure.database import Database, DatabaseSettings
+    from app.server_v2.infrastructure.persistence.packages import DatabasePackageStore
+    from tests.app.server_v2.conftest import make_settings
+
+    database = Database(DatabaseSettings(url=f"sqlite+aiosqlite:///{tmp_path}/host.db"))
+    await database.start()
+    service = ServerHost(make_settings(tmp_path), database=database)
+    try:
+        await service.start()
+        assert isinstance(service.agent_management.store, DatabasePackageStore)
+    finally:
+        await service.close()
+        await database.stop()
+
+
+@pytest.mark.asyncio
+async def test_application_closes_host_scheduler_before_model_pool(
+    tmp_path: Path, monkeypatch
+):
+    service = make_test_service(tmp_path)
+    await service.start()
+    scheduler = service.application.service("execution.scheduler")
+    models = service.execution.model_pool
+    closed = []
+    close_scheduler = scheduler.close
+    close_models = models.close
+
+    async def record_scheduler_close():
+        closed.append("scheduler")
+        await close_scheduler()
+
+    async def record_model_close():
+        closed.append("models")
+        await close_models()
+
+    monkeypatch.setattr(scheduler, "close", record_scheduler_close)
+    monkeypatch.setattr(models, "close", record_model_close)
+    try:
+        await service.application.close()
+        assert closed == ["scheduler", "models"]
+    finally:
+        await service.close()
+
+
 def test_from_env_requires_mysql(tmp_path: Path, monkeypatch):
     monkeypatch.delenv("SAGE_SERVER_MYSQL_URL", raising=False)
     with pytest.raises(ValueError, match="MYSQL"):
@@ -67,7 +175,9 @@ def test_main_preserves_server_logging_configuration(monkeypatch, tmp_path: Path
 
     monkeypatch.setattr("app.server_v2.main.uvicorn.run", fake_run)
 
-    assert main(["--data-root", str(tmp_path), "--host", "0.0.0.0", "--port", "9001"]) == 0
+    assert (
+        main(["--data-root", str(tmp_path), "--host", "0.0.0.0", "--port", "9001"]) == 0
+    )
     assert captured["host"] == "0.0.0.0"
     assert captured["port"] == 9001
     assert captured["log_level"] == "warning"
@@ -105,13 +215,7 @@ def test_health(client: TestClient):
     payload = response.json()["data"]
     assert payload["protocol"] == "ag-ui"
     assert payload["status"] == "ok"
-    assert payload["backends"] == {
-        "host_store": "memory",
-        "session_store": "filesystem",
-        "agui_replay": "session-store",
-        "log": "stdout",
-        "run_ownership": "single-process",
-    }
+    assert payload["trace_enabled"] is False
     assert response.json()["request_id"]
     assert response.headers["x-request-id"] == response.json()["request_id"]
     assert client.get("/livez").status_code == 200
@@ -185,7 +289,7 @@ def test_create_app_wires_mysql_as_only_required_client(tmp_path: Path, monkeypa
     assert runtime.database.name == "database"
     assert runtime.settings.jaeger_url is None
     assert isinstance(runtime.users, DatabaseUserStore)
-    assert len(app.state.resources._resources) == 1
+    assert app.state.service.database is runtime.database
 
 
 def test_jaeger_routes_absent_without_url(client: TestClient):

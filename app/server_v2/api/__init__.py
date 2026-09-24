@@ -1,5 +1,3 @@
-import logging
-
 from fastapi import FastAPI
 
 from app.server_v2.api.routers import (
@@ -18,7 +16,9 @@ from app.server_v2.api.routers import (
     threads,
 )
 
-_LOGGER = logging.getLogger(__name__)
+from app.server_v2.core.observability.logging import get_logger
+
+_LOGGER = get_logger(__name__)
 
 
 def register_routers(app: FastAPI, *, jaeger: bool = False) -> None:
@@ -49,6 +49,10 @@ def _register_a2a(app: FastAPI) -> None:
     try:
         from app.server_v2.api.routers import a2a
     except ImportError as exc:
-        _LOGGER.info("A2A disabled: %s (install the 'a2a' extra to enable)", exc)
+        _LOGGER.info(
+            "server.a2a.disabled",
+            "A2A disabled; install the a2a extra to enable it",
+            attributes={"reason": str(exc)},
+        )
         return
     app.include_router(a2a.router)

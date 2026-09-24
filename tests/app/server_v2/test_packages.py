@@ -234,10 +234,12 @@ def test_agent_creates_agent_through_management_tool(service):
         ]
         parent["manifest"]["agents"]["assistant"]["tools"] = ["agent_package_save"]
         # Saving and building do not consume scripted responses.
-        service._fallback_model = ScriptedModelProvider(
-            (
-                tool_step("agent_package_save", {"bundle": child}, "create"),
-                *scripted_hello()._steps,
+        service.execution.fallback_model = (
+            ScriptedModelProvider(
+                (
+                    tool_step("agent_package_save", {"bundle": child}, "create"),
+                    *scripted_hello()._steps,
+                )
             )
         )
         saved = client.post("/api/agent-packages", headers=headers, json=parent)
@@ -273,7 +275,7 @@ async def test_server_close_retains_failed_resources_for_retry(tmp_path, monkeyp
 
     service = make_test_service(tmp_path)
     await service.start()
-    app, model = service.application, service._host_models
+    app, model = service.application, service.execution.model_pool
     close = app.close
     attempts = 0
 
@@ -287,9 +289,9 @@ async def test_server_close_retains_failed_resources_for_retry(tmp_path, monkeyp
     monkeypatch.setattr(app, "close", flaky)
     with pytest.raises(RuntimeError, match="close failed"):
         await service.close()
-    assert service._application is app and service._host_models is model
+    assert service._application is app and service.execution.model_pool is model
     await service.close()
-    assert service._application is None and service._host_models is None
+    assert service._application is None and service.execution.model_pool is None
 
 
 @pytest.mark.asyncio
@@ -302,7 +304,7 @@ async def test_pending_package_recovers_on_server_restart(tmp_path):
     await first.start()
     user = await first.users.admin()
     context = first.contexts.for_user(user.user_id)
-    data = await first.agent_management.template(context)
+    data = await first.package_queries.template(context)
     data["manifest"]["agents"]["assistant"]["entrypoint"] = {
         "type": "flow",
         "flow": "main",
@@ -419,7 +421,7 @@ def test_source_tool_plugin_uses_standard_registration(service):
     provider = ScriptedModelProvider(
         (tool_step("scale", {"value": 4}, "scale"), *scripted_hello()._steps)
     )
-    service._fallback_model = provider
+    service.execution.fallback_model = provider
     with TestClient(create_app(service=service)) as client:
         headers = {"Authorization": f"Bearer {register_and_login(client)}"}
         bundle = client.get("/api/agent-packages/template", headers=headers).json()[

@@ -3,18 +3,18 @@
 多用户 AG-UI 宿主。代码直接在 `app/server_v2/`，前端在 `web/`。
 
 ```text
-api/            HTTP 路由、鉴权、请求响应。只调用例
-application/    用例：identity、catalog、skills、conversations、packages、a2a、sessions、loop
+api/            HTTP 路由、鉴权、请求响应；简单列表直接读取宿主仓储
+application/    用例与共享运行编排：identity、catalog、skills、admission、runs、packages、sessions、loop
 domain/         记录和纯规则，不读库
 infrastructure/ MySQL 客户端与表、仓储、工作区、模型池、MCP/A2A 客户端
-adapters/       agui/、a2a/ 协议翻译
+adapters/       agui/、a2a/ 的协议服务、映射与流转换
 bootstrap.py    进程宿主（ServerHost、请求上下文）
 main.py         应用装配与启动入口
 core/           配置、错误、JWT、HTTP、观测
 web/            前端
 ```
 
-新业务加一个 `application/<name>.py`。要落库再加 `infrastructure/persistence/<name>.py`，纯规则放 `domain/`。路由通过 FastAPI `Depends` 取一个用例。AG-UI 与 A2A 共用 `application/admission.py` 受理 Run，Session 读取在 `application/sessions.py`，对话与包任务的技能、MCP、A2A 和模型租约在 `application/loop.py`。catalog 的 Agent、模型、MCP、A2A peer 分列保存，写操作只更新对应列。
+新业务加一个 `application/<name>.py`。要落库再加 `infrastructure/persistence/<name>.py`，纯规则放 `domain/`。HTTP 写入走用例；简单只读列表可直接访问 `ServerHost` 暴露的仓储，不加透传用例。AG-UI 与 A2A 的协议服务分别在 `adapters/agui/service.py` 和 `adapters/a2a/service.py`，共用 `application/admission.py` 受理 Run，Session 读取在 `application/sessions.py`，对话与包任务的技能、MCP、A2A 和模型租约在 `application/loop.py`。运行时创建后，由宿主将 Application、Session access 和日志 sink 显式传入协议服务及 RunService。catalog 的 Agent、模型、MCP、A2A peer 分列保存，写操作只更新对应列。
 
 生产启动只强制 MySQL：`SAGE_SERVER_MYSQL_URL`。AG-UI 回放读取 Sage Session 的 canonical RuntimeEvent；模型流式 delta 是进程内预览，断线重连通过预览序号续接，进程重启后以持久事件恢复。
 
@@ -49,7 +49,7 @@ Web 单独启动：在 `app/server_v2/web` 执行 `npm install && npm run dev`�
 
 对话：首次 run 把 `agent_id` 钉在会话上（之后忽略下拉/`forwardedProps`）；读 catalog Agent → Official 文件/沙箱工具 + MCP + A2A peer + skill 组成 Composite，再 `materialize_agent` 加载 sagents/v2 loop。进程 Application 只 build 一次。
 
-`/health` 的 `backends` 按实际装配报告 `host_store`（`mysql` / `memory`）、`session_store`（`mysql` / `filesystem`）、`agui_replay`、`log` 和 `run_ownership`（恒为 `single-process`），配了 `SAGE_SERVER_JAEGER_URL` 再多一个 `trace`。sagents 结构化日志由 host 固定接到 `sage.logging.stdout`，默认输出 `sage.log/v1` JSONL；`SAGE_SERVER_LOG_LEVEL` 控制最低级别，`SAGE_SERVER_LOG_FORMAT` 可显式切到本地阅读用的 `text`。stdout 的持久化由容器日志驱动或 Alloy/Loki 负责，不写审计业务表。
+`/health` 返回就绪状态与 `trace_enabled`；配置 `SAGE_SERVER_JAEGER_URL` 时管理页显示 Jaeger 入口。Server V2 与 sagents/v2 运行时直接通过 `StructuredLogger` 调用统一日志接口；Uvicorn 和第三方标准日志经适配器转换成 `sage.log/v1` 记录。所有记录由同一 LogSink 写入 stdout 和 `SAGE_SERVER_LOG_DIRECTORY` 指定的轮转文件。`SAGE_SERVER_LOG_LEVEL` 控制最低级别，`SAGE_SERVER_LOG_FORMAT` 控制两处输出的 `json` 或 `text` 格式。stdout 也可由容器日志驱动或 Alloy/Loki 持久化，不写审计业务表。
 
 模型客户端池使用 `SAGE_SERVER_MAX_MODEL_CLIENTS`（默认 64）限制容量。同一用户的相同配置跨 Run 复用连接，凭据变化使用新客户端；池满且所有客户端占用时返回可重试的限流错误。详见[模型池与增量持久化](../../docs/zh/architecture/sagents-v2-model-pool-and-persistence.md)。
 
@@ -57,7 +57,7 @@ Web 单独启动：在 `app/server_v2/web` 执行 `npm install && npm run dev`�
 
 `/studio` 提供完整包定义编辑、普通 Agent 导入、不可变版本、复制/切换版本、运行、事件、任务历史、反馈、人工审批和同 Session 续接。对应 HTTP 入口为 `/api/agent-packages`。普通 Agent 可选择 `agent_package_*` 工具，通过同一管理服务创建并调用其他 Agent。
 
-生产库存使用 MySQL `managed_agent_records`；managed Session 使用独立 MySQL 前缀，验证用临时文件存储。普通对话与包任务共享运行/用户额度、模型额度和 JobRuntime。可通过 `SAGE_SERVER_MAX_MANAGED_APPLICATIONS`（默认 32）和 `SAGE_SERVER_MAX_MANAGED_BUILDS`（默认 4）控制实例与装配容量。
+ServerHost 必须注入 Database；生产库存使用 MySQL `managed_agent_records`，测试使用 SQLite Database，不再使用独立的包库存文件。managed Session 使用独立 MySQL 前缀，验证用临时文件存储。普通对话与包任务共享运行/用户额度、模型额度和 JobRuntime。可通过 `SAGE_SERVER_MAX_MANAGED_APPLICATIONS`（默认 32）和 `SAGE_SERVER_MAX_MANAGED_BUILDS`（默认 4）控制实例与装配容量。
 
 包模型使用 `provider=server`，`model` 指向本人模型 ID 或 `default`，不携带凭据和地址。源码插件默认关闭，只有宿主注册与明确授权后才能加载，且属于可信宿主代码。能力、API、部署成本和验证边界见 [Server V2 Agent 平台](../../docs/zh/architecture/SERVER_V2_AGENT_PLATFORM.md)。
 
