@@ -53,7 +53,7 @@ class RunAdmission:
                     message=absent,
                 )
             )
-        catalog = await self.catalog.store.get(user_id)
+        catalog = await self.catalog.get(user_id)
         requested = (
             resolve_thread_agent_id(existing, agent_id) if pin_existing else agent_id
         )

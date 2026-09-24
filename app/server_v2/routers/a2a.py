@@ -18,7 +18,7 @@ from app.server_v2.identity.keys import (
     ApiKeyRecord,
     require_scope,
 )
-from app.server_v2.routers.deps import ServiceDep
+from app.server_v2.routers.deps import A2ADep, CredentialDep
 from sagents.v2.contracts.errors import ErrorCategory, RuntimeErrorInfo, SageV2Error
 
 router = APIRouter(tags=["a2a"])
@@ -47,7 +47,7 @@ _METHOD_SCOPES = {
 async def a2a_key(
     request: Request,
     bearer: Annotated[HTTPAuthorizationCredentials | None, Depends(_bearer)],
-    service: ServiceDep,
+    service: CredentialDep,
 ) -> ApiKeyRecord:
     """Authenticate the caller and pin the credential to this request.
 
@@ -65,7 +65,7 @@ async def a2a_key(
                 message="api key required",
             )
         )
-    key = await service.credentials.keys.authenticate(token)
+    key = await service.authenticate(token)
     setattr(request.state, REQUEST_ATTR, key)
     return key
 
@@ -74,10 +74,10 @@ KeyDep = Annotated[ApiKeyRecord, Depends(a2a_key)]
 
 
 @router.post(RPC_PATH)
-async def jsonrpc(request: Request, key: KeyDep, service: ServiceDep) -> Response:
+async def jsonrpc(request: Request, key: KeyDep, service: A2ADep) -> Response:
     await _authorize_method(request, key)
     dispatcher = JsonRpcDispatcher(
-        SageRequestHandler(service.a2a),
+        SageRequestHandler(service),
         context_builder=SageCallContextBuilder(),
     )
     return await dispatcher.handle_requests(request)
@@ -85,7 +85,7 @@ async def jsonrpc(request: Request, key: KeyDep, service: ServiceDep) -> Respons
 
 @router.get("/.well-known/agent-card.json")
 @router.get(f"{RPC_PATH}/card")
-async def agent_card(request: Request, key: KeyDep, service: ServiceDep) -> Response:
+async def agent_card(request: Request, key: KeyDep, service: A2ADep) -> Response:
     """Serve the card for the Agent this key is bound to.
 
     A2A puts the card at a well-known unauthenticated path, which assumes one
@@ -95,7 +95,9 @@ async def agent_card(request: Request, key: KeyDep, service: ServiceDep) -> Resp
     """
 
     require_scope(key, SCOPE_READ)
-    card = await service.a2a.card(key, base_url=_base_url(request, service))
+    card = await service.card(
+        key, base_url=service.public_base_url or str(request.base_url).rstrip("/")
+    )
     return JSONResponse(MessageToDict(card, preserving_proto_field_name=False))
 
 
@@ -116,7 +118,3 @@ async def _authorize_method(request: Request, key: ApiKeyRecord) -> None:
     scope = _METHOD_SCOPES.get(str(method or ""))
     if scope is not None:
         require_scope(key, scope)
-
-
-def _base_url(request: Request, service) -> str:
-    return service.settings.public_base_url or str(request.base_url).rstrip("/")

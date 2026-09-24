@@ -14,7 +14,7 @@ from sagents.v2.testing.plugins import ScriptedModelProvider, ScriptedModelStep
 
 from app.server_v2.main import create_app
 from app.server_v2.config.settings import ServerSettings
-from app.server_v2.bootstrap import HostRepositories, ServerHost
+from app.server_v2.bootstrap import ServerHost
 from app.server_v2.database import Database, DatabaseSettings
 from app.server_v2.identity.key_repository import MemoryApiKeyStore
 from tests.app.server_v2.fakes import (
@@ -101,13 +101,11 @@ def make_test_service(
         database=Database(
             DatabaseSettings(url=f"sqlite+aiosqlite:///{tmp_path}/host.db")
         ),
-        repositories=HostRepositories(
-            users=MemoryUserStore(),
-            catalog=MemoryCatalogStore(),
-            threads=MemoryThreadIndex(),
-            skills=MemorySkillStore(),
-            api_keys=MemoryApiKeyStore(),
-        ),
+        users=MemoryUserStore(),
+        catalog_store=MemoryCatalogStore(),
+        threads=MemoryThreadIndex(),
+        skills=MemorySkillStore(),
+        api_keys=MemoryApiKeyStore(),
     )
 
 

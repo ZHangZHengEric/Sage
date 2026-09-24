@@ -1,6 +1,6 @@
 from fastapi import APIRouter
 
-from app.server_v2.routers.deps import ServiceDep
+from app.server_v2.routers.deps import HostDep
 from app.server_v2.routers.schemas.common import ApiResponse, HealthPayload
 from app.server_v2.routers.render import success
 
@@ -9,7 +9,7 @@ router = APIRouter(tags=["health"])
 
 @router.get("/health", response_model=ApiResponse[HealthPayload])
 @router.get("/active", response_model=ApiResponse[HealthPayload])
-async def health(service: ServiceDep):
+async def health(service: HostDep):
     ready = await service.ready()
     return success(
         {

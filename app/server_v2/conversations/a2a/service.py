@@ -71,12 +71,14 @@ class A2AService:
         session_access,
         context_for,
         language: str,
+        public_base_url: str,
     ) -> None:
         self._threads = threads
         self._catalog = catalog
         self._admission = admission
         self._runs = runs
         self._language = language
+        self.public_base_url = public_base_url
         self._application = application
         self._session_access = session_access
         self._context_for = context_for
@@ -398,7 +400,7 @@ class A2AService:
         return reducer.build(history_length=history_length)
 
     async def _agent_for(self, key: ApiKeyRecord) -> AgentRecord:
-        catalog = await self._catalog.store.get(key.owner_user_id)
+        catalog = await self._catalog.get(key.owner_user_id)
         return require_agent(catalog, key.agent_id or None)
 
 

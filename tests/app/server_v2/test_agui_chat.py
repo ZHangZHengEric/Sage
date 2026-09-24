@@ -171,8 +171,15 @@ def test_live_stream_skips_user_text_but_history_keeps_it(client: TestClient):
 
 
 @pytest.mark.timeout(30)
-def test_run_without_model_returns_clear_error(tmp_path):
-    service = make_test_service(tmp_path, fallback=False)
+@pytest.mark.parametrize(
+    ("language", "message"),
+    [
+        ("zh", "请先在「模型」页配置模型后再发送"),
+        ("en", "Configure a model on the Models page before sending"),
+    ],
+)
+def test_run_without_model_returns_clear_error(tmp_path, language, message):
+    service = make_test_service(tmp_path, fallback=False, language=language)
     with TestClient(create_app(service=service)) as client:
         token = register_and_login(client)
         response = client.post(
@@ -185,7 +192,7 @@ def test_run_without_model_returns_clear_error(tmp_path):
     errors = [event for event in events if event["type"] == "RUN_ERROR"]
     assert errors
     assert errors[0]["code"] == "server.model_not_configured"
-    assert "模型" in errors[0]["message"]
+    assert errors[0]["message"] == message
 
 
 @pytest.mark.timeout(30)

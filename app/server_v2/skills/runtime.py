@@ -19,7 +19,7 @@ from sagents.v2.skill import (
     SkillDescriptor,
 )
 
-from app.server_v2.runtime.loop import compose_catalog_loop
+from app.server_v2.runtime.loop import CatalogRunDependencies, compose_catalog_loop
 from app.server_v2.skills.records import (
     SkillPackage,
     SkillRecord,
@@ -179,7 +179,7 @@ class ReadThroughSkillWorkspace:
 class CatalogRunDriver:
     """Load the catalog Agent, then materialize a sagents/v2 loop for this run."""
 
-    def __init__(self, service, run_id: str) -> None:
+    def __init__(self, service: CatalogRunDependencies, run_id: str) -> None:
         self.service = service
         self.run_id = run_id
         self._driver = None

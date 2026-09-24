@@ -8,7 +8,7 @@ though it cannot host one.
 
 from fastapi import APIRouter
 
-from app.server_v2.routers.deps import ServiceDep, CurrentUser
+from app.server_v2.routers.deps import CatalogDep, CurrentUser
 from app.server_v2.routers.schemas.common import AUTH_ERRORS, VALIDATION_ERRORS, ApiResponse
 from app.server_v2.routers.schemas.catalog import A2AAgentBody, A2AAgentPublic
 from app.server_v2.routers.render import success
@@ -21,36 +21,36 @@ router = APIRouter(
 
 
 @router.get("", response_model=ApiResponse[list[A2AAgentPublic]])
-async def list_a2a_agents(user: CurrentUser, service: ServiceDep):
-    agents = (await service.catalog_store.get(user.user_id)).a2a_agents
+async def list_a2a_agents(user: CurrentUser, service: CatalogDep):
+    agents = (await service.get(user.user_id)).a2a_agents
     return success([item.public_dict() for item in agents])
 
 
 @router.post("", response_model=ApiResponse[A2AAgentPublic])
-async def create_a2a_agent(body: A2AAgentBody, user: CurrentUser, service: ServiceDep):
-    record = await service.catalog.create_a2a_agent(user.user_id, body.model_dump())
+async def create_a2a_agent(body: A2AAgentBody, user: CurrentUser, service: CatalogDep):
+    record = await service.create_a2a_agent(user.user_id, body.model_dump())
     return success(record.public_dict())
 
 
 @router.put("/{name}", response_model=ApiResponse[A2AAgentPublic])
 async def update_a2a_agent(
-    name: str, body: A2AAgentBody, user: CurrentUser, service: ServiceDep
+    name: str, body: A2AAgentBody, user: CurrentUser, service: CatalogDep
 ):
-    record = await service.catalog.update_a2a_agent(
+    record = await service.update_a2a_agent(
         user.user_id, name, body.model_dump()
     )
     return success(record.public_dict())
 
 
 @router.delete("/{name}", response_model=ApiResponse[None])
-async def remove_a2a_agent(name: str, user: CurrentUser, service: ServiceDep):
-    await service.catalog.delete_a2a_agent(user.user_id, name)
+async def remove_a2a_agent(name: str, user: CurrentUser, service: CatalogDep):
+    await service.delete_a2a_agent(user.user_id, name)
     return success()
 
 
 @router.post("/{name}/refresh", response_model=ApiResponse[A2AAgentPublic])
-async def refresh_a2a_agent(name: str, user: CurrentUser, service: ServiceDep):
+async def refresh_a2a_agent(name: str, user: CurrentUser, service: CatalogDep):
     """Re-read the peer's Agent Card and record what it advertises now."""
 
-    record = await service.catalog.refresh_a2a_agent(user.user_id, name)
+    record = await service.refresh_a2a_agent(user.user_id, name)
     return success(record.public_dict())

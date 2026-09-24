@@ -2,6 +2,10 @@
 
 面向版本用户的完整说明保存在 [`release_notes/`](release_notes/)；本文件记录持续开发变更。
 
+- **2026-09-24** server_v2 路由改为注入所属业务服务，目录、Skill、会话及凭据读取经服务接口完成；Run Driver 接收明确的运行依赖，身份与工具权限上下文归入 identity。缺模型提示移到 AG-UI/A2A 接口，网页显示接口返回的文案，执行资源不再保存用户文案。
+
+- **2026-09-24** 移除只用于打包注入参数的 `HostRepositories`；`ServerHost` 直接接收可替换的仓储，生产环境仍从 Database 创建默认仓储。
+
 - **2026-09-24** 移除 server_v2 的 `ServerError` 包装层：业务失败直接使用 sagents 的结构化错误契约，HTTP 与 A2A 边界按错误信息转换响应。
 
 - **2026-09-24** 拆分 server_v2 的异常与 HTTP 响应渲染：`errors.py` 保留异常及运行时错误归类，`routers/render.py` 负责响应格式和状态码映射。

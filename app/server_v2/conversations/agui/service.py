@@ -38,6 +38,9 @@ class ConversationService:
         self.log_sink = log_sink
         self.context_for = context_for
 
+    async def list_threads(self, user_id: str):
+        return await self.threads.list_for(user_id)
+
     async def events(
         self,
         thread_id: str,
