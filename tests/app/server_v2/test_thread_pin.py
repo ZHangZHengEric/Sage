@@ -1,4 +1,4 @@
-from app.server_v2.domain.threads import (
+from app.server_v2.conversations.records import (
     ThreadRecord,
     apply_thread_upsert,
     resolve_thread_agent_id,

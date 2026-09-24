@@ -12,15 +12,15 @@ from sagents.v2.contracts.errors import ErrorCategory, RuntimeErrorInfo, SageV2E
 from sagents.v2.skill.plugins.session import SessionDerivedSkillActivationRepository
 from sagents.v2.tool.plugins.ephemeral import EphemeralToolPlugin
 
-from app.server_v2.domain.catalog import require_agent
-from app.server_v2.infrastructure.models import (
+from app.server_v2.catalog.records import require_agent
+from app.server_v2.runtime.models import (
     HostModelProvider,
     bind_model_user,
     create_catalog_provider,
     reset_model_user,
 )
-from app.server_v2.application.composition import composition_metadata, load_composition
-from app.server_v2.application.skill_runtime import (
+from app.server_v2.conversations.composition import composition_metadata, load_composition
+from app.server_v2.skills.runtime import (
     CatalogRunDriver,
     compose_catalog_loop,
 )
@@ -98,7 +98,7 @@ async def test_cancelled_sdk_construction_closes_result_and_stays_off_event_loop
         return Provider()
 
     monkeypatch.setattr(
-        "app.server_v2.infrastructure.models._build_catalog_provider",
+        "app.server_v2.runtime.models._build_catalog_provider",
         lambda record: create(),
     )
     task = asyncio.create_task(
@@ -134,7 +134,7 @@ async def test_dynamic_model_is_closed_after_run_or_composition_failure(
 
     monkeypatch.setattr(provider, "close", close, raising=False)
     monkeypatch.setattr(
-        "app.server_v2.infrastructure.models._build_catalog_provider", lambda record: provider
+        "app.server_v2.runtime.models._build_catalog_provider", lambda record: provider
     )
     if fail_materialization:
 
@@ -205,7 +205,7 @@ async def test_catalog_loop_uses_materialized_skill_plugin_and_derived_activatio
     monkeypatch.setattr(AgentCompositionFactory, "create_skill_loader", capture)
 
     monkeypatch.setattr(
-        "app.server_v2.application.loop.attach_official_tools",
+        "app.server_v2.runtime.loop.attach_official_tools",
         _attach_without_host_sandbox,
     )
     try:
@@ -269,7 +269,7 @@ async def test_catalog_loop_uses_the_skill_versions_accepted_with_the_run(
 
     monkeypatch.setattr(AgentCompositionFactory, "create_skill_loader", capture)
     monkeypatch.setattr(
-        "app.server_v2.application.loop.attach_official_tools",
+        "app.server_v2.runtime.loop.attach_official_tools",
         _attach_without_host_sandbox,
     )
     try:
@@ -315,7 +315,7 @@ async def test_catalog_loop_uses_the_agent_config_accepted_with_the_run(
 
     monkeypatch.setattr(AgentCompositionFactory, "create_loop", capture)
     monkeypatch.setattr(
-        "app.server_v2.application.loop.attach_official_tools",
+        "app.server_v2.runtime.loop.attach_official_tools",
         _attach_without_host_sandbox,
     )
     try:

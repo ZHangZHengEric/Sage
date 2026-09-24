@@ -5,9 +5,9 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from app.server_v2.core.settings import DEFAULT_JWT_SECRET, ServerSettings
+from app.server_v2.config.settings import DEFAULT_JWT_SECRET, ServerSettings
 from app.server_v2.main import create_app, main
-from app.server_v2.infrastructure.persistence import DatabaseUserStore
+from app.server_v2.identity.repository import DatabaseUserStore
 from tests.app.server_v2.conftest import make_test_service, register_and_login
 
 
@@ -27,7 +27,7 @@ def test_server_host_requires_database(tmp_path: Path):
 async def test_start_cleans_up_if_package_management_setup_fails(
     tmp_path: Path, monkeypatch
 ):
-    from app.server_v2.application.packages import ServerAgentManagement
+    from app.server_v2.packages.management import ServerAgentManagement
 
     service = make_test_service(tmp_path)
 
@@ -48,7 +48,7 @@ async def test_start_cleans_up_if_package_management_setup_fails(
 
 @pytest.mark.asyncio
 async def test_host_and_managed_agents_share_run_limits(tmp_path: Path):
-    from app.server_v2.infrastructure.persistence.packages import DatabasePackageStore
+    from app.server_v2.packages.repository import DatabasePackageStore
 
     service = make_test_service(
         tmp_path,
@@ -79,8 +79,8 @@ async def test_host_and_managed_agents_share_run_limits(tmp_path: Path):
 @pytest.mark.asyncio
 async def test_host_explicitly_uses_database_package_store(tmp_path: Path):
     from app.server_v2.bootstrap import ServerHost
-    from app.server_v2.infrastructure.database import Database, DatabaseSettings
-    from app.server_v2.infrastructure.persistence.packages import DatabasePackageStore
+    from app.server_v2.database import Database, DatabaseSettings
+    from app.server_v2.packages.repository import DatabasePackageStore
     from tests.app.server_v2.conftest import make_settings
 
     database = Database(DatabaseSettings(url=f"sqlite+aiosqlite:///{tmp_path}/host.db"))

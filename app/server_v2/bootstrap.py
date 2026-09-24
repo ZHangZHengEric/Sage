@@ -19,39 +19,32 @@ from sagents.v2.runtime.execution.scheduler.plugins.ephemeral import (
     SchedulerQuotaGroup,
 )
 
-from app.server_v2.application.admin import AdminService
-from app.server_v2.application.admission import RunAdmission
-from app.server_v2.application.execution import ProcessExecution
-from app.server_v2.application.catalog import CatalogService
-from app.server_v2.adapters.a2a.service import A2AService
-from app.server_v2.adapters.agui.service import ConversationService
-from app.server_v2.application.credentials import CredentialService
-from app.server_v2.application.identity import IdentityService
-from app.server_v2.application.manifest import server_v2_manifest
-from app.server_v2.application.official import install_sandbox
-from app.server_v2.application.runs import RunService
-from app.server_v2.application.skill_runtime import CatalogRunDriver
-from app.server_v2.application.skills import SkillCatalogService
-from app.server_v2.core.settings import ServerSettings
-from app.server_v2.core.observability.logging import get_logger
-from app.server_v2.domain.api_keys import ApiKeyRecord
-from app.server_v2.infrastructure.a2a_client import A2APluginCache
-from app.server_v2.infrastructure.database import Database
-from app.server_v2.infrastructure.mcp import McpPluginCache
-from app.server_v2.infrastructure.models import HostModelProvider
-from app.server_v2.infrastructure.persistence import (
-    ApiKeyStore,
-    CatalogStore,
-    DatabaseApiKeyStore,
-    DatabaseCatalogStore,
-    DatabaseSkillStore,
-    DatabaseThreadIndex,
-    DatabaseUserStore,
-    SkillStore,
-    ThreadIndex,
-    UserStore,
-)
-from app.server_v2.infrastructure.storage import prepare_server_v2_storage
+from app.server_v2.admin.service import AdminService
+from app.server_v2.conversations.admission import RunAdmission
+from app.server_v2.runtime.execution import ProcessExecution
+from app.server_v2.catalog.service import CatalogService
+from app.server_v2.conversations.a2a.service import A2AService
+from app.server_v2.conversations.agui.service import ConversationService
+from app.server_v2.identity.credentials import CredentialService
+from app.server_v2.identity.service import IdentityService
+from app.server_v2.config.manifest import server_v2_manifest
+from app.server_v2.runtime.official import install_sandbox
+from app.server_v2.conversations.runs import RunService
+from app.server_v2.skills.runtime import CatalogRunDriver
+from app.server_v2.skills.service import SkillCatalogService
+from app.server_v2.config.settings import ServerSettings
+from app.server_v2.observability.logging import get_logger
+from app.server_v2.identity.keys import ApiKeyRecord
+from app.server_v2.runtime.integrations.a2a import A2APluginCache
+from app.server_v2.database import Database
+from app.server_v2.runtime.integrations.mcp import McpPluginCache
+from app.server_v2.runtime.models import HostModelProvider
+from app.server_v2.identity.key_repository import ApiKeyStore, DatabaseApiKeyStore
+from app.server_v2.identity.repository import DatabaseUserStore, UserStore
+from app.server_v2.catalog.repository import CatalogStore, DatabaseCatalogStore
+from app.server_v2.skills.repository import DatabaseSkillStore, SkillStore
+from app.server_v2.conversations.repository import DatabaseThreadIndex, ThreadIndex
+from app.server_v2.storage import prepare_server_v2_storage
 
 LOGGER = get_logger(__name__)
 
@@ -160,14 +153,7 @@ class ServerHost:
             skills=self.skill_catalog,
         )
         self.credentials = CredentialService(repositories.api_keys, self.catalog)
-        self.execution = ProcessExecution(
-            model_missing=(
-                "请先在「模型」页配置模型后再发送"
-                if str(settings.language).lower().startswith("zh")
-                else "Configure a model on the Models page before sending"
-            ),
-            fallback_model=model_provider,
-        )
+        self.execution = ProcessExecution(fallback_model=model_provider)
         self._application: SAgentApplication | None = None
         self._tasks: set[asyncio.Task[None]] = set()
         install_sandbox(self.execution)
@@ -193,7 +179,7 @@ class ServerHost:
         if self._application is not None:
             return
         if self.log_sink is None:
-            from app.server_v2.core.observability.logging import LoggingSettings, init_logging
+            from app.server_v2.observability.logging import LoggingSettings, init_logging
 
             self.log_sink = init_logging(
                 LoggingSettings(
@@ -203,7 +189,7 @@ class ServerHost:
                 ),
                 service_name="sage-server",
             )
-        from app.server_v2.infrastructure.database.schema import create_host_schema
+        from app.server_v2.database.schema import create_host_schema
 
         await create_host_schema(self.database)
         await self.identity.ensure_admin(
@@ -259,11 +245,11 @@ class ServerHost:
                 threads=self.threads,
                 admission=admission,
                 runs=runs,
-                execution=self.execution,
                 application=self._application,
                 session_access=session_access,
                 log_sink=self.log_sink,
                 context_for=self.contexts.for_user,
+                language=self.settings.language,
             )
             self.admin = AdminService(
                 users=self.users,
@@ -275,69 +261,36 @@ class ServerHost:
                 catalog=self.catalog,
                 admission=admission,
                 runs=runs,
-                execution=self.execution,
                 application=self._application,
                 session_access=session_access,
                 context_for=self.contexts.for_a2a_key,
+                language=self.settings.language,
             )
-            from app.server_v2.application.package_builder import (
-                ServerPackageBuilderFactory,
-            )
-            from app.server_v2.application.package_policy import ServerPackagePolicy
-            from app.server_v2.application.package_queries import ServerPackageQueries
-            from app.server_v2.application.package_recovery import (
+            from app.server_v2.packages.recovery import (
                 recover_pending_packages,
             )
-            from app.server_v2.application.packages import ServerAgentManagement
+            from app.server_v2.packages.management import ServerAgentManagement
 
-            policy = ServerPackagePolicy(
-                users=self.users,
-                catalog=self.catalog,
-                skills=self.skills,
-                package_authorizer=self.package_authorizer,
-                extensions=self.package_extensions,
-            )
-            builder_factory = ServerPackageBuilderFactory(
+            self.agent_management = ServerAgentManagement(
+                self.paths.data_root / "managed",
+                database=self.database,
                 settings=self.settings,
                 paths=self.paths,
-                catalog=self.catalog,
-                skills=self.skills,
-                execution=self.execution,
-                mcp_plugins=self.mcp_plugins,
-                a2a_plugins=self.a2a_plugins,
-                extensions=self.package_extensions,
-                run_quota=run_quota,
-                policy=policy,
-                log_sink=self.log_sink,
-            )
-            queries = ServerPackageQueries(
                 users=self.users,
                 catalog=self.catalog,
                 skills=self.skills,
                 skill_catalog=self.skill_catalog,
-                model_budget=model_budget,
+                execution=self.execution,
+                mcp_plugins=self.mcp_plugins,
+                a2a_plugins=self.a2a_plugins,
+                package_authorizer=self.package_authorizer,
+                extensions=self.package_extensions,
                 run_quota=run_quota,
-            )
-            self.package_queries = queries
-            self.agent_management = ServerAgentManagement(
-                self.paths.data_root / "managed",
-                database=self.database,
-                policy=policy,
-                builder_factory=builder_factory,
-                queries=queries,
-                max_applications=self.settings.max_managed_applications,
-                max_concurrent_builds=self.settings.max_managed_builds,
                 model_budget=model_budget,
+                log_sink=self.log_sink,
                 job_runtime=self.application.service("execution.job-runtime"),
-                allow_source_plugins=self.package_authorizer is not None,
-                inventory=tuple(
-                    {
-                        "id": item.descriptor.plugin_id,
-                        "version": item.descriptor.version,
-                    }
-                    for item in self.package_extensions
-                ),
             )
+            self.package_queries = self.agent_management.queries
             self._track(
                 asyncio.create_task(
                     recover_pending_packages(

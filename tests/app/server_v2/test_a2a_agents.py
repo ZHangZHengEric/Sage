@@ -10,8 +10,8 @@ from __future__ import annotations
 
 import pytest
 
-from app.server_v2.application import catalog
-from app.server_v2.core.errors import ServerError
+from app.server_v2.catalog import service as catalog
+from sagents.v2.contracts.errors import ErrorCategory, RuntimeErrorInfo, SageV2Error
 from tests.app.server_v2.conftest import register_and_login
 
 PEER = {"name": "researcher", "url": "https://peer.example.com"}
@@ -147,7 +147,13 @@ def test_a_peer_that_cannot_be_read_reports_why_and_stays_unchanged(client, monk
     """Nothing about the record is wrong; the peer is down. Keep what we had."""
 
     async def fake_discover(config):
-        raise ServerError("validation", "a2a discovery failed: no route to host")
+        raise SageV2Error(
+            RuntimeErrorInfo(
+                code="server.catalog.discovery.validation",
+                category=ErrorCategory.VALIDATION,
+                message="a2a discovery failed: no route to host",
+            )
+        )
 
     monkeypatch.setattr(catalog, "discover_a2a_skills", fake_discover)
     headers = auth(client)

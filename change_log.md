@@ -2,6 +2,14 @@
 
 面向版本用户的完整说明保存在 [`release_notes/`](release_notes/)；本文件记录持续开发变更。
 
+- **2026-09-24** 移除 server_v2 的 `ServerError` 包装层：业务失败直接使用 sagents 的结构化错误契约，HTTP 与 A2A 边界按错误信息转换响应。
+
+- **2026-09-24** 拆分 server_v2 的异常与 HTTP 响应渲染：`errors.py` 保留异常及运行时错误归类，`routers/render.py` 负责响应格式和状态码映射。
+
+- **2026-09-24** 将托管 Agent 包的策略、Builder、查询服务和插件清单装配收回 `packages/management.py`；`bootstrap.py` 继续显式注入跨模块依赖并管理启动与关闭。
+
+- **2026-09-24** 将 server_v2 全量迁移为按业务能力组织的目录：对外 HTTP 接口统一放在 `routers/`，配置放在 `config/`，身份、目录、技能、会话和 Agent 包各自拥有服务、规则与仓储；共享数据库和运行时独立放置，删除旧分层路径与兼容转发。
+
 - **2026-09-24** 清除 server_v2 的纯转发接口：路由直接注入宿主，用例直接访问目录、凭据和 Session 仓储；删除宿主运行时转发、SessionLog、执行对象的取值与挂载方法，以及模型池租约的重复转发。
 
 - **2026-09-24** 收紧 server_v2 目录边界：AG-UI/A2A 协议服务归入 adapters，Run 与协议服务在运行时创建后接收明确依赖，模型客户端创建归入 infrastructure；简单列表直接读宿主仓储，不添加透传用例。

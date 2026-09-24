@@ -4,8 +4,8 @@ import asyncio
 from pydantic import SecretStr
 import pytest
 
-from app.server_v2.domain.catalog import ModelRecord
-from app.server_v2.infrastructure.model_pool import ExceptionGroup, ModelClientPool
+from app.server_v2.catalog.records import ModelRecord
+from app.server_v2.runtime.model_pool import ExceptionGroup, ModelClientPool
 from sagents.v2.contracts.errors import SageV2Error
 
 

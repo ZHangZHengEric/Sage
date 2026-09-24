@@ -6,10 +6,10 @@ from dataclasses import replace
 
 import pytest
 
-from app.server_v2.infrastructure.database import Database, DatabaseSettings
-from app.server_v2.infrastructure.database.schema import create_host_schema
-from app.server_v2.domain.skills import AgentSkillBinding, SkillDimension, SkillRecord
-from app.server_v2.infrastructure.persistence.skills import DatabaseSkillStore
+from app.server_v2.database import Database, DatabaseSettings
+from app.server_v2.database.schema import create_host_schema
+from app.server_v2.skills.records import AgentSkillBinding, SkillDimension, SkillRecord
+from app.server_v2.skills.repository import DatabaseSkillStore
 
 
 def _record(name: str, *, dimension: SkillDimension, owner: str = "") -> SkillRecord:

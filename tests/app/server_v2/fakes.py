@@ -1,20 +1,20 @@
 from __future__ import annotations
 
-from app.server_v2.domain.catalog import (
+from app.server_v2.catalog.records import (
     ModelRecord,
     UserCatalog,
     apply_delete,
     apply_upsert,
     empty_catalog,
 )
-from app.server_v2.infrastructure.persistence.api_keys import MemoryApiKeyStore  # noqa: F401
-from app.server_v2.infrastructure.persistence.skills import MemorySkillStore  # noqa: F401
-from app.server_v2.domain.threads import (
+from app.server_v2.identity.key_repository import MemoryApiKeyStore  # noqa: F401
+from app.server_v2.skills.repository import MemorySkillStore  # noqa: F401
+from app.server_v2.conversations.records import (
     ThreadRecord,
     apply_thread_upsert,
     require_owned_thread,
 )
-from app.server_v2.domain.users import UserRecord
+from app.server_v2.identity.users import UserRecord
 
 
 class MemoryUserStore:
