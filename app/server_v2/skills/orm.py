@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from sqlalchemy import Integer, String, UniqueConstraint
+from sqlalchemy import Integer, String, Text, UniqueConstraint
+from sqlalchemy.dialects.mysql import LONGTEXT
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.server_v2.database.base import Base
@@ -21,7 +22,9 @@ class SkillRow(Base):
     dimension: Mapped[str] = mapped_column(String(16), index=True)
     owner_user_id: Mapped[str] = mapped_column(String(128), default="")
     name: Mapped[str] = mapped_column(String(191))
-    description: Mapped[str] = mapped_column(String(512), default="")
+    description: Mapped[str] = mapped_column(
+        Text().with_variant(LONGTEXT(), "mysql", "mariadb"), default=""
+    )
     current_version_id: Mapped[str] = mapped_column(String(64), default="")
     status: Mapped[str] = mapped_column(String(16), default="active")
     created_at: Mapped[str] = mapped_column(String(64))

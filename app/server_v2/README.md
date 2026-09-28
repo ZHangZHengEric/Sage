@@ -35,7 +35,9 @@ python -m pip install -e '.[server-v2]'
 python -m app.server_v2 --data-root /tmp/sage-server-v2
 ```
 
-Web 单独启动：在 `app/server_v2/web` 执行 `npm install && npm run dev`，Vite 将 API 请求代理到后端 `8090` 端口。构建静态文件可执行 `npm run build`，由独立的静态文件服务部署。
+Web 开发时可单独启动：在 `app/server_v2/web` 执行 `npm install && npm run dev`，Vite 将 API 请求代理到后端 `8090` 端口。执行 `npm run build` 后再启动后端，后端会托管 `web/dist`，可直接访问 `http://localhost:8090` 或 `/studio`。也可使用独立静态文件服务部署，并代理 API 请求到后端。
+
+启动时会幂等升级旧数据库：补齐 `threads.agent_id`，将 Skill 描述列扩展为 `LONGTEXT`。升级账号需要对应表的 `ALTER` 权限。Skill 列表描述不截断，加载内容仍受 Skill 文件大小限制。已有的截断描述可重新导入原 Skill 文件修复。
 
 读 `app/server_v2/.env`（进程环境变量优先）。生产必须设置 `SAGE_SERVER_JWT_SECRET`（至少 32 字节）。默认管理员：`admin` / `admin12345`。OpenAPI 在 `/docs`。
 

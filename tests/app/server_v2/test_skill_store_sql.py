@@ -100,3 +100,11 @@ async def test_bindings_are_scoped_to_one_agent(store):
     bindings = await store.list_bindings(owner_user_id="user_1", agent_id="main")
     assert [item.skill_name for item in bindings] == ["mine"]
     assert await store.list_bindings(owner_user_id="user_1", agent_id="other") == []
+
+
+async def test_long_description_survives_database_catalog_round_trip(store):
+    description = "完整的技能描述" * 2000
+    record = replace(_record("long", dimension="system"), description=description)
+    await store.publish(record)
+    visible = await store.list_visible(user_id="user_1", role="user")
+    assert visible[0].description == description

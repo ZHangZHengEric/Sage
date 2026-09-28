@@ -9,6 +9,10 @@ import stat
 import zipfile
 from pathlib import Path
 
+import yaml
+
+from sagents.v2.package.strict_yaml import load_unique_yaml
+
 from app.server_v2.skills.records import SkillPackage, normalize_skill_name
 from sagents.v2.contracts.errors import ErrorCategory, RuntimeErrorInfo, SageV2Error
 
@@ -281,31 +285,29 @@ def _description(skill_md: bytes) -> str:
                 message="SKILL.md must be UTF-8",
             )
         ) from exc
-    lines = text.splitlines()
-    if lines and lines[0].strip() == "---":
-        for line in lines[1:]:
-            stripped = line.strip()
-            if stripped == "---":
-                break
-            key, separator, value = stripped.partition(":")
-            if separator and key.strip() == "description":
-                return value.strip().strip("'\"")[:500]
-    body = lines
-    if lines and lines[0].strip() == "---":
-        closing = next(
-            (
-                index
-                for index, line in enumerate(lines[1:], start=1)
-                if line.strip() == "---"
-            ),
-            len(lines) - 1,
-        )
-        body = lines[closing + 1 :]
+    metadata, body = _skill_metadata(text)
+    description = metadata.get("description")
+    if isinstance(description, str):
+        return description
     for line in body:
         stripped = line.strip().lstrip("#").strip()
         if stripped:
-            return stripped[:500]
+            return stripped
     return ""
+
+
+def _skill_metadata(text: str) -> tuple[dict, list[str]]:
+    lines = text.splitlines()
+    if not lines or lines[0].strip() != "---":
+        return {}, lines
+    for index, line in enumerate(lines[1:], start=1):
+        if line.strip() in {"---", "..."}:
+            try:
+                metadata = load_unique_yaml("\n".join(lines[1:index]) + "\n")
+            except (ValueError, yaml.YAMLError):
+                metadata = None
+            return (metadata if isinstance(metadata, dict) else {}), lines[index + 1 :]
+    return {}, []
 
 
 def _front_matter_name(skill_md: bytes) -> str:
@@ -313,17 +315,9 @@ def _front_matter_name(skill_md: bytes) -> str:
         text = skill_md.decode("utf-8")
     except UnicodeDecodeError:
         return ""
-    lines = text.splitlines()
-    if not lines or lines[0].strip() != "---":
-        return ""
-    for line in lines[1:]:
-        stripped = line.strip()
-        if stripped == "---":
-            break
-        key, separator, value = stripped.partition(":")
-        if separator and key.strip() == "name":
-            return value.strip().strip("'\"")
-    return ""
+    metadata, _ = _skill_metadata(text)
+    name = metadata.get("name")
+    return name if isinstance(name, str) else ""
 
 
 def _copytree(source: Path, destination: Path) -> None:
