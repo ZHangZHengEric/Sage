@@ -21,22 +21,22 @@ Run from the checkout root with the Python environment active:
 
 ```bash
 python -m pip install -e '.[server-v2]'
-cp app/server_v2/.env.example app/server_v2/.env
+cp app/v2/server/.env.example app/v2/server/.env
 ```
 
-Set `SAGE_SERVER_MYSQL_URL`, your own `SAGE_SERVER_JWT_SECRET` (at least 32 bytes), and initial administrator credentials in `app/server_v2/.env`.
+Set `SAGE_SERVER_MYSQL_URL`, your own `SAGE_SERVER_JWT_SECRET` (at least 32 bytes), and initial administrator credentials in `app/v2/server/.env`.
 
 ```bash
-cd app/server_v2/web
+cd app/v2/server/web
 npm install
 npm run build
 cd ../../..
-python -m app.server_v2
+python -m app.v2.server
 ```
 
 Open [http://127.0.0.1:8090](http://127.0.0.1:8090). Configure a model and an Agent after login. `/studio` manages Agent packages; `/docs` exposes the running server's OpenAPI.
 
-For frontend development use `npm run dev` in `app/server_v2/web`; Vite proxies to port 8090. Process environment variables override the component `.env` file.
+For frontend development use `npm run dev` in `app/v2/server/web`; Vite proxies to port 8090. Process environment variables override the component `.env` file.
 
 Startup idempotently upgrades legacy tables: it adds missing `threads.agent_id` and expands Skill descriptions to `LONGTEXT`. The database account needs `ALTER` privileges for these upgrades. Reimport original Skill files to repair descriptions previously truncated in the catalog.
 
@@ -49,4 +49,4 @@ Startup idempotently upgrades legacy tables: it adds missing `threads.agent_id` 
 
 [`deploy/`](https://github.com/ZHangZHengEric/Sage/blob/main/deploy/README.md) contains several stacks. Inspect the image and module used by a Compose environment before treating it as a Server v2 deployment.
 
-[Environment reference](../ENV_VARS.md) · [HTTP API](../api/HTTP_API_REFERENCE.md) · [Component reference](https://github.com/ZHangZHengEric/Sage/blob/main/app/server_v2/README.md)
+[Environment reference](../ENV_VARS.md) · [HTTP API](../api/HTTP_API_REFERENCE.md) · [Component reference](https://github.com/ZHangZHengEric/Sage/blob/main/app/v2/server/README.md)

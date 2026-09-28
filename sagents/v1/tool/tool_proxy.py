@@ -1,0 +1,409 @@
+from typing import List, Dict, Any, Optional, Union
+from .tool_manager import ToolManager
+from .tool_expansion import TOOL_EXPAND_TOOLS
+from sagents.v1.utils.logger import logger
+from sagents.v1.utils.completion_mode import is_turn_status_mode
+
+
+def _should_expose_turn_status() -> bool:
+    return is_turn_status_mode()
+
+
+class ToolProxy:
+    """
+    工具代理类
+
+    作为 ToolManager 的代理，支持管理多个 ToolManager 实例并进行工具筛选。
+    兼容 ToolManager 的所有工具相关接口。
+    """
+
+    def __init__(
+        self,
+        tool_managers: Union[ToolManager, List[ToolManager]],
+        available_tools: Optional[List[str]] = None,
+    ):
+        """
+        初始化工具代理
+
+        Args:
+            tool_managers: 工具管理器实例或实例列表（优先级按列表顺序递减）
+            available_tools: 可用工具名称列表（白名单）。如果不传或为None，
+                则除 explicit_only 外的工具默认可用。
+        """
+        if isinstance(tool_managers, list):
+            self.tool_managers = tool_managers
+        else:
+            self.tool_managers = [tool_managers]
+
+        self.tool_manager = (
+            self.tool_managers[0] if self.tool_managers else None
+        )  # Backward compatibility attribute
+        self._available_tools = (
+            set(available_tools) if available_tools is not None else None
+        )
+
+        # 验证工具是否存在（仅当设置了 available_tools 时）
+        if self._available_tools is not None:
+            all_tools_names = set()
+            for tm in self.tool_managers:
+                all_tools_names.update(tm.list_all_tools_name())
+
+            invalid_tools = self._available_tools - all_tools_names
+            if invalid_tools:
+                logger.warning(f"ToolProxy: 以下工具不存在: {invalid_tools}")
+                self._available_tools -= invalid_tools
+
+            # 强制注入：turn_status 是 agent 状态协议模式的一部分，无论上游
+            # availableTools 是否勾选都必须可用。其他完成模式不暴露该协议工具。
+            if _should_expose_turn_status():
+                if "turn_status" in all_tools_names:
+                    self._available_tools.add("turn_status")
+
+            # 协议性工具：tool_expand_tools 只用于恢复 tool suggestion 二次筛选遗漏的工具。
+            # 它必须在入口白名单内可见，真正是否下发给模型由执行层按"是否被二次收窄"判断。
+            if TOOL_EXPAND_TOOLS in all_tools_names:
+                self._available_tools.add(TOOL_EXPAND_TOOLS)
+
+            # 工具捆绑组：组内任何一个被勾选，组内全部解锁（共享后台任务注册表，缺一个就废）。
+            _TOOL_BUNDLES: List[set] = [
+                {"execute_shell_command", "await_shell", "kill_shell"},
+            ]
+            for bundle in _TOOL_BUNDLES:
+                if self._available_tools & bundle:
+                    for name in bundle:
+                        if name in all_tools_names:
+                            self._available_tools.add(name)
+
+    def _check_tool_available(self, tool_name: str) -> None:
+        """
+        检查工具是否可用
+        """
+        if self._is_tool_available(tool_name):
+            return
+        raise ValueError(f"Tool '{tool_name}' is not in the available tool list")
+
+    def _tool_requires_explicit_selection(self, tool_name: str) -> bool:
+        for tool_manager in self.tool_managers:
+            tool = tool_manager.get_tool(tool_name)
+            if tool is not None:
+                return bool(getattr(tool, "explicit_only", False))
+        return False
+
+    def _is_tool_available(self, tool_name: str) -> bool:
+        if self._available_tools is not None:
+            return tool_name in self._available_tools
+        return not self._tool_requires_explicit_selection(tool_name)
+
+    def allow_tools(self, tool_names: List[str]) -> None:
+        """
+        将工具加入白名单。
+
+        若当前未启用白名单（所有工具默认可用），此方法为 no-op，避免对 None 调用 .add()。
+        """
+        if self._available_tools is None:
+            return
+        self._available_tools.update(tool_names)
+
+    # ToolManager 兼容接口
+
+    def get_openai_tools(
+        self, lang: Optional[str] = None, fallback_chain: Optional[List[str]] = None
+    ) -> List[Dict[str, Any]]:
+        """
+        获取 OpenAI 格式的工具规范（仅限可用工具），支持语言筛选
+        """
+        all_tools_map = {}
+        # Iterate in reverse order so higher priority managers overwrite lower ones
+        for tm in reversed(self.tool_managers):
+            tools = tm.get_openai_tools(lang=lang, fallback_chain=fallback_chain)
+            for tool in tools:
+                name = tool["function"]["name"]
+                if not _should_expose_turn_status() and name == "turn_status":
+                    continue
+                if self._is_tool_available(name):
+                    all_tools_map[name] = tool
+
+        # 与 ToolManager.get_openai_tools 保持一致：按 function.name 字典序排序，
+        # 使 tools 字段在多次调用间稳定，提升 prompt cache 命中率。
+        ordered = list(all_tools_map.values())
+        ordered.sort(key=lambda t: (t.get("function") or {}).get("name") or "")
+        return ordered
+
+    def list_tools_simplified(
+        self, lang: Optional[str] = None, fallback_chain: Optional[List[str]] = None
+    ) -> List[Dict[str, Any]]:
+        """
+        获取简化的工具列表（仅限可用工具），支持语言筛选
+        """
+        all_tools_map = {}
+        for tm in reversed(self.tool_managers):
+            tools = tm.list_tools_simplified(lang=lang, fallback_chain=fallback_chain)
+            for tool in tools:
+                if not _should_expose_turn_status() and tool["name"] == "turn_status":
+                    continue
+                if self._is_tool_available(tool["name"]):
+                    all_tools_map[tool["name"]] = tool
+
+        return list(all_tools_map.values())
+
+    def list_tools(
+        self, lang: Optional[str] = None, fallback_chain: Optional[List[str]] = None
+    ) -> List[Dict[str, Any]]:
+        """
+        获取详细的工具列表（仅限可用工具），支持语言筛选
+        """
+        all_tools_map = {}
+        for tm in reversed(self.tool_managers):
+            tools = tm.list_tools(lang=lang, fallback_chain=fallback_chain)
+            for tool in tools:
+                if not _should_expose_turn_status() and tool["name"] == "turn_status":
+                    continue
+                if self._is_tool_available(tool["name"]):
+                    all_tools_map[tool["name"]] = tool
+
+        return list(all_tools_map.values())
+
+    def list_all_tools_name(self, lang: Optional[str] = None) -> List[str]:
+        """
+        获取所有工具名称（包括不可用工具），接受语言参数以保持接口一致性
+        """
+        all_names = set()
+        for tm in self.tool_managers:
+            names = tm.list_all_tools_name(lang=lang)
+            if not _should_expose_turn_status():
+                names = [n for n in names if n != "turn_status"]
+            all_names.update([name for name in names if self._is_tool_available(name)])
+        return list(all_names)
+
+    def list_tools_with_type(
+        self, lang: Optional[str] = None, fallback_chain: Optional[List[str]] = None
+    ) -> List[Dict[str, Any]]:
+        """
+        获取带类型的工具列表（仅限可用工具），支持语言筛选
+        """
+        all_tools_map = {}
+        for tm in reversed(self.tool_managers):
+            tools = tm.list_tools_with_type(lang=lang, fallback_chain=fallback_chain)
+            for tool in tools:
+                if not _should_expose_turn_status() and tool["name"] == "turn_status":
+                    continue
+                if self._is_tool_available(tool["name"]):
+                    all_tools_map[tool["name"]] = tool
+
+        return list(all_tools_map.values())
+
+    def get_tool(self, name: str) -> Optional[Any]:
+        """
+        根据名称获取工具（仅限可用工具）
+        """
+        try:
+            self._check_tool_available(name)
+            # Search in managers by priority
+            for tm in self.tool_managers:
+                tool = tm.get_tool(name)
+                if tool:
+                    return tool
+            return None
+        except ValueError:
+            return None
+
+    async def run_tool_async(
+        self, tool_name: str, session_id: str, user_id=None, **kwargs
+    ) -> Any:
+        """
+        异步执行工具（仅限可用工具）
+
+        Args:
+            tool_name: 工具名称
+            session_id: 会话ID
+            **kwargs: 其他工具参数
+        """
+        self._check_tool_available(tool_name)
+
+        for tm in self.tool_managers:
+            if tm.get_tool(tool_name):
+                # 只传递 session_id，不传递 session_context
+                return await tm.run_tool_async(
+                    tool_name,
+                    session_id=session_id,
+                    user_id=user_id,
+                    **kwargs,
+                )
+
+        raise ValueError(f"Tool {tool_name} not found")
+
+    async def register_mcp_server(
+        self, server_name: str, config: dict, force: bool = False
+    ) -> Any:
+        """
+        注册 MCP Server 到优先级最高的 ToolManager
+
+        Args:
+            server_name: MCP server 名称
+            config: MCP server 配置
+
+        Returns:
+            注册结果
+        """
+        if not self.tool_managers:
+            logger.warning(
+                "ToolProxy: No tool managers available to register MCP server"
+            )
+            return False
+
+        # 注册到优先级最高的 manager (index 0)
+        target_tm = self.tool_managers[0]
+        logger.info(
+            f"ToolProxy: Registering MCP server '{server_name}' to highest priority manager"
+        )
+        return await target_tm.register_mcp_server(server_name, config, force=force)
+
+    def add_tool_manager(self, tool_manager: ToolManager) -> None:
+        """
+        Add a tool manager to the proxy with highest priority.
+
+        Args:
+            tool_manager: The tool manager to add.
+        """
+        self.tool_managers.insert(0, tool_manager)
+
+        # If available_tools is set, we need to ensure the new manager's tools are allowed if they were not implicitly.
+        # However, available_tools acts as a whitelist filter.
+        # If the user adds a manager dynamically, they likely want its tools to be available.
+        # But if available_tools was restricted, we should probably update it or assume the new manager's tools are allowed?
+        # The current implementation of methods filters by self._available_tools.
+        # If self._available_tools is not None, new tools won't be visible unless added to the set.
+
+        if self._available_tools is not None:
+            new_tools = tool_manager.list_all_tools_name()
+            self._available_tools.update(new_tools)
+            logger.info(
+                f"ToolProxy: Added tools from new manager to whitelist: {new_tools}"
+            )
+
+    def register_tools_from_object(self, obj: Any) -> int:
+        """
+        Register tools from an object instance or class into the highest priority ToolManager.
+
+        Args:
+            obj: An object instance or class to scan for tools.
+
+        Returns:
+            int: Number of tools successfully registered.
+        """
+        if not self.tool_managers:
+            logger.warning("ToolProxy: No tool managers available to register tools")
+            return 0
+
+        # Register to the highest priority manager (index 0)
+        target_tm = self.tool_managers[0]
+        # ToolManager.register_tools_from_object now returns List[str] (names of registered tools)
+        registered_tool_names = target_tm.register_tools_from_object(obj)
+        count = len(registered_tool_names)
+
+        if count > 0:
+            # Update whitelist only with the newly registered tools
+            if self._available_tools is not None:
+                try:
+                    self._available_tools.update(registered_tool_names)
+                except Exception as e:
+                    logger.warning(
+                        f"ToolProxy: Failed to update available_tools after registration: {e}"
+                    )
+
+        return count
+
+
+class ToolProxyFactory:
+    """
+    工具代理工厂类
+
+    用于创建和管理预定义的工具组合。
+    """
+
+    # 预定义的工具组合
+    PREDEFINED_TOOL_SETS = {
+        "im_invitation": [
+            "calculate",
+            "factorial",
+            "file_read",
+            "file_write",
+            "complete_task",
+            "todo_write",
+            "todo_read",
+        ],
+        "sales_assistant": [
+            "calculate",
+            "file_read",
+            "file_write",
+            "web_search",
+            "send_email",
+            "complete_task",
+            "todo_write",
+            "todo_read",
+        ],
+        "batch_operation": [
+            "file_read",
+            "file_write",
+            "batch_process",
+            "complete_task",
+            "todo_write",
+            "todo_read",
+        ],
+        "basic": ["calculate", "factorial", "complete_task", "todo_write", "todo_read"],
+    }
+
+    def __init__(self, tool_manager: ToolManager):
+        """
+        初始化工具代理工厂
+
+        Args:
+            tool_manager: 全局工具管理器实例
+        """
+        self.tool_manager = tool_manager
+        logger.info("ToolProxyFactory: 工具代理工厂初始化完成")
+
+    def get_available_tool_sets(self) -> List[str]:
+        """
+        获取可用的工具集名称
+
+        Returns:
+            工具集名称列表
+        """
+        return list(self.PREDEFINED_TOOL_SETS.keys())
+
+    def create_proxy(self, tool_set_name: str) -> ToolProxy:
+        """
+        创建预定义工具集的代理
+
+        Args:
+            tool_set_name: 工具集名称
+
+        Returns:
+            工具代理实例
+
+        Raises:
+            ValueError: 工具集不存在时抛出异常
+        """
+        if tool_set_name not in self.PREDEFINED_TOOL_SETS:
+            raise ValueError(
+                f"Tool set '{tool_set_name}' does not exist. "
+                f"Available tool sets: {list(self.PREDEFINED_TOOL_SETS.keys())}"
+            )
+
+        tools = self.PREDEFINED_TOOL_SETS[tool_set_name]
+        logger.info(f"ToolProxyFactory: 创建 '{tool_set_name}' 工具集代理")
+        return ToolProxy(self.tool_manager, tools)
+
+    def create_custom_proxy(self, tools: List[str]) -> ToolProxy:
+        """
+        创建自定义工具集的代理
+
+        Args:
+            tools: 工具名称列表
+
+        Returns:
+            工具代理实例
+        """
+        logger.info(f"ToolProxyFactory: 创建自定义工具集代理: {tools}")
+        return ToolProxy(self.tool_manager, tools)

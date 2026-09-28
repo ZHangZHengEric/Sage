@@ -6,7 +6,7 @@
       "pythonVersion": "3.12"
     },
     {
-      "root": "app/desktop_v2",
+      "root": "app/v2/desktop",
       "pythonVersion": "3.12"
     },
     {
@@ -14,29 +14,49 @@
       "pythonVersion": "3.12"
     },
     {
-      "root": "tests/app/desktop_v2",
+      "root": "tests/app/v2/desktop",
+      "pythonVersion": "3.12"
+    },
+    {
+      "root": "app/v2/server",
+      "pythonVersion": "3.12"
+    },
+    {
+      "root": "tests/app/v2/server",
+      "pythonVersion": "3.12"
+    },
+    {
+      "root": "app/v2/cli",
+      "pythonVersion": "3.12"
+    },
+    {
+      "root": "tests/clients/cli",
       "pythonVersion": "3.12"
     }
   ],
   "venvPath": ".",
-  "venv": ".conda",
+  "venv": ".venv",
   "typeCheckingMode": "basic",
   "include": [
     "app/__init__.py",
-    "app/cli",
-    "app/desktop/core",
-    "app/desktop/entry.py",
-    "app/desktop/scripts",
-    "app/server",
+    "clients/cli",
+    "app/v1/cli",
+    "app/v2/cli",
+    "app/v1/desktop/core",
+    "app/v1/desktop/entry.py",
+    "app/v1/desktop/scripts",
+    "app/v1/server",
     "app/skills",
-    "common",
+    "app/v1/common",
     "conftest.py",
     "docs/scripts",
     "examples",
     "mcp_servers",
     "sagents",
     "scripts",
-    "tests"
+    "tests",
+    "app/v2/desktop/backend",
+    "app/v2/server"
   ],
   "exclude": [
     "**/__pycache__",
@@ -48,14 +68,16 @@
     ".conda",
     ".git",
     ".claude",
-    "app/desktop/build",
-    "app/desktop/tauri",
-    "app/desktop/ui",
-    "app/server/web",
-    "app/terminal",
+    "app/v1/desktop/build",
+    "app/v1/desktop/tauri",
+    "app/v1/desktop/ui",
+    "app/v1/server/web",
+    "clients/terminal",
     "app/wiki",
     "assets",
     "deploy",
-    "release_notes"
+    "release_notes",
+    ".venv",
+    "app/v2/server/web"
   ]
 }

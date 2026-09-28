@@ -39,7 +39,7 @@ project directories with `add_project`; pass per-invocation changes in
 `DesktopRunRequest.run_context`:
 
 ```python
-from app.desktop_v2.backend.schemas import (
+from app.v2.desktop.backend.schemas import (
     DesktopMcpBinding, DesktopRunContext, DesktopRunRequest, RunMessage,
 )
 
@@ -123,7 +123,7 @@ multi-process write guarantees or coordinate independent schedulers.
 
 ```sh
 .venv/bin/pytest -q tests/sagents/v2/test_multi_project_example.py \
-  tests/app/desktop_v2/test_run_isolation.py
+  tests/app/v2/desktop/test_run_isolation.py
 ```
 
 Desktop tests use its actual dispatcher, loops, event streams and filesystem

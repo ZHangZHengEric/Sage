@@ -1,0 +1,2873 @@
+from sagents.v1.utils.request_latency import timed_stream_sync
+# 负责管理会话的上下文，以及过程中产生的日志以及状态记录。
+from sagents.v1.utils.latency_diagnostics import (
+    diagnose,
+    timed,
+    stage,
+    to_thread as diagnostic_to_thread,
+)
+import asyncio
+import time
+import threading
+import uuid
+from typing import Dict, Any, Optional, List, Set, Union
+from enum import Enum
+from concurrent.futures import ThreadPoolExecutor
+
+from sagents.v1.context.messages.message import MessageChunk, MessageRole, MessageType
+from sagents.v1.context.messages.message_manager import MessageManager
+from sagents.v1.context.messages.token_accounting import PromptBudgetManager
+from sagents.v1.context.session_memory import create_session_memory_manager
+from sagents.v1.skill import SkillProxy, SkillManager
+from sagents.v1.skill.sandbox_skill_manager import SandboxSkillManager
+from sagents.v1.utils.prompt_manager import prompt_manager
+from sagents.v1.context.workflows import WorkflowManager
+
+from sagents.v1.utils.logger import logger
+from sagents.v1.storage import SessionStore, create_session_store
+from sagents.v1.utils.lock_manager import lock_manager, UnifiedLock
+from sagents.v1.utils.serialization import make_serializable
+import json
+import os
+import re
+import sys
+import datetime
+from sagents.v1.utils.sandbox import SandboxProviderFactory, SandboxConfig, SandboxType
+from sagents.v1.utils.sandbox.config import VolumeMount
+from sagents.v1.utils.sandbox.providers.local.local import LocalSandboxProvider
+from sagents.v1.utils.sandbox.environment import is_server_process
+from sagents.v1.utils.common_utils import detect_machine_environment
+
+_session_context_file_io_pool = ThreadPoolExecutor(
+    max_workers=8, thread_name_prefix="session-context-io"
+)
+
+MESSAGE_JOURNAL_SCHEMA_VERSION = 1
+MESSAGE_JOURNAL_FILE = "messages.journal.jsonl"
+
+
+class SessionStatus(Enum):
+    """会话状态枚举"""
+
+    IDLE = "idle"  # 空闲状态
+    RUNNING = "running"  # 运行中
+    INTERRUPTED = "interrupted"  # 被中断
+    COMPLETED = "completed"  # 已完成
+    ERROR = "error"  # 错误状态
+
+
+class SessionContext:
+    LOG_FLUSH_TIMEOUT_SECONDS = 5.0
+    LOG_WRITER_CANCEL_TIMEOUT_SECONDS = 0.5
+
+    def __init__(
+        self,
+        session_id: str,
+        user_id: str,
+        agent_id: str,
+        session_root_space: str,
+        sandbox_agent_workspace: Optional[str] = None,
+        volume_mounts: Optional[List[VolumeMount]] = None,
+        sandbox_id: Optional[str] = None,
+        context_budget_config: Optional[Dict[str, Any]] = None,
+        system_context: Optional[Dict[str, Any]] = None,
+        tool_manager: Optional[Any] = None,
+        skill_manager: Optional[Union[SkillManager, SkillProxy]] = None,
+        parent_session_id: Optional[str] = None,
+        storage: Optional[SessionStore] = None,
+    ):
+        # 基础身份与外部依赖
+        self.session_id = session_id
+        self.user_id = user_id
+        self.agent_id = agent_id
+        self.system_context: Dict[str, Any] = system_context or {}
+        self.session_root_space = session_root_space
+        # init_more() canonicalizes these paths, but restored/reused contexts can
+        # receive system_context updates before init_more() has run.
+        self.external_paths: List[str] = self._normalize_external_paths(
+            self.system_context.get("external_paths")
+        )
+
+        # workspace 配置
+        self.sandbox_agent_workspace: Optional[str] = (
+            sandbox_agent_workspace  # Agent 工作目录（沙箱内路径）
+        )
+        self.volume_mounts: List[VolumeMount] = volume_mounts or []  # 额外卷挂载
+        self.sandbox_id: Optional[str] = sandbox_id
+        # sandbox 会在 init_more() 中初始化；先占位避免半初始化上下文直接 AttributeError
+        self.sandbox: Optional[Any] = None
+
+        self.tool_manager = tool_manager
+        self.skill_manager = skill_manager
+        self.sandbox_skill_manager: Optional[SandboxSkillManager] = None
+        self.parent_session_id = parent_session_id
+        self.storage = storage or create_session_store(session_root=session_root_space)
+        self._init_runtime_state(context_budget_config=context_budget_config)
+        # 注意：init_more 不再在 __init__ 中自动调用，需要调用方显式调用
+        self._session_root_space = session_root_space
+        self._volume_mounts = volume_mounts
+
+    @property
+    def effective_skill_manager(self) -> Optional[Any]:
+        """
+        Agent 提示词、任务分析、工具建议等使用的技能视图：若沙箱内已成功加载技能，
+        则与 load_skill 一致采用 agent workspace/skills 副本；否则回退宿主 SkillProxy / SkillManager。
+        """
+        if (
+            self.sandbox_skill_manager is not None
+            and self.sandbox_skill_manager.list_skills()
+        ):
+            return self.sandbox_skill_manager
+        return self.skill_manager
+
+    @diagnose("session.prepare", 500)
+    async def init_more(self, session_root_space: Optional[str] = None):
+        """
+        初始化 SessionContext（异步方法，需要显式调用）
+
+        Args:
+            session_root_space: 会话根空间路径（宿主机），用于存储会话数据
+        """
+        # 使用构造函数中传入的参数作为默认值
+        if session_root_space is None:
+            session_root_space = getattr(self, "_session_root_space", None)
+
+        # 从环境变量获取沙箱模式，默认使用本地沙箱
+        sandbox_mode_str = os.environ.get("SAGE_SANDBOX_MODE", "local").lower()
+        if sandbox_mode_str == "passthrough":
+            sandbox_mode = SandboxType.PASSTHROUGH
+        elif sandbox_mode_str == "remote":
+            sandbox_mode = SandboxType.REMOTE
+        else:
+            sandbox_mode = SandboxType.LOCAL
+        if is_server_process():
+            if sandbox_mode == SandboxType.PASSTHROUGH:
+                raise RuntimeError(
+                    "Sage Server cannot use passthrough sandbox mode because it "
+                    "shares the credential-bearing server process boundary"
+                )
+            linux_isolation = os.environ.get(
+                "SAGE_LOCAL_LINUX_ISOLATION", "bwrap"
+            ).lower()
+            if sandbox_mode == SandboxType.LOCAL and (
+                not sys.platform.startswith("linux") or linux_isolation != "bwrap"
+            ):
+                raise RuntimeError(
+                    "Sage Server local sandbox mode requires Linux bwrap; "
+                    "configure SAGE_LOCAL_LINUX_ISOLATION=bwrap or use remote mode"
+                )
+        logger.debug(f"SessionContext: sandbox_mode: {sandbox_mode.value}")
+
+        # 解析工作空间路径
+        # - session_workspace: 会话数据路径（宿主机）
+        self._resolve_workspace_paths(session_root_space)  # pyright: ignore[reportArgumentType]
+
+        # 初始化外部路径和上下文
+        self._init_external_paths_and_context()
+
+        # 初始化沙箱和文件系统
+        await self._init_sandbox_and_file_system(sandbox_mode=sandbox_mode)
+
+        # 准备工作区引导文件（通过沙箱接口，在沙箱初始化后执行）
+        await self._prepare_workspace_bootstrap_files()
+
+        # 注册并准备技能
+        await self._register_and_prepare_skills()
+
+        # 最终化运行变量（兼容字段名 system_context）
+        await self._finalize_system_context()
+
+        # 加载已持久化的消息
+        await diagnostic_to_thread(
+            "prepare.load_messages", self._load_persisted_messages
+        )
+
+        # 清理过期的待办任务（异步执行，确保 system_context 正确加载）
+        try:
+            await self._cleanup_expired_todo_tasks()
+        except Exception as e:
+            logger.warning(f"SessionContext: 清理过期任务失败: {e}")
+
+    @staticmethod
+    def _normalize_context_budget_config(
+        context_budget_config: Optional[Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        if not isinstance(context_budget_config, dict):
+            return {}
+        allowed_keys = {
+            "max_model_len",
+            "history_ratio",
+            "active_ratio",
+            "max_new_message_ratio",
+            "compression_threshold",
+        }
+        return {
+            key: value
+            for key, value in context_budget_config.items()
+            if key in allowed_keys and value is not None
+        }
+
+    def _effective_context_budget_config(self) -> Dict[str, Any]:
+        manager = self.message_manager.context_budget_manager
+        return {
+            "max_model_len": manager.max_model_len,
+            "history_ratio": manager.history_ratio,
+            "active_ratio": manager.active_ratio,
+            "max_new_message_ratio": manager.max_new_message_ratio,
+            "compression_threshold": self.message_manager.compression_threshold,
+        }
+
+    def update_context_budget_config(
+        self, context_budget_config: Optional[Dict[str, Any]]
+    ) -> None:
+        """Refresh budget settings on a reused/restored SessionContext."""
+        incoming = self._normalize_context_budget_config(context_budget_config)
+        if not incoming:
+            return
+
+        manager = self.message_manager.context_budget_manager
+        current_config = self._effective_context_budget_config()
+        next_config = dict(current_config)
+        next_config.update(incoming)
+
+        if next_config == current_config:
+            self.context_budget_config = next_config
+            return
+
+        manager.max_model_len = next_config["max_model_len"]
+        manager.history_ratio = next_config["history_ratio"]
+        manager.active_ratio = next_config["active_ratio"]
+        manager.max_new_message_ratio = next_config["max_new_message_ratio"]
+        compression_threshold = float(next_config["compression_threshold"])
+        if not 0 < compression_threshold < 1:
+            raise ValueError(
+                "compression_threshold must be greater than 0 and less than 1"
+            )
+        self.message_manager.compression_threshold = compression_threshold
+        manager.budget_info = None
+        self.context_budget_config = next_config
+        logger.info(
+            f"SessionContext: 更新 context_budget_config, "
+            f"session_id={self.session_id}, "
+            f"old_max_model_len={current_config.get('max_model_len')}, "
+            f"new_max_model_len={manager.max_model_len}"
+        )
+
+    def _init_runtime_state(
+        self, context_budget_config: Optional[Dict[str, Any]] = None
+    ):
+        # 运行期状态容器（与 I/O、会话生命周期绑定）
+        self.llm_requests_logs: List[Dict[str, Any]] = []
+        self.mcp_calls_logs: List[Dict[str, Any]] = []
+        self.thread_id = threading.get_ident()
+        self.start_time = time.time()
+        self._perf_origin = time.perf_counter()
+        self.end_time = None
+        self._status = SessionStatus.IDLE
+        self.message_manager = MessageManager(
+            context_budget_config=context_budget_config
+        )
+        self.prompt_budget_manager = PromptBudgetManager()
+        self.context_budget_config = self._effective_context_budget_config()
+        # pending_user_injections：运行中等待被下一次 LLM 请求消费的"引导用户消息"。
+        # 不进入持久化快照，会话销毁即释放。
+        self.pending_user_injections: List[MessageChunk] = []
+        self.workflow_manager = WorkflowManager()
+        self.audit_status: Dict[str, Any] = {}
+        self.session_memory_manager = create_session_memory_manager()
+        self.agent_config: Dict[str, Any] = {}
+        self.custom_sub_agents: List[Dict[str, Any]] = []
+        self.orchestrator: Optional[Any] = None
+        self.child_session_ids: List[str] = []
+        self.execution_timeline_events: List[Dict[str, Any]] = []
+        self._message_timing: Dict[str, Dict[str, Any]] = {}
+        # per-request tokens 累加器（详见 start_request / end_request / add_llm_request）
+        self._current_request: Optional[Dict[str, Any]] = None
+        self._request_lock = threading.Lock()
+        self._llm_request_save_lock = threading.Lock()
+        self._mcp_calls_lock = threading.Lock()
+        self._mcp_calls_save_lock = threading.Lock()
+        # One writer task serializes all diagnostic log I/O for this session.
+        # The existing log lists are also the pending queue, avoiding one task
+        # (and one retained SessionContext) per LLM or MCP call.
+        self._log_writer_task: Optional[asyncio.Task] = None
+        self._llm_log_save_cursor = 0
+        self._dirty_mcp_request_ids: Set[str] = set()
+        self._mcp_request_versions: Dict[str, int] = {}
+        self._log_writer_closed = False
+        self._log_flush_lock = asyncio.Lock()
+        try:
+            self._owner_loop: Optional[asyncio.AbstractEventLoop] = (
+                asyncio.get_running_loop()
+            )
+        except RuntimeError:
+            self._owner_loop = None
+        self._save_lock = threading.Lock()
+        self._message_journal_lock = threading.RLock()
+        self._message_journal_seq = 0
+        self._message_journal_active_message_id: Optional[str] = None
+        self._message_journal_flushed_signatures: Dict[str, str] = {}
+        self._last_save_signature: Optional[tuple] = None
+        self._last_save_time = 0.0
+        self.record_timing_event(
+            "session_start",
+            status=self.status.value,
+            session_id=self.session_id,
+        )
+
+    def _now_perf_ms(self) -> float:
+        return (time.perf_counter() - self._perf_origin) * 1000.0
+
+    def record_timing_event(self, event_type: str, **fields: Any) -> None:
+        try:
+            event = {
+                "event_type": event_type,
+                "timestamp": time.time(),
+                "perf_ms": self._now_perf_ms(),
+            }
+            event.update(fields)
+            self.execution_timeline_events.append(make_serializable(event))  # pyright: ignore[reportArgumentType]
+        except Exception as e:
+            logger.debug(f"SessionContext: 记录 timing 事件失败 {event_type}: {e}")
+
+    @property
+    def status(self) -> SessionStatus:
+        return self._status
+
+    @status.setter
+    def status(self, value: SessionStatus) -> None:
+        self._status = value
+
+    @timed_stream_sync("ledger.message_timing")
+    def _record_message_timing(
+        self, message: Union[MessageChunk, Dict[str, Any]]
+    ) -> None:
+        try:
+            if isinstance(message, MessageChunk):
+                # Timing needs only scalar identity fields. Avoid recursively
+                # copying content, tool arguments and metadata for every token.
+                msg = {
+                    "message_id": message.message_id,
+                    "role": getattr(message.role, "value", message.role),
+                    "message_type": getattr(message.message_type, "value", message.message_type),
+                    "type": getattr(message.type, "value", message.type),
+                    "tool_call_id": message.tool_call_id,
+                }
+            elif isinstance(message, dict):
+                msg = message
+            else:
+                return
+
+            message_id = str(msg.get("message_id") or "").strip()
+            if not message_id:
+                return
+
+            now_ts = time.time()
+            now_perf_ms = self._now_perf_ms()
+            role = msg.get("role")
+            message_type = msg.get("message_type") or msg.get("type")
+
+            stat = self._message_timing.get(message_id)
+            if not stat:
+                stat = {
+                    "message_id": message_id,
+                    "role": role,
+                    "message_type": message_type,
+                    "tool_call_id": msg.get("tool_call_id"),
+                    "start_ts": now_ts,
+                    "start_perf_ms": now_perf_ms,
+                    "end_ts": now_ts,
+                    "end_perf_ms": now_perf_ms,
+                }
+                self._message_timing[message_id] = stat
+                self.record_timing_event(
+                    "message_start",
+                    message_id=message_id,
+                    role=role,
+                    message_type=message_type,
+                )
+            else:
+                stat["end_ts"] = now_ts
+                stat["end_perf_ms"] = now_perf_ms
+                if not stat.get("role") and role:
+                    stat["role"] = role
+                if not stat.get("message_type") and message_type:
+                    stat["message_type"] = message_type
+
+        except Exception as e:
+            logger.debug(f"SessionContext: 记录 message 时序失败: {e}")
+
+    def _build_execution_timing_summary(self) -> Dict[str, Any]:
+        messages = list(self._message_timing.values())
+        messages.sort(key=lambda item: float(item.get("start_ts") or 0.0))
+
+        message_timings: List[Dict[str, Any]] = []
+        for item in messages:
+            start_ts = float(item.get("start_ts") or 0.0)
+            end_ts = float(item.get("end_ts") or start_ts)
+            message_timings.append(
+                {
+                    "message_id": item.get("message_id"),
+                    "role": item.get("role"),
+                    "message_type": item.get("message_type"),
+                    "tool_call_id": item.get("tool_call_id"),
+                    "start_ts": start_ts,
+                    "end_ts": end_ts,
+                    "duration_ms": max(0.0, (end_ts - start_ts) * 1000.0),
+                    "start_perf_ms": float(item.get("start_perf_ms") or 0.0),
+                    "end_perf_ms": float(item.get("end_perf_ms") or 0.0),
+                }
+            )
+
+        message_intervals: List[Dict[str, Any]] = []
+        for i in range(1, len(message_timings)):
+            prev_item = message_timings[i - 1]
+            cur_item = message_timings[i]
+            gap_start_to_start_ms = max(
+                0.0,
+                (float(cur_item["start_ts"]) - float(prev_item["start_ts"])) * 1000.0,
+            )
+            gap_prev_end_to_cur_start_ms = max(
+                0.0,
+                (float(cur_item["start_ts"]) - float(prev_item["end_ts"])) * 1000.0,
+            )
+            message_intervals.append(
+                {
+                    "from_message_id": prev_item["message_id"],
+                    "to_message_id": cur_item["message_id"],
+                    "start_to_start_gap_ms": gap_start_to_start_ms,
+                    "prev_end_to_cur_start_gap_ms": gap_prev_end_to_cur_start_ms,
+                }
+            )
+
+        flow_node_timings = [
+            evt
+            for evt in self.execution_timeline_events
+            if evt.get("event_type") == "flow_node_end"
+        ]
+
+        return {
+            "session_id": self.session_id,
+            "status": self.status.value
+            if hasattr(self.status, "value")
+            else str(self.status),
+            "generated_at": time.time(),
+            "total_timeline_events": len(self.execution_timeline_events),
+            "message_count": len(message_timings),
+            "message_timings": message_timings,
+            "message_intervals": message_intervals,
+            "flow_node_timings": flow_node_timings,
+        }
+
+    def _bind_storage_workspace(self) -> None:
+        workspace = getattr(self, "session_workspace", None)
+        if workspace:
+            self.storage.bind_session_workspace(self.session_id, workspace)
+
+    @staticmethod
+    def _upsert_persisted_message(
+        messages: List[MessageChunk],
+        message: MessageChunk,
+    ) -> List[MessageChunk]:
+        if not message.message_id:
+            return [*messages, message]
+        for idx, existing in enumerate(messages):
+            if existing.message_id == message.message_id:
+                messages[idx] = message
+                return messages
+        messages.append(message)
+        return messages
+
+    @staticmethod
+    def load_persisted_message_ledger(
+        session_workspace: str,
+        session_id: Optional[str] = None,
+        storage: Optional[SessionStore] = None,
+    ) -> tuple[List[MessageChunk], int, int]:
+        effective_session_id = session_id or os.path.basename(session_workspace)
+        effective_storage = storage
+        if effective_storage is None:
+            effective_storage = create_session_store(
+                session_root=os.path.dirname(session_workspace),
+                initialize=False,
+            )
+            effective_storage.bind_session_workspace(
+                effective_session_id, session_workspace
+            )
+        try:
+            ledger = effective_storage.load_message_ledger(effective_session_id)
+            messages = []
+            for message_data in ledger.messages:
+                try:
+                    messages.append(MessageChunk.from_dict(message_data))
+                except Exception as exc:
+                    logger.warning(
+                        "SessionContext: skipped invalid persisted message "
+                        f"session_id={effective_session_id}: {exc}"
+                    )
+            return messages, ledger.max_sequence, ledger.journal_records
+        except UnicodeDecodeError:
+            logger.warning(
+                "SessionContext: message ledger decode failed, file may be "
+                "in legacy encoding, will start with empty messages"
+            )
+            return [], 0, 0
+        except Exception as exc:
+            logger.warning(f"SessionContext: Failed to load message ledger: {exc}")
+            return [], 0, 0
+
+    def _get_message_by_id(self, message_id: Optional[str]) -> Optional[MessageChunk]:
+        if not message_id:
+            return None
+        for message in reversed(self.message_manager.messages):
+            if message.message_id == message_id:
+                return message
+        return None
+
+    @timed_stream_sync("ledger.journal")
+    def _append_message_to_journal(
+        self,
+        message_id: Optional[str],
+        *,
+        reason: str,
+    ) -> bool:
+        session_workspace = getattr(self, "session_workspace", None)
+        if not session_workspace:
+            return False
+        try:
+            self._bind_storage_workspace()
+            with self._message_journal_lock:
+                message = self._get_message_by_id(message_id)
+                if message is None:
+                    return False
+                message_data = make_serializable(message)
+                message_signature = json.dumps(
+                    message_data,
+                    ensure_ascii=False,
+                    sort_keys=True,
+                )
+                if (
+                    message.message_id
+                    and self._message_journal_flushed_signatures.get(message.message_id)
+                    == message_signature
+                ):
+                    return False
+                self._message_journal_seq += 1
+                record = {
+                    "schema_version": MESSAGE_JOURNAL_SCHEMA_VERSION,
+                    "op": "put_message",
+                    "session_id": self.session_id,
+                    "message_id": message.message_id,
+                    "seq": self._message_journal_seq,
+                    "timestamp": time.time(),
+                    "reason": reason,
+                    "message": message_data,
+                }
+                self.storage.append_message_event(self.session_id, record)
+                if message.message_id:
+                    self._message_journal_flushed_signatures[message.message_id] = (
+                        message_signature
+                    )
+            return True
+        except Exception as e:
+            logger.warning(
+                "SessionContext: Failed to append message journal "
+                f"session_id={self.session_id} message_id={message_id} "
+                f"reason={reason}: {e}"
+            )
+            return False
+
+    def _track_message_journal_after_add(self, message_id: Optional[str]) -> None:
+        if not message_id:
+            return
+        if self._message_journal_active_message_id is None:
+            self._message_journal_active_message_id = message_id
+            return
+        if message_id == self._message_journal_active_message_id:
+            return
+        self._append_message_to_journal(
+            self._message_journal_active_message_id,
+            reason="message_id_switch",
+        )
+        self._message_journal_active_message_id = message_id
+
+    def flush_message_journal_current(self, *, reason: str) -> None:
+        self._append_message_to_journal(
+            self._message_journal_active_message_id,
+            reason=reason,
+        )
+
+    def _clear_message_journal_after_snapshot(self) -> None:
+        try:
+            self._bind_storage_workspace()
+            with self._message_journal_lock:
+                self.storage.clear_message_events(self.session_id)
+            logger.info(
+                f"SessionContext: cleared {MESSAGE_JOURNAL_FILE} "
+                f"session_id={self.session_id}"
+            )
+        except Exception as e:
+            logger.warning(
+                f"SessionContext: Failed to clear {MESSAGE_JOURNAL_FILE} "
+                f"session_id={self.session_id}: {e}"
+            )
+
+    def _message_journal_has_records(self) -> bool:
+        try:
+            self._bind_storage_workspace()
+            return self.storage.message_events_have_records(self.session_id)
+        except OSError:
+            return False
+
+    def _is_acceptable_message_session_id(self, msg_session_id: Optional[str]) -> bool:
+        """Return True if message may enter this session's inference ledger.
+
+        Accepts only untagged chunks (``None``) or an exact match with this
+        session. Delegated child ``{parent}_sub_{n}`` traffic must stay in the
+        child session ledger; parents receive only the final delegate tool
+        result. Client-visible child progress is streamed by FlowExecutor
+        without calling ``add_messages``.
+        """
+        return msg_session_id is None or msg_session_id == self.session_id
+
+    @staticmethod
+    def _normalize_message_content_for_ledger(
+        msg: Union[MessageChunk, Dict[str, Any]],
+    ) -> None:
+        """Keep ledger content OpenAI-compatible (string | multimodal list)."""
+        if isinstance(msg, MessageChunk):
+            if isinstance(msg.content, dict):
+                msg.content = json.dumps(msg.content, ensure_ascii=False, default=str)
+            return
+        if isinstance(msg, dict) and isinstance(msg.get("content"), dict):
+            msg["content"] = json.dumps(msg["content"], ensure_ascii=False, default=str)
+
+    @timed_stream_sync("ledger.add")
+    def add_messages(
+        self, messages: Union[MessageChunk, List[MessageChunk], List[Dict[str, Any]]]
+    ) -> None:
+        """
+        Add messages to the message manager with session_id validation.
+
+        Args:
+            messages: A message chunk or a list of message chunks/dicts.
+        """
+        if not isinstance(messages, list):
+            messages_list = [messages]
+        else:
+            messages_list = messages
+
+        valid_messages = []
+        rejected_session_ids: List[str] = []
+        for msg in messages_list:
+            msg_session_id = None
+            if isinstance(msg, MessageChunk):
+                msg_session_id = msg.session_id
+            elif isinstance(msg, dict):
+                msg_session_id = msg.get("session_id")
+
+            if self._is_acceptable_message_session_id(msg_session_id):
+                self._normalize_message_content_for_ledger(msg)
+                valid_messages.append(msg)
+            else:
+                rejected_session_ids.append(str(msg_session_id))
+
+        if rejected_session_ids:
+            logger.warning(
+                "SessionContext: rejected messages with mismatched session_id "
+                f"session_id={self.session_id} ctx_id={id(self)} "
+                f"manager_id={id(self.message_manager)} input_count={len(messages_list)} "
+                f"rejected_count={len(rejected_session_ids)} "
+                f"sample_rejected_session_ids={rejected_session_ids[:3]}"
+            )
+        if messages_list and not valid_messages:
+            logger.debug(
+                "SessionContext: add_messages had no valid messages "
+                f"session_id={self.session_id} ctx_id={id(self)} "
+                f"manager_id={id(self.message_manager)} input_count={len(messages_list)}"
+            )
+
+        with self._message_journal_lock:
+            for msg in valid_messages:
+                message_role = self._get_message_role(msg)
+                message_id = self._get_message_id(msg)
+                if message_role == MessageRole.USER.value:
+                    self.flush_message_journal_current(reason="before_user_message")
+                    self._normalize_tool_call_pairs_before_user_message()
+                if message_role == MessageRole.TOOL.value:
+                    if self._replace_synthetic_tool_result(msg):
+                        self._record_message_timing(msg)
+                        if self._get_message_by_id(message_id) is not None:
+                            self._track_message_journal_after_add(message_id)
+                            self._append_message_to_journal(
+                                message_id,
+                                reason="stable_message",
+                            )
+                        continue
+                self._record_message_timing(msg)
+                self.message_manager.add_messages(msg)
+                if self._get_message_by_id(message_id) is not None:
+                    self._track_message_journal_after_add(message_id)
+                    if message_role in {
+                        MessageRole.USER.value,
+                        MessageRole.TOOL.value,
+                    } or self._is_message_final(msg):
+                        self._append_message_to_journal(
+                            message_id,
+                            reason="stable_message",
+                        )
+
+    def claim_llm_messages_for_request(
+        self,
+        message_ids: List[str],
+        logical_request_id: str,
+    ) -> List[str]:
+        """Atomically reserve pending request-scoped messages for one request.
+
+        Claims are intentionally kept in memory only. A terminal provider
+        response journals the final ``consumed`` state, while a tool-call
+        response or a request that fails before its first response releases the
+        claim back to ``pending``. This also means a process restart restores
+        the last journaled pending state instead of stranding an in-flight claim.
+        """
+
+        if not message_ids or not logical_request_id:
+            return []
+        target_ids = set(message_ids)
+        claimed_at = time.time()
+        claimed_ids: List[str] = []
+        with self._message_journal_lock:
+            for message in self.message_manager.messages:
+                if message.message_id not in target_ids:
+                    continue
+                metadata = (
+                    dict(message.metadata) if isinstance(message.metadata, dict) else {}
+                )
+                if metadata.get("llm_scope") != "next_request":
+                    continue
+                if metadata.get("llm_state", "pending") != "pending":
+                    continue
+                metadata.update(
+                    {
+                        "llm_state": "claimed",
+                        "llm_claimed_by": logical_request_id,
+                        "llm_claimed_at": claimed_at,
+                    }
+                )
+                message.metadata = metadata
+                claimed_ids.append(message.message_id)
+
+            if claimed_ids:
+                self.message_manager.stats["last_updated"] = (
+                    datetime.datetime.now().isoformat()
+                )
+
+        if claimed_ids:
+            logger.info(
+                "SessionContext: claimed next-request messages "
+                f"session={self.session_id} request={logical_request_id} "
+                f"count={len(claimed_ids)}"
+            )
+        return claimed_ids
+
+    def release_llm_message_claims(
+        self,
+        message_ids: List[str],
+        logical_request_id: str,
+    ) -> int:
+        """Release claims when a request did not produce a terminal response."""
+
+        if not message_ids or not logical_request_id:
+            return 0
+        target_ids = set(message_ids)
+        released = 0
+        with self._message_journal_lock:
+            for message in self.message_manager.messages:
+                if message.message_id not in target_ids:
+                    continue
+                metadata = (
+                    dict(message.metadata) if isinstance(message.metadata, dict) else {}
+                )
+                if metadata.get("llm_scope") != "next_request":
+                    continue
+                if metadata.get("llm_state") != "claimed":
+                    continue
+                if metadata.get("llm_claimed_by") != logical_request_id:
+                    continue
+                metadata.update(
+                    {
+                        "llm_state": "pending",
+                        "llm_claimed_by": None,
+                        "llm_claimed_at": None,
+                    }
+                )
+                message.metadata = metadata
+                released += 1
+
+            if released:
+                self.message_manager.stats["last_updated"] = (
+                    datetime.datetime.now().isoformat()
+                )
+
+        if released:
+            logger.info(
+                "SessionContext: released next-request message claims "
+                f"session={self.session_id} request={logical_request_id} "
+                f"count={released}"
+            )
+        return released
+
+    def mark_llm_messages_consumed(
+        self,
+        message_ids: List[str],
+        logical_request_id: str,
+    ) -> int:
+        """Mark request-scoped ledger messages consumed by one logical request.
+
+        The update is idempotent. Durable messages and already-consumed messages
+        are left untouched, while changed metadata is journaled immediately so a
+        restored session will not feed the diagnostic to another request.
+        """
+
+        if not message_ids or not logical_request_id:
+            return 0
+        target_ids = set(message_ids)
+        consumed_at = time.time()
+        changed: List[MessageChunk] = []
+        with self._message_journal_lock:
+            for message in self.message_manager.messages:
+                if message.message_id not in target_ids:
+                    continue
+                metadata = (
+                    dict(message.metadata) if isinstance(message.metadata, dict) else {}
+                )
+                if metadata.get("llm_scope") != "next_request":
+                    continue
+                state = metadata.get("llm_state", "pending")
+                if (
+                    state == "claimed"
+                    and metadata.get("llm_claimed_by") != logical_request_id
+                ):
+                    continue
+                if state not in {"pending", "claimed"}:
+                    continue
+                metadata.update(
+                    {
+                        "llm_state": "consumed",
+                        "llm_consumed_by": logical_request_id,
+                        "llm_consumed_at": consumed_at,
+                    }
+                )
+                message.metadata = metadata
+                changed.append(message)
+
+            if changed:
+                self.message_manager.stats["last_updated"] = (
+                    datetime.datetime.now().isoformat()
+                )
+                for message in changed:
+                    self._append_message_to_journal(
+                        message.message_id,
+                        reason="llm_scope_consumed",
+                    )
+
+        if changed:
+            logger.info(
+                "SessionContext: marked next-request messages consumed "
+                f"session={self.session_id} request={logical_request_id} "
+                f"count={len(changed)}"
+            )
+        return len(changed)
+
+    @staticmethod
+    def _debug_message_snapshot(message: Union[MessageChunk, Dict[str, Any]]) -> str:
+        if isinstance(message, MessageChunk):
+            role = message.role
+            message_type = message.message_type
+            message_id = message.message_id
+            content = message.content
+            tool_calls = message.tool_calls or []
+        elif isinstance(message, dict):
+            role = message.get("role")
+            message_type = message.get("message_type") or message.get("type")
+            message_id = message.get("message_id")
+            content = message.get("content")
+            tool_calls = message.get("tool_calls") or []
+        else:
+            return type(message).__name__
+        content_len = len(content) if isinstance(content, str) else 0
+        return (
+            f"{role}/{message_type}:{message_id}:"
+            f"content_len={content_len}:tool_calls={len(tool_calls)}"
+        )
+
+    def _debug_last_message_snapshots(self, limit: int = 5) -> List[str]:
+        messages = getattr(self.message_manager, "messages", []) or []
+        return [self._debug_message_snapshot(message) for message in messages[-limit:]]
+
+    @staticmethod
+    def _get_message_role(
+        message: Union[MessageChunk, Dict[str, Any]],
+    ) -> Optional[str]:
+        if isinstance(message, MessageChunk):
+            return message.role
+        if isinstance(message, dict):
+            role = message.get("role")
+            return role.value if hasattr(role, "value") else role
+        return None
+
+    @staticmethod
+    def _get_message_id(
+        message: Union[MessageChunk, Dict[str, Any]],
+    ) -> Optional[str]:
+        if isinstance(message, MessageChunk):
+            return message.message_id
+        if isinstance(message, dict):
+            message_id = message.get("message_id")
+            return str(message_id) if message_id else None
+        return None
+
+    @staticmethod
+    def _is_message_final(message: Union[MessageChunk, Dict[str, Any]]) -> bool:
+        if isinstance(message, MessageChunk):
+            return bool(message.is_final)
+        if isinstance(message, dict):
+            return bool(message.get("is_final"))
+        return False
+
+    @staticmethod
+    def _get_tool_call_id_from_call(tool_call: Any) -> Optional[str]:
+        if isinstance(tool_call, dict):
+            tid = tool_call.get("id")
+            return str(tid) if tid else None
+        tid = getattr(tool_call, "id", None)
+        return str(tid) if tid else None
+
+    def _normalize_tool_call_pairs_before_user_message(self) -> None:
+        """Keep ledger protocol-clean before appending a new user turn."""
+        messages = list(getattr(self.message_manager, "messages", []) or [])
+        if not messages:
+            return
+
+        remaining = list(messages)
+        normalized: List[MessageChunk] = []
+        changed = False
+
+        while remaining:
+            message = remaining.pop(0)
+            normalized.append(message)
+            if message.role != MessageRole.ASSISTANT.value or not message.tool_calls:
+                continue
+
+            expected_ids = [
+                tid
+                for tid in (
+                    self._get_tool_call_id_from_call(tool_call)
+                    for tool_call in message.tool_calls
+                )
+                if tid
+            ]
+            if not expected_ids:
+                continue
+
+            expected_set = set(expected_ids)
+            moved_by_id: Dict[str, MessageChunk] = {}
+            idx = 0
+            while idx < len(remaining):
+                candidate = remaining[idx]
+                if (
+                    candidate.role == MessageRole.TOOL.value
+                    and candidate.tool_call_id in expected_set
+                ):
+                    moved_by_id[str(candidate.tool_call_id)] = candidate
+                    del remaining[idx]
+                    changed = True
+                    if expected_set.issubset(moved_by_id.keys()):
+                        break
+                    continue
+                idx += 1
+
+            for tool_call_id in expected_ids:
+                moved = moved_by_id.get(tool_call_id)
+                if moved is not None:
+                    normalized.append(moved)
+                    continue
+                normalized.append(self._create_interrupted_tool_result(tool_call_id))
+                changed = True
+
+        if changed:
+            self.message_manager.messages = normalized
+            self.message_manager.stats["total_messages"] = len(normalized)
+            self.message_manager.stats["last_updated"] = (
+                datetime.datetime.now().isoformat()
+            )
+            self.message_manager.refresh_compact_manifest()
+            logger.info(
+                f"SessionContext: normalized tool call pairs before user message "
+                f"session={self.session_id} total_messages={len(normalized)}"
+            )
+
+    def _create_interrupted_tool_result(self, tool_call_id: str) -> MessageChunk:
+        return MessageChunk(
+            role=MessageRole.TOOL.value,
+            content=json.dumps(
+                {
+                    "status": "interrupted",
+                    "message": (
+                        "Tool execution was interrupted before a result was recorded; "
+                        "a newer user message started the next turn."
+                    ),
+                },
+                ensure_ascii=False,
+            ),
+            tool_call_id=tool_call_id,
+            message_type=MessageType.TOOL_CALL_RESULT.value,
+            session_id=self.session_id,
+            metadata={"synthetic_interrupted_tool_result": True},
+        )
+
+    def _replace_synthetic_tool_result(
+        self, message: Union[MessageChunk, Dict[str, Any]]
+    ) -> bool:
+        if isinstance(message, dict):
+            message = MessageChunk.from_dict(message)
+        if not message.tool_call_id:
+            return False
+        for idx, existing in enumerate(self.message_manager.messages):
+            metadata = existing.metadata if isinstance(existing.metadata, dict) else {}
+            if (
+                existing.role == MessageRole.TOOL.value
+                and existing.tool_call_id == message.tool_call_id
+                and metadata.get("synthetic_interrupted_tool_result") is True
+            ):
+                self.message_manager.messages[idx] = message
+                self.message_manager.stats["last_updated"] = (
+                    datetime.datetime.now().isoformat()
+                )
+                self.message_manager.refresh_compact_manifest()
+                logger.info(
+                    f"SessionContext: replaced synthetic interrupted tool result "
+                    f"session={self.session_id} tool_call_id={message.tool_call_id}"
+                )
+                return True
+        return False
+
+    def get_messages(self) -> List[MessageChunk]:
+        """
+        获取会话中的所有消息
+
+        Returns:
+            List[MessageChunk]: 消息列表
+        """
+        return self.message_manager.messages
+
+    def enqueue_user_injection(
+        self,
+        content: Union[str, List[Dict[str, Any]]],
+        *,
+        guidance_id: Optional[str] = None,
+        extra_metadata: Optional[Dict[str, Any]] = None,
+    ) -> str:
+        """运行期向当前会话注入一条 user 引导消息，等待下一次 LLM 请求前被消费。
+
+        消费时机：agent 在调用 ``_call_llm_streaming`` 之前调用 ``flush_user_injections``，
+        将 pending 消息写入 ``message_manager``、追加到本轮请求 messages、并 yield 给 SSE。
+
+        Args:
+            content: 注入内容，支持文本或多模态 content 列表。
+            guidance_id: 客户端可生成；不传则自动生成 uuid，便于前端引导区按 id 对账消费。
+            extra_metadata: 透传到 MessageChunk.metadata 的额外字段。
+
+        Returns:
+            str: 实际生效的 ``guidance_id``。
+        """
+        if not self._is_valid_user_injection_content(content):
+            raise ValueError("Injected content cannot be empty")
+        gid = guidance_id or str(uuid.uuid4())
+        for existing in self.pending_user_injections:
+            md = existing.metadata or {}
+            if md.get("guidance_id") == gid:
+                existing.content = content
+                if extra_metadata:
+                    md.update(extra_metadata)
+                    existing.metadata = md
+                logger.info(
+                    f"SessionContext: update duplicate pending user injection "
+                    f"session={self.session_id} guidance_id={gid}"
+                )
+                return gid
+        if self._has_user_injection_message(gid):
+            logger.info(
+                f"SessionContext: skip already flushed user injection "
+                f"session={self.session_id} guidance_id={gid}"
+            )
+            return gid
+        metadata: Dict[str, Any] = {
+            "injected": True,
+            "guidance_id": gid,
+            "source": "guidance",
+        }
+        if extra_metadata:
+            metadata.update(extra_metadata)
+        chunk = MessageChunk(
+            role="user",
+            content=content,
+            session_id=self.session_id,
+            metadata=metadata,
+        )
+        self.pending_user_injections.append(chunk)
+        logger.info(
+            f"SessionContext: enqueue user injection session={self.session_id} guidance_id={gid} "
+            f"pending_total={len(self.pending_user_injections)}"
+        )
+        return gid
+
+    def flush_user_injections(
+        self,
+        ledger_messages: Optional[List[Union[MessageChunk, Dict[str, Any]]]] = None,
+    ) -> List[MessageChunk]:
+        """pop 全部 pending 引导消息，返回供下一次 LLM 请求使用的列表。
+
+        默认注入消息会写入 ``message_manager`` 并经 SSE 展示；metadata 中设置
+        ``persist=False`` 或 ``transient=True`` 的消息只进入当次 LLM 请求，不落盘。
+        """
+        if not self.pending_user_injections:
+            return []
+        if self._has_unclosed_tool_call_tail(ledger_messages):
+            logger.info(
+                f"SessionContext: defer user injections because tool call tail is open "
+                f"session={self.session_id} pending_total={len(self.pending_user_injections)}"
+            )
+            return []
+        drained = []
+        seen_guidance_ids = set()
+        for chunk in self.pending_user_injections:
+            gid = (chunk.metadata or {}).get("guidance_id")
+            if gid:
+                if gid in seen_guidance_ids or self._has_user_injection_message(gid):
+                    continue
+                seen_guidance_ids.add(gid)
+            drained.append(chunk)
+        self.pending_user_injections = []
+        persistent_drained = [
+            chunk
+            for chunk in drained
+            if not (
+                (chunk.metadata or {}).get("persist") is False
+                or (chunk.metadata or {}).get("transient") is True
+            )
+        ]
+        if persistent_drained:
+            self.add_messages(persistent_drained)
+        logger.info(
+            f"SessionContext: flush user injections session={self.session_id} count={len(drained)} "
+            f"persistent_count={len(persistent_drained)}"
+        )
+        return drained
+
+    def _has_user_injection_message(self, guidance_id: str) -> bool:
+        if not guidance_id:
+            return False
+        messages = getattr(self.message_manager, "messages", None) or []
+        for message in messages:
+            md = getattr(message, "metadata", None) or {}
+            if md.get("guidance_id") == guidance_id and md.get("source") == "guidance":
+                return True
+        return False
+
+    def _has_unclosed_tool_call_tail(
+        self,
+        ledger_messages: Optional[List[Union[MessageChunk, Dict[str, Any]]]] = None,
+    ) -> bool:
+        """Return True when the ledger currently ends inside an assistant tool_call pair."""
+        raw_messages = (
+            ledger_messages
+            if ledger_messages is not None
+            else getattr(self.message_manager, "messages", None)
+        ) or []
+        messages = [
+            MessageChunk.from_dict(message) if isinstance(message, dict) else message
+            for message in raw_messages
+        ]
+        trailing_tool_call_ids = set()
+        for message in reversed(messages):
+            role = message.role
+            if role == MessageRole.TOOL.value:
+                if message.tool_call_id:
+                    trailing_tool_call_ids.add(message.tool_call_id)
+                continue
+            if role == MessageRole.ASSISTANT.value and message.tool_calls:
+                expected_ids = {
+                    tool_call.get("id")
+                    for tool_call in message.tool_calls
+                    if isinstance(tool_call, dict) and tool_call.get("id")
+                }
+                return not expected_ids.issubset(trailing_tool_call_ids)
+            return False
+        return False
+
+    def list_user_injections(self) -> List[Dict[str, Any]]:
+        """快照当前 pending 引导消息列表（仅用于查询/调试，不修改状态）。"""
+        snapshot: List[Dict[str, Any]] = []
+        for chunk in self.pending_user_injections:
+            md = chunk.metadata or {}
+            snapshot.append(
+                {
+                    "guidance_id": md.get("guidance_id"),
+                    "content": chunk.content,
+                    "metadata": dict(md),
+                    "timestamp": chunk.timestamp,
+                }
+            )
+        return snapshot
+
+    def update_user_injection(
+        self,
+        guidance_id: str,
+        content: Union[str, List[Dict[str, Any]]],
+    ) -> bool:
+        """修改尚未被消费的 pending 引导消息内容。返回是否命中。"""
+        if not guidance_id:
+            return False
+        if not self._is_valid_user_injection_content(content):
+            raise ValueError("content cannot be empty")
+        for chunk in self.pending_user_injections:
+            md = chunk.metadata or {}
+            if md.get("guidance_id") == guidance_id:
+                chunk.content = content
+                logger.info(
+                    f"SessionContext: update user injection session={self.session_id} guidance_id={guidance_id}"
+                )
+                return True
+        return False
+
+    def _is_valid_user_injection_content(
+        self,
+        content: Union[str, List[Dict[str, Any]], None],
+    ) -> bool:
+        if isinstance(content, str):
+            return bool(content.strip())
+        if not isinstance(content, list):
+            return False
+        for item in content:
+            if not isinstance(item, dict):
+                continue
+            item_type = str(item.get("type") or "").strip()
+            if item_type == "text" and str(item.get("text") or "").strip():
+                return True
+            if item_type == "image_url" and isinstance(item.get("image_url"), dict):
+                image_url = item.get("image_url") or {}
+                if str(image_url.get("url") or "").strip():
+                    return True
+            if item_type == "input_audio" and isinstance(item.get("input_audio"), dict):
+                input_audio = item.get("input_audio") or {}
+                if str(input_audio.get("data") or input_audio.get("url") or "").strip():
+                    return True
+        return False
+
+    def delete_user_injection(self, guidance_id: str) -> bool:
+        """删除尚未被消费的 pending 引导消息。返回是否命中。"""
+        if not guidance_id:
+            return False
+        before = len(self.pending_user_injections)
+        self.pending_user_injections = [
+            c
+            for c in self.pending_user_injections
+            if (c.metadata or {}).get("guidance_id") != guidance_id
+        ]
+        hit = len(self.pending_user_injections) != before
+        if hit:
+            logger.info(
+                f"SessionContext: delete user injection session={self.session_id} guidance_id={guidance_id}"
+            )
+        return hit
+
+    def _write_default_md_file(self, file_path: str, prompt_key: str, file_label: str):
+        """
+        写入默认的Markdown文件到指定路径。
+
+        Args:
+            file_path: 目标文件路径
+            prompt_key: 提示模板键名
+            file_label: 文件标签，用于日志记录
+        """
+        try:
+            language = self.get_language()
+            default_content = prompt_manager.get_prompt(
+                prompt_key,
+                agent="SessionContext",
+                language=language,
+            )
+            with open(file_path, "w", encoding="utf-8") as f:
+                f.write(default_content)
+        except Exception as e:
+            logger.warning(f"SessionContext: Failed to create {file_label}: {e}")
+
+    def _submit_default_md_file(self, file_path: str, prompt_key: str, file_label: str):
+        """
+        异步提交创建默认Markdown文件的任务。
+
+        Args:
+            file_path: 目标文件路径
+            prompt_key: 提示模板键名
+            file_label: 文件标签，用于日志记录
+        """
+        try:
+            _session_context_file_io_pool.submit(
+                self._write_default_md_file,
+                file_path,
+                prompt_key,
+                file_label,
+            )
+        except Exception as e:
+            logger.warning(
+                f"SessionContext: Failed to submit {file_label} creation: {e}"
+            )
+
+    @timed("prepare.resolve_workspace_paths")
+    def _resolve_workspace_paths(self, session_root_space: str) -> None:
+        """
+        解析会话空间与工作空间路径。
+
+        路径说明：
+        - session_workspace: 会话数据存储路径（消息、上下文等），始终在宿主机
+        - volume_mounts: 卷挂载配置
+        - sandbox_agent_workspace: Agent 工作区的沙箱内路径
+
+        Args:
+            session_root_space: 会话根空间路径（宿主机）
+        """
+        if not session_root_space:
+            raise ValueError(
+                f"SessionContext 初始化需要传入有效的 session_root_space: {session_root_space}"
+            )
+
+        self.session_root_space = str(session_root_space)
+
+        # 确定 session_workspace（会话数据，始终在宿主机）
+        parent_session_id = self.parent_session_id or self.system_context.get(
+            "parent_session_id"
+        )
+
+        if parent_session_id:
+            try:
+                from sagents.v1.session_runtime import get_global_session_manager
+
+                manager = get_global_session_manager()
+                parent_session = manager.get(parent_session_id)
+                if parent_session and parent_session.session_context:
+                    self.session_workspace = self.storage.create_session_workspace(
+                        self.session_id,
+                        parent_workspace=parent_session.session_context.session_workspace,
+                    )
+                else:
+                    raise ValueError(
+                        f"Parent session {parent_session_id} not found or not initialized."
+                    )
+            except ImportError:
+                logger.error(
+                    "SessionContext: Could not import get_global_session_manager."
+                )
+                raise ValueError(
+                    "Could not resolve parent session workspace due to import error."
+                )
+            except Exception as e:
+                logger.error(f"SessionContext: Error resolving parent workspace: {e}")
+                raise ValueError(
+                    f"Failed to resolve parent session workspace for {parent_session_id}: {e}"
+                )
+        else:
+            self.session_workspace = self.storage.create_session_workspace(
+                self.session_id
+            )
+
+        self.storage.bind_session_workspace(self.session_id, self.session_workspace)
+        with stage("prepare.register_session"):
+            self.storage.register_session(
+                self.session_id,
+                self.session_workspace,
+                parent_session_id=parent_session_id,
+            )
+
+    @timed("prepare.prepare_workspace_bootstrap_files")
+    async def _prepare_workspace_bootstrap_files(self):
+        """
+        准备工作区引导文件（通过沙箱接口）
+
+        在沙箱初始化后调用，通过沙箱接口创建 AGENT.md, USER.md, SOUL.md, IDENTITY.md, MEMORY.md
+        """
+        use_claw_mode = os.environ.get("SAGE_USE_CLAW_MODE", "true").lower() == "true"
+        if "use_claw_mode" in self.system_context:
+            use_claw_mode = self.system_context.get("use_claw_mode", use_claw_mode)
+            if isinstance(use_claw_mode, str):
+                use_claw_mode = use_claw_mode.lower() == "true"
+        if not use_claw_mode:
+            return
+
+        bootstrap_files = [
+            ("AGENT.md", "default_agent_md"),
+            ("USER.md", "default_user_md"),
+            ("SOUL.md", "default_soul_md"),
+            ("IDENTITY.md", "default_identity_md"),
+            ("MEMORY.md", "default_memory_md"),
+        ]
+
+        if type(self.sandbox) is LocalSandboxProvider:
+            await self.sandbox._ensure_initialized_async()
+
+            def prepare_local():
+                # Keep the existing per-file order/error handling and resolve
+                # permissions immediately before each access, in one worker.
+                for filename, content_key in bootstrap_files:
+                    file_path = os.path.join(self.sandbox_agent_workspace, filename)
+                    try:
+                        exists = self.sandbox._checked_file_operation(
+                            file_path, "read", os.path.exists
+                        )
+                        if not exists:
+                            content = self._get_default_md_content(content_key, filename)
+                            if content:
+                                self.sandbox._checked_file_operation(
+                                    file_path, "write", self.sandbox._write_file_sync,
+                                    content, "utf-8", "overwrite",
+                                )
+                                logger.debug(f"创建引导文件: {file_path}")
+                    except Exception as e:
+                        logger.warning(f"创建引导文件失败 {file_path}: {e}")
+                try:
+                    self.sandbox._checked_file_operation(
+                        os.path.join(self.sandbox_agent_workspace, "memory"),
+                        "mkdir", os.makedirs, exist_ok=True,
+                    )
+                except Exception as e:
+                    logger.warning(f"创建 memory 目录失败: {e}")
+
+            await diagnostic_to_thread("local.bootstrap_files", prepare_local)
+            return
+
+        for filename, content_key in bootstrap_files:
+            file_path = os.path.join(self.sandbox_agent_workspace, filename)  # pyright: ignore[reportArgumentType,reportCallIssue]
+            try:
+                exists = await self.sandbox.file_exists(file_path)  # pyright: ignore[reportOptionalMemberAccess]
+                if not exists:
+                    content = self._get_default_md_content(content_key, filename)
+                    if content:
+                        await self.sandbox.write_file(file_path, content)  # pyright: ignore[reportOptionalMemberAccess]
+                        logger.debug(f"创建引导文件: {file_path}")
+            except Exception as e:
+                logger.warning(f"创建引导文件失败 {file_path}: {e}")
+
+        try:
+            memory_dir = os.path.join(self.sandbox_agent_workspace, "memory")  # pyright: ignore[reportArgumentType,reportCallIssue]
+            await self.sandbox.ensure_directory(memory_dir)  # pyright: ignore[reportOptionalMemberAccess]
+        except Exception as e:
+            logger.warning(f"创建 memory 目录失败: {e}")
+
+    def _get_default_md_content(self, content_key: str, filename: str) -> str:
+        """获取默认的 markdown 文件内容"""
+        # 使用 prompt_manager 获取多语言内容，默认使用中文
+        # agent="SessionContext" 指定从 session_context_prompts.py 中获取
+        try:
+            content = prompt_manager.get_prompt(
+                content_key, agent="SessionContext", language=self.get_language()
+            )
+            return content
+        except Exception as e:
+            logger.warning(f"获取默认内容失败 {content_key}: {e}")
+            return ""
+
+    @timed("prepare.init_external_paths_and_context")
+    def _init_external_paths_and_context(self):
+        """
+        初始化外部路径和运行变量
+        """
+        self.external_paths = self.system_context.get("external_paths") or []
+        self.system_context.pop("可以访问的其他路径文件夹", None)
+        self.system_context.pop("external_paths", None)
+        if isinstance(self.external_paths, str):
+            self.external_paths = [self.external_paths]
+        if len(self.external_paths) > 0:
+            self.external_paths = [
+                os.path.abspath(path) for path in self.external_paths
+            ]
+            self.system_context["external_paths"] = self.external_paths
+        now = datetime.datetime.now().astimezone()
+        current_time_str = now.strftime("%a, %d %b %Y %H:%M:%S %z")
+        if self.system_context.get("current_time") is None:
+            self.system_context["current_time"] = current_time_str
+
+    @timed("prepare.init_sandbox_and_file_system")
+    async def _init_sandbox_and_file_system(self, sandbox_mode: SandboxType):
+        """
+        初始化沙箱环境和文件系统
+
+        Args:
+            sandbox_mode: 沙箱模式 (LOCAL, PASSTHROUGH, REMOTE)
+        """
+        logger.info(
+            f"SessionContext: 开始初始化沙箱环境，模式: {sandbox_mode.value}, "
+            f"volume_mounts_count={len(self.volume_mounts)}"
+        )
+        t0 = time.time()
+
+        if sandbox_mode == SandboxType.REMOTE:
+            if not self.sandbox_agent_workspace:
+                self.sandbox_agent_workspace = "/sage-workspace"
+            # 远程沙箱配置
+            config = SandboxConfig(
+                sandbox_id=self.sandbox_id or self.user_id or self.session_id,
+                mode=sandbox_mode,
+                sandbox_agent_workspace=self.sandbox_agent_workspace,
+                volume_mounts=self.volume_mounts,  # 远程沙箱可能支持的挂载
+                # 远程沙箱特定的配置
+                remote_provider=os.environ.get("SAGE_REMOTE_PROVIDER", "opensandbox"),
+                remote_server_url=os.environ.get("OPENSANDBOX_URL"),
+                remote_api_key=os.environ.get("OPENSANDBOX_API_KEY"),
+                remote_image=os.environ.get(
+                    "OPENSANDBOX_IMAGE", "opensandbox/code-interpreter:v1.0.2"
+                ),
+                remote_timeout=int(os.environ.get("OPENSANDBOX_TIMEOUT", "1800")),
+                remote_persistent=True,
+                remote_sandbox_ttl=3600,
+            )
+        else:
+            # 本地/直通沙箱配置
+            # 构建 volume_mounts：包含原有的 volume_mounts 和 external_paths
+            volume_mounts = list(self.volume_mounts) if self.volume_mounts else []
+
+            # 将 external_paths 添加到 volume_mounts，映射路径与 host_path 相同
+            for path in self.external_paths or []:
+                abs_path = os.path.abspath(path)
+                volume_mounts.append(
+                    VolumeMount(
+                        host_path=abs_path,
+                        mount_path=abs_path,  # 映射路径与 host_path 相同
+                    )
+                )
+
+            config = SandboxConfig(
+                sandbox_id=self.user_id or self.session_id,
+                mode=sandbox_mode,
+                sandbox_agent_workspace=self.sandbox_agent_workspace,
+                volume_mounts=volume_mounts,  # 传递所有卷挂载配置
+                # 本地沙箱特定的配置
+                cpu_time_limit=int(os.environ.get("SAGE_LOCAL_CPU_TIME_LIMIT", "300")),
+                memory_limit_mb=int(
+                    os.environ.get("SAGE_LOCAL_MEMORY_LIMIT_MB", "4096")
+                ),
+                linux_isolation_mode=os.environ.get(
+                    "SAGE_LOCAL_LINUX_ISOLATION", "bwrap"
+                ),
+                macos_isolation_mode=os.environ.get(
+                    "SAGE_LOCAL_MACOS_ISOLATION", "seatbelt"
+                ),
+            )
+
+        self.sandbox = await SandboxProviderFactory.create(config)
+        if sandbox_mode == SandboxType.REMOTE:
+            self.sandbox_agent_workspace = self.sandbox.workspace_path
+
+        # 基础沙箱由工厂初始化；代码运行时作为独立生命周期阶段准备。
+        await self.sandbox.prepare_code_environment()
+
+        logger.debug(
+            f"SessionContext: 沙箱环境初始化完成，耗时: {time.time() - t0:.3f}s"
+        )
+
+    @timed("prepare.register_and_prepare_skills")
+    async def _register_and_prepare_skills(self):
+        """
+        注册并准备技能，主要是同步技能到沙箱
+        """
+        if (
+            self.skill_manager
+            and self.skill_manager.list_skills()
+            and self.tool_manager
+        ):
+            # 确保 load_skill 工具已注册
+            if not self.tool_manager.get_tool("load_skill"):
+                try:
+                    from sagents.v1.skill.skill_tool import SkillTool
+
+                    skill_tool = SkillTool()
+                    self.tool_manager.register_tools_from_object(skill_tool)
+                except Exception as e:
+                    logger.error(
+                        f"SessionContext: Failed to register load_skill tool: {e}"
+                    )
+
+        if self.skill_manager and self.skill_manager.list_skills():
+            logger.debug(
+                f"SessionContext: 当前可用的技能: {list(self.skill_manager.skills.keys())}, 准备同步技能到沙箱"
+            )
+            t1 = time.time()
+            try:
+                # 初始化沙箱技能管理器并同步技能
+                await self._init_sandbox_skill_manager()
+                logger.debug(
+                    f"SessionContext: 技能同步完成，耗时: {time.time() - t1:.3f}s"
+                )
+            except Exception as e:
+                logger.error(f"SessionContext: 技能同步失败: {e}", exc_info=True)
+        else:
+            logger.warning("SessionContext: SkillManager 未初始化，跳过技能复制")
+
+    async def _init_sandbox_skill_manager(self):
+        """
+        初始化沙箱技能管理器：按宿主 SkillProxy 给出的名称，仅从沙箱内
+        ``<agent_workspace>/skills/<name>/`` 加载（与挂载目录一致），供 load_skill 与提示词使用。
+        """
+        self.sandbox_skill_manager = await self.sandbox.sync_skills(self.skill_manager)
+
+    @timed("prepare.finalize_system_context")
+    async def _finalize_system_context(self):
+        """
+        最终化运行变量，设置私有工作区、用户ID和会话ID
+        """
+        # 设置私有工作区
+        workspace = self.sandbox_agent_workspace
+        self.system_context["private_workspace"] = workspace
+        # 设置用户ID
+        if self.user_id:
+            self.system_context["user_id"] = self.user_id
+        # 设置会话ID
+        self.system_context["session_id"] = self.session_id
+        # 设置机器运行环境摘要
+        self.system_context["machine_environment"] = detect_machine_environment(
+            sandbox=self.sandbox,
+            sandbox_agent_workspace=self.sandbox_agent_workspace,
+        )
+        # 设置文件权限路径
+        permission_paths = [self.system_context["private_workspace"]]
+        logger.debug(f"self.external_paths: {self.external_paths}")
+        if self.external_paths and isinstance(self.external_paths, list):
+            permission_paths.extend([str(p) for p in self.external_paths])
+        paths_str = ", ".join(permission_paths)  # pyright: ignore[reportArgumentType,reportCallIssue]
+        sandbox_root = workspace
+        common_dirs = ["data", "projects", "temp", "logs"]
+        if type(self.sandbox) is LocalSandboxProvider:
+            await self.sandbox.ensure_directories(
+                [os.path.join(sandbox_root, d) for d in common_dirs]
+            )
+        else:
+            for d in common_dirs:
+                dir_path = os.path.join(sandbox_root, d)  # pyright: ignore[reportArgumentType,reportCallIssue]
+                if hasattr(self.sandbox, "ensure_directory"):
+                    await self.sandbox.ensure_directory(dir_path)  # pyright: ignore[reportOptionalMemberAccess]
+                else:
+                    # 沙箱不支持 ensure_directory 接口，报错
+                    raise NotImplementedError(
+                        f"沙箱 {type(self.sandbox).__name__} 不支持 ensure_directory 接口，"
+                        f"无法创建目录: {dir_path}"
+                    )
+        self.system_context["file_permission"] = (
+            f"only allow read and write files in: {paths_str} (Note: {workspace} is your private sandbox). "
+            f"Please save files in the pre-created folders: {', '.join(common_dirs)} and use absolute paths; avoid creating extra directories in the root."
+        )
+        # 设置响应语言
+        self.system_context["response_language"] = self.system_context.get(
+            "response_language", "en-US"
+        )
+
+    def _load_persisted_messages(self):
+        """
+        加载持久化的消息历史
+        """
+        messages, max_journal_seq, journal_records = self.load_persisted_message_ledger(
+            self.session_workspace,
+            session_id=self.session_id,
+            storage=self.storage,
+        )
+        self.message_manager.messages = messages
+        self.message_manager.stats["total_messages"] = len(messages)
+        self.message_manager.refresh_compact_manifest()
+        self._message_journal_seq = max_journal_seq
+        self._message_journal_active_message_id = (
+            messages[-1].message_id if messages else None
+        )
+        logger.debug(
+            "SessionContext: Loaded persisted messages "
+            f"session_id={self.session_id} messages={len(messages)} "
+            f"journal_records={journal_records}"
+        )
+
+    def _save_llm_request_sync(self, llm_request: Dict[str, Any]) -> str:
+        with self._llm_request_save_lock:
+            self._bind_storage_workspace()
+            internal_request = llm_request["request"]
+            provider_attempts = internal_request.get("_provider_request_attempts", [])
+            actual_request = (
+                provider_attempts[-1]
+                if provider_attempts
+                else {
+                    key: value
+                    for key, value in internal_request.items()
+                    if not str(key).startswith("_")
+                }
+            )
+            metadata = {
+                key: value
+                for key, value in internal_request.items()
+                if key
+                not in {
+                    "messages",
+                    "model",
+                    "model_config",
+                    "_provider_request_attempts",
+                    "_provider_metadata",
+                }
+                and not str(key).startswith("_")
+            }
+            provider_metadata = internal_request.get("_provider_metadata")
+            if isinstance(provider_metadata, dict):
+                metadata.update(provider_metadata)
+            if not provider_attempts:
+                metadata["request_view"] = "pre_adapter_fallback"
+            serializable_request = {
+                "schema_version": 2,
+                "request": make_serializable(actual_request),
+                "response": make_serializable(llm_request["response"]),
+                "metadata": make_serializable(metadata),
+                "timestamp": llm_request["timestamp"],
+            }
+            if len(provider_attempts) > 1:
+                serializable_request["request_attempts"] = make_serializable(
+                    provider_attempts
+                )
+            return self.storage.append_llm_request(
+                self.session_id, serializable_request
+            )
+
+    def _save_mcp_calls_sync(self, request_id: str) -> str:
+        with self._mcp_calls_save_lock:
+            self._bind_storage_workspace()
+            with self._mcp_calls_lock:
+                calls = [
+                    make_serializable(call)
+                    for call in self.mcp_calls_logs
+                    if call.get("request_id") == request_id
+                ]
+
+            payload = {
+                "request_id": request_id,
+                "session_id": self.session_id,
+                "call_count": len(calls),
+                "calls": calls,
+            }
+            return self.storage.save_mcp_calls(self.session_id, request_id, payload)
+
+    def _has_mcp_calls_for_request(self, request_id: str) -> bool:
+        with self._mcp_calls_lock:
+            return any(
+                call.get("request_id") == request_id for call in self.mcp_calls_logs
+            )
+
+    @timed("prepare.cleanup_expired_todo_tasks")
+    async def _cleanup_expired_todo_tasks(self):
+        try:
+            from sagents.v1.tool.impl.todo_tool import ToDoTool
+
+            await ToDoTool().clean_old_tasks(
+                session_id=self.session_id, time_threshold=1800
+            )
+        except Exception as e:
+            logger.warning(f"SessionContext: 清理过期任务失败: {e}")
+
+    async def load_recent_skill_to_context(self):
+        """
+        检测历史消息，收集所有使用过的 load_skill skill，或者用户消息中包含 <skill>name</skill>。
+        按时间顺序加载所有 skill（新的在后面），总 token 数限制由 tool_manager 处理。
+        """
+        if not self.skill_manager:
+            return
+
+        # 使用有序字典保持 skill 的顺序（去重，新的覆盖旧的）
+        found_skills = {}  # skill_name -> arguments
+
+        # 正序遍历消息（从早到晚），这样后面的 skill 会覆盖前面的
+        for msg in self.message_manager.messages:
+            # Check for <skill> tag in user message
+            if msg.role == "user" and msg.content:
+                content_str = ""
+                if isinstance(msg.content, str):
+                    content_str = msg.content
+                elif isinstance(msg.content, list):
+                    # Handle multimodal content
+                    for part in msg.content:
+                        if isinstance(part, dict) and part.get("type") == "text":
+                            content_str += part.get("text", "")
+
+                # Check for <skill>...</skill> - 支持多个 skill
+                matches = re.findall(r"<skill>(.*?)</skill>", content_str, re.DOTALL)
+                for match in matches:
+                    skill_name = match.strip()
+                    if skill_name:
+                        found_skills[skill_name] = {"skill_name": skill_name}
+                        logger.debug(f"SessionContext: Found skill tag: {skill_name}")
+
+            # Check for load_skill tool call
+            if msg.role == "assistant" and msg.tool_calls:
+                for tool_call in msg.tool_calls:
+                    if tool_call.get("function", {}).get("name") == "load_skill":
+                        arguments = tool_call["function"]["arguments"]
+                        if isinstance(arguments, str):
+                            try:
+                                arguments = json.loads(arguments)
+                            except Exception:
+                                continue
+
+                        if isinstance(arguments, dict):
+                            skill_name = arguments.get("skill_name")
+                            if skill_name:
+                                found_skills[skill_name] = arguments
+                                logger.debug(
+                                    f"SessionContext: Found skill tool call: {skill_name}"
+                                )
+
+        # 加载所有找到的 skill（按时间顺序）
+        if found_skills:
+            skill_list = list(found_skills.keys())
+            logger.info(
+                f"SessionContext: Loading {len(skill_list)} skills: {skill_list}"
+            )
+
+            for skill_name, arguments in found_skills.items():
+                try:
+                    logger.debug(
+                        f"SessionContext: Loading skill '{skill_name}' via ToolManager..."
+                    )
+                    # 移除 arguments 中的 session_id，避免重复传递
+                    args = arguments.copy()
+                    args.pop("session_id", None)
+                    await self.tool_manager.run_tool_async(  # pyright: ignore[reportOptionalMemberAccess]
+                        tool_name="load_skill", session_id=self.session_id, **args
+                    )
+                except Exception as e:
+                    logger.error(
+                        f"SessionContext: Failed to load skill '{skill_name}': {e}"
+                    )
+
+    def restrict_tools_for_mode(self, agent_mode: str):
+        """
+        根据 agent_mode 限制工具的使用。
+        非 fibre/team 模式屏蔽多智能体系统工具；team 模式只允许 Team 委派工具。
+        """
+        if agent_mode == "fibre":
+            fibre_tools = ["sys_team_delegate_task"]
+        elif agent_mode == "team":
+            fibre_tools = [
+                "sys_spawn_agent",
+                "sys_delegate_task",
+            ]
+        else:
+            fibre_tools = [
+                "sys_spawn_agent",
+                "sys_delegate_task",
+                "sys_team_delegate_task",
+            ]
+
+        if not fibre_tools:
+            return
+
+        # 避免循环引用
+        from sagents.v1.tool.tool_manager import ToolManager
+        from sagents.v1.tool.tool_proxy import ToolProxy
+
+        current_manager = self.tool_manager
+        if not current_manager:
+            return
+
+        # 获取基础管理器和当前可用工具。ToolProxy 可能包装多个 manager；
+        # 过滤时必须保留完整 manager 列表，否则会丢掉普通文件/代码/MCP 工具。
+        tool_managers = None
+        available_tools = set()
+
+        if isinstance(current_manager, ToolProxy):
+            tool_managers = list(current_manager.tool_managers)
+            # ToolProxy.list_all_tools_name 返回的是当前 proxy 可用的工具名
+            available_tools = set(current_manager.list_all_tools_name())
+        elif isinstance(current_manager, ToolManager):
+            tool_managers = [current_manager]
+            available_tools = set(current_manager.list_all_tools_name())
+        else:
+            logger.warning(
+                f"SessionContext: Unknown tool manager type: {type(current_manager)}"
+            )
+            return
+
+        # 检查是否包含需要屏蔽的工具
+        tools_to_remove = available_tools.intersection(set(fibre_tools))
+
+        if tools_to_remove:
+            # 过滤掉 fibre tools
+            new_available = list(available_tools - tools_to_remove)
+
+            # 创建新的 ToolProxy
+            self.tool_manager = ToolProxy(tool_managers, new_available)  # pyright: ignore[reportArgumentType]
+            logger.info(
+                f"SessionContext: Restricted tools for mode '{agent_mode}'. Removed: {tools_to_remove}"
+            )
+
+    def set_agent_config(
+        self,
+        model: Optional[str] = None,
+        model_config: Optional[dict] = None,
+        system_prefix: Optional[str] = None,
+        available_tools: Optional[list] = None,
+        available_skills: Optional[list] = None,
+        system_context: Optional[dict] = None,
+        available_workflows: Optional[dict] = None,
+        deep_thinking: Optional[bool] = None,
+        thinking_level: Optional[str] = None,
+        agent_mode: Optional[str] = None,
+        more_suggest: bool = False,
+        max_loop_count: Optional[int] = None,
+        agent_id: Optional[str] = None,
+        memory_backends: Optional[Dict[str, str]] = None,
+    ):
+        """设置agent配置信息
+
+        Args:
+            model: 模型名称或OpenAI客户端实例
+            model_config: 模型配置
+            system_prefix: 系统前缀
+
+            available_tools: 可用工具列表
+            available_skills: 可用技能列表
+            system_context: 运行变量（兼容字段名）
+            available_workflows: 可用工作流
+            deep_thinking: 深度思考模式
+            thinking_level: 模型原生思考等级
+            agent_mode: 智能体运行模式
+            more_suggest: 更多建议模式
+            max_loop_count: 最大循环次数
+            agent_id: Agent ID (Fibre用)
+            memory_backends: 记忆后端配置，如 {"session_history": "bm25", "file_memory": "scoped_index"}
+        """
+        if max_loop_count is None:
+            raise ValueError("max_loop_count is required")
+        # 生成与preset_running_agent_config.json格式一致的配置
+        current_time = datetime.datetime.now().astimezone()
+
+        # 从model_config中提取llmConfig信息
+        llm_config = {}
+        if model_config:
+            llm_config = {
+                "model": model_config.get("model", ""),
+                "maxTokens": model_config.get("max_tokens", ""),
+                "temperature": model_config.get("temperature", ""),
+                "max_model_len": model_config.get("max_model_len"),
+            }
+
+        self.agent_config = {
+            "id": str(int(time.time() * 1000)),  # 使用时间戳作为ID
+            "agent_id": agent_id or self.agent_id,  # Fibre agent ID
+            "name": f"Agent Session {self.session_id}",
+            "description": f"Agent configuration for session {self.session_id}",
+            "system_prefix": system_prefix or "",
+            "deep_thinking": deep_thinking if deep_thinking is not None else False,
+            "thinking_level": thinking_level,
+            "agent_mode": agent_mode,
+            "more_suggest": more_suggest,
+            "max_loop_count": max_loop_count,
+            "llm_config": llm_config,
+            "available_tools": available_tools or [],
+            "available_skills": available_skills or [],
+            "system_context": system_context or {},
+            "available_workflows": available_workflows or {},
+            "memory_backends": memory_backends or {},
+            "exportTime": current_time.strftime("%Y-%m-%d %H:%M:%S"),
+            "version": "1.0",
+        }
+        self.session_memory_manager = create_session_memory_manager(
+            agent_config=self.agent_config
+        )
+        logger.debug("SessionContext: 设置agent配置信息完成")
+
+    def set_status(self, status: SessionStatus, cascade: bool = True) -> None:
+        raise RuntimeError(
+            f"SessionContext: set_status is deprecated; use Session instead, session_id={self.session_id}"
+        )
+
+    def request_interrupt(
+        self, reason: str = "User requested interruption", cascade: bool = True
+    ) -> None:
+        raise RuntimeError(
+            f"SessionContext: request_interrupt is deprecated; use Session instead, session_id={self.session_id}"
+        )
+
+    def should_interrupt(self) -> bool:
+        raise RuntimeError(
+            f"SessionContext: should_interrupt is deprecated; use Session instead, session_id={self.session_id}"
+        )
+
+    def add_child_session(self, child_session_id: str) -> None:
+        raise RuntimeError(
+            f"SessionContext: add_child_session is deprecated; use Session instead, session_id={self.session_id}"
+        )
+
+    def remove_child_session(self, child_session_id: str) -> None:
+        raise RuntimeError(
+            f"SessionContext: remove_child_session is deprecated; use Session instead, session_id={self.session_id}"
+        )
+
+    def set_parent_session(self, parent_session_id: str) -> None:
+        """设置父会话ID
+
+        Args:
+            parent_session_id: 父会话ID
+        """
+        self.parent_session_id = parent_session_id
+        logger.debug(
+            f"SessionContext: Set parent session {parent_session_id} for session {self.session_id}"
+        )
+
+    def match_language(self, response_language: str) -> str:
+        """根据 response_language 匹配语言"""
+        _LANGUAGE_ALIAS_MAP = {
+            "zh": ["zh", "zh-CN"],
+            "en": ["en", "en-US"],
+            "pt": ["pt", "pt-BR"],
+        }
+        for canonical_lang, aliases in _LANGUAGE_ALIAS_MAP.items():
+            for alias in aliases:
+                if alias in response_language:
+                    return canonical_lang
+        return "en"
+
+    def get_language(self) -> str:
+        """获取当前会话的语言设置
+
+        根据system_context中的response_language判断语言类型
+        如果包含'zh'或'中文'则返回'zh'，否则返回'en'
+
+        Returns:
+            str: 'zh'、'en' 或 'pt'
+        """
+        response_language = self.system_context.get("response_language")
+        return self.match_language(str(response_language or "en"))
+
+    def _normalize_external_paths(self, external_paths: Any) -> List[str]:
+        if external_paths is None:
+            return []
+        if isinstance(external_paths, str):
+            return [external_paths]
+        if isinstance(external_paths, list):
+            return [str(p) for p in external_paths if p is not None]
+        return []
+
+    def _refresh_file_permission(self):
+        private_workspace = (
+            self.system_context.get("private_workspace") or self.sandbox_agent_workspace
+        )
+        permission_paths = [str(private_workspace)] if private_workspace else []
+        external_paths = getattr(self, "external_paths", None)
+        if external_paths and isinstance(external_paths, list):
+            permission_paths.extend([str(p) for p in external_paths])
+        paths_str = ", ".join(permission_paths)  # pyright: ignore[reportArgumentType,reportCallIssue]
+        workspace = self.sandbox_agent_workspace
+        self.system_context["file_permission"] = (
+            f"only allow read and write files in: {paths_str} (Note: {workspace} is your private sandbox), and use absolute path"
+        )
+
+    # 注意：自动记忆提取功能已迁移到sagents层面
+    # 现在由sagents直接调用MemoryExtractionAgent来处理记忆提取和更新
+
+    def add_and_update_system_context(self, new_system_context: Dict[str, Any]):
+        """添加并更新运行变量。"""
+        if new_system_context:
+            external_paths_value = None
+            has_external_paths = False
+            if "external_paths" in new_system_context:
+                has_external_paths = True
+                external_paths_value = new_system_context.get("external_paths")
+            self.system_context.update(new_system_context)
+            if has_external_paths:
+                normalized_external_paths = self._normalize_external_paths(
+                    external_paths_value
+                )
+                previous_external_paths = list(
+                    getattr(self, "external_paths", None) or []
+                )
+                self.external_paths = normalized_external_paths
+                self.system_context["external_paths"] = normalized_external_paths
+                # 更新沙箱的 allowed_paths
+                if self.sandbox:
+                    # 使用新的接口方法
+                    if previous_external_paths:
+                        self.sandbox.remove_allowed_paths(previous_external_paths)
+                    self.sandbox.add_allowed_paths(normalized_external_paths)
+                self._refresh_file_permission()
+
+    def add_llm_request(
+        self, request: Dict[str, Any], response: Optional[Dict[str, Any]]
+    ):
+        """添加 LLM 请求，并在当前 request 窗口内累计 usage / 时延。
+
+        Desktop 会在 request 结束时保留 usage 诊断文件；Server 只使用最终的
+        数据库统计，避免为同一份 usage 额外写会话文件。
+        """
+
+        if self._log_writer_closed:
+            logger.warning(
+                f"SessionContext: ignore late LLM log after close, session_id={self.session_id}"
+            )
+            return
+
+        llm_request = {
+            "request": request,
+            "response": response,
+            "timestamp": time.time(),
+        }
+        self.llm_requests_logs.append(llm_request)
+
+        try:
+            self._accumulate_request_usage(request, response)
+        except Exception as exc:
+            logger.warning(f"SessionContext: 累加 per-request usage 失败: {exc}")
+
+        self._schedule_log_writer()
+
+    def add_mcp_call(self, call: Dict[str, Any]) -> Optional[str]:
+        """记录一次 MCP 调用，并按当前 chat request 聚合落盘。"""
+        if self._log_writer_closed:
+            logger.warning(
+                f"SessionContext: ignore late MCP log after close, session_id={self.session_id}"
+            )
+            return None
+
+        with self._request_lock:
+            cur = self._current_request
+            if cur is None:
+                return None
+            request_id = cur["request_id"]
+            request_started_at = cur.get("started_at")
+
+        now = time.time()
+        with self._mcp_calls_lock:
+            index = sum(
+                1
+                for item in self.mcp_calls_logs
+                if item.get("request_id") == request_id
+            )
+            mcp_call = {
+                "index": index,
+                "request_id": request_id,
+                "session_id": self.session_id,
+                "request_started_at": request_started_at,
+                "timestamp": now,
+                **call,
+            }
+            self.mcp_calls_logs.append(make_serializable(mcp_call))  # pyright: ignore[reportArgumentType]
+            self._dirty_mcp_request_ids.add(request_id)
+            self._mcp_request_versions[request_id] = (
+                self._mcp_request_versions.get(request_id, 0) + 1
+            )
+
+        self._schedule_log_writer()
+        return request_id
+
+    def _schedule_log_writer(self) -> None:
+        if self._log_writer_closed:
+            return
+        if self._log_writer_task is not None and not self._log_writer_task.done():
+            return
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            # The canonical lists retain the data until close flushes it on the
+            # owning event loop.
+            return
+        self._owner_loop = self._owner_loop or loop
+        self._log_writer_task = loop.create_task(
+            self._drain_pending_log_writes(),
+            name=f"session-log-writer-{self.session_id}",
+        )
+
+    async def _drain_pending_log_writes(self) -> None:
+        current_task = asyncio.current_task()
+        reached_empty_queue = False
+        try:
+            while True:
+                if self._llm_log_save_cursor < len(self.llm_requests_logs):
+                    llm_request = self.llm_requests_logs[self._llm_log_save_cursor]
+                    await self._async_save_llm_request(llm_request)
+                    self._llm_log_save_cursor += 1
+                    continue
+
+                with self._mcp_calls_lock:
+                    request_id = (
+                        next(iter(self._dirty_mcp_request_ids))
+                        if self._dirty_mcp_request_ids
+                        else None
+                    )
+                    request_version = (
+                        self._mcp_request_versions.get(request_id, 0)
+                        if request_id is not None
+                        else 0
+                    )
+                if request_id is not None:
+                    await self._async_save_mcp_calls(request_id)
+                    with self._mcp_calls_lock:
+                        # A call may have arrived for this request while the
+                        # aggregate was being written. Keep it dirty so the
+                        # next pass persists the newer snapshot.
+                        if (
+                            self._mcp_request_versions.get(request_id, 0)
+                            == request_version
+                        ):
+                            self._dirty_mcp_request_ids.discard(request_id)
+                            self._mcp_request_versions.pop(request_id, None)
+                    continue
+                reached_empty_queue = True
+                return
+        finally:
+            if self._log_writer_task is current_task:
+                self._log_writer_task = None
+                if (
+                    reached_empty_queue
+                    and not self._log_writer_closed
+                    and self._has_pending_log_writes()
+                ):
+                    # An item can arrive after the empty-queue check but before
+                    # this task clears the writer slot. Ensure that race always
+                    # hands off to a successor writer.
+                    self._schedule_log_writer()
+
+    def _has_pending_log_writes(self) -> bool:
+        if self._llm_log_save_cursor < len(self.llm_requests_logs):
+            return True
+        with self._mcp_calls_lock:
+            return bool(self._dirty_mcp_request_ids)
+
+    def _discard_diagnostic_log_buffers(self) -> None:
+        """Release diagnostic payloads after flush or a bounded-flush failure."""
+        self.llm_requests_logs.clear()
+        self._llm_log_save_cursor = 0
+        with self._mcp_calls_lock:
+            self.mcp_calls_logs.clear()
+            self._dirty_mcp_request_ids.clear()
+            self._mcp_request_versions.clear()
+
+    async def _cancel_log_writer(self, task: Optional[asyncio.Task]) -> None:
+        if task is not None and not task.done():
+            task.cancel()
+        if task is not None:
+            done, pending = await asyncio.wait(
+                {task}, timeout=self.LOG_WRITER_CANCEL_TIMEOUT_SECONDS
+            )
+            for finished in done:
+                if not finished.cancelled():
+                    finished.exception()
+            for unfinished in pending:
+                # A broken I/O adapter may suppress cancellation. Do not let it
+                # retain the SessionContext through the global writer slot.
+                unfinished.add_done_callback(
+                    lambda item: None if item.cancelled() else item.exception()
+                )
+        if self._log_writer_task is task:
+            self._log_writer_task = None
+
+    async def flush_pending_log_writes(
+        self, timeout_seconds: Optional[float] = None
+    ) -> bool:
+        async with self._log_flush_lock:
+            return await self._flush_pending_log_writes(timeout_seconds)
+
+    async def _flush_pending_log_writes(
+        self, timeout_seconds: Optional[float] = None
+    ) -> bool:
+        """Persist registered diagnostics within a bounded close window.
+
+        Returns ``True`` when every queued item was handled. On timeout the
+        writer is cancelled and all remaining diagnostic payloads are dropped
+        so Session cleanup can release its object graph.
+        """
+        self._log_writer_closed = True
+        timeout = (
+            self.LOG_FLUSH_TIMEOUT_SECONDS
+            if timeout_seconds is None
+            else max(0.0, float(timeout_seconds))
+        )
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + timeout
+        try:
+            while True:
+                task = self._log_writer_task
+                if task is None or task.done():
+                    if (
+                        self._llm_log_save_cursor >= len(self.llm_requests_logs)
+                        and not self._dirty_mcp_request_ids
+                    ):
+                        self._discard_diagnostic_log_buffers()
+                        return True
+                    task = asyncio.create_task(
+                        self._drain_pending_log_writes(),
+                        name=f"session-log-flush-{self.session_id}",
+                    )
+                    self._log_writer_task = task
+
+                remaining = deadline - loop.time()
+                if remaining <= 0:
+                    raise asyncio.TimeoutError
+                await asyncio.wait_for(asyncio.shield(task), timeout=remaining)
+        except asyncio.TimeoutError:
+            pending_llm = max(
+                0, len(self.llm_requests_logs) - self._llm_log_save_cursor
+            )
+            pending_mcp = len(self._dirty_mcp_request_ids)
+            logger.warning(
+                "SessionContext: diagnostic log flush timed out; dropping "
+                f"pending payloads session_id={self.session_id} "
+                f"llm={pending_llm} mcp={pending_mcp} timeout={timeout:.3f}s"
+            )
+            await self._cancel_log_writer(self._log_writer_task)
+            self._discard_diagnostic_log_buffers()
+            return False
+        except asyncio.CancelledError:
+            await self._cancel_log_writer(self._log_writer_task)
+            self._discard_diagnostic_log_buffers()
+            raise
+
+    def current_request_id(self) -> Optional[str]:
+        with self._request_lock:
+            cur = self._current_request
+            if cur is None:
+                return None
+            return cur.get("request_id")
+
+    def start_request(self, metadata: Optional[Dict[str, Any]] = None) -> str:
+        """开启一次"用户请求"窗口；返回 request_id。
+
+        线程安全：同一 session 不允许嵌套 request；如已有未关闭的 request
+        会先把它结掉（status=interrupted）再开启新的。
+        """
+        with self._request_lock:
+            if self._current_request is not None:
+                logger.warning(
+                    f"SessionContext: start_request 检测到上一个 request 未结束，自动收尾"
+                    f" prev_id={self._current_request.get('request_id')}"
+                )
+                try:
+                    self._finalize_current_request("interrupted")
+                except Exception:
+                    self._current_request = None
+
+            request_id = "req_" + uuid.uuid4().hex[:12]
+            now = time.time()
+            self._current_request = {
+                "request_id": request_id,
+                "session_id": self.session_id,
+                "started_at": now,
+                "ended_at": None,
+                "status": "running",
+                "agent_mode": (metadata or {}).get("agent_mode"),
+                "model": (metadata or {}).get("model"),
+                "metadata": metadata or {},
+                "total_usage": {
+                    "prompt_tokens": 0,
+                    "completion_tokens": 0,
+                    "total_tokens": 0,
+                    "cached_tokens": 0,
+                    "reasoning_tokens": 0,
+                },
+                "per_call": [],
+            }
+            return request_id
+
+    def end_request(self, status: str = "completed") -> Optional[str]:
+        """结束当前 request 窗口。
+
+        Returns:
+            Desktop 返回 usage 文件路径，Server 返回 request_id；若没有活跃
+            request 则返回 None。
+        """
+        with self._request_lock:
+            return self._finalize_current_request(status)
+
+    def _finalize_current_request(self, status: str) -> Optional[str]:
+        cur = self._current_request
+        if cur is None:
+            return None
+        self._current_request = None
+        cur["ended_at"] = time.time()
+        cur["duration_sec"] = max(0.0, cur["ended_at"] - cur["started_at"])
+        cur["status"] = status
+        server_process = is_server_process()
+        file_path: Optional[str] = None
+        if not server_process:
+            try:
+                self._bind_storage_workspace()
+                payload = make_serializable(cur)
+                file_path = self.storage.save_request_usage(
+                    self.session_id, cur["request_id"], payload
+                )
+                logger.info(
+                    f"SessionContext: tokens_usage saved request_id={cur['request_id']} "
+                    f"calls={len(cur['per_call'])} total_tokens={cur['total_usage'].get('total_tokens')}"
+                )
+            except Exception as exc:
+                logger.error(f"SessionContext: 落盘 tokens_usage 失败: {exc}")
+                return None
+
+        if self._has_mcp_calls_for_request(cur["request_id"]):
+            try:
+                self._save_mcp_calls_sync(cur["request_id"])
+            except Exception as exc:
+                logger.error(f"SessionContext: 落盘 mcp_calls 失败: {exc}")
+        return str(cur["request_id"]) if server_process else file_path
+
+    def _accumulate_request_usage(
+        self,
+        request: Dict[str, Any],
+        response: Optional[Dict[str, Any]],
+    ) -> None:
+        cur = self._current_request
+        if cur is None:
+            return
+        response_dict = make_serializable(response) if response is not None else None
+        usage = (
+            (response_dict or {}).get("usage")
+            if isinstance(response_dict, dict)
+            else None
+        )
+
+        # 提取 cached / reasoning 等子项，便于汇总
+        cached_tokens = 0
+        reasoning_tokens = 0
+        if isinstance(usage, dict):
+            prompt_details = usage.get("prompt_tokens_details") or {}
+            if isinstance(prompt_details, dict):
+                v = prompt_details.get("cached_tokens")
+                if isinstance(v, (int, float)):
+                    cached_tokens = int(v)
+            completion_details = usage.get("completion_tokens_details") or {}
+            if isinstance(completion_details, dict):
+                v = completion_details.get("reasoning_tokens")
+                if isinstance(v, (int, float)):
+                    reasoning_tokens = int(v)
+
+        # model 优先级：request["model"] > request["model_config"]["model"] > response.model
+        mc = (
+            request.get("model_config")
+            if isinstance(request.get("model_config"), dict)
+            else None
+        )
+        resolved_model = (
+            request.get("model")
+            or (mc.get("model") if mc else None)
+            or (response_dict.get("model") if isinstance(response_dict, dict) else None)
+        )
+        call_entry = {
+            "index": len(cur["per_call"]),
+            "step_name": request.get("step_name"),
+            "model": resolved_model,
+            "started_at": request.get("started_at"),
+            "first_token_time": request.get("first_token_time"),
+            "ttfb_sec": request.get("ttfb_sec"),
+            "duration_sec": request.get("duration_sec"),
+            "usage": usage,
+            "cached_tokens": cached_tokens,
+            "reasoning_tokens": reasoning_tokens,
+        }
+        cur["per_call"].append(call_entry)
+
+        # 累加 total_usage
+        total = cur["total_usage"]
+        if isinstance(usage, dict):
+            for key in ("prompt_tokens", "completion_tokens", "total_tokens"):
+                v = usage.get(key)
+                if isinstance(v, (int, float)):
+                    total[key] = total.get(key, 0) + int(v)
+        total["cached_tokens"] = total.get("cached_tokens", 0) + cached_tokens
+        total["reasoning_tokens"] = total.get("reasoning_tokens", 0) + reasoning_tokens
+
+        # 同步给前端方便对账：取首个 model 作为 request 的代表 model
+        if not cur.get("model") and call_entry.get("model"):
+            cur["model"] = call_entry["model"]
+
+    async def _async_save_llm_request(self, llm_request: Dict[str, Any]):
+        """异步保存单个LLM请求到文件"""
+        try:
+            await diagnostic_to_thread(
+                "session_context._async_save_llm_request",
+                self._save_llm_request_sync,
+                llm_request,
+            )
+        except Exception as e:
+            logger.error(f"SessionContext: Failed to async save LLM request: {e}")
+
+    async def _async_save_mcp_calls(self, request_id: str):
+        """异步保存当前 request 的 MCP 调用日志到同一个文件。"""
+        try:
+            await diagnostic_to_thread(
+                "session_context._async_save_mcp_calls",
+                self._save_mcp_calls_sync,
+                request_id,
+            )
+        except Exception as e:
+            logger.error(f"SessionContext: Failed to async save MCP calls: {e}")
+
+    def get_tokens_usage_info(self):
+        """获取tokens使用信息
+
+        - per_step_info 每条带 ``model`` 字段（来自 request.model > request.model_config.model > response.model）
+        - total_info 末尾追加 ``model``（首个非空 model）和 ``models``（去重保序的 model 列表）
+        - 没有任何 LLM 调用时也返回稳定结构（``total_info``/``per_step_info``/``models`` 都存在）
+        """
+        tokens_info = {"total_info": {}, "per_step_info": []}
+        models_seen: List[str] = []
+
+        def _resolve_model(
+            req: Dict[str, Any], resp_dict: Optional[Dict[str, Any]]
+        ) -> Optional[str]:
+            req = req or {}
+            mc = (
+                req.get("model_config")
+                if isinstance(req.get("model_config"), dict)
+                else None
+            )
+            return (
+                req.get("model")
+                or (mc.get("model") if mc else None)
+                or (
+                    (resp_dict or {}).get("model")
+                    if isinstance(resp_dict, dict)
+                    else None
+                )
+            )
+
+        for i, llm_request in enumerate(self.llm_requests_logs):
+            raw_response = llm_request["response"]
+
+            response_dict = make_serializable(raw_response)
+            if not isinstance(response_dict, dict):
+                continue
+
+            request_dict = llm_request.get("request") or {}
+            step_model = _resolve_model(request_dict, response_dict)
+            if step_model and step_model not in models_seen:
+                models_seen.append(step_model)
+
+            if "usage" in response_dict and response_dict["usage"]:
+                usage = response_dict["usage"]
+                step_info = {
+                    "step_name": request_dict.get("step_name", "unknown"),
+                    "model": step_model,
+                    "usage": usage,
+                }
+                tokens_info["per_step_info"].append(step_info)
+
+                # 处理基本 token 字段
+                for key, value in usage.items():  # pyright: ignore[reportAttributeAccessIssue]
+                    if isinstance(value, (int, float)):
+                        if key not in tokens_info["total_info"]:
+                            tokens_info["total_info"][key] = 0
+                        tokens_info["total_info"][key] += value
+
+                # 处理 prompt_tokens_details 中的 cached_tokens
+                prompt_details = usage.get("prompt_tokens_details")  # pyright: ignore[reportAttributeAccessIssue]
+                if prompt_details and isinstance(prompt_details, dict):
+                    cached_tokens = prompt_details.get("cached_tokens")
+                    if isinstance(cached_tokens, (int, float)):
+                        if "cached_tokens" not in tokens_info["total_info"]:
+                            tokens_info["total_info"]["cached_tokens"] = 0
+                        tokens_info["total_info"]["cached_tokens"] += cached_tokens
+
+                    audio_tokens = prompt_details.get("audio_tokens")
+                    if isinstance(audio_tokens, (int, float)):
+                        if "prompt_audio_tokens" not in tokens_info["total_info"]:
+                            tokens_info["total_info"]["prompt_audio_tokens"] = 0
+                        tokens_info["total_info"]["prompt_audio_tokens"] += audio_tokens
+
+                # 处理 completion_tokens_details
+                completion_details = usage.get("completion_tokens_details")  # pyright: ignore[reportAttributeAccessIssue]
+                if completion_details and isinstance(completion_details, dict):
+                    reasoning_tokens = completion_details.get("reasoning_tokens")
+                    if isinstance(reasoning_tokens, (int, float)):
+                        if "reasoning_tokens" not in tokens_info["total_info"]:
+                            tokens_info["total_info"]["reasoning_tokens"] = 0
+                        tokens_info["total_info"]["reasoning_tokens"] += (
+                            reasoning_tokens
+                        )
+
+                    audio_tokens = completion_details.get("audio_tokens")
+                    if isinstance(audio_tokens, (int, float)):
+                        if "completion_audio_tokens" not in tokens_info["total_info"]:
+                            tokens_info["total_info"]["completion_audio_tokens"] = 0
+                        tokens_info["total_info"]["completion_audio_tokens"] += (
+                            audio_tokens
+                        )
+            else:
+                # 流式响应可能没有 usage 字段，记录提示
+                logger.info(
+                    f"get_tokens_usage_info: no usage in response_dict, keys={response_dict.keys()}"
+                )
+                step_info = {
+                    "step_name": request_dict.get("step_name", "unknown"),
+                    "model": step_model,
+                    "usage": None,
+                    "note": "Stream response does not include token usage",
+                }
+                tokens_info["per_step_info"].append(step_info)
+
+        # 在 total_info 中追加 model 信息，方便前端/统计直接使用
+        tokens_info["models"] = models_seen
+        if models_seen:
+            tokens_info["total_info"]["model"] = models_seen[0]
+            tokens_info["total_info"]["models"] = models_seen
+        return tokens_info
+
+    def save(
+        self,
+        session_status: Optional[SessionStatus] = None,
+        child_session_ids: Optional[List[str]] = None,
+        interrupt_reason: Optional[str] = None,
+    ):
+        """保存会话上下文（不包含 llm_requests，已在 add 时异步保存）"""
+        with self._save_lock:
+            effective_status = session_status or self._status
+            effective_child_session_ids = (
+                child_session_ids
+                if child_session_ids is not None
+                else self.child_session_ids
+            )
+            if interrupt_reason is not None:
+                self.audit_status["interrupt_reason"] = interrupt_reason
+
+            status_value = (
+                effective_status.value
+                if hasattr(effective_status, "value")
+                else str(effective_status)
+            )
+            message_stats = self.message_manager.stats
+            signature = (
+                len(self.message_manager.messages),
+                message_stats.get("total_chunks"),
+                message_stats.get("last_updated"),
+                status_value,
+                tuple(effective_child_session_ids or []),
+                self.audit_status.get("interrupt_reason"),
+                self.audit_status.get("tools_expanded"),
+                len(self.llm_requests_logs),
+                self._current_request is None,
+            )
+            now = time.time()
+            if (
+                signature == self._last_save_signature
+                and now - self._last_save_time < 2.0
+                and not self._message_journal_has_records()
+            ):
+                logger.debug(
+                    f"SessionContext: 跳过重复保存 session_id={self.session_id}"
+                )
+                return
+            session_workspace = getattr(self, "session_workspace", None)
+            if not session_workspace:
+                logger.warning(
+                    "SessionContext: skip save because session_workspace is not set "
+                    f"session_id={self.session_id}"
+                )
+                self.record_timing_event(
+                    "session_end",
+                    status=status_value,
+                )
+                self._last_save_signature = signature
+                self._last_save_time = now
+                return
+            self.storage.bind_session_workspace(self.session_id, session_workspace)
+
+            # 1. 保存 messages 到 messages.json
+            # 始终覆盖，保存完整历史
+            messages_saved = False
+            with self._message_journal_lock:
+                self.flush_message_journal_current(reason="before_session_save")
+                logger.info(
+                    "SessionContext: saving messages.json "
+                    f"session_id={self.session_id} status={status_value} "
+                    f"ctx_id={id(self)} manager_id={id(self.message_manager)} "
+                    f"message_count={len(self.message_manager.messages)} "
+                    f"llm_request_count={len(self.llm_requests_logs)} "
+                    f"last_messages={self._debug_last_message_snapshots()}"
+                )
+                try:
+                    serializable_messages = make_serializable(
+                        self.message_manager.messages
+                    )
+                    messages_path = self.storage.save_message_snapshot(
+                        self.session_id, serializable_messages
+                    )
+                    messages_saved = True
+                    logger.info(
+                        "SessionContext: saved messages.json "
+                        f"session_id={self.session_id} "
+                        f"message_count={len(self.message_manager.messages)} "
+                        f"path={messages_path}"
+                    )
+                except Exception as e:
+                    logger.error(f"SessionContext: Failed to save messages.json: {e}")
+
+                if messages_saved:
+                    self._clear_message_journal_after_snapshot()
+
+            # 2. 保存 compact_manifest.json（派生索引，仅用于审计/调试）
+            try:
+                compact_manifest = self.message_manager.get_compact_manifest()
+                self.storage.save_compact_manifest(
+                    self.session_id, make_serializable(compact_manifest)
+                )
+            except Exception as e:
+                logger.error(
+                    f"SessionContext: Failed to save compact_manifest.json: {e}"
+                )
+
+            # 3. 保存 session_context.json (仅保存最新状态)
+            # 包含 system_context、audit_status 和基本元数据；Server 不重复写
+            # token usage，最终统计由数据库负责。
+            try:
+                context_data = {
+                    "session_id": self.session_id,
+                    "user_id": self.user_id,
+                    "parent_session_id": self.parent_session_id,
+                    "child_session_ids": effective_child_session_ids,
+                    "status": status_value,
+                    "created_at": self.start_time,
+                    "updated_at": now,
+                    "session_root_space": self.session_root_space,
+                    "session_workspace": self.session_workspace,
+                    "sandbox_agent_workspace": self.sandbox_agent_workspace,
+                    # 关键状态
+                    "system_context": make_serializable(self.system_context),
+                    "audit_status": make_serializable(self.audit_status),
+                    "execution_timeline_events": make_serializable(
+                        self.execution_timeline_events
+                    ),
+                    "execution_timing_summary": make_serializable(
+                        self._build_execution_timing_summary()
+                    ),
+                    "context_budget_config": make_serializable(
+                        self._effective_context_budget_config()
+                    ),
+                    "prompt_token_checkpoints": make_serializable(
+                        self.prompt_budget_manager.to_dict()
+                    ),
+                    # Agent 配置
+                    "agent_config": make_serializable(self.agent_config),
+                }
+                if not is_server_process():
+                    context_data["tokens_usage_info"] = self.get_tokens_usage_info()
+
+                self.storage.save_session_snapshot(self.session_id, context_data)
+
+            except Exception as e:
+                logger.error(
+                    f"SessionContext: Failed to save session_context.json: {e}"
+                )
+
+            # 基于messages.json 提取里面不同的工具调用的数量统计，并保存到tools_usage.json
+            try:
+                tools_usage = {}
+                for msg in self.message_manager.messages:
+                    if msg.tool_calls:
+                        for tool_call in msg.tool_calls:
+                            tool_call_data = make_serializable(tool_call)
+                            function = (
+                                tool_call_data.get("function", {})
+                                if isinstance(tool_call_data, dict)
+                                else {}
+                            )
+                            tool_name = (
+                                function.get("name")
+                                if isinstance(function, dict)
+                                else None
+                            )
+                            if tool_name:
+                                tools_usage[tool_name] = (
+                                    tools_usage.get(tool_name, 0) + 1
+                                )
+
+                self.storage.save_tools_usage(self.session_id, tools_usage)
+            except Exception as e:
+                logger.error(f"SessionContext: Failed to save tools_usage.json: {e}")
+
+            self.record_timing_event(
+                "session_end",
+                status=status_value,
+            )
+            self._last_save_signature = signature
+            self._last_save_time = now
+
+    # def _serialize_messages_for_history_memory(self, messages: List[MessageChunk]) -> str:
+    #     """序列化消息列表为运行变量格式的字符串（私有方法）"""
+    #     # 获取当前语言设置
+    #     language = self.get_language()
+
+    #     # 从PromptManager获取多语言文本
+    #     explanation = prompt_manager.get_prompt(
+    #         "history_messages_explanation",
+    #         agent="SessionContext",
+    #         language=language,
+    #         default=(
+    #             "以下是检索到的相关历史对话上下文，这些消息与当前查询相关，"
+    #             "可以帮助你更好地理解对话背景和用户意图。请参考这些历史消息来提供更准确和连贯的回答。\n"
+    #             "=== 相关历史对话上下文 ===\n"
+    #         )
+    #     )
+
+    #     # 获取消息格式模板
+    #     message_format_template = prompt_manager.get_prompt(
+    #         "history_message_format",
+    #         agent="SessionContext",
+    #         language=language,
+    #         default="[Memory {index}] ({time}): {content}"
+    #     )
+
+    #     messages_str_list = []
+    #     for idx, msg in enumerate(messages):
+    #         content = msg.get_content()
+    #         utc_time = datetime.datetime.fromtimestamp(msg.timestamp or time.time(), tz=datetime.timezone.utc)
+    #         local_time = utc_time.astimezone()
+    #         time_str = local_time.strftime('%Y-%m-%d %H:%M:%S')
+    #         messages_str_list.append(message_format_template.format(index=idx + 1, time=time_str, content=content))
+
+    #     messages_content = "\n".join(messages_str_list)
+    #     return explanation + messages_content
+
+    # def set_session_history_context(self) -> None:
+    #     """准备并设置历史上下文到 system_context
+
+    #     完整流程：计算预算 -> 切分消息 -> 设置索引 -> BM25重排序 -> 序列化 -> 保存到system_context
+
+    #     这是 SessionContext 的职责：协调消息检索和上下文保存。
+    #     """
+    #     t_start = time.time()
+    #     # 1. 准备历史上下文
+    #     prepare_result = self.message_manager.prepare_history_split(self.agent_config)
+    #     t_prepare = time.time()
+
+    #     # 2. 检索历史消息
+    #     history_messages = self.session_memory_manager.retrieve_history_messages(
+    #         messages=prepare_result['split_result']['history_messages'],
+    #         query=prepare_result['current_query'],
+    #         history_budget=prepare_result['budget_info']['history_budget']
+    #     )
+    #     t_retrieve = time.time()
+
+    #     if len(history_messages) > 0:
+    #         # 4. 序列化为字符串并插入到system_context
+    #         history_messages_str = self._serialize_messages_for_history_memory(history_messages)
+    #         self.system_context['history_messages'] = history_messages_str
+
+    #     logger.info(
+    #         f"SessionContext: 历史上下文准备完成 - "
+    #         f"检索历史消息{len(history_messages)}条消息到system_context, "
+    #         f"总耗时: {time.time() - t_start:.3f}s (准备: {t_prepare - t_start:.3f}s, 检索: {t_retrieve - t_prepare:.3f}s)"
+    #     )
+
+
+def get_session_run_lock(session_id: str) -> UnifiedLock:
+    return lock_manager.get_lock(session_id)
+
+
+def delete_session_run_lock(session_id: str):
+    lock_manager.delete_lock_ref(session_id)

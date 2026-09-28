@@ -11,7 +11,7 @@ parent: API
 
 # Server HTTP API
 
-本页面向 **`app/server_v2`**，不是旧版服务端。请求结构、响应模型和状态码以运行服务的 `/docs` 或 `/openapi.json` 为准。
+本页面向 **`app/v2/server`**，不是旧版服务端。请求结构、响应模型和状态码以运行服务的 `/docs` 或 `/openapi.json` 为准。
 
 ## 身份认证
 
@@ -118,4 +118,4 @@ parent: API
 
 成功与失败的 JSON 都包含 `request_id`，服务端同时返回 `X-Request-ID`。流式响应使用 AG-UI 事件格式。
 
-[路由源码](https://github.com/ZHangZHengEric/Sage/blob/main/app/server_v2/routers/) · [服务端启动](../applications/WEB.md)
+[路由源码](https://github.com/ZHangZHengEric/Sage/blob/main/app/v2/server/routers/) · [服务端启动](../applications/WEB.md)

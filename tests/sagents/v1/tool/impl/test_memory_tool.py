@@ -1,0 +1,461 @@
+import asyncio
+import importlib
+import json
+import sys
+import types
+import unittest
+from unittest.mock import patch
+
+
+if "rank_bm25" not in sys.modules:
+    fake_rank_bm25 = types.ModuleType("rank_bm25")
+
+    class _FakeBM25Okapi:
+        def __init__(self, corpus):
+            self.corpus = corpus
+
+        def get_scores(self, query_tokens):
+            return [1.0 for _ in self.corpus]
+
+    fake_rank_bm25.BM25Okapi = _FakeBM25Okapi  # pyright: ignore[reportAttributeAccessIssue]
+    sys.modules["rank_bm25"] = fake_rank_bm25
+
+
+def _load_memory_tool_module():
+    return importlib.import_module("sagents.v1.tool.impl.memory_tool")
+
+
+def _load_tool_manager_class():
+    module = importlib.import_module("sagents.v1.tool.tool_manager")
+    return module.ToolManager
+
+
+class _FakeMessage:
+    def __init__(self, message_id: str, role: str, content, message_type: str = "text"):
+        self.message_id = message_id
+        self.role = role
+        self.content = content
+        self.message_type = message_type
+        self.timestamp = 123
+
+    def get_content(self):
+        return self.content
+
+    def normalized_message_type(self):
+        return self.message_type
+
+    def is_user_input_message(self):
+        return self.role == "user"
+
+    def is_assistant_text_message(self):
+        return self.role == "assistant" and self.message_type in {
+            "assistant_text",
+            "final_answer",
+            "text",
+        }
+
+
+class _FakeMessageManager:
+    def __init__(self, messages, history_messages):
+        self._messages = messages
+        self._history_messages = history_messages
+        self.compute_calls = 0
+        self._force_empty_anchor = False
+
+    @property
+    def messages(self):
+        return list(self._history_messages) + list(self._messages)
+
+    def compute_history_anchor_index(self):
+        self.compute_calls += 1
+        if self._force_empty_anchor:
+            return None
+        if not self._history_messages:
+            return None
+        return len(self._history_messages)
+
+
+class _FakeSessionMemoryManager:
+    def __init__(self, retrieved_messages):
+        self.retrieved_messages = retrieved_messages
+        self.calls = 0
+        self.grouped_calls = 0
+        self.retrieve_calls = []
+        self.retrieve_message_ids = []
+        self.retrieve_contents = []
+
+    def retrieve_history_messages(self, messages, query, history_budget):
+        self.calls += 1
+        self.retrieve_message_ids.append([msg.message_id for msg in messages])
+        self.retrieve_contents.append([msg.content for msg in messages])
+        return self.retrieved_messages
+
+    def retrieve_group_messages_by_chat(self, messages, query, history_budget):
+        self.grouped_calls += 1
+        self.retrieve_message_ids.append([msg.message_id for msg in messages])
+        self.retrieve_contents.append([msg.content for msg in messages])
+        return self.retrieved_messages
+
+    def retrieve(
+        self, messages, query, history_budget, *, strategy=None, agent_config=None
+    ):
+        self.retrieve_calls.append((strategy, agent_config))
+        if strategy == "grouped_chat":
+            return self.retrieve_group_messages_by_chat(messages, query, history_budget)
+        return self.retrieve_history_messages(messages, query, history_budget)
+
+
+class _FakeIndex:
+    instances = []
+    update_calls = 0
+    search_calls = []
+
+    def __init__(self, sandbox, workspace_path, index_path):
+        self.sandbox = sandbox
+        self.workspace_path = workspace_path
+        self.index_path = index_path
+        self._has_search_index = False
+        self.update_count = 0
+        _FakeIndex.instances.append(self)
+
+    def has_search_index(self):
+        return self._has_search_index
+
+    async def update_index(self):
+        self.update_count += 1
+        _FakeIndex.update_calls += 1
+        self._has_search_index = True
+        return {"updated": True}
+
+    def search(self, query, top_k):
+        _FakeIndex.search_calls.append((query, top_k, self.workspace_path))
+        return [
+            types.SimpleNamespace(
+                path="/workspace/clients/cli/example.py",
+                content="[Line 3] matched snippet",
+                line_number=3,
+            )
+        ]
+
+
+class TestMemoryTool(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.module = _load_memory_tool_module()
+        cls.MemoryTool = cls.module.MemoryTool
+        cls.FileMemoryRetriever = cls.module.FileMemoryRetriever
+        cls.SessionHistoryRetriever = cls.module.SessionHistoryRetriever
+        cls.ToolManager = _load_tool_manager_class()
+
+    def setUp(self):
+        self.FileMemoryRetriever.clear_cache()
+        self.SessionHistoryRetriever.clear_cache()
+        _FakeIndex.instances.clear()
+        _FakeIndex.update_calls = 0
+        _FakeIndex.search_calls.clear()
+
+    def test_search_memory_error_contract_is_stable(self):
+        tool = self.MemoryTool()
+
+        missing_session = asyncio.run(
+            tool.search_memory(query="hello", top_k=3, session_id=None)
+        )
+        self.assertEqual(missing_session["status"], "error")
+        self.assertEqual(missing_session["long_term_memory"], [])
+        self.assertEqual(missing_session["session_history"], [])
+
+        missing_query = asyncio.run(
+            tool.search_memory(query=" ", top_k=3, session_id="s1")
+        )
+        self.assertEqual(missing_query["status"], "error")
+        self.assertEqual(missing_query["long_term_memory"], [])
+        self.assertEqual(missing_query["session_history"], [])
+
+    def test_session_history_retriever_reuses_history_anchor_cache(self):
+        tool = self.MemoryTool()
+        messages = [_FakeMessage("m1", "user", "hello session")]
+        history_messages = [_FakeMessage("h1", "assistant", "history snippet")]
+        message_manager = _FakeMessageManager(
+            messages=messages, history_messages=history_messages
+        )
+        session_memory_manager = _FakeSessionMemoryManager(
+            retrieved_messages=history_messages
+        )
+        session_context = types.SimpleNamespace(
+            message_manager=message_manager,
+            agent_config={"name": "demo"},
+            session_memory_manager=session_memory_manager,
+        )
+
+        results1 = tool.session_history_retriever.search(
+            "history", 3, "session-1", session_context
+        )
+        results2 = tool.session_history_retriever.search(
+            "history", 3, "session-1", session_context
+        )
+
+        self.assertEqual(message_manager.compute_calls, 1)
+        self.assertEqual(session_memory_manager.calls, 2)
+        self.assertEqual(len(results1), 1)
+        self.assertEqual(len(results2), 1)
+
+        messages.append(_FakeMessage("m2", "user", "new history"))
+        tool.session_history_retriever.search(
+            "history", 3, "session-1", session_context
+        )
+        self.assertEqual(message_manager.compute_calls, 2)
+
+    def test_session_history_retriever_invalidates_cache_on_agent_config_change(self):
+        tool = self.MemoryTool()
+        history_messages = [_FakeMessage("h1", "assistant", "history snippet")]
+        session_context = types.SimpleNamespace(
+            message_manager=_FakeMessageManager(
+                messages=[_FakeMessage("m1", "user", "hello session")],
+                history_messages=history_messages,
+            ),
+            agent_config={"name": "demo-v1"},
+            session_memory_manager=_FakeSessionMemoryManager(
+                retrieved_messages=history_messages
+            ),
+        )
+
+        tool.session_history_retriever.search(
+            "history", 3, "session-1", session_context
+        )
+        tool.session_history_retriever.search(
+            "history", 3, "session-1", session_context
+        )
+        self.assertEqual(session_context.message_manager.compute_calls, 1)
+
+        session_context.agent_config = {"name": "demo-v2"}
+        tool.session_history_retriever.search(
+            "history", 3, "session-1", session_context
+        )
+        self.assertEqual(session_context.message_manager.compute_calls, 2)
+
+    def test_session_history_retriever_only_uses_history_anchor_scope(self):
+        tool = self.MemoryTool()
+        history_messages = [_FakeMessage("h1", "assistant", "history snippet")]
+        session_memory_manager = _FakeSessionMemoryManager(
+            retrieved_messages=history_messages
+        )
+        session_context = types.SimpleNamespace(
+            message_manager=_FakeMessageManager(
+                messages=[
+                    _FakeMessage("m1", "user", "active question"),
+                    _FakeMessage("m2", "assistant", "active answer"),
+                ],
+                history_messages=history_messages,
+            ),
+            agent_config={"name": "demo"},
+            session_memory_manager=session_memory_manager,
+        )
+
+        results = tool.session_history_retriever.search(
+            "history", 3, "session-1", session_context
+        )
+
+        self.assertEqual(len(results), 1)
+        self.assertEqual(session_memory_manager.retrieve_message_ids, [["h1"]])
+
+    def test_session_history_retriever_returns_no_results_without_history_anchor(self):
+        tool = self.MemoryTool()
+        history_messages = [_FakeMessage("h1", "assistant", "history snippet")]
+        message_manager = _FakeMessageManager(
+            messages=[_FakeMessage("m1", "user", "latest question")],
+            history_messages=history_messages,
+        )
+        message_manager._force_empty_anchor = True
+        session_memory_manager = _FakeSessionMemoryManager(
+            retrieved_messages=history_messages
+        )
+        session_context = types.SimpleNamespace(
+            message_manager=message_manager,
+            agent_config={"name": "demo"},
+            session_memory_manager=session_memory_manager,
+        )
+
+        results = tool.session_history_retriever.search(
+            "history", 3, "session-1", session_context
+        )
+
+        self.assertEqual(results, [])
+        self.assertEqual(session_memory_manager.retrieve_message_ids, [])
+
+    def test_session_history_retriever_uses_grouped_chat_strategy_from_agent_config(
+        self,
+    ):
+        tool = self.MemoryTool()
+        history_messages = [_FakeMessage("h1", "assistant", "history snippet")]
+        session_memory_manager = _FakeSessionMemoryManager(
+            retrieved_messages=history_messages
+        )
+        session_context = types.SimpleNamespace(
+            message_manager=_FakeMessageManager(
+                messages=[_FakeMessage("m1", "user", "hello session")],
+                history_messages=history_messages,
+            ),
+            agent_config={
+                "memory_backends": {"session_history_strategy": "grouped_chat"}
+            },
+            session_memory_manager=session_memory_manager,
+        )
+
+        results = tool.session_history_retriever.search(
+            "history", 3, "session-1", session_context
+        )
+
+        self.assertEqual(len(results), 1)
+        self.assertEqual(session_memory_manager.calls, 0)
+        self.assertEqual(session_memory_manager.grouped_calls, 1)
+        self.assertEqual(
+            session_memory_manager.retrieve_calls,
+            [
+                (
+                    "grouped_chat",
+                    {"memory_backends": {"session_history_strategy": "grouped_chat"}},
+                )
+            ],
+        )
+
+    def test_file_memory_retriever_releases_scoped_index_after_each_search(self):
+        tool = self.MemoryTool()
+        session_context = types.SimpleNamespace(
+            sandbox=object(),
+            sandbox_agent_workspace="/workspace",
+            agent_id="agent-a",
+            user_id="alice",
+        )
+
+        with patch("sagents.v1.tool.impl.memory_index.MemoryIndex", _FakeIndex):
+            results1 = asyncio.run(
+                tool.file_memory_retriever.search("provider cli", 3, session_context)
+            )
+            results2 = asyncio.run(
+                tool.file_memory_retriever.search("provider cli", 3, session_context)
+            )
+
+        self.assertEqual(len(_FakeIndex.instances), 2)
+        self.assertEqual(_FakeIndex.update_calls, 2)
+        self.assertEqual(tool.file_memory_retriever._index_cache, {})
+        self.assertEqual(len(results1), 1)
+        self.assertEqual(len(results2), 1)
+        self.assertEqual(results1[0]["path"], "/workspace/clients/cli/example.py")
+        self.assertEqual(results1[0]["snippets"][0]["line_number"], 3)
+
+    def test_search_memory_success_returns_split_results(self):
+        tool = self.MemoryTool()
+
+        async def fake_file_search(query, top_k, session_id):
+            return [
+                {
+                    "path": "/workspace/clients/cli/example.py",
+                    "snippets": [{"line_number": 2, "text": "provider"}],
+                }
+            ]
+
+        async def fake_history_search(query, top_k, session_id):
+            return [
+                {"role": "assistant", "content_preview": "history", "timestamp": 123}
+            ]
+
+        with (
+            patch.object(tool, "_search_file_memory", fake_file_search),
+            patch.object(tool, "_search_session_history", fake_history_search),
+        ):
+            result = asyncio.run(
+                tool.search_memory(query="provider", top_k=3, session_id="session-1")
+            )
+
+        self.assertEqual(result["status"], "success")
+        self.assertEqual(result["query"], "provider")
+        self.assertEqual(len(result["long_term_memory"]), 1)
+        self.assertEqual(len(result["session_history"]), 1)
+
+    def test_session_history_search_compacts_to_text_user_and_final_assistant(self):
+        tool = self.MemoryTool()
+        history_messages = [
+            _FakeMessage(
+                "u1",
+                "user",
+                [
+                    {"type": "text", "text": "分析 provider 配置"},
+                    {
+                        "type": "image_url",
+                        "image_url": {"url": "data:image/png;base64,abc123"},
+                    },
+                ],
+                "user_input",
+            ),
+            _FakeMessage("tc1", "assistant", None, "tool_call"),
+            _FakeMessage("tr1", "tool", '{"noisy":"tool result"}', "tool_call_result"),
+            _FakeMessage(
+                "a1", "assistant", "最终回答：provider 配置会被使用", "final_answer"
+            ),
+        ]
+        active_messages = [_FakeMessage("u2", "user", "继续问", "user_input")]
+        session_memory_manager = _FakeSessionMemoryManager(retrieved_messages=[])
+        session_context = types.SimpleNamespace(
+            message_manager=_FakeMessageManager(active_messages, history_messages),
+            session_memory_manager=session_memory_manager,
+            agent_config={},
+        )
+
+        result = tool.session_history_retriever.search(
+            "provider", 5, "session-history-text-only", session_context
+        )
+
+        self.assertEqual(result, [])
+        self.assertEqual(session_memory_manager.retrieve_message_ids, [["u1", "a1"]])
+        self.assertEqual(
+            session_memory_manager.retrieve_contents,
+            [["分析 provider 配置", "最终回答：provider 配置会被使用"]],
+        )
+
+    def test_tool_manager_run_tool_async_uses_system_context_session_id_for_search_memory(
+        self,
+    ):
+        tool = self.MemoryTool()
+        manager = self.ToolManager(is_auto_discover=False, isolated=True)
+        manager.register_tools_from_object(tool)
+
+        async def fake_file_search(query, top_k, session_id):
+            self.assertEqual(session_id, "session-tool")
+            return [{"path": "/workspace/clients/cli/example.py", "snippets": []}]
+
+        async def fake_history_search(query, top_k, session_id):
+            self.assertEqual(session_id, "session-tool")
+            return [
+                {"role": "assistant", "content_preview": "history", "timestamp": 123}
+            ]
+
+        with (
+            patch.object(tool, "_search_file_memory", fake_file_search),
+            patch.object(tool, "_search_session_history", fake_history_search),
+            patch(
+                "sagents.v1.tool.tool_manager._resolve_session_context",
+                return_value=types.SimpleNamespace(
+                    system_context={"session_id": "session-tool"},
+                    user_id=None,
+                ),
+            ),
+        ):
+            raw = asyncio.run(
+                manager.run_tool_async(
+                    tool_name="search_memory",
+                    session_id="session-tool",
+                    query="provider",
+                    top_k=2,
+                )
+            )
+
+        payload = json.loads(raw)
+        self.assertIn("content", payload)
+        self.assertEqual(payload["content"]["status"], "success")
+        self.assertEqual(payload["content"]["query"], "provider")
+        self.assertEqual(len(payload["content"]["long_term_memory"]), 1)
+        self.assertEqual(len(payload["content"]["session_history"]), 1)
+
+
+if __name__ == "__main__":
+    unittest.main()

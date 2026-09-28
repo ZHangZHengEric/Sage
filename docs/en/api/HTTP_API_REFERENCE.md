@@ -11,7 +11,7 @@ parent: API
 
 # Server HTTP API
 
-This page describes **`app/server_v2`**, not the legacy server. Open the running server's `/docs` or `/openapi.json` for request schemas, response models, and status codes.
+This page describes **`app/v2/server`**, not the legacy server. Open the running server's `/docs` or `/openapi.json` for request schemas, response models, and status codes.
 
 ## Authentication
 
@@ -118,4 +118,4 @@ Host infrastructure also exposes `GET /livez`, `GET /readyz`, and `GET /metrics`
 
 Success and error JSON carry `request_id`; the server also returns `X-Request-ID`. Streaming responses follow AG-UI event framing.
 
-[Router source](https://github.com/ZHangZHengEric/Sage/blob/main/app/server_v2/routers/) · [Server setup](../applications/WEB.md)
+[Router source](https://github.com/ZHangZHengEric/Sage/blob/main/app/v2/server/routers/) · [Server setup](../applications/WEB.md)

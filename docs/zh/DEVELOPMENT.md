@@ -15,10 +15,10 @@ ref: v2-DEVELOPMENT
 | 目录 | 职责 |
 | --- | --- |
 | `sagents/v2/` | 运行时契约、装配、provider 与执行 |
-| `app/desktop_v2/` | Flutter 界面与本机 FastAPI sidecar |
-| `app/server_v2/` | 多用户服务端与 Vue Web 客户端 |
+| `app/v2/desktop/` | Flutter 界面与本机 FastAPI sidecar |
+| `app/v2/server/` | 多用户服务端与 Vue Web 客户端 |
 | `tests/sagents/v2/` | 运行时测试和契约检查 |
-| `tests/app/desktop_v2/`、`tests/app/server_v2/` | 宿主集成测试 |
+| `tests/app/v2/desktop/`、`tests/app/v2/server/` | 宿主集成测试 |
 | `docs/en/`、`docs/zh/` | 当前中英文 v2 文档 |
 
 ## 验证修改
@@ -27,19 +27,19 @@ ref: v2-DEVELOPMENT
 
 ```bash
 python -m pip install -e '.[server-v2]' pytest pytest-asyncio pytest-timeout
-python -m pytest tests/sagents/v2 tests/app/desktop_v2 tests/app/server_v2 -q
+python -m pytest tests/sagents/v2 tests/app/v2/desktop tests/app/v2/server -q
 ```
 
 开发时先运行相关测试。真实模型测试需显式配置，可能产生调用费用。注入测试存储的数据库测试不证明生产 MySQL 行为。
 
 ```bash
-cd app/desktop_v2
+cd app/v2/desktop
 flutter analyze
 flutter test
 ```
 
 ```bash
-cd app/server_v2/web
+cd app/v2/server/web
 npm install
 npm run build
 ```

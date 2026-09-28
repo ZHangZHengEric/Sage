@@ -20,8 +20,8 @@ from urllib.parse import urlparse
 import httpx
 from mcp.server.fastmcp import FastMCP
 
-from sagents.tool.mcp_tool_base import sage_mcp_tool
-from sagents.utils.logger import logger
+from sagents.v1.tool.mcp_tool_base import sage_mcp_tool
+from sagents.v1.utils.logger import logger
 
 mcp = FastMCP("Unified Video Analysis Service")
 

@@ -189,7 +189,7 @@ result = subprocess.run(
 
 ### 添加新的预设包
 
-如果需要添加新的预设 Node 包，编辑 `app/desktop/tauri/src/main.rs`：
+如果需要添加新的预设 Node 包，编辑 `app/v1/desktop/tauri/src/main.rs`：
 
 ```rust
 const PRESET_NPX_PACKAGES: &[&str] = &[

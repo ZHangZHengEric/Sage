@@ -20,7 +20,7 @@ import logging
 from typing import Optional, Dict, Any
 
 from mcp.server.fastmcp import FastMCP
-from sagents.tool.mcp_tool_base import sage_mcp_tool
+from sagents.v1.tool.mcp_tool_base import sage_mcp_tool
 
 from .im_providers import get_im_provider
 from .db import get_im_db

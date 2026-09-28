@@ -24,8 +24,8 @@ from .search_providers import (
     ShuyanProvider,
 )
 from .search_providers.base import BaseSearchProvider
-from sagents.tool.mcp_tool_base import sage_mcp_tool
-from sagents.utils.logger import logger
+from sagents.v1.tool.mcp_tool_base import sage_mcp_tool
+from sagents.v1.utils.logger import logger
 
 # 初始化 MCP 服务器
 mcp = FastMCP("Unified Search Service")

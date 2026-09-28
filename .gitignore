@@ -8,7 +8,7 @@ sage_demo_workspace/
 app/fastapi_react_demo/backend/config.yaml
 mcp_servers/mcp_setting.json
 app/fastapi_react_demo/frontend/node_modules/
-app/desktop/tauri/resources/node/bin/node
+app/v1/desktop/tauri/resources/node/bin/node
 .DS_Store
 # Byte-compiled / optimized / DLL files
 __pycache__/
@@ -46,8 +46,8 @@ eggs/
 .eggs/
 lib/
 lib64/
-!app/desktop_v2/lib/
-!app/desktop_v2/lib/**
+!app/v2/desktop/lib/
+!app/v2/desktop/lib/**
 parts/
 sdist/
 var/
@@ -64,7 +64,7 @@ share/python-wheels/
 *.manifest
 *.spec
 # 桌面侧车 spec 为仓库内唯一真源，必须提交；否则 CI 报 Spec file not found
-!app/desktop/sage-desktop.spec
+!app/v1/desktop/sage-desktop.spec
 
 # Installer logs
 pip-log.txt
@@ -231,12 +231,12 @@ skills/*
 .cargo
 .pyinstaller
 .rustup
-app/desktop/tauri/bin/*
-app/desktop/tauri/gen
+app/v1/desktop/tauri/bin/*
+app/v1/desktop/tauri/gen
 
 # Nuitka build artifacts
-app/desktop/build_nuitka/
-app/desktop/dist_nuitka/
+app/v1/desktop/build_nuitka/
+app/v1/desktop/dist_nuitka/
 .nuitka_cache/
 *.build/
 *.dist/
@@ -247,9 +247,12 @@ sidecar
 app/wiki/.vitepress/cache/
 
 # Certificates
-app/desktop/scripts/certs
+app/v1/desktop/scripts/certs
 
 # Build Cache
 .build_cache/
 
 .sandbox
+
+# Required Flutter Windows source, not a generated application manifest.
+!app/v2/desktop/windows/runner/runner.exe.manifest

@@ -1,0 +1,1442 @@
+#!/usr/bin/env python3
+"""
+Execute Command Tool
+
+通过沙箱执行命令的工具，所有命令都在沙箱环境中运行。
+
+新版本支持两段式：
+- ``execute_shell_command(command, ..., block_until_ms=30000)``
+  - ``block_until_ms == 0`` 立即放后台，返回 ``task_id`` 与输出文件路径；
+  - ``block_until_ms > 0`` 阻塞等待至命令完成或到点，到点未结束返回 ``task_id`` + tail 输出。
+- ``await_shell(task_id, block_until_ms=10000, pattern=None)`` 拉取增量输出，结束后返回 ``exit_code``。
+- ``kill_shell(task_id)`` 发 SIGTERM，再视情况升级 SIGKILL。
+"""
+
+from __future__ import annotations
+
+import asyncio
+import json as _json
+import os
+import re
+import shlex
+import time
+import uuid
+from typing import Any, Dict, List, Optional, Set, Tuple
+
+from ..tool_base import tool
+from ..tool_progress import emit_tool_event, emit_tool_progress, get_progress_queue
+from .._progress_diff import diff_tail_for_progress as _diff_tail_for_progress
+from ..error_codes import ToolErrorCode, make_tool_error
+from sagents.v1.utils.logger import logger
+from sagents.v1.utils.i18n import tool_t
+from sagents.v1.utils.sandbox._stdout_echo import echo_header, echo_footer
+from sagents.v1.utils.sandbox.policy import SandboxPolicyDecision, SandboxPolicyGateway
+from sagents.v1.utils.sandbox.approval import get_sandbox_approval_broker
+from sagents.v1.utils.agent_session_helper import (
+    get_session_sandbox as _get_session_sandbox_util,
+)
+
+
+_BG_DIR = os.environ.get("SAGE_BG_DIR", "~/.sage/bg")
+
+# completion event 的 tail 最大字节数。reminder 只是"知会"通知，agent 想看完整结果应调
+# await_shell。保持小一些可以避免长会话里 reminder 累积失控。
+_REMINDER_TAIL_MAX_BYTES = 512
+
+# 命令"已完成"分支返回 stdout 的字节上限。<= 此阈值返回完整内容；超过则取尾部 + 截断标记。
+# 1MB 足以容纳绝大多数命令输出，又不至于把 LLM context 撑爆。
+_COMPLETED_STDOUT_MAX_BYTES = 1_000_000
+
+# _BG_TASKS 的硬性最长存活时间。任何 task 自 ``started_at`` 起 12 小时未被消费会被
+# 强制 GC（_BG_TASKS / _COMPLETION_EVENTS / sandbox cleanup）。每次 spawn 触发一次扫描。
+_BG_TASK_MAX_AGE_S = 12 * 3600
+
+
+_ERROR_KEYWORDS = re.compile(
+    r"error|exception|traceback|fatal|fail|stderr|critical|abort|killed|oom",
+    re.IGNORECASE,
+)
+
+
+def _truncate_tail_for_reminder(
+    text: str, max_bytes: int = _REMINDER_TAIL_MAX_BYTES
+) -> str:
+    """对 reminder 用 tail 做尾部优先的截断，尾部全空行时补一条错误行。
+
+    逻辑：
+    1. 从尾部取 max_bytes 字节，保留最后几行（drop 被截断的首行碎片）。
+    2. 若截出来的内容去掉空白后为空（命令无输出），从原始文本中反向搜
+       第一条包含 error/exception/traceback 等关键词的行追加到头部，
+       帮助 agent 快速感知失败原因。
+    3. 不超 max_bytes 时直接返回原文。
+    """
+    if not text:
+        return ""
+    raw = text.encode("utf-8", errors="ignore")
+    if len(raw) <= max_bytes:
+        return text
+
+    truncated = raw[-max_bytes:]
+    nl = truncated.find(b"\n")
+    if 0 <= nl < max_bytes - 1:
+        truncated = truncated[nl + 1 :]
+    tail_str = truncated.decode("utf-8", errors="ignore")
+    result = "...<truncated>...\n" + tail_str
+
+    # 若尾部有效内容为空，补一条错误行（反向搜索原始文本，取最后一条命中行）
+    if not tail_str.strip():
+        error_line = ""
+        for line in reversed(text.splitlines()):
+            if line.strip() and _ERROR_KEYWORDS.search(line):
+                error_line = line.strip()
+                break
+        if error_line:
+            result = f"[key line] {error_line}\n" + result
+
+    return result
+
+
+# _BG_TASKS 的硬性最长存活时间。任何 task 自 ``started_at`` 起 12 小时未被消费会被
+# 强制 GC（_BG_TASKS / _COMPLETION_EVENTS / sandbox cleanup）。每次 spawn 触发一次扫描。
+_BG_TASK_MAX_AGE_S = 12 * 3600
+
+
+class SecurityManager:
+    """Compatibility wrapper around the sandbox policy gateway."""
+
+    def is_command_safe(self, command: str) -> Tuple[bool, str]:
+        decision = SandboxPolicyGateway().evaluate_shell_command(command)
+        if decision.action == "allow":
+            return True, "命令安全检查通过"
+        return False, decision.reason
+
+
+def _gen_task_id() -> str:
+    return "shtask_" + uuid.uuid4().hex[:12]
+
+
+def _suggest_next_block_ms(running_ms: int) -> int:
+    """根据已运行时长建议下一次 await_shell 的 block_until_ms。
+
+    分档：
+    - < 30s：建议 60000（1 分钟）
+    - 30s–5min：建议 min(running_ms * 1.5, 300000)
+    - > 5min：建议 600000（10 分钟）
+    """
+    if running_ms < 30_000:
+        return 60_000
+    if running_ms < 300_000:
+        return min(int(running_ms * 1.5), 300_000)
+    return 600_000
+
+
+class ExecuteCommandTool:
+    TOOL_CATEGORY = "shell"
+
+    """命令执行工具 - 通过沙箱执行命令。两段式 + 后台进程注册表 + 完成事件队列。"""
+
+    # 进程级注册表：task_id -> {session_id, pid, log_path, exit_path, command, started_at}
+    _BG_TASKS: Dict[str, Dict[str, Any]] = {}
+
+    # 完成事件字典：session_id -> {task_id: event_dict}
+    # 事件结构：{task_id, command, exit_code, elapsed_ms, tail}
+    # 写入：watcher 在命令完成时写入；
+    # 消费路径：
+    #   1) await_shell 返回 completed 时 consume_completion_event 显式消费；
+    #   2) _call_llm_streaming 在每次 LLM 请求前 pop_completion_events 全部 flush 注入。
+    # 两条路径互斥：被 await_shell 消费过的不会再走 LLM flush。
+    _COMPLETION_EVENTS: Dict[str, Dict[str, Dict[str, Any]]] = {}
+
+    # watcher tasks must be cancelled together with their owning session.  Keeping
+    # them here also gives them a strong reference until their done callback runs.
+    _WATCHER_TASKS: Dict[str, Set[asyncio.Task]] = {}
+
+    _APPROVAL_TTL_S = 30 * 60
+
+    def __init__(self):
+        self.security_manager = SecurityManager()
+
+    @classmethod
+    def _track_watcher(cls, session_id: str, watcher: asyncio.Task) -> None:
+        bucket = cls._WATCHER_TASKS.setdefault(session_id, set())
+        bucket.add(watcher)
+
+        def discard_finished_task(done_task: asyncio.Task) -> None:
+            current_bucket = cls._WATCHER_TASKS.get(session_id)
+            if current_bucket is None:
+                return
+            current_bucket.discard(done_task)
+            if not current_bucket:
+                cls._WATCHER_TASKS.pop(session_id, None)
+
+        watcher.add_done_callback(discard_finished_task)
+
+    @classmethod
+    def has_session_tasks(cls, session_id: str) -> bool:
+        if session_id in cls._WATCHER_TASKS:
+            return True
+        if session_id in cls._COMPLETION_EVENTS:
+            return True
+        return any(
+            info.get("session_id") == session_id for info in cls._BG_TASKS.values()
+        )
+
+    @classmethod
+    def get_session_loop(cls, session_id: str) -> Optional[asyncio.AbstractEventLoop]:
+        """Return the event loop that owns this session's watcher tasks."""
+        for watcher in cls._WATCHER_TASKS.get(session_id, set()):
+            try:
+                return watcher.get_loop()
+            except Exception:
+                continue
+        return None
+
+    @classmethod
+    def detach_session_tasks(
+        cls, session_id: str
+    ) -> Tuple[List[asyncio.Task], List[Dict[str, Any]]]:
+        """Atomically detach all process state owned by one closing session."""
+        watchers = list(cls._WATCHER_TASKS.pop(session_id, set()))
+        for watcher in watchers:
+            watcher.cancel()
+
+        cls._COMPLETION_EVENTS.pop(session_id, None)
+        task_infos: List[Dict[str, Any]] = []
+        for task_id, task_info in list(cls._BG_TASKS.items()):
+            if task_info.get("session_id") != session_id:
+                continue
+            detached = cls._BG_TASKS.pop(task_id, None)
+            if detached is not None:
+                task_infos.append(detached)
+        return watchers, task_infos
+
+    async def cleanup_detached_session_tasks(
+        self,
+        session_id: str,
+        watchers: List[asyncio.Task],
+        task_infos: List[Dict[str, Any]],
+        sandbox: Any = None,
+    ) -> None:
+        """Stop detached watcher tasks and sandbox processes for one session."""
+        current_task = asyncio.current_task()
+        pending_watchers = [
+            watcher for watcher in watchers if watcher is not current_task
+        ]
+
+        for task_info in task_infos:
+            task_id = task_info.get("task_id", "")
+            task_sandbox = sandbox or task_info.get("sandbox")
+            if task_sandbox is None:
+                logger.warning(
+                    "Session shell cleanup could not stop task without a sandbox: "
+                    f"session_id={session_id} task_id={task_id}"
+                )
+                continue
+
+            try:
+                if task_info.get("mode") == "native":
+                    try:
+                        await task_sandbox.kill_background(task_id, force=True)
+                    except Exception as exc:
+                        logger.warning(
+                            "Session shell force-kill failed: "
+                            f"session_id={session_id} task_id={task_id} "
+                            f"error={exc}"
+                        )
+                    try:
+                        await task_sandbox.cleanup_background(task_id)
+                    except Exception as exc:
+                        logger.warning(
+                            "Session shell sandbox cleanup failed: "
+                            f"session_id={session_id} task_id={task_id} "
+                            f"error={exc}"
+                        )
+                    continue
+
+                pid = int(task_info.get("pid"))
+                await self._shell(
+                    task_sandbox,
+                    f"kill -9 -- -{pid} 2>/dev/null; kill -9 {pid} 2>/dev/null",
+                    timeout=5,
+                )
+            except (TypeError, ValueError):
+                logger.warning(
+                    "Session shell cleanup found a task without a valid pid: "
+                    f"session_id={session_id} task_id={task_id}"
+                )
+            except Exception as exc:
+                logger.warning(
+                    "Session shell cleanup failed: "
+                    f"session_id={session_id} task_id={task_id} error={exc}"
+                )
+
+        if pending_watchers:
+            try:
+                await asyncio.wait(pending_watchers, timeout=5)
+            except Exception as exc:
+                logger.debug(
+                    "Session shell cleanup could not await every watcher "
+                    f"for session_id={session_id}: {exc}"
+                )
+
+        # A cancelled watcher cannot repopulate this bucket after gather, but a
+        # concurrent consumer may have raced with cleanup.  Make the terminal
+        # ownership rule explicit once more.
+        self.__class__._COMPLETION_EVENTS.pop(session_id, None)
+
+    async def cleanup_session_tasks(self, session_id: str, sandbox: Any = None) -> None:
+        watchers, task_infos = self.detach_session_tasks(session_id)
+        await self.cleanup_detached_session_tasks(
+            session_id, watchers, task_infos, sandbox=sandbox
+        )
+
+    @classmethod
+    def pop_completion_events(cls, session_id: str) -> List[Dict[str, Any]]:
+        """取出指定 session 下所有 pending completion 事件并清空。
+
+        被 ``_call_llm_streaming`` 在每次 LLM 请求前调用；返回的事件会被注入为
+        ``<system_reminder>`` 消息。
+        """
+        if not session_id:
+            return []
+        bucket = cls._COMPLETION_EVENTS.pop(session_id, None)
+        if not bucket:
+            return []
+        return list(bucket.values())
+
+    @classmethod
+    def consume_completion_event(
+        cls, session_id: str, task_id: str
+    ) -> Optional[Dict[str, Any]]:
+        """显式消费某 session 下指定 task_id 的事件（如果存在）。
+
+        ``await_shell`` 显式拿到 completed 时调用，避免与 system_reminder 重复通知。
+        """
+        if not session_id or not task_id:
+            return None
+        bucket = cls._COMPLETION_EVENTS.get(session_id)
+        if not bucket:
+            return None
+        ev = bucket.pop(task_id, None)
+        if not bucket:
+            cls._COMPLETION_EVENTS.pop(session_id, None)
+        return ev
+
+    @classmethod
+    def _emit_completion_event(
+        cls,
+        session_id: str,
+        task_id: str,
+        command: str,
+        exit_code: Optional[int],
+        elapsed_ms: int,
+        tail: str,
+    ) -> None:
+        if not session_id or not task_id:
+            return
+        cls._COMPLETION_EVENTS.setdefault(session_id, {})[task_id] = {
+            "task_id": task_id,
+            "command": command,
+            "exit_code": exit_code,
+            "elapsed_ms": elapsed_ms,
+            "tail": tail,
+        }
+
+    def _get_sandbox(self, session_id: str):
+        return _get_session_sandbox_util(session_id, log_prefix="ExecuteCommandTool")
+
+    def _policy_blocked_error(
+        self,
+        command: str,
+        session_id: str,
+        policy_decision: SandboxPolicyDecision,
+        policy_gateway: SandboxPolicyGateway,
+    ) -> Dict[str, Any]:
+        logger.warning(
+            "sandbox policy blocked command: "
+            f"action={policy_decision.action} "
+            f"category={policy_decision.category} "
+            f"reason={policy_decision.reason}"
+        )
+        approval_id = None
+        approval_expires_at = None
+        next_action = None
+        if policy_decision.action == "ask":
+            message = (
+                "Sandbox policy requires confirmation, but no approval channel is "
+                f"available: {policy_decision.reason}"
+            )
+            hint = (
+                policy_decision.next_step
+                or "Use an approval-capable runtime before retrying this command."
+            )
+            policy_action = "deny"
+            policy_category = "approval_channel_unavailable"
+            policy_reason = (
+                f"{policy_decision.reason}; no approval channel is available"
+            )
+        else:
+            message = f"Sandbox policy denied this command: {policy_decision.reason}"
+            hint = (
+                policy_decision.next_step
+                or "Use a safer, workspace-scoped command instead."
+            )
+            policy_action = policy_decision.action
+            policy_category = policy_decision.category
+            policy_reason = policy_decision.reason
+        return make_tool_error(
+            ToolErrorCode.SAFETY_BLOCKED,
+            message,
+            hint=hint,
+            command=command,
+            policy_action=policy_action,
+            policy_category=policy_category,
+            policy_reason=policy_reason,
+            policy_approval_mode=policy_gateway.approval_mode,
+            approval_id=approval_id,
+            approval_expires_at=approval_expires_at,
+            next_action=next_action,
+        )
+
+    async def _await_policy_approval(
+        self,
+        *,
+        command: str,
+        session_id: str,
+        policy_decision: SandboxPolicyDecision,
+        policy_gateway: SandboxPolicyGateway,
+    ) -> Optional[Dict[str, Any]]:
+        if get_progress_queue(session_id) is None:
+            return self._policy_blocked_error(
+                command=command,
+                session_id=session_id,
+                policy_decision=policy_decision,
+                policy_gateway=policy_gateway,
+            )
+
+        broker = get_sandbox_approval_broker()
+        pending = broker.create(
+            session_id=session_id,
+            command=command,
+            category=policy_decision.category,
+            reason=policy_decision.reason,
+            approval_mode=policy_gateway.approval_mode,
+            hint=policy_decision.next_step,
+            ttl_s=self._APPROVAL_TTL_S,
+        )
+        await emit_tool_event(pending.event_payload())
+        logger.info(
+            "sandbox policy approval requested: "
+            f"approval_id={pending.approval_id} category={policy_decision.category}"
+        )
+        try:
+            decision = await asyncio.wait_for(
+                pending.future,
+                timeout=max(1, pending.expires_at_epoch - time.time()),
+            )
+        except asyncio.TimeoutError:
+            broker.discard(pending.approval_id)
+            await emit_tool_event(
+                self._approval_resolved_event(
+                    pending=pending,
+                    decision="deny",
+                    status="timeout",
+                    content=tool_t("shell.approval.timeout"),
+                )
+            )
+            return make_tool_error(
+                ToolErrorCode.SAFETY_BLOCKED,
+                tool_t("shell.approval.timeout"),
+                hint="Ask the user to retry the command if it is still needed.",
+                command=command,
+                policy_action="deny",
+                policy_category="approval_timeout",
+                policy_reason="sandbox approval timed out",
+                policy_approval_mode=policy_gateway.approval_mode,
+                approval_id=pending.approval_id,
+            )
+
+        if decision != "approve":
+            await emit_tool_event(
+                self._approval_resolved_event(
+                    pending=pending,
+                    decision="deny",
+                    status="denied",
+                    content=tool_t("shell.approval.denied"),
+                )
+            )
+            return make_tool_error(
+                ToolErrorCode.SAFETY_BLOCKED,
+                tool_t("shell.approval.denied"),
+                hint="Choose a safer command or ask the user for a different approval.",
+                command=command,
+                policy_action="deny",
+                policy_category="approval_denied",
+                policy_reason="user denied sandbox approval",
+                policy_approval_mode=policy_gateway.approval_mode,
+                approval_id=pending.approval_id,
+            )
+        logger.info(
+            "sandbox policy approval resolved: "
+            f"approval_id={pending.approval_id} category={policy_decision.category}"
+        )
+        await emit_tool_event(
+            self._approval_resolved_event(
+                pending=pending,
+                decision="approve",
+                status="approved",
+                content=tool_t("shell.approval.approved"),
+            )
+        )
+        return None
+
+    @staticmethod
+    def _approval_resolved_event(
+        *,
+        pending: Any,
+        decision: str,
+        status: str,
+        content: str,
+    ) -> Dict[str, Any]:
+        return {
+            "type": "sandbox_approval_resolved",
+            "role": "system",
+            "content": content,
+            "session_id": pending.session_id,
+            "approval_id": pending.approval_id,
+            "command": pending.command,
+            "command_hash": pending.command_hash,
+            "category": pending.category,
+            "reason": pending.reason,
+            "approval_mode": pending.approval_mode,
+            "decision": decision,
+            "approval_status": status,
+            "tool_name": "execute_shell_command",
+        }
+
+    @staticmethod
+    def _get_agent_workspace_log_dir(
+        sandbox: Any, fallback_workdir: Optional[str] = None
+    ) -> Optional[str]:
+        """Return the current session agent workspace log directory.
+
+        This intentionally uses the sandbox-visible workspace path. Providers
+        that execute on the host are responsible for translating it back to
+        their concrete host path before touching the filesystem.
+        """
+        try:
+            workspace = getattr(sandbox, "workspace_path", None)
+        except Exception:
+            workspace = None
+        if workspace:
+            return os.path.join(str(workspace), "bg")
+        if fallback_workdir:
+            return os.path.join(str(fallback_workdir), "bg")
+        return None
+
+    @staticmethod
+    def _parse_env_vars(env_vars: Any) -> Optional[Dict[str, str]]:
+        if env_vars is None:
+            return None
+        if isinstance(env_vars, dict):
+            return env_vars
+        if isinstance(env_vars, str) and env_vars.strip():
+            try:
+                return _json.loads(env_vars)
+            except Exception:
+                logger.warning(f"env_vars 解析失败，忽略: {env_vars!r}")
+        return None
+
+    async def _shell(
+        self, sandbox: Any, cmd: str, timeout: int = 10
+    ) -> Tuple[int, str, str]:
+        try:
+            r = await sandbox.execute_command(command=cmd, timeout=timeout)
+            return (
+                int(getattr(r, "return_code", -1) or 0),
+                getattr(r, "stdout", "") or "",
+                getattr(r, "stderr", "") or "",
+            )
+        except Exception as exc:
+            return -1, "", str(exc)
+
+    @staticmethod
+    def _sandbox_supports_native_bg(sandbox: Any) -> bool:
+        try:
+            return bool(sandbox.supports_background())
+        except Exception:
+            return False
+
+    async def _watch_completion(
+        self,
+        sandbox: Any,
+        task_info: Dict[str, Any],
+        session_id: str,
+    ) -> None:
+        """后台 watcher：轮询命令直到结束，写入 completion 事件。
+
+        - 写入路径：``_COMPLETION_EVENTS[session_id][task_id]``
+        - LLM 在下一次请求前 ``pop_completion_events`` 取出注入为 system_reminder
+        - 若 ``await_shell`` 抢先拿到结果并 ``consume_completion_event``，事件会被显式删除，
+          watcher 后写入会被覆盖也无所谓——下次 await_shell completed 时会再消费一次。
+        - 真正去重的关键是：watcher 写入时若 task 已经被 ``_cleanup_task`` 清理（说明
+          await_shell 路径已处理），就不再写事件。
+        """
+        task_id = task_info["task_id"]
+        sleep_s = 0.5
+        try:
+            while True:
+                await asyncio.sleep(sleep_s)
+                sleep_s = min(2.0, sleep_s * 1.3)
+
+                if task_id not in ExecuteCommandTool._BG_TASKS:
+                    return
+
+                exit_code = await self._read_exit(sandbox, task_info)
+                if exit_code is not None:
+                    break
+
+            if task_id not in ExecuteCommandTool._BG_TASKS:
+                return
+
+            # 这里读取的 tail 仅用于 system_reminder 知会，agent 想看完整结果应调 await_shell；
+            # 多读一些再截断，保留尾部关键信息。
+            raw_tail = await self._read_tail(sandbox, task_info, max_bytes=4096)
+            short_tail = _truncate_tail_for_reminder(raw_tail or "")
+            elapsed_ms = int(
+                (time.time() - task_info.get("started_at", time.time())) * 1000
+            )
+            self._emit_completion_event(
+                session_id=session_id,
+                task_id=task_id,
+                command=task_info.get("command", ""),
+                exit_code=exit_code,
+                elapsed_ms=elapsed_ms,
+                tail=short_tail,
+            )
+            # 故意不调 _cleanup_task：
+            # - sandbox-side exit/log 留给后续 await_shell 拿完整结果；
+            # - _BG_TASKS 由 await_shell completed 路径清理；reminder 只做通知。
+            # - 12h 仍未被消费的，由下次 spawn 触发的 _gc_stale_tasks 兜底强制清理。
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            logger.warning(f"_watch_completion 异常 task_id={task_id}: {exc}")
+
+    async def _gc_stale_tasks(self) -> None:
+        """清理 _BG_TASKS 与 _COMPLETION_EVENTS 中超过 12 小时的条目。
+
+        每次 spawn 前调用；发现超期 task 时：
+        1. 尝试 sandbox cleanup（忽略失败）；
+        2. 从 _BG_TASKS 删除；
+        3. 从对应 session 的 _COMPLETION_EVENTS 删除（若存在）。
+        """
+        now = time.time()
+        stale = [
+            tid
+            for tid, info in list(self._BG_TASKS.items())
+            if now - info.get("started_at", now) > _BG_TASK_MAX_AGE_S
+        ]
+        for tid in stale:
+            info = self._BG_TASKS.pop(tid, None)
+            if not info:
+                continue
+            sid = info.get("session_id", "")
+            logger.info(f"GC: 清理超期 task_id={tid} session_id={sid}")
+            try:
+                sandbox = self._get_sandbox(sid) if sid else None
+                if sandbox and info.get("mode") == "native":
+                    await sandbox.cleanup_background(tid)
+            except Exception as exc:
+                logger.debug(
+                    f"GC: sandbox.cleanup_background({tid}) 失败（忽略）: {exc}"
+                )
+            # 同步清理 _COMPLETION_EVENTS
+            bucket = self.__class__._COMPLETION_EVENTS.get(sid)
+            if bucket:
+                bucket.pop(tid, None)
+                if not bucket:
+                    self.__class__._COMPLETION_EVENTS.pop(sid, None)
+
+    async def _spawn_background(
+        self,
+        sandbox: Any,
+        command: str,
+        workdir: Optional[str],
+        env_vars: Optional[Dict[str, str]],
+        session_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """在沙箱内后台启动命令。
+
+        优先调用沙箱原生 ``start_background``（PassthroughSandbox / LocalSandbox 已实现，
+        跨 POSIX/Windows）；缺失时回退到 bash-shell 包装（仅 POSIX 沙箱可用，
+        例如远程 Linux 容器）。
+
+        返回 task_info（含 task_id / pid / log_path / mode）。
+        """
+        # === 1) 原生路径（跨平台） ===
+        if self._sandbox_supports_native_bg(sandbox):
+            log_dir = self._get_agent_workspace_log_dir(
+                sandbox, fallback_workdir=workdir
+            )
+            info = await sandbox.start_background(
+                command,
+                workdir=workdir,
+                env_vars=env_vars,
+                log_dir=log_dir,
+            )
+            task_id = info["task_id"]
+            task_info = {
+                "task_id": task_id,
+                "pid": info.get("pid"),
+                "log_path": info.get("log_path"),
+                "exit_path": None,
+                "command": command,
+                "started_at": time.time(),
+                "mode": "native",
+                "session_id": session_id,
+                "sandbox": sandbox,
+            }
+            ExecuteCommandTool._BG_TASKS[task_id] = task_info
+            return task_info
+
+        # === 2) 兜底：bash 包装（仅 POSIX；Windows 主机会到不了这里，
+        #     因为 PassthroughSandbox 已经走 native 了） ===
+        task_id = _gen_task_id()
+        bg_dir_path = (
+            self._get_agent_workspace_log_dir(sandbox, fallback_workdir=workdir)
+            or _BG_DIR
+        )
+        log_path = f"{bg_dir_path}/{task_id}.log"
+        exit_path = f"{bg_dir_path}/{task_id}.exit"
+
+        env_prefix = ""
+        if env_vars:
+            env_prefix = (
+                " ".join(
+                    f"{shlex.quote(k)}={shlex.quote(v)}" for k, v in env_vars.items()
+                )
+                + " "
+            )
+
+        cd_prefix = f"cd {shlex.quote(workdir)} && " if workdir else ""
+        bg_dir = shlex.quote(bg_dir_path)
+        log_q = shlex.quote(log_path)
+        exit_q = shlex.quote(exit_path)
+        cmd_q = shlex.quote(command)
+        runner = (
+            f"if command -v setsid >/dev/null 2>&1; then "
+            f"setsid bash -c {cmd_q}; "
+            f"else nohup bash -c {cmd_q}; fi"
+        )
+        wrapped = (
+            f"mkdir -p {bg_dir} && "
+            f"({cd_prefix}{env_prefix}({runner}) > {log_q} 2>&1; echo $? > {exit_q}) "
+            f"</dev/null & echo $!"
+        )
+        rc, out, err = await self._shell(sandbox, wrapped, timeout=10)
+        pid = None
+        if rc == 0:
+            try:
+                pid = int((out or "").strip().splitlines()[-1])
+            except Exception:
+                pid = None
+        task_info = {
+            "task_id": task_id,
+            "pid": pid,
+            "log_path": log_path,
+            "exit_path": exit_path,
+            "command": command,
+            "started_at": time.time(),
+            "mode": "shell",
+            "session_id": session_id,
+            "sandbox": sandbox,
+        }
+        ExecuteCommandTool._BG_TASKS[task_id] = task_info
+        return task_info
+
+    async def _read_log_size(
+        self, sandbox: Any, task_info: Dict[str, Any]
+    ) -> Optional[int]:
+        """读取后台任务日志总字节数；不可用时返回 ``None``。"""
+        if task_info.get("mode") == "native":
+            try:
+                getter = getattr(sandbox, "get_background_output_size", None)
+                if getter is None:
+                    return None
+                return await getter(task_info["task_id"])
+            except Exception as exc:
+                logger.debug(f"get_background_output_size 失败（忽略）: {exc}")
+                return None
+        # shell 兜底模式：通过 wc -c 拿大小
+        path = task_info.get("log_path")
+        if not path:
+            return None
+        rc, out, _ = await self._shell(
+            sandbox, f"wc -c < {shlex.quote(path)} 2>/dev/null || true", timeout=5
+        )
+        text = (out or "").strip()
+        if not text:
+            return None
+        try:
+            return int(text.splitlines()[-1].strip())
+        except Exception:
+            return None
+
+    async def _read_completed_output(
+        self,
+        sandbox: Any,
+        task_info: Dict[str, Any],
+        max_bytes: Optional[int] = None,
+    ) -> Tuple[str, Optional[int], bool]:
+        """读完成命令的输出。
+
+        - 总字节 ``<= max_bytes``：返回完整内容（``truncated=False``）。
+        - 超过：返回尾部 ``max_bytes`` 字节，并在头部加显式截断标记
+          ``...<truncated: showing last N of M bytes>...\\n``。
+        - 取不到 size 时退化为 "返回长度 == max_bytes 即视作截断" 的启发式。
+
+        返回 ``(text, total_bytes_or_None, truncated)``。
+        """
+        if max_bytes is None:
+            # 模块级常量，便于测试 / 配置时动态改写
+            max_bytes = globals().get("_COMPLETED_STDOUT_MAX_BYTES", 1_000_000)
+        total = await self._read_log_size(sandbox, task_info)
+        data = await self._read_tail(sandbox, task_info, max_bytes=max_bytes)  # pyright: ignore[reportArgumentType]
+        if total is not None:
+            truncated = total > max_bytes  # pyright: ignore[reportOperatorIssue]
+        else:
+            truncated = len(data.encode("utf-8", errors="ignore")) >= max_bytes  # pyright: ignore[reportOperatorIssue]
+
+        if truncated:
+            shown = len(data.encode("utf-8", errors="ignore"))
+            if total is not None:
+                marker = (
+                    f"...<truncated: showing last {shown} of {total} bytes; "
+                    f"full output at output_file>...\n"
+                )
+            else:
+                marker = (
+                    f"...<truncated: showing last ~{shown} bytes; "
+                    f"full output at output_file>...\n"
+                )
+            data = marker + data
+        return data, total, truncated
+
+    async def _read_tail(
+        self, sandbox: Any, task_info: Dict[str, Any], max_bytes: int = 8192
+    ) -> str:
+        if task_info.get("mode") == "native":
+            try:
+                return await sandbox.read_background_output(
+                    task_info["task_id"], max_bytes=max_bytes
+                )
+            except Exception as exc:
+                logger.warning(f"read_background_output 失败: {exc}")
+                return ""
+        path = task_info.get("log_path")
+        if not path:
+            return ""
+        rc, out, _ = await self._shell(
+            sandbox,
+            f"tail -c {max_bytes} {shlex.quote(path)} 2>/dev/null || true",
+            timeout=5,
+        )
+        return out
+
+    async def _is_alive(self, sandbox: Any, task_info: Dict[str, Any]) -> bool:
+        if task_info.get("mode") == "native":
+            try:
+                return await sandbox.is_background_alive(task_info["task_id"])
+            except Exception:
+                return False
+        pid = task_info.get("pid")
+        if not pid:
+            return False
+        rc, _, _ = await self._shell(sandbox, f"kill -0 {pid} 2>/dev/null", timeout=3)
+        return rc == 0
+
+    async def _read_exit(
+        self, sandbox: Any, task_info: Dict[str, Any]
+    ) -> Optional[int]:
+        if task_info.get("mode") == "native":
+            try:
+                return await sandbox.get_background_exit_code(task_info["task_id"])
+            except Exception:
+                return None
+        exit_path = task_info.get("exit_path")
+        if not exit_path:
+            return None
+        rc, out, _ = await self._shell(
+            sandbox, f"cat {shlex.quote(exit_path)} 2>/dev/null || true", timeout=3
+        )
+        text = (out or "").strip()
+        if not text:
+            return None
+        try:
+            return int(text.splitlines()[-1])
+        except Exception:
+            return None
+
+    async def _wait_for_finish(
+        self,
+        sandbox: Any,
+        task_info: Dict[str, Any],
+        block_until_ms: int,
+        pattern: Optional[str] = None,
+        emit_progress: bool = False,
+    ) -> Tuple[bool, Optional[int]]:
+        """轮询直到命令结束 / 超时 / 命中 pattern。返回 (finished, exit_code)。
+
+        Args:
+            emit_progress: 若为 True，每次轮询新增的 tail 输出会通过
+                ``emit_tool_progress`` 推送到前端 UI 实时显示。整体
+                ``stdout`` 由调用方在结束时再读取一次返回，progress 推送
+                只是"过程展示"，不影响最终给 LLM 的工具结果。
+        """
+        deadline = time.time() + max(0, block_until_ms) / 1000.0
+        compiled = None
+        if pattern:
+            try:
+                compiled = re.compile(pattern)
+            except Exception as exc:
+                logger.warning(f"await_shell pattern 编译失败，忽略: {exc}")
+                compiled = None
+
+        # progress 推送状态。
+        # 优先策略（byte-offset，零重复零丢失）：
+        #   - 沙箱实现了 read_background_output_range(offset)：维护本地
+        #     emitted_offset，每次只取 (offset, EOF] 区间作为 delta。
+        #   - 任意一次返回 ("", same_offset) 视为暂无新字节。
+        # 兜底策略：沙箱不支持 range 读取（返回 ("", offset) 但 size 在涨）时，
+        #   退回到 read_background_output 的 tail diff 模式，与原行为一致。
+        emitted_offset: int = 0
+        emitted_tail: str = ""
+        use_range = True
+
+        sleep_s = 0.2
+        while True:
+            exit_code = await self._read_exit(sandbox, task_info)
+
+            if emit_progress:
+                try:
+                    pushed = False
+                    if use_range and task_info.get("mode") == "native":
+                        reader = getattr(sandbox, "read_background_output_range", None)
+                        if reader is not None:
+                            try:
+                                delta_text, new_offset = await reader(
+                                    task_info["task_id"],
+                                    offset=emitted_offset,
+                                    max_bytes=1 << 20,  # 1MB / 次
+                                )
+                            except Exception as range_exc:
+                                logger.debug(
+                                    f"read_range fallback to tail-diff: {range_exc}"
+                                )
+                                use_range = False
+                                delta_text, new_offset = "", emitted_offset
+                            if delta_text:
+                                await emit_tool_progress(delta_text, stream="stdout")
+                                emitted_offset = new_offset
+                                pushed = True
+                            elif new_offset > emitted_offset:
+                                emitted_offset = new_offset
+                                pushed = True
+                        else:
+                            use_range = False
+                    if not pushed and not use_range:
+                        cur_tail = await self._read_tail(
+                            sandbox, task_info, max_bytes=65536
+                        )
+                        delta = _diff_tail_for_progress(emitted_tail, cur_tail or "")
+                        if delta:
+                            await emit_tool_progress(delta, stream="stdout")
+                            emitted_tail = cur_tail or ""
+                except Exception as exc:
+                    logger.debug(f"emit progress 失败（忽略）: {exc}")
+
+            if exit_code is not None:
+                return True, exit_code
+
+            if compiled is not None:
+                tail = await self._read_tail(sandbox, task_info, max_bytes=16384)
+                if tail and compiled.search(tail):
+                    return False, None
+
+            if time.time() >= deadline:
+                return False, None
+            await asyncio.sleep(sleep_s)
+            sleep_s = min(1.0, sleep_s * 1.5)
+
+    @tool(
+        description_i18n={
+            "zh": (
+                "在沙箱中执行 Shell 命令。"
+                "block_until_ms=0 时后台运行并返回 task_id；>0 时等待完成或超时（默认 30000）。"
+                "超时未结束会返回 tail_output。"
+                "如果当前任务需要这个命令的结果，必须调用 await_shell 等结果，不要只回复等待。"
+                "如果还有别的独立工作，可以先做别的。必要时用 kill_shell 终止。"
+            ),
+            "en": (
+                "Execute a shell command in the sandbox. "
+                "block_until_ms=0 runs it in the background and returns a task_id; >0 waits until completion or timeout (default 30000). "
+                "If it times out, tail_output is returned. "
+                "If the current task needs the command result, call await_shell and wait for it; do not only reply that you are waiting. "
+                "If there is other independent work, do that first. Use kill_shell when needed."
+            ),
+        },
+        param_description_i18n={
+            "command": {"zh": "待执行的 Shell 命令", "en": "Shell command to execute"},
+            "workdir": {
+                "zh": "执行目录（虚拟路径），默认沙箱工作区",
+                "en": "Working directory (virtual path)",
+            },
+            "block_until_ms": {
+                "zh": "阻塞等待毫秒数；0 表示立即后台运行；默认 30000",
+                "en": "Block this many ms; 0 means background immediately; default 30000",
+            },
+            "env_vars": {
+                "zh": "附加环境变量字典或 JSON 字符串",
+                "en": "Additional env vars dict or JSON string",
+            },
+            "session_id": {
+                "zh": "会话ID（必填，自动注入）",
+                "en": "Session ID (Required, Auto-injected)",
+            },
+            "sandbox_approval_mode": {
+                "zh": "运行时审批模式（自动注入）",
+                "en": "Runtime approval mode (auto-injected)",
+            },
+            "command_policy": {
+                "zh": "运行时命令策略（自动注入）",
+                "en": "Runtime command policy (auto-injected)",
+            },
+        },
+        param_schema={
+            "command": {"type": "string", "description": "Shell command to execute"},
+            "workdir": {
+                "type": "string",
+                "description": "Working directory (virtual path)",
+            },
+            "block_until_ms": {"type": "integer", "default": 30000},
+            "env_vars": {
+                "type": "string",
+                "description": "Additional env vars as JSON object string",
+            },
+            "session_id": {"type": "string", "description": "Session ID"},
+            "sandbox_approval_mode": {"type": "string"},
+            "command_policy": {"type": "object"},
+        },
+        return_data={
+            "type": "object",
+            "properties": {
+                "success": {"type": "boolean"},
+                "status": {
+                    "type": "string",
+                    "description": "completed | running | error",
+                },
+                "task_id": {"type": "string"},
+                "output_file": {"type": "string"},
+                "stdout": {"type": "string"},
+                "exit_code": {"type": "integer"},
+            },
+            "required": ["success"],
+        },
+    )
+    async def execute_shell_command(
+        self,
+        command: str,
+        workdir: Optional[str] = None,
+        block_until_ms: int = 30000,
+        env_vars: Optional[str] = None,
+        approval_id: Optional[str] = None,
+        sandbox_approval_mode: Optional[str] = None,
+        command_policy: Optional[Dict[str, Any]] = None,
+        session_id: str = None,  # pyright: ignore[reportArgumentType]
+    ) -> Dict[str, Any]:
+        if not session_id:
+            raise ValueError("ExecuteCommandTool: session_id is required")
+
+        parsed_env_vars = self._parse_env_vars(env_vars)
+        logger.info(
+            f"🖥️ ExecuteCommandTool: {command[:100]}{'...' if len(command) > 100 else ''} block_until_ms={block_until_ms}"
+        )
+
+        # Sandbox policy gateway: allow safe commands immediately; block commands
+        # that need a confirmation channel or must never run automatically.
+        policy_gateway = SandboxPolicyGateway(
+            approval_mode=sandbox_approval_mode,
+            command_policy=command_policy,
+        )
+        policy_decision = policy_gateway.evaluate_shell_command(
+            command, sandbox_mode=os.environ.get("SAGE_SANDBOX_MODE")
+        )
+        if policy_decision.action != "allow":
+            if policy_decision.action == "ask":
+                if approval_id:
+                    logger.info(
+                        "execute_shell_command ignored legacy approval_id argument; "
+                        "sandbox approvals must resolve through the runtime broker"
+                    )
+                approval_error = await self._await_policy_approval(
+                    command=command,
+                    session_id=session_id,
+                    policy_decision=policy_decision,
+                    policy_gateway=policy_gateway,
+                )
+                if approval_error is not None:
+                    return approval_error
+            else:
+                return self._policy_blocked_error(
+                    command=command,
+                    session_id=session_id,
+                    policy_decision=policy_decision,
+                    policy_gateway=policy_gateway,
+                )
+
+        sandbox = self._get_sandbox(session_id)
+
+        # 每次 spawn 前顺手做一次 12h 超期 GC，不开独立定时器，避免复杂度
+        try:
+            await self._gc_stale_tasks()
+        except Exception as _gc_exc:
+            logger.debug(f"_gc_stale_tasks 异常（忽略）: {_gc_exc}")
+
+        # 始终经由后台模式启动；阻塞模式下我们再轮询等待
+        echo_header(command)
+        try:
+            task_info = await self._spawn_background(
+                sandbox,
+                command,
+                workdir,
+                parsed_env_vars or None,
+                session_id=session_id,
+            )
+        except Exception as exc:
+            echo_footer(None)
+            logger.error(f"ExecuteCommandTool: 启动后台命令失败: {exc}")
+            return make_tool_error(
+                ToolErrorCode.SANDBOX_ERROR,
+                f"Failed to start command: {exc}",
+                command=command,
+            )
+
+        pid = task_info.get("pid")
+        log_path = task_info.get("log_path")
+        if pid is None:
+            echo_footer(None)
+            return make_tool_error(
+                ToolErrorCode.SANDBOX_ERROR,
+                "无法获取后台命令的 PID",
+                command=command,
+            )
+
+        task_id = task_info["task_id"]
+        task_info["session_id"] = session_id
+
+        # 启动后台 watcher：命令结束时写入 completion 事件，供下一次 LLM 请求 flush 注入
+        try:
+            watcher = asyncio.create_task(
+                self._watch_completion(sandbox, task_info, session_id)
+            )
+            self._track_watcher(session_id, watcher)
+        except RuntimeError:
+            logger.warning("无法启动 completion watcher：当前无运行中的 event loop")
+
+        try:
+            if block_until_ms <= 0:
+                tail = await self._read_tail(sandbox, task_info, max_bytes=2048)
+                return {
+                    "success": True,
+                    "status": "running",
+                    "task_id": task_id,
+                    "pid": pid,
+                    "output_file": log_path,
+                    "tail_output": tail,
+                    "command": command,
+                    "message": tool_t("shell.background", params={"task_id": task_id}),
+                    "next_action": {
+                        "if_result_required": tool_t("shell.next.await_now"),
+                        "await_shell_args": {
+                            "task_id": task_id,
+                            "block_until_ms": max(60000, _suggest_next_block_ms(0)),
+                        },
+                        "do_not": tool_t("shell.next.no_progress_only"),
+                    },
+                }
+
+            finished, exit_code = await self._wait_for_finish(
+                sandbox, task_info, block_until_ms, emit_progress=True
+            )
+            if finished:
+                stdout_text, total_bytes, truncated = await self._read_completed_output(
+                    sandbox, task_info
+                )
+                # 同步拿到结果，显式消费 watcher 可能已写入的事件，避免重复通知
+                self.consume_completion_event(session_id, task_id)
+                await self._cleanup_task(sandbox, task_id)
+                return {
+                    "success": exit_code == 0,
+                    "status": "completed",
+                    "task_id": task_id,
+                    "pid": pid,
+                    "exit_code": exit_code,
+                    "stdout": stdout_text,
+                    "stdout_truncated": truncated,
+                    "stdout_total_bytes": total_bytes,
+                    "output_file": log_path,
+                    "command": command,
+                }
+            tail = await self._read_tail(sandbox, task_info, max_bytes=8192)
+            running_ms = int(
+                (time.time() - task_info.get("started_at", time.time())) * 1000
+            )
+            return {
+                "success": True,
+                "status": "running",
+                "task_id": task_id,
+                "pid": pid,
+                "output_file": log_path,
+                "tail_output": tail,
+                "running_for_ms": running_ms,
+                "suggested_next_block_ms": _suggest_next_block_ms(running_ms),
+                "command": command,
+                "message": tool_t(
+                    "shell.running", params={"block_until_ms": block_until_ms}
+                ),
+                "next_action": {
+                    "if_result_required": tool_t("shell.next.await_now"),
+                    "await_shell_args": {
+                        "task_id": task_id,
+                        "block_until_ms": max(
+                            60000, _suggest_next_block_ms(running_ms)
+                        ),
+                    },
+                    "do_not": tool_t("shell.next.no_progress_only"),
+                },
+            }
+        finally:
+            echo_footer(None)
+
+    async def _cleanup_task(self, sandbox: Any, task_id: str) -> None:
+        info = self._BG_TASKS.pop(task_id, None)
+        if not info:
+            return
+        if info.get("mode") == "native":
+            try:
+                await sandbox.cleanup_background(task_id)
+            except Exception:
+                pass
+
+    @tool(
+        description_i18n={
+            "zh": (
+                "等待后台 shell 任务并读取输出；可选 pattern 命中即返回；结束时返回 exit_code 并清理。"
+                "默认 block_until_ms=600000（10 分钟）。"
+                "当前任务需要命令结果时使用。"
+                "如果任务还在运行且仍需要结果，继续调用 await_shell，不要只回复等待。"
+                "短任务可用 60000–120000；几分钟任务 120000–300000；长构建或训练 600000–1200000。"
+            ),
+            "en": (
+                "Wait for a background shell task and read output. "
+                "Optional pattern returns early on match. On finish, returns exit_code and cleans up. "
+                "Default block_until_ms=600000 (10 minutes). "
+                "Use this when the current task needs the command result. "
+                "If the task is still running and the result is still needed, call await_shell again; do not only reply that you are waiting. "
+                "Use 60000–120000 for short tasks, 120000–300000 for multi-minute tasks, and 600000–1200000 for long builds or training."
+            ),
+        },
+        param_description_i18n={
+            "task_id": {
+                "zh": "execute_shell_command 返回的 task_id",
+                "en": "task_id returned by execute_shell_command",
+            },
+            "block_until_ms": {
+                "zh": "最多等待毫秒数；默认 600000（10 分钟）；建议按场景选择 60000+",
+                "en": "Max wait in ms; default 600000 (10min); pick 60000+ by scenario",
+            },
+            "pattern": {
+                "zh": "可选正则；命中时立即返回",
+                "en": "Optional regex; return early when matched",
+            },
+            "session_id": {
+                "zh": "会话ID（必填，自动注入）",
+                "en": "Session ID (Required, Auto-injected)",
+            },
+        },
+        param_schema={
+            "task_id": {"type": "string"},
+            "block_until_ms": {"type": "integer", "default": 600000},
+            "pattern": {"type": "string"},
+            "session_id": {"type": "string"},
+        },
+    )
+    async def await_shell(
+        self,
+        task_id: str,
+        block_until_ms: int = 600000,
+        pattern: Optional[str] = None,
+        session_id: str = None,  # pyright: ignore[reportArgumentType]
+    ) -> Dict[str, Any]:
+        if not session_id:
+            raise ValueError("ExecuteCommandTool: session_id is required")
+        # 顺带触发一次 GC，确保长期僵尸 task 被清理（spawn 不活跃的会话也能覆盖）
+        try:
+            await self._gc_stale_tasks()
+        except Exception as _gc_exc:
+            logger.debug(f"_gc_stale_tasks 异常（忽略）: {_gc_exc}")
+        task_info = self._BG_TASKS.get(task_id)
+        if not task_info:
+            # task 已不在注册表，可能 watcher 已经写入完成事件并清理，
+            # 也可能 await_shell / 另一个调用先消费过——尝试从事件队列中拿一次
+            ev = self.consume_completion_event(session_id, task_id)
+            if ev is not None:
+                return {
+                    "success": ev.get("exit_code") == 0,
+                    "status": "completed",
+                    "task_id": task_id,
+                    "exit_code": ev.get("exit_code"),
+                    "stdout": ev.get("tail", ""),
+                }
+            return make_tool_error(
+                ToolErrorCode.NOT_FOUND,
+                f"未找到 task_id={task_id} 对应的后台任务",
+                task_id=task_id,
+            )
+
+        # 自适应改写：跑得越久，最低等待越长，避免反射性短间隔轮询
+        running_ms = int(
+            (time.time() - task_info.get("started_at", time.time())) * 1000
+        )
+        requested_block_until_ms = block_until_ms
+        if running_ms > 30_000 and block_until_ms < 60_000:
+            block_until_ms = 60_000
+        if running_ms > 300_000 and block_until_ms < 300_000:
+            block_until_ms = 300_000
+
+        sandbox = self._get_sandbox(session_id)
+        finished, exit_code = await self._wait_for_finish(
+            sandbox, task_info, block_until_ms, pattern=pattern, emit_progress=True
+        )
+        if finished:
+            stdout_text, total_bytes, truncated = await self._read_completed_output(
+                sandbox, task_info
+            )
+            self.consume_completion_event(session_id, task_id)
+            await self._cleanup_task(sandbox, task_id)
+            return {
+                "success": exit_code == 0,
+                "status": "completed",
+                "task_id": task_id,
+                "exit_code": exit_code,
+                "stdout": stdout_text,
+                "stdout_truncated": truncated,
+                "stdout_total_bytes": total_bytes,
+                "output_file": task_info.get("log_path"),
+            }
+        tail = await self._read_tail(sandbox, task_info, max_bytes=8192)
+        running_ms_after = int(
+            (time.time() - task_info.get("started_at", time.time())) * 1000
+        )
+        next_block_ms = _suggest_next_block_ms(running_ms_after)
+        return {
+            "success": True,
+            "status": "running",
+            "task_id": task_id,
+            "tail_output": tail,
+            "output_file": task_info.get("log_path"),
+            "matched_pattern": bool(pattern),
+            "running_for_ms": running_ms_after,
+            "suggested_next_block_ms": next_block_ms,
+            "block_until_ms_requested": requested_block_until_ms,
+            "block_until_ms_used": block_until_ms,
+            "message": tool_t(
+                "shell.await_running", params={"block_until_ms": block_until_ms}
+            ),
+            "next_action": {
+                "if_result_required": tool_t("shell.next.await_again"),
+                "await_shell_args": {
+                    "task_id": task_id,
+                    "block_until_ms": next_block_ms,
+                },
+                "do_not": tool_t("shell.next.no_progress_only"),
+            },
+        }
+
+    @tool(
+        description_i18n={
+            "zh": "终止后台 shell 任务：先发 SIGTERM，2 秒后仍存活则升级 SIGKILL。",
+            "en": "Terminate a background shell task: SIGTERM first, escalate to SIGKILL if still alive after 2s.",
+        },
+        param_description_i18n={
+            "task_id": {
+                "zh": "execute_shell_command 返回的 task_id",
+                "en": "task_id returned by execute_shell_command",
+            },
+            "session_id": {
+                "zh": "会话ID（必填，自动注入）",
+                "en": "Session ID (Required, Auto-injected)",
+            },
+        },
+        param_schema={
+            "task_id": {"type": "string"},
+            "session_id": {"type": "string"},
+        },
+    )
+    async def kill_shell(
+        self,
+        task_id: str,
+        session_id: str = None,  # pyright: ignore[reportArgumentType]
+    ) -> Dict[str, Any]:
+        if not session_id:
+            raise ValueError("ExecuteCommandTool: session_id is required")
+        task_info = self._BG_TASKS.get(task_id)
+        if not task_info:
+            return make_tool_error(
+                ToolErrorCode.NOT_FOUND,
+                f"未找到 task_id={task_id} 对应的后台任务",
+                task_id=task_id,
+            )
+
+        sandbox = self._get_sandbox(session_id)
+        pid = task_info.get("pid")
+
+        if task_info.get("mode") == "native":
+            # 优先调用沙箱原生 kill，跨平台
+            try:
+                await sandbox.kill_background(task_id, force=False)
+            except Exception as exc:
+                logger.warning(f"kill_background SIGTERM 失败: {exc}")
+            await asyncio.sleep(2.0)
+            try:
+                if await sandbox.is_background_alive(task_id):
+                    await sandbox.kill_background(task_id, force=True)
+            except Exception:
+                pass
+        else:
+            if not pid:
+                await self._cleanup_task(sandbox, task_id)
+                return {"success": True, "status": "missing_pid", "task_id": task_id}
+            await self._shell(
+                sandbox,
+                f"kill -- -{pid} 2>/dev/null; kill {pid} 2>/dev/null",
+                timeout=5,
+            )
+            await asyncio.sleep(2.0)
+            if await self._is_alive(sandbox, task_info):
+                await self._shell(
+                    sandbox,
+                    f"kill -9 -- -{pid} 2>/dev/null; kill -9 {pid} 2>/dev/null",
+                    timeout=5,
+                )
+
+        tail = await self._read_tail(sandbox, task_info, max_bytes=2048)
+        await self._cleanup_task(sandbox, task_id)
+        return {
+            "success": True,
+            "status": "killed",
+            "task_id": task_id,
+            "pid": pid,
+            "tail_output": tail,
+        }

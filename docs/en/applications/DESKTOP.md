@@ -16,7 +16,7 @@ parent: Applications
 Complete the [Python setup](GETTING_STARTED.md). Install Flutter with Dart `^3.12.2` and your platform's desktop toolchain:
 
 ```bash
-cd app/desktop_v2
+cd app/v2/desktop
 flutter pub get
 flutter run -d macos
 ```
@@ -44,4 +44,4 @@ Settings save automatically. Model and Agent settings are not overridden by envi
 
 Desktop v2 does not import v1 data. Existing Tauri release installers follow their own release instructions; do not assume they are Flutter v2 builds.
 
-[Component reference](https://github.com/ZHangZHengEric/Sage/blob/main/app/desktop_v2/README.md) · [Troubleshooting](../TROUBLESHOOTING.md)
+[Component reference](https://github.com/ZHangZHengEric/Sage/blob/main/app/v2/desktop/README.md) · [Troubleshooting](../TROUBLESHOOTING.md)

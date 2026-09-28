@@ -9,4 +9,4 @@ if [ -z "$(ls -A /app/skills 2>/dev/null)" ]; then
 fi
 
 # 执行主命令
-exec python -m app.server.main "$@"
+exec python -m app.v1.server.main "$@"
