@@ -40,12 +40,12 @@ MySQL / PostgreSQL 提交由协调器按已持久化事件数，仅序列化待�
 项目要求 Python 3.12+。使用当前测试与基准核对行为，不将历史通过数量视作当前验收结果：
 
 ```bash
-python -m pytest tests/app/server_v2/test_model_pool.py
-python scripts/benchmark_v2_session_projection.py --events 10000 --repeats 10
+python -m pytest tests/app/v2/server/test_model_pool.py
+python scripts/v2/benchmark_v2_session_projection.py --events 10000 --repeats 10
 ```
 
 模型池测试覆盖并发初始化、用户和凭据隔离、容量、失败、取消、缓慢淘汰及关闭失败。SQL 投影测试覆盖增量追加、没有新增、历史截断、删除 Run 与完整导出。模拟数据库连接的测试不等同于真实 MySQL / PostgreSQL 验收。
 
 基准只计合成长事件列表的协调器序列化，不计 SQL、网络、模型或任务完成率；不能换算为生产 QPS。真实端点的长时间负载需要单独验证。
 
-实现入口：[model_pool.py](https://github.com/ZHangZHengEric/Sage/blob/main/app/server_v2/runtime/model_pool.py)。
+实现入口：[model_pool.py](https://github.com/ZHangZHengEric/Sage/blob/main/app/v2/server/runtime/model_pool.py)。

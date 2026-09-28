@@ -65,7 +65,7 @@ Persistent-summary 默认 `max_summary_calls=4`，摘要源预算 `max_summary_s
 这些是上下文准备的辅助额度，不替代 Scheduler、租户配额、模型连接池或存储限制。
 
 ```bash
-python scripts/benchmark_v2_context.py --messages 800 --sessions 8
+python scripts/v2/benchmark_v2_context.py --messages 800 --sessions 8
 python -m pytest tests/sagents/v2/test_context_efficiency.py tests/sagents/v2/test_skill_provider_matrix.py
 ```
 

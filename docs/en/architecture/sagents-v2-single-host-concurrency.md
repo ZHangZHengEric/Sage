@@ -51,8 +51,8 @@ Reduce execution concurrency when model rate limits or database capacity become 
 
 ```bash
 python -m pytest tests/sagents/v2/test_single_host_fencing.py
-python scripts/benchmark_v2_single_host.py --sessions 64 --writes 8 --io-ms 2
-python scripts/benchmark_v2_single_host.py --sessions 128 --writes 8 --io-ms 2
+python scripts/v2/benchmark_v2_single_host.py --sessions 64 --writes 8 --io-ms 2
+python scripts/v2/benchmark_v2_single_host.py --sessions 128 --writes 8 --io-ms 2
 ```
 
 Tests cover parallel cross-Run commits, same-Run ordering, renewal, reclamation, quotas, cancellation, shutdown, and the Dispatcher → LeaseFencedSessionStore → SessionStoreCoordinator path. Benchmarks simulate slow asynchronous storage without real models or databases. Historical pass counts and synthetic latency are not production-capacity guarantees.

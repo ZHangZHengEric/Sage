@@ -1,0 +1,391 @@
+import asyncio
+import time
+from typing import AsyncGenerator, List, Any, Optional
+from sagents.v1.flow.schema import (
+    FlowNode,
+    AgentNode,
+    SequenceNode,
+    ParallelNode,
+    LoopNode,
+    IfNode,
+    SwitchNode,
+)
+from sagents.v1.flow.conditions import ConditionRegistry
+from sagents.v1.utils.logger import logger
+from sagents.v1.context.messages.message import MessageChunk, is_message_client_visible
+from sagents.v1.context.session_context import SessionStatus
+
+
+def _message_chunk_debug_summary(message_chunks: List[MessageChunk]) -> str:
+    if not message_chunks:
+        return "empty"
+    parts: List[str] = []
+    for chunk in message_chunks[-3:]:
+        role = getattr(chunk, "role", None)
+        message_type = getattr(chunk, "message_type", None) or getattr(
+            chunk, "type", None
+        )
+        message_id = getattr(chunk, "message_id", None)
+        content = getattr(chunk, "content", None)
+        content_len = len(content) if isinstance(content, str) else 0
+        tool_calls = getattr(chunk, "tool_calls", None) or []
+        parts.append(
+            f"{role}/{message_type}:{message_id}:"
+            f"content_len={content_len}:tool_calls={len(tool_calls)}"
+        )
+    return "; ".join(parts)
+
+
+def _message_ledger_count(ctx: Any) -> Optional[int]:
+    message_manager = getattr(ctx, "message_manager", None)
+    messages = getattr(message_manager, "messages", None)
+    if messages is None:
+        return None
+    return len(messages)
+
+
+def _message_manager_debug_id(ctx: Any) -> Optional[int]:
+    message_manager = getattr(ctx, "message_manager", None)
+    if message_manager is None:
+        return None
+    return id(message_manager)
+
+
+def _visible_chunks_for_flow_stream(
+    message_chunks: List[MessageChunk],
+) -> List[MessageChunk]:
+    return [chunk for chunk in message_chunks if is_message_client_visible(chunk)]
+
+
+def _message_chunk_session_id(message: Any) -> Optional[str]:
+    if isinstance(message, MessageChunk):
+        return message.session_id
+    if isinstance(message, dict):
+        value = message.get("session_id")
+        return str(value) if value is not None else None
+    return getattr(message, "session_id", None)
+
+
+def _ledger_chunks_for_session(
+    session_id: str, message_chunks: Optional[List[Any]]
+) -> List[Any]:
+    """Keep parent inference ledger free of delegated child stream traffic.
+
+    Child ``{parent}_sub_*`` chunks may still be yielded to the client SSE
+    stream; only untagged / exact-session messages enter ``add_messages``.
+    """
+    ledger_chunks: List[Any] = []
+    for chunk in message_chunks or []:
+        chunk_session_id = _message_chunk_session_id(chunk)
+        if chunk_session_id is None or chunk_session_id == session_id:
+            ledger_chunks.append(chunk)
+    return ledger_chunks
+
+
+class _FlowExecutionTrace:
+    def __init__(self) -> None:
+        self.events: List[str] = []
+
+    def add(self, event: str) -> None:
+        self.events.append(event)
+
+    def emit(self) -> None:
+        if self.events:
+            logger.info("FlowExecutor: Trace " + " -> ".join(self.events))
+
+
+class FlowExecutor:
+    """流程执行器：负责解析并执行 AgentFlow 定义"""
+
+    def __init__(
+        self,
+        tool_manager: Optional[Any],
+        session_runtime: Any,
+        session_id: str,
+        session_manager: Any,
+    ):
+        self.tool_manager = tool_manager
+        self.runtime = session_runtime
+        self.session_id = session_id
+        self.session_manager = session_manager
+
+        # 注册 ToDoTool 用于多智能体任务检查
+        # self._todo_tool = ToDoTool()
+        # if self.tool_manager:
+        #     self.tool_manager.register_tools_from_object(self._todo_tool)
+
+    @staticmethod
+    def _is_terminal_session_state(session: Any) -> bool:
+        try:
+            return session.get_status() in {
+                SessionStatus.INTERRUPTED,
+                SessionStatus.ERROR,
+            }
+        except Exception:
+            return False
+
+    def _should_stop_now(self, session: Any, node_name: str) -> bool:
+        if session.should_interrupt():
+            logger.info(
+                f"FlowExecutor: session {self.session_id} interrupted before executing {node_name}"
+            )
+            return True
+        if self._is_terminal_session_state(session):
+            logger.info(
+                f"FlowExecutor: session {self.session_id} already in terminal state "
+                f"{session.get_status().value}, stop executing {node_name}"
+            )
+            return True
+        return False
+
+    async def execute(self, node: FlowNode) -> AsyncGenerator[List[MessageChunk], None]:
+        trace = _FlowExecutionTrace()
+        try:
+            async for chunk in self._execute_node(node, trace):
+                yield chunk
+        finally:
+            trace.emit()
+
+    async def _execute_node(
+        self, node: FlowNode, trace: _FlowExecutionTrace
+    ) -> AsyncGenerator[List[MessageChunk], None]:
+        """递归执行流程节点"""
+        if self.session_manager is None:
+            raise RuntimeError(
+                f"FlowExecutor: session_manager 未初始化，session_id={self.session_id}"
+            )
+        session = self.session_manager.get_live_session(self.session_id)
+        if session is None:
+            raise RuntimeError(
+                f"FlowExecutor: session 未绑定，session_id={self.session_id}"
+            )
+        ctx = session.get_context()
+        if ctx is None:
+            raise RuntimeError(
+                f"FlowExecutor: session_context 未绑定，session_id={self.session_id}"
+            )
+        if self._should_stop_now(session, getattr(node, "node_type", "unknown")):
+            return
+
+        if isinstance(node, SequenceNode):
+            trace.add("sequence")
+            for step in node.steps:
+                if self._should_stop_now(
+                    session, getattr(step, "node_type", "unknown")
+                ):
+                    return
+                async for chunk in self._execute_node(step, trace):
+                    yield chunk
+                if self._is_terminal_session_state(session):
+                    logger.info(
+                        f"FlowExecutor: session {self.session_id} reached terminal state "
+                        f"{session.get_status().value} after sequence step '{getattr(step, 'node_type', 'unknown')}', stopping"
+                    )
+                    return
+
+        elif isinstance(node, ParallelNode):
+            # 并行执行所有分支
+            trace.add(f"parallel(branches={len(node.branches)})")
+
+            async def run_branch(branch: FlowNode) -> List[MessageChunk]:
+                """执行单个分支并收集所有消息"""
+                chunks = []
+                async for chunk in self._execute_node(branch, trace):
+                    chunks.extend(chunk)
+                return chunks
+
+            # 创建所有分支的任务
+            tasks = [run_branch(branch) for branch in node.branches]
+
+            # 并行执行并收集结果
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+
+            # 处理结果（按分支顺序yield）
+            for i, result in enumerate(results):
+                if isinstance(result, Exception):
+                    logger.error(
+                        f"FlowExecutor: Branch {i} failed with error: {result}"
+                    )
+                    continue
+                if result:
+                    yield result  # pyright: ignore[reportReturnType]
+
+            if self._is_terminal_session_state(session):
+                logger.info(
+                    f"FlowExecutor: session {self.session_id} reached terminal state "
+                    f"{session.get_status().value} after parallel branches, stopping"
+                )
+                return
+
+            trace.add(f"parallel_done({len(node.branches)})")
+
+        elif isinstance(node, LoopNode):
+            loop_count = 0
+            # 检查初始条件
+            while loop_count < node.max_loops:
+                if self._should_stop_now(session, f"loop:{node.condition}"):
+                    break
+                # 在循环开始前检查条件
+                if not ConditionRegistry.check(node.condition, ctx, session=session):
+                    trace.add(f"loop({node.condition}=False)")
+                    break
+
+                trace.add(
+                    f"loop({node.condition}=True,{loop_count + 1}/{node.max_loops})"
+                )
+                async for chunk in self._execute_node(node.body, trace):
+                    yield chunk
+                if self._is_terminal_session_state(session):
+                    logger.info(
+                        f"FlowExecutor: session {self.session_id} reached terminal state "
+                        f"{session.get_status().value} during loop, stopping"
+                    )
+                    break
+                loop_count += 1
+
+            if loop_count >= node.max_loops:
+                logger.warning(
+                    f"FlowExecutor: Loop max iterations ({node.max_loops}) reached."
+                )
+
+        elif isinstance(node, IfNode):
+            condition_met = ConditionRegistry.check(
+                node.condition, ctx, session=session
+            )
+            trace.add(f"if({node.condition}={condition_met})")
+
+            if condition_met:
+                async for chunk in self._execute_node(node.true_body, trace):
+                    yield chunk
+            elif node.false_body:
+                async for chunk in self._execute_node(node.false_body, trace):
+                    yield chunk
+
+        elif isinstance(node, SwitchNode):
+            # 获取上下文变量值
+            # 优先从 audit_status 获取，其次从 system_context 获取
+            variable_value = ctx.audit_status.get(node.variable)
+            if variable_value is None:
+                variable_value = ctx.system_context.get(node.variable)
+
+            if variable_value is None:
+                error_msg = f"FlowExecutor: Switch variable '{node.variable}' not found in context."
+                logger.error(error_msg)
+                raise ValueError(error_msg)
+
+            trace.add(f"switch({node.variable}={variable_value})")
+
+            target_node = node.cases.get(str(variable_value))
+            if target_node:
+                async for chunk in self._execute_node(target_node, trace):
+                    yield chunk
+            elif node.default:
+                async for chunk in self._execute_node(node.default, trace):
+                    yield chunk
+            else:
+                logger.warning(
+                    f"FlowExecutor: No matching case for switch '{node.variable}'={variable_value}, and no default."
+                )
+
+        elif isinstance(node, AgentNode):
+            agent_key = node.agent_key
+            if self._should_stop_now(session, f"agent '{agent_key}'"):
+                return
+            trace.add(f"agent({agent_key})")
+
+            # 获取 Agent 实例
+            # 注意：session_runtime._get_agent 是内部方法，这里我们需要访问
+            try:
+                agent = self.runtime._get_agent(agent_key)
+            except KeyError:
+                logger.error(
+                    f"FlowExecutor: Agent '{agent_key}' not found in registry."
+                )
+                return
+
+            # 如果有特殊配置，可能需要应用到 Agent (暂未实现完全覆盖，因 Agent 通常是单例或池化)
+            # 这里直接执行
+            phase_name = node.description or agent.agent_name
+            phase_started_at = time.time()
+            ledger_before = _message_ledger_count(ctx)
+            chunks_seen = 0
+            add_calls = 0
+            last_chunk_summary = "none"
+
+            try:
+                async for message_chunks in self.runtime._execute_agent_phase(
+                    session_id=self.session_id,
+                    agent=agent,
+                    phase_name=phase_name,
+                    # override_config=node.override_config, # FlowNode definition does not have override_config yet
+                ):
+                    if self._is_terminal_session_state(session):
+                        terminal_tool_chunks = [
+                            message
+                            for message in (message_chunks or [])
+                            if getattr(message, "role", None) == "tool"
+                            or (
+                                isinstance(message, dict)
+                                and message.get("role") == "tool"
+                            )
+                        ]
+                        terminal_ledger_chunks = _ledger_chunks_for_session(
+                            self.session_id, terminal_tool_chunks
+                        )
+                        if terminal_ledger_chunks:
+                            ctx.add_messages(terminal_ledger_chunks)
+                            add_calls += 1
+                            chunks_seen += len(terminal_ledger_chunks)
+                            last_chunk_summary = _message_chunk_debug_summary(
+                                terminal_ledger_chunks
+                            )
+                        logger.info(
+                            f"FlowExecutor: session {self.session_id} reached terminal state "
+                            f"{session.get_status().value} while running agent '{agent_key}', stopping"
+                        )
+                        return
+                    # Parent ledger: only this session / untagged. Child *_sub_*
+                    # progress still yields to the client without polluting
+                    # parent tool-call pairing.
+                    ledger_chunks = _ledger_chunks_for_session(
+                        self.session_id, message_chunks
+                    )
+                    if ledger_chunks:
+                        ctx.add_messages(ledger_chunks)
+                        add_calls += 1
+                    chunks_seen += len(message_chunks or [])
+                    last_chunk_summary = _message_chunk_debug_summary(
+                        message_chunks or []
+                    )
+                    visible_message_chunks = _visible_chunks_for_flow_stream(
+                        message_chunks or []
+                    )
+                    if len(visible_message_chunks) != len(message_chunks or []):
+                        logger.info(
+                            "FlowExecutor: suppressed hidden runtime context "
+                            f"from client stream session_id={self.session_id}"
+                        )
+                    if not visible_message_chunks:
+                        continue
+                    yield visible_message_chunks
+            finally:
+                flush_journal = getattr(ctx, "flush_message_journal_current", None)
+                if callable(flush_journal):
+                    flush_journal(reason="agent_phase_end")
+                ledger_after = _message_ledger_count(ctx)
+                logger.info(
+                    "FlowExecutor: agent phase ledger summary "
+                    f"session_id={self.session_id} agent={agent_key} phase={phase_name} "
+                    f"ctx_id={id(ctx)} manager_id={_message_manager_debug_id(ctx)} "
+                    f"add_calls={add_calls} chunks_seen={chunks_seen} "
+                    f"ledger_before={ledger_before} ledger_after={ledger_after} "
+                    f"duration_ms={int((time.time() - phase_started_at) * 1000)} "
+                    f"last_chunks={last_chunk_summary}"
+                )
+
+            if self._is_terminal_session_state(session):
+                logger.info(
+                    f"FlowExecutor: session {self.session_id} reached terminal state "
+                    f"{session.get_status().value} after agent '{agent_key}', stopping"
+                )
+                return

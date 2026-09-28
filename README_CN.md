@@ -37,8 +37,8 @@
 
 | 选择你的入口 | 从这里开始 |
 | --- | --- |
-| 💻 **Desktop v2** — 本地项目工作与智能体协作 | [桌面端指南](app/desktop_v2/README.md) |
-| 🌐 **Server v2** — 多用户 Web 应用与 Agent Studio | [服务端指南](app/server_v2/README.md) |
+| 💻 **Desktop v2** — 本地项目工作与智能体协作 | [桌面端指南](app/v2/desktop/README.md) |
+| 🌐 **Server v2** — 多用户 Web 应用与 Agent Studio | [服务端指南](app/v2/server/README.md) |
 | 🧠 **SAgents v2** — 将智能体能力集成到自己的应用 | [运行时快速开始](sagents/v2/README.md#quick-start) |
 | 📦 **桌面安装包** — 已发布版本 | [下载与版本说明](https://github.com/ZHangZHengEric/Sage/releases) |
 
@@ -52,7 +52,7 @@ cd Sage
 python3.12 -m venv .venv
 source .venv/bin/activate
 python -m pip install -e .
-cd app/desktop_v2
+cd app/v2/desktop
 flutter pub get
 flutter run -d macos
 ```
@@ -61,7 +61,7 @@ flutter run -d macos
 
 应用自动启动本机后端。设置与会话数据保存在 `~/sage/runtime`，默认工作区为 `~/sage/agent_workspace`。
 
-Windows、Linux 配置见 [桌面端指南](app/desktop_v2/README.md)。安装包以对应版本说明为准；现有发布工作流构建的是旧版 Tauri 应用。
+Windows、Linux 配置见 [桌面端指南](app/v2/desktop/README.md)。安装包以对应版本说明为准；现有发布工作流构建的是旧版 Tauri 应用。
 
 ### 🌐 从源码启动服务端
 
@@ -69,22 +69,22 @@ Windows、Linux 配置见 [桌面端指南](app/desktop_v2/README.md)。安装�
 
 ```bash
 python -m pip install -e '.[server-v2]'
-cp app/server_v2/.env.example app/server_v2/.env
+cp app/v2/server/.env.example app/v2/server/.env
 ```
 
 在 `.env` 中配置 MySQL 连接、JWT 密钥和初始管理员账号，然后运行：
 
 ```bash
-cd app/server_v2/web
+cd app/v2/server/web
 npm install
 npm run build
 cd ../../..
-python -m app.server_v2
+python -m app.v2.server
 ```
 
 打开 **[localhost:8090](http://localhost:8090)**，添加模型和 Agent 后开始对话；进入 **`/studio`** 管理 Agent 包。
 
-详细配置见 [服务端指南](app/server_v2/README.md)。Server v2 当前支持**单 worker**，MySQL 持久化不代表已支持横向扩容。
+详细配置见 [服务端指南](app/v2/server/README.md)。Server v2 当前支持**单 worker**，MySQL 持久化不代表已支持横向扩容。
 
 ### 🧑‍💻 用 SAgents v2 运行第一个 Agent
 
@@ -190,15 +190,16 @@ flowchart TB
 | 了解 Sage | 构建与扩展 |
 | --- | --- |
 | [文档索引](docs/zh/README.md) | [运行时集成手册](sagents/v2/使用手册.md) |
-| [Desktop v2](app/desktop_v2/README.md) | [Server Agent 平台](docs/zh/architecture/SERVER_V2_AGENT_PLATFORM.md) |
-| [Server v2](app/server_v2/README.md) | [部署指南](deploy/README.md) |
+| [Desktop v2](app/v2/desktop/README.md) | [Server Agent 平台](docs/zh/architecture/SERVER_V2_AGENT_PLATFORM.md) |
+| [Server v2](app/v2/server/README.md) | [部署指南](deploy/README.md) |
+| [版本目录说明](docs/VERSIONED_LAYOUT.md) | v1 代码位置与导入迁移 |
 | [版本说明](release_notes/) | [开发变更日志](change_log.md) |
 
 请优先阅读所选入口对应的组件文档。
 
 ## 🛠️ **参与贡献**
 
-运行时位于 [`sagents/v2/`](sagents/v2/)，桌面端位于 [`app/desktop_v2/`](app/desktop_v2/)，Web 平台位于 [`app/server_v2/`](app/server_v2/)。
+运行时位于 [`sagents/v2/`](sagents/v2/)，桌面端位于 [`app/v2/desktop/`](app/v2/desktop/)，Web 平台位于 [`app/v2/server/`](app/v2/server/)。
 
 欢迎提交 [Issue](https://github.com/ZHangZHengEric/Sage/issues) 或 Pull Request。请附上复现步骤，并运行受影响组件的检查：Python 测试位于 [`tests/`](tests/)，Desktop v2 使用 `flutter analyze` 和 `flutter test`。
 

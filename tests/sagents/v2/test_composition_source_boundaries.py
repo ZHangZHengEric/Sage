@@ -12,7 +12,7 @@ def test_production_composition_never_calls_registration_factory_directly():
     violations: list[str] = []
     sources = (
         *(ROOT / "sagents/v2").rglob("*.py"),
-        *(ROOT / "app/desktop_v2/backend").rglob("*.py"),
+        *(ROOT / "app/v2/desktop/backend").rglob("*.py"),
     )
     for path in sources:
         if path == allowed:

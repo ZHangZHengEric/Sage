@@ -1,25 +1,11 @@
+"""Standalone AnyTool simulation; no Sage runtime or persistence dependencies."""
 from __future__ import annotations
 
 import json
+import re
 from typing import Any, Dict, List, Optional, Tuple
-
 from loguru import logger
-
-from common.core import config
-from common.models.agent import AgentConfigDao
-from common.models.conversation import ConversationDao
-from common.models.llm_provider import LLMProviderDao
-from common.services.chat_utils import create_model_client
-from sagents.context.messages.message import MessageChunk
-from sagents.utils.serialization import make_serializable
-
-
-def _get_cfg() -> config.StartupConfig:
-    cfg = config.get_startup_config()
-    if not cfg:
-        raise RuntimeError("Startup config not initialized")
-    return cfg
-
+from .model_client import resolve_model_client
 
 def _build_no_thinking_extra_body(model: str) -> Dict[str, Any]:
     """复用与各 agent 一致的"禁用思考/推理"请求参数。"""
@@ -142,7 +128,8 @@ def _extract_json_result(raw_text: str) -> Tuple[Optional[Any], Optional[str]]:
         pass
 
     try:
-        extracted = MessageChunk.extract_json_from_markdown(text)
+        match = re.search(r"```(?:json)?\s*\n([\s\S]*?)\n```", text)
+        extracted = match.group(1) if match else text
         if extracted != text:
             return json.loads(extracted), None
     except Exception:
@@ -159,116 +146,6 @@ def _extract_json_result(raw_text: str) -> Tuple[Optional[Any], Optional[str]]:
     return None, "unable to parse JSON from model output"
 
 
-async def _resolve_session_provider(session_id: str) -> Optional[Any]:
-    if not session_id:
-        return None
-
-    conversation = await ConversationDao().get_by_session_id(session_id)
-    if not conversation or not conversation.agent_id:
-        return None
-
-    agent = await AgentConfigDao().get_by_id(conversation.agent_id)
-    agent_config = agent.config if agent and isinstance(agent.config, dict) else {}
-    provider_id = agent_config.get("llm_provider_id")
-    if not provider_id:
-        return None
-
-    provider = await LLMProviderDao().get_by_id(provider_id)
-    if not provider:
-        return None
-    if not provider.api_key or not provider.model:
-        return None
-    return provider
-
-
-async def _resolve_first_provider(user_id: Optional[str]) -> Optional[Any]:
-    dao = LLMProviderDao()
-    providers = await dao.get_list(user_id=user_id or None)
-    if not providers:
-        return None
-    provider = providers[0]
-    if not provider.api_key or not provider.model:
-        return None
-    return provider
-
-
-async def _resolve_model_client(
-    user_id: Optional[str],
-    server_config: Dict[str, Any],
-    *,
-    session_id: Optional[str] = None,
-    prefer_first_provider: bool = False,
-) -> Tuple[Any, str]:
-    simulator = server_config.get("simulator") or {}
-    cfg = _get_cfg()
-    if cfg.app_mode == "server":
-        provider = None
-        if session_id and not prefer_first_provider:
-            provider = await _resolve_session_provider(session_id)
-        if provider is None:
-            provider = await _resolve_first_provider(user_id)
-        if provider is None and not prefer_first_provider:
-            dao = LLMProviderDao()
-            providers = await dao.get_list(user_id=user_id or None)
-            provider = next(
-                (item for item in providers if item.is_default),
-                providers[0] if providers else None,
-            )
-        if not provider:
-            if isinstance(simulator, dict):
-                api_key = simulator.get("api_key")
-                base_url = simulator.get("base_url")
-                model = simulator.get("model")
-                if api_key and base_url and model:
-                    return create_model_client(
-                        {
-                            "api_key": api_key,
-                            "base_url": base_url,
-                            "model": model,
-                        }
-                    ), model
-            raise RuntimeError("当前用户未配置可用的模型提供商")
-        return create_model_client(
-            {
-                "api_key": provider.api_key,
-                "base_url": provider.base_url,
-                "model": provider.model,
-            }
-        ), provider.model
-
-    if session_id and not prefer_first_provider:
-        provider = await _resolve_session_provider(session_id)
-        if provider:
-            return create_model_client(
-                {
-                    "api_key": provider.api_key,
-                    "base_url": provider.base_url,
-                    "model": provider.model,
-                }
-            ), provider.model
-
-    provider = await _resolve_first_provider(user_id)
-    if provider:
-        return create_model_client(
-            {
-                "api_key": provider.api_key,
-                "base_url": provider.base_url,
-                "model": provider.model,
-            }
-        ), provider.model
-
-    model_name = cfg.default_llm_model_name
-    if not cfg.default_llm_api_key:
-        raise RuntimeError("未配置默认模型 API Key")
-    return create_model_client(
-        {
-            "api_key": cfg.default_llm_api_key,
-            "base_url": cfg.default_llm_api_base_url,
-            "model": model_name,
-        }
-    ), model_name
-
-
 async def generate_anytool_result(
     *,
     server_name: str,
@@ -278,6 +155,7 @@ async def generate_anytool_result(
     user_id: Optional[str] = None,
     session_id: Optional[str] = None,
     prefer_first_provider: bool = False,
+    model_resolver=None,
 ) -> Dict[str, Any]:
     sanitized_arguments = {
         key: value
@@ -293,7 +171,7 @@ async def generate_anytool_result(
     simulator = server_config.get("simulator") or {}
     temperature = simulator.get("temperature", 0.2)
 
-    model_client, model_name = await _resolve_model_client(
+    model_client, model_name = await (model_resolver or resolve_model_client)(
         user_id,
         server_config,
         session_id=session_id,
@@ -307,7 +185,7 @@ async def generate_anytool_result(
         "model": model_name,
         "messages": messages,
         "temperature": temperature,
-        # 与 sagents/agent/* 各 agent 一致：禁用模型思考/推理过程，仅要 JSON 输出
+        # Ask for JSON output without a visible reasoning trace.
         "extra_body": _build_no_thinking_extra_body(model_name),
     }
     try:
@@ -323,6 +201,11 @@ async def generate_anytool_result(
         message = getattr(choice, "message", None) if choice else None
         raw_text = getattr(message, "content", "") or ""
     except Exception as exc:
+        status = getattr(exc, "status_code", None)
+        if status is None:
+            status = getattr(getattr(exc, "response", None), "status_code", None)
+        if status not in {400, 422}:
+            raise
         logger.warning(
             f"[AnyTool] JSON mode failed, retrying without response_format: {exc}"
         )
@@ -347,7 +230,7 @@ async def generate_anytool_result(
         "tool_name": tool_def.get("name", ""),
         "model": model_name,
         "raw_text": raw_text,
-        "parsed": make_serializable(parsed),
-        "tool_definition": make_serializable(tool_def),
-        "arguments": make_serializable(sanitized_arguments),
+        "parsed": parsed,
+        "tool_definition": tool_def,
+        "arguments": sanitized_arguments,
     }

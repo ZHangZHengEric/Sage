@@ -10,7 +10,7 @@ from mcp_servers.video_analysis.unified_video_analysis_server import (
     get_config_error,
     prepare_video_input,
 )
-from sagents.tool.tool_manager import ToolManager
+from sagents.v1.tool.tool_manager import ToolManager
 
 
 class TestVideoAnalysisServer(unittest.TestCase):

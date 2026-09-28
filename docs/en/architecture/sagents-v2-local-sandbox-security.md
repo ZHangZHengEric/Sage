@@ -15,7 +15,7 @@ The local sandbox controls which files and system capabilities tools can access,
 
 ## Scope and standard configuration
 
-`sage.sandbox.local-workspace` constrains official file tools, Shell, background Shell Jobs, and Skill writes. It does not isolate host Python plugins or MCP services and does not use the v1 sagents/utils/sandbox backend.
+`sage.sandbox.local-workspace` constrains official file tools, Shell, background Shell Jobs, and Skill writes. It does not isolate host Python plugins or MCP services and does not use the v1 sagents/v1/utils/sandbox backend.
 
 ResolvedSandboxSpec.resources and Desktop component_configs["execution.sandbox"].resources accept the same fields:
 

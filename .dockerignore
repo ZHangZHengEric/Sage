@@ -62,9 +62,9 @@ target
 *.dist/
 *.onefile-build/
 
-app/desktop/build/
-app/desktop/dist/
-app/desktop/tauri/sidecar/
+app/v1/desktop/build/
+app/v1/desktop/dist/
+app/v1/desktop/tauri/sidecar/
 
 # =========================
 # IDE

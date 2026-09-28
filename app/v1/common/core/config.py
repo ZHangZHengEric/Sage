@@ -1,0 +1,539 @@
+"""
+共享配置模块，供 server / desktop 共用。
+"""
+
+from __future__ import annotations
+
+import os
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any, Dict, Optional, overload
+
+_GLOBAL_STARTUP_CONFIG: Any
+
+
+def get_default_sage_home() -> Path:
+    configured = str(os.environ.get("SAGE_LOCAL_DATA_ROOT") or "").strip()
+    if configured:
+        return Path(configured).expanduser().resolve()
+    return Path.home() / ".sage"
+
+
+def get_server_project_root() -> Path:
+    return Path(__file__).resolve().parents[4]
+
+
+def _get_storage_defaults(sage_home: Path) -> Dict[str, str]:
+    return {
+        "sage_home": str(sage_home),
+        "logs_dir": str(sage_home / "logs"),
+        "session_dir": str(sage_home / "sessions"),
+        "agents_dir": str(sage_home / "agents"),
+        "skill_dir": str(sage_home / "skills"),
+        "user_dir": str(sage_home / "users"),
+        "db_file": str(sage_home / "sage.db"),
+        "env_file": str(sage_home / ".sage_env"),
+    }
+
+
+def get_local_storage_defaults() -> Dict[str, str]:
+    return _get_storage_defaults(get_default_sage_home())
+
+
+def get_server_storage_defaults() -> Dict[str, str]:
+    return _get_storage_defaults(get_server_project_root() / ".sage")
+
+
+@dataclass
+class StartupConfig:
+    app_mode: str = "server"
+
+    env: str = "development"
+    log_level: str = "INFO"
+    port: int = 8080
+    logs_dir: str = "logs"
+    session_dir: str = "sessions"
+    agents_dir: str = "agents"
+    skill_dir: str = "skills"
+    user_dir: str = "users"
+    workspace: str = "agent_workspace"
+
+    db_type: str = "file"
+    db_file: str = "./sage.db"
+    mysql_host: str = "127.0.0.1"
+    mysql_port: int = 3306
+    mysql_user: str = "root"
+    mysql_password: str = "sage.1234"
+    mysql_database: str = "sage"
+    mysql_charset: str = "utf8mb4"
+
+    preset_mcp_config: str = "mcp_setting.json"
+    preset_running_config: str = "agent_setting.json"
+
+    default_llm_api_key: str = "sk-demo"
+    default_llm_api_base_url: str = "https://dashscope.aliyuncs.com/compatible-mode/v1/"
+    default_llm_model_name: str = "deepseek-v4-flash"
+    default_llm_max_tokens: Optional[int] = 4096
+    default_llm_temperature: float = 0.2
+    default_llm_max_model_len: int = 52000
+    default_llm_top_p: float = 0.9
+    default_llm_presence_penalty: float = 0.0
+
+    context_history_ratio: float = 0.2
+    context_active_ratio: float = 0.3
+    context_max_new_message_ratio: float = 0.5
+    context_compression_threshold: float = 0.85
+    context_recent_turns: int = 0
+
+    bootstrap_admin_username: str = ""
+    bootstrap_admin_password: str = ""
+    jwt_key: str = "sage_dev_jwt_secret_key_change_me_in_prod_v1"
+    jwt_expire_hours: int = 24
+    refresh_token_secret: str = "sage_dev_refresh_secret_key_change_me_in_prod_v1"
+    session_secret: str = "sage_dev_session_secret_key_change_me_in_prod_v1"
+    session_cookie_name: str = "sage_session"
+    session_cookie_secure: bool = False
+    session_cookie_same_site: str = "lax"
+    cors_allowed_origins: list[str] = field(default_factory=lambda: ["*"])
+    cors_allow_credentials: bool = False
+    cors_allow_methods: list[str] = field(default_factory=lambda: ["*"])
+    cors_allow_headers: list[str] = field(default_factory=lambda: ["*"])
+    cors_expose_headers: list[str] = field(default_factory=list)
+    cors_max_age: int = 600
+    web_base_path: str = "/sage"
+    s3_endpoint: Optional[str] = None
+    s3_access_key: Optional[str] = None
+    s3_secret_key: Optional[str] = None
+    s3_secure: bool = False
+    s3_bucket_name: Optional[str] = None
+    s3_public_base_url: Optional[str] = None
+
+    trace_jaeger_endpoint: Optional[str] = None
+    trace_jaeger_public_url: Optional[str] = "http://127.0.0.1:30051/jaeger"
+
+
+class ENV:
+    APP_ENV = "SAGE_ENV"
+
+    DEFAULT_LLM_API_KEY = "SAGE_DEFAULT_LLM_API_KEY"
+    DEFAULT_LLM_API_BASE_URL = "SAGE_DEFAULT_LLM_API_BASE_URL"
+    DEFAULT_LLM_MODEL_NAME = "SAGE_DEFAULT_LLM_MODEL_NAME"
+    DEFAULT_LLM_MAX_TOKENS = "SAGE_DEFAULT_LLM_MAX_TOKENS"
+    DEFAULT_LLM_TEMPERATURE = "SAGE_DEFAULT_LLM_TEMPERATURE"
+    DEFAULT_LLM_MAX_MODEL_LEN = "SAGE_DEFAULT_LLM_MAX_MODEL_LEN"
+    DEFAULT_LLM_TOP_P = "SAGE_DEFAULT_LLM_TOP_P"
+    DEFAULT_LLM_PRESENCE_PENALTY = "SAGE_DEFAULT_LLM_PRESENCE_PENALTY"
+
+    CONTEXT_HISTORY_RATIO = "SAGE_CONTEXT_HISTORY_RATIO"
+    CONTEXT_ACTIVE_RATIO = "SAGE_CONTEXT_ACTIVE_RATIO"
+    CONTEXT_MAX_NEW_MESSAGE_RATIO = "SAGE_CONTEXT_MAX_NEW_MESSAGE_RATIO"
+    CONTEXT_COMPRESSION_THRESHOLD = "SAGE_CONTEXT_COMPRESSION_THRESHOLD"
+    CONTEXT_RECENT_TURNS = "SAGE_CONTEXT_RECENT_TURNS"
+
+    TRACE_JAEGER_URL = "SAGE_TRACE_JAEGER_URL"
+    TRACE_JAEGER_ENDPOINT = "SAGE_TRACE_JAEGER_ENDPOINT"
+    TRACE_JAEGER_PUBLIC_URL = "SAGE_TRACE_JAEGER_PUBLIC_URL"
+
+    PORT = "SAGE_PORT"
+    LOG_LEVEL = "SAGE_LOG_LEVEL"
+    SESSION_DIR = "SAGE_SESSION_DIR"
+    LOGS_DIR = "SAGE_LOGS_DIR_PATH"
+    AGENTS_DIR = "SAGE_AGENTS_DIR"
+    USER_DIR = "SAGE_USER_DIR"
+    DB_TYPE = "SAGE_DB_TYPE"
+    DB_FILE = "SAGE_DB_FILE"
+
+    S3_ENDPOINT = "SAGE_S3_ENDPOINT"
+    S3_ACCESS_KEY = "SAGE_S3_ACCESS_KEY"
+    S3_SECRET_KEY = "SAGE_S3_SECRET_KEY"
+    S3_SECURE = "SAGE_S3_SECURE"
+    S3_BUCKET_NAME = "SAGE_S3_BUCKET_NAME"
+    S3_PUBLIC_BASE_URL = "SAGE_S3_PUBLIC_BASE_URL"
+
+    SKILL_DIR = "SAGE_SKILL_WORKSPACE"
+    BOOTSTRAP_ADMIN_USERNAME = "SAGE_BOOTSTRAP_ADMIN_USERNAME"
+    BOOTSTRAP_ADMIN_PASSWORD = "SAGE_BOOTSTRAP_ADMIN_PASSWORD"
+    JWT_KEY = "SAGE_JWT_KEY"
+    JWT_EXPIRE_HOURS = "SAGE_JWT_EXPIRE_HOURS"
+    REFRESH_TOKEN_SECRET = "SAGE_REFRESH_TOKEN_SECRET"
+    SESSION_SECRET = "SAGE_SESSION_SECRET"
+    SESSION_COOKIE_NAME = "SAGE_SESSION_COOKIE_NAME"
+    SESSION_COOKIE_SECURE = "SAGE_SESSION_COOKIE_SECURE"
+    SESSION_COOKIE_SAME_SITE = "SAGE_SESSION_COOKIE_SAME_SITE"
+    CORS_ALLOWED_ORIGINS = "SAGE_CORS_ALLOWED_ORIGINS"
+    CORS_ALLOW_CREDENTIALS = "SAGE_CORS_ALLOW_CREDENTIALS"
+    CORS_ALLOW_METHODS = "SAGE_CORS_ALLOW_METHODS"
+    CORS_ALLOW_HEADERS = "SAGE_CORS_ALLOW_HEADERS"
+    CORS_EXPOSE_HEADERS = "SAGE_CORS_EXPOSE_HEADERS"
+    CORS_MAX_AGE = "SAGE_CORS_MAX_AGE"
+    WEB_BASE_PATH = "SAGE_WEB_BASE_PATH"
+    MYSQL_HOST = "SAGE_MYSQL_HOST"
+    MYSQL_PORT = "SAGE_MYSQL_PORT"
+    MYSQL_USER = "SAGE_MYSQL_USER"
+    MYSQL_PASSWORD = "SAGE_MYSQL_PASSWORD"
+    MYSQL_DATABASE = "SAGE_MYSQL_DATABASE"
+
+    PRESET_MCP_CONFIG = "SAGE_MCP_CONFIG_PATH"
+    PRESET_RUNNING_CONFIG = "SAGE_PRESET_RUNNING_CONFIG_PATH"
+    LEGACY_LLM_API_KEY = "LLM_API_KEY"
+    LEGACY_LLM_API_BASE_URL = "LLM_API_BASE_URL"
+    LEGACY_LLM_MODEL_NAME = "LLM_MODEL_NAME"
+
+
+def env_str(name: str, default: Optional[str] = None) -> Optional[str]:
+    return os.getenv(name, default)
+
+
+@overload
+def env_int(name: str, default: int) -> int: ...
+
+
+@overload
+def env_int(name: str, default: None = None) -> Optional[int]: ...
+
+
+def env_int(name: str, default: Optional[int] = None) -> Optional[int]:
+    val = os.getenv(name)
+    if val is None:
+        return default
+    try:
+        return int(val)
+    except (TypeError, ValueError):
+        return default
+
+
+@overload
+def env_float(name: str, default: float) -> float: ...
+
+
+@overload
+def env_float(name: str, default: None = None) -> Optional[float]: ...
+
+
+def env_float(name: str, default: Optional[float] = None) -> Optional[float]:
+    val = os.getenv(name)
+    if val is None:
+        return default
+    try:
+        return float(val)
+    except (TypeError, ValueError):
+        return default
+
+
+def env_bool(name: str, default: bool = False) -> bool:
+    val = os.getenv(name)
+    if val is None:
+        return default
+    return str(val).strip().lower() in ("true", "1", "yes", "y", "t")
+
+
+def env_csv(name: str, default: Optional[list[str]] = None) -> list[str]:
+    val = os.getenv(name)
+    if val is None:
+        return list(default or [])
+    if not val:
+        return []
+    return [item.strip() for item in val.split(",") if item.strip()]
+
+
+def is_production_like(cfg: StartupConfig) -> bool:
+    return (cfg.env or "").strip().lower() in {"production", "staging"}
+
+
+def validate_startup_config(cfg: StartupConfig) -> None:
+    if cfg.app_mode != "server":
+        return
+
+    if not is_production_like(cfg):
+        if cfg.cors_allow_credentials and "*" in (cfg.cors_allowed_origins or []):
+            raise ValueError("Credentialed wildcard CORS is not allowed.")
+        return
+
+    default_secrets = {
+        "jwt_key": StartupConfig.jwt_key,
+        "refresh_token_secret": StartupConfig.refresh_token_secret,
+        "session_secret": StartupConfig.session_secret,
+    }
+    insecure = [
+        name
+        for name, default in default_secrets.items()
+        if getattr(cfg, name) == default
+    ]
+    if insecure:
+        raise ValueError("Production-like environments must use secure secrets.")
+
+    if not cfg.session_cookie_secure:
+        raise ValueError(
+            "Production-like environments must enable secure session cookies."
+        )
+
+    if cfg.cors_allow_credentials and "*" in (cfg.cors_allowed_origins or []):
+        raise ValueError("Credentialed wildcard CORS is not allowed.")
+
+
+def _normalize_paths(cfg: StartupConfig) -> StartupConfig:
+    if cfg.session_dir:
+        cfg.session_dir = os.path.abspath(cfg.session_dir)
+        os.makedirs(cfg.session_dir, exist_ok=True)
+    if cfg.logs_dir:
+        cfg.logs_dir = os.path.abspath(cfg.logs_dir)
+        os.makedirs(cfg.logs_dir, exist_ok=True)
+    if cfg.agents_dir:
+        cfg.agents_dir = os.path.abspath(cfg.agents_dir)
+        os.makedirs(cfg.agents_dir, exist_ok=True)
+    if cfg.skill_dir:
+        cfg.skill_dir = os.path.abspath(cfg.skill_dir)
+        os.makedirs(cfg.skill_dir, exist_ok=True)
+    if cfg.user_dir:
+        cfg.user_dir = os.path.abspath(cfg.user_dir)
+        os.makedirs(cfg.user_dir, exist_ok=True)
+    if cfg.db_type == "file" and cfg.db_file:
+        cfg.db_file = os.path.abspath(cfg.db_file)
+        os.makedirs(os.path.dirname(cfg.db_file), exist_ok=True)
+    return cfg
+
+
+def build_startup_config(mode: str = "server") -> StartupConfig:
+    if mode == "desktop":
+        local_defaults = get_local_storage_defaults()
+        cfg = StartupConfig(
+            app_mode="desktop",
+            port=env_int(ENV.PORT, StartupConfig.port),
+            logs_dir=env_str(ENV.LOGS_DIR, local_defaults["logs_dir"])
+            or local_defaults["logs_dir"],
+            session_dir=env_str(ENV.SESSION_DIR, local_defaults["session_dir"])
+            or local_defaults["session_dir"],
+            agents_dir=env_str(ENV.AGENTS_DIR, local_defaults["agents_dir"])
+            or local_defaults["agents_dir"],
+            skill_dir=env_str(ENV.SKILL_DIR, local_defaults["skill_dir"])
+            or local_defaults["skill_dir"],
+            user_dir=env_str(ENV.USER_DIR, local_defaults["user_dir"])
+            or local_defaults["user_dir"],
+            db_type=env_str(ENV.DB_TYPE, StartupConfig.db_type)
+            or StartupConfig.db_type,
+            db_file=env_str(ENV.DB_FILE, local_defaults["db_file"])
+            or local_defaults["db_file"],
+            preset_mcp_config=env_str(
+                ENV.PRESET_MCP_CONFIG, StartupConfig.preset_mcp_config
+            )
+            or StartupConfig.preset_mcp_config,
+            preset_running_config=env_str(
+                ENV.PRESET_RUNNING_CONFIG, StartupConfig.preset_running_config
+            )
+            or StartupConfig.preset_running_config,
+            default_llm_api_key=env_str(
+                ENV.DEFAULT_LLM_API_KEY, StartupConfig.default_llm_api_key
+            )
+            or StartupConfig.default_llm_api_key,
+            default_llm_api_base_url=env_str(
+                ENV.DEFAULT_LLM_API_BASE_URL, StartupConfig.default_llm_api_base_url
+            )
+            or StartupConfig.default_llm_api_base_url,
+            default_llm_model_name=env_str(
+                ENV.DEFAULT_LLM_MODEL_NAME, StartupConfig.default_llm_model_name
+            )
+            or StartupConfig.default_llm_model_name,
+            default_llm_max_tokens=env_int(
+                ENV.DEFAULT_LLM_MAX_TOKENS, StartupConfig.default_llm_max_tokens
+            ),
+            default_llm_temperature=env_float(
+                ENV.DEFAULT_LLM_TEMPERATURE, StartupConfig.default_llm_temperature
+            ),
+            default_llm_max_model_len=env_int(
+                ENV.DEFAULT_LLM_MAX_MODEL_LEN, StartupConfig.default_llm_max_model_len
+            ),
+            default_llm_top_p=env_float(
+                ENV.DEFAULT_LLM_TOP_P, StartupConfig.default_llm_top_p
+            ),
+            default_llm_presence_penalty=env_float(
+                ENV.DEFAULT_LLM_PRESENCE_PENALTY,
+                StartupConfig.default_llm_presence_penalty,
+            ),
+            context_history_ratio=env_float(
+                ENV.CONTEXT_HISTORY_RATIO, StartupConfig.context_history_ratio
+            ),
+            context_active_ratio=env_float(
+                ENV.CONTEXT_ACTIVE_RATIO, StartupConfig.context_active_ratio
+            ),
+            context_max_new_message_ratio=env_float(
+                ENV.CONTEXT_MAX_NEW_MESSAGE_RATIO,
+                StartupConfig.context_max_new_message_ratio,
+            ),
+            context_compression_threshold=env_float(
+                ENV.CONTEXT_COMPRESSION_THRESHOLD,
+                StartupConfig.context_compression_threshold,
+            ),
+            context_recent_turns=env_int(
+                ENV.CONTEXT_RECENT_TURNS, StartupConfig.context_recent_turns
+            ),
+            jwt_key=env_str(ENV.JWT_KEY, StartupConfig.jwt_key)
+            or StartupConfig.jwt_key,
+            jwt_expire_hours=env_int(
+                ENV.JWT_EXPIRE_HOURS, StartupConfig.jwt_expire_hours
+            ),
+            refresh_token_secret=env_str(
+                ENV.REFRESH_TOKEN_SECRET, StartupConfig.refresh_token_secret
+            )
+            or StartupConfig.refresh_token_secret,
+            s3_endpoint=env_str(ENV.S3_ENDPOINT, StartupConfig.s3_endpoint),
+            s3_access_key=env_str(ENV.S3_ACCESS_KEY, StartupConfig.s3_access_key),
+            s3_secret_key=env_str(ENV.S3_SECRET_KEY, StartupConfig.s3_secret_key),
+            s3_secure=env_bool(ENV.S3_SECURE, StartupConfig.s3_secure),
+            s3_bucket_name=env_str(ENV.S3_BUCKET_NAME, StartupConfig.s3_bucket_name),
+            s3_public_base_url=env_str(
+                ENV.S3_PUBLIC_BASE_URL, StartupConfig.s3_public_base_url
+            ),
+        )
+        return _normalize_paths(cfg)
+
+    server_defaults = get_server_storage_defaults()
+    cfg = StartupConfig(
+        app_mode="server",
+        env=env_str(ENV.APP_ENV, StartupConfig.env) or StartupConfig.env,
+        log_level=env_str(ENV.LOG_LEVEL, StartupConfig.log_level)
+        or StartupConfig.log_level,
+        port=env_int(ENV.PORT, StartupConfig.port),
+        logs_dir=env_str(ENV.LOGS_DIR, server_defaults["logs_dir"]),  # pyright: ignore[reportArgumentType]
+        session_dir=env_str(ENV.SESSION_DIR, server_defaults["session_dir"]),  # pyright: ignore[reportArgumentType]
+        agents_dir=env_str(ENV.AGENTS_DIR, server_defaults["agents_dir"]),  # pyright: ignore[reportArgumentType]
+        skill_dir=env_str(ENV.SKILL_DIR, server_defaults["skill_dir"]),  # pyright: ignore[reportArgumentType]
+        user_dir=env_str(ENV.USER_DIR, server_defaults["user_dir"]),  # pyright: ignore[reportArgumentType]
+        db_type=env_str(ENV.DB_TYPE, StartupConfig.db_type),  # pyright: ignore[reportArgumentType]
+        db_file=env_str(ENV.DB_FILE, server_defaults["db_file"]),  # pyright: ignore[reportArgumentType]
+        mysql_host=env_str(ENV.MYSQL_HOST, StartupConfig.mysql_host),  # pyright: ignore[reportArgumentType]
+        mysql_port=env_int(ENV.MYSQL_PORT, StartupConfig.mysql_port),
+        mysql_user=env_str(ENV.MYSQL_USER, StartupConfig.mysql_user),  # pyright: ignore[reportArgumentType]
+        mysql_password=env_str(ENV.MYSQL_PASSWORD, StartupConfig.mysql_password),  # pyright: ignore[reportArgumentType]
+        mysql_database=env_str(ENV.MYSQL_DATABASE, StartupConfig.mysql_database),  # pyright: ignore[reportArgumentType]
+        mysql_charset=StartupConfig.mysql_charset,
+        default_llm_api_key="",
+        default_llm_api_base_url=env_str(
+            ENV.DEFAULT_LLM_API_BASE_URL, StartupConfig.default_llm_api_base_url
+        )
+        or StartupConfig.default_llm_api_base_url,
+        default_llm_model_name=env_str(
+            ENV.DEFAULT_LLM_MODEL_NAME, StartupConfig.default_llm_model_name
+        )
+        or StartupConfig.default_llm_model_name,
+        default_llm_max_tokens=env_int(
+            ENV.DEFAULT_LLM_MAX_TOKENS, StartupConfig.default_llm_max_tokens
+        ),
+        default_llm_temperature=env_float(
+            ENV.DEFAULT_LLM_TEMPERATURE, StartupConfig.default_llm_temperature
+        ),
+        default_llm_max_model_len=env_int(
+            ENV.DEFAULT_LLM_MAX_MODEL_LEN, StartupConfig.default_llm_max_model_len
+        ),
+        default_llm_top_p=env_float(
+            ENV.DEFAULT_LLM_TOP_P, StartupConfig.default_llm_top_p
+        ),
+        default_llm_presence_penalty=env_float(
+            ENV.DEFAULT_LLM_PRESENCE_PENALTY, StartupConfig.default_llm_presence_penalty
+        ),
+        context_history_ratio=env_float(
+            ENV.CONTEXT_HISTORY_RATIO, StartupConfig.context_history_ratio
+        ),
+        context_active_ratio=env_float(
+            ENV.CONTEXT_ACTIVE_RATIO, StartupConfig.context_active_ratio
+        ),
+        context_max_new_message_ratio=env_float(
+            ENV.CONTEXT_MAX_NEW_MESSAGE_RATIO,
+            StartupConfig.context_max_new_message_ratio,
+        ),
+        context_compression_threshold=env_float(
+            ENV.CONTEXT_COMPRESSION_THRESHOLD,
+            StartupConfig.context_compression_threshold,
+        ),
+        context_recent_turns=env_int(
+            ENV.CONTEXT_RECENT_TURNS, StartupConfig.context_recent_turns
+        ),
+        bootstrap_admin_username=env_str(
+            ENV.BOOTSTRAP_ADMIN_USERNAME, StartupConfig.bootstrap_admin_username
+        )
+        or StartupConfig.bootstrap_admin_username,
+        bootstrap_admin_password=env_str(
+            ENV.BOOTSTRAP_ADMIN_PASSWORD, StartupConfig.bootstrap_admin_password
+        )
+        or StartupConfig.bootstrap_admin_password,
+        jwt_key=env_str(ENV.JWT_KEY, StartupConfig.jwt_key),  # pyright: ignore[reportArgumentType]
+        jwt_expire_hours=env_int(ENV.JWT_EXPIRE_HOURS, StartupConfig.jwt_expire_hours),
+        refresh_token_secret=env_str(  # pyright: ignore[reportArgumentType]
+            ENV.REFRESH_TOKEN_SECRET, StartupConfig.refresh_token_secret
+        ),
+        session_secret=env_str(ENV.SESSION_SECRET, StartupConfig.session_secret),  # pyright: ignore[reportArgumentType]
+        session_cookie_name=env_str(  # pyright: ignore[reportArgumentType]
+            ENV.SESSION_COOKIE_NAME, StartupConfig.session_cookie_name
+        ),
+        session_cookie_secure=env_bool(
+            ENV.SESSION_COOKIE_SECURE, StartupConfig.session_cookie_secure
+        ),
+        session_cookie_same_site=(
+            env_str(
+                ENV.SESSION_COOKIE_SAME_SITE, StartupConfig.session_cookie_same_site
+            )
+            or StartupConfig.session_cookie_same_site
+        )
+        .strip()
+        .lower(),
+        cors_allowed_origins=env_csv(
+            ENV.CORS_ALLOWED_ORIGINS, StartupConfig().cors_allowed_origins
+        ),
+        cors_allow_credentials=env_bool(
+            ENV.CORS_ALLOW_CREDENTIALS, StartupConfig.cors_allow_credentials
+        ),
+        cors_allow_methods=env_csv(
+            ENV.CORS_ALLOW_METHODS, StartupConfig().cors_allow_methods
+        ),
+        cors_allow_headers=env_csv(
+            ENV.CORS_ALLOW_HEADERS, StartupConfig().cors_allow_headers
+        ),
+        cors_expose_headers=env_csv(
+            ENV.CORS_EXPOSE_HEADERS, StartupConfig().cors_expose_headers
+        ),
+        cors_max_age=env_int(ENV.CORS_MAX_AGE, StartupConfig.cors_max_age),
+        web_base_path=env_str(ENV.WEB_BASE_PATH, StartupConfig.web_base_path),  # pyright: ignore[reportArgumentType]
+        s3_endpoint=env_str(ENV.S3_ENDPOINT, StartupConfig.s3_endpoint),
+        s3_access_key=env_str(ENV.S3_ACCESS_KEY, StartupConfig.s3_access_key),
+        s3_secret_key=env_str(ENV.S3_SECRET_KEY, StartupConfig.s3_secret_key),
+        s3_secure=env_bool(ENV.S3_SECURE, StartupConfig.s3_secure),
+        s3_bucket_name=env_str(ENV.S3_BUCKET_NAME, StartupConfig.s3_bucket_name),
+        s3_public_base_url=env_str(
+            ENV.S3_PUBLIC_BASE_URL, StartupConfig.s3_public_base_url
+        ),
+        trace_jaeger_endpoint=env_str(
+            ENV.TRACE_JAEGER_URL,
+            env_str(ENV.TRACE_JAEGER_ENDPOINT, StartupConfig.trace_jaeger_endpoint),
+        ),
+        trace_jaeger_public_url=env_str(
+            ENV.TRACE_JAEGER_PUBLIC_URL, StartupConfig.trace_jaeger_public_url
+        ),
+    )
+
+    same_site = (
+        (cfg.session_cookie_same_site or StartupConfig.session_cookie_same_site)
+        .strip()
+        .lower()
+    )
+    if same_site not in {"lax", "strict", "none"}:
+        cfg.session_cookie_same_site = StartupConfig.session_cookie_same_site
+    if is_production_like(cfg):
+        cfg.session_cookie_secure = True
+    if cfg.web_base_path:
+        cfg.web_base_path = "/" + cfg.web_base_path.strip("/")
+    else:
+        cfg.web_base_path = StartupConfig.web_base_path
+
+    cfg = _normalize_paths(cfg)
+    return cfg
+
+
+def get_startup_config() -> StartupConfig:
+    return _GLOBAL_STARTUP_CONFIG
+
+
+def init_startup_config(mode: str = "server") -> StartupConfig:
+    global _GLOBAL_STARTUP_CONFIG
+    cfg = build_startup_config(mode)
+    validate_startup_config(cfg)
+    _GLOBAL_STARTUP_CONFIG = cfg
+    return cfg

@@ -254,7 +254,7 @@ def test_descriptor_io_rejects_symlinks_and_hardlinks_without_modifying_target(
 
 
 def test_resource_changes_are_bound_to_desktop_policy_hash(tmp_path):
-    from app.desktop_v2.backend.bindings import DesktopExecutionBindingProvider
+    from app.v2.desktop.backend.bindings import DesktopExecutionBindingProvider
 
     first = DesktopExecutionBindingProvider(tmp_path).sandbox_spec()
     second = DesktopExecutionBindingProvider(

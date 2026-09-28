@@ -15,7 +15,7 @@ ref: v2-detail-sagents-v2-local-sandbox-security
 
 ## 范围与标准配置
 
-`sage.sandbox.local-workspace` 约束官方文件、Shell、后台 Shell Job 和 Skill 写入，不隔离宿主 Python 插件或 MCP 服务，也不使用 v1 的 sagents/utils/sandbox 后端。
+`sage.sandbox.local-workspace` 约束官方文件、Shell、后台 Shell Job 和 Skill 写入，不隔离宿主 Python 插件或 MCP 服务，也不使用 v1 的 sagents/v1/utils/sandbox 后端。
 
 ResolvedSandboxSpec.resources 与 Desktop 的 component_configs["execution.sandbox"].resources 接受相同字段：
 
