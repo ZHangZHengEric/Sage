@@ -278,6 +278,23 @@ def test_workspace_cannot_supply_an_unsandboxed_launch_utility(tmp_path, monkeyp
         resources._trusted_utility("bwrap", tmp_path)
 
 
+def test_sandbox_command_path_puts_homebrew_ahead_of_system_default(tmp_path):
+    from sagents.v2.runtime.execution.sandbox.local_support.resources import (
+        _sandbox_command_path,
+    )
+
+    homebrew = tmp_path / "opt" / "homebrew" / "bin"
+    local_bin = tmp_path / "usr" / "local" / "bin"
+    homebrew.mkdir(parents=True)
+    local_bin.mkdir(parents=True)
+    path = _sandbox_command_path(
+        "/usr/bin:/bin",
+        prefixes=(str(homebrew), str(local_bin), str(tmp_path / "missing")),
+    )
+    assert path.split(os.pathsep)[:3] == [str(homebrew), str(local_bin), "/usr/bin"]
+    assert _sandbox_command_path("/usr/bin:/bin", prefixes=()) == "/usr/bin:/bin"
+
+
 def test_macos_seatbelt_reads_xcode_developer_roots(tmp_path):
     from sagents.v2.runtime.execution.sandbox.local_support.resources import (
         _macos_developer_read_roots,

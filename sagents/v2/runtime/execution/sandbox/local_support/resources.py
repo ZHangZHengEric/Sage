@@ -55,6 +55,28 @@ def _macos_developer_read_roots(
     return tuple(unique)
 
 
+_SANDBOX_PATH_PREFIXES = (
+    "/opt/homebrew/bin",
+    "/usr/local/bin",
+)
+
+
+def _sandbox_command_path(
+    existing: str | None = None,
+    *,
+    prefixes: tuple[str, ...] = _SANDBOX_PATH_PREFIXES,
+) -> str:
+    """Put Homebrew / usr/local ahead of the system default so ffmpeg resolves."""
+    parts: list[str] = []
+    for prefix in prefixes:
+        if prefix and Path(prefix).is_dir() and prefix not in parts:
+            parts.append(prefix)
+    for item in (existing or os.defpath).split(os.pathsep):
+        if item and item not in parts:
+            parts.append(item)
+    return os.pathsep.join(parts) or os.defpath
+
+
 # Keep the trampoline in memory. Executing a helper file from a workspace
 # checkout would let a prior command rewrite code that runs BEFORE isolation.
 _LAUNCH_CODE = """
@@ -491,6 +513,7 @@ class LocalResourceBoundary:
 
     def command(self, executable, argv, cwd, env):
         spec = self.row.spec
+        env["PATH"] = _sandbox_command_path(env.get("PATH"))
         file_limit = min(
             spec.filesystem.max_file_bytes or spec.resources.disk_mb * 1024**2,
             spec.resources.disk_mb * 1024**2,
