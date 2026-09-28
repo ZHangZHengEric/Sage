@@ -9,7 +9,7 @@ ROOT = Path(__file__).resolve().parents[2]
 
 
 def server_environment() -> dict[str, str]:
-    tree = ast.parse((ROOT / "app/server_v2/config/settings.py").read_text())
+    tree = ast.parse((ROOT / "app/v2/server/config/settings.py").read_text())
     values = {}
     for node in ast.walk(tree):
         if (
@@ -29,7 +29,7 @@ def server_environment() -> dict[str, str]:
 
 
 def server_routes() -> list[tuple[str, str, str]]:
-    card = ast.parse((ROOT / "app/server_v2/conversations/a2a/card.py").read_text())
+    card = ast.parse((ROOT / "app/v2/server/conversations/a2a/card.py").read_text())
     constants = {
         n.targets[0].id: n.value.value
         for n in card.body
@@ -51,7 +51,7 @@ def server_routes() -> list[tuple[str, str, str]]:
         raise ValueError(f"Unsupported route expression: {ast.dump(node)}")
 
     routes = []
-    for path in sorted((ROOT / "app/server_v2/routers").glob("*.py")):
+    for path in sorted((ROOT / "app/v2/server/routers").glob("*.py")):
         tree = ast.parse(path.read_text())
         prefix = ""
         for n in tree.body:

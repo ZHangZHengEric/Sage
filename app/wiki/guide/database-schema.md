@@ -225,8 +225,8 @@ Sage 使用 SQLite 数据库存储应用数据，数据库文件位于 `~/.sage/
 Sage 使用 DAO (Data Access Object) 模式封装数据库操作：
 
 ```python
-from app.desktop.core.models.agent import AgentConfigDao
-from app.desktop.core.models.conversation import ConversationDao
+from app.v1.desktop.core.models.agent import AgentConfigDao
+from app.v1.desktop.core.models.conversation import ConversationDao
 
 # 获取 Agent 配置
 dao = AgentConfigDao()
@@ -242,7 +242,7 @@ conversations, total = await conv_dao.get_conversations_paginated(
 ### 直接使用 SQLAlchemy Session
 
 ```python
-from app.desktop.core.core.client.db import get_global_db
+from app.v1.desktop.core.core.client.db import get_global_db
 from sqlalchemy import select
 
 db = await get_global_db()
@@ -276,7 +276,7 @@ cp ~/.sage/sage_backup.db ~/.sage/sage.db
 
 ### 添加新表
 
-1. 在 `app/desktop/core/models/` 目录下创建新的模型文件
+1. 在 `app/v1/desktop/core/models/` 目录下创建新的模型文件
 2. 继承 `Base` 类并定义表结构
 3. 创建对应的 DAO 类继承 `BaseDao`
 4. 数据库表会在应用启动时自动创建

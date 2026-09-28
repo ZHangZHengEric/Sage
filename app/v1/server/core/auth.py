@@ -1,0 +1,46 @@
+from typing import Optional
+
+import jwt
+
+from app.v1.common.core import config
+from app.v1.common.core.exceptions import SageHTTPException
+
+
+def get_session_claims(request) -> Optional[dict]:
+    session = request.scope.get("session")
+    if not isinstance(session, dict):
+        return None
+    claims = session.get("user_claims")
+    return claims if isinstance(claims, dict) else None
+
+
+def parse_access_token(token: str) -> Optional[dict]:
+    cfg = config.get_startup_config()
+    try:
+        claims = jwt.decode(token, cfg.jwt_key, algorithms=["HS256"])
+        return claims
+    except jwt.ExpiredSignatureError:
+        raise SageHTTPException(
+            status_code=401,
+            message_key="auth.session_expired",
+            error_detail="token expired",
+        )
+    except Exception:
+        raise SageHTTPException(
+            status_code=401,
+            message_key="auth.invalid_token",
+            error_detail="invalid token",
+        )
+
+
+def parse_refresh_token(token: str) -> Optional[dict]:
+    cfg = config.get_startup_config()
+    try:
+        claims = jwt.decode(token, cfg.refresh_token_secret, algorithms=["HS256"])
+        return claims
+    except Exception:
+        raise SageHTTPException(
+            status_code=401,
+            message_key="auth.invalid_token",
+            error_detail="invalid refresh token",
+        )

@@ -2,10 +2,10 @@ import asyncio
 import logging
 from types import SimpleNamespace
 
-from app.server import bootstrap, lifecycle
+from app.v1.server import bootstrap, lifecycle
 from mcp_servers.task_scheduler import task_scheduler_server
-from sagents.tool import tool_manager as tool_manager_module
-from sagents.tool.tool_manager import ToolManager
+from sagents.v1.tool import tool_manager as tool_manager_module
+from sagents.v1.tool.tool_manager import ToolManager
 
 
 class _RecordingLogger:
@@ -79,7 +79,7 @@ def test_default_anytool_activation_does_not_repeat_registration_success(monkeyp
     monkeypatch.setattr(lifecycle, "logger", recording_logger)
     monkeypatch.setattr(lifecycle.asyncio, "sleep", no_wait)
     monkeypatch.setattr(
-        "common.services.mcp_service.ensure_default_anytool_server", ensure_ready
+        "app.v1.common.services.mcp_service.ensure_default_anytool_server", ensure_ready
     )
 
     asyncio.run(lifecycle._ensure_default_anytool_server_ready())
@@ -111,7 +111,7 @@ def test_mcp_validation_keeps_summary_without_per_server_success(monkeypatch):
 
     monkeypatch.setattr(bootstrap, "logger", recording_logger)
     monkeypatch.setattr(bootstrap, "ensure_default_anytool_server", ensure_default)
-    monkeypatch.setattr("common.models.mcp_server.MCPServerDao", FakeDao)
+    monkeypatch.setattr("app.v1.common.models.mcp_server.MCPServerDao", FakeDao)
     monkeypatch.setattr(
         ToolManager, "get_instance", classmethod(lambda _cls: FakeToolManager())
     )

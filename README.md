@@ -37,8 +37,8 @@
 
 | Choose your path | Start here |
 | --- | --- |
-| 💻 **Desktop v2** — Local projects and agent collaboration | [Desktop guide](app/desktop_v2/README.md) |
-| 🌐 **Server v2** — Multi-user web access and Agent Studio | [Server guide](app/server_v2/README.md) |
+| 💻 **Desktop v2** — Local projects and agent collaboration | [Desktop guide](app/v2/desktop/README.md) |
+| 🌐 **Server v2** — Multi-user web access and Agent Studio | [Server guide](app/v2/server/README.md) |
 | 🧠 **SAgents v2** — Build agents into your own application | [Runtime quick start](sagents/v2/README.md#quick-start) |
 | 📦 **Desktop installers** — Available release builds | [Downloads & release instructions](https://github.com/ZHangZHengEric/Sage/releases) |
 
@@ -52,7 +52,7 @@ cd Sage
 python3.12 -m venv .venv
 source .venv/bin/activate
 python -m pip install -e .
-cd app/desktop_v2
+cd app/v2/desktop
 flutter pub get
 flutter run -d macos
 ```
@@ -61,7 +61,7 @@ flutter run -d macos
 
 The app starts its local backend automatically. Settings and session data live in `~/sage/runtime`; the default workspace is `~/sage/agent_workspace`.
 
-For Windows and Linux setup, see the [Desktop guide](app/desktop_v2/README.md). Packaged releases follow their own release instructions; the existing release workflow builds the legacy Tauri app.
+For Windows and Linux setup, see the [Desktop guide](app/v2/desktop/README.md). Packaged releases follow their own release instructions; the existing release workflow builds the legacy Tauri app.
 
 ### 🌐 Server from source
 
@@ -69,22 +69,22 @@ Requires **Python 3.12+**, **MySQL**, and **Node.js 22.12+**. From the checkout 
 
 ```bash
 python -m pip install -e '.[server-v2]'
-cp app/server_v2/.env.example app/server_v2/.env
+cp app/v2/server/.env.example app/v2/server/.env
 ```
 
 Set the MySQL connection, JWT secret, and initial administrator credentials in `.env`, then run:
 
 ```bash
-cd app/server_v2/web
+cd app/v2/server/web
 npm install
 npm run build
 cd ../../..
-python -m app.server_v2
+python -m app.v2.server
 ```
 
 Open **[localhost:8090](http://localhost:8090)**. Add a model and an Agent to start chatting, or open **`/studio`** to manage Agent packages.
 
-See the [Server guide](app/server_v2/README.md) for configuration. Server v2 currently supports **one worker**; MySQL persistence does not enable horizontal scaling.
+See the [Server guide](app/v2/server/README.md) for configuration. Server v2 currently supports **one worker**; MySQL persistence does not enable horizontal scaling.
 
 ### 🧑‍💻 Run your first SAgents v2 agent
 
@@ -190,15 +190,16 @@ Your application owns the UI, authentication, and credentials. Built-in runtime 
 | Learn | Build |
 | --- | --- |
 | [Documentation index](docs/en/README.md) | [Runtime integration manual](sagents/v2/使用手册.md) |
-| [Desktop v2](app/desktop_v2/README.md) | [Server Agent platform](docs/zh/architecture/SERVER_V2_AGENT_PLATFORM.md) |
-| [Server v2](app/server_v2/README.md) | [Deployment](deploy/README.md) |
+| [Desktop v2](app/v2/desktop/README.md) | [Server Agent platform](docs/zh/architecture/SERVER_V2_AGENT_PLATFORM.md) |
+| [Server v2](app/v2/server/README.md) | [Deployment](deploy/README.md) |
+| [Versioned source layout](docs/VERSIONED_LAYOUT.md) | v1 directories and import migration |
 | [Release notes](release_notes/) | [Development changelog](change_log.md) |
 
 Some component guides are currently in Chinese. Use the guide for your chosen entry point.
 
 ## 🛠️ **Contributing**
 
-Explore [`sagents/v2/`](sagents/v2/) for the runtime, [`app/desktop_v2/`](app/desktop_v2/) for the desktop app, and [`app/server_v2/`](app/server_v2/) for the web platform.
+Explore [`sagents/v2/`](sagents/v2/) for the runtime, [`app/v2/desktop/`](app/v2/desktop/) for the desktop app, and [`app/v2/server/`](app/v2/server/) for the web platform.
 
 Contributions are welcome through [Issues](https://github.com/ZHangZHengEric/Sage/issues) and pull requests. Include reproduction steps and run the affected component's checks: Python tests live in [`tests/`](tests/); Desktop v2 uses `flutter analyze` and `flutter test`.
 

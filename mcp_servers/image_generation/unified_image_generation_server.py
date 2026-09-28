@@ -21,8 +21,8 @@ from .image_providers import (
     SeedreamProvider,
 )
 from .image_providers.base import BaseImageProvider
-from sagents.tool.mcp_tool_base import sage_mcp_tool
-from sagents.utils.logger import logger
+from sagents.v1.tool.mcp_tool_base import sage_mcp_tool
+from sagents.v1.utils.logger import logger
 
 # 初始化 MCP 服务器
 mcp = FastMCP("Unified Image Generation Service")

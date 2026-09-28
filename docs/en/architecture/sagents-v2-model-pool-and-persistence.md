@@ -40,12 +40,12 @@ This reduces repeated event serialization, not the cost of Session metadata, com
 The project requires Python 3.12+. Use current tests and benchmarks rather than treating historical pass counts as current acceptance results:
 
 ```bash
-python -m pytest tests/app/server_v2/test_model_pool.py
-python scripts/benchmark_v2_session_projection.py --events 10000 --repeats 10
+python -m pytest tests/app/v2/server/test_model_pool.py
+python scripts/v2/benchmark_v2_session_projection.py --events 10000 --repeats 10
 ```
 
 Pool tests cover concurrent initialization, user and credential isolation, capacity, failure, cancellation, slow eviction, and shutdown failures. SQL projection tests cover incremental append, no new events, history truncation, Run deletion, and full export. Mock database connections do not constitute real MySQL / PostgreSQL acceptance.
 
 The benchmark measures coordinator serialization of synthetic long event lists, excluding SQL, network, model calls, and task completion rates. It cannot be converted into production QPS. Long-running load against real endpoints requires separate validation.
 
-Implementation: [model_pool.py](https://github.com/ZHangZHengEric/Sage/blob/main/app/server_v2/runtime/model_pool.py).
+Implementation: [model_pool.py](https://github.com/ZHangZHengEric/Sage/blob/main/app/v2/server/runtime/model_pool.py).

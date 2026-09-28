@@ -5,7 +5,7 @@ import json
 
 import pytest
 
-from sagents.prompts.simple_agent_prompts import task_complete_template
+from sagents.v1.prompts.simple_agent_prompts import task_complete_template
 from sagents.v2.agent.policy import (
     ContinuationAction,
     ContinuationContext,

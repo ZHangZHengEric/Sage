@@ -19,4 +19,4 @@ parent: API
 
 Server v2 uses MySQL for application inventory and Session persistence, and Session events for AG-UI replay. Desktop uses its own local data root and catalog. Neither host uses the legacy desktop-update API.
 
-[Environment variables](../ENV_VARS.md) · [Server component](https://github.com/ZHangZHengEric/Sage/blob/main/app/server_v2/README.md)
+[Environment variables](../ENV_VARS.md) · [Server component](https://github.com/ZHangZHengEric/Sage/blob/main/app/v2/server/README.md)

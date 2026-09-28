@@ -9,7 +9,7 @@ def test_deployment_does_not_bundle_elasticsearch():
         REPO_ROOT / "deploy/compose.sh",
         REPO_ROOT / "deploy/prod/docker-compose.yml",
         REPO_ROOT / "deploy/README.md",
-        REPO_ROOT / "scripts/dev-up.sh",
+        REPO_ROOT / "scripts/v1/dev-up.sh",
         REPO_ROOT / "docs/en/applications/WEB.md",
         REPO_ROOT / "docs/zh/applications/WEB.md",
     )

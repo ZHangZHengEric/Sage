@@ -1,15 +1,16 @@
 *
 
 !app/
-!app/server/
-!app/server/web/
-!app/server/web/**
+!app/v1/
+!app/v1/server/
+!app/v1/server/web/
+!app/v1/server/web/**
 
-app/server/web/node_modules
-app/server/web/dist
-app/server/web/.vite
-app/server/web/.DS_Store
-app/server/web/npm-debug.log*
+app/v1/server/web/node_modules
+app/v1/server/web/dist
+app/v1/server/web/.vite
+app/v1/server/web/.DS_Store
+app/v1/server/web/npm-debug.log*
 
 !deploy/
 !deploy/**

@@ -65,7 +65,7 @@ The estimator caches at most 2,048 digests and counts, not full prompts. The bui
 These are context-preparation limits, not substitutes for Scheduler limits, tenant quotas, model pools, or storage guarantees.
 
 ```bash
-python scripts/benchmark_v2_context.py --messages 800 --sessions 8
+python scripts/v2/benchmark_v2_context.py --messages 800 --sessions 8
 python -m pytest tests/sagents/v2/test_context_efficiency.py tests/sagents/v2/test_skill_provider_matrix.py
 ```
 

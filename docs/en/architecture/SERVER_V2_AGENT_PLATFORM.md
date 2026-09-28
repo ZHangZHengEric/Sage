@@ -71,10 +71,10 @@ Archived results need no model initialization. File storage supports read-only c
 
 See [HTTP API](../api/HTTP_API_REFERENCE.md) for the complete route inventory, authentication, and conditional mounts. Resource denial returns 403, invisible objects 404, version conflicts 409, capacity/model rate limits 429, and invalid definitions 422.
 
-After building app/server_v2/web, the backend hosts web/dist, including `/studio`. Unknown APIs and escaping file paths never fall back to HTML. Separate frontend hosting with API proxying is also supported; see [Server setup](../applications/WEB.md).
+After building app/v2/server/web, the backend hosts web/dist, including `/studio`. Unknown APIs and escaping file paths never fall back to HTML. Separate frontend hosting with API proxying is also supported; see [Server setup](../applications/WEB.md).
 
 Only one worker is supported. MySQL persistence does not supply horizontal scaling. AG-UI replay reads Session events without Redis. SQLite transactions, scripted models, and synthetic concurrency tests do not replace real MySQL, native-platform, or long-running model-load acceptance.
 
-Implementation: [bootstrap.py](https://github.com/ZHangZHengEric/Sage/blob/main/app/server_v2/bootstrap.py).
+Implementation: [bootstrap.py](https://github.com/ZHangZHengEric/Sage/blob/main/app/v2/server/bootstrap.py).
 
-Package authorization rules: [policy.py](https://github.com/ZHangZHengEric/Sage/blob/main/app/server_v2/packages/policy.py).
+Package authorization rules: [policy.py](https://github.com/ZHangZHengEric/Sage/blob/main/app/v2/server/packages/policy.py).

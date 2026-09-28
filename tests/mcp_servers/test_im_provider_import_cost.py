@@ -5,7 +5,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from sagents.tool.tool_manager import ToolManager
+from sagents.v1.tool.tool_manager import ToolManager
 
 
 class TestImProviderImportCost(unittest.TestCase):
@@ -102,7 +102,7 @@ assert "dingtalk_stream" not in sys.modules
         with (
             patch.dict(os.environ, {"SAGE_INTERNAL_SERVER_PROCESS": "1"}),
             patch(
-                "sagents.tool.tool_manager._DISCOVERED_MCP_TOOLS",
+                "sagents.v1.tool.tool_manager._DISCOVERED_MCP_TOOLS",
                 discovered,
             ),
             patch.object(tm, "_discover_import_path"),
