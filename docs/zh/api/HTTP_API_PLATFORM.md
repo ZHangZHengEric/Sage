@@ -11,7 +11,7 @@ parent: API
 
 # 平台与可观测性
 
-- `GET /health` 和 `GET /active` 返回服务健康状态与实际后端选择。
+- `GET /health` 和 `GET /active` 返回服务状态、协议版本、运行时和 tracing 是否启用。
 - Server 默认输出 `sage.log/v1` JSON 行日志，通过 `SAGE_SERVER_LOG_*` 配置级别、格式和可选目录。
 - 请求关联使用 `X-Request-ID`，JSON 响应也包含 `request_id`。
 - 可选 Jaeger 集成使用 `SAGE_SERVER_JAEGER_*`，不是对话启动的必要依赖。

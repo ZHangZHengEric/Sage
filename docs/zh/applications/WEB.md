@@ -38,6 +38,8 @@ python -m app.server_v2
 
 开发前端时，在 `app/server_v2/web` 中运行 `npm run dev`，Vite 代理到 8090 端口。进程环境变量优先于组件 `.env` 文件。
 
+启动时幂等升级旧表：补齐缺失的 `threads.agent_id`，将 Skill 描述扩展为 `LONGTEXT`。数据库账号需要相应的 `ALTER` 权限。以前已截断的目录描述可重新导入原 Skill 文件修复。
+
 ## 存储与部署边界
 
 - MySQL 保存用户、catalog、thread 索引、Agent 包库存和运行时 Session。

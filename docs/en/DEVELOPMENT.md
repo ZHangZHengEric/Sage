@@ -48,8 +48,11 @@ npm run build
 
 ```bash
 .venv/bin/python docs/scripts/check_docs.py
+.venv/bin/python -m unittest discover -s docs/scripts -p 'test_*.py'
 bash docs/scripts/build_jekyll.sh
 python3 docs/scripts/check_language_nav.py
 ```
 
 The Jekyll build requires Ruby and the gems in `docs/Gemfile`. Current pages must have matching language metadata, valid local links, and a v2 source reference. Historical files belong in `docs/archive/`, which is excluded from publication. Do not turn old audit pass counts into current readiness guarantees.
+
+The checks compare English/Chinese page sets, navigation metadata, heading structure, code examples, and link targets. Route and environment-variable inventories are checked against current Server v2 source. After building, every published language page is checked for a complete, consistent sidebar and an exact language-switch counterpart.

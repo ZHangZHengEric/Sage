@@ -24,6 +24,8 @@ ref: v2-MCP_SERVERS
 
 通过 Web 界面管理模型、Agent、Skill 和 MCP。Skills 支持 ZIP 上传及按 Agent 选择。MCP 管理使用 `/api/mcp`，刷新连接可重新发现工具。详见 [HTTP API](api/HTTP_API_REFERENCE.md)。
 
+Server MCP 只接受 `sse` 和 `streamable_http`，拒绝租户 `stdio` 命令；Desktop 可以使用 stdio。Skill 列表完整保留描述，包括多行 YAML；只有加载后的活跃 Skill 内容有独立 token 预算。完整列表仍计入上下文总预算。
+
 ## 嵌入式宿主
 
 最小示例有意不启用文件或 Shell 工具。Official tools 需要宿主提供 `OfficialToolRuntime` 和明确的工作区、沙箱绑定。工具执行必须在资源边界校验 grant。内存 manifest 本身不授权任意本机文件访问。

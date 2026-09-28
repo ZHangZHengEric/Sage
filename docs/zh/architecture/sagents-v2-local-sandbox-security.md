@@ -9,13 +9,13 @@ ref: v2-detail-sagents-v2-local-sandbox-security
 
 {% include lang_switcher.html %}
 
-# Sage v2 local 沙箱：资源限制与验证
+# v2 本机沙箱
 
-本次范围是 `sage.sandbox.local-workspace`，覆盖官方文件、Shell、后台 Shell 作业和技能写入入口。MCP 服务不在范围内。v1 的 `sagents/utils/sandbox` 不是 v2 使用的执行后端，本次没有修改其行为。
+## 范围与标准配置
 
-## 标准配置
+`sage.sandbox.local-workspace` 约束官方文件、Shell、后台 Shell Job 和 Skill 写入，不隔离宿主 Python 插件或 MCP 服务，也不使用 v1 的 sagents/utils/sandbox 后端。
 
-`ResolvedSandboxSpec.resources` 和 Desktop 的 `component_configs["execution.sandbox"].resources` 使用相同字段：
+ResolvedSandboxSpec.resources 与 Desktop 的 component_configs["execution.sandbox"].resources 接受相同字段：
 
 ```json
 {
@@ -27,24 +27,24 @@ ref: v2-detail-sagents-v2-local-sandbox-security
 }
 ```
 
-CPU 的 100% 表示一个逻辑核心的计算配额，200% 表示两个核心；不是进程累计 CPU 秒数，也不是整台机器的百分比。内存和磁盘单位为 MiB。CPU、内存、进程数限制覆盖沙箱执行进程及其后代，磁盘范围包括工作区、临时目录和共享内存文件。宿主 Sage 控制进程不属于执行 cgroup。
+CPU 100% 是一个逻辑核心配额，200% 是两个核心，不是累计 CPU 秒数或整机百分比。内存/磁盘以 MiB 计，进程限制覆盖执行进程及后代；磁盘范围包含工作区、临时目录和共享内存，宿主控制进程不进入执行 cgroup。
 
-协议默认要求硬限制；`require_hard_limits=false` 表示"本次不要求内核级硬限制"，两个平台含义相同：macOS 用 Seatbelt 隔离、按采样计量，Linux 用 bubblewrap 隔离、同样按采样计量。隔离那一半在 Linux 上不可协商——命名空间、能力清空、seccomp、无网络、系统只读始终强制，不存在退回普通宿主 subprocess 的路径。硬限制那一半来自管理员准备的 cgroup 子树与 XFS project 挂载：没有配置时 provider 的 capabilities 如实报告 cpu/memory/disk/process_count 不可用，`require_hard_limits=true` 的 spec 在 admission 阶段就以 `sandbox.resource_limits_unsupported` 拒绝，而不是等到 provisioning 才发现。资源参数进入 Desktop 的配置解析、策略指纹和持久化 spec。非法、零值、负数、无穷大不被接受。
+协议默认要求硬限制。require_hard_limits=false 允许采样计量，不取消 OS 隔离：macOS 使用 Seatbelt，Linux 使用 bubblewrap、命名空间、能力清空、seccomp、无网络和只读系统。没有普通宿主 subprocess 回退。无硬限制能力时，硬限制请求在 admission 阶段以 sandbox.resource_limits_unsupported 拒绝。非法、零、负和无穷资源值被拒绝。
 
-`filesystem.max_file_bytes` 和 `filesystem.max_total_bytes` 仍是额外的文件接口限制，不能代替操作系统配额。单文件还通过继承的 `RLIMIT_FSIZE` 限制；完整磁盘限制以以下平台行为为准。
+filesystem.max_file_bytes / max_total_bytes 是额外文件 API 限制，不代替内核配额；继承 RLIMIT_FSIZE 提供单文件限制。
 
 ## Linux
 
-执行路径为 `LocalProcessRuntime → 隔离 Python 启动器 → cgroup.procs → bubblewrap → 命令及后代`。启动器使用内存中的固定代码和 `python -I -c`，不执行工作区中的可变启动脚本；宿主 Python、Sage 沙箱实现和隔离工具必须位于可写工作区之外。动态加载器环境变量只在隔离边界内生效；若宿主服务以 root 运行，启动器在执行 bubblewrap 前清空附加组并降权到指定的非 root UID/GID。
+执行路径为 LocalProcessRuntime → 固定隔离 Python 启动器 → cgroup.procs → bubblewrap → 命令及后代。启动器使用 python -I -c，不执行可写工作区脚本。Python、Sage 和隔离工具须在可写工作区外；宿主以 root 运行时，执行前清空附加组并降至指定非 root UID/GID。动态加载器环境只在隔离边界内生效。
 
-- `cpu.max` 控制 CPU 配额，`memory.max` 限制聚合内存，`memory.swap.max=0` 禁止通过 swap 扩大额度，`pids.max` 限制全部后代线程/进程。配置写入后读回核对。
-- 每个沙箱有一个父 cgroup，每次命令有一个子 cgroup。因此并发命令共享沙箱总额度，正常完成、超时、取消都清理命令 cgroup；`setsid`、关闭输出管道不能脱离 cgroup。
-- bubblewrap 强制建立命名空间，默认无网络、无额外挂载、无 capabilities。系统运行时、根文件系统、`/proc`、`/dev` 只读；工作区、`/tmp`、`/dev/shm` 的可写内容均落在同一个 XFS project 中。挂载源使用 `--bind-fd` / `--ro-bind-fd`，由 bubblewrap 校验 inode、设备并关闭目录 FD，避免路径替换和宿主目录 FD 泄露。
-- 禁止再次创建用户命名空间，防止在内部挂载其他可写文件系统绕开磁盘配额。seccomp 额外拒绝套接字、挂载/命名空间、跨进程读写、keyring、BPF、perf 和 io_uring 等通道，包括网络命名空间不能单独隔离的工作区宿主 Unix socket。还拒绝修改 XFS project/继承标志的 ioctl，并按内核的 32 位请求码语义匹配，防止通过高位别名绕过。
-- XFS project 配额必须由管理员预先启用、分配和设置。Sage 检查 quota accounting/enforcement、project ID 继承、工作区所属文件系统，以及内核返回的实际硬额度。现有额度必须不大于请求额度；不执行 sudo，不自动修改共享项目的额度，以免放宽其他活跃沙箱的上限。降低 GUI 磁盘额度后，若宿主 quota 尚未相应降低，创建会失败。
-- project 必须有 inode 硬配额，最大为请求磁盘字节数除以 4096，防止无限创建空文件。初始化拒绝符号链接、跨文件系统子挂载和硬链接。
+- cpu.max、memory.max、memory.swap.max=0、pids.max 分别限制 CPU、聚合内存、swap 和后代进程/线程，写入后读回校验。
+- 沙箱父 cgroup 与每命令子 cgroup 共享总额度，完成、超时与取消均清理。setsid 或关闭输出管道不能脱离 cgroup。
+- 系统、/proc、/dev 只读，/dev/null 单独允许写入；工作区、/tmp、/dev/shm 的可写内容位于同一 XFS project。FD 挂载核对 inode/设备，避免路径替换及目录 FD 泄露。
+- 禁止新建用户命名空间；seccomp 拒绝套接字、挂载、跨进程内存、keyring、BPF、perf、io_uring 及修改 XFS project 标志的 ioctl，包含高位别名。宿主 Unix socket 也不能绕过无网络策略。
+- 管理员预先准备 cgroup 子树与 XFS project 配额。Sage 校验 accounting/enforcement、project ID 继承、文件系统与实际硬额度；实际额度不得大于请求，不执行 sudo，也不自动放宽共享项目额度。
+- project 必须有 inode 硬配额，最多为磁盘字节数除以 4096。初始化拒绝符号链接、跨文件系统挂载和硬链接。
 
-宿主配置项：
+LocalWorkspaceSandboxProvider 的宿主参数如下；Desktop 放在 execution.sandbox 配置顶层：
 
 ```json
 {
@@ -55,53 +55,42 @@ CPU 的 100% 表示一个逻辑核心的计算配额，200% 表示两个核心�
 }
 ```
 
-以上项传给 LocalWorkspaceSandboxProvider 构造函数；Desktop 放在 `execution.sandbox` 配置的顶层。**没有提供 `linux_cgroup_root` / `linux_quota_mount` 时不创建 cgroup、不做 project 配额校验**，隔离照常，计量退回到与 macOS 相同的进程树采样；这也是 server_v2、CLI 和未配置的 Desktop 的默认状态。要求 Linux 5.14+、提供 `quotactl_fd` 的 libc、支持 `--bind-fd`、`--ro-bind-fd`、`--unshare-user`、`--disable-userns`、`--seccomp` 的 bubblewrap、xfsprogs、libseccomp2、允许用户命名空间，且 cgroup 子树已启用 `cpu memory pids` 控制器。`--disable-userns` 必须带显式 `--unshare-user`，`--unshare-all` 里的 `--unshare-user-try` 不满足这个检查。Ubuntu 24.04 默认 `kernel.apparmor_restrict_unprivileged_userns=1`，不放开时 bwrap 会在写入 uid map 时得到 Permission denied。`/dev` 私有 tmpfs 会 remount 成只读，但 `/dev/null` 单独可写挂载，因为 git 和 shell 会以读写方式打开它。启动时检查 bubblewrap 实际提供的参数；缺少 FD 挂载支持的旧版本会被拒绝。`quotactl_fd` 的 project 查询需要宿主具备相应权限；可由有权限的 Sage 宿主完成验证，但执行 UID/GID 必须非 root，工作区须属于执行 UID，且目录上级允许该用户进入。
+不配置 cgroup/quota 时不创建或校验硬配额，采用与 macOS 相同的进程树采样，隔离仍生效。部分配置或硬额度核验失败会拒绝执行。
 
-管理员在**专用 XFS 测试卷和专用目录**上准备配额的示例（不要直接用于未核对的现有项目）：
+硬限制需要 Linux 5.14+、quotactl_fd、xfsprogs、libseccomp2、允许用户命名空间，以及启用 cpu memory pids 的 cgroup 子树。bubblewrap 必须支持 --bind-fd、--ro-bind-fd、--unshare-user、--disable-userns 和 --seccomp。--disable-userns 要求显式 --unshare-user。Ubuntu 的 AppArmor 用户命名空间限制可能阻止 uid map 创建，需管理员准备相应宿主权限；执行身份必须非 root，拥有工作区且可穿过父目录。
+
+以下仅为专用测试卷示例，project ID 由管理员分配，文件系统须以 prjquota 挂载：
 
 ```sh
-# 文件系统需已使用 prjquota 挂载；project ID 应由管理员分配，避免与现有项目冲突。
 xfs_quota -x -c 'project -s -p /srv/sage-xfs/workspace 1001' /srv/sage-xfs
 xfs_quota -x -c 'limit -p bhard=4096m ihard=1048576 1001' /srv/sage-xfs
 ```
 
-配置了 cgroup 与 quota 之后，缺少控制器、未启用 quota、实际额度大于请求、工作区不符合要求、内核不支持清理时，均拒绝运行，不回退到无隔离执行——配了一半比没配更危险，所以不容忍半成品。CPU 和内存限制按 sandbox 计；主动共享同一工作区的 Run 共享该项目的磁盘容量，彼此的文件不是保密边界。
-
-`workspace_root` 是工作区在沙箱内的路径。它不能落在 `/usr`、`/bin`、`/sbin`、`/lib`、`/lib64`、`/dev`、`/proc`、`/sys`、`/tmp` 之下：这些是沙箱自己的运行时挂载点，`/tmp` 还是沙箱 scratch 的挂载点，绑在它们下面会和沙箱自身的挂载顺序相撞。把宿主真实路径直接当作沙箱内路径的宿主（CLI、Desktop 的 host 路径模式）因此不能使用 `/tmp` 下的工作区。
+CPU/内存按沙箱计；主动共享工作区的 Run 共享磁盘容量，文件之间没有保密边界。workspace_root 不能落在 /usr、/bin、/sbin、/lib、/lib64、/dev、/proc、/sys 或 /tmp 下，以免覆盖运行时挂载。直接使用宿主路径的 CLI/Desktop 因此不能使用 /tmp 工作区。
 
 ## 原生 macOS
 
-Seatbelt 使用默认拒绝规则，只允许工作区写入、必要系统运行时读取及进程创建，默认拒绝网络。临时目录位于工作区内。文件 API 使用目录 FD、`O_NOFOLLOW` 和硬链接检查，避免检查路径后通过替换链接读写宿主文件；macOS 工作区中预先存在的硬链接也会在运行前被拒绝。
+Seatbelt 默认拒绝，仅允许工作区写入、必要运行时只读和进程创建，默认禁止网络；临时目录在工作区内。文件 API 使用目录 FD、O_NOFOLLOW 和硬链接检查，预先存在的工作区硬链接也会被拒绝。
 
-CPU 按已发现的进程树 CPU 时间进行暂停/恢复节流；内存使用聚合 RSS 采样；磁盘使用目录累计文件大小。内存、进程数或磁盘超限会杀死已追踪进程，并将沙箱标为 LOST，禁止继续使用。磁盘还在命令结束时检查，避免快速写完后被误报成功。
+CPU 使用已发现进程树的采样时间节流；内存统计聚合 RSS，磁盘统计逻辑文件大小。超限终止已追踪进程并将沙箱标为 LOST；命令结束时也检查磁盘。必要 SDK 应位于允许的只读运行时目录，不能放开整个 HOME。标准 Xcode/CommandLineTools 运行时目录可只读访问。
 
-非系统路径安装的 SDK 可能被拒绝；不能为兼容性放开整个 HOME。需要的运行时应由管理员部署在允许的只读运行时目录。
+采样存在延迟，极快脱离父进程的后代可能逃过资源计量，但继承的 Seatbelt 文件/网络隔离仍生效。磁盘逻辑大小不等于物理块、快照及元数据计费，超限不删除用户文件。require_hard_limits=true 在 macOS 明确拒绝，不宣称提供 Linux 级硬配额。
 
-这些不是内核硬配额：采样存在延迟，短时超限可能发生；极快脱离父进程的后代可能逃过资源监控，但继承的 Seatbelt 文件和网络限制仍生效。磁盘检查是逻辑文件大小，不等价于物理块、快照和文件系统元数据计费；超限后不会删除用户文件。因此不能将原生 macOS 模式用于要求恶意负载绝不超额的场景。选择 `require_hard_limits=true` 会明确拒绝，绝不声称已满足 Linux 等级的硬限制。
+## 授权与生命周期
 
-## 入口与生命周期加固
+Shell 和后台 Job 统一走 sandbox.process.run。授权签名绑定 argv、cwd、环境、stdin 摘要和 timeout；任意更改需要新授权。shell 还需 allow_shell，可执行白名单只限制初始程序，解释器后续执行靠 OS 边界。
 
-- 官方 Shell（包括后台 Job）统一调用 sandbox.process.run；没有宿主执行回退。
-- 授权签名绑定 argv、cwd、环境变量、stdin 摘要和 timeout；修改任一输入需要新授权。
-- shell 入口还必须显式允许 `allow_shell`；可执行文件白名单约束初始程序，解释器内部调用依靠 OS 边界约束。只读模式保留受限命令语法和 Git 加固，逐个引用参数后在系统只读边界内执行管道。
-- `protected_paths` 的文件 API 保护继续生效；配置了受保护子路径时，可写进程请求直接拒绝，只读进程可以执行，避免进程绕过文件 API 修改受保护文件。
-- timeout 包括向 stdin 写入阻塞的时间。取消、终止和正常完成均执行后代清理，排队操作在获取执行槽后重新检查状态。
-- 沙箱终止主动取消正在执行的进程任务；清理未完成不报告成功释放。
-- 技能材料写入改走 SandboxSkillWorkspace，使用相同文件策略与签名授权。
-- 内存模型插件只用于语义测试，默认拒绝硬资源限制请求。测试需显式选择非硬限制模式。
+配置 protected_paths 时拒绝可写进程，避免绕过文件 API；只读模式保留受限命令语法与 Git 加固。timeout 包含阻塞 stdin，取消、终止和完成都清理后代，排队操作获取槽位后再次检查状态。清理未结束不报告成功释放。Skill 使用 SandboxSkillWorkspace 和相同文件策略。
 
-任意加载进 Sage 主进程的 Python 插件、管理员配置和 MCP 服务属于宿主信任边界；这个沙箱不隔离 Sage 自身，也不把第三方宿主插件变为不可信代码的执行容器。
+内存沙箱只用于语义测试，默认拒绝硬限制请求。宿主插件、管理员配置与 MCP 属于宿主信任边界。
 
 ## 验证
 
-macOS 的真实测试必须在允许创建 Seatbelt 子沙箱的宿主环境中运行。某些开发工具自身的外层沙箱会禁止 `sandbox-exec`；这时应让测试失败并检查部署权限，不能跳过隔离执行。
-
 ```sh
-python -m pytest tests/sagents/v2/test_local_sandbox_resource_limits.py \
-  tests/sagents/v2/test_local_workspace_sandbox_matrix.py
+python -m pytest tests/sagents/v2/test_local_sandbox_resource_limits.py   tests/sagents/v2/test_local_workspace_sandbox_matrix.py
 ```
 
-Linux 集成测试显式依赖管理员准备好的、空白的专用工作区（8 MiB project 硬额度，inode 硬额度最多 2048）。设置以下环境变量再运行同一测试文件：
+macOS 测试要求能创建 Seatbelt 子沙箱，外层开发工具沙箱可能禁止 sandbox-exec。Linux 硬配额集成测试要求管理员准备空白专用工作区，8 MiB project 硬额度、inode 硬额度最多 2048，并设置：
 
 ```text
 SAGE_TEST_CGROUP_ROOT
@@ -111,6 +100,4 @@ SAGE_TEST_EXECUTION_UID
 SAGE_TEST_EXECUTION_GID
 ```
 
-本次开发宿主是 macOS；Linux 命令构造和失败处理有单元验证，真实 cgroup/XFS 集成测试在此环境跳过，不能据此宣称 Linux 实机验收已完成。
-
-设计依据：[Linux cgroup v2 文档](https://www.kernel.org/doc/html/v6.8/admin-guide/cgroup-v2.html)、[xfs_quota 手册](https://www.man7.org/linux/man-pages/man8/xfs_quota.8.html)。
+缺失平台或专用资源时的跳过不算通过。命令构造单元测试不代表 Linux cgroup/XFS 实机验收。

@@ -25,4 +25,4 @@ Skill loading has a separate active-context budget. Provider-reported usage can 
 
 Desktop's summary state uses the selected SessionStore's derived namespace. Workspace identity and memory files belong to the workspace; they are not a substitute for Session storage. Neither local summary storage nor SQL persistence guarantees automatic replay of uncertain tool side effects.
 
-[Context budgets (Chinese)](../../zh/architecture/sagents-v2-context-budget.md) · [Runtime reference](https://github.com/ZHangZHengEric/Sage/blob/main/sagents/v2/README.md)
+[Context budgets](../architecture/sagents-v2-context-budget.md) · [Runtime reference](https://github.com/ZHangZHengEric/Sage/blob/main/sagents/v2/README.md)

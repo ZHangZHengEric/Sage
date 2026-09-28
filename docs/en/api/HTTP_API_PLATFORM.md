@@ -11,7 +11,7 @@ parent: API
 
 # Platform and Observability
 
-- `GET /health` and `GET /active` report service health and actual backend selections.
+- `GET /health` and `GET /active` report service status, protocol version, runtime, and whether tracing is enabled.
 - Server logs use `sage.log/v1` JSON lines by default. Configure level, format, and optional directory with `SAGE_SERVER_LOG_*`.
 - Request correlation uses `X-Request-ID`; JSON responses also include `request_id`.
 - Optional Jaeger integration uses `SAGE_SERVER_JAEGER_*`; it is not required to run chat.
