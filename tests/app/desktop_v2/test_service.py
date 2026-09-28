@@ -5078,3 +5078,26 @@ async def test_all_user_plugin_fields_have_defaults_or_are_host_owned(tmp_path):
         assert checked > 30
     finally:
         await service.session_store.close()
+
+
+def test_local_sandbox_command_path_config_is_forwarded_and_separates_cache():
+    from app.desktop_v2.backend.run_composition import DesktopRunCompositionMixin
+    from sagents.v2.runtime.execution.sandbox import SandboxGrantIssuer
+
+    host = SimpleNamespace(
+        _sandbox_grant_issuer=SandboxGrantIssuer(), _sandbox_providers={}
+    )
+    factory = DesktopRunCompositionMixin._sandbox_provider
+    first = factory(
+        host, "sage.sandbox.local-workspace", {"command_path": "/first/bin"}
+    )
+    second = factory(
+        host, "sage.sandbox.local-workspace", {"command_path": "/second/bin"}
+    )
+    assert first.command_path == "/first/bin"
+    assert second.command_path == "/second/bin"
+    assert first is not second
+    assert (
+        factory(host, "sage.sandbox.local-workspace", {"command_path": "/first/bin"})
+        is first
+    )

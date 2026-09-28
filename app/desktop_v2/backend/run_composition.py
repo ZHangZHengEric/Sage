@@ -1051,6 +1051,7 @@ class DesktopRunCompositionMixin(DesktopRunEnvironmentMixin):
             for key, value in (config or {}).items()
             if key
             in {
+                "command_path",
                 "linux_cgroup_root",
                 "linux_quota_mount",
                 "linux_execution_uid",

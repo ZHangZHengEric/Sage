@@ -474,10 +474,54 @@ class LocalWorkerDispatcher:
                                 lease.work.run_id, request, lease=lease
                             )
                         else:
-                            await self._finish_cancelled_execution(
-                                lease.work.run_id, request, lease=lease
+                            recovery = asyncio.create_task(
+                                self._finish_cancelled_execution(
+                                    lease.work.run_id, request, lease=lease
+                                )
                             )
+                            try:
+                                done, _ = await asyncio.wait(
+                                    {recovery, renewer},
+                                    return_when=asyncio.FIRST_COMPLETED,
+                                )
+                                if renewer in done:
+                                    recovery.cancel()
+                                    await asyncio.gather(
+                                        recovery, return_exceptions=True
+                                    )
+                                    renewal_error = renewer.exception() or RuntimeError(
+                                        "scheduler lease renewer stopped"
+                                    )
+                                    await _agent_method(
+                                        request.agent,
+                                        "fail_driver_crash",
+                                        "_fail_driver_crash",
+                                    )(lease.work.run_id, renewal_error, request.context)
+                                    raise renewal_error
+                                recovery.result()
+                            finally:
+                                if not recovery.done():
+                                    recovery.cancel()
+                                await asyncio.gather(recovery, return_exceptions=True)
+                except asyncio.CancelledError:
+                    # close() may cancel the worker while recovery is in flight.
+                    # Settle shutdown before the request is discarded below.
+                    async with (
+                        self.lease_scope_factory(lease)
+                        if self.lease_scope_factory is not None
+                        else _NullAsyncScope()
+                    ):
+                        await self._finish_shutdown_request(
+                            lease.work.run_id, request, lease=lease
+                        )
+                    raise
                 except BaseException as exc:
+                    try:
+                        await self.scheduler.release(
+                            lease, LeaseReleaseReason.FAILED, requeue=False
+                        )
+                    except Exception:
+                        pass
                     if not request.result.done():
                         request.result.set_exception(exc)
                 if self._closed:
