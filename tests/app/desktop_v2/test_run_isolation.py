@@ -98,6 +98,9 @@ def request(project, session, model="model_main"):
     )
 
 
+# Two persisted runs plus approval recovery exceed the 2s unit-test default
+# on shared runners. Individual synchronization waits remain bounded below.
+@pytest.mark.timeout(60)
 @pytest.mark.asyncio
 @pytest.mark.parametrize("same_project", [False, True])
 @pytest.mark.parametrize("first_action", ["complete", "cancel", "approve"])
