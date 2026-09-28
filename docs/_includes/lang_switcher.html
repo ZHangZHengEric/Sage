@@ -2,7 +2,7 @@
   {% assign translations = site.html_pages | where: "ref", page.ref | sort: "lang" %}
   {% if translations.size > 1 %}
   <div class="sage-lang-switcher-wrap">
-    <div class="sage-lang-switcher__label">Language</div>
+    <div class="sage-lang-switcher__label">{% if page.lang == "zh" %}语言{% else %}Language{% endif %}</div>
     <div class="sage-lang-switcher">
       {% for match in translations %}
         {% if match.lang %}

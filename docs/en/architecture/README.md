@@ -31,8 +31,11 @@ Hosts own authentication, credentials, UI, global conversation indexes, and tool
 - [Memory](../memory/README.md): context projection versus durable history.
 - [Tools and MCP](../MCP_SERVERS.md): capabilities and authorization.
 - [Sandbox lifecycle](SAGENTS_V2_SANDBOX_LIFECYCLE.md): suspension and resource release.
+- [Agent package management](SAGENTS_V2_AGENT_MANAGEMENT.md) · [Server Agent platform](SERVER_V2_AGENT_PLATFORM.md).
+- [Resource management](SAGENTS_V2_RESOURCE_MANAGEMENT.md) · [Single-host concurrency](sagents-v2-single-host-concurrency.md).
+- [Context budgets](sagents-v2-context-budget.md) · [Model pool and persistence](sagents-v2-model-pool-and-persistence.md).
+- [Local sandbox constraints](sagents-v2-local-sandbox-security.md).
 - [Full runtime architecture](https://github.com/ZHangZHengEric/Sage/blob/main/sagents/v2/ARCHITECTURE.md): dependency rules and contracts.
-- [Detailed v2 engineering guides (Chinese)](../../zh/architecture/README.md).
 
 ## Deployment boundary
 

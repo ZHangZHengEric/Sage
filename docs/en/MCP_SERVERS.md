@@ -24,6 +24,8 @@ Configure tools and Skills on the Agent, and add MCP connections in Settings. En
 
 Use model/Agent/Skill/MCP management in the web client. Skills support ZIP upload and per-Agent selection. MCP management uses `/api/mcp`; refresh a connection to rediscover tools. See [HTTP API](api/HTTP_API_REFERENCE.md).
 
+Server accepts only `sse` and `streamable_http` MCP transports; it rejects tenant `stdio` commands. Desktop may use stdio. Skill catalog descriptions are complete, including multiline YAML; only loaded active Skill content has a separate token budget. The full catalog still counts toward the overall context budget.
+
 ## Embedded hosts
 
 The minimal quick start intentionally has no file or shell tools. Official tools require an `OfficialToolRuntime` with explicit workspace and sandbox bindings. Host-provided tool execution must validate grants at the resource boundary. An in-memory manifest does not authorize access to arbitrary host files.

@@ -33,10 +33,11 @@ ref: v2-ENV_VARS
 | `SAGE_SERVER_MAX_MANAGED_BUILDS` | `4` |
 | `SAGE_SERVER_LOG_LEVEL` | `info` |
 | `SAGE_SERVER_LOG_FORMAT` | `json` (`text` also supported) |
-| `SAGE_SERVER_LOG_DIRECTORY` | Optional |
+| `SAGE_SERVER_LOG_DIRECTORY` | `./logs` |
 | `SAGE_SERVER_JAEGER_URL` | Optional OTLP endpoint |
 | `SAGE_SERVER_JAEGER_SERVICE_NAME` | `sage-server` |
 | `SAGE_SERVER_JAEGER_PUBLIC_URL` | `http://127.0.0.1:16686/jaeger` |
+| `SAGE_SERVER_PUBLIC_URL` | Empty: use the incoming request origin; set the public origin for A2A behind a proxy |
 
 Concurrency and capacity values must be positive. They are per-process limits, not distributed quotas. Redis is no longer a startup dependency or AG-UI replay store.
 

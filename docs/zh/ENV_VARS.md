@@ -33,10 +33,11 @@ ref: v2-ENV_VARS
 | `SAGE_SERVER_MAX_MANAGED_BUILDS` | `4` |
 | `SAGE_SERVER_LOG_LEVEL` | `info` |
 | `SAGE_SERVER_LOG_FORMAT` | `json` （也支持 `text`） |
-| `SAGE_SERVER_LOG_DIRECTORY` | 可选 |
+| `SAGE_SERVER_LOG_DIRECTORY` | `./logs` |
 | `SAGE_SERVER_JAEGER_URL` | 可选 OTLP 地址 |
 | `SAGE_SERVER_JAEGER_SERVICE_NAME` | `sage-server` |
 | `SAGE_SERVER_JAEGER_PUBLIC_URL` | `http://127.0.0.1:16686/jaeger` |
+| `SAGE_SERVER_PUBLIC_URL` | 默认空：使用请求来源地址；反向代理后的 A2A 应设置公开来源地址 |
 
 并发和容量参数必须为正数，约束单进程，不是分布式配额。Redis 不再是启动依赖或 AG-UI 回放存储。
 

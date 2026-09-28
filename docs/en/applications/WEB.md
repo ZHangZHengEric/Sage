@@ -38,6 +38,8 @@ Open [http://127.0.0.1:8090](http://127.0.0.1:8090). Configure a model and an Ag
 
 For frontend development use `npm run dev` in `app/server_v2/web`; Vite proxies to port 8090. Process environment variables override the component `.env` file.
 
+Startup idempotently upgrades legacy tables: it adds missing `threads.agent_id` and expands Skill descriptions to `LONGTEXT`. The database account needs `ALTER` privileges for these upgrades. Reimport original Skill files to repair descriptions previously truncated in the catalog.
+
 ## Storage and deployment boundary
 
 - MySQL stores users, catalogs, thread indexes, Agent package inventory, and runtime Sessions.
