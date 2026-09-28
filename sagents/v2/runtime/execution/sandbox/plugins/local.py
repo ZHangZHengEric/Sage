@@ -253,30 +253,6 @@ class _LocalProcessRuntime:
             )
         else:
             stages = (request.argv,)
-        resolved = []
-        for stage in stages:
-            executable = stage[0]
-            if (
-                Path(executable).name in {"sh", "bash", "zsh", "dash", "ksh", "fish"}
-                and not policy.allow_shell
-            ):
-                raise PermissionError("shell execution is disabled")
-            if (
-                policy.allowed_executables
-                and executable not in policy.allowed_executables
-            ):
-                raise PermissionError(f"executable {executable!r} is not allowed")
-            resolved_executable = shutil.which(executable)
-            if resolved_executable is None:
-                raise FileNotFoundError(executable)
-            resolved.append((resolved_executable, *stage[1:]))
-        if policy.read_only:
-            # Only fully parsed argv stages enter this pipeline; quote every
-            # argument and run the pipeline inside the OS read-only boundary.
-            resolved_executable = "/bin/sh"
-            arguments = ("-c", " | ".join(shlex.join(stage) for stage in resolved))
-        else:
-            resolved_executable, *arguments = resolved[0]
         cwd = self.provider._path(self.row, request.cwd)
         if not cwd.is_dir():
             raise NotADirectoryError(request.cwd)
@@ -305,6 +281,35 @@ class _LocalProcessRuntime:
             for name in policy.allowed_env_names
             if name in os.environ
         }
+        environment = {
+            **inherited_env,
+            "PATH": self.provider.command_path,
+            **request.env,
+        }
+        resolved = []
+        for stage in stages:
+            executable = stage[0]
+            if (
+                Path(executable).name in {"sh", "bash", "zsh", "dash", "ksh", "fish"}
+                and not policy.allow_shell
+            ):
+                raise PermissionError("shell execution is disabled")
+            if (
+                policy.allowed_executables
+                and executable not in policy.allowed_executables
+            ):
+                raise PermissionError(f"executable {executable!r} is not allowed")
+            resolved_executable = shutil.which(executable, path=environment["PATH"])
+            if resolved_executable is None:
+                raise FileNotFoundError(executable)
+            resolved.append((resolved_executable, *stage[1:]))
+        if policy.read_only:
+            # Only fully parsed argv stages enter this pipeline; quote every
+            # argument and run the pipeline inside the OS read-only boundary.
+            resolved_executable = "/bin/sh"
+            arguments = ("-c", " | ".join(shlex.join(stage) for stage in resolved))
+        else:
+            resolved_executable, *arguments = resolved[0]
         started = time.monotonic()
         async with self.row.process_slots:
             # Recheck after queueing: terminate may have run while we waited.
@@ -312,7 +317,6 @@ class _LocalProcessRuntime:
                 raise PermissionError("sandbox is not ready")
             task = asyncio.current_task()
             self.row.active_tasks.add(task)
-            environment = {**inherited_env, **request.env}
             if policy.read_only:
                 environment.update(_READ_ONLY_GIT_ENV)
             process = None
@@ -556,6 +560,7 @@ class LocalWorkspaceSandboxProvider:
         clock: Callable[[], datetime] = utc_now,
         terminal_ttl_seconds: int = 86_400,
         max_retained_terminal_items: int = 1024,
+        command_path: str | None = None,
         linux_cgroup_root: str | None = None,
         linux_quota_mount: str | None = None,
         linux_execution_uid: int | None = None,
@@ -565,6 +570,19 @@ class LocalWorkspaceSandboxProvider:
             raise ValueError("terminal_ttl_seconds must be positive")
         if max_retained_terminal_items < 0:
             raise ValueError("max_retained_terminal_items must be non-negative")
+        if command_path is not None and (
+            not command_path
+            or "\x00" in command_path
+            or any(not os.path.isabs(part) for part in command_path.split(os.pathsep))
+        ):
+            raise ValueError(
+                "command_path must contain absolute, non-empty directories"
+            )
+        self.command_path = (
+            command_path
+            if command_path is not None
+            else os.environ.get("PATH") or os.defpath
+        )
         self.verification_key = verification_key
         self._clock = clock
         self._terminal_ttl = timedelta(seconds=terminal_ttl_seconds)

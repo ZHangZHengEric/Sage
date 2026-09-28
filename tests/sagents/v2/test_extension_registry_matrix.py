@@ -292,3 +292,24 @@ def test_every_continuation_plugin_factory_creates_a_real_policy(
     )
 
     assert isinstance(value, expected_type)
+
+
+def test_local_sandbox_command_path_passes_through_plugin_config():
+    from sagents.v2.runtime.extensions.contracts import ExtensionScopeContext
+
+    registry = builtin_extension_registry()
+    config = {"verification_key": "key", "command_path": "/configured/bin:/bin"}
+    host = ExtensionHost(registry)
+    host.plan(
+        (CapabilityRequirement(capability="execution.sandbox", api_version=">=3,<4"),),
+        selections={"execution.sandbox": "sage.sandbox.local-workspace"},
+        configs={"sage.sandbox.local-workspace": config},
+    )
+    registration = registry.get("sage.sandbox.local-workspace")
+    provider = registration.factory(
+        ExtensionScopeContext(
+            scope=ExtensionScope.PROCESS, scope_id="path-test", config=config
+        ),
+        {},
+    )
+    assert provider.command_path == config["command_path"]

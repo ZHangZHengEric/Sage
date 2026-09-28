@@ -2,6 +2,10 @@
 
 面向版本用户的完整说明保存在 [`release_notes/`](release_notes/)；本文件记录持续开发变更。
 
+- **2026-09-28** 长工具等待中 driver 被取消时不再误判 worker_shutdown：先落 tool.unknown，再 recover 未完成副作用，worker 留在池里。
+
+- **2026-09-28** 本地沙箱命令路径由插件 `command_path` 配置，默认继承宿主 PATH，直接命令与 shell 使用一致的路径；恢复执行继续受租约监控，恢复中关停也会完成 Run 收尾。
+
 - **2026-09-24** server_v2 路由改为注入所属业务服务，目录、Skill、会话及凭据读取经服务接口完成；Run Driver 接收明确的运行依赖，身份与工具权限上下文归入 identity。缺模型提示移到 AG-UI/A2A 接口，网页显示接口返回的文案，执行资源不再保存用户文案。
 
 - **2026-09-24** 移除只用于打包注入参数的 `HostRepositories`；`ServerHost` 直接接收可替换的仓储，生产环境仍从 Database 创建默认仓储。

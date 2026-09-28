@@ -469,13 +469,63 @@ class LocalWorkerDispatcher:
                 )
                 try:
                     async with shutdown_scope:
+                        if self._closed:
+                            await self._finish_shutdown_request(
+                                lease.work.run_id, request, lease=lease
+                            )
+                        else:
+                            recovery = asyncio.create_task(
+                                self._finish_cancelled_execution(
+                                    lease.work.run_id, request, lease=lease
+                                )
+                            )
+                            try:
+                                done, _ = await asyncio.wait(
+                                    {recovery, renewer},
+                                    return_when=asyncio.FIRST_COMPLETED,
+                                )
+                                if renewer in done:
+                                    recovery.cancel()
+                                    await asyncio.gather(
+                                        recovery, return_exceptions=True
+                                    )
+                                    renewal_error = renewer.exception() or RuntimeError(
+                                        "scheduler lease renewer stopped"
+                                    )
+                                    await _agent_method(
+                                        request.agent,
+                                        "fail_driver_crash",
+                                        "_fail_driver_crash",
+                                    )(lease.work.run_id, renewal_error, request.context)
+                                    raise renewal_error
+                                recovery.result()
+                            finally:
+                                if not recovery.done():
+                                    recovery.cancel()
+                                await asyncio.gather(recovery, return_exceptions=True)
+                except asyncio.CancelledError:
+                    # close() may cancel the worker while recovery is in flight.
+                    # Settle shutdown before the request is discarded below.
+                    async with (
+                        self.lease_scope_factory(lease)
+                        if self.lease_scope_factory is not None
+                        else _NullAsyncScope()
+                    ):
                         await self._finish_shutdown_request(
                             lease.work.run_id, request, lease=lease
                         )
+                    raise
                 except BaseException as exc:
+                    try:
+                        await self.scheduler.release(
+                            lease, LeaseReleaseReason.FAILED, requeue=False
+                        )
+                    except Exception:
+                        pass
                     if not request.result.done():
                         request.result.set_exception(exc)
-                raise
+                if self._closed:
+                    raise
             except Exception as exc:
                 try:
                     await self.scheduler.release(
@@ -665,6 +715,96 @@ class LocalWorkerDispatcher:
                     # Expiry/reaping remains the final fallback, but shutdown
                     # must never strand the caller's Future on release failure.
                     pass
+
+    async def _finish_cancelled_execution(
+        self,
+        run_id: str,
+        request: _DispatchRequest,
+        *,
+        lease: WorkerLease | None = None,
+    ) -> None:
+        """Recover a live driver cancel instead of pretending the worker died.
+
+        ``execution.result()`` raising ``CancelledError`` is not process
+        shutdown. Long MCP waits (video generate) hit this when the driver
+        task is cancelled while the dispatcher and sidecar stay up. The
+        durable ``tool.call.started`` barrier must be recovered so a later
+        turn can see the side effect.
+        """
+
+        _LOGGER.warning(
+            "scheduler.worker.execution_cancelled",
+            "execution cancelled while the local worker stayed up; recovering",
+            run_id=run_id,
+        )
+        snapshot = None
+        recover = getattr(request.agent, "recover_interrupted_run", None) or getattr(
+            request.agent, "_recover_interrupted_run", None
+        )
+        if recover is not None:
+            try:
+                snapshot = await recover(run_id, request.context)
+            except Exception as exc:
+                _LOGGER.exception(
+                    "scheduler.worker.recovery_failed",
+                    "live execution cancel could not recover the Run barrier",
+                    exc,
+                    run_id=run_id,
+                )
+                runtime = getattr(request.agent, "runtime", None)
+                if runtime is not None:
+                    try:
+                        current = await runtime.get_run(run_id)
+                    except Exception:
+                        current = None
+                    if current is not None and (
+                        current.state in TERMINAL_RUN_STATES
+                        or current.state == RunState.SUSPENDED
+                    ):
+                        snapshot = current
+                    elif current is not None:
+                        error = RuntimeErrorInfo(
+                            code="execution.barrier_recovery_failed",
+                            category=ErrorCategory.UNCERTAIN_SIDE_EFFECT,
+                            message=(
+                                "worker lost the driver after a possible side "
+                                "effect and barrier recovery failed"
+                            ),
+                            safe_to_resume=False,
+                            metadata={"recovery_error": str(exc)},
+                        )
+                        snapshot = await self._fail_recovered_execution_tree(
+                            runtime,
+                            current,
+                            request.context,
+                            error,
+                        )
+        if snapshot is None:
+            snapshot = await _agent_method(
+                request.agent, "fail_driver_crash", "_fail_driver_crash"
+            )(
+                run_id,
+                self._shutdown_error(),
+                request.context,
+            )
+        reason = {
+            RunState.COMPLETED: LeaseReleaseReason.COMPLETED,
+            RunState.FAILED: LeaseReleaseReason.FAILED,
+            RunState.CANCELLED: LeaseReleaseReason.CANCELLED,
+            RunState.SUSPENDED: LeaseReleaseReason.SUSPENDED,
+        }.get(snapshot.state, LeaseReleaseReason.FAILED)
+        try:
+            if lease is not None:
+                await self.scheduler.release(
+                    lease,
+                    reason,
+                    requeue=snapshot.state == RunState.RESUMING,
+                )
+        except BaseException:
+            pass
+        self._discard_request(run_id, request)
+        if not request.result.done():
+            request.result.set_result(snapshot)
 
     async def _renew(self, lease) -> None:
         delay = max(self.lease_duration.total_seconds() / 3, 0.05)
