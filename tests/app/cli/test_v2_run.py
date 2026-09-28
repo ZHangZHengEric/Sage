@@ -2515,6 +2515,9 @@ async def test_prompt_decider_offers_workspace_scope_only_when_the_runtime_lists
     assert err.getvalue().count("please answer one of") == 1
 
 
+# Three full sandbox-backed runs and durable approval stores need an
+# integration-test budget rather than the global 2s unit-test default.
+@pytest.mark.timeout(30)
 async def test_workspace_remembered_approval_covers_later_sessions_in_the_same_workspace(
     tmp_path,
 ):
