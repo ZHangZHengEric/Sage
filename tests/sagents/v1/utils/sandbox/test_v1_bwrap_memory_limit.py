@@ -177,6 +177,7 @@ else:
 
 
 @LINUX
+@pytest.mark.timeout(45)  # Allow the bounded 30s compile and 5s sandbox run on CI.
 @pytest.mark.asyncio
 async def test_preload_constructor_runs_only_after_limit(tmp_path, monkeypatch):
     """Exercise real ld.so constructors without requiring namespace privileges.
