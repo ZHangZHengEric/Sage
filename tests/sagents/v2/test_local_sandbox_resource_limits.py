@@ -278,6 +278,77 @@ def test_workspace_cannot_supply_an_unsandboxed_launch_utility(tmp_path, monkeyp
         resources._trusted_utility("bwrap", tmp_path)
 
 
+def test_plugin_command_path_defaults_to_host_and_can_be_overridden(monkeypatch):
+    monkeypatch.setenv("PATH", "/custom/bin:/usr/bin")
+    assert LocalWorkspaceSandboxProvider(b"key").command_path == "/custom/bin:/usr/bin"
+    assert (
+        LocalWorkspaceSandboxProvider(
+            b"key", command_path="/configured/bin"
+        ).command_path
+        == "/configured/bin"
+    )
+
+
+@pytest.mark.parametrize("path", ["", "relative/bin", "/bin:", "/bin:.", "/bin\x00"])
+def test_plugin_command_path_rejects_ambiguous_directories(path):
+    with pytest.raises(ValueError, match="command_path"):
+        LocalWorkspaceSandboxProvider(b"key", command_path=path)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("shell", [False, True])
+@pytest.mark.parametrize("override", [False, True])
+async def test_plugin_command_path_reaches_lookup_and_isolated_environment(
+    tmp_path, monkeypatch, shell, override
+):
+    async def prepare(boundary):
+        pass
+
+    monkeypatch.setattr(LocalResourceBoundary, "prepare", prepare)
+    issuer = SandboxGrantIssuer()
+    provider = LocalWorkspaceSandboxProvider(
+        issuer.verification_key, command_path="/configured/bin:/bin"
+    )
+    monkeypatch.setenv("PATH", "/host/bin")
+    resolved = spec(tmp_path)
+    resolved = resolved.model_copy(
+        update={
+            "process": resolved.process.model_copy(
+                update={"allowed_env_names": ("PATH",)}
+            )
+        }
+    )
+    handle = await provider.provision(resolved, CONTEXT, run_id="path-run")
+    expected_path = "/request/bin:/bin" if override else "/configured/bin:/bin"
+    lookups = []
+
+    def which(executable, *, path):
+        lookups.append((executable, path))
+        return "/configured/bin/" + executable
+
+    monkeypatch.setattr(
+        "sagents.v2.runtime.execution.sandbox.plugins.local.shutil.which", which
+    )
+
+    class CapturedCommand(Exception):
+        pass
+
+    def command(executable, argv, cwd, env):
+        assert executable == "/configured/bin/" + ("bash" if shell else "python")
+        assert env["PATH"] == expected_path
+        raise CapturedCommand
+
+    provider._rows[handle.ref.sandbox_id].boundary.command = command
+    request = ProcessRequest(
+        argv=("bash", "-c", "python --version") if shell else ("python", "--version"),
+        env={"PATH": expected_path} if override else {},
+    )
+    with pytest.raises(CapturedCommand):
+        await handle.process.run(request, **authorize(issuer, handle, request))
+    assert lookups == [(request.argv[0], expected_path)]
+    await handle.close()
+
+
 def test_macos_seatbelt_reads_xcode_developer_roots(tmp_path):
     from sagents.v2.runtime.execution.sandbox.local_support.resources import (
         _macos_developer_read_roots,
@@ -294,9 +365,7 @@ def test_macos_seatbelt_reads_xcode_developer_roots(tmp_path):
     assert "/Library/Developer/CommandLineTools" in roots
     assert "/opt/Xcode.app/Contents" in roots
     assert "/Custom/Xcode.app/Contents" in roots
-    assert _macos_developer_read_roots(
-        environ={}, selected_link=missing
-    ) == (
+    assert _macos_developer_read_roots(environ={}, selected_link=missing) == (
         "/Library/Developer/CommandLineTools",
         "/Applications/Xcode.app/Contents",
         "/Applications/Xcode-beta.app/Contents",
@@ -535,3 +604,36 @@ async def test_linux_kernel_limits_and_escaped_descendant_cleanup():
     finally:
         await handle.destroy()
         await provider.purge_terminated(handle.ref)
+
+
+@pytest.mark.asyncio
+@pytest.mark.skipif(sys.platform != "darwin", reason="native Seatbelt")
+async def test_configured_command_path_resolves_short_names_inside_shell(tmp_path):
+    tools = tmp_path / "bin"
+    tools.mkdir()
+    executable = tools / "sage-path-probe"
+    executable.write_text("#!/bin/sh\nprintf 'configured-path'\n")
+    executable.chmod(0o755)
+    issuer = SandboxGrantIssuer()
+    provider = LocalWorkspaceSandboxProvider(
+        issuer.verification_key, command_path=f"{tools}:/usr/bin:/bin"
+    )
+    resolved = spec(tmp_path)
+    resolved = resolved.model_copy(
+        update={
+            "process": resolved.process.model_copy(
+                update={"allowed_executables": ("sage-path-probe", "sh")}
+            )
+        }
+    )
+    handle = await provider.provision(resolved, CONTEXT, run_id="native-path-run")
+    try:
+        for argv in (("sage-path-probe",), ("sh", "-c", "sage-path-probe")):
+            request = ProcessRequest(argv=argv)
+            result = await handle.process.run(
+                request, **authorize(issuer, handle, request)
+            )
+            assert result.exit_code == 0, result.stderr
+            assert result.stdout == b"configured-path"
+    finally:
+        await handle.close()

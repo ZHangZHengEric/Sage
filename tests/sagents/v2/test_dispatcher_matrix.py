@@ -482,6 +482,127 @@ async def test_shutdown_records_a_typed_terminal_failure_instead_of_requeueing()
 
 
 @pytest.mark.asyncio
+async def test_cancelled_execution_recovers_started_tool_instead_of_worker_shutdown():
+    from sagents.v2.agent.engine import AgentLoopEngine
+    from sagents.v2.contracts.items import UsageSummary
+    from sagents.v2.model.contracts import (
+        ModelEventKind,
+        ModelResponse,
+        ModelStreamEvent,
+        ModelToolCall,
+    )
+    from sagents.v2.testing.plugins.scripted_model import (
+        ScriptedModelProvider,
+        ScriptedModelStep,
+    )
+    from sagents.v2.tool.contracts import SideEffectLevel, ToolDefinition
+    from sagents.v2.tool.plugins.ephemeral import (
+        InMemoryToolCatalog,
+        InMemoryToolExecutor,
+    )
+
+    dispatched = asyncio.Event()
+
+    async def hang(call, context):
+        del call, context
+        dispatched.set()
+        await asyncio.Event().wait()
+
+    read_tool = ToolDefinition(
+        name="read_value",
+        description="read a value",
+        input_schema={
+            "type": "object",
+            "properties": {"key": {"type": "string"}},
+            "required": ["key"],
+            "additionalProperties": False,
+        },
+        side_effect_level=SideEffectLevel.READ,
+    )
+    scheduler = InMemoryScheduler()
+    store = EphemeralSessionStore()
+    fenced = LeaseFencedSessionStore(store, scheduler)
+    runtime = HarnessRuntime(fenced)
+    loop = AgentLoopEngine(
+        runtime=runtime,
+        model=ScriptedModelProvider(
+            (
+                ScriptedModelStep(
+                    events=(
+                        ModelStreamEvent(
+                            kind=ModelEventKind.COMPLETED,
+                            response=ModelResponse(
+                                response_id="response_1",
+                                text="",
+                                tool_calls=(
+                                    ModelToolCall(
+                                        tool_call_id="call_1",
+                                        name="read_value",
+                                        arguments={"key": "answer"},
+                                    ),
+                                ),
+                                finish_reason="tool_calls",
+                                usage=UsageSummary(input_tokens=5, output_tokens=2),
+                            ),
+                        ),
+                    )
+                ),
+            )
+        ),
+        tool_catalog=InMemoryToolCatalog((read_tool,)),
+        tool_executor=InMemoryToolExecutor(
+            {"read_value": read_tool}, {"read_value": hang}
+        ),
+        expected_resolved_spec_hash="sha256:test",
+    )
+
+    class LoopDriver:
+        async def execute(self, run_id, context):
+            return await loop.execute(run_id, context)
+
+        async def resume(self, run_id, context):
+            return await loop.resume(run_id, context)
+
+        async def recover_interrupted(self, run_id, context):
+            return await loop.recover_interrupted(run_id, context)
+
+        async def close(self):
+            return None
+
+    dispatcher = LocalWorkerDispatcher(
+        scheduler,
+        max_concurrent_runs=1,
+        lease_scope_factory=fenced.lease_scope,
+    )
+    agent = SAgent(runtime=runtime, driver_factory=lambda run_id: LoopDriver())
+    agent.attach_dispatcher(dispatcher)
+    stream = await agent.run_stream(
+        StartRun(
+            agent_id="agent",
+            input=(InputItem(role="user", content=(TextBlock(text="work"),)),),
+            resolved_spec_hash="sha256:test",
+            idempotency_key="live-cancel-run",
+        ),
+        CONTEXT,
+    )
+    await asyncio.wait_for(dispatched.wait(), timeout=1)
+
+    execution = agent._tasks[stream.handle.run_id]
+    execution.cancel()
+    result = await asyncio.wait_for(stream.wait(), timeout=2)
+
+    assert result.state == RunState.SUSPENDED
+    events = await runtime.session_store.read_events(result.run_id)
+    assert any(event.type == "tool.call.unknown" for event in events)
+    assert any(event.type == "run.suspended" for event in events)
+    assert dispatcher._workers
+    assert all(not worker.done() for worker in dispatcher._workers)
+    await dispatcher.close()
+    await agent.close()
+    await scheduler.close()
+
+
+@pytest.mark.asyncio
 async def test_dispatcher_restores_queued_work_after_process_restart(tmp_path):
     runtime = HarnessRuntime(EphemeralSessionStore())
     handle = await runtime.start_run(start_command("recover-queued"), CONTEXT)
@@ -595,3 +716,90 @@ async def test_recovery_fails_active_inline_child_with_parent_worker(tmp_path):
     assert child_result.error is not None
     assert child_result.error.code == "execution.parent_worker_restarted"
     await dispatcher.close()
+
+
+@pytest.mark.asyncio
+async def test_recovery_stops_when_lease_renewal_fails():
+    recovering = asyncio.Event()
+    renewal_failed = asyncio.Event()
+    recovery_cancelled = asyncio.Event()
+
+    class Scheduler(InMemoryScheduler):
+        async def renew(self, lease, **kwargs):
+            await recovering.wait()
+            renewal_failed.set()
+            raise RuntimeError("lease lost during recovery")
+
+    class Agent(FakeAgent):
+        def _ensure_execution(self, *args, **kwargs):
+            async def cancelled():
+                raise asyncio.CancelledError()
+
+            return asyncio.create_task(cancelled())
+
+        async def recover_interrupted_run(self, run_id, context):
+            recovering.set()
+            try:
+                await asyncio.Event().wait()
+            finally:
+                recovery_cancelled.set()
+
+    scheduler = Scheduler()
+    dispatcher = LocalWorkerDispatcher(
+        scheduler, max_concurrent_runs=1, lease_seconds=0.15
+    )
+    result = await dispatcher.submit(
+        Agent(), SimpleNamespace(run_id="run-1", run_revision=0), CONTEXT
+    )
+    try:
+        await asyncio.wait_for(renewal_failed.wait(), 1)
+        await asyncio.wait_for(recovery_cancelled.wait(), 1)
+        with pytest.raises(RuntimeError, match="lease lost during recovery"):
+            await asyncio.wait_for(result, 1)
+        assert all(not worker.done() for worker in dispatcher._workers)
+    finally:
+        await dispatcher.close()
+        await scheduler.close()
+        if result.done() and not result.cancelled():
+            result.exception()
+
+
+@pytest.mark.asyncio
+async def test_close_during_recovery_records_shutdown():
+    recovering = asyncio.Event()
+    scheduler = InMemoryScheduler()
+    fenced = LeaseFencedSessionStore(EphemeralSessionStore(), scheduler)
+    runtime = HarnessRuntime(fenced)
+
+    class Driver:
+        async def execute(self, run_id, context):
+            raise asyncio.CancelledError()
+
+        async def recover_interrupted(self, run_id, context):
+            recovering.set()
+            await asyncio.Event().wait()
+
+        async def close(self):
+            pass
+
+    agent = SAgent(runtime=runtime, driver_factory=lambda run_id: Driver())
+    dispatcher = LocalWorkerDispatcher(
+        scheduler, max_concurrent_runs=1, lease_scope_factory=fenced.lease_scope
+    )
+    agent.attach_dispatcher(dispatcher)
+    stream = await agent.run_stream(start_command("close-during-recovery"), CONTEXT)
+    await asyncio.wait_for(recovering.wait(), 1)
+    await dispatcher.close()
+    result = await asyncio.wait_for(stream.wait(), 1)
+    assert result.state == RunState.FAILED
+    terminal = await runtime.get_run_result(result.run_id)
+    assert terminal.error.code == "scheduler.worker_shutdown"
+    assert not dispatcher._requests
+    assert (
+        await scheduler.claim(
+            "replacement", lease_duration=dispatcher.lease_duration, wait_timeout=0
+        )
+        is None
+    )
+    await agent.close()
+    await scheduler.close()

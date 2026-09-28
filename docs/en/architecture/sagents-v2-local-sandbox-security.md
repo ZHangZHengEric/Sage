@@ -35,6 +35,12 @@ The protocol defaults to hard limits. require_hard_limits=false permits sampled 
 
 filesystem.max_file_bytes / max_total_bytes are additional file-API limits, not substitutes for kernel quotas. Inherited RLIMIT_FSIZE supplies a per-file limit.
 
+## Command search path
+
+The local sandbox plugin accepts a `command_path` string, configured at the top level of Desktop's `execution.sandbox` config, for example `"command_path": "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"`. When omitted, it uses the host PATH captured when the plugin is created; no Homebrew paths are inserted automatically. Explicit paths must contain non-empty absolute directories.
+
+Direct command lookup and the isolated process PATH use the same value. Plugin configuration takes precedence over the host PATH. Request values can override it only when process policy allows the PATH environment variable. Search paths do not grant additional read or mount permissions; executables and their dependencies must already be readable inside the sandbox.
+
 ## Linux
 
 Execution follows LocalProcessRuntime → fixed isolated Python launcher → cgroup.procs → bubblewrap → command and descendants. The launcher uses python -I -c, never a writable workspace script. Python, Sage, and isolation tools must be outside the writable workspace. A root host clears supplementary groups and switches to the configured non-root UID/GID before execution. Dynamic-loader environment changes apply only inside isolation.

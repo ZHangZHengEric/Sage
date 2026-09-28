@@ -35,6 +35,12 @@ CPU 100% 是一个逻辑核心配额，200% 是两个核心，不是累计 CPU �
 
 filesystem.max_file_bytes / max_total_bytes 是额外文件 API 限制，不代替内核配额；继承 RLIMIT_FSIZE 提供单文件限制。
 
+## 命令搜索路径
+
+本地沙箱插件接受 `command_path` 字符串，Desktop 在 `execution.sandbox` 配置顶层设置，例如 `"command_path": "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"`。未设置时使用插件创建时的宿主 PATH；不会自动插入 Homebrew 路径。显式配置必须由非空绝对目录组成。
+
+直接命令解析与隔离进程内的 PATH 使用同一值。插件配置优先于宿主 PATH；只有进程策略允许 PATH 环境变量时，请求值才能覆盖插件配置。配置搜索路径不会扩大文件读取或挂载权限，目录及依赖必须已在沙箱可读范围内。
+
 ## Linux
 
 执行路径为 LocalProcessRuntime → 固定隔离 Python 启动器 → cgroup.procs → bubblewrap → 命令及后代。启动器使用 python -I -c，不执行可写工作区脚本。Python、Sage 和隔离工具须在可写工作区外；宿主以 root 运行时，执行前清空附加组并降至指定非 root UID/GID。动态加载器环境只在隔离边界内生效。
