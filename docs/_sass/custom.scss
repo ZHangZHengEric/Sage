@@ -143,14 +143,6 @@ h1, h2, h3, h4, h5, h6 {
   }
 }
 
-.highlight {
-  padding: 1rem !important;
-  margin: 1rem 0 !important;
-  border-left: 4px solid var(--sage-success-color) !important;
-  background-color: var(--sage-highlight-background-color) !important;
-  border-radius: 0 4px 4px 0 !important;
-}
-
 // Improve search functionality
 .search-input {
   font-family: inherit;
@@ -188,16 +180,29 @@ h1, h2, h3, h4, h5, h6 {
   }
 }
 
-// Improve code syntax highlighting
-.highlight {
-  background-color: #f6f8fa;
+// Rouge nests div.highlight > pre.highlight: style the container only once.
+.main-content div.highlighter-rouge {
+  margin: 1rem 0;
+  background-color: var(--sage-code-background-color);
+  border: 1px solid var(--sage-border-color);
   border-radius: 6px;
-  padding: 16px;
-  overflow-x: auto;
-  
-  code {
-    background-color: transparent;
+
+  .highlight {
+    margin: 0;
     padding: 0;
+    border: 0;
+    background-color: transparent;
+  }
+
+  pre.highlight {
+    padding: 16px;
+    overflow-x: auto;
+  }
+
+  code {
+    padding: 0;
+    border: 0;
+    background-color: transparent;
   }
 }
 
@@ -351,6 +356,44 @@ blockquote {
   .highlight {
     background-color: var(--sage-code-background-color) !important;
     color: var(--sage-text-color);
+  }
+
+  // The upstream Rouge palette is compiled for light mode. Reset unknown
+  // tokens to readable text, then color the semantic groups for dark mode.
+  .main-content .highlight {
+    span { color: var(--sage-text-color); }
+
+    .c, .ch, .cd, .cm, .cp, .cpf, .c1, .cs, .gh, .go, .gp, .gu, .w {
+      color: #a9b4c3;
+    }
+    .k, .kc, .kd, .kn, .kp, .kr, .kt, .ow {
+      color: #ff7b72;
+    }
+    .s, .sa, .sb, .sc, .dl, .sd, .s1, .s2, .se, .sh, .si, .sr, .ss, .sx {
+      color: #a5d6ff;
+    }
+    .m, .mb, .mf, .mh, .mi, .il, .mo, .mx, .l, .ld, .o, .nb, .bp {
+      color: #79c0ff;
+    }
+    .na, .nc, .nd, .ne, .nl, .no, .nt {
+      color: #ffa657;
+    }
+    .nf, .fm, .nv, .vc, .vg, .vi, .vm {
+      color: #d2a8ff;
+    }
+    .err, .gr, .gt, .gd {
+      color: #ffaba8;
+      background-color: #3c1820;
+    }
+    .gi {
+      color: #aff5b4;
+      background-color: #123322;
+    }
+    .hll { background-color: #263449; }
+  }
+
+  .main-content div.highlighter-rouge > button {
+    color: var(--sage-muted-text-color);
   }
 
   .mermaid {
