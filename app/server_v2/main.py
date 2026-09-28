@@ -12,6 +12,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.server_v2.routers import register_routers
+from app.server_v2.routers.web import mount_web
 from app.server_v2.bootstrap import ServerHost
 from app.server_v2.routers.exceptions import register_exception_handlers
 from app.server_v2.observability import (
@@ -67,6 +68,7 @@ def create_app(service: ServerHost) -> FastAPI:
     register_exception_handlers(app)
     app.include_router(build_observability_router(service=service, metrics=metrics))
     register_routers(app, jaeger=bool(settings.jaeger_url))
+    mount_web(app, Path(__file__).parent / "web" / "dist")
     return app
 
 

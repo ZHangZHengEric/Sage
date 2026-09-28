@@ -7,7 +7,7 @@ import threading
 from typing import TextIO
 
 from sagents.v2.runtime.observability.contracts import LogLevel, LogRecord
-from sagents.v2.runtime.observability.logs import (
+from sagents.v2.runtime.observability.log_format import (
     encode_log_record,
     format_log_record,
     record_reaches_min_level,

@@ -388,7 +388,11 @@ class SkillCatalogService:
             ),
             None,
         )
-        if existing is not None and existing.package_sha256 == package.package_sha256:
+        if (
+            existing is not None
+            and existing.package_sha256 == package.package_sha256
+            and existing.description == package.description
+        ):
             return existing
         version_id = new_version_id()
         relative = artifact_relative_path(

@@ -76,3 +76,25 @@ async def test_unknown_bind_name_is_rejected(tmp_path: Path):
         await service.bind_agent_skills(
             owner_user_id="user_1", agent_id="main", names=["missing"]
         )
+
+
+@pytest.mark.asyncio
+async def test_reimport_repairs_legacy_truncated_description(tmp_path):
+    from dataclasses import replace
+
+    service = _service(tmp_path)
+    description = "long description " * 100
+    content = f"---\nname: demo\ndescription: {description}\n---\n# Body\n"
+    record = await service.publish_markdown(
+        name="demo", content=content, user_id="user_1", role="user"
+    )
+    await service.store.publish(replace(record, description=description[:500]))
+    repaired = await service.publish_markdown(
+        name="demo", content=content, user_id="user_1", role="user"
+    )
+    assert repaired.description == description.rstrip()
+    assert repaired.skill_id == record.skill_id
+    again = await service.publish_markdown(
+        name="demo", content=content, user_id="user_1", role="user"
+    )
+    assert again.version_id == repaired.version_id
