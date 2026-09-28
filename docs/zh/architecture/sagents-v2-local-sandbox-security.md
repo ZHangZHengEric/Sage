@@ -11,6 +11,8 @@ ref: v2-detail-sagents-v2-local-sandbox-security
 
 # v2 本机沙箱
 
+本机沙箱主要回答两个问题：工具可以读写哪些文件、访问哪些系统能力，以及执行进程能使用多少资源。文件和网络隔离与资源配额是不同能力。Linux 在宿主准备好 cgroup 和 XFS 配额后可强制执行硬限制；macOS 使用系统隔离和采样计量，不能承诺同样的硬配额。
+
 ## 范围与标准配置
 
 `sage.sandbox.local-workspace` 约束官方文件、Shell、后台 Shell Job 和 Skill 写入，不隔离宿主 Python 插件或 MCP 服务，也不使用 v1 的 sagents/utils/sandbox 后端。

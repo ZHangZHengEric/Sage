@@ -11,6 +11,8 @@ ref: v2-detail-SERVER_V2_AGENT_PLATFORM
 
 # Server v2 Agent 平台
 
+如果只是给现有 Agent 发消息，使用普通聊天即可。需要保存一组完整配置、比较版本、测试后再切换版本时，使用 `/studio` 中的 Agent 包管理。两者共用 v2 运行时，但入口和任务记录各有自己的工作流程。
+
 ## 职责与入口
 
 SAgents v2 提供定义、装配、Flow、执行、持久化和交互；Server 提供身份、权限、用户目录、宿主配置和 HTTP/Web 入口。HTTP 与模型管理工具使用同一个 AgentManagementService。
@@ -72,3 +74,7 @@ Session 使用核心 MySQL SessionStore。managed Application 以宿主持久路
 构建 app/server_v2/web 后，后端托管 web/dist，可访问 `/studio`；未知 API 和越界文件路径不会回退成 HTML。也可独立部署前端并代理后端请求，见[Server 启动](../applications/WEB.md)。
 
 仅支持单 worker。MySQL 持久化不提供横向扩容，AG-UI 回放读取 Session 事件，不依赖 Redis。测试中的 SQLite 事务、模拟模型和合成并发不能代替真实 MySQL、原生平台或长时间模型负载验收。
+
+实现入口：[bootstrap.py](https://github.com/ZHangZHengEric/Sage/blob/main/app/server_v2/bootstrap.py)。
+
+包权限规则：[policy.py](https://github.com/ZHangZHengEric/Sage/blob/main/app/server_v2/packages/policy.py)。

@@ -11,6 +11,8 @@ ref: v2-detail-sagents-v2-context-budget
 
 # v2 上下文预算
 
+模型每次能接收的内容有限，但会话历史可以持续增长。v2 会先保留固定指令和当前请求，再在剩余空间中安排历史；需要压缩时，为较早的历史生成摘要。下文的 token 数是预算估算，不是模型供应商的计费统计。
+
 所有裁剪与摘要只作用于模型请求投影，不删除 Session 的原始消息、工具结果或事件。`system` 与 `developer` 都是固定指令，不进入历史裁剪或摘要区。
 
 ## 预算边界
@@ -44,7 +46,7 @@ agents:
 
 `protected_recent_tokens: 0` 取消当前回合之前的额外历史保护，不允许删除当前用户请求。Context API 对应 `ContextBudget.max_system_tokens` 和 `ContextBudget.protected_recent_tokens`。
 
-Persistent-summary 默认 `max_summary_calls=4`，摘要源预算 `max_summary_source_tokens=24000`，包含滚动摘要空间。工具调用与结果不跨批次拆分。单个单元无可用持久引用且超限，或批次数超限时，在调用摘要模型前拒绝。每次逻辑摘要最多两次格式修复尝试，因此默认最多 8 次供应商请求，每次仍受超时约束。
+Persistent-summary 默认 `max_summary_calls=4`，摘要源预算 `max_summary_source_tokens=24000`，包含滚动摘要空间。工具调用与结果不跨批次拆分。单个单元无可用持久引用且超限，或批次数超限时，在调用摘要模型前拒绝。每次逻辑摘要先请求一次；返回格式不合格时最多再试一次。因此默认最多 8 次摘要生成请求，每次仍受超时约束。
 
 已有摘要可与新增可压缩历史共同缩短。输出没有缩小源内容或不满足最终预算时，不保存派生摘要，不反复扩大源区重试。同一最新用户请求内的长工具轨迹不会自动成为旧历史；大型工具结果应提供持久引用。
 
@@ -68,3 +70,5 @@ python -m pytest tests/sagents/v2/test_context_efficiency.py tests/sagents/v2/te
 ```
 
 基准只测合成历史的裁剪成本，不代表真实模型、数据库吞吐或生产容量。
+
+实现入口：[persistent_reducer.py](https://github.com/ZHangZHengEric/Sage/blob/main/sagents/v2/context/plugins/persistent_reducer.py) · [summarizer_model.py](https://github.com/ZHangZHengEric/Sage/blob/main/sagents/v2/context/plugins/summarizer_model.py) · [provider.py](https://github.com/ZHangZHengEric/Sage/blob/main/sagents/v2/skill/provider.py)。

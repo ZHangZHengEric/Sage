@@ -15,9 +15,11 @@ ref: v2-memory-README
 | Layer | Authority and purpose |
 | --- | --- |
 | SessionStore | Canonical Session history, Run state, and events. |
-| Context | A temporary model-request projection of history and instructions. |
-| Derived state | Summaries and other rebuildable data; never a second authoritative message ledger. |
+| Context | The content sent for this model request, including history and instructions selected within the budget. |
+| Derived state | Summaries and other data derived from history; failure or rebuilding does not change the original messages. |
 | Memory providers | Long-term memory and retrieval over omitted Session history. |
+
+For example, in a long conversation the model may receive a summary of old messages and the latest messages in full, while SessionStore retains the original events. A configured Memory provider can retrieve details omitted from the current request.
 
 Context reduction does not delete raw Session events. Fixed instructions and required current-turn content are protected by budgets; if they cannot fit, the runtime reports the problem instead of silently discarding constraints.
 

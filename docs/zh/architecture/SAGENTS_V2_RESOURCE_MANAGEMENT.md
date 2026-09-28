@@ -11,6 +11,10 @@ ref: v2-detail-SAGENTS_V2_RESOURCE_MANAGEMENT
 
 # v2 运行时资源管理
 
+这里要解决的是：同时运行多个 Agent 时，如何限制模型调用、等待队列和常驻应用的数量，以及何时可以释放空闲资源。释放应用实例不等于删除包或会话，也不等于取消任务。
+
+这几种上限分开计算：Scheduler 限制运行中的任务，`ModelConcurrencyBudget` 限制正在调用模型的请求，管理服务限制已装配的 Application 数量。一个任务等待工具时，仍可能处于运行状态，但不占用模型调用名额。
+
 ## 宿主接入
 
 ```python
@@ -35,7 +39,9 @@ metrics = service.capacity()
 
 ## 资源就绪性
 
-`validate(readiness=True)` 查询 Tool 与 Skill 目录，返回 readiness.ready、missing_tools、missing_skills、unverified。valid 表示结构、组合与 provider 初始化通过，可能同时有 `valid=True` 和 `readiness.ready=False`。
+`validate(readiness=True)` 回答“配置声明的工具和 Skills 现在能否被找到”。总体结果在 `readiness.ready`；每个 Agent 的 `missing_tools`、`missing_skills` 和 `unverified` 在 `readiness.agents[agent_id]` 中。`valid=True` 只表示配置、组件组合和初始化通过，不表示任务一定能完成。
+
+例如，配置引用了已经移除的 Skill：普通就绪检查可以返回 `valid=True`、`readiness.ready=False`，并列出该 Skill；启用下面的严格模式后，这种情况会直接报错。
 
 `require_readiness=True` 阻止缺失或无法验证资源的保存和新 Run。同 ref 重复保存及缓存实例也重新验证，返回本次真实报告和 reused=True；这会产生初始化与清理成本。默认关闭严格模式。`agent_package_validate` 也支持 readiness=true。
 
@@ -53,7 +59,9 @@ Desktop 默认 max_concurrent_model_calls=8、max_waiting_model_calls=128、mode
 
 ## 安全空闲回收
 
-release_idle 是宿主接口，按最后使用时间回收，最多 limit 个。管理操作持有实例使用计数，包括查询、提交、控制及等待构建；在用实例不回收，取消释放计数。
+宿主可调用 `release_idle()` 主动释放最久未使用的实例，每次最多 `limit` 个。回收前必须同时满足：没有管理操作正在使用它、已达到空闲时间、会话能从持久存储恢复，并且没有未结束的任务。等待审批的任务也属于未结束任务，因此不会因为“暂时没有输出”而被回收。
+
+查询、提交、控制和等待构建都会计入实例使用计数；操作取消后归还计数。
 
 存储必须声明 durable_across_process_restart=True 并支持 has_nonterminal_runs()。检查包括排队、运行、暂停和子 Run，未知及内存存储跳过。文件存储扫描未加载 Session 和 journal，损坏时报错；扫描在后台线程中进行。关闭失败保留实例并进入 draining，后续 close 可重试。
 
@@ -82,3 +90,5 @@ Flow 可达集合包括条件边、并行 branches、subflow 和成员 subagents
 测试覆盖就绪检查、资源消失、共享额度、取消、流失败、暂停保留、回收重建、持久状态、损坏与关闭失败。参见[Agent 包管理](SAGENTS_V2_AGENT_MANAGEMENT.md)和[单机并发](sagents-v2-single-host-concurrency.md)。
 
 尚不承诺全进程内存限制、跨进程公平调度、任意存储的离线读取、非可信源码隔离安装或真实模型长时间容量。插件自行创建的线程和子进程不因共享 JobRuntime 就受到控制。
+
+实现入口：[service.py](https://github.com/ZHangZHengEric/Sage/blob/main/sagents/v2/agent/management/service.py) · [readiness.py](https://github.com/ZHangZHengEric/Sage/blob/main/sagents/v2/agent/management/readiness.py) · [concurrency.py](https://github.com/ZHangZHengEric/Sage/blob/main/sagents/v2/model/middleware/concurrency.py)。

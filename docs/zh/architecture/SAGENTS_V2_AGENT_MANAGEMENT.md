@@ -11,6 +11,10 @@ ref: v2-detail-SAGENTS_V2_AGENT_MANAGEMENT
 
 # v2 Agent 包管理
 
+Agent 包把提示词、模型选择、工具、Skills 和流程放在一起，保存为可复用的版本。`AgentManagementService` 负责校验、保存、选用版本和启动任务；用户身份、密钥和允许使用的资源仍由接入它的应用（宿主）决定。
+
+例如，保存新版本后，可以先单独测试，再把它设为活动版本。已经开始的任务继续使用原版本，不会在执行中途切换配置。本文面向需要接入这套管理能力的开发者；通过 Web 使用时先看 [Server Agent 平台](SERVER_V2_AGENT_PLATFORM.md)。
+
 ## 定义与公共接口
 
 `AgentManagementService` 使用原生 `SageManifest` 创建、验证、保存并运行 Agent 包，不另造简化配置。包可以配置 Simple / Fibre / Team、成员、Flow、工具、Skill、记忆、模型、预算和指令文件；具体能力仍需要宿主绑定 provider。创建出的 Agent 只有获得管理工具及宿主授权，才能继续创建其他 Agent。它不改变 Fibre 轻量 `sys_spawn_agent` 的叶子工作者语义。
@@ -100,3 +104,5 @@ python -m pytest tests/sagents/v2/test_agent_management_matrix.py
 示例使用脚本化模型，经过工具调用、保存、Builder 装配与 Native Run，不访问模型 API，也不证明模型质量。测试覆盖版本冲突、隔离、幂等、续接、Flow、Skill、交互和失败清理；原生平台及真实模型测试仍需独立执行。
 
 Server 的 `/studio` 和 `/api/agent-packages` 接入完整包平台；Desktop 普通 Agent 编辑与多成员 Studio 不等于完整包版本管理。
+
+实现入口：[service.py](https://github.com/ZHangZHengEric/Sage/blob/main/sagents/v2/agent/management/service.py)。
