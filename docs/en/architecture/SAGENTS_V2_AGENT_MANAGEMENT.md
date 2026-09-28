@@ -11,6 +11,10 @@ ref: v2-detail-SAGENTS_V2_AGENT_MANAGEMENT
 
 # v2 Agent Package Management
 
+An Agent package keeps instructions, model selections, tools, Skills, and flows together as a reusable version. `AgentManagementService` validates and saves packages, selects versions, and starts work. The integrating application (the host) still controls user identity, credentials, and allowed resources.
+
+For example, you can save a new version, test it separately, and then activate it. Tasks already running keep their original version; their configuration does not change halfway through execution. This page is for developers integrating package management. For the Web workflow, start with the [Server Agent platform](SERVER_V2_AGENT_PLATFORM.md).
+
 ## Definitions and public interfaces
 
 `AgentManagementService` creates, validates, saves, and runs packages using native `SageManifest`, not a simplified configuration format. Packages can select Simple / Fibre / Team modes, members, Flow, tools, Skills, memory, models, budgets, and instruction files; actual capabilities still require host-bound providers. A created Agent can create other Agents only when granted management tools and host authorization. This does not change the leaf-worker semantics of Fibre's lightweight `sys_spawn_agent`.
@@ -100,3 +104,5 @@ python -m pytest tests/sagents/v2/test_agent_management_matrix.py
 Examples use scripted models through tool calls, save, Builder composition, and Native Run. They do not call model APIs or establish model quality. Tests cover version conflicts, isolation, idempotency, continuation, Flow, Skills, interactions, and cleanup failures. Native-platform and real-model tests still need separate execution.
 
 Server exposes the full package platform through `/studio` and `/api/agent-packages`. Desktop's ordinary Agent editing and multi-member Studio are not full package-version management.
+
+Implementation: [service.py](https://github.com/ZHangZHengEric/Sage/blob/main/sagents/v2/agent/management/service.py).

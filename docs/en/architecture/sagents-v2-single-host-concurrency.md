@@ -11,9 +11,13 @@ ref: v2-detail-sagents-v2-single-host-concurrency
 
 # v2 Single-host Concurrency
 
+The current Server can serve multiple users within one process, but deployment still uses one worker. Concurrency lets other tasks progress while one task waits for a model or storage. It does not automatically parallelize database writes or guarantee that more execution slots will improve throughput.
+
 ## Commits and leases
 
-One application process can interleave model calls, tools, and persistence across users and Sessions. The memory and file Schedulers hold their global lock in `execute_fenced` only while checking, registering, and removing lease protection. Storage writes retain a protection marker for the corresponding Run.
+A lease means a worker currently has authority to execute a Run; fencing checks reject writes from a worker whose authority has expired. Once a write passes the check and enters the protected section, the Scheduler preserves its authority until it finishes.
+
+In-memory and file Schedulers hold the global `execute_fenced` lock briefly to check and update protection records. They do not block other Runs for the entire storage write.
 
 - Different Runs may commit concurrently; commits within one Run remain ordered.
 - A committing Run cannot be reclaimed, cancelled, or have its lease released; its tenant slot is not freed early.

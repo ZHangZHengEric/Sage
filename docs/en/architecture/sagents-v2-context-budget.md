@@ -11,6 +11,8 @@ ref: v2-detail-sagents-v2-context-budget
 
 # v2 Context Budgets
 
+A model request has a size limit, while conversation history can keep growing. v2 reserves space for fixed instructions and the current request, then fits history into the remaining space. When compression is needed, it summarizes older history. The token counts below are budget estimates, not provider billing measurements.
+
 Trimming and summaries affect only the model-request projection. They do not delete raw Session messages, tool results, or events. Both `system` and `developer` messages are fixed instructions, outside history trimming and summarization.
 
 ## Budget boundaries
@@ -44,7 +46,7 @@ agents:
 
 `protected_recent_tokens: 0` removes additional protection for history before the current turn; it does not permit deleting the current user request. The Context API fields are `ContextBudget.max_system_tokens` and `ContextBudget.protected_recent_tokens`.
 
-Persistent-summary defaults to `max_summary_calls=4` and `max_summary_source_tokens=24000`, including space for rolling summaries. Tool calls and results are never split across batches. Oversized units without durable references, or too many batches, fail before a summary-model call. Each logical summary allows at most two format-repair attempts, so the default permits at most 8 provider requests, each with its own timeout.
+Persistent-summary defaults to `max_summary_calls=4` and `max_summary_source_tokens=24000`, including space for rolling summaries. Tool calls and results are never split across batches. Oversized units without durable references, or too many batches, fail before a summary-model call. Each logical summary starts with one request and retries at most once if the response format is invalid. The default therefore permits at most 8 summary-generation requests, each with its own timeout.
 
 An existing summary may be shortened together with newly compressible history. Output that does not reduce its source or fit the final budget is not saved as derived state; the runtime does not repeatedly enlarge the source and retry. A long tool trace within the latest user request does not automatically become old history; large results should provide durable references.
 
@@ -68,3 +70,5 @@ python -m pytest tests/sagents/v2/test_context_efficiency.py tests/sagents/v2/te
 ```
 
 The benchmark measures synthetic-history trimming, not real-model or database throughput or production capacity.
+
+Implementation: [persistent_reducer.py](https://github.com/ZHangZHengEric/Sage/blob/main/sagents/v2/context/plugins/persistent_reducer.py) · [summarizer_model.py](https://github.com/ZHangZHengEric/Sage/blob/main/sagents/v2/context/plugins/summarizer_model.py) · [provider.py](https://github.com/ZHangZHengEric/Sage/blob/main/sagents/v2/skill/provider.py).

@@ -11,6 +11,8 @@ ref: v2-detail-sagents-v2-model-pool-and-persistence
 
 # v2 模型池与增量持久化
 
+这一页解释两项独立优化：复用模型客户端，减少重复创建连接对象；只序列化新事件，减少长会话保存时的重复工作。它们都不改变会话内容，也不决定同时能运行多少任务。
+
 ## 有界模型客户端池
 
 Server 宿主持有客户端，Run 借用租约。相同用户、模型记录、协议、地址、模型名和凭据复用客户端；不同用户或变更后的凭据使用不同条目。池键是这些字段的 SHA-256 摘要，不输出原始凭据。
@@ -45,3 +47,5 @@ python scripts/benchmark_v2_session_projection.py --events 10000 --repeats 10
 模型池测试覆盖并发初始化、用户和凭据隔离、容量、失败、取消、缓慢淘汰及关闭失败。SQL 投影测试覆盖增量追加、没有新增、历史截断、删除 Run 与完整导出。模拟数据库连接的测试不等同于真实 MySQL / PostgreSQL 验收。
 
 基准只计合成长事件列表的协调器序列化，不计 SQL、网络、模型或任务完成率；不能换算为生产 QPS。真实端点的长时间负载需要单独验证。
+
+实现入口：[model_pool.py](https://github.com/ZHangZHengEric/Sage/blob/main/app/server_v2/runtime/model_pool.py)。

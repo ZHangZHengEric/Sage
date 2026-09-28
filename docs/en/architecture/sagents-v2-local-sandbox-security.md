@@ -11,6 +11,8 @@ ref: v2-detail-sagents-v2-local-sandbox-security
 
 # v2 Local Sandbox
 
+The local sandbox controls which files and system capabilities tools can access, and how much resource their processes may use. File/network isolation and resource quotas are separate capabilities. Linux can enforce hard limits when the host provides cgroups and XFS quotas. macOS uses system isolation and sampled accounting, which do not provide the same hard-limit guarantee.
+
 ## Scope and standard configuration
 
 `sage.sandbox.local-workspace` constrains official file tools, Shell, background Shell Jobs, and Skill writes. It does not isolate host Python plugins or MCP services and does not use the v1 sagents/utils/sandbox backend.

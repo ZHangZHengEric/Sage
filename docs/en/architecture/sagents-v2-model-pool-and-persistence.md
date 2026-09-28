@@ -11,6 +11,8 @@ ref: v2-detail-sagents-v2-model-pool-and-persistence
 
 # v2 Model Pool and Incremental Persistence
 
+This page covers two independent optimizations: reusing model clients instead of repeatedly creating connection objects, and serializing only new events when saving long Sessions. Neither changes conversation content or determines how many tasks may run at once.
+
 ## Bounded model-client pool
 
 The Server host owns clients; Runs borrow leases. The same user, model record, protocol, address, model name, and credentials reuse a client. Different users or changed credentials use separate entries. Pool keys are SHA-256 digests of those fields; raw credentials are not exposed.
@@ -45,3 +47,5 @@ python scripts/benchmark_v2_session_projection.py --events 10000 --repeats 10
 Pool tests cover concurrent initialization, user and credential isolation, capacity, failure, cancellation, slow eviction, and shutdown failures. SQL projection tests cover incremental append, no new events, history truncation, Run deletion, and full export. Mock database connections do not constitute real MySQL / PostgreSQL acceptance.
 
 The benchmark measures coordinator serialization of synthetic long event lists, excluding SQL, network, model calls, and task completion rates. It cannot be converted into production QPS. Long-running load against real endpoints requires separate validation.
+
+Implementation: [model_pool.py](https://github.com/ZHangZHengEric/Sage/blob/main/app/server_v2/runtime/model_pool.py).

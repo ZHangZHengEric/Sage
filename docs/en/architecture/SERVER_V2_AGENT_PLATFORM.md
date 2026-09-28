@@ -11,6 +11,8 @@ ref: v2-detail-SERVER_V2_AGENT_PLATFORM
 
 # Server v2 Agent Platform
 
+Use ordinary chat to send messages to an existing Agent. Use Agent package management in `/studio` when you need to save complete configurations, compare versions, and test a version before activating it. Both use the v2 runtime, but have separate entry points and task workflows.
+
 ## Responsibilities and entrypoints
 
 SAgents v2 provides definitions, composition, Flow, execution, persistence, and interactions. Server owns identity, authorization, user catalogs, host configuration, and HTTP/Web entrypoints. HTTP and model management tools use the same AgentManagementService.
@@ -72,3 +74,7 @@ See [HTTP API](../api/HTTP_API_REFERENCE.md) for the complete route inventory, a
 After building app/server_v2/web, the backend hosts web/dist, including `/studio`. Unknown APIs and escaping file paths never fall back to HTML. Separate frontend hosting with API proxying is also supported; see [Server setup](../applications/WEB.md).
 
 Only one worker is supported. MySQL persistence does not supply horizontal scaling. AG-UI replay reads Session events without Redis. SQLite transactions, scripted models, and synthetic concurrency tests do not replace real MySQL, native-platform, or long-running model-load acceptance.
+
+Implementation: [bootstrap.py](https://github.com/ZHangZHengEric/Sage/blob/main/app/server_v2/bootstrap.py).
+
+Package authorization rules: [policy.py](https://github.com/ZHangZHengEric/Sage/blob/main/app/server_v2/packages/policy.py).

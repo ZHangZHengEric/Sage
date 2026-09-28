@@ -11,6 +11,10 @@ ref: v2-detail-SAGENTS_V2_RESOURCE_MANAGEMENT
 
 # v2 Runtime Resource Management
 
+This page explains how to limit model calls, waiting requests, and resident applications when several Agents run at once, and when idle resources can be released. Releasing an application instance does not delete its package or Session, or cancel a task.
+
+These limits count different things: the Scheduler limits executing tasks, `ModelConcurrencyBudget` limits active model calls, and the management service limits assembled Applications. A task waiting for a tool may still be running while holding no model-call slot.
+
 ## Host integration
 
 ```python
@@ -35,7 +39,9 @@ The host supplies root, bundle, context, and callbacks. All relevant services an
 
 ## Resource readiness
 
-`validate(readiness=True)` queries Tool and Skill catalogs and returns readiness.ready, missing_tools, missing_skills, and unverified. valid means structure, composition, and provider initialization passed; `valid=True` can coexist with `readiness.ready=False`.
+`validate(readiness=True)` answers whether the declared tools and Skills can currently be discovered. The overall result is `readiness.ready`; each Agent’s `missing_tools`, `missing_skills`, and `unverified` fields are under `readiness.agents[agent_id]`. `valid=True` means configuration, composition, and initialization passed, not that a task will succeed.
+
+For example, a package may reference a Skill that has been removed. An ordinary readiness check can return `valid=True` and `readiness.ready=False`, listing the missing Skill. Strict mode, described below, raises an error instead.
 
 `require_readiness=True` blocks saving and new Runs when resources are missing or unverifiable. Repeated saves of the same ref and cached instances are revalidated, returning the actual report and reused=True. This has initialization and cleanup costs. Strict mode is off by default. `agent_package_validate` also supports readiness=true.
 
@@ -53,7 +59,9 @@ Desktop defaults to max_concurrent_model_calls=8, max_waiting_model_calls=128, a
 
 ## Safe idle reclamation
 
-release_idle is a host interface, reclaiming at most limit instances in last-used order. Management operations hold usage counts, including reads, submission, control, and waiting for builds. In-use instances are protected; cancellation releases counts.
+The host can call `release_idle()` to release the oldest unused instances, at most `limit` per call. An instance is eligible only when no management operation is using it, its idle time has elapsed, its Sessions can be restored from durable storage, and it has no unfinished tasks. A task waiting for approval is unfinished; a lack of output does not make it safe to reclaim.
+
+Reads, submissions, control operations, and waiting for builds all hold usage counts. Cancellation returns those counts.
 
 Stores must declare durable_across_process_restart=True and support has_nonterminal_runs(). Checks include queued, running, suspended, and child Runs. Unknown and memory stores are skipped. File stores scan unloaded Sessions and journals in a background thread and report corruption. Failed shutdown retains the instance in draining; later close calls can retry.
 
@@ -82,3 +90,5 @@ The host owns injected JobRuntime objects. Close users first, then `await jobs.c
 Tests cover readiness, disappearing resources, shared budgets, cancellation, failed streams, suspended-instance protection, reclaim/rebuild, persistent state, corruption, and cleanup failure. See [Agent package management](SAGENTS_V2_AGENT_MANAGEMENT.md) and [single-host concurrency](sagents-v2-single-host-concurrency.md).
 
 There is no guarantee of process-wide memory limits, cross-process fair scheduling, offline reading for arbitrary stores, isolated installation of untrusted source, or long-running real-model capacity. Threads and subprocesses created independently by plugins are not controlled merely by sharing JobRuntime.
+
+Implementation: [service.py](https://github.com/ZHangZHengEric/Sage/blob/main/sagents/v2/agent/management/service.py) · [readiness.py](https://github.com/ZHangZHengEric/Sage/blob/main/sagents/v2/agent/management/readiness.py) · [concurrency.py](https://github.com/ZHangZHengEric/Sage/blob/main/sagents/v2/model/middleware/concurrency.py).
