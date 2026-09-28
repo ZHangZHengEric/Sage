@@ -81,18 +81,18 @@ def _inject_stubs():
         mod.HTML2Text = HTML2Text  # pyright: ignore[reportAttributeAccessIssue]
         sys.modules["html2text"] = mod
 
-    # sagents.utils.logger stub，避免包初始化导致的循环导入
+    # sagents.v1.utils.logger stub，避免包初始化导致的循环导入
     try:
-        import sagents.utils.logger  # noqa: F401
+        import sagents.v1.utils.logger  # noqa: F401
     except Exception:
         import logging
 
-        # 创建分层模块：sagents -> sagents.utils -> sagents.utils.logger
+        # 创建分层模块：sagents -> sagents.v1.utils -> sagents.v1.utils.logger
         sagents_mod = sys.modules.get("sagents") or types.ModuleType("sagents")
         utils_mod = getattr(sagents_mod, "utils", None) or types.ModuleType(
-            "sagents.utils"
+            "sagents.v1.utils"
         )
-        logger_mod = types.ModuleType("sagents.utils.logger")
+        logger_mod = types.ModuleType("sagents.v1.utils.logger")
         # 简单 logger
         logging.basicConfig(level=logging.INFO)
         logger_mod.logger = logging.getLogger("sagents-test")  # pyright: ignore[reportAttributeAccessIssue]
@@ -100,18 +100,18 @@ def _inject_stubs():
         utils_mod.logger = logger_mod  # pyright: ignore[reportAttributeAccessIssue]
         sagents_mod.utils = utils_mod  # pyright: ignore[reportAttributeAccessIssue]
         sys.modules["sagents"] = sagents_mod
-        sys.modules["sagents.utils"] = utils_mod
-        sys.modules["sagents.utils.logger"] = logger_mod
+        sys.modules["sagents.v1.utils"] = utils_mod
+        sys.modules["sagents.v1.utils.logger"] = logger_mod
 
-    # sagents.context.session_context stub，提供 SessionContext
+    # sagents.v1.context.session_context stub，提供 SessionContext
     try:
-        from sagents.context.session_context import SessionContext  # noqa: F401  # pyright: ignore[reportAssignmentType]
+        from sagents.v1.context.session_context import SessionContext  # noqa: F401  # pyright: ignore[reportAssignmentType]
     except Exception:
         sagents_mod = sys.modules.get("sagents") or types.ModuleType("sagents")
         context_mod = getattr(sagents_mod, "context", None) or types.ModuleType(
-            "sagents.context"
+            "sagents.v1.context"
         )
-        session_mod = types.ModuleType("sagents.context.session_context")
+        session_mod = types.ModuleType("sagents.v1.context.session_context")
 
         class SessionContext:  # minimal stub
             def __init__(self):
@@ -121,8 +121,8 @@ def _inject_stubs():
         context_mod.session_context = session_mod  # pyright: ignore[reportAttributeAccessIssue]
         sagents_mod.context = context_mod  # pyright: ignore[reportAttributeAccessIssue]
         sys.modules["sagents"] = sagents_mod
-        sys.modules["sagents.context"] = context_mod
-        sys.modules["sagents.context.session_context"] = session_mod
+        sys.modules["sagents.v1.context"] = context_mod
+        sys.modules["sagents.v1.context.session_context"] = session_mod
 
 
 def main() -> bool:

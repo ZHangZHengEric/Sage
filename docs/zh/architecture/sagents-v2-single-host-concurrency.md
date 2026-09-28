@@ -51,8 +51,8 @@ SAGE_SERVER_MAX_PENDING_RUNS=1024
 
 ```bash
 python -m pytest tests/sagents/v2/test_single_host_fencing.py
-python scripts/benchmark_v2_single_host.py --sessions 64 --writes 8 --io-ms 2
-python scripts/benchmark_v2_single_host.py --sessions 128 --writes 8 --io-ms 2
+python scripts/v2/benchmark_v2_single_host.py --sessions 64 --writes 8 --io-ms 2
+python scripts/v2/benchmark_v2_single_host.py --sessions 128 --writes 8 --io-ms 2
 ```
 
 测试覆盖跨 Run 并行、同 Run 顺序、续租、回收、配额、取消、关闭和 Dispatcher → LeaseFencedSessionStore → SessionStoreCoordinator 协调路径。基准模拟慢异步存储，不包含真实模型或数据库；历史通过数量和合成延迟不是生产容量保证。

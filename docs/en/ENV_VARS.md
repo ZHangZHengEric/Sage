@@ -12,7 +12,7 @@ ref: v2-ENV_VARS
 
 ## Server v2
 
-`python -m app.server_v2` reads `app/server_v2/.env`; process environment variables take precedence. The source of truth is [ServerSettings](https://github.com/ZHangZHengEric/Sage/blob/main/app/server_v2/config/settings.py).
+`python -m app.v2.server` reads `app/v2/server/.env`; process environment variables take precedence. The source of truth is [ServerSettings](https://github.com/ZHangZHengEric/Sage/blob/main/app/v2/server/config/settings.py).
 
 | Variable | Default / role |
 | --- | --- |

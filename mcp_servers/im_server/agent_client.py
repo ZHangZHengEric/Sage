@@ -14,8 +14,8 @@ import httpx
 
 # Import Sage's message management classes
 try:
-    from sagents.context.messages import MessageChunk, MessageManager
-    from sagents.context.messages.message import MessageRole
+    from sagents.v1.context.messages import MessageChunk, MessageManager
+    from sagents.v1.context.messages.message import MessageRole
 
     SAGE_MESSAGE_AVAILABLE = True
 except ImportError:

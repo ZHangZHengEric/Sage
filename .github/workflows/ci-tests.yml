@@ -14,7 +14,18 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  architecture:
+    name: Source architecture
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python scripts/checks/check_architecture.py
+
   python-tests:
+    needs: architecture
     name: Pytest (${{ matrix.suite }})
     runs-on: ubuntu-latest
     strategy:
@@ -22,11 +33,15 @@ jobs:
       matrix:
         include:
           - suite: app
-            path: tests/app
+            path: tests/app --ignore=tests/app/v1/common
           - suite: common
-            path: tests/common
+            path: tests/app/v1/common
           - suite: sagents
             path: tests/sagents
+          - suite: clients
+            path: tests/clients
+          - suite: mcp
+            path: tests/mcp_servers
 
     steps:
       - name: Checkout
@@ -67,7 +82,7 @@ jobs:
 
     defaults:
       run:
-        working-directory: app/server/web
+        working-directory: app/v1/server/web
 
     steps:
       - name: Checkout
@@ -78,7 +93,7 @@ jobs:
         with:
           node-version: "20"
           cache: "npm"
-          cache-dependency-path: app/server/web/package-lock.json
+          cache-dependency-path: app/v1/server/web/package-lock.json
 
       - name: Install Web Dependencies
         run: npm ci
@@ -95,7 +110,7 @@ jobs:
 
     defaults:
       run:
-        working-directory: app/desktop/ui
+        working-directory: app/v1/desktop/ui
 
     steps:
       - name: Checkout
@@ -106,7 +121,7 @@ jobs:
         with:
           node-version: "20"
           cache: "npm"
-          cache-dependency-path: app/desktop/ui/package-lock.json
+          cache-dependency-path: app/v1/desktop/ui/package-lock.json
 
       - name: Install Desktop UI Dependencies
         run: npm ci

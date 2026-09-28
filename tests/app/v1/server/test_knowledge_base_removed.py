@@ -1,0 +1,61 @@
+import importlib.util
+import inspect
+
+from app.v1.server import routers
+from app.v1.common.core import config
+from app.v1.common.schemas.agent import AgentConfigDTO
+from app.v1.common.schemas.chat import StreamRequest
+
+
+def _module_is_removed(module_name: str) -> bool:
+    try:
+        return importlib.util.find_spec(module_name) is None
+    except ModuleNotFoundError:
+        return True
+
+
+def test_server_knowledge_base_modules_are_removed():
+    removed_modules = (
+        "app.v1.server.routers.kdb",
+        "app.v1.common.services.knowledge_base.kdb",
+        "app.v1.common.models.file",
+        "app.v1.common.models.kdb",
+        "app.v1.common.core.client.embed",
+        "app.v1.common.core.client.es",
+        "sagents.v1.llm.embedding",
+    )
+
+    for module_name in removed_modules:
+        assert _module_is_removed(module_name)
+
+
+def test_server_contracts_do_not_expose_knowledge_base_or_embedding_settings():
+    startup_config = config.StartupConfig()
+
+    for field_name in (
+        "embed_api_key",
+        "embed_base_url",
+        "embed_model",
+        "embed_dims",
+        "es_url",
+        "es_api_key",
+        "es_username",
+        "es_password",
+    ):
+        assert not hasattr(startup_config, field_name)
+
+    assert "availableKnowledgeBases" not in AgentConfigDTO.model_fields
+    assert "available_knowledge_bases" not in StreamRequest.model_fields
+    assert not hasattr(config.ENV, "KB_MCP_URL")
+    assert not hasattr(config.ENV, "KB_MCP_API_KEY")
+
+    from sagents.v1 import llm
+
+    assert not hasattr(llm, "OpenAIEmbedding")
+
+
+def test_server_router_registry_does_not_register_knowledge_base():
+    source = inspect.getsource(routers.register_routes)
+
+    assert "kdb" not in source.lower()
+    assert "knowledge-base" not in source

@@ -104,7 +104,7 @@ def _build_tool_schema(tool_def: Dict[str, Any]) -> types.Tool:
     )
 
 
-def build_anytool_server(server_name: str, server_config: Dict[str, Any]) -> Server:
+def build_anytool_server(server_name: str, server_config: Dict[str, Any], *, result_generator=generate_anytool_result) -> Server:
     """Build an in-process MCP server for AnyTool."""
 
     normalized_config = dict(server_config or {})
@@ -143,13 +143,13 @@ def build_anytool_server(server_name: str, server_config: Dict[str, Any]) -> Ser
 
         tool_arguments = dict(arguments or {})
         session_id = str(tool_arguments.pop("session_id", "") or "")
-        request_user_id = str(tool_arguments.pop("user_id", "") or "")
-        result = await generate_anytool_result(
+        tool_arguments.pop("user_id", None)
+        result = await result_generator(
             server_name=server_name,
             tool_def=tool_def,
             arguments=tool_arguments,
             server_config=normalized_config,
-            user_id=request_user_id or owner_user_id,
+            user_id=owner_user_id,
             session_id=session_id or None,
         )
         parsed = result.get("parsed")

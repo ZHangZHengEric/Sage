@@ -71,10 +71,10 @@ Session 使用核心 MySQL SessionStore。managed Application 以宿主持久路
 
 完整路由、鉴权与条件挂载见[HTTP API](../api/HTTP_API_REFERENCE.md)。资源授权失败为 403，不可见对象为 404，版本冲突为 409，容量/模型限流为 429，非法定义为 422。
 
-构建 app/server_v2/web 后，后端托管 web/dist，可访问 `/studio`；未知 API 和越界文件路径不会回退成 HTML。也可独立部署前端并代理后端请求，见[Server 启动](../applications/WEB.md)。
+构建 app/v2/server/web 后，后端托管 web/dist，可访问 `/studio`；未知 API 和越界文件路径不会回退成 HTML。也可独立部署前端并代理后端请求，见[Server 启动](../applications/WEB.md)。
 
 仅支持单 worker。MySQL 持久化不提供横向扩容，AG-UI 回放读取 Session 事件，不依赖 Redis。测试中的 SQLite 事务、模拟模型和合成并发不能代替真实 MySQL、原生平台或长时间模型负载验收。
 
-实现入口：[bootstrap.py](https://github.com/ZHangZHengEric/Sage/blob/main/app/server_v2/bootstrap.py)。
+实现入口：[bootstrap.py](https://github.com/ZHangZHengEric/Sage/blob/main/app/v2/server/bootstrap.py)。
 
-包权限规则：[policy.py](https://github.com/ZHangZHengEric/Sage/blob/main/app/server_v2/packages/policy.py)。
+包权限规则：[policy.py](https://github.com/ZHangZHengEric/Sage/blob/main/app/v2/server/packages/policy.py)。

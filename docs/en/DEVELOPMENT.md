@@ -15,10 +15,10 @@ ref: v2-DEVELOPMENT
 | Directory | Responsibility |
 | --- | --- |
 | `sagents/v2/` | Runtime contracts, composition, providers, and execution |
-| `app/desktop_v2/` | Flutter UI and local FastAPI sidecar |
-| `app/server_v2/` | Multi-user server and Vue web client |
+| `app/v2/desktop/` | Flutter UI and local FastAPI sidecar |
+| `app/v2/server/` | Multi-user server and Vue web client |
 | `tests/sagents/v2/` | Runtime tests and conformance checks |
-| `tests/app/desktop_v2/`, `tests/app/server_v2/` | Host integration tests |
+| `tests/app/v2/desktop/`, `tests/app/v2/server/` | Host integration tests |
 | `docs/en/`, `docs/zh/` | Current bilingual v2 documentation |
 
 ## Validate a change
@@ -27,19 +27,19 @@ Use the Python 3.12+ environment from [Getting Started](applications/GETTING_STA
 
 ```bash
 python -m pip install -e '.[server-v2]' pytest pytest-asyncio pytest-timeout
-python -m pytest tests/sagents/v2 tests/app/desktop_v2 tests/app/server_v2 -q
+python -m pytest tests/sagents/v2 tests/app/v2/desktop tests/app/v2/server -q
 ```
 
 Run focused tests while developing. Live-provider tests require explicit configuration and may incur model costs. Database tests with injected test stores do not prove production MySQL behavior.
 
 ```bash
-cd app/desktop_v2
+cd app/v2/desktop
 flutter analyze
 flutter test
 ```
 
 ```bash
-cd app/server_v2/web
+cd app/v2/server/web
 npm install
 npm run build
 ```

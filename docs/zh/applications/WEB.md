@@ -21,22 +21,22 @@ Python 3.12+、MySQL 和 Node.js 22.12+。先完成[源码环境安装](GETTING_
 
 ```bash
 python -m pip install -e '.[server-v2]'
-cp app/server_v2/.env.example app/server_v2/.env
+cp app/v2/server/.env.example app/v2/server/.env
 ```
 
-在 `app/server_v2/.env` 中配置 `SAGE_SERVER_MYSQL_URL`、自己的 `SAGE_SERVER_JWT_SECRET`（至少 32 字节），以及初始管理员账号。
+在 `app/v2/server/.env` 中配置 `SAGE_SERVER_MYSQL_URL`、自己的 `SAGE_SERVER_JWT_SECRET`（至少 32 字节），以及初始管理员账号。
 
 ```bash
-cd app/server_v2/web
+cd app/v2/server/web
 npm install
 npm run build
 cd ../../..
-python -m app.server_v2
+python -m app.v2.server
 ```
 
 打开 [http://127.0.0.1:8090](http://127.0.0.1:8090)，登录后配置模型和 Agent。`/studio` 管理 Agent 包，`/docs` 提供当前服务的 OpenAPI。
 
-开发前端时，在 `app/server_v2/web` 中运行 `npm run dev`，Vite 代理到 8090 端口。进程环境变量优先于组件 `.env` 文件。
+开发前端时，在 `app/v2/server/web` 中运行 `npm run dev`，Vite 代理到 8090 端口。进程环境变量优先于组件 `.env` 文件。
 
 启动时幂等升级旧表：补齐缺失的 `threads.agent_id`，将 Skill 描述扩展为 `LONGTEXT`。数据库账号需要相应的 `ALTER` 权限。以前已截断的目录描述可重新导入原 Skill 文件修复。
 
@@ -49,4 +49,4 @@ python -m app.server_v2
 
 [`deploy/`](https://github.com/ZHangZHengEric/Sage/blob/main/deploy/README.md) 包含多套部署配置，使用前应核对具体环境的镜像和启动模块，不能将所有 Compose 环境都视作 Server v2。
 
-[环境变量](../ENV_VARS.md) · [HTTP API](../api/HTTP_API_REFERENCE.md) · [组件参考](https://github.com/ZHangZHengEric/Sage/blob/main/app/server_v2/README.md)
+[环境变量](../ENV_VARS.md) · [HTTP API](../api/HTTP_API_REFERENCE.md) · [组件参考](https://github.com/ZHangZHengEric/Sage/blob/main/app/v2/server/README.md)

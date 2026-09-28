@@ -44,7 +44,7 @@ except ImportError:
     croniter = SimpleCroniter
 
 from mcp.server.fastmcp import FastMCP
-from sagents.tool.mcp_tool_base import sage_mcp_tool
+from sagents.v1.tool.mcp_tool_base import sage_mcp_tool
 
 # Initialize FastMCP server
 mcp = FastMCP("Task Scheduler Service")

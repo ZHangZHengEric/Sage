@@ -16,7 +16,7 @@ parent: 应用入口
 先完成 [Python 环境安装](GETTING_STARTED.md)，再安装 Dart 满足 `^3.12.2` 的 Flutter 和目标平台的桌面工具链：
 
 ```bash
-cd app/desktop_v2
+cd app/v2/desktop
 flutter pub get
 flutter run -d macos
 ```
@@ -44,4 +44,4 @@ Windows 或 Linux 使用 `-d windows`、`-d linux`。应用自动启动托管 Py
 
 Desktop v2 不导入 v1 数据。现有 Tauri 发布安装包以对应版本说明为准，不应视为 Flutter v2 构建。
 
-[组件参考](https://github.com/ZHangZHengEric/Sage/blob/main/app/desktop_v2/README.md) · [故障排查](../TROUBLESHOOTING.md)
+[组件参考](https://github.com/ZHangZHengEric/Sage/blob/main/app/v2/desktop/README.md) · [故障排查](../TROUBLESHOOTING.md)
