@@ -337,6 +337,10 @@ async def test_worker_restart_recovers_started_tool_as_manual_resolution_barrier
     with pytest.raises(asyncio.CancelledError):
         await execution
     assert (await runtime.get_run(handle.run_id)).state == RunState.RUNNING
+    assert any(
+        event.type == "tool.call.unknown"
+        for event in await runtime.session_store.read_events(handle.run_id)
+    )
 
     unexpected_dispatches = 0
 

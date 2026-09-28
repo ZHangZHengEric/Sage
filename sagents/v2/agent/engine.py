@@ -2254,6 +2254,36 @@ class AgentLoopEngine:
                 # release Run-scoped Tool resources (e.g. shell jobs) here.
                 await self._release_run_resources(run.run_id)
                 return run, None
+        except asyncio.CancelledError:
+            current = await self.runtime.get_run(run.run_id)
+            if current.state in TERMINAL_RUN_STATES:
+                await self._release_run_resources(run.run_id)
+                raise
+            if current.state in {RunState.RUNNING, RunState.SUSPEND_REQUESTED}:
+                uncertainty = RuntimeErrorInfo(
+                    code="tool.cancelled_before_result",
+                    category=ErrorCategory.UNCERTAIN_SIDE_EFFECT,
+                    message=(
+                        "tool execution was cancelled before a result was received"
+                    ),
+                    safe_to_resume=True,
+                    metadata={
+                        "tool_name": call.tool_name,
+                        "operation_id": call.operation_id,
+                        "tool_result_received": False,
+                    },
+                )
+                try:
+                    await asyncio.shield(
+                        self._record_tool_unknown(
+                            current, call, uncertainty, context, turn_id, step_id
+                        )
+                    )
+                except asyncio.CancelledError:
+                    raise
+                except Exception:
+                    pass
+            raise
         except SageV2Error as exc:
             localized = localize_error(exc.info, context.language)
             result = ToolExecutionResult(
