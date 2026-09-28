@@ -2,6 +2,8 @@
 
 面向版本用户的完整说明保存在 [`release_notes/`](release_notes/)；本文件记录持续开发变更。
 
+- **2026-09-28** 长工具等待中 driver 被取消时不再误判 worker_shutdown：先落 tool.unknown，再 recover 未完成副作用，worker 留在池里。
+
 - **2026-09-24 21:57** 沙箱 PATH 加上 /opt/homebrew/bin 和 /usr/local/bin，短名能找到 ffmpeg。
 
 - **2026-09-24** server_v2 路由改为注入所属业务服务，目录、Skill、会话及凭据读取经服务接口完成；Run Driver 接收明确的运行依赖，身份与工具权限上下文归入 identity。缺模型提示移到 AG-UI/A2A 接口，网页显示接口返回的文案，执行资源不再保存用户文案。
