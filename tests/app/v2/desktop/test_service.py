@@ -5101,3 +5101,34 @@ def test_local_sandbox_command_path_config_is_forwarded_and_separates_cache():
         factory(host, "sage.sandbox.local-workspace", {"command_path": "/first/bin"})
         is first
     )
+
+
+def test_local_sandbox_read_paths_config_is_forwarded_and_separates_cache():
+    from app.v2.desktop.backend.run_composition import DesktopRunCompositionMixin
+    from sagents.v2.runtime.execution.sandbox import SandboxGrantIssuer
+
+    host = SimpleNamespace(
+        _sandbox_grant_issuer=SandboxGrantIssuer(), _sandbox_providers={}
+    )
+    factory = DesktopRunCompositionMixin._sandbox_provider
+    first = factory(
+        host,
+        "sage.sandbox.local-workspace",
+        {"read_paths": ["/opt/first-runtime"]},
+    )
+    second = factory(
+        host,
+        "sage.sandbox.local-workspace",
+        {"read_paths": ["/opt/second-runtime"]},
+    )
+    assert first.read_paths == ("/opt/first-runtime",)
+    assert second.read_paths == ("/opt/second-runtime",)
+    assert first is not second
+    assert (
+        factory(
+            host,
+            "sage.sandbox.local-workspace",
+            {"read_paths": ["/opt/first-runtime"]},
+        )
+        is first
+    )

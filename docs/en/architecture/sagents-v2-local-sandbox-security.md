@@ -39,7 +39,9 @@ filesystem.max_file_bytes / max_total_bytes are additional file-API limits, not 
 
 The local sandbox plugin accepts a `command_path` string, configured at the top level of Desktop's `execution.sandbox` config, for example `"command_path": "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"`. When omitted, it uses the host PATH captured when the plugin is created; no Homebrew paths are inserted automatically. Explicit paths must contain non-empty absolute directories.
 
-Direct command lookup and the isolated process PATH use the same value. Plugin configuration takes precedence over the host PATH. Request values can override it only when process policy allows the PATH environment variable. Search paths do not grant additional read or mount permissions; executables and their dependencies must already be readable inside the sandbox.
+Direct command lookup and the isolated process PATH use the same value. Plugin configuration takes precedence over the host PATH. Request values can override it only when process policy allows the PATH environment variable. Search paths do not grant additional read or mount permissions.
+
+Extra readable directories come from the plugin `read_paths` list: absolute directories, read-only. macOS adds them to Seatbelt `file-read*`; Linux bind-mounts the same list read-only. Relative paths and `/` are rejected; paths inside the current workspace are ignored at command time. An empty list keeps the previous sandbox surface. Hosts supply the directories they need (for example a packaged runtime tree); the generic plugin does not read host environment variables.
 
 ## Linux
 
