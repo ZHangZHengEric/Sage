@@ -194,28 +194,39 @@ class SkillLoader:
                 run_id not in self._initialized_runs
                 and self.inherited_skills is not None
             ):
-                if not values:
+                remaining = self.max_active_tokens - sum(
+                    self.token_estimator(self._context_content(value))
+                    for value in values
+                )
+                if remaining > 0:
                     allowed = {
                         v.name for v in await self.catalog.list_skills(run_id=run_id)
                     }
-                    remaining = self.max_active_tokens
+                    current_names = {value.descriptor.name for value in values}
                     inherited = []
                     for name in dict.fromkeys(await self.inherited_skills(run_id)):
-                        if name not in allowed:
+                        if remaining <= 0:
+                            break
+                        if name in current_names or name not in allowed:
                             continue
                         try:
                             value = await self._load_once(
                                 name, run_id=run_id, budget_tokens=remaining
                             )
                         except SageV2Error as exc:
-                            if exc.info.code == "skill.active_budget_exceeded":
-                                break
+                            if exc.info.code in {
+                                "skill.active_budget_exceeded",
+                                "skill.not_found",
+                                "skill.not_enabled",
+                            }:
+                                continue
                             raise
                         inherited.append(value)
                         remaining -= self.token_estimator(self._context_content(value))
-                    # Repositories retain chronological order for later eviction.
+                    # History is older than this Run's explicit/default loads.
+                    # Keep current activations newest for later budget eviction.
                     await self.activations.replace_loaded(
-                        run_id=run_id, values=tuple(reversed(inherited))
+                        run_id=run_id, values=(*reversed(inherited), *values)
                     )
                 self._initialized_runs.add(run_id)
                 values = await self.activations.list_loaded(run_id=run_id)

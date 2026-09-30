@@ -104,12 +104,26 @@ class AgentCompositionFactory:
             messages = await SessionHistoryLedgerBuilder(
                 self.runtime.session_store
             ).build(command, run_id=run_id)
+            # SkillLoadTool emits these metadata fields only after a successful
+            # load. A call alone (failed, denied, or unfinished) is not activation.
+            successful_loads = {
+                (message.metadata.get("source_run_id"), message.tool_call_id):
+                    message.metadata["skill_name"]
+                for message in messages
+                if message.role == "tool"
+                and message.metadata.get("skill_name")
+                and message.metadata.get("content_hash")
+            }
             names: list[str] = []
             for message in reversed(messages):
                 for call in reversed(message.tool_calls):
                     if call.name != "load_skill":
                         continue
                     name = call.arguments.get("skill_name")
+                    if successful_loads.get(
+                        (message.metadata.get("source_run_id"), call.tool_call_id)
+                    ) != name:
+                        continue
                     if isinstance(name, str) and name and name not in names:
                         names.append(name)
             return tuple(names)

@@ -496,6 +496,155 @@ async def test_inherited_skills_obey_current_grant_and_materialize_for_new_run()
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("budget", [20, 30, 40])
+async def test_history_restores_around_defaults_and_skips_oversized_candidates(budget):
+    provider, workspace, activations, loader = loader_for(
+        *(
+            bundle(name, name)
+            for name in ("a", "b", "large", "recent", "old", "revoked")
+        )
+    )
+    loader.token_estimator = lambda text: (
+        25 if "<skill_name>large</skill_name>" in text else 10
+    )
+    loader.max_active_tokens = budget
+    defaults = tuple([await loader.load(name, run_id="next") for name in ("a", "b")])
+    history_reads = []
+
+    async def history(run_id):
+        history_reads.append(run_id)
+        return ("a", "large", "revoked", "deleted", "recent", "recent", "old", "b")
+
+    loader.inherited_skills = history
+    loader.catalog = FilteredSkillCatalog(
+        provider, ("a", "b", "large", "recent", "old")
+    )
+    results = await asyncio.gather(*(loader.loaded(run_id="next") for _ in range(3)))
+    loaded = results[0]
+    expected = {20: [], 30: ["recent"], 40: ["old", "recent"]}[budget] + ["a", "b"]
+    assert [value.descriptor.name for value in loaded] == expected
+    assert loaded[-2:] == defaults
+    assert (
+        sum(loader.token_estimator(loader._context_content(value)) for value in loaded)
+        <= budget
+    )
+    assert all(result == loaded for result in results)
+    assert history_reads == ([] if budget == 20 else ["next"])
+    assert len(provider.fetches) == len(set(provider.fetches))
+    assert {name for _, name, _ in workspace.materializations} == set(expected)
+    assert await activations.list_loaded(run_id="next") == loaded
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("code", ["skill.not_found", "skill.not_enabled"])
+async def test_history_skips_candidates_removed_after_catalog_listing(
+    monkeypatch, code
+):
+    provider, _, _, loader = loader_for(
+        bundle("default", "Default"), bundle("stale", "Stale"), bundle("valid", "Valid")
+    )
+    await loader.load("default", run_id="next")
+
+    async def history(run_id):
+        return ("stale", "valid")
+
+    original = provider.get_skill
+
+    async def lookup(name, *, run_id):
+        if name == "stale":
+            raise loader._error(code, "Skill is no longer available")
+        return await original(name, run_id=run_id)
+
+    monkeypatch.setattr(provider, "get_skill", lookup)
+    loader.inherited_skills = history
+    segments = await ActiveSkillsContextProvider(loader).segments(
+        command(), run_id="next"
+    )
+    content = "\n".join(segment.content for segment in segments)
+    assert "<skill_name>valid</skill_name>" in content
+    assert "<skill_name>default</skill_name>" in content
+    assert "<skill_name>stale</skill_name>" not in content
+    assert provider.fetches == [("next", "default"), ("next", "valid")]
+
+
+@pytest.mark.asyncio
+async def test_factory_history_requires_successful_load_result(monkeypatch):
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+
+    from sagents.v2.agent.factory import AgentCompositionFactory
+    from sagents.v2.context.session_history import SessionHistoryLedgerBuilder
+    from sagents.v2.model import ModelMessage, ModelToolCall
+
+    messages = []
+    # Reused provider call IDs must not match success from a different Run.
+    for run, name, success in (
+        ("first", "good", True),
+        ("second", "failed", False),
+        ("third", "unfinished", None),
+    ):
+        messages.append(
+            ModelMessage(
+                role="assistant",
+                metadata={"source_run_id": run},
+                tool_calls=(
+                    ModelToolCall(
+                        tool_call_id="load",
+                        name="load_skill",
+                        arguments={"skill_name": name},
+                    ),
+                ),
+            )
+        )
+        if success is not None:
+            messages.append(
+                ModelMessage(
+                    role="tool",
+                    tool_call_id="load",
+                    content=(TextBlock(text="loaded" if success else "failed"),),
+                    metadata={
+                        "source_run_id": run,
+                        **(
+                            {"skill_name": name, "content_hash": "hash"}
+                            if success
+                            else {}
+                        ),
+                    },
+                )
+            )
+    monkeypatch.setattr(
+        SessionHistoryLedgerBuilder, "build", AsyncMock(return_value=tuple(messages))
+    )
+    provider, workspace, activations, _ = loader_for(
+        *(bundle(name, name) for name in ("good", "failed", "unfinished"))
+    )
+    names = ("good", "failed", "unfinished")
+    factory = AgentCompositionFactory(
+        SimpleNamespace(
+            session_store=SimpleNamespace(
+                get_start_command=AsyncMock(return_value=command()),
+            )
+        )
+    )
+    loader = factory.create_skill_loader(
+        SimpleNamespace(
+            agents={"agent": SimpleNamespace(skills=names)},
+            policy_ceilings={"agent": SimpleNamespace(allowed_skills=set(names))},
+        ),
+        "agent",
+        catalog=provider,
+        source=provider,
+        workspace=workspace,
+        activations=activations,
+        skill_loading=SimpleNamespace(create_loader=SkillLoader),
+    )
+    assert [value.descriptor.name for value in await loader.loaded(run_id="next")] == [
+        "good"
+    ]
+    assert provider.fetches == [("next", "good")]
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("style", ["plain", "folded", "literal"])
 async def test_filesystem_catalog_preserves_complete_yaml_description(tmp_path, style):
     root = tmp_path / "long-skill"
