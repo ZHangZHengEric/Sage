@@ -39,7 +39,9 @@ filesystem.max_file_bytes / max_total_bytes 是额外文件 API 限制，不代�
 
 本地沙箱插件接受 `command_path` 字符串，Desktop 在 `execution.sandbox` 配置顶层设置，例如 `"command_path": "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"`。未设置时使用插件创建时的宿主 PATH；不会自动插入 Homebrew 路径。显式配置必须由非空绝对目录组成。
 
-直接命令解析与隔离进程内的 PATH 使用同一值。插件配置优先于宿主 PATH；只有进程策略允许 PATH 环境变量时，请求值才能覆盖插件配置。配置搜索路径不会扩大文件读取或挂载权限，目录及依赖必须已在沙箱可读范围内。
+直接命令解析与隔离进程内的 PATH 使用同一值。插件配置优先于宿主 PATH；只有进程策略允许 PATH 环境变量时，请求值才能覆盖插件配置。配置搜索路径不会扩大文件读取或挂载权限。
+
+额外可读目录由插件 `read_paths` 配置：一组绝对目录，只读放行。macOS 加入 Seatbelt `file-read*`，Linux 做只读 bind。拒绝相对路径和 `/`；落在当前工作区里的路径在启动命令时忽略。未设置时与改前一致。宿主自行写入需要放行的目录（例如打包运行时树），通用沙箱插件不认宿主环境变量。
 
 ## Linux
 

@@ -372,6 +372,42 @@ def test_macos_seatbelt_reads_xcode_developer_roots(tmp_path):
     )
 
 
+def test_plugin_read_paths_default_empty_and_keep_absolute_dirs():
+    assert LocalWorkspaceSandboxProvider(b"key").read_paths == ()
+    provider = LocalWorkspaceSandboxProvider(
+        b"key", read_paths=["/opt/host-runtime", "/opt/host-runtime", "/usr/local/tools"]
+    )
+    assert provider.read_paths == ("/opt/host-runtime", "/usr/local/tools")
+
+
+@pytest.mark.parametrize(
+    "paths",
+    ["relative/dir", ["relative/dir"], ["/"], [""], ["/tmp\x00"], [" / "]],
+)
+def test_plugin_read_paths_reject_ambiguous_directories(paths):
+    with pytest.raises(ValueError, match="read_paths"):
+        LocalWorkspaceSandboxProvider(b"key", read_paths=paths)
+
+
+def test_host_read_paths_skip_workspace_and_root(tmp_path):
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / "inside").mkdir()
+    runtime = tmp_path / "Yiii.app" / "Contents" / "Resources" / "yiii-runtime"
+    runtime.mkdir(parents=True)
+    boundary = LocalResourceBoundary(
+        SimpleNamespace(root=workspace),
+        extra_read_paths=(
+            str(runtime),
+            str(workspace),
+            str(workspace / "inside"),
+            "/",
+            str(tmp_path / "missing-runtime"),
+        ),
+    )
+    assert boundary._host_read_paths() == (str(runtime.resolve()),)
+
+
 @pytest.mark.asyncio
 @pytest.mark.skipif(sys.platform != "darwin", reason="native Seatbelt")
 @pytest.mark.timeout(10)
