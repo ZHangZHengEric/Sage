@@ -62,6 +62,7 @@ class ContextRequestReservation(StrictModel):
     hidden_tool_index_tokens: int = Field(default=0, ge=0)
     continuation_guidance_tokens: int = Field(default=0, ge=0)
     protocol_overhead_tokens: int = Field(default=0, ge=0)
+    runtime_context_tokens: int = Field(default=0, ge=0)
     message_count: int = Field(default=0, ge=0)
 
     @property
@@ -73,6 +74,7 @@ class ContextRequestReservation(StrictModel):
             + self.hidden_tool_index_tokens
             + self.continuation_guidance_tokens
             + self.protocol_overhead_tokens
+            + self.runtime_context_tokens
         )
 
 

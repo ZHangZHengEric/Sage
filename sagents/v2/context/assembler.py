@@ -248,10 +248,8 @@ class DefaultContextAssembler:
                     },
                 )
             )
-        payload = self._sanitize_tool_pairs(
-            self._strip_historical_search_memory(
-                tuple(message for message in ledger if message.role != "system")
-            )
+        canonical = tuple(
+            message for message in ledger if message.role != "system"
         )
         volatile = tuple(
             segment
@@ -262,9 +260,10 @@ class DefaultContextAssembler:
                 and segment.stability == ContextStability.VOLATILE
             )
         )
-        if volatile:
-            payload = self._inject_latest_user(payload, volatile)
-        messages = (*system, *payload)
+        # Reducer hashes and coverage follow committed ledger messages. Drop
+        # unfinished tool pairs and inject runtime context only on the
+        # provider-facing view after reduction.
+        messages = (*system, *canonical)
         # Resolved once and shared: the reduction scope and the projection
         # observer both need the owning Run, and neither should pay for a
         # second store read.
@@ -294,10 +293,19 @@ class DefaultContextAssembler:
                         command.config.metadata.get("response_language") or "en"
                     ),
                 )
-            effective_budget = self._with_reservation(
-                self.budget,
-                reservation or ContextRequestReservation(),
+            reservation = reservation or ContextRequestReservation()
+            runtime_tokens = await self._runtime_injection_tokens(
+                canonical, volatile
             )
+            if runtime_tokens:
+                reservation = reservation.model_copy(
+                    update={
+                        "runtime_context_tokens": (
+                            reservation.runtime_context_tokens + runtime_tokens
+                        )
+                    }
+                )
+            effective_budget = self._with_reservation(self.budget, reservation)
             projection = await self.reducer.reduce(
                 messages, effective_budget, scope=scope
             )
@@ -306,6 +314,16 @@ class DefaultContextAssembler:
                 messages=messages,
                 estimated_tokens=await estimate_tokens_async(self.estimator, messages),
                 source_message_count=len(messages),
+            )
+        view = self._apply_inference_view(projection.messages, volatile)
+        if view != projection.messages:
+            projection = projection.model_copy(
+                update={
+                    "messages": view,
+                    "estimated_tokens": await estimate_tokens_async(
+                        self.estimator, view
+                    ),
+                }
             )
         if self.projection_observer is not None and run_id is not None:
             await self.projection_observer.observe_projection(
@@ -364,6 +382,53 @@ class DefaultContextAssembler:
                 "max_messages": max_messages,
             }
         )
+
+    async def _runtime_injection_tokens(
+        self,
+        canonical: tuple[ModelMessage, ...],
+        volatile: tuple[ContextSegment, ...],
+    ) -> int:
+        """Tokens added when the latest user message receives runtime context."""
+
+        if not volatile:
+            return 0
+        latest = next(
+            (
+                message
+                for message in reversed(canonical)
+                if is_user_request(message)
+            ),
+            None,
+        )
+        if latest is None:
+            return 0
+        injected = self._inject_latest_user((latest,), volatile)[-1]
+        before = await estimate_tokens_async(self.estimator, (latest,))
+        after = await estimate_tokens_async(self.estimator, (injected,))
+        return max(0, after - before)
+
+    @classmethod
+    def _apply_inference_view(
+        cls,
+        messages: tuple[ModelMessage, ...],
+        volatile: tuple[ContextSegment, ...],
+    ) -> tuple[ModelMessage, ...]:
+        systems = tuple(
+            message
+            for message in messages
+            if message.role in {"system", "developer"}
+        )
+        payload = tuple(
+            message
+            for message in messages
+            if message.role not in {"system", "developer"}
+        )
+        payload = cls._sanitize_tool_pairs(
+            cls._strip_historical_search_memory(payload)
+        )
+        if volatile:
+            payload = cls._inject_latest_user(payload, volatile)
+        return (*systems, *payload)
 
     @staticmethod
     def _inject_latest_user(

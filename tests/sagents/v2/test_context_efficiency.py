@@ -140,25 +140,36 @@ async def test_oversized_summary_does_not_repeat_overlapping_model_work():
 
 
 @pytest.mark.asyncio
-async def test_summary_work_limit_is_checked_before_model_calls():
+async def test_summary_work_limit_saves_partial_prefix_for_the_next_turn():
     summarizer = Summary()
+    store = InMemoryConversationSummaryStore()
     source = tuple(message("history " * 70 + str(i)) for i in range(12)) + (
         message("latest", "user"),
     )
-    with pytest.raises(SageV2Error) as caught:
-        await PersistentSummaryContextReducer(
-            InMemoryConversationSummaryStore(),
-            summarizer=summarizer,
-            summary_target_tokens=32,
-            max_summary_source_tokens=600,
-            max_summary_calls=1,
-        ).reduce(
-            source,
-            ContextBudget(max_input_tokens=1000, protected_recent_tokens=0),
-            scope=scope(),
-        )
-    assert caught.value.info.code == "context.summary_work_limit"
-    assert not summarizer.requests
+    reducer = PersistentSummaryContextReducer(
+        store,
+        summarizer=summarizer,
+        summary_target_tokens=32,
+        max_summary_source_tokens=600,
+        max_summary_calls=1,
+    )
+    budget = ContextBudget(max_input_tokens=1000, protected_recent_tokens=0)
+    result = None
+    for _ in range(8):
+        try:
+            result = await reducer.reduce(source, budget, scope=scope())
+            break
+        except SageV2Error as caught:
+            assert caught.info.code != "context.summary_work_limit"
+            assert await store.get("session") is not None
+    stored = await store.get("session")
+    assert result is not None
+    assert stored is not None
+    assert result.strategy == "persistent_summary"
+    assert len(summarizer.requests) >= 1
+    assert summarizer.requests[0].previous_summary is None
+    if len(summarizer.requests) > 1:
+        assert summarizer.requests[1].previous_summary == summarizer.text
 
 
 @pytest.mark.asyncio

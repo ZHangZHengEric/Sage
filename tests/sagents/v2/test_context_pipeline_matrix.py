@@ -5,6 +5,7 @@ import pytest
 from sagents.v2.context import (
     ContextBudget,
     ContextPlacement,
+    ContextProjection,
     ContextSegment,
     ContextStability,
     DefaultContextAssembler,
@@ -367,3 +368,109 @@ async def test_budget_never_truncates_protected_latest_user_silently():
             (ModelMessage(role="user", content=(TextBlock(text="must survive"),)),),
         )
     assert caught.value.info.code == "context.budget_exhausted"
+
+
+@pytest.mark.asyncio
+async def test_reducer_sees_canonical_history_not_inference_rewrites():
+    captured = {}
+
+    class CaptureReducer:
+        async def reduce(self, messages, budget, *, scope=None):
+            captured["messages"] = messages
+            return ContextProjection(
+                messages=messages,
+                estimated_tokens=1,
+                source_message_count=len(messages),
+            )
+
+    call = ModelToolCall(tool_call_id="open", name="lookup", arguments={})
+    ledger = (
+        ModelMessage(role="user", content=(TextBlock(text="old"),)),
+        ModelMessage(role="assistant", tool_calls=(call,)),
+        ModelMessage(role="user", content=(TextBlock(text="latest"),)),
+    )
+    assembler = DefaultContextAssembler(
+        system_instructions="system",
+        budget=ContextBudget(max_input_tokens=10_000),
+        reducer=CaptureReducer(),
+        providers=(
+            StaticContextProvider(
+                (
+                    ContextSegment(
+                        segment_id="runtime",
+                        content="workspace context",
+                        stability=ContextStability.VOLATILE,
+                        placement=ContextPlacement.LATEST_USER,
+                    ),
+                )
+            ),
+        ),
+    )
+
+    projection = await assembler.prepare_projection(command(), ledger)
+
+    reduced = captured["messages"]
+    assert [message.role for message in reduced if message.role != "system"] == [
+        "user",
+        "assistant",
+        "user",
+    ]
+    assert reduced[-2].tool_calls[0].tool_call_id == "open"
+    assert all(
+        "<runtime_context>" not in block.text
+        for message in reduced
+        if message.role == "user"
+        for block in message.content
+        if isinstance(block, TextBlock)
+    )
+    assert [message.role for message in projection.messages if message.role != "system"] == [
+        "user",
+        "user",
+    ]
+    assert "workspace context" in projection.messages[-1].content[0].text
+
+
+@pytest.mark.asyncio
+async def test_runtime_injection_is_reserved_before_reduction():
+    captured = {}
+
+    class CaptureReducer:
+        async def reduce(self, messages, budget, *, scope=None):
+            captured["budget"] = budget
+            return ContextProjection(
+                messages=messages,
+                estimated_tokens=1,
+                source_message_count=len(messages),
+            )
+
+    runtime = "workspace listing " * 200
+    ledger = (ModelMessage(role="user", content=(TextBlock(text="latest"),)),)
+    assembler = DefaultContextAssembler(
+        system_instructions="system",
+        budget=ContextBudget(max_input_tokens=10_000),
+        reducer=CaptureReducer(),
+        providers=(
+            StaticContextProvider(
+                (
+                    ContextSegment(
+                        segment_id="runtime",
+                        content=runtime,
+                        stability=ContextStability.VOLATILE,
+                        placement=ContextPlacement.LATEST_USER,
+                    ),
+                )
+            ),
+        ),
+    )
+
+    await assembler.prepare_projection(command(), ledger)
+
+    reserved = captured["budget"].reserve_input_tokens
+    assert reserved > 0
+    bare = DefaultContextAssembler(
+        budget=ContextBudget(max_input_tokens=10_000),
+        reducer=CaptureReducer(),
+    )
+    await bare.prepare_projection(command(), ledger)
+    assert captured["budget"].reserve_input_tokens == 0
+    assert reserved > captured["budget"].reserve_input_tokens
