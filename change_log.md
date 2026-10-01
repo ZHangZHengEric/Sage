@@ -2,6 +2,8 @@
 
 面向版本用户的完整说明保存在 [`release_notes/`](release_notes/)；本文件记录持续开发变更。
 
+- **2026-10-01** 持久摘要按规范历史续压且不删检查点，一次压不完先写回已覆盖前缀；压缩前预留 runtime 注入。
+
 - **2026-10-01** 本地沙箱增加插件 `read_paths`：宿主注入绝对只读目录，macOS Seatbelt / Linux bind 共用；空配置不扩大可读范围。
 
 - **2026-09-28** 长工具等待中 driver 被取消时不再误判 worker_shutdown：先落 tool.unknown，再 recover 未完成副作用，worker 留在池里。

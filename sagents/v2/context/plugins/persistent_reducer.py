@@ -200,12 +200,9 @@ class PersistentSummaryContextReducer:
             )
         stored = await self.store.get(scope.context_key, session_id=scope.session_id)
         previous, remaining = await self._validated_previous(stored, payload)
-        if stored is not None and previous is None:
-            await self.store.delete(
-                scope.context_key,
-                expected_revision=stored.revision,
-                session_id=scope.session_id,
-            )
+        # A mismatched prefix must not apply the old summary, but the
+        # checkpoint stays until a new summary replaces it. Deleting here
+        # forces the next turn to start from zero and can pin the Session.
         summary_prefix = (self._summary_message(previous),) if previous else ()
         request_index = next(
             (i for i in range(len(payload) - 1, -1, -1) if is_user_request(payload[i])),
@@ -341,30 +338,38 @@ class PersistentSummaryContextReducer:
             selected_count += 1
         selected_count = max(1, selected_count)
         selected = tuple(message for unit in units[:selected_count] for message in unit)
-        retained = tuple(message for unit in units[selected_count:] for message in unit)
+        suffix = tuple(message for unit in units[selected_count:] for message in unit)
         # If selection did not reach the request, it remains in the suffix.
         selected_end = covered_count + len(selected)
-        anchor = (
+        planned_anchor = (
             (payload[request_index],)
             if request_index is not None and request_index < selected_end
             else ()
         )
-        retained = (*anchor, *retained)
-        available = maximum - counter.estimate((*systems, *retained))
+        planned_retained = (*planned_anchor, *suffix)
+        available = maximum - counter.estimate((*systems, *planned_retained))
         if available <= 0 or (
             budget.max_messages is not None
-            and len(systems) + 1 + len(retained) > budget.max_messages
+            and len(systems) + 1 + len(planned_retained) > budget.max_messages
         ):
             raise self._error(
                 "context.budget_exhausted", "no space remains for a history summary"
             )
         target = max(1, min(self.summary_target_tokens, available - 128))
         prior_count = len(previous.covered_message_digests) if previous else 0
-        all_covered = payload[: prior_count + len(selected)]
-        covered_digests = await message_digests_async(all_covered)
-        text = await self._hierarchical_summary(
+        text, covered_selected = await self._hierarchical_summary(
             scope, previous, selected, target_tokens=target
         )
+        leftover = selected[covered_selected:]
+        all_covered = payload[: prior_count + covered_selected]
+        covered_end = prior_count + covered_selected
+        anchor = (
+            (payload[request_index],)
+            if request_index is not None and request_index < covered_end
+            else ()
+        )
+        retained = (*anchor, *leftover, *suffix)
+        covered_digests = await message_digests_async(all_covered)
         summary = create_summary(
             scope=scope,
             previous=previous,
@@ -373,18 +378,27 @@ class PersistentSummaryContextReducer:
             text=text,
             estimator=self.estimator,
         )
-        self._require_compression_gain(previous, selected, summary)
+        self._require_compression_gain(previous, selected[:covered_selected], summary)
         result = (*systems, self._summary_message(summary), *retained)
-        # Do not retry progressively larger overlapping sources. A plugin that
-        # ignores its requested target must fail without committing derived state.
-        if over(result):
+        # A summary that itself blows the reserved budget is not committed.
+        # Leftover unsummarized prefix is different: persist the prefix that
+        # did fit this turn so the next projection can continue.
+        if over(result) and not leftover:
             raise self._error(
                 "context.budget_exhausted",
                 "summary exceeds its reserved request budget",
             )
         saved = await self.store.save(
-            summary, expected_revision=previous.revision if previous else None
+            summary,
+            expected_revision=(
+                previous.revision if previous is not None else stored.revision if stored else None
+            ),
         )
+        if over(result):
+            raise self._error(
+                "context.budget_exhausted",
+                "summary exceeds its reserved request budget",
+            )
         return self._projection(
             messages, result, saved, historical_messages=(*all_covered, *changed)
         )
@@ -449,13 +463,11 @@ class PersistentSummaryContextReducer:
             batch_tokens += cost
         if batch:
             batches.append(tuple(batch))
-        if len(batches) > self.max_summary_calls:
-            raise self._error(
-                "context.summary_work_limit",
-                "history exceeds the bounded summary work per projection",
-            )
+        # One projection may only spend max_summary_calls. Cover that prefix,
+        # persist it, and let the next turn continue. Do not fail the Run.
+        work = batches[: self.max_summary_calls]
         rolling = previous.text if previous else None
-        for batch in batches:
+        for batch in work:
             # Intermediate output can be larger than the requested target. Check
             # its actual size before sending it to the next summary request.
             prefix = (
@@ -480,7 +492,8 @@ class PersistentSummaryContextReducer:
                 raise self._error(
                     "context.summary_empty", "summarizer returned an empty summary"
                 )
-        return rolling.strip()
+        covered = sum(len(batch) for batch in work)
+        return rolling.strip(), covered
 
     @staticmethod
     async def _validated_previous(
@@ -495,6 +508,7 @@ class PersistentSummaryContextReducer:
         actual = await message_digests_async(payload[:count])
         if actual != summary.covered_message_digests:
             # Never apply a summary to a rewritten or fork-incompatible prefix.
+            # The caller keeps the checkpoint so a later turn can replace it.
             return None, payload
         return summary, payload[count:]
 
