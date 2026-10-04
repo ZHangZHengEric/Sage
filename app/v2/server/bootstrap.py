@@ -120,6 +120,7 @@ class ServerHost:
             a2a_plugins=self.a2a_plugins,
             contexts=self.contexts,
             agent_management=self.agent_management,
+            users=self.users, keys=self.credentials.keys,
         )
 
     async def ready(self) -> bool:
@@ -194,11 +195,13 @@ class ServerHost:
                 catalog=self.catalog,
                 skills=self.skill_catalog,
                 execution=self.execution,
+                users=self.users, settings=self.settings,
             )
             runs = RunService(
                 application=self._application,
                 session_access=session_access,
                 execution=self.execution,
+                users=self.users, keys=self.credentials.keys, catalog=self.catalog, settings=self.settings,
             )
             self.conversations = ConversationService(
                 threads=self.threads,
@@ -210,6 +213,7 @@ class ServerHost:
                 context_for=self.contexts.for_user,
                 language=self.settings.language,
             )
+            self._track(asyncio.create_task(self._expire_approvals(runs), name="approval-expiration"))
             self.admin = AdminService(
                 users=self.users,
                 threads=self.threads,
@@ -225,6 +229,7 @@ class ServerHost:
                 context_for=self.contexts.for_a2a_key,
                 language=self.settings.language,
                 public_base_url=self.settings.public_base_url,
+                settings=self.settings,
             )
             from app.v2.server.packages.recovery import (
                 recover_pending_packages,
@@ -292,11 +297,19 @@ class ServerHost:
         self.a2a = None
         if self._application is not None:
             await self._application.close()
-            self._application = None
+        self._application = None
         self.mcp_plugins.clear()
         self.a2a_plugins.clear()
         self.execution.model_pool = None
         self.execution.model_budget = None
+
+    async def _expire_approvals(self, runs):
+        while True:
+            try:
+                await runs.expire_approvals(self.threads, self.contexts.for_user)
+            except Exception as exc:
+                LOGGER.exception("approval.expiration.failed", "approval expiration pass failed", exc)
+            await asyncio.sleep(60)
 
     def _track(self, task: asyncio.Task[None]) -> None:
         self._tasks.add(task)

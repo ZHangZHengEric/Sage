@@ -16,6 +16,7 @@ from app.v2.server.conversations.a2a.task import TaskReducer
 from app.v2.server.identity.keys import (
     SCOPE_INVOKE,
     SCOPE_READ,
+    SCOPE_APPROVE,
     ApiKeyRecord,
     require_scope,
 )
@@ -72,6 +73,7 @@ class A2AService:
         context_for,
         language: str,
         public_base_url: str,
+        settings=None,
     ) -> None:
         self._threads = threads
         self._catalog = catalog
@@ -83,6 +85,7 @@ class A2AService:
         self._session_access = session_access
         self._context_for = context_for
         self._adapter = A2AProtocolAdapter()
+        self._settings = settings
 
     async def card(self, key: ApiKeyRecord, *, base_url: str) -> AgentCard:
         agent = await self._agent_for(key)
@@ -272,7 +275,7 @@ class A2AService:
             agent_id=admitted.agent_id,
             composition_hash=self._application.composition_hash,
             enabled_skills=tuple(item.name for item in admitted.skills),
-            metadata=admitted.metadata,
+            metadata={**admitted.metadata, **await self._execution_metadata(message, key, admitted)},
         )
         await self._threads.upsert(
             session_id, user_id, title=_title_of(command), agent_id=admitted.agent_id
@@ -309,6 +312,10 @@ class A2AService:
         context = self._context_for(key, correlation_id=get_request_id())
         task_id = message.task_id
         run = await self._run(task_id, context)
+        command = await self._application.entrypoint().runtime.session_store.get_start_command(task_id)
+        if key.agent_id and key.agent_id != command.agent_id:
+            raise SageV2Error(RuntimeErrorInfo(code="server.conversations.a2a.service.not_found",
+                category=ErrorCategory.VALIDATION, message="task not found"))
         if run.state != RunState.SUSPENDED:
             # Continuing a finished conversation is a new Task in the same
             # context, not a message to the old one, so this is the client
@@ -327,7 +334,7 @@ class A2AService:
                 user_id=key.owner_user_id,
                 session_id=run.session_id,
                 label="a2a",
-                decide=lambda interaction: _answer(interaction, message),
+                decide=lambda interaction: _authorized_answer(interaction, message, key),
             )
         except SageV2Error as exc:
             raise _absent(exc) from exc
@@ -340,6 +347,31 @@ class A2AService:
             session_access=self._session_access,
             after=run.last_run_sequence,
         )
+
+    async def _execution_metadata(self, message, key, admitted):
+        from app.v2.server.runtime.policy import (
+            ExecutionPolicy, execution_metadata, intersect_policies, EXECUTION_METADATA_KEY,
+        )
+        raw_grant = admitted.metadata[EXECUTION_METADATA_KEY]
+        policies = [ExecutionPolicy.model_validate(raw_grant["policy"])]
+        raw = message.metadata["sage.executionPolicy"] if "sage.executionPolicy" in message.metadata else None
+        if raw is not None:
+            if isinstance(raw, Struct):
+                from google.protobuf.json_format import MessageToDict
+                raw = MessageToDict(raw)
+            # Protobuf numbers are floats; accept integral timeout values only.
+            if isinstance(raw, dict) and isinstance(raw.get("approval_timeout_seconds"), float):
+                raw = dict(raw)
+                value = raw["approval_timeout_seconds"]
+                if value.is_integer():
+                    raw["approval_timeout_seconds"] = int(value)
+            try:
+                policies.append(ExecutionPolicy.model_validate(raw))
+            except ValueError as exc:
+                raise SageV2Error(RuntimeErrorInfo(code="server.execution_policy.validation",
+                    category=ErrorCategory.VALIDATION, message="Invalid execution policy restriction")) from exc
+        return execution_metadata(intersect_policies(*policies), user_id=key.owner_user_id,
+                                  key_id=key.key_id, agent_id=admitted.agent_id)
 
     async def _events(
         self,
@@ -505,6 +537,13 @@ def _title_of(command) -> str:
     if not command.input or not command.input[0].content:
         return ""
     return getattr(command.input[0].content[0], "text", "")[:80]
+
+
+def _authorized_answer(interaction, message, key):
+    answer = _answer(interaction, message)
+    if answer and answer[0].startswith("approve"):
+        require_scope(key, SCOPE_APPROVE)
+    return answer
 
 
 def _answer(interaction, message: Message) -> tuple[str, dict] | None:

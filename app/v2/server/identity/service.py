@@ -1,6 +1,8 @@
 """Account use cases. Password hashing stays here; the user store only persists rows."""
 
 from __future__ import annotations
+from dataclasses import replace
+from app.v2.server.runtime.policy import ExecutionPolicy
 
 from app.v2.server.identity.jwt import (
     create_access_token,
@@ -26,6 +28,15 @@ class IdentityService:
 
     async def get_by_id(self, user_id: str) -> UserRecord | None:
         return await self.users.get_by_id(user_id)
+
+    async def set_execution_policy(self, user_id: str, policy: ExecutionPolicy) -> UserRecord:
+        user = await self.get_by_id(user_id)
+        if user is None:
+            raise SageV2Error(RuntimeErrorInfo(code="server.identity.not_found",
+                category=ErrorCategory.AUTHORIZATION, message="User no longer exists"))
+        updated = replace(user, execution_policy=policy)
+        await self.users.save(updated)
+        return updated
 
     async def from_token(self, token: str) -> UserRecord | None:
         claims = decode_access_token(token, secret=self._jwt_secret)
@@ -66,6 +77,7 @@ class IdentityService:
                 username=named.username,
                 password_hash=named.password_hash,
                 role="admin",
+                execution_policy=named.execution_policy,
             )
             await self.users.save(upgraded)
             return upgraded
