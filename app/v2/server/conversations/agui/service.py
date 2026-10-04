@@ -41,6 +41,48 @@ class ConversationService:
     async def list_threads(self, user_id: str):
         return await self.threads.list_for(user_id)
 
+    async def pending_approvals(self, user_id, *, limit=50, offset=0):
+        from datetime import timedelta
+        from app.v2.server.runtime.policy import frozen_execution
+        context = self.context_for(user_id)
+        threads = await self.threads.list_for(user_id)
+        # Cursor pages scan a bounded set of threads, including empty pages.
+        items = []
+        for thread in threads[offset:offset + limit]:
+            try:
+                runs = await self.session_access.list_session_runs(thread.thread_id, context)
+            except SageV2Error:
+                continue
+            for run in runs:
+                if run.state != RunState.SUSPENDED or not run.suspension_id:
+                    continue
+                suspension = await self.session_access.get_suspension(run.suspension_id, context)
+                if not suspension.interaction_id:
+                    continue
+                interaction = await self.session_access.get_interaction(suspension.interaction_id, context)
+                if interaction.interaction_type.value != "approval":
+                    continue
+                command = await self.application.entrypoint().runtime.session_store.get_start_command(run.run_id)
+                _, policy = frozen_execution(command)
+                timeout = min(policy.approval_timeout_seconds, self.runs.settings.approval_timeout_seconds)
+                items.append({"run_id": run.run_id, "thread_id": thread.thread_id,
+                    "title": thread.title or thread.thread_id,
+                    "interaction": interaction.model_dump(mode="json"),
+                    "expires_at": (interaction.requested_at + timedelta(seconds=timeout)).isoformat(),
+                    "expected": {"interaction_id": interaction.interaction_id,
+                        "revision": run.revision, "suspension_revision": suspension.expected_revision,
+                        "interaction_revision": interaction.expected_revision}})
+        return {"items": items, "next_offset": offset + limit if len(threads) > offset + limit else None}
+
+    async def decide_approval(self, run_id, *, user_id, decision, payload, expected):
+        context = self.context_for(user_id)
+        run = await self.session_access.get_run(run_id, context)
+        await self.runs.resume_detached_run(run_id, context, user_id=user_id,
+            session_id=run.session_id, label="approval",
+            expected=expected,
+            decide=lambda interaction: (decision, payload) if decision in interaction.allowed_decisions else None)
+        return {"run_id": run_id, "accepted": True}
+
     async def events(
         self,
         thread_id: str,

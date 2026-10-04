@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Literal
 from pydantic import BaseModel, Field
+from app.v2.server.runtime.policy import ExecutionPolicy
 
 class ModelBody(BaseModel):
     id: str | None = None
@@ -18,6 +19,7 @@ class AgentBody(BaseModel):
     instructions: str = ""
     model_id: str = ""
     tools: list[str] = Field(default_factory=list)
+    execution_policy: ExecutionPolicy | None = None
 
 class AgentPublic(BaseModel):
     id: str
@@ -27,6 +29,7 @@ class AgentPublic(BaseModel):
     model_id: str | None = None
     tools: list[str] = Field(default_factory=list)
     skills: list[str] = Field(default_factory=list)
+    execution_policy: ExecutionPolicy = Field(default_factory=lambda: ExecutionPolicy(shell="sandboxed"))
 
 class ToolPublic(BaseModel):
     name: str
@@ -80,4 +83,3 @@ class ModelPublic(BaseModel):
     base_url: str
     model: str
     is_default: bool
-

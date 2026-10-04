@@ -37,7 +37,7 @@ python -m app.v2.server --data-root /tmp/sage-server-v2
 
 Web 开发时可单独启动：在 `app/v2/server/web` 执行 `npm install && npm run dev`，Vite 将 API 请求代理到后端 `8090` 端口。执行 `npm run build` 后再启动后端，后端会托管 `web/dist`，可直接访问 `http://localhost:8090` 或 `/studio`。也可使用独立静态文件服务部署，并代理 API 请求到后端。
 
-启动时会幂等升级旧数据库：补齐 `threads.agent_id`，将 Skill 描述列扩展为 `LONGTEXT`。升级账号需要对应表的 `ALTER` 权限。Skill 列表描述不截断，加载内容仍受 Skill 文件大小限制。已有的截断描述可重新导入原 Skill 文件修复。
+启动时会幂等升级旧数据库：补齐 `threads.agent_id`、`users.execution_policy`，将 Skill 描述列扩展为 `LONGTEXT`。旧用户采用需要确认的默认执行策略。升级账号需要对应表的 `ALTER` 权限。Skill 列表描述不截断，加载内容仍受 Skill 文件大小限制。已有的截断描述可重新导入原 Skill 文件修复。
 
 读 `app/v2/server/.env`（进程环境变量优先）。生产必须设置 `SAGE_SERVER_JWT_SECRET`（至少 32 字节）。默认管理员：`admin` / `admin12345`。OpenAPI 在 `/docs`。
 
@@ -81,7 +81,29 @@ Run 一律交给后台任务驱动，不跑在请求自己的任务上：Run 是
 
 流式遵循 A2A 的“先整体后增量”：第一帧是完整 Task，后续是 `statusUpdate` / `artifactUpdate` / `message` 增量，所以晚接入的客户端也不用自己拼状态。`SubscribeToTask` 把接入前的历史折进开场 Task 而不重放，已经终态的 Run 就只给一帧最终 Task。调用方自己写的 user message 不会作为增量回吐（它仍在 Task history 里）。A2A 1.0 的 `TaskStatusUpdateEvent` 没有 `final` 字段，流的结束由终态 `status.state` 加 SSE 断流表示。流式方法要求请求带 `A2A-Version: 1.0` 头，这是 SDK 的版本校验，非流式方法不强制。
 
-### 等待输入与续跑
+### 用户执行授权
+
+执行策略属于用户账号，控制台「执行设置」页、网页对话和该用户全部 API 密钥共用。API Key 只承担身份、Agent 绑定和接口 scope，不携带执行策略。使用账号 JWT 调用 `GET /api/auth/execution-policy` 读取，`PUT /api/auth/execution-policy` 更新：
+
+```json
+{
+  "shell": "ask",
+  "on_approval_required": "suspend",
+  "approval_timeout_seconds": 86400
+}
+```
+
+`shell` 默认为 `ask`，命令和文件修改需要审批；`sandboxed` 允许官方 Shell、文件修改工具在该用户工作区内执行；`deny` 禁止 Shell，其他工具仍按各自策略审核。Shell 网络禁用，`sandboxed` 允许工作区内代码执行及文件删除，MCP/A2A 等外部工具仍保留原审批要求。机器调用不能管理 Agent 包。`on_approval_required=deny` 将所有需要审批的操作直接拒绝，适合无人值守。
+
+生效策略取服务上限、Agent 上限、用户设置和请求限制的交集。服务上限由 `SAGE_SERVER_EXECUTION_SHELL_MODE`（默认 `sandboxed`）及 `SAGE_SERVER_APPROVAL_TIMEOUT_SECONDS`（默认 86400，允许 60–604800 秒）指定。Agent 的 `execution_policy` 是上限，默认允许用户自行选择；用户默认仍需确认。A2A 消息的 `metadata["sage.executionPolicy"]` 可提供相同结构收紧本次请求，不能扩大授权。
+
+受理时冻结实际策略与哈希，恢复和每次工具决策都会重新检查用户当前策略、原密钥是否撤销、Agent 是否存在及当前上限。后续放宽权限不会扩大已受理任务的权限。机器回复审批必须额外持有 `a2a:approve`；只调用或读取的密钥不能批准操作，默认签发不包含审批权限。执行设置接口只接受用户登录凭据，API Key 不能修改账号策略。托管包运行继续使用自身 manifest 的工具策略。
+
+用户可在「待审批」页查看跨会话的操作，或使用账号 JWT 调用 `GET /api/approvals?limit=50&offset=0`。分页按会话扫描，可能出现空页，应继续使用 `next_offset`。将条目的 `expected` 原样回传到 `POST /api/approvals/{run_id}/decisions`，body 为 `{"decision":"approve_once","expected":{...}}`，也支持 `deny`、`cancel`。过期或版本已改变返回 409；接口受理决定后由后台继续执行。
+
+挂起后保留持久化 Run、事件和审批记录；执行任务退出、释放调度槽并销毁本轮沙箱及其中进程，工作区文件保留。恢复时重建执行资源，因此旧后台 Shell 作业不会跨审批挂起继续存活。宿主共享服务仍常驻。一个宿主维护任务每分钟清理过期审批，答复入口也检查有效期；不为每条审批创建等待任务。
+
+### 审批消息与续跑
 
 Sage 的"挂起 Run + 待答 Interaction"对应 A2A 的 `input-required` Task，回答就是一条带 `taskId` 的普通 Message。Task 的 `metadata` 会带上 `sage.interactionId`、`sage.interactionType`、`sage.allowedDecisions` 和 `sage.payload`：A2A 只说"需要输入"，不说需要哪种输入，不把决策词表交出去的话，客户端只能从给人看的散文里猜。
 

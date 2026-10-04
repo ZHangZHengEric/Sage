@@ -6,6 +6,7 @@ from . import (
     agent,
     agents,
     api_keys,
+    approvals,
     auth,
     health,
     mcp,
@@ -33,6 +34,7 @@ def register_routers(app: FastAPI, *, jaeger: bool = False) -> None:
     app.include_router(threads.router)
     app.include_router(agent.router)
     app.include_router(api_keys.router)
+    app.include_router(approvals.router)
     app.include_router(admin.router)
     _register_a2a(app)
     if jaeger:

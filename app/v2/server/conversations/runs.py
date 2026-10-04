@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import timedelta
 
 from app.v2.server.observability.logging import get_logger
 from app.v2.server.runtime.models import bind_model_user, reset_model_user
@@ -10,15 +11,21 @@ from sagents.v2.contracts.commands import CancelRun, ReplyInteraction, ResumeRun
 from sagents.v2.contracts.errors import ErrorCategory, RuntimeErrorInfo, SageV2Error
 from sagents.v2.contracts.principals import RequestContext
 from sagents.v2.contracts.run_state import TERMINAL_RUN_STATES, RunState
+from sagents.v2.contracts.common import utc_now
+from app.v2.server.runtime.policy import frozen_execution, live_execution_policy
 
 LOGGER = get_logger(__name__)
 
 
 class RunService:
-    def __init__(self, *, application, session_access, execution) -> None:
+    def __init__(self, *, application, session_access, execution, users=None, keys=None, catalog=None, settings=None) -> None:
         self.application = application
         self.session_access = session_access
         self.execution = execution
+        self.users = users
+        self.keys = keys
+        self.catalog = catalog
+        self.settings = settings
 
     async def cancel_run(
         self,
@@ -58,6 +65,7 @@ class RunService:
         session_id: str,
         label: str,
         decide=None,
+        expected=None,
     ) -> None:
         """Answer whatever a suspended Run is waiting on and put it back in flight.
 
@@ -99,6 +107,14 @@ class RunService:
             interaction = await access.get_interaction(
                 suspension.interaction_id, context
             )
+            if expected is not None and expected != {
+                "interaction_id": interaction.interaction_id,
+                "revision": run.revision,
+                "suspension_revision": suspension.expected_revision,
+                "interaction_revision": interaction.expected_revision,
+            }:
+                raise SageV2Error(RuntimeErrorInfo(code="server.approval.conflict",
+                    category=ErrorCategory.CONFLICT, message="Approval changed; refresh before deciding"))
             answer = decide(interaction) if decide is not None else None
             if answer is None:
                 raise SageV2Error(
@@ -110,6 +126,7 @@ class RunService:
                     )
                 )
             decision, payload = answer
+            await self._check_execution_grant(run, interaction, context, decision)
             receipt = await runtime.reply_interaction(
                 ReplyInteraction(
                     run_id=run_id,
@@ -132,6 +149,49 @@ class RunService:
             session_id=session_id,
             label=label,
         )
+
+    async def approval_expired(self, run, interaction) -> bool:
+        command = await self.application.entrypoint().runtime.session_store.get_start_command(run.run_id)
+        _, policy = frozen_execution(command)
+        timeout = policy.approval_timeout_seconds
+        if self.settings is not None:
+            timeout = min(timeout, self.settings.approval_timeout_seconds)
+        return (interaction.interaction_type.value == "approval"
+                and utc_now() >= interaction.requested_at + timedelta(seconds=timeout))
+
+    async def _check_execution_grant(self, run, interaction, context, decision):
+        if await self.approval_expired(run, interaction):
+            await self.cancel_run(run.run_id, context, expected_revision=run.revision,
+                                  reason="approval_timeout")
+            raise SageV2Error(RuntimeErrorInfo(code="server.approval.expired",
+                category=ErrorCategory.CONFLICT, message="Approval expired; start a new task"))
+        if self.keys is not None and decision not in {"deny", "cancel"}:
+            command = await self.application.entrypoint().runtime.session_store.get_start_command(run.run_id)
+            live = await live_execution_policy(command, users=self.users, keys=self.keys, catalog=self.catalog,
+                settings=self.settings, user_id=context.actor.principal_id)
+            if live is None:
+                raise SageV2Error(RuntimeErrorInfo(code="server.execution_grant.forbidden",
+                    category=ErrorCategory.AUTHORIZATION, message="The originating execution grant is no longer valid"))
+
+    async def expire_approvals(self, threads, context_for):
+        """One host maintenance pass, no waiting task per approval."""
+        for thread in await threads.list_all():
+            context = context_for(thread.user_id)
+            try:
+                runs = await self.session_access.list_session_runs(thread.thread_id, context)
+                for run in runs:
+                    if run.state != RunState.SUSPENDED or not run.suspension_id:
+                        continue
+                    suspension = await self.session_access.get_suspension(run.suspension_id, context)
+                    if not suspension.interaction_id:
+                        continue
+                    interaction = await self.session_access.get_interaction(suspension.interaction_id, context)
+                    if await self.approval_expired(run, interaction):
+                        await self.cancel_run(run.run_id, context, expected_revision=run.revision,
+                                              reason="approval_timeout")
+            except SageV2Error as exc:
+                LOGGER.warning("approval.expiration.skipped", "approval changed during cleanup",
+                               thread_id=thread.thread_id, error_code=exc.info.code)
 
     async def continue_detached_run(
         self,
