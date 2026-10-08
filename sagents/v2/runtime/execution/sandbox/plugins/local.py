@@ -638,7 +638,7 @@ class LocalWorkspaceSandboxProvider:
             os=os.name,
             architectures=("native",),
             filesystem_modes=frozenset({FileSystemMode.WORKSPACE}),
-            network_modes=frozenset({NetworkMode.NONE}),
+            network_modes=frozenset({NetworkMode.NONE, NetworkMode.UNRESTRICTED}),
             process=ProcessCapabilities(
                 available=sys.platform in {"darwin", "linux"},
                 supports_argv=True,

@@ -31,7 +31,7 @@ ResolvedSandboxSpec.resources and Desktop component_configs["execution.sandbox"]
 
 CPU 100% is one logical core's quota; 200% is two cores, not cumulative CPU seconds or a percentage of the entire machine. Memory/disk units are MiB. Process limits cover execution processes and descendants. Disk scope includes workspace, temporary files, and shared memory; the host control process stays outside the execution cgroup.
 
-The protocol defaults to hard limits. require_hard_limits=false permits sampled metering without removing OS isolation: Seatbelt on macOS; bubblewrap, namespaces, cleared capabilities, seccomp, no network, and read-only system paths on Linux. There is no plain host-subprocess fallback. Without hard-limit capabilities, hard-limit requests fail during admission with sandbox.resource_limits_unsupported. Invalid, zero, negative, and infinite resource values are rejected.
+The protocol defaults to hard limits. require_hard_limits=false permits sampled metering without removing OS isolation: Seatbelt on macOS; bubblewrap, namespaces, cleared capabilities, seccomp, no network by default, and read-only system paths on Linux. There is no plain host-subprocess fallback. Without hard-limit capabilities, hard-limit requests fail during admission with sandbox.resource_limits_unsupported. Invalid, zero, negative, and infinite resource values are rejected.
 
 filesystem.max_file_bytes / max_total_bytes are additional file-API limits, not substitutes for kernel quotas. Inherited RLIMIT_FSIZE supplies a per-file limit.
 
@@ -43,6 +43,24 @@ Direct command lookup and the isolated process PATH use the same value. Plugin c
 
 Extra readable directories come from the plugin `read_paths` list: absolute directories, read-only. macOS adds them to Seatbelt `file-read*`; Linux bind-mounts the same list read-only. Relative paths and `/` are rejected; paths inside the current workspace are ignored at command time. An empty list keeps the previous sandbox surface. Hosts supply the directories they need (for example a packaged runtime tree); the generic plugin does not read host environment variables.
 
+## Shell network configuration
+
+Desktop accepts this configuration in `component_configs["execution.sandbox"]`:
+
+```json
+{
+  "network": {"mode": "unrestricted"}
+}
+```
+
+Omitting the setting, or using `mode=none`, keeps networking disabled. `unrestricted` allows Shell processes and their descendants to initiate IPv4/IPv6 connections to public, private and loopback addresses. Desktop sets `deny_private_networks=false`; direct `ResolvedSandboxSpec` callers must set it explicitly. Network configuration participates in sandbox fingerprints; existing runs are not upgraded in place.
+
+CLI accepts `sage v2 run "task" --network-mode unrestricted` for `run`, `chat` and `resume`; the default is `none`. Server hosts can explicitly pass `NetworkPolicy` to `workspace_sandbox_spec` or `provision_workspace`.
+
+Linux retains the host network namespace, permits outbound IP sockets and mounts DNS configuration and system certificate paths read-only. Apart from the required macOS system DNS channel, Unix sockets, listening and existing restricted system capabilities remain blocked. macOS permits outbound IP networking through Seatbelt while retaining file isolation and listening restrictions. Commands continue to perform normal TLS certificate verification.
+
+Shell host/port/HTTP-method allowlists, private-network blocking, listening and customized request constraints are not implemented. The local Provider rejects these additional constraints and `allowlist`/`proxy` modes. `SandboxHandle.network.request` still has no real HTTP implementation: this setting enables process networking only. Executable and file-read policies still apply.
+
 ## Linux
 
 Execution follows LocalProcessRuntime → fixed isolated Python launcher → cgroup.procs → bubblewrap → command and descendants. The launcher uses python -I -c, never a writable workspace script. Python, Sage, and isolation tools must be outside the writable workspace. A root host clears supplementary groups and switches to the configured non-root UID/GID before execution. Dynamic-loader environment changes apply only inside isolation.
@@ -50,7 +68,7 @@ Execution follows LocalProcessRuntime → fixed isolated Python launcher → cgr
 - cpu.max, memory.max, memory.swap.max=0, and pids.max constrain CPU, aggregate memory, swap, and descendant processes/threads. Values are read back after writing.
 - A sandbox parent cgroup and per-command child cgroups share total limits. Completion, timeout, and cancellation clean up; setsid or closing output pipes cannot escape the cgroup.
 - System paths, /proc, and /dev are read-only, with /dev/null separately writable. Writable workspace, /tmp, and /dev/shm content belongs to one XFS project. FD mounts check inode/device identity to prevent path replacement and directory-FD leaks.
-- New user namespaces are forbidden. Seccomp rejects sockets, mounts, cross-process memory access, keyring, BPF, perf, io_uring, and XFS-project-changing ioctls including high-bit aliases. Host Unix sockets cannot bypass the no-network policy.
+- New user namespaces are forbidden. Seccomp rejects sockets in offline mode; both modes reject mounts, cross-process memory access, keyring, BPF, perf, io_uring, and XFS-project-changing ioctls including high-bit aliases. Host Unix sockets cannot bypass the no-network policy.
 - Administrators prepare the cgroup subtree and XFS project quota. Sage checks accounting/enforcement, project-ID inheritance, filesystem identity, and actual hard limits. Existing limits must not exceed requested limits. Sage does not run sudo or relax shared project quotas automatically.
 - The project must have an inode hard quota of at most requested disk bytes divided by 4096. Initialization rejects symlinks, cross-filesystem mounts, and hard links.
 

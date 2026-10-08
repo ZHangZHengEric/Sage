@@ -52,6 +52,7 @@ class DesktopExecutionBindingProvider:
         read_only: bool = False,
         process_enabled: bool = True,
         resources: ResourceLimits | None = None,
+        network: NetworkPolicy | None = None,
     ) -> None:
         self.workspace = Path(workspace).expanduser().resolve()
         self.workspace.mkdir(parents=True, exist_ok=True)
@@ -75,6 +76,7 @@ class DesktopExecutionBindingProvider:
         )
         self.read_only = read_only
         self.process_enabled = process_enabled
+        self.network = network or NetworkPolicy()
         # 内核硬限制来自管理员委派的 cgroup 子树与 XFS project 挂载，随 provider
         # 一起配置；默认构造的 provider 没有它们，所以默认不声称拥有。配了的宿主
         # 由 runtime_config 把 require_hard_limits 传进来。
@@ -110,7 +112,7 @@ class DesktopExecutionBindingProvider:
             max_wall_time_seconds=300,
             max_output_bytes=4 * 1024 * 1024,
         )
-        network = NetworkPolicy()
+        network = self.network
         policy_source = json.dumps(
             {
                 "filesystem": filesystem.model_dump(mode="json"),

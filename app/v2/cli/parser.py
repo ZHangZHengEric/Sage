@@ -62,6 +62,12 @@ def _add_v2_common_args(parser: argparse.ArgumentParser, *, default_user_id: str
         ),
     )
     parser.add_argument(
+        "--network-mode",
+        choices=["none", "unrestricted"],
+        default="none",
+        help="Shell network access (default: none; unrestricted allows public and private addresses)",
+    )
+    parser.add_argument(
         "--read-only",
         dest="read_only",
         action="store_true",

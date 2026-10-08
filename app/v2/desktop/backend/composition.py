@@ -14,6 +14,7 @@ from sagents.v2.runtime.session import DerivedStateStore, SessionStore
 
 from app.v2.desktop.backend.bindings import DesktopExecutionBindingProvider
 from app.v2.desktop.backend.package import desktop_v2_manifest
+from app.v2.desktop.backend.runtime_config import _sandbox_network_policy
 
 
 class UnusableProcessModelProvider:
@@ -32,7 +33,9 @@ class UnusableProcessModelProvider:
 
     async def stream(self, request):
         del request
-        raise RuntimeError("Desktop process Application model is a composition placeholder")
+        raise RuntimeError(
+            "Desktop process Application model is a composition placeholder"
+        )
         yield
 
 
@@ -62,6 +65,9 @@ async def build_desktop_application(
     provider = bindings or DesktopExecutionBindingProvider(
         workspace_path,
         private_workspace_root=root / "private-workspaces",
+        network=_sandbox_network_policy(
+            (component_configs or {}).get("execution.sandbox", {}).get("network")
+        ),
     )
     builder = (
         SAgentBuilder()

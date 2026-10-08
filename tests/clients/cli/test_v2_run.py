@@ -505,6 +505,7 @@ def test_parser_v2_run_defaults():
     assert args.preset == "coder"
     assert args.package is None
     assert args.approval_mode is None
+    assert args.network_mode == "none"
     assert args.json is False
     assert (
         build_argument_parser()
@@ -2825,3 +2826,24 @@ async def test_prompt_decider_reconciliation_keys_and_static_fallback():
     ) == InteractionAnswer("cancel")
     assert err.getvalue().count("please answer one of") == 2
 
+
+
+def test_cli_shell_network_setting_changes_sandbox_fingerprint(tmp_path):
+    offline = LocalWorkspaceBindingProvider(tmp_path).sandbox_spec()
+    online = LocalWorkspaceBindingProvider(
+        tmp_path, settings=WorkspaceSandboxSettings(network_mode="unrestricted")
+    ).sandbox_spec()
+    assert offline.network.mode.value == "none"
+    assert online.network.mode.value == "unrestricted"
+    assert online.network.deny_private_networks is False
+    assert offline.spec_hash != online.spec_hash
+    with pytest.raises(ValueError, match="network mode"):
+        LocalWorkspaceBindingProvider(
+            tmp_path, settings=WorkspaceSandboxSettings(network_mode="allowlist")
+        ).sandbox_spec()
+
+
+@pytest.mark.parametrize("arguments", [["v2", "run", "hello"], ["v2", "chat"], ["v2", "resume", "session_abc"]])
+def test_cli_parser_accepts_shell_network_mode(arguments):
+    args = build_argument_parser().parse_args([*arguments, "--network-mode", "unrestricted"])
+    assert args.network_mode == "unrestricted"

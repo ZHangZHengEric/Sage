@@ -588,7 +588,7 @@ class DesktopRunCompositionMixin(DesktopRunEnvironmentMixin):
                 max_wall_time_seconds=300,
                 max_output_bytes=4 * 1024 * 1024,
             ),
-            network=NetworkPolicy(),
+            network=NetworkPolicy.model_validate(sandbox_config.get("network", {})),
             lifecycle=LifecyclePolicy(
                 durability=(
                     SandboxDurability.DURABLE_EXTERNAL

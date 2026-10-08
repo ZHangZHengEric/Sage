@@ -1068,6 +1068,14 @@ def _sandbox_config_schema(*, in_memory: bool) -> dict:
     if not in_memory:
         properties.update(
             {
+                "network": {
+                    "type": "object",
+                    "properties": {
+                        "mode": {"type": "string", "enum": ["none", "unrestricted"]},
+                        "deny_private_networks": {"type": "boolean"},
+                    },
+                    "additionalProperties": True,
+                },
                 "command_path": {"type": "string", "minLength": 1},
                 "read_paths": {
                     "type": "array",

@@ -10,7 +10,12 @@ from app.v2.desktop.backend.package import (
 )
 from app.v2.desktop.backend.run_context import _virtual_workspace_root
 from app.v2.desktop.backend.schemas import DesktopV2Settings
-from sagents.v2.runtime.execution.sandbox import FileSystemMode, ResourceLimits
+from sagents.v2.runtime.execution.sandbox import (
+    FileSystemMode,
+    NetworkMode,
+    NetworkPolicy,
+    ResourceLimits,
+)
 from sagents.v2.model.provider import DEFAULT_AUXILIARY_MODEL_TIMEOUT_SECONDS
 from sagents.v2.tool import ToolSelectionConfig
 
@@ -165,6 +170,13 @@ _SANDBOX_DEFAULTS = {
 }
 
 
+def _sandbox_network_policy(raw: dict[str, Any] | None = None) -> NetworkPolicy:
+    values = dict(raw or {})
+    if values.get("mode") == NetworkMode.UNRESTRICTED.value:
+        values.setdefault("deny_private_networks", False)
+    return NetworkPolicy.model_validate(values)
+
+
 def _resolved_sandbox_config(
     settings: DesktopV2Settings,
 ) -> tuple[str, dict[str, Any]]:
@@ -189,6 +201,10 @@ def _resolved_sandbox_config(
     config["resources"] = ResourceLimits.model_validate(resource_config).model_dump(
         mode="json"
     )
+    if "network" in config:
+        config["network"] = _sandbox_network_policy(config["network"]).model_dump(
+            mode="json"
+        )
     config["workspace_root"] = _virtual_workspace_root(config.get("workspace_root"))
     path_mode = str(config.get("workspace_path_mode", "virtual"))
     if path_mode not in {"virtual", "host"}:
