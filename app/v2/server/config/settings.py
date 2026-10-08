@@ -66,8 +66,14 @@ class ServerSettings:
     max_model_clients: int = 64
     max_managed_applications: int = 32
     max_managed_builds: int = 4
+    execution_shell_mode: str = "sandboxed"
+    approval_timeout_seconds: int = 86400
 
     def __post_init__(self) -> None:
+        if self.execution_shell_mode not in {"ask", "sandboxed", "deny"}:
+            raise ValueError("execution_shell_mode must be ask, sandboxed or deny")
+        if not 60 <= self.approval_timeout_seconds <= 604800:
+            raise ValueError("approval timeout must be between 60 and 604800 seconds")
         if min(self.max_managed_applications, self.max_managed_builds) < 1:
             raise ValueError("managed application and build limits must be positive")
         if self.max_model_clients < 1:
@@ -124,6 +130,8 @@ class ServerSettings:
             max_model_clients=int(_env("SAGE_SERVER_MAX_MODEL_CLIENTS", "64")),
             max_managed_applications=int(_env("SAGE_SERVER_MAX_MANAGED_APPLICATIONS", "32")),
             max_managed_builds=int(_env("SAGE_SERVER_MAX_MANAGED_BUILDS", "4")),
+            execution_shell_mode=_choice_env("SAGE_SERVER_EXECUTION_SHELL_MODE", "sandboxed", frozenset({"ask", "sandboxed", "deny"})),
+            approval_timeout_seconds=int(_env("SAGE_SERVER_APPROVAL_TIMEOUT_SECONDS", "86400")),
             mysql_url=mysql_url,
             jaeger_url=_env("SAGE_SERVER_JAEGER_URL") or None,
             jaeger_service_name=_env("SAGE_SERVER_JAEGER_SERVICE_NAME", "sage-server"),

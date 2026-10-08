@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from sqlalchemy import String
+from sqlalchemy import String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.v2.server.database.base import Base
@@ -12,6 +12,7 @@ class UserRow(Base):
     username: Mapped[str] = mapped_column(String(191), unique=True)
     password_hash: Mapped[str] = mapped_column(String(255))
     role: Mapped[str] = mapped_column(String(16))
+    execution_policy: Mapped[str] = mapped_column(Text, default="{}")
 
 
 class ApiKeyRow(Base):

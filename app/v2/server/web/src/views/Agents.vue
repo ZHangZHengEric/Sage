@@ -42,6 +42,7 @@ function emptyForm() {
     instructions: 'Be helpful, concise, and explicit about uncertainty.',
     model_id: '',
     tools: [],
+    execution_policy: { shell: 'sandboxed', on_approval_required: 'suspend', approval_timeout_seconds: 86400 },
   }
 }
 
@@ -92,6 +93,7 @@ async function edit(item) {
     instructions: detail.instructions || '',
     model_id: detail.model_id || '',
     tools: [...(detail.tools || [])],
+    execution_policy: detail.execution_policy || emptyForm().execution_policy,
   }
   bound.value = await api.listAgentSkills(item.id)
 }
@@ -180,6 +182,11 @@ onMounted(async () => {
           </label>
         </div>
       </div>
+      <label class="field"><span>命令权限上限</span><select v-model="form.execution_policy.shell">
+        <option value="sandboxed">允许用户设置工作区内自动执行</option>
+        <option value="ask">命令必须审批</option>
+        <option value="deny">禁止执行命令</option>
+      </select><small class="muted">这是权限上限，实际授权取当前用户的执行设置，网页对话和 API 调用共用。</small></label>
       <div v-if="externalTools.length" class="field">
         <span>外部工具</span>
         <p class="muted">

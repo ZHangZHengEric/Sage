@@ -77,6 +77,8 @@ class CatalogRunDependencies:
     a2a_plugins: A2APluginCache
     contexts: RequestContexts
     agent_management: ServerAgentManagement | None
+    users: object
+    keys: object = None
 
 
 def prepare_tenant_binding(
@@ -134,7 +136,7 @@ async def open_model_lease(
 
 
 async def compose_catalog_loop(
-    service: CatalogRunDependencies, command: StartRun, *, user_id: str
+    service: CatalogRunDependencies, command: StartRun, *, user_id: str, run_id: str | None = None
 ):
     catalog = await service.catalog.get(user_id)
     frozen = await _composition(service, command, catalog, user_id=user_id)
@@ -161,9 +163,10 @@ async def compose_catalog_loop(
             model=model,
         )
         official, official_runtime, sandbox_handle = await attach_official_tools(
-            service, command, user_id=user_id
+            service, command, user_id=user_id, run_id=run_id
         )
-        extra.extend([official_runtime, sandbox_handle])
+        # ExitStack unwinds in reverse: stop Jobs, then destroy the sandbox.
+        extra.extend([sandbox_handle, official_runtime])
         factory = AgentCompositionFactory(
             service.application.entrypoint().runtime,
             context_components=ContextComponentBundle(
@@ -227,6 +230,13 @@ async def compose_catalog_loop(
             catalogs.append(tool)
             executors.append(tool)
         from app.v2.server.packages.tool_policy import server_tool_policy
+        from app.v2.server.runtime.policy import frozen_execution, live_execution_policy
+
+        key_id, admitted_policy = frozen_execution(command)
+
+        async def current_policy():
+            return await live_execution_policy(command, users=service.users, keys=service.keys,
+                catalog=service.catalog, settings=service.settings, user_id=user_id)
 
         loop = factory.create_loop(
             resolved,
@@ -236,9 +246,9 @@ async def compose_catalog_loop(
             tool_executor=CompositeToolExecutor(tuple(executors)),
             granted_catalogs=binding.external,
             skill_loader=loader if names else None,
-            tool_policy=server_tool_policy(service.agent_management)
-            if service.agent_management is not None
-            else None,
+            tool_policy=server_tool_policy(service.agent_management,
+                execution_policy=admitted_policy, current_policy=current_policy,
+                machine_invocation=key_id is not None),
             continuation_policy=ports.continuation_policy,
             tool_selection_policy=ports.tool_selection_policy,
             log_sink=service.application.service("observability.log-sink"),

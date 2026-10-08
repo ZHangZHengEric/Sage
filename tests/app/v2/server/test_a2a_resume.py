@@ -78,6 +78,7 @@ def asking_client(tmp_path):
 def ask(client: TestClient, token: str, **key_options) -> tuple[str, dict]:
     """Drive one agent up to its approval question. Returns (api_key, task)."""
 
+    key_options.setdefault("scopes", ["a2a:invoke", "a2a:read", "a2a:approve"])
     agent_id, api_key = mint_key(client, token, **key_options)
     granted = client.put(
         f"/api/agents/{agent_id}",

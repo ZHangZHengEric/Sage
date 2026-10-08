@@ -37,6 +37,30 @@ async def test_old_thread_schema_is_upgraded_without_losing_rows(tmp_path):
         await database.stop()
 
 
+async def test_legacy_user_receives_safe_default_execution_policy(tmp_path):
+    from app.v2.server.identity.repository import DatabaseUserStore
+    from app.v2.server.runtime.policy import ExecutionPolicy
+
+    database = Database(DatabaseSettings(url=f"sqlite+aiosqlite:///{tmp_path}/old-users.db"))
+    await database.start()
+    try:
+        async with database._engine.begin() as connection:
+            await connection.execute(text(
+                "CREATE TABLE users (user_id VARCHAR(64) PRIMARY KEY, "
+                "username VARCHAR(191), password_hash VARCHAR(255), role VARCHAR(16))"
+            ))
+            await connection.execute(text(
+                "INSERT INTO users VALUES ('legacy', 'alice', 'hash', 'user')"
+            ))
+        await create_host_schema(database)
+        await create_host_schema(database)
+        user = await DatabaseUserStore(database).get_by_id("legacy")
+        assert user.username == "alice"
+        assert user.execution_policy == ExecutionPolicy()
+    finally:
+        await database.stop()
+
+
 def test_skill_description_mysql_column_can_hold_full_metadata():
     from sqlalchemy.dialects.mysql import dialect
 

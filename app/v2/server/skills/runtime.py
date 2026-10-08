@@ -194,6 +194,7 @@ class CatalogRunDriver:
             self.service,
             command,
             user_id=context.actor.principal_id,
+            run_id=self.run_id,
         )
         return self._driver
 

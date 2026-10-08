@@ -14,6 +14,7 @@ from pydantic import (
 )
 
 from app.v2.server.observability.logging import get_logger
+from app.v2.server.runtime.policy import ExecutionPolicy
 from sagents.v2.contracts.common import new_id
 from sagents.v2.contracts.errors import ErrorCategory, RuntimeErrorInfo, SageV2Error
 from sagents.v2.model.protocols import resolve_model_protocol
@@ -58,6 +59,8 @@ class AgentRecord(BaseModel):
     model_id: str = ""
     tools: list[str] = Field(default_factory=list)
     skills: list[str] = Field(default_factory=list)
+    # A ceiling, not a grant: API Keys still default to asking for approval.
+    execution_policy: ExecutionPolicy = Field(default_factory=lambda: ExecutionPolicy(shell="sandboxed"))
 
     def public_dict(self) -> dict[str, object]:
         return {
@@ -68,6 +71,7 @@ class AgentRecord(BaseModel):
             "model_id": self.model_id or None,
             "tools": list(self.tools),
             "skills": list(self.skills),
+            "execution_policy": self.execution_policy.model_dump(),
         }
 
 
@@ -294,6 +298,8 @@ def upsert_agent(
         instructions=str(payload.get("instructions") or ""),
         model_id=str(payload.get("model_id") or ""),
         tools=_unique_names(payload.get("tools")),
+        execution_policy=ExecutionPolicy.model_validate(payload.get("execution_policy") or
+            (existing.execution_policy.model_dump() if existing else {"shell": "sandboxed"})),
         skills=list(existing.skills)
         if existing is not None
         else _unique_names(payload.get("skills")),

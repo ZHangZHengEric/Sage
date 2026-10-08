@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
+from app.v2.server.runtime.policy import ExecutionPolicy
 
 class LoginBody(BaseModel):
     username: str
@@ -11,6 +12,7 @@ class RegisterBody(BaseModel):
     password: str
 
 class ApiKeyBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     agent_id: str = ""
     name: str = ""
     scopes: list[str] | None = None
@@ -32,9 +34,9 @@ class UserPublic(BaseModel):
     user_id: str
     username: str
     role: str
+    execution_policy: ExecutionPolicy = Field(default_factory=ExecutionPolicy)
 
 class TokenPayload(BaseModel):
     access_token: str
     expires_in: int
     user: UserPublic
-
