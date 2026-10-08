@@ -18,6 +18,8 @@ from sagents.v2.model.provider import (
     auxiliary_model_timeout_error,
 )
 
+DEFAULT_SUMMARY_MODEL_TIMEOUT_SECONDS = 300.0
+
 
 class ModelConversationSummarizer:
     """Use any v2 ModelProvider for a bounded, structured rolling summary.
@@ -68,33 +70,53 @@ arrays of strings. Do not invent facts and do not wrap the JSON in Markdown."""
         *,
         model_binding: str = "summary",
         max_source_tokens: int = 24_000,
-        timeout_seconds: float = DEFAULT_AUXILIARY_MODEL_TIMEOUT_SECONDS,
+        timeout_seconds: float = DEFAULT_SUMMARY_MODEL_TIMEOUT_SECONDS,
+        idle_timeout_seconds: float = DEFAULT_AUXILIARY_MODEL_TIMEOUT_SECONDS,
     ) -> None:
         if timeout_seconds <= 0:
             raise ValueError("timeout_seconds must be greater than zero")
+        if idle_timeout_seconds <= 0:
+            raise ValueError("idle_timeout_seconds must be greater than zero")
         if max_source_tokens <= 0:
             raise ValueError("max_source_tokens must be greater than zero")
         self.model = model
         self.model_binding = model_binding
         self.max_source_tokens = max_source_tokens
         self.timeout_seconds = float(timeout_seconds)
+        self.idle_timeout_seconds = float(idle_timeout_seconds)
 
     async def summarize(self, request: SummarizationRequest) -> str:
         async with auxiliary_capacity("context-summary"):
+            progress = {"attempt": 0, "text_delta_count": 0, "reasoning_delta_count": 0}
             try:
                 # Include capabilities discovery and both format attempts in
                 # one bounded operation, not just each streaming iteration.
                 async with asyncio.timeout(self.timeout_seconds):
-                    return await self._summarize(request)
+                    return await self._summarize(request, progress)
             except TimeoutError as exc:
-                raise auxiliary_model_timeout_error(
-                    code="context.summarizer.model_timeout",
-                    operation="Model conversation summarization",
-                    timeout_seconds=self.timeout_seconds,
-                    plugin_id=self.plugin_id,
-                ) from exc
+                raise self._timeout_error("total", progress) from exc
 
-    async def _summarize(self, request: SummarizationRequest) -> str:
+    def _timeout_error(self, kind, progress):
+        seconds = self.timeout_seconds if kind == "total" else self.idle_timeout_seconds
+        error = auxiliary_model_timeout_error(
+            code="context.summarizer.model_timeout",
+            operation="Model conversation summarization",
+            timeout_seconds=seconds,
+            plugin_id=self.plugin_id,
+        )
+        return SageV2Error(
+            error.info.model_copy(
+                update={
+                    "metadata": {
+                        **error.info.metadata,
+                        "timeout_kind": kind,
+                        **progress,
+                    }
+                }
+            )
+        )
+
+    async def _summarize(self, request: SummarizationRequest, progress) -> str:
         parts = []
         if request.previous_summary:
             parts.append(
@@ -136,6 +158,7 @@ arrays of strings. Do not invent facts and do not wrap the JSON in Markdown."""
         }[request.response_language]
         last_error = ""
         for attempt in range(2):
+            progress["attempt"] = attempt + 1
             retry = (
                 "\n\nThe previous answer was not valid against the required JSON schema. "
                 "Return a complete, smaller JSON object now."
@@ -176,17 +199,22 @@ arrays of strings. Do not invent facts and do not wrap the JSON in Markdown."""
             completed = None
             stream = self.model.stream(model_request)
             try:
-                async with asyncio.timeout(self.timeout_seconds):
-                    async for event in stream:
-                        if event.kind == ModelEventKind.COMPLETED:
-                            completed = event.response
-            except TimeoutError as exc:
-                raise auxiliary_model_timeout_error(
-                    code="context.summarizer.model_timeout",
-                    operation="Model conversation summarization",
-                    timeout_seconds=self.timeout_seconds,
-                    plugin_id=self.plugin_id,
-                ) from exc
+                iterator = aiter(stream)
+                while True:
+                    try:
+                        async with asyncio.timeout(self.idle_timeout_seconds):
+                            event = await anext(iterator)
+                    except StopAsyncIteration:
+                        break
+                    except TimeoutError as exc:
+                        raise self._timeout_error("idle", progress) from exc
+                    if event.kind == ModelEventKind.TEXT_DELTA and event.delta:
+                        progress["text_delta_count"] += 1
+                    elif event.kind == ModelEventKind.REASONING_DELTA and event.delta:
+                        progress["reasoning_delta_count"] += 1
+                    elif event.kind == ModelEventKind.COMPLETED:
+                        completed = event.response
+                        break
             finally:
                 closer = getattr(stream, "aclose", None)
                 if closer is not None:

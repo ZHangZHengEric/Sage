@@ -543,6 +543,81 @@ async def test_model_summarizer_bounds_the_entire_auxiliary_stream():
         )
 
     assert caught.value.info.code == "context.summarizer.model_timeout"
+    assert caught.value.info.metadata["timeout_kind"] == "total"
+    assert caught.value.info.metadata["text_delta_count"] == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mode", ["continuous", "idle", "total", "completed_tail"])
+async def test_summary_stream_distinguishes_progress_stalls_and_completion(mode):
+    payload = json.dumps(
+        {
+            "summary": "Verified history",
+            "decisions": [],
+            "open_tasks": [],
+            "files_touched": [],
+            "commands_run": [],
+            "important_errors": [],
+            "user_requirements": [],
+        }
+    )
+    closed = asyncio.Event()
+
+    class StreamingSummaryModel:
+        async def capabilities(self, binding):
+            return await ScriptedModelProvider(()).capabilities(binding)
+
+        def stream(self, request):
+            async def events():
+                try:
+                    yield ModelStreamEvent(kind=ModelEventKind.TEXT_DELTA, delta="{")
+                    if mode == "idle":
+                        await asyncio.Event().wait()
+                    elif mode == "total":
+                        while True:
+                            await asyncio.sleep(0.01)
+                            yield ModelStreamEvent(
+                                kind=ModelEventKind.REASONING_DELTA, delta="thinking"
+                            )
+                    elif mode == "continuous":
+                        for _ in range(7):
+                            await asyncio.sleep(0.02)
+                            yield ModelStreamEvent(
+                                kind=ModelEventKind.TEXT_DELTA, delta="x"
+                            )
+                    yield _summary_completion(payload)
+                    if mode == "completed_tail":
+                        # COMPLETED is authoritative; EOF may never arrive.
+                        await asyncio.Event().wait()
+                finally:
+                    closed.set()
+
+            return events()
+
+    summarizer = ModelConversationSummarizer(
+        StreamingSummaryModel(),
+        timeout_seconds=0.08 if mode == "total" else 0.5,
+        idle_timeout_seconds=0.06,
+    )
+    request = SummarizationRequest(
+        scope=scope(), messages=ledger()[1:4], target_tokens=512
+    )
+    if mode in {"idle", "total"}:
+        with pytest.raises(SageV2Error) as caught:
+            await summarizer.summarize(request)
+        assert caught.value.info.code == "context.summarizer.model_timeout"
+        assert caught.value.info.metadata["timeout_kind"] == mode
+        assert caught.value.info.metadata["text_delta_count"] == 1
+    else:
+        result = await summarizer.summarize(request)
+        assert json.loads(result)["summary"] == "Verified history"
+    assert closed.is_set()
+
+
+def test_summary_has_a_separate_total_budget_from_short_auxiliary_calls():
+    summarizer = ModelConversationSummarizer(ScriptedModelProvider(()))
+    assert summarizer.timeout_seconds == 300
+    assert summarizer.idle_timeout_seconds == 60
 
 
 @pytest.mark.asyncio
@@ -580,13 +655,18 @@ async def test_summary_timeout_includes_capability_discovery():
             )
         )
     assert caught.value.info.code == "context.summarizer.model_timeout"
+    assert caught.value.info.metadata["timeout_kind"] == "total"
+    assert caught.value.info.metadata["attempt"] == 0
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("budget", [
-    ContextBudget(max_input_tokens=100_000, max_messages=6),
-    ContextBudget(max_input_tokens=25_000),
-])
+@pytest.mark.parametrize(
+    "budget",
+    [
+        ContextBudget(max_input_tokens=100_000, max_messages=6),
+        ContextBudget(max_input_tokens=25_000),
+    ],
+)
 async def test_long_run_summarizes_old_image_batches_and_reuses_exact_request(budget):
     request = ModelMessage(
         role="user", content=(TextBlock(text="Animate this character"),)

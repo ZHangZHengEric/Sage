@@ -35,6 +35,7 @@ from sagents.v2.context import (
     UnicodeHeuristicTokenEstimator,
     WindowContextReducer,
 )
+from sagents.v2.context.plugins.summarizer_model import DEFAULT_SUMMARY_MODEL_TIMEOUT_SECONDS
 from sagents.v2.interfaces.protocols.a2a import A2AProtocolAdapter
 from sagents.v2.interfaces.protocols.acp import AcpProtocolAdapter
 from sagents.v2.interfaces.protocols.ag_ui import AgUiProtocolAdapter
@@ -444,9 +445,12 @@ def _register_infrastructure(registry: ExtensionRegistry) -> None:
             max_source_tokens=int(context.config.get("max_source_tokens", 24000)),
             timeout_seconds=float(
                 context.config.get(
-                    "timeout_seconds", DEFAULT_AUXILIARY_MODEL_TIMEOUT_SECONDS
+                    "timeout_seconds", DEFAULT_SUMMARY_MODEL_TIMEOUT_SECONDS
                 )
             ),
+            idle_timeout_seconds=float(context.config.get(
+                "idle_timeout_seconds", DEFAULT_AUXILIARY_MODEL_TIMEOUT_SECONDS
+            )),
         ),
         scopes={ExtensionScope.AGENT},
         config_schema={
@@ -455,7 +459,8 @@ def _register_infrastructure(registry: ExtensionRegistry) -> None:
                 "model": {},
                 "model_binding": {"type": "string", "minLength": 1, "default": "summary"},
                 "max_source_tokens": {"type": "integer", "minimum": 1, "default": 24_000},
-                "timeout_seconds": {"type": "number", "exclusiveMinimum": 0, "default": DEFAULT_AUXILIARY_MODEL_TIMEOUT_SECONDS},
+                "timeout_seconds": {"type": "number", "exclusiveMinimum": 0, "default": DEFAULT_SUMMARY_MODEL_TIMEOUT_SECONDS},
+                "idle_timeout_seconds": {"type": "number", "exclusiveMinimum": 0, "default": DEFAULT_AUXILIARY_MODEL_TIMEOUT_SECONDS},
             },
             "required": ["model"],
             "additionalProperties": False,
