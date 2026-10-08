@@ -24,6 +24,7 @@ from sagents.v2.context.contracts import (
 from sagents.v2.context.plugins.estimator_json import JsonHeuristicTokenEstimator
 from sagents.v2.context.plugins.window import WindowContextReducer
 from sagents.v2.context.token_estimator import TokenEstimator, estimate_tokens_async
+from sagents.v2.context.calibration import input_usage_projection, input_usage_scope
 from sagents.v2.model import ModelMessage
 from sagents.v2.contracts.items import ContentBlock
 from sagents.v2.contracts.commands import StartRun
@@ -322,9 +323,13 @@ class DefaultContextAssembler:
                     }
                 )
             effective_budget = self._with_reservation(self.budget, reservation)
-            projection = await self.reducer.reduce(
-                messages, effective_budget, scope=scope
-            )
+            with input_usage_projection(
+                lambda values: self._apply_inference_view(tuple(values), volatile),
+                reserved_tokens=runtime_tokens,
+            ):
+                projection = await self.reducer.reduce(
+                    messages, effective_budget, scope=scope
+                )
         else:
             projection = ContextProjection(
                 messages=messages,
@@ -415,8 +420,11 @@ class DefaultContextAssembler:
         if latest is None:
             return 0
         injected = self._inject_latest_user((latest,), volatile)[-1]
-        before = await estimate_tokens_async(self.estimator, (latest,))
-        after = await estimate_tokens_async(self.estimator, (injected,))
+        # Both sides must use the same local estimate. A reported total for
+        # the injected message cannot be subtracted from an uncalibrated one.
+        with input_usage_scope(None):
+            before = await estimate_tokens_async(self.estimator, (latest,))
+            after = await estimate_tokens_async(self.estimator, (injected,))
         return max(0, after - before)
 
     @classmethod

@@ -393,6 +393,111 @@ async def test_usage_calibration_is_used_before_context_reduction():
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("persistent", [False, True])
+async def test_image_usage_calibration_survives_runtime_projection_before_reduction(
+    persistent,
+):
+    from types import SimpleNamespace
+    from sagents.v2.context import (
+        InMemoryConversationSummaryStore,
+        PersistentSummaryContextReducer,
+    )
+    from sagents.v2.context.assembler import StaticContextProvider
+    from sagents.v2.context.contracts import ContextSegment, ContextStability
+
+    assembler = DefaultContextAssembler(
+        budget=ContextBudget(max_input_tokens=20000),
+        providers=(
+            StaticContextProvider(
+                (
+                    ContextSegment(
+                        segment_id="runtime",
+                        content="Current workspace: /work",
+                        stability=ContextStability.VOLATILE,
+                    ),
+                )
+            ),
+        ),
+    )
+    if persistent:
+        assembler.reducer = PersistentSummaryContextReducer(
+            InMemoryConversationSummaryStore()
+        )
+
+        class Reader:
+            async def get_run(self, run_id):
+                return SimpleNamespace(
+                    run_id=run_id,
+                    session_id="session_images",
+                    concurrency_mode=None,
+                    base_session_sequence=0,
+                )
+
+        assembler.history = SimpleNamespace(reader=Reader())
+    builder = _calibration_builder(assembler)
+    messages = (
+        ModelMessage(
+            role="user",
+            content=(
+                TextBlock(text="Inspect the image"),
+                ImageBlock(uri="data:image/png;base64,AAAA", mime_type="image/png"),
+            ),
+        ),
+    )
+    first = await _calibrated_prepare(builder, messages)
+    builder.observe_response(first, _reported_response())
+    assembler.budget = ContextBudget(max_input_tokens=2000)
+    builder.context_budget = assembler.budget
+    added = (ModelMessage(role="assistant", content=(TextBlock(text="A red frame"),)),)
+    second = await _calibrated_prepare(builder, (*messages, *added))
+    assert second.messages == (*first.messages, *added)
+    assert (
+        second.metadata["request_budget"]["accounting_method"]
+        == "reported_prefix_plus_estimated_delta"
+    )
+    assert second.metadata["request_budget"]["estimated_input_tokens"] == (
+        1128 + builder.token_estimator.estimate(added)
+    )
+    # If the provider reports MORE than the fixed image reserve, reduction
+    # must reject the request even though its local estimate would fit.
+    assembler.budget = ContextBudget(max_input_tokens=5000)
+    builder.context_budget = assembler.budget
+    builder.observe_response(second, _reported_response(6000))
+    with pytest.raises(SageV2Error, match="budget"):
+        await _calibrated_prepare(builder, (*messages, *added))
+
+    # A new runtime view or changed image cannot borrow the old low usage.
+    builder.observe_response(first, _reported_response())
+    assembler.budget = ContextBudget(max_input_tokens=2000)
+    builder.context_budget = assembler.budget
+    changed = (
+        messages[0].model_copy(
+            update={
+                "content": (
+                    messages[0].content[0],
+                    ImageBlock(uri="data:image/png;base64,BBBB", mime_type="image/png"),
+                )
+            }
+        ),
+    )
+    with pytest.raises(SageV2Error, match="budget"):
+        await _calibrated_prepare(builder, changed)
+    assembler.providers = (
+        StaticContextProvider(
+            (
+                ContextSegment(
+                    segment_id="runtime",
+                    content="Current workspace: /other",
+                    stability=ContextStability.VOLATILE,
+                ),
+            )
+        ),
+    )
+    with pytest.raises(SageV2Error, match="budget"):
+        await _calibrated_prepare(builder, messages)
+
+
+@pytest.mark.asyncio
 async def test_calibration_context_is_task_local_and_restored_after_errors():
     import asyncio
     from sagents.v2.context.calibration import (
