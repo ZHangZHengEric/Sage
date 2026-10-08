@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from bisect import bisect_left
 
 from sagents.v2.contracts.errors import (
     ErrorCategory,
@@ -191,6 +192,25 @@ class PersistentSummaryContextReducer:
             for message in messages
             if message.role not in {"system", "developer"}
         )
+        canonical = (
+            scope.canonical_messages
+            if scope.canonical_messages is not None
+            else payload
+        )
+        indices = (
+            scope.canonical_indices
+            if scope.canonical_messages is not None
+            else tuple(range(len(payload)))
+        )
+        if (
+            len(indices) != len(payload)
+            or any(index < 0 or index >= len(canonical) for index in indices)
+            or any(left >= right for left, right in zip(indices, indices[1:]))
+        ):
+            raise self._error(
+                "context.invalid_source_mapping", "invalid canonical history mapping"
+            )
+        original_messages = (*systems, *canonical)
         counter = await MessageTokenCounter.create(self.estimator, messages)
         system_tokens = counter.estimate(systems)
         if system_tokens > budget.max_system_tokens:
@@ -199,7 +219,10 @@ class PersistentSummaryContextReducer:
                 "system instructions exceed their token budget",
             )
         stored = await self.store.get(scope.context_key, session_id=scope.session_id)
-        previous, remaining = await self._validated_previous(stored, payload)
+        previous, _ = await self._validated_previous(stored, canonical)
+        canonical_covered = len(previous.covered_message_digests) if previous else 0
+        covered_count = bisect_left(indices, canonical_covered)
+        remaining = payload[covered_count:]
         # A mismatched prefix must not apply the old summary, but the
         # checkpoint stays until a new summary replaces it. Deleting here
         # forces the next turn to start from zero and can pin the Session.
@@ -208,7 +231,6 @@ class PersistentSummaryContextReducer:
             (i for i in range(len(payload) - 1, -1, -1) if is_user_request(payload[i])),
             None,
         )
-        covered_count = len(payload) - len(remaining)
         anchor = (
             (payload[request_index],)
             if request_index is not None and request_index < covered_count
@@ -224,10 +246,10 @@ class PersistentSummaryContextReducer:
         if not over(current):
             return ContextProjection(
                 messages=current,
-                historical_messages=payload[: len(payload) - len(remaining)],
+                historical_messages=canonical[:canonical_covered],
                 estimated_tokens=counter.estimate(current),
-                source_message_count=len(messages),
-                dropped_message_count=len(payload) - len(remaining),
+                source_message_count=len(original_messages),
+                dropped_message_count=canonical_covered,
                 dropped_digest=previous.source_digest if previous else None,
                 strategy="persistent_summary" if previous else "none",
             )
@@ -280,12 +302,12 @@ class PersistentSummaryContextReducer:
                     "context.budget_exhausted",
                     "no completed history remains to reduce within the model budget",
                 )
-            historical = (*payload[: len(payload) - len(remaining)], *changed)
+            historical = (*canonical[:canonical_covered], *changed)
             return ContextProjection(
                 messages=result,
                 historical_messages=historical,
                 estimated_tokens=counter.estimate(result),
-                source_message_count=len(messages),
+                source_message_count=len(original_messages),
                 dropped_message_count=len(historical),
                 dropped_digest=previous.source_digest if previous else None,
                 strategy="reference_compaction",
@@ -356,12 +378,13 @@ class PersistentSummaryContextReducer:
                 "context.budget_exhausted", "no space remains for a history summary"
             )
         target = max(1, min(self.summary_target_tokens, available - 128))
-        prior_count = len(previous.covered_message_digests) if previous else 0
+        prior_count = covered_count
         text, covered_selected = await self._hierarchical_summary(
             scope, previous, selected, target_tokens=target
         )
         leftover = selected[covered_selected:]
-        all_covered = payload[: prior_count + covered_selected]
+        canonical_end = indices[prior_count + covered_selected - 1] + 1
+        all_covered = canonical[:canonical_end]
         covered_end = prior_count + covered_selected
         anchor = (
             (payload[request_index],)
@@ -394,7 +417,9 @@ class PersistentSummaryContextReducer:
             expected_revision=(
                 previous.revision
                 if previous is not None
-                else stored.revision if stored else None
+                else stored.revision
+                if stored
+                else None
             ),
         )
         if over(result):
@@ -403,7 +428,10 @@ class PersistentSummaryContextReducer:
                 "summary exceeds its reserved request budget",
             )
         return self._projection(
-            messages, result, saved, historical_messages=(*all_covered, *changed)
+            original_messages,
+            result,
+            saved,
+            historical_messages=(*all_covered, *changed),
         )
 
     async def _hierarchical_summary(

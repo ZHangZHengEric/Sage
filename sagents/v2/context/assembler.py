@@ -248,9 +248,7 @@ class DefaultContextAssembler:
                     },
                 )
             )
-        canonical = tuple(
-            message for message in ledger if message.role != "system"
-        )
+        canonical = tuple(message for message in ledger if message.role != "system")
         volatile = tuple(
             segment
             for segment in segments
@@ -260,10 +258,19 @@ class DefaultContextAssembler:
                 and segment.stability == ContextStability.VOLATILE
             )
         )
-        # Reducer hashes and coverage follow committed ledger messages. Drop
-        # unfinished tool pairs and inject runtime context only on the
-        # provider-facing view after reduction.
-        messages = (*system, *canonical)
+        # Excluded tool pairs must not consume the reduction budget or enter
+        # summaries. Keep canonical positions separately for durable coverage;
+        # transport ordering and runtime injection remain inference-only.
+        source_positions = {
+            id(message): index for index, message in enumerate(canonical)
+        }
+        clean = self._strip_historical_search_memory(
+            canonical, source_positions=source_positions
+        )
+        retained_ids = {id(message) for message in self._sanitize_tool_pairs(clean)}
+        payload = tuple(message for message in clean if id(message) in retained_ids)
+        canonical_indices = tuple(source_positions[id(message)] for message in payload)
+        messages = (*system, *payload)
         # Resolved once and shared: the reduction scope and the projection
         # observer both need the owning Run, and neither should pay for a
         # second store read.
@@ -289,14 +296,14 @@ class DefaultContextAssembler:
                     session_id=run.session_id,
                     run_id=run.run_id,
                     source_sequence=run.base_session_sequence,
+                    canonical_messages=canonical,
+                    canonical_indices=canonical_indices,
                     response_language=str(
                         command.config.metadata.get("response_language") or "en"
                     ),
                 )
             reservation = reservation or ContextRequestReservation()
-            runtime_tokens = await self._runtime_injection_tokens(
-                canonical, volatile
-            )
+            runtime_tokens = await self._runtime_injection_tokens(canonical, volatile)
             if runtime_tokens:
                 reservation = reservation.model_copy(
                     update={
@@ -393,11 +400,7 @@ class DefaultContextAssembler:
         if not volatile:
             return 0
         latest = next(
-            (
-                message
-                for message in reversed(canonical)
-                if is_user_request(message)
-            ),
+            (message for message in reversed(canonical) if is_user_request(message)),
             None,
         )
         if latest is None:
@@ -414,18 +417,14 @@ class DefaultContextAssembler:
         volatile: tuple[ContextSegment, ...],
     ) -> tuple[ModelMessage, ...]:
         systems = tuple(
-            message
-            for message in messages
-            if message.role in {"system", "developer"}
+            message for message in messages if message.role in {"system", "developer"}
         )
         payload = tuple(
             message
             for message in messages
             if message.role not in {"system", "developer"}
         )
-        payload = cls._sanitize_tool_pairs(
-            cls._strip_historical_search_memory(payload)
-        )
+        payload = cls._sanitize_tool_pairs(cls._strip_historical_search_memory(payload))
         if volatile:
             payload = cls._inject_latest_user(payload, volatile)
         return (*systems, *payload)
@@ -631,6 +630,8 @@ class DefaultContextAssembler:
     @staticmethod
     def _strip_historical_search_memory(
         messages: tuple[ModelMessage, ...],
+        *,
+        source_positions: dict[int, int] | None = None,
     ) -> tuple[ModelMessage, ...]:
         """Keep only the current turn's automatic Memory Tool pair, as v1 does."""
 
@@ -674,6 +675,9 @@ class DefaultContextAssembler:
                     )
                     if not kept and not has_content:
                         continue
+                    original = message
                     message = message.model_copy(update={"tool_calls": kept})
+                    if source_positions is not None:
+                        source_positions[id(message)] = source_positions[id(original)]
             output.append(message)
         return tuple(output)
