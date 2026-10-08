@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-from bisect import bisect_left
 
 from sagents.v2.contracts.errors import (
     ErrorCategory,
@@ -205,7 +204,7 @@ class PersistentSummaryContextReducer:
         if (
             len(indices) != len(payload)
             or any(index < 0 or index >= len(canonical) for index in indices)
-            or any(left >= right for left, right in zip(indices, indices[1:]))
+            or len(set(indices)) != len(indices)
         ):
             raise self._error(
                 "context.invalid_source_mapping", "invalid canonical history mapping"
@@ -221,7 +220,7 @@ class PersistentSummaryContextReducer:
         stored = await self.store.get(scope.context_key, session_id=scope.session_id)
         previous, _ = await self._validated_previous(stored, canonical)
         canonical_covered = len(previous.covered_message_digests) if previous else 0
-        covered_count = bisect_left(indices, canonical_covered)
+        covered_count = sum(index < canonical_covered for index in indices)
         remaining = payload[covered_count:]
         # A mismatched prefix must not apply the old summary, but the
         # checkpoint stays until a new summary replaces it. Deleting here
@@ -383,7 +382,10 @@ class PersistentSummaryContextReducer:
             scope, previous, selected, target_tokens=target
         )
         leftover = selected[covered_selected:]
-        canonical_end = indices[prior_count + covered_selected - 1] + 1
+        # Tool-context followups can move after results in the inference view.
+        # Whole units are selected, so their highest source position defines
+        # the canonical prefix even when positions within a unit are reordered.
+        canonical_end = max(indices[: prior_count + covered_selected]) + 1
         all_covered = canonical[:canonical_end]
         covered_end = prior_count + covered_selected
         anchor = (
