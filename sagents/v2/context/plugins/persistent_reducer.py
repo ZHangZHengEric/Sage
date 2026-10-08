@@ -380,10 +380,11 @@ class PersistentSummaryContextReducer:
         )
         self._require_compression_gain(previous, selected[:covered_selected], summary)
         result = (*systems, self._summary_message(summary), *retained)
-        # A summary that itself blows the reserved budget is not committed.
-        # Leftover unsummarized prefix is different: persist the prefix that
-        # did fit this turn so the next projection can continue.
-        if over(result) and not leftover:
+        # Validate the summary with the suffix and request anchor that must
+        # remain even after the selected prefix is fully summarized. Only the
+        # temporary leftover may exceed this projection's reserved budget;
+        # persisting an oversized summary would poison the next checkpoint.
+        if over((*systems, self._summary_message(summary), *planned_retained)):
             raise self._error(
                 "context.budget_exhausted",
                 "summary exceeds its reserved request budget",
@@ -391,7 +392,9 @@ class PersistentSummaryContextReducer:
         saved = await self.store.save(
             summary,
             expected_revision=(
-                previous.revision if previous is not None else stored.revision if stored else None
+                previous.revision
+                if previous is not None
+                else stored.revision if stored else None
             ),
         )
         if over(result):
