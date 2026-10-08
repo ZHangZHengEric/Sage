@@ -1620,29 +1620,39 @@ class _InteractionCardState extends State<_InteractionCard> {
     final decisions = _visibleDecisions(approval);
     final colors = Theme.of(context).colorScheme;
     final recovery = payload['reason'] == 'tool_outcome_unknown';
-    final title = _interactionTitle(
-      prompt: prompt,
-      approval: approval,
-      recovery: recovery,
-      toolName: toolName,
-      riskCategory: riskCategory,
-      arguments: arguments,
-      language: language,
-    );
+    final recoveryTitle = payload['title']?.toString().trim();
+    final runtimeRecovery =
+        !approval &&
+        payload['reason_code'] != null &&
+        recoveryTitle != null &&
+        recoveryTitle.isNotEmpty;
+    final title = runtimeRecovery
+        ? recoveryTitle
+        : _interactionTitle(
+            prompt: prompt,
+            approval: approval,
+            recovery: recovery,
+            toolName: toolName,
+            riskCategory: riskCategory,
+            arguments: arguments,
+            language: language,
+          );
     final elevatedRisk =
         sideEffectLevel == 'irreversible' ||
         riskCategory == 'destructive_filesystem' ||
         riskCategory == 'filesystem_delete' ||
         riskCategory == 'external_side_effect';
-    final subtitle = _interactionSubtitle(
-      payload: payload,
-      approval: approval,
-      recovery: recovery,
-      toolName: toolName,
-      arguments: arguments,
-      riskReason: displayedRiskReason,
-      language: language,
-    );
+    final subtitle = runtimeRecovery
+        ? prompt
+        : _interactionSubtitle(
+            payload: payload,
+            approval: approval,
+            recovery: recovery,
+            toolName: toolName,
+            arguments: arguments,
+            riskReason: displayedRiskReason,
+            language: language,
+          );
     final badge = approval && !recovery
         ? _interactionBadge(
             toolName,
