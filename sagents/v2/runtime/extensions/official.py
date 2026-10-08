@@ -1071,8 +1071,12 @@ def _sandbox_config_schema(*, in_memory: bool) -> dict:
                 "network": {
                     "type": "object",
                     "properties": {
-                        "mode": {"type": "string", "enum": ["none", "unrestricted"]},
+                        "mode": {"type": "string", "enum": ["none", "unrestricted", "allowlist", "proxy"]},
                         "deny_private_networks": {"type": "boolean"},
+                        "allowed_hosts": {"type": "array", "items": {"type": "string"}},
+                        "allowed_ports": {"type": "array", "items": {"type": "integer", "minimum": 1, "maximum": 65535}},
+                        "allowed_schemes": {"type": "array", "items": {"type": "string", "enum": ["http", "https"]}},
+                        "proxy_url": {"type": "string"},
                     },
                     "additionalProperties": True,
                 },

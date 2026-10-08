@@ -408,6 +408,10 @@ async def open_cli_session(
         settings=WorkspaceSandboxSettings(
             read_only=read_only,
             network_mode=getattr(args, "network_mode", "none"),
+            network_hosts=tuple(getattr(args, "network_host", ()) or ()),
+            network_ports=tuple(getattr(args, "network_port", ()) or ()),
+            network_proxy=getattr(args, "network_proxy", None),
+            network_allow_private=bool(getattr(args, "network_allow_private", False)),
         ),
     )
     tool_policy = build_tool_policy(getattr(args, "approval_mode", None))

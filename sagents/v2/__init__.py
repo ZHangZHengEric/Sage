@@ -11,6 +11,9 @@ Requires Python 3.12 or newer. The legacy Sage runtime remains 3.10+.
 from sagents.v2._lazy import exported_names, resolve_export
 
 _EXPORTS = {
+    "SelfConfigurationService": ("sagents.v2.agent.self_configuration", "SelfConfigurationService"),
+    "SelfConfigurationRequest": ("sagents.v2.agent.self_configuration", "SelfConfigurationRequest"),
+    "SqliteSelfConfigurationStore": ("sagents.v2.agent.self_configuration", "SqliteSelfConfigurationStore"),
     "AgentManagementService": ("sagents.v2.agent.management", "AgentManagementService"),
     "AgentPackageBundle": ("sagents.v2.agent.management", "AgentPackageBundle"),
     "AgentPackageStore": ("sagents.v2.agent.management", "AgentPackageStore"),

@@ -63,10 +63,14 @@ def _add_v2_common_args(parser: argparse.ArgumentParser, *, default_user_id: str
     )
     parser.add_argument(
         "--network-mode",
-        choices=["none", "unrestricted"],
+        choices=["none", "unrestricted", "allowlist", "proxy"],
         default="none",
         help="Shell network access (default: none; unrestricted allows public and private addresses)",
     )
+    parser.add_argument("--network-host", action="append", default=[], help="Allowed destination host (repeatable; *.example.com matches subdomains)")
+    parser.add_argument("--network-port", action="append", type=int, default=[], help="Allowed destination port (repeatable; proxy modes default to 80 and 443)")
+    parser.add_argument("--network-proxy", help="Upstream HTTP(S) proxy origin for proxy mode")
+    parser.add_argument("--network-allow-private", action="store_true", help="Allow private destination IPs in allowlist/proxy mode")
     parser.add_argument(
         "--read-only",
         dest="read_only",

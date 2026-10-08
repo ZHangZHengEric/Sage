@@ -18,6 +18,7 @@ import time
 import sys
 import re
 from collections.abc import Callable
+from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -246,6 +247,43 @@ class _LocalFileSystem:
         return tuple(values)
 
 
+class _LocalProcessStream:
+    def __init__(self, process, output_limit, input_limit):
+        self.process = process
+        self.output_limit = output_limit
+        self.input_limit = input_limit
+        self.output_bytes = 0
+        self.input_bytes = 0
+
+    async def write_stdin(self, data: bytes):
+        self.input_bytes += len(data)
+        if self.input_bytes > self.input_limit:
+            raise ValueError("interactive stdin exceeds sandbox limit")
+        self.process.stdin.write(data)
+        await self.process.stdin.drain()
+
+    async def close_stdin(self):
+        self.process.stdin.close()
+
+    async def _read(self, stream, max_bytes):
+        if max_bytes <= 0:
+            raise ValueError("stream read size must be positive")
+        data = await stream.read(min(max_bytes, 65536))
+        self.output_bytes += len(data)
+        if self.output_bytes > self.output_limit:
+            raise ValueError("interactive output exceeds sandbox limit")
+        return data
+
+    async def read_stdout(self, max_bytes=65536):
+        return await self._read(self.process.stdout, max_bytes)
+
+    async def read_stderr(self, max_bytes=65536):
+        return await self._read(self.process.stderr, max_bytes)
+
+    async def wait(self):
+        return await self.process.wait()
+
+
 class _LocalProcessRuntime:
     _TERMINATE_GRACE_SECONDS = 2.0
     _PIPE_DRAIN_GRACE_SECONDS = 1.0
@@ -254,7 +292,7 @@ class _LocalProcessRuntime:
         self.provider = provider
         self.row = row
 
-    async def run(self, request: ProcessRequest, *, intent, grant) -> ProcessResult:
+    def _prepare(self, request, intent, grant):
         self.provider._verify(self.row, "process.run", intent, grant)
         if (
             intent.executable != request.argv[0]
@@ -332,6 +370,53 @@ class _LocalProcessRuntime:
             arguments = ("-c", " | ".join(shlex.join(stage) for stage in resolved))
         else:
             resolved_executable, *arguments = resolved[0]
+        return resolved_executable, arguments, cwd, environment, timeout
+
+    @asynccontextmanager
+    async def open_process(self, request: ProcessRequest, *, intent, grant):
+        executable, arguments, cwd, environment, timeout = self._prepare(request, intent, grant)
+        if self.row.spec.process.read_only:
+            raise PermissionError("interactive processes require a writable process policy")
+        if request.stdin is not None:
+            raise ValueError("interactive stdin must be written through the stream")
+        async with self.row.process_slots:
+            if self.row.state != SandboxState.READY:
+                raise PermissionError("sandbox is not ready")
+            task = asyncio.current_task()
+            self.row.active_tasks.add(task)
+            process = None
+            job = None
+            launch_fds = []
+            try:
+                command, job, launch_fds = self.row.boundary.command(executable, arguments, cwd, environment)
+                process = await asyncio.create_subprocess_exec(
+                    *command, cwd=cwd, env=environment,
+                    stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE, start_new_session=True,
+                    pass_fds=tuple(launch_fds),
+                )
+                for fd in launch_fds:
+                    os.close(fd)
+                launch_fds = []
+                self.row.boundary.started(process, job)
+                async with asyncio.timeout(timeout):
+                    yield _LocalProcessStream(process, self.row.spec.process.max_output_bytes,
+                                              self.row.spec.resources.memory_mb * 1024**2)
+            finally:
+                try:
+                    if process is not None:
+                        await self._terminate_process_tree(process)
+                        await self.row.boundary.finish(process)
+                    elif job is not None:
+                        await self.row.boundary.finish_job(job)
+                finally:
+                    for fd in launch_fds:
+                        os.close(fd)
+                    self.row.active_tasks.discard(task)
+
+    async def run(self, request: ProcessRequest, *, intent, grant) -> ProcessResult:
+        resolved_executable, arguments, cwd, environment, timeout = self._prepare(request, intent, grant)
+        policy = self.row.spec.process
         started = time.monotonic()
         async with self.row.process_slots:
             # Recheck after queueing: terminate may have run while we waited.
@@ -638,10 +723,18 @@ class LocalWorkspaceSandboxProvider:
             os=os.name,
             architectures=("native",),
             filesystem_modes=frozenset({FileSystemMode.WORKSPACE}),
-            network_modes=frozenset({NetworkMode.NONE, NetworkMode.UNRESTRICTED}),
+            network_modes=frozenset(
+                {
+                    NetworkMode.NONE,
+                    NetworkMode.UNRESTRICTED,
+                    NetworkMode.ALLOWLIST,
+                    NetworkMode.PROXY,
+                }
+            ),
             process=ProcessCapabilities(
                 available=sys.platform in {"darwin", "linux"},
                 supports_argv=True,
+                supports_stdio=True,
                 supports_shell=True,
             ),
             resources=ResourceLimitCapabilities(
@@ -714,6 +807,8 @@ class LocalWorkspaceSandboxProvider:
         try:
             await row.boundary.prepare()
         except BaseException:
+            if row.boundary.network_broker is not None:
+                await row.boundary.network_broker.close()
             row.boundary.remove()
             raise
         self._rows[ref.sandbox_id] = row

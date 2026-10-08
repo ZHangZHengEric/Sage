@@ -176,6 +176,8 @@ class AgentCompositionFactory:
         memory_recall_limit: int = 5,
         memory_recall_query_generator: MemoryRecallQueryGenerator | None = None,
         expected_resolved_spec_hash: str | None = None,
+        self_configuration=None,
+        skill_loader=None,
         trace_sink=None,
         log_sink=None,
     ) -> AgentLoopEngine:
@@ -203,6 +205,8 @@ class AgentCompositionFactory:
             memory_recall_query_generator=memory_recall_query_generator,
             context_assembler=context_assembler,
             expected_resolved_spec_hash=expected_resolved_spec_hash,
+            self_configuration=self_configuration,
+            skill_loader=skill_loader,
             **(
                 {"trace_sink": trace_sink, "log_sink": log_sink}
                 if engine_type is ObservedRunDriver
@@ -227,6 +231,7 @@ class AgentCompositionFactory:
         step_request_builder: AgentStepRequestBuilder | None = None,
         enabled_tools: tuple[str, ...] | None = None,
         skill_loader: SkillLoader | None = None,
+        self_configuration=None,
         memory_service: MemoryService | None = None,
         session_memory_service: SessionMemoryService | None = None,
         goal_state_service: GoalStateService | None = None,
@@ -322,6 +327,8 @@ class AgentCompositionFactory:
                 granted_catalogs=granted_catalogs,
             ),
             tool_executor=tool_executor,
+            self_configuration=self_configuration,
+            skill_loader=skill_loader,
             tool_policy=tool_policy,
             approval_memory=approval_memory,
             continuation_policy=selected_continuation_policy,

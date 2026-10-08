@@ -24,6 +24,7 @@ from sagents.v2.tool.contracts import ToolDefinition
 
 DEFAULT_ALWAYS_VISIBLE_TOOLS = (
     "tool_expand_tools",
+    "agent_self_configure",
     "questionnaire_async",
     "turn_status",
     "load_skill",

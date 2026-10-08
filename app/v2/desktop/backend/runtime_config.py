@@ -170,11 +170,22 @@ _SANDBOX_DEFAULTS = {
 }
 
 
-def _sandbox_network_policy(raw: dict[str, Any] | None = None) -> NetworkPolicy:
+def _sandbox_network_policy(
+    raw: dict[str, Any] | None = None, *, local_shell: bool = True
+) -> NetworkPolicy:
     values = dict(raw or {})
     if values.get("mode") == NetworkMode.UNRESTRICTED.value:
         values.setdefault("deny_private_networks", False)
-    return NetworkPolicy.model_validate(values)
+    if values.get("mode") in {NetworkMode.ALLOWLIST.value, NetworkMode.PROXY.value}:
+        values.setdefault("allowed_schemes", ["http", "https"])
+    policy = NetworkPolicy.model_validate(values)
+    from sagents.v2.runtime.execution.sandbox.local_support.network import (
+        validate_shell_network,
+    )
+
+    if local_shell:
+        validate_shell_network(policy)
+    return policy
 
 
 def _resolved_sandbox_config(
@@ -202,9 +213,9 @@ def _resolved_sandbox_config(
         mode="json"
     )
     if "network" in config:
-        config["network"] = _sandbox_network_policy(config["network"]).model_dump(
-            mode="json"
-        )
+        config["network"] = _sandbox_network_policy(
+            config["network"], local_shell=plugin_id == "sage.sandbox.local-workspace"
+        ).model_dump(mode="json")
     config["workspace_root"] = _virtual_workspace_root(config.get("workspace_root"))
     path_mode = str(config.get("workspace_path_mode", "virtual"))
     if path_mode not in {"virtual", "host"}:

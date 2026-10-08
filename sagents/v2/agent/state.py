@@ -55,6 +55,8 @@ class AgentLoopCheckpointState(StrictModel):
     # Run-scoped Tool projection state. Persisting exact names makes
     # tool_expand_tools survive suspension and process restart.
     expanded_tool_names: tuple[str, ...] = ()
+    # Private capability revisions must survive pause/restart alongside this Run.
+    self_configuration_revision: int | None = None
     # Stable response fingerprints allow ContinuationPolicy to detect a loop
     # without depending on provider-specific text formatting.
     response_fingerprints: tuple[str, ...] = ()

@@ -327,3 +327,17 @@ def test_desktop_resolves_shell_network_setting():
     )
     assert config["network"]["mode"] == "unrestricted"
     assert config["network"]["deny_private_networks"] is False
+
+
+@pytest.mark.parametrize("network", [
+    {"mode": "allowlist", "allowed_hosts": ["example.com"]},
+    {"mode": "proxy", "proxy_url": "http://localhost:8080"},
+])
+def test_desktop_resolves_proxy_network_configuration(network):
+    from app.v2.desktop.backend.runtime_config import _resolved_sandbox_config
+    from app.v2.desktop.backend.schemas import DesktopV2Settings
+
+    _, config = _resolved_sandbox_config(DesktopV2Settings(component_configs={"execution.sandbox": {"network": network}}))
+    assert config["network"]["mode"] == network["mode"]
+    assert config["network"]["deny_private_networks"] is True
+    assert config["network"]["allowed_schemes"] == ["http", "https"]

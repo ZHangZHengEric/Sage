@@ -358,6 +358,7 @@ class SAgentBuilder:
         self._diagnostic_sink: DiagnosticSink | None = None
         self._model_client: Any | None = None
         self._agent_management = None
+        self._self_configuration_factory = None
         self._flow_tool_nodes = {}
         self._skill_provider = None
         self._model_budget = None
@@ -412,6 +413,18 @@ class SAgentBuilder:
     def with_flow_tool_nodes(self, nodes) -> "SAgentBuilder":
         """Bind tool-named Flow nodes implementing the public RunnableNode protocol."""
         self._flow_tool_nodes = dict(nodes)
+        return self
+
+    def with_self_configuration(self, factory) -> "SAgentBuilder":
+        """Enable one self-configure tool with a private host-authorized service.
+
+        factory(agent_id) returns SelfConfigurationService. Requires explicit
+        with_skill_provider ports, even when the Agent initially has no Skills.
+        Services must not be shared between loops or Runs.
+        """
+        if not callable(factory):
+            raise TypeError("self configuration factory must be callable")
+        self._self_configuration_factory = factory
         return self
 
     def with_agent_management(self, service) -> "SAgentBuilder":
@@ -1075,7 +1088,13 @@ class SAgentBuilder:
                     models_by_agent[definition_id] = models_by_agent[selected_agent]
                 definition = effective_resolved.agents[definition_id]
                 skill_loader = None
-                if self._skill_provider is not None and definition.skills:
+                self_configuration = (
+                    self._self_configuration_factory(definition_id)
+                    if self._self_configuration_factory is not None else None
+                )
+                if self_configuration is not None and self._skill_provider is None:
+                    raise ValueError("with_self_configuration requires with_skill_provider")
+                if self._skill_provider is not None and (definition.skills or self_configuration is not None):
                     from sagents.v2.skill.plugins.session import SessionDerivedSkillActivationRepository
                     from sagents.v2.tool.plugins.skill import SkillToolPlugin
                     from sagents.v2.tool import CompositeToolCatalog, CompositeToolExecutor
@@ -1121,6 +1140,7 @@ class SAgentBuilder:
                     additional_runtime_tools=runtime_tools,
                     granted_catalogs=tuple(pair[0] for pair in self._extra_tools),
                     skill_loader=skill_loader,
+                    self_configuration=self_configuration,
                     additional_context_providers=(
                         AgentRosterContextProvider(
                             registry,

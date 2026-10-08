@@ -2837,7 +2837,7 @@ def test_cli_shell_network_setting_changes_sandbox_fingerprint(tmp_path):
     assert online.network.mode.value == "unrestricted"
     assert online.network.deny_private_networks is False
     assert offline.spec_hash != online.spec_hash
-    with pytest.raises(ValueError, match="network mode"):
+    with pytest.raises(ValueError, match="requires allowed_hosts"):
         LocalWorkspaceBindingProvider(
             tmp_path, settings=WorkspaceSandboxSettings(network_mode="allowlist")
         ).sandbox_spec()
@@ -2847,3 +2847,17 @@ def test_cli_shell_network_setting_changes_sandbox_fingerprint(tmp_path):
 def test_cli_parser_accepts_shell_network_mode(arguments):
     args = build_argument_parser().parse_args([*arguments, "--network-mode", "unrestricted"])
     assert args.network_mode == "unrestricted"
+
+
+@pytest.mark.parametrize("mode, extra", [
+    ("allowlist", ["--network-host", "example.com"]),
+    ("proxy", ["--network-proxy", "http://127.0.0.1:8080"]),
+])
+def test_cli_proxy_mode_configuration_reaches_sandbox_spec(tmp_path, mode, extra):
+    args = build_argument_parser().parse_args(["v2", "run", "hello", "--network-mode", mode, *extra, "--network-port", "443"])
+    settings = WorkspaceSandboxSettings(network_mode=args.network_mode, network_hosts=tuple(args.network_host), network_ports=tuple(args.network_port), network_proxy=args.network_proxy)
+    spec = LocalWorkspaceBindingProvider(tmp_path, settings=settings).sandbox_spec()
+    assert spec.network.mode.value == mode
+    assert spec.network.allowed_ports == (443,)
+    assert spec.network.deny_private_networks is True
+    assert spec.network.allowed_schemes == ("http", "https")
