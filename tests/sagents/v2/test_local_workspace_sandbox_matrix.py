@@ -18,6 +18,8 @@ from sagents.v2.runtime.execution.sandbox import (
     FileSystemPolicy,
     LifecyclePolicy,
     LocalWorkspaceSandboxProvider,
+    NetworkMode,
+    NetworkPolicy,
     OperationIntent,
     ProcessPolicy,
     ProcessRequest,
@@ -55,6 +57,7 @@ async def provision(
     allow_symlinks: bool = False,
     max_output_bytes: int = 32,
     max_wall_time_seconds: float = 2,
+    network: NetworkPolicy | None = None,
 ):
     issuer = SandboxGrantIssuer(b"local-provider-test-key-32-bytes!!")
     provider = LocalWorkspaceSandboxProvider(issuer.verification_key)
@@ -63,6 +66,7 @@ async def provision(
             resources=ResourceLimits(require_hard_limits=False),
             spec_hash="sha256:spec",
             architecture="native",
+            network=network or NetworkPolicy(),
             filesystem=FileSystemPolicy(
                 allowed_operations=frozenset(FileOperation),
                 allowed_roots=allowed_roots,
@@ -561,15 +565,21 @@ async def test_read_only_git_ignores_repository_hooks_and_helpers(tmp_path: Path
     # Apple's git shim may initialize Xcode before reaching git. This test
     # checks repository helper isolation, not toolchain cold-start latency.
     status = await run_read_only(
-        tmp_path, ("bash", "-c", "git status --short"), max_output_bytes=4096,
+        tmp_path,
+        ("bash", "-c", "git status --short"),
+        max_output_bytes=4096,
         max_wall_time_seconds=8,
     )
     diff = await run_read_only(
-        tmp_path, ("bash", "-c", "git diff"), max_output_bytes=4096,
+        tmp_path,
+        ("bash", "-c", "git diff"),
+        max_output_bytes=4096,
         max_wall_time_seconds=8,
     )
     log = await run_read_only(
-        tmp_path, ("bash", "-c", "git log --oneline | head -n 1"), max_output_bytes=4096,
+        tmp_path,
+        ("bash", "-c", "git log --oneline | head -n 1"),
+        max_output_bytes=4096,
         max_wall_time_seconds=8,
     )
 
@@ -910,5 +920,121 @@ async def test_local_process_may_close_stdin_before_consuming_input(tmp_path):
         assert result.exit_code == 0
         assert result.stdout.strip() == b"done"
         assert not result.timed_out
+    finally:
+        await handle.destroy()
+
+
+@_SKIP_SANDBOX_PROCESS_IN_CI
+@pytest.mark.asyncio
+@pytest.mark.parametrize("enabled", [False, True])
+async def test_shell_network_mode_controls_real_connections(tmp_path, enabled):
+    async def respond(reader, writer):
+        try:
+            await reader.read(1)
+            writer.write(b"network-ok")
+            await writer.drain()
+        finally:
+            writer.close()
+            await writer.wait_closed()
+
+    server = await asyncio.start_server(respond, "127.0.0.1", 0)
+    try:
+        port = server.sockets[0].getsockname()[1]
+        issuer, handle = await provision(
+            tmp_path,
+            network=NetworkPolicy(
+                mode=NetworkMode.UNRESTRICTED, deny_private_networks=False
+            )
+            if enabled
+            else NetworkPolicy(),
+            allowed_executables=("python3",),
+            max_output_bytes=4096,
+            max_wall_time_seconds=10,
+        )
+        try:
+            argv = (
+                "python3",
+                "-c",
+                f"import socket; s=socket.create_connection(('127.0.0.1', {port}), timeout=2); s.sendall(b'x'); print(s.recv(64).decode())",
+            )
+            intent, grant = authorization(
+                issuer,
+                handle,
+                "process.run",
+                executable="python3",
+                argv=argv,
+                path="/workspace",
+            )
+            result = await handle.process.run(
+                ProcessRequest(argv=argv, cwd="/workspace"), intent=intent, grant=grant
+            )
+            if enabled:
+                assert result.exit_code == 0, result.stderr
+                assert b"network-ok" in result.stdout
+            else:
+                assert result.exit_code != 0
+                assert b"network-ok" not in result.stdout
+        finally:
+            await handle.destroy()
+    finally:
+        server.close()
+        await server.wait_closed()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "policy",
+    [
+        NetworkPolicy(mode=NetworkMode.ALLOWLIST, allowed_hosts=("example.com",)),
+        NetworkPolicy(mode=NetworkMode.UNRESTRICTED),
+        NetworkPolicy(
+            mode=NetworkMode.UNRESTRICTED,
+            deny_private_networks=False,
+            allowed_ports=(443,),
+        ),
+        NetworkPolicy(
+            mode=NetworkMode.UNRESTRICTED,
+            deny_private_networks=False,
+            allow_listen=True,
+        ),
+    ],
+)
+async def test_local_shell_rejects_unenforceable_network_policies(tmp_path, policy):
+    with pytest.raises(ValueError, match="network|networking"):
+        await provision(tmp_path, network=policy)
+
+
+@_SKIP_SANDBOX_PROCESS_IN_CI
+@pytest.mark.asyncio
+async def test_online_shell_keeps_file_isolation_and_denies_listening(tmp_path):
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    sentinel = tmp_path / "private.txt"
+    sentinel.write_text("private")
+    issuer, handle = await provision(
+        workspace,
+        network=NetworkPolicy(
+            mode=NetworkMode.UNRESTRICTED, deny_private_networks=False
+        ),
+        allowed_executables=("python3",),
+        max_output_bytes=4096,
+    )
+    try:
+        code = f"import pathlib,socket\nfor op in [lambda: pathlib.Path({str(sentinel)!r}).read_text(), lambda: pathlib.Path({str(sentinel)!r}).write_text('changed'), lambda: socket.socket().bind(('127.0.0.1',0))]:\n try: op(); print('ESCAPED')\n except PermissionError: print('denied')"
+        argv = ("python3", "-c", code)
+        intent, grant = authorization(
+            issuer,
+            handle,
+            "process.run",
+            executable="python3",
+            argv=argv,
+            path="/workspace",
+        )
+        result = await handle.process.run(
+            ProcessRequest(argv=argv, cwd="/workspace"), intent=intent, grant=grant
+        )
+        assert result.exit_code == 0, result.stderr
+        assert result.stdout.splitlines() == [b"denied"] * 3
+        assert sentinel.read_text() == "private"
     finally:
         await handle.destroy()

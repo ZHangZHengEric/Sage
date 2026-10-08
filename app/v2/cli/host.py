@@ -22,6 +22,7 @@ from sagents.v2.runtime.execution import (
 from sagents.v2.runtime.execution.sandbox import (
     FileOperation,
     FileSystemPolicy,
+    NetworkMode,
     NetworkPolicy,
     ProcessPolicy,
     ResolvedSandboxSpec,
@@ -62,6 +63,7 @@ class WorkspaceSandboxSettings:
     resources: ResourceLimits = field(
         default_factory=lambda: ResourceLimits(require_hard_limits=False)
     )
+    network_mode: str = "none"
     process_enabled: bool = True
     read_only: bool = False
     allowed_executables: tuple[str, ...] = DEFAULT_ALLOWED_EXECUTABLES
@@ -128,7 +130,12 @@ class LocalWorkspaceBindingProvider:
             max_wall_time_seconds=settings.max_wall_time_seconds,
             max_output_bytes=settings.max_output_bytes,
         )
-        network = NetworkPolicy()
+        mode = NetworkMode(settings.network_mode)
+        if mode not in {NetworkMode.NONE, NetworkMode.UNRESTRICTED}:
+            raise ValueError("local Shell network mode must be none or unrestricted")
+        network = NetworkPolicy(
+            mode=mode, deny_private_networks=mode != NetworkMode.UNRESTRICTED
+        )
         policy_source = json.dumps(
             {
                 "filesystem": filesystem.model_dump(mode="json"),

@@ -95,7 +95,7 @@ def _trusted_utility(name: str, workspace: Path) -> str:
     return str(resolved)
 
 
-def _seccomp_filter() -> int:
+def _seccomp_filter(*, network_enabled: bool = False) -> int:
     """Deny alternate networking, host IPC and namespace/kernel control paths."""
     library = ctypes.CDLL("libseccomp.so.2", use_errno=True)
     library.seccomp_init.argtypes = [ctypes.c_uint32]
@@ -135,8 +135,7 @@ def _seccomp_filter() -> int:
     fd = None
     try:
         for name in (
-            "socket",
-            "connect",
+            *(() if network_enabled else ("socket", "connect")),
             "bind",
             "listen",
             "accept",
@@ -174,6 +173,31 @@ def _seccomp_filter() -> int:
                 continue
             if library.seccomp_rule_add(context, 0x00050001, number, 0) != 0:  # EPERM
                 raise RuntimeError(f"cannot deny syscall {name}")
+        if network_enabled:
+            # Outbound IP sockets only. Keep host Unix sockets, netlink,
+            # raw packet families and future address families inaccessible.
+            socket_call = library.seccomp_syscall_resolve_name(b"socket")
+            if socket_call < 0:
+                raise RuntimeError("seccomp cannot resolve socket")
+            for family in range(46):
+                if family in {2, 10}:  # AF_INET, AF_INET6
+                    continue
+                argument = Argument(0, 7, 0xFFFFFFFF, family)  # MASKED_EQ
+                if (
+                    library.seccomp_rule_add_array(
+                        context, 0x00050001, socket_call, 1, ctypes.byref(argument)
+                    )
+                    != 0
+                ):
+                    raise RuntimeError("cannot restrict socket address family")
+            argument = Argument(0, 5, 46, 0)  # GE, also rejects high-bit aliases
+            if (
+                library.seccomp_rule_add_array(
+                    context, 0x00050001, socket_call, 1, ctypes.byref(argument)
+                )
+                != 0
+            ):
+                raise RuntimeError("cannot deny unknown socket address families")
         # Directory owners can clear PROJINHERIT without changing their project
         # ID. Block both XFS fsxattr and legacy flag setters, or new files could
         # fall back to project 0 and escape quota accounting.
@@ -347,10 +371,21 @@ class LocalResourceBoundary:
                 raise PermissionError(
                     "host sandbox runtime must be installed outside the writable workspace"
                 )
-        if self.row.spec.network.mode != NetworkMode.NONE:
+        policy = self.row.spec.network
+        if policy.mode not in {NetworkMode.NONE, NetworkMode.UNRESTRICTED}:
             raise ValueError(
-                "native local isolation currently supports network mode none only"
+                "native local isolation supports network modes none and unrestricted only"
             )
+        if policy.mode == NetworkMode.UNRESTRICTED:
+            # HTTP-level fields describe network.request, not arbitrary Shell
+            # sockets. Reject customized constraints instead of ignoring them.
+            expected = policy.__class__(
+                mode=NetworkMode.UNRESTRICTED, deny_private_networks=False
+            )
+            if policy != expected:
+                raise ValueError(
+                    "unrestricted Shell networking requires deny_private_networks=false and does not support additional network constraints"
+                )
         if self.row.spec.mounts:
             raise ValueError("native local isolation does not allow extra mounts")
         if (
@@ -540,7 +575,11 @@ class LocalResourceBoundary:
                 launch_fds.append(
                     os.open(self.scratch, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
                 )
-                launch_fds.append(_seccomp_filter())
+                launch_fds.append(
+                    _seccomp_filter(
+                        network_enabled=spec.network.mode == NetworkMode.UNRESTRICTED
+                    )
+                )
                 # Each --bind-fd consumes and closes its descriptor. Use a
                 # distinct duplicate for the second scratch mount.
                 launch_fds.append(os.dup(launch_fds[1]))
@@ -578,6 +617,18 @@ class LocalResourceBoundary:
                 "--seccomp",
                 str(launch_fds[2]),
             ]
+            if spec.network.mode == NetworkMode.UNRESTRICTED:
+                command += ["--share-net"]
+                for path in (
+                    "/etc/resolv.conf",
+                    "/etc/hosts",
+                    "/etc/nsswitch.conf",
+                    "/etc/ssl",
+                    "/etc/pki",
+                    "/etc/gai.conf",
+                ):
+                    if Path(path).exists():
+                        command += ["--ro-bind", path, path]
             for path in (
                 "/usr/bin",
                 "/usr/sbin",
@@ -685,6 +736,16 @@ class LocalResourceBoundary:
                 '(allow file-read* (literal "/Library/Preferences/com.apple.dt.Xcode.plist"))',
                 '(allow file-write* (literal "/dev/null"))',
             ]
+            if spec.network.mode == NetworkMode.UNRESTRICTED:
+                profile += [
+                    '(allow network-outbound (remote ip "*:*"))',
+                    # macOS resolves names through system DNS services.
+                    '(allow network-outbound (remote unix-socket (path-literal "/private/var/run/mDNSResponder")))',
+                    '(allow mach-lookup (global-name "com.apple.system.opendirectoryd.libinfo") (global-name "com.apple.mDNSResponder"))',
+                    '(allow file-read* (literal "/private/etc/hosts") (literal "/private/etc/resolv.conf"))',
+                    '(allow file-read* (subpath "/private/etc/ssl") (subpath "/opt/homebrew/etc/openssl@3") (subpath "/opt/homebrew/etc/ca-certificates") (subpath "/usr/local/etc/openssl@3") (subpath "/usr/local/etc/ca-certificates"))',
+                    '(allow mach-lookup (global-name "com.apple.trustd.agent") (global-name "com.apple.trustd"))',
+                ]
             if not spec.process.read_only and spec.filesystem.allowed_operations & {
                 FileOperation.WRITE,
                 FileOperation.CREATE,

@@ -16,6 +16,8 @@ from sagents.v2.runtime.execution.sandbox import (
     FileSystemPolicy,
     InMemorySandboxProvider,
     LocalWorkspaceSandboxProvider,
+    NetworkMode,
+    NetworkPolicy,
     OperationIntent,
     ProcessPolicy,
     ProcessRequest,
@@ -375,7 +377,8 @@ def test_macos_seatbelt_reads_xcode_developer_roots(tmp_path):
 def test_plugin_read_paths_default_empty_and_keep_absolute_dirs():
     assert LocalWorkspaceSandboxProvider(b"key").read_paths == ()
     provider = LocalWorkspaceSandboxProvider(
-        b"key", read_paths=["/opt/host-runtime", "/opt/host-runtime", "/usr/local/tools"]
+        b"key",
+        read_paths=["/opt/host-runtime", "/opt/host-runtime", "/usr/local/tools"],
     )
     assert provider.read_paths == ("/opt/host-runtime", "/usr/local/tools")
 
@@ -489,13 +492,16 @@ async def test_sandbox_cannot_signal_an_unrelated_host_process(tmp_path):
         await protected.wait()
 
 
-def test_linux_launch_pins_mounts_cgroups_and_loader_environment(tmp_path, monkeypatch):
+@pytest.mark.parametrize("network_enabled", [False, True])
+def test_linux_launch_pins_mounts_cgroups_and_loader_environment(
+    tmp_path, monkeypatch, network_enabled
+):
     import sagents.v2.runtime.execution.sandbox.local_support.resources as module
 
     monkeypatch.setattr(module.sys, "platform", "linux")
     monkeypatch.setattr(module, "_trusted_utility", lambda name, root: "/usr/bin/bwrap")
     monkeypatch.setattr(
-        module, "_seccomp_filter", lambda: os.open(os.devnull, os.O_RDONLY)
+        module, "_seccomp_filter", lambda **kwargs: os.open(os.devnull, os.O_RDONLY)
     )
     row = SimpleNamespace(
         root=tmp_path,
@@ -506,6 +512,14 @@ def test_linux_launch_pins_mounts_cgroups_and_loader_environment(tmp_path, monke
     boundary.cgroup = tmp_path / "cgroup"
     boundary.cgroup.mkdir()
     boundary.scratch.mkdir()
+    if network_enabled:
+        row.spec = row.spec.model_copy(
+            update={
+                "network": NetworkPolicy(
+                    mode=NetworkMode.UNRESTRICTED, deny_private_networks=False
+                )
+            }
+        )
     environment = {"LD_PRELOAD": "/workspace/injection.so"}
     command, job, fds = boundary.command(
         "/usr/bin/python", ("-c", "pass"), tmp_path, environment
@@ -517,6 +531,10 @@ def test_linux_launch_pins_mounts_cgroups_and_loader_environment(tmp_path, monke
         assert command.index("--unshare-user") < command.index("--disable-userns")
         assert "--disable-userns" in command
         assert "--seccomp" in command
+        assert ("--share-net" in command) is network_enabled
+        if network_enabled:
+            assert command.index("--share-net") > command.index("--unshare-all")
+            assert "/etc/resolv.conf" in command
         assert command.count("--bind-fd") == 3
         assert len(fds) == 4 and len(set(fds)) == 4
         assert command.count("--remount-ro") == 3

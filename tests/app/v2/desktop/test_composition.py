@@ -298,3 +298,32 @@ def test_core_document_read_limit_cannot_hide_instructions_after_whitespace(tmp_
     with pytest.raises(SageV2Error) as caught:
         DesktopRunCompositionMixin()._identity_documents(tmp_path)
     assert caught.value.info.code == "context.system_document_too_large"
+
+
+def test_shell_network_configuration_changes_binding_fingerprint(tmp_path):
+    from app.v2.desktop.backend.runtime_config import _sandbox_network_policy
+
+    offline = DesktopExecutionBindingProvider(tmp_path / "workspace")
+    online = DesktopExecutionBindingProvider(
+        tmp_path / "workspace",
+        network=_sandbox_network_policy({"mode": "unrestricted"}),
+    )
+    assert offline.sandbox_spec().network.mode.value == "none"
+    assert online.sandbox_spec().network.mode.value == "unrestricted"
+    assert online.sandbox_spec().network.deny_private_networks is False
+    assert offline.sandbox_spec().spec_hash != online.sandbox_spec().spec_hash
+
+
+def test_desktop_resolves_shell_network_setting():
+    from app.v2.desktop.backend.runtime_config import _resolved_sandbox_config
+    from app.v2.desktop.backend.schemas import DesktopV2Settings
+
+    _, config = _resolved_sandbox_config(
+        DesktopV2Settings(
+            component_configs={
+                "execution.sandbox": {"network": {"mode": "unrestricted"}}
+            }
+        )
+    )
+    assert config["network"]["mode"] == "unrestricted"
+    assert config["network"]["deny_private_networks"] is False

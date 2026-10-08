@@ -3146,10 +3146,15 @@ async def test_agent_workspace_uses_the_selected_initializer_plugin(tmp_path: Pa
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("network_mode", ["none", "unrestricted"])
 async def test_loop_composition_uses_native_model_skill_tool_and_sandbox_plugins(
-    tmp_path: Path,
+    tmp_path: Path, network_mode: str,
 ):
     service = DesktopV2Service(tmp_path)
+    settings = await service.get_settings()
+    await service.save_settings(settings.model_copy(update={
+        "component_configs": {"execution.sandbox": {"network": {"mode": network_mode}}}
+    }))
     await service.list_agents("user_1")
     await service.patch_model_provider(
         "model_main", ModelProviderPatch(api_keys=["test-key"]), "user_1"
@@ -3180,6 +3185,7 @@ async def test_loop_composition_uses_native_model_skill_tool_and_sandbox_plugins
     names = {value.name for value in await loop.tool_catalog.list_tools(run_id="run_1")}
     assert resolved.model_routes["primary"]["provider"] == "openai-responses"
     assert sandbox.ref.provider_id == "sage.sandbox.local-workspace"
+    assert sandbox.provider._row(sandbox.ref).spec.network.mode.value == network_mode
     assert isinstance(
         loop.context_assembler.reducer.summarizer, ModelConversationSummarizer
     )

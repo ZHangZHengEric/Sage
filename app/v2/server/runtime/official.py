@@ -55,11 +55,18 @@ def install_sandbox(execution) -> None:
     execution.sandbox_provider = LocalWorkspaceSandboxProvider(issuer.verification_key)
 
 
-async def provision_workspace(execution, workspace: Path, context, *, run_id: str):
+async def provision_workspace(
+    execution,
+    workspace: Path,
+    context,
+    *,
+    run_id: str,
+    network: NetworkPolicy | None = None,
+):
     """Map this user's workspace into one Run's sandbox."""
 
     return await execution.sandbox_provider.provision(
-        workspace_sandbox_spec(workspace), context, run_id=run_id
+        workspace_sandbox_spec(workspace, network=network), context, run_id=run_id
     )
 
 
@@ -89,13 +96,17 @@ def official_tool_catalog() -> list[dict[str, object]]:
 
 
 def workspace_sandbox_spec(
-    host_workspace: Path, *, resources: ResourceLimits | None = None
+    host_workspace: Path,
+    *,
+    resources: ResourceLimits | None = None,
+    network: NetworkPolicy | None = None,
 ) -> ResolvedSandboxSpec:
     # Kernel hard limits come from a delegated cgroup subtree and an XFS
     # project mount that an administrator prepares and hands to the provider.
     # This host does not take that configuration, so it never asserts limits it
     # has no way to obtain; the sandbox still isolates, and meters by sampling.
     resources = resources or ResourceLimits(require_hard_limits=False)
+    network = network or NetworkPolicy()
     root = str(Path(host_workspace).resolve())
     fingerprint = hashlib.sha256(
         json.dumps(
@@ -103,6 +114,7 @@ def workspace_sandbox_spec(
                 "plugin": LocalWorkspaceSandboxProvider.plugin_id,
                 "host_workspace": root,
                 "resources": resources.model_dump(mode="json"),
+                "network": network.model_dump(mode="json"),
             },
             sort_keys=True,
         ).encode()
@@ -128,7 +140,7 @@ def workspace_sandbox_spec(
             max_wall_time_seconds=300,
             max_output_bytes=4 * 1024 * 1024,
         ),
-        network=NetworkPolicy(),
+        network=network,
         lifecycle=LifecyclePolicy(
             durability=SandboxDurability.DURABLE_EXTERNAL,
             safe_pause_behavior=SandboxReleaseDisposition.TERMINATE,

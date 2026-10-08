@@ -31,7 +31,7 @@ ResolvedSandboxSpec.resources 与 Desktop 的 component_configs["execution.sandb
 
 CPU 100% 是一个逻辑核心配额，200% 是两个核心，不是累计 CPU 秒数或整机百分比。内存/磁盘以 MiB 计，进程限制覆盖执行进程及后代；磁盘范围包含工作区、临时目录和共享内存，宿主控制进程不进入执行 cgroup。
 
-协议默认要求硬限制。require_hard_limits=false 允许采样计量，不取消 OS 隔离：macOS 使用 Seatbelt，Linux 使用 bubblewrap、命名空间、能力清空、seccomp、无网络和只读系统。没有普通宿主 subprocess 回退。无硬限制能力时，硬限制请求在 admission 阶段以 sandbox.resource_limits_unsupported 拒绝。非法、零、负和无穷资源值被拒绝。
+协议默认要求硬限制。require_hard_limits=false 允许采样计量，不取消 OS 隔离：macOS 使用 Seatbelt，Linux 使用 bubblewrap、命名空间、能力清空、seccomp、默认无网络和只读系统。没有普通宿主 subprocess 回退。无硬限制能力时，硬限制请求在 admission 阶段以 sandbox.resource_limits_unsupported 拒绝。非法、零、负和无穷资源值被拒绝。
 
 filesystem.max_file_bytes / max_total_bytes 是额外文件 API 限制，不代替内核配额；继承 RLIMIT_FSIZE 提供单文件限制。
 
@@ -43,6 +43,24 @@ filesystem.max_file_bytes / max_total_bytes 是额外文件 API 限制，不代�
 
 额外可读目录由插件 `read_paths` 配置：一组绝对目录，只读放行。macOS 加入 Seatbelt `file-read*`，Linux 做只读 bind。拒绝相对路径和 `/`；落在当前工作区里的路径在启动命令时忽略。未设置时与改前一致。宿主自行写入需要放行的目录（例如打包运行时树），通用沙箱插件不认宿主环境变量。
 
+## Shell 网络配置
+
+Desktop 的 `component_configs["execution.sandbox"]` 接受以下配置：
+
+```json
+{
+  "network": {"mode": "unrestricted"}
+}
+```
+
+未配置或 `mode=none` 时保持断网。`unrestricted` 允许 Shell 及其子进程发起 IPv4/IPv6 出站连接，包括公网、内网和本机；Desktop 自动设置 `deny_private_networks=false`。直接构造 `ResolvedSandboxSpec` 时需显式设置这个字段。配置变化计入沙箱指纹，已有运行不就地扩权。
+
+CLI 通过 `sage v2 run "任务" --network-mode unrestricted` 开启，`run`、`chat` 和 `resume` 均支持；默认是 `none`。Server 宿主可在 `workspace_sandbox_spec` 或 `provision_workspace` 显式传入 `NetworkPolicy`。
+
+Linux 保留宿主网络命名空间，放行 IP 出站套接字，并只读挂载 DNS 配置和系统证书；除 macOS 必需的系统 DNS 通道外，仍禁止 Unix socket、监听和其他原有受限系统能力。macOS 通过 Seatbelt 放行 IP 出站网络，继续保留文件隔离和监听限制。TLS 证书校验由命令正常执行，不自动关闭。
+
+目前不支持 Shell 的域名、端口、HTTP 方法白名单、私网禁用、监听或自定义请求限制；本地 Provider 拒绝这些额外限制及 `allowlist`/`proxy` 模式。`SandboxHandle.network.request` 仍未实现真实 HTTP 请求；此配置只开放沙箱进程网络。命令仍需满足可执行文件和文件读取策略。
+
 ## Linux
 
 执行路径为 LocalProcessRuntime → 固定隔离 Python 启动器 → cgroup.procs → bubblewrap → 命令及后代。启动器使用 python -I -c，不执行可写工作区脚本。Python、Sage 和隔离工具须在可写工作区外；宿主以 root 运行时，执行前清空附加组并降至指定非 root UID/GID。动态加载器环境只在隔离边界内生效。
@@ -50,7 +68,7 @@ filesystem.max_file_bytes / max_total_bytes 是额外文件 API 限制，不代�
 - cpu.max、memory.max、memory.swap.max=0、pids.max 分别限制 CPU、聚合内存、swap 和后代进程/线程，写入后读回校验。
 - 沙箱父 cgroup 与每命令子 cgroup 共享总额度，完成、超时与取消均清理。setsid 或关闭输出管道不能脱离 cgroup。
 - 系统、/proc、/dev 只读，/dev/null 单独允许写入；工作区、/tmp、/dev/shm 的可写内容位于同一 XFS project。FD 挂载核对 inode/设备，避免路径替换及目录 FD 泄露。
-- 禁止新建用户命名空间；seccomp 拒绝套接字、挂载、跨进程内存、keyring、BPF、perf、io_uring 及修改 XFS project 标志的 ioctl，包含高位别名。宿主 Unix socket 也不能绕过无网络策略。
+- 禁止新建用户命名空间；断网模式的 seccomp 拒绝套接字；两种模式均拒绝挂载、跨进程内存、keyring、BPF、perf、io_uring 及修改 XFS project 标志的 ioctl，包含高位别名。宿主 Unix socket 也不能绕过无网络策略。
 - 管理员预先准备 cgroup 子树与 XFS project 配额。Sage 校验 accounting/enforcement、project ID 继承、文件系统与实际硬额度；实际额度不得大于请求，不执行 sudo，也不自动放宽共享项目额度。
 - project 必须有 inode 硬配额，最多为磁盘字节数除以 4096。初始化拒绝符号链接、跨文件系统挂载和硬链接。
 

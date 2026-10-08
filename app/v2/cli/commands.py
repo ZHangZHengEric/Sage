@@ -404,7 +404,11 @@ async def open_cli_session(
     # plan 模式只做检查与提案：沙箱退到只读，写类工具对模型隐藏（即使被调用也会被策略拒绝）。
     read_only = bool(getattr(args, "read_only", False)) or mode == "plan"
     bindings = LocalWorkspaceBindingProvider(
-        workspace, settings=WorkspaceSandboxSettings(read_only=read_only)
+        workspace,
+        settings=WorkspaceSandboxSettings(
+            read_only=read_only,
+            network_mode=getattr(args, "network_mode", "none"),
+        ),
     )
     tool_policy = build_tool_policy(getattr(args, "approval_mode", None))
     try:
