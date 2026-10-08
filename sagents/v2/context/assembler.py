@@ -248,7 +248,13 @@ class DefaultContextAssembler:
                     },
                 )
             )
-        canonical = tuple(message for message in ledger if message.role != "system")
+        system = (
+            *system,
+            *(message for message in ledger if message.role == "developer"),
+        )
+        canonical = tuple(
+            message for message in ledger if message.role not in {"system", "developer"}
+        )
         volatile = tuple(
             segment
             for segment in segments
@@ -261,15 +267,17 @@ class DefaultContextAssembler:
         # Excluded tool pairs must not consume the reduction budget or enter
         # summaries. Keep canonical positions separately for durable coverage;
         # transport ordering and runtime injection remain inference-only.
-        source_positions = {
-            id(message): index for index, message in enumerate(canonical)
-        }
+        source_positions: list[int] = []
         clean = self._strip_historical_search_memory(
             canonical, source_positions=source_positions
         )
         retained_ids = {id(message) for message in self._sanitize_tool_pairs(clean)}
         payload = tuple(message for message in clean if id(message) in retained_ids)
-        canonical_indices = tuple(source_positions[id(message)] for message in payload)
+        canonical_indices = tuple(
+            index
+            for index, message in zip(source_positions, clean, strict=True)
+            if id(message) in retained_ids
+        )
         messages = (*system, *payload)
         # Resolved once and shared: the reduction scope and the projection
         # observer both need the owning Run, and neither should pay for a
@@ -631,7 +639,7 @@ class DefaultContextAssembler:
     def _strip_historical_search_memory(
         messages: tuple[ModelMessage, ...],
         *,
-        source_positions: dict[int, int] | None = None,
+        source_positions: list[int] | None = None,
     ) -> tuple[ModelMessage, ...]:
         """Keep only the current turn's automatic Memory Tool pair, as v1 does."""
 
@@ -644,6 +652,8 @@ class DefaultContextAssembler:
             None,
         )
         if latest_user is None:
+            if source_positions is not None:
+                source_positions.extend(range(len(messages)))
             return messages
         historical_ids = {
             call.tool_call_id
@@ -653,6 +663,8 @@ class DefaultContextAssembler:
             if call.name == "search_memory"
         }
         if not historical_ids:
+            if source_positions is not None:
+                source_positions.extend(range(len(messages)))
             return messages
         output = []
         for index, message in enumerate(messages):
@@ -675,9 +687,8 @@ class DefaultContextAssembler:
                     )
                     if not kept and not has_content:
                         continue
-                    original = message
                     message = message.model_copy(update={"tool_calls": kept})
-                    if source_positions is not None:
-                        source_positions[id(message)] = source_positions[id(original)]
             output.append(message)
+            if source_positions is not None:
+                source_positions.append(index)
         return tuple(output)
