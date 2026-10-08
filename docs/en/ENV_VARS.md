@@ -25,6 +25,8 @@ ref: v2-ENV_VARS
 | `SAGE_SERVER_JWT_EXPIRE_HOURS` | `72` |
 | `SAGE_SERVER_ADMIN_USERNAME` | `admin` (initial administrator) |
 | `SAGE_SERVER_ADMIN_PASSWORD` | `admin12345` (replace before deployment) |
+| `SAGE_SERVER_EXECUTION_SHELL_MODE` | `sandboxed`; `ask` / `sandboxed` / `deny` |
+| `SAGE_SERVER_APPROVAL_TIMEOUT_SECONDS` | `86400` seconds |
 | `SAGE_SERVER_MAX_CONCURRENT_RUNS` | `8` |
 | `SAGE_SERVER_MAX_CONCURRENT_RUNS_PER_USER` | `2` |
 | `SAGE_SERVER_MAX_PENDING_RUNS` | `1024` |

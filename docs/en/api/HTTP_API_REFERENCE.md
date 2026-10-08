@@ -67,6 +67,10 @@ The inventory below follows the registered router source. Jaeger routes depend o
 | `GET` | `/api/keys` | `api_keys` |
 | `POST` | `/api/keys` | `api_keys` |
 | `DELETE` | `/api/keys/{key_id}` | `api_keys` |
+| `GET` | `/api/approvals` | `approvals` |
+| `POST` | `/api/approvals/{run_id}/decisions` | `approvals` |
+| `GET` | `/api/auth/execution-policy` | `auth` |
+| `PUT` | `/api/auth/execution-policy` | `auth` |
 | `POST` | `/api/auth/login` | `auth` |
 | `POST` | `/api/auth/logout` | `auth` |
 | `POST` | `/api/auth/register` | `auth` |
