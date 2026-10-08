@@ -547,6 +547,73 @@ def test_linux_launch_pins_mounts_cgroups_and_loader_environment(
             os.close(fd)
 
 
+@pytest.mark.parametrize("mode", [NetworkMode.ALLOWLIST, NetworkMode.PROXY])
+def test_linux_proxy_launch_retains_network_namespace_and_delays_loader_environment(
+    tmp_path, monkeypatch, mode
+):
+    import base64
+    import json
+    import sagents.v2.runtime.execution.sandbox.local_support.resources as module
+    from sagents.v2.runtime.execution.sandbox.local_support.network import (
+        LINUX_PROXY_LAUNCH,
+    )
+
+    monkeypatch.setattr(module.sys, "platform", "linux")
+    monkeypatch.setattr(module, "_trusted_utility", lambda name, root: "/usr/bin/bwrap")
+    filters = []
+
+    def export_filter(**kwargs):
+        filters.append(kwargs)
+        return os.open(os.devnull, os.O_RDONLY)
+
+    monkeypatch.setattr(module, "_seccomp_filter", export_filter)
+    resolved = spec(tmp_path).model_copy(
+        update={
+            "network": NetworkPolicy(
+                mode=mode,
+                allowed_hosts=("example.com",),
+                proxy_url="http://proxy.test:8080"
+                if mode == NetworkMode.PROXY
+                else None,
+            )
+        }
+    )
+    row = SimpleNamespace(
+        root=tmp_path, spec=resolved, ref=SimpleNamespace(sandbox_id="proxy-test")
+    )
+    boundary = LocalResourceBoundary(row)
+    boundary.scratch.mkdir()
+    boundary.network_broker = SimpleNamespace(
+        socket_path=tmp_path / "broker.sock", token="run-token"
+    )
+    environment = {"LD_PRELOAD": "/workspace/injection.so", "PYTHONPATH": "/workspace"}
+    command, _, fds = boundary.command(
+        "/bin/sh", ("-c", "echo ok"), tmp_path, environment
+    )
+    try:
+        assert "--unshare-all" in command
+        assert "--share-net" not in command
+        assert str(boundary.network_broker.socket_path) in command
+        assert "/sage-egress.sock" in command
+        assert filters == [
+            {"network_enabled": True, "proxy_bridge": True},
+            {"network_enabled": True},
+        ]
+        assert command[
+            command.index(LINUX_PROXY_LAUNCH) - 2 : command.index(LINUX_PROXY_LAUNCH)
+        ] == ["-I", "-c"]
+        index = command.index(LINUX_PROXY_LAUNCH)
+        payload = json.loads(command[index + 4])
+        assert payload["LD_PRELOAD"] == "/workspace/injection.so"
+        assert payload["PYTHONPATH"] == "/workspace"
+        assert base64.b64decode(command[index + 3]) == b""
+        assert command.count("--setenv") == 0
+        assert "LD_PRELOAD" not in environment
+    finally:
+        for fd in fds:
+            os.close(fd)
+
+
 @pytest.mark.asyncio
 @pytest.mark.skipif(
     sys.platform != "linux" or not os.getenv("SAGE_TEST_CGROUP_ROOT"),

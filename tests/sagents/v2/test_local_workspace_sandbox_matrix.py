@@ -58,9 +58,12 @@ async def provision(
     max_output_bytes: int = 32,
     max_wall_time_seconds: float = 2,
     network: NetworkPolicy | None = None,
+    read_paths: tuple[str, ...] = (),
 ):
     issuer = SandboxGrantIssuer(b"local-provider-test-key-32-bytes!!")
-    provider = LocalWorkspaceSandboxProvider(issuer.verification_key)
+    provider = LocalWorkspaceSandboxProvider(
+        issuer.verification_key, read_paths=read_paths
+    )
     handle = await provider.provision(
         ResolvedSandboxSpec(
             resources=ResourceLimits(require_hard_limits=False),
@@ -834,6 +837,7 @@ async def test_local_process_stdin_backpressure_is_bounded_and_reaped(tmp_path, 
     pid_path = tmp_path / "child.pid"
     argv = (
         sys.executable,
+        "-S",
         "-c",
         "import os,time; from pathlib import Path; "
         "Path('child.pid').write_text(str(os.getpid())); time.sleep(30)",
@@ -870,7 +874,7 @@ async def test_local_process_stdin_backpressure_is_bounded_and_reaped(tmp_path, 
             os.kill(pid, 0)
         # Cleanup must release the process slot for the next command as well.
         next_request = ProcessRequest(
-            argv=(sys.executable, "-c", "print('alive')"), cwd="/workspace"
+            argv=(sys.executable, "-S", "-c", "print('alive')"), cwd="/workspace"
         )
         next_intent, next_grant = authorization(
             issuer,
@@ -902,7 +906,7 @@ async def test_local_process_may_close_stdin_before_consuming_input(tmp_path):
 
     issuer, handle = await provision(tmp_path, allowed_executables=(sys.executable,))
     request = ProcessRequest(
-        argv=(sys.executable, "-c", "print('done')"),
+        argv=(sys.executable, "-S", "-c", "print('done')"),
         cwd="/workspace",
         stdin=b"x" * 4_000_000,
     )
@@ -985,7 +989,7 @@ async def test_shell_network_mode_controls_real_connections(tmp_path, enabled):
 @pytest.mark.parametrize(
     "policy",
     [
-        NetworkPolicy(mode=NetworkMode.ALLOWLIST, allowed_hosts=("example.com",)),
+        NetworkPolicy(mode=NetworkMode.ALLOWLIST),
         NetworkPolicy(mode=NetworkMode.UNRESTRICTED),
         NetworkPolicy(
             mode=NetworkMode.UNRESTRICTED,

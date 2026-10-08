@@ -928,10 +928,32 @@ class DesktopRunCompositionMixin(DesktopRunEnvironmentMixin):
                     continuation_policy,
                     goal_state_service,
                 )
+            self_configuration = None
+            if (owns_invocation and invocation_mode != "plan" and not force_leaf
+                    and sandbox_plugin_id == "sage.sandbox.local-workspace"
+                    and sandbox_config["workspace_mapping"] == "active_workspace"):
+                from sagents.v2.agent.self_configuration import SelfConfigurationService, SqliteSelfConfigurationStore
+
+                async def authorize_self_configuration(request, context):
+                    if context.actor.principal_id != agent.user_id or context.actor.delegated_by:
+                        raise PermissionError("Only the Agent owner can change its capabilities")
+
+                from sagents.v2.tool.plugins.sandbox_mcp import SandboxMcpSessionFactory
+
+                self_configuration = SelfConfigurationService(
+                    store=SqliteSelfConfigurationStore(self.runtime_root / "self-configuration.sqlite3"),
+                    owner=json.dumps(["desktop", agent.user_id, agent.agent_id]),
+                    workspace_root=workspace, workspace_alias=workspace_root,
+                    authorize=authorize_self_configuration,
+                    mcp_session_factory=SandboxMcpSessionFactory(sandbox_handle, self._sandbox_grant_issuer, workspace_root=workspace_root),
+                )
+
             return factory.create_engine(
                 model=models_by_agent.get(descriptor.agent_id, recording_model),
                 tool_catalog=catalog,
                 tool_executor=executor,
+                self_configuration=self_configuration,
+                skill_loader=loader if self_configuration is not None else None,
                 tool_policy=DefaultToolPolicy(
                     approval_strategy=ApprovalStrategy(approval_mode),
                     operation_assessor=ShellCommandOperationAssessor(

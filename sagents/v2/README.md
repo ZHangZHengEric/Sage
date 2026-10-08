@@ -156,6 +156,90 @@ loop implementations and unbound Flow nodes fail explicitly.
 See the [implementation and host integration guide](../../docs/zh/architecture/SAGENTS_V2_AGENT_MANAGEMENT.md)
 and the [offline executable example](../../examples/sagents_v2_agent_management.py).
 
+### Agents that configure their own capabilities
+
+`agent_self_configure` is one Tool for adding downloaded/authored local Skill
+folders, MCP connections and Agent-owned instructions. It does not download or install Skills: Agents
+use their existing file, shell and network Tools first, then register a directory
+containing `SKILL.md`. The directory name is the Skill name.
+
+```json
+{
+  "system_prompt": "Answer concisely and verify changes before reporting completion.",
+  "add_skill_paths": ["downloads/code-review"],
+  "add_mcp_servers": [
+    {"name": "docs", "protocol": "streamable_http", "url": "https://example.com/mcp"}
+  ]
+}
+```
+
+An empty request inspects registered capability names, the saved `system_prompt`
+and the current revision. `system_prompt` replaces only the Agent-owned instruction
+overlay, not the host system rules or base role definition. Omit it (or pass null)
+to preserve the value; pass `""` to clear it. It takes effect at the next model
+step and survives recovery. Existing Runs keep their own snapshots; new Runs
+inherit the latest defaults. Stale Runs cannot overwrite instructions changed by
+another Run. The field accepts up to 32,768 characters; normal context token
+budgets still apply.
+
+Skills and MCP connections still support only additions; conflicting names fail rather than overwrite an
+existing Skill, host Tool or MCP connection. Credentials are host owned and
+are not accepted as configuration fields.
+
+The Tool validates local Skill bundles and discovers MCP schemas before saving
+an atomic revision and operation receipt. Changes are **usable in the same Run
+before the next model step**, after every Tool in the current response has
+settled. Model-visible schemas, execution routes and Skill grants change together.
+Agents must still call `load_skill` before following a Skill. A context provider
+automatically explains this capability; no per-Agent prompt edit is needed.
+
+`SelfConfigurationService` belongs to the v2 core. Hosts provide its authorizer,
+private persistence store and workspace mapping. `SqliteSelfConfigurationStore`
+is a single-host implementation: it records separate Agent defaults and Run
+revisions, snapshots Skill bytes, and stores idempotent receipts. Existing Runs
+retain their own revisions; future Runs inherit saved additions. Paused Runs
+restore their capabilities with a fresh loop, and fail closed if the required
+Run snapshot is missing. MCP calls themselves retain the bridge's uncertain
+side-effect/reconciliation limitations.
+
+For embedded applications:
+
+```python
+import json
+from sagents.v2 import SelfConfigurationService, SqliteSelfConfigurationStore
+
+store = SqliteSelfConfigurationStore(private_runtime_root / "capabilities.sqlite3")
+
+builder.with_skill_provider(skill_catalog, skill_source, skill_workspace)
+builder.with_self_configuration(lambda agent_id: SelfConfigurationService(
+    store=store,
+    owner=json.dumps([tenant_id, agent_id]),
+    workspace_root=host_workspace,
+    workspace_alias="/workspace",
+    authorize=authorize_capability_change,
+))
+```
+
+`authorize_capability_change(request, context)` must check ownership, live
+revocation and transport/network permission. It is called before discovery and
+again when a revision is activated. Explicit Skill ports are required even when
+the initial Skill list is empty. A factory may return `None` for Agents that
+must not configure themselves. Each loop needs a private service instance.
+Lower-level hosts pass `self_configuration` and `skill_loader` to
+`AgentCompositionFactory.create_loop/create_engine`; the standard context and
+step builders perform the live refresh.
+
+Desktop enables this for owner-invoked, non-plan root Runs using the local
+active workspace. Server enables it for non-plan, non-delegated authenticated
+human Runs whose execution policy permits changes. Both built-in integrations
+support remote MCP transports and sandboxed `stdio`. The stdio transport uses
+the official MCP SDK over a signed, sandbox-owned duplex process; executable,
+filesystem, network, environment, output and lifetime limits remain enforced.
+Each discovery/call session releases its process tree. Read-only process policies
+and providers without streaming process support reject stdio without a host-process
+fallback. Custom hosts pass `SandboxMcpSessionFactory` to enable the same behavior.
+Additions live in the v2 private capability store, separate from the product's editable base Agent/catalog configuration.
+
 ### Models
 
 Built-in protocols cover OpenAI Responses, OpenAI-compatible Chat

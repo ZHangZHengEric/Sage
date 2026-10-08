@@ -45,21 +45,47 @@ Extra readable directories come from the plugin `read_paths` list: absolute dire
 
 ## Shell network configuration
 
-Desktop accepts this configuration in `component_configs["execution.sandbox"]`:
+Desktop configures networking through `component_configs["execution.sandbox"].network`. `none` (default) disables networking; `unrestricted` permits direct outbound IP connections. The other modes use a separate host-owned egress broker for each sandbox:
 
 ```json
 {
-  "network": {"mode": "unrestricted"}
+  "network": {
+    "mode": "allowlist",
+    "allowed_hosts": ["pypi.org", "files.pythonhosted.org", "*.npmjs.org"],
+    "allowed_ports": [80, 443]
+  }
 }
 ```
 
-Omitting the setting, or using `mode=none`, keeps networking disabled. `unrestricted` allows Shell processes and their descendants to initiate IPv4/IPv6 connections to public, private and loopback addresses. Desktop sets `deny_private_networks=false`; direct `ResolvedSandboxSpec` callers must set it explicitly. Network configuration participates in sandbox fingerprints; existing runs are not upgraded in place.
+```json
+{
+  "network": {
+    "mode": "proxy",
+    "proxy_url": "http://127.0.0.1:8080"
+  }
+}
+```
 
-CLI accepts `sage v2 run "task" --network-mode unrestricted` for `run`, `chat` and `resume`; the default is `none`. Server hosts can explicitly pass `NetworkPolicy` to `workspace_sandbox_spec` or `provision_workspace`.
+`allowlist` requires destination hosts. Exact names exclude subdomains; `*.example.com` matches subdomains only. `proxy` requires an upstream HTTP(S) proxy origin and can also restrict `allowed_hosts`. The upstream must support CONNECT to destination IPs. SOCKS and proxy URLs containing credentials are not supported. Both modes default to destination ports 80/443 and reject private, loopback and other non-global resolved addresses; explicitly set `deny_private_networks=false` to permit them. The explicitly configured upstream proxy itself can be private.
 
-Linux retains the host network namespace, permits outbound IP sockets and mounts DNS configuration and system certificate paths read-only. Apart from the required macOS system DNS channel, Unix sockets, listening and existing restricted system capabilities remain blocked. macOS permits outbound IP networking through Seatbelt while retaining file isolation and listening restrictions. Commands continue to perform normal TLS certificate verification.
+System DNS Fake-IP mappings (for example `198.18.0.0/15`) are non-global and rejected by default. Explicitly set `deny_private_networks=false` if these mappings are required; host, port and TLS-name checks remain enforced.
 
-Shell host/port/HTTP-method allowlists, private-network blocking, listening and customized request constraints are not implemented. The local Provider rejects these additional constraints and `allowlist`/`proxy` modes. `SandboxHandle.network.request` still has no real HTTP implementation: this setting enables process networking only. Executable and file-read policies still apply.
+Desktop defaults proxy modes to HTTP/HTTPS. CLI supports:
+
+```bash
+sage v2 run "task" --network-mode allowlist --network-host pypi.org --network-host files.pythonhosted.org
+sage v2 run "task" --network-mode proxy --network-proxy http://127.0.0.1:8080
+```
+
+These options apply to `run`, `chat` and `resume`. Repeat `--network-port` to configure ports; `--network-allow-private` permits private destinations. Host/port/proxy options require a proxy mode. Server hosts can pass `NetworkPolicy` to `workspace_sandbox_spec` or `provision_workspace`. Direct spec callers must set `deny_private_networks=false` for `unrestricted` and select `allowed_schemes` for proxy modes.
+
+Proxy environment variables are injected and `NO_PROXY` is cleared. They are not the security boundary: macOS Seatbelt permits only the broker's loopback TCP port, reserved on both IPv4 and IPv6. Linux retains a private network namespace and bridges through one fixed mounted Unix socket. A trusted launcher starts the bridge before applying a second seccomp filter to the payload; Unix sockets, listening and existing restricted syscalls remain denied. Payload loader/Python environment values apply only at final exec.
+
+The broker checks each destination host, port and DNS result, then connects to that checked IP without resolving it again. Redirected destinations must pass a new check. Plain HTTP forwards exactly one length-framed request per connection and rejects ambiguous headers, chunked uploads and upgrades. HTTPS uses CONNECT without terminating TLS or disabling certificate verification, and checks the visible ClientHello server name against CONNECT authority. Encrypted ClientHello is not supported. Allowlists constrain network destinations and TLS server names, not encrypted HTTP Host, paths or methods.
+
+`max_wall_time_seconds`, `max_request_body_bytes` and `max_response_bytes` bound connection time and upload/download bytes including TLS overhead (defaults: 30 seconds, 1 MiB, 10 MiB). These limits can be adjusted in network configuration. Customized `allowed_methods`, `allowed_request_headers` and `max_redirects` are rejected because opaque HTTPS cannot enforce them. Terminating the sandbox closes the broker and existing connections. There is no direct-connect fallback. `SandboxHandle.network.request` still has no real HTTP implementation; these settings control process networking.
+
+Configuration participates in sandbox fingerprints; existing runs are not upgraded in place. `unrestricted` retains file isolation and listening restrictions while allowing public, private and loopback outbound IP connections. Linux mounts DNS configuration and certificates read-only; macOS permits required system DNS/certificate channels. Executable and file-read policies still apply.
 
 ## Linux
 

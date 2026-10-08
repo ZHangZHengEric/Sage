@@ -76,6 +76,7 @@ class SandboxReleaseDisposition(str, Enum):
 
 class ProcessCapabilities(StrictModel):
     available: bool
+    supports_stdio: bool = False
     supports_argv: bool = False
     supports_shell: bool = False
     supports_signals: bool = False
@@ -240,6 +241,7 @@ class ProcessPolicy(StrictModel):
 
 class NetworkPolicy(StrictModel):
     mode: NetworkMode = NetworkMode.NONE
+    proxy_url: str | None = None
     allowed_hosts: tuple[str, ...] = ()
     allowed_ports: tuple[int, ...] = ()
     allowed_schemes: tuple[Literal["http", "https"], ...] = ("https",)
@@ -259,7 +261,10 @@ class NetworkPolicy(StrictModel):
     @model_validator(mode="after")
     def validate_none_mode(self) -> "NetworkPolicy":
         if self.mode == NetworkMode.NONE and (
-            self.allowed_hosts or self.allowed_ports or self.allow_listen
+            self.allowed_hosts
+            or self.allowed_ports
+            or self.allow_listen
+            or self.proxy_url
         ):
             raise ValueError("network mode none cannot contain network allowances")
         return self

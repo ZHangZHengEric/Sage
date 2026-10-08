@@ -7,7 +7,7 @@ exact signed intent at the resource boundary.
 
 from __future__ import annotations
 
-from typing import Protocol
+from typing import Protocol, AsyncContextManager
 
 from sagents.v2.runtime.execution.sandbox.contracts import (
     FileStat,
@@ -61,7 +61,19 @@ class SandboxFileSystem(Protocol):
     ) -> tuple[FileStat, ...]: ...
 
 
+class SandboxProcessStream(Protocol):
+    async def write_stdin(self, data: bytes) -> None: ...
+    async def close_stdin(self) -> None: ...
+    async def read_stdout(self, max_bytes: int = 65536) -> bytes: ...
+    async def read_stderr(self, max_bytes: int = 65536) -> bytes: ...
+    async def wait(self) -> int: ...
+
+
 class SandboxProcessRuntime(Protocol):
+    def open_process(
+        self, request: ProcessRequest, *, intent: OperationIntent, grant: SandboxGrant
+    ) -> AsyncContextManager[SandboxProcessStream]: ...
+
     async def run(
         self,
         request: ProcessRequest,

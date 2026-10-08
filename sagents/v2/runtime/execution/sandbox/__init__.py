@@ -34,6 +34,7 @@ from sagents.v2.runtime.execution.sandbox.provider import (
     SandboxHandle,
     SandboxNetworkRuntime,
     SandboxProcessRuntime,
+    SandboxProcessStream,
     SandboxProvider,
 )
 
@@ -79,6 +80,7 @@ __all__ = [
     "SandboxHandle",
     "SandboxNetworkRuntime",
     "SandboxProcessRuntime",
+    "SandboxProcessStream",
     "SandboxProvider",
     "SandboxRef",
     "SandboxReleaseDisposition",

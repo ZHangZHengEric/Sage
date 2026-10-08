@@ -64,6 +64,10 @@ class WorkspaceSandboxSettings:
         default_factory=lambda: ResourceLimits(require_hard_limits=False)
     )
     network_mode: str = "none"
+    network_hosts: tuple[str, ...] = ()
+    network_ports: tuple[int, ...] = ()
+    network_proxy: str | None = None
+    network_allow_private: bool = False
     process_enabled: bool = True
     read_only: bool = False
     allowed_executables: tuple[str, ...] = DEFAULT_ALLOWED_EXECUTABLES
@@ -131,11 +135,32 @@ class LocalWorkspaceBindingProvider:
             max_output_bytes=settings.max_output_bytes,
         )
         mode = NetworkMode(settings.network_mode)
-        if mode not in {NetworkMode.NONE, NetworkMode.UNRESTRICTED}:
-            raise ValueError("local Shell network mode must be none or unrestricted")
-        network = NetworkPolicy(
-            mode=mode, deny_private_networks=mode != NetworkMode.UNRESTRICTED
+        options = {"mode": mode}
+        if mode in {NetworkMode.ALLOWLIST, NetworkMode.PROXY}:
+            options.update(
+                allowed_hosts=settings.network_hosts,
+                allowed_ports=settings.network_ports,
+                proxy_url=settings.network_proxy,
+                deny_private_networks=not settings.network_allow_private,
+                allowed_schemes=("http", "https"),
+            )
+        elif (
+            settings.network_hosts
+            or settings.network_ports
+            or settings.network_proxy
+            or settings.network_allow_private
+        ):
+            raise ValueError(
+                "network host/port/proxy/private settings require allowlist or proxy mode"
+            )
+        elif mode == NetworkMode.UNRESTRICTED:
+            options["deny_private_networks"] = False
+        network = NetworkPolicy.model_validate(options)
+        from sagents.v2.runtime.execution.sandbox.local_support.network import (
+            validate_shell_network,
         )
+
+        validate_shell_network(network)
         policy_source = json.dumps(
             {
                 "filesystem": filesystem.model_dump(mode="json"),

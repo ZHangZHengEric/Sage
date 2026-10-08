@@ -8,6 +8,7 @@ filesystems or invokes sudo. Missing controls are fatal, never a host fallback.
 from __future__ import annotations
 
 import asyncio
+import base64
 import ctypes
 import json
 import os
@@ -18,6 +19,7 @@ import time
 from pathlib import Path
 
 from ..contracts import FileOperation, NetworkMode
+from .network import LINUX_PROXY_LAUNCH, ShellNetworkBroker, validate_shell_network
 
 _MACOS_DEVELOPER_READ_ROOTS = (
     "/Library/Developer/CommandLineTools",
@@ -95,7 +97,9 @@ def _trusted_utility(name: str, workspace: Path) -> str:
     return str(resolved)
 
 
-def _seccomp_filter(*, network_enabled: bool = False) -> int:
+def _seccomp_filter(
+    *, network_enabled: bool = False, proxy_bridge: bool = False
+) -> int:
     """Deny alternate networking, host IPC and namespace/kernel control paths."""
     library = ctypes.CDLL("libseccomp.so.2", use_errno=True)
     library.seccomp_init.argtypes = [ctypes.c_uint32]
@@ -136,10 +140,7 @@ def _seccomp_filter(*, network_enabled: bool = False) -> int:
     try:
         for name in (
             *(() if network_enabled else ("socket", "connect")),
-            "bind",
-            "listen",
-            "accept",
-            "accept4",
+            *(() if proxy_bridge else ("bind", "listen", "accept", "accept4")),
             "ptrace",
             "process_vm_readv",
             "process_vm_writev",
@@ -180,7 +181,9 @@ def _seccomp_filter(*, network_enabled: bool = False) -> int:
             if socket_call < 0:
                 raise RuntimeError("seccomp cannot resolve socket")
             for family in range(46):
-                if family in {2, 10}:  # AF_INET, AF_INET6
+                if family in (
+                    {1, 2, 10} if proxy_bridge else {2, 10}
+                ):  # Unix bridge / IP
                     continue
                 argument = Argument(0, 7, 0xFFFFFFFF, family)  # MASKED_EQ
                 if (
@@ -335,6 +338,7 @@ class LocalResourceBoundary:
         self.execution_uid = os.geteuid() if execution_uid is None else execution_uid
         self.execution_gid = os.getegid() if execution_gid is None else execution_gid
         self.extra_read_paths = tuple(extra_read_paths)
+        self.network_broker: ShellNetworkBroker | None = None
         self.jobs: dict[int, Path] = {}
         self._monitors: dict[int, asyncio.Task] = {}
         self._tracked = {}
@@ -371,21 +375,7 @@ class LocalResourceBoundary:
                 raise PermissionError(
                     "host sandbox runtime must be installed outside the writable workspace"
                 )
-        policy = self.row.spec.network
-        if policy.mode not in {NetworkMode.NONE, NetworkMode.UNRESTRICTED}:
-            raise ValueError(
-                "native local isolation supports network modes none and unrestricted only"
-            )
-        if policy.mode == NetworkMode.UNRESTRICTED:
-            # HTTP-level fields describe network.request, not arbitrary Shell
-            # sockets. Reject customized constraints instead of ignoring them.
-            expected = policy.__class__(
-                mode=NetworkMode.UNRESTRICTED, deny_private_networks=False
-            )
-            if policy != expected:
-                raise ValueError(
-                    "unrestricted Shell networking requires deny_private_networks=false and does not support additional network constraints"
-                )
+        validate_shell_network(self.row.spec.network)
         if self.row.spec.mounts:
             raise ValueError("native local isolation does not allow extra mounts")
         if (
@@ -548,6 +538,18 @@ class LocalResourceBoundary:
                 os.close(fd)
         if self._disk_bytes() > self.row.spec.resources.disk_mb * 1024**2:
             raise ValueError("existing workspace exceeds resources.disk_mb")
+        if self.row.spec.network.mode in {NetworkMode.ALLOWLIST, NetworkMode.PROXY}:
+            broker = ShellNetworkBroker(self.row.spec.network)
+            try:
+                await broker.start(
+                    unix=sys.platform == "linux",
+                    uid=self.execution_uid,
+                    gid=self.execution_gid,
+                )
+            except BaseException:
+                await broker.close()
+                raise
+            self.network_broker = broker
 
     def command(self, executable, argv, cwd, env):
         spec = self.row.spec
@@ -577,7 +579,8 @@ class LocalResourceBoundary:
                 )
                 launch_fds.append(
                     _seccomp_filter(
-                        network_enabled=spec.network.mode == NetworkMode.UNRESTRICTED
+                        network_enabled=spec.network.mode != NetworkMode.NONE,
+                        proxy_bridge=self.network_broker is not None,
                     )
                 )
                 # Each --bind-fd consumes and closes its descriptor. Use a
@@ -619,6 +622,13 @@ class LocalResourceBoundary:
             ]
             if spec.network.mode == NetworkMode.UNRESTRICTED:
                 command += ["--share-net"]
+            if self.network_broker is not None:
+                command += [
+                    "--ro-bind",
+                    str(self.network_broker.socket_path),
+                    "/sage-egress.sock",
+                ]
+            if spec.network.mode != NetworkMode.NONE:
                 for path in (
                     "/etc/resolv.conf",
                     "/etc/hosts",
@@ -671,15 +681,32 @@ class LocalResourceBoundary:
                 + "/"
                 + cwd.relative_to(self.row.root).as_posix(),
             ]
-            for key, value in env.items():
-                command += ["--setenv", key, value]
+            payload_env = {**env, "TMPDIR": "/tmp", "HOME": "/tmp"}
+            if self.network_broker is None:
+                for key, value in payload_env.items():
+                    command += ["--setenv", key, value]
+                payload = [executable, *argv]
+            else:
+                # Never inject payload loader/Python environment into the
+                # trusted bridge interpreter. Apply it only at payload exec.
+                filter_fd = _seccomp_filter(network_enabled=True)
+                try:
+                    filter_bytes = os.read(filter_fd, 1024 * 1024)
+                finally:
+                    os.close(filter_fd)
+                payload = [
+                    str(self.host_python),
+                    "-I",
+                    "-c",
+                    LINUX_PROXY_LAUNCH,
+                    "/sage-egress.sock",
+                    self.network_broker.token,
+                    base64.b64encode(filter_bytes).decode("ascii"),
+                    json.dumps(payload_env),
+                    executable,
+                    *argv,
+                ]
             command += [
-                "--setenv",
-                "TMPDIR",
-                "/tmp",
-                "--setenv",
-                "HOME",
-                "/tmp",
                 "--remount-ro",
                 "/proc",
                 "--remount-ro",
@@ -687,8 +714,7 @@ class LocalResourceBoundary:
                 "--remount-ro",
                 "/",
                 "--",
-                executable,
-                *argv,
+                *payload,
             ]
         else:
 
@@ -746,6 +772,12 @@ class LocalResourceBoundary:
                     '(allow file-read* (subpath "/private/etc/ssl") (subpath "/opt/homebrew/etc/openssl@3") (subpath "/opt/homebrew/etc/ca-certificates") (subpath "/usr/local/etc/openssl@3") (subpath "/usr/local/etc/ca-certificates"))',
                     '(allow mach-lookup (global-name "com.apple.trustd.agent") (global-name "com.apple.trustd"))',
                 ]
+            if self.network_broker is not None:
+                profile += [
+                    f'(allow network-outbound (remote tcp "localhost:{self.network_broker.port}"))',
+                    '(allow file-read* (subpath "/private/etc/ssl") (subpath "/opt/homebrew/etc/openssl@3") (subpath "/opt/homebrew/etc/ca-certificates") (subpath "/usr/local/etc/openssl@3") (subpath "/usr/local/etc/ca-certificates"))',
+                ]
+                env.update(self.network_broker.environment())
             if not spec.process.read_only and spec.filesystem.allowed_operations & {
                 FileOperation.WRITE,
                 FileOperation.CREATE,
@@ -918,6 +950,8 @@ class LocalResourceBoundary:
             (job / "cgroup.kill").write_text("1")
 
     async def terminate(self):
+        if self.network_broker:
+            await self.network_broker.close()
         if self.cgroup:
             (self.cgroup / "cgroup.kill").write_text("1")
 

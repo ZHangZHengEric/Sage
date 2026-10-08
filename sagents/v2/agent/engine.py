@@ -161,8 +161,31 @@ class AgentLoopEngine:
         tool_selection_model: ModelProvider | None = None,
         delegated_run_controller=None,
         expected_resolved_spec_hash: str | None = None,
+        self_configuration=None,
+        skill_loader=None,
         clock: Callable = utc_now,
     ) -> None:
+        self.self_configuration = self_configuration
+        if self_configuration is not None:
+            if step_request_builder is not None:
+                raise ValueError("self configuration requires the standard step request builder")
+            from copy import copy
+            # Hosts may reuse their base loader for child loops. Keep capability
+            # additions private to this Agent rather than mutating that shared loader.
+            skill_loader = copy(skill_loader) if skill_loader is not None else None
+            tool_catalog, tool_executor = self_configuration.bind(tool_catalog, tool_executor, skill_loader)
+            if context_assembler is None:
+                context_assembler = DefaultContextAssembler(history_reader=runtime.session_store)
+            if not isinstance(context_assembler, DefaultContextAssembler):
+                raise ValueError("self configuration requires DefaultContextAssembler")
+            context_assembler = copy(context_assembler)
+            from sagents.v2.skill.context import AvailableSkillsContextProvider, ActiveSkillsContextProvider
+            # Existing providers captured the pre-bind catalog. Replace those
+            # references so a freshly registered Skill is discoverable immediately.
+            providers = tuple(provider for provider in context_assembler.providers
+                              if not isinstance(provider, (AvailableSkillsContextProvider, ActiveSkillsContextProvider)))
+            context_assembler.providers = (*providers, AvailableSkillsContextProvider(skill_loader.catalog),
+                                           ActiveSkillsContextProvider(skill_loader), self_configuration)
         self.runtime = runtime
         self.model = model
         self.tool_catalog = tool_catalog
@@ -228,6 +251,7 @@ class AgentLoopEngine:
             )
         command = await self.runtime.session_store.get_start_command(run_id)
         context = self._context_for_command(context, command)
+        await self._prepare_self_configuration(run_id, context)
         turn_id = new_id("turn")
         messages = await self.context_assembler.initial_ledger(
             command, run_id=run.run_id
@@ -269,6 +293,12 @@ class AgentLoopEngine:
                 await asyncio.gather(tool_selection_task, return_exceptions=True)
             raise
         return await self._drive(run, state, context)
+
+    async def _prepare_self_configuration(self, run_id, context):
+        if self.self_configuration is not None:
+            changed = await self.self_configuration.prepare(run_id, context)
+            if changed:
+                self._prepared_tool_selection_runs.discard(run_id)
 
     async def _prepare_tool_selection(
         self, *, command, run_id: str, messages, language: str | None
@@ -475,6 +505,13 @@ class AgentLoopEngine:
         command = await self.runtime.session_store.get_start_command(run_id)
         context = self._context_for_command(context, command)
         events = await self.runtime.session_store.read_events(run_id)
+        if any(event.type in {"tool.call.succeeded", "tool.call.reconciled"}
+               and isinstance(event.data, ToolEventData)
+               and event.data.tool_name == "agent_self_configure" for event in events):
+            if self.self_configuration is None:
+                raise self._conflict("self_configuration.unavailable", "The Run requires its saved self configuration")
+            await self.self_configuration.verify_checkpoint(run_id, 0)
+        await self._prepare_self_configuration(run_id, context)
         settled_types = {
             "tool.call.succeeded",
             "tool.call.failed",
@@ -691,11 +728,16 @@ class AgentLoopEngine:
                 )
             )
         state = AgentLoopCheckpointCodec.decode(checkpoint.state)
+        if state.self_configuration_revision is not None:
+            if self.self_configuration is None:
+                raise self._conflict("self_configuration.unavailable", "The Run requires its saved self configuration")
+            await self.self_configuration.verify_checkpoint(run_id, state.self_configuration_revision)
         self.tool_selection_policy.restore_expanded_tools(
             run_id, state.expanded_tool_names
         )
         command = await self.runtime.session_store.get_start_command(run_id)
         context = self._context_for_command(context, command)
+        await self._prepare_self_configuration(run_id, context)
         rebuilt_messages = await self.ledger_rebuilder.rebuild(
             command,
             run_id=run_id,
@@ -1011,6 +1053,9 @@ class AgentLoopEngine:
         context_overflow_retries = 0
         additional_input_reserve_tokens = 0
         while run.state == RunState.RUNNING:
+            await self._prepare_self_configuration(run.run_id, context)
+            if self.self_configuration is not None:
+                state = state.model_copy(update={"self_configuration_revision": self.self_configuration.revision})
             state = state.model_copy(
                 update={"messages": order_tool_context(state.messages)}
             )

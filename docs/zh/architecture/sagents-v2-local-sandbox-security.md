@@ -45,21 +45,47 @@ filesystem.max_file_bytes / max_total_bytes 是额外文件 API 限制，不代�
 
 ## Shell 网络配置
 
-Desktop 的 `component_configs["execution.sandbox"]` 接受以下配置：
+Desktop 在 `component_configs["execution.sandbox"].network` 配置网络策略。默认 `none` 禁止联网，`unrestricted` 允许直接出站；另外两种模式通过每个沙箱独立的宿主代理出口联网：
 
 ```json
 {
-  "network": {"mode": "unrestricted"}
+  "network": {
+    "mode": "allowlist",
+    "allowed_hosts": ["pypi.org", "files.pythonhosted.org", "*.npmjs.org"],
+    "allowed_ports": [80, 443]
+  }
 }
 ```
 
-未配置或 `mode=none` 时保持断网。`unrestricted` 允许 Shell 及其子进程发起 IPv4/IPv6 出站连接，包括公网、内网和本机；Desktop 自动设置 `deny_private_networks=false`。直接构造 `ResolvedSandboxSpec` 时需显式设置这个字段。配置变化计入沙箱指纹，已有运行不就地扩权。
+```json
+{
+  "network": {
+    "mode": "proxy",
+    "proxy_url": "http://127.0.0.1:8080"
+  }
+}
+```
 
-CLI 通过 `sage v2 run "任务" --network-mode unrestricted` 开启，`run`、`chat` 和 `resume` 均支持；默认是 `none`。Server 宿主可在 `workspace_sandbox_spec` 或 `provision_workspace` 显式传入 `NetworkPolicy`。
+`allowlist` 必须配置目标域名；精确域名不自动包含子域名，`*.example.com` 仅匹配子域名。`proxy` 必须配置上游 HTTP(S) 代理地址，可额外配置 `allowed_hosts`。上游代理需要支持向目标 IP 的 CONNECT；暂不支持 SOCKS 或含用户名密码的代理 URL。两种模式默认只允许目标端口 80/443，默认拒绝解析到私网、回环和其他非公网地址的目标；可显式设置 `deny_private_networks=false`。显式指定的上游代理可以位于内网。
 
-Linux 保留宿主网络命名空间，放行 IP 出站套接字，并只读挂载 DNS 配置和系统证书；除 macOS 必需的系统 DNS 通道外，仍禁止 Unix socket、监听和其他原有受限系统能力。macOS 通过 Seatbelt 放行 IP 出站网络，继续保留文件隔离和监听限制。TLS 证书校验由命令正常执行，不自动关闭。
+系统 DNS 使用 Fake-IP 映射（例如 `198.18.0.0/15`）时，该结果属于非公网地址，默认会拒绝；确需使用这种映射时应显式设置 `deny_private_networks=false`，域名、端口和 TLS 名称检查仍然生效。
 
-目前不支持 Shell 的域名、端口、HTTP 方法白名单、私网禁用、监听或自定义请求限制；本地 Provider 拒绝这些额外限制及 `allowlist`/`proxy` 模式。`SandboxHandle.network.request` 仍未实现真实 HTTP 请求；此配置只开放沙箱进程网络。命令仍需满足可执行文件和文件读取策略。
+Desktop 为代理模式默认启用 HTTP/HTTPS。CLI 支持：
+
+```bash
+sage v2 run "任务" --network-mode allowlist --network-host pypi.org --network-host files.pythonhosted.org
+sage v2 run "任务" --network-mode proxy --network-proxy http://127.0.0.1:8080
+```
+
+`run`、`chat`、`resume` 均支持这些参数。`--network-port` 可重复指定端口；`--network-allow-private` 显式允许私网目标。`none`/`unrestricted` 不能附带白名单或代理参数。Server 宿主可向 `workspace_sandbox_spec` 或 `provision_workspace` 显式传入 `NetworkPolicy`。直接构造规格时，`unrestricted` 需设置 `deny_private_networks=false`，代理模式需显式选择 `allowed_schemes`。
+
+代理环境变量自动注入，并清空 `NO_PROXY`。它们不是隔离边界：macOS 的 Seatbelt 仅允许连接宿主代理的回环 TCP 端口，IPv4/IPv6 端口均由同一个代理占用；Linux 保留独立网络命名空间，通过一个固定挂载的 Unix socket 桥接宿主代理。可信启动器先启动桥接，再给 Shell 加载第二层 seccomp，禁止 Unix socket、监听和原有受限系统调用；用户的动态加载器/Python 环境仅在最终 Shell exec 时生效。
+
+出口逐次检查目标域名、端口和 DNS 结果，并直接连接已检查的 IP。重定向后的新目标仍需经过出口检查。明文 HTTP 每连接仅转发一条已检查、明确长度的请求，拒绝重复头、分块上传和 Upgrade 等不支持的帧格式；HTTPS 使用 CONNECT 和原有端到端证书校验，不解密流量，检查明文 ClientHello 的 TLS 名称与 CONNECT 目标一致。暂不支持加密 ClientHello。白名单约束网络目标和 TLS 名称，不检查加密后的 HTTP Host、路径或方法。
+
+代理使用 `max_wall_time_seconds`、`max_request_body_bytes` 和 `max_response_bytes` 限制连接时长及上传/下载字节（包括 TLS 开销）；默认 30 秒、1 MiB、10 MiB，可在 network 配置中调整。不能在 Shell 模式自定义 `allowed_methods`、`allowed_request_headers` 或 `max_redirects`，因为不解密 HTTPS 无法保证这些约束。终止沙箱会关闭出口及所有现存连接，没有直连回退。`SandboxHandle.network.request` 仍未实现真实 HTTP 请求；这里开放的是进程网络。
+
+配置变化计入沙箱指纹，已有运行不就地扩权。`unrestricted` 保留文件隔离和禁止监听规则，允许公网、内网及本机 IP 出站；Linux 只读挂载 DNS 配置和系统证书，macOS 只放行必要的系统 DNS/证书通道。可执行文件和文件读取策略继续生效。
 
 ## Linux
 

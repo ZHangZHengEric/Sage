@@ -9,6 +9,7 @@ official tool plugin.
 
 from __future__ import annotations
 
+import json
 from contextlib import AsyncExitStack
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING
@@ -238,6 +239,29 @@ async def compose_catalog_loop(
             return await live_execution_policy(command, users=service.users, keys=service.keys,
                 catalog=service.catalog, settings=service.settings, user_id=user_id)
 
+        self_configuration = None
+        if (command.invocation_mode != "plan" and key_id is None
+                and command.parent_run_id is None and admitted_policy.shell != "deny"):
+            from sagents.v2.agent.self_configuration import SelfConfigurationService, SqliteSelfConfigurationStore
+
+            async def authorize_self_configuration(request, context):
+                if (context.actor.principal_id != user_id or context.actor.tenant_id != user_id
+                        or context.actor.delegated_by or await service.users.get_by_id(user_id) is None):
+                    raise PermissionError("Only the authenticated owner can configure this Agent")
+                live = await current_policy()
+                if live is None or live.shell == "deny":
+                    raise PermissionError("The live execution grant does not permit capability changes")
+
+            from sagents.v2.tool.plugins.sandbox_mcp import SandboxMcpSessionFactory
+
+            self_configuration = SelfConfigurationService(
+                store=SqliteSelfConfigurationStore(service.paths.runtime_root / "self-configuration.sqlite3"),
+                owner=json.dumps(["server", user_id, agent.id]),
+                workspace_root=service.paths.workspace_dir(user_id), workspace_alias="/workspace",
+                authorize=authorize_self_configuration,
+                mcp_session_factory=SandboxMcpSessionFactory(official_runtime.sandbox, service.execution.sandbox_grant_issuer),
+            )
+
         loop = factory.create_loop(
             resolved,
             agent.id,
@@ -245,7 +269,8 @@ async def compose_catalog_loop(
             tool_catalog=CompositeToolCatalog(tuple(catalogs)),
             tool_executor=CompositeToolExecutor(tuple(executors)),
             granted_catalogs=binding.external,
-            skill_loader=loader if names else None,
+            skill_loader=loader if names or self_configuration is not None else None,
+            self_configuration=self_configuration,
             tool_policy=server_tool_policy(service.agent_management,
                 execution_policy=admitted_policy, current_policy=current_policy,
                 machine_invocation=key_id is not None),
