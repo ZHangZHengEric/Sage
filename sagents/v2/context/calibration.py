@@ -51,6 +51,20 @@ _active: ContextVar[InputUsageBaseline | None] = ContextVar(
     default=None,
 )
 
+_projection: ContextVar[tuple | None] = ContextVar(
+    "sage_v2_input_usage_projection", default=None
+)
+
+
+@contextmanager
+def input_usage_projection(project, *, reserved_tokens=0):
+    """Match reducer input against the inference view whose usage was reported."""
+    token = _projection.set((project, reserved_tokens))
+    try:
+        yield
+    finally:
+        _projection.reset(token)
+
 
 @contextmanager
 def input_usage_scope(baseline):
@@ -69,31 +83,48 @@ class CalibratedEstimator:
     def __init__(self, estimator, baseline):
         self.estimator = estimator
         self.baseline = baseline
+        self.projection = _projection.get()
+
+    def _project(self, messages):
+        if self.projection is None:
+            return messages, 0
+        project, reserved = self.projection
+        return project(messages), reserved
 
     def estimate(self, messages):
         baseline = self.baseline
-        if not baseline.matches(messages):
+        projected, reserved = self._project(messages)
+        if not baseline.matches(projected):
             return self.estimator.estimate(messages)
-        return (
-            baseline.input_tokens
-            - baseline.non_message_tokens
-            + baseline.margin
-            + self.estimator.estimate(messages[len(baseline.messages) :])
+        return max(
+            0,
+            (
+                baseline.input_tokens
+                - baseline.non_message_tokens
+                - reserved
+                + baseline.margin
+                + self.estimator.estimate(projected[len(baseline.messages) :])
+            ),
         )
 
     async def estimate_async(self, messages):
         baseline = self.baseline
-        matched = baseline.matches(messages)
-        suffix = messages[len(baseline.messages) :] if matched else messages
+        projected, reserved = self._project(messages)
+        matched = baseline.matches(projected)
+        suffix = projected[len(baseline.messages) :] if matched else messages
         method = getattr(self.estimator, "estimate_async", None)
         count = await method(suffix) if method else self.estimator.estimate(suffix)
         if not matched:
             return count
-        return (
-            baseline.input_tokens
-            - baseline.non_message_tokens
-            + baseline.margin
-            + count
+        return max(
+            0,
+            (
+                baseline.input_tokens
+                - baseline.non_message_tokens
+                - reserved
+                + baseline.margin
+                + count
+            ),
         )
 
 
