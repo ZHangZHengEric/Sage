@@ -1052,6 +1052,7 @@ class DesktopRunCompositionMixin(DesktopRunEnvironmentMixin):
             if key
             in {
                 "command_path",
+                "read_paths",
                 "linux_cgroup_root",
                 "linux_quota_mount",
                 "linux_execution_uid",

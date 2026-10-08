@@ -601,6 +601,7 @@ def _register_infrastructure(registry: ExtensionRegistry) -> None:
                 key: context.config[key]
                 for key in (
                     "command_path",
+                    "read_paths",
                     "linux_cgroup_root",
                     "linux_quota_mount",
                     "linux_execution_uid",
@@ -1068,6 +1069,10 @@ def _sandbox_config_schema(*, in_memory: bool) -> dict:
         properties.update(
             {
                 "command_path": {"type": "string", "minLength": 1},
+                "read_paths": {
+                    "type": "array",
+                    "items": {"type": "string", "minLength": 1},
+                },
                 "linux_cgroup_root": {"type": "string"},
                 "linux_quota_mount": {"type": "string"},
                 "linux_execution_uid": {"type": "integer", "minimum": 1},

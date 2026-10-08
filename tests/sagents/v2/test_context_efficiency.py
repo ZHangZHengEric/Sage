@@ -140,25 +140,93 @@ async def test_oversized_summary_does_not_repeat_overlapping_model_work():
 
 
 @pytest.mark.asyncio
-async def test_summary_work_limit_is_checked_before_model_calls():
+@pytest.mark.parametrize(
+    ("summary_text", "latest", "reserve_input_tokens"),
+    [
+        ("summary " * 400, "latest", 0),
+        ("summary " * 150, "latest " * 150, 0),
+        ("summary " * 150, "latest", 200),
+    ],
+    ids=["oversized_summary", "mandatory_suffix", "reserved_input"],
+)
+@pytest.mark.parametrize("checkpoint", ["none", "matching", "rewritten"])
+async def test_partial_summary_over_reserved_budget_does_not_replace_checkpoint(
+    summary_text, latest, reserve_input_tokens, checkpoint
+):
     summarizer = Summary()
+    store = InMemoryConversationSummaryStore()
+    source = tuple(message("history " * 1000 + str(i)) for i in range(12)) + (
+        message(latest, "user"),
+    )
+    reducer = PersistentSummaryContextReducer(
+        store,
+        summarizer=summarizer,
+        summary_target_tokens=32,
+        max_summary_source_tokens=4000,
+        max_summary_calls=1,
+    )
+    budget = ContextBudget(
+        max_input_tokens=500,
+        reserve_input_tokens=reserve_input_tokens,
+        protected_recent_tokens=0,
+    )
+    if checkpoint != "none":
+        with pytest.raises(SageV2Error) as caught:
+            await reducer.reduce(source, budget, scope=scope())
+        assert caught.value.info.code == "context.budget_exhausted"
+    original = await store.get("session")
+    assert (original is not None) == (checkpoint != "none")
+    if checkpoint == "rewritten":
+        source = (message("rewritten " * 1000), *source[1:])
+    summarizer.requests.clear()
+    summarizer.text = summary_text
+
+    with pytest.raises(SageV2Error) as caught:
+        await reducer.reduce(source, budget, scope=scope())
+
+    assert caught.value.info.code == "context.budget_exhausted"
+    assert len(summarizer.requests) == 1
+    assert await store.get("session") == original
+
+
+@pytest.mark.asyncio
+async def test_summary_work_limit_saves_partial_prefix_for_the_next_turn():
+    summarizer = Summary()
+    store = InMemoryConversationSummaryStore()
     source = tuple(message("history " * 70 + str(i)) for i in range(12)) + (
         message("latest", "user"),
     )
-    with pytest.raises(SageV2Error) as caught:
-        await PersistentSummaryContextReducer(
-            InMemoryConversationSummaryStore(),
-            summarizer=summarizer,
-            summary_target_tokens=32,
-            max_summary_source_tokens=600,
-            max_summary_calls=1,
-        ).reduce(
-            source,
-            ContextBudget(max_input_tokens=1000, protected_recent_tokens=0),
-            scope=scope(),
-        )
-    assert caught.value.info.code == "context.summary_work_limit"
-    assert not summarizer.requests
+    reducer = PersistentSummaryContextReducer(
+        store,
+        summarizer=summarizer,
+        summary_target_tokens=32,
+        max_summary_source_tokens=600,
+        max_summary_calls=1,
+    )
+    budget = ContextBudget(max_input_tokens=1000, protected_recent_tokens=0)
+    result = None
+    covered_count = 0
+    for _ in range(8):
+        request_count = len(summarizer.requests)
+        try:
+            result = await reducer.reduce(source, budget, scope=scope())
+        except SageV2Error as caught:
+            assert caught.info.code == "context.budget_exhausted"
+        checkpoint = await store.get("session")
+        assert checkpoint is not None
+        assert len(checkpoint.covered_message_digests) > covered_count
+        covered_count = len(checkpoint.covered_message_digests)
+        assert len(summarizer.requests) - request_count == 1
+        if result is not None:
+            break
+    stored = await store.get("session")
+    assert result is not None
+    assert stored is not None
+    assert result.strategy == "persistent_summary"
+    assert len(summarizer.requests) >= 1
+    assert summarizer.requests[0].previous_summary is None
+    if len(summarizer.requests) > 1:
+        assert summarizer.requests[1].previous_summary == summarizer.text
 
 
 @pytest.mark.asyncio

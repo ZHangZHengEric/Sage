@@ -301,6 +301,7 @@ class LocalResourceBoundary:
         quota_mount=None,
         execution_uid=None,
         execution_gid=None,
+        extra_read_paths=(),
     ):
         self.row = row
         self.host_python = Path(sys.executable).resolve(strict=True)
@@ -309,11 +310,35 @@ class LocalResourceBoundary:
         self.cgroup = None
         self.execution_uid = os.geteuid() if execution_uid is None else execution_uid
         self.execution_gid = os.getegid() if execution_gid is None else execution_gid
+        self.extra_read_paths = tuple(extra_read_paths)
         self.jobs: dict[int, Path] = {}
         self._monitors: dict[int, asyncio.Task] = {}
         self._tracked = {}
         self._root_processes = {}
         self.scratch = row.root / ".sage-sandbox-tmp"
+
+    def _host_read_paths(self) -> tuple[str, ...]:
+        workspace = self.row.root.resolve()
+        extras: list[str] = []
+        seen: set[str] = set()
+        for raw in self.extra_read_paths:
+            try:
+                resolved = Path(raw).expanduser().resolve()
+            except OSError:
+                continue
+            if (
+                not resolved.is_dir()
+                or resolved == Path("/")
+                or resolved == workspace
+                or workspace in resolved.parents
+            ):
+                continue
+            path = str(resolved)
+            if path in seen:
+                continue
+            seen.add(path)
+            extras.append(path)
+        return tuple(extras)
 
     async def prepare(self):
         for trusted_path in (self.host_python, __file__, os.__file__):
@@ -566,6 +591,7 @@ class LocalResourceBoundary:
                 "/sbin",
                 "/lib",
                 "/lib64",
+                *self._host_read_paths(),
             ):
                 if Path(path).exists():
                     command += ["--ro-bind", path, path]
@@ -634,6 +660,7 @@ class LocalResourceBoundary:
                 "/sbin",
                 "/Library/Frameworks",
                 *_macos_developer_read_roots(),
+                *self._host_read_paths(),
                 "/opt/homebrew/bin",
                 "/opt/homebrew/lib",
                 "/opt/homebrew/libexec",

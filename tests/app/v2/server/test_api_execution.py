@@ -264,5 +264,10 @@ def test_automatic_shell_runs_and_preserves_workspace_after_cleanup(tmp_path):
         task = send(client, key["api_key"], "run")["result"]["task"]
         assert task["status"]["state"] == "TASK_STATE_COMPLETED"
         files = list(tmp_path.rglob("shell_result.txt"))
-        assert len(files) == 1
+        tool_results = [
+            message.model_dump(mode="json")
+            for message in provider.requests[-1].messages
+            if message.role == "tool"
+        ]
+        assert len(files) == 1, tool_results
         assert files[0].read_text() == "blue"

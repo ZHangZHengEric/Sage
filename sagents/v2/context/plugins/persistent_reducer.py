@@ -191,6 +191,25 @@ class PersistentSummaryContextReducer:
             for message in messages
             if message.role not in {"system", "developer"}
         )
+        canonical = (
+            scope.canonical_messages
+            if scope.canonical_messages is not None
+            else payload
+        )
+        indices = (
+            scope.canonical_indices
+            if scope.canonical_messages is not None
+            else tuple(range(len(payload)))
+        )
+        if (
+            len(indices) != len(payload)
+            or any(index < 0 or index >= len(canonical) for index in indices)
+            or len(set(indices)) != len(indices)
+        ):
+            raise self._error(
+                "context.invalid_source_mapping", "invalid canonical history mapping"
+            )
+        original_messages = (*systems, *canonical)
         counter = await MessageTokenCounter.create(self.estimator, messages)
         system_tokens = counter.estimate(systems)
         if system_tokens > budget.max_system_tokens:
@@ -199,19 +218,18 @@ class PersistentSummaryContextReducer:
                 "system instructions exceed their token budget",
             )
         stored = await self.store.get(scope.context_key, session_id=scope.session_id)
-        previous, remaining = await self._validated_previous(stored, payload)
-        if stored is not None and previous is None:
-            await self.store.delete(
-                scope.context_key,
-                expected_revision=stored.revision,
-                session_id=scope.session_id,
-            )
+        previous, _ = await self._validated_previous(stored, canonical)
+        canonical_covered = len(previous.covered_message_digests) if previous else 0
+        covered_count = sum(index < canonical_covered for index in indices)
+        remaining = payload[covered_count:]
+        # A mismatched prefix must not apply the old summary, but the
+        # checkpoint stays until a new summary replaces it. Deleting here
+        # forces the next turn to start from zero and can pin the Session.
         summary_prefix = (self._summary_message(previous),) if previous else ()
         request_index = next(
             (i for i in range(len(payload) - 1, -1, -1) if is_user_request(payload[i])),
             None,
         )
-        covered_count = len(payload) - len(remaining)
         anchor = (
             (payload[request_index],)
             if request_index is not None and request_index < covered_count
@@ -227,10 +245,10 @@ class PersistentSummaryContextReducer:
         if not over(current):
             return ContextProjection(
                 messages=current,
-                historical_messages=payload[: len(payload) - len(remaining)],
+                historical_messages=canonical[:canonical_covered],
                 estimated_tokens=counter.estimate(current),
-                source_message_count=len(messages),
-                dropped_message_count=len(payload) - len(remaining),
+                source_message_count=len(original_messages),
+                dropped_message_count=canonical_covered,
                 dropped_digest=previous.source_digest if previous else None,
                 strategy="persistent_summary" if previous else "none",
             )
@@ -283,12 +301,12 @@ class PersistentSummaryContextReducer:
                     "context.budget_exhausted",
                     "no completed history remains to reduce within the model budget",
                 )
-            historical = (*payload[: len(payload) - len(remaining)], *changed)
+            historical = (*canonical[:canonical_covered], *changed)
             return ContextProjection(
                 messages=result,
                 historical_messages=historical,
                 estimated_tokens=counter.estimate(result),
-                source_message_count=len(messages),
+                source_message_count=len(original_messages),
                 dropped_message_count=len(historical),
                 dropped_digest=previous.source_digest if previous else None,
                 strategy="reference_compaction",
@@ -341,30 +359,42 @@ class PersistentSummaryContextReducer:
             selected_count += 1
         selected_count = max(1, selected_count)
         selected = tuple(message for unit in units[:selected_count] for message in unit)
-        retained = tuple(message for unit in units[selected_count:] for message in unit)
+        suffix = tuple(message for unit in units[selected_count:] for message in unit)
         # If selection did not reach the request, it remains in the suffix.
         selected_end = covered_count + len(selected)
-        anchor = (
+        planned_anchor = (
             (payload[request_index],)
             if request_index is not None and request_index < selected_end
             else ()
         )
-        retained = (*anchor, *retained)
-        available = maximum - counter.estimate((*systems, *retained))
+        planned_retained = (*planned_anchor, *suffix)
+        available = maximum - counter.estimate((*systems, *planned_retained))
         if available <= 0 or (
             budget.max_messages is not None
-            and len(systems) + 1 + len(retained) > budget.max_messages
+            and len(systems) + 1 + len(planned_retained) > budget.max_messages
         ):
             raise self._error(
                 "context.budget_exhausted", "no space remains for a history summary"
             )
         target = max(1, min(self.summary_target_tokens, available - 128))
-        prior_count = len(previous.covered_message_digests) if previous else 0
-        all_covered = payload[: prior_count + len(selected)]
-        covered_digests = await message_digests_async(all_covered)
-        text = await self._hierarchical_summary(
+        prior_count = covered_count
+        text, covered_selected = await self._hierarchical_summary(
             scope, previous, selected, target_tokens=target
         )
+        leftover = selected[covered_selected:]
+        # Tool-context followups can move after results in the inference view.
+        # Whole units are selected, so their highest source position defines
+        # the canonical prefix even when positions within a unit are reordered.
+        canonical_end = max(indices[: prior_count + covered_selected]) + 1
+        all_covered = canonical[:canonical_end]
+        covered_end = prior_count + covered_selected
+        anchor = (
+            (payload[request_index],)
+            if request_index is not None and request_index < covered_end
+            else ()
+        )
+        retained = (*anchor, *leftover, *suffix)
+        covered_digests = await message_digests_async(all_covered)
         summary = create_summary(
             scope=scope,
             previous=previous,
@@ -373,20 +403,37 @@ class PersistentSummaryContextReducer:
             text=text,
             estimator=self.estimator,
         )
-        self._require_compression_gain(previous, selected, summary)
+        self._require_compression_gain(previous, selected[:covered_selected], summary)
         result = (*systems, self._summary_message(summary), *retained)
-        # Do not retry progressively larger overlapping sources. A plugin that
-        # ignores its requested target must fail without committing derived state.
-        if over(result):
+        # Validate the summary with the suffix and request anchor that must
+        # remain even after the selected prefix is fully summarized. Only the
+        # temporary leftover may exceed this projection's reserved budget;
+        # persisting an oversized summary would poison the next checkpoint.
+        if over((*systems, self._summary_message(summary), *planned_retained)):
             raise self._error(
                 "context.budget_exhausted",
                 "summary exceeds its reserved request budget",
             )
         saved = await self.store.save(
-            summary, expected_revision=previous.revision if previous else None
+            summary,
+            expected_revision=(
+                previous.revision
+                if previous is not None
+                else stored.revision
+                if stored
+                else None
+            ),
         )
+        if over(result):
+            raise self._error(
+                "context.budget_exhausted",
+                "summary exceeds its reserved request budget",
+            )
         return self._projection(
-            messages, result, saved, historical_messages=(*all_covered, *changed)
+            original_messages,
+            result,
+            saved,
+            historical_messages=(*all_covered, *changed),
         )
 
     async def _hierarchical_summary(
@@ -449,13 +496,11 @@ class PersistentSummaryContextReducer:
             batch_tokens += cost
         if batch:
             batches.append(tuple(batch))
-        if len(batches) > self.max_summary_calls:
-            raise self._error(
-                "context.summary_work_limit",
-                "history exceeds the bounded summary work per projection",
-            )
+        # One projection may only spend max_summary_calls. Cover that prefix,
+        # persist it, and let the next turn continue. Do not fail the Run.
+        work = batches[: self.max_summary_calls]
         rolling = previous.text if previous else None
-        for batch in batches:
+        for batch in work:
             # Intermediate output can be larger than the requested target. Check
             # its actual size before sending it to the next summary request.
             prefix = (
@@ -480,7 +525,8 @@ class PersistentSummaryContextReducer:
                 raise self._error(
                     "context.summary_empty", "summarizer returned an empty summary"
                 )
-        return rolling.strip()
+        covered = sum(len(batch) for batch in work)
+        return rolling.strip(), covered
 
     @staticmethod
     async def _validated_previous(
@@ -495,6 +541,7 @@ class PersistentSummaryContextReducer:
         actual = await message_digests_async(payload[:count])
         if actual != summary.covered_message_digests:
             # Never apply a summary to a rewritten or fork-incompatible prefix.
+            # The caller keeps the checkpoint so a later turn can replace it.
             return None, payload
         return summary, payload[count:]
 

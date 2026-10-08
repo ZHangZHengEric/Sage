@@ -59,6 +59,22 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y bubblewrap
+          # Ubuntu runners restrict unprivileged user namespaces. Prepare the
+          # disposable runner as upstream bubblewrap does for its native tests.
+          if sysctl kernel.apparmor_restrict_unprivileged_userns >/dev/null 2>&1; then
+            sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          fi
+          bwrap --version
+          python - <<'PYTHON'
+          import subprocess
+          help_text = subprocess.check_output(["bwrap", "--help"], text=True)
+          required = ("--bind-fd", "--ro-bind-fd", "--disable-userns", "--seccomp")
+          missing = [flag for flag in required if flag not in help_text]
+          if missing:
+              raise SystemExit(f"bubblewrap lacks required sandbox capabilities: {missing}")
+          subprocess.run(["bwrap", "--unshare-all", "--unshare-user", "--disable-userns",
+                          "--ro-bind", "/", "/", "--", "/usr/bin/true"], check=True)
+          PYTHON
 
       - name: Install Python Dependencies
         run: |

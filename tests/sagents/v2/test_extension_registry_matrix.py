@@ -313,3 +313,27 @@ def test_local_sandbox_command_path_passes_through_plugin_config():
         {},
     )
     assert provider.command_path == config["command_path"]
+
+
+def test_local_sandbox_read_paths_pass_through_plugin_config():
+    from sagents.v2.runtime.extensions.contracts import ExtensionScopeContext
+
+    registry = builtin_extension_registry()
+    config = {
+        "verification_key": "key",
+        "read_paths": ["/opt/host-runtime"],
+    }
+    host = ExtensionHost(registry)
+    host.plan(
+        (CapabilityRequirement(capability="execution.sandbox", api_version=">=3,<4"),),
+        selections={"execution.sandbox": "sage.sandbox.local-workspace"},
+        configs={"sage.sandbox.local-workspace": config},
+    )
+    registration = registry.get("sage.sandbox.local-workspace")
+    provider = registration.factory(
+        ExtensionScopeContext(
+            scope=ExtensionScope.PROCESS, scope_id="read-paths-test", config=config
+        ),
+        {},
+    )
+    assert provider.read_paths == ("/opt/host-runtime",)
