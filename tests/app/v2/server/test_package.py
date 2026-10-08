@@ -28,7 +28,13 @@ def test_package_has_no_yaml_credentials_or_model_routes():
         "min_level": "info",
         "format": "json",
     }
-    assert list(manifest.runtime.capabilities) == ["observability.log-sink"]
+    judge = manifest.runtime.capabilities["agent.continuation-policy"]
+    assert judge.plugin == "sage.agent.continuation.llm-judge"
+    assert judge.config == {"model_binding": "fast"}
+    assert list(manifest.runtime.capabilities) == [
+        "agent.continuation-policy",
+        "observability.log-sink",
+    ]
 
 
 def test_package_always_registers_stdout_log_sink(tmp_path: Path):

@@ -132,6 +132,10 @@ def _runtime_capabilities(
     log_level = settings.log_level if settings is not None else "info"
     log_format = settings.log_format if settings is not None else "json"
     capabilities: dict[str, CapabilitySelection] = {
+        "agent.continuation-policy": CapabilitySelection(
+            plugin="sage.agent.continuation.llm-judge",
+            config={"model_binding": "fast"},
+        ),
         "observability.log-sink": CapabilitySelection(
             plugin="sage.logging.stdout",
             config={
