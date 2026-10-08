@@ -176,8 +176,9 @@ def provider_error(exc: Exception, *, response_started: bool = False) -> SageV2E
         )
         if value is not None
     ).lower()
-    context_overflow = status in {400, 413, 422} and any(
-        marker in details for marker in _CONTEXT_WINDOW_MARKERS
+    context_overflow = status in {400, 413, 422} and (
+        any(marker in details for marker in _CONTEXT_WINDOW_MARKERS)
+        or ("input token count" in details and "exceeds" in details)
     )
     retryable = status in {408, 409, 425, 429} or (
         isinstance(status, int) and status >= 500

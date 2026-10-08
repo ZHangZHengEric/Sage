@@ -930,14 +930,17 @@ async def test_usage_overview_keeps_events_when_diagnostics_are_unreadable(
 
 
 @pytest.mark.asyncio
-async def test_model_patch_persists_explicit_protocol_and_secret(tmp_path: Path):
+@pytest.mark.parametrize("protocol", ["anthropic-messages", "gemini-generate-content"])
+async def test_model_patch_persists_explicit_protocol_and_secret(
+    tmp_path: Path, protocol: str
+):
     service = DesktopV2Service(tmp_path)
     await service.list_agents("user_1")
 
     value = await service.patch_model_provider(
         "model_main",
         ModelProviderPatch(
-            protocol="anthropic-messages",
+            protocol=protocol,
             model="claude-test",
             base_url="https://api.anthropic.test",
             api_keys=["secret"],
@@ -945,7 +948,7 @@ async def test_model_patch_persists_explicit_protocol_and_secret(tmp_path: Path)
         "user_1",
     )
 
-    assert value["protocol"] == "anthropic-messages"
+    assert value["protocol"] == protocol
     assert value["api_key_configured"] is True
     assert await service.reveal_model_provider_api_key("model_main", "user_1") == {
         "api_key": "secret"
@@ -954,12 +957,13 @@ async def test_model_patch_persists_explicit_protocol_and_secret(tmp_path: Path)
 
 
 @pytest.mark.asyncio
-async def test_model_provider_can_be_created(tmp_path: Path):
+@pytest.mark.parametrize("protocol", ["anthropic-messages", "gemini-generate-content"])
+async def test_model_provider_can_be_created(tmp_path: Path, protocol: str):
     service = DesktopV2Service(tmp_path)
     created = await service.create_model_provider(
         ModelProviderCreate(
             name="Secondary",
-            protocol="anthropic-messages",
+            protocol=protocol,
             model="claude-test",
             base_url="https://anthropic.test",
             api_keys=["secret"],
@@ -971,7 +975,7 @@ async def test_model_provider_can_be_created(tmp_path: Path):
     )
 
     assert created["name"] == "Secondary"
-    assert created["protocol"] == "anthropic-messages"
+    assert created["protocol"] == protocol
     assert created["api_key_configured"] is True
     assert created["supports_tool_calling"] is False
     assert created["is_default"] is False

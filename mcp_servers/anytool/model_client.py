@@ -5,6 +5,7 @@ Configuration comes from the caller or standalone JSON config, never Sage DAOs.
 from __future__ import annotations
 
 from types import SimpleNamespace
+from urllib.parse import quote
 
 import httpx
 
@@ -44,6 +45,24 @@ class SimulatorClient:
                 messages=[m for m in messages if m["role"] != "system"],
                 max_tokens=config.get("max_tokens", 4096),
             )
+        elif protocol == "gemini-generate-content":
+            url = base + "/models/" + quote(model.removeprefix("models/"), safe="-._") + ":generateContent"
+            headers = {"x-goog-api-key": config["api_key"]}
+            generation = {"temperature": temperature, "candidateCount": 1}
+            if config.get("max_tokens"):
+                generation["maxOutputTokens"] = config["max_tokens"]
+            if response_format:
+                generation["responseMimeType"] = "application/json"
+            payload = {
+                "contents": [
+                    {"role": "model" if m["role"] == "assistant" else "user", "parts": [{"text": m["content"]}]}
+                    for m in messages if m["role"] not in {"system", "developer"}
+                ],
+                "generationConfig": generation,
+            }
+            system = [{"text": m["content"]} for m in messages if m["role"] in {"system", "developer"}]
+            if system:
+                payload["systemInstruction"] = {"parts": system}
         else:
             raise ValueError(f"Unsupported AnyTool model protocol: {protocol}")
         async with httpx.AsyncClient(timeout=config.get("timeout", 60.0)) as client:
@@ -56,6 +75,14 @@ class SimulatorClient:
             text = "".join(
                 block.get("text", "") for item in data.get("output", [])
                 for block in item.get("content", []) if block.get("type") == "output_text"
+            )
+        elif protocol == "gemini-generate-content":
+            candidates = data.get("candidates") or []
+            if not candidates or candidates[0].get("finishReason") not in {None, "STOP"}:
+                raise RuntimeError("Gemini simulator returned no complete candidate")
+            text = "".join(
+                part.get("text", "") for part in candidates[0].get("content", {}).get("parts", [])
+                if not part.get("thought")
             )
         else:
             text = "".join(block.get("text", "") for block in data.get("content", []) if block.get("type") == "text")

@@ -78,7 +78,7 @@ and are not rewritten.
 `mcp_servers/anytool/` owns tool schemas, simulation prompts, JSON parsing,
 model protocol adapters, and its standalone stdio entry point. It imports neither
 `common`, `app`, nor either `sagents` runtime. It supports OpenAI Chat Completions,
-OpenAI Responses, and Anthropic Messages through explicit simulator configuration.
+OpenAI Responses, Anthropic Messages, and Gemini GenerateContent through explicit simulator configuration.
 
 - v1 owns its DAO/model selection and HTTP mounting adapters in
   `app/v1/common/services/anytool_adapter.py` and `app/v1/common/services/anytool_http.py`.

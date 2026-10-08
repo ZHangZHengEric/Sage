@@ -31,8 +31,10 @@ Example configuration:
 }
 ```
 
-Supported protocols: `openai-chat-completions`, `openai-responses`, and
-`anthropic-messages`. OpenAI base URLs include `/v1`; Anthropic URLs may include
+Supported protocols: `openai-chat-completions`, `openai-responses`,
+`anthropic-messages`, and `gemini-generate-content`. Native Gemini base URLs
+include the API version, for example `https://generativelanguage.googleapis.com/v1beta`.
+OpenAI base URLs include `/v1`; Anthropic URLs may include
 it or use the API origin. Chat-specific extensions can be supplied explicitly
 in `simulator.extra_body`; AnyTool does not infer provider capabilities from Sage.
 

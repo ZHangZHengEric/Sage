@@ -79,7 +79,12 @@ class MCPConnectionRequest(BaseModel):
 class ModelProviderPatch(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=255)
     protocol: (
-        Literal["openai-chat-completions", "openai-responses", "anthropic-messages"]
+        Literal[
+            "openai-chat-completions",
+            "openai-responses",
+            "anthropic-messages",
+            "gemini-generate-content",
+        ]
         | None
     ) = None
     model: str | None = Field(default=None, min_length=1, max_length=255)
@@ -100,7 +105,10 @@ class ModelProviderPatch(BaseModel):
 class ModelProviderCreate(BaseModel):
     name: str = Field(min_length=1, max_length=255)
     protocol: Literal[
-        "openai-chat-completions", "openai-responses", "anthropic-messages"
+        "openai-chat-completions",
+        "openai-responses",
+        "anthropic-messages",
+        "gemini-generate-content",
     ] = "openai-responses"
     model: str = Field(min_length=1, max_length=255)
     base_url: str = Field(min_length=1, max_length=2_000)

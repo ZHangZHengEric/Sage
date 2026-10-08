@@ -83,6 +83,7 @@ class DesktopModelCompatibilityProfile(StrictModel):
         "enable_thinking_false",
         "thinking_false",
         "chat_template_enable_thinking_false",
+        "thinking_budget_zero",
     ] = "omit"
     reasoning_behavior: Literal["none", "always", "controllable"] = "none"
     reasoning_effort_strategy: Literal[
@@ -110,7 +111,8 @@ class DesktopModelProviderRecord(StrictModel):
     user_id: str
     name: str
     protocol: Literal[
-        "openai-chat-completions", "openai-responses", "anthropic-messages"
+        "openai-chat-completions", "openai-responses", "anthropic-messages",
+        "gemini-generate-content",
     ] = "openai-responses"
     model: str
     base_url: str
