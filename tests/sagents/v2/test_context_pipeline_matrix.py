@@ -480,7 +480,10 @@ async def test_runtime_injection_is_reserved_before_reduction():
 @pytest.mark.asyncio
 @pytest.mark.parametrize("strategy", ["window", "persistent"])
 @pytest.mark.parametrize("pair", ["missing", "partial"])
-async def test_excluded_tool_pairs_do_not_consume_reduction_budget(strategy, pair):
+@pytest.mark.parametrize("reuse_with_developer", [False, True])
+async def test_excluded_tool_pairs_do_not_consume_reduction_budget(
+    strategy, pair, reuse_with_developer
+):
     from types import SimpleNamespace
     from sagents.v2.context import (
         InMemoryConversationSummaryStore,
@@ -519,9 +522,15 @@ async def test_excluded_tool_pairs_do_not_consume_reduction_budget(strategy, pai
         role="user", content=(TextBlock(text="remember project choice A"),)
     )
     latest = ModelMessage(role="user", content=(TextBlock(text="latest"),))
+    instruction = ModelMessage(role="developer", content=(TextBlock(text="policy"),))
+    ledger = (old, *pending, latest)
+    expected = (old, latest)
+    if reuse_with_developer:
+        ledger = (instruction, old, *pending, old, latest)
+        expected = (instruction, old, old, latest)
     assembler = DefaultContextAssembler(
         budget=ContextBudget(
-            max_input_tokens=500, max_messages=2, protected_recent_tokens=0
+            max_input_tokens=500, max_messages=len(expected), protected_recent_tokens=0
         ),
         reducer=PersistentSummaryContextReducer(
             InMemoryConversationSummaryStore(), summarizer=Summary()
@@ -531,11 +540,9 @@ async def test_excluded_tool_pairs_do_not_consume_reduction_budget(strategy, pai
         history_reader=Reader(),
     )
 
-    projection = await assembler.prepare_projection(
-        command(), (old, *pending, latest), run_id="run"
-    )
+    projection = await assembler.prepare_projection(command(), ledger, run_id="run")
 
-    assert projection.messages == (old, latest)
+    assert projection.messages == expected
     assert projection.strategy == "none"
 
 
