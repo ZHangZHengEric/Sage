@@ -23,6 +23,9 @@ async def create_host_schema(database: Database) -> None:
 def _upgrade_legacy_schema(connection) -> None:
     """Apply idempotent upgrades; create_all does not alter existing tables."""
     inspector = inspect(connection)
+    user_columns = {column["name"] for column in inspector.get_columns("users")}
+    if "execution_policy" not in user_columns:
+        connection.execute(text("ALTER TABLE users ADD COLUMN execution_policy TEXT"))
     columns = {column["name"] for column in inspector.get_columns("threads")}
     if "agent_id" not in columns:
         connection.execute(

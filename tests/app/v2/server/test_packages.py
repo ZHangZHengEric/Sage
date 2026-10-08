@@ -263,10 +263,16 @@ def test_agent_creates_agent_through_management_tool(service):
         } == {"user.assistant", "user.child"}
 
 
-def test_server_does_not_serve_web_pages(client):
-    assert client.get("/studio").status_code == 404
-    assert client.get("/assets/index.js").status_code == 404
-    assert client.get("/api/not-a-route").status_code == 404
+def test_server_without_web_build_does_not_serve_web_pages(service, tmp_path, monkeypatch):
+    from fastapi.testclient import TestClient
+    from app.v2.server.main import create_app
+    from app.v2.server.routers.web import mount_web
+    monkeypatch.setattr("app.v2.server.main.mount_web",
+                        lambda app, root: mount_web(app, tmp_path / "missing-web"))
+    with TestClient(create_app(service=service)) as client:
+        assert client.get("/studio").status_code == 404
+        assert client.get("/assets/index.js").status_code == 404
+        assert client.get("/api/not-a-route").status_code == 404
 
 
 @pytest.mark.asyncio

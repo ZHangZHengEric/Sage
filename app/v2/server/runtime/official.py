@@ -139,22 +139,39 @@ def workspace_sandbox_spec(
     )
 
 
-async def attach_official_tools(service, command: StartRun, *, user_id: str):
+async def attach_official_tools(service, command: StartRun, *, user_id: str, run_id: str | None = None):
     """Provision a host-mapped sandbox and wrap it as OfficialToolPlugin."""
 
     install_sandbox(service.execution)
+    owner_run_id = run_id or command.idempotency_key
     handle = await provision_workspace(
         service.execution,
         service.paths.workspace_dir(user_id),
         service.contexts.for_user(user_id),
-        run_id=command.idempotency_key,
+        run_id=owner_run_id,
     )
     runtime = OfficialToolRuntime(handle, service.execution.sandbox_grant_issuer)
     plugin = OfficialToolPlugin(
         ExtensionScopeContext(
             scope=ExtensionScope.RUN,
-            scope_id=command.idempotency_key,
+            scope_id=owner_run_id,
             config={"runtime": runtime},
         )
     )
-    return plugin, runtime, handle
+    return plugin, runtime, OwnedWorkspaceSandbox(handle, service.execution.sandbox_provider)
+
+
+class OwnedWorkspaceSandbox:
+    """End per-drive compute on suspension too; preserve the user's files."""
+
+    def __init__(self, handle, provider):
+        self.handle = handle
+        self.provider = provider
+        self.closed = False
+
+    async def close(self):
+        if self.closed:
+            return
+        await self.handle.destroy()
+        await self.provider.purge_terminated(self.handle.ref)
+        self.closed = True

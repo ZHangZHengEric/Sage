@@ -7,6 +7,7 @@ from sqlalchemy import select
 
 from app.v2.server.identity.orm import UserRow
 from app.v2.server.identity.users import UserRecord
+from app.v2.server.runtime.policy import ExecutionPolicy
 
 
 class UserStore(Protocol):
@@ -49,6 +50,7 @@ class DatabaseUserStore:
                     username=user.username,
                     password_hash=user.password_hash,
                     role=user.role,
+                    execution_policy=user.execution_policy.model_dump_json(),
                 )
             )
 
@@ -59,4 +61,5 @@ def _user_from_row(row: UserRow) -> UserRecord:
         username=row.username,
         password_hash=row.password_hash,
         role="admin" if row.role == "admin" else "user",
+        execution_policy=ExecutionPolicy.model_validate_json(row.execution_policy or "{}"),
     )

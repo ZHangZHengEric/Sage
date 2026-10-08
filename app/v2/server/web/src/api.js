@@ -22,6 +22,15 @@ async function request(path, options = {}) {
 }
 
 export const api = {
+  executionPolicy: () => request('/api/auth/execution-policy'),
+  saveExecutionPolicy: (body) => request('/api/auth/execution-policy',
+    { method: 'PUT', body: JSON.stringify(body) }),
+  listKeys: () => request('/api/keys'),
+  createKey: (body) => request('/api/keys', { method: 'POST', body: JSON.stringify(body) }),
+  revokeKey: (id) => request(`/api/keys/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+  approvals: (offset = 0) => request(`/api/approvals?limit=50&offset=${offset}`),
+  decideApproval: (id, body) => request(`/api/approvals/${encodeURIComponent(id)}/decisions`,
+    { method: 'POST', body: JSON.stringify(body) }),
   packageSchema: () => request('/api/agent-packages/schema'),
   packageTemplate: (agentId = '') => request(`/api/agent-packages/template${agentId ? `?agent_id=${encodeURIComponent(agentId)}` : ''}`),
   packages: (offset = 0) => request(`/api/agent-packages?limit=50&offset=${offset}`),
