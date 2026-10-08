@@ -212,6 +212,39 @@ async def test_rewritten_prefix_never_applies_stale_summary():
 
 
 @pytest.mark.asyncio
+async def test_incompatible_prefix_keeps_checkpoint_when_reduction_fails():
+    store = InMemoryConversationSummaryStore()
+    reducer = PersistentSummaryContextReducer(
+        store, summarizer=RecordingSummarizer(), protected_recent_units=2
+    )
+    await reducer.reduce(
+        ledger(), ContextBudget(max_input_tokens=100_000, max_messages=4), scope=scope()
+    )
+    original = await store.get("session_1")
+    rewritten = list(ledger())
+    rewritten[1] = ModelMessage(
+        role="user", content=(TextBlock(text="rewritten history"),)
+    )
+
+    with pytest.raises(SageV2Error) as caught:
+        await reducer.reduce(
+            tuple(rewritten),
+            ContextBudget(max_input_tokens=80, max_messages=1),
+            scope=scope(),
+        )
+
+    assert caught.value.info.code in {
+        "context.budget_exhausted",
+        "context.summary_source_too_large",
+    }
+    kept = await store.get("session_1")
+    assert kept is not None
+    assert kept.summary_id == original.summary_id
+    assert kept.text == original.text
+    assert kept.revision == original.revision
+
+
+@pytest.mark.asyncio
 async def test_summary_state_is_isolated_by_context_key():
     store = InMemoryConversationSummaryStore()
     reducer = PersistentSummaryContextReducer(store, protected_recent_units=2)
