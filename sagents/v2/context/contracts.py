@@ -124,6 +124,10 @@ class ContextReductionScope(StrictModel):
     run_id: Identifier
     source_sequence: int = Field(default=0, ge=0)
     response_language: str = "en"
+    # The reducer receives a filtered history view. Persistent coverage still
+    # hashes the canonical ledger, using these payload-to-ledger positions.
+    canonical_messages: tuple[ModelMessage, ...] | None = None
+    canonical_indices: tuple[int, ...] = ()
 
 
 class ContextReducer(Protocol):
