@@ -578,6 +578,11 @@ async def test_filtered_summary_hashes_canonical_history_and_reuses_checkpoint()
         ModelMessage(role="user", content=(TextBlock(text="old " * 1000),)),
         ModelMessage(role="assistant", tool_calls=(memory, lookup)),
         ModelMessage(
+            role="user",
+            content=(TextBlock(text="supplemental tool fact"),),
+            metadata={"tool_context": True, "source_tool_call_id": "lookup"},
+        ),
+        ModelMessage(
             role="tool",
             tool_call_id="memory",
             content=(TextBlock(text="obsolete memory " * 20_000),),
@@ -606,6 +611,13 @@ async def test_filtered_summary_hashes_canonical_history_and_reuses_checkpoint()
     second = await assembler.prepare_projection(command(), ledger, run_id="run")
 
     assert len(summarizer.requests) == 1
+    assert [message.role for message in summarizer.requests[0].messages] == [
+        "user",
+        "assistant",
+        "tool",
+        "user",
+    ]
+    assert summarizer.requests[0].messages[-1].metadata["tool_context"] is True
     assert all(
         call.name != "search_memory"
         for message in summarizer.requests[0].messages

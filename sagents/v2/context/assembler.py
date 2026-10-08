@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections import defaultdict, deque
 import re
 from typing import Protocol
 
@@ -271,12 +272,12 @@ class DefaultContextAssembler:
         clean = self._strip_historical_search_memory(
             canonical, source_positions=source_positions
         )
-        retained_ids = {id(message) for message in self._sanitize_tool_pairs(clean)}
-        payload = tuple(message for message in clean if id(message) in retained_ids)
+        positions = defaultdict(deque)
+        for index, message in zip(source_positions, clean, strict=True):
+            positions[id(message)].append(index)
+        payload = self._sanitize_tool_pairs(clean)
         canonical_indices = tuple(
-            index
-            for index, message in zip(source_positions, clean, strict=True)
-            if id(message) in retained_ids
+            positions[id(message)].popleft() for message in payload
         )
         messages = (*system, *payload)
         # Resolved once and shared: the reduction scope and the projection
