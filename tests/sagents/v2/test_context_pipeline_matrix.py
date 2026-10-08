@@ -5,6 +5,7 @@ import pytest
 from sagents.v2.context import (
     ContextBudget,
     ContextPlacement,
+    ContextProjection,
     ContextSegment,
     ContextStability,
     DefaultContextAssembler,
@@ -367,3 +368,284 @@ async def test_budget_never_truncates_protected_latest_user_silently():
             (ModelMessage(role="user", content=(TextBlock(text="must survive"),)),),
         )
     assert caught.value.info.code == "context.budget_exhausted"
+
+
+@pytest.mark.asyncio
+async def test_reducer_sees_filtered_history_without_runtime_injection():
+    captured = {}
+
+    class CaptureReducer:
+        async def reduce(self, messages, budget, *, scope=None):
+            captured["messages"] = messages
+            return ContextProjection(
+                messages=messages,
+                estimated_tokens=1,
+                source_message_count=len(messages),
+            )
+
+    call = ModelToolCall(tool_call_id="open", name="lookup", arguments={})
+    ledger = (
+        ModelMessage(role="user", content=(TextBlock(text="old"),)),
+        ModelMessage(role="assistant", tool_calls=(call,)),
+        ModelMessage(role="user", content=(TextBlock(text="latest"),)),
+    )
+    assembler = DefaultContextAssembler(
+        system_instructions="system",
+        budget=ContextBudget(max_input_tokens=10_000),
+        reducer=CaptureReducer(),
+        providers=(
+            StaticContextProvider(
+                (
+                    ContextSegment(
+                        segment_id="runtime",
+                        content="workspace context",
+                        stability=ContextStability.VOLATILE,
+                        placement=ContextPlacement.LATEST_USER,
+                    ),
+                )
+            ),
+        ),
+    )
+
+    projection = await assembler.prepare_projection(command(), ledger)
+
+    reduced = captured["messages"]
+    assert [message.role for message in reduced if message.role != "system"] == [
+        "user",
+        "user",
+    ]
+    assert not any(message.tool_calls for message in reduced)
+    assert all(
+        "<runtime_context>" not in block.text
+        for message in reduced
+        if message.role == "user"
+        for block in message.content
+        if isinstance(block, TextBlock)
+    )
+    assert [
+        message.role for message in projection.messages if message.role != "system"
+    ] == [
+        "user",
+        "user",
+    ]
+    assert "workspace context" in projection.messages[-1].content[0].text
+
+
+@pytest.mark.asyncio
+async def test_runtime_injection_is_reserved_before_reduction():
+    captured = {}
+
+    class CaptureReducer:
+        async def reduce(self, messages, budget, *, scope=None):
+            captured["budget"] = budget
+            return ContextProjection(
+                messages=messages,
+                estimated_tokens=1,
+                source_message_count=len(messages),
+            )
+
+    runtime = "workspace listing " * 200
+    ledger = (ModelMessage(role="user", content=(TextBlock(text="latest"),)),)
+    assembler = DefaultContextAssembler(
+        system_instructions="system",
+        budget=ContextBudget(max_input_tokens=10_000),
+        reducer=CaptureReducer(),
+        providers=(
+            StaticContextProvider(
+                (
+                    ContextSegment(
+                        segment_id="runtime",
+                        content=runtime,
+                        stability=ContextStability.VOLATILE,
+                        placement=ContextPlacement.LATEST_USER,
+                    ),
+                )
+            ),
+        ),
+    )
+
+    await assembler.prepare_projection(command(), ledger)
+
+    reserved = captured["budget"].reserve_input_tokens
+    assert reserved > 0
+    bare = DefaultContextAssembler(
+        budget=ContextBudget(max_input_tokens=10_000),
+        reducer=CaptureReducer(),
+    )
+    await bare.prepare_projection(command(), ledger)
+    assert captured["budget"].reserve_input_tokens == 0
+    assert reserved > captured["budget"].reserve_input_tokens
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("strategy", ["window", "persistent"])
+@pytest.mark.parametrize("pair", ["missing", "partial"])
+@pytest.mark.parametrize("reuse_with_developer", [False, True])
+async def test_excluded_tool_pairs_do_not_consume_reduction_budget(
+    strategy, pair, reuse_with_developer
+):
+    from types import SimpleNamespace
+    from sagents.v2.context import (
+        InMemoryConversationSummaryStore,
+        PersistentSummaryContextReducer,
+    )
+    from sagents.v2.contracts.run_state import SessionConcurrencyMode
+
+    class Reader:
+        async def get_run(self, run_id):
+            return SimpleNamespace(
+                session_id="session",
+                run_id=run_id,
+                concurrency_mode=SessionConcurrencyMode.SERIAL,
+                base_session_sequence=0,
+            )
+
+    class Summary:
+        async def summarize(self, request):
+            pytest.fail("excluded calls must not trigger summary work")
+
+    call = ModelToolCall(
+        tool_call_id="open", name="lookup", arguments={"query": "large " * 20_000}
+    )
+    pending = (ModelMessage(role="assistant", tool_calls=(call,)),)
+    if pair == "partial":
+        other = ModelToolCall(tool_call_id="other", name="lookup", arguments={})
+        pending = (
+            ModelMessage(role="assistant", tool_calls=(call, other)),
+            ModelMessage(
+                role="tool",
+                tool_call_id="other",
+                content=(TextBlock(text="large " * 20_000),),
+            ),
+        )
+    old = ModelMessage(
+        role="user", content=(TextBlock(text="remember project choice A"),)
+    )
+    latest = ModelMessage(role="user", content=(TextBlock(text="latest"),))
+    instruction = ModelMessage(role="developer", content=(TextBlock(text="policy"),))
+    ledger = (old, *pending, latest)
+    expected = (old, latest)
+    if reuse_with_developer:
+        ledger = (instruction, old, *pending, old, latest)
+        expected = (instruction, old, old, latest)
+    assembler = DefaultContextAssembler(
+        budget=ContextBudget(
+            max_input_tokens=500, max_messages=len(expected), protected_recent_tokens=0
+        ),
+        reducer=PersistentSummaryContextReducer(
+            InMemoryConversationSummaryStore(), summarizer=Summary()
+        )
+        if strategy == "persistent"
+        else None,
+        history_reader=Reader(),
+    )
+
+    projection = await assembler.prepare_projection(command(), ledger, run_id="run")
+
+    assert projection.messages == expected
+    assert projection.strategy == "none"
+
+
+@pytest.mark.asyncio
+async def test_filtered_summary_hashes_canonical_history_and_reuses_checkpoint():
+    from types import SimpleNamespace
+    from sagents.v2.context import (
+        InMemoryConversationSummaryStore,
+        PersistentSummaryContextReducer,
+    )
+    from sagents.v2.context.summary import message_digests_async
+    from sagents.v2.contracts.run_state import SessionConcurrencyMode
+
+    class Reader:
+        async def get_run(self, run_id):
+            return SimpleNamespace(
+                session_id="session",
+                run_id=run_id,
+                concurrency_mode=SessionConcurrencyMode.SERIAL,
+                base_session_sequence=0,
+            )
+
+    class Summary:
+        requests = []
+
+        async def summarize(self, request):
+            self.requests.append(request)
+            return "project facts"
+
+    memory = ModelToolCall(tool_call_id="memory", name="search_memory", arguments={})
+    lookup = ModelToolCall(tool_call_id="lookup", name="lookup", arguments={})
+    ledger = (
+        ModelMessage(role="user", content=(TextBlock(text="old " * 1000),)),
+        ModelMessage(role="assistant", tool_calls=(memory, lookup)),
+        ModelMessage(
+            role="user",
+            content=(TextBlock(text="supplemental tool fact"),),
+            metadata={"tool_context": True, "source_tool_call_id": "lookup"},
+        ),
+        ModelMessage(
+            role="tool",
+            tool_call_id="memory",
+            content=(TextBlock(text="obsolete memory " * 20_000),),
+        ),
+        ModelMessage(
+            role="tool", tool_call_id="lookup", content=(TextBlock(text="fact"),)
+        ),
+        ModelMessage(role="user", content=(TextBlock(text="latest"),)),
+    )
+    store = InMemoryConversationSummaryStore()
+    summarizer = Summary()
+    assembler = DefaultContextAssembler(
+        budget=ContextBudget(
+            max_input_tokens=500, max_messages=2, protected_recent_tokens=0
+        ),
+        reducer=PersistentSummaryContextReducer(
+            store, summarizer=summarizer, summary_target_tokens=32
+        ),
+        history_reader=Reader(),
+    )
+
+    first = await assembler.prepare_projection(command(), ledger, run_id="run")
+    checkpoint = await store.get(
+        assembler._summary_context_key("session"), session_id="session"
+    )
+    second = await assembler.prepare_projection(command(), ledger, run_id="run")
+
+    assert len(summarizer.requests) == 1
+    assert [message.role for message in summarizer.requests[0].messages] == [
+        "user",
+        "assistant",
+        "tool",
+        "user",
+    ]
+    assert summarizer.requests[0].messages[-1].metadata["tool_context"] is True
+    assert all(
+        call.name != "search_memory"
+        for message in summarizer.requests[0].messages
+        for call in message.tool_calls
+    )
+    assert all(
+        message.tool_call_id != "memory" for message in summarizer.requests[0].messages
+    )
+    assert checkpoint.covered_message_digests == await message_digests_async(
+        ledger[:-1]
+    )
+    assert first.historical_messages == ledger[:-1]
+    assert first.messages == second.messages
+    assert (
+        await store.get(assembler._summary_context_key("session"), session_id="session")
+        == checkpoint
+    )
+
+    rewritten = (
+        ModelMessage(role="user", content=(TextBlock(text="rewritten facts " * 1000),)),
+        *ledger[1:],
+    )
+    await assembler.prepare_projection(command(), rewritten, run_id="run")
+    replacement = await store.get(
+        assembler._summary_context_key("session"), session_id="session"
+    )
+    assert len(summarizer.requests) == 2
+    assert summarizer.requests[-1].previous_summary is None
+    assert replacement.covered_message_digests == await message_digests_async(
+        rewritten[:-1]
+    )

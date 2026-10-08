@@ -105,6 +105,28 @@ def _harden_read_only_stage(stage: tuple[str, ...]) -> tuple[str, ...]:
     return hardened
 
 
+def _configured_read_paths(
+    read_paths: tuple[str, ...] | list[str] | None,
+) -> tuple[str, ...]:
+    if read_paths is None:
+        return ()
+    if isinstance(read_paths, str):
+        raise ValueError("read_paths must be a list of absolute directories")
+    seen: set[str] = set()
+    normalized: list[str] = []
+    for raw in read_paths:
+        path = str(raw or "").strip()
+        if not path or "\x00" in path or path == "/" or not os.path.isabs(path):
+            raise ValueError(
+                "read_paths must contain absolute, non-root directories"
+            )
+        if path in seen:
+            continue
+        seen.add(path)
+        normalized.append(path)
+    return tuple(normalized)
+
+
 @dataclass
 class _LocalRow:
     ref: SandboxRef
@@ -561,6 +583,7 @@ class LocalWorkspaceSandboxProvider:
         terminal_ttl_seconds: int = 86_400,
         max_retained_terminal_items: int = 1024,
         command_path: str | None = None,
+        read_paths: tuple[str, ...] | list[str] | None = None,
         linux_cgroup_root: str | None = None,
         linux_quota_mount: str | None = None,
         linux_execution_uid: int | None = None,
@@ -583,6 +606,7 @@ class LocalWorkspaceSandboxProvider:
             if command_path is not None
             else os.environ.get("PATH") or os.defpath
         )
+        self.read_paths = _configured_read_paths(read_paths)
         self.verification_key = verification_key
         self._clock = clock
         self._terminal_ttl = timedelta(seconds=terminal_ttl_seconds)
@@ -595,6 +619,7 @@ class LocalWorkspaceSandboxProvider:
             quota_mount=linux_quota_mount,
             execution_uid=linux_execution_uid,
             execution_gid=linux_execution_gid,
+            extra_read_paths=self.read_paths,
         )
 
     async def capabilities(self) -> SandboxCapabilities:

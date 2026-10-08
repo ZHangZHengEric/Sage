@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections import defaultdict, deque
 import re
 from typing import Protocol
 
@@ -248,10 +249,12 @@ class DefaultContextAssembler:
                     },
                 )
             )
-        payload = self._sanitize_tool_pairs(
-            self._strip_historical_search_memory(
-                tuple(message for message in ledger if message.role != "system")
-            )
+        system = (
+            *system,
+            *(message for message in ledger if message.role == "developer"),
+        )
+        canonical = tuple(
+            message for message in ledger if message.role not in {"system", "developer"}
         )
         volatile = tuple(
             segment
@@ -262,8 +265,20 @@ class DefaultContextAssembler:
                 and segment.stability == ContextStability.VOLATILE
             )
         )
-        if volatile:
-            payload = self._inject_latest_user(payload, volatile)
+        # Excluded tool pairs must not consume the reduction budget or enter
+        # summaries. Keep canonical positions separately for durable coverage;
+        # transport ordering and runtime injection remain inference-only.
+        source_positions: list[int] = []
+        clean = self._strip_historical_search_memory(
+            canonical, source_positions=source_positions
+        )
+        positions = defaultdict(deque)
+        for index, message in zip(source_positions, clean, strict=True):
+            positions[id(message)].append(index)
+        payload = self._sanitize_tool_pairs(clean)
+        canonical_indices = tuple(
+            positions[id(message)].popleft() for message in payload
+        )
         messages = (*system, *payload)
         # Resolved once and shared: the reduction scope and the projection
         # observer both need the owning Run, and neither should pay for a
@@ -290,14 +305,23 @@ class DefaultContextAssembler:
                     session_id=run.session_id,
                     run_id=run.run_id,
                     source_sequence=run.base_session_sequence,
+                    canonical_messages=canonical,
+                    canonical_indices=canonical_indices,
                     response_language=str(
                         command.config.metadata.get("response_language") or "en"
                     ),
                 )
-            effective_budget = self._with_reservation(
-                self.budget,
-                reservation or ContextRequestReservation(),
-            )
+            reservation = reservation or ContextRequestReservation()
+            runtime_tokens = await self._runtime_injection_tokens(canonical, volatile)
+            if runtime_tokens:
+                reservation = reservation.model_copy(
+                    update={
+                        "runtime_context_tokens": (
+                            reservation.runtime_context_tokens + runtime_tokens
+                        )
+                    }
+                )
+            effective_budget = self._with_reservation(self.budget, reservation)
             projection = await self.reducer.reduce(
                 messages, effective_budget, scope=scope
             )
@@ -306,6 +330,16 @@ class DefaultContextAssembler:
                 messages=messages,
                 estimated_tokens=await estimate_tokens_async(self.estimator, messages),
                 source_message_count=len(messages),
+            )
+        view = self._apply_inference_view(projection.messages, volatile)
+        if view != projection.messages:
+            projection = projection.model_copy(
+                update={
+                    "messages": view,
+                    "estimated_tokens": await estimate_tokens_async(
+                        self.estimator, view
+                    ),
+                }
             )
         if self.projection_observer is not None and run_id is not None:
             await self.projection_observer.observe_projection(
@@ -364,6 +398,45 @@ class DefaultContextAssembler:
                 "max_messages": max_messages,
             }
         )
+
+    async def _runtime_injection_tokens(
+        self,
+        canonical: tuple[ModelMessage, ...],
+        volatile: tuple[ContextSegment, ...],
+    ) -> int:
+        """Tokens added when the latest user message receives runtime context."""
+
+        if not volatile:
+            return 0
+        latest = next(
+            (message for message in reversed(canonical) if is_user_request(message)),
+            None,
+        )
+        if latest is None:
+            return 0
+        injected = self._inject_latest_user((latest,), volatile)[-1]
+        before = await estimate_tokens_async(self.estimator, (latest,))
+        after = await estimate_tokens_async(self.estimator, (injected,))
+        return max(0, after - before)
+
+    @classmethod
+    def _apply_inference_view(
+        cls,
+        messages: tuple[ModelMessage, ...],
+        volatile: tuple[ContextSegment, ...],
+    ) -> tuple[ModelMessage, ...]:
+        systems = tuple(
+            message for message in messages if message.role in {"system", "developer"}
+        )
+        payload = tuple(
+            message
+            for message in messages
+            if message.role not in {"system", "developer"}
+        )
+        payload = cls._sanitize_tool_pairs(cls._strip_historical_search_memory(payload))
+        if volatile:
+            payload = cls._inject_latest_user(payload, volatile)
+        return (*systems, *payload)
 
     @staticmethod
     def _inject_latest_user(
@@ -566,6 +639,8 @@ class DefaultContextAssembler:
     @staticmethod
     def _strip_historical_search_memory(
         messages: tuple[ModelMessage, ...],
+        *,
+        source_positions: list[int] | None = None,
     ) -> tuple[ModelMessage, ...]:
         """Keep only the current turn's automatic Memory Tool pair, as v1 does."""
 
@@ -578,6 +653,8 @@ class DefaultContextAssembler:
             None,
         )
         if latest_user is None:
+            if source_positions is not None:
+                source_positions.extend(range(len(messages)))
             return messages
         historical_ids = {
             call.tool_call_id
@@ -587,6 +664,8 @@ class DefaultContextAssembler:
             if call.name == "search_memory"
         }
         if not historical_ids:
+            if source_positions is not None:
+                source_positions.extend(range(len(messages)))
             return messages
         output = []
         for index, message in enumerate(messages):
@@ -611,4 +690,6 @@ class DefaultContextAssembler:
                         continue
                     message = message.model_copy(update={"tool_calls": kept})
             output.append(message)
+            if source_positions is not None:
+                source_positions.append(index)
         return tuple(output)
