@@ -2012,7 +2012,7 @@ async def test_materialized_user_config_is_not_overwritten_by_host_defaults(tmp_
             ),
             "context.summarizer": CapabilitySelection(
                 plugin="sage.context.summarizer.model",
-                config={"max_source_tokens": 16000, "timeout_seconds": 18},
+                config={"max_source_tokens": 16000, "timeout_seconds": 18, "idle_timeout_seconds": 9},
             ),
         },
     })})
@@ -2024,6 +2024,7 @@ async def test_materialized_user_config_is_not_overwritten_by_host_defaults(tmp_
         assert ports.memory_query_generator.timeout_seconds == 15
         assert ports.summarizer.max_source_tokens == 16000
         assert ports.summarizer.timeout_seconds == 18
+        assert ports.summarizer.idle_timeout_seconds == 9
         deterministic = package.model_copy(update={"runtime": package.runtime.model_copy(update={
             "capabilities": {**package.runtime.capabilities,
                 "agent.continuation-policy": CapabilitySelection(
