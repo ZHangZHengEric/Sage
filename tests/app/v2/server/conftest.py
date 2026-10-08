@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -84,11 +85,43 @@ def scripted_hello(steps: int = 1) -> ScriptedModelProvider:
     )
 
 
+class CompletingJudgeModel:
+    """Keep existing server fixtures focused on their primary model responses."""
+
+    def __init__(self, provider) -> None:
+        self.provider = provider
+        self.judge_requests = []
+
+    async def capabilities(self, model_binding):
+        return await self.provider.capabilities(model_binding)
+
+    async def probe_capabilities(self, request):
+        return await self.provider.probe_capabilities(request)
+
+    async def stream(self, request):
+        if request.metadata.get("purpose") == "continuation_judge":
+            self.judge_requests.append(request)
+            yield ModelStreamEvent(
+                kind=ModelEventKind.COMPLETED,
+                response=ModelResponse(
+                    response_id="fixture_judge_completed",
+                    text=json.dumps(
+                        {"decision": "completed", "reason": "fixture response is final"}
+                    ),
+                    finish_reason="stop",
+                ),
+            )
+            return
+        async for event in self.provider.stream(request):
+            yield event
+
+
 def make_test_service(
     tmp_path: Path,
     *,
     model_provider=None,
     fallback=True,
+    stub_judge=True,
     **overrides,
 ) -> ServerHost:
     settings = make_settings(tmp_path, **overrides)
@@ -97,7 +130,11 @@ def make_test_service(
         provider = scripted_hello()
     return FixtureServerHost(
         settings,
-        model_provider=provider,
+        model_provider=(
+            CompletingJudgeModel(provider)
+            if provider is not None and stub_judge
+            else provider
+        ),
         database=Database(
             DatabaseSettings(url=f"sqlite+aiosqlite:///{tmp_path}/host.db")
         ),
