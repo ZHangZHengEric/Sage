@@ -33,6 +33,7 @@ from mcp_servers.anytool import anytool_runtime, anytool_server, model_client, _
     ("openai-chat-completions", "/v1/chat/completions", {"choices": [{"message": {"content": '{"ok":true}'}}]}),
     ("openai-responses", "/v1/responses", {"output": [{"content": [{"type": "output_text", "text": '{"ok":true}'}]}]}),
     ("anthropic-messages", "/v1/messages", {"content": [{"type": "text", "text": '{"ok":true}'}]}),
+    ("gemini-generate-content", "/v1/models/test:generateContent", {"candidates": [{"content": {"parts": [{"text": "thinking", "thought": True}, {"text": '{"ok":true}'}]}, "finishReason": "STOP"}]}),
 ])
 async def test_model_wire_and_result(monkeypatch, protocol, path, response):
     requests = []
@@ -52,8 +53,12 @@ async def test_model_wire_and_result(monkeypatch, protocol, path, response):
     assert requests[0].url.path == path
     payload = json.loads(requests[0].content)
     assert "hidden" not in requests[0].content.decode()
-    assert payload["model"] == "test"
-    if protocol == "anthropic-messages":
+    if protocol == "gemini-generate-content":
+        assert requests[0].headers["x-goog-api-key"] == "test-key"
+        assert payload["generationConfig"]["responseMimeType"] == "application/json"
+        assert "systemInstruction" in payload
+    elif protocol == "anthropic-messages":
+        assert payload["model"] == "test"
         assert requests[0].headers["x-api-key"] == "test-key"
         assert "system" in payload and "response_format" not in payload
     elif protocol == "openai-responses":

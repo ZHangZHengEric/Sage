@@ -11,6 +11,8 @@ from sagents.v2.contracts.items import ImageBlock, TextBlock
 from sagents.v2.model import (
     AnthropicMessagesConfig,
     AnthropicMessagesModelProvider,
+    GeminiGenerateContentConfig,
+    GeminiGenerateContentModelProvider,
     ModelCapabilities,
     ModelCapabilityProbeOutcome,
     ModelCapabilityProbeRequest,
@@ -125,10 +127,26 @@ class _AnthropicProbeProvider(_SemanticProbeMixin, AnthropicMessagesModelProvide
     pass
 
 
+class _GeminiProbeProvider(_SemanticProbeMixin, GeminiGenerateContentModelProvider):
+    pass
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("provider", "protocol", "plugin_id"),
     [
+        (
+            _GeminiProbeProvider(
+                GeminiGenerateContentConfig(
+                    model="gemini-3-test",
+                    capabilities=CAPABILITIES,
+                    default_max_output_tokens=128,
+                ),
+                client=object(),
+            ),
+            "gemini-generate-content",
+            "sage.model.gemini-generate-content",
+        ),
         (
             _ChatProbeProvider(
                 OpenAIChatCompletionsConfig(
@@ -182,7 +200,7 @@ async def test_every_builtin_model_plugin_returns_owned_versioned_profile(
 
     assert profile.schema_version == 1
     assert profile.plugin_id == plugin_id
-    assert profile.plugin_version == "3.0.0"
+    assert profile.plugin_version == provider.plugin_version
     assert profile.protocol == protocol
     assert profile.route_fingerprint == "sha256:route"
     assert profile.supports("connection") is True
@@ -198,7 +216,7 @@ async def test_every_builtin_model_plugin_returns_owned_versioned_profile(
 def test_every_builtin_protocol_advertises_the_probe_contract_version():
     descriptors = model_protocol_descriptors()
 
-    assert len(descriptors) == 3
+    assert len(descriptors) == 4
     assert all("multimodal" in value.capabilities for value in descriptors)
     assert {
         value.plugin_id for value in descriptors
@@ -206,6 +224,7 @@ def test_every_builtin_protocol_advertises_the_probe_contract_version():
         "sage.model.openai-chat-completions",
         "sage.model.openai-responses",
         "sage.model.anthropic-messages",
+        "sage.model.gemini-generate-content",
     }
 
 

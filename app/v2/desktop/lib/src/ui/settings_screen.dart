@@ -6057,6 +6057,10 @@ class _ModelSettingsState extends State<_ModelSettings> {
                             value: 'anthropic-messages',
                             label: 'Anthropic Messages',
                           ),
+                          _PickerOption(
+                            value: 'gemini-generate-content',
+                            label: 'Gemini GenerateContent',
+                          ),
                         ],
                         onChanged: (value) {
                           if (value == _protocol) return;
@@ -6133,6 +6137,7 @@ class _ModelSettingsState extends State<_ModelSettings> {
 String _modelProtocolLabel(String value) => switch (value) {
   'openai-chat-completions' => 'OpenAI Chat Completions',
   'anthropic-messages' => 'Anthropic Messages',
+  'gemini-generate-content' => 'Gemini GenerateContent',
   _ => 'OpenAI Responses',
 };
 

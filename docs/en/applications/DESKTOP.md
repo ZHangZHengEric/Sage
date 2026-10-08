@@ -30,7 +30,15 @@ Use `-d windows` or `-d linux` for those targets. The managed Python sidecar sta
 3. Start a conversation in Agent Workspace, or register a project directory.
 4. Inspect files and tool progress; answer input and approval requests when needed.
 
-Model routes support OpenAI Chat Completions, OpenAI Responses, and Anthropic Messages. MCP connections discover tools when configured and enabled. Studio provides shared conversations with member-directed messages.
+Model routes support OpenAI Chat Completions, OpenAI Responses, Anthropic Messages, and Gemini GenerateContent. MCP connections discover tools when configured and enabled. Studio provides shared conversations with member-directed messages.
+
+For native Gemini, select **Gemini GenerateContent**, set the endpoint to
+`https://generativelanguage.googleapis.com/v1beta`, and enter the model ID and
+Google API key. Run the capability check before saving. The adapter streams
+native text and thought summaries, calls Sage tools, and preserves thought
+signatures across tool calls and Session restarts. Google-hosted search and code
+execution are not exposed by this adapter. Model support for thinking levels,
+JSON output, and media is verified by the capability check.
 
 ## Data and settings
 

@@ -8,6 +8,14 @@ _CAPABILITIES = "sagents.v2.model.capability_contracts"
 _PROBES = "sagents.v2.model.capability_probe"
 _PROTOCOLS = "sagents.v2.model.protocols"
 _EXPORTS = {
+    "GeminiGenerateContentConfig": (
+        "sagents.v2.model.plugins.gemini_generate_content",
+        "GeminiGenerateContentConfig",
+    ),
+    "GeminiGenerateContentModelProvider": (
+        "sagents.v2.model.plugins.gemini_generate_content",
+        "GeminiGenerateContentModelProvider",
+    ),
     "AnthropicMessagesConfig": (
         "sagents.v2.model.plugins.anthropic_messages",
         "AnthropicMessagesConfig",

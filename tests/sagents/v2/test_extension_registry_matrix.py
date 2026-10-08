@@ -74,6 +74,7 @@ def test_builtin_inventory_contains_only_real_factories():
         "sage.model.openai-responses",
         "sage.model.openai-chat-completions",
         "sage.model.anthropic-messages",
+        "sage.model.gemini-generate-content",
         "sage.observability.filesystem",
         "sage.observability.noop",
         "sage.logging.filesystem",

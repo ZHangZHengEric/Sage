@@ -8601,68 +8601,75 @@ void main() {
     );
   });
 
-  testWidgets(
-    'model settings can create a new route in light and dark themes',
-    (tester) async {
-      for (final brightness in [Brightness.light, Brightness.dark]) {
-        tester.view.physicalSize = const Size(1200, 800);
-        tester.view.devicePixelRatio = 1;
-        tester.platformDispatcher.platformBrightnessTestValue = brightness;
-        SharedPreferences.setMockInitialValues({});
-        final api = _FakeApi();
-        final controller = WorkspaceController(
-          api: api,
-          preferencesLoader: SharedPreferences.getInstance,
-        );
+  for (final protocol in ['anthropic-messages', 'gemini-generate-content']) {
+    final protocolLabel = protocol == 'anthropic-messages'
+        ? 'Anthropic Messages'
+        : 'Gemini GenerateContent';
+    testWidgets(
+      'model settings can create $protocol routes in light and dark themes',
+      (tester) async {
+        for (final brightness in [Brightness.light, Brightness.dark]) {
+          tester.view.physicalSize = const Size(1200, 800);
+          tester.view.devicePixelRatio = 1;
+          tester.platformDispatcher.platformBrightnessTestValue = brightness;
+          SharedPreferences.setMockInitialValues({});
+          final api = _FakeApi();
+          final controller = WorkspaceController(
+            api: api,
+            preferencesLoader: SharedPreferences.getInstance,
+          );
 
-        await tester.pumpWidget(SageDesktopV2App(controller: controller));
-        await tester.pumpAndSettle();
-        await tester.tap(find.byKey(const ValueKey('settings-button')));
-        await tester.pumpAndSettle();
-        await tester.tap(find.byIcon(CupertinoIcons.slider_horizontal_3).first);
-        await tester.pumpAndSettle();
-        await tester.tap(find.byKey(const ValueKey('settings-model-add')));
-        await tester.pumpAndSettle();
+          await tester.pumpWidget(SageDesktopV2App(controller: controller));
+          await tester.pumpAndSettle();
+          await tester.tap(find.byKey(const ValueKey('settings-button')));
+          await tester.pumpAndSettle();
+          await tester.tap(
+            find.byIcon(CupertinoIcons.slider_horizontal_3).first,
+          );
+          await tester.pumpAndSettle();
+          await tester.tap(find.byKey(const ValueKey('settings-model-add')));
+          await tester.pumpAndSettle();
 
-        expect(
-          find.byKey(const ValueKey('settings-model-id-field')),
-          findsOneWidget,
-        );
-        await tester.tap(
-          find.byKey(const ValueKey('settings-model-protocol-picker')),
-        );
-        await tester.pumpAndSettle();
-        await tester.tap(find.text('Anthropic Messages').last);
-        await tester.pumpAndSettle();
-        expect(
-          find.byKey(const ValueKey('settings-model-id-field')),
-          findsOneWidget,
-        );
-        expect(find.text('Anthropic Messages'), findsOneWidget);
-        await tester.enterText(
-          find.byKey(const ValueKey('settings-model-id-field')),
-          'created-model',
-        );
-        await tester.tap(
-          find.byKey(const ValueKey('settings-model-capability-check')),
-        );
-        await tester.pumpAndSettle();
-        await tester.tap(find.byKey(const ValueKey('settings-model-save')));
-        await tester.pumpAndSettle();
+          expect(
+            find.byKey(const ValueKey('settings-model-id-field')),
+            findsOneWidget,
+          );
+          await tester.tap(
+            find.byKey(const ValueKey('settings-model-protocol-picker')),
+          );
+          await tester.pumpAndSettle();
+          await tester.tap(find.text(protocolLabel).last);
+          await tester.pumpAndSettle();
+          expect(
+            find.byKey(const ValueKey('settings-model-id-field')),
+            findsOneWidget,
+          );
+          expect(find.text(protocolLabel), findsOneWidget);
+          await tester.enterText(
+            find.byKey(const ValueKey('settings-model-id-field')),
+            'created-model',
+          );
+          await tester.tap(
+            find.byKey(const ValueKey('settings-model-capability-check')),
+          );
+          await tester.pumpAndSettle();
+          await tester.tap(find.byKey(const ValueKey('settings-model-save')));
+          await tester.pumpAndSettle();
 
-        expect(api.lastModelCreate?['model'], 'created-model');
-        expect(api.lastModelCreate?['protocol'], 'anthropic-messages');
-        expect(controller.modelProviders.last.id, 'model_created');
-        controller.dispose();
-        await tester.pumpWidget(const SizedBox.shrink());
-        await tester.pumpAndSettle();
-      }
-      tester.platformDispatcher.clearPlatformBrightnessTestValue();
-      tester.platformDispatcher.clearLocaleTestValue();
-      tester.view.resetPhysicalSize();
-      tester.view.resetDevicePixelRatio();
-    },
-  );
+          expect(api.lastModelCreate?['model'], 'created-model');
+          expect(api.lastModelCreate?['protocol'], protocol);
+          expect(controller.modelProviders.last.id, 'model_created');
+          controller.dispose();
+          await tester.pumpWidget(const SizedBox.shrink());
+          await tester.pumpAndSettle();
+        }
+        tester.platformDispatcher.clearPlatformBrightnessTestValue();
+        tester.platformDispatcher.clearLocaleTestValue();
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+      },
+    );
+  }
 
   for (final width in const [375.0, 700.0]) {
     testWidgets(

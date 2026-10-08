@@ -20,6 +20,10 @@ from sagents.v2.model.plugins.anthropic_messages import (
     AnthropicMessagesModelProvider,
 )
 from sagents.v2.model.contracts import ModelCapabilities
+from sagents.v2.model.plugins.gemini_generate_content import (
+    GeminiGenerateContentConfig,
+    GeminiGenerateContentModelProvider,
+)
 from sagents.v2.model.plugins.openai_compatible import (
     OpenAIChatCompletionsConfig,
     OpenAIChatCompletionsModelProvider,
@@ -38,12 +42,14 @@ class BuiltinModelProtocol(str, Enum):
     OPENAI_CHAT_COMPLETIONS = "openai-chat-completions"
     OPENAI_RESPONSES = "openai-responses"
     ANTHROPIC_MESSAGES = "anthropic-messages"
+    GEMINI_GENERATE_CONTENT = "gemini-generate-content"
 
 
 _PROTOCOL_PROVIDERS = {
     BuiltinModelProtocol.OPENAI_CHAT_COMPLETIONS: OpenAIChatCompletionsModelProvider,
     BuiltinModelProtocol.OPENAI_RESPONSES: OpenAIResponsesModelProvider,
     BuiltinModelProtocol.ANTHROPIC_MESSAGES: AnthropicMessagesModelProvider,
+    BuiltinModelProtocol.GEMINI_GENERATE_CONTENT: GeminiGenerateContentModelProvider,
 }
 
 
@@ -95,6 +101,20 @@ _DESCRIPTORS = (
         value=AnthropicMessagesModelProvider.description,
         default_base_url="https://api.anthropic.com",
         aliases=("anthropic", "claude", "claude-messages"),
+        capabilities=(
+            "streaming",
+            "tools",
+            "structured-output",
+            "reasoning",
+            "multimodal",
+        ),
+    ),
+    ModelProtocolDescriptor(
+        protocol=BuiltinModelProtocol.GEMINI_GENERATE_CONTENT,
+        name=GeminiGenerateContentModelProvider.name,
+        value=GeminiGenerateContentModelProvider.description,
+        default_base_url="https://generativelanguage.googleapis.com/v1beta",
+        aliases=("gemini", "google-gemini", "generate-content"),
         capabilities=(
             "streaming",
             "tools",
@@ -212,6 +232,18 @@ def create_registered_model_provider(
         if capability_profile is not None:
             config = implementation.apply_capability_profile(config, capability_profile)
         return OpenAIResponsesModelProvider(config, credential, client=client)
+    if protocol == BuiltinModelProtocol.GEMINI_GENERATE_CONTENT:
+        config = GeminiGenerateContentConfig(
+            **common,
+            reasoning_effort=route.request.reasoning_effort,
+            thinking_control=extra.pop("thinking_control", "auto"),
+            thinking_budget=extra.pop("thinking_budget", None),
+            include_thoughts=extra.pop("include_thoughts", True),
+            extra_body=extra,
+        )
+        if capability_profile is not None:
+            config = implementation.apply_capability_profile(config, capability_profile)
+        return GeminiGenerateContentModelProvider(config, credential, client=client)
     config = AnthropicMessagesConfig(
         **common,
         reasoning_effort=route.request.reasoning_effort,
