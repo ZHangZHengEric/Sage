@@ -608,8 +608,9 @@ class OpenAIResponsesModelProvider:
         }
         if tool.strict is not None:
             value["strict"] = tool.strict
-        if tool.output_schema is not None:
-            value["output_schema"] = tool.output_schema
+        # Historical function_call_output is a string or content parts, not a
+        # schema object. Advertising output_schema makes the gateway 422 the
+        # next turn when it validates those stored results.
         return value
 
     @classmethod

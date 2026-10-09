@@ -208,5 +208,5 @@ def test_a_peer_that_is_not_in_the_catalog_gives_the_agent_no_tools(tmp_path):
     # The Run asks what to do instead of delegating: the Tool the model named
     # is not one this Run was granted, because no peer was configured.
     assert interactions
-    assert interactions[0]["payload"]["reason_code"] == "tool.not_enabled"
+    assert interactions[0]["payload"]["reason_code"] == "tool.not_found"
     assert transport.sent == []

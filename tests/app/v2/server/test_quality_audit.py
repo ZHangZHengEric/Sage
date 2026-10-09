@@ -32,7 +32,12 @@ from tests.app.v2.server.test_skill_runtime import _command
 
 async def _attach_without_host_sandbox(*args, **kwargs):
     del args, kwargs
-    return EphemeralToolPlugin(), None, None
+
+    async def close():
+        pass
+
+    runtime = SimpleNamespace(sandbox=object(), close=close)
+    return EphemeralToolPlugin(), runtime, None
 
 
 @pytest.mark.asyncio
