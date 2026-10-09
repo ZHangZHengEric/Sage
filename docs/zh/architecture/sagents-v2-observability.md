@@ -1,3 +1,14 @@
+---
+layout: default
+title: 模型观测与 Langfuse
+parent: 架构
+nav_order: 10
+lang: zh
+ref: v2-detail-sagents-v2-observability
+---
+
+{% include lang_switcher.html %}
+
 # SAgents V2 模型观测与 Langfuse
 
 ## 职责

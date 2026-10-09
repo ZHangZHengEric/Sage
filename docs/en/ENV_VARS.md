@@ -39,6 +39,21 @@ ref: v2-ENV_VARS
 | `SAGE_SERVER_JAEGER_URL` | Optional OTLP endpoint |
 | `SAGE_SERVER_JAEGER_SERVICE_NAME` | `sage-server` |
 | `SAGE_SERVER_JAEGER_PUBLIC_URL` | `http://127.0.0.1:16686/jaeger` |
+| `SAGE_SERVER_TRACE_BACKEND` | Empty: use OTLP when `JAEGER_URL` is configured, otherwise `noop`; select `noop`, `otlp`, or `langfuse` |
+| `SAGE_SERVER_TRACE_OTLP_ENDPOINT` | Empty; falls back to the legacy Jaeger endpoint |
+| `SAGE_SERVER_TRACE_OTLP_PROTOCOL` | `grpc`; `grpc` or `http` |
+| `SAGE_SERVER_TRACE_OTLP_INSECURE` | `false`; enable only for plaintext gRPC |
+| `SAGE_SERVER_TRACE_SERVICE_NAME` | `sage-server` |
+| `SAGE_SERVER_TRACE_ENVIRONMENT` | `production` |
+| `SAGE_SERVER_TRACE_CONTENT_MODE` | `redacted`; `redacted` or `metadata` |
+| `SAGE_SERVER_TRACE_MAX_CONTENT_CHARS` | `16384`; between 256 and 65536 characters |
+| `SAGE_SERVER_TRACE_SAMPLE_RATE` | `1`; between 0 and 1 |
+| `SAGE_SERVER_TRACE_TIMEOUT_SECONDS` | `3`; greater than 0 and at most 30 seconds |
+| `SAGE_SERVER_LANGFUSE_BASE_URL` | Empty; required for the Langfuse backend |
+| `SAGE_SERVER_LANGFUSE_PUBLIC_URL` | Empty; optional project console URL |
+| `SAGE_SERVER_LANGFUSE_PUBLIC_KEY_ENV` | `LANGFUSE_PUBLIC_KEY`; environment variable containing the public key |
+| `SAGE_SERVER_LANGFUSE_SECRET_KEY_ENV` | `LANGFUSE_SECRET_KEY`; environment variable containing the secret key |
+| `SAGE_SERVER_LANGFUSE_INGESTION_VERSION` | `4`; `3` or `4` |
 | `SAGE_SERVER_PUBLIC_URL` | Empty: use the incoming request origin; set the public origin for A2A behind a proxy |
 
 Concurrency and capacity values must be positive. They are per-process limits, not distributed quotas. Redis is no longer a startup dependency or AG-UI replay store.
