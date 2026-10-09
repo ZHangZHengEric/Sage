@@ -13,9 +13,8 @@ import base64
 import hashlib
 import json
 import re
-from collections.abc import AsyncIterator, Callable
-from contextlib import AsyncExitStack, asynccontextmanager
-from typing import Any, Literal, Protocol
+from collections.abc import Callable
+from typing import Any, Literal
 from urllib.parse import urlsplit
 
 from jsonschema import Draft202012Validator
@@ -41,6 +40,8 @@ from sagents.v2.tool.contracts import (
     ToolExecutionResult,
 )
 from sagents.v2.tool._idempotency import call_fingerprint
+from sagents.v2.tool._mcp_session import McpClientSession as McpClientSession
+from sagents.v2.tool._mcp_session import sdk_session as _sdk_session
 
 
 class McpServerConfig(StrictModel):
@@ -76,12 +77,6 @@ class McpServerConfig(StrictModel):
         if self.command is not None:
             raise ValueError(f"{self.protocol} MCP cannot define command")
         return self
-
-
-class McpClientSession(Protocol):
-    async def initialize(self) -> Any: ...
-    async def list_tools(self) -> Any: ...
-    async def call_tool(self, name: str, arguments: dict[str, Any]) -> Any: ...
 
 
 McpSessionFactory = Callable[[McpServerConfig], Any]
@@ -718,56 +713,6 @@ class McpToolPlugin:
                 metadata=dict(metadata or {}),
             )
         )
-
-
-@asynccontextmanager
-async def _sdk_session(config: McpServerConfig) -> AsyncIterator[McpClientSession]:
-    """Open and initialize one official MCP Python SDK client session."""
-
-    try:
-        from mcp import ClientSession, StdioServerParameters
-        from mcp.client.sse import sse_client
-        from mcp.client.stdio import stdio_client
-        from mcp.client.streamable_http import streamablehttp_client
-    except ImportError as exc:  # pragma: no cover - depends on host packaging
-        raise RuntimeError("the optional 'mcp' package is not installed") from exc
-
-    headers = (
-        {"Authorization": f"Bearer {config.api_key.get_secret_value()}"}
-        if config.api_key
-        else None
-    )
-    async with AsyncExitStack() as stack:
-        if config.protocol == "stdio":
-            if not config.command:
-                raise ValueError("stdio MCP requires command")
-            streams = await stack.enter_async_context(
-                stdio_client(
-                    StdioServerParameters(
-                        command=config.command,
-                        args=list(config.args),
-                        env=dict(config.env),
-                    )
-                )
-            )
-            read, write = streams
-        elif config.protocol == "sse":
-            if not config.url:
-                raise ValueError("SSE MCP requires URL")
-            read, write = await stack.enter_async_context(
-                sse_client(config.url, headers=headers, timeout=config.timeout_seconds)
-            )
-        else:
-            if not config.url:
-                raise ValueError("streamable HTTP MCP requires URL")
-            read, write, _ = await stack.enter_async_context(
-                streamablehttp_client(
-                    config.url, headers=headers, timeout=config.timeout_seconds
-                )
-            )
-        session = await stack.enter_async_context(ClientSession(read, write))
-        await asyncio.wait_for(session.initialize(), timeout=config.timeout_seconds)
-        yield session
 
 
 def _value(value: Any, name: str, default: Any = None) -> Any:

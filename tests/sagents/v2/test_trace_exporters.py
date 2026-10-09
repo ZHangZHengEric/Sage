@@ -312,7 +312,7 @@ def test_real_http_export_uses_langfuse_endpoint_auth_and_protobuf():
             received.append(
                 (
                     self.path,
-                    dict(self.headers),
+                    {key.lower(): value for key, value in self.headers.items()},
                     self.rfile.read(int(self.headers["Content-Length"])),
                 )
             )
@@ -341,7 +341,7 @@ def test_real_http_export_uses_langfuse_endpoint_auth_and_protobuf():
         assert sink.failed_exports == 0
         path, headers, body = received[0]
         assert path == "/api/public/otel/v1/traces"
-        assert headers["Authorization"] == "Basic cGstdGVzdDpzay10ZXN0"
+        assert headers["authorization"] == "Basic cGstdGVzdDpzay10ZXN0"
         assert headers["x-langfuse-ingestion-version"] == "4"
         data = ExportTraceServiceRequest.FromString(body)
         exported = data.resource_spans[0].scope_spans[0].spans[0]
