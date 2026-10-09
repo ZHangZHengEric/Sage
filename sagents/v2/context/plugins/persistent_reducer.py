@@ -34,6 +34,9 @@ from sagents.v2.context.partition import (
     protected_boundary,
 )
 from sagents.v2.model.contracts import ModelMessage
+from sagents.v2.runtime.observability.logs import get_logger
+
+LOGGER = get_logger(__name__)
 
 
 class _ExtractiveConversationSummarizer:
@@ -378,13 +381,68 @@ class PersistentSummaryContextReducer:
             )
         target = max(1, min(self.summary_target_tokens, available - 128))
         prior_count = covered_count
-        text, covered_selected = await self._hierarchical_summary(
-            scope, previous, selected, target_tokens=target
+        checkpoint = previous
+        checkpoint_covered = 0
+
+        async def save_batch(text, covered_selected):
+            nonlocal checkpoint, checkpoint_covered
+            batch_message_count = covered_selected - checkpoint_covered
+            # Commit only complete source units, with canonical provenance and
+            # CAS. A later model failure must not lose this validated prefix.
+            canonical_end = max(indices[: prior_count + covered_selected]) + 1
+            all_covered = canonical[:canonical_end]
+            summary = create_summary(
+                scope=scope,
+                previous=checkpoint,
+                covered_messages=all_covered,
+                covered_digests=await message_digests_async(all_covered),
+                text=text,
+                estimator=self.estimator,
+            )
+            self._require_compression_gain(
+                checkpoint, selected[checkpoint_covered:covered_selected], summary
+            )
+            if over((*systems, self._summary_message(summary), *planned_retained)):
+                raise self._error(
+                    "context.budget_exhausted",
+                    "summary exceeds its reserved request budget",
+                )
+            checkpoint = await self.store.save(
+                summary,
+                expected_revision=(
+                    checkpoint.revision
+                    if checkpoint is not None
+                    else stored.revision
+                    if stored
+                    else None
+                ),
+            )
+            checkpoint_covered = covered_selected
+            LOGGER.info(
+                "context.summary.checkpoint_saved",
+                "Saved validated conversation summary batch",
+                session_id=scope.session_id,
+                run_id=scope.run_id,
+                attributes={
+                    "summary_id": checkpoint.summary_id,
+                    "summary_revision": checkpoint.revision,
+                    "covered_message_count": checkpoint.source_message_count,
+                    "newly_covered_message_count": batch_message_count,
+                    "projection_covered_message_count": covered_selected,
+                    "remaining_selected_message_count": len(selected)
+                    - covered_selected,
+                    "estimated_summary_tokens": checkpoint.estimated_tokens,
+                },
+            )
+
+        _, covered_selected = await self._hierarchical_summary(
+            scope,
+            previous,
+            selected,
+            target_tokens=target,
+            on_batch_completed=save_batch,
         )
         leftover = selected[covered_selected:]
-        # Tool-context followups can move after results in the inference view.
-        # Whole units are selected, so their highest source position defines
-        # the canonical prefix even when positions within a unit are reordered.
         canonical_end = max(indices[: prior_count + covered_selected]) + 1
         all_covered = canonical[:canonical_end]
         covered_end = prior_count + covered_selected
@@ -394,36 +452,9 @@ class PersistentSummaryContextReducer:
             else ()
         )
         retained = (*anchor, *leftover, *suffix)
-        covered_digests = await message_digests_async(all_covered)
-        summary = create_summary(
-            scope=scope,
-            previous=previous,
-            covered_messages=all_covered,
-            covered_digests=covered_digests,
-            text=text,
-            estimator=self.estimator,
-        )
-        self._require_compression_gain(previous, selected[:covered_selected], summary)
-        result = (*systems, self._summary_message(summary), *retained)
-        # Validate the summary with the suffix and request anchor that must
-        # remain even after the selected prefix is fully summarized. Only the
-        # temporary leftover may exceed this projection's reserved budget;
-        # persisting an oversized summary would poison the next checkpoint.
-        if over((*systems, self._summary_message(summary), *planned_retained)):
-            raise self._error(
-                "context.budget_exhausted",
-                "summary exceeds its reserved request budget",
-            )
-        saved = await self.store.save(
-            summary,
-            expected_revision=(
-                previous.revision
-                if previous is not None
-                else stored.revision
-                if stored
-                else None
-            ),
-        )
+        assert checkpoint is not None
+        saved = checkpoint
+        result = (*systems, self._summary_message(saved), *retained)
         if over(result):
             raise self._error(
                 "context.budget_exhausted",
@@ -437,7 +468,7 @@ class PersistentSummaryContextReducer:
         )
 
     async def _hierarchical_summary(
-        self, scope, previous, messages, *, target_tokens=None
+        self, scope, previous, messages, *, target_tokens=None, on_batch_completed=None
     ):
         target = target_tokens or self.summary_target_tokens
         # Summary prompts describe media rather than sending pixels. Budget the
@@ -500,6 +531,7 @@ class PersistentSummaryContextReducer:
         # persist it, and let the next turn continue. Do not fail the Run.
         work = batches[: self.max_summary_calls]
         rolling = previous.text if previous else None
+        covered = 0
         for batch in work:
             # Intermediate output can be larger than the requested target. Check
             # its actual size before sending it to the next summary request.
@@ -525,7 +557,9 @@ class PersistentSummaryContextReducer:
                 raise self._error(
                     "context.summary_empty", "summarizer returned an empty summary"
                 )
-        covered = sum(len(batch) for batch in work)
+            covered += len(batch)
+            if on_batch_completed is not None:
+                await on_batch_completed(rolling.strip(), covered)
         return rolling.strip(), covered
 
     @staticmethod
@@ -540,6 +574,19 @@ class PersistentSummaryContextReducer:
             return None, payload
         actual = await message_digests_async(payload[:count])
         if actual != summary.covered_message_digests:
+            # Existing checkpoints used full message metadata. Accept their
+            # exact legacy hash or the provenance-free hash for each message;
+            # an active Run can contain both reconstructed and new messages.
+            legacy = await message_digests_async(
+                payload[:count], include_source_metadata=True
+            )
+            if all(
+                saved in {current, old}
+                for saved, current, old in zip(
+                    summary.covered_message_digests, actual, legacy, strict=True
+                )
+            ):
+                return summary, payload[count:]
             # Never apply a summary to a rewritten or fork-incompatible prefix.
             # The caller keeps the checkpoint so a later turn can replace it.
             return None, payload

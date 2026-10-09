@@ -275,6 +275,11 @@ class RecordingModelProvider:
                     finalized = True
                 yield event
         except BaseException as exc:
+            # A consumer may close immediately after COMPLETED (summaries do
+            # this). GeneratorExit/cancellation must not overwrite the already
+            # authoritative successful diagnostic and span.
+            if finalized:
+                raise
             await persist_first_token()
             await self._diagnose(
                 "fail_model_request",
