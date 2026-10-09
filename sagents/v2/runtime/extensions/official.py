@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import importlib.util
 import inspect
+import os
 
 from sagents.v2.agent.policy import (
     BudgetRule,
@@ -63,6 +64,8 @@ from sagents.v2.runtime.observability import (
     NoopLogSink,
     NoopTraceSink,
     OtlpTraceSink,
+    LangfuseTraceSink,
+    langfuse_available,
     StdoutLogSink,
     otel_available,
 )
@@ -776,6 +779,7 @@ def _register_infrastructure(registry: ExtensionRegistry) -> None:
             service_name=str(context.config.get("service_name") or "sage"),
             protocol=str(context.config.get("protocol") or "grpc"),
             insecure=bool(context.config.get("insecure", True)),
+            **_trace_options(context.config),
         ),
         scopes={ExtensionScope.PROCESS},
         availability=ExtensionAvailability(
@@ -805,9 +809,35 @@ def _register_infrastructure(registry: ExtensionRegistry) -> None:
                     "default": "grpc",
                 },
                 "insecure": {"type": "boolean", "default": True},
+                **_TRACE_PROPERTIES,
             },
             "additionalProperties": False,
         },
+        capabilities={"exports_otlp": True},
+    )
+    _one(
+        registry,
+        LangfuseTraceSink,
+        "observability.trace-sink",
+        lambda context, dependencies: LangfuseTraceSink(
+            base_url=context.config["base_url"],
+            public_key=os.environ.get(context.config.get("public_key_env", "LANGFUSE_PUBLIC_KEY"), ""),
+            secret_key=os.environ.get(context.config.get("secret_key_env", "LANGFUSE_SECRET_KEY"), ""),
+            service_name=context.config.get("service_name", "sage"),
+            ingestion_version=context.config.get("ingestion_version", 4),
+            **_trace_options(context.config),
+        ),
+        scopes={ExtensionScope.PROCESS},
+        availability=ExtensionAvailability(available=langfuse_available(),
+            reason=None if langfuse_available() else "optional OTLP HTTP exporter is not installed"),
+        config_schema={"type": "object", "required": ["base_url"], "properties": {
+            "base_url": {"type": "string", "minLength": 1},
+            "public_key_env": {"type": "string", "default": "LANGFUSE_PUBLIC_KEY"},
+            "secret_key_env": {"type": "string", "default": "LANGFUSE_SECRET_KEY"},
+            "service_name": {"type": "string", "default": "sage"},
+            "ingestion_version": {"type": "integer", "enum": [3, 4], "default": 4},
+            **_TRACE_PROPERTIES,
+        }, "additionalProperties": False},
         capabilities={"exports_otlp": True},
     )
     _one(
@@ -1557,3 +1587,18 @@ def _model_factory(context, dependencies):
         client=context.config.get("client"),
         provider_instance_id=context.config.get("provider_instance_id"),
     )
+
+
+_TRACE_PROPERTIES = {
+    "environment": {"type": "string", "default": "production"},
+    "content_mode": {"type": "string", "enum": ["metadata", "redacted"], "default": "redacted"},
+    "max_content_chars": {"type": "integer", "minimum": 256, "maximum": 65536, "default": 16384},
+    "sample_rate": {"type": "number", "minimum": 0, "maximum": 1, "default": 1.0},
+    "max_queue_size": {"type": "integer", "minimum": 1, "default": 2048},
+    "max_active_spans": {"type": "integer", "minimum": 1, "default": 4096},
+    "timeout_seconds": {"type": "number", "exclusiveMinimum": 0, "maximum": 30, "default": 3.0},
+}
+
+
+def _trace_options(config):
+    return {key: config[key] for key in _TRACE_PROPERTIES if key in config}

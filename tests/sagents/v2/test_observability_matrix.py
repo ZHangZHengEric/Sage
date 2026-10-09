@@ -642,10 +642,10 @@ async def test_recording_provider_emits_model_request_spans(tmp_path):
     )
     [event async for event in recording.stream(request)]
 
-    from sagents.v2.runtime.observability import session_trace_id
 
     assert traces.started[0].name == "model.request"
-    assert traces.started[0].trace_id == session_trace_id("session_1")
+    assert len(traces.started[0].trace_id) == 32
+    assert traces.started[0].parent_span_id is None
     assert traces.events[0][1].name == "first_token"
     ended = traces.ended[0]
     assert ended.status is TraceStatus.OK
@@ -781,10 +781,9 @@ async def test_otlp_trace_sink_maps_spans_when_sdk_is_installed():
 
 
 @pytest.mark.asyncio
-async def test_loop_emits_session_scoped_run_model_and_tool_spans():
+async def test_loop_emits_execution_scoped_run_model_and_tool_spans():
     from sagents.v2.runtime.observability import (
         NoopDiagnosticSink,
-        session_trace_id,
     )
 
     from tests.sagents.v2.test_agent_loop_matrix import (
@@ -828,7 +827,8 @@ async def test_loop_emits_session_scoped_run_model_and_tool_spans():
     model_spans = [span for span in traces.started if span.name == "model.request"]
     run_span = by_name["agent.run"]
     tool_span = by_name["tool.call"]
-    expected_trace = session_trace_id(handle.session_id)
+    expected_trace = run_span.trace_id
+    assert run_span.parent_span_id is None
     assert run_span.trace_id == expected_trace
     assert {span.trace_id for span in traces.started} == {expected_trace}
     assert all(span.parent_span_id == run_span.span_id for span in model_spans)
@@ -953,7 +953,7 @@ async def test_tool_result_failure_is_logged_as_error_without_result_payload():
 
 
 @pytest.mark.asyncio
-async def test_forked_child_run_joins_parent_session_trace():
+async def test_forked_child_run_joins_parent_execution_trace():
     from sagents.v2.agent.multi_agent import (
         AgentDescriptor,
         DelegationTask,
@@ -967,7 +967,7 @@ async def test_forked_child_run_joins_parent_session_trace():
         PrincipalType,
         RequestContext,
     )
-    from sagents.v2.runtime.observability import NoopDiagnosticSink, session_trace_id
+    from sagents.v2.runtime.observability import NoopDiagnosticSink
     from sagents.v2.testing.runtime import ephemeral_runtime
     from sagents.v2.tool import (
         InMemoryToolCatalog,
@@ -1112,7 +1112,8 @@ async def test_forked_child_run_joins_parent_session_trace():
     parent_run, child_run = child_runs
     tool_span = next(span for span in traces.started if span.name == "tool.call")
     model_span = next(span for span in traces.started if span.name == "model.request")
-    expected_trace = session_trace_id(parent.session_id)
+    expected_trace = parent_run.trace_id
+    assert parent_run.parent_span_id is None
     assert {span.trace_id for span in traces.started} == {expected_trace}
     assert child_run.session_id != parent.session_id
     assert child_run.attributes["root_session_id"] == parent.session_id

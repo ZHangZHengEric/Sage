@@ -12,6 +12,7 @@ class NoopTraceSink:
     name = "No-op trace sink"
     description = "Discards trace spans."
     format_version = "sage.trace/v1"
+    content_mode = "metadata"
 
     def start_span(self, span: TraceSpan) -> None:
         del span
