@@ -380,6 +380,87 @@ def test_openai_responses_preserves_image_blocks_in_tool_output():
     }
 
 
+def test_openai_responses_omits_output_schema_when_tool_result_is_plain_text():
+    provider = OpenAIResponsesModelProvider(
+        OpenAIResponsesConfig(model="gpt-test", capabilities=CAPABILITIES),
+        client=object(),
+    )
+    outgoing = provider.diagnostic_request(
+        request(
+            tools=(
+                ModelToolDefinition(
+                    name="load_skill",
+                    description="Load one skill",
+                    input_schema={
+                        "type": "object",
+                        "properties": {"skill_name": {"type": "string"}},
+                    },
+                    strict=True,
+                    output_schema={
+                        "type": "object",
+                        "properties": {
+                            "skill_name": {"type": "string"},
+                            "workspace_path": {"type": "string"},
+                            "content_hash": {"type": "string"},
+                            "active_skills": {
+                                "type": "array",
+                                "items": {"type": "string"},
+                            },
+                        },
+                        "required": [
+                            "skill_name",
+                            "workspace_path",
+                            "content_hash",
+                            "active_skills",
+                        ],
+                        "additionalProperties": False,
+                    },
+                ),
+            ),
+            messages=(
+                ModelMessage(
+                    role="assistant",
+                    tool_calls=(
+                        ModelToolCall(
+                            tool_call_id="call_skill",
+                            name="load_skill",
+                            arguments={"skill_name": "yiii-short-video-production"},
+                        ),
+                    ),
+                ),
+                ModelMessage(
+                    role="tool",
+                    tool_call_id="call_skill",
+                    content=(
+                        TextBlock(
+                            text=(
+                                "Skill yiii-short-video-production loaded. "
+                                "Active skills: yiii-short-video-production."
+                            )
+                        ),
+                    ),
+                    metadata={
+                        "skill_name": "yiii-short-video-production",
+                        "workspace_path": "/tmp/skill",
+                        "content_hash": "sha256:abc",
+                        "active_skills": ["yiii-short-video-production"],
+                    },
+                ),
+            ),
+        )
+    )
+
+    assert "output_schema" not in outgoing["tools"][0]
+    assert outgoing["input"][1] == {
+        "type": "function_call_output",
+        "call_id": "call_skill",
+        "output": (
+            "Skill yiii-short-video-production loaded. "
+            "Active skills: yiii-short-video-production."
+        ),
+    }
+
+
 @pytest.mark.asyncio
 async def test_openai_responses_retries_rejected_reasoning_control_once():
     error = RuntimeError("reasoning is unsupported by this deployment")
