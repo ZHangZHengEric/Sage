@@ -73,8 +73,8 @@ Desktop 在 `component_configs["execution.sandbox"].network` 配置网络策略�
 Desktop 为代理模式默认启用 HTTP/HTTPS。CLI 支持：
 
 ```bash
-sage v2 run "任务" --network-mode allowlist --network-host pypi.org --network-host files.pythonhosted.org
-sage v2 run "任务" --network-mode proxy --network-proxy http://127.0.0.1:8080
+sage v2 run "task" --network-mode allowlist --network-host pypi.org --network-host files.pythonhosted.org
+sage v2 run "task" --network-mode proxy --network-proxy http://127.0.0.1:8080
 ```
 
 `run`、`chat`、`resume` 均支持这些参数。`--network-port` 可重复指定端口；`--network-allow-private` 显式允许私网目标。`none`/`unrestricted` 不能附带白名单或代理参数。Server 宿主可向 `workspace_sandbox_spec` 或 `provision_workspace` 显式传入 `NetworkPolicy`。直接构造规格时，`unrestricted` 需设置 `deny_private_networks=false`，代理模式需显式选择 `allowed_schemes`。
