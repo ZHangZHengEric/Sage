@@ -113,6 +113,50 @@ async def test_recording_stream_close_immediately_returns_inner_budget_slot():
 
 
 @pytest.mark.asyncio
+async def test_recording_close_after_completed_does_not_overwrite_success():
+    from unittest.mock import AsyncMock
+    from sagents.v2.model import (
+        ModelRequest,
+        ModelStreamEvent,
+        ModelEventKind,
+        ModelResponse,
+        RecordingModelProvider,
+    )
+
+    closed = []
+
+    class Provider:
+        async def stream(self, request):
+            try:
+                yield ModelStreamEvent(
+                    kind=ModelEventKind.COMPLETED,
+                    response=ModelResponse(
+                        response_id="summary-response",
+                        text="summary",
+                        finish_reason="stop",
+                    ),
+                )
+                await asyncio.Event().wait()
+            finally:
+                closed.append(True)
+
+    sink = AsyncMock()
+    provider = RecordingModelProvider(
+        Provider(), sink=sink, session_id_resolver=AsyncMock(return_value="session")
+    )
+    stream = provider.stream(
+        ModelRequest(
+            request_id="request", run_id="run", model_binding="summary", messages=()
+        )
+    )
+    assert (await anext(stream)).kind == ModelEventKind.COMPLETED
+    await stream.aclose()
+    sink.complete_model_request.assert_awaited_once()
+    sink.fail_model_request.assert_not_awaited()
+    assert closed == [True]
+
+
+@pytest.mark.asyncio
 async def test_queue_rejects_overflow_without_invoking_provider_and_preserves_fifo():
     from sagents.v2.contracts.errors import SageV2Error
 

@@ -64,11 +64,7 @@ def summary_safe_block_text(block: Any) -> str:
             sort_keys=True,
         )
     if isinstance(block, ImageBlock):
-        alt = (
-            f", alt={_redact_data_urls(block.alt)[:200]}"
-            if block.alt
-            else ""
-        )
+        alt = f", alt={_redact_data_urls(block.alt)[:200]}" if block.alt else ""
         return f"[image attached: mime={block.mime_type}{alt}]"
     if isinstance(block, AudioBlock):
         return f"[audio attached: mime={block.mime_type}]"
@@ -147,9 +143,20 @@ class ConversationSummarizer(Protocol):
     async def summarize(self, request: SummarizationRequest) -> str: ...
 
 
-def message_digest(message: ModelMessage) -> str:
+def message_digest(
+    message: ModelMessage, *, include_source_metadata: bool = False
+) -> str:
+    value = message.model_dump(mode="json")
+    if not include_source_metadata:
+        # Event reconstruction adds provenance that the active Run ledger does
+        # not carry. It must not invalidate an otherwise identical summary.
+        value["metadata"] = {
+            key: item
+            for key, item in value["metadata"].items()
+            if key not in {"source_session_id", "source_run_id", "source_item_id"}
+        }
     payload = json.dumps(
-        message.model_dump(mode="json"),
+        value,
         sort_keys=True,
         separators=(",", ":"),
         ensure_ascii=False,
@@ -157,13 +164,16 @@ def message_digest(message: ModelMessage) -> str:
     return f"sha256:{hashlib.sha256(payload).hexdigest()}"
 
 
-async def message_digests_async(messages):
+async def message_digests_async(messages, *, include_source_metadata: bool = False):
     from copy import deepcopy
     from sagents.v2._concurrency import bounded_to_thread
 
     def prepare():
         snapshot = deepcopy(messages)
-        return lambda: tuple(message_digest(message) for message in snapshot)
+        return lambda: tuple(
+            message_digest(message, include_source_metadata=include_source_metadata)
+            for message in snapshot
+        )
 
     return await bounded_to_thread("context-cpu", None, prepare=prepare)
 

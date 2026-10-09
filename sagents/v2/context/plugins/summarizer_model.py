@@ -7,6 +7,8 @@ from sagents.v2._concurrency import auxiliary_capacity
 import json
 from typing import Any
 
+import httpx
+
 from sagents.v2.context.summary import SummarizationRequest, summary_safe_block_text
 from sagents.v2.contracts.common import new_id
 from sagents.v2.contracts.errors import ErrorCategory, RuntimeErrorInfo, SageV2Error
@@ -17,8 +19,10 @@ from sagents.v2.model.provider import (
     ModelProvider,
     auxiliary_model_timeout_error,
 )
+from sagents.v2.runtime.observability.logs import get_logger
 
 DEFAULT_SUMMARY_MODEL_TIMEOUT_SECONDS = 300.0
+LOGGER = get_logger(__name__)
 
 
 class ModelConversationSummarizer:
@@ -32,6 +36,7 @@ class ModelConversationSummarizer:
     plugin_id = "sage.context.summarizer.model"
     name = "Model conversation summarizer"
     description = "Uses a model binding to write conversation summaries."
+    _MAX_TIMEOUT_RETRIES = 3
     _FIELDS = (
         "summary",
         "decisions",
@@ -87,14 +92,132 @@ arrays of strings. Do not invent facts and do not wrap the JSON in Markdown."""
 
     async def summarize(self, request: SummarizationRequest) -> str:
         async with auxiliary_capacity("context-summary"):
-            progress = {"attempt": 0, "text_delta_count": 0, "reasoning_delta_count": 0}
-            try:
-                # Include capabilities discovery and both format attempts in
-                # one bounded operation, not just each streaming iteration.
-                async with asyncio.timeout(self.timeout_seconds):
-                    return await self._summarize(request, progress)
-            except TimeoutError as exc:
-                raise self._timeout_error("total", progress) from exc
+            logger = LOGGER.bind(
+                session_id=request.scope.session_id,
+                run_id=request.scope.run_id,
+                correlation_id=new_id("summary_operation"),
+            )
+            started = asyncio.get_running_loop().time()
+            for timeout_attempt in range(self._MAX_TIMEOUT_RETRIES + 1):
+                progress = {
+                    "attempt": 0,
+                    "text_delta_count": 0,
+                    "reasoning_delta_count": 0,
+                    "timeout_attempt": timeout_attempt + 1,
+                    "timeout_retry_limit": self._MAX_TIMEOUT_RETRIES,
+                }
+                attributes = {
+                    "model_binding": self.model_binding,
+                    "source_message_count": len(request.messages),
+                    "target_tokens": request.target_tokens,
+                    "timeout_seconds": self.timeout_seconds,
+                    "idle_timeout_seconds": self.idle_timeout_seconds,
+                    **progress,
+                }
+                logger.info(
+                    "context.summary.attempt_started",
+                    "Starting conversation summary attempt",
+                    attributes=attributes,
+                )
+                try:
+                    try:
+                        # Each timeout retry gets a fresh total budget, including
+                        # capabilities discovery and both output-format attempts.
+                        async with asyncio.timeout(self.timeout_seconds):
+                            result = await self._summarize(request, progress)
+                    except TimeoutError as exc:
+                        raise self._timeout_error("total", progress) from exc
+                except Exception as exc:
+                    timeout_error = self._as_timeout_error(exc, progress)
+                    if timeout_error is None:
+                        logger.exception(
+                            "context.summary.failed",
+                            "Conversation summary failed",
+                            exc,
+                            attributes={**attributes, **progress},
+                        )
+                        raise
+                    exhausted = timeout_attempt == self._MAX_TIMEOUT_RETRIES
+                    delay = 0 if exhausted else 2 ** (timeout_attempt + 1)
+                    attributes.update(
+                        {
+                            **timeout_error.info.metadata,
+                            "retry_delay_seconds": delay,
+                            "elapsed_seconds": asyncio.get_running_loop().time()
+                            - started,
+                            "timeout_retries_exhausted": exhausted,
+                        }
+                    )
+                    if exhausted:
+                        error = SageV2Error(
+                            timeout_error.info.model_copy(
+                                update={
+                                    "metadata": {
+                                        **timeout_error.info.metadata,
+                                        "timeout_retries_exhausted": True,
+                                    }
+                                }
+                            )
+                        )
+                        logger.exception(
+                            "context.summary.timeout_exhausted",
+                            "Conversation summary timeout retries exhausted",
+                            error,
+                            attributes=attributes,
+                        )
+                        raise error from exc
+                    logger.warning(
+                        "context.summary.timeout_retry",
+                        "Conversation summary timed out; retrying",
+                        error=timeout_error,
+                        attributes=attributes,
+                    )
+                    await asyncio.sleep(delay)
+                else:
+                    logger.info(
+                        "context.summary.completed",
+                        "Conversation summary completed",
+                        attributes={
+                            **attributes,
+                            **progress,
+                            "elapsed_seconds": asyncio.get_running_loop().time()
+                            - started,
+                            "output_characters": len(result),
+                        },
+                    )
+                    return result
+            raise AssertionError("unreachable summary retry state")
+
+    def _as_timeout_error(self, error, progress):
+        if (
+            isinstance(error, SageV2Error)
+            and error.info.code == "context.summarizer.model_timeout"
+        ):
+            return error
+        # Official providers wrap SDK errors but preserve their exception cause.
+        # Recognize transport timeouts by type, never by matching arbitrary text.
+        cause = error
+        seen = set()
+        while cause is not None and id(cause) not in seen:
+            seen.add(id(cause))
+            if isinstance(cause, (TimeoutError, httpx.TimeoutException)):
+                return SageV2Error(
+                    RuntimeErrorInfo(
+                        code="context.summarizer.model_timeout",
+                        category=ErrorCategory.PROVIDER_TRANSIENT,
+                        message="Conversation summary provider request timed out",
+                        retryable=True,
+                        safe_to_resume=True,
+                        metadata={
+                            "plugin_id": self.plugin_id,
+                            "timeout_kind": "provider",
+                            "provider_exception_type": type(cause).__name__,
+                            **progress,
+                        },
+                    )
+                )
+            cause = cause.__cause__
+        return None
 
     def _timeout_error(self, kind, progress):
         seconds = self.timeout_seconds if kind == "total" else self.idle_timeout_seconds
@@ -196,6 +319,7 @@ arrays of strings. Do not invent facts and do not wrap the JSON in Markdown."""
                     "response_language": request.response_language,
                 },
             )
+            progress["model_request_id"] = model_request.request_id
             completed = None
             stream = self.model.stream(model_request)
             try:

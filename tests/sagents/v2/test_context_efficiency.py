@@ -230,6 +230,71 @@ async def test_summary_work_limit_saves_partial_prefix_for_the_next_turn():
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("failure", ["timeout", "cancel", "empty", "oversized"])
+async def test_summary_checkpoints_completed_batches_before_later_failure(failure):
+    from sagents.v2.context import ModelConversationSummarizer
+
+    class PartialSummary:
+        def __init__(self):
+            self.requests = []
+            self.fail = True
+
+        async def summarize(self, request):
+            self.requests.append(request)
+            if self.fail and len(self.requests) == 2:
+                if failure == "cancel":
+                    raise asyncio.CancelledError()
+                if failure == "timeout":
+                    raise ModelConversationSummarizer(None)._timeout_error("idle", {})
+                return "" if failure == "empty" else "expanded " * 2000
+            return "saved batch summary"
+
+    summarizer = PartialSummary()
+    store = InMemoryConversationSummaryStore()
+    source = tuple(message("history " * 70 + str(i)) for i in range(12)) + (
+        message("latest", "user"),
+    )
+    original = tuple(m.model_dump() for m in source)
+    reducer = PersistentSummaryContextReducer(
+        store,
+        summarizer=summarizer,
+        summary_target_tokens=32,
+        max_summary_source_tokens=600,
+        max_summary_calls=4,
+    )
+    budget = ContextBudget(max_input_tokens=1000, protected_recent_tokens=0)
+    with pytest.raises(asyncio.CancelledError if failure == "cancel" else SageV2Error):
+        await reducer.reduce(source, budget, scope=scope())
+    saved = await store.get("session")
+    assert saved is not None and saved.revision == 1
+    assert saved.source_message_count == len(summarizer.requests[0].messages)
+    assert saved.text == "saved batch summary"
+    completed_batch = summarizer.requests[0].messages
+    summarizer.requests.clear()
+    summarizer.fail = False
+    # A fresh reducer represents the next Run/process using the durable port.
+    reducer = PersistentSummaryContextReducer(
+        store,
+        summarizer=summarizer,
+        summary_target_tokens=32,
+        max_summary_source_tokens=600,
+        max_summary_calls=4,
+    )
+    try:
+        await reducer.reduce(source, budget, scope=scope())
+    except SageV2Error as exc:
+        assert exc.info.code == "context.budget_exhausted"
+    assert summarizer.requests[0].previous_summary == saved.text
+    assert not any(
+        m in completed_batch for r in summarizer.requests for m in r.messages
+    )
+    assert (
+        await store.get("session")
+    ).source_message_count > saved.source_message_count
+    assert tuple(m.model_dump() for m in source) == original
+
+
+@pytest.mark.asyncio
 async def test_summary_batches_keep_tool_pairs_together_and_bound_source():
     summarizer = Summary()
     call = ModelToolCall(tool_call_id="call", name="read", arguments={})
@@ -479,6 +544,7 @@ async def test_public_builder_rejects_unbounded_input_before_model_request(tmp_p
 @pytest.mark.asyncio
 async def test_summary_capacity_is_shared_across_plugin_instances():
     from sagents.v2.context import ModelConversationSummarizer
+    from sagents.v2.context.summary import SummarizationRequest
 
     active = peak = 0
 
@@ -493,8 +559,9 @@ async def test_summary_capacity_is_shared_across_plugin_instances():
             finally:
                 active -= 1
 
+    request = SummarizationRequest(scope=scope(), messages=(), target_tokens=512)
     values = await asyncio.gather(
-        *(SummaryPlugin(None).summarize(None) for _ in range(16))
+        *(SummaryPlugin(None).summarize(request) for _ in range(16))
     )
     assert values == ["summary"] * 16
     assert peak == 4

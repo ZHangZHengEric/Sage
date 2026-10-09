@@ -190,6 +190,110 @@ async def test_existing_summary_is_reused_and_rolled_forward_on_later_turns():
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("legacy", [False, True])
+async def test_summary_survives_history_provenance_reconstruction(legacy):
+    from sagents.v2.context.summary import message_digests_async
+
+    store = InMemoryConversationSummaryStore()
+    summarizer = RecordingSummarizer()
+    reducer = PersistentSummaryContextReducer(
+        store,
+        summarizer=summarizer,
+        protected_recent_units=2,
+        summary_target_tokens=128,
+    )
+    source = ledger()
+    # Simulate a prefix from prior Runs, followed by new active-Run messages.
+    source = (
+        source[0],
+        source[1].model_copy(
+            update={
+                "metadata": {"source_run_id": "old-run", "source_item_id": "old-item"}
+            }
+        ),
+        *source[2:],
+    )
+    budget = ContextBudget(max_input_tokens=100_000, max_messages=4)
+    await reducer.reduce(source, budget, scope=scope())
+    saved = await store.get("session_1")
+    if legacy:
+        saved = saved.model_copy(
+            update={
+                "covered_message_digests": await message_digests_async(
+                    source[1:4], include_source_metadata=True
+                )
+            }
+        )
+        await store.save(saved, expected_revision=saved.revision)
+    rebuilt = tuple(
+        m.model_copy(
+            update={
+                "metadata": {
+                    **m.metadata,
+                    "source_session_id": "session_1",
+                    "source_run_id": "rebuilt-run",
+                    "source_item_id": f"item-{i}",
+                }
+            }
+        )
+        if i >= 2
+        else m
+        for i, m in enumerate(source)
+    )
+    result = await reducer.reduce(rebuilt, budget, scope=scope())
+    assert result.strategy == "persistent_summary"
+    assert len(summarizer.requests) == 1
+    assert await store.get("session_1") == saved
+    for field in ("content", "metadata"):
+        changed = rebuilt[1].model_copy(
+            update={
+                field: (
+                    (TextBlock(text="rewritten fact"),)
+                    if field == "content"
+                    else {**rebuilt[1].metadata, "tool_context": True}
+                )
+            }
+        )
+        validated, _ = await reducer._validated_previous(saved, (changed, *rebuilt[2:]))
+        assert validated is None
+
+
+@pytest.mark.asyncio
+async def test_exhausted_summary_timeout_preserves_previous_summary_and_history(
+    monkeypatch,
+):
+    store = InMemoryConversationSummaryStore()
+    reducer = PersistentSummaryContextReducer(
+        store, summarizer=RecordingSummarizer(), protected_recent_units=2
+    )
+    budget = ContextBudget(max_input_tokens=100_000, max_messages=4)
+    await reducer.reduce(ledger(), budget, scope=scope())
+    previous = await store.get("session_1")
+    source = (
+        *ledger(),
+        ModelMessage(role="assistant", content=(TextBlock(text="new answer"),)),
+        ModelMessage(role="user", content=(TextBlock(text="new request"),)),
+    )
+    original = tuple(message.model_dump() for message in source)
+    summarizer = ModelConversationSummarizer(ScriptedModelProvider(()))
+
+    async def fail(request, progress):
+        raise summarizer._timeout_error("idle", progress)
+
+    async def sleep(delay):
+        pass
+
+    monkeypatch.setattr(summarizer, "_summarize", fail)
+    monkeypatch.setattr(asyncio, "sleep", sleep)
+    reducer.summarizer = summarizer
+    with pytest.raises(SageV2Error) as caught:
+        await reducer.reduce(source, budget, scope=scope())
+    assert caught.value.info.metadata["timeout_retries_exhausted"] is True
+    assert await store.get("session_1") == previous
+    assert tuple(message.model_dump() for message in source) == original
+
+
+@pytest.mark.asyncio
 async def test_rewritten_prefix_never_applies_stale_summary():
     store = InMemoryConversationSummaryStore()
     summarizer = RecordingSummarizer()
@@ -532,6 +636,7 @@ async def test_model_summarizer_bounds_the_entire_auxiliary_stream():
             return events()
 
     summarizer = ModelConversationSummarizer(SlowSummaryModel(), timeout_seconds=0.01)
+    summarizer._MAX_TIMEOUT_RETRIES = 0  # Test the deadline independently of backoff.
 
     with pytest.raises(SageV2Error) as caught:
         await summarizer.summarize(
@@ -599,6 +704,7 @@ async def test_summary_stream_distinguishes_progress_stalls_and_completion(mode)
         timeout_seconds=0.08 if mode == "total" else 0.5,
         idle_timeout_seconds=0.06,
     )
+    summarizer._MAX_TIMEOUT_RETRIES = 0
     request = SummarizationRequest(
         scope=scope(), messages=ledger()[1:4], target_tokens=512
     )
@@ -618,6 +724,104 @@ def test_summary_has_a_separate_total_budget_from_short_auxiliary_calls():
     summarizer = ModelConversationSummarizer(ScriptedModelProvider(()))
     assert summarizer.timeout_seconds == 300
     assert summarizer.idle_timeout_seconds == 60
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ["idle", "total", "provider"])
+@pytest.mark.parametrize("recover", [True, False])
+async def test_summary_timeout_retries_are_bounded_and_logged(
+    monkeypatch, kind, recover
+):
+    import httpx
+    import sagents.v2.context.plugins.summarizer_model as module
+    from sagents.v2.model.wire import provider_error
+    from sagents.v2.runtime.observability.logs import StructuredLogger
+
+    class Sink:
+        def __init__(self):
+            self.records = []
+
+        def write(self, record):
+            self.records.append(record)
+
+    sink = Sink()
+    monkeypatch.setattr(module, "LOGGER", StructuredLogger(sink, "summary-test"))
+    delays = []
+
+    async def sleep(delay):
+        delays.append(delay)
+
+    monkeypatch.setattr(module.asyncio, "sleep", sleep)
+    summarizer = ModelConversationSummarizer(ScriptedModelProvider(()))
+    attempts = []
+
+    async def summarize(request, progress):
+        attempts.append(request)
+        progress["text_delta_count"] = 1
+        if recover and len(attempts) == 4:
+            return '{"summary":"recovered"}'
+        if kind == "total":
+            raise TimeoutError()
+        if kind == "provider":
+            try:
+                raise httpx.ReadTimeout("provider stalled")
+            except httpx.ReadTimeout as exc:
+                raise provider_error(exc) from exc
+        raise summarizer._timeout_error("idle", progress)
+
+    monkeypatch.setattr(summarizer, "_summarize", summarize)
+    request = SummarizationRequest(
+        scope=scope(), messages=ledger()[1:4], target_tokens=512
+    )
+    if recover:
+        assert json.loads(await summarizer.summarize(request))["summary"] == "recovered"
+    else:
+        with pytest.raises(SageV2Error) as caught:
+            await summarizer.summarize(request)
+        assert caught.value.info.code == "context.summarizer.model_timeout"
+        assert caught.value.info.metadata["timeout_kind"] == kind
+        assert caught.value.info.metadata["timeout_attempt"] == 4
+        assert caught.value.info.metadata["timeout_retries_exhausted"] is True
+    assert attempts == [request] * 4
+    assert delays == [2, 4, 8]
+    retries = [
+        record
+        for record in sink.records
+        if record.event == "context.summary.timeout_retry"
+    ]
+    assert len(retries) == 3
+    assert [record.attributes["timeout_attempt"] for record in retries] == [1, 2, 3]
+    assert all(record.attributes["timeout_kind"] == kind for record in retries)
+    assert all(
+        record.session_id == "session_1" and record.run_id == "run_1"
+        for record in sink.records
+    )
+    assert len({record.correlation_id for record in sink.records}) == 1
+    assert sink.records[-1].event == (
+        "context.summary.completed" if recover else "context.summary.timeout_exhausted"
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("cancel", [False, True])
+async def test_summary_does_not_retry_non_timeout_or_cancellation(monkeypatch, cancel):
+    summarizer = ModelConversationSummarizer(ScriptedModelProvider(()))
+    attempts = []
+
+    async def summarize(request, progress):
+        attempts.append(request)
+        if cancel:
+            raise asyncio.CancelledError()
+        raise ValueError("invalid source")
+
+    monkeypatch.setattr(summarizer, "_summarize", summarize)
+    with pytest.raises(asyncio.CancelledError if cancel else ValueError):
+        await summarizer.summarize(
+            SummarizationRequest(
+                scope=scope(), messages=ledger()[1:4], target_tokens=512
+            )
+        )
+    assert len(attempts) == 1
 
 
 @pytest.mark.asyncio
@@ -648,6 +852,7 @@ async def test_summary_timeout_includes_capability_discovery():
             raise AssertionError("must time out before starting a stream")
 
     summarizer = ModelConversationSummarizer(SlowCapabilities(), timeout_seconds=0.01)
+    summarizer._MAX_TIMEOUT_RETRIES = 0
     with pytest.raises(SageV2Error) as caught:
         await summarizer.summarize(
             SummarizationRequest(
