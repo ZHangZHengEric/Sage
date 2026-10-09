@@ -33,6 +33,8 @@ from sagents.v2.runtime.observability.traces import (
 )
 
 _LAZY_EXPORTS = {
+    "LangfuseTraceSink": ("sagents.v2.runtime.observability.plugins.langfuse", "LangfuseTraceSink"),
+    "langfuse_available": ("sagents.v2.runtime.observability.plugins.langfuse", "langfuse_available"),
     "FilesystemDiagnosticSink": (
         "sagents.v2.runtime.observability.plugins.filesystem",
         "FilesystemDiagnosticSink",
@@ -65,6 +67,8 @@ _LAZY_EXPORTS = {
 }
 
 __all__ = [
+    "LangfuseTraceSink",
+    "langfuse_available",
     "DiagnosticSink",
     "FilesystemDiagnosticSink",
     "FilesystemLogSink",

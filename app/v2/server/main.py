@@ -67,7 +67,8 @@ def create_app(service: ServerHost) -> FastAPI:
     app.add_middleware(RequestIdMiddleware)
     register_exception_handlers(app)
     app.include_router(build_observability_router(service=service, metrics=metrics))
-    register_routers(app, jaeger=bool(settings.jaeger_url))
+    register_routers(app, jaeger=(settings.effective_trace_backend == "otlp" and bool(settings.jaeger_url)),
+                     trace_console=bool(settings.trace_console_url))
     mount_web(app, Path(__file__).parent / "web" / "dist")
     return app
 

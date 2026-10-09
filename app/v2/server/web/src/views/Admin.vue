@@ -9,13 +9,15 @@ const threads = ref([])
 const models = ref([])
 const selected = ref('')
 const error = ref('')
-const jaeger = ref(false)
+const traceBackend = ref('')
+const traceConsole = ref(false)
 const rawEvents = ref([])
 const messages = computed(() => messagesFromEvents(rawEvents.value))
 
 async function load() {
   const health = await api.health()
-  jaeger.value = health?.trace_enabled === true
+  traceBackend.value = health?.trace_backend || ''
+  traceConsole.value = health?.trace_console === true
   users.value = await api.adminUsers()
   threads.value = await api.adminThreads()
   models.value = await api.adminModels()
@@ -39,8 +41,8 @@ onMounted(async () => {
   <section>
     <header class="page-head">
       <h1>总览</h1>
-      <p v-if="jaeger">
-        <a class="btn ghost" href="/api/observability/jaeger">打开 Jaeger</a>
+      <p v-if="traceConsole">
+        <a class="btn ghost" href="/api/observability/console">打开 {{ traceBackend === 'langfuse' ? 'Langfuse' : 'Jaeger' }}</a>
       </p>
     </header>
     <p v-if="error" class="error" role="alert">{{ error }}</p>

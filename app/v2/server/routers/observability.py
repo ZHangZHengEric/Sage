@@ -67,3 +67,11 @@ async def redirect_jaeger_path(request: Request, full_path: str):
         url=_public_jaeger_url(request, full_path, request.url.query),
         status_code=307,
     )
+
+
+console_router = APIRouter(prefix="/api/observability", tags=["observability"])
+
+
+@console_router.get("/console")
+async def open_trace_console(request: Request, user: AdminUser):
+    return RedirectResponse(url=request.app.state.service.settings.trace_console_url, status_code=307)

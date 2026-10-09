@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from sagents.v2.agent.engine import AgentLoopEngine
+from sagents.v2.runtime.observability.content import trace_content
 from sagents.v2.contracts.items import TextBlock
 from sagents.v2.contracts.principals import RequestContext
 from sagents.v2.contracts.run_state import RunSnapshot, RunState
@@ -22,7 +23,8 @@ from sagents.v2.runtime.observability.traces import (
     StructuredTracer,
     preview_trace_value,
     resolve_root_session_id,
-    session_trace_id,
+    new_trace_id,
+    current_trace_context,
 )
 
 
@@ -34,7 +36,12 @@ def _run_outcome_observation(
     if state == RunState.FAILED:
         return TraceStatus.ERROR, "agent.run.failed", "agent run failed", "error"
     if state == RunState.CANCELLED:
-        return TraceStatus.UNSET, "agent.run.cancelled", "agent run cancelled", "warning"
+        return (
+            TraceStatus.UNSET,
+            "agent.run.cancelled",
+            "agent run cancelled",
+            "warning",
+        )
     if state == RunState.SUSPENDED:
         return TraceStatus.UNSET, "agent.run.suspended", "agent run suspended", "info"
     return TraceStatus.UNSET, "agent.run.stopped", "agent run stopped", "warning"
@@ -114,13 +121,23 @@ class ObservedRunDriver(AgentLoopEngine):
         tracer = StructuredTracer(
             self._observed_trace_sink,
             "agent",
-            trace_id=session_trace_id(root_session_id),
+            trace_id=context.trace.trace_id or new_trace_id(),
+            parent_span_id=(
+                context.trace.span_id if current_trace_context() is None else None
+            ),
         )
         attributes = {
             "agent_id": getattr(command, "agent_id", None),
             "invocation_mode": getattr(command, "invocation_mode", None) or "normal",
             "resumed": resumed,
-            "user_input": preview_trace_value(self._user_input_preview(command)),
+            "user_input": trace_content(
+                self._observed_trace_sink, self._user_input_preview(command)
+            ),
+            "input": trace_content(
+                self._observed_trace_sink, getattr(command, "input", ())
+            ),
+            "user_id": context.actor.principal_id,
+            "tenant_id": context.actor.tenant_id,
             "root_session_id": root_session_id,
         }
         parent_session_id = getattr(session, "parent_session_id", None)
@@ -149,11 +166,24 @@ class ObservedRunDriver(AgentLoopEngine):
             kind=TraceKind.INTERNAL,
             session_id=run.session_id,
             run_id=run.run_id,
+            correlation_id=correlation_id,
             attributes=attributes,
         )
         try:
             with structured_log_context(**correlation):
-                snapshot = await body(run_id, context)
+                snapshot = await body(
+                    run_id,
+                    context.model_copy(
+                        update={
+                            "trace": context.trace.model_copy(
+                                update={
+                                    "trace_id": handle.span.trace_id,
+                                    "span_id": handle.span.span_id,
+                                }
+                            ),
+                        }
+                    ),
+                )
         except BaseException as exc:
             handle.end(TraceStatus.ERROR, error=exc)
             if logger is not None:
@@ -167,10 +197,27 @@ class ObservedRunDriver(AgentLoopEngine):
                 )
             raise
         status, event, message, log_method = _run_outcome_observation(snapshot.state)
-        handle.end(
-            status,
-            attributes={"run_state": snapshot.state.value},
-        )
+        final_attributes = {"run_state": snapshot.state.value}
+        try:
+            if (
+                self._observed_trace_sink is not None
+                and getattr(self._observed_trace_sink, "content_mode", "redacted")
+                != "metadata"
+                and snapshot.state
+                in {RunState.COMPLETED, RunState.FAILED, RunState.CANCELLED}
+            ):
+                result = await self.runtime.get_run_result(run_id)
+                final_attributes["output"] = trace_content(
+                    self._observed_trace_sink, result.final_items
+                )
+                if result.error is not None:
+                    final_attributes["status_message"] = preview_trace_value(
+                        result.error.message
+                    )
+        except Exception:
+            pass
+        finally:
+            handle.end(status, attributes=final_attributes)
         if logger is not None:
             getattr(logger, log_method)(
                 event,
@@ -208,7 +255,8 @@ class ObservedRunDriver(AgentLoopEngine):
             tool_call_id=call.tool_call_id,
             attributes={
                 "tool_name": call.tool_name,
-                "arguments": preview_trace_value(call.arguments),
+                "arguments": trace_content(self._observed_trace_sink, call.arguments),
+                "input": trace_content(self._observed_trace_sink, call.arguments),
             },
         )
         logger = self._structured_logger()
@@ -247,7 +295,15 @@ class ObservedRunDriver(AgentLoopEngine):
             if getattr(result, "error", None) is not None
             else TraceStatus.OK,
             attributes={
-                "result": preview_trace_value(self._tool_result_preview(result))
+                "result": trace_content(
+                    self._observed_trace_sink, self._tool_result_preview(result)
+                ),
+                "output": trace_content(
+                    self._observed_trace_sink, getattr(result, "content", ())
+                ),
+                "status_message": preview_trace_value(str(result.error))
+                if getattr(result, "error", None)
+                else None,
             },
         )
         failed = getattr(result, "error", None) is not None

@@ -162,14 +162,31 @@ def _runtime_capabilities(
                 "table_prefix": "",
             },
         )
-    if settings is not None and settings.jaeger_url:
+    if settings is not None and settings.effective_trace_backend != "noop":
+        config = {
+            "environment": settings.trace_environment,
+            "content_mode": settings.trace_content_mode,
+            "max_content_chars": settings.trace_max_content_chars,
+            "sample_rate": settings.trace_sample_rate,
+            "timeout_seconds": settings.trace_timeout_seconds,
+        }
+        if settings.effective_trace_backend == "langfuse":
+            config.update({
+                "base_url": settings.langfuse_base_url,
+                "service_name": settings.trace_service_name,
+                "public_key_env": settings.langfuse_public_key_env,
+                "secret_key_env": settings.langfuse_secret_key_env,
+                "ingestion_version": settings.langfuse_ingestion_version,
+            })
+        else:
+            legacy_jaeger = not settings.trace_otlp_endpoint and bool(settings.jaeger_url)
+            config.update({
+                "endpoint": settings.trace_otlp_endpoint or settings.jaeger_url,
+                "service_name": settings.jaeger_service_name if legacy_jaeger else settings.trace_service_name,
+                "protocol": "grpc" if legacy_jaeger else settings.trace_otlp_protocol,
+                "insecure": True if legacy_jaeger else settings.trace_otlp_insecure,
+            })
         capabilities["observability.trace-sink"] = CapabilitySelection(
-            plugin="sage.trace.otlp",
-            config={
-                "endpoint": settings.jaeger_url,
-                "service_name": settings.jaeger_service_name,
-                "protocol": "grpc",
-                "insecure": True,
-            },
+            plugin=f"sage.trace.{settings.effective_trace_backend}", config=config,
         )
     return capabilities

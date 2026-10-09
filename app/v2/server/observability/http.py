@@ -27,6 +27,14 @@ def build_observability_router(
 
     @router.get("/metrics", include_in_schema=False)
     async def metric_snapshot() -> PlainTextResponse:
+        try:
+            sink = service.application.service("observability.trace-sink")
+        except (KeyError, RuntimeError):
+            sink = None
+        statistics = getattr(sink, "statistics", None)
+        if statistics is not None:
+            for name, value in statistics().items():
+                metrics.set_gauge(f"trace_{name}", value)
         return PlainTextResponse(
             metrics.render_prometheus(),
             media_type="text/plain; version=0.0.4",
