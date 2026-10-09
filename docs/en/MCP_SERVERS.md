@@ -75,3 +75,10 @@ This constructs the provider without contacting the server. Register it as both 
 2. **Authorize:** For embedded Agents, include the discovered names in the Agent's `tools` allowlist. The host must also give the actor the required `tool.external_side_effect` scope. The MCP bridge marks every external tool as `WRITE` and `requires_approval=True`, even if its name or annotations suggest a read-only search. The default `CONFIGURED` policy asks for approval after scope checks; a host's selected strategy and approval memory can change that interaction. A service API key does not replace Sage authorization.
 3. **Call:** Review the selected tool and arguments in the host's approval flow, then inspect its result. Distinguish discovery/authentication failures from a tool response with `isError`. A timeout, cancellation, or lost response can leave the remote effect unknown; check the remote result before considering a retry.
 4. **Close:** The default bridge opens a short-lived SDK session for discovery or one call and closes its context afterward. Keep `await application.close()` in your embedded host's shutdown path. Disable or remove the connection to stop future use, and cancel an active Run separately; closing a local session does not revoke the service's API key or prove that remote work stopped.
+
+## Keyless Parallel search example
+
+The [runnable SAgents v2 example](../../examples/PARALLEL_SEARCH.md) uses
+Parallel Search MCP over Streamable HTTP to discover and execute web search and
+page fetch through the v2 bridge without a Parallel API key. It demonstrates
+explicit host-side calls; see the authorization steps above when wiring an Agent.

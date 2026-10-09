@@ -8,6 +8,9 @@ For the v2 public-API, offline multi-project concurrency example, see
 For inherited and explicit team/fibre child-run model selections, see
 [CHILD_RUN_BINDINGS.md](CHILD_RUN_BINDINGS.md).
 
+For the keyless v2 MCP catalog/executor search and fetch example, see
+[PARALLEL_SEARCH.md](PARALLEL_SEARCH.md). It requires Python 3.12+.
+
 ## Prerequisites
 
 - Python 3.10 or newer
