@@ -10,7 +10,7 @@ from sagents.v2.runtime.execution.sandbox.contracts import (
     OperationIntent,
     ProcessRequest,
 )
-from sagents.v2.tool.plugins.mcp import _sdk_session
+from sagents.v2.tool._mcp_session import sdk_session
 
 
 class SandboxMcpSessionFactory:
@@ -22,7 +22,7 @@ class SandboxMcpSessionFactory:
     @asynccontextmanager
     async def __call__(self, config):
         if config.protocol != "stdio":
-            async with _sdk_session(config) as session:
+            async with sdk_session(config) as session:
                 yield session
             return
         import anyio

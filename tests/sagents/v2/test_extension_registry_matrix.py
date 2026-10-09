@@ -82,6 +82,7 @@ def test_builtin_inventory_contains_only_real_factories():
         "sage.logging.stdout",
         "sage.trace.noop",
         "sage.trace.otlp",
+        "sage.trace.langfuse",
         "sage.package-registry.ephemeral",
         "sage.protocol.a2a",
         "sage.protocol.acp",

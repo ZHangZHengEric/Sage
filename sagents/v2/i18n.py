@@ -1022,6 +1022,10 @@ def error_recovery_payload(
     )
     payload.update(
         {
+            # Questionnaire clients render the title and questions. Make the
+            # failure understandable there, without depending on a separate
+            # prompt field retained for existing recovery consumers.
+            "title": error.message,
             "prompt": error.message,
             "error": error.model_dump(mode="json", exclude_none=True),
             "resumable": resumable,

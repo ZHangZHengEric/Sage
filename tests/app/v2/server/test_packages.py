@@ -221,7 +221,7 @@ def test_agent_creates_agent_through_management_tool(service):
     from app.v2.server.main import create_app
     from sagents.v2.testing.plugins import ScriptedModelProvider
     from tests.sagents.v2.test_agent_management_matrix import tool_step
-    from tests.app.v2.server.conftest import scripted_hello
+    from tests.app.v2.server.conftest import CompletingJudgeModel, scripted_hello
 
     with TestClient(create_app(service=service)) as client:
         headers = {"Authorization": f"Bearer {register_and_login(client)}"}
@@ -234,7 +234,7 @@ def test_agent_creates_agent_through_management_tool(service):
         ]
         parent["manifest"]["agents"]["assistant"]["tools"] = ["agent_package_save"]
         # Saving and building do not consume scripted responses.
-        service.execution.fallback_model = (
+        service.execution.fallback_model = CompletingJudgeModel(
             ScriptedModelProvider(
                 (
                     tool_step("agent_package_save", {"bundle": child}, "create"),
@@ -418,7 +418,7 @@ def test_source_tool_plugin_uses_standard_registration(service):
     from app.v2.server.main import create_app
     from sagents.v2.testing.plugins import ScriptedModelProvider
     from tests.sagents.v2.test_agent_management_matrix import tool_step
-    from tests.app.v2.server.conftest import scripted_hello
+    from tests.app.v2.server.conftest import CompletingJudgeModel, scripted_hello
 
     async def authorize(action, bundle, context):
         assert bundle.manifest.plugins[0].id == "test.scale"
@@ -427,7 +427,7 @@ def test_source_tool_plugin_uses_standard_registration(service):
     provider = ScriptedModelProvider(
         (tool_step("scale", {"value": 4}, "scale"), *scripted_hello()._steps)
     )
-    service.execution.fallback_model = provider
+    service.execution.fallback_model = CompletingJudgeModel(provider)
     with TestClient(create_app(service=service)) as client:
         headers = {"Authorization": f"Bearer {register_and_login(client)}"}
         bundle = client.get("/api/agent-packages/template", headers=headers).json()[

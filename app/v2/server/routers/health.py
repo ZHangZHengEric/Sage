@@ -17,6 +17,8 @@ async def health(service: HostDep):
             "protocol": "ag-ui",
             "protocol_version": "0.1.19",
             "runtime": "sagents.v2",
-            "trace_enabled": bool(service.settings.jaeger_url),
+            "trace_enabled": service.settings.effective_trace_backend != "noop",
+            "trace_backend": service.settings.effective_trace_backend,
+            "trace_console": bool(service.settings.trace_console_url),
         }
     )
