@@ -301,21 +301,27 @@ class LoopRecoveryRule:
 
     async def evaluate(self, context: ContinuationContext):
         if context.repeated_fingerprint_count >= self.threshold:
+            tool_names = [call.name for call in context.response.tool_calls]
+            payload = recovery_payload(
+                "recovery.loop_tools" if tool_names else "recovery.loop_text",
+                context.language,
+                reason_code="loop.repeated_pattern",
+                message_params={
+                    "count": context.repeated_fingerprint_count,
+                },
+            )
+            payload.update(
+                repeat_count=context.repeated_fingerprint_count,
+                repeated_tool_names=tool_names,
+            )
             return ContinuationDecision(
                 action=ContinuationAction.REQUEST_INTERACTION,
                 reason_code="loop.repeated_pattern",
-                reason=tr("recovery.loop", context.language),
+                reason=payload["prompt"],
                 interaction=InteractionDraft(
                     interaction_type="loop_recovery",
                     allowed_decisions=("submit", "cancel"),
-                    payload={
-                        **recovery_payload(
-                            "recovery.loop",
-                            context.language,
-                            reason_code="loop.repeated_pattern",
-                        ),
-                        "repeat_count": context.repeated_fingerprint_count,
-                    },
+                    payload=payload,
                 ),
             )
         return None

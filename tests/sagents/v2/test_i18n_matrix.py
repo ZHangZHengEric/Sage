@@ -163,3 +163,27 @@ def test_error_recovery_questionnaire_localizes_actions_and_guidance(language):
         assert payload["questions"][0]["options"][0]["label"] != tr(
             "action.retry", "en"
         )
+
+
+@pytest.mark.parametrize("language", SUPPORTED_LANGUAGES)
+def test_interrupted_reply_and_repetition_have_distinct_recovery_titles(language):
+    repeated = recovery_payload(
+        "recovery.loop_tools",
+        language,
+        reason_code="loop.repeated_pattern",
+        message_params={"count": 3, "tools": "internal_tool"},
+    )
+    error = localize_error(
+        RuntimeErrorInfo(
+            code="model.stream_incomplete",
+            category=ErrorCategory.PROVIDER_TRANSIENT,
+            message="raw transport diagnostic",
+            retryable=True,
+        ),
+        language,
+    )
+    interrupted = error_recovery_payload(error, language, resumable=True)
+    assert interrupted["title"] != repeated["title"]
+    assert "3" in repeated["prompt"]
+    assert "internal_tool" not in repeated["prompt"]
+    assert "raw transport diagnostic" not in interrupted["prompt"]

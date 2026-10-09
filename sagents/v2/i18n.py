@@ -61,7 +61,7 @@ _EN = {
     "error.uncertain_side_effect": "The Tool outcome is unknown. Confirm the result before continuing.",
     "error.cancelled": "The operation was cancelled.",
     "error.internal": "An internal runtime error stopped the run. Diagnostic details were recorded.",
-    "error.model.stream_incomplete": "The model connection ended before a complete response was received.",
+    "error.model.stream_incomplete": "The reply was interrupted before it was complete.",
     "error.model.empty_semantic_response": "The model returned token usage but no usable text, reasoning, or Tool call. Sage retried automatically but still received an empty response.",
     "error.model.provider_error": "The model provider could not complete the request.",
     "error.model.queue_full": "The model request queue is full. Try again later.",
@@ -132,15 +132,15 @@ _TRANSLATIONS: dict[str, dict[str, str]] = {
             "error.authentication": "身份验证失败，请检查已配置的凭据。",
             "error.authorization": "当前用户无权执行该操作。",
             "error.rate_limited": "模型服务暂时限制请求频率，请稍后重试。",
-            "error.provider_transient": "模型或工具服务暂时不可用，请稍后重试。",
-            "error.provider_permanent": "模型或工具服务拒绝了请求，请检查相关配置。",
+            "error.provider_transient": "当前服务暂时不可用，请稍后重试。",
+            "error.provider_permanent": "这次请求未能完成，请检查服务设置。",
             "error.resource_lost": "运行所需的资源已不可用。",
             "error.unsupported_schema": "该运行使用了当前版本不支持的数据格式。",
             "error.corrupt_state": "保存的运行状态不完整或已损坏，无法安全恢复。",
             "error.uncertain_side_effect": "工具执行结果未知，请确认结果后再继续。",
             "error.cancelled": "操作已取消。",
             "error.internal": "内部运行时错误终止了本次运行，诊断信息已记录。",
-            "error.model.stream_incomplete": "模型连接在返回完整响应前中断。",
+            "error.model.stream_incomplete": "这次回复还没完成就中断了。",
             "error.model.empty_semantic_response": "模型报告已生成 Token，但没有返回可用的文本、推理或工具调用；Sage 自动重试后仍收到空响应。",
             "error.model.provider_error": "模型服务未能完成请求。",
             "error.model.queue_full": "模型请求队列已满，请稍后重试。",
@@ -769,6 +769,103 @@ for _locale, (_system, _request) in _TOOL_SELECTION_LOCALE_TEXT.items():
     )
 
 
+_RECOVERY_REASON_LOCALE_TEXT = {
+    "en": {
+        "recovery.title_loop": "Repeated model response",
+        "recovery.title_tools": "Repeated Tool calls",
+        "recovery.title_stream": "Reply interrupted",
+        "recovery.title_provider": "Provider request failed",
+        "recovery.title_limit": "Step limit reached",
+        "recovery.loop": "The model repeated the same response.",
+        "recovery.loop_tools": "The same Tools were used in the same way for {count} consecutive rounds. The task is paused; add information or suggest a different approach.",
+        "recovery.loop_text": "The same reply was repeated for {count} consecutive rounds. The task is paused; add information or suggest a different approach.",
+    },
+    "zh": {
+        "recovery.title_loop": "回复重复，已暂停",
+        "recovery.title_tools": "操作重复，已暂停",
+        "recovery.title_stream": "回复中途断开",
+        "recovery.title_provider": "请求未能完成",
+        "recovery.title_limit": "本次执行已达到上限",
+        "recovery.loop": "模型重复了相同的回复。",
+        "recovery.loop_tools": "连续 {count} 轮重复使用相同工具，现已暂停。请补充信息，或告诉我换一种方式继续。",
+        "recovery.loop_text": "连续 {count} 轮回复相同，现已暂停。请补充信息，或告诉我换一种方式继续。",
+    },
+    "pt": {
+        "recovery.title_loop": "Resposta do modelo repetida",
+        "recovery.title_tools": "Chamadas de ferramentas repetidas",
+        "recovery.title_stream": "Resposta do modelo interrompida",
+        "recovery.title_provider": "Falha na solicitação ao provedor",
+        "recovery.title_limit": "Limite de etapas atingido",
+        "recovery.loop": "O modelo repetiu a mesma resposta.",
+        "recovery.loop_tools": "As mesmas ferramentas foram usadas da mesma forma por {count} rodadas consecutivas. A tarefa foi pausada.",
+        "recovery.loop_text": "A mesma resposta foi repetida por {count} rodadas consecutivas. A tarefa foi pausada.",
+    },
+    "es": {
+        "recovery.title_loop": "Respuesta del modelo repetida",
+        "recovery.title_tools": "Llamadas a herramientas repetidas",
+        "recovery.title_stream": "Respuesta del modelo interrumpida",
+        "recovery.title_provider": "Solicitud al proveedor fallida",
+        "recovery.title_limit": "Límite de pasos alcanzado",
+        "recovery.loop": "El modelo repitió la misma respuesta.",
+        "recovery.loop_tools": "Se usaron las mismas herramientas de la misma forma durante {count} rondas consecutivas. La tarea está en pausa.",
+        "recovery.loop_text": "La misma respuesta se repitió durante {count} rondas consecutivas. La tarea está en pausa.",
+    },
+    "fr": {
+        "recovery.title_loop": "Réponse du modèle répétée",
+        "recovery.title_tools": "Appels d’outils répétés",
+        "recovery.title_stream": "Réponse du modèle interrompue",
+        "recovery.title_provider": "Échec de la requête au fournisseur",
+        "recovery.title_limit": "Limite d’étapes atteinte",
+        "recovery.loop": "Le modèle a répété la même réponse.",
+        "recovery.loop_tools": "Les mêmes outils ont été utilisés de la même façon pendant {count} tours consécutifs. La tâche est en pause.",
+        "recovery.loop_text": "La même réponse a été répétée pendant {count} tours consécutifs. La tâche est en pause.",
+    },
+    "de": {
+        "recovery.title_loop": "Wiederholte Modellantwort",
+        "recovery.title_tools": "Wiederholte Werkzeugaufrufe",
+        "recovery.title_stream": "Modellantwort unterbrochen",
+        "recovery.title_provider": "Anbieteranfrage fehlgeschlagen",
+        "recovery.title_limit": "Schrittlimit erreicht",
+        "recovery.loop": "Das Modell hat dieselbe Antwort wiederholt.",
+        "recovery.loop_tools": "Dieselben Werkzeuge wurden in {count} aufeinanderfolgenden Runden gleich verwendet. Die Aufgabe ist pausiert.",
+        "recovery.loop_text": "Dieselbe Antwort wurde in {count} aufeinanderfolgenden Runden wiederholt. Die Aufgabe ist pausiert.",
+    },
+    "ja": {
+        "recovery.title_loop": "モデルの返信が重複",
+        "recovery.title_tools": "ツール呼び出しが重複",
+        "recovery.title_stream": "モデルの応答が中断",
+        "recovery.title_provider": "プロバイダーへのリクエストが失敗",
+        "recovery.title_limit": "実行ステップの上限に到達",
+        "recovery.loop": "モデルが同じ返信を繰り返しました。",
+        "recovery.loop_tools": "連続 {count} ラウンドで同じツールを同じ方法で使用したため、一時停止しました。",
+        "recovery.loop_text": "連続 {count} ラウンドで同じ返信を繰り返したため、一時停止しました。",
+    },
+    "ko": {
+        "recovery.title_loop": "모델 응답 반복",
+        "recovery.title_tools": "도구 호출 반복",
+        "recovery.title_stream": "모델 응답 중단",
+        "recovery.title_provider": "제공자 요청 실패",
+        "recovery.title_limit": "실행 단계 제한 도달",
+        "recovery.loop": "모델이 같은 응답을 반복했습니다.",
+        "recovery.loop_tools": "연속 {count}회 같은 도구를 같은 방식으로 사용하여 작업을 일시 중지했습니다.",
+        "recovery.loop_text": "연속 {count}회 같은 응답을 반복하여 작업을 일시 중지했습니다.",
+    },
+    "ru": {
+        "recovery.title_loop": "Повтор ответа модели",
+        "recovery.title_tools": "Повтор вызовов инструментов",
+        "recovery.title_stream": "Ответ модели прерван",
+        "recovery.title_provider": "Ошибка запроса к поставщику",
+        "recovery.title_limit": "Достигнут лимит шагов",
+        "recovery.loop": "Модель повторила тот же ответ.",
+        "recovery.loop_tools": "Одни и те же инструменты использовались одинаково в {count} последовательных раундах. Задача приостановлена.",
+        "recovery.loop_text": "Один и тот же ответ повторился в {count} последовательных раундах. Задача приостановлена.",
+    },
+}
+for _locale, _values in _RECOVERY_REASON_LOCALE_TEXT.items():
+    _TRANSLATIONS[_locale].update(_values)
+_EN.update(_RECOVERY_REASON_LOCALE_TEXT["en"])
+
+
 def tr(key: str, language: str | None, **params: Any) -> str:
     locale = normalize_language(language)
     localized = _TRANSLATIONS[locale]
@@ -844,11 +941,23 @@ def recovery_payload(
     reason_code: str,
     status: str | None = None,
     questions: list[dict[str, Any]] | None = None,
+    message_params: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     locale = normalize_language(language)
-    params = {"status": status or ""}
+    params = {"status": status or "", **(message_params or {})}
+    title_key = {
+        "recovery.loop": "recovery.title_loop",
+        "recovery.loop_text": "recovery.title_loop",
+        "recovery.loop_tools": "recovery.title_tools",
+        "recovery.max_steps": "recovery.title_limit",
+        "recovery.missing_status": "recovery.title_limit",
+        "error.model.stream_incomplete": "recovery.title_stream",
+        "error.provider_transient": "recovery.title_provider",
+        "error.provider_permanent": "recovery.title_provider",
+        "error.rate_limited": "recovery.title_provider",
+    }.get(reason_key, "recovery.title")
     return {
-        "title": tr("recovery.title", locale),
+        "title": tr(title_key, locale),
         "prompt": tr(reason_key, locale, **params),
         "guidance": tr("recovery.guidance", locale),
         "reason_code": reason_code,
