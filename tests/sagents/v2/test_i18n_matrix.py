@@ -138,13 +138,16 @@ def test_localized_errors_keep_raw_diagnostics_out_of_user_message(language):
 
 
 @pytest.mark.parametrize("language", SUPPORTED_LANGUAGES)
-def test_error_recovery_questionnaire_localizes_actions_and_guidance(language):
+@pytest.mark.parametrize(
+    "category", [ErrorCategory.PROVIDER_TRANSIENT, ErrorCategory.PROVIDER_PERMANENT]
+)
+def test_error_recovery_questionnaire_localizes_actions_and_guidance(language, category):
     error = localize_error(
         RuntimeErrorInfo(
-            code="model.provider_error",
-            category=ErrorCategory.PROVIDER_TRANSIENT,
+            code=f"model.{category.value}",
+            category=category,
             message="raw diagnostic",
-            retryable=True,
+            retryable=category == ErrorCategory.PROVIDER_TRANSIENT,
         ),
         language,
     )
@@ -152,6 +155,9 @@ def test_error_recovery_questionnaire_localizes_actions_and_guidance(language):
     payload = error_recovery_payload(error, language, resumable=True)
 
     assert payload["language"] == language
+    assert payload["title"] == error.message
+    assert payload["title"] != tr("recovery.title_provider", language)
+    assert "raw diagnostic" not in payload["title"]
     assert payload["prompt"] == error.message
     assert payload["resumable"] is True
     assert [value["value"] for value in payload["questions"][0]["options"]] == [
