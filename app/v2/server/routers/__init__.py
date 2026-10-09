@@ -22,7 +22,7 @@ from app.v2.server.observability.logging import get_logger
 _LOGGER = get_logger(__name__)
 
 
-def register_routers(app: FastAPI, *, jaeger: bool = False) -> None:
+def register_routers(app: FastAPI, *, jaeger: bool = False, trace_console: bool = False) -> None:
     app.include_router(health.router)
     app.include_router(auth.router)
     app.include_router(models.router)
@@ -37,6 +37,8 @@ def register_routers(app: FastAPI, *, jaeger: bool = False) -> None:
     app.include_router(approvals.router)
     app.include_router(admin.router)
     _register_a2a(app)
+    if trace_console:
+        app.include_router(observability.console_router)
     if jaeger:
         app.include_router(observability.router)
 

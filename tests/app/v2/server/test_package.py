@@ -62,6 +62,11 @@ def test_package_selects_mysql_and_otlp_from_host_settings(tmp_path: Path):
     trace = manifest.runtime.capabilities["observability.trace-sink"]
     assert trace.plugin == "sage.trace.otlp"
     assert trace.config == {
+        "environment": "production",
+        "content_mode": "redacted",
+        "max_content_chars": 16384,
+        "sample_rate": 1.0,
+        "timeout_seconds": 3.0,
         "endpoint": "http://sage-jaeger:4317",
         "service_name": "sage-server",
         "protocol": "grpc",

@@ -20,6 +20,7 @@ from sagents.v2.runtime.observability.contracts import (
 )
 from sagents.v2.runtime.observability.logs import _log_error, redact_log_value
 from sagents.v2.runtime.observability.timing import elapsed_ms
+from sagents.v2.runtime.observability.content import safe_trace_value
 
 _TRACE_PREVIEW_LIMIT = 2048
 
@@ -30,6 +31,11 @@ _active_span: contextvars.ContextVar[tuple[str, str] | None] = contextvars.Conte
 )
 
 
+_active_metadata: contextvars.ContextVar[dict[str, Any]] = contextvars.ContextVar(
+    "sage_trace_metadata", default={}
+)
+
+
 def current_trace_context() -> tuple[str, str] | None:
     """Return the active ``(trace_id, span_id)`` pair, if any."""
 
@@ -37,7 +43,7 @@ def current_trace_context() -> tuple[str, str] | None:
 
 
 def session_trace_id(session_id: str) -> str:
-    """Stable 128-bit trace id so one Session is one Jaeger trace."""
+    """Legacy deterministic ID helper; execution traces now use fresh IDs."""
 
     return hashlib.md5(session_id.encode("utf-8")).hexdigest()
 
@@ -88,6 +94,17 @@ class SpanHandle:
         self.span = span
         self._ended = False
         self._token = _active_span.set((span.trace_id, span.span_id))
+        self._metadata_token = _active_metadata.set(
+            {
+                **_active_metadata.get(),
+                **{
+                    key: span.attributes[key]
+                    for key in ("user_id", "tenant_id", "root_session_id", "agent_id")
+                    if key in span.attributes
+                },
+                "correlation_id": span.correlation_id,
+            }
+        )
 
     def add_event(
         self,
@@ -122,11 +139,19 @@ class SpanHandle:
         if duration is not None:
             merged.setdefault("duration_ms", duration)
         merged.update(redact_log_value(dict(attributes or {})))
+        error_record = _log_error(error)
+        if error_record is not None:
+            error_record = error_record.model_copy(
+                update={
+                    "message": safe_trace_value(error_record.message),
+                    "stack_trace": safe_trace_value(error_record.stack_trace),
+                }
+            )
         self.span = self.span.model_copy(
             update={
                 "end_time": finished,
                 "status": TraceStatus(status),
-                "error": _log_error(error),
+                "error": error_record,
                 "attributes": merged,
             }
         )
@@ -141,6 +166,7 @@ class SpanHandle:
         finally:
             try:
                 _active_span.reset(self._token)
+                _active_metadata.reset(self._metadata_token)
             except Exception:
                 return
 
@@ -180,7 +206,7 @@ class StructuredTracer:
         attributes: Mapping[str, Any] | None = None,
         **context: Any,
     ) -> SpanHandle:
-        values = {**self.context, **context}
+        values = {**_active_metadata.get(), **self.context, **context}
         known = {
             key: values.pop(key, None)
             for key in (

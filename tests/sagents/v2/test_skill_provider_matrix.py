@@ -272,6 +272,7 @@ async def test_load_skill_exposes_a_strict_native_v2_schema_and_loads_lazily():
 
     assert definition.name == "load_skill"
     assert definition.strict is True
+    assert definition.output_schema is None
     assert definition.input_schema == {
         "type": "object",
         "properties": {
@@ -298,6 +299,10 @@ async def test_load_skill_exposes_a_strict_native_v2_schema_and_loads_lazily():
     )
 
     assert "alpha" in result.content[0].text
+    assert result.metadata["skill_name"] == "alpha"
+    assert result.metadata["active_skills"] == ["alpha"]
+    assert result.metadata["content_hash"]
+    assert result.metadata["workspace_path"]
     assert provider.fetches == [("run_1", "alpha")]
     assert workspace.materializations[0][1] == "alpha"
 

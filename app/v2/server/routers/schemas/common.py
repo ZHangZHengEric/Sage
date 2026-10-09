@@ -24,6 +24,8 @@ class HealthPayload(BaseModel):
     protocol_version: str
     runtime: str
     trace_enabled: bool
+    trace_backend: str = "noop"
+    trace_console: bool = False
 
 AUTH_ERRORS = {
     401: {"model": ErrorBody, "description": "authentication required"},

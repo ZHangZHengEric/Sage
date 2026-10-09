@@ -367,6 +367,7 @@ async def test_parent_model_creates_and_invokes_full_agent(tmp_path):
 
 
 @pytest.mark.asyncio
+@pytest.mark.timeout(10)
 @pytest.mark.parametrize("binding", ["host", "plugin"])
 async def test_builder_executes_declared_flow_and_custom_node(tmp_path, binding):
     from sagents.v2.flow import FlowNodeResult

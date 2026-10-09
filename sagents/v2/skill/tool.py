@@ -48,25 +48,6 @@ class SkillLoadTool:
             "additionalProperties": False,
         },
         strict=True,
-        output_schema={
-            "type": "object",
-            "properties": {
-                "skill_name": {"type": "string"},
-                "workspace_path": {"type": "string"},
-                "content_hash": {"type": "string"},
-                "active_skills": {
-                    "type": "array",
-                    "items": {"type": "string"},
-                },
-            },
-            "required": [
-                "skill_name",
-                "workspace_path",
-                "content_hash",
-                "active_skills",
-            ],
-            "additionalProperties": False,
-        },
         side_effect_level=SideEffectLevel.WRITE,
         idempotency_strategy=IdempotencyStrategy.FINGERPRINT,
         cancel_semantics=CancelSemantics.NOT_STARTED_ONLY,

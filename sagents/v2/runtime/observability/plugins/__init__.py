@@ -4,6 +4,8 @@ from sagents.v2._lazy import exported_names, resolve_export
 
 
 _EXPORTS = {
+    "LangfuseTraceSink": ("sagents.v2.runtime.observability.plugins.langfuse", "LangfuseTraceSink"),
+    "langfuse_available": ("sagents.v2.runtime.observability.plugins.langfuse", "langfuse_available"),
     "FilesystemDiagnosticSink": (
         "sagents.v2.runtime.observability.plugins.filesystem",
         "FilesystemDiagnosticSink",
