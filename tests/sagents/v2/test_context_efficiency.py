@@ -483,7 +483,7 @@ async def test_summary_capacity_is_shared_across_plugin_instances():
     active = peak = 0
 
     class SummaryPlugin(ModelConversationSummarizer):
-        async def _summarize(self, request):
+        async def _summarize(self, request, progress):
             nonlocal active, peak
             active += 1
             peak = max(active, peak)

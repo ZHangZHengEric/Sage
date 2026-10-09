@@ -197,11 +197,11 @@ def test_run_without_model_returns_clear_error(tmp_path, language, message):
 
 @pytest.mark.timeout(30)
 def test_catalog_model_is_used_when_dispatcher_drops_contextvar(tmp_path, monkeypatch):
-    from tests.app.v2.server.conftest import scripted_hello
+    from tests.app.v2.server.conftest import CompletingJudgeModel, scripted_hello
 
     monkeypatch.setattr(
         "app.v2.server.runtime.models._build_catalog_provider",
-        lambda record: scripted_hello(),
+        lambda record: CompletingJudgeModel(scripted_hello()),
     )
     service = make_test_service(tmp_path, fallback=False)
     with TestClient(create_app(service=service)) as client:
