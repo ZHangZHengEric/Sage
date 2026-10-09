@@ -39,6 +39,21 @@ ref: v2-ENV_VARS
 | `SAGE_SERVER_JAEGER_URL` | 可选 OTLP 地址 |
 | `SAGE_SERVER_JAEGER_SERVICE_NAME` | `sage-server` |
 | `SAGE_SERVER_JAEGER_PUBLIC_URL` | `http://127.0.0.1:16686/jaeger` |
+| `SAGE_SERVER_TRACE_BACKEND` | 默认空：配置 `JAEGER_URL` 时使用 OTLP，否则为 `noop`；可选 `noop`、`otlp`、`langfuse` |
+| `SAGE_SERVER_TRACE_OTLP_ENDPOINT` | 默认空；回退到旧 Jaeger 地址 |
+| `SAGE_SERVER_TRACE_OTLP_PROTOCOL` | `grpc`；可选 `grpc` 或 `http` |
+| `SAGE_SERVER_TRACE_OTLP_INSECURE` | `false`；仅明文 gRPC 时启用 |
+| `SAGE_SERVER_TRACE_SERVICE_NAME` | `sage-server` |
+| `SAGE_SERVER_TRACE_ENVIRONMENT` | `production` |
+| `SAGE_SERVER_TRACE_CONTENT_MODE` | `redacted`；可选 `redacted` 或 `metadata` |
+| `SAGE_SERVER_TRACE_MAX_CONTENT_CHARS` | `16384`；范围 256–65536 字符 |
+| `SAGE_SERVER_TRACE_SAMPLE_RATE` | `1`；范围 0–1 |
+| `SAGE_SERVER_TRACE_TIMEOUT_SECONDS` | `3`；大于 0 且不超过 30 秒 |
+| `SAGE_SERVER_LANGFUSE_BASE_URL` | 默认空；使用 Langfuse 后端时必填 |
+| `SAGE_SERVER_LANGFUSE_PUBLIC_URL` | 默认空；可选项目控制台地址 |
+| `SAGE_SERVER_LANGFUSE_PUBLIC_KEY_ENV` | `LANGFUSE_PUBLIC_KEY`；保存公钥的环境变量名 |
+| `SAGE_SERVER_LANGFUSE_SECRET_KEY_ENV` | `LANGFUSE_SECRET_KEY`；保存私钥的环境变量名 |
+| `SAGE_SERVER_LANGFUSE_INGESTION_VERSION` | `4`；可选 `3` 或 `4` |
 | `SAGE_SERVER_PUBLIC_URL` | 默认空：使用请求来源地址；反向代理后的 A2A 应设置公开来源地址 |
 
 并发和容量参数必须为正数，约束单进程，不是分布式配额。Redis 不再是启动依赖或 AG-UI 回放存储。
