@@ -1992,9 +1992,13 @@ class _DeferredPlanApi extends _PlanSuspendedRunApi {
 }
 
 class _QuestionnaireSuspendedRunApi extends _SuspendedRunApi {
-  _QuestionnaireSuspendedRunApi({this.source = 'questionnaire_async'});
+  _QuestionnaireSuspendedRunApi({
+    this.source = 'questionnaire_async',
+    this.recoveryPayload,
+  });
 
   final String? source;
+  final Map<String, Object?>? recoveryPayload;
 
   @override
   Future<Map<String, Object?>> getRun(String runId) async => {
@@ -2010,35 +2014,42 @@ class _QuestionnaireSuspendedRunApi extends _SuspendedRunApi {
       'interaction_type': 'user_input',
       'status': 'pending',
       'allowed_decisions': ['submit', 'cancel'],
-      'payload': {
-        if (source != null) 'source': source,
-        'title': '需要你的引导',
-        'prompt': '请选择部署目标并补充说明。',
-        'guidance': '回答后 Agent 会从原位置继续。',
-        'questions': [
+      'payload':
+          recoveryPayload ??
           {
-            'id': 'target',
-            'type': 'single',
-            'title': '部署目标',
-            'default': 'production',
-            'allow_other': true,
-            'options': [
-              {'label': '预发布', 'value': 'staging'},
-              {'label': '生产', 'value': 'production'},
+            if (source != null) 'source': source,
+            'title': '需要你的引导',
+            'prompt': '请选择部署目标并补充说明。',
+            'guidance': '回答后 Agent 会从原位置继续。',
+            'questions': [
+              {
+                'id': 'target',
+                'type': 'single',
+                'title': '部署目标',
+                'default': 'production',
+                'allow_other': true,
+                'options': [
+                  {'label': '预发布', 'value': 'staging'},
+                  {'label': '生产', 'value': 'production'},
+                ],
+              },
+              {
+                'id': 'preserve',
+                'type': 'multiple',
+                'title': '保留内容',
+                'options': [
+                  {'label': '页面结构', 'value': 'structure'},
+                  {'label': '交互逻辑', 'value': 'interaction'},
+                ],
+              },
+              {
+                'id': 'notes',
+                'type': 'text',
+                'title': '补充说明',
+                'placeholder': '可选',
+              },
             ],
           },
-          {
-            'id': 'preserve',
-            'type': 'multiple',
-            'title': '保留内容',
-            'options': [
-              {'label': '页面结构', 'value': 'structure'},
-              {'label': '交互逻辑', 'value': 'interaction'},
-            ],
-          },
-          {'id': 'notes', 'type': 'text', 'title': '补充说明', 'placeholder': '可选'},
-        ],
-      },
     },
   };
 }
@@ -4545,6 +4556,100 @@ void main() {
     );
   }
 
+  for (final brightness in Brightness.values) {
+    for (final interrupted in [false, true]) {
+      testWidgets(
+        'runtime recovery explains ${interrupted ? 'interruption' : 'repetition'} '
+        'in ${brightness.name} appearance',
+        (tester) async {
+          tester.view.physicalSize = const Size(1200, 800);
+          tester.view.devicePixelRatio = 1;
+          tester.platformDispatcher.platformBrightnessTestValue = brightness;
+          addTearDown(tester.view.resetPhysicalSize);
+          addTearDown(tester.view.resetDevicePixelRatio);
+          addTearDown(
+            tester.platformDispatcher.clearPlatformBrightnessTestValue,
+          );
+          final title = interrupted ? '回复中途断开' : '操作重复，已暂停';
+          final prompt = interrupted
+              ? '这次回复还没完成就中断了。'
+              : '连续 3 轮重复使用相同工具，现已暂停。请补充信息，或告诉我换一种方式继续。';
+          final payload = <String, Object?>{
+            'title': title,
+            'prompt': prompt,
+            'guidance': '旧的通用说明不应重复显示',
+            'reason_code': interrupted
+                ? 'model.stream_incomplete'
+                : 'loop.repeated_pattern',
+            if (!interrupted) 'repeat_count': 3,
+            'questions': [
+              if (interrupted)
+                {
+                  'id': 'recovery_action',
+                  'type': 'single',
+                  'title': '接下来应该怎么做？',
+                  'options': [
+                    {'label': '重试', 'value': 'retry'},
+                    {'label': '停止', 'value': 'cancel'},
+                  ],
+                }
+              else
+                {'id': 'guidance', 'type': 'text', 'title': '接下来应该怎么做？'},
+            ],
+          };
+          final conversation = _persistedSuspendedConversation();
+          conversation['pending_interaction'] = {
+            'interaction_id': 'interaction_questionnaire',
+            'interaction_type': 'user_input',
+            'allowed_decisions': ['submit', 'cancel'],
+            'payload': payload,
+          };
+          SharedPreferences.setMockInitialValues({
+            'sage.desktop_v2.conversations.v1': jsonEncode({
+              WorkspaceController.agentWorkspaceId: [conversation],
+            }),
+          });
+          final api = _QuestionnaireSuspendedRunApi(
+            source: null,
+            recoveryPayload: payload,
+          );
+          final controller = WorkspaceController(
+            api: api,
+            preferencesLoader: SharedPreferences.getInstance,
+          );
+          await tester.pumpWidget(SageDesktopV2App(controller: controller));
+          await tester.pump();
+          await tester.pump(const Duration(milliseconds: 500));
+          expect(find.text(title), findsOneWidget);
+          expect(find.text(prompt), findsOneWidget);
+          expect(find.text('旧的通用说明不应重复显示'), findsNothing);
+          expect(find.text(payload['reason_code']! as String), findsNothing);
+          expect(
+            find.byKey(const ValueKey('questionnaire-block')),
+            findsNothing,
+          );
+          if (interrupted) {
+            await tester.tap(find.byKey(const ValueKey('interaction-question-recovery_action')));
+            await tester.pumpAndSettle();
+            expect(find.text('重试'), findsOneWidget);
+            await tester.tap(find.text('重试'));
+            await tester.pumpAndSettle();
+          }
+          await tester.tap(
+            find.byKey(const ValueKey('interaction-submit-cancel')),
+          );
+          await tester.pump();
+          await tester.pump(const Duration(milliseconds: 200));
+          expect(api.repliedDecision, 'cancel');
+          expect(tester.takeException(), isNull);
+          controller.dispose();
+          await tester.pumpWidget(const SizedBox.shrink());
+          await tester.pump();
+        },
+      );
+    }
+  }
+
   testWidgets('generic user input is not rendered as an inline questionnaire', (
     tester,
   ) async {
@@ -4573,7 +4678,6 @@ void main() {
       api: _QuestionnaireSuspendedRunApi(source: null),
       preferencesLoader: SharedPreferences.getInstance,
     );
-    addTearDown(controller.dispose);
 
     await tester.pumpWidget(SageDesktopV2App(controller: controller));
     await tester.pump();
@@ -4584,6 +4688,9 @@ void main() {
       find.byKey(const ValueKey('interaction-submit-submit')),
       findsOneWidget,
     );
+    controller.dispose();
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump();
   });
 
   for (final brightness in Brightness.values) {
@@ -6470,7 +6577,6 @@ void main() {
           api: api,
           preferencesLoader: SharedPreferences.getInstance,
         );
-        addTearDown(controller.dispose);
 
         await tester.pumpWidget(SageDesktopV2App(controller: controller));
         await tester.pump();
@@ -6531,6 +6637,9 @@ void main() {
           'preserve': ['structure', 'interaction'],
           'notes': '先进行冒烟验证',
         });
+        controller.dispose();
+        await tester.pumpWidget(const SizedBox.shrink());
+        await tester.pump();
       },
     );
   }

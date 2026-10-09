@@ -551,7 +551,9 @@ async def test_exact_matcher_is_deterministic_and_argument_sensitive():
     )
     other = await policy.decide(tool_context(definition, arguments={"path": "b.txt"}))
 
-    assert first.approval_matcher == repeat.approval_matcher == reordered.approval_matcher
+    assert (
+        first.approval_matcher == repeat.approval_matcher == reordered.approval_matcher
+    )
     assert first.approval_matcher != other.approval_matcher
 
 
@@ -633,3 +635,35 @@ async def test_custom_matcher_can_opt_a_call_out_and_is_part_of_policy_hash():
         policy.policy_hash,
     }
     assert len(hashes) == 3
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("with_tools", [False, True])
+async def test_loop_recovery_explains_round_count_without_claiming_no_progress(
+    with_tools,
+):
+    from sagents.v2.agent.policy.continuation import LoopRecoveryRule
+
+    tools = (
+        (ModelToolCall(tool_call_id="call_1", name="read", arguments={}),)
+        if with_tools
+        else ()
+    )
+    rule = LoopRecoveryRule()
+    context = continuation_context(
+        response=response(tools=tools), repeated_fingerprint_count=2, language="zh"
+    )
+    assert await rule.evaluate(context) is None
+    decision = await rule.evaluate(
+        context.model_copy(update={"repeated_fingerprint_count": 3})
+    )
+    payload = decision.interaction.payload
+    assert payload["repeat_count"] == 3
+    assert payload["repeated_tool_names"] == (["read"] if with_tools else [])
+    assert "连续 3 轮" in payload["prompt"]
+    assert "没有取得进展" not in payload["prompt"]
+    assert "read" not in payload["prompt"]
+    assert payload["title"] == (
+        "操作重复，已暂停" if with_tools else "回复重复，已暂停"
+    )
+    assert decision.interaction.allowed_decisions == ("submit", "cancel")
