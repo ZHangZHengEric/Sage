@@ -72,8 +72,9 @@ def test_build_manifest_rejects_missing_signature(tmp_path):
         raise AssertionError("missing updater signatures must fail the release")
 
 
-def test_release_workflow_publishes_manifest_after_all_platform_builds():
-    workflow = (REPO_ROOT / ".github/workflows/release-desktop.yml").read_text()
+def test_archived_release_workflow_preserves_legacy_manifest_contract():
+    assert not (REPO_ROOT / ".github/workflows/release-desktop.yml").exists()
+    workflow = (REPO_ROOT / "scripts/release/legacy-release-desktop.yml").read_text()
     windows_build = (
         REPO_ROOT / "app/v1/desktop/scripts/build_windows.ps1"
     ).read_text()
