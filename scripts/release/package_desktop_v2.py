@@ -35,9 +35,9 @@ def main() -> None:
         bundle = stage / ('Sage.app' if args.platform == 'macos' else 'Sage')
         shutil.copytree(source, bundle, symlinks=True)
         if args.platform == 'windows':
-            for name in ('msvcp140.dll', 'vcruntime140.dll', 'vcruntime140_1.dll'):
-                if not (bundle / name).is_file():
-                    raise RuntimeError(f'Windows bundle is missing its MSVC runtime: {name}')
+            for runtime_name in ('msvcp140.dll', 'vcruntime140.dll', 'vcruntime140_1.dll'):
+                if not (bundle / runtime_name).is_file():
+                    raise RuntimeError(f'Windows bundle is missing its MSVC runtime: {runtime_name}')
         subprocess.run([sys.executable, str(ROOT / 'scripts/release/bundle_desktop_v2.py'),
             '--bundle', str(bundle), '--wheel', str(args.wheel.resolve()),
             '--version', VERSION, '--commit', args.commit], check=True)
