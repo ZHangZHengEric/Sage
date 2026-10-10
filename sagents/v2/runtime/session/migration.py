@@ -503,6 +503,9 @@ def _atomic_json_replace(path: Path, payload: dict[str, Any]) -> None:
 
 
 def _fsync_directory(path: Path) -> None:
+    # Windows CRT cannot open directories; file data is fsynced before replace.
+    if os.name == "nt":
+        return
     descriptor = os.open(path, os.O_RDONLY)
     try:
         os.fsync(descriptor)

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import errno
 import heapq
 import hashlib
 import json
@@ -29,8 +30,13 @@ from sagents.v2.runtime.execution.scheduler.contracts import (
 
 try:
     import fcntl
-except ImportError:  # pragma: no cover - Windows requires a lock adapter.
+except ImportError:  # pragma: no cover - Windows uses msvcrt below.
     fcntl = None  # type: ignore[assignment]
+
+try:
+    import msvcrt
+except ImportError:  # pragma: no cover - POSIX uses fcntl above.
+    msvcrt = None  # type: ignore[assignment]
 
 
 _T = TypeVar("_T")
@@ -653,11 +659,13 @@ class FilesystemSchedulerStateStore:
                 handle.flush()
                 os.fsync(handle.fileno())
             os.replace(temporary, self.path)
-            descriptor = os.open(self.root, os.O_RDONLY)
-            try:
-                os.fsync(descriptor)
-            finally:
-                os.close(descriptor)
+            # Windows CRT cannot open directories; file data was fsynced above.
+            if os.name != "nt":
+                descriptor = os.open(self.root, os.O_RDONLY)
+                try:
+                    os.fsync(descriptor)
+                finally:
+                    os.close(descriptor)
         finally:
             temporary.unlink(missing_ok=True)
 
@@ -700,7 +708,7 @@ class FilesystemScheduler(_FilesystemSchedulerStateMachine):
         self._release_writer_lock()
 
     def _acquire_writer_lock(self, root: Path) -> None:
-        if fcntl is None:
+        if fcntl is None and msvcrt is None:
             self._writer_handle.close()
             raise SageV2Error(
                 RuntimeErrorInfo(
@@ -710,9 +718,16 @@ class FilesystemScheduler(_FilesystemSchedulerStateMachine):
                 )
             )
         try:
-            fcntl.flock(self._writer_handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except BlockingIOError as exc:
+            if fcntl is not None:
+                fcntl.flock(self._writer_handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            else:
+                # Always lock the same byte, including in a newly created file.
+                self._writer_handle.seek(0)
+                msvcrt.locking(self._writer_handle.fileno(), msvcrt.LK_NBLCK, 1)
+        except OSError as exc:
             self._writer_handle.close()
+            if exc.errno not in {errno.EACCES, errno.EAGAIN, errno.EDEADLK}:
+                raise
             raise SchedulerInUseError(
                 RuntimeErrorInfo(
                     code="scheduler.in_use",
@@ -728,6 +743,9 @@ class FilesystemScheduler(_FilesystemSchedulerStateMachine):
             return
         if fcntl is not None:
             fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+        elif msvcrt is not None:
+            handle.seek(0)
+            msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
         handle.close()
 
 
