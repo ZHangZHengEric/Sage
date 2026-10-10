@@ -468,6 +468,9 @@ class RuntimeHost {
     if (File('${root.path}/sage-runtime.json').existsSync()) {
       environment.remove('PYTHONHOME');
       environment.remove('PYTHONPATH');
+      environment.remove('LD_LIBRARY_PATH');
+      environment.remove('DYLD_LIBRARY_PATH');
+      environment.remove('DYLD_FALLBACK_LIBRARY_PATH');
       environment['PYTHONNOUSERSITE'] = '1';
     }
     return environment;
