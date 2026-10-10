@@ -27,7 +27,7 @@ def main() -> None:
     with tempfile.TemporaryDirectory(prefix='sage-release-smoke-') as temp:
         environment.update(HOME=temp, USERPROFILE=temp)
         # Check installed package resources as well as lazy v2 imports.
-        subprocess.run([str(python), '-c', '''
+        subprocess.run([str(python), '-c', r'''
 from pathlib import Path
 import importlib.metadata
 import sys
@@ -37,6 +37,23 @@ from sagents.v2 import SAgentBuilder
 assert importlib.metadata.version('sage') == '2.0.0'
 assert any((Path(app.__file__).parent / 'skills').glob('*/SKILL.md'))
 assert not any(n.startswith(('app.v1.', 'sagents.v1.')) for n in sys.modules)
+# Verify native one-writer locks, including Windows, across processes.
+import asyncio
+import subprocess
+from sagents.v2.runtime.session.plugins.filesystem import FilesystemSessionStore
+from sagents.v2.runtime.execution.scheduler.plugins.filesystem import FilesystemScheduler
+for module, name, error in (
+    ('sagents.v2.runtime.session.plugins.filesystem', 'FilesystemSessionStore', 'StoreInUseError'),
+    ('sagents.v2.runtime.execution.scheduler.plugins.filesystem', 'FilesystemScheduler', 'SchedulerInUseError'),
+):
+    cls = getattr(__import__(module, fromlist=[name]), name)
+    store_root = Path.cwd() / name
+    first = cls(store_root)
+    probe = f'from {module} import {name}, {error}\ntry: {name}({str(store_root)!r})\nexcept {error}: raise SystemExit(42)'
+    assert subprocess.run([sys.executable, '-c', probe]).returncode == 42
+    asyncio.run(first.close())
+    replacement = cls(store_root)
+    asyncio.run(replacement.close())
 '''], cwd=temp, env=environment, check=True)
         with (Path(temp) / 'stderr.log').open('w+') as log:
             process = subprocess.Popen([str(python), '-m', 'app.v2.desktop.backend.main',

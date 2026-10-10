@@ -1,0 +1,4 @@
+# Numba 0.63+ / llvmlite 0.46+ no longer publish macOS Intel wheels.
+# Use the last compatible pair for the embedded CPython 3.13 runtime.
+numba==0.62.1; sys_platform == "darwin" and platform_machine == "x86_64"
+llvmlite==0.45.1; sys_platform == "darwin" and platform_machine == "x86_64"

@@ -30,7 +30,7 @@ def main() -> None:
     python = root / ('python/python.exe' if os.name == 'nt' else 'python/bin/python3')
     environment = {k: v for k, v in os.environ.items() if k not in {'PYTHONHOME', 'PYTHONPATH', 'LD_LIBRARY_PATH', 'DYLD_LIBRARY_PATH', 'DYLD_FALLBACK_LIBRARY_PATH'}}
     environment['PYTHONNOUSERSITE'] = '1'
-    subprocess.run(['uv', 'pip', 'install', '--break-system-packages', '--python', str(python), str(args.wheel.resolve())], env=environment, check=True)
+    subprocess.run(['uv', 'pip', 'install', '--break-system-packages', '--python', str(python), '--constraint', str(Path(__file__).with_name('desktop-constraints.txt')), str(args.wheel.resolve())], env=environment, check=True)
     (root / 'sage-runtime.json').write_text(json.dumps({
         'version': args.version, 'commit': args.commit,
         'build_id': f'release-{args.version}-{args.commit}',

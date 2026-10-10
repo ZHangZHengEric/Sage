@@ -9,6 +9,7 @@ Session. Product-level indexes belong to the embedding application.
 from __future__ import annotations
 
 import asyncio
+import errno
 import hashlib
 import itertools
 import json
@@ -44,8 +45,13 @@ from sagents.v2.runtime.session.journal import (
 
 try:
     import fcntl
-except ImportError:  # pragma: no cover - Windows hosts need a dedicated lock adapter.
+except ImportError:  # pragma: no cover - Windows uses msvcrt below.
     fcntl = None  # type: ignore[assignment]
+
+try:
+    import msvcrt
+except ImportError:  # pragma: no cover - POSIX uses fcntl above.
+    msvcrt = None  # type: ignore[assignment]
 
 
 LOGGER = get_logger(__name__)
@@ -667,16 +673,24 @@ class _FilesystemSessionState(SessionStoreCoordinator):
         return len(rows) == 1 and rows[0].get("session_id") == session_id
 
     def _acquire_writer_lock(self) -> None:
-        if fcntl is None:
+        if fcntl is None and msvcrt is None:
+            self._writer_handle.close()
             raise self._error(
                 "session_store.lock_unsupported",
                 ErrorCategory.UNSUPPORTED_SCHEMA,
                 "the filesystem SessionStore requires an advisory-lock adapter",
             )
         try:
-            fcntl.flock(self._writer_handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except BlockingIOError as exc:
+            if fcntl is not None:
+                fcntl.flock(self._writer_handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            else:
+                # Always lock the same byte, including in a newly created file.
+                self._writer_handle.seek(0)
+                msvcrt.locking(self._writer_handle.fileno(), msvcrt.LK_NBLCK, 1)
+        except OSError as exc:
             self._writer_handle.close()
+            if exc.errno not in {errno.EACCES, errno.EAGAIN, errno.EDEADLK}:
+                raise
             raise StoreInUseError(
                 RuntimeErrorInfo(
                     code="session_store.in_use",
@@ -692,6 +706,9 @@ class _FilesystemSessionState(SessionStoreCoordinator):
             return
         if fcntl is not None:
             fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+        elif msvcrt is not None:
+            handle.seek(0)
+            msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
         handle.close()
 
     def _write_snapshot(self, path: Path, state: dict[str, Any]) -> None:
@@ -1873,6 +1890,10 @@ class _FilesystemSessionState(SessionStoreCoordinator):
 
     @staticmethod
     def _fsync_directory(path: Path) -> None:
+        # Windows CRT cannot open directories. File data is fsynced before replace;
+        # POSIX additionally persists the directory entry here.
+        if os.name == "nt":
+            return
         descriptor = os.open(path, os.O_RDONLY)
         try:
             os.fsync(descriptor)
