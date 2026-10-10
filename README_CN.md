@@ -208,7 +208,7 @@ flowchart TB
 
 **欢迎提交你的第一个 PR！** 文档、翻译、示例、测试、Bug 修复，以及模型和工具集成，都是对 Sage 的帮助。我们欢迎小而专注的改进，也很乐意与你一起完善贡献，让有价值、经过验证的改动顺利合并。
 
-请从[贡献指南](CONTRIBUTING.md#中文)开始，了解开发配置、组件检查和 PR 清单。可以查看[现有 Issue](https://github.com/ZHangZHengEric/Sage/issues)，较大的改动请先开 Issue 讨论；小的文档修正可以直接提交 PR。
+请从[贡献指南](CONTRIBUTING.md)开始，了解开发配置、组件检查和 PR 清单。可以查看[现有 Issue](https://github.com/ZHangZHengEric/Sage/issues)，较大的改动请先开 Issue 讨论；小的文档修正可以直接提交 PR。
 
 运行时位于 [`sagents/v2/`](sagents/v2/)，桌面端位于 [`app/v2/desktop/`](app/v2/desktop/)，Web 平台位于 [`app/v2/server/`](app/v2/server/)。
 
