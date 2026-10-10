@@ -28,7 +28,7 @@
 - 📦 **声明式 Agent 包** — 用 `sage.yaml` 定义指令、能力和运行配置，在 Server Studio 中管理不可变版本。
 - 🔄 **有状态、可交互的执行** — 持久化 Session 历史，流式输出事件，支持暂停、恢复、人工输入与审批。
 - 🤝 **多智能体编排** — 通过定向消息协调 Studio 成员，或在运行时中组合 Agent Flow。
-- 🔌 **可扩展的工具生态** — 将内置工具、可复用 Skills 与 MCP 服务接入同一智能体工作流程。
+- 🔌 **可扩展的工具生态** — 将内置工具、可复用 Skills 与 [MCP](https://modelcontextprotocol.io/) 服务接入同一智能体工作流程。
 - 🏗️ **统一内核，多端接入** — 通过 Desktop 和 Server 使用 SAgents v2，也可以嵌入自己的 Python 应用。
 
 ---
@@ -51,7 +51,7 @@
 
 ### 💻 从源码启动桌面端
 
-需要 **Python 3.12+**，以及支持桌面构建、Dart 版本满足 `^3.12.2` 的 **Flutter**。macOS 下运行：
+需要 **Python 3.12+**，以及支持桌面构建、Dart 版本满足 `^3.12.2` 的 **[Flutter](https://flutter.dev/)**。macOS 下运行：
 
 ```bash
 git clone https://github.com/ZHangZHengEric/Sage.git
@@ -206,9 +206,11 @@ flowchart TB
 
 ## 🛠️ **参与贡献**
 
-运行时位于 [`sagents/v2/`](sagents/v2/)，桌面端位于 [`app/v2/desktop/`](app/v2/desktop/)，Web 平台位于 [`app/v2/server/`](app/v2/server/)。
+**欢迎提交你的第一个 PR！** 文档、翻译、示例、测试、Bug 修复，以及模型和工具集成，都是对 Sage 的帮助。我们欢迎小而专注的改进，也很乐意与你一起完善贡献，让有价值、经过验证的改动顺利合并。
 
-欢迎提交 [Issue](https://github.com/ZHangZHengEric/Sage/issues) 或 Pull Request。请附上复现步骤，并运行受影响组件的检查：Python 测试位于 [`tests/`](tests/)，Desktop v2 使用 `flutter analyze` 和 `flutter test`。
+请从[贡献指南](CONTRIBUTING.md#中文)开始，了解开发配置、组件检查和 PR 清单。可以查看[现有 Issue](https://github.com/ZHangZHengEric/Sage/issues)，较大的改动请先开 Issue 讨论；小的文档修正可以直接提交 PR。
+
+运行时位于 [`sagents/v2/`](sagents/v2/)，桌面端位于 [`app/v2/desktop/`](app/v2/desktop/)，Web 平台位于 [`app/v2/server/`](app/v2/server/)。
 
 ## 💬 **加入社区**
 
