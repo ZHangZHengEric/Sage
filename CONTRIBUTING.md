@@ -4,6 +4,8 @@ Thanks for helping build Sage! First-time contributors are welcome. A clearer se
 
 ## Pick a starting point
 
+Please use English for issues, pull requests, and general repository documentation. Keep translations in their dedicated language files.
+
 - Read the [English README](README.md) and the guide for your component: [runtime](sagents/v2/README.md), [Desktop v2](app/v2/desktop/README.md), or [Server v2](app/v2/server/README.md).
 - Browse [open issues](https://github.com/ZHangZHengEric/Sage/issues) and [pull requests](https://github.com/ZHangZHengEric/Sage/pulls) to avoid duplicate work. Ask in an issue if the expected behavior or scope is unclear.
 - Small documentation fixes can go straight to a PR. Discuss larger features, new integrations, or architecture changes in an issue first.
