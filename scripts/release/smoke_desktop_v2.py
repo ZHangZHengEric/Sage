@@ -20,7 +20,7 @@ def main() -> None:
     root = args.runtime.resolve()
     manifest = json.loads((root / 'sage-runtime.json').read_text())
     python = root / ('python/python.exe' if os.name == 'nt' else 'python/bin/python3')
-    environment = {k: v for k, v in os.environ.items() if k not in {'PYTHONHOME', 'PYTHONPATH'}}
+    environment = {k: v for k, v in os.environ.items() if k not in {'PYTHONHOME', 'PYTHONPATH', 'LD_LIBRARY_PATH', 'DYLD_LIBRARY_PATH', 'DYLD_FALLBACK_LIBRARY_PATH'}}
     environment['PYTHONNOUSERSITE'] = '1'
     with tempfile.TemporaryDirectory(prefix='sage-release-smoke-') as temp:
         environment.update(HOME=temp, USERPROFILE=temp)

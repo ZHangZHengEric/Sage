@@ -28,9 +28,9 @@ def main() -> None:
     # Preserve relative interpreter/library links from python-build-standalone.
     shutil.copytree(prefix, root / 'python', symlinks=True)
     python = root / ('python/python.exe' if os.name == 'nt' else 'python/bin/python3')
-    environment = {k: v for k, v in os.environ.items() if k not in {'PYTHONHOME', 'PYTHONPATH'}}
+    environment = {k: v for k, v in os.environ.items() if k not in {'PYTHONHOME', 'PYTHONPATH', 'LD_LIBRARY_PATH', 'DYLD_LIBRARY_PATH', 'DYLD_FALLBACK_LIBRARY_PATH'}}
     environment['PYTHONNOUSERSITE'] = '1'
-    subprocess.run(['uv', 'pip', 'install', '--python', str(python), str(args.wheel.resolve())], env=environment, check=True)
+    subprocess.run(['uv', 'pip', 'install', '--break-system-packages', '--python', str(python), str(args.wheel.resolve())], env=environment, check=True)
     (root / 'sage-runtime.json').write_text(json.dumps({
         'version': args.version, 'commit': args.commit,
         'build_id': f'release-{args.version}-{args.commit}',
