@@ -42,6 +42,13 @@
 | 🧠 **SAgents v2** — Build agents into your own application | [Runtime quick start](sagents/v2/README.md#quick-start) |
 | 📦 **Desktop installers** — Available release builds | [Downloads & release instructions](https://github.com/ZHangZHengEric/Sage/releases/tag/v2.0.0) |
 
+### 📦 Desktop installer
+
+1. Download [Sage 2.0.0](https://github.com/ZHangZHengEric/Sage/releases/tag/v2.0.0) for macOS (arm64/x86_64), Windows (x86_64), or Linux (arm64/x86_64).
+2. Install and open Sage. Python and the backend are bundled; no repository checkout, system Python, or Flutter is needed. Linux still requires GTK and bubblewrap.
+3. Add your model in Settings → Configure an Agent → Start a conversation. Your model service may charge usage fees. See the [Desktop guide](docs/en/applications/DESKTOP.md#first-task).
+4. macOS packages are not notarized; Windows installers are not code-signed. See the [release notes](release_notes/v2.0.0.md) for package details.
+
 ### 💻 Desktop from source
 
 Requires **Python 3.12+** and **Flutter** with Dart `^3.12.2` and desktop support. On macOS:
