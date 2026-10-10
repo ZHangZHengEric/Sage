@@ -28,7 +28,7 @@
 - 📦 **Declarative Agent packages** — Define instructions, capabilities, and runtime configuration in `sage.yaml`; manage immutable versions in Server Studio.
 - 🔄 **Stateful, interactive execution** — Durable Session history, streamed events, and pause/resume with human input and approvals.
 - 🤝 **Multi-agent orchestration** — Coordinate Studio members through directed messages, or compose Agent Flows in the runtime.
-- 🔌 **An extensible tool ecosystem** — Bring built-in tools, reusable Skills, and MCP services into the same agent workflow.
+- 🔌 **An extensible tool ecosystem** — Bring built-in tools, reusable Skills, and [MCP](https://modelcontextprotocol.io/) services into the same agent workflow.
 - 🏗️ **One runtime, multiple hosts** — Use SAgents v2 through Desktop and Server, or embed it in your own Python application.
 
 ---
@@ -51,7 +51,7 @@
 
 ### 💻 Desktop from source
 
-Requires **Python 3.12+** and **Flutter** with Dart `^3.12.2` and desktop support. On macOS:
+Requires **Python 3.12+** and **[Flutter](https://flutter.dev/)** with Dart `^3.12.2` and desktop support. On macOS:
 
 ```bash
 git clone https://github.com/ZHangZHengEric/Sage.git
@@ -206,9 +206,11 @@ Some component guides are currently in Chinese. Use the guide for your chosen en
 
 ## 🛠️ **Contributing**
 
-Explore [`sagents/v2/`](sagents/v2/) for the runtime, [`app/v2/desktop/`](app/v2/desktop/) for the desktop app, and [`app/v2/server/`](app/v2/server/) for the web platform.
+**Your first PR is welcome!** Documentation, translations, examples, tests, bug fixes, and model/tool integrations all help Sage grow. We welcome small, focused improvements and are happy to work with you to get useful, well-tested contributions merged.
 
-Contributions are welcome through [Issues](https://github.com/ZHangZHengEric/Sage/issues) and pull requests. Include reproduction steps and run the affected component's checks: Python tests live in [`tests/`](tests/); Desktop v2 uses `flutter analyze` and `flutter test`.
+Start with the [contribution guide](CONTRIBUTING.md) for setup, component checks, and a PR checklist. Browse [open issues](https://github.com/ZHangZHengEric/Sage/issues), or open an issue to discuss a larger change before building it. A small documentation fix can go straight to a PR.
+
+Explore [`sagents/v2/`](sagents/v2/) for the runtime, [`app/v2/desktop/`](app/v2/desktop/) for the desktop app, and [`app/v2/server/`](app/v2/server/) for the web platform.
 
 ## 💬 **Community**
 
