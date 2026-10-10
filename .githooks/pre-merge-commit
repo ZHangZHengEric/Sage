@@ -1,3 +1,5 @@
 #!/usr/bin/env sh
 set -eu
+
+# Repository checks run in CI; this hook allows local merge commits.
 exit 0
