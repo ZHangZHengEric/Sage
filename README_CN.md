@@ -42,6 +42,13 @@
 | 🧠 **SAgents v2** — 将智能体能力集成到自己的应用 | [运行时快速开始](sagents/v2/README.md#quick-start) |
 | 📦 **桌面安装包** — 已发布版本 | [下载与版本说明](https://github.com/ZHangZHengEric/Sage/releases/tag/v2.0.0) |
 
+### 📦 安装桌面端
+
+1. 下载 [Sage 2.0.0](https://github.com/ZHangZHengEric/Sage/releases/tag/v2.0.0)：支持 macOS（arm64/x86_64）、Windows（x86_64）和 Linux（arm64/x86_64）。
+2. 安装并打开 Sage。安装包已包含 Python 和后端，无需克隆仓库、安装系统 Python 或 Flutter；Linux 仍需 GTK 和 bubblewrap。
+3. 在设置中添加模型 → 配置 Agent → 开始对话。模型服务可能收取使用费用，操作步骤见[桌面端指南](docs/zh/applications/DESKTOP.md#第一个任务)。
+4. macOS 安装包未公证，Windows 安装包未做代码签名；各类安装包详情见 [版本说明](release_notes/v2.0.0.md)。
+
 ### 💻 从源码启动桌面端
 
 需要 **Python 3.12+**，以及支持桌面构建、Dart 版本满足 `^3.12.2` 的 **Flutter**。macOS 下运行：
