@@ -1,11 +1,12 @@
-name: Release Desktop App
+name: Release Legacy Desktop App
 permissions:
     contents: write
     
 on:
   push:
     tags:
-      - 'desktop-v*'
+      - 'desktop-v0.*'
+      - 'desktop-v1.*'
   workflow_dispatch:
     inputs:
       build_target:

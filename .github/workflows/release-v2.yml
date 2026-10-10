@@ -1,0 +1,148 @@
+name: Release Sage v2
+
+on:
+  push:
+    tags: ['v2.*']
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: Publish v2.0.0 after every package passes verification
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-v2-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  packages:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: app/v2/server/web/package-lock.json
+      - name: Check release metadata and documentation
+        run: |
+          if [ "$GITHUB_REF_TYPE" = "tag" ]; then test "$GITHUB_REF_NAME" = "v2.0.0"; fi
+          python -m pip install build pyyaml
+          python scripts/release/check_v2_release.py
+          python docs/scripts/check_docs.py
+          python scripts/checks/check_architecture.py
+      - name: Build Python distributions
+        run: python -m build --outdir release-assets
+      - name: Verify distribution contents
+        run: python scripts/release/check_v2_release.py --assets release-assets
+      - name: Build Server v2 Web
+        working-directory: app/v2/server/web
+        run: |
+          npm ci
+          npm run build
+      - name: Package source and Web
+        run: |
+          git archive --format=tar.gz --prefix=Sage-2.0.0/ HEAD > release-assets/Sage-2.0.0-source.tar.gz
+          tar -czf release-assets/Sage-2.0.0-server-web.tar.gz -C app/v2/server/web dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sage-v2-packages
+          path: release-assets/*
+          if-no-files-found: error
+
+  desktop:
+    needs: packages
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-latest
+            platform: macos
+            arch: arm64
+          - runner: macos-15-intel
+            platform: macos
+            arch: x86_64
+          - runner: ubuntu-24.04
+            platform: linux
+            arch: x86_64
+          - runner: ubuntu-24.04-arm
+            platform: linux
+            arch: arm64
+          - runner: windows-latest
+            platform: windows
+            arch: x86_64
+    runs-on: ${{ matrix.runner }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: sage-v2-packages
+          path: python-packages
+      - uses: astral-sh/setup-uv@v6
+      - name: Install managed relocatable Python
+        run: uv python install 3.13
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.44.2'
+          channel: stable
+          cache: true
+      - name: Install Linux build dependencies
+        if: matrix.platform == 'linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev liblzma-dev bubblewrap
+      - name: Install Windows installer tooling
+        if: matrix.platform == 'windows'
+        run: choco install nsis --no-progress -y
+      - name: Verify Flutter client
+        working-directory: app/v2/desktop
+        run: |
+          flutter pub get
+          flutter analyze
+          flutter test
+      - name: Build Flutter v2 client
+        working-directory: app/v2/desktop
+        run: flutter build ${{ matrix.platform }} --release --build-name=2.0.0 --build-number=1
+      - name: Bundle, relocate and verify Desktop v2
+        run: python scripts/release/package_desktop_v2.py --platform '${{ matrix.platform }}' --arch '${{ matrix.arch }}' --commit '${{ github.sha }}' --wheel python-packages/sage-2.0.0-py3-none-any.whl --out release-assets
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sage-v2-desktop-${{ matrix.platform }}-${{ matrix.arch }}
+          path: release-assets/*
+          if-no-files-found: error
+
+  publish:
+    needs: [packages, desktop]
+    if: startsWith(github.ref, 'refs/tags/v2.') || inputs.publish
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: sage-v2-*
+          path: release-assets
+          merge-multiple: true
+      - name: Verify expected assets and publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          python scripts/release/check_v2_release.py --assets release-assets --complete
+          cd release-assets
+          sha256sum * > SHA256SUMS
+          cd ..
+          gh release create v2.0.0 release-assets/* --target '${{ github.sha }}' --title 'Sage 2.0.0' --notes-file release_notes/v2.0.0.md --latest

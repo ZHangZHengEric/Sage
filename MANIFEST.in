@@ -3,3 +3,6 @@ include LICENSE
 recursive-include docs *.md
 recursive-include clients/terminal/bin *
 recursive-include clients/terminal/scripts *.sh
+
+recursive-include app/skills *
+global-exclude __pycache__ *.py[cod]

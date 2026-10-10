@@ -144,3 +144,36 @@ jobs:
 
       - name: Check Desktop i18n keys (zh / en)
         run: npm run check:i18n
+
+  web-v2:
+    name: Server v2 Web build
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: app/v2/server/web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: app/v2/server/web/package-lock.json
+      - run: npm ci
+      - run: npm run build
+
+  desktop-v2:
+    name: Desktop v2 Flutter checks
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: app/v2/desktop
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.44.2'
+          channel: stable
+          cache: true
+      - run: flutter pub get
+      - run: flutter analyze
+      - run: flutter test
