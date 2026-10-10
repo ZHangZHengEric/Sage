@@ -33,8 +33,12 @@ sagents/
     sagents/v2/      v2 runtime tests (matrix and contract tests, stores, sandbox, plugins).
     sagents/test_architecture.py checks import boundaries (architecture gate);
     sagents/test_versioned_layout.py smoke-tests public imports and entry points.
-    sagents/v2/live/ Tests marked "live" call a real model provider. They are skipped
-                     unless the API key environment variable is set (see pytest.ini).
+    sagents/v2/live/ Live model acceptance tests. They call a real model provider and
+                     may incur charges. They are skipped unless SAGE_V2_LIVE_API_KEY is
+                     set. The skip is implemented in _live_provider() in
+                     tests/sagents/v2/live/test_gpt_5_6_luna_scenarios.py.
+                     SAGE_V2_LIVE_BASE_URL and SAGE_V2_LIVE_MODEL override the default
+                     endpoint and model. Check the provider endpoint before you opt in.
 
 clients/
     clients/cli/     Command-line client tests (JSON contracts, version dispatch, TUI, v2 run).
