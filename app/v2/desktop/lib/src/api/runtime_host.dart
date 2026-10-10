@@ -472,6 +472,7 @@ class RuntimeHost {
       environment.remove('DYLD_LIBRARY_PATH');
       environment.remove('DYLD_FALLBACK_LIBRARY_PATH');
       environment['PYTHONNOUSERSITE'] = '1';
+      environment['PYTHONDONTWRITEBYTECODE'] = '1';
     }
     return environment;
   }

@@ -187,6 +187,7 @@ void main() {
       expect(spawnedArguments, contains('release-2.0.0-test'));
       expect(api.expectedBuildId, 'release-2.0.0-test');
       expect(spawnedEnvironment!['PYTHONNOUSERSITE'], '1');
+      expect(spawnedEnvironment!['PYTHONDONTWRITEBYTECODE'], '1');
       expect(spawnedEnvironment!.containsKey('PYTHONPATH'), isFalse);
       expect(spawnedEnvironment!.containsKey('PYTHONHOME'), isFalse);
     },
