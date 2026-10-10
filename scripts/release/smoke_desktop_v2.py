@@ -23,6 +23,7 @@ def main() -> None:
     python = root / ('python/python.exe' if os.name == 'nt' else 'python/bin/python3')
     environment = {k: v for k, v in os.environ.items() if k not in {'PYTHONHOME', 'PYTHONPATH', 'LD_LIBRARY_PATH', 'DYLD_LIBRARY_PATH', 'DYLD_FALLBACK_LIBRARY_PATH'}}
     environment['PYTHONNOUSERSITE'] = '1'
+    environment['PYTHONDONTWRITEBYTECODE'] = '1'
     with tempfile.TemporaryDirectory(prefix='sage-release-smoke-') as temp:
         environment.update(HOME=temp, USERPROFILE=temp)
         # Check installed package resources as well as lazy v2 imports.
