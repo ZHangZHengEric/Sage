@@ -34,6 +34,9 @@ def main() -> None:
         text = (ROOT / readme).read_text()
         assert 'Version-2.0.0-green.svg' in text, readme
         assert '/releases/tag/v2.0.0' in text, readme
+    assert not (ROOT / '.github/workflows/release-desktop.yml').exists(), 'Legacy application release must stay disabled'
+    workflow = (ROOT / '.github/workflows/release-v2.yml').read_text()
+    assert 'app/v1' not in workflow and 'desktop-v1' not in workflow
     if args.assets:
         wheel = args.assets / f'sage-{VERSION}-py3-none-any.whl'
         sdist = args.assets / f'sage-{VERSION}.tar.gz'

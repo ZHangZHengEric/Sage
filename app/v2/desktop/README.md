@@ -131,4 +131,4 @@ Agent 编辑页的“复制”会先提交待保存内容，再打开副本的�
 
 每个平台在发布前将整个应用移动到另一个包含空格的路径，从仓库外启动内置 Python，验证 v2 导入、skills、带认证的 health 与客户端 lease 关闭。全部平台成功后才创建 `v2.0.0` tag 和 GitHub Release。手动验证运行不发布；选择 `publish` 才发布。
 
-macOS 包使用 ad-hoc 签名，未使用 Apple Developer ID 签名或公证；Windows 包未做代码签名。旧 Tauri updater feed 仅适用于 v1，不向 v1 自动推送 Flutter v2。
+macOS 包使用 ad-hoc 签名，未使用 Apple Developer ID 签名或公证；Windows 包未做代码签名。旧 Tauri 发布流水线已移出 GitHub Actions，不再构建 v1 应用；历史 updater feed 不向 v1 自动推送 Flutter v2。
