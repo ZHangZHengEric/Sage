@@ -10,7 +10,8 @@ import 'package:flutter/foundation.dart';
 import 'package:file_selector/file_selector.dart' show XFile;
 import 'package:sage_desktop_v2/src/services/image_clipboard.dart';
 import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
-import 'package:flutter_test/flutter_test.dart';
+import 'package:flutter_test/flutter_test.dart' hide testWidgets;
+import 'package:flutter_test/flutter_test.dart' as widget_tests show testWidgets;
 import 'package:liquid_glass_widgets/liquid_glass_widgets.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -2116,9 +2117,52 @@ class _MissingProviderAgentApi extends _FakeApi {
       );
 }
 
+// Dispose externally owned controllers inside the widget test's fake-async
+// scope, before Flutter verifies that no polling timers remain.
+List<WorkspaceController>? _widgetControllers;
+final _disposedControllers = Expando<bool>();
+
+WorkspaceController _newController({
+  V2ApiClient? api,
+  PreferencesLoader? preferencesLoader,
+}) {
+  final controller = WorkspaceController(
+    api: api,
+    preferencesLoader: preferencesLoader,
+  );
+  _widgetControllers?.add(controller);
+  return controller;
+}
+
+void _disposeController(WorkspaceController controller) {
+  if (_disposedControllers[controller] == true) return;
+  _disposedControllers[controller] = true;
+  controller.dispose();
+}
+
+void testWidgets(
+  String description,
+  WidgetTesterCallback callback, {
+  TestVariant<Object?> variant = const DefaultTestVariant(),
+}) {
+  widget_tests.testWidgets(description, (tester) async {
+    final controllers = <WorkspaceController>[];
+    _widgetControllers = controllers;
+    try {
+      await callback(tester);
+    } finally {
+      await tester.pumpWidget(const SizedBox.shrink());
+      for (final controller in controllers.reversed) {
+        _disposeController(controller);
+      }
+      _widgetControllers = null;
+    }
+  }, variant: variant);
+}
+
 Future<WorkspaceController> _controller({_FakeApi? api}) async {
   SharedPreferences.setMockInitialValues({});
-  final value = WorkspaceController(
+  final value = _newController(
     api: api ?? _FakeApi(),
     preferencesLoader: SharedPreferences.getInstance,
   );
@@ -2347,7 +2391,7 @@ void main() {
     SharedPreferences.setMockInitialValues({});
     final api = _SteeringProcessApi();
     final controller = await _controller(api: api);
-    addTearDown(controller.dispose);
+    addTearDown(() => _disposeController(controller));
     await tester.pumpWidget(SageDesktopV2App(controller: controller));
     await tester.pumpAndSettle();
     await controller.send('original');
@@ -2411,8 +2455,8 @@ void main() {
           'sage.desktop_v2.conversations.v1': jsonEncode({WorkspaceController.agentWorkspaceId: [persisted]}),
         });
         final api = _BranchingApi();
-        final controller = WorkspaceController(api: api, preferencesLoader: SharedPreferences.getInstance);
-        addTearDown(controller.dispose);
+        final controller = _newController(api: api, preferencesLoader: SharedPreferences.getInstance);
+        addTearDown(() => _disposeController(controller));
         await controller.initialize();
         await controller.rewriteLastUserMessage(id, replacement);
         await pumpEventQueue();
@@ -2448,7 +2492,7 @@ void main() {
         });
         final api = _ClipboardApi();
         final controller = await _controller(api: api);
-        addTearDown(controller.dispose);
+        addTearDown(() => _disposeController(controller));
         await tester.pumpWidget(SageDesktopV2App(controller: controller));
         await tester.pumpAndSettle();
         final field = find.byKey(const ValueKey('agent-composer'));
@@ -2493,7 +2537,7 @@ void main() {
     addTearDown(tester.view.resetDevicePixelRatio);
     final api = _FakeApi();
     final controller = await _controller(api: api);
-    addTearDown(controller.dispose);
+    addTearDown(() => _disposeController(controller));
     await tester.pumpWidget(SageDesktopV2App(controller: controller));
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const ValueKey('settings-button')));
@@ -2521,7 +2565,7 @@ void main() {
       addTearDown(tester.view.resetDevicePixelRatio);
       final api = _FakeApi();
       final controller = await _controller(api: api);
-      addTearDown(controller.dispose);
+      addTearDown(() => _disposeController(controller));
       await tester.pumpWidget(SageDesktopV2App(controller: controller));
       await tester.pumpAndSettle();
       await tester.tap(find.byKey(const ValueKey('settings-button')));
@@ -2548,7 +2592,7 @@ void main() {
   test('settings writes are serialized and contain only edited fields', () async {
     final api = _SerializedSettingsApi();
     final controller = await _controller(api: api);
-    addTearDown(controller.dispose);
+    addTearDown(() => _disposeController(controller));
     final first = controller.saveSettings(controller.settings.copyWith(themeMode: 'dark'));
     final second = controller.saveSettings(controller.settings.copyWith(themeMode: 'light'));
     await Future<void>.delayed(Duration.zero);
@@ -2564,7 +2608,7 @@ void main() {
     test('agent patch rollback uses confirmed server state $failures', () async {
       final api = _PatchFailuresApi(failures);
       final controller = await _controller(api: api);
-      addTearDown(controller.dispose);
+      addTearDown(() => _disposeController(controller));
       controller.agentConfiguration = api.saved;
       final first = controller.patchAgentConfiguration({'name': 'Edited'}).catchError((Object _) {});
       final second = controller.patchAgentConfiguration({'description': 'Details'}).catchError((Object _) {});
@@ -2577,7 +2621,7 @@ void main() {
   test('older settings read cannot overwrite successful agent write', () async {
     final api = _ReadAfterPatchApi();
     final controller = await _controller(api: api);
-    addTearDown(controller.dispose);
+    addTearDown(() => _disposeController(controller));
     controller.agentConfiguration = const AgentConfiguration(id: 'agent_main', name: 'Old');
     final read = controller.loadSettingsCatalog(agentId: 'agent_main');
     await controller.patchAgentConfiguration({'name': 'Saved'});
@@ -2589,7 +2633,7 @@ void main() {
   test('settings catalog response cannot overwrite a newer agent selection', () async {
     final api = _QueuedAgentApi();
     final controller = await _controller(api: api);
-    addTearDown(controller.dispose);
+    addTearDown(() => _disposeController(controller));
     final catalog = controller.loadSettingsCatalog(agentId: 'agent_main');
     final selection = controller.selectSettingsAgent('agent_review');
     api.pending[1].complete(const AgentConfiguration(id: 'agent_review', name: 'Review'));
@@ -2604,7 +2648,7 @@ void main() {
   test('settings selection A B A ignores the first A response', () async {
     final api = _QueuedAgentApi();
     final controller = await _controller(api: api);
-    addTearDown(controller.dispose);
+    addTearDown(() => _disposeController(controller));
     final first = controller.selectSettingsAgent('agent_main');
     final second = controller.selectSettingsAgent('agent_review');
     final third = controller.selectSettingsAgent('agent_main');
@@ -2624,7 +2668,7 @@ void main() {
     final controller = await _controller(api: api);
     final catalog = controller.loadSettingsCatalog(agentId: 'agent_main');
     final selection = controller.selectSettingsAgent('agent_review');
-    controller.dispose();
+    _disposeController(controller);
     api.pending[0].complete(const AgentConfiguration(id: 'agent_main', name: 'Old'));
     api.pending[1].completeError(StateError('late failure'));
     await Future.wait([catalog, selection]);
@@ -2687,11 +2731,11 @@ void main() {
         WorkspaceController.agentWorkspaceId: [root.toJson()],
       }),
     });
-    final controller = WorkspaceController(
+    final controller = _newController(
       api: _LegacySubSessionHydrationApi(),
       preferencesLoader: SharedPreferences.getInstance,
     );
-    addTearDown(controller.dispose);
+    addTearDown(() => _disposeController(controller));
 
     await controller.initialize();
 
@@ -2826,7 +2870,7 @@ void main() {
       SharedPreferences.setMockInitialValues({});
       final api = _ControlledProcessApi();
       final controller = await _controller(api: api);
-      addTearDown(controller.dispose);
+      addTearDown(() => _disposeController(controller));
       await tester.pumpWidget(SageDesktopV2App(controller: controller));
       await tester.pumpAndSettle();
       controller.setInvocationMode(InvocationMode.goal);
@@ -2895,7 +2939,7 @@ void main() {
     () async {
       final api = _SessionTreeApi();
       final controller = await _controller(api: api);
-      addTearDown(controller.dispose);
+      addTearDown(() => _disposeController(controller));
       await controller.initialize();
 
       await controller.send('委派快速排序检查');
@@ -3284,7 +3328,7 @@ void main() {
 
   test('workspace selection queues a structured composer reference', () async {
     final controller = await _controller();
-    addTearDown(controller.dispose);
+    addTearDown(() => _disposeController(controller));
     const node = WorkspaceFileNode(
       name: 'notes.md',
       path: 'docs/notes.md',
@@ -3343,7 +3387,7 @@ void main() {
       addTearDown(tester.view.resetDevicePixelRatio);
       final api = _FakeApi();
       final controller = await _controller(api: api);
-      addTearDown(controller.dispose);
+      addTearDown(() => _disposeController(controller));
 
       await tester.pumpWidget(SageDesktopV2App(controller: controller));
       await tester.pumpAndSettle();
@@ -3454,7 +3498,7 @@ void main() {
             mediaType: 'image/png',
           );
         final controller = await _controller(api: api);
-        addTearDown(controller.dispose);
+        addTearDown(() => _disposeController(controller));
 
         await tester.pumpWidget(SageDesktopV2App(controller: controller));
         await tester.pumpAndSettle();
@@ -3495,7 +3539,7 @@ void main() {
       final api = _FakeApi()
         ..workspaceFileError = StateError('preview unavailable');
       final controller = await _controller(api: api);
-      addTearDown(controller.dispose);
+      addTearDown(() => _disposeController(controller));
 
       await tester.pumpWidget(SageDesktopV2App(controller: controller));
       await tester.pumpAndSettle();
@@ -3530,7 +3574,7 @@ void main() {
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
     final controller = await _controller();
-    addTearDown(controller.dispose);
+    addTearDown(() => _disposeController(controller));
 
     await tester.pumpWidget(SageDesktopV2App(controller: controller));
     await tester.pumpAndSettle();
@@ -3573,7 +3617,7 @@ void main() {
     addTearDown(tester.view.resetDevicePixelRatio);
     final api = _FakeApi();
     final controller = await _controller(api: api);
-    addTearDown(controller.dispose);
+    addTearDown(() => _disposeController(controller));
 
     await tester.pumpWidget(SageDesktopV2App(controller: controller));
     await tester.pumpAndSettle();
@@ -3656,11 +3700,11 @@ void main() {
         WorkspaceController.agentWorkspaceId: [persisted],
       }),
     });
-    final controller = WorkspaceController(
+    final controller = _newController(
       api: _FakeApi(),
       preferencesLoader: SharedPreferences.getInstance,
     );
-    addTearDown(controller.dispose);
+    addTearDown(() => _disposeController(controller));
 
     await tester.pumpWidget(SageDesktopV2App(controller: controller));
     await tester.pumpAndSettle();
@@ -3700,11 +3744,11 @@ void main() {
         WorkspaceController.agentWorkspaceId: [persisted],
       }),
     });
-    final controller = WorkspaceController(
+    final controller = _newController(
       api: _FakeApi(),
       preferencesLoader: SharedPreferences.getInstance,
     );
-    addTearDown(controller.dispose);
+    addTearDown(() => _disposeController(controller));
 
     await tester.pumpWidget(SageDesktopV2App(controller: controller));
     await tester.pumpAndSettle();
@@ -3752,11 +3796,11 @@ void main() {
             ),
             mediaType: 'image/png',
           );
-        final controller = WorkspaceController(
+        final controller = _newController(
           api: api,
           preferencesLoader: SharedPreferences.getInstance,
         );
-        addTearDown(controller.dispose);
+        addTearDown(() => _disposeController(controller));
 
         await tester.pumpWidget(SageDesktopV2App(controller: controller));
         await tester.pumpAndSettle();
@@ -3823,11 +3867,11 @@ void main() {
       }),
     });
     final api = _FakeApi();
-    final controller = WorkspaceController(
+    final controller = _newController(
       api: api,
       preferencesLoader: SharedPreferences.getInstance,
     );
-    addTearDown(controller.dispose);
+    addTearDown(() => _disposeController(controller));
 
     await tester.pumpWidget(SageDesktopV2App(controller: controller));
     await tester.pumpAndSettle();
@@ -3857,7 +3901,7 @@ void main() {
   test('workspace references use the real path in host path mode', () async {
     final api = _FakeApi();
     final controller = await _controller(api: api);
-    addTearDown(controller.dispose);
+    addTearDown(() => _disposeController(controller));
     await controller.initialize();
     controller.components = [
       const ComponentSummary(
@@ -3940,11 +3984,11 @@ void main() {
         }),
       });
       final api = _ReconnectApi();
-      final controller = WorkspaceController(
+      final controller = _newController(
         api: api,
         preferencesLoader: SharedPreferences.getInstance,
       );
-      addTearDown(controller.dispose);
+      addTearDown(() => _disposeController(controller));
 
       await controller.initialize();
       await pumpEventQueue();
@@ -3969,11 +4013,11 @@ void main() {
           ],
         }),
       });
-      final controller = WorkspaceController(
+      final controller = _newController(
         api: _SuspendedRunApi(cancelled: true),
         preferencesLoader: SharedPreferences.getInstance,
       );
-      addTearDown(controller.dispose);
+      addTearDown(() => _disposeController(controller));
 
       await controller.initialize();
       await pumpEventQueue();
@@ -3997,11 +4041,11 @@ void main() {
         }),
       });
       final api = _SuspendedRunApi();
-      final controller = WorkspaceController(
+      final controller = _newController(
         api: api,
         preferencesLoader: SharedPreferences.getInstance,
       );
-      addTearDown(controller.dispose);
+      addTearDown(() => _disposeController(controller));
 
       await controller.initialize();
       final conversation = controller.selectedConversation!;
@@ -4048,11 +4092,11 @@ void main() {
         }),
       });
       final api = _ReconnectApi();
-      final controller = WorkspaceController(
+      final controller = _newController(
         api: api,
         preferencesLoader: SharedPreferences.getInstance,
       );
-      addTearDown(controller.dispose);
+      addTearDown(() => _disposeController(controller));
 
       await controller.initialize();
       await pumpEventQueue();
@@ -4093,11 +4137,11 @@ void main() {
         }),
       });
       final api = _FakeApi();
-      final controller = WorkspaceController(
+      final controller = _newController(
         api: api,
         preferencesLoader: SharedPreferences.getInstance,
       );
-      addTearDown(controller.dispose);
+      addTearDown(() => _disposeController(controller));
 
       await controller.initialize();
       await pumpEventQueue();
@@ -4117,7 +4161,7 @@ void main() {
     addTearDown(tester.view.resetDevicePixelRatio);
     final api = _FakeApi();
     final controller = await _controller(api: api);
-    addTearDown(controller.dispose);
+    addTearDown(() => _disposeController(controller));
 
     await tester.pumpWidget(SageDesktopV2App(controller: controller));
     await tester.pumpAndSettle();
@@ -4221,7 +4265,7 @@ void main() {
         addTearDown(tester.platformDispatcher.clearPlatformBrightnessTestValue);
         final api = _FakeApi();
         final controller = await _controller(api: api);
-        addTearDown(controller.dispose);
+        addTearDown(() => _disposeController(controller));
 
         await tester.pumpWidget(SageDesktopV2App(controller: controller));
         await tester.pumpAndSettle();
@@ -4284,11 +4328,11 @@ void main() {
         ],
       }),
     });
-    final controller = WorkspaceController(
+    final controller = _newController(
       api: _FileUpdateSuspendedRunApi(),
       preferencesLoader: SharedPreferences.getInstance,
     );
-    addTearDown(controller.dispose);
+    addTearDown(() => _disposeController(controller));
 
     await tester.pumpWidget(SageDesktopV2App(controller: controller));
     await tester.pump();
@@ -4320,7 +4364,7 @@ void main() {
     addTearDown(tester.view.resetDevicePixelRatio);
     final api = _RecordingGroupedToolsApi();
     final controller = await _controller(api: api);
-    addTearDown(controller.dispose);
+    addTearDown(() => _disposeController(controller));
     await tester.pumpWidget(SageDesktopV2App(controller: controller));
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const ValueKey('settings-button')));
@@ -4352,7 +4396,7 @@ void main() {
       addTearDown(tester.view.resetDevicePixelRatio);
       final api = _RecordingGroupedToolsApi();
       final controller = await _controller(api: api);
-      addTearDown(controller.dispose);
+      addTearDown(() => _disposeController(controller));
       await tester.pumpWidget(SageDesktopV2App(controller: controller));
       await tester.pumpAndSettle();
       await tester.tap(find.byKey(const ValueKey('settings-button')));
@@ -4384,7 +4428,7 @@ void main() {
       addTearDown(tester.view.resetDevicePixelRatio);
       final api = _RecordingGroupedToolsApi();
       final controller = await _controller(api: api);
-      addTearDown(controller.dispose);
+      addTearDown(() => _disposeController(controller));
       await tester.pumpWidget(SageDesktopV2App(controller: controller));
       await tester.pumpAndSettle();
       await tester.tap(find.byKey(const ValueKey('settings-button')));
@@ -4425,7 +4469,7 @@ void main() {
     addTearDown(tester.view.resetDevicePixelRatio);
     final api = _RecordingGroupedToolsApi();
     final controller = await _controller(api: api);
-    addTearDown(controller.dispose);
+    addTearDown(() => _disposeController(controller));
 
     await tester.pumpWidget(SageDesktopV2App(controller: controller));
     await tester.pumpAndSettle();
@@ -4470,7 +4514,7 @@ void main() {
       addTearDown(tester.view.resetDevicePixelRatio);
       final api = _TeamAgentApi(mode: mode);
       final controller = await _controller(api: api);
-      addTearDown(controller.dispose);
+      addTearDown(() => _disposeController(controller));
 
       await tester.pumpWidget(SageDesktopV2App(controller: controller));
       await tester.pumpAndSettle();
@@ -4516,7 +4560,7 @@ void main() {
         addTearDown(tester.view.resetDevicePixelRatio);
         addTearDown(tester.platformDispatcher.clearPlatformBrightnessTestValue);
         final controller = await _controller();
-        addTearDown(controller.dispose);
+        addTearDown(() => _disposeController(controller));
 
         await tester.pumpWidget(SageDesktopV2App(controller: controller));
         await tester.pumpAndSettle();
@@ -4613,7 +4657,7 @@ void main() {
             source: null,
             recoveryPayload: payload,
           );
-          final controller = WorkspaceController(
+          final controller = _newController(
             api: api,
             preferencesLoader: SharedPreferences.getInstance,
           );
@@ -4642,7 +4686,7 @@ void main() {
           await tester.pump(const Duration(milliseconds: 200));
           expect(api.repliedDecision, 'cancel');
           expect(tester.takeException(), isNull);
-          controller.dispose();
+          _disposeController(controller);
           await tester.pumpWidget(const SizedBox.shrink());
           await tester.pump();
         },
@@ -4674,7 +4718,7 @@ void main() {
         WorkspaceController.agentWorkspaceId: [conversation],
       }),
     });
-    final controller = WorkspaceController(
+    final controller = _newController(
       api: _QuestionnaireSuspendedRunApi(source: null),
       preferencesLoader: SharedPreferences.getInstance,
     );
@@ -4688,7 +4732,7 @@ void main() {
       find.byKey(const ValueKey('interaction-submit-submit')),
       findsOneWidget,
     );
-    controller.dispose();
+    _disposeController(controller);
     await tester.pumpWidget(const SizedBox.shrink());
     await tester.pump();
   });
@@ -4704,7 +4748,7 @@ void main() {
         addTearDown(tester.view.resetDevicePixelRatio);
         addTearDown(tester.platformDispatcher.clearPlatformBrightnessTestValue);
         final controller = await _controller();
-        addTearDown(controller.dispose);
+        addTearDown(() => _disposeController(controller));
 
         await tester.pumpWidget(SageDesktopV2App(controller: controller));
         await tester.pumpAndSettle();
@@ -4874,7 +4918,7 @@ void main() {
         addTearDown(tester.platformDispatcher.clearPlatformBrightnessTestValue);
         final api = _FakeApi();
         final controller = await _controller(api: api);
-        addTearDown(controller.dispose);
+        addTearDown(() => _disposeController(controller));
 
         await tester.pumpWidget(SageDesktopV2App(controller: controller));
         await tester.pumpAndSettle();
@@ -4920,7 +4964,7 @@ void main() {
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
     final controller = await _controller();
-    addTearDown(controller.dispose);
+    addTearDown(() => _disposeController(controller));
 
     await tester.pumpWidget(SageDesktopV2App(controller: controller));
     await tester.pumpAndSettle();
@@ -4945,7 +4989,7 @@ void main() {
     addTearDown(tester.view.resetDevicePixelRatio);
     final api = _FakeApi();
     final controller = await _controller(api: api);
-    addTearDown(controller.dispose);
+    addTearDown(() => _disposeController(controller));
 
     await tester.pumpWidget(SageDesktopV2App(controller: controller));
     await tester.pumpAndSettle();
@@ -4976,7 +5020,7 @@ void main() {
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
     final controller = await _controller();
-    addTearDown(controller.dispose);
+    addTearDown(() => _disposeController(controller));
 
     await tester.pumpWidget(SageDesktopV2App(controller: controller));
     await tester.pumpAndSettle();
@@ -5054,11 +5098,11 @@ void main() {
             ],
           }),
         });
-        final controller = WorkspaceController(
+        final controller = _newController(
           api: _FakeApi(),
           preferencesLoader: SharedPreferences.getInstance,
         );
-        addTearDown(controller.dispose);
+        addTearDown(() => _disposeController(controller));
 
         await tester.pumpWidget(SageDesktopV2App(controller: controller));
         await tester.pumpAndSettle();
@@ -5108,11 +5152,11 @@ void main() {
     addTearDown(tester.view.resetDevicePixelRatio);
     SharedPreferences.setMockInitialValues({});
     final api = _ControlledProcessApi();
-    final controller = WorkspaceController(
+    final controller = _newController(
       api: api,
       preferencesLoader: SharedPreferences.getInstance,
     );
-    addTearDown(controller.dispose);
+    addTearDown(() => _disposeController(controller));
 
     await tester.pumpWidget(SageDesktopV2App(controller: controller));
     await tester.pumpAndSettle();
@@ -5197,11 +5241,11 @@ void main() {
         api.desktopSettings = api.desktopSettings.copyWith(
           themeMode: brightness.name,
         );
-        final controller = WorkspaceController(
+        final controller = _newController(
           api: api,
           preferencesLoader: SharedPreferences.getInstance,
         );
-        addTearDown(controller.dispose);
+        addTearDown(() => _disposeController(controller));
         await tester.pumpWidget(SageDesktopV2App(controller: controller));
         await tester.pumpAndSettle();
         expect(controller.selectedConversation!.pendingInteraction, isNull);
@@ -5277,7 +5321,7 @@ void main() {
     addTearDown(tester.view.resetDevicePixelRatio);
     final api = _ControlledProcessApi();
     final controller = await _controller(api: api);
-    addTearDown(controller.dispose);
+    addTearDown(() => _disposeController(controller));
 
     await tester.pumpWidget(SageDesktopV2App(controller: controller));
     await tester.pumpAndSettle();
@@ -5320,7 +5364,7 @@ void main() {
     addTearDown(tester.view.resetDevicePixelRatio);
     final api = _ControlledProcessApi();
     final controller = await _controller(api: api);
-    addTearDown(controller.dispose);
+    addTearDown(() => _disposeController(controller));
 
     await tester.pumpWidget(SageDesktopV2App(controller: controller));
     await tester.pumpAndSettle();
@@ -5372,7 +5416,7 @@ void main() {
     addTearDown(tester.view.resetDevicePixelRatio);
     final api = _ControlledProcessApi();
     final controller = await _controller(api: api);
-    addTearDown(controller.dispose);
+    addTearDown(() => _disposeController(controller));
 
     await tester.pumpWidget(SageDesktopV2App(controller: controller));
     await tester.pumpAndSettle();
@@ -5429,7 +5473,7 @@ void main() {
       addTearDown(tester.view.resetDevicePixelRatio);
       final api = _ReconnectingSessionTreeApi();
       final controller = await _controller(api: api);
-      addTearDown(controller.dispose);
+      addTearDown(() => _disposeController(controller));
 
       await tester.pumpWidget(SageDesktopV2App(controller: controller));
       await tester.pumpAndSettle();
@@ -5524,7 +5568,7 @@ void main() {
     addTearDown(tester.view.resetDevicePixelRatio);
     final api = _SessionTreeApi();
     final controller = await _controller(api: api);
-    addTearDown(controller.dispose);
+    addTearDown(() => _disposeController(controller));
 
     await tester.pumpWidget(SageDesktopV2App(controller: controller));
     await tester.pumpAndSettle();
@@ -5561,11 +5605,11 @@ void main() {
       addTearDown(tester.view.resetDevicePixelRatio);
       SharedPreferences.setMockInitialValues({});
       final api = _ControlledProcessApi();
-      final controller = WorkspaceController(
+      final controller = _newController(
         api: api,
         preferencesLoader: SharedPreferences.getInstance,
       );
-      addTearDown(controller.dispose);
+      addTearDown(() => _disposeController(controller));
 
       await tester.pumpWidget(SageDesktopV2App(controller: controller));
       await tester.pumpAndSettle();
@@ -5612,11 +5656,11 @@ void main() {
     addTearDown(tester.view.resetDevicePixelRatio);
     SharedPreferences.setMockInitialValues({});
     final api = _FakeApi();
-    final controller = WorkspaceController(
+    final controller = _newController(
       api: api,
       preferencesLoader: SharedPreferences.getInstance,
     );
-    addTearDown(controller.dispose);
+    addTearDown(() => _disposeController(controller));
 
     await tester.pumpWidget(SageDesktopV2App(controller: controller));
     await tester.pumpAndSettle();
@@ -5656,7 +5700,7 @@ void main() {
       addTearDown(tester.view.resetDevicePixelRatio);
       final api = _FakeApi();
       final controller = await _controller(api: api);
-      addTearDown(controller.dispose);
+      addTearDown(() => _disposeController(controller));
       final semantics = tester.ensureSemantics();
       await tester.pumpWidget(SageDesktopV2App(controller: controller));
       await tester.pumpAndSettle();
@@ -5782,7 +5826,7 @@ void main() {
       addTearDown(tester.view.resetPhysicalSize);
       addTearDown(tester.view.resetDevicePixelRatio);
       final controller = await _controller();
-      addTearDown(controller.dispose);
+      addTearDown(() => _disposeController(controller));
       await tester.pumpWidget(SageDesktopV2App(controller: controller));
       await tester.pumpAndSettle();
       controller.setInvocationMode(InvocationMode.plan);
@@ -5796,11 +5840,11 @@ void main() {
       expect(find.text('计划'), findsOneWidget);
       expect(find.text('目标'), findsNothing);
       // Reuse saved preferences instead of resetting the store via _controller.
-      final restored = WorkspaceController(
+      final restored = _newController(
         api: _FakeApi(),
         preferencesLoader: SharedPreferences.getInstance,
       );
-      addTearDown(restored.dispose);
+      addTearDown(() => _disposeController(restored));
       await tester.pumpWidget(const SizedBox());
       await tester.pumpWidget(
         SageDesktopV2App(key: const ValueKey('restored'), controller: restored),
@@ -5824,7 +5868,7 @@ void main() {
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
     final controller = await _controller();
-    addTearDown(controller.dispose);
+    addTearDown(() => _disposeController(controller));
     await tester.pumpWidget(SageDesktopV2App(controller: controller));
     await tester.pumpAndSettle();
     for (final status in [
@@ -5889,7 +5933,7 @@ void main() {
             language: locale.languageCode,
           );
           final controller = await _controller(api: api);
-          addTearDown(controller.dispose);
+          addTearDown(() => _disposeController(controller));
           await tester.pumpWidget(const SizedBox());
           tester.view.physicalSize = const Size(1200, 800);
           await tester.pumpWidget(SageDesktopV2App(controller: controller));
@@ -5980,11 +6024,11 @@ void main() {
     addTearDown(tester.view.resetDevicePixelRatio);
     SharedPreferences.setMockInitialValues({});
     final api = _FakeApi();
-    final controller = WorkspaceController(
+    final controller = _newController(
       api: api,
       preferencesLoader: SharedPreferences.getInstance,
     );
-    addTearDown(controller.dispose);
+    addTearDown(() => _disposeController(controller));
 
     await tester.pumpWidget(SageDesktopV2App(controller: controller));
     await tester.pumpAndSettle();
@@ -6024,11 +6068,11 @@ void main() {
     addTearDown(tester.view.resetDevicePixelRatio);
     SharedPreferences.setMockInitialValues({});
     final api = _FakeApi();
-    final controller = WorkspaceController(
+    final controller = _newController(
       api: api,
       preferencesLoader: SharedPreferences.getInstance,
     );
-    addTearDown(controller.dispose);
+    addTearDown(() => _disposeController(controller));
 
     await tester.pumpWidget(SageDesktopV2App(controller: controller));
     await tester.pumpAndSettle();
@@ -6063,11 +6107,11 @@ void main() {
     () async {
       SharedPreferences.setMockInitialValues({});
       final api = _FakeApi();
-      final controller = WorkspaceController(
+      final controller = _newController(
         api: api,
         preferencesLoader: SharedPreferences.getInstance,
       );
-      addTearDown(controller.dispose);
+      addTearDown(() => _disposeController(controller));
       await controller.initialize();
       const sessionId = 'session_1787875200000_042731';
       controller.selectedConversation!.sessionId = sessionId;
@@ -6090,11 +6134,11 @@ void main() {
         }),
       });
       final api = _BranchingApi();
-      final controller = WorkspaceController(
+      final controller = _newController(
         api: api,
         preferencesLoader: SharedPreferences.getInstance,
       );
-      addTearDown(controller.dispose);
+      addTearDown(() => _disposeController(controller));
       await controller.initialize();
 
       expect(await controller.branchFromRun('run_branch_1'), isTrue);
@@ -6135,11 +6179,11 @@ void main() {
         }),
       });
       final api = _BranchingApi();
-      final controller = WorkspaceController(
+      final controller = _newController(
         api: api,
         preferencesLoader: SharedPreferences.getInstance,
       );
-      addTearDown(controller.dispose);
+      addTearDown(() => _disposeController(controller));
       await controller.initialize();
       final source = controller.selectedConversation!;
       final conversationCount = controller.agentWorkspaceConversations.length;
@@ -6180,11 +6224,11 @@ void main() {
         }),
       });
       final api = _BranchingApi();
-      final controller = WorkspaceController(
+      final controller = _newController(
         api: api,
         preferencesLoader: SharedPreferences.getInstance,
       );
-      addTearDown(controller.dispose);
+      addTearDown(() => _disposeController(controller));
       await controller.initialize();
       final source = controller.selectedConversation!;
 
@@ -6224,11 +6268,11 @@ void main() {
             ],
           }),
         });
-        final controller = WorkspaceController(
+        final controller = _newController(
           api: _BranchingApi(),
           preferencesLoader: SharedPreferences.getInstance,
         );
-        addTearDown(controller.dispose);
+        addTearDown(() => _disposeController(controller));
 
         await tester.pumpWidget(SageDesktopV2App(controller: controller));
         await tester.pumpAndSettle();
@@ -6347,11 +6391,11 @@ void main() {
           WorkspaceController.agentWorkspaceId: [persisted],
         }),
       });
-      final controller = WorkspaceController(
+      final controller = _newController(
         api: _BranchingApi(),
         preferencesLoader: SharedPreferences.getInstance,
       );
-      addTearDown(controller.dispose);
+      addTearDown(() => _disposeController(controller));
 
       await tester.pumpWidget(SageDesktopV2App(controller: controller));
       await tester.pumpAndSettle();
@@ -6424,11 +6468,11 @@ void main() {
           WorkspaceController.agentWorkspaceId: [persisted],
         }),
       });
-      final controller = WorkspaceController(
+      final controller = _newController(
         api: _BranchingApi(),
         preferencesLoader: SharedPreferences.getInstance,
       );
-      addTearDown(controller.dispose);
+      addTearDown(() => _disposeController(controller));
 
       await tester.pumpWidget(SageDesktopV2App(controller: controller));
       await tester.pumpAndSettle();
@@ -6508,11 +6552,11 @@ void main() {
         }),
       });
       final api = _SuspendedRunApi();
-      final controller = WorkspaceController(
+      final controller = _newController(
         api: api,
         preferencesLoader: SharedPreferences.getInstance,
       );
-      addTearDown(controller.dispose);
+      addTearDown(() => _disposeController(controller));
 
       await tester.pumpWidget(SageDesktopV2App(controller: controller));
       await tester.pump();
@@ -6573,7 +6617,7 @@ void main() {
           }),
         });
         final api = _QuestionnaireSuspendedRunApi();
-        final controller = WorkspaceController(
+        final controller = _newController(
           api: api,
           preferencesLoader: SharedPreferences.getInstance,
         );
@@ -6637,7 +6681,7 @@ void main() {
           'preserve': ['structure', 'interaction'],
           'notes': '先进行冒烟验证',
         });
-        controller.dispose();
+        _disposeController(controller);
         await tester.pumpWidget(const SizedBox.shrink());
         await tester.pump();
       },
@@ -6659,11 +6703,11 @@ void main() {
         }),
       });
       final api = _FakeApi();
-      final controller = WorkspaceController(
+      final controller = _newController(
         api: api,
         preferencesLoader: SharedPreferences.getInstance,
       );
-      addTearDown(controller.dispose);
+      addTearDown(() => _disposeController(controller));
 
       await tester.pumpWidget(SageDesktopV2App(controller: controller));
       await tester.pump();
@@ -6729,11 +6773,11 @@ void main() {
             ],
           }),
         });
-        final controller = WorkspaceController(
+        final controller = _newController(
           api: _FileWriteSuspendedRunApi(),
           preferencesLoader: SharedPreferences.getInstance,
         );
-        addTearDown(controller.dispose);
+        addTearDown(() => _disposeController(controller));
 
         await tester.pumpWidget(SageDesktopV2App(controller: controller));
         await tester.pump();
@@ -6780,11 +6824,11 @@ void main() {
         api.desktopSettings = api.desktopSettings.copyWith(
           themeMode: brightness.name,
         );
-        final controller = WorkspaceController(
+        final controller = _newController(
           api: api,
           preferencesLoader: SharedPreferences.getInstance,
         );
-        addTearDown(controller.dispose);
+        addTearDown(() => _disposeController(controller));
         await tester.pumpWidget(SageDesktopV2App(controller: controller));
         await tester.pumpAndSettle();
         final card = find.byKey(const ValueKey('plan-approval-card'));
@@ -6892,11 +6936,11 @@ void main() {
       }),
     });
     final api = _PlanSuspendedRunApi();
-    final controller = WorkspaceController(
+    final controller = _newController(
       api: api,
       preferencesLoader: SharedPreferences.getInstance,
     );
-    addTearDown(controller.dispose);
+    addTearDown(() => _disposeController(controller));
     await tester.pumpWidget(SageDesktopV2App(controller: controller));
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const ValueKey('plan-feedback-submit')));
@@ -6922,7 +6966,7 @@ void main() {
           }),
         });
         final api = _DeferredPlanApi();
-        final controller = WorkspaceController(
+        final controller = _newController(
           api: api,
           preferencesLoader: SharedPreferences.getInstance,
         );
@@ -6940,14 +6984,14 @@ void main() {
           contains('desktop-plan-execute:run_suspended'),
         );
         if (restart) {
-          controller.dispose();
+          _disposeController(controller);
           await api.events.close();
           final reopenedApi = _DeferredPlanApi()..planCompleted = true;
-          final reopened = WorkspaceController(
+          final reopened = _newController(
             api: reopenedApi,
             preferencesLoader: SharedPreferences.getInstance,
           );
-          addTearDown(reopened.dispose);
+          addTearDown(() => _disposeController(reopened));
           addTearDown(reopenedApi.events.close);
           await reopened.initialize();
           await pumpEventQueue();
@@ -6955,7 +6999,7 @@ void main() {
           expect(reopenedApi.lastRunBody?['session_id'], 'session_suspended');
           expect(reopened.selectedConversation!.pendingPlanExecution, isNull);
         } else {
-          addTearDown(controller.dispose);
+          addTearDown(() => _disposeController(controller));
           addTearDown(api.events.close);
           controller.createConversation();
           final other = controller.selectedConversation!;
@@ -6987,11 +7031,11 @@ void main() {
         }),
       });
       final api = _PlanSuspendedRunApi();
-      final controller = WorkspaceController(
+      final controller = _newController(
         api: api,
         preferencesLoader: SharedPreferences.getInstance,
       );
-      addTearDown(controller.dispose);
+      addTearDown(() => _disposeController(controller));
 
       await tester.pumpWidget(SageDesktopV2App(controller: controller));
       await tester.pump();
@@ -7031,7 +7075,7 @@ void main() {
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
     final controller = await _controller();
-    addTearDown(controller.dispose);
+    addTearDown(() => _disposeController(controller));
     await tester.pumpWidget(SageDesktopV2App(controller: controller));
     await tester.pumpAndSettle();
 
@@ -7060,7 +7104,7 @@ void main() {
     addTearDown(tester.view.resetDevicePixelRatio);
     final api = _FakeApi();
     final controller = await _controller(api: api);
-    addTearDown(controller.dispose);
+    addTearDown(() => _disposeController(controller));
     await tester.pumpWidget(SageDesktopV2App(controller: controller));
     await tester.pumpAndSettle();
 
@@ -7115,7 +7159,7 @@ void main() {
     addTearDown(tester.view.resetDevicePixelRatio);
     final api = _FakeApi();
     final controller = await _controller(api: api);
-    addTearDown(controller.dispose);
+    addTearDown(() => _disposeController(controller));
     await tester.pumpWidget(SageDesktopV2App(controller: controller));
     await tester.pumpAndSettle();
 
@@ -7250,7 +7294,7 @@ void main() {
           expect(tester.takeException(), isNull);
         } finally {
           await tester.pumpWidget(const SizedBox.shrink());
-          controller.dispose();
+          _disposeController(controller);
         }
       });
     }
@@ -7307,7 +7351,7 @@ void main() {
         expect(api.lastSelectedComponentConfig, {'max_source_tokens': 24000, 'timeout_seconds': 60.0, 'format': 'text', 'batch_size': 4});
       } finally {
         await tester.pumpWidget(const SizedBox.shrink());
-        controller.dispose();
+        _disposeController(controller);
       }
     });
 
@@ -7366,7 +7410,7 @@ void main() {
         expect(tester.takeException(), isNull);
       } finally {
         await tester.pumpWidget(const SizedBox.shrink());
-        controller.dispose();
+        _disposeController(controller);
       }
     });
 
@@ -7536,7 +7580,7 @@ void main() {
         expect(api.lastSelectedComponent, 'memory.recall-query');
         expect(api.lastSelectedComponentPlugin, 'sage.memory.recall-query.llm');
         await tester.pumpWidget(const SizedBox.shrink());
-        controller.dispose();
+        _disposeController(controller);
       },
     );
   }
@@ -7547,7 +7591,7 @@ void main() {
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
     final controller = await _controller();
-    addTearDown(controller.dispose);
+    addTearDown(() => _disposeController(controller));
 
     await tester.pumpWidget(SageDesktopV2App(controller: controller));
     await tester.pumpAndSettle();
@@ -7620,7 +7664,7 @@ void main() {
     addTearDown(tester.view.resetDevicePixelRatio);
     final api = _FakeApi();
     final controller = await _controller(api: api);
-    addTearDown(controller.dispose);
+    addTearDown(() => _disposeController(controller));
 
     await tester.pumpWidget(SageDesktopV2App(controller: controller));
     await tester.pumpAndSettle();
@@ -7681,7 +7725,7 @@ void main() {
             skippedEventSessions: 1,
           );
         final controller = await _controller(api: api);
-        addTearDown(controller.dispose);
+        addTearDown(() => _disposeController(controller));
         await controller.loadUsageOverview();
 
         await tester.pumpWidget(
@@ -7735,7 +7779,7 @@ void main() {
       addTearDown(tester.view.resetDevicePixelRatio);
       addTearDown(tester.platformDispatcher.clearPlatformBrightnessTestValue);
       final controller = await _controller();
-      addTearDown(controller.dispose);
+      addTearDown(() => _disposeController(controller));
 
       await tester.pumpWidget(SageDesktopV2App(controller: controller));
       await tester.pumpAndSettle();
@@ -7824,7 +7868,7 @@ void main() {
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
     final controller = await _controller();
-    addTearDown(controller.dispose);
+    addTearDown(() => _disposeController(controller));
 
     await tester.pumpWidget(SageDesktopV2App(controller: controller));
     await tester.pumpAndSettle();
@@ -7857,7 +7901,7 @@ void main() {
     addTearDown(tester.view.resetDevicePixelRatio);
     final api = _FakeApi();
     final controller = await _controller(api: api);
-    addTearDown(controller.dispose);
+    addTearDown(() => _disposeController(controller));
 
     await tester.pumpWidget(SageDesktopV2App(controller: controller));
     await tester.pumpAndSettle();
@@ -7912,11 +7956,11 @@ void main() {
     addTearDown(tester.view.resetDevicePixelRatio);
     SharedPreferences.setMockInitialValues({});
     final api = _FakeApi();
-    final controller = WorkspaceController(
+    final controller = _newController(
       api: api,
       preferencesLoader: SharedPreferences.getInstance,
     );
-    addTearDown(controller.dispose);
+    addTearDown(() => _disposeController(controller));
 
     await tester.pumpWidget(SageDesktopV2App(controller: controller));
     await tester.pumpAndSettle();
@@ -7955,7 +7999,7 @@ void main() {
         addTearDown(tester.platformDispatcher.clearPlatformBrightnessTestValue);
         final api = _FakeApi();
         final controller = await _controller(api: api);
-        addTearDown(controller.dispose);
+        addTearDown(() => _disposeController(controller));
 
         await tester.pumpWidget(SageDesktopV2App(controller: controller));
         await tester.pumpAndSettle();
@@ -7987,11 +8031,11 @@ void main() {
         addTearDown(tester.view.resetDevicePixelRatio);
         addTearDown(tester.platformDispatcher.clearPlatformBrightnessTestValue);
         SharedPreferences.setMockInitialValues({});
-        final controller = WorkspaceController(
+        final controller = _newController(
           api: _GroupedToolsApi(),
           preferencesLoader: SharedPreferences.getInstance,
         );
-        addTearDown(controller.dispose);
+        addTearDown(() => _disposeController(controller));
 
         await tester.pumpWidget(SageDesktopV2App(controller: controller));
         await tester.pumpAndSettle();
@@ -8050,7 +8094,7 @@ void main() {
       addTearDown(tester.view.resetPhysicalSize);
       addTearDown(tester.view.resetDevicePixelRatio);
       final controller = await _controller();
-      addTearDown(controller.dispose);
+      addTearDown(() => _disposeController(controller));
 
       await tester.pumpWidget(SageDesktopV2App(controller: controller));
       await tester.pumpAndSettle();
@@ -8097,7 +8141,7 @@ void main() {
     addTearDown(tester.view.resetDevicePixelRatio);
     final api = _FakeApi();
     final controller = await _controller(api: api);
-    addTearDown(controller.dispose);
+    addTearDown(() => _disposeController(controller));
 
     await tester.pumpWidget(SageDesktopV2App(controller: controller));
     await tester.pumpAndSettle();
@@ -8145,7 +8189,7 @@ void main() {
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
     final controller = await _controller();
-    addTearDown(controller.dispose);
+    addTearDown(() => _disposeController(controller));
 
     await tester.pumpWidget(SageDesktopV2App(controller: controller));
     await tester.pumpAndSettle();
@@ -8173,11 +8217,11 @@ void main() {
     addTearDown(tester.view.resetDevicePixelRatio);
     SharedPreferences.setMockInitialValues({});
     final api = _DelayedAgentApi();
-    final controller = WorkspaceController(
+    final controller = _newController(
       api: api,
       preferencesLoader: SharedPreferences.getInstance,
     );
-    addTearDown(controller.dispose);
+    addTearDown(() => _disposeController(controller));
 
     await tester.pumpWidget(SageDesktopV2App(controller: controller));
     await tester.pumpAndSettle();
@@ -8219,11 +8263,11 @@ void main() {
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
     SharedPreferences.setMockInitialValues({});
-    final controller = WorkspaceController(
+    final controller = _newController(
       api: _MissingProviderAgentApi(),
       preferencesLoader: SharedPreferences.getInstance,
     );
-    addTearDown(controller.dispose);
+    addTearDown(() => _disposeController(controller));
 
     await tester.pumpWidget(SageDesktopV2App(controller: controller));
     await tester.pumpAndSettle();
@@ -8253,11 +8297,11 @@ void main() {
     addTearDown(tester.view.resetDevicePixelRatio);
     SharedPreferences.setMockInitialValues({});
     final api = _FakeApi();
-    final controller = WorkspaceController(
+    final controller = _newController(
       api: api,
       preferencesLoader: SharedPreferences.getInstance,
     );
-    addTearDown(controller.dispose);
+    addTearDown(() => _disposeController(controller));
 
     await tester.pumpWidget(SageDesktopV2App(controller: controller));
     await tester.pumpAndSettle();
@@ -8334,11 +8378,11 @@ void main() {
     addTearDown(tester.view.resetDevicePixelRatio);
     SharedPreferences.setMockInitialValues({});
     final api = _FakeApi();
-    final controller = WorkspaceController(
+    final controller = _newController(
       api: api,
       preferencesLoader: SharedPreferences.getInstance,
     );
-    addTearDown(controller.dispose);
+    addTearDown(() => _disposeController(controller));
 
     await tester.pumpWidget(SageDesktopV2App(controller: controller));
     await tester.pumpAndSettle();
@@ -8388,11 +8432,11 @@ void main() {
     addTearDown(tester.view.resetDevicePixelRatio);
     SharedPreferences.setMockInitialValues({});
     final api = _FakeApi();
-    final controller = WorkspaceController(
+    final controller = _newController(
       api: api,
       preferencesLoader: SharedPreferences.getInstance,
     );
-    addTearDown(controller.dispose);
+    addTearDown(() => _disposeController(controller));
 
     await tester.pumpWidget(SageDesktopV2App(controller: controller));
     await tester.pumpAndSettle();
@@ -8423,7 +8467,7 @@ void main() {
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
     final controller = await _controller();
-    addTearDown(controller.dispose);
+    addTearDown(() => _disposeController(controller));
 
     await tester.pumpWidget(SageDesktopV2App(controller: controller));
     await tester.pumpAndSettle();
@@ -8452,7 +8496,7 @@ void main() {
     addTearDown(tester.view.resetDevicePixelRatio);
     final api = _FakeApi();
     final controller = await _controller(api: api);
-    addTearDown(controller.dispose);
+    addTearDown(() => _disposeController(controller));
 
     await tester.pumpWidget(SageDesktopV2App(controller: controller));
     await tester.pumpAndSettle();
@@ -8540,11 +8584,11 @@ void main() {
     addTearDown(tester.view.resetDevicePixelRatio);
     SharedPreferences.setMockInitialValues({});
     final api = _FakeApi();
-    final controller = WorkspaceController(
+    final controller = _newController(
       api: api,
       preferencesLoader: SharedPreferences.getInstance,
     );
-    addTearDown(controller.dispose);
+    addTearDown(() => _disposeController(controller));
 
     await tester.pumpWidget(SageDesktopV2App(controller: controller));
     await tester.pumpAndSettle();
@@ -8665,11 +8709,11 @@ void main() {
           },
         },
       };
-    final controller = WorkspaceController(
+    final controller = _newController(
       api: api,
       preferencesLoader: SharedPreferences.getInstance,
     );
-    addTearDown(controller.dispose);
+    addTearDown(() => _disposeController(controller));
 
     await tester.pumpWidget(SageDesktopV2App(controller: controller));
     await tester.pumpAndSettle();
@@ -8723,7 +8767,7 @@ void main() {
           tester.platformDispatcher.platformBrightnessTestValue = brightness;
           SharedPreferences.setMockInitialValues({});
           final api = _FakeApi();
-          final controller = WorkspaceController(
+          final controller = _newController(
             api: api,
             preferencesLoader: SharedPreferences.getInstance,
           );
@@ -8768,7 +8812,7 @@ void main() {
           expect(api.lastModelCreate?['model'], 'created-model');
           expect(api.lastModelCreate?['protocol'], protocol);
           expect(controller.modelProviders.last.id, 'model_created');
-          controller.dispose();
+          _disposeController(controller);
           await tester.pumpWidget(const SizedBox.shrink());
           await tester.pumpAndSettle();
         }
@@ -8789,11 +8833,11 @@ void main() {
         addTearDown(tester.view.resetPhysicalSize);
         addTearDown(tester.view.resetDevicePixelRatio);
         SharedPreferences.setMockInitialValues({});
-        final controller = WorkspaceController(
+        final controller = _newController(
           api: _FakeApi(),
           preferencesLoader: SharedPreferences.getInstance,
         );
-        addTearDown(controller.dispose);
+        addTearDown(() => _disposeController(controller));
 
         await tester.pumpWidget(SageDesktopV2App(controller: controller));
         await tester.pumpAndSettle();
@@ -8822,11 +8866,11 @@ void main() {
     addTearDown(tester.view.resetDevicePixelRatio);
     SharedPreferences.setMockInitialValues({});
     final api = _FakeApi();
-    final controller = WorkspaceController(
+    final controller = _newController(
       api: api,
       preferencesLoader: SharedPreferences.getInstance,
     );
-    addTearDown(controller.dispose);
+    addTearDown(() => _disposeController(controller));
 
     await tester.pumpWidget(SageDesktopV2App(controller: controller));
     await tester.pumpAndSettle();
@@ -8863,11 +8907,11 @@ void main() {
     addTearDown(tester.view.resetDevicePixelRatio);
     SharedPreferences.setMockInitialValues({});
     final api = _FakeApi();
-    final controller = WorkspaceController(
+    final controller = _newController(
       api: api,
       preferencesLoader: SharedPreferences.getInstance,
     );
-    addTearDown(controller.dispose);
+    addTearDown(() => _disposeController(controller));
 
     await tester.pumpWidget(SageDesktopV2App(controller: controller));
     await tester.pumpAndSettle();
@@ -8916,7 +8960,7 @@ void main() {
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
     final controller = await _controller();
-    addTearDown(controller.dispose);
+    addTearDown(() => _disposeController(controller));
 
     await tester.pumpWidget(SageDesktopV2App(controller: controller));
     await tester.pumpAndSettle();
@@ -8948,11 +8992,11 @@ void main() {
     addTearDown(tester.view.resetDevicePixelRatio);
     SharedPreferences.setMockInitialValues({});
     final api = _FakeApi();
-    final controller = WorkspaceController(
+    final controller = _newController(
       api: api,
       preferencesLoader: SharedPreferences.getInstance,
     );
-    addTearDown(controller.dispose);
+    addTearDown(() => _disposeController(controller));
 
     await tester.pumpWidget(SageDesktopV2App(controller: controller));
     await tester.pumpAndSettle();
@@ -8991,11 +9035,11 @@ void main() {
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
     SharedPreferences.setMockInitialValues({});
-    final controller = WorkspaceController(
+    final controller = _newController(
       api: _ManyToolsApi(),
       preferencesLoader: SharedPreferences.getInstance,
     );
-    addTearDown(controller.dispose);
+    addTearDown(() => _disposeController(controller));
 
     await tester.pumpWidget(SageDesktopV2App(controller: controller));
     await tester.pumpAndSettle();
@@ -9056,7 +9100,7 @@ void main() {
       addTearDown(tester.view.resetDevicePixelRatio);
       addTearDown(tester.platformDispatcher.clearPlatformBrightnessTestValue);
       final controller = await _controller();
-      addTearDown(controller.dispose);
+      addTearDown(() => _disposeController(controller));
 
       await tester.pumpWidget(SageDesktopV2App(controller: controller));
       await tester.pumpAndSettle();
@@ -9088,7 +9132,7 @@ void main() {
       addTearDown(tester.view.resetDevicePixelRatio);
       addTearDown(tester.platformDispatcher.clearPlatformBrightnessTestValue);
       final controller = await _controller();
-      addTearDown(controller.dispose);
+      addTearDown(() => _disposeController(controller));
 
       await tester.pumpWidget(SageDesktopV2App(controller: controller));
       await tester.pumpAndSettle();
@@ -9118,7 +9162,7 @@ void main() {
       addTearDown(tester.view.resetPhysicalSize);
       addTearDown(tester.view.resetDevicePixelRatio);
       final controller = await _controller();
-      addTearDown(controller.dispose);
+      addTearDown(() => _disposeController(controller));
 
       await tester.pumpWidget(SageDesktopV2App(controller: controller));
       await tester.pumpAndSettle();
@@ -9149,11 +9193,11 @@ void main() {
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
     SharedPreferences.setMockInitialValues({});
-    final controller = WorkspaceController(
+    final controller = _newController(
       api: _DenseAgentApi(),
       preferencesLoader: SharedPreferences.getInstance,
     );
-    addTearDown(controller.dispose);
+    addTearDown(() => _disposeController(controller));
 
     await tester.pumpWidget(SageDesktopV2App(controller: controller));
     await tester.pumpAndSettle();
@@ -9190,11 +9234,11 @@ void main() {
         language: 'zh',
         agentWorkspacePath: '/tmp/sage/agent_workspace',
       );
-    final controller = WorkspaceController(
+    final controller = _newController(
       api: api,
       preferencesLoader: SharedPreferences.getInstance,
     );
-    addTearDown(controller.dispose);
+    addTearDown(() => _disposeController(controller));
 
     await tester.pumpWidget(SageDesktopV2App(controller: controller));
     await tester.pumpAndSettle();
@@ -9235,11 +9279,11 @@ void main() {
         language: 'ja',
         agentWorkspacePath: '/tmp/sage/agent_workspace',
       );
-    final controller = WorkspaceController(
+    final controller = _newController(
       api: api,
       preferencesLoader: SharedPreferences.getInstance,
     );
-    addTearDown(controller.dispose);
+    addTearDown(() => _disposeController(controller));
 
     await tester.pumpWidget(SageDesktopV2App(controller: controller));
     await tester.pumpAndSettle();
@@ -9278,11 +9322,11 @@ void main() {
     addTearDown(tester.view.resetDevicePixelRatio);
     SharedPreferences.setMockInitialValues({});
     final api = _FakeApi();
-    final controller = WorkspaceController(
+    final controller = _newController(
       api: api,
       preferencesLoader: SharedPreferences.getInstance,
     );
-    addTearDown(controller.dispose);
+    addTearDown(() => _disposeController(controller));
 
     await tester.pumpWidget(SageDesktopV2App(controller: controller));
     await tester.pumpAndSettle();
@@ -9316,7 +9360,7 @@ void main() {
       addTearDown(tester.view.resetPhysicalSize);
       addTearDown(tester.view.resetDevicePixelRatio);
       final controller = await _controller();
-      addTearDown(controller.dispose);
+      addTearDown(() => _disposeController(controller));
 
       await tester.pumpWidget(SageDesktopV2App(controller: controller));
       await tester.pumpAndSettle();

@@ -94,10 +94,17 @@ jobs:
         with:
           python-version: '3.13'
       - uses: subosito/flutter-action@v2
+        if: matrix.platform != 'linux' || matrix.arch != 'arm64'
         with:
           flutter-version: '3.44.2'
           channel: stable
           cache: true
+      - name: Bootstrap pinned Flutter SDK on Linux arm64
+        if: matrix.platform == 'linux' && matrix.arch == 'arm64'
+        run: |
+          git clone --depth 1 --branch 3.44.2 https://github.com/flutter/flutter.git "$RUNNER_TEMP/flutter-arm64"
+          echo "$RUNNER_TEMP/flutter-arm64/bin" >> "$GITHUB_PATH"
+          "$RUNNER_TEMP/flutter-arm64/bin/flutter" --version
       - name: Install Linux build dependencies
         if: matrix.platform == 'linux'
         run: |

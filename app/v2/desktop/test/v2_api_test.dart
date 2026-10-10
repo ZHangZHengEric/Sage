@@ -6,6 +6,14 @@ import 'package:file_selector/file_selector.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sage_desktop_v2/src/api/v2_api.dart';
 
+// Multipart names can contain characters that are illegal in Windows paths.
+class _NamedUploadFile extends XFile {
+  _NamedUploadFile(super.path, this.name);
+
+  @override
+  final String name;
+}
+
 void main() {
   test('clone agent sends source identity and preserves returned settings', () async {
     final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
@@ -106,7 +114,7 @@ void main() {
         'sage-v2-api-unicode-upload-test-',
       );
       const filename = '小凤筝 copy "最终".png';
-      final source = File('${directory.path}/$filename');
+      final source = File('${directory.path}/unicode-upload.png');
       await source.writeAsBytes(const [0x89, 0x50, 0x4e, 0x47]);
       addTearDown(() => server.close(force: true));
       addTearDown(() => directory.delete(recursive: true));
@@ -142,7 +150,7 @@ void main() {
 
       final uploaded = await api.upload(
         agentId: 'sage',
-        file: XFile(source.path),
+        file: _NamedUploadFile(source.path, filename),
       );
       final multipartBytes = await body.future;
       final multipart = utf8.decode(multipartBytes, allowMalformed: true);
