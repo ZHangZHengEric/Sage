@@ -48,6 +48,6 @@ Windows 或 Linux 使用 `-d windows`、`-d linux`。应用自动启动托管 Py
 
 设置自动保存，模型和 Agent 配置不接受环境变量覆盖。源码调试时可给后端传 `--data-root /absolute/path`。注册项目仍使用各自的文件根目录。
 
-Desktop v2 不导入 v1 数据。现有 Tauri 发布安装包以对应版本说明为准，不应视为 Flutter v2 构建。
+Desktop v2 不导入 v1 数据。[Sage 2.0.0](https://github.com/ZHangZHengEric/Sage/releases/tag/v2.0.0) 安装包由 GitHub Actions 从 Flutter v2 客户端构建，包含 Python 与 v2 后端。旧 Tauri 发布仍属于 v1。macOS 包使用 ad-hoc 签名、未公证；Windows 包未做代码签名。
 
 [组件参考](https://github.com/ZHangZHengEric/Sage/blob/main/app/v2/desktop/README.md) · [故障排查](../TROUBLESHOOTING.md)

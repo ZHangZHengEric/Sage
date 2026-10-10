@@ -22,6 +22,7 @@ class RuntimeHost {
   RuntimeHost({
     V2ApiClient? api,
     File? sidecarRegistryFile,
+    Directory? bundledRuntimeRoot,
     String? buildId,
     RuntimeProcessStarter startProcess = Process.start,
     RuntimePidKiller killPid = Process.killPid,
@@ -34,6 +35,7 @@ class RuntimeHost {
     this.readPythonVersion = _inspectPythonVersion,
   }) : api = api ?? V2ApiClient(),
        _sidecarRegistryFileOverride = sidecarRegistryFile,
+       _bundledRuntimeRootOverride = bundledRuntimeRoot,
        _buildIdOverride = buildId,
        _processStarter = startProcess,
        _pidKiller = killPid,
@@ -44,6 +46,7 @@ class RuntimeHost {
 
   final V2ApiClient api;
   final File? _sidecarRegistryFileOverride;
+  final Directory? _bundledRuntimeRootOverride;
   final String? _buildIdOverride;
   final RuntimeProcessStarter _processStarter;
   final RuntimePidKiller _pidKiller;
@@ -117,7 +120,7 @@ class RuntimeHost {
         buildId,
       ],
       workingDirectory: root.path,
-      environment: Platform.environment,
+      environment: _runtimeEnvironment(root),
     );
     _process = process;
     _sidecarPid = process.pid;
@@ -252,7 +255,8 @@ class RuntimeHost {
   }
 
   String _dataRootPath() {
-    final home = Platform.environment['HOME'];
+    final home =
+        Platform.environment['HOME'] ?? Platform.environment['USERPROFILE'];
     if (home == null || home.trim().isEmpty) {
       throw const SageApiException('Cannot determine the user home directory.');
     }
@@ -442,7 +446,37 @@ class RuntimeHost {
     return base64Url.encode(bytes).replaceAll('=', '');
   }
 
+  Directory? _bundledRuntimeRoot() {
+    final override = _bundledRuntimeRootOverride;
+    if (override != null) return override;
+    final executableDirectory = File(Platform.resolvedExecutable).parent;
+    final candidates = [
+      Directory('${executableDirectory.path}/sage-runtime'),
+      if (Platform.isMacOS)
+        Directory('${executableDirectory.parent.path}/Resources/sage-runtime'),
+    ];
+    for (final candidate in candidates) {
+      if (File('${candidate.path}/sage-runtime.json').existsSync()) {
+        return candidate;
+      }
+    }
+    return null;
+  }
+
+  Map<String, String> _runtimeEnvironment(Directory root) {
+    final environment = Map<String, String>.from(Platform.environment);
+    if (File('${root.path}/sage-runtime.json').existsSync()) {
+      environment.remove('PYTHONHOME');
+      environment.remove('PYTHONPATH');
+      environment['PYTHONNOUSERSITE'] = '1';
+    }
+    return environment;
+  }
+
   Directory _findRepositoryRoot() {
+    final bundled = _bundledRuntimeRoot();
+    if (bundled != null) return bundled;
+
     final candidates = <Directory>[
       Directory.current.absolute,
       File(Platform.resolvedExecutable).parent.absolute,
@@ -465,6 +499,20 @@ class RuntimeHost {
   }
 
   String _pythonExecutable(Directory root) {
+    if (File('${root.path}/sage-runtime.json').existsSync()) {
+      final python = File(
+        Platform.isWindows
+            ? '${root.path}/python/python.exe'
+            : '${root.path}/python/bin/python3',
+      );
+      if (!python.existsSync()) {
+        throw const SageApiException(
+          'The bundled Sage Python runtime is missing.',
+        );
+      }
+      return python.path;
+    }
+
     final candidate = File('${root.path}/.venv/bin/python');
     if (candidate.existsSync()) return candidate.path;
     return Platform.isWindows ? 'python' : 'python3';
@@ -504,6 +552,18 @@ class RuntimeHost {
   }
 
   Future<String> _sourceBuildId(Directory root) async {
+    final manifest = File('${root.path}/sage-runtime.json');
+    if (manifest.existsSync()) {
+      final value = jsonDecode(await manifest.readAsString());
+      final buildId = value is Map ? value['build_id'] : null;
+      if (buildId is! String || buildId.isEmpty) {
+        throw const SageApiException(
+          'The bundled Sage build identity is missing.',
+        );
+      }
+      return buildId;
+    }
+
     final sourceRoots = [
       Directory('${root.path}/app/v2/desktop/backend'),
       Directory('${root.path}/sagents/v2'),

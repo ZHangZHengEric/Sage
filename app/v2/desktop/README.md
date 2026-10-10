@@ -1,6 +1,6 @@
 # Sage Desktop v2
 
-Sage Desktop v2 是验证 `sagents/v2` 的独立 Flutter 客户端，不替换、复用或修改旧 `app/v1/desktop` 的前端代码。
+Sage Desktop 2.0 是使用 `sagents/v2` 的独立 Flutter 客户端。旧 `app/v1/desktop` 保留为历史实现。
 
 ## 目录
 
@@ -124,3 +124,11 @@ Agent 编辑页的“复制”会先提交待保存内容，再打开副本的�
 `studio_send_message` 在消息和收件队列持久化后返回，不等待对方执行或回复。被 @ 的 Agent 自动唤醒，忙碌或等待审批的成员按顺序排队；@用户只发布消息。接收者可以不回复，也可以通过该工具公开回复而不 @ 回去。Agent 发起的消息所触发的 Run，其普通最终输出不会自动发布；无收件人的公开消息不触发新 Run。用户未指定成员时仍由协调成员接收。
 
 投递记录和 Run 绑定用于重启恢复与去重；启动回执不明时先查询已接受的 Run，不盲目重放。用户触发的最终结果由后端补入公开历史，前端不重复上传。自动投递最多同时占用 8 个执行任务，每个用户轮次最多 64 次自动投递、最多 8 层转发。本机制用于单宿主，不提供多宿主调度保证。
+
+## 2.0 发布包
+
+安装包由 `.github/workflows/release-v2.yml` 在 GitHub Actions 构建，包含 Flutter 客户端、独立 CPython、v2 后端和内置 skills；安装后无需源码目录或系统 Python。macOS 提供 arm64 / x86_64 DMG，Windows 提供 x86_64 安装程序，Linux 提供 arm64 / x86_64 DEB 与便携 tar.gz。Linux 仍需要 GTK 等系统动态库与 bubblewrap。
+
+每个平台在发布前将整个应用移动到另一个包含空格的路径，从仓库外启动内置 Python，验证 v2 导入、skills、带认证的 health 与客户端 lease 关闭。全部平台成功后才创建 `v2.0.0` tag 和 GitHub Release。手动验证运行不发布；选择 `publish` 才发布。
+
+macOS 包使用 ad-hoc 签名，未使用 Apple Developer ID 签名或公证；Windows 包未做代码签名。旧 Tauri updater feed 仅适用于 v1，不向 v1 自动推送 Flutter v2。

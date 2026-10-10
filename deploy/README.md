@@ -1,5 +1,7 @@
 # Sage Deploy
 
+当前 Compose / Kubernetes 应用入口和 Web 镜像仍属于 v1，不是 Sage 2.0 Server 部署方案。Server v2 请按 [独立启动指南](../app/v2/server/README.md) 配置，当前仅支持单 worker。
+
 部署相关文件统一放在 `deploy/` 下：
 
 - `deploy/images/`: Dockerfile、entrypoint、Jaeger 配置等共享镜像构建资源

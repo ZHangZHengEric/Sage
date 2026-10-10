@@ -4,11 +4,11 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "sage"
-version = "1.1.0"
-description = "A production-ready, modular, and intelligent multi-agent orchestration framework for complex problem solving."
+version = "2.0.0"
+description = "A modular multi-agent runtime with Desktop v2 and Server v2 applications."
 readme = "README.md"
-# Legacy Sage remains 3.10+. sagents.v2 and Desktop v2 require 3.12+.
-requires-python = ">=3.10"
+# Sage 2.0 applications and runtime require Python 3.12+.
+requires-python = ">=3.12"
 license = { text = "MIT" }
 authors = [
   { name = "Eric ZZ" },
@@ -90,8 +90,8 @@ sage = "clients.cli.main:main"
 include-package-data = true
 
 [tool.setuptools.packages.find]
-include = ["sagents*", "app*", "clients*", "mcp_servers.anytool*"]
-exclude = ["tests*", "app.v2.desktop*", "app.v1.desktop*", "app.skills*", "app.wiki*", "assets*", "logs*"]
+include = ["sagents*", "app", "app.v1*", "app.v2", "app.v2.cli*", "app.v2.server*", "app.v2.desktop", "app.v2.desktop.backend*", "clients*", "mcp_servers.anytool*"]
+exclude = ["tests*", "app.v1.desktop*", "app.skills*", "app.wiki*", "assets*", "logs*"]
 
 [tool.setuptools.data-files]
 "share/sage/docs/en" = ["docs/en/*.md"]
@@ -109,3 +109,5 @@ exclude = ["tests*", "app.v2.desktop*", "app.v1.desktop*", "app.skills*", "app.w
   "bin/sage-terminal.exe",
   "scripts/run-sage-terminal.sh",
 ]
+
+"app" = ["skills/**/*"]

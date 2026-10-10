@@ -142,6 +142,57 @@ class _BlockingRenewalApi extends _RegistryApi {
 
 void main() {
   test(
+    'RuntimeHost launches embedded Python outside a source checkout',
+    () async {
+      final directory = await Directory.systemTemp.createTemp(
+        'sage bundled runtime ',
+      );
+      addTearDown(() => directory.delete(recursive: true));
+      await File('${directory.path}/sage-runtime.json').writeAsString(
+        jsonEncode({'version': '2.0.0', 'build_id': 'release-2.0.0-test'}),
+      );
+      final python = File(
+        Platform.isWindows
+            ? '${directory.path}/python/python.exe'
+            : '${directory.path}/python/bin/python3',
+      );
+      await python.parent.create(recursive: true);
+      await python.writeAsString('test interpreter');
+      final api = _RegistryApi(healthyPorts: const {54322});
+      final process = _FakeProcess(pid: 456, readyPort: 54322);
+      String? spawnedExecutable;
+      String? spawnedDirectory;
+      Map<String, String>? spawnedEnvironment;
+      List<String>? spawnedArguments;
+      final host = RuntimeHost(
+        api: api,
+        bundledRuntimeRoot: directory,
+        sidecarRegistryFile: File('${directory.path}/sidecar.json'),
+        readPythonVersion: (executable) async => (3, 13),
+        startProcess:
+            (executable, arguments, {workingDirectory, environment}) async {
+              spawnedExecutable = executable;
+              spawnedDirectory = workingDirectory;
+              spawnedEnvironment = environment;
+              spawnedArguments = arguments;
+              return process;
+            },
+        terminationGracePeriod: const Duration(milliseconds: 1),
+      );
+      addTearDown(host.stopOwnedSidecar);
+      await host.ensureReady();
+      expect(spawnedExecutable, python.path);
+      expect(spawnedDirectory, directory.path);
+      expect(spawnedArguments, contains('app.v2.desktop.backend.main'));
+      expect(spawnedArguments, contains('release-2.0.0-test'));
+      expect(api.expectedBuildId, 'release-2.0.0-test');
+      expect(spawnedEnvironment!['PYTHONNOUSERSITE'], '1');
+      expect(spawnedEnvironment!.containsKey('PYTHONPATH'), isFalse);
+      expect(spawnedEnvironment!.containsKey('PYTHONHOME'), isFalse);
+    },
+  );
+
+  test(
     'RuntimeHost survives final detach racing registered health check',
     () async {
       final directory = await Directory.systemTemp.createTemp(
