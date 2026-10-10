@@ -5,6 +5,7 @@ import argparse
 from concurrent.futures import ThreadPoolExecutor
 import json
 import os
+import secrets
 from pathlib import Path
 import subprocess
 import tempfile
@@ -66,8 +67,9 @@ assert not any(n.startswith(('app.v1.', 'sagents.v1.')) for n in sys.modules)
                     raise RuntimeError('Sidecar never became healthy')
                 assert health['status'] == 'ok' and health['build_id'] == manifest['build_id']
                 assert health['protocol'] == 'sage.runtime/v2', health
+                client_id = secrets.token_urlsafe(24)
                 for method in ('PUT', 'DELETE'):
-                    request = urllib.request.Request(endpoint + '/api/v2/runtime/clients/release-smoke',
+                    request = urllib.request.Request(endpoint + f'/api/v2/runtime/clients/{client_id}',
                         headers=headers, method=method)
                     with urllib.request.urlopen(request, timeout=5) as response:
                         result = json.load(response)['data']
