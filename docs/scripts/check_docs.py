@@ -61,8 +61,11 @@ def main() -> None:
             for m in metadata.values()
         ):
             errors.append(f"{path}: missing parent {parent}")
-    extra = [ROOT / "README.md", ROOT / "README_CN.md", ROOT / "sagents/v2/README.md"]
-    for path in pages + extra:
+    quickstart_pages = [
+        ROOT / "README.md", ROOT / "README_CN.md", ROOT / "sagents/v2/README.md"
+    ]
+    link_pages = pages + quickstart_pages + [ROOT / "CONTRIBUTING.md"]
+    for path in link_pages:
         text = path.read_text()
         for link in re.findall(r'\]\(([^)\s]+)\)|src="([^"]+)"', text):
             target = unquote(link[0] or link[1]).split("#", 1)[0]
@@ -85,7 +88,7 @@ def main() -> None:
                 errors.append(f"{path}: local link into unpublished archive: {target}")
     source = (ROOT / "examples/sagents_v2_quickstart.py").read_text()
     ast.parse(source)
-    for path in extra + [
+    for path in quickstart_pages + [
         DOCS / lang / "applications/GETTING_STARTED.md" for lang in ("en", "zh")
     ]:
         if "```python\n" + source + "```" not in path.read_text():
