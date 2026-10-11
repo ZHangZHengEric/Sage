@@ -38,7 +38,8 @@ class ModelHandler(BaseHTTPRequestHandler):
         self.server.requests += 1
         if request.get("stream"):
             chunks = [
-                {"index": 0, "delta": {"role": "assistant", "content": MARKER}, "finish_reason": None},
+                {"index": 0, "delta": {"role": "assistant", "content": MARKER[:8]}, "finish_reason": None},
+                {"index": 0, "delta": {"content": MARKER[8:]}, "finish_reason": None},
                 {"index": 0, "delta": {}, "finish_reason": "stop"},
             ]
             payload = "".join("data: " + json.dumps({
@@ -107,10 +108,17 @@ def cli_case(workspace: Path, env: dict[str, str], version: str):
         args += ["--session-root", str(workspace / "runtime")]
     result = subprocess.run(args, cwd=workspace, env=env, input="", capture_output=True, text=True, timeout=45)
     assert result.returncode == 0, result.stdout + result.stderr
-    assert MARKER in result.stdout, result.stdout + result.stderr
+    rows = [json.loads(line) for line in result.stdout.splitlines() if line.startswith("{")]
     if version == "v2":
-        rows = [json.loads(line) for line in result.stdout.splitlines() if line.startswith("{")]
-        assert any(row.get("type") == "cli_v2_result" and row.get("state") == "completed" for row in rows)
+        assert any(row.get("type") == "cli_v2_result" and row.get("state") == "completed"
+                   and MARKER in row.get("final_text", "") for row in rows), result.stdout + result.stderr
+    else:
+        replies: dict[str, str] = {}
+        for row in rows:
+            if row.get("role") == "assistant" and row.get("type") == "do_subtask_result":
+                message_id = row.get("message_id", "")
+                replies[message_id] = replies.get(message_id, "") + (row.get("content") or "")
+        assert any(MARKER in reply for reply in replies.values()), result.stdout + result.stderr
     print(f"CLI {version}: task completed", flush=True)
 
 
@@ -140,14 +148,24 @@ def tui_case(workspace: Path, env: dict[str, str], version: str):
             if b"\x1b[6n" in chunk:
                 os.write(master, b"\x1b[1;1R")
             rendered = re.sub(r"\x1b\[[0-?]*[ -/]*[@-~]", "", output.decode(errors="replace"))
-            # The marker plus a subsequent ready status proves Finished was handled.
+            # Require the completed transcript summary; session metadata can arrive
+            # before the assistant stream and does not prove Finished was handled.
             marker_at = rendered.rfind(MARKER)
-            if marker_at >= 0 and "ready" in rendered[marker_at:]:
+            if marker_at >= 0 and "completed •" in rendered[marker_at:] and "ready" in rendered[marker_at:]:
                 completed = True
                 break
         assert completed, output.decode(errors="replace")[-12000:]
         os.write(master, b"\x03")
-        process.wait(timeout=5)
+        # Keep draining the PTY while the terminal redraws/restores on exit.
+        # Waiting without reading can block a writer on the PTY's small buffer.
+        exit_deadline = time.monotonic() + 5
+        while process.poll() is None and time.monotonic() < exit_deadline:
+            if select.select([master], [], [], 0.1)[0]:
+                try:
+                    output.extend(os.read(master, 65536))
+                except OSError:
+                    break
+        process.wait(timeout=1)
         assert process.returncode == 0, process.returncode
         print(f"TUI {version}: task completed and terminal exited cleanly", flush=True)
     finally:

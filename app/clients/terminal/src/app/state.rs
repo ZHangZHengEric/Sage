@@ -389,7 +389,9 @@ impl App {
             self.current_goal = Some(goal);
         }
         self.pending_goal_mutation = None;
-        self.status = if meta.command_mode.as_deref() == Some("resume") {
+        self.status = if self.busy {
+            format!("running  {}", self.session_id)
+        } else if meta.command_mode.as_deref() == Some("resume") {
             format!("resumed  {}", self.session_id)
         } else {
             format!("ready  {}", self.session_id)
