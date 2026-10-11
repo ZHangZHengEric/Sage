@@ -1,6 +1,6 @@
 //! `sage v2 chat --json` 的 NDJSON 解析：native `RuntimeEvent` 与 `cli_v2_*` 框架帧。
 //!
-//! 契约见 `clients/terminal/CLI_CONTRACT.md` 末尾的 experimental 一节。这里只做投影，
+//! 契约见 `app/clients/terminal/CLI_CONTRACT.md` 末尾的 experimental 一节。这里只做投影，
 //! 不改变事件语义：assistant 增量→ `LiveChunk`，工具状态→ `ToolStarted/Finished`，
 //! 审批交互→ `SandboxApprovalRequested`（复用现有的审批 UI），其余交互→ `InputRequested`。
 

@@ -72,6 +72,6 @@ Avoid moving these concerns into Rust TUI code:
 
 For future PRs:
 
-- if a change only affects rendering or interaction, it belongs in `clients/terminal`
-- if a change affects runtime meaning or data shape, it belongs in `clients/cli` / runtime first
+- if a change only affects rendering or interaction, it belongs in `app/clients/terminal`
+- if a change affects runtime meaning or data shape, it belongs in `app/clients/cli` / runtime first
 - if the TUI needs a new capability, prefer adding a stable CLI/JSON contract instead of special-casing UI logic

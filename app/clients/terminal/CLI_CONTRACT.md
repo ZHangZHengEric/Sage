@@ -59,7 +59,7 @@ For streaming events:
 If one of these contracts must change:
 
 1. change the CLI/runtime contract intentionally
-2. update `clients/terminal/src/backend/contract.rs`
+2. update `app/clients/terminal/src/backend/contract.rs`
 3. update Rust-side tests
 4. update Python-side JSON contract tests
 5. update this document if the surface area changed
@@ -168,8 +168,8 @@ session id it previously received in a `cli_v2_session` frame, maps native `mess
 `message.completed` / `tool.call.*` events onto its transcript, turns `approval` interactions into the
 existing `/approve` (`approve_once`), `/remember` (`approve_and_remember`) and `/deny` flow, and answers
 other interactions (`submit` / `change_direction`) with the next composer input or `/deny` (`cancel`).
-Rust-side parsing lives in `clients/terminal/src/backend/protocol_v2.rs` with tests in
-`clients/terminal/src/backend/tests/protocol_v2.rs`. Composer input typed while a run is active is sent as a
+Rust-side parsing lives in `app/clients/terminal/src/backend/protocol_v2.rs` with tests in
+`app/clients/terminal/src/backend/tests/protocol_v2.rs`. Composer input typed while a run is active is sent as a
 `v2_steer` frame and the `cli_v2_steer` answer is shown in the transcript; an approval must be
 answered first (the CLI reads only decision lines then). With the v2 runtime selected, `/sessions`,
 `/resume` and `/sessions inspect` read the v2 store through `sage v2 sessions --json` and

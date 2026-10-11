@@ -38,8 +38,6 @@ jobs:
             path: tests/app/v1/common
           - suite: sagents
             path: tests/sagents
-          - suite: clients
-            path: tests/clients
           - suite: mcp
             path: tests/mcp_servers
 

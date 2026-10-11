@@ -8,8 +8,8 @@ def main(argv=None):
         from app.v2.cli.main import main as run
     elif args and args[0] == "tui":
         import argparse
-        from clients.cli.tui import tui_command
-        from clients.cli.errors import CLIError
+        from app.clients.cli.tui import tui_command
+        from app.clients.cli.errors import CLIError
         try:
             return tui_command(argparse.Namespace(command="tui", terminal_args=args[1:]))
         except CLIError as exc:
@@ -18,7 +18,7 @@ def main(argv=None):
                 print(step, file=sys.stderr)
             return exc.exit_code
     elif not args or args[0] in {"-h", "--help"}:
-        from clients.cli.parser import build_argument_parser
+        from app.clients.cli.parser import build_argument_parser
         build_argument_parser().parse_args(args)
         return 0
     else:

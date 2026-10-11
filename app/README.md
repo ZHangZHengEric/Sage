@@ -2,6 +2,9 @@
 
 ```text
 app/
+  clients/
+    cli/              Shared sage command dispatch and terminal launcher
+    terminal/         Shared Rust terminal UI
   v1/
     cli/              Legacy command implementations
     desktop/          Legacy desktop host and UI
@@ -25,8 +28,8 @@ dependency artifacts were removed during the requested local cleanup.
 
 See [source ownership and entry points](../docs/VERSIONED_LAYOUT.md).
 
-Public launchers live outside `app`: `clients/cli` dispatches `sage` commands;
-`clients/terminal` owns the Rust terminal client.
+Public launchers live in `app/clients`: `app/clients/cli` dispatches `sage` commands;
+`app/clients/terminal` owns the Rust terminal client.
 
 `app/skills` is the only built-in skill source. Former local root skills were
 archived intact under `.sage/organization-backup/root-skills`; they are not shipped.

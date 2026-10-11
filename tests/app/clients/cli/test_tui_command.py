@@ -3,17 +3,17 @@ from pathlib import Path
 import unittest
 from unittest.mock import patch
 
-import clients.cli.tui as tui
-import clients.cli.main as cli_main
+import app.clients.cli.tui as tui
+import app.clients.cli.main as cli_main
 
 
 class TestCliTuiCommand(unittest.TestCase):
     def test_tui_command_forwards_arguments_in_order(self):
         with patch(
-            "clients.cli.tui.resolve_terminal_binary",
+            "app.clients.cli.tui.resolve_terminal_binary",
             return_value=Path("/tmp/sage-terminal"),
         ):
-            with patch("clients.cli.tui.subprocess.call", return_value=0) as call:
+            with patch("app.clients.cli.tui.subprocess.call", return_value=0) as call:
                 exit_code = cli_main.main(
                     [
                         "tui",
@@ -49,10 +49,10 @@ class TestCliTuiCommand(unittest.TestCase):
 
     def test_tui_command_does_not_parse_terminal_arguments_in_python(self):
         with patch(
-            "clients.cli.tui.resolve_terminal_binary",
+            "app.clients.cli.tui.resolve_terminal_binary",
             return_value=Path("/tmp/sage-terminal"),
         ):
-            with patch("clients.cli.tui.subprocess.call", return_value=0) as call:
+            with patch("app.clients.cli.tui.subprocess.call", return_value=0) as call:
                 exit_code = cli_main.main(
                     [
                         "tui",
@@ -74,7 +74,7 @@ class TestCliTuiCommand(unittest.TestCase):
         )
 
     def test_tui_command_requires_terminal_binary(self):
-        with patch("clients.cli.tui.resolve_terminal_binary", return_value=None):
+        with patch("app.clients.cli.tui.resolve_terminal_binary", return_value=None):
             stderr = io.StringIO()
             with patch("sys.stderr", stderr):
                 exit_code = cli_main.main(["tui"])
@@ -87,7 +87,7 @@ class TestCliTuiCommand(unittest.TestCase):
 
     def test_terminal_resolver_prefers_packaged_launcher_before_source_target(self):
         with patch(
-            "clients.cli.tui._package_terminal_candidates"
+            "app.clients.cli.tui._package_terminal_candidates"
         ) as package_candidates:
             with patch("os.access", return_value=True):
                 with patch("pathlib.Path.is_file", return_value=True):
@@ -104,7 +104,7 @@ class TestCliTuiCommand(unittest.TestCase):
 
     def test_terminal_resolver_keeps_explicit_env_override_first(self):
         with patch(
-            "clients.cli.tui._package_terminal_candidates"
+            "app.clients.cli.tui._package_terminal_candidates"
         ) as package_candidates:
             with patch("os.access", return_value=True):
                 with patch("pathlib.Path.is_file", return_value=True):

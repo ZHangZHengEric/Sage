@@ -10,7 +10,7 @@ Desktop v2 构建通过；已修复发现的路径、历史脚本加载和打包
 
 - Agent 引擎：`sagents/v1`、`sagents/v2`。
 - 应用实现：`app/v1/{cli,desktop,server,common,chrome-extension}`、`app/v2/{cli,desktop,server}`。
-- 用户入口：`clients/cli`、`clients/terminal`；`sage` 命令兼容原用法，v2 CLI 不导入 v1。
+- 用户入口：`app/clients/cli`、`app/clients/terminal`；`sage` 命令兼容原用法，v2 CLI 不导入 v1。
 - AnyTool：`mcp_servers/anytool` 独立 MCP，不导入 `app`、`common` 或 `sagents`。
 - 内置技能唯一源码：`app/skills`。原根目录 `skills` 为本地未入库内容，包含同名不同版本，
   已完整归档到 `.sage/organization-backup/root-skills`，22 个文件/链接经内容或目标校验。

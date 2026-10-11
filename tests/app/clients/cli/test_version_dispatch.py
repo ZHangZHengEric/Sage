@@ -6,7 +6,7 @@ import sys
 
 import pytest
 
-ROOT = Path(__file__).resolve().parents[3]
+ROOT = Path(__file__).resolve().parents[4]
 
 
 @pytest.mark.parametrize('version,args', [
@@ -25,7 +25,7 @@ class BlockOther(importlib.abc.MetaPathFinder):
             if fullname == prefix or fullname.startswith(prefix + '.'):
                 raise AssertionError('Cross-generation import: ' + fullname)
 sys.meta_path.insert(0, BlockOther())
-from clients.cli.main import main
+from app.clients.cli.main import main
 try:
     result = main({args!r})
 except SystemExit as exc:

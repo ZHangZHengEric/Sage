@@ -76,7 +76,7 @@ pub(crate) fn run_cli_json(args: &[&str]) -> Result<Value> {
             command
                 .current_dir(&runtime_root)
                 .arg("-m")
-                .arg("clients.cli.main");
+                .arg("app.clients.cli.main");
             command
         }
     };

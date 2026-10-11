@@ -30,7 +30,7 @@
       "pythonVersion": "3.12"
     },
     {
-      "root": "tests/clients/cli",
+      "root": "tests/app/clients/cli",
       "pythonVersion": "3.12"
     }
   ],
@@ -39,7 +39,7 @@
   "typeCheckingMode": "basic",
   "include": [
     "app/__init__.py",
-    "clients/cli",
+    "app/clients/cli",
     "app/v1/cli",
     "app/v2/cli",
     "app/v1/desktop/core",
@@ -72,7 +72,7 @@
     "app/v1/desktop/tauri",
     "app/v1/desktop/ui",
     "app/v1/server/web",
-    "clients/terminal",
+    "app/clients/terminal",
     "app/wiki",
     "assets",
     "deploy",

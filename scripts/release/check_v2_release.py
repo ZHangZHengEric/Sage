@@ -27,8 +27,8 @@ def main() -> None:
         assert data['version'] == VERSION, path
         if 'packages' in data:
             assert data['packages']['']['version'] == VERSION
-    assert tomllib.loads((ROOT / 'clients/terminal/Cargo.toml').read_text())['package']['version'] == VERSION
-    lock = tomllib.loads((ROOT / 'clients/terminal/Cargo.lock').read_text())
+    assert tomllib.loads((ROOT / 'app/clients/terminal/Cargo.toml').read_text())['package']['version'] == VERSION
+    lock = tomllib.loads((ROOT / 'app/clients/terminal/Cargo.lock').read_text())
     assert next(p['version'] for p in lock['package'] if p['name'] == 'sage-terminal') == VERSION
     for readme in ('README.md', 'README_CN.md'):
         text = (ROOT / readme).read_text()
@@ -43,7 +43,7 @@ def main() -> None:
         with zipfile.ZipFile(wheel) as archive:
             names = archive.namelist()
             for required in ['app/v2/desktop/backend/main.py', 'app/v2/server/main.py',
-                             'clients/cli/main.py', 'sagents/v2/__init__.py', 'mcp_servers/anytool/__init__.py']:
+                             'app/clients/cli/main.py', 'sagents/v2/__init__.py', 'mcp_servers/anytool/__init__.py']:
                 assert required in names, f'Missing wheel module: {required}'
             assert any(n.startswith('app/skills/') and n.endswith('/SKILL.md') for n in names)
             metadata = archive.read(f'sage-{VERSION}.dist-info/METADATA').decode()

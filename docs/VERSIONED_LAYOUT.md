@@ -24,7 +24,7 @@ assessment rules and fallback model request defaults belong to its own backend.
 Those modules do not import v1 code. V2 capability profiles continue to take
 precedence over fallback request defaults.
 
-`clients/cli/` and `clients/terminal/` select between runtimes and remain public entry
+`app/clients/cli/` and `app/clients/terminal/` select between runtimes and remain public entry
 points. `app/skills/` and `app/wiki/` remain shared resources. `app/v1/common/` is the legacy application service layer, not a version-neutral
 runtime library. `mcp_servers/` contains separately hosted MCP integrations;
 several still depend on v1. Legacy integrations remain outside the agent engine; AnyTool is independently deployable. The AnyTool MCP package is independent; v2 does not
@@ -50,7 +50,7 @@ bash app/v1/desktop/scripts/dev.sh
 python -m pytest tests/sagents/v1 tests/app/v1
 ```
 
-The `sage` command still points to `clients.cli.main:main`, including its `v2`
+The `sage` command still points to `app.clients.cli.main:main`, including its `v2`
 subcommands. Old release notes and `docs/archive/` describe historical layouts
 and are not rewritten.
 
@@ -64,8 +64,8 @@ and are not rewritten.
 | `app/v2/server` | Server API, persistence, web client | Uses v2; no legacy application services |
 | `app/v1/cli` | Legacy CLI implementation | Uses v1 application services |
 | `app/v2/cli` | V2 CLI implementation and configuration | No v1 imports |
-| `clients/cli` | Public command dispatch and terminal launcher | Lazily selects the application version |
-| `clients/terminal` | Rust terminal client and launchers | Selects the requested backend; not an agent engine |
+| `app/clients/cli` | Public command dispatch and terminal launcher | Lazily selects the application version |
+| `app/clients/terminal` | Rust terminal client and launchers | Selects the requested backend; not an agent engine |
 | `app/v1/common` | Legacy application configuration, DAOs, schemas, services | New v2 features must not import it |
 | `mcp_servers` | Built-in MCP integrations | Not a version-neutral core library |
 | `app/skills`, `app/wiki` | Packaged content | Resources rather than runtime implementations |
@@ -119,9 +119,9 @@ caches may reappear after running commands and are ignored by Git.
 ## Command and terminal clients
 
 `app/cli` and `app/terminal` no longer exist. The Python CLI implementations are
-version-owned; `clients/cli` contains only public dispatch, combined help, and the
+version-owned; `app/clients/cli` contains only public dispatch, combined help, and the
 terminal launcher. The installed command remains `sage`; the module entry point
-is `python -m clients.cli.main`. `sage run` selects v1, `sage v2 run` selects v2,
+is `python -m app.clients.cli.main`. `sage run` selects v1, `sage v2 run` selects v2,
 and `sage tui --runtime v2` starts the Rust client with the v2 protocol.
 
 V2 CLI environment loading and stderr logging are independent of the v1 startup

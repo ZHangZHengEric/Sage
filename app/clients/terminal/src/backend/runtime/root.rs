@@ -9,6 +9,7 @@ pub(crate) fn repo_root() -> Result<PathBuf> {
     manifest_dir
         .parent()
         .and_then(|path| path.parent())
+        .and_then(|path| path.parent())
         .map(PathBuf::from)
         .ok_or_else(|| anyhow!("failed to resolve repo root from CARGO_MANIFEST_DIR"))
 }
@@ -24,7 +25,7 @@ pub(crate) fn resolve_runtime_root_from(current_exe: Option<PathBuf>) -> Result<
             return Ok(path);
         }
         return Err(anyhow!(
-            "SAGE_TERMINAL_RUNTIME_ROOT does not contain clients/cli/main.py: {}",
+            "SAGE_TERMINAL_RUNTIME_ROOT does not contain app/clients/cli/main.py: {}",
             path.display()
         ));
     }

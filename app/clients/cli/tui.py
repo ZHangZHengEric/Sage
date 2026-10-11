@@ -7,11 +7,11 @@ import subprocess
 import sys
 from typing import Iterable, Optional
 
-from clients.cli.errors import CLIError
+from app.clients.cli.errors import CLIError
 
 
 def _repo_root() -> Path:
-    return Path(__file__).resolve().parents[2]
+    return Path(__file__).resolve().parents[3]
 
 
 def _platform_binary_name() -> str:
@@ -61,8 +61,8 @@ def resolve_terminal_binary(
 
     root = repo_root or _repo_root()
     source_candidates = [
-        root / "clients" / "terminal" / "target" / "release" / "sage-terminal",
-        root / "clients" / "terminal" / "target" / "debug" / "sage-terminal",
+        root / "app" / "clients" / "terminal" / "target" / "release" / "sage-terminal",
+        root / "app" / "clients" / "terminal" / "target" / "debug" / "sage-terminal",
     ]
     source_candidates.sort(
         key=lambda path: path.stat().st_mtime if path.exists() else 0,
@@ -98,7 +98,7 @@ def tui_command(
             next_steps=[
                 "Install a Sage package that includes the Terminal TUI launcher and binary for your platform.",
                 "Alternatively set SAGE_TERMINAL_BIN=/path/to/sage-terminal.",
-                "For source checkout development only, build it with: cargo build --manifest-path clients/terminal/Cargo.toml --release",
+                "For source checkout development only, build it with: cargo build --manifest-path app/clients/terminal/Cargo.toml --release",
             ],
         )
 
