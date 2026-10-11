@@ -1,11 +1,13 @@
 """Execute CLI and PTY terminal tasks against a local deterministic model.
 
 Run with the project's Python environment after building sage-terminal.
-No external model credentials or network requests are used.
+By default no external model credentials or network requests are used.
+Use --app-model to test both default v2 clients against the APP's real default model.
 """
 from __future__ import annotations
 
 import fcntl
+import argparse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import os
@@ -24,6 +26,7 @@ import time
 
 ROOT = Path(__file__).resolve().parents[2]
 MARKER = "SAGE_SMOKE_TASK_COMPLETED"
+TASK = "Return the completion marker."
 
 
 class ModelHandler(BaseHTTPRequestHandler):
@@ -32,6 +35,22 @@ class ModelHandler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         request = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+        if self.path.endswith("/responses"):
+            self.server.requests += 1
+            events = [
+                {"type": "response.output_text.delta", "delta": MARKER[:8], "output_index": 0, "content_index": 0},
+                {"type": "response.output_text.delta", "delta": MARKER[8:], "output_index": 0, "content_index": 0},
+                {"type": "response.completed", "response": {"id": "smoke-response", "status": "completed",
+                 "output": [], "usage": {"input_tokens": 1, "output_tokens": 1, "total_tokens": 2}}},
+            ]
+            body = "".join("event: " + event["type"] + "\ndata: " + json.dumps(event) + "\n\n"
+                           for event in events).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
         if not self.path.endswith("/chat/completions"):
             self.send_error(404)
             return
@@ -101,7 +120,7 @@ def cli_case(workspace: Path, env: dict[str, str], version: str):
     args = [sys.executable, "-m", "app.clients.cli.main"]
     if version == "v1":
         args += ["v1"]
-    args += ["run", "Return the completion marker.", "--json", "--workspace", str(workspace)]
+    args += ["run", TASK, "--json", "--workspace", str(workspace)]
     if version == "v1":
         args += ["--agent-mode", "simple", "--sandbox-type", "local"]
     else:
@@ -127,7 +146,7 @@ def tui_case(workspace: Path, env: dict[str, str], version: str):
             "--workspace", str(workspace)]
     if version == "v1":
         args += ["--runtime", "v1", "--agent-mode", "simple", "--sandbox-type", "local"]
-    args += ["run", "Return the completion marker."]
+    args += ["run", TASK]
     master, slave = pty.openpty()
     fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 40, 140, 0, 0))
     process = subprocess.Popen(args, cwd=workspace, env=env, stdin=slave, stdout=slave, stderr=slave,
@@ -175,7 +194,34 @@ def tui_case(workspace: Path, env: dict[str, str], version: str):
         os.close(master)
 
 
+def app_model_env(workspace: Path) -> dict[str, str]:
+    env = test_env(workspace, "unused")
+    for key in ("SAGE_DEFAULT_LLM_API_KEY", "SAGE_DEFAULT_LLM_API_BASE_URL", "SAGE_DEFAULT_LLM_MODEL_NAME"):
+        env.pop(key, None)
+    env["SAGE_CLI_USER_ID"] = os.environ.get("SAGE_CLI_USER_ID") or os.environ.get("SAGE_DESKTOP_USER_ID") or "default_user"
+    if os.environ.get("SAGE_DESKTOP_DATA_ROOT"):
+        env["SAGE_DESKTOP_DATA_ROOT"] = os.environ["SAGE_DESKTOP_DATA_ROOT"]
+    return env
+
+
+def live_app_main():
+    global MARKER, TASK
+    MARKER = "SAGE_LIVE_437"
+    TASK = "Calculate 19 times 23, then return SAGE_LIVE_ followed by the answer. No explanation or tools."
+    with tempfile.TemporaryDirectory(prefix="sage-app-model-smoke-") as folder:
+        for kind, case in (("cli", cli_case), ("tui", tui_case)):
+            workspace = Path(folder) / kind
+            workspace.mkdir()
+            case(workspace, app_model_env(workspace), "v2")
+    print("Both default v2 clients passed with the APP default model.")
+
+
 def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--app-model", action="store_true", help="Use the APP's configured real default model")
+    if parser.parse_args().app_model:
+        live_app_main()
+        return
     server = ThreadingHTTPServer(("127.0.0.1", 0), ModelHandler)
     server.requests = 0
     thread = threading.Thread(target=server.serve_forever, daemon=True)
@@ -190,8 +236,28 @@ def main():
                     if version == "v1":
                         configure_v1_provider(workspace, env)
                     case(workspace, env, version)
-        assert server.requests >= 4, server.requests
-        print("All four CLI/TUI runtime task paths passed.")
+            # Test catalog discovery through both public v2 entry points as well.
+            for protocol, kind, case in (
+                (protocol, kind, case)
+                for protocol in ("openai-chat-completions", "openai-responses")
+                for kind, case in (("cli", cli_case), ("tui", tui_case))
+            ):
+                workspace = Path(folder) / f"app-{protocol}-{kind}"
+                workspace.mkdir()
+                env = app_model_env(workspace)
+                app_root = workspace / "app-data"
+                (app_root / "runtime").mkdir(parents=True)
+                (app_root / "runtime" / "desktop-catalog.json").write_text(json.dumps({
+                    "format_version": "sage.desktop-catalog/v2",
+                    "model_providers": [{"user_id": env["SAGE_CLI_USER_ID"], "is_default": True,
+                                         "protocol": protocol, "model": "smoke-model",
+                                         "base_url": f"http://127.0.0.1:{server.server_port}/v1",
+                                         "api_key": "catalog-smoke-key"}],
+                }))
+                env["SAGE_DESKTOP_DATA_ROOT"] = str(app_root)
+                case(workspace, env, "v2")
+        assert server.requests >= 8, server.requests
+        print("All four runtime paths and four APP catalog/protocol task paths passed.")
     finally:
         server.shutdown()
         server.server_close()

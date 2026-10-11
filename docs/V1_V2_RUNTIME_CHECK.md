@@ -1,5 +1,16 @@
 # v1 / v2 重构验证报告
 
+## 2026-10-11 CLI / TUI 共享 APP 模型配置
+
+- 默认 v2 CLI 与 TUI 在后端启动时读取 `~/sage/runtime/desktop-catalog.json`，按当前用户选择 APP 默认模型；没有默认标记时沿用 APP 的首个模型回退。模型协议、上下文长度、输出限制、采样参数、能力声明及仍有效的兼容性配置随路由加载。
+- APP 保存的密钥只通过进程内凭据引用传给 Runtime，不写入任务 manifest。配置读取不启动 Desktop，也不修改目录中的模型记录。
+- `--package` 优先；显式 endpoint/key 环境配置保留原行为；仅覆盖模型名称时复用 APP 默认模型的协议、地址与密钥。自定义 APP 数据目录使用 `SAGE_DESKTOP_DATA_ROOT`；用户选择使用 CLI 的 `--user-id` / `SAGE_CLI_USER_ID` / `SAGE_DESKTOP_USER_ID`。v1 保留旧 Provider 配置。
+- 新增共享目录/路由测试，覆盖默认模型切换、用户隔离、覆盖优先级、缺失密钥、损坏文件及密钥不进入 manifest。完整 CLI 回归在允许原生沙箱进程的环境 221 项通过；本地模型验证的四条 v1/v2 链路及四条 APP 配置/协议链路通过。
+- 使用临时 APP 格式模型目录中的已配置真实 `deepseek-v4-flash`：默认 CLI 与 TUI 都正确计算 19 × 23，并完成任务，TUI 正常退出。未修改 APP 默认设置。
+- 原 APP 默认 `DeepSeek-V4-Flash-Vision-Exp`（Responses）两次真实任务请求均遇到 HTTP 502；绕过 CLI 直接请求其 Responses 接口的非流式与流式请求也返回 502。
+- 经用户确认，已将本地 APP 当前用户的默认模型切换为已配置的 `DeepSeek / deepseek-v4-flash`（Chat Completions）。原模型仍保留在配置中；本地模型目录不进入 Git。
+- 切换后运行 `.venv/bin/python scripts/checks/smoke_cli_tui.py --app-model`，不传入模型名称、地址或密钥覆盖，默认 CLI 与 TUI 自动读取实际 APP 目录，均返回 `SAGE_LIVE_437` 并完成任务；TUI 正常退出。默认 v2 的真实模型验收通过。
+
 ## 2026-10-11 已配置真实模型验证
 
 - 本地 Desktop v2 的 `~/sage/runtime/desktop-catalog.json` 有 7 个模型配置。CLI 环境配置未保存密钥，尚不自动读取 Desktop 模型目录；本次在隔离临时环境中加载其中的 DeepSeek 配置，未修改用户保存的模型或默认值。
