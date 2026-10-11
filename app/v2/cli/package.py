@@ -8,6 +8,7 @@ from pathlib import Path
 from sagents.v2.agent.presets.catalog import BUILTIN_AGENT_PRESETS
 from sagents.v2.package.manifest.loader import SageManifestLoader
 from sagents.v2.package.manifest.root import SageManifest
+from sagents.v2.package.manifest.models import ModelRoute
 from sagents.v2.package.manifest.runtime import CapabilitySelection
 from sagents.v2.package.presets.factory import BuiltinPackageFactory
 from sagents.v2.tool.contracts import SideEffectLevel
@@ -37,6 +38,7 @@ class CliModelSettings:
     credential_env: str = DEFAULT_CREDENTIAL_ENV
     context_window: int | None = None
     max_output_tokens: int | None = None
+    route: ModelRoute | None = None
 
 
 def available_presets() -> tuple[str, ...]:
@@ -77,6 +79,8 @@ def build_preset_package(
         context_window=model.context_window,
         max_output_tokens=model.max_output_tokens,
     )
+    if model.route is not None:
+        manifest = manifest.model_copy(update={"models": {"primary": model.route}})
     capabilities = {
         **manifest.runtime.capabilities,
         "tool.catalog": CapabilitySelection(

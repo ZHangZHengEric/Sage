@@ -111,6 +111,17 @@ def resolve_package(
     if package_path:
         # 用户自带的 package 原样尊重（含 scheduler 选择）。
         return load_package(package_path)
+    if getattr(cfg, "use_app_model", False):
+        from app.v2.cli.config import app_default_model
+        from app.v2.cli.app_model import app_model_settings
+
+        provider = app_default_model(args.user_id)
+        if provider is not None:
+            if os.environ.get("SAGE_DEFAULT_LLM_MODEL_NAME"):
+                provider = {**provider, "model": cfg.default_llm_model_name}
+            return build_preset_package(
+                args.preset, app_model_settings(provider), scheduler_root=scheduler_root,
+            )
     model = (cfg.default_llm_model_name or "").strip()
     base_url = (cfg.default_llm_api_base_url or "").strip()
     api_key = (os.environ.get(DEFAULT_CREDENTIAL_ENV) or "").strip()
