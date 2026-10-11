@@ -1543,9 +1543,12 @@ def test_token_tail_counts_tool_arguments_and_preserves_pending_call():
 
 
 @pytest.mark.parametrize("provider_overflow", [False, True])
+@pytest.mark.parametrize("model_window, protected_tokens", [(64000, 9600), (None, 19200)])
 @pytest.mark.asyncio
-async def test_runtime_tail_budget_is_fifteen_percent_of_model_window(monkeypatch, provider_overflow):
-    agent = SimpleAgent(model=None, model_config={"max_model_len": 64000})
+async def test_runtime_tail_budget_is_fifteen_percent_of_model_window(
+    monkeypatch, provider_overflow, model_window, protected_tokens
+):
+    agent = SimpleAgent(model=None, model_config={"max_model_len": model_window})
     message = _msg("assistant", "large " * 100000, MessageType.ASSISTANT_TEXT.value,
                    message_id="large")
     monkeypatch.setattr(agent, "_get_live_session_context", lambda _: None)
@@ -1560,4 +1563,4 @@ async def test_runtime_tail_budget_is_fifteen_percent_of_model_window(monkeypatc
         [message], "test", provider_overflow_recovery=provider_overflow
     ):
         pass
-    assert captured == {"active_protection_tokens": 9600}
+    assert captured == {"active_protection_tokens": protected_tokens}

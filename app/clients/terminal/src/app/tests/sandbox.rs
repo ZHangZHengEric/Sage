@@ -360,6 +360,23 @@ fn runtime_command_switches_backend_runtime_and_requests_restart() {
 }
 
 #[test]
+fn session_metadata_keeps_an_active_request_running_until_finished() {
+    let mut app = App::new();
+    app.begin_task_submission("calculate".to_string(), true);
+    app.apply_session_meta(crate::backend::BackendSessionMeta {
+        session_id: "session_active".to_string(),
+        command_mode: Some("chat".to_string()),
+        session_state: Some("active".to_string()),
+        goal: None,
+    });
+    assert!(app.busy);
+    assert_eq!(app.status, "running  session_active");
+    app.complete_request();
+    assert!(!app.busy);
+    assert_eq!(app.status, "ready  session_active");
+}
+
+#[test]
 fn v2_session_is_only_known_after_the_backend_announces_it() {
     let mut app = App::new();
     app.set_runtime_selection(crate::backend::BackendRuntime::V2);

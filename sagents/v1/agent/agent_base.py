@@ -1215,7 +1215,7 @@ class AgentBase(ABC):
             session_context.message_manager if session_context is not None else None
         )
         max_model_len = int(
-            self.model_config.get("max_model_len", 128000)
+            (self.model_config.get("max_model_len") or 128000)
             if isinstance(self.model_config, dict)
             else 128000
         )

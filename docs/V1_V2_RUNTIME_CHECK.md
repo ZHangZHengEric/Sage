@@ -1,5 +1,22 @@
 # v1 / v2 重构验证报告
 
+## 2026-10-11 已配置真实模型验证
+
+- 本地 Desktop v2 的 `~/sage/runtime/desktop-catalog.json` 有 7 个模型配置。CLI 环境配置未保存密钥，尚不自动读取 Desktop 模型目录；本次在隔离临时环境中加载其中的 DeepSeek 配置，未修改用户保存的模型或默认值。
+- 使用真实 `deepseek-v4-flash` 模型执行“计算 19 × 23，并返回带前缀的答案”。输入未包含正确答案，四条链路均返回 `SAGE_LIVE_437`。
+
+| 客户端 | Runtime | 结果 | 总耗时（含启动，v1 含 Provider 创建） |
+| --- | --- | --- | --- |
+| CLI | v1 | 完成 | 4.10 秒 |
+| CLI | v2（默认入口） | completed | 1.48 秒 |
+| TUI（PTY） | v1 | 完成且正常退出 | 6.61 秒 |
+| TUI（PTY） | v2（默认入口） | 完成且正常退出 | 2.80 秒 |
+
+- 真实验证发现并修复：v1 可选上下文长度为 `None` 时 `int(None)` 报错；TUI 收到会话信息时把仍在执行的任务错误显示为 ready。
+- 验证脚本拼接 v1 流式回复片段，TUI 必须出现明确 completed 记录才退出，并持续读取退出时的 PTY 输出。
+- Python 上下文压缩回归测试：45 通过；Rust Terminal：332 通过；拆分流式片段的本地模型四条任务回归也通过。
+- 验证范围为真实模型推理与客户端任务完成流程。Desktop 默认模型使用 Responses 协议，本次未验证该模型，也未覆盖复杂工具任务或其他平台。
+
 ## 2026-10-11 CLI / TUI 验证
 
 - CLI 默认使用 v2：`sage run`、`sage chat`、`sage sessions`；显式 v1 使用 `sage v1 ...`。
