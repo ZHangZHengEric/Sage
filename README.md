@@ -33,6 +33,16 @@
 
 ---
 
+## 📰 **Latest updates**
+
+- **2026-10-11** — [OpenRouter free models: selection and limits](knowledge/resources/openrouter-free-models.md)
+- **2026-10-11** — [MCP engineering resources: protocols, SDKs, testing, and security](knowledge/resources/mcp-engineering-resources.md)
+- **2026-10-11** — [A read-only MCP smoke test through Sage](knowledge/tutorials/mcp-smoke-test.md)
+
+[More agent resources and tutorials →](knowledge/README.md)
+
+---
+
 ## 🚀 **Get Started**
 
 | Choose your path | Start here |
