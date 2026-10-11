@@ -100,7 +100,7 @@ PASS: discovery + 3 read-only calls; no model used
 Exit code: 0
 ```
 
-The script makes one discovery request and three tool calls, then releases the run in a `finally` block. Counts and record IDs depend on the live dataset. A successful run exits with status 0; connection, schema, or content failures raise an error instead of printing a final PASS.
+The script discovers tools and makes three tool calls, then releases the run in a `finally` block. Counts and record IDs depend on the live dataset. A successful run exits with status 0; connection, schema, or content failures raise an error instead of printing a final PASS.
 
 ## What this establishes
 
