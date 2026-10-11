@@ -60,9 +60,9 @@ CHAT_COMMAND_HELP = (
     "  /quit     leave the session\n"
     "\n"
     "session recovery:\n"
-    "  sage resume <session_id>\n"
-    "  sage sessions\n"
-    "  sage sessions inspect latest"
+    "  sage v1 resume <session_id>\n"
+    "  sage v1 sessions\n"
+    "  sage v1 sessions inspect latest"
 )
 CHAT_INPUT_PROMPT = "Sage> "
 

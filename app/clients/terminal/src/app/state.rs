@@ -246,7 +246,11 @@ impl App {
             input_cursor: 0,
             session_seq: session_seq.max(1),
             session_id: String::new(),
-            user_id: "default_user".to_string(),
+            user_id: std::env::var("SAGE_CLI_USER_ID")
+                .or_else(|_| std::env::var("SAGE_DESKTOP_USER_ID"))
+                .ok()
+                .filter(|value| !value.trim().is_empty())
+                .unwrap_or_else(|| "default_user".to_string()),
             selected_agent_id: None,
             agent_config_path: None,
             agent_mode: "simple".to_string(),
@@ -258,7 +262,7 @@ impl App {
             sandbox_approval_mode: "on-request".to_string(),
             pending_sandbox_approval: None,
             sandbox_approval_history: Vec::new(),
-            runtime: BackendRuntime::V1,
+            runtime: BackendRuntime::default(),
             v2_session_known: false,
             pending_v2_input: None,
             current_goal: None,

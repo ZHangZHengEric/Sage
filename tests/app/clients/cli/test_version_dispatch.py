@@ -11,11 +11,14 @@ ROOT = Path(__file__).resolve().parents[4]
 
 @pytest.mark.parametrize('version,args', [
     ('v2', ['v2', 'sessions', '--json']),
-    ('v1', ['run', '--help']),
+    ('v1', ['v1', 'run', '--help']),
+    ('v2', ['sessions', '--json']),
+    ('v2', ['run', '--help']),
+    ('v2', ['--help']),
 ])
 def test_dispatch_with_other_generation_blocked(tmp_path, version, args):
     other = 'v1' if version == 'v2' else 'v2'
-    if version == 'v2':
+    if version == 'v2' and 'sessions' in args:
         args += ['--session-root', str(tmp_path / 'sessions')]
     script = f'''
 import importlib.abc, sys
@@ -54,3 +57,12 @@ def test_v2_configuration_uses_env_without_legacy_initialization(tmp_path, monke
     assert config.default_llm_api_base_url == 'http://localhost:4321/v1'
     assert sage_home() == tmp_path
     assert not (tmp_path / 'sage.db').exists()
+
+
+def test_v1_cli_configuration_keeps_local_model_credentials(tmp_path, monkeypatch):
+    from app.v1.cli.services.runtime import init_cli_config
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv('SAGE_LOCAL_DATA_ROOT', str(tmp_path))
+    monkeypatch.setenv('SAGE_DEFAULT_LLM_API_KEY', 'local-test-key')
+    config = init_cli_config(init_logging=False)
+    assert config.default_llm_api_key == 'local-test-key'

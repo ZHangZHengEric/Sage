@@ -1,13 +1,45 @@
 import io
+import os
 from pathlib import Path
+import shutil
+import subprocess
+import tempfile
 import unittest
 from unittest.mock import patch
+
+import pytest
 
 import app.clients.cli.tui as tui
 import app.clients.cli.main as cli_main
 
 
 class TestCliTuiCommand(unittest.TestCase):
+    @pytest.mark.timeout(10)
+    @unittest.skipIf(os.name == "nt", "POSIX source launcher")
+    def test_source_launcher_finds_compiled_terminal_and_runtime_root(self):
+        with tempfile.TemporaryDirectory() as folder:
+            repo = Path(folder).resolve()
+            terminal = repo / "app/clients/terminal"
+            (terminal / "scripts").mkdir(parents=True)
+            launcher = terminal / "scripts/run-sage-terminal.sh"
+            source = Path(tui.__file__).resolve().parents[1] / "terminal/scripts/run-sage-terminal.sh"
+            shutil.copyfile(source, launcher)
+            binary = terminal / "target/debug/sage-terminal"
+            binary.parent.mkdir(parents=True)
+            binary.write_text("#!/bin/sh\nprintf 'source-terminal-ran\\n'\n")
+            binary.chmod(0o755)
+            main = repo / "app/clients/cli/main.py"
+            main.parent.mkdir(parents=True)
+            main.write_text("# runtime entry\n")
+            env = {key: value for key, value in os.environ.items() if not key.startswith("SAGE_")}
+            result = subprocess.run(
+                ["sh", str(launcher), "--help"], env={**env, "SAGE_TERMINAL_DEBUG_LAUNCH": "1"},
+                capture_output=True, text=True, timeout=5,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn(f"SAGE_TERMINAL_RUNTIME_ROOT={repo}", result.stdout)
+            self.assertIn("source-terminal-ran", result.stdout)
+
     def test_tui_command_forwards_arguments_in_order(self):
         with patch(
             "app.clients.cli.tui.resolve_terminal_binary",

@@ -154,6 +154,9 @@ impl CliJsonCommand<'_> {
 
 pub(crate) fn run_cli_command(command: CliJsonCommand<'_>) -> Result<Value> {
     let label = command.label();
-    let args = command.args();
+    let mut args = command.args();
+    if args.first().map(String::as_str) != Some("v2") {
+        args.insert(0, "v1".to_string());
+    }
     run_cli_json_owned(&args).map_err(|err| anyhow!("{} failed: {err}", label))
 }

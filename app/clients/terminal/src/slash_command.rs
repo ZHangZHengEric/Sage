@@ -56,7 +56,7 @@ impl SlashCommandDef {
                 "Use this to verify which command was approved, denied, or is still pending.",
             ],
             "/runtime" => &[
-                "v1 drives the current `sage chat --json` backend; v2 drives `sage v2 chat --json` (SAgents v2, experimental).",
+                "v2 is the default (`sage v2 chat --json`); v1 uses the legacy `sage v1 chat --json` backend.",
                 "Switching runtimes restarts the backend on the next task; v2 session ids come from the backend.",
                 "On v2, /approve, /remember and /deny answer tool approvals; questions are answered from the composer.",
             ],

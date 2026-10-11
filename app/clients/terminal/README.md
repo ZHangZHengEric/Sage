@@ -2,6 +2,8 @@
 
 `sage tui` is Sage's user-facing Terminal TUI entrypoint. The Rust implementation binary is named `sage-terminal` and is launched by the Sage Python CLI.
 
+The default runtime is v2. Use `sage tui --runtime v1` for the legacy runtime.
+
 Current status:
 
 - no packaged installer yet
@@ -147,7 +149,7 @@ Sandbox commands:
 - Session-scoped `--agent-config` is used for chat backend requests. Auxiliary views such as `/sessions` and `/skills` still use the saved `agent_id` contract when one is active.
 - The bundled `coding` agent config requires an explicit repo workspace. Start with `--workspace /path/to/repo` or run `/workspace set /path/to/repo` before sending coding tasks.
 - `--sandbox-type` and `/sandbox set ...` configure the client-side sandbox mode passed to the Sage backend through `SAGE_SANDBOX_MODE`; enforcement remains owned by the Sage runtime sandbox.
-- `--runtime v2` and `/runtime set v2` drive the experimental SAgents v2 backend (`sage v2 chat --json`) instead of `sage chat --json`. On v2, tool approvals are answered with `/approve`, `/remember` (approve and remember for the session) and `/deny`; questions from the runtime are answered by typing in the composer, and text typed while a run is active steers the run at its next model step (`v2_steer`; answer a pending approval first). Session ids are assigned by the v2 runtime; `/sessions`, `/resume` and `/sessions inspect` list and replay v2 sessions (`sage v2 sessions`) while the v2 runtime is selected.
+- The default runtime is v2 (`sage v2 chat --json`). Use `--runtime v1` or `/runtime set v1` to select the legacy backend (`sage v1 chat --json`). On v2, tool approvals are answered with `/approve`, `/remember` (approve and remember for the session) and `/deny`; questions from the runtime are answered by typing in the composer, and text typed while a run is active steers the run at its next model step (`v2_steer`; answer a pending approval first). Session ids are assigned by the v2 runtime; `/sessions`, `/resume` and `/sessions inspect` list and replay v2 sessions (`sage v2 sessions`) while the v2 runtime is selected.
 - By default the TUI does not force the current directory into `--workspace`, so it will not create `AGENT.md` / `MEMORY.md` / `.sage-docs` inside your repository unless you opt into a workspace override.
 - Runtime lookup now supports explicit CLI/Python overrides, bundled `sage` / Python fallbacks, and packaged-layout state roots as a first distribution step.
 - The repo now also includes a minimal launcher wrapper at `scripts/run-sage-terminal.sh` and a distribution smoke script at `scripts/smoke-runtime-distribution.sh`.

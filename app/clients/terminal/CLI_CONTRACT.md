@@ -15,18 +15,18 @@ There are two integration paths:
 
 The TUI currently expects these commands to support structured JSON output:
 
-- `sage doctor --json`
-- `sage config show --json`
-- `sage config init --json`
-- `sage sessions --json`
-- `sage sessions inspect <session_id|latest> --json`
-- `sage skills --json`
-- `sage provider list --json`
-- `sage provider inspect <provider_id> --json`
-- `sage provider verify --json`
-- `sage provider create --json`
-- `sage provider update <provider_id> --json`
-- `sage provider delete <provider_id> --json`
+- `sage v1 doctor --json`
+- `sage v1 config show --json`
+- `sage v1 config init --json`
+- `sage v1 sessions --json`
+- `sage v1 sessions inspect <session_id|latest> --json`
+- `sage v1 skills --json`
+- `sage v1 provider list --json`
+- `sage v1 provider inspect <provider_id> --json`
+- `sage v1 provider verify --json`
+- `sage v1 provider create --json`
+- `sage v1 provider update <provider_id> --json`
+- `sage v1 provider delete <provider_id> --json`
 
 ## Stable Startup Entry Surface
 
@@ -147,7 +147,7 @@ frame sent while no interaction is pending is reported as a rejected steer with
 `detail: "no interaction is pending"`. In plain (non-JSON) mode steering is enabled only when stdin is
 a terminal; lines piped into `sage v2 chat` are always treated as the next prompts.
 
-`sage v2 sessions --json` is a one-shot command like `sage sessions --json`: it prints one JSON
+`sage v2 sessions --json` is a one-shot command like `sage v1 sessions --json`: it prints one JSON
 object with `session_root`, `total`, `unreadable` (session ids whose state could not be read) and
 `list` (newest first; each entry has `session_id`, `created_at`, `updated_at`, `run_count`,
 `last_run_id`, `last_state`, `agent_id`, `task`, `workspace`, `package_id`).

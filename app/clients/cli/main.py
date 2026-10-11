@@ -4,6 +4,9 @@ import sys
 
 def main(argv=None):
     args = list(argv) if argv is not None else sys.argv[1:]
+    if args and args[0] == "v1":
+        from app.v1.cli.main import main as run
+        return run(args[1:])
     if args and args[0] == "v2":
         from app.v2.cli.main import main as run
     elif args and args[0] == "tui":
@@ -22,7 +25,8 @@ def main(argv=None):
         build_argument_parser().parse_args(args)
         return 0
     else:
-        from app.v1.cli.main import main as run
+        from app.v2.cli.main import main as run
+        args.insert(0, "v2")
     return run(args)
 
 

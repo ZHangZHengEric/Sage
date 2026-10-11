@@ -196,13 +196,13 @@ async def inspect_cli_provider(
     if not provider:
         raise CLIError(
             f"Provider not found: {provider_id}",
-            next_steps=["Run `sage provider list` to inspect visible providers."],
+            next_steps=["Run `sage v1 provider list` to inspect visible providers."],
         )
     if provider.user_id and provider.user_id != resolved_user_id:
         raise CLIError(
             f"Provider {provider_id} is not visible to user {resolved_user_id}",
             next_steps=[
-                f"Run `sage provider list --user-id {resolved_user_id}` to inspect visible providers."
+                f"Run `sage v1 provider list --user-id {resolved_user_id}` to inspect visible providers."
             ],
         )
     return {
@@ -250,7 +250,7 @@ async def verify_cli_provider(
         raise CLIError(
             friendly_provider_probe_error(exc, subject="Provider"),
             next_steps=[
-                "Check `--api-key`, `--base-url`, and `--model`, then run `sage provider verify` again.",
+                "Check `--api-key`, `--base-url`, and `--model`, then run `sage v1 provider verify` again.",
             ],
         ) from exc
     return {

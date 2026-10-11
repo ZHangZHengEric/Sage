@@ -90,11 +90,11 @@ pub struct ProviderMutation {
     pub is_default: Option<bool>,
 }
 
-/// 后端运行时：v1 = `sage chat --json`（现有），v2 = `sage v2 chat --json`（SAgents v2）。
+/// 后端运行时：v1 = `sage v1 chat --json`，v2 = `sage v2 chat --json`（默认）。
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub enum BackendRuntime {
-    #[default]
     V1,
+    #[default]
     V2,
 }
 

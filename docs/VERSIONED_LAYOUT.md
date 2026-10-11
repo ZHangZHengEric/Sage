@@ -121,8 +121,8 @@ caches may reappear after running commands and are ignored by Git.
 `app/cli` and `app/terminal` no longer exist. The Python CLI implementations are
 version-owned; `app/clients/cli` contains only public dispatch, combined help, and the
 terminal launcher. The installed command remains `sage`; the module entry point
-is `python -m app.clients.cli.main`. `sage run` selects v1, `sage v2 run` selects v2,
-and `sage tui --runtime v2` starts the Rust client with the v2 protocol.
+is `python -m app.clients.cli.main`. `sage run` and `sage tui` default to v2. `sage v2 run` also selects v2;
+`sage v1 run` and `sage tui --runtime v1` explicitly select v1.
 
 V2 CLI environment loading and stderr logging are independent of the v1 startup
 configuration and database. The existing environment variable names and defaults
