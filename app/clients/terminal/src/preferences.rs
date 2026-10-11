@@ -165,10 +165,14 @@ mod tests {
     fn persisted_preferences_load_back_into_startup_options() {
         let _env_lock = lock_env();
         let runtime_root = unique_temp_dir("preferences-runtime");
-        fs::create_dir_all(runtime_root.join("clients").join("cli"))
+        fs::create_dir_all(runtime_root.join("app").join("clients").join("cli"))
             .expect("runtime cli dir should exist");
         fs::write(
-            runtime_root.join("clients").join("cli").join("main.py"),
+            runtime_root
+                .join("app")
+                .join("clients")
+                .join("cli")
+                .join("main.py"),
             "# stub",
         )
         .expect("runtime entry should exist");
@@ -204,10 +208,14 @@ mod tests {
     fn persisted_preferences_restore_into_new_app_state() {
         let _env_lock = lock_env();
         let runtime_root = unique_temp_dir("preferences-restore-runtime");
-        fs::create_dir_all(runtime_root.join("clients").join("cli"))
+        fs::create_dir_all(runtime_root.join("app").join("clients").join("cli"))
             .expect("runtime cli dir should exist");
         fs::write(
-            runtime_root.join("clients").join("cli").join("main.py"),
+            runtime_root
+                .join("app")
+                .join("clients")
+                .join("cli")
+                .join("main.py"),
             "# stub",
         )
         .expect("runtime entry should exist");
@@ -256,10 +264,14 @@ mod tests {
     fn clearing_preferences_updates_saved_defaults() {
         let _env_lock = lock_env();
         let runtime_root = unique_temp_dir("preferences-clear-runtime");
-        fs::create_dir_all(runtime_root.join("clients").join("cli"))
+        fs::create_dir_all(runtime_root.join("app").join("clients").join("cli"))
             .expect("runtime cli dir should exist");
         fs::write(
-            runtime_root.join("clients").join("cli").join("main.py"),
+            runtime_root
+                .join("app")
+                .join("clients")
+                .join("cli")
+                .join("main.py"),
             "# stub",
         )
         .expect("runtime entry should exist");
@@ -293,10 +305,14 @@ mod tests {
     fn session_agent_config_does_not_clear_persisted_agent_default() {
         let _env_lock = lock_env();
         let runtime_root = unique_temp_dir("preferences-agent-config-runtime");
-        fs::create_dir_all(runtime_root.join("clients").join("cli"))
+        fs::create_dir_all(runtime_root.join("app").join("clients").join("cli"))
             .expect("runtime cli dir should exist");
         fs::write(
-            runtime_root.join("clients").join("cli").join("main.py"),
+            runtime_root
+                .join("app")
+                .join("clients")
+                .join("cli")
+                .join("main.py"),
             "# stub",
         )
         .expect("runtime entry should exist");
@@ -324,10 +340,14 @@ mod tests {
     fn next_local_session_sequence_uses_existing_session_directories() {
         let _env_lock = lock_env();
         let runtime_root = unique_temp_dir("preferences-seq-runtime");
-        fs::create_dir_all(runtime_root.join("clients").join("cli"))
+        fs::create_dir_all(runtime_root.join("app").join("clients").join("cli"))
             .expect("runtime cli dir should exist");
         fs::write(
-            runtime_root.join("clients").join("cli").join("main.py"),
+            runtime_root
+                .join("app")
+                .join("clients")
+                .join("cli")
+                .join("main.py"),
             "# stub",
         )
         .expect("runtime entry should exist");

@@ -76,10 +76,10 @@ def check() -> tuple[int, list[str]]:
             if runtime and module.startswith("sagents.") and not module.startswith(f"sagents.{runtime}.") and module != f"sagents.{runtime}":
                 errors.append(f"{name}:{line}: cross-version runtime dependency {module}")
             if name.startswith(("app/v2/desktop/", "app/v2/server/", "app/v2/cli/")):
-                legacy = top in {"common", "mcp_servers"} or module.startswith(("sagents.v1", "app.v1")) or module in {"sagents", "sagents.SAgent"}
+                legacy = top in {"common", "mcp_servers", "clients"} or module.startswith(("sagents.v1", "app.v1")) or module in {"sagents", "sagents.SAgent"}
                 if legacy and (name, module) not in MCP_INTEGRATIONS:
                     errors.append(f"{name}:{line}: unregistered legacy application dependency {module}")
-    for obsolete in ("common", "app/desktop_v2", "app/server_v2", "app/cli", "app/terminal"):
+    for obsolete in ("clients", "common", "app/desktop_v2", "app/server_v2", "app/cli", "app/terminal"):
         if (ROOT / obsolete).exists():
             errors.append(f"obsolete source directory {obsolete}; use the versioned application tree")
     if (ROOT / "sagents/shared").exists():

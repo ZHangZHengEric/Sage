@@ -31,7 +31,11 @@ pub(crate) fn apply_state_env(command: &mut Command, state_root: &Path) {
 }
 
 pub(crate) fn is_runtime_root(path: &Path) -> bool {
-    path.join("clients").join("cli").join("main.py").is_file()
+    path.join("app")
+        .join("clients")
+        .join("cli")
+        .join("main.py")
+        .is_file()
 }
 
 fn sync_builtin_skills(runtime_root: &Path, target_root: &Path) -> Result<()> {

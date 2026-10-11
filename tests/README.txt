@@ -1,7 +1,7 @@
 tests/ directory guide
 ======================
 
-The CI workflow (.github/workflows/ci-tests.yml, job "python-tests") runs five pytest
+The CI workflow (.github/workflows/ci-tests.yml, job "python-tests") runs four pytest
 suites. Run the suite that matches the code you changed, using the same path CI uses,
 from the repository root:
 
@@ -10,7 +10,6 @@ from the repository root:
   app       pytest tests/app --ignore=tests/app/v1/common
   common    pytest tests/app/v1/common
   sagents   pytest tests/sagents
-  clients   pytest tests/clients
   mcp       pytest tests/mcp_servers
 
 Python version, system dependencies (such as the Linux sandbox setup) and pip
@@ -21,6 +20,7 @@ Directories
 
 app/
     Application backend tests: FastAPI routes, services and core modules.
+    app/clients/cli/ Shared command-line client tests (JSON contracts, version dispatch, TUI, v2 run).
     app/v1/common/   Legacy v1 shared services and models. Runs in the "common" suite.
     app/v1/server/   Legacy v1 server tests.
     app/v1/desktop/  Legacy v1 desktop tests.
@@ -40,15 +40,12 @@ sagents/
                      SAGE_V2_LIVE_BASE_URL and SAGE_V2_LIVE_MODEL override the default
                      endpoint and model. Check the provider endpoint before you opt in.
 
-clients/
-    clients/cli/     Command-line client tests (JSON contracts, version dispatch, TUI, v2 run).
-
 mcp_servers/
     Tests for the bundled MCP servers.
 
 deploy/
     Deployment checks: Dockerfile, Windows runner manifest and Elasticsearch ownership.
-    These are not part of the five CI suites above. Run them directly with
+    These are not part of the four CI suites above. Run them directly with
     pytest tests/deploy.
 
 Legacy v1 tests and cross-version tests

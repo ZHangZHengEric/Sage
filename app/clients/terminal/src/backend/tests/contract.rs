@@ -428,8 +428,9 @@ fn parse_backend_line_ignores_structured_log_json_without_stream_type() {
 
 #[test]
 fn parse_stream_contract_fixture_round_trip_sequence() {
-    let fixture =
-        include_str!("../../../../../tests/clients/cli/fixtures/stream_contract_round_trip.jsonl");
+    let fixture = include_str!(
+        "../../../../../../tests/app/clients/cli/fixtures/stream_contract_round_trip.jsonl"
+    );
     let mut saw_phase = false;
     let mut saw_tool_started = false;
     let mut saw_tool_finished = false;

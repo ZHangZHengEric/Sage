@@ -16,7 +16,7 @@ from unittest.mock import patch
 import pytest
 
 import app.v2.cli.commands as v2_command
-from clients.cli.parser import build_argument_parser
+from app.clients.cli.parser import build_argument_parser
 from app.v2.cli.errors import CLIError
 from app.v2.cli.interaction import (
     JSON_DECISION_TYPE,
@@ -2354,8 +2354,8 @@ async def test_deny_all_rejects_a_remembered_write_after_reopening_session(tmp_p
 @pytest.mark.parametrize("text_json", [False, True])
 def test_plain_renderer_displays_inline_questionnaire_once(text_json):
     capture = (
-        Path(__file__).resolve().parents[3]
-        / "clients/terminal/src/backend/tests/fixtures/v2_inline_questionnaire.ndjson"
+        Path(__file__).resolve().parents[4]
+        / "app/clients/terminal/src/backend/tests/fixtures/v2_inline_questionnaire.ndjson"
     )
     err = io.StringIO()
     renderer = PlainRenderer(io.StringIO(), err)

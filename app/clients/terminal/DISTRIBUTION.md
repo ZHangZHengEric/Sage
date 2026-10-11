@@ -20,7 +20,7 @@ Related documents:
 
 A valid runtime root is any directory that contains:
 
-- `clients/cli/main.py`
+- `app/clients/cli/main.py`
 
 ## CLI Resolution
 
@@ -28,7 +28,7 @@ The Sage backend entrypoint used by the TUI is resolved in this order:
 
 1. `SAGE_TERMINAL_CLI`
 2. bundled `sage` executable candidates under the runtime root
-3. Python module fallback via `python -m clients.cli.main`
+3. Python module fallback via `python -m app.clients.cli.main`
 
 This keeps source checkouts working while allowing future bundles or wrapper launchers to provide a stable `sage` command without changing TUI code.
 

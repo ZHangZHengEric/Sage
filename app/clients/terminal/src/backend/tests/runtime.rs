@@ -98,9 +98,14 @@ fn apply_state_env_routes_sage_session_dir_into_terminal_state_root() {
 fn resolve_runtime_root_prefers_explicit_env_override() {
     let _env_lock = lock_env();
     let runtime_root = unique_temp_dir("runtime-root");
-    fs::create_dir_all(runtime_root.join("clients").join("cli")).expect("runtime cli dir should exist");
+    fs::create_dir_all(runtime_root.join("app").join("clients").join("cli"))
+        .expect("runtime cli dir should exist");
     fs::write(
-        runtime_root.join("clients").join("cli").join("main.py"),
+        runtime_root
+            .join("app")
+            .join("clients")
+            .join("cli")
+            .join("main.py"),
         "# stub",
     )
     .expect("runtime entry should exist");

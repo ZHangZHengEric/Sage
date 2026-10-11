@@ -29,7 +29,7 @@ sage tui
 sage tui coding --workspace /path/to/repo
 ```
 
-The Python CLI acts as a thin launcher. It resolves packaged binaries from `clients/terminal/bin/<platform>/sage-terminal` before falling back to `SAGE_TERMINAL_BIN`, `PATH`, and source checkout build outputs.
+The Python CLI acts as a thin launcher. It resolves packaged binaries from `app/clients/terminal/bin/<platform>/sage-terminal` before falling back to `SAGE_TERMINAL_BIN`, `PATH`, and source checkout build outputs.
 
 ## Run From Source
 
@@ -43,20 +43,20 @@ export SAGE_DEFAULT_LLM_API_BASE_URL="https://api.deepseek.com/v1"
 export SAGE_DEFAULT_LLM_MODEL_NAME="deepseek-v4-flash"
 export SAGE_DB_TYPE="file"
 
-cargo run --quiet --offline --manifest-path clients/terminal/Cargo.toml
+cargo run --quiet --offline --manifest-path app/clients/terminal/Cargo.toml
 ```
 
-Or from `clients/terminal`:
+Or from `app/clients/terminal`:
 
 ```bash
-cd clients/terminal
+cd app/clients/terminal
 cargo run --quiet --offline
 ```
 
 ## Build The Binary During Development
 
 ```bash
-cd clients/terminal
+cd app/clients/terminal
 cargo build --release
 ./target/release/sage-terminal
 ```

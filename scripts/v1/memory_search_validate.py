@@ -60,7 +60,7 @@ def main() -> int:
         "tests/sagents/v1/tool/impl/test_memory_tool.py",
         "tests/sagents/v1/context/test_session_memory_manager.py",
         "tests/sagents/v1/tool/impl/test_file_memory_backend.py",
-        "tests/clients/cli/test_doctor_memory_backends.py",
+        "tests/app/clients/cli/test_doctor_memory_backends.py",
         "scripts/v1/memory_search_benchmark.py",
     ]
 
@@ -69,7 +69,7 @@ def main() -> int:
     _run([sys.executable, "tests/sagents/v1/tool/impl/test_memory_tool.py"])
     _run([sys.executable, "tests/sagents/v1/context/test_session_memory_manager.py"])
     _run([sys.executable, "tests/sagents/v1/tool/impl/test_file_memory_backend.py"])
-    _run([sys.executable, "tests/clients/cli/test_doctor_memory_backends.py"])
+    _run([sys.executable, "tests/app/clients/cli/test_doctor_memory_backends.py"])
     _run(
         [
             sys.executable,

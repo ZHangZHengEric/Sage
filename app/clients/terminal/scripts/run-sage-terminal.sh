@@ -48,18 +48,18 @@ resolve_runtime_root() {
     return
   fi
 
-  if [ -f "$BUNDLE_ROOT/runtime/clients/cli/main.py" ]; then
+  if [ -f "$BUNDLE_ROOT/runtime/app/clients/cli/main.py" ]; then
     printf '%s\n' "$BUNDLE_ROOT/runtime"
     return
   fi
 
-  if [ -f "$BUNDLE_ROOT/share/sage/clients/cli/main.py" ]; then
+  if [ -f "$BUNDLE_ROOT/share/sage/app/clients/cli/main.py" ]; then
     printf '%s\n' "$BUNDLE_ROOT/share/sage"
     return
   fi
 
-  if [ -f "$BUNDLE_ROOT/../../clients/cli/main.py" ]; then
-    CDPATH= cd -- "$BUNDLE_ROOT/../.." && pwd
+  if [ -f "$BUNDLE_ROOT/../../../app/clients/cli/main.py" ]; then
+    CDPATH= cd -- "$BUNDLE_ROOT/../../.." && pwd
     return
   fi
 

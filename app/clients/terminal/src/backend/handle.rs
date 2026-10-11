@@ -102,7 +102,7 @@ impl BackendHandle {
                     .current_dir(&runtime_root)
                     .arg("-u")
                     .arg("-m")
-                    .arg("clients.cli.main")
+                    .arg("app.clients.cli.main")
                     .env("PYTHONUNBUFFERED", "1");
                 command
             }

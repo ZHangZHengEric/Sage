@@ -84,13 +84,13 @@ a2a = ["a2a-sdk[fastapi]>=1.1.4,<2"]
 Homepage = "https://github.com/ZHangZHengEric/Sage"
 
 [project.scripts]
-sage = "clients.cli.main:main"
+sage = "app.clients.cli.main:main"
 
 [tool.setuptools]
 include-package-data = true
 
 [tool.setuptools.packages.find]
-include = ["sagents*", "app", "app.v1*", "app.v2", "app.v2.cli*", "app.v2.server*", "app.v2.desktop", "app.v2.desktop.backend*", "clients*", "mcp_servers.anytool*"]
+include = ["sagents*", "app", "app.v1*", "app.v2", "app.v2.cli*", "app.v2.server*", "app.v2.desktop", "app.v2.desktop.backend*", "app.clients*", "mcp_servers.anytool*"]
 exclude = ["tests*", "app.v1.desktop*", "app.skills*", "app.wiki*", "assets*", "logs*"]
 
 [tool.setuptools.data-files]
@@ -98,7 +98,7 @@ exclude = ["tests*", "app.v1.desktop*", "app.skills*", "app.wiki*", "assets*", "
 "share/sage/docs/zh" = ["docs/zh/*.md"]
 
 [tool.setuptools.package-data]
-"clients.terminal" = [
+"app.clients.terminal" = [
   "bin/*/run-sage-terminal.sh",
   "bin/*/run-sage-terminal.cmd",
   "bin/*/sage-terminal",

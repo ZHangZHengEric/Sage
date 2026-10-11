@@ -2,8 +2,8 @@
 
 set -eu
 
-REPO_ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/../../.." && pwd)
-TERMINAL_DIR="$REPO_ROOT/clients/terminal"
+REPO_ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/../../../.." && pwd)
+TERMINAL_DIR="$REPO_ROOT/app/clients/terminal"
 BINARY_PATH="$TERMINAL_DIR/target/release/sage-terminal"
 WORK_DIR=$(mktemp -d "${TMPDIR:-/tmp}/sage-terminal-smoke.XXXXXX")
 WORK_DIR=$(CDPATH= cd -- "$WORK_DIR" && pwd)
@@ -14,12 +14,12 @@ if [ ! -x "$BINARY_PATH" ]; then
 fi
 
 BUNDLE_ROOT="$WORK_DIR/bundle"
-mkdir -p "$BUNDLE_ROOT/bin" "$BUNDLE_ROOT/runtime/clients/cli" "$BUNDLE_ROOT/state"
+mkdir -p "$BUNDLE_ROOT/bin" "$BUNDLE_ROOT/runtime/app/clients/cli" "$BUNDLE_ROOT/state"
 cp "$BINARY_PATH" "$BUNDLE_ROOT/bin/sage-terminal"
 cp "$TERMINAL_DIR/scripts/run-sage-terminal.sh" "$BUNDLE_ROOT/bin/run-sage-terminal"
 chmod +x "$BUNDLE_ROOT/bin/run-sage-terminal"
 
-printf '# stub\n' >"$BUNDLE_ROOT/runtime/clients/cli/main.py"
+printf '# stub\n' >"$BUNDLE_ROOT/runtime/app/clients/cli/main.py"
 
 run_debug() {
   env SAGE_TERMINAL_DEBUG_LAUNCH=1 "$BUNDLE_ROOT/bin/run-sage-terminal" --help
