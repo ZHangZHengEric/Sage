@@ -10,7 +10,11 @@ Practical resources and worked examples for people building agents, MCP integrat
 
 ## Suggest a useful resource
 
-Public agent projects, MCP servers, developer tools, and practical learning resources are welcome, including projects independent of Sage. A useful submission identifies the problem solved, links to the project's official source or documentation, shows a concrete example, and states setup, licensing, cost, and security limits. Disclose your connection to the project. Follow the [contribution guide](../CONTRIBUTING.md) for a focused documentation PR. Inclusion depends on relevance and verifiable usefulness; stars, reciprocal promotion, and paid placement are not selection criteria, and submission does not guarantee publication or exposure.
+Public agent projects, MCP servers, developer tools, and practical learning resources are welcome, including projects independent of Sage. To suggest a project or resource, add a **comment to the [Agent projects and resources: submissions thread (#289)](https://github.com/ZHangZHENGEric/Sage/issues/289)** using the outline provided in that thread. Please submit suggestions there rather than opening separate promotional issues.
+
+A useful submission identifies the problem solved, links to the project's official source or documentation, shows a concrete example, and states setup, licensing, cost, and security limits. Disclose your connection to the project. Follow the [contribution guide](../CONTRIBUTING.md) for a focused documentation PR.
+
+Inclusion depends on relevance and verifiable usefulness; stars, reciprocal promotion, and paid placement are not selection criteria, and submission does not guarantee publication or exposure.
 
 ## How updates work
 
