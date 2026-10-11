@@ -39,7 +39,9 @@ resolve_terminal_bin() {
   tag=$(platform_tag)
   first_existing_executable \
     "$BUNDLE_ROOT/bin/$tag/sage-terminal" \
-    "$BUNDLE_ROOT/bin/sage-terminal"
+    "$BUNDLE_ROOT/bin/sage-terminal" \
+    "$BUNDLE_ROOT/target/release/sage-terminal" \
+    "$BUNDLE_ROOT/target/debug/sage-terminal"
 }
 
 resolve_runtime_root() {

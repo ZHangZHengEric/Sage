@@ -72,9 +72,9 @@ class TestStatsToolDetection(unittest.TestCase):
         )
 
     def test_chat_help_mentions_resume_and_history_commands(self):
-        self.assertIn("sage resume <session_id>", CHAT_COMMAND_HELP)
-        self.assertIn("sage sessions", CHAT_COMMAND_HELP)
-        self.assertIn("sage sessions inspect latest", CHAT_COMMAND_HELP)
+        self.assertIn("sage v1 resume <session_id>", CHAT_COMMAND_HELP)
+        self.assertIn("sage v1 sessions", CHAT_COMMAND_HELP)
+        self.assertIn("sage v1 sessions inspect latest", CHAT_COMMAND_HELP)
 
     def test_goal_command_shorthand_sets_goal_objective_and_returns_task(self):
         args = Namespace(
@@ -568,8 +568,8 @@ class TestStatsToolDetection(unittest.TestCase):
 
         output = stderr.getvalue()
         self.assertIn("session_id: session-123", output)
-        self.assertIn("resume: sage resume session-123", output)
-        self.assertIn("history: sage sessions", output)
+        self.assertIn("resume: sage v1 resume session-123", output)
+        self.assertIn("history: sage v1 sessions", output)
 
     def test_emit_chat_exit_summary_skips_json_output(self):
         from io import StringIO

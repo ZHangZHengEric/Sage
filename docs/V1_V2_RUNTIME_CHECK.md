@@ -1,5 +1,19 @@
 # v1 / v2 重构验证报告
 
+## 2026-10-11 CLI / TUI 验证
+
+- CLI 默认使用 v2：`sage run`、`sage chat`、`sage sessions`；显式 v1 使用 `sage v1 ...`。
+- TUI 默认使用 v2；`sage tui --runtime v1` 保留旧版入口。
+- 原来的 35 个 V2 CLI 失败由测试环境缺少已声明的 `psutil` 引起；补齐后全部 84 个 V2 运行测试通过。
+- 修复 v1 CLI 丢失环境变量模型密钥、Python 包缺少 `argon2-cffi`、TUI 忽略用户配置，启动任务被遗留重启标志中断，以及源码启动器未查找 Cargo 构建产物的问题。
+- `.venv/bin/python -m pytest tests/app/clients/cli -q`：212 通过。
+- `cargo test --offline --manifest-path app/clients/terminal/Cargo.toml`：331 通过。
+- `.venv/bin/python scripts/checks/smoke_cli_tui.py`：CLI→v1、CLI→v2、TUI→v1、TUI→v2 均完成实际任务；TUI 使用 PTY，完成后正常退出。
+- 实际任务使用本地确定性模型与临时存储，不调用外部模型。原生沙箱测试需允许 macOS Seatbelt 创建进程；外层限制中的嵌套沙箱会导致进程执行假失败。
+- Python 导入检查通过；完整架构脚本仍报告五个本地已有旧目录残留。本次未重新验证桌面端或其他平台。
+
+以下为 2026-09-28 的历史验证记录。
+
 日期：2026-09-28。分支：`codex/organize-v1`，迁移前基线：`49544f9f`。
 
 当前结论：最终目录结构下，四个后端实际启动通过，三个 Web 前端和 macOS
@@ -10,7 +24,7 @@ Desktop v2 构建通过；已修复发现的路径、历史脚本加载和打包
 
 - Agent 引擎：`sagents/v1`、`sagents/v2`。
 - 应用实现：`app/v1/{cli,desktop,server,common,chrome-extension}`、`app/v2/{cli,desktop,server}`。
-- 用户入口：`app/clients/cli`、`app/clients/terminal`；`sage` 命令兼容原用法，v2 CLI 不导入 v1。
+- 用户入口：`app/clients/cli`、`app/clients/terminal`；公共入口按所选版本分发，v2 CLI 不导入 v1。
 - AnyTool：`mcp_servers/anytool` 独立 MCP，不导入 `app`、`common` 或 `sagents`。
 - 内置技能唯一源码：`app/skills`。原根目录 `skills` 为本地未入库内容，包含同名不同版本，
   已完整归档到 `.sage/organization-backup/root-skills`，22 个文件/链接经内容或目标校验。

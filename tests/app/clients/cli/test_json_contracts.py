@@ -84,7 +84,7 @@ class TestCliJsonContracts(unittest.TestCase):
             "path": "/tmp/demo.env",
             "template": "minimal-local",
             "overwritten": True,
-            "next_steps": ["Run `sage doctor`."],
+            "next_steps": ["Run `sage v1 doctor`."],
         }
 
         with patch.object(
@@ -99,7 +99,7 @@ class TestCliJsonContracts(unittest.TestCase):
         self.assertEqual(payload["path"], "/tmp/demo.env")
         self.assertEqual(payload["template"], "minimal-local")
         self.assertEqual(payload["overwritten"], True)
-        self.assertEqual(payload["next_steps"], ["Run `sage doctor`."])
+        self.assertEqual(payload["next_steps"], ["Run `sage v1 doctor`."])
 
     def test_provider_verify_command_json_outputs_verification_payload(self):
         args = cli_main.build_argument_parser().parse_args(

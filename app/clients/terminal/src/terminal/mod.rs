@@ -101,6 +101,7 @@ pub fn run_with_startup_action(
     startup_action: Option<SubmitAction>,
 ) -> Result<()> {
     let mut backend: Option<BackendHandle> = None;
+    prepare_startup_action(app, startup_action.as_ref());
     if let Some(action) = startup_action {
         let _ = handle_submit_action(app, &mut backend, action)?;
     }
@@ -180,6 +181,15 @@ pub fn run_with_startup_action(
     }
 
     Ok(())
+}
+
+fn prepare_startup_action(app: &mut App, action: Option<&SubmitAction>) {
+    // No backend exists yet. Startup selections must not stop the backend
+    // spawned for the initial task on the first event-loop iteration.
+    let _ = app.take_backend_restart_request();
+    if let Some(SubmitAction::RunTask(task)) = action {
+        app.begin_task_submission(task.clone(), true);
+    }
 }
 
 fn should_handle_key_event(kind: KeyEventKind) -> bool {

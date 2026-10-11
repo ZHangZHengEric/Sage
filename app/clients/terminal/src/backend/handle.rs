@@ -144,6 +144,7 @@ impl BackendHandle {
 
     fn apply_v1_args(command: &mut Command, request: &BackendRequest, workspace: Option<&PathBuf>) {
         command
+            .arg("v1")
             .arg("chat")
             .arg("--json")
             .arg("--stats")

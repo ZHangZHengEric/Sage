@@ -311,8 +311,8 @@ def _emit_chat_exit_summary(session_id: Optional[str], *, json_output: bool) -> 
     sys.stderr.write(
         "\n"
         f"session_id: {session_id}\n"
-        f"resume: sage resume {session_id}\n"
-        "history: sage sessions\n"
+        f"resume: sage v1 resume {session_id}\n"
+        "history: sage v1 sessions\n"
     )
     sys.stderr.flush()
 

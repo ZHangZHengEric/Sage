@@ -236,14 +236,14 @@ async def validate_requested_skills(
         available_display = (
             ", ".join(sorted(available_names)) if available_names else "(none)"
         )
-        next_steps = ["Run `sage skills` to inspect currently visible skills."]
+        next_steps = ["Run `sage v1 skills` to inspect currently visible skills."]
         if agent_id:
             next_steps[0] = (
-                f"Run `sage skills --agent-id {agent_id}` to inspect the skills currently available to that agent."
+                f"Run `sage v1 skills --agent-id {agent_id}` to inspect the skills currently available to that agent."
             )
         if workspace:
             next_steps.append(
-                f"Run `sage skills --workspace {os.path.abspath(workspace)}` to inspect workspace skills."
+                f"Run `sage v1 skills --workspace {os.path.abspath(workspace)}` to inspect workspace skills."
             )
         raise CLIError(
             "Unknown CLI skill(s): "
@@ -339,11 +339,11 @@ async def inspect_session(
                 scope_suffix += f" and agent {agent_id}"
             raise CLIError(
                 f"No recent session found{scope_suffix}",
-                next_steps=["Run `sage sessions` to inspect visible sessions."],
+                next_steps=["Run `sage v1 sessions` to inspect visible sessions."],
             )
         raise CLIError(
             f"Session not found: {session_id}",
-            next_steps=["Run `sage sessions` to inspect visible sessions."],
+            next_steps=["Run `sage v1 sessions` to inspect visible sessions."],
         )
 
     if (
@@ -354,14 +354,14 @@ async def inspect_session(
         raise CLIError(
             f"Session {conversation.session_id} is not visible to user {resolved_user_id}",
             next_steps=[
-                "Check `--user-id`, or run `sage sessions --user-id <user>` to inspect visible sessions."
+                "Check `--user-id`, or run `sage v1 sessions --user-id <user>` to inspect visible sessions."
             ],
         )
     if agent_id and conversation.agent_id and conversation.agent_id != agent_id:
         raise CLIError(
             f"Session {conversation.session_id} is not visible to agent {agent_id}",
             next_steps=[
-                f"Run `sage sessions --agent-id {agent_id}` to inspect sessions for that agent."
+                f"Run `sage v1 sessions --agent-id {agent_id}` to inspect sessions for that agent."
             ],
         )
 

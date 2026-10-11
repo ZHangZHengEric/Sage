@@ -772,6 +772,9 @@ def init_cli_config(*, init_logging: bool = True) -> config.StartupConfig:
         os.environ.setdefault(env_name, default_value)
 
     cfg = config.init_startup_config(mode="server")
+    # Server hosts resolve credentials per user and intentionally omit the
+    # environment key. The standalone CLI owns its local model configuration.
+    cfg.default_llm_api_key = os.environ.get(config.ENV.DEFAULT_LLM_API_KEY, "").strip()
     if init_logging:
         from app.v1.common.utils.logging import init_logging_base
 

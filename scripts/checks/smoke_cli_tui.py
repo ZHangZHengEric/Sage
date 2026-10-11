@@ -1,0 +1,183 @@
+"""Execute CLI and PTY terminal tasks against a local deterministic model.
+
+Run with the project's Python environment after building sage-terminal.
+No external model credentials or network requests are used.
+"""
+from __future__ import annotations
+
+import fcntl
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+import json
+import os
+from pathlib import Path
+import pty
+import re
+import select
+import signal
+import struct
+import subprocess
+import sys
+import tempfile
+import termios
+import threading
+import time
+
+ROOT = Path(__file__).resolve().parents[2]
+MARKER = "SAGE_SMOKE_TASK_COMPLETED"
+
+
+class ModelHandler(BaseHTTPRequestHandler):
+    def log_message(self, *_args):
+        pass
+
+    def do_POST(self):
+        request = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+        if not self.path.endswith("/chat/completions"):
+            self.send_error(404)
+            return
+        self.server.requests += 1
+        if request.get("stream"):
+            chunks = [
+                {"index": 0, "delta": {"role": "assistant", "content": MARKER}, "finish_reason": None},
+                {"index": 0, "delta": {}, "finish_reason": "stop"},
+            ]
+            payload = "".join("data: " + json.dumps({
+                "id": "smoke-response", "object": "chat.completion.chunk",
+                "created": int(time.time()), "model": "smoke-model", "choices": [choice],
+            }) + "\n\n" for choice in chunks) + "data: [DONE]\n\n"
+            content_type = "text/event-stream"
+        else:
+            payload = json.dumps({
+                "id": "smoke-response", "object": "chat.completion", "created": int(time.time()),
+                "model": "smoke-model", "choices": [{"index": 0,
+                    "message": {"role": "assistant", "content": MARKER}, "finish_reason": "stop"}],
+                "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+            })
+            content_type = "application/json"
+        body = payload.encode()
+        self.send_response(200)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+
+def test_env(workspace: Path, endpoint: str) -> dict[str, str]:
+    # Each case owns its configuration and storage; repository .env is not loaded.
+    env = {k: v for k, v in os.environ.items() if not k.startswith("SAGE_")}
+    launcher = workspace / "sage-smoke"
+    launcher.write_text(
+        f"#!{sys.executable}\n"
+        "import os\nfrom pathlib import Path\n"
+        "os.chdir(Path(__file__).resolve().parent)\n"
+        "from app.clients.cli.main import main\nraise SystemExit(main())\n"
+    )
+    launcher.chmod(0o755)
+    env.update({
+        "PYTHONPATH": str(ROOT), "SAGE_PYTHON": sys.executable,
+        "SAGE_TERMINAL_RUNTIME_ROOT": str(ROOT),
+        "SAGE_TERMINAL_CLI": str(launcher),
+        "SAGE_TERMINAL_STATE_ROOT": str(workspace / "terminal-state"),
+        "SAGE_LOCAL_DATA_ROOT": str(workspace / "data"),
+        "SAGE_DB_TYPE": "file", "SAGE_DB_FILE": str(workspace / "terminal-state/sage.db"),
+        "SAGE_DEFAULT_LLM_API_KEY": "local-smoke-key",
+        "SAGE_DEFAULT_LLM_API_BASE_URL": endpoint,
+        "SAGE_DEFAULT_LLM_MODEL_NAME": "smoke-model",
+        "SAGE_CLI_USER_ID": "smoke-user", "TERM": "xterm-256color",
+    })
+    return env
+
+
+def configure_v1_provider(workspace: Path, env: dict[str, str]):
+    result = subprocess.run(
+        [sys.executable, "-m", "app.clients.cli.main", "v1", "provider", "create", "--set-default", "--json"],
+        cwd=workspace, env=env, capture_output=True, text=True, timeout=45,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+def cli_case(workspace: Path, env: dict[str, str], version: str):
+    args = [sys.executable, "-m", "app.clients.cli.main"]
+    if version == "v1":
+        args += ["v1"]
+    args += ["run", "Return the completion marker.", "--json", "--workspace", str(workspace)]
+    if version == "v1":
+        args += ["--agent-mode", "simple", "--sandbox-type", "local"]
+    else:
+        args += ["--session-root", str(workspace / "runtime")]
+    result = subprocess.run(args, cwd=workspace, env=env, input="", capture_output=True, text=True, timeout=45)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert MARKER in result.stdout, result.stdout + result.stderr
+    if version == "v2":
+        rows = [json.loads(line) for line in result.stdout.splitlines() if line.startswith("{")]
+        assert any(row.get("type") == "cli_v2_result" and row.get("state") == "completed" for row in rows)
+    print(f"CLI {version}: task completed", flush=True)
+
+
+def tui_case(workspace: Path, env: dict[str, str], version: str):
+    args = [sys.executable, "-m", "app.clients.cli.main", "tui",
+            "--workspace", str(workspace)]
+    if version == "v1":
+        args += ["--runtime", "v1", "--agent-mode", "simple", "--sandbox-type", "local"]
+    args += ["run", "Return the completion marker."]
+    master, slave = pty.openpty()
+    fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 40, 140, 0, 0))
+    process = subprocess.Popen(args, cwd=workspace, env=env, stdin=slave, stdout=slave, stderr=slave,
+                               start_new_session=True)
+    os.close(slave)
+    output = bytearray()
+    deadline = time.monotonic() + 45
+    completed = False
+    try:
+        while time.monotonic() < deadline and process.poll() is None:
+            if not select.select([master], [], [], 0.1)[0]:
+                continue
+            try:
+                chunk = os.read(master, 65536)
+            except OSError:
+                break
+            output.extend(chunk)
+            if b"\x1b[6n" in chunk:
+                os.write(master, b"\x1b[1;1R")
+            rendered = re.sub(r"\x1b\[[0-?]*[ -/]*[@-~]", "", output.decode(errors="replace"))
+            # The marker plus a subsequent ready status proves Finished was handled.
+            marker_at = rendered.rfind(MARKER)
+            if marker_at >= 0 and "ready" in rendered[marker_at:]:
+                completed = True
+                break
+        assert completed, output.decode(errors="replace")[-12000:]
+        os.write(master, b"\x03")
+        process.wait(timeout=5)
+        assert process.returncode == 0, process.returncode
+        print(f"TUI {version}: task completed and terminal exited cleanly", flush=True)
+    finally:
+        if process.poll() is None:
+            os.killpg(process.pid, signal.SIGTERM)
+            process.wait(timeout=5)
+        os.close(master)
+
+
+def main():
+    server = ThreadingHTTPServer(("127.0.0.1", 0), ModelHandler)
+    server.requests = 0
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        with tempfile.TemporaryDirectory(prefix="sage-cli-tui-smoke-") as folder:
+            for kind, case in (("cli", cli_case), ("tui", tui_case)):
+                for version in ("v1", "v2"):
+                    workspace = Path(folder) / f"{kind}-{version}"
+                    workspace.mkdir()
+                    env = test_env(workspace, f"http://127.0.0.1:{server.server_port}/v1")
+                    if version == "v1":
+                        configure_v1_provider(workspace, env)
+                    case(workspace, env, version)
+        assert server.requests >= 4, server.requests
+        print("All four CLI/TUI runtime task paths passed.")
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+if __name__ == "__main__":
+    main()

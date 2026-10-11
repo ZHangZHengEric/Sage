@@ -325,6 +325,8 @@ fn rendered_history(app: &App) -> String {
 #[test]
 fn runtime_command_switches_backend_runtime_and_requests_restart() {
     let mut app = App::new();
+    assert_eq!(app.runtime, crate::backend::BackendRuntime::V2);
+    app.set_runtime_selection(crate::backend::BackendRuntime::V1);
     let _ = app.take_backend_restart_request();
     let _ = app.take_pending_history_lines();
 
@@ -396,6 +398,7 @@ fn resuming_a_v2_session_marks_it_known_and_restarts_the_backend() {
     assert!(app.take_backend_restart_request());
 
     let mut legacy = App::new();
+    legacy.set_runtime_selection(crate::backend::BackendRuntime::V1);
     legacy.load_resumed_session("local-000123".to_string(), Vec::new());
     assert!(!legacy.v2_session_known);
 }
@@ -456,6 +459,7 @@ fn v2_steer_is_refused_while_an_approval_is_pending() {
 #[test]
 fn v1_input_while_busy_is_still_submitted_as_a_task() {
     let mut app = App::new();
+    app.set_runtime_selection(crate::backend::BackendRuntime::V1);
     app.begin_task_submission("first task".to_string(), true);
 
     app.input = "next prompt".to_string();
