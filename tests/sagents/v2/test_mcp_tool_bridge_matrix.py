@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from contextlib import asynccontextmanager
 
 import pytest
@@ -840,3 +841,144 @@ async def test_optional_mcp_recovers_after_transient_discovery_failure():
     assert await plugin.list_tools(run_id="one") == ()
     assert len(await plugin.list_tools(run_id="two")) == 1
     assert plugin.discovery_errors() == {}
+
+
+@pytest.mark.asyncio
+async def test_mcp_discovery_rejects_pagination_after_page_limit():
+    class PaginatedSession(FakeSession):
+        def __init__(self):
+            super().__init__()
+            self.cursors = []
+
+        async def list_tools(self, cursor=None):
+            self.cursors.append(cursor)
+            return {"tools": [], "nextCursor": f"page_{len(self.cursors) + 1}"}
+
+    session = PaginatedSession()
+
+    @asynccontextmanager
+    async def factory(config):
+        del config
+        yield session
+
+    bridge = McpToolPlugin(
+        (McpServerConfig(name="drive", protocol="stdio", command="mcp", max_pages=2),),
+        session_factory=factory,
+    )
+
+    with pytest.raises(SageV2Error) as limited:
+        await bridge.list_tools(run_id="run_1")
+
+    assert limited.value.info.code == "mcp.pagination_limit_exceeded"
+    assert limited.value.info.category == ErrorCategory.PROVIDER_PERMANENT
+    assert session.cursors == [None, "page_2"]
+
+
+@pytest.mark.asyncio
+async def test_mcp_discovery_enforces_schema_boundaries_and_utf8_bytes():
+    boundary_schema = {"type": "object", "description": "é"}
+    serialized = json.dumps(
+        boundary_schema, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+    )
+    boundary_bytes = len(serialized.encode("utf-8"))
+
+    class SchemaSession(FakeSession):
+        def __init__(self, schema):
+            super().__init__()
+            self.schema = schema
+
+        async def list_tools(self):
+            return {"tools": [{"name": "search", "inputSchema": self.schema}]}
+
+    async def discover(schema, max_schema_bytes):
+        @asynccontextmanager
+        async def factory(config):
+            del config
+            yield SchemaSession(schema)
+
+        return McpToolPlugin(
+            (
+                McpServerConfig(
+                    name="drive",
+                    protocol="stdio",
+                    command="mcp",
+                    max_schema_bytes=max_schema_bytes,
+                ),
+            ),
+            session_factory=factory,
+        )
+
+    with pytest.raises(SageV2Error) as invalid_schema:
+        await (await discover({"type": "not-a-json-schema"}, 1024)).list_tools(
+            run_id="run_1"
+        )
+    assert invalid_schema.value.info.code == "mcp.tool_schema_invalid"
+
+    accepted = await (await discover(boundary_schema, boundary_bytes)).list_tools(
+        run_id="run_1"
+    )
+    assert [tool.name for tool in accepted] == ["mcp_drive_search"]
+
+    with pytest.raises(SageV2Error) as oversized:
+        await (await discover(boundary_schema, boundary_bytes - 1)).list_tools(
+            run_id="run_1"
+        )
+    assert oversized.value.info.code == "mcp.tool_schema_too_large"
+
+
+@pytest.mark.asyncio
+async def test_mcp_discovery_rejects_invalid_catalog_without_publishing_tools():
+    class InvalidCatalogSession(FakeSession):
+        async def list_tools(self):
+            return {
+                "tools": [
+                    {"name": "healthy", "inputSchema": {"type": "object"}},
+                    {"name": "broken", "inputSchema": {"type": "invalid"}},
+                ]
+            }
+
+    @asynccontextmanager
+    async def factory(config):
+        del config
+        yield InvalidCatalogSession()
+
+    bridge = McpToolPlugin(
+        (McpServerConfig(name="drive", protocol="stdio", command="mcp"),),
+        session_factory=factory,
+    )
+    with pytest.raises(SageV2Error) as invalid:
+        await bridge.list_tools(run_id="run_1")
+
+    assert invalid.value.info.code == "mcp.tool_schema_invalid"
+    assert bridge.tool_counts_by_server() == {}
+    assert bridge._definitions == {}
+    assert bridge._routes == {}
+
+
+@pytest.mark.asyncio
+async def test_mcp_discovery_rejects_normalized_tool_name_collision():
+    class CollidingCatalogSession(FakeSession):
+        async def list_tools(self):
+            return {
+                "tools": [
+                    {"name": "search-files", "inputSchema": {"type": "object"}},
+                    {"name": "search files", "inputSchema": {"type": "object"}},
+                ]
+            }
+
+    @asynccontextmanager
+    async def factory(config):
+        del config
+        yield CollidingCatalogSession()
+
+    bridge = McpToolPlugin(
+        (McpServerConfig(name="drive", protocol="stdio", command="mcp"),),
+        session_factory=factory,
+    )
+    with pytest.raises(SageV2Error) as collision:
+        await bridge.list_tools(run_id="run_1")
+
+    assert collision.value.info.code == "mcp.tool_name_collision"
+    assert collision.value.info.category == ErrorCategory.CONFLICT
+    assert bridge._definitions == {}
+    assert bridge._routes == {}
