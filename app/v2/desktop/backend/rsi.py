@@ -43,6 +43,7 @@ from sagents.v2.tool.plugins.official import (
     official_tool_definitions,
 )
 from app.v2.desktop.backend.bindings import DesktopExecutionBindingProvider
+from app.v2.desktop.backend.runtime_config import _TOOL_NAME, _SKILL_NAME
 
 
 def fingerprint(agent):
@@ -225,8 +226,29 @@ class DesktopRsiMixin:
         provider = provider or next((p for p in providers if p.is_default), None)
         if provider is None:
             raise ValueError("Agent has no configured model")
-        tools = tuple(agent.config.get("availableTools") or ())
-        skills = tuple(agent.config.get("availableSkills") or ())
+        configured_tools = agent.config.get("availableTools")
+        if configured_tools is None:
+            mcp = await self._mcp_plugin(agent.user_id)
+            mcp_definitions = await mcp.list_tools(run_id="rsi-snapshot")
+            configured_tools = tuple(
+                definition.name
+                for definition in (*self._native_tool_definitions(), *mcp_definitions)
+            )
+        # Match normal Desktop composition: stale internal operation names are
+        # not callable tools. Preserve the raw configuration in version records,
+        # but snapshot the executable allowlist without renaming or new grants.
+        tools = tuple(
+            name
+            for name in configured_tools
+            if isinstance(name, str) and _TOOL_NAME.fullmatch(name)
+        )
+        skills = tuple(
+            name
+            for name in (agent.config.get("availableSkills") or ())
+            if isinstance(name, str) and _SKILL_NAME.fullmatch(name)
+        )
+        if skills and "load_skill" not in tools:
+            tools = (*tools, "load_skill")
         manifest = self._manifest(agent, provider, tools, skills)
         files = dict((agent.config.get("rsiPackage") or {}).get("files") or {})
         assets = dict(agent.config.get("rsiAssets") or {})
@@ -501,7 +523,13 @@ class DesktopRsiMixin:
             package = AgentPackageBundle(manifest=manifest_data, files=package.files)
             roles = {}
             role_provider = {}
-            for role in ("evaluator", "tuner", "designer", "reviewer", "suite_reviewer"):
+            for role in (
+                "evaluator",
+                "tuner",
+                "designer",
+                "reviewer",
+                "suite_reviewer",
+            ):
                 manifest = self._manifest(agent, internal_provider, (), ())
                 definition = manifest.agents[identity].model_copy(
                     update={
