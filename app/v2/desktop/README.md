@@ -132,3 +132,19 @@ Agent 编辑页的“复制”会先提交待保存内容，再打开副本的�
 每个平台在发布前将整个应用移动到另一个包含空格的路径，从仓库外启动内置 Python，验证 v2 导入、skills、带认证的 health 与客户端 lease 关闭。全部平台成功后才创建 `v2.0.0` tag 和 GitHub Release。手动验证运行不发布；选择 `publish` 才发布。
 
 macOS 包使用 ad-hoc 签名，未使用 Apple Developer ID 签名或公证；Windows 包未做代码签名。旧 Tauri 发布流水线已移出 GitHub Actions，不再构建 v1 应用；历史 updater feed 不向 v1 自动推送 Flutter v2。
+
+## RSI 与 Agent 版本
+
+Agent 配置中的 RSI 按钮在设置框架内打开优化页面，保留侧栏和统一的字段布局；“版本历史”直接打开全部版本，无需启动 RSI。用户可设置 1–100 轮、内部 Agent 模型和优化范围（指令、Skill、原生工具启用列表、步数预算），也可导入符合 OptimizationSuite 的 JSON 测试集；未提供时由测试设计 Agent 生成。独立最终测试集在基线前固定，候选修改由独立 Session 的审查 Agent 检查。
+
+RSI 在 sidecar 的后台任务中执行，页面增量读取过程；离开页面或关闭最后一个窗口不会终止正在执行的 RSI。重新打开页面可读取历次任务、每轮版本、测试回答、评测和审查结果。sidecar 退出/崩溃时任务保留为 interrupted，不会自动重放未知结果的模型或工具调用。
+
+记录保存在 Desktop 数据目录的 runtime/rsi.sqlite3 与 runtime/rsi/<run-id>/。普通配置保存、Skill 删除和 shell 授权变更也保存版本；进入 RSI 时为已有 Agent 建立快照。各版本包含当时的配置、完整文本 package 和独立归档的二进制 Skill 资源。激活 Skill 使用按内容寻址的 Agent 局部覆盖目录，避免修改其他 Agent 的共享 Skill。
+
+人工保存版本在列表中标为“配置保存”，详情可展开查看名称、描述、模型、运行变量和权限，另有指令、工具、Skills、预算及文件内容。配置从 A 改为 B 再改回 A 会保留三个历史节点；重复读取不会新增节点。功能启用前尚未归档的旧编辑无法恢复，只能从现有配置建立初始快照。
+
+优化完成不修改当前 Agent。用户点击“使用此版本”，再确认替换，才调用独立的应用接口；接口要求 confirmed=true 和当前配置指纹。确认期间配置改变则拒绝覆盖。语义审查拒绝的候选保留用于查看，不能激活；未完成评测的候选不能激活。页面标出各版本是否接受了独立最终测试，用户可明确选择其他完成评测的迭代。完整报告与版本可分别导出。
+
+第一版支持 simple Agent 和原生工具；原有运行变量被固定带入测试，每次测试使用新 Application/Session 和临时工作区。临时工作区不包含真实项目文件，进程执行禁用，网络使用默认沙箱限制；Shell 尚需测试绑定，MCP 与非 simple Agent 在启动前拒绝。工具范围可以从原生工具集合增减启用项，预算范围目前只开放 max_steps。依赖 Desktop 单 sidecar 进程，不提供分布式任务接管或自动断点续跑。
+
+`integration_test/desktop_rsi_live_test.dart` 是显式启用的 macOS 原生验证。需先准备真实模型 provider、独立测试 Agent 和 `setup.json`/`suite.json`，然后运行 `flutter test integration_test/desktop_rsi_live_test.dart -d macos --dart-define=RSI_LIVE_MODEL=true --dart-define=RSI_LIVE_ARTIFACT_DIR=<绝对目录>`。它调用真实后台与模型，通过原生前端检查人工保存、三轮进度、离开/重连、确认/取消、版本恢复和后端重启后的历史；仅系统文件选择器使用固定测试文件替代。默认不运行，避免普通测试产生模型费用。

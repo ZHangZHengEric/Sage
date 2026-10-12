@@ -167,30 +167,36 @@ class _SidebarFooterAction extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = Theme.of(context).colorScheme;
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(14, 2, 14, 8),
-      child: InkWell(
-        key: const ValueKey('settings-button'),
-        borderRadius: BorderRadius.circular(9),
-        onTap: onTap,
-        child: SizedBox(
-          height: 36,
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 10),
-            child: Row(
-              children: [
-                Icon(icon, size: 16, color: colors.onSurfaceVariant),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Text(
-                    label,
-                    style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                      fontSize: 13,
-                      color: colors.onSurface,
+    return Semantics(
+      button: true,
+      label: label,
+      onTap: onTap,
+      excludeSemantics: true,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(14, 2, 14, 8),
+        child: InkWell(
+          key: const ValueKey('settings-button'),
+          borderRadius: BorderRadius.circular(9),
+          onTap: onTap,
+          child: SizedBox(
+            height: 36,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 10),
+              child: Row(
+                children: [
+                  Icon(icon, size: 16, color: colors.onSurfaceVariant),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      label,
+                      style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                        fontSize: 13,
+                        color: colors.onSurface,
+                      ),
                     ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
           ),
         ),

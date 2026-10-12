@@ -12,11 +12,11 @@
 [![DeepWiki](https://img.shields.io/badge/DeepWiki-Learn%20More-purple.svg)](https://deepwiki.com/ZHangZHengEric/Sage)
 [![Slack](https://img.shields.io/badge/Slack-Join%20Community-4A154B?logo=slack)](https://join.slack.com/t/sage-b021145/shared_invite/zt-3t8nabs6c-qCEDzNUYtMblPshQTKSWOA)
 
-# 🧠 **Sage Agent Platform**
+# 🧠 **Sage · Custom, Self-Evolving Agents**
 
-### 🎯 **From Complex Work to Reliable Delivery**
+### 🎯 **Define Your Agent. Evaluate. Evolve.**
 
-> 🌟 **An open-source agent platform for project work, tool execution, and multi-agent collaboration — on your desktop, on the web, or in your own application.**
+> 🌟 **An open-source platform for building custom, self-evolving AI agents. Define an Agent package, evaluate it, and improve it through multiple RSI rounds — with version history and your choice of which version to adopt.**
 
 </div>
 
@@ -24,8 +24,9 @@
 
 ## ✨ **Why Sage**
 
+- 📦 **Custom Agent packages** — Define your agent's instructions, Skills, tools, and runtime configuration in `sage.yaml`; reuse packages in Desktop, Server, or your Python application.
+- 🧬 **Self-evolution with RSI** — Test and refine packages over configurable rounds using evaluation, tuning, and review agents in separate Sessions. Retain every iteration and choose which version to use.
 - 🧩 **Plugin-based architecture** — Compose model, memory, storage, tool, and scheduling providers with explicit contracts and managed lifecycles.
-- 📦 **Declarative Agent packages** — Define instructions, capabilities, and runtime configuration in `sage.yaml`; manage immutable versions in Server Studio.
 - 🔄 **Stateful, interactive execution** — Durable Session history, streamed events, and pause/resume with human input and approvals.
 - 🤝 **Multi-agent orchestration** — Coordinate Studio members through directed messages, or compose Agent Flows in the runtime.
 - 🔌 **An extensible tool ecosystem** — Bring built-in tools, reusable Skills, and [MCP](https://modelcontextprotocol.io/) services into the same agent workflow.
@@ -33,8 +34,22 @@
 
 ---
 
+## 🧬 **RSI: From Custom Agents to Self-Evolution**
+
+Supply an Agent package, choose a goal, round count, and editable scope, and run an independent RSI (Recursive Self-Improvement) loop.
+
+- **Control what evolves** — Optimize only Skills, or allow instruction guidance, tool enablement, and step budgets. Supply your own test suite or generate one with a test-design agent; test single-turn tasks and conversations with bounded turn counts.
+- **Evaluate and review independently** — Evaluation and semantic review use separate Sessions to check goal completion, test memorization, and changes to the original goal. An independent final suite is fixed before baseline evaluation.
+- **Inspect every iteration** — Retain the original package, every iteration's complete package, test responses, evaluations, and review results. Desktop shows background progress, RSI history, and manually saved Agent versions.
+- **Choose what to adopt** — Optimization produces candidates without replacing your configuration. Inspect the comparison, select a version, and explicitly confirm before Desktop applies it. Keep the original when no better candidate emerges.
+
+Use `AgentPackageOptimizer` through the [Python API](sagents/v2/optimization/README.md), or open RSI from [Desktop Agent settings](app/v2/desktop/README.md#rsi-与-agent-版本). Desktop RSI currently supports simple Agents and native tools; installer availability follows each release's notes.
+
+---
+
 ## 📰 **Latest updates**
 
+- **2026-10-12** — RSI: multi-round Agent package optimization, independent final tests and semantic review, plus Desktop progress and version history. [Python API](sagents/v2/optimization/README.md) · [Desktop guide](app/v2/desktop/README.md#rsi-与-agent-版本)
 - **2026-10-11** — [OpenRouter free models: selection and limits](knowledge/resources/openrouter-free-models.md)
 - **2026-10-11** — [MCP engineering resources: protocols, SDKs, testing, and security](knowledge/resources/mcp-engineering-resources.md)
 - **2026-10-11** — [A read-only MCP smoke test through Sage](knowledge/tutorials/mcp-smoke-test.md)
@@ -47,9 +62,9 @@
 
 | Choose your path | Start here |
 | --- | --- |
-| 💻 **Desktop v2** — Local projects and agent collaboration | [Desktop guide](app/v2/desktop/README.md) |
+| 💻 **Desktop v2** — Configure agents, run RSI, and choose versions | [Desktop guide](app/v2/desktop/README.md) |
 | 🌐 **Server v2** — Multi-user web access and Agent Studio | [Server guide](app/v2/server/README.md) |
-| 🧠 **SAgents v2** — Build agents into your own application | [Runtime quick start](sagents/v2/README.md#quick-start) |
+| 🧠 **SAgents v2** — Build and optimize agents through Python | [Runtime quick start](sagents/v2/README.md#quick-start) |
 | 📦 **Desktop installers** — Available release builds | [Downloads & release instructions](https://github.com/ZHangZHengEric/Sage/releases/tag/v2.0.0) |
 
 ### 📦 Desktop installer

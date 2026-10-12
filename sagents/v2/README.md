@@ -598,3 +598,13 @@ and omitted from submitted overrides. Built-in registrations publish scalar
 constructor defaults, with explicit factory defaults taking precedence. Desktop
 completion thresholds and model timeouts remain configurable when the selected
 implementation uses them; local tool selection does not expose model timeouts.
+
+### External AgentPackage optimization
+
+`AgentPackageOptimizer` is a separate Python API that evaluates a supplied
+package and runs configurable proposal rounds (default five). Host-configured
+evaluation/tuning Agents return fixed-rubric grades and scoped candidate patches;
+the controller retains the best candidate without saving or activating it.
+See [optimization API](optimization/README.md) and run
+`python -m examples.sagents_v2_package_optimizer` for an offline multi-round
+example with the native v2 runtime.

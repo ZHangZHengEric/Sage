@@ -578,9 +578,14 @@ class DesktopRunServiceMixin(DesktopRunCompositionMixin):
         }
         remembered.add(command)
         config["approvedShellCommands"] = sorted(remembered)
-        await self.catalog.save_agent(
-            agent.model_copy(update={"config": config, "updated_at": utc_now()})
-        )
+        async with self._agent_update_lock:
+            current = await self._agent(agent.agent_id, user_id)
+            merged = dict(current.config)
+            merged["approvedShellCommands"] = sorted(set(merged.get("approvedShellCommands") or ()) | {command})
+            updated = current.model_copy(update={"config": merged, "updated_at": utc_now()})
+            await self._record_agent_version(current)
+            await self._record_agent_version(updated)
+            await self.catalog.save_agent(updated)
 
         driver = self._drivers.get(run_id)
         assessor = (
