@@ -1393,7 +1393,7 @@ class _AgentPickerState extends State<_AgentPicker> {
                       _ComposerMenuItem(
                         selected: agent.id == widget.controller.selectedAgentId,
                         icon: CupertinoIcons.person_crop_circle,
-                        label: agent.name,
+                        label: agent.rsiStatus == null ? agent.name : '${agent.name} · RSI',
                         onTap: () {
                           _close();
                           widget.controller.selectAgent(agent.id);

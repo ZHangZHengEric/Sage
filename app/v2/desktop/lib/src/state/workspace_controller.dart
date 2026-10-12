@@ -84,6 +84,8 @@ class WorkspaceController extends ChangeNotifier {
   final Set<ChatMessage> _pendingTextReveals = {};
   final Random _sessionIdRandom = Random.secure();
   Timer? _workspaceRefreshTimer;
+  Timer? _agentStatusTimer;
+  bool _agentStatusPolling = false;
   Timer? _streamingTextRevealTimer;
   Future<void> _agentPatchTail = Future<void>.value();
   int _agentPatchRevision = 0;
@@ -290,7 +292,54 @@ class WorkspaceController extends ChangeNotifier {
     return true;
   }
 
+  Future<Map<String, Object?>> rsiHistory(String agentId) =>
+      _api.rsiHistory(agentId);
+  Future<Map<String, Object?>> rsiRun(
+    String agentId,
+    String runId, {
+    int afterSequence = 0,
+  }) => _api.rsiRun(agentId, runId, afterSequence: afterSequence);
+  Future<Map<String, Object?>> rsiVersion(String agentId, String versionId) =>
+      _api.rsiVersion(agentId, versionId);
+  Future<void> startRsi(String agentId, Map<String, Object?> request) async {
+    await _api.startRsi(agentId, request);
+    await refreshAgentStatuses();
+  }
+
+  Future<void> cancelRsi(String agentId, String runId) async {
+    await _api.cancelRsi(agentId, runId);
+    await refreshAgentStatuses();
+  }
+
+  Future<void> applyRsiVersion(
+    String agentId,
+    String versionId,
+    String fingerprint,
+  ) async {
+    await _api.applyRsiVersion(agentId, versionId, fingerprint);
+    await loadSettingsCatalog(agentId: agentId);
+    await refreshAgentStatuses();
+    await refreshSkills();
+  }
+
+  Future<void> refreshAgentStatuses() async {
+    if (_disposed || _agentStatusPolling) return;
+    _agentStatusPolling = true;
+    try {
+      final values = await _api.listAgents();
+      if (!_disposed) {
+        agents = values;
+        notifyListeners();
+      }
+    } on Object {
+      // A temporary polling failure must not discard the visible catalog.
+    } finally {
+      _agentStatusPolling = false;
+    }
+  }
+
   Future<void> initialize() async {
+    _agentStatusTimer ??= Timer.periodic(const Duration(seconds: 4), (_) => refreshAgentStatuses());
     loading = true;
     error = null;
     notifyListeners();
@@ -324,19 +373,20 @@ class WorkspaceController extends ChangeNotifier {
   }
 
   Future<void> loadUsageOverview({int days = 30}) async {
+    if (_disposed) return;
     final revision = ++_usageOverviewRevision;
     usageOverviewLoading = true;
     usageOverviewError = null;
     notifyListeners();
     try {
       final value = await _api.getUsageOverview(days: days);
-      if (revision != _usageOverviewRevision) return;
+      if (_disposed || revision != _usageOverviewRevision) return;
       usageOverview = value;
     } on Object catch (exception) {
-      if (revision != _usageOverviewRevision) return;
+      if (_disposed || revision != _usageOverviewRevision) return;
       usageOverviewError = exception.toString();
     } finally {
-      if (revision == _usageOverviewRevision) {
+      if (!_disposed && revision == _usageOverviewRevision) {
         usageOverviewLoading = false;
         notifyListeners();
       }
@@ -1137,6 +1187,7 @@ class WorkspaceController extends ChangeNotifier {
                 id: agent.id,
                 name: configuration.name,
                 isDefault: agent.isDefault,
+                rsiStatus: agent.rsiStatus,
               )
             : agent,
     ];
@@ -3192,6 +3243,7 @@ class WorkspaceController extends ChangeNotifier {
   void dispose() {
     _disposed = true;
     _workspaceRefreshTimer?.cancel();
+    _agentStatusTimer?.cancel();
     _studioPollTimer?.cancel();
     _streamingTextRevealTimer?.cancel();
     _pendingTextReveals.clear();

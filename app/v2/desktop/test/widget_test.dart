@@ -83,6 +83,13 @@ class _ClipboardApi extends _FakeApi {
   }
 }
 
+class _DelayedUsageApi extends _FakeApi {
+  final response = Completer<UsageOverview>();
+  @override
+  Future<UsageOverview> getUsageOverview({int days = 30}) => response.future;
+  Future<UsageOverview> fixture() => super.getUsageOverview();
+}
+
 class _FakeApi extends V2ApiClient {
   final _sessionTreeEvents = StreamController<Map<String, Object?>>.broadcast();
   Map<String, Object?>? lastAgentPatch;
@@ -2387,6 +2394,23 @@ Map<String, Object?> _persistedBranchableConversation() => {
 };
 
 void main() {
+  for (final fails in [false, true]) {
+    test('late usage overview ${fails ? "error" : "response"} is ignored after disposal', () async {
+      final api = _DelayedUsageApi();
+      final value = await api.fixture();
+      final controller = WorkspaceController(api: api);
+      final pending = controller.loadUsageOverview();
+      controller.dispose();
+      if (fails) {
+        api.response.completeError(StateError('late statistics failure'));
+      } else {
+        api.response.complete(value);
+      }
+      await pending;
+      expect(controller.usageOverview, isNull);
+      api.close();
+    });
+  }
   testWidgets('steer splits timeline and keeps in-flight tool ownership', (tester) async {
     SharedPreferences.setMockInitialValues({});
     final api = _SteeringProcessApi();

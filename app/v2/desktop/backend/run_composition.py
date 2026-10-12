@@ -242,7 +242,7 @@ class DesktopRunCompositionMixin(DesktopRunEnvironmentMixin):
         environment=None,
         sandbox_observer,
     ):
-        skill_provider = self._skill_provider()
+        skill_provider = self._skill_provider(agent)
         mcp_plugin = (
             environment.mcp
             if environment is not None

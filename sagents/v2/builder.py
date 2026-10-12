@@ -1094,7 +1094,11 @@ class SAgentBuilder:
                 )
                 if self_configuration is not None and self._skill_provider is None:
                     raise ValueError("with_self_configuration requires with_skill_provider")
-                if self._skill_provider is not None and (definition.skills or self_configuration is not None):
+                if self._skill_provider is not None and (
+                    definition.skills
+                    or "load_skill" in definition.tools
+                    or self_configuration is not None
+                ):
                     from sagents.v2.skill.plugins.session import SessionDerivedSkillActivationRepository
                     from sagents.v2.tool.plugins.skill import SkillToolPlugin
                     from sagents.v2.tool import CompositeToolCatalog, CompositeToolExecutor

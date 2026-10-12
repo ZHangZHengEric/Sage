@@ -146,6 +146,7 @@ class DesktopCatalogServiceMixin:
                 "is_default": value.is_default,
                 "tool_count": len(value.config.get("availableTools") or []),
                 "skill_count": len(value.config.get("availableSkills") or []),
+                **({"rsi_status": status} if (status := next((run["status"] for run in self.rsi_store.list(user_id, value.agent_id, "run") if run["status"] in {"queued", "running"}), None)) else {}),
             }
             for value in values
         ]
@@ -176,6 +177,7 @@ class DesktopCatalogServiceMixin:
                 created = created.model_copy(update={"config": {**source.config, "name": name}})
             if request.settings is not None:
                 created = await self._apply_agent_settings(created, request.settings, user_id)
+            await self._record_agent_version(created)
             await self.catalog.save_agent(created)
         return await self.get_agent_settings(created.agent_id, user_id)
 
@@ -242,16 +244,17 @@ class DesktopCatalogServiceMixin:
         if target is None:
             raise ValueError(f"Imported Skill not found: {skill_name}")
 
-        await asyncio.to_thread(shutil.rmtree, target)
-        for agent in await self.catalog.list_agents(user_id):
-            available = list(agent.config.get("availableSkills") or [])
-            if skill_name not in available:
-                continue
-            config = {
-                **agent.config,
-                "availableSkills": [name for name in available if name != skill_name],
-            }
-            await self.catalog.save_agent(agent.model_copy(update={"config": config}))
+        async with self._agent_update_lock:
+            affected = [agent for agent in await self.catalog.list_agents(user_id)
+                        if skill_name in (agent.config.get("availableSkills") or [])]
+            for agent in affected:
+                await self._record_agent_version(agent)
+            await asyncio.to_thread(shutil.rmtree, target)
+            for agent in affected:
+                config = {**agent.config, "availableSkills": [name for name in agent.config.get("availableSkills") or [] if name != skill_name]}
+                updated = agent.model_copy(update={"config": config, "updated_at": utc_now()})
+                await self._record_agent_version(updated)
+                await self.catalog.save_agent(updated)
         return {"deleted_name": skill_name}
 
     async def list_tools(
@@ -734,6 +737,8 @@ class DesktopCatalogServiceMixin:
         async with self._agent_update_lock:
             agent = await self._agent(agent_id, user_id)
             updated = await self._apply_agent_settings(agent, patch, user_id)
+            await self._record_agent_version(agent)
+            await self._record_agent_version(updated)
             await self.catalog.save_agent(updated)
         return await self.get_agent_settings(agent_id, user_id)
 
@@ -821,6 +826,8 @@ class DesktopCatalogServiceMixin:
     async def delete_agent(self, agent_id: str, user_id: str) -> list[dict[str, Any]]:
         async with self._agent_update_lock:
             agent = await self._agent(agent_id, user_id)
+            if any(run["status"] in {"queued", "running"} for run in self.rsi_store.list(user_id, agent_id, "run")):
+                raise ValueError("Cancel RSI before deleting this Agent")
             values = await self.catalog.list_agents(user_id)
             replacement = next(
                 (value for value in values if value.agent_id != agent_id), None
