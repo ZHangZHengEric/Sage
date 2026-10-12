@@ -22,6 +22,8 @@
 
 ---
 
+New to RSI? [Inspect your first run](docs/en/applications/FIRST_RSI_RUN.md): a scripted Python walkthrough with no model API key.
+
 ## ✨ **Why Sage**
 
 - 📦 **Custom Agent packages** — Define your agent's instructions, Skills, tools, and runtime configuration in `sage.yaml`; reuse packages in Desktop, Server, or your Python application.
