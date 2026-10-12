@@ -57,6 +57,8 @@ class RsiModel(ScriptedModelProvider):
                 rationale="Reusable method",
                 findings=[],
             )
+        elif "issues" in properties:
+            answer = dict(approved=True, rationale="Goal and suites are consistent", issues=[])
         elif "instruction_guidance" in properties:
             answer = dict(
                 rationale="Reusable arithmetic verification",
@@ -282,7 +284,7 @@ async def test_background_idempotency_keepalive_cancel_and_no_replay(
         assert not service.rsi_active
         assert (await leases.expire()).shutdown_requested
         journal = (await service.rsi_run(agent_id, run["id"], "alice"))["events"]
-        assert any(e["event"] == "target_call_started" for e in journal)
+        assert any(e["event"] in {"target_call_started", "agent_call_started"} for e in journal)
         assert not any(e["event"] == "target_call_completed" for e in journal)
     finally:
         await service.close()

@@ -459,8 +459,10 @@ void main() {
         audit['selected_iteration'] = chosen['iteration'];
         audit['selected_package_differs_from_baseline'] =
             chosen['package_hash'] != original['package_hash'];
-        await tap(find.text('所有版本'));
-        await tap(find.byKey(ValueKey('rsi-version-${chosen['id']}')));
+        await tap(find.textContaining('迭代 ${chosen['iteration']}').first);
+        await tap(
+          find.byKey(ValueKey('rsi-open-iteration-${chosen['iteration']}')),
+        );
         await until(
           () => find
               .byKey(const ValueKey('rsi-apply-version'))

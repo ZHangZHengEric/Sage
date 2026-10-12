@@ -39,11 +39,11 @@
 输入 Agent package，设置优化目标、轮数和允许修改的范围，就可以启动独立的 RSI（Recursive Self-Improvement）循环。
 
 - **按需调优** — 可只优化 Skills，或开放指令指导、工具启用列表与步数预算。支持用户提供测试集，也可由测试设计 Agent 生成，支持单轮任务与设有轮数上限的多轮对话。
-- **独立评测与审查** — 评测和候选语义审查使用独立 Session，检查原始目标是否完成、是否背题或改变目标；独立最终测试集在基线评测前固定。
-- **每次迭代可追溯** — 保留原始版本、每轮完整 package、测试回答、评测及审查结果。Desktop 显示后台进度、历次 RSI 和人工编辑保存的版本。
+- **独立评测与审查** — 运行目标 Agent 前，独立 Session 的审查 Agent 先检查测试集与授权目标的一致性。评测和候选语义审查分别检查任务完成、背题和目标漂移；独立最终测试集在基线前封存。
+- **每次迭代可追溯** — 保留原始版本、每轮完整 package、测试回答、评测及审查结果。Desktop 显示后台进度和 RSI 运行历史。Agent 配置层级单独保存人工编辑与确认应用的版本，未应用的候选保留在对应 RSI 记录中。
 - **用户决定采用版本** — 优化不会直接替换原配置。用户查看对比结果、选择版本并确认后，Desktop 才应用该版本；没有更好的候选时保留原版本。
 
-从 [Python API](sagents/v2/optimization/README.md) 使用 `AgentPackageOptimizer`，或在 [Desktop 的 Agent 配置](app/v2/desktop/README.md#rsi-与-agent-版本)中打开 RSI。当前 Desktop RSI 支持 simple Agent 与原生工具，安装包支持范围以对应版本说明为准。
+参见 [RSI 流程指南](docs/zh/applications/RSI.md)。从 [Python API](sagents/v2/optimization/README.md) 使用 `AgentPackageOptimizer`，或在 [Desktop 的 Agent 配置](app/v2/desktop/README.md#rsi-与-agent-版本)中打开 RSI。当前 Desktop RSI 支持 simple Agent 与原生工具，安装包支持范围以对应版本说明为准。
 
 ---
 

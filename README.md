@@ -39,17 +39,17 @@
 Supply an Agent package, choose a goal, round count, and editable scope, and run an independent RSI (Recursive Self-Improvement) loop.
 
 - **Control what evolves** — Optimize only Skills, or allow instruction guidance, tool enablement, and step budgets. Supply your own test suite or generate one with a test-design agent; test single-turn tasks and conversations with bounded turn counts.
-- **Evaluate and review independently** — Evaluation and semantic review use separate Sessions to check goal completion, test memorization, and changes to the original goal. An independent final suite is fixed before baseline evaluation.
-- **Inspect every iteration** — Retain the original package, every iteration's complete package, test responses, evaluations, and review results. Desktop shows background progress, RSI history, and manually saved Agent versions.
+- **Evaluate and review independently** — A separate audit Session checks test-suite alignment with the authorized goal before any target execution. Evaluation and candidate semantic review then check completion, memorization, and goal drift in separate Sessions. An independent final suite is sealed before baseline evaluation.
+- **Inspect every iteration** — Retain the original package, every iteration's complete package, test responses, evaluations, and review results. Desktop shows background progress and RSI run histories. Agent settings separately retain saved and applied configuration versions; unapplied candidates stay in their RSI runs.
 - **Choose what to adopt** — Optimization produces candidates without replacing your configuration. Inspect the comparison, select a version, and explicitly confirm before Desktop applies it. Keep the original when no better candidate emerges.
 
-Use `AgentPackageOptimizer` through the [Python API](sagents/v2/optimization/README.md), or open RSI from [Desktop Agent settings](app/v2/desktop/README.md#rsi-与-agent-版本). Desktop RSI currently supports simple Agents and native tools; installer availability follows each release's notes.
+See the [RSI workflow guide](docs/en/applications/RSI.md). Use `AgentPackageOptimizer` through the [Python API](sagents/v2/optimization/README.md), or open RSI from [Desktop Agent settings](app/v2/desktop/README.md#rsi-与-agent-版本). Desktop RSI currently supports simple Agents and native tools; installer availability follows each release's notes.
 
 ---
 
 ## 📰 **Latest updates**
 
-- **2026-10-12** — RSI: multi-round Agent package optimization, independent final tests and semantic review, plus Desktop progress and version history. [Python API](sagents/v2/optimization/README.md) · [Desktop guide](app/v2/desktop/README.md#rsi-与-agent-版本)
+- **2026-10-12** — RSI: multi-round Agent package optimization, test-suite alignment audits, independent final tests and semantic review, plus Desktop progress and Agent-level version history. [Python API](sagents/v2/optimization/README.md) · [Desktop guide](app/v2/desktop/README.md#rsi-与-agent-版本)
 - **2026-10-11** — [OpenRouter free models: selection and limits](knowledge/resources/openrouter-free-models.md)
 - **2026-10-11** — [MCP engineering resources: protocols, SDKs, testing, and security](knowledge/resources/mcp-engineering-resources.md)
 - **2026-10-11** — [A read-only MCP smoke test through Sage](knowledge/tutorials/mcp-smoke-test.md)

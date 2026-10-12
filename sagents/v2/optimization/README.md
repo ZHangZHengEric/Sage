@@ -24,6 +24,8 @@ optimizer = AgentPackageOptimizer(
     runner=runner,
     evaluator=OptimizationAgent(package=evaluator_package, agent_id="evaluator"),
     tuner=OptimizationAgent(package=tuner_package, agent_id="tuner"),
+    # Optional separate audit package; each review uses a fresh Session.
+    # suite_reviewer=OptimizationAgent(package=audit_package, agent_id="suite-reviewer"),
     # Optional separate test designer; otherwise the evaluator designs the suite.
     # test_designer=OptimizationAgent(package=designer_package, agent_id="designer"),
 )
@@ -63,6 +65,22 @@ Supply an `OptimizationSuite` containing unique cases with `id`, `input`,
 there must be 2..100 cases. Alternatively, the test-design Agent generates one
 suite before baseline execution. Review generated rubrics when task success is
 ambiguous: generated tests alone are not a quality certification.
+
+Before baseline execution, an independent audit Session checks the original
+responsibilities, authorized goal, constraints, and both sealed suites for
+conflicting rubrics, impossible fixtures, ambiguous requirements, and concrete
+split leakage. Blocking issues raise `OptimizationSuiteReviewRejected`, whose
+`review` and `call` retain the audit evidence; no target or tuner Session runs.
+Advisory coverage gaps are retained in `report.suite_review`. By default the
+reviewer uses the evaluator package with host audit principles; an explicit
+`suite_reviewer` can use its own package and model route. Audit findings are not
+provided to the tuner, because they can contain sealed final-case information.
+
+Model-facing training feedback bounds individual outputs and diagnostic excerpts
+and retains the latest four previous attempts. Complete observations, evaluations,
+and all iteration packages remain in the returned report and journal. These bounds
+reduce repeated error-payload growth; they are not a total prompt-token budget for
+arbitrary large suites or packages.
 
 The baseline and every semantically approved changed candidate run against the
 same fixed suite in fresh sessions. The evaluation Agent returns a score in [0,1], pass/fail, and
@@ -439,3 +457,69 @@ references. Other editable resources require `resources`. Original instructions,
 protected manifest fields and source plugins remain protected across all scopes.
 
 optimize(..., on_event=callback) accepts a synchronous progress observer. It runs after each journal event is durably flushed when a journal path is supplied, and also works without a journal. Observers should perform only bounded work; an exception aborts the operation without activating a candidate. IsolatedOptimizationRunner(..., run_metadata=factory) lets the host inject frozen per-package Run metadata, including runtime variables; internal agent packages can receive separate metadata. Desktop uses these hooks for background progress and configuration/Skill version history.
+
+## Opt-in live domain specialization benchmark
+
+`examples/sagents_v2_optimizer_domains.py` starts three independent specializations
+from the same general-purpose package: subscription support triage, purchase-order
+normalization, and production incident triage. Domain policies are supplied as
+host-authorized optimization goals. The original package does not yet contain those
+policies, so this measures acquisition and generalization of domain procedures,
+not a general intelligence gain. The default `--mode instructions` edits instruction guidance. Procurement also
+supports `--mode skills`, `--mode tools`, and `--mode joint`. Skill modes load a
+bundled procedure through the native Skill provider with host-granted load scope.
+Tool mode can replace an intentionally limited draft tool with a host-bound exact
+decimal normalizer. It tests capability selection, not tool source-code synthesis.
+Joint mode permits both guidance and Skill edits; the tuner may choose either.
+
+Revision 1 has three training cases, two validation cases, and three final cases
+fixed before execution; revised procurement adds coverage as described below.
+Final cases are untouched only if they have not been disclosed in earlier studies. Support includes bounded multi-turn intake.
+The default is four proposal rounds and two fresh trials per case, with real
+model evaluators, tuners, reviewers, and dialogue drivers in separate Sessions.
+No scripted patches, cached baseline answers, or code-based semantic grades are
+used. A no-change round or rejected proposal is retained as a real outcome.
+
+The command reads Yiii's local Agent model configuration in memory and requires
+`gpt-6.1-sol` with the Responses protocol. It makes billable model calls. Credentials
+are not copied to packages or reports. Output directories must not already exist,
+and no production Agent configuration is registered or activated.
+
+```sh
+.venv/bin/python -m examples.sagents_v2_optimizer_domains \
+  --domain support --rounds 4 --repeats 2 \
+  --output artifacts/optimizer/domain-run/support
+# Repeat with --domain procurement or --domain incident and a new output path.
+```
+
+Outputs include the sealed suites, authorized goal, complete original and iteration
+packages, per-iteration observations and model judgments, semantic reviews,
+call/session evidence, append-only journal, and comparison summary. Inspect failed
+cases and rubric ambiguity before interpreting the aggregate score. Validation
+participates in selection; only the sealed final suite is an untouched check.
+
+For the clarified procurement contract, add `--revision 2`. Revision 1's negative
+quantity final rubric asks for an invalid-field indication that its goal does not
+explicitly specify. Revision 2 defines invalid-field reporting and null amounts
+in the authorized policy, adds a training case for that behavior, and uses a fresh
+final suite. Keep revision 1's failure record; do not relabel it as a pass or reuse
+its disclosed final questions as untouched tests.
+
+
+For procurement capability experiments, use `--revision 3 --mode skills` (or
+`tools` / `joint`) with a new output directory. Revision 3 explicitly defines
+calculation precision and rounding stages and supplies mixed-validity, multiline
+and missing-supplier final cases. Reusing a revision's previously evaluated final
+fixtures is a workflow regression check, not a fresh independent benchmark.
+Add `--preflight-probe` to deliberately introduce a contradictory final rubric;
+the expected outcome is a retained `preflight-rejected.json` and zero target calls.
+
+In the 2026-10-12 real-model experiments, Skill-only tuning changed only SKILL.md,
+and tool-only tuning removed draft_order and enabled normalize_order. Both reached
+3/3 final cases; the joint-scope run also reached 3/3 but chose only a Skill edit.
+Each used four proposal rounds and two trials per evaluated case. Only round 1
+made a change; rounds 2–4 returned no changes. The Skill/tool final fixtures had
+been used in an earlier study, while the clarified joint run used newly sealed
+final cases. These small results validate the exercised workflow, not general
+reliability or simultaneous instruction-and-Skill tuning. Large raw experiment
+artifacts remain local and are not distributed with the repository.

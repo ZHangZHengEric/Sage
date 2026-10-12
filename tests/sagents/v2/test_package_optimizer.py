@@ -79,7 +79,11 @@ class Runner:
     async def run(self, package, agent_id, content, ctx):
         self.requests.append((package.manifest.metadata.id, content))
         name = package.manifest.metadata.id
-        if name == "test.reviewer":
+        if name == "test.suite-reviewer":
+            output = json.dumps(
+                {"approved": True, "rationale": "Consistent fixed tests", "issues": []}
+            )
+        elif name == "test.reviewer":
             output = json.dumps(
                 {
                     "approved": True,
@@ -129,6 +133,9 @@ def optimizer(runner):
         evaluator=OptimizationAgent(package=bundle("evaluator"), agent_id="assistant"),
         tuner=OptimizationAgent(package=bundle("tuner"), agent_id="assistant"),
         reviewer=OptimizationAgent(package=bundle("reviewer"), agent_id="assistant"),
+        suite_reviewer=OptimizationAgent(
+            package=bundle("suite-reviewer"), agent_id="assistant"
+        ),
     )
 
 
@@ -155,7 +162,7 @@ async def test_multiple_rounds_select_best_preserve_input_and_hide_holdout():
     assert result.report.baseline.mean_score("training") == 0.4
     assert result.report.improved
     assert len(runner.target_hashes) == 8  # baseline + three candidates, two cases each
-    assert len(result.report.agent_calls) == 14  # eight grades + three proposals
+    assert len(result.report.agent_calls) == 15  # eight grades + three proposals
     candidate = result.candidate_package
     instructions = candidate.manifest.agents["assistant"].instructions.inline
     assert instructions.startswith(target.files["prompts/base.md"])
@@ -578,6 +585,7 @@ async def test_all_iterations_include_rejected_packages_and_full_evaluations():
         "evaluator",
         "tuner",
         "reviewer",
+        "suite_reviewer",
     }
     for call in result.report.agent_calls:
         assert call.request
@@ -1204,6 +1212,8 @@ async def test_cancelled_journal_marks_inflight_call_unknown_without_replay(tmp_
 
     class Blocked(Runner):
         async def run(self, *args):
+            if args[0].manifest.metadata.id == "test.suite-reviewer":
+                return await super().run(*args)
             started.set()
             await asyncio.Event().wait()
 
@@ -1936,3 +1946,215 @@ async def test_invalid_optimization_scope_before_any_model_call(scope):
             bundle(), context=context(), goal="Accuracy", optimization_scope=scope
         )
     assert not runner.requests
+
+
+@pytest.mark.asyncio
+async def test_suite_review_blocks_before_any_target_or_tuner_and_preserves_record(
+    tmp_path,
+):
+    from sagents.v2 import OptimizationSuiteReviewRejected
+
+    class Reject(Runner):
+        async def run(self, package, agent_id, content, ctx):
+            if package.manifest.metadata.id == "test.suite-reviewer":
+                self.requests.append((package.manifest.metadata.id, content))
+                return OptimizationObservation(
+                    state="completed",
+                    output=json.dumps(
+                        {
+                            "approved": False,
+                            "rationale": "Rubric adds an unstated obligation",
+                            "issues": [
+                                {
+                                    "kind": "goal_conflict",
+                                    "severity": "blocking",
+                                    "case_ids": ["untouched-final"],
+                                    "rationale": "Requires an unauthorized action",
+                                    "suggested_fix": "Align the rubric with authorized conversions",
+                                }
+                            ],
+                        }
+                    ),
+                )
+            return await super().run(package, agent_id, content, ctx)
+
+    runner = Reject()
+    path = tmp_path / "audit.jsonl"
+    with pytest.raises(OptimizationSuiteReviewRejected) as caught:
+        await optimizer(runner).optimize(
+            bundle(),
+            context=context(),
+            goal="Conversions only",
+            suite=suite(),
+            final_suite=final_suite(),
+            rounds=2,
+            journal_path=path,
+        )
+    assert not runner.target_hashes
+    assert all(name == "test.suite-reviewer" for name, _ in runner.requests)
+    assert caught.value.review.issues[0].case_ids == ("untouched-final",)
+    assert caught.value.call.role == "suite_review"
+    request = json.loads(caught.value.call.request)
+    assert request["data"]["final_suite"]["cases"][0]["id"] == "untouched-final"
+    events = [json.loads(line) for line in path.read_text().splitlines()]
+    assert any(
+        e["event"] == "suite_review_completed" and not e["data"]["review"]["approved"]
+        for e in events
+    )
+    assert not any(e["event"] == "target_call_started" for e in events)
+    assert events[-1]["data"]["status"] == "failed"
+
+
+@pytest.mark.parametrize(
+    "output",
+    [
+        "invalid JSON",
+        json.dumps(
+            {
+                "approved": True,
+                "rationale": "Okay",
+                "issues": [
+                    {
+                        "kind": "goal_conflict",
+                        "severity": "blocking",
+                        "rationale": "Conflict",
+                        "suggested_fix": "Fix",
+                    }
+                ],
+            }
+        ),
+        json.dumps({"approved": False, "rationale": "Bad", "issues": []}),
+        json.dumps(
+            {
+                "approved": False,
+                "rationale": "Bad",
+                "issues": [
+                    {
+                        "kind": "goal_conflict",
+                        "severity": "blocking",
+                        "case_ids": ["invented-case"],
+                        "rationale": "Conflict",
+                        "suggested_fix": "Fix",
+                    }
+                ],
+            }
+        ),
+    ],
+)
+@pytest.mark.asyncio
+async def test_invalid_suite_review_fails_closed(output):
+    class Invalid(Runner):
+        async def run(self, package, agent_id, content, ctx):
+            if package.manifest.metadata.id == "test.suite-reviewer":
+                return OptimizationObservation(state="completed", output=output)
+            return await super().run(package, agent_id, content, ctx)
+
+    runner = Invalid()
+    with pytest.raises(ValueError):
+        await optimizer(runner).optimize(
+            bundle(),
+            context=context(),
+            goal="Accuracy",
+            suite=suite(),
+            final_max_cases=0,
+        )
+    assert not runner.target_hashes
+    assert not any(name == "test.tuner" for name, _ in runner.requests)
+
+
+@pytest.mark.asyncio
+async def test_advisory_suite_review_is_retained_and_does_not_leak_final_to_tuner():
+    class Advisory(FinalRunner):
+        async def run(self, package, agent_id, content, ctx):
+            if package.manifest.metadata.id == "test.suite-reviewer":
+                self.requests.append((package.manifest.metadata.id, content))
+                return OptimizationObservation(
+                    state="completed",
+                    output=json.dumps(
+                        {
+                            "approved": True,
+                            "rationale": "Consistent; coverage could be broader",
+                            "issues": [
+                                {
+                                    "kind": "coverage_gap",
+                                    "severity": "advisory",
+                                    "case_ids": [],
+                                    "rationale": "Small sample",
+                                    "suggested_fix": "Add varied conversions",
+                                }
+                            ],
+                        }
+                    ),
+                )
+            return await super().run(package, agent_id, content, ctx)
+
+    runner = Advisory()
+    result = await optimizer(runner).optimize(
+        bundle(),
+        context=context(),
+        goal="Accuracy",
+        suite=suite(),
+        final_suite=final_suite(),
+        rounds=1,
+    )
+    assert result.report.suite_review.approved
+    assert result.report.suite_review.issues[0].severity == "advisory"
+    assert result.report.agent_calls[0].role == "suite_review"
+    for name, request in runner.requests:
+        if name in ("test.tuner", "test.reviewer"):
+            assert "untouched-final" not in request
+            assert "Convert 13 meters" not in request
+
+
+@pytest.mark.asyncio
+async def test_model_training_feedback_is_bounded_but_report_stays_lossless():
+    from sagents.v2.optimization.feedback import training_feedback
+    from sagents.v2.optimization import OptimizationCaseResult, OptimizationGrade
+
+    noisy = OptimizationCaseResult(
+        case=suite().cases[0],
+        observation=OptimizationObservation(
+            state="completed",
+            output="answer" * 3000,
+            evidence={
+                "session_id": "session-1",
+                "runtime_events": [
+                    {
+                        "type": "tool",
+                        "data": {"kind": "tool_result", "output": "large" * 50000},
+                    }
+                ],
+            },
+        ),
+        grade=OptimizationGrade(score=0, passed=False, rationale="Wrong"),
+    )
+    before = noisy.model_dump_json()
+    feedback = training_feedback(noisy)
+    assert noisy.model_dump_json() == before
+    assert len(json.dumps(feedback)) < 8000
+    assert feedback["observation"]["output_truncated"]
+    assert feedback["observation"]["evidence"]["evidence_summarized"]
+    assert feedback["observation"]["evidence"]["session_id"] == "session-1"
+    assert feedback["observation"]["evidence"]["tool_events"][0]["truncated"]
+
+
+@pytest.mark.asyncio
+async def test_tuner_history_is_bounded_and_omission_is_explicit():
+    runner = Runner(proposals=[{"rationale": "No justified change"}] * 7)
+    result = await optimizer(runner).optimize(
+        bundle(),
+        context=context(),
+        goal="Accuracy",
+        suite=suite(),
+        final_max_cases=0,
+        rounds=7,
+    )
+    assert len(result.report.rounds) == 7
+    requests = [
+        json.loads(content)["data"]
+        for name, content in runner.requests
+        if name == "test.tuner"
+    ]
+    assert len(requests[-1]["previous_attempts"]) == 4
+    assert requests[-1]["previous_attempts_omitted"] == 2
+    assert [item["round"] for item in requests[-1]["previous_attempts"]] == [3, 4, 5, 6]
