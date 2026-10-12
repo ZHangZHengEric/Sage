@@ -58,7 +58,9 @@ class RsiModel(ScriptedModelProvider):
                 findings=[],
             )
         elif "issues" in properties:
-            answer = dict(approved=True, rationale="Goal and suites are consistent", issues=[])
+            answer = dict(
+                approved=True, rationale="Goal and suites are consistent", issues=[]
+            )
         elif "instruction_guidance" in properties:
             answer = dict(
                 rationale="Reusable arithmetic verification",
@@ -284,7 +286,9 @@ async def test_background_idempotency_keepalive_cancel_and_no_replay(
         assert not service.rsi_active
         assert (await leases.expire()).shutdown_requested
         journal = (await service.rsi_run(agent_id, run["id"], "alice"))["events"]
-        assert any(e["event"] in {"target_call_started", "agent_call_started"} for e in journal)
+        assert any(
+            e["event"] in {"target_call_started", "agent_call_started"} for e in journal
+        )
         assert not any(e["event"] == "target_call_completed" for e in journal)
     finally:
         await service.close()
@@ -483,5 +487,114 @@ async def test_rsi_http_routes_auth_and_explicit_confirmation(tmp_path):
                 await client.post(apply_path, json={**body, "confirmed": True})
             ).status_code == 200
             assert (await client.get(f"{path}/runs/missing")).status_code == 400
+    finally:
+        await service.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.timeout(20)
+async def test_legacy_operation_names_do_not_break_history_or_rsi(
+    tmp_path, monkeypatch
+):
+    model = RsiModel()
+    service, agent_id = await setup_service(tmp_path, monkeypatch, model)
+    stale_names = [
+        "code.search",
+        "plan.update",
+        "process.run",
+        "workspace.create_file",
+        "workspace.delete_file",
+        "workspace.list_files",
+        "workspace.read_file",
+        "workspace.write_file",
+    ]
+    try:
+        agent = await service._agent(agent_id, "alice")
+        tools = ["file_read", "grep", *stale_names]
+        config = {**agent.config, "availableTools": tools}
+        await service.catalog.save_agent(agent.model_copy(update={"config": config}))
+        history = await service.rsi_history(agent_id, "alice")
+        latest = next(v for v in history["versions"] if v["source"] == "settings")
+        version = await service.rsi_version(agent_id, latest["id"], "alice")
+        assert version["config"]["availableTools"] == tools
+        assert version["package"]["manifest"]["agents"][agent_id]["tools"] == [
+            "file_read",
+            "grep",
+        ]
+        run = await service.start_rsi(
+            agent_id, start_request().model_copy(update={"rounds": 1}), "alice"
+        )
+        await service._rsi_tasks[run["id"]]
+        result = await service.rsi_run(agent_id, run["id"], "alice")
+        assert result["status"] == "completed", result
+        assert (await service._agent(agent_id, "alice")).config == config
+        # A confirmed restore preserves the original configuration, and its next
+        # history read must still work despite retained legacy names.
+        await service.apply_rsi_version(
+            agent_id,
+            version["id"],
+            RsiApply(
+                confirmed=True, expected_fingerprint=history["current_fingerprint"]
+            ),
+            "alice",
+        )
+        assert (await service.rsi_history(agent_id, "alice"))["versions"]
+        assert (await service._agent(agent_id, "alice")).config[
+            "availableTools"
+        ] == tools
+    finally:
+        await service.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("selection", [None, []])
+async def test_snapshot_matches_default_and_explicit_empty_tool_selection(
+    tmp_path, monkeypatch, selection
+):
+    service, agent_id = await setup_service(tmp_path, monkeypatch, RsiModel())
+    try:
+        agent = await service._agent(agent_id, "alice")
+        config = {**agent.config, "availableTools": selection}
+        agent = agent.model_copy(update={"config": config})
+        package = await service._agent_bundle(agent)
+        expected = (
+            tuple(d.name for d in service._native_tool_definitions())
+            if selection is None
+            else ()
+        )
+        assert package.manifest.agents[agent_id].tools == expected
+        assert agent.config == config
+    finally:
+        await service.close()
+
+
+@pytest.mark.asyncio
+async def test_snapshot_preserves_external_tools_for_rsi_binding_rejection(
+    tmp_path, monkeypatch
+):
+    from types import SimpleNamespace
+
+    service, agent_id = await setup_service(tmp_path, monkeypatch, RsiModel())
+
+    class ExternalTools:
+        async def list_tools(self, **kwargs):
+            return (SimpleNamespace(name="external_lookup"),)
+
+    async def external_plugin(*args):
+        return ExternalTools()
+
+    monkeypatch.setattr(service, "_mcp_plugin", external_plugin)
+    try:
+        agent = await service._agent(agent_id, "alice")
+        agent = agent.model_copy(
+            update={"config": {**agent.config, "availableTools": None}}
+        )
+        await service.catalog.save_agent(agent)
+        package = await service._agent_bundle(agent)
+        assert "external_lookup" in package.manifest.agents[agent_id].tools
+        assert (await service.rsi_history(agent_id, "alice"))["versions"]
+        with pytest.raises(ValueError, match="external MCP tools"):
+            await service.start_rsi(agent_id, start_request(), "alice")
+        assert not service._rsi_tasks
     finally:
         await service.close()
