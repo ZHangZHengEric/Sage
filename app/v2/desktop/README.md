@@ -135,9 +135,9 @@ macOS 包使用 ad-hoc 签名，未使用 Apple Developer ID 签名或公证；W
 
 ## RSI 与 Agent 版本
 
-Agent 配置中的 RSI 按钮在设置框架内打开优化页面，保留侧栏和统一的字段布局；“版本历史”直接打开全部版本，无需启动 RSI。用户可设置 1–100 轮、内部 Agent 模型和优化范围（指令、Skill、原生工具启用列表、步数预算），也可导入符合 OptimizationSuite 的 JSON 测试集；未提供时由测试设计 Agent 生成。独立最终测试集在基线前固定，候选修改由独立 Session 的审查 Agent 检查。
+Agent 配置中的 RSI 按钮在设置框架内打开优化页面，保留侧栏和统一的字段布局；“版本历史”是 Agent 配置层级的独立入口，展示人工保存和确认应用的配置版本，无需启动 RSI。RSI 页面只展示运行历史与各轮候选，未应用的候选不会混入 Agent 版本历史。用户可设置 1–100 轮、内部 Agent 模型和优化范围（指令、Skill、原生工具启用列表、步数预算），也可导入符合 OptimizationSuite 的 JSON 测试集；未提供时由测试设计 Agent 生成。独立最终测试集在基线前封存；测试集与授权目标的一致性由独立 Session 的审查 Agent 先行检查。有阻断问题时不执行目标 Agent 或调优 Agent，页面显示问题与修正建议；覆盖不足等建议保留供查看。候选修改另由独立 Session 的语义审查 Agent 检查。
 
-RSI 在 sidecar 的后台任务中执行，页面增量读取过程；离开页面或关闭最后一个窗口不会终止正在执行的 RSI。重新打开页面可读取历次任务、每轮版本、测试回答、评测和审查结果。sidecar 退出/崩溃时任务保留为 interrupted，不会自动重放未知结果的模型或工具调用。
+运行设置可收起，优化范围使用 Glass 控件并适配深浅色。RSI 在 sidecar 的后台任务中执行，页面增量读取过程；离开页面或关闭最后一个窗口不会终止正在执行的 RSI。重新打开页面可读取历次任务、每轮版本、测试回答、评测和审查结果。sidecar 退出/崩溃时任务保留为 interrupted，不会自动重放未知结果的模型或工具调用。
 
 记录保存在 Desktop 数据目录的 runtime/rsi.sqlite3 与 runtime/rsi/<run-id>/。普通配置保存、Skill 删除和 shell 授权变更也保存版本；进入 RSI 时为已有 Agent 建立快照。各版本包含当时的配置、完整文本 package 和独立归档的二进制 Skill 资源。激活 Skill 使用按内容寻址的 Agent 局部覆盖目录，避免修改其他 Agent 的共享 Skill。
 

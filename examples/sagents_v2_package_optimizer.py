@@ -122,7 +122,15 @@ async def demo(root: Path):
         async def run(self, bundle, agent_id, content, ctx):
             if bundle.manifest.metadata.id == "demo.evaluator":
                 request = json.loads(content)
-                if request["task"].startswith("Review"):
+                if request["task"].startswith("Audit"):
+                    answer = json.dumps(
+                        {
+                            "approved": True,
+                            "rationale": "Scripted consistent suite",
+                            "issues": [],
+                        }
+                    )
+                elif request["task"].startswith("Review"):
                     answer = json.dumps(
                         {
                             "approved": True,

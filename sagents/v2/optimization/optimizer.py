@@ -35,6 +35,7 @@ from sagents.v2.optimization.contracts import (
     OptimizationFinalVerification,
     OptimizationProposalReview,
     OptimizationPart,
+    OptimizationSuiteReview,
 )
 from sagents.v2.optimization.runner import OptimizationRunner
 from sagents.v2.optimization.generator import AgentPackageTestGenerator
@@ -42,9 +43,11 @@ from sagents.v2.optimization.principles import (
     EVALUATION_PRINCIPLES,
     REVIEW_PRINCIPLES,
     TUNING_PRINCIPLES,
+    SUITE_REVIEW_PRINCIPLES,
     with_principles,
 )
 from sagents.v2.optimization.journal import OptimizationJournal
+from sagents.v2.optimization.feedback import training_feedback
 
 
 @asynccontextmanager
@@ -57,6 +60,17 @@ async def _bounded_conversation(factory, package, target, context, timeout):
 
 class InvalidOptimizationProposal(ValueError):
     """A malformed patch, distinct from a runner or authorization failure."""
+
+
+class OptimizationSuiteReviewRejected(ValueError):
+    """Preflight blocked before target/tuning calls; inspect review and call."""
+
+    def __init__(self, review, call):
+        super().__init__(
+            "Test suite conflicts with the authorized goal or is not reliably evaluable"
+        )
+        self.review = review.model_copy(deep=True)
+        self.call = call.model_copy(deep=True)
 
 
 class NoOptimizationChange(ValueError):
@@ -82,11 +96,15 @@ class AgentPackageOptimizer:
         test_designer: OptimizationAgent | None = None,
         test_driver: OptimizationAgent | None = None,
         reviewer: OptimizationAgent | None = None,
+        suite_reviewer: OptimizationAgent | None = None,
     ):
         self.runner = runner
         self.evaluator = with_principles(evaluator, EVALUATION_PRINCIPLES)
         self.tuner = with_principles(tuner, TUNING_PRINCIPLES)
         self.reviewer = with_principles(reviewer or evaluator, REVIEW_PRINCIPLES)
+        self.suite_reviewer = with_principles(
+            suite_reviewer or evaluator, SUITE_REVIEW_PRINCIPLES
+        )
         self.test_designer = (test_designer or evaluator).model_copy(deep=True)
         self.test_driver = (test_driver or self.test_designer).model_copy(deep=True)
         driver_data = self.test_driver.model_dump(mode="json")
@@ -552,6 +570,7 @@ class AgentPackageOptimizer:
                         "test_designer": self.test_designer,
                         "test_driver": self.test_driver,
                         "reviewer": self.reviewer,
+                        "suite_reviewer": self.suite_reviewer,
                     }.items()
                 },
             )
@@ -622,6 +641,47 @@ class AgentPackageOptimizer:
                     journal.emit(
                         "final_suite_sealed", suite=sealed_final.model_dump(mode="json")
                     )
+                suite_package_view = original.model_dump(mode="json")
+                suite_package_view["manifest"]["tests"] = {"scenarios": [], "gates": {}}
+                journal.emit("suite_review_started")
+                suite_review = await ask(
+                    "suite_review",
+                    self.suite_reviewer,
+                    "Audit goal and fixed test-suite consistency before any target execution. "
+                    "Identify conflicting or ambiguous pass/fail requirements and fixture defects; "
+                    "do not change tests or disclose hidden cases to other agents.",
+                    {
+                        "goal": goal,
+                        "agent_id": target,
+                        "original_instructions": original.resolved_manifest()
+                        .agents[target]
+                        .instructions.inline,
+                        "package": suite_package_view,
+                        "constraints": policy.model_dump(mode="json"),
+                        "suite": fixed_suite.model_dump(mode="json"),
+                        "final_suite": sealed_final.model_dump(mode="json")
+                        if sealed_final
+                        else None,
+                    },
+                    OptimizationSuiteReview,
+                )
+                known_ids = {
+                    c.id
+                    for c in (
+                        *fixed_suite.cases,
+                        *(sealed_final.cases if sealed_final else ()),
+                    )
+                }
+                if any(
+                    set(issue.case_ids) - known_ids for issue in suite_review.issues
+                ):
+                    raise ValueError("suite review references unknown case IDs")
+                journal.emit(
+                    "suite_review_completed",
+                    review=suite_review.model_dump(mode="json"),
+                )
+                if not suite_review.approved:
+                    raise OptimizationSuiteReviewRejected(suite_review, calls[-1])
                 baseline = await evaluate(original, fixed_suite)
                 journal.emit(
                     "evaluation_completed",
@@ -640,7 +700,7 @@ class AgentPackageOptimizer:
                     evaluation = None
                     # Deliberately exclude holdout details and acceptance feedback.
                     training = [
-                        item.model_dump(mode="json")
+                        training_feedback(item)
                         for item in best_evaluation.cases
                         if item.case.split == "training"
                     ]
@@ -651,7 +711,7 @@ class AgentPackageOptimizer:
                             if item.patch
                             else None,
                             "training": [
-                                case.model_dump(mode="json")
+                                training_feedback(case)
                                 for case in item.evaluation.cases
                                 if case.case.split == "training"
                             ]
@@ -664,7 +724,7 @@ class AgentPackageOptimizer:
                             if item.review
                             else None,
                         }
-                        for item in history
+                        for item in history[-4:]
                     ]
                     package_view = best.model_dump(mode="json")
                     package_view["manifest"]["tests"] = {"scenarios": [], "gates": {}}
@@ -690,6 +750,8 @@ class AgentPackageOptimizer:
                                 "optimization_scope": optimization_scope,
                                 "training": training,
                                 "previous_attempts": previous,
+                                "previous_attempts_omitted": max(0, len(history) - 4),
+                                "feedback_note": "Tool evidence is bounded excerpts; complete raw records remain with the host. Truncated evidence is not proof of absence.",
                             },
                             OptimizationPatch,
                         )
@@ -894,6 +956,7 @@ class AgentPackageOptimizer:
                     ),
                     report=OptimizationReport(
                         goal=goal,
+                        suite_review=suite_review,
                         requested_rounds=rounds,
                         evaluation_repeats=evaluation_repeats,
                         final_verification=final_verification,
@@ -909,6 +972,7 @@ class AgentPackageOptimizer:
                             "evaluator": self.evaluator.model_copy(deep=True),
                             "tuner": self.tuner.model_copy(deep=True),
                             "reviewer": self.reviewer.model_copy(deep=True),
+                            "suite_reviewer": self.suite_reviewer.model_copy(deep=True),
                             **(
                                 {"test_driver": self.test_driver.model_copy(deep=True)}
                                 if any(

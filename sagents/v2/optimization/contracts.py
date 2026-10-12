@@ -142,6 +142,33 @@ class OptimizationEvaluation(StrictModel):
         return sum(grades) / len(grades)
 
 
+class OptimizationSuiteIssue(StrictModel):
+    kind: Literal[
+        "goal_conflict",
+        "ambiguous_rubric",
+        "untestable",
+        "split_leakage",
+        "coverage_gap",
+    ]
+    severity: Literal["blocking", "advisory"]
+    case_ids: tuple[str, ...] = ()
+    rationale: str = Field(min_length=1)
+    suggested_fix: str = Field(min_length=1)
+
+
+class OptimizationSuiteReview(StrictModel):
+    approved: bool
+    rationale: str = Field(min_length=1)
+    issues: tuple[OptimizationSuiteIssue, ...] = ()
+
+    @model_validator(mode="after")
+    def check_decision(self):
+        blocked = any(issue.severity == "blocking" for issue in self.issues)
+        if self.approved == blocked:
+            raise ValueError("suite approval must agree with blocking issues")
+        return self
+
+
 class OptimizationProposalReview(StrictModel):
     approved: bool
     memorization_detected: bool
@@ -187,7 +214,12 @@ class OptimizationAgent(StrictModel):
 
 class OptimizationAgentCall(StrictModel):
     role: Literal[
-        "test_design", "test_dialogue", "evaluation", "tuning", "semantic_review"
+        "test_design",
+        "test_dialogue",
+        "evaluation",
+        "tuning",
+        "semantic_review",
+        "suite_review",
     ]
     observation: OptimizationObservation
     request: VerbatimText = ""
@@ -209,6 +241,7 @@ class OptimizationFinalVerification(StrictModel):
 
 class OptimizationReport(StrictModel):
     goal: VerbatimText
+    suite_review: OptimizationSuiteReview | None = None
     requested_rounds: int
     suite: OptimizationSuite
     baseline: OptimizationEvaluation

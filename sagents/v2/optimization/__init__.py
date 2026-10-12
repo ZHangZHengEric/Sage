@@ -22,10 +22,15 @@ from sagents.v2.optimization.contracts import (
     OptimizationResult,
     OptimizationRound,
     OptimizationSuite,
+    OptimizationSuiteIssue,
+    OptimizationSuiteReview,
     OptimizationSuiteGeneration,
 )
 from sagents.v2.optimization.generator import AgentPackageTestGenerator
-from sagents.v2.optimization.optimizer import AgentPackageOptimizer
+from sagents.v2.optimization.optimizer import (
+    AgentPackageOptimizer,
+    OptimizationSuiteReviewRejected,
+)
 from sagents.v2.optimization.runner import (
     IsolatedOptimizationRunner,
     OptimizationRunner,
@@ -58,4 +63,7 @@ __all__ = [
     "OptimizationResult",
     "OptimizationRound",
     "OptimizationSuite",
+    "OptimizationSuiteIssue",
+    "OptimizationSuiteReview",
+    "OptimizationSuiteReviewRejected",
 ]

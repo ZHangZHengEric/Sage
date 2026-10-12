@@ -1,3 +1,4 @@
+import 'package:liquid_glass_widgets/liquid_glass_widgets.dart';
 import 'dart:io';
 import 'package:flutter/services.dart';
 import 'dart:ui' as ui;
@@ -12,6 +13,7 @@ import 'package:sage_desktop_v2/src/ui/rsi_screen.dart';
 class RsiApi extends V2ApiClient {
   int applications = 0;
   bool running = false;
+  bool suiteBlocked = false;
   bool manualHistory = false;
   Map<String, Object?>? startOptions;
   @override
@@ -28,6 +30,13 @@ class RsiApi extends V2ApiClient {
       },
     ],
     'versions': [
+      if (manualHistory)
+        {
+          'id': 'unapplied-candidate',
+          'source': 'rsi',
+          'iteration': 2,
+          'created_at': '2026-10-12 10:20',
+        },
       {
         'id': 'version-1',
         'source': manualHistory ? 'settings' : 'rsi',
@@ -44,7 +53,24 @@ class RsiApi extends V2ApiClient {
     int afterSequence = 0,
   }) async => {
     'id': runId,
-    'status': running ? 'running' : 'completed',
+    'status': suiteBlocked
+        ? 'failed'
+        : running
+        ? 'running'
+        : 'completed',
+    if (suiteBlocked)
+      'suite_review': {
+        'approved': false,
+        'rationale': 'Rubric conflicts with the authorized goal',
+        'issues': [
+          {
+            'severity': 'blocking',
+            'case_ids': ['final-negative'],
+            'rationale': 'Negative quantity must not be ready',
+            'suggested_fix': 'Align the rubric with the review policy',
+          },
+        ],
+      },
     'iteration': running ? 1 : 3,
     'rounds': 3,
     'stage': 'round_completed',
@@ -187,7 +213,8 @@ void main() {
           ),
         );
         await tester.pumpAndSettle();
-        expect(find.text('RSI 历史'), findsOneWidget);
+        expect(find.text('所有版本'), findsNothing);
+        expect(find.byType(GlassSegmentedControl), findsNothing);
         expect(find.textContaining('已完成'), findsWidgets);
         final screenshotDir = Platform.environment['RSI_SCREENSHOT_DIR'];
         if (screenshotDir != null) {
@@ -205,9 +232,13 @@ void main() {
             image.dispose();
           });
         }
-        await tester.tap(find.text('所有版本'));
+        await tester.ensureVisible(find.text('迭代 1'));
+        await tester.tap(find.text('迭代 1'));
         await tester.pumpAndSettle();
-        await tester.tap(find.textContaining('迭代 1 ·'));
+        await tester.ensureVisible(
+          find.byKey(const ValueKey('rsi-open-iteration-1')),
+        );
+        await tester.tap(find.byKey(const ValueKey('rsi-open-iteration-1')));
         await tester.pumpAndSettle();
         await tester.ensureVisible(
           find.byKey(const ValueKey('rsi-apply-version')),
@@ -290,6 +321,12 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.byKey(const ValueKey('rsi-start')), findsNothing);
       expect(find.text('版本历史 · Sage'), findsOneWidget);
+      expect(find.byKey(const ValueKey('rsi-run-run-1')), findsNothing);
+      expect(
+        find.byKey(const ValueKey('rsi-version-unapplied-candidate')),
+        findsNothing,
+      );
+      expect(find.byType(GlassSegmentedControl), findsNothing);
       await tester.tap(find.textContaining('配置保存 ·'));
       await tester.pumpAndSettle();
       await tester.ensureVisible(
@@ -336,6 +373,41 @@ void main() {
     );
     expect(find.textContaining('优化中'), findsWidgets);
     expect(find.text('取消优化'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox.shrink());
+    controller.dispose();
+    api.close();
+  });
+  testWidgets('Blocked suite review shows concrete issues before activation', (
+    tester,
+  ) async {
+    final api = RsiApi()..suiteBlocked = true;
+    final controller = WorkspaceController(api: api);
+    tester.view.physicalSize = const Size(1440, 1200);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: RsiScreen(
+          controller: controller,
+          agentId: 'agent',
+          agentName: 'Sage',
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('rsi-suite-review')), findsOneWidget);
+    expect(find.text('Negative quantity must not be ready'), findsOneWidget);
+    expect(
+      find.text('Align the rubric with the review policy'),
+      findsOneWidget,
+    );
+    expect(api.applications, 0);
+    await tester.tap(find.byKey(const ValueKey('rsi-toggle-setup')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('rsi-goal')), findsNothing);
+    expect(find.byKey(const ValueKey('rsi-suite-review')), findsOneWidget);
     expect(tester.takeException(), isNull);
     await tester.pumpWidget(const SizedBox.shrink());
     controller.dispose();

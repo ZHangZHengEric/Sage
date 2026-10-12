@@ -28,6 +28,9 @@ _EXPORTS = {
     "OptimizationConstraints": ("sagents.v2.optimization", "OptimizationConstraints"),
     "OptimizationCase": ("sagents.v2.optimization", "OptimizationCase"),
     "OptimizationCaseTrial": ("sagents.v2.optimization", "OptimizationCaseTrial"),
+    "OptimizationSuiteIssue": ("sagents.v2.optimization", "OptimizationSuiteIssue"),
+    "OptimizationSuiteReview": ("sagents.v2.optimization", "OptimizationSuiteReview"),
+    "OptimizationSuiteReviewRejected": ("sagents.v2.optimization", "OptimizationSuiteReviewRejected"),
     "OptimizationSuite": ("sagents.v2.optimization", "OptimizationSuite"),
     "OptimizationFinalSuite": ("sagents.v2.optimization", "OptimizationFinalSuite"),
     "OptimizationFinalVerification": (

@@ -467,6 +467,8 @@ class DesktopRsiMixin:
                 value["role"] = data["role"]
             if event["event"] == "operation_started":
                 version_event(0, data["package"])
+            elif event["event"] == "suite_review_completed":
+                value["suite_review"] = data["review"]
             elif event["event"] == "candidate_created":
                 version_event(data["round"], data["package"])
             elif event["event"] in {
@@ -499,7 +501,7 @@ class DesktopRsiMixin:
             package = AgentPackageBundle(manifest=manifest_data, files=package.files)
             roles = {}
             role_provider = {}
-            for role in ("evaluator", "tuner", "designer", "reviewer"):
+            for role in ("evaluator", "tuner", "designer", "reviewer", "suite_reviewer"):
                 manifest = self._manifest(agent, internal_provider, (), ())
                 definition = manifest.agents[identity].model_copy(
                     update={
@@ -637,6 +639,7 @@ class DesktopRsiMixin:
                 tuner=roles["tuner"],
                 test_designer=roles["designer"],
                 reviewer=roles["reviewer"],
+                suite_reviewer=roles["suite_reviewer"],
             )
             result = await optimizer.optimize(
                 package,
