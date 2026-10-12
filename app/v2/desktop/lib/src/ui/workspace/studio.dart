@@ -247,6 +247,7 @@ class _StudioThread extends StatefulWidget {
     required this.onToggleWorkspace,
     required this.workspaceCollapsed,
     required this.railCollapsed,
+    this.compact = false,
     super.key,
   });
   final WorkspaceController controller;
@@ -255,6 +256,7 @@ class _StudioThread extends StatefulWidget {
   final VoidCallback onToggleWorkspace;
   final bool workspaceCollapsed;
   final bool railCollapsed;
+  final bool compact;
   @override
   State<_StudioThread> createState() => _StudioThreadState();
 }
@@ -294,52 +296,59 @@ class _StudioThreadState extends State<_StudioThread> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          SizedBox(
-            height: desktopPaneHeaderHeight,
-            child: Row(
-              children: [
-                IconButton(
+          _PaneHeader(
+            railCollapsed: widget.railCollapsed,
+            children: [
+              if (widget.railCollapsed || widget.compact) ...[
+                _HeaderIconButton(
+                  keyValue: widget.railCollapsed
+                      ? 'rail-expand-button'
+                      : 'rail-collapse-button',
                   tooltip: context.l10n.text(
                     widget.railCollapsed
                         ? 'workspace.expandSidebar'
                         : 'workspace.collapseSidebar',
                   ),
-                  onPressed: widget.onToggleRail,
-                  icon: const Icon(CupertinoIcons.sidebar_left, size: 18),
+                  highlighted: widget.railCollapsed,
+                  onTap: widget.onToggleRail,
+                  icon: CupertinoIcons.sidebar_left,
                 ),
-                Expanded(
-                  child: Text(
-                    studio.name,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: Theme.of(context).textTheme.titleMedium,
-                  ),
-                ),
-                if (busyMembers.isNotEmpty)
-                  Padding(
-                    padding: const EdgeInsets.only(right: 8),
-                    child: Text(
-                      context.l10n.text('studio.active', {
-                        'count': busyMembers.length,
-                      }),
-                      style: Theme.of(context).textTheme.labelSmall,
-                    ),
-                  ),
-                IconButton(
-                  key: const ValueKey('studio-details-open'),
-                  tooltip: context.l10n.text('studio.details'),
-                  onPressed: widget.onDetails,
-                  icon: const Icon(CupertinoIcons.person_2, size: 20),
-                ),
-                if (widget.workspaceCollapsed)
-                  _HeaderIconButton(
-                    keyValue: 'canvas-expand-button',
-                    tooltip: context.l10n.text('workspace.expandSidebar'),
-                    icon: CupertinoIcons.sidebar_right,
-                    onTap: widget.onToggleWorkspace,
-                  ),
+                const SizedBox(width: 14),
               ],
-            ),
+              Expanded(
+                child: Text(
+                  studio.name,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(context).textTheme.titleMedium,
+                ),
+              ),
+              if (busyMembers.isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.only(right: 8),
+                  child: Text(
+                    context.l10n.text('studio.active', {
+                      'count': busyMembers.length,
+                    }),
+                    style: Theme.of(context).textTheme.labelSmall,
+                  ),
+                ),
+              _HeaderIconButton(
+                keyValue: 'studio-details-open',
+                tooltip: context.l10n.text('studio.details'),
+                onTap: widget.onDetails,
+                icon: CupertinoIcons.person_2,
+              ),
+              if (widget.workspaceCollapsed) ...[
+                const SizedBox(width: 14),
+                _HeaderIconButton(
+                  keyValue: 'canvas-expand-button',
+                  tooltip: context.l10n.text('workspace.expandSidebar'),
+                  icon: CupertinoIcons.sidebar_right,
+                  onTap: widget.onToggleWorkspace,
+                ),
+              ],
+            ],
           ),
           if (controller.error != null)
             Padding(
