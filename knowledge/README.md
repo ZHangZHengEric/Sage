@@ -4,6 +4,7 @@ Practical resources and worked examples for people building agents, MCP integrat
 
 ## Resources and tutorials
 
+- **2026-10-12 · [MCP tools are visible, but calls fail: a five-step diagnostic](tutorials/mcp-visible-calls-fail.md)** — Separate approval, transport, RPC, tool, schema, and result-size failures with three fictional responses.
 - **2026-10-11 · [OpenRouter free models: selection and limits](resources/openrouter-free-models.md)** — Find official listings, distinguish fixed free variants from the free router, and check capabilities, quotas, cost, and data handling.
 - **2026-10-11 · [MCP engineering resources](resources/mcp-engineering-resources.md)** — Ten primary references for protocol versions, Python and TypeScript SDKs, server development, debugging, security, and observability.
 - **2026-10-11 · [A read-only MCP smoke test through Sage](tutorials/mcp-smoke-test.md)** — A tested OpenQFR discovery/search/fetch round trip, with the actual output and explicit environment and approval boundaries.
