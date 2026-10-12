@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 import 'dart:ui' as ui;
 
+import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
@@ -548,6 +549,47 @@ void main() {
           find.byKey(const ValueKey('workspace-repaint-boundary')),
           findsNothing,
         );
+        // Studio must share the desktop header spacing and single rail toggle.
+        expect(find.byIcon(CupertinoIcons.sidebar_left), findsOneWidget);
+        await tester.tap(find.byKey(const ValueKey('rail-collapse-button')));
+        await tester.pumpAndSettle();
+        expect(
+          find.byKey(const ValueKey('project-rail-repaint-boundary')),
+          findsNothing,
+        );
+        final railExpand = find.byKey(const ValueKey('rail-expand-button'));
+        final canvasExpand = find.byKey(const ValueKey('canvas-expand-button'));
+        expect(find.byIcon(CupertinoIcons.sidebar_left), findsOneWidget);
+        expect(tester.getRect(railExpand).left, greaterThanOrEqualTo(136));
+        expect(
+          tester.getRect(canvasExpand).right,
+          lessThanOrEqualTo(1440 - 24),
+        );
+        expect(
+          tester.getRect(canvasExpand).left -
+              tester
+                  .getRect(find.byKey(const ValueKey('studio-details-open')))
+                  .right,
+          greaterThanOrEqualTo(14),
+        );
+        if (Platform.environment['STUDIO_SCREENSHOTS'] == '1') {
+          await tester.runAsync(() async {
+            final boundary = tester.renderObject<RenderRepaintBoundary>(
+              find.byKey(const ValueKey('capture')),
+            );
+            final image = await boundary.toImage();
+            final bytes = await image.toByteData(
+              format: ui.ImageByteFormat.png,
+            );
+            await File(
+              '/tmp/studio-header-collapsed-${dark ? 'dark' : 'light'}.png',
+            ).writeAsBytes(bytes!.buffer.asUint8List());
+            image.dispose();
+          });
+        }
+        await tester.tap(railExpand);
+        await tester.pumpAndSettle();
+        expect(find.byIcon(CupertinoIcons.sidebar_left), findsOneWidget);
         await tester.tap(find.byKey(const ValueKey('canvas-expand-button')));
         await tester.pumpAndSettle();
         expect(

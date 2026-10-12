@@ -1,5 +1,25 @@
 part of '../workspace_screen.dart';
 
+class _PaneHeader extends StatelessWidget {
+  const _PaneHeader({required this.railCollapsed, required this.children});
+
+  final bool railCollapsed;
+  final List<Widget> children;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      // In the desktop row, a hidden rail exposes the native window controls.
+      // In the compact column, an open rail already sits above this header.
+      padding: EdgeInsets.only(left: railCollapsed ? 136 : 18, right: 24),
+      child: SizedBox(
+        height: desktopPaneHeaderHeight,
+        child: Row(children: children),
+      ),
+    );
+  }
+}
+
 class _GlassSurface extends StatelessWidget {
   const _GlassSurface({required this.child});
 
