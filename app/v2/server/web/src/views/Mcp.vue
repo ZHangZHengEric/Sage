@@ -1,6 +1,9 @@
 <script setup>
 import { computed, onMounted, ref } from 'vue'
 import { api } from '../api.js'
+import FormDrawer from '../components/FormDrawer.vue'
+
+const drawerOpen = ref(false)
 
 const servers = ref([])
 const error = ref('')
@@ -40,6 +43,7 @@ async function save() {
     editing.value = ''
     form.value = emptyForm()
     await refresh()
+    drawerOpen.value = false
   } catch (exc) {
     error.value = exc.message
   } finally {
@@ -48,6 +52,8 @@ async function save() {
 }
 
 function edit(item) {
+  drawerOpen.value = true
+  error.value = ''
   editing.value = item.name
   form.value = {
     name: item.name,
@@ -84,6 +90,10 @@ onMounted(async () => {
     error.value = exc.message
   }
 })
+function startNew() {
+  error.value = ''; editing.value = ''; form.value = emptyForm()
+  drawerOpen.value = true
+}
 </script>
 
 <template>
@@ -91,6 +101,32 @@ onMounted(async () => {
     <header class="page-head">
       <h1>MCP</h1>
     </header>
+    <div class="panel stack">
+      <div class="list-toolbar"><h2>已连接</h2><button class="btn cta" type="button" :disabled="pending" @click="startNew">新增 MCP</button></div>
+      <p v-if="error && !drawerOpen" class="error" role="alert">{{ error }}</p>
+      <p v-if="!hasServers" class="empty">还没有 MCP。添加后它的工具对本租户的智能体全部可用。</p>
+      <table v-else>
+        <thead>
+          <tr><th>名称</th><th>协议</th><th>工具</th><th></th></tr>
+        </thead>
+        <tbody>
+          <tr v-for="item in servers" :key="item.name">
+            <td>
+              {{ item.name }}
+              <div class="muted">{{ item.description || item.url }}</div>
+            </td>
+            <td>{{ item.protocol }}</td>
+            <td class="muted">{{ (item.tools || []).join(', ') || '未刷新' }}</td>
+            <td class="row">
+              <button class="btn ghost" type="button" @click="refreshTools(item.name)">刷新工具</button>
+              <button class="btn ghost" type="button" @click="edit(item)">编辑</button>
+              <button class="btn ghost" type="button" @click="remove(item.name)">删除</button>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <FormDrawer v-model="drawerOpen" :title="editing ? '编辑 MCP' : '新增 MCP'" :busy="pending">
     <form class="panel" @submit.prevent="save">
       <label class="field">
         <span>名称</span>
@@ -120,29 +156,6 @@ onMounted(async () => {
         {{ editing ? '保存连接' : '添加 MCP' }}
       </button>
     </form>
-    <div class="panel stack">
-      <h2>已连接</h2>
-      <p v-if="!hasServers" class="empty">还没有 MCP。添加后它的工具对本租户的智能体全部可用。</p>
-      <table v-else>
-        <thead>
-          <tr><th>名称</th><th>协议</th><th>工具</th><th></th></tr>
-        </thead>
-        <tbody>
-          <tr v-for="item in servers" :key="item.name">
-            <td>
-              {{ item.name }}
-              <div class="muted">{{ item.description || item.url }}</div>
-            </td>
-            <td>{{ item.protocol }}</td>
-            <td class="muted">{{ (item.tools || []).join(', ') || '未刷新' }}</td>
-            <td class="row">
-              <button class="btn ghost" type="button" @click="refreshTools(item.name)">刷新工具</button>
-              <button class="btn ghost" type="button" @click="edit(item)">编辑</button>
-              <button class="btn ghost" type="button" @click="remove(item.name)">删除</button>
-            </td>
-          </tr>
-        </tbody>
-      </table>
-    </div>
+    </FormDrawer>
   </section>
 </template>

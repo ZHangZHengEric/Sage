@@ -19,7 +19,7 @@ const interaction = ref(null)
 // Where the Run in flight began. A resumed Run replays from its first event,
 // so answering a question means rewinding the transcript back to here first.
 const baseline = ref([])
-const selectedAgentId = ref(localStorage.getItem('sage.server_v2.agent') || 'main')
+const selectedAgentId = ref(localStorage.getItem('sage.server_v2.agent') || '')
 const scroller = ref(null)
 const input = ref(null)
 const agent = shallowRef(null)
@@ -53,7 +53,7 @@ function bindAgent() {
 async function loadAgents() {
   agents.value = await api.listAgents()
   if (!agents.value.some((item) => item.id === selectedAgentId.value)) {
-    selectedAgentId.value = agents.value[0]?.id || 'main'
+    selectedAgentId.value = agents.value[0]?.id || ''
   }
 }
 

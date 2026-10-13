@@ -23,6 +23,10 @@ async def create_host_schema(database: Database) -> None:
 def _upgrade_legacy_schema(connection) -> None:
     """Apply idempotent upgrades; create_all does not alter existing tables."""
     inspector = inspect(connection)
+    if "agents" in {column["name"] for column in inspector.get_columns("catalogs")}:
+        raise RuntimeError(
+            "Legacy Agent catalog detected; run scripts.v2.migrate_agent_table before starting Server v2"
+        )
     user_columns = {column["name"] for column in inspector.get_columns("users")}
     if "execution_policy" not in user_columns:
         connection.execute(text("ALTER TABLE users ADD COLUMN execution_policy TEXT"))

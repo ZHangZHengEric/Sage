@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from typing import Literal
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 from app.v2.server.runtime.policy import ExecutionPolicy
 
 class ModelBody(BaseModel):
@@ -13,7 +13,7 @@ class ModelBody(BaseModel):
     is_default: bool = True
 
 class AgentBody(BaseModel):
-    id: str | None = None
+    model_config = ConfigDict(extra="forbid")
     name: str
     description: str = ""
     instructions: str = ""

@@ -26,6 +26,7 @@ def test_publish_bind_and_keep_relative_artifact_path(tmp_path):
     with _client(tmp_path)[0] as client:
         token = register_and_login(client)
         headers = {"Authorization": f"Bearer {token}"}
+        agent_id = client.get("/api/agents", headers=headers).json()["data"][0]["id"]
         created = client.post(
             "/api/skills",
             json={
@@ -41,12 +42,12 @@ def test_publish_bind_and_keep_relative_artifact_path(tmp_path):
         assert not skill["artifact_path"].startswith("/")
 
         bound = client.put(
-            "/api/agents/main/skills",
+            f"/api/agents/{agent_id}/skills",
             json={"names": ["demo"]},
             headers=headers,
         )
         assert bound.status_code == 200
-        listed = client.get("/api/agents/main/skills", headers=headers)
+        listed = client.get(f"/api/agents/{agent_id}/skills", headers=headers)
         assert listed.status_code == 200
         assert [item["name"] for item in listed.json()["data"]] == ["demo"]
         assert listed.json()["data"][0]["workspace_status"] == "missing"
@@ -57,6 +58,7 @@ def test_workspace_write_does_not_change_catalog_artifact(tmp_path):
     with client:
         token = register_and_login(client)
         headers = {"Authorization": f"Bearer {token}"}
+        agent_id = client.get("/api/agents", headers=headers).json()["data"][0]["id"]
         created = client.post(
             "/api/skills",
             json={
@@ -65,7 +67,7 @@ def test_workspace_write_does_not_change_catalog_artifact(tmp_path):
             },
             headers=headers,
         ).json()["data"]
-        client.put("/api/agents/main/skills", json={"names": ["demo"]}, headers=headers)
+        client.put(f"/api/agents/{agent_id}/skills", json={"names": ["demo"]}, headers=headers)
         written = client.put(
             "/api/workspace/skills/demo",
             json={"content": "---\nname: demo\ndescription: local\n---\n\n# Local\n"},
@@ -112,6 +114,7 @@ def test_upload_zip_batch_partial_success(tmp_path):
     with _client(tmp_path)[0] as client:
         token = register_and_login(client)
         headers = {"Authorization": f"Bearer {token}"}
+        agent_id = client.get("/api/agents", headers=headers).json()["data"][0]["id"]
         response = client.post(
             "/api/skills/upload",
             files=[

@@ -1,10 +1,13 @@
 <script setup>
 import { computed, onMounted, ref } from 'vue'
 import { api } from '../api.js'
+import FormDrawer from '../components/FormDrawer.vue'
+
+const drawerOpen = ref(false)
 
 const skills = ref([])
 const agents = ref([])
-const agentId = ref(localStorage.getItem('sage.server_v2.agent') || 'main')
+const agentId = ref(localStorage.getItem('sage.server_v2.agent') || '')
 const bound = ref([])
 const error = ref('')
 const pending = ref(false)
@@ -24,7 +27,7 @@ async function refresh() {
   skills.value = nextSkills
   agents.value = nextAgents
   if (!agents.value.some((item) => item.id === agentId.value)) {
-    agentId.value = agents.value[0]?.id || 'main'
+    agentId.value = agents.value[0]?.id || ''
   }
   bound.value = await api.listAgentSkills(agentId.value)
 }
@@ -111,6 +114,10 @@ onMounted(async () => {
     error.value = exc.message
   }
 })
+function startNew() {
+  error.value = ''; files.value = []; results.value = []
+  drawerOpen.value = true
+}
 </script>
 
 <template>
@@ -126,6 +133,39 @@ onMounted(async () => {
         </select>
       </label>
     </header>
+    <div class="panel stack">
+      <div class="list-toolbar"><h2>已发布</h2><button class="btn cta" type="button" :disabled="pending" @click="startNew">上传技能</button></div>
+      <p v-if="error && !drawerOpen" class="error" role="alert">{{ error }}</p>
+      <p v-if="!hasSkills" class="empty">还没有技能。上传 ZIP 后勾选即可给对话使用，未修改时不会拷到工作区。</p>
+      <table v-else>
+        <thead>
+          <tr><th>技能</th><th>路径</th><th>对话</th><th></th></tr>
+        </thead>
+        <tbody>
+          <tr v-for="item in skills" :key="item.skill_id">
+            <td>
+              {{ item.name }}
+              <div class="muted">{{ item.description }}</div>
+            </td>
+            <td class="mono">{{ item.artifact_path }}</td>
+            <td>
+              <label>
+                <input
+                  type="checkbox"
+                  :checked="boundNames.has(item.name)"
+                  @change="toggleBind(item)"
+                />
+                关联 {{ currentAgent }}
+              </label>
+            </td>
+            <td class="row">
+              <button class="btn ghost" type="button" @click="remove(item.skill_id)">删除</button>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <FormDrawer v-model="drawerOpen" title="上传技能" :busy="pending">
     <div class="panel">
       <input
         ref="picker"
@@ -165,36 +205,6 @@ onMounted(async () => {
         {{ pending ? '正在上传…' : '上传技能包' }}
       </button>
     </div>
-    <div class="panel stack">
-      <h2>已发布</h2>
-      <p v-if="!hasSkills" class="empty">还没有技能。上传 ZIP 后勾选即可给对话使用，未修改时不会拷到工作区。</p>
-      <table v-else>
-        <thead>
-          <tr><th>技能</th><th>路径</th><th>对话</th><th></th></tr>
-        </thead>
-        <tbody>
-          <tr v-for="item in skills" :key="item.skill_id">
-            <td>
-              {{ item.name }}
-              <div class="muted">{{ item.description }}</div>
-            </td>
-            <td class="mono">{{ item.artifact_path }}</td>
-            <td>
-              <label>
-                <input
-                  type="checkbox"
-                  :checked="boundNames.has(item.name)"
-                  @change="toggleBind(item)"
-                />
-                关联 {{ currentAgent }}
-              </label>
-            </td>
-            <td class="row">
-              <button class="btn ghost" type="button" @click="remove(item.skill_id)">删除</button>
-            </td>
-          </tr>
-        </tbody>
-      </table>
-    </div>
+    </FormDrawer>
   </section>
 </template>

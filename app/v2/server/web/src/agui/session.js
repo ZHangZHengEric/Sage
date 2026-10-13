@@ -27,7 +27,7 @@ export function messageForAguiError(event, fallback) {
   return event?.message || fallback?.message || fallback || 'run failed'
 }
 
-export function createAguiAgent({ onMessages, onError, onInteraction, agentId = 'main' } = {}) {
+export function createAguiAgent({ onMessages, onError, onInteraction, agentId = '' } = {}) {
   const agent = new SageHttpAgent({
     url: AGENT_URL,
     agentId,
@@ -54,7 +54,7 @@ export function createAguiAgent({ onMessages, onError, onInteraction, agentId = 
   return agent
 }
 
-export async function runAgui(agent, { threadId, runId, message, agentId = 'main' }) {
+export async function runAgui(agent, { threadId, runId, message, agentId = '' }) {
   agent.headers = { Authorization: `Bearer ${getToken()}` }
   agent.threadId = threadId
   agent.addMessage(message)

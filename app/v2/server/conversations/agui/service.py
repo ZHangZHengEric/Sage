@@ -56,12 +56,7 @@ class ConversationService:
         if not user_id.strip() or not agent_id.strip():
             raise _error("invalid_identity", "user_id and agent_id are required")
         validate_agui_id(session_id, field="session_id")
-        owner_id = None
-        for owner in await self.runs.users.list_users():
-            catalog = await self.runs.catalog.get(owner.user_id)
-            if any(agent.id == agent_id for agent in catalog.agents):
-                owner_id = owner.user_id
-                break
+        owner_id = await self.runs.catalog.agent_owner(agent_id)
         if owner_id is None:
             raise _error("agent_not_found", "agent not found")
         identity = json.dumps(

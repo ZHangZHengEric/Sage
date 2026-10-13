@@ -25,14 +25,15 @@ def setup_agent(client):
     response = client.post(
         "/api/agents",
         headers={"Authorization": f"Bearer {token}"},
-        json={"id": "palune-agent", "name": "Palune", "instructions": "Say hello"},
+        json={"name": "Palune", "instructions": "Say hello"},
     )
     assert response.status_code == 200, response.text
     client.cookies.clear()
+    client.headers["SAGE_AGENT_ID"] = response.json()["data"]["id"]
 
 
 def headers(user="business-user-123"):
-    return {"SAGE_AGENT_ID": "palune-agent", "SAGE_TENANT_ID": user}
+    return {"SAGE_TENANT_ID": user}
 
 
 def send(client, session="work-1", request="create-1", user="business-user-123"):
@@ -58,6 +59,7 @@ def result(client, session="work-1", request=None, user="business-user-123"):
 def test_external_chat_unregistered_user_edits_and_restart(tmp_path):
     with TestClient(create_app(make_host(tmp_path))) as client:
         setup_agent(client)
+        agent_id = client.headers["SAGE_AGENT_ID"]
         first = send(client)
         assert first.status_code == 200, first.text
         events = _parse_sse(first.text)
@@ -92,6 +94,7 @@ def test_external_chat_unregistered_user_edits_and_restart(tmp_path):
         )
     # Reopen both runtime and SQL repositories; no Python objects carry the results.
     with TestClient(create_app(make_host(tmp_path))) as restarted:
+        restarted.headers["SAGE_AGENT_ID"] = agent_id
         restored = result(restarted, request="edit-2")
         assert restored.status_code == 200, restored.text
         assert restored.json()["data"] == latest
@@ -101,6 +104,7 @@ def test_external_chat_unregistered_user_edits_and_restart(tmp_path):
 def test_external_headers_required_and_existing_chat_still_authenticated(tmp_path):
     with TestClient(create_app(make_host(tmp_path))) as client:
         setup_agent(client)
+        del client.headers["SAGE_AGENT_ID"]
         body = {
             "threadId": "work-1",
             "runId": "create-1",
@@ -145,7 +149,7 @@ async def test_disconnect_only_detaches_reader(tmp_path):
     await host.start()
     try:
         owner = await host.identity.register("owner", "secret1")
-        await host.catalog.create_agent(
+        agent = await host.catalog.create_agent(
             owner.user_id, {"id": "palune-agent", "name": "Palune"}
         )
         service = host.conversations
@@ -159,13 +163,13 @@ async def test_disconnect_only_detaches_reader(tmp_path):
             forwarded_props={},
         )
         stream = await service.start(
-            request, user_id="not-a-sage-user", agent_id="palune-agent"
+            request, user_id="not-a-sage-user", agent_id=agent.id
         )
         first = await anext(stream)
         assert "RUN_STARTED" in first
         await stream.aclose()
         running = await service.result(
-            user_id="not-a-sage-user", agent_id="palune-agent", session_id="session"
+            user_id="not-a-sage-user", agent_id=agent.id, session_id="session"
         )
         assert running["state"] in {"queued", "running"}
         assert running["text"] == ""
@@ -174,7 +178,7 @@ async def test_disconnect_only_detaches_reader(tmp_path):
             while True:
                 result = await service.result(
                     user_id="not-a-sage-user",
-                    agent_id="palune-agent",
+                    agent_id=agent.id,
                     session_id="session",
                 )
                 if result["state"] == "completed":

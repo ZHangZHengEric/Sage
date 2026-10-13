@@ -6,10 +6,11 @@ from app.v2.server.catalog.records import (
 )
 
 
-def test_empty_catalog_has_main_agent():
+def test_empty_catalog_has_unique_default_agent():
     catalog = empty_catalog()
-    assert require_agent(catalog, None).id == "main"
-    assert require_agent(catalog, "main").instructions
+    assert require_agent(catalog, None).id == catalog.default_agent_id
+    assert catalog.default_agent_id != empty_catalog().default_agent_id
+    assert require_agent(catalog, catalog.default_agent_id).instructions
 
 
 def test_upsert_agent_keeps_skill_bindings():
@@ -17,7 +18,7 @@ def test_upsert_agent_keeps_skill_bindings():
     catalog.agents[0] = catalog.agents[0].model_copy(update={"skills": ["demo"]})
     record, catalog = upsert_agent(
         catalog,
-        {"id": "main", "name": "Writer", "instructions": "Write briefly."},
+        {"id": catalog.default_agent_id, "name": "Writer", "instructions": "Write briefly."},
     )
     assert record.name == "Writer"
     assert record.instructions == "Write briefly."

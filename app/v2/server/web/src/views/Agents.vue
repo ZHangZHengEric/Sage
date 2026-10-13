@@ -1,6 +1,9 @@
 <script setup>
 import { computed, onMounted, ref } from 'vue'
 import { api } from '../api.js'
+import FormDrawer from '../components/FormDrawer.vue'
+
+const drawerOpen = ref(false)
 
 const agents = ref([])
 const models = ref([])
@@ -77,6 +80,7 @@ async function save() {
       : await api.createAgent(payload)
     editing.value = saved.id
     await refresh()
+    drawerOpen.value = false
   } catch (exc) {
     error.value = exc.message
   } finally {
@@ -86,6 +90,8 @@ async function save() {
 
 async function edit(item) {
   const detail = await api.getAgent(item.id)
+  drawerOpen.value = true
+  error.value = ''
   editing.value = item.id
   form.value = {
     name: detail.name,
@@ -99,6 +105,8 @@ async function edit(item) {
 }
 
 function startNew() {
+  drawerOpen.value = true
+  error.value = ''
   editing.value = ''
   form.value = emptyForm()
   bound.value = []
@@ -145,6 +153,31 @@ onMounted(async () => {
     <header class="page-head">
       <h1>智能体</h1>
     </header>
+    <div class="panel stack">
+      <div class="list-toolbar"><h2>已配置</h2><button class="btn cta" type="button" :disabled="pending" @click="startNew">新增智能体</button></div>
+      <p v-if="error && !drawerOpen" class="error" role="alert">{{ error }}</p>
+      <p v-if="!hasAgents" class="empty">还没有智能体</p>
+      <table v-else>
+        <thead>
+          <tr><th>智能体</th><th>模型</th><th>工具 / 技能</th><th></th></tr>
+        </thead>
+        <tbody>
+          <tr v-for="item in agents" :key="item.id">
+            <td>
+              {{ item.name }}
+              <div class="muted">{{ item.description || item.id }}</div>
+            </td>
+            <td class="mono">{{ item.model_id || '默认' }}</td>
+            <td class="muted">{{ item.tools.length }} 工具 · {{ item.skills.length }} 技能</td>
+            <td class="row">
+              <button class="btn ghost" type="button" @click="edit(item)">编辑</button>
+              <button class="btn ghost" type="button" @click="remove(item.id)">删除</button>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <FormDrawer v-model="drawerOpen" :title="editing ? '编辑智能体' : '新增智能体'" :busy="pending">
     <form class="panel" @submit.prevent="save">
       <label class="field">
         <span>名称</span>
@@ -214,28 +247,6 @@ onMounted(async () => {
         <span class="muted">{{ item.description }}</span>
       </label>
     </div>
-    <div class="panel stack">
-      <h2>已配置</h2>
-      <p v-if="!hasAgents" class="empty">还没有智能体</p>
-      <table v-else>
-        <thead>
-          <tr><th>智能体</th><th>模型</th><th>工具 / 技能</th><th></th></tr>
-        </thead>
-        <tbody>
-          <tr v-for="item in agents" :key="item.id">
-            <td>
-              {{ item.name }}
-              <div class="muted">{{ item.description || item.id }}</div>
-            </td>
-            <td class="mono">{{ item.model_id || '默认' }}</td>
-            <td class="muted">{{ item.tools.length }} 工具 · {{ item.skills.length }} 技能</td>
-            <td class="row">
-              <button class="btn ghost" type="button" @click="edit(item)">编辑</button>
-              <button class="btn ghost" type="button" @click="remove(item.id)">删除</button>
-            </td>
-          </tr>
-        </tbody>
-      </table>
-    </div>
+    </FormDrawer>
   </section>
 </template>

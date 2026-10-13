@@ -130,6 +130,7 @@ async def test_dynamic_model_is_closed_after_run_or_composition_failure(
 ):
     service = make_test_service(tmp_path)
     await service.start()
+    agent_id = (await service.catalog.get("user")).default_agent_id
     await _save_demo_model(service.catalog, "user")
     provider = scripted_hello()
     closed = []
@@ -150,9 +151,9 @@ async def test_dynamic_model_is_closed_after_run_or_composition_failure(
     try:
         if fail_materialization:
             with pytest.raises(ValueError, match="materialization failed"):
-                await compose_catalog_loop(service, _command(), user_id="user")
+                await compose_catalog_loop(service, _command().model_copy(update={"agent_id": agent_id}), user_id="user")
         else:
-            _, ports = await compose_catalog_loop(service, _command(), user_id="user")
+            _, ports = await compose_catalog_loop(service, _command().model_copy(update={"agent_id": agent_id}), user_id="user")
             driver = CatalogRunDriver(service, "run")
             driver._ports = ports
             await driver._close_ports()
@@ -191,6 +192,7 @@ async def test_catalog_loop_uses_materialized_skill_plugin_and_derived_activatio
 ):
     service = make_test_service(tmp_path)
     await service.start()
+    agent_id = (await service.catalog.get("user")).default_agent_id
     await service.skill_catalog.publish_markdown(
         name="demo",
         content="---\nname: demo\ndescription: Demo skill\n---\n\n# Demo\n",
@@ -198,7 +200,7 @@ async def test_catalog_loop_uses_materialized_skill_plugin_and_derived_activatio
         role="user",
     )
     await service.skill_catalog.bind_agent_skills(
-        owner_user_id="user", agent_id="main", names=["demo"]
+        owner_user_id="user", agent_id=agent_id, names=["demo"]
     )
     captured = {}
     original = AgentCompositionFactory.create_skill_loader
@@ -214,7 +216,7 @@ async def test_catalog_loop_uses_materialized_skill_plugin_and_derived_activatio
         _attach_without_host_sandbox,
     )
     try:
-        _, ports = await compose_catalog_loop(service, _command(), user_id="user")
+        _, ports = await compose_catalog_loop(service, _command().model_copy(update={"agent_id": agent_id}), user_id="user")
         assert captured["skill_loading"] is ports.skill_loading
         assert isinstance(
             captured["activations"], SessionDerivedSkillActivationRepository
@@ -232,6 +234,7 @@ async def test_catalog_loop_uses_the_skill_versions_accepted_with_the_run(
 ):
     service = make_test_service(tmp_path)
     await service.start()
+    agent_id = (await service.catalog.get("user")).default_agent_id
     first = await service.skill_catalog.publish_markdown(
         name="demo",
         content="---\nname: demo\ndescription: First\n---\n\n# First\n",
@@ -239,17 +242,18 @@ async def test_catalog_loop_uses_the_skill_versions_accepted_with_the_run(
         role="user",
     )
     await service.skill_catalog.bind_agent_skills(
-        owner_user_id="user", agent_id="main", names=["demo"]
+        owner_user_id="user", agent_id=agent_id, names=["demo"]
     )
     accepted = tuple(
-        await service.skill_catalog.bound_skills(owner_user_id="user", agent_id="main")
+        await service.skill_catalog.bound_skills(owner_user_id="user", agent_id=agent_id)
     )
     command = _command().model_copy(
         update={
+            "agent_id": agent_id,
             "config": RunConfig(
                 enabled_skills=("demo",),
                 metadata=composition_metadata(
-                    agent=require_agent(await service.catalog.store.get("user"), "main"),
+                    agent=require_agent(await service.catalog.store.get("user"), agent_id),
                     skills=accepted,
                     mcp_servers=(),
                 ),
@@ -263,7 +267,7 @@ async def test_catalog_loop_uses_the_skill_versions_accepted_with_the_run(
         role="user",
     )
     await service.skill_catalog.bind_agent_skills(
-        owner_user_id="user", agent_id="main", names=[]
+        owner_user_id="user", agent_id=agent_id, names=[]
     )
     captured = {}
     original = AgentCompositionFactory.create_skill_loader
@@ -295,12 +299,14 @@ async def test_catalog_loop_uses_the_agent_config_accepted_with_the_run(
 ):
     service = make_test_service(tmp_path)
     await service.start()
+    agent_id = (await service.catalog.get("user")).default_agent_id
     catalog = await service.catalog.store.get("user")
-    admitted = require_agent(catalog, "main").model_copy(
+    admitted = require_agent(catalog, agent_id).model_copy(
         update={"instructions": "Admitted instructions"}
     )
     command = _command().model_copy(
         update={
+            "agent_id": agent_id,
             "config": RunConfig(
                 enabled_skills=(),
                 metadata=composition_metadata(
@@ -334,8 +340,10 @@ async def test_catalog_loop_uses_the_agent_config_accepted_with_the_run(
 
 
 def test_run_composition_rejects_a_user_skill_owned_by_another_tenant():
+    agent_id = "main"
     command = _command().model_copy(
         update={
+            "agent_id": agent_id,
             "config": RunConfig(
                 enabled_skills=("demo",),
                 metadata={

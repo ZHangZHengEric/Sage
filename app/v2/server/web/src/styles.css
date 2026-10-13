@@ -516,3 +516,6 @@ th, td { text-align: left; padding: var(--space-3) var(--space-2); border-bottom
 @media (prefers-reduced-motion: reduce) {
   .btn, .pending-dot { transition: none; animation: none; }
 }
+
+.list-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex-wrap: wrap; }
+.list-toolbar h2 { margin: 0; }

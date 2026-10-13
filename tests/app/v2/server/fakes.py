@@ -6,6 +6,8 @@ from app.v2.server.catalog.records import (
     apply_delete,
     apply_upsert,
     empty_catalog,
+    delete_agent,
+    require_agent,
 )
 from app.v2.server.identity.key_repository import MemoryApiKeyStore  # noqa: F401
 from app.v2.server.skills.repository import MemorySkillStore  # noqa: F401
@@ -52,10 +54,15 @@ class MemoryCatalogStore:
     def __init__(self) -> None:
         self._catalogs: dict[str, UserCatalog] = {}
 
+    async def agent_owner(self, agent_id):
+        return next((uid for uid, catalog in self._catalogs.items()
+                     if any(a.id == agent_id for a in catalog.agents)), None)
+
     async def get(self, user_id: str) -> UserCatalog:
         current = self._catalogs.get(user_id)
         if current is None:
-            return empty_catalog()
+            current = empty_catalog()
+            self._catalogs[user_id] = current
         return current.model_copy(deep=True)
 
     async def save(self, user_id: str, catalog: UserCatalog) -> UserCatalog:
@@ -69,6 +76,23 @@ class MemoryCatalogStore:
         updated = current.model_copy(update={section: getattr(catalog, section)})
         self._catalogs[user_id] = updated
         return updated
+
+    async def create_agent(self, user_id, record):
+        catalog = await self.get(user_id)
+        catalog.agents.append(record)
+        await self.save(user_id, catalog)
+
+    async def update_agent(self, user_id, record):
+        catalog = await self.get(user_id)
+        require_agent(catalog, record.id)
+        catalog.agents = [record if a.id == record.id else a for a in catalog.agents]
+        await self.save(user_id, catalog)
+
+    async def delete_agent(self, user_id, agent_id):
+        catalog = delete_agent(await self.get(user_id), agent_id)
+        if catalog.default_agent_id == agent_id:
+            catalog.default_agent_id = catalog.agents[0].id
+        await self.save(user_id, catalog)
 
     async def list_models(self, user_id: str) -> list[ModelRecord]:
         return (await self.get(user_id)).models
