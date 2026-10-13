@@ -20,7 +20,7 @@ main.py         应用启动入口
 web/            前端
 ```
 
-业务代码按能力放入对应目录，记录、规则、服务和仓储就近组织；共享的数据库连接和运行时能力分别放在 `database/`、`runtime/`。对外接口统一放在 `routers/`，配置放在 `config/`。HTTP 接口注入所属业务服务，由服务访问仓储；简单列表从服务读取目录，不暴露仓储给路由。AG-UI 与 A2A 协议实现在 `conversations/agui/`、`conversations/a2a/`，共用 `conversations/admission.py` 受理 Run。catalog 的 Agent、模型、MCP、A2A peer 分列保存，写操作只更新对应列。
+业务代码按能力放入对应目录，记录、规则、服务和仓储就近组织；共享的数据库连接和运行时能力分别放在 `database/`、`runtime/`。对外接口统一放在 `routers/`，配置放在 `config/`。HTTP 接口注入所属业务服务，由服务访问仓储；简单列表从服务读取目录，不暴露仓储给路由。AG-UI 与 A2A 协议实现在 `conversations/agui/`、`conversations/a2a/`，共用 `conversations/admission.py` 受理 Run。Agent 独立保存在 `agents` 表，以服务端生成的 `agent_<UUID>` 为全局主键，`owner_user_id` 限定归属。`catalogs.default_agent_id` 保存默认 Agent 引用；模型、MCP、A2A peer 仍按目录分列保存。Agent 新建接口不接受 `id`，修改使用路径中的 ID，外部调用按 Agent 主键查找归属。
 
 生产启动只强制 MySQL：`SAGE_SERVER_MYSQL_URL`。AG-UI 回放读取 Sage Session 的 canonical RuntimeEvent；模型流式 delta 是进程内预览，断线重连通过预览序号续接，进程重启后以持久事件恢复。
 
@@ -38,6 +38,16 @@ python -m app.v2.server --data-root /tmp/sage-server-v2
 Docker 部署可使用仓库中的 `deploy/compose_v2.sh`，仅启动 v2 后端和 Web，连接外部 MySQL；配置与命令见 [部署指南](../../../deploy/README.md)。
 
 Web 开发时可单独启动：在 `app/v2/server/web` 执行 `npm install && npm run dev`，Vite 将 API 请求代理到后端 `8090` 端口。执行 `npm run build` 后再启动后端，后端会托管 `web/dist`，可直接访问 `http://localhost:8090` 或 `/studio`。也可使用独立静态文件服务部署，并代理 API 请求到后端。
+
+已有 `catalogs.agents` JSON 列的数据库须先停写，再执行一次显式迁移：
+
+```bash
+python -m scripts.v2.migrate_agent_table --env app/v2/server/.env --backup /secure/path/before-agent-migration.json
+```
+
+脚本先保存权限为 `0600` 的本地全表行数据备份，再创建独立表；事务内生成 ID、迁移默认引用、技能绑定、密钥和历史会话，验证后移除 `catalogs.agents`。备份包含凭据哈希及模型配置，应放在受限目录，不能提交 Git。活跃 Run、带未折叠 journal 的会话、外部会话会阻止本脚本的数据迁移，须先按其存储协议处理。DDL 在 MySQL 上独立提交，数据迁移失败可重新运行；若数据提交成功但最终删列失败，可核对引用后调用迁移模块的 `finalize` 完成删列。
+
+迁移后必须启动这版 Server v2；旧服务和旧客户端使用的 `main` 或自定义 Agent ID 不再有效，客户端从 `/api/agents` 获取新 ID。运行包 manifest 内的 Agent 名称不属于用户目录 ID，不受此变更影响。
 
 启动时会幂等升级旧数据库：补齐 `threads.agent_id`、`users.execution_policy`，将 Skill 描述列扩展为 `LONGTEXT`。旧用户采用需要确认的默认执行策略。升级账号需要对应表的 `ALTER` 权限。Skill 列表描述不截断，加载内容仍受 Skill 文件大小限制。已有的截断描述可重新导入原 Skill 文件修复。
 

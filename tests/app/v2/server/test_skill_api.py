@@ -114,7 +114,6 @@ def test_upload_zip_batch_partial_success(tmp_path):
     with _client(tmp_path)[0] as client:
         token = register_and_login(client)
         headers = {"Authorization": f"Bearer {token}"}
-        agent_id = client.get("/api/agents", headers=headers).json()["data"][0]["id"]
         response = client.post(
             "/api/skills/upload",
             files=[

@@ -97,7 +97,7 @@ onUnmounted(() => { disposed = true; statusRevision++; clearInterval(timer) })
 <template>
   <section class="studio">
     <h1>Agent Studio</h1>
-    <p role="alert" v-if="error" class="error">{{ error }}</p><p role="status">{{ message }}</p>
+    <p role="alert" v-if="error && !definitionOpen && !runOpen" class="error">{{ error }}</p><p role="status">{{ message }}</p>
     <fieldset :disabled="busy">
       <legend>定义与版本</legend>
       <div class="list-toolbar"><h2>版本库</h2><button class="btn cta" @click="startNew">新增定义</button></div>
@@ -121,7 +121,10 @@ onUnmounted(() => { disposed = true; statusRevision++; clearInterval(timer) })
       </template>
     </fieldset>
     <FormDrawer v-model="definitionOpen" title="定义与版本" :busy="busy">
-      <fieldset :disabled="busy">      <label>导入现有 Agent <select v-model="importId"><option value="">空白模板</option><option v-for="a in agents" :key="a.id" :value="a.id">{{ a.name }}</option></select></label>
+      <fieldset :disabled="busy">
+      <p v-if="error" class="error" role="alert">{{ error }}</p>
+      <p v-if="message" role="status">{{ message }}</p>
+      <label>导入现有 Agent <select v-model="importId"><option value="">空白模板</option><option v-for="a in agents" :key="a.id" :value="a.id">{{ a.name }}</option></select></label>
       <button @click="importDraft">导入为草稿</button>
       <label class="editor">完整包定义<textarea aria-label="完整包定义" v-model="editor" spellcheck="false" rows="22" /></label>
       <button @click="action(async () => { const r = await api.validatePackage(JSON.parse(editor)); message = JSON.stringify(r, null, 2) })">验证与资源检查</button>
@@ -132,7 +135,9 @@ onUnmounted(() => { disposed = true; statusRevision++; clearInterval(timer) })
       </fieldset>
     </FormDrawer>
     <FormDrawer v-model="runOpen" title="新增任务" :busy="busy">
-      <fieldset :disabled="busy">      <label>入口 Agent <select v-model="selectedAgent"><option v-for="id in definitions" :key="id">{{ id }}</option></select></label>
+      <fieldset :disabled="busy">
+      <p v-if="error" class="error" role="alert">{{ error }}</p>
+      <label>入口 Agent <select v-model="selectedAgent"><option v-for="id in definitions" :key="id">{{ id }}</option></select></label>
       <label>任务<textarea v-model="content" rows="3" /></label>
       <label>续接 Session（留空新建）<input v-model="sessionId" /></label>
       <button :disabled="!clean || !content.trim()" @click="run">运行已保存版本</button>
