@@ -159,6 +159,7 @@ class A2AAgentRecord(BaseModel):
 
 
 class UserCatalog(BaseModel):
+    default_agent_id: str = ""
     agents: list[AgentRecord] = Field(default_factory=list)
     models: list[ModelRecord] = Field(default_factory=list)
     mcp_servers: list[McpServerRecord] = Field(default_factory=list)
@@ -224,15 +225,12 @@ class UserCatalog(BaseModel):
 
 
 def empty_catalog() -> UserCatalog:
-    return UserCatalog(
-        agents=[
-            AgentRecord(
-                id="main",
-                name="Main Assistant",
-                instructions="Be helpful, concise, and explicit about uncertainty.",
-            )
-        ]
+    agent = AgentRecord(
+        id=new_id("agent"),
+        name="Main Assistant",
+        instructions="Be helpful, concise, and explicit about uncertainty.",
     )
+    return UserCatalog(default_agent_id=agent.id, agents=[agent])
 
 
 def catalog_payload(catalog: UserCatalog) -> dict[str, object]:
@@ -251,7 +249,7 @@ def catalog_payload(catalog: UserCatalog) -> dict[str, object]:
 
 
 def require_agent(catalog: UserCatalog, agent_id: str | None) -> AgentRecord:
-    requested = str(agent_id or "").strip()
+    requested = str(agent_id or catalog.default_agent_id or "").strip()
     if requested:
         match = next((item for item in catalog.agents if item.id == requested), None)
         if match is None:
@@ -263,9 +261,12 @@ def require_agent(catalog: UserCatalog, agent_id: str | None) -> AgentRecord:
                 )
             )
         return match
-    return next(
-        (item for item in catalog.agents if item.id == "main"),
-        catalog.agents[0] if catalog.agents else empty_catalog().agents[0],
+    raise SageV2Error(
+        RuntimeErrorInfo(
+            code="server.catalog.records.not_found",
+            category=ErrorCategory.VALIDATION,
+            message="default agent is not configured",
+        )
     )
 
 
@@ -339,6 +340,8 @@ def delete_agent(catalog: UserCatalog, agent_id: str) -> UserCatalog:
             )
         )
     catalog.agents = remaining
+    if catalog.default_agent_id == agent_id:
+        catalog.default_agent_id = remaining[0].id
     return catalog
 
 

@@ -1,6 +1,9 @@
 <script setup>
 import { computed, onMounted, ref } from 'vue'
 import { api } from '../api.js'
+import FormDrawer from '../components/FormDrawer.vue'
+
+const drawerOpen = ref(false)
 
 const models = ref([])
 const error = ref('')
@@ -25,6 +28,7 @@ async function save() {
     await api.saveModel({ ...form.value, is_default: !hasModels.value })
     form.value.api_key = ''
     await refresh()
+    drawerOpen.value = false
   } catch (exc) {
     error.value = exc.message
   } finally {
@@ -56,6 +60,10 @@ onMounted(async () => {
     error.value = exc.message
   }
 })
+function startNew() {
+  error.value = ''; form.value = { protocol: 'openai-chat-completions', base_url: 'https://api.openai.com/v1', model: '', api_key: '' }
+  drawerOpen.value = true
+}
 </script>
 
 <template>
@@ -63,32 +71,9 @@ onMounted(async () => {
     <header class="page-head">
       <h1>模型</h1>
     </header>
-    <form class="panel" @submit.prevent="save">
-      <label class="field">
-        <span>协议</span>
-        <select v-model="form.protocol">
-          <option value="openai-chat-completions">openai-chat-completions</option>
-          <option value="openai-responses">openai-responses</option>
-          <option value="anthropic-messages">anthropic-messages</option>
-        </select>
-      </label>
-      <label class="field">
-        <span>Base URL</span>
-        <input v-model="form.base_url" required />
-      </label>
-      <label class="field">
-        <span>Model</span>
-        <input v-model="form.model" required />
-      </label>
-      <label class="field">
-        <span>API Key</span>
-        <input v-model="form.api_key" type="password" autocomplete="off" required />
-      </label>
-      <p v-if="error" class="error" role="alert">{{ error }}</p>
-      <button class="btn cta" type="submit" :disabled="pending">上传模型</button>
-    </form>
     <div class="panel stack">
-      <h2>已上传</h2>
+      <div class="list-toolbar"><h2>已上传</h2><button class="btn cta" type="button" :disabled="pending" @click="startNew">新增模型</button></div>
+      <p v-if="error && !drawerOpen" class="error" role="alert">{{ error }}</p>
       <p v-if="!hasModels" class="empty">还没有模型</p>
       <table v-else>
         <thead>
@@ -117,5 +102,31 @@ onMounted(async () => {
         </tbody>
       </table>
     </div>
+    <FormDrawer v-model="drawerOpen" title="新增模型" :busy="pending">
+    <form class="panel" @submit.prevent="save">
+      <label class="field">
+        <span>协议</span>
+        <select v-model="form.protocol">
+          <option value="openai-chat-completions">openai-chat-completions</option>
+          <option value="openai-responses">openai-responses</option>
+          <option value="anthropic-messages">anthropic-messages</option>
+        </select>
+      </label>
+      <label class="field">
+        <span>Base URL</span>
+        <input v-model="form.base_url" required />
+      </label>
+      <label class="field">
+        <span>Model</span>
+        <input v-model="form.model" required />
+      </label>
+      <label class="field">
+        <span>API Key</span>
+        <input v-model="form.api_key" type="password" autocomplete="off" required />
+      </label>
+      <p v-if="error" class="error" role="alert">{{ error }}</p>
+      <button class="btn cta" type="submit" :disabled="pending">上传模型</button>
+    </form>
+    </FormDrawer>
   </section>
 </template>

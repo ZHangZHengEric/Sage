@@ -19,6 +19,7 @@ def test_agui_run_sees_bound_skill_without_workspace_copy(tmp_path):
     with TestClient(create_app(service=service)) as client:
         token = register_and_login(client)
         headers = {"Authorization": f"Bearer {token}"}
+        agent_id = client.get("/api/agents", headers=headers).json()["data"][0]["id"]
         client.post(
             "/api/skills",
             json={
@@ -27,7 +28,7 @@ def test_agui_run_sees_bound_skill_without_workspace_copy(tmp_path):
             },
             headers=headers,
         )
-        client.put("/api/agents/main/skills", json={"names": ["demo"]}, headers=headers)
+        client.put(f"/api/agents/{agent_id}/skills", json={"names": ["demo"]}, headers=headers)
         response = client.post("/api/agent", json=_run_input(), headers=headers)
         assert response.status_code == 200
 

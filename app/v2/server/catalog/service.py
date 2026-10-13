@@ -10,7 +10,6 @@ from app.v2.server.catalog.records import (
     AgentRecord,
     ModelRecord,
     delete_a2a_agent,
-    delete_agent,
     delete_mcp,
     require_agent,
     upsert_a2a_agent,
@@ -19,6 +18,7 @@ from app.v2.server.catalog.records import (
 )
 from app.v2.server.runtime.integrations.a2a import discover_a2a_skills, to_a2a_config
 from app.v2.server.runtime.integrations.mcp import discover_mcp_tools, to_mcp_config
+from sagents.v2.contracts.common import new_id
 from sagents.v2.contracts.errors import ErrorCategory, RuntimeErrorInfo, SageV2Error
 
 
@@ -29,6 +29,9 @@ class CatalogService:
         self.mcp_plugins = mcp_plugins
         self.a2a_plugins = a2a_plugins
         self.skills = skills
+
+    async def agent_owner(self, agent_id: str) -> str | None:
+        return await self.store.agent_owner(agent_id)
 
     async def get(self, user_id: str):
         return await self.store.get(user_id)
@@ -56,8 +59,8 @@ class CatalogService:
     async def create_agent(self, user_id: str, payload: dict) -> AgentRecord:
         async with self._lock(user_id, "agents"):
             catalog = await self.store.get(user_id)
-            record, catalog = upsert_agent(catalog, payload)
-            await self.store.replace_section(user_id, "agents", catalog)
+            record, catalog = upsert_agent(catalog, {**payload, "id": new_id("agent")})
+            await self.store.create_agent(user_id, record)
             return record
 
     async def get_agent(self, user_id: str, agent_id: str) -> dict:
@@ -75,15 +78,12 @@ class CatalogService:
             require_agent(catalog, agent_id)
             payload = {**payload, "id": agent_id}
             record, catalog = upsert_agent(catalog, payload)
-            await self.store.replace_section(user_id, "agents", catalog)
+            await self.store.update_agent(user_id, record)
             return record
 
     async def delete_agent(self, user_id: str, agent_id: str) -> None:
         async with self._lock(user_id, "agents"):
-            catalog = await self.store.get(user_id)
-            await self.store.replace_section(
-                user_id, "agents", delete_agent(catalog, agent_id)
-            )
+            await self.store.delete_agent(user_id, agent_id)
 
     async def create_mcp(self, user_id: str, payload: dict):
         async with self._lock(user_id, "mcp_servers"):
@@ -180,11 +180,11 @@ class CatalogService:
     async def bind_agent_skills(self, user_id: str, agent_id: str, names: list[str]):
         async with self._lock(user_id, "agents"):
             catalog = await self.store.get(user_id)
+            require_agent(catalog, agent_id)
             skills = await self.skills.bind_agent_skills(
                 owner_user_id=user_id,
                 agent_id=agent_id,
                 names=names,
                 catalog=catalog,
             )
-            await self.store.replace_section(user_id, "agents", catalog)
             return skills

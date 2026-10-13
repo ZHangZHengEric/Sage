@@ -1,6 +1,9 @@
 <script setup>
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { api } from '../api.js'
+import FormDrawer from '../components/FormDrawer.vue'
+
+const definitionOpen = ref(false), runOpen = ref(false)
 import { onBeforeRouteLeave } from 'vue-router'
 
 const packages = ref([]), runs = ref([]), agents = ref([]), schema = ref(null)
@@ -29,8 +32,9 @@ async function refresh() {
 }
 function canReplaceDraft() { return editor.value === savedText.value || window.confirm('当前修改尚未保存，确定放弃吗？') }
 onBeforeRouteLeave(() => canReplaceDraft())
+async function startNew() { if (canReplaceDraft()) await action(async () => { setBundle(await api.packageTemplate()); definitionOpen.value = true }) }
 async function importDraft() { if (canReplaceDraft()) await action(async () => setBundle(await api.packageTemplate(importId.value))) }
-async function load(reference) { if (canReplaceDraft()) await action(async () => setBundle(await api.package(reference), reference)) }
+async function load(reference) { if (canReplaceDraft()) await action(async () => { setBundle(await api.package(reference), reference); definitionOpen.value = true }) }
 async function inspect(op) {
   const revision = ++statusRevision
   const result = await api.packageRun(op)
@@ -50,6 +54,7 @@ async function continueConversation() {
     setBundle(bundle, previous.ref)
     selectedAgent.value = previous.agent_id || runs.value.find(r => r.operation === previous.operation)?.agent || selectedAgent.value
     sessionId.value = previous.run.session_id
+    runOpen.value = true
     content.value = ''; message.value = '已选择原版本和会话，请输入下一轮任务。'
   })
 }
@@ -61,13 +66,13 @@ async function control(kind) {
   })
 }
 async function save() {
-  await action(async () => { const result = await api.savePackage(JSON.parse(editor.value)); savedRef.value = result.ref; savedText.value = editor.value; message.value = '版本已保存'; await refresh() })
+  await action(async () => { const result = await api.savePackage(JSON.parse(editor.value)); savedRef.value = result.ref; savedText.value = editor.value; message.value = '版本已保存'; await refresh(); definitionOpen.value = false })
 }
 async function run() {
   await action(async () => {
     const id = `${Date.now()}-${crypto.randomUUID()}`
     await api.runPackage({ ref: savedRef.value, agent_id: selectedAgent.value, content: content.value, operation: id, session_id: sessionId.value || null })
-    await inspect(id); await refresh()
+    await inspect(id); await refresh(); runOpen.value = false
   })
 }
 async function activate(row) {
@@ -92,31 +97,17 @@ onUnmounted(() => { disposed = true; statusRevision++; clearInterval(timer) })
 <template>
   <section class="studio">
     <h1>Agent Studio</h1>
-    <p>编辑完整定义，保存不可变版本，再运行和处理多轮反馈。模型填写当前用户的模型 ID；默认模型用 default。</p>
     <p role="alert" v-if="error" class="error">{{ error }}</p><p role="status">{{ message }}</p>
     <fieldset :disabled="busy">
       <legend>定义与版本</legend>
-      <label>导入现有 Agent <select v-model="importId"><option value="">空白模板</option><option v-for="a in agents" :key="a.id" :value="a.id">{{ a.name }}</option></select></label>
-      <button @click="importDraft">导入为草稿</button>
-      <label class="editor">完整包定义<textarea aria-label="完整包定义" v-model="editor" spellcheck="false" rows="22" /></label>
-      <button @click="action(async () => { const r = await api.validatePackage(JSON.parse(editor)); message = JSON.stringify(r, null, 2) })">验证与资源检查</button>
-      <button @click="save">保存版本</button>
-      <details><summary>宿主能力与完整 Schema</summary><pre>{{ JSON.stringify(schema, null, 2) }}</pre></details>
-      <h2>版本库</h2>
+      <div class="list-toolbar"><h2>版本库</h2><button class="btn cta" @click="startNew">新增定义</button></div>
       <ul><li v-for="p in packages" :key="p.ref">{{ p.package }} · {{ p.version }} {{ p.active ? '（活动）' : '' }} <button @click="load(p.ref)">打开</button><button @click="activate(p)">切换到此版本</button></li></ul>
       <button :disabled="offset === 0" @click="action(async () => { offset -= 50; await refresh() })">上一页</button>
       <button :disabled="packages.length < 50" @click="action(async () => { offset += 50; await refresh() })">下一页</button>
-      <label>复制为新包 <input v-model="forkId" placeholder="新包 ID" /></label><input aria-label="新版本" v-model="forkVersion" />
-      <button :disabled="!clean || !forkId" @click="action(async () => { const r = await api.forkPackage(savedRef, forkId, forkVersion); setBundle(await api.package(r.ref), r.ref); await refresh() })">复制已保存版本</button>
     </fieldset>
     <fieldset :disabled="busy">
       <legend>运行与多轮反馈</legend>
-      <label>入口 Agent <select v-model="selectedAgent"><option v-for="id in definitions" :key="id">{{ id }}</option></select></label>
-      <label>任务<textarea v-model="content" rows="3" /></label>
-      <label>续接 Session（留空新建）<input v-model="sessionId" /></label>
-      <button :disabled="!clean || !content.trim()" @click="run">运行已保存版本</button>
-      <p v-if="!clean">运行前请先保存当前定义。</p>
-      <h2>任务历史</h2><ul><li v-for="r in runs" :key="r.operation"><button @click="action(() => inspect(r.operation))">{{ r.operation }} · {{ r.agent }}</button></li></ul>
+      <div class="list-toolbar"><h2>任务历史</h2><button class="btn cta" :disabled="!savedRef" @click="runOpen = true">新增任务</button></div><ul><li v-for="r in runs" :key="r.operation"><button @click="action(() => inspect(r.operation))">{{ r.operation }} · {{ r.agent }}</button></li></ul>
       <button :disabled="runOffset === 0" @click="action(async () => { runOffset -= 50; await refresh() })">上一页任务</button>
       <button :disabled="runs.length < 50" @click="action(async () => { runOffset += 50; await refresh() })">下一页任务</button>
       <template v-if="operation">
@@ -129,6 +120,25 @@ onUnmounted(() => { disposed = true; statusRevision++; clearInterval(timer) })
         <details><summary>运行详情</summary><pre aria-label="运行结果">{{ JSON.stringify(status, null, 2) }}</pre></details>
       </template>
     </fieldset>
+    <FormDrawer v-model="definitionOpen" title="定义与版本" :busy="busy">
+      <fieldset :disabled="busy">      <label>导入现有 Agent <select v-model="importId"><option value="">空白模板</option><option v-for="a in agents" :key="a.id" :value="a.id">{{ a.name }}</option></select></label>
+      <button @click="importDraft">导入为草稿</button>
+      <label class="editor">完整包定义<textarea aria-label="完整包定义" v-model="editor" spellcheck="false" rows="22" /></label>
+      <button @click="action(async () => { const r = await api.validatePackage(JSON.parse(editor)); message = JSON.stringify(r, null, 2) })">验证与资源检查</button>
+      <button @click="save">保存版本</button>
+      <details><summary>宿主能力与完整 Schema</summary><pre>{{ JSON.stringify(schema, null, 2) }}</pre></details>
+      <label>复制为新包 <input v-model="forkId" placeholder="新包 ID" /></label><input aria-label="新版本" v-model="forkVersion" />
+      <button :disabled="!clean || !forkId" @click="action(async () => { const r = await api.forkPackage(savedRef, forkId, forkVersion); setBundle(await api.package(r.ref), r.ref); await refresh() })">复制已保存版本</button>
+      </fieldset>
+    </FormDrawer>
+    <FormDrawer v-model="runOpen" title="新增任务" :busy="busy">
+      <fieldset :disabled="busy">      <label>入口 Agent <select v-model="selectedAgent"><option v-for="id in definitions" :key="id">{{ id }}</option></select></label>
+      <label>任务<textarea v-model="content" rows="3" /></label>
+      <label>续接 Session（留空新建）<input v-model="sessionId" /></label>
+      <button :disabled="!clean || !content.trim()" @click="run">运行已保存版本</button>
+      <p v-if="!clean">运行前请先保存当前定义。</p>
+      </fieldset>
+    </FormDrawer>
   </section>
 </template>
 

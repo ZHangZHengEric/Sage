@@ -25,7 +25,7 @@ def test_admin_can_see_all_users_threads_and_models(client: TestClient):
             "threadId": "thread-alice",
             "runId": "run-alice",
             "messages": [{"id": "m1", "role": "user", "content": "hello"}],
-            "forwardedProps": {"agentId": "main"},
+            "forwardedProps": {},
         },
         headers={"Authorization": f"Bearer {alice}"},
     )

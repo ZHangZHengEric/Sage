@@ -1,6 +1,9 @@
 <script setup>
 import { computed, onMounted, ref } from 'vue'
 import { api } from '../api.js'
+import FormDrawer from '../components/FormDrawer.vue'
+
+const drawerOpen = ref(false)
 
 const peers = ref([])
 const error = ref('')
@@ -42,6 +45,7 @@ async function save() {
     editing.value = ''
     form.value = emptyForm()
     await refresh()
+    drawerOpen.value = false
   } catch (exc) {
     error.value = exc.message
   } finally {
@@ -50,6 +54,8 @@ async function save() {
 }
 
 function edit(item) {
+  drawerOpen.value = true
+  error.value = ''
   editing.value = item.name
   form.value = {
     name: item.name,
@@ -61,6 +67,8 @@ function edit(item) {
 }
 
 function startNew() {
+  drawerOpen.value = true
+  error.value = ''
   editing.value = ''
   form.value = emptyForm()
 }
@@ -116,6 +124,41 @@ onMounted(async () => {
     <header class="page-head">
       <h1>A2A</h1>
     </header>
+    <div class="panel stack">
+      <div class="list-toolbar"><h2>可委派</h2><button class="btn cta" type="button" :disabled="pending" @click="startNew">新增远端智能体</button></div>
+      <p v-if="error && !drawerOpen" class="error" role="alert">{{ error }}</p>
+      <p v-if="!hasPeers" class="empty">
+        还没有远端智能体。添加后每个技能会成为一个 <code>a2a_&lt;名称&gt;_&lt;技能&gt;</code> 工具。
+      </p>
+      <table v-else>
+        <thead>
+          <tr><th>名称</th><th>凭据</th><th>技能</th><th></th></tr>
+        </thead>
+        <tbody>
+          <tr v-for="item in peers" :key="item.name">
+            <td>
+              {{ item.name }}
+              <span v-if="item.disabled" class="muted">（已停用）</span>
+              <div class="muted">{{ item.description || item.url }}</div>
+            </td>
+            <td class="muted">{{ item.has_api_key ? '已保存' : '无' }}</td>
+            <td class="muted">{{ (item.skills || []).join(', ') || '未刷新' }}</td>
+            <td class="row">
+              <button class="btn ghost" type="button" @click="refreshSkills(item.name)">刷新技能</button>
+              <button class="btn ghost" type="button" @click="toggle(item)">
+                {{ item.disabled ? '启用' : '停用' }}
+              </button>
+              <button class="btn ghost" type="button" @click="edit(item)">编辑</button>
+              <button class="btn ghost" type="button" @click="remove(item.name)">删除</button>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+      <p class="muted">
+        委派会把消息发给另一个组织，撤不回来，所以第一次调用会先在对话里请求批准。
+      </p>
+    </div>
+    <FormDrawer v-model="drawerOpen" :title="editing ? '编辑远端智能体' : '新增远端智能体'" :busy="pending">
     <form class="panel" @submit.prevent="save">
       <label class="field">
         <span>名称</span>
@@ -151,38 +194,6 @@ onMounted(async () => {
         <button v-if="editing" class="btn ghost" type="button" @click="startNew">新建另一个</button>
       </div>
     </form>
-    <div class="panel stack">
-      <h2>可委派</h2>
-      <p v-if="!hasPeers" class="empty">
-        还没有远端智能体。添加后每个技能会成为一个 <code>a2a_&lt;名称&gt;_&lt;技能&gt;</code> 工具。
-      </p>
-      <table v-else>
-        <thead>
-          <tr><th>名称</th><th>凭据</th><th>技能</th><th></th></tr>
-        </thead>
-        <tbody>
-          <tr v-for="item in peers" :key="item.name">
-            <td>
-              {{ item.name }}
-              <span v-if="item.disabled" class="muted">（已停用）</span>
-              <div class="muted">{{ item.description || item.url }}</div>
-            </td>
-            <td class="muted">{{ item.has_api_key ? '已保存' : '无' }}</td>
-            <td class="muted">{{ (item.skills || []).join(', ') || '未刷新' }}</td>
-            <td class="row">
-              <button class="btn ghost" type="button" @click="refreshSkills(item.name)">刷新技能</button>
-              <button class="btn ghost" type="button" @click="toggle(item)">
-                {{ item.disabled ? '启用' : '停用' }}
-              </button>
-              <button class="btn ghost" type="button" @click="edit(item)">编辑</button>
-              <button class="btn ghost" type="button" @click="remove(item.name)">删除</button>
-            </td>
-          </tr>
-        </tbody>
-      </table>
-      <p class="muted">
-        委派会把消息发给另一个组织，撤不回来，所以第一次调用会先在对话里请求批准。
-      </p>
-    </div>
+    </FormDrawer>
   </section>
 </template>

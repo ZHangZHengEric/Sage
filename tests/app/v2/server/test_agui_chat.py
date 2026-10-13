@@ -36,7 +36,7 @@ def _run_input(thread_id: str = "thread-1", run_id: str = "run-1") -> dict:
         "messages": [{"id": "m1", "role": "user", "content": "hello"}],
         "tools": [],
         "context": [],
-        "forwardedProps": {"agentId": "main"},
+        "forwardedProps": {},
     }
 
 

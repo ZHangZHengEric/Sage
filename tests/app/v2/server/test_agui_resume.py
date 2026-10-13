@@ -153,7 +153,7 @@ def test_a_thread_that_is_not_waiting_cannot_be_resumed(tmp_path):
                 "messages": [{"id": "m1", "role": "user", "content": "hello"}],
                 "tools": [],
                 "context": [],
-                "forwardedProps": {"agentId": "main"},
+                "forwardedProps": {},
             },
             headers={"Authorization": f"Bearer {token}"},
         )

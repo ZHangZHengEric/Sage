@@ -65,3 +65,16 @@ def test_an_unreachable_mcp_transport_is_refused_before_it_reaches_a_chat(client
     assert no_url.status_code == 422
     assert "URL" in no_url.json()["message"]
     assert client.get("/api/mcp", headers=headers).json()["data"] == []
+
+
+def test_client_cannot_choose_or_overwrite_an_agent_id(client):
+    token = register_and_login(client)
+    headers = {"Authorization": f"Bearer {token}"}
+    original = client.get('/api/agents', headers=headers).json()['data'][0]
+    response = client.post('/api/agents', headers=headers,
+                           json={'id': original['id'], 'name': 'Overwrite'})
+    assert response.status_code == 422
+    response = client.put(f"/api/agents/{original['id']}", headers=headers,
+                          json={'id': 'renamed', 'name': 'Overwrite'})
+    assert response.status_code == 422
+    assert client.get('/api/agents', headers=headers).json()['data'][0] == original
