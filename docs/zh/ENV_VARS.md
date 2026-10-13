@@ -26,6 +26,8 @@ ref: v2-ENV_VARS
 | `SAGE_SERVER_ADMIN_USERNAME` | `admin` (初始管理员) |
 | `SAGE_SERVER_ADMIN_PASSWORD` | `admin12345` (部署前修改) |
 | `SAGE_SERVER_EXECUTION_SHELL_MODE` | `sandboxed`；可选 `ask` / `sandboxed` / `deny` |
+| `SAGE_SERVER_LINUX_EXECUTION_UID` | 默认未设置；Linux 沙箱执行用户 ID。须与 GID 一起设置，两者均须为 `1` 至 `4294967294` 的整数（非 root）。 |
+| `SAGE_SERVER_LINUX_EXECUTION_GID` | 默认未设置；Linux 沙箱执行组 ID。须与 UID 一起设置，两者均须为 `1` 至 `4294967294` 的整数（非 root）。 |
 | `SAGE_SERVER_APPROVAL_TIMEOUT_SECONDS` | `86400` 秒 |
 | `SAGE_SERVER_MAX_CONCURRENT_RUNS` | `8` |
 | `SAGE_SERVER_MAX_CONCURRENT_RUNS_PER_USER` | `2` |

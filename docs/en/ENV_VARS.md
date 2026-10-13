@@ -26,6 +26,8 @@ ref: v2-ENV_VARS
 | `SAGE_SERVER_ADMIN_USERNAME` | `admin` (initial administrator) |
 | `SAGE_SERVER_ADMIN_PASSWORD` | `admin12345` (replace before deployment) |
 | `SAGE_SERVER_EXECUTION_SHELL_MODE` | `sandboxed`; `ask` / `sandboxed` / `deny` |
+| `SAGE_SERVER_LINUX_EXECUTION_UID` | Unset; Linux sandbox execution user ID. Set together with GID; both must be integers from `1` to `4294967294` (non-root). |
+| `SAGE_SERVER_LINUX_EXECUTION_GID` | Unset; Linux sandbox execution group ID. Set together with UID; both must be integers from `1` to `4294967294` (non-root). |
 | `SAGE_SERVER_APPROVAL_TIMEOUT_SECONDS` | `86400` seconds |
 | `SAGE_SERVER_MAX_CONCURRENT_RUNS` | `8` |
 | `SAGE_SERVER_MAX_CONCURRENT_RUNS_PER_USER` | `2` |
