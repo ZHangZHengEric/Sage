@@ -16,6 +16,24 @@
 
 ## Docker Compose
 
+### 仅 Web 和后端（连接外部 MySQL）
+
+独立配置 `deploy/standalone/docker-compose.yml` 只包含 `sage-server` 和 `sage-web`，容器名分别为 `sage-server_v2` 和 `sage-web_v2`，沿用 v1 镜像入口。后端连接单独部署的 MySQL；Compose 自动创建项目网络，无需 shared 或 Ling 网络。
+
+在仓库根目录执行：
+
+```bash
+cp deploy/standalone/.env.example deploy/standalone/.env
+# 编辑 .env，配置外部 MySQL 地址、账号、管理员密码和各项密钥
+docker compose --env-file deploy/standalone/.env -f deploy/standalone/docker-compose.yml -p sage_standalone up -d --build
+```
+
+访问 `http://localhost:32001/sage/`，后端端口为 `32000`。可通过 `.env` 中的 `SAGE_WEB_PORT`、`SAGE_SERVER_PORT` 修改端口。示例允许本机 HTTP 登录；部署到 HTTPS 时将 `SAGE_SESSION_COOKIE_SECURE` 改为 `true`。`SAGE_ROOT` 的相对路径以 `deploy/standalone/` 为基准。
+
+此配置不启动 MySQL、Redis、RustFS 或观测服务。通过 `SAGE_MYSQL_HOST`、`SAGE_MYSQL_PORT` 及数据库账号连接你单独部署的 MySQL；同机数据库可使用 `host.docker.internal` 和宿主机映射端口，远程数据库填写可访问的 IP 或域名，不要使用容器内的 `localhost`。需要文件上传时，在 `.env` 配置可访问的外部 S3 服务。此入口直接使用上述 Docker Compose 命令，不经过 `deploy/compose.sh`。
+
+### 完整环境部署
+
 先按目标环境创建 `.env`：
 
 ```bash
