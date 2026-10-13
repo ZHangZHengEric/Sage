@@ -25,12 +25,14 @@
 ```bash
 cp deploy/standalone/.env.example deploy/standalone/.env
 # 编辑 .env，配置外部 MySQL 地址、账号、管理员密码和各项密钥
-docker compose --env-file deploy/standalone/.env -f deploy/standalone/docker-compose.yml -p sage_standalone up -d --build
+deploy/compose_v2.sh up -d --build
 ```
+
+`deploy/compose_v2.sh` 默认读取 `deploy/standalone/.env`，可用 `ENV_FILE=/path/to/.env` 指定其他配置；项目名默认为 `sage_standalone`，可用 `SAGE_COMPOSE_PROJECT_NAME` 覆盖。支持透传 Compose 参数，例如 `deploy/compose_v2.sh down`、`deploy/compose_v2.sh logs -f sage-server`。脚本可从任意工作目录调用。
 
 访问 `http://localhost:32001/sage/`，后端端口为 `32000`。可通过 `.env` 中的 `SAGE_WEB_PORT`、`SAGE_SERVER_PORT` 修改端口。示例允许本机 HTTP 登录；部署到 HTTPS 时将 `SAGE_SESSION_COOKIE_SECURE` 改为 `true`。`SAGE_ROOT` 的相对路径以 `deploy/standalone/` 为基准。
 
-此配置不启动 MySQL、Redis、RustFS 或观测服务。通过 `SAGE_MYSQL_HOST`、`SAGE_MYSQL_PORT` 及数据库账号连接你单独部署的 MySQL；同机数据库可使用 `host.docker.internal` 和宿主机映射端口，远程数据库填写可访问的 IP 或域名，不要使用容器内的 `localhost`。需要文件上传时，在 `.env` 配置可访问的外部 S3 服务。此入口直接使用上述 Docker Compose 命令，不经过 `deploy/compose.sh`。
+此配置不启动 MySQL、Redis、RustFS 或观测服务。通过 `SAGE_MYSQL_HOST`、`SAGE_MYSQL_PORT` 及数据库账号连接你单独部署的 MySQL；同机数据库可使用 `host.docker.internal` 和宿主机映射端口，远程数据库填写可访问的 IP 或域名，不要使用容器内的 `localhost`。需要文件上传时，在 `.env` 配置可访问的外部 S3 服务。此入口通过 `deploy/compose_v2.sh` 调用独立 Compose，不经过 `deploy/compose.sh`。
 
 ### 完整环境部署
 
