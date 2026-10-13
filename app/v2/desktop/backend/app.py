@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from app.v2.desktop.backend.rsi import RsiStart, RsiApply
+
 import asyncio
 import base64
 import binascii
@@ -137,7 +139,7 @@ def create_app(
         raise ValueError("Desktop sidecar auth token must not be empty")
     runtime_service = service or DesktopV2Service()
     terminals = terminal_manager or TerminalSessionManager()
-    client_leases = SidecarClientLeases(ttl_seconds=client_lease_ttl_seconds)
+    client_leases = SidecarClientLeases(ttl_seconds=client_lease_ttl_seconds, keep_alive=lambda: getattr(runtime_service, "rsi_active", False))
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
@@ -410,6 +412,30 @@ def create_app(
                 runtime_service.create_agent(value, get_desktop_user_id(request))
             )
         )
+
+    @app.get("/api/v2/agents/{agent_id}/rsi")
+    async def rsi_history(agent_id: str, request: Request):
+        return _success(await _safe(runtime_service.rsi_history(agent_id, get_desktop_user_id(request))))
+
+    @app.post("/api/v2/agents/{agent_id}/rsi")
+    async def rsi_start(agent_id: str, value: RsiStart, request: Request):
+        return _success(await _safe(runtime_service.start_rsi(agent_id, value, get_desktop_user_id(request))))
+
+    @app.get("/api/v2/agents/{agent_id}/rsi/runs/{run_id}")
+    async def rsi_run(agent_id: str, run_id: str, request: Request, after_sequence: int = 0):
+        return _success(await _safe(runtime_service.rsi_run(agent_id, run_id, get_desktop_user_id(request), after_sequence=after_sequence)))
+
+    @app.post("/api/v2/agents/{agent_id}/rsi/runs/{run_id}/cancel")
+    async def rsi_cancel(agent_id: str, run_id: str, request: Request):
+        return _success(await _safe(runtime_service.cancel_rsi(agent_id, run_id, get_desktop_user_id(request))))
+
+    @app.get("/api/v2/agents/{agent_id}/rsi/versions/{version_id}")
+    async def rsi_version(agent_id: str, version_id: str, request: Request):
+        return _success(await _safe(runtime_service.rsi_version(agent_id, version_id, get_desktop_user_id(request))))
+
+    @app.post("/api/v2/agents/{agent_id}/rsi/versions/{version_id}/apply")
+    async def rsi_apply(agent_id: str, version_id: str, value: RsiApply, request: Request):
+        return _success(await _safe(runtime_service.apply_rsi_version(agent_id, version_id, value, get_desktop_user_id(request))))
 
     @app.get("/api/v2/agents/{agent_id}/skills")
     async def list_skills(agent_id: str, request: Request):

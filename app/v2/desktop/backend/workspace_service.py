@@ -359,12 +359,36 @@ class DesktopWorkspaceServiceMixin:
         if initialize is not None:
             await initialize(user_id)
 
-    def _skill_provider(self) -> FilesystemSkillProvider:
+    def _skill_provider(self, agent=None) -> FilesystemSkillProvider:
         module_path = Path(__file__).resolve()
         source_skills = module_path.parents[3] / "skills"
         bundled_skills = module_path.parents[4] / "skills"
         builtin_skills = source_skills if source_skills.is_dir() else bundled_skills
-        return FilesystemSkillProvider((self.skill_root, builtin_skills))
+        roots = (self.skill_root, builtin_skills)
+        if agent is not None and agent.config.get("rsiPackage"):
+            from sagents.v2.agent.management import AgentPackageBundle
+            bundle = AgentPackageBundle.model_validate(agent.config["rsiPackage"])
+            # Content-addressed, per-agent overlay. Never overwrite shared Skills.
+            import hashlib
+            import json
+            asset_identity = hashlib.sha256(json.dumps(agent.config.get("rsiAssets") or {}, sort_keys=True).encode()).hexdigest()
+            overlay = self.runtime_root / "agent-packages" / f"{bundle.content_hash}-{asset_identity}"
+            for name, content in bundle.files.items():
+                target = overlay / name
+                if not target.exists():
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    target.write_text(content, encoding="utf-8")
+            import base64
+            assets = agent.config.get("rsiAssets") or {}
+            # Reuse package path validation before materializing binary resources.
+            AgentPackageBundle(manifest=bundle.manifest, files=assets)
+            for name, content in assets.items():
+                target = overlay / name
+                if not target.exists():
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    target.write_bytes(base64.b64decode(content, validate=True))
+            roots = (overlay / "skills", *roots)
+        return FilesystemSkillProvider(roots)
 
     def _imported_skill_root(self, skill_name: str) -> Path | None:
         if not _SKILL_NAME.fullmatch(skill_name):

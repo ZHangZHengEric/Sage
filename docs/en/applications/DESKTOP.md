@@ -53,3 +53,7 @@ Settings save automatically. Model and Agent settings are not overridden by envi
 Desktop v2 does not import v1 data. [Sage 2.0.0](https://github.com/ZHangZHengEric/Sage/releases/tag/v2.0.0) installers are built by GitHub Actions from the Flutter v2 client and include Python and the v2 backend. The older Tauri releases remain v1. macOS packages use ad-hoc signing and are not notarized; Windows packages are not code-signed.
 
 [Component reference](https://github.com/ZHangZHengEric/Sage/blob/main/app/v2/desktop/README.md) · [Troubleshooting](../TROUBLESHOOTING.md)
+
+## RSI and Agent versions
+
+[RSI workflow, editable scope, audits and version confirmation](RSI.md).

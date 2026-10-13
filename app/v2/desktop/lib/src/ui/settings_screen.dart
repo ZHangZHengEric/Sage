@@ -14,6 +14,7 @@ import '../state/workspace_controller.dart';
 import 'shared/desktop_shell.dart';
 import 'shared/desktop_notice.dart';
 import 'usage_overview.dart';
+import 'rsi_screen.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({
@@ -51,6 +52,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
   String? _deletingAgentId;
   String _settingsAgentId = '';
   String _syncedAgentId = '';
+  AgentConfiguration? _rsiAgent;
+  bool _rsiHistoryOnly = false;
   Timer? _debounce;
   Timer? _agentTextDebounce;
   final Map<String, Object?> _pendingAgentText = {};
@@ -302,6 +305,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
   }
 
+  Future<void> _openRsi(AgentConfiguration agent, {bool historyOnly = false}) async {
+    await _flushAgentText();
+    if (!mounted) return;
+    setState(() {
+      _rsiAgent = agent;
+      _rsiHistoryOnly = historyOnly;
+    });
+  }
+
   Future<void> _saveAgent(Map<String, Object?> patch) async {
     setState(() => _saving = true);
     try {
@@ -519,6 +531,24 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final controller = widget.controller;
     final agent = controller.agentConfiguration;
     if (agent != null) _syncAgentControllers(agent);
+    final rsiAgent = _rsiAgent;
+    if (rsiAgent != null) {
+      return RsiScreen(
+        key: ValueKey('settings-rsi-${rsiAgent.id}'),
+        controller: controller,
+        agentId: rsiAgent.id,
+        agentName: rsiAgent.name,
+        historyOnly: _rsiHistoryOnly,
+        onBack: () => setState(() {
+          _rsiAgent = null;
+          _syncedAgentId = '';
+        }),
+        frameBuilder: (title, action, body) => _SettingsContent(
+          title: title, action: action, fillRemaining: true, children: [body],
+        ),
+        fieldBuilder: (label, control) => _SettingsRow(label: label, control: control),
+      );
+    }
     return switch (_section) {
       0 => UsageOverviewSettings(controller: widget.controller),
       1 => _general(),
@@ -1018,7 +1048,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             for (final value in widget.controller.agents)
               _SettingsChoice(
                 id: value.id,
-                label: value.name,
+                label: value.rsiStatus == null ? value.name : '${value.name} · RSI',
                 marked: _draft.defaultAgentId?.isNotEmpty == true
                     ? value.id == _draft.defaultAgentId
                     : value.isDefault,
@@ -1054,12 +1084,26 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   children: [
                     Align(
                       alignment: Alignment.centerRight,
-                      child: TextButton.icon(
+                      child: Wrap(spacing: 10, crossAxisAlignment: WrapCrossAlignment.center, children: [
+                        _SettingsActionButton(
+                          key: const ValueKey('settings-agent-rsi'),
+                          onTap: _saving || _editingAgent ? null : () => _openRsi(agent),
+                          icon: const Icon(CupertinoIcons.arrow_2_circlepath, size: 15),
+                          label: 'RSI',
+                        ),
+                        _SettingsActionButton(
+                          key: const ValueKey('settings-agent-history'),
+                          onTap: _saving || _editingAgent ? null : () => _openRsi(agent, historyOnly: true),
+                          icon: const Icon(CupertinoIcons.clock, size: 15),
+                          label: context.l10n.languageCode == 'zh' ? '版本历史' : 'Version history',
+                          width: 116,
+                        ),
+                        TextButton.icon(
                         key: const ValueKey('settings-agent-clone'),
                         onPressed: _saving ? null : () => _createAgent(sourceId: agent.id),
                         icon: const Icon(CupertinoIcons.doc_on_doc, size: 16),
                         label: Text(context.l10n.text('common.copy')),
-                      ),
+                      ),]),
                     ),
                     _SettingsRowGroup(
                       children: [
@@ -1072,6 +1116,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           onChanged: (_) => _saveAgentTextLater('name', _name),
                         ),
                         _AgentTextRow(
+                          fieldKey: const ValueKey('agent-description-field'),
                           label: context.l10n.text('common.description'),
                           value: agent.description,
                           controller: _description,
@@ -1654,7 +1699,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
     if (value == _navItems(context).length - 1) {
       widget.controller.loadArchivedConversations();
     }
-    setState(() => _section = value);
+    setState(() {
+      _section = value;
+      _rsiAgent = null;
+    });
   }
 
   @override
@@ -3592,55 +3640,66 @@ class _NavButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = Theme.of(context).colorScheme;
-    return Padding(
-      padding: compact
-          ? const EdgeInsets.symmetric(horizontal: 2, vertical: 8)
-          : const EdgeInsets.only(bottom: 3),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(8),
-        onTap: onTap,
-        child: Container(
-          height: 36,
-          padding: const EdgeInsets.symmetric(horizontal: 10),
-          decoration: BoxDecoration(
-            color: selected
-                ? colors.onSurface.withValues(alpha: 0.1)
-                : Colors.transparent,
-            borderRadius: BorderRadius.circular(8),
-          ),
-          child: Row(
-            mainAxisSize: compact ? MainAxisSize.min : MainAxisSize.max,
-            children: [
-              Icon(
-                icon,
-                size: 17,
-                color: selected ? colors.primary : colors.onSurfaceVariant,
-              ),
-              const SizedBox(width: 10),
-              if (compact)
-                ConstrainedBox(
-                  constraints: const BoxConstraints(maxWidth: 160),
-                  child: Text(
-                    label,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                      fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
-                    ),
-                  ),
-                )
-              else
-                Expanded(
-                  child: Text(
-                    label,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                      fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
-                    ),
-                  ),
+    return Semantics(
+      button: true,
+      selected: selected,
+      label: label,
+      onTap: onTap,
+      excludeSemantics: true,
+      child: Padding(
+        padding: compact
+            ? const EdgeInsets.symmetric(horizontal: 2, vertical: 8)
+            : const EdgeInsets.only(bottom: 3),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(8),
+          onTap: onTap,
+          child: Container(
+            height: 36,
+            padding: const EdgeInsets.symmetric(horizontal: 10),
+            decoration: BoxDecoration(
+              color: selected
+                  ? colors.onSurface.withValues(alpha: 0.1)
+                  : Colors.transparent,
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Row(
+              mainAxisSize: compact ? MainAxisSize.min : MainAxisSize.max,
+              children: [
+                Icon(
+                  icon,
+                  size: 17,
+                  color: selected ? colors.primary : colors.onSurfaceVariant,
                 ),
-            ],
+                const SizedBox(width: 10),
+                if (compact)
+                  ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 160),
+                    child: Text(
+                      label,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                        fontWeight: selected
+                            ? FontWeight.w600
+                            : FontWeight.w500,
+                      ),
+                    ),
+                  )
+                else
+                  Expanded(
+                    child: Text(
+                      label,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                        fontWeight: selected
+                            ? FontWeight.w600
+                            : FontWeight.w500,
+                      ),
+                    ),
+                  ),
+              ],
+            ),
           ),
         ),
       ),
@@ -3958,6 +4017,8 @@ class _SettingsActionButton extends StatelessWidget {
     button: true,
     enabled: onTap != null,
     label: label,
+    onTap: onTap,
+    excludeSemantics: true,
     child: IgnorePointer(
       ignoring: onTap == null,
       child: AnimatedOpacity(
@@ -4374,94 +4435,103 @@ class _SettingsChoiceButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = Theme.of(context).colorScheme;
-    return Padding(
-      padding: EdgeInsets.zero,
-      child: GestureDetector(
-        behavior: HitTestBehavior.opaque,
-        onSecondaryTapDown: onSetDefault == null
-            ? null
-            : (details) => _showContextMenu(context, details),
-        child: InkWell(
-          borderRadius: BorderRadius.circular(11),
-          mouseCursor: SystemMouseCursors.click,
-          onTap: onTap,
-          child: AnimatedContainer(
-            duration: const Duration(milliseconds: 180),
-            curve: Curves.easeOutCubic,
-            constraints: const BoxConstraints(minHeight: 46),
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-            decoration: BoxDecoration(
-              color: selected
-                  ? colors.onSurface.withValues(alpha: 0.1)
-                  : Colors.transparent,
-              borderRadius: BorderRadius.circular(11),
-            ),
-            child: Row(
-              children: [
-                Icon(
-                  selected
-                      ? CupertinoIcons.checkmark_circle_fill
-                      : CupertinoIcons.circle,
-                  size: 15,
-                  color: selected ? colors.primary : colors.onSurfaceVariant,
-                ),
-                const SizedBox(width: 9),
-                Expanded(
-                  child: Text(
-                    item.label,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                      fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
+    return Semantics(
+      button: true,
+      selected: selected,
+      onTap: onTap,
+      child: Padding(
+        padding: EdgeInsets.zero,
+        child: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onSecondaryTapDown: onSetDefault == null
+              ? null
+              : (details) => _showContextMenu(context, details),
+          child: InkWell(
+            borderRadius: BorderRadius.circular(11),
+            mouseCursor: SystemMouseCursors.click,
+            excludeFromSemantics: true,
+            onTap: onTap,
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 180),
+              curve: Curves.easeOutCubic,
+              constraints: const BoxConstraints(minHeight: 46),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              decoration: BoxDecoration(
+                color: selected
+                    ? colors.onSurface.withValues(alpha: 0.1)
+                    : Colors.transparent,
+                borderRadius: BorderRadius.circular(11),
+              ),
+              child: Row(
+                children: [
+                  Icon(
+                    selected
+                        ? CupertinoIcons.checkmark_circle_fill
+                        : CupertinoIcons.circle,
+                    size: 15,
+                    color: selected ? colors.primary : colors.onSurfaceVariant,
+                  ),
+                  const SizedBox(width: 9),
+                  Expanded(
+                    child: Text(
+                      item.label,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                        fontWeight: selected
+                            ? FontWeight.w600
+                            : FontWeight.w500,
+                      ),
                     ),
                   ),
-                ),
-                if (item.marked)
-                  Tooltip(
-                    message: context.l10n.text('settings.currentDefault'),
-                    child: Icon(
-                      CupertinoIcons.star_fill,
-                      size: 11,
-                      color: colors.primary,
+                  if (item.marked)
+                    Tooltip(
+                      message: context.l10n.text('settings.currentDefault'),
+                      child: Icon(
+                        CupertinoIcons.star_fill,
+                        size: 11,
+                        color: colors.primary,
+                      ),
                     ),
-                  ),
-                if (onRemove != null) ...[
-                  const SizedBox(width: 3),
-                  Semantics(
-                    button: true,
-                    label: context.l10n.text('settings.deleteNamed', {
-                      'name': item.label,
-                    }),
-                    child: item.busy
-                        ? const SizedBox.square(
-                            dimension: 30,
-                            child: Center(
-                              child: CupertinoActivityIndicator(radius: 7),
-                            ),
-                          )
-                        : Tooltip(
-                            message: context.l10n.text('settings.deleteNamed', {
-                              'name': item.label,
-                            }),
-                            child: InkWell(
-                              key: ValueKey(
-                                '${item.removeKeyPrefix}-${item.id}',
+                  if (onRemove != null) ...[
+                    const SizedBox(width: 3),
+                    Semantics(
+                      button: true,
+                      label: context.l10n.text('settings.deleteNamed', {
+                        'name': item.label,
+                      }),
+                      child: item.busy
+                          ? const SizedBox.square(
+                              dimension: 30,
+                              child: Center(
+                                child: CupertinoActivityIndicator(radius: 7),
                               ),
-                              borderRadius: BorderRadius.circular(7),
-                              onTap: onRemove,
-                              child: Padding(
-                                padding: const EdgeInsets.all(7),
-                                child: Icon(
-                                  CupertinoIcons.trash,
-                                  size: 14,
-                                  color: colors.error,
+                            )
+                          : Tooltip(
+                              message: context.l10n.text(
+                                'settings.deleteNamed',
+                                {'name': item.label},
+                              ),
+                              child: InkWell(
+                                key: ValueKey(
+                                  '${item.removeKeyPrefix}-${item.id}',
+                                ),
+                                borderRadius: BorderRadius.circular(7),
+                                onTap: onRemove,
+                                child: Padding(
+                                  padding: const EdgeInsets.all(7),
+                                  child: Icon(
+                                    CupertinoIcons.trash,
+                                    size: 14,
+                                    color: colors.error,
+                                  ),
                                 ),
                               ),
                             ),
-                          ),
-                  ),
+                    ),
+                  ],
                 ],
-              ],
+              ),
             ),
           ),
         ),

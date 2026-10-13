@@ -163,81 +163,78 @@ class _ThreadHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      height: desktopPaneHeaderHeight,
-      padding: EdgeInsets.only(left: railCollapsed ? 136 : 10, right: 18),
-      child: Row(
-        children: [
-          if (railCollapsed || compact) ...[
-            _HeaderIconButton(
-              keyValue: railCollapsed
-                  ? 'rail-expand-button'
-                  : 'rail-collapse-button',
-              icon: CupertinoIcons.sidebar_left,
-              tooltip: context.l10n.text(
-                railCollapsed
-                    ? 'workspace.expandSidebar'
-                    : 'workspace.collapseSidebar',
-              ),
-              semanticsLabel: context.l10n.text(
-                railCollapsed
-                    ? 'workspace.expandSidebar'
-                    : 'workspace.collapseSidebar',
-              ),
-              highlighted: railCollapsed,
-              onTap: onToggleRail,
-            ),
-            const SizedBox(width: 14),
-          ],
-          Expanded(
-            child: Text(
-              context.l10n.conversationTitle(conversation.title),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                fontSize: 15,
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-          ),
-          if (conversation.status != RunStatus.idle) ...[
-            _RunStatusChip(status: conversation.status),
-            const SizedBox(width: 4),
-          ],
-          if ({
-            RunStatus.starting,
-            RunStatus.running,
-          }.contains(conversation.status))
-            _HeaderIconButton(
-              icon: CupertinoIcons.pause,
-              onTap: controller.pause,
-            ),
-          if (conversation.status == RunStatus.suspended &&
-              conversation.pendingInteraction == null)
-            _HeaderIconButton(
-              icon: CupertinoIcons.play,
-              onTap: controller.resume,
-            ),
-          if ({
-            RunStatus.starting,
-            RunStatus.running,
-            RunStatus.suspending,
-            RunStatus.suspended,
-          }.contains(conversation.status))
-            _HeaderIconButton(
-              icon: CupertinoIcons.stop_fill,
-              onTap: controller.cancel,
-            ),
-          const SizedBox(width: 8),
+    return _PaneHeader(
+      railCollapsed: railCollapsed,
+      children: [
+        if (railCollapsed || compact) ...[
           _HeaderIconButton(
-            keyValue: workspaceCollapsed
-                ? 'canvas-expand-button'
-                : 'canvas-collapse-button',
-            icon: CupertinoIcons.sidebar_right,
-            onTap: onToggleWorkspace,
+            keyValue: railCollapsed
+                ? 'rail-expand-button'
+                : 'rail-collapse-button',
+            icon: CupertinoIcons.sidebar_left,
+            tooltip: context.l10n.text(
+              railCollapsed
+                  ? 'workspace.expandSidebar'
+                  : 'workspace.collapseSidebar',
+            ),
+            semanticsLabel: context.l10n.text(
+              railCollapsed
+                  ? 'workspace.expandSidebar'
+                  : 'workspace.collapseSidebar',
+            ),
+            highlighted: railCollapsed,
+            onTap: onToggleRail,
           ),
+          const SizedBox(width: 14),
         ],
-      ),
+        Expanded(
+          child: Text(
+            context.l10n.conversationTitle(conversation.title),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: Theme.of(context).textTheme.titleMedium?.copyWith(
+              fontSize: 15,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ),
+        if (conversation.status != RunStatus.idle) ...[
+          _RunStatusChip(status: conversation.status),
+          const SizedBox(width: 4),
+        ],
+        if ({
+          RunStatus.starting,
+          RunStatus.running,
+        }.contains(conversation.status))
+          _HeaderIconButton(
+            icon: CupertinoIcons.pause,
+            onTap: controller.pause,
+          ),
+        if (conversation.status == RunStatus.suspended &&
+            conversation.pendingInteraction == null)
+          _HeaderIconButton(
+            icon: CupertinoIcons.play,
+            onTap: controller.resume,
+          ),
+        if ({
+          RunStatus.starting,
+          RunStatus.running,
+          RunStatus.suspending,
+          RunStatus.suspended,
+        }.contains(conversation.status))
+          _HeaderIconButton(
+            icon: CupertinoIcons.stop_fill,
+            onTap: controller.cancel,
+          ),
+        const SizedBox(width: 8),
+        _HeaderIconButton(
+          keyValue: workspaceCollapsed
+              ? 'canvas-expand-button'
+              : 'canvas-collapse-button',
+          icon: CupertinoIcons.sidebar_right,
+          onTap: onToggleWorkspace,
+        ),
+      ],
     );
   }
 }

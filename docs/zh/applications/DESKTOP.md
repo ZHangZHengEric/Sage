@@ -51,3 +51,7 @@ Windows 或 Linux 使用 `-d windows`、`-d linux`。应用自动启动托管 Py
 Desktop v2 不导入 v1 数据。[Sage 2.0.0](https://github.com/ZHangZHengEric/Sage/releases/tag/v2.0.0) 安装包由 GitHub Actions 从 Flutter v2 客户端构建，包含 Python 与 v2 后端。旧 Tauri 发布仍属于 v1。macOS 包使用 ad-hoc 签名、未公证；Windows 包未做代码签名。
 
 [组件参考](https://github.com/ZHangZHengEric/Sage/blob/main/app/v2/desktop/README.md) · [故障排查](../TROUBLESHOOTING.md)
+
+## RSI 与 Agent 版本
+
+参见 [RSI 流程、优化范围、独立审查与版本确认](RSI.md)。

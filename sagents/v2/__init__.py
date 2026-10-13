@@ -11,9 +11,55 @@ Requires Python 3.12 or newer. The legacy Sage runtime remains 3.10+.
 from sagents.v2._lazy import exported_names, resolve_export
 
 _EXPORTS = {
-    "SelfConfigurationService": ("sagents.v2.agent.self_configuration", "SelfConfigurationService"),
-    "SelfConfigurationRequest": ("sagents.v2.agent.self_configuration", "SelfConfigurationRequest"),
-    "SqliteSelfConfigurationStore": ("sagents.v2.agent.self_configuration", "SqliteSelfConfigurationStore"),
+    "AgentPackageTestGenerator": (
+        "sagents.v2.optimization",
+        "AgentPackageTestGenerator",
+    ),
+    "OptimizationSuiteGeneration": (
+        "sagents.v2.optimization",
+        "OptimizationSuiteGeneration",
+    ),
+    "AgentPackageOptimizer": ("sagents.v2.optimization", "AgentPackageOptimizer"),
+    "IsolatedOptimizationRunner": (
+        "sagents.v2.optimization",
+        "IsolatedOptimizationRunner",
+    ),
+    "OptimizationAgent": ("sagents.v2.optimization", "OptimizationAgent"),
+    "OptimizationConstraints": ("sagents.v2.optimization", "OptimizationConstraints"),
+    "OptimizationCase": ("sagents.v2.optimization", "OptimizationCase"),
+    "OptimizationCaseTrial": ("sagents.v2.optimization", "OptimizationCaseTrial"),
+    "OptimizationSuiteIssue": ("sagents.v2.optimization", "OptimizationSuiteIssue"),
+    "OptimizationSuiteReview": ("sagents.v2.optimization", "OptimizationSuiteReview"),
+    "OptimizationSuiteReviewRejected": ("sagents.v2.optimization", "OptimizationSuiteReviewRejected"),
+    "OptimizationSuite": ("sagents.v2.optimization", "OptimizationSuite"),
+    "OptimizationFinalSuite": ("sagents.v2.optimization", "OptimizationFinalSuite"),
+    "OptimizationFinalVerification": (
+        "sagents.v2.optimization",
+        "OptimizationFinalVerification",
+    ),
+    "OptimizationProposalReview": (
+        "sagents.v2.optimization",
+        "OptimizationProposalReview",
+    ),
+    "OptimizationFinalSuiteGeneration": (
+        "sagents.v2.optimization",
+        "OptimizationFinalSuiteGeneration",
+    ),
+    "OptimizationIteration": ("sagents.v2.optimization", "OptimizationIteration"),
+    "OptimizationResult": ("sagents.v2.optimization", "OptimizationResult"),
+    "OptimizationReport": ("sagents.v2.optimization", "OptimizationReport"),
+    "SelfConfigurationService": (
+        "sagents.v2.agent.self_configuration",
+        "SelfConfigurationService",
+    ),
+    "SelfConfigurationRequest": (
+        "sagents.v2.agent.self_configuration",
+        "SelfConfigurationRequest",
+    ),
+    "SqliteSelfConfigurationStore": (
+        "sagents.v2.agent.self_configuration",
+        "SqliteSelfConfigurationStore",
+    ),
     "AgentManagementService": ("sagents.v2.agent.management", "AgentManagementService"),
     "AgentPackageBundle": ("sagents.v2.agent.management", "AgentPackageBundle"),
     "AgentPackageStore": ("sagents.v2.agent.management", "AgentPackageStore"),

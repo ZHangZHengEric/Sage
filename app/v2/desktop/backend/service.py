@@ -54,6 +54,7 @@ from sagents.v2.runtime.observability import (
 )
 from app.v2.desktop.backend.bindings import DesktopExecutionBindingProvider
 from app.v2.desktop.backend.composition import build_desktop_application
+from app.v2.desktop.backend.rsi import DesktopRsiMixin
 from app.v2.desktop.backend.catalog_service import DesktopCatalogServiceMixin
 from app.v2.desktop.backend.observability import create_desktop_log_sink
 from app.v2.desktop.backend.studio import DesktopStudioMixin, StudioStore
@@ -190,6 +191,7 @@ class _DesktopRecoveryAgent:
 
 
 class DesktopV2Service(
+    DesktopRsiMixin,
     DesktopStudioMixin,
     DesktopCatalogServiceMixin,
     DesktopRunServiceMixin,
@@ -226,6 +228,7 @@ class DesktopV2Service(
         self.runtime_root = self.root / "runtime"
         self.runtime_root.mkdir(parents=True, exist_ok=True)
         self.settings_path = self.runtime_root / "settings.json"
+        self._initialize_rsi()
         self.studio_store = StudioStore(self.runtime_root / "studios.sqlite3")
         self.extensions = builtin_extension_registry()
         self._workspace_initializations: dict[tuple[str, str, str], Path] = {}
@@ -471,6 +474,7 @@ class DesktopV2Service(
             self._closed = True
 
     async def _close_once(self) -> None:
+        await self._close_rsi()
         await self._stop_studio_delivery_worker()
         observers = tuple(self._run_observers.values())
         self._run_observers.clear()

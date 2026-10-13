@@ -42,6 +42,60 @@ class V2ApiClient {
   String? expectedBuildId;
   String? authToken;
 
+  String _rsiPath(String agentId) =>
+      '/api/v2/agents/${Uri.encodeComponent(agentId)}/rsi';
+
+  Future<Map<String, Object?>> rsiHistory(String agentId) async =>
+      (await _json('GET', _rsiPath(agentId)) as Map).cast<String, Object?>();
+
+  Future<Map<String, Object?>> startRsi(
+    String agentId,
+    Map<String, Object?> body,
+  ) async => (await _json('POST', _rsiPath(agentId), body: body) as Map)
+      .cast<String, Object?>();
+
+  Future<Map<String, Object?>> rsiRun(
+    String agentId,
+    String runId, {
+    int afterSequence = 0,
+  }) async =>
+      (await _json(
+                'GET',
+                '${_rsiPath(agentId)}/runs/${Uri.encodeComponent(runId)}?after_sequence=$afterSequence',
+              )
+              as Map)
+          .cast<String, Object?>();
+
+  Future<void> cancelRsi(String agentId, String runId) async {
+    await _json(
+      'POST',
+      '${_rsiPath(agentId)}/runs/${Uri.encodeComponent(runId)}/cancel',
+    );
+  }
+
+  Future<Map<String, Object?>> rsiVersion(
+    String agentId,
+    String versionId,
+  ) async =>
+      (await _json(
+                'GET',
+                '${_rsiPath(agentId)}/versions/${Uri.encodeComponent(versionId)}',
+              )
+              as Map)
+          .cast<String, Object?>();
+
+  Future<void> applyRsiVersion(
+    String agentId,
+    String versionId,
+    String fingerprint,
+  ) async {
+    await _json(
+      'POST',
+      '${_rsiPath(agentId)}/versions/${Uri.encodeComponent(versionId)}/apply',
+      body: {'confirmed': true, 'expected_fingerprint': fingerprint},
+    );
+  }
+
   Future<void> syncStudio(String studioId, Map<String, Object?> body) async {
     await _json(
       'PUT',

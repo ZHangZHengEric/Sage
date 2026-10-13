@@ -1,5 +1,25 @@
 part of '../workspace_screen.dart';
 
+class _PaneHeader extends StatelessWidget {
+  const _PaneHeader({required this.railCollapsed, required this.children});
+
+  final bool railCollapsed;
+  final List<Widget> children;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      // In the desktop row, a hidden rail exposes the native window controls.
+      // In the compact column, an open rail already sits above this header.
+      padding: EdgeInsets.only(left: railCollapsed ? 136 : 18, right: 24),
+      child: SizedBox(
+        height: desktopPaneHeaderHeight,
+        child: Row(children: children),
+      ),
+    );
+  }
+}
+
 class _GlassSurface extends StatelessWidget {
   const _GlassSurface({required this.child});
 
@@ -167,30 +187,36 @@ class _SidebarFooterAction extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = Theme.of(context).colorScheme;
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(14, 2, 14, 8),
-      child: InkWell(
-        key: const ValueKey('settings-button'),
-        borderRadius: BorderRadius.circular(9),
-        onTap: onTap,
-        child: SizedBox(
-          height: 36,
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 10),
-            child: Row(
-              children: [
-                Icon(icon, size: 16, color: colors.onSurfaceVariant),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Text(
-                    label,
-                    style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                      fontSize: 13,
-                      color: colors.onSurface,
+    return Semantics(
+      button: true,
+      label: label,
+      onTap: onTap,
+      excludeSemantics: true,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(14, 2, 14, 8),
+        child: InkWell(
+          key: const ValueKey('settings-button'),
+          borderRadius: BorderRadius.circular(9),
+          onTap: onTap,
+          child: SizedBox(
+            height: 36,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 10),
+              child: Row(
+                children: [
+                  Icon(icon, size: 16, color: colors.onSurfaceVariant),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      label,
+                      style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                        fontSize: 13,
+                        color: colors.onSurface,
+                      ),
                     ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
           ),
         ),
