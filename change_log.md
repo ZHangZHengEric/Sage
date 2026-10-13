@@ -2,6 +2,8 @@
 
 面向版本用户的完整说明保存在 [`release_notes/`](release_notes/)；本文件记录持续开发变更。
 
+- **2026-10-13** 仅精简 Server V2 Docker 镜像依赖：新增独立 `deploy/images/requirements.server_v2.txt`，补齐 Pillow、AnyIO、PyJWT 和 Starlette，保留 MCP、A2A、MySQL、OTel 及依赖层缓存。公共 `pyproject.toml`、其他端安装和构建方式保持不变。
+
 - **2026-10-13** Server v2 Agent 改为独立 `agents` 表和服务端生成的全局唯一 ID，默认 Agent 使用显式引用，外部调用按主键定位归属；提供带本地备份的旧目录/会话引用迁移脚本。Web 列表新增、上传和 Studio 定义/任务入口统一使用右侧 70% 表单侧窗，窄屏使用全宽。
 
 - **2026-10-13** v2 后端 pip 切换为清华源；先复制 `pyproject.toml` 安装运行和构建依赖，再复制源码安装项目，使代码修改可以复用依赖层缓存。
