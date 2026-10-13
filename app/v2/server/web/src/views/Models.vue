@@ -18,6 +18,19 @@ const form = ref({
 
 const hasModels = computed(() => models.value.length > 0)
 
+const defaultBaseUrls = {
+  'openai-chat-completions': 'https://api.openai.com/v1',
+  'openai-responses': 'https://api.openai.com/v1',
+  'anthropic-messages': 'https://api.anthropic.com',
+  orcarouter: 'https://api.orcarouter.ai/v1',
+}
+
+function onProtocolChange() {
+  if (!form.value.base_url || Object.values(defaultBaseUrls).includes(form.value.base_url)) {
+    form.value.base_url = defaultBaseUrls[form.value.protocol]
+  }
+}
+
 async function refresh() {
   models.value = await api.listModels()
 }
@@ -109,10 +122,11 @@ function startNew() {
     <form class="panel" @submit.prevent="save">
       <label class="field">
         <span>协议</span>
-        <select v-model="form.protocol">
+        <select v-model="form.protocol" @change="onProtocolChange">
           <option value="openai-chat-completions">openai-chat-completions</option>
           <option value="openai-responses">openai-responses</option>
           <option value="anthropic-messages">anthropic-messages</option>
+          <option value="orcarouter">orcarouter</option>
         </select>
       </label>
       <label class="field">

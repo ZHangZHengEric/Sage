@@ -954,3 +954,44 @@ def test_text_only_binding_rejects_image_before_network(protocol):
     with pytest.raises(SageV2Error) as caught:
         provider._validate_request(request())
     assert caught.value.info.code == "model.capability_unsupported"
+
+
+@pytest.mark.parametrize("provider_id", ["orcarouter", " OrcaRouter "])
+def test_orcarouter_resolves_to_openai_compatible_protocol(provider_id):
+    from sagents.v2.model.protocols import model_protocol_default_base_url
+
+    assert (
+        resolve_model_protocol(provider_id)
+        == BuiltinModelProtocol.OPENAI_CHAT_COMPLETIONS
+    )
+    assert model_protocol_default_base_url(provider_id) == "https://api.orcarouter.ai/v1"
+
+
+@pytest.mark.parametrize("base_url", [None, "https://gateway.example/v1"])
+def test_orcarouter_factory_uses_openai_compatible_provider(base_url):
+    from sagents.v2.model.protocols import create_registered_model_provider
+
+    provider = create_registered_model_provider(
+        ModelRoute(provider="orcarouter", base_url=base_url, model="orcarouter/auto"),
+        client=object(),
+    )
+
+    assert isinstance(provider, OpenAIChatCompletionsModelProvider)
+    assert provider.config.base_url == (base_url or "https://api.orcarouter.ai/v1")
+    assert provider.config.model == "orcarouter/auto"
+
+
+@pytest.mark.parametrize(
+    ("provider_id", "expected_url"),
+    [
+        ("openai-chat-completions", "https://api.openai.com/v1"),
+        ("openai-compatible", "https://api.openai.com/v1"),
+        ("openai-responses", "https://api.openai.com/v1"),
+        ("anthropic-messages", "https://api.anthropic.com"),
+        ("gemini", "https://generativelanguage.googleapis.com/v1beta"),
+    ],
+)
+def test_existing_protocol_default_base_urls_are_preserved(provider_id, expected_url):
+    from sagents.v2.model.protocols import model_protocol_default_base_url
+
+    assert model_protocol_default_base_url(provider_id) == expected_url
