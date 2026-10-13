@@ -50,7 +50,9 @@ class DatabaseCatalogStore:
 
     async def agent_owner(self, agent_id: str) -> str | None:
         async with self.database.session() as session:
-            return await session.scalar(select(AgentRow.owner_user_id).where(AgentRow.id == agent_id))
+            return await session.scalar(
+                select(AgentRow.owner_user_id).where(AgentRow.id == agent_id)
+            )
 
     async def _catalog(self, session, user_id: str) -> CatalogRow:
         # Lock a stable parent even before the first catalog is created. This
@@ -62,8 +64,13 @@ class DatabaseCatalogStore:
         if row is None:
             initial = empty_catalog()
             session.add(_agent_row(user_id, initial.agents[0]))
-            row = CatalogRow(user_id=user_id, default_agent_id=initial.default_agent_id,
-                             models=[], mcp_servers=[], a2a_agents=[])
+            row = CatalogRow(
+                user_id=user_id,
+                default_agent_id=initial.default_agent_id,
+                models=[],
+                mcp_servers=[],
+                a2a_agents=[],
+            )
             session.add(row)
             await session.flush()
         return row
@@ -71,19 +78,34 @@ class DatabaseCatalogStore:
     async def get(self, user_id: str) -> UserCatalog:
         async with self.database.transaction() as session:
             row = await self._catalog(session, user_id)
-            agents = (await session.scalars(select(AgentRow).where(
-                AgentRow.owner_user_id == user_id).order_by(AgentRow.id))).all()
-            bindings = (await session.scalars(select(AgentSkillSelectionRow).where(
-                AgentSkillSelectionRow.owner_user_id == user_id
-            ).order_by(AgentSkillSelectionRow.position))).all()
+            agents = (
+                await session.scalars(
+                    select(AgentRow)
+                    .where(AgentRow.owner_user_id == user_id)
+                    .order_by(AgentRow.id)
+                )
+            ).all()
+            bindings = (
+                await session.scalars(
+                    select(AgentSkillSelectionRow)
+                    .where(AgentSkillSelectionRow.owner_user_id == user_id)
+                    .order_by(AgentSkillSelectionRow.position)
+                )
+            ).all()
             skills: dict[str, list[str]] = {}
             for binding in bindings:
                 skills.setdefault(binding.agent_id, []).append(binding.skill_name)
-            records = [_agent_record(agent, skills.get(agent.id, [])) for agent in agents]
+            records = [
+                _agent_record(agent, skills.get(agent.id, [])) for agent in agents
+            ]
             records.sort(key=lambda agent: agent.id != row.default_agent_id)
-            return UserCatalog(default_agent_id=row.default_agent_id, agents=records,
-                               models=row.models, mcp_servers=row.mcp_servers,
-                               a2a_agents=row.a2a_agents)
+            return UserCatalog(
+                default_agent_id=row.default_agent_id,
+                agents=records,
+                models=row.models,
+                mcp_servers=row.mcp_servers,
+                a2a_agents=row.a2a_agents,
+            )
 
     async def create_agent(self, user_id: str, record: AgentRecord) -> None:
         async with self.database.transaction() as session:
@@ -105,21 +127,33 @@ class DatabaseCatalogStore:
             row = await session.get(AgentRow, agent_id, with_for_update=True)
             if row is None or row.owner_user_id != user_id:
                 raise _not_found("agent not found")
-            remaining = (await session.scalars(select(AgentRow.id).where(
-                AgentRow.owner_user_id == user_id, AgentRow.id != agent_id
-            ).order_by(AgentRow.id))).all()
+            remaining = (
+                await session.scalars(
+                    select(AgentRow.id)
+                    .where(AgentRow.owner_user_id == user_id, AgentRow.id != agent_id)
+                    .order_by(AgentRow.id)
+                )
+            ).all()
             if not remaining:
                 raise _not_found("at least one agent is required")
             if catalog.default_agent_id == agent_id:
                 catalog.default_agent_id = remaining[0]
-            await session.execute(delete(AgentSkillSelectionRow).where(
-                AgentSkillSelectionRow.owner_user_id == user_id,
-                AgentSkillSelectionRow.agent_id == agent_id))
+            await session.execute(
+                delete(AgentSkillSelectionRow).where(
+                    AgentSkillSelectionRow.owner_user_id == user_id,
+                    AgentSkillSelectionRow.agent_id == agent_id,
+                )
+            )
             # A deleted agent's credentials must never become unscoped keys.
-            await session.execute(update(ApiKeyRow).where(
-                ApiKeyRow.owner_user_id == user_id, ApiKeyRow.agent_id == agent_id,
-                ApiKeyRow.revoked_at == "").values(
-                    revoked_at=datetime.now(timezone.utc).isoformat()))
+            await session.execute(
+                update(ApiKeyRow)
+                .where(
+                    ApiKeyRow.owner_user_id == user_id,
+                    ApiKeyRow.agent_id == agent_id,
+                    ApiKeyRow.revoked_at == "",
+                )
+                .values(revoked_at=datetime.now(timezone.utc).isoformat())
+            )
             await session.delete(row)
 
     async def replace_section(
@@ -133,7 +167,9 @@ class DatabaseCatalogStore:
             setattr(row, section, documents[section])
         return catalog
 
-    async def list_all_models(self, user_ids: list[str]) -> list[tuple[str, ModelRecord]]:
+    async def list_all_models(
+        self, user_ids: list[str]
+    ) -> list[tuple[str, ModelRecord]]:
         return [
             (user_id, model)
             for user_id in user_ids
@@ -142,9 +178,13 @@ class DatabaseCatalogStore:
 
     async def default_model(self, user_id: str) -> ModelRecord | None:
         models = (await self.get(user_id)).models
-        return next((item for item in models if item.is_default), models[0] if models else None)
+        return next(
+            (item for item in models if item.is_default), models[0] if models else None
+        )
 
-    async def upsert_model(self, user_id: str, payload: dict[str, object]) -> ModelRecord:
+    async def upsert_model(
+        self, user_id: str, payload: dict[str, object]
+    ) -> ModelRecord:
         record, catalog = apply_upsert(await self.get(user_id), payload)
         await self.replace_section(user_id, "models", catalog)
         return record
@@ -163,11 +203,23 @@ def _agent_row(user_id: str, record: AgentRecord) -> AgentRow:
 
 
 def _agent_record(row: AgentRow, skills: list[str]) -> AgentRecord:
-    return AgentRecord(id=row.id, name=row.name, description=row.description,
-                       instructions=row.instructions, model_id=row.model_id,
-                       tools=row.tools, execution_policy=row.execution_policy, skills=skills)
+    return AgentRecord(
+        id=row.id,
+        name=row.name,
+        description=row.description,
+        instructions=row.instructions,
+        model_id=row.model_id,
+        tools=row.tools,
+        execution_policy=row.execution_policy,
+        skills=skills,
+    )
 
 
 def _not_found(message: str) -> SageV2Error:
-    return SageV2Error(RuntimeErrorInfo(code="server.catalog.records.not_found",
-                                      category=ErrorCategory.VALIDATION, message=message))
+    return SageV2Error(
+        RuntimeErrorInfo(
+            code="server.catalog.records.not_found",
+            category=ErrorCategory.VALIDATION,
+            message=message,
+        )
+    )

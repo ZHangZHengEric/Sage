@@ -1,5 +1,5 @@
 <script setup>
-import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 
 const props = defineProps({ modelValue: Boolean, title: String, busy: Boolean })
 const emit = defineEmits(['update:modelValue'])
@@ -7,9 +7,15 @@ const dialog = ref(null)
 const body = ref(null)
 let previousOverflow = ''
 let locked = false
+let lastOutsideFocus = null
+let returnFocus = null
+function rememberFocus(event) {
+  if (event.target instanceof HTMLElement && event.target !== document.body && !event.target.closest('dialog')) lastOutsideFocus = event.target
+}
 function sync() {
   if (!dialog.value) return
   if (props.modelValue && !dialog.value.open) {
+    returnFocus = lastOutsideFocus || document.activeElement
     previousOverflow = document.body.style.overflow
     document.body.style.overflow = 'hidden'
     locked = true
@@ -18,6 +24,7 @@ function sync() {
   } else if (!props.modelValue && dialog.value.open) {
     dialog.value.close()
     unlock()
+    nextTick(() => { if (returnFocus?.isConnected) returnFocus.focus() })
   }
 }
 function unlock() {
@@ -28,8 +35,8 @@ function close() {
   if (!props.busy) emit('update:modelValue', false)
 }
 watch(() => props.modelValue, sync, { flush: 'post' })
-onMounted(sync)
-onBeforeUnmount(unlock)
+onMounted(() => { document.addEventListener('focusin', rememberFocus); sync() })
+onBeforeUnmount(() => { document.removeEventListener('focusin', rememberFocus); unlock() })
 </script>
 
 <template>
