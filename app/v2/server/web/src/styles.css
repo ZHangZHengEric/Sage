@@ -213,7 +213,7 @@ input, textarea, select {
 
 .chat-layout {
   display: grid;
-  grid-template-columns: 272px 1fr;
+  grid-template-columns: 272px minmax(0, 1fr);
   height: 100%;
   min-height: 0;
 }
@@ -306,7 +306,12 @@ input, textarea, select {
   opacity: 0.65;
   cursor: not-allowed;
 }
+.thread-heading { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.thread-owner { flex-shrink: 0; max-width: 9rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 2px 8px; border-radius: 6px; background: var(--muted); color: var(--muted-foreground); font-size: 0.6875rem; font-weight: 500; }
 .thread-bar h1 {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   margin: 0;
   font-size: 0.95rem;
   font-weight: 600;
@@ -502,10 +507,18 @@ table { width: 100%; border-collapse: collapse; }
 th, td { text-align: left; padding: var(--space-3) var(--space-2); border-bottom: 1px solid var(--border); font-size: 0.875rem; }
 
 @media (max-width: 860px) {
-  .topbar { flex-wrap: wrap; height: auto; padding: var(--space-3) var(--space-4); }
-  .shell { grid-template-rows: auto 1fr; }
-  .stage-chat { height: calc(100vh - 96px); }
-  .chat-layout { grid-template-columns: 1fr; }
+  .topbar { flex-wrap: wrap; height: auto; gap: 10px; min-width: 0; padding: var(--space-3) var(--space-4); }
+  .topbar nav { order: 3; flex-basis: 100%; min-width: 0; overflow-x: auto; }
+  .topbar nav a { flex-shrink: 0; white-space: nowrap; }
+  .topbar .userbox { margin-left: auto; }
+  .shell { grid-template-rows: auto 1fr; min-width: 0; }
+  .shell:has(.stage-chat) { height: 100dvh; min-height: 0; grid-template-rows: auto minmax(0, 1fr); }
+  .stage-chat { height: auto; min-width: 0; }
+  .chat-layout { grid-template-columns: minmax(0, 1fr); grid-template-rows: 180px minmax(0, 1fr); }
+  .thread-bar { padding: 12px 16px; }
+  .thread-heading { flex: 1; }
+  .agent-pick select { min-width: 0; width: 120px; }
+  .thread-owner { max-width: 5rem; }
   .thread-panel {
     max-height: 180px;
     border-right: 0;

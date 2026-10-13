@@ -224,7 +224,10 @@ onUnmounted(() => {
     />
     <div class="thread-root">
       <header class="thread-bar">
-        <h1>{{ threadTitle }} <span v-if="currentThread?._owner" class="tag">{{ currentThread._owner.username }}</span></h1>
+        <div class="thread-heading">
+          <h1 :title="threadTitle">{{ threadTitle }}</h1>
+          <span v-if="currentThread?._owner" class="thread-owner" :title="`所属用户：${currentThread._owner.username}`">{{ currentThread._owner.username }}</span>
+        </div>
         <label class="agent-pick">
           <span class="sr-only">智能体</span>
           <select
