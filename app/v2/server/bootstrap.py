@@ -68,7 +68,11 @@ class ServerHost:
         self.package_queries = None
         self.database = database
 
-        self.paths = prepare_server_v2_storage(settings.data_root)
+        self.paths = prepare_server_v2_storage(
+            settings.data_root,
+            linux_execution_uid=settings.linux_execution_uid,
+            linux_execution_gid=settings.linux_execution_gid,
+        )
 
         self.users = users if users is not None else DatabaseUserStore(database)
         self.catalog_store = (
@@ -97,7 +101,7 @@ class ServerHost:
         self.execution = ProcessExecution(fallback_model=model_provider)
         self._application: SAgentApplication | None = None
         self._tasks: set[asyncio.Task[None]] = set()
-        install_sandbox(self.execution)
+        install_sandbox(self.execution, settings)
         self.conversations: ConversationService | None = None
         self.admin: AdminService | None = None
         self.a2a: A2AService | None = None

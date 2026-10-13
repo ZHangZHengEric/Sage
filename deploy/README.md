@@ -48,6 +48,8 @@ MySQL 请准备独立的 `sage_v2` 数据库及账号权限，不与 v1 共用�
 
 数据与日志分别持久化到 `${SAGE_ROOT}/sage-server/data`、`${SAGE_ROOT}/sage-server/logs`；相对路径以 `deploy/standalone/` 为基准。只运行单个后端进程，并发额度通过 `SAGE_SERVER_MAX_CONCURRENT_RUNS` 等变量设置。
 
+V2 镜像自动创建 `sage-sandbox` 用户（UID/GID `10001:10001`），服务主进程继续以 root 运行，沙箱命令降权后执行。镜像默认设置 `SAGE_SERVER_LINUX_EXECUTION_UID/GID`，已有 `.env` 无需补充即可生效。服务仅调整各用户 `workspace` 及子 Agent 工作目录的属主，不递归修改挂载目录、已有文件、数据库或日志；拒绝通过符号链接调整目录。宿主机无需创建同名账号。如需匹配已有非 root 目录，可在 `.env` 同时覆盖这两个数字 ID；已有文件的读写权限仍需与该身份匹配。NFS root-squash 等禁止 root 修改属主的挂载需由宿主机管理员预先设置工作目录权限。
+
 脚本默认读取 `deploy/standalone/.env`，可用 `ENV_FILE=/path/to/.env` 指定其他配置。项目名默认为 `sage_standalone`，可用 `SAGE_COMPOSE_PROJECT_NAME` 覆盖。支持 `deploy/compose_v2.sh down`、`deploy/compose_v2.sh logs -f sage-server` 等 Compose 命令，可从任意工作目录调用。
 
 ### 完整环境部署

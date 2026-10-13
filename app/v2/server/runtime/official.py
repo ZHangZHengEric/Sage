@@ -45,14 +45,18 @@ DEFAULT_OFFICIAL_TOOLS = (
 )
 
 
-def install_sandbox(execution) -> None:
+def install_sandbox(execution, settings=None) -> None:
     """One issuer and one local-workspace provider for the process."""
 
     if execution.sandbox_grant_issuer is not None:
         return
     issuer = SandboxGrantIssuer()
+    execution.sandbox_provider = LocalWorkspaceSandboxProvider(
+        issuer.verification_key,
+        linux_execution_uid=settings.linux_execution_uid if settings else None,
+        linux_execution_gid=settings.linux_execution_gid if settings else None,
+    )
     execution.sandbox_grant_issuer = issuer
-    execution.sandbox_provider = LocalWorkspaceSandboxProvider(issuer.verification_key)
 
 
 async def provision_workspace(
@@ -154,7 +158,7 @@ def workspace_sandbox_spec(
 async def attach_official_tools(service, command: StartRun, *, user_id: str, run_id: str | None = None):
     """Provision a host-mapped sandbox and wrap it as OfficialToolPlugin."""
 
-    install_sandbox(service.execution)
+    install_sandbox(service.execution, service.settings)
     owner_run_id = run_id or command.idempotency_key
     handle = await provision_workspace(
         service.execution,
