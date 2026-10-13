@@ -1,6 +1,6 @@
 <script setup>
 import { computed, onMounted, onUnmounted, ref } from 'vue'
-import { api } from '../api.js'
+import { api, isForeign } from '../api.js'
 import FormDrawer from '../components/FormDrawer.vue'
 
 const definitionOpen = ref(false), runOpen = ref(false)
@@ -10,13 +10,17 @@ const packages = ref([]), runs = ref([]), agents = ref([]), schema = ref(null)
 const editor = ref(''), savedRef = ref(''), savedText = ref(''), selectedAgent = ref('assistant')
 const content = ref(''), sessionId = ref(''), operation = ref(''), status = ref(null)
 const events = ref([]), eventCursor = ref(0)
+const bundleOwner = ref(null), runOwner = ref(null)
+const foreignBundle = computed(() => isForeign({ _owner: bundleOwner.value }))
+const foreignRun = computed(() => isForeign({ _owner: runOwner.value }))
 const decision = ref(''), reply = ref('{}'), error = ref(''), message = ref(''), busy = ref(false)
 const importId = ref(''), forkId = ref(''), forkVersion = ref('1.0.0'), offset = ref(0), runOffset = ref(0)
 let timer, disposed = false, statusRevision = 0, polling = false
 const answer = computed(() => (status.value?.result?.final_items || []).flatMap(item => item.data?.content || item.content || []).map(block => block.text || '').filter(Boolean).join('\n'))
 const clean = computed(() => savedRef.value && editor.value === savedText.value)
 const definitions = computed(() => { try { return Object.keys(JSON.parse(editor.value).manifest.agents) } catch { return [] } })
-function setBundle(bundle, reference = '') {
+function setBundle(bundle, reference = '', owner = null) {
+  bundleOwner.value = owner; runOwner.value = null
   editor.value = JSON.stringify(bundle, null, 2); savedText.value = editor.value; savedRef.value = reference
   selectedAgent.value = bundle.manifest.entrypoint.agent || Object.keys(bundle.manifest.agents)[0]
   sessionId.value = ''; status.value = null; operation.value = ''; events.value = []; eventCursor.value = 0; statusRevision++
@@ -34,16 +38,16 @@ function canReplaceDraft() { return editor.value === savedText.value || window.c
 onBeforeRouteLeave(() => canReplaceDraft())
 async function startNew() { if (canReplaceDraft()) await action(async () => { setBundle(await api.packageTemplate()); definitionOpen.value = true }) }
 async function importDraft() { if (canReplaceDraft()) await action(async () => setBundle(await api.packageTemplate(importId.value))) }
-async function load(reference) { if (canReplaceDraft()) await action(async () => { setBundle(await api.package(reference), reference); definitionOpen.value = true }) }
-async function inspect(op) {
+async function load(row) { if (canReplaceDraft()) await action(async () => { setBundle(await api.package(row.ref, row._owner), row.ref, row._owner); definitionOpen.value = true }) }
+async function inspect(op, owner = runOwner.value) {
   const revision = ++statusRevision
-  const result = await api.packageRun(op)
+  const result = await api.packageRun(op, owner)
   if (!disposed && revision === statusRevision) {
-    if (operation.value !== op) { events.value = []; eventCursor.value = 0 }
-    operation.value = op; status.value = result
-    const page = await api.packageEvents(op, eventCursor.value)
+    if (operation.value !== op || runOwner.value?.user_id !== owner?.user_id) { events.value = []; eventCursor.value = 0 }
+    operation.value = op; runOwner.value = owner; status.value = result
+    const page = await api.packageEvents(op, eventCursor.value, owner)
     if (!disposed && revision === statusRevision) {
-      events.value = [...events.value, ...page.events].slice(-100); eventCursor.value = page.cursor
+      events.value = [...events.value, ...page.events]; eventCursor.value = page.cursor
     }
   }
 }
@@ -72,7 +76,7 @@ async function run() {
   await action(async () => {
     const id = `${Date.now()}-${crypto.randomUUID()}`
     await api.runPackage({ ref: savedRef.value, agent_id: selectedAgent.value, content: content.value, operation: id, session_id: sessionId.value || null })
-    await inspect(id); await refresh(); runOpen.value = false
+    await inspect(id, null); await refresh(); runOpen.value = false
   })
 }
 async function activate(row) {
@@ -82,7 +86,7 @@ async function activate(row) {
   })
 }
 onMounted(() => action(async () => {
-  const [s, a, bundle] = await Promise.all([api.packageSchema(), api.listAgents(), api.packageTemplate()])
+  const [s, a, bundle] = await Promise.all([api.packageSchema(), api.listAgents(false), api.packageTemplate()])
   if (disposed) return
   schema.value = s; agents.value = a; setBundle(bundle); await refresh()
   timer = setInterval(async () => {
@@ -101,19 +105,19 @@ onUnmounted(() => { disposed = true; statusRevision++; clearInterval(timer) })
     <fieldset :disabled="busy">
       <legend>定义与版本</legend>
       <div class="list-toolbar"><h2>版本库</h2><button class="btn cta" @click="startNew">新增定义</button></div>
-      <ul><li v-for="p in packages" :key="p.ref">{{ p.package }} · {{ p.version }} {{ p.active ? '（活动）' : '' }} <button @click="load(p.ref)">打开</button><button @click="activate(p)">切换到此版本</button></li></ul>
+      <ul><li v-for="p in packages" :key="`${p._owner?.user_id || ''}:${p.ref}`"><span v-if="p._owner" class="tag">{{ p._owner.username }}</span> {{ p.package }} · {{ p.version }} {{ p.active ? '（活动）' : '' }} <button @click="load(p)">打开</button><button v-if="!isForeign(p)" @click="activate(p)">切换到此版本</button></li></ul>
       <button :disabled="offset === 0" @click="action(async () => { offset -= 50; await refresh() })">上一页</button>
       <button :disabled="packages.length < 50" @click="action(async () => { offset += 50; await refresh() })">下一页</button>
     </fieldset>
     <fieldset :disabled="busy">
       <legend>运行与多轮反馈</legend>
-      <div class="list-toolbar"><h2>任务历史</h2><button class="btn cta" :disabled="!savedRef" @click="runOpen = true">新增任务</button></div><ul><li v-for="r in runs" :key="r.operation"><button @click="action(() => inspect(r.operation))">{{ r.operation }} · {{ r.agent }}</button></li></ul>
+      <div class="list-toolbar"><h2>任务历史</h2><button class="btn cta" :disabled="!savedRef || foreignBundle" @click="runOpen = true">新增任务</button></div><ul><li v-for="r in runs" :key="`${r._owner?.user_id || ''}:${r.operation}`"><button @click="action(() => inspect(r.operation, r._owner))"><span v-if="r._owner" class="tag">{{ r._owner.username }}</span> {{ r.operation }} · {{ r.agent }}</button></li></ul>
       <button :disabled="runOffset === 0" @click="action(async () => { runOffset -= 50; await refresh() })">上一页任务</button>
       <button :disabled="runs.length < 50" @click="action(async () => { runOffset += 50; await refresh() })">下一页任务</button>
       <template v-if="operation">
-        <button @click="action(() => inspect(operation))">刷新状态</button><button :disabled="status?.terminal" @click="control('cancel')">取消任务</button><button :disabled="!status?.terminal" @click="continueConversation">继续此会话</button>
-        <div v-if="status?.needs_attention"><p>{{ status.interaction.payload?.prompt }}</p><label>决策<select v-model="decision"><option value="" disabled>请选择</option><option v-for="choice in status.interaction.allowed_decisions" :key="choice" :value="choice">{{ choice }}</option></select></label><label>回复 payload（JSON）<textarea v-model="reply" /></label><button @click="control('reply')">提交反馈并恢复</button><button @click="control('approve')">提交人工审批决定</button></div>
-        <details><summary>最近执行事件（最多 100 条）</summary><ol><li v-for="event in events" :key="event.event_id">{{ event.run_sequence }} · {{ event.type }}</li></ol></details>
+        <button @click="action(() => inspect(operation))">刷新状态</button><button :disabled="foreignRun || status?.terminal" @click="control('cancel')">取消任务</button><button :disabled="foreignRun || !status?.terminal" @click="continueConversation">继续此会话</button>
+        <div v-if="status?.needs_attention && !foreignRun"><p>{{ status.interaction.payload?.prompt }}</p><label>决策<select v-model="decision"><option value="" disabled>请选择</option><option v-for="choice in status.interaction.allowed_decisions" :key="choice" :value="choice">{{ choice }}</option></select></label><label>回复 payload（JSON）<textarea v-model="reply" /></label><button @click="control('reply')">提交反馈并恢复</button><button @click="control('approve')">提交人工审批决定</button></div>
+        <details><summary>执行事件</summary><ol><li v-for="event in events" :key="event.event_id"><details><summary>{{ event.run_sequence }} · {{ event.type }}</summary><pre>{{ JSON.stringify(event, null, 2) }}</pre></details></li></ol><button @click="action(() => inspect(operation))">加载后续事件</button></details>
         <p>状态：{{ status?.run?.state || status?.state }}</p>
         <pre v-if="answer" aria-label="回答">{{ answer }}</pre>
         <pre v-if="status?.flow_results">{{ JSON.stringify(status.flow_results, null, 2) }}</pre>
@@ -121,7 +125,8 @@ onUnmounted(() => { disposed = true; statusRevision++; clearInterval(timer) })
       </template>
     </fieldset>
     <FormDrawer v-model="definitionOpen" title="定义与版本" :busy="busy">
-      <fieldset :disabled="busy">
+      <pre v-if="foreignBundle" aria-label="完整包定义">{{ editor }}</pre>
+      <fieldset v-else :disabled="busy">
       <p v-if="error" class="error" role="alert">{{ error }}</p>
       <p v-if="message" role="status">{{ message }}</p>
       <label>导入现有 Agent <select v-model="importId"><option value="">空白模板</option><option v-for="a in agents" :key="a.id" :value="a.id">{{ a.name }}</option></select></label>
@@ -135,7 +140,7 @@ onUnmounted(() => { disposed = true; statusRevision++; clearInterval(timer) })
       </fieldset>
     </FormDrawer>
     <FormDrawer v-model="runOpen" title="新增任务" :busy="busy">
-      <fieldset :disabled="busy">
+      <fieldset :disabled="busy || foreignBundle">
       <p v-if="error" class="error" role="alert">{{ error }}</p>
       <label>入口 Agent <select v-model="selectedAgent"><option v-for="id in definitions" :key="id">{{ id }}</option></select></label>
       <label>任务<textarea v-model="content" rows="3" /></label>

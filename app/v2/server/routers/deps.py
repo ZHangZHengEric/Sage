@@ -140,11 +140,52 @@ async def get_current_user(
                 message="authentication required",
             )
         )
+    if request.headers.get("X-Sage-View-User") is not None and request.method != "GET":
+        raise SageV2Error(RuntimeErrorInfo(
+            code="server.routers.deps.forbidden",
+            category=ErrorCategory.AUTHORIZATION,
+            message="admin data viewing is read-only",
+        ))
     return user
 
 
 CurrentUser = Annotated[UserRecord, Depends(get_current_user)]
 OptionalUser = Annotated[UserRecord | None, Depends(get_optional_user)]
+
+
+async def get_read_user(
+    request: Request,
+    user: CurrentUser,
+    service: IdentityDep,
+    view_user: Annotated[str | None, Header(alias="X-Sage-View-User", min_length=1, max_length=128)] = None,
+) -> UserRecord:
+    """Resolve an explicitly requested read scope without changing the caller identity."""
+    if view_user is None:
+        return user
+    if user.role != "admin" or request.method != "GET":
+        raise SageV2Error(RuntimeErrorInfo(
+            code="server.routers.deps.forbidden",
+            category=ErrorCategory.AUTHORIZATION,
+            message="only admin can view another user's data",
+        ))
+    owner = await service.get_by_id(view_user)
+    if owner is None:
+        raise SageV2Error(RuntimeErrorInfo(
+            code="server.routers.deps.not_found",
+            category=ErrorCategory.VALIDATION,
+            message="user not found",
+        ))
+    return owner
+
+
+ReadUser = Annotated[UserRecord, Depends(get_read_user)]
+
+
+def get_package_read_context(user: ReadUser, host: HostDep) -> RequestContext:
+    return host.contexts.for_user(user.user_id)
+
+
+PackageReadContextDep = Annotated[RequestContext, Depends(get_package_read_context)]
 
 
 def get_package_context(user: CurrentUser, host: HostDep) -> RequestContext:

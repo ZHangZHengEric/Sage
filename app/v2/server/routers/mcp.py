@@ -1,6 +1,6 @@
 from fastapi import APIRouter
 
-from app.v2.server.routers.deps import CatalogDep, CurrentUser
+from app.v2.server.routers.deps import ReadUser, CatalogDep, CurrentUser
 from app.v2.server.routers.schemas.common import AUTH_ERRORS, VALIDATION_ERRORS, ApiResponse
 from app.v2.server.routers.schemas.catalog import McpBody, McpPublic
 from app.v2.server.routers.render import success
@@ -9,7 +9,7 @@ router = APIRouter(tags=["mcp"], responses={**AUTH_ERRORS, **VALIDATION_ERRORS})
 
 
 @router.get("/api/mcp", response_model=ApiResponse[list[McpPublic]])
-async def list_mcp(user: CurrentUser, service: CatalogDep):
+async def list_mcp(user: ReadUser, service: CatalogDep):
     servers = (await service.get(user.user_id)).mcp_servers
     return success([item.public_dict() for item in servers])
 

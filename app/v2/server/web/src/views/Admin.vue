@@ -12,6 +12,8 @@ const error = ref('')
 const traceBackend = ref('')
 const traceConsole = ref(false)
 const rawEvents = ref([])
+const eventOffset = ref(0), eventTotal = ref(0), eventsLoading = ref(false)
+let eventRevision = 0
 const messages = computed(() => messagesFromEvents(rawEvents.value))
 
 async function load() {
@@ -24,8 +26,21 @@ async function load() {
 }
 
 async function openThread(id) {
-  selected.value = id
-  rawEvents.value = (await api.adminThreadEvents(id))?.events || []
+  ++eventRevision
+  selected.value = id; rawEvents.value = []; eventOffset.value = 0; eventTotal.value = 0
+  await loadEvents()
+}
+
+async function loadEvents() {
+  const current = eventRevision
+  eventsLoading.value = true; error.value = ''
+  try {
+    const page = await api.adminThreadEvents(selected.value, 500, eventOffset.value)
+    if (current !== eventRevision) return
+    rawEvents.value.push(...page.events)
+    eventOffset.value = page.offset + page.limit; eventTotal.value = page.total
+  } catch (exc) { if (current === eventRevision) error.value = exc.message }
+  finally { if (current === eventRevision) eventsLoading.value = false }
 }
 
 onMounted(async () => {
@@ -88,6 +103,8 @@ onMounted(async () => {
         <span>{{ item.username }} / {{ item.title || '未命名' }}</span>
         <small>{{ item.thread_id }}</small>
       </button>
+      <p v-if="eventsLoading" role="status">加载会话中…</p>
+      <button v-if="selected && eventOffset < eventTotal" class="btn ghost" :disabled="eventsLoading" @click="loadEvents">加载后续记录</button>
       <AguiTranscript
         v-if="selected"
         class="admin-transcript"

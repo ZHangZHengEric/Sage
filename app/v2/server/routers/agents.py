@@ -1,6 +1,6 @@
 from fastapi import APIRouter
 
-from app.v2.server.routers.deps import CatalogDep, CurrentUser, PackageDep
+from app.v2.server.routers.deps import ReadUser, CatalogDep, CurrentUser, PackageDep
 from app.v2.server.runtime.official import official_tool_catalog
 from app.v2.server.routers.render import success
 from app.v2.server.routers.schemas.common import AUTH_ERRORS, VALIDATION_ERRORS, ApiResponse
@@ -19,7 +19,7 @@ async def list_tools(_: CurrentUser, packages: PackageDep):
 
 
 @router.get("/api/agents", response_model=ApiResponse[list[AgentPublic]])
-async def list_agents(user: CurrentUser, service: CatalogDep):
+async def list_agents(user: ReadUser, service: CatalogDep):
     agents = (await service.get(user.user_id)).agents
     return success([item.public_dict() for item in agents])
 
@@ -31,7 +31,7 @@ async def create_agent(body: AgentBody, user: CurrentUser, service: CatalogDep):
 
 
 @router.get("/api/agents/{agent_id}", response_model=ApiResponse[AgentPublic])
-async def get_agent(agent_id: str, user: CurrentUser, service: CatalogDep):
+async def get_agent(agent_id: str, user: ReadUser, service: CatalogDep):
     return success(await service.get_agent(user.user_id, agent_id))
 
 

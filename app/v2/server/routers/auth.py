@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Response
 from app.v2.server.runtime.policy import ExecutionPolicy
 
-from app.v2.server.routers.deps import CurrentUser, IdentityDep
+from app.v2.server.routers.deps import ReadUser, CurrentUser, IdentityDep
 from app.v2.server.routers.schemas.common import AUTH_ERRORS, VALIDATION_ERRORS, ApiResponse, ErrorBody
 from app.v2.server.routers.schemas.identity import LoginBody, RegisterBody, TokenPayload, UserPublic
 from app.v2.server.routers.render import success
@@ -60,7 +60,7 @@ async def session(user: CurrentUser):
 
 
 @router.get("/execution-policy", response_model=ApiResponse[ExecutionPolicy], responses=AUTH_ERRORS)
-async def execution_policy(user: CurrentUser):
+async def execution_policy(user: ReadUser):
     return success(user.execution_policy.model_dump())
 
 

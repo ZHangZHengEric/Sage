@@ -1,6 +1,8 @@
 <script setup>
 import { computed, onMounted, ref } from 'vue'
-import { api } from '../api.js'
+import { getUser } from '../auth.js'
+import { api, isForeign } from '../api.js'
+import ResourceDetails from '../components/ResourceDetails.vue'
 import FormDrawer from '../components/FormDrawer.vue'
 
 const drawerOpen = ref(false)
@@ -53,17 +55,17 @@ async function refresh() {
   const [nextAgents, nextModels, nextMcp, nextPeers, nextSkills, nextTools] =
     await Promise.all([
       api.listAgents(),
-      api.listModels(),
-      api.listMcp(),
-      api.listA2aAgents(),
-      api.listSkills(),
+      api.listModels(false),
+      api.listMcp(false),
+      api.listA2aAgents(false),
+      api.listSkills(false),
       api.listTools(),
     ])
   agents.value = nextAgents
   models.value = nextModels
   mcp.value = nextMcp
   peers.value = nextPeers
-  skills.value = nextSkills
+  skills.value = nextSkills.filter(item => !item.owner_user_id || item.owner_user_id === getUser()?.user_id)
   officialTools.value = nextTools
   if (editing.value) {
     bound.value = await api.listAgentSkills(editing.value)
@@ -159,10 +161,11 @@ onMounted(async () => {
       <p v-if="!hasAgents" class="empty">还没有智能体</p>
       <table v-else>
         <thead>
-          <tr><th>智能体</th><th>模型</th><th>工具 / 技能</th><th></th></tr>
+          <tr><th v-if="agents[0]?._owner">用户</th><th>智能体</th><th>模型</th><th>工具 / 技能</th><th></th></tr>
         </thead>
         <tbody>
-          <tr v-for="item in agents" :key="item.id">
+          <tr v-for="item in agents" :key="`${item._owner?.user_id || ''}:${item.id}`">
+            <td v-if="agents[0]?._owner">{{ item._owner?.username }}</td>
             <td>
               {{ item.name }}
               <div class="muted">{{ item.description || item.id }}</div>
@@ -170,8 +173,9 @@ onMounted(async () => {
             <td class="mono">{{ item.model_id || '默认' }}</td>
             <td class="muted">{{ item.tools.length }} 工具 · {{ item.skills.length }} 技能</td>
             <td class="row">
-              <button class="btn ghost" type="button" @click="edit(item)">编辑</button>
-              <button class="btn ghost" type="button" @click="remove(item.id)">删除</button>
+              <ResourceDetails :item="item" kind="agents" />
+              <button class="btn ghost" type="button" v-if="!isForeign(item)" @click="edit(item)">编辑</button>
+              <button class="btn ghost" type="button" v-if="!isForeign(item)" @click="remove(item.id)">删除</button>
             </td>
           </tr>
         </tbody>

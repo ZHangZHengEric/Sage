@@ -1,6 +1,6 @@
 from fastapi import APIRouter
 
-from app.v2.server.routers.deps import CatalogDep, CurrentUser
+from app.v2.server.routers.deps import ReadUser, CatalogDep, CurrentUser
 from app.v2.server.routers.schemas.common import AUTH_ERRORS, VALIDATION_ERRORS, ApiResponse
 from app.v2.server.routers.schemas.catalog import ModelBody, ModelPublic
 from app.v2.server.routers.render import success
@@ -13,7 +13,7 @@ router = APIRouter(
 
 
 @router.get("", response_model=ApiResponse[list[ModelPublic]])
-async def list_models(user: CurrentUser, service: CatalogDep):
+async def list_models(user: ReadUser, service: CatalogDep):
     return success(
         [item.public_dict() for item in (await service.get(user.user_id)).models]
     )

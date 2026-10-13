@@ -3,7 +3,7 @@ from typing import Literal
 from fastapi import APIRouter, Query
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.v2.server.routers.deps import ConversationDep, CurrentUser
+from app.v2.server.routers.deps import ReadUser, ConversationDep, CurrentUser
 from app.v2.server.routers.render import success
 from app.v2.server.routers.schemas.common import AUTH_ERRORS, ApiResponse
 
@@ -44,7 +44,7 @@ class ApprovalAccepted(BaseModel):
 
 
 @router.get("", response_model=ApiResponse[ApprovalPage])
-async def list_approvals(user: CurrentUser, service: ConversationDep,
+async def list_approvals(user: ReadUser, service: ConversationDep,
                          limit: int = Query(50, ge=1, le=100), offset: int = Query(0, ge=0)):
     return success(await service.pending_approvals(user.user_id, limit=limit, offset=offset))
 

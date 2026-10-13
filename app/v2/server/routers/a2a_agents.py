@@ -8,7 +8,7 @@ though it cannot host one.
 
 from fastapi import APIRouter
 
-from app.v2.server.routers.deps import CatalogDep, CurrentUser
+from app.v2.server.routers.deps import ReadUser, CatalogDep, CurrentUser
 from app.v2.server.routers.schemas.common import AUTH_ERRORS, VALIDATION_ERRORS, ApiResponse
 from app.v2.server.routers.schemas.catalog import A2AAgentBody, A2AAgentPublic
 from app.v2.server.routers.render import success
@@ -21,7 +21,7 @@ router = APIRouter(
 
 
 @router.get("", response_model=ApiResponse[list[A2AAgentPublic]])
-async def list_a2a_agents(user: CurrentUser, service: CatalogDep):
+async def list_a2a_agents(user: ReadUser, service: CatalogDep):
     agents = (await service.get(user.user_id)).a2a_agents
     return success([item.public_dict() for item in agents])
 
