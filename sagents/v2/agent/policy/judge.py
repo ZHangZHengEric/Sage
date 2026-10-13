@@ -558,7 +558,10 @@ class LLMJudgeContinuationPolicy:
         protocol = _v1_protocol_decision(context)
         if protocol is not None:
             return protocol
-        if _trailing_plain_assistant_responses(context.ledger) >= 3:
+        if (
+            not context.validated_output_progress
+            and _trailing_plain_assistant_responses(context.ledger) >= 3
+        ):
             return ContinuationDecision(
                 action=ContinuationAction.REQUEST_INTERACTION,
                 reason_code="judge.plain_text_no_progress",

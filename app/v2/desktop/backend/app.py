@@ -845,6 +845,25 @@ def create_app(
         )
         return _success()
 
+    @app.get("/api/v2/sessions/{session_id}/openui")
+    async def openui_surfaces(session_id: str, request: Request):
+        return _success(await _safe(runtime_service.openui_surfaces(session_id, get_desktop_user_id(request))))
+
+    @app.get("/api/v2/sessions/{session_id}/openui/{surface_id}/pptx")
+    async def openui_pptx(session_id: str, surface_id: str, request: Request, revision: int, dark: bool = False):
+        from .openui_slides import export_deck
+        surfaces = await _safe(runtime_service.openui_surfaces(session_id, get_desktop_user_id(request)))
+        surface = next((s for s in surfaces if s["surface_id"] == surface_id), None)
+        if surface is None:
+            raise HTTPException(404, "Presentation not found")
+        if surface["revision"] != revision:
+            raise HTTPException(409, "Presentation changed; reopen it before exporting")
+        try:
+            data = await asyncio.to_thread(export_deck, surface["tree"], dark=dark)
+        except ValueError as error:
+            raise HTTPException(422, str(error)) from error
+        return _success({"filename": "sage-presentation.pptx", "base64": base64.b64encode(data).decode()})
+
     @app.get("/api/v2/sessions/{session_id}/runs")
     async def list_session_runs(session_id: str, request: Request):
         return _success(

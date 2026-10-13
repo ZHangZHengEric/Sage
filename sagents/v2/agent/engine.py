@@ -1612,6 +1612,7 @@ class AgentLoopEngine:
                     "judge.continue",
                     "judge.explanation_required",
                     "judge.v1_must_continue",
+                    "openui.validation_retry",
                 }
             ):
                 continuation_reason = self._normalized_continuation_reason(

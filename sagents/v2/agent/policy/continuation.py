@@ -46,6 +46,9 @@ class ContinuationContext(StrictModel):
     available_tools: tuple[str, ...] = ()
     pending_tool_calls: int = Field(default=0, ge=0)
     repeated_fingerprint_count: int = Field(default=0, ge=0)
+    # Host validators may certify a structured answer as actual output progress.
+    # This only bypasses the plain-text loop heuristic, never runtime budgets.
+    validated_output_progress: bool = False
     explicit_status: str | None = None
     explicit_status_note: str | None = None
     requested_interaction: InteractionDraft | None = None

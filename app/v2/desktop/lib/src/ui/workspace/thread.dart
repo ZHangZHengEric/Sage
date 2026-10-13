@@ -598,6 +598,7 @@ class _MessageListState extends State<_MessageList> {
   Widget build(BuildContext context) {
     final children = <Widget>[];
     final attachedPanelIds = <String>{};
+    final supersededUi = supersededOpenUiMessages(conversation.messages);
     final pendingInteraction = conversation.pendingInteraction;
     final pendingQuestionnaire =
         pendingInteraction != null && _isInlineQuestionnaire(pendingInteraction)
@@ -642,7 +643,8 @@ class _MessageListState extends State<_MessageList> {
     var lastVisibleMessageIndex = -1;
     for (var index = conversation.messages.length - 1; index >= 0; index--) {
       if (!conversation.messages[index].processOnly &&
-          !hiddenByQuestionnaire(conversation.messages[index])) {
+          !hiddenByQuestionnaire(conversation.messages[index]) &&
+          !supersededUi.contains(conversation.messages[index].id)) {
         lastVisibleMessageIndex = index;
         break;
       }
@@ -653,7 +655,11 @@ class _MessageListState extends State<_MessageList> {
       messageIndex++
     ) {
       final message = conversation.messages[messageIndex];
-      if (message.processOnly || hiddenByQuestionnaire(message)) continue;
+      if (message.processOnly ||
+          hiddenByQuestionnaire(message) ||
+          supersededUi.contains(message.id)) {
+        continue;
+      }
       final panel = message.role == 'assistant'
           ? _panelForMessage(message)
           : null;
@@ -663,6 +669,7 @@ class _MessageListState extends State<_MessageList> {
           child: _MessageBubble(
             key: ValueKey(message.id),
             message: message,
+            openUiController: widget.readOnly ? null : widget.controller,
             onEdit:
                 !widget.readOnly &&
                     widget.controller.canRewriteLastUserMessage(
@@ -703,6 +710,7 @@ class _MessageListState extends State<_MessageList> {
         children.add(const SizedBox(height: 14));
         children.add(
           _ProcessPanel(
+            onOpenUi: widget.readOnly ? null : widget.controller.expandOpenUi,
             key: ValueKey(panel.id),
             panel: panel,
             messages: _processMessagesFor(panel),
@@ -736,6 +744,7 @@ class _MessageListState extends State<_MessageList> {
     )) {
       children.add(
         _ProcessPanel(
+          onOpenUi: widget.readOnly ? null : widget.controller.expandOpenUi,
           key: ValueKey(panel.id),
           panel: panel,
           messages: _processMessagesFor(panel),
@@ -849,7 +858,12 @@ class _MessageListState extends State<_MessageList> {
         anchorIndex + 1,
         endIndex,
       ))
-        if (message.role == 'assistant' && message.processOnly) message,
+        if (message.role == 'assistant' &&
+            (message.processOnly ||
+                supersededOpenUiMessages(
+                  conversation.messages,
+                ).contains(message.id)))
+          message,
     ];
   }
 

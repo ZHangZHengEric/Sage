@@ -20,6 +20,7 @@ class DesktopV2Settings(BaseModel):
         "system", "zh", "en", "pt", "es", "fr", "de", "ja", "ko", "ru"
     ] = "system"
     default_agent_id: str | None = None
+    default_interactive_ui: bool = False
     projects: list[DesktopProject] = Field(default_factory=list)
     agent_workspace_path: str = ""
     max_preview_bytes: int = Field(default=2_000_000, ge=1, le=20_000_000)
@@ -179,7 +180,17 @@ class DesktopRunContext(BaseModel):
     mcp_bindings: list[DesktopMcpBinding] | None = None
 
 
+class OpenUiAction(BaseModel):
+    model_config = {"extra": "forbid"}
+    surface_id: str = Field(min_length=1, max_length=80)
+    revision: int = Field(ge=1)
+    action: str = Field(min_length=1, max_length=64)
+    values: dict[str, Any] = Field(default_factory=dict, max_length=100)
+
+
 class DesktopRunRequest(BaseModel):
+    ui_preference: Literal["auto", "interactive"] = "auto"
+    openui_action: OpenUiAction | None = None
     studio_id: str | None = None
     studio_member_id: str | None = None
     studio_message_id: str | None = None

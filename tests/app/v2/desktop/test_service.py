@@ -671,7 +671,7 @@ async def test_desktop_catalog_is_native_seeded_and_persistent(tmp_path: Path):
             "name": "Sage",
             "is_default": True,
             "tool_count": 14,
-            "skill_count": 0,
+            "skill_count": 1,
         }
     ]
     assert providers[0]["protocol"] == "openai-responses"
@@ -2550,7 +2550,7 @@ async def test_hybrid_is_not_selectable_and_explicit_status_builds_real_policy(
         approval_mode="high_risk",
     )
     assert isinstance(
-        explicit_loop.continuation_policy, ExplicitStatusContinuationPolicy
+        explicit_loop.continuation_policy.delegate, ExplicitStatusContinuationPolicy
     )
     segments = await explicit_loop.context_assembler.providers[0].segments(
         StartRun(
@@ -2618,8 +2618,8 @@ async def test_llm_judge_selection_uses_v1_contract_and_hides_turn_status(
     )
     tools = await loop.tool_catalog.list_tools(run_id="pending")
 
-    assert isinstance(loop.continuation_policy, LLMJudgeContinuationPolicy)
-    assert loop.continuation_policy.judge.model.provider_metadata == {
+    assert isinstance(loop.continuation_policy.delegate, LLMJudgeContinuationPolicy)
+    assert loop.continuation_policy.delegate.judge.model.provider_metadata == {
         "agent_id": "sage",
         "provider_id": fast_provider["id"],
         "protocol": "openai-chat-completions",
@@ -2629,8 +2629,8 @@ async def test_llm_judge_selection_uses_v1_contract_and_hides_turn_status(
         "model_type": "fast",
     }
     assert loop.model.provider.config.reasoning_effort == "high"
-    assert loop.continuation_policy.judge.model.provider.config.reasoning_effort is None
-    assert loop.continuation_policy.judge.model.provider.config.extra_body == {
+    assert loop.continuation_policy.delegate.judge.model.provider.config.reasoning_effort is None
+    assert loop.continuation_policy.delegate.judge.model.provider.config.extra_body == {
         "chat_template_kwargs": {"enable_thinking": False},
         "enable_thinking": False,
         "thinking": {"type": "disabled"},
@@ -2655,7 +2655,7 @@ async def test_llm_judge_selection_uses_v1_contract_and_hides_turn_status(
         "timeout_seconds": 60.0,
         "judge_failure": "propagate_error",
     }
-    assert loop.continuation_policy.judge.timeout_seconds == 60.0
+    assert loop.continuation_policy.delegate.judge.timeout_seconds == 60.0
     assert "turn_status" not in {tool.name for tool in tools}
 
     await sandbox.close()
@@ -2751,7 +2751,7 @@ async def test_create_agent_uses_independent_runnable_defaults(
     assert created["agent_mode"] == "simple"
     assert created["max_loop_count"] == 48
     assert created["available_tools"]
-    assert created["available_skills"] == []
+    assert created["available_skills"] == ["sage-openui"]
     assert created["is_default"] is False
     assert {value["id"] for value in await service.list_agents("user_1")} == {
         "sage",

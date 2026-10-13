@@ -60,6 +60,33 @@ Desktop v2 只创建自己的数据布局：`~/sage/runtime/sessions` 为每个 
 `fork-base-events.jsonl`；删除父 Session 会级联删除整个子树。内部 `locations/` 仅用于
 按子 Session ID 直接定位，可随时从目录结构重建。
 
+## OpenUI
+
+当前源码使用 [OpenUI](https://github.com/thesysdev/openui) 的官方 `@openuidev/lang-core` 1.0.0 流式解析器，并通过 Sage 自己的 Flutter 原生 Glass 渲染器显示组件，支持浅色和深色模式。它不是 WebView 页面，也不需要调用 UI 发布工具。普通聊天可在输入框加号菜单打开“优先交互 UI”，按聊天保存；打开时宿主在首轮模型上下文中预加载完整 `sage-openui` Skill，无需模型调用加载工具。关闭时按自然需求自动选择 UI 或文字，不要求用户说 OpenUI。“设置 → 通用 → 默认开启交互式 UI”控制新聊天默认值；初始关闭，已有聊天不被修改，可从加号菜单单独覆盖，分支聊天继承原聊天的选择。交互 UI 默认承载全部内容，省略开场白和重复说明；仅在必要时保留一句结论、异常或下一步。
+
+Assistant 在普通 Markdown 消息中输出 `openui` fenced code block。每个消息增量都会更新官方流式解析器的累计源码，部分组件树通过同一 NDJSON 连接发送给 Desktop；源码保留在消息历史中，界面隐藏协议代码并逐步显示组件。文本、工具执行、审批和暂停恢复继续使用已有路径。
+
+当前注册 31 类原生组件：演示 `Deck`、`Slide`；布局 `Stack`、`Row`、`Card`、`Tabs`、`Tab`、`Accordion`、`Section`；展示 `Text`、`Heading`、`Table`、`Badge`、`Metric`、`Divider`、`Image`、`Progress`、`Alert`、`Chart`、`Timeline`、`Diagram`、`Computed`；输入 `Input`、`Select`、`Toggle`、`Button`、`NumberInput`、`Slider`、`DateInput`、`CheckboxGroup`、`RadioGroup`。这是 Sage 注册的声明式组件库，不支持上游全部组件、表达式、Query、Mutation、HTML 或 JavaScript。可在聊天正文查看界面，也可展开到右侧 OpenUI 面板。计算结果可级联引用并绑定到图表，随输入即时更新，无需调用模型；纯本地交互不需要提交按钮，只有任务要求将参数交回助手时才提供提交操作；只支持明确列出的运算、复利和贷款月供规则，不执行任意表达式。图片只允许匿名读取公开 HTTPS 地址，并检查重定向、解析地址和大小。表单草稿随桌面会话保存；完成的界面可以从后端持久化记录和原始消息重建。
+
+最终校验失败时保留已生成的只读预览并标记未完成。生成过程中字段与按钮不可操作；完整源码校验通过且所属 Run 完成后，按钮才能提交。本地和后端均校验表单，提交绑定 Agent、Session、界面版本与动作，重复提交复用已接受的 Run。旧轮次界面、被替换界面和其他会话的界面不可提交。动作仅作为同一 Session 的下一轮用户输入，后续工具操作仍受 Sage 审批策略约束。Studio 和子会话中的界面目前只读。提交已登记但 Run 未确认的情况会停止并等待核对，不自动重复执行。
+
+完成判定会调用与发布相同的解析和校验链路，具体错误作为运行时反馈进入下一轮模型请求；同一用户回合达到三版仍未通过校验时终止修复，并受 Run 总预算约束。有效的修订稿不会仅因“没有工具调用”被当作无进展文字循环，但仍需通过正常完成判定。同轮被替换的旧稿折叠为 Process Panel 中的一行，可在侧栏查看详情，正文只保留最新稿。`Computed` 本身就是动态结果卡片，应直接放入布局；`Metric` 接收固定文本，不接收组件引用。容器允许的子组件类型由官方 `.ref` 契约生成到签名中，并在原生树校验时再次检查。
+
+内置 [sage-openui Skill](../../skills/sage-openui/SKILL.md) 指导 Agent 选择使用场景与编写协议；运行时直接注入由真实组件库生成的语法与签名，Agent 无需先调用工具。可以直接要求 Agent：“把结果显示成对比表”或“用表单收集目的地和交通方式”。模型需支持流式输出；具体增量粒度取决于模型服务，渲染不等待整条消息完成。
+
+源码运行需要 **Node.js 22+**。官方解析器已打包为本地 `worker.cjs`，运行时不下载脚本或依赖 CDN。重新构建解析器及其组件契约：
+
+```bash
+cd app/v2/desktop/backend/openui_runtime
+npm ci --ignore-scripts --no-audit --no-fund
+npm run build
+npm test
+```
+
+发布流水线将 Node 可执行文件、官方解析器和第三方许可证放入安装包；现有已发布的 2.0.0 安装包不包含这次源码更新。OpenUI 使用 MIT 许可证，版权及许可文本保留在 `backend/openui_runtime/THIRD_PARTY_NOTICES.txt` 中。
+
+Current source uses the official [OpenUI](https://github.com/thesysdev/openui) streaming parser with Sage's own native Flutter Glass renderer. Assistant `openui` fenced blocks update progressively as model output arrives, with light/dark themes, cards, tables, and input forms. No UI publishing tool is required. Ordinary chats have a “Prefer interactive UI” switch in the composer plus menu, persisted per chat. When enabled, the host preloads the full sage-openui Skill into the first model context without a tool call. When disabled, presentation is chosen automatically from natural requests; users do not need to mention OpenUI. Settings → General → Interactive UI on by default controls new chats (initially off), without changing existing chat choices. The plus menu overrides a chat, and branches inherit their source chat preference. Interactive UI normally carries the whole answer without introductory or repeated prose; only a necessary conclusion, exception, or next step gets one short sentence. The current library has 31 native component types listed above, including line/bar/pie charts, metrics, tabs, accordions, timelines, diagrams, images, and richer inputs. Computed results and numeric chart bindings update locally without a model round-trip. Input fields do not require a submit button; only task-required handoffs to the assistant should add one. Native computations use a bounded allowlist of arithmetic, compound growth, and loan payment operations, not arbitrary expressions. Images use anonymous HTTPS reads with public-address validation, size limits, and redirect checks; Studio and child-session surfaces are read-only. Form submissions are validated and routed as the next user turn in the same Session, with durable duplicate protection and existing tool approvals. Source mode requires Node.js 22+; release packaging embeds Node and the parser. Previously published binaries do not include this source change.
+
 ## 契约边界
 
 - 客户端直接消费 `sage.runtime/v2` NDJSON 事件，并按 `run_sequence` 续订。
@@ -150,3 +177,12 @@ Agent 配置中的 RSI 按钮在设置框架内打开优化页面，保留侧栏
 第一版支持 simple Agent 和原生工具；原有运行变量被固定带入测试，每次测试使用新 Application/Session 和临时工作区。临时工作区不包含真实项目文件，进程执行禁用，网络使用默认沙箱限制；Shell 尚需测试绑定，MCP 与非 simple Agent 在启动前拒绝。工具范围可以从原生工具集合增减启用项，预算范围目前只开放 max_steps。依赖 Desktop 单 sidecar 进程，不提供分布式任务接管或自动断点续跑。
 
 `integration_test/desktop_rsi_live_test.dart` 是显式启用的 macOS 原生验证。需先准备真实模型 provider、独立测试 Agent 和 `setup.json`/`suite.json`，然后运行 `flutter test integration_test/desktop_rsi_live_test.dart -d macos --dart-define=RSI_LIVE_MODEL=true --dart-define=RSI_LIVE_ARTIFACT_DIR=<绝对目录>`。它调用真实后台与模型，通过原生前端检查人工保存、三轮进度、离开/重连、确认/取消、版本恢复和后端重启后的历史；仅系统文件选择器使用固定测试文件替代。默认不运行，避免普通测试产生模型费用。
+
+
+### Streaming presentations / 流式演示文稿
+
+`Deck(title, [slides])` contains `Slide(title, [blocks], layout, accent)`. The official parser updates native 16:9 pages incrementally; layouts are `cover`, `content`, `split`, with blue/rose/emerald/amber accents and light/dark palettes. Navigation, thumbnails, fullscreen presentation and editable PPTX export are native controls. Export is enabled for a validated persisted Deck and uses its exact revision, with no model/tool call. PPTX text, tables and charts are editable Office objects, not screenshots. Preview and export share generated canvas geometry, but Flutter Glass material and Office chart typography may differ.
+
+幻灯片支持封面、内容、双栏三种固定版式，内容为文字、指标、表格、折线/柱状/环形图。当前不支持 PPTX 导入、任意自由排版、图片/视频、动画或逐字流式写入 PPTX 二进制。生成过程中更新的是幻灯片数据；完整验证后导出文件。旧 `pptx` 制作 Skill 已移除，模型通过 `sage-openui` 和系统中的组件签名直接输出 OpenUI 代码。超过版式限制应拆页，不能裁剪内容。此能力是 Sage 自己实现的渲染与导出，并非 OpenUI Cloud Reports API。
+
+本地完成进度支持：`Computed` 的 `count` 对勾选项显式计数，`ratioPercent` 计算完成数 ÷ 总数 × 100；`Progress` 可绑定数值字段或计算结果。进度、指标和图表在输入变化时本地更新，无需提交。`sum` 不会隐式转换勾选数组，既有 `percent` 仍表示基数 × 百分比 ÷ 100。

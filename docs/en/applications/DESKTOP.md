@@ -13,7 +13,7 @@ parent: Applications
 
 ## Start from source
 
-Complete the [Python setup](GETTING_STARTED.md). Install Flutter with Dart `^3.12.2` and your platform's desktop toolchain:
+Complete the [Python setup](GETTING_STARTED.md). Install Node.js 22+ for the official streaming UI parser, then install Flutter with Dart `^3.12.2` and your platform's desktop toolchain:
 
 ```bash
 cd app/v2/desktop
@@ -57,3 +57,19 @@ Desktop v2 does not import v1 data. [Sage 2.0.0](https://github.com/ZHangZHengEr
 ## RSI and Agent versions
 
 [RSI workflow, editable scope, audits and version confirmation](RSI.md).
+
+## Interactive UI and presentations
+
+Ask naturally: “Compare these three plans”, “Make a compound-interest calculator”, or “Create a four-page product presentation”. You do not need to mention OpenUI or write a protocol.
+
+- For one ordinary chat, open the composer **+** menu and enable **Prefer interactive UI**.
+- For new chats by default, enable **Settings → General → Interactive UI on by default**. Settings save automatically; the initial default is off. Existing chats keep their choice, and branches inherit their source chat's choice.
+- Enabled chats preload the complete built-in `sage-openui` Skill into the first model context without a loading tool call. Disabled chats select UI or prose automatically; an explicit text request is respected.
+
+Sage uses the official [OpenUI](https://github.com/thesysdev/openui) streaming parser and its own native Flutter Glass renderer, with light/dark themes and 31 registered component types. The renderer updates for every incoming text chunk; token-by-token cadence depends on the model provider. Inputs become usable after validation and completion. Calculators and numeric chart bindings update locally, while a form button sends the values as the next user turn. Computed results can feed further calculations and charts through acyclic dependencies. If final validation fails, the existing preview remains visible with an incomplete status and submission disabled.
+
+Presentations stream into native 16:9 pages with navigation, thumbnails and fullscreen mode. After validation, export the same document to editable PPTX and open it in PowerPoint or Keynote. Supported slide blocks are text, metrics, tables and literal-data charts. PPTX import, freeform editing and animation are not included. This is Sage's own integration, not the full upstream renderer or OpenUI Cloud Reports API. Previously published installers do not contain these source additions.
+
+Local-only input interfaces do not require submit buttons. Computed results and bound charts update on input changes; a submit button is a separate handoff to the assistant, not a recalculation control.
+
+Local progress tracking supports explicit `Computed` operations: `count` counts selected checkbox options; `ratioPercent` returns completed / total * 100. `Progress` can bind numeric fields or computed results. Updates remain local. `sum` does not coerce selection arrays; the existing `percent` operation retains base * rate / 100 semantics.

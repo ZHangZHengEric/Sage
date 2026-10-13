@@ -162,6 +162,7 @@ const _translations = <String, Map<String, String>>{
     'settings.defaultModel': '默认模型',
     'settings.setAsDefault': '设为默认',
     'settings.currentDefault': '当前默认',
+    'settings.defaultInteractiveUi': '默认开启交互式 UI',
     'settings.defaultWorkspace': '默认智能体工作区',
     'settings.defaultWorkspacePath': '默认智能体工作区路径',
     'settings.chooseDirectory': '选择目录',
@@ -407,6 +408,7 @@ const _translations = <String, Map<String, String>>{
     'workspace.goalModeShort': '目标',
     'workspace.closePlanMode': '关闭计划模式',
     'workspace.closeGoalMode': '关闭目标模式',
+    'workspace.preferInteractiveUi': '优先交互 UI',
     'workspace.goalMode': '目标模式',
     'workspace.goalModeDescription': '持续执行并验证目标，完成后才结束',
     'workspace.planModeDescription': '先制定可执行计划，不修改工作区',
@@ -537,6 +539,7 @@ const _translations = <String, Map<String, String>>{
     'settings.defaultModel': 'Default model',
     'settings.setAsDefault': 'Make default',
     'settings.currentDefault': 'Current default',
+    'settings.defaultInteractiveUi': 'Interactive UI on by default',
     'settings.defaultWorkspace': 'Default agent workspace',
     'settings.defaultWorkspacePath': 'Default agent workspace path',
     'settings.chooseDirectory': 'Choose directory',
@@ -812,6 +815,7 @@ const _translations = <String, Map<String, String>>{
     'workspace.goalModeShort': 'Goal',
     'workspace.closePlanMode': 'Exit plan mode',
     'workspace.closeGoalMode': 'Exit goal mode',
+    'workspace.preferInteractiveUi': 'Prefer interactive UI',
     'workspace.goalMode': 'Goal mode',
     'workspace.goalModeDescription':
         'Execute and verify the goal before completing',
@@ -950,6 +954,7 @@ const _translations = <String, Map<String, String>>{
     'settings.defaultModel': 'Modelo padrão',
     'settings.setAsDefault': 'Definir como padrão',
     'settings.currentDefault': 'Padrão atual',
+    'settings.defaultInteractiveUi': 'UI interativa ativada por padrão',
     'settings.defaultWorkspace': 'Workspace padrão do agente',
     'settings.defaultWorkspacePath': 'Caminho do workspace padrão do agente',
     'settings.chooseDirectory': 'Escolher pasta',
@@ -1225,6 +1230,7 @@ const _translations = <String, Map<String, String>>{
     'workspace.goalModeShort': 'Objetivo',
     'workspace.closePlanMode': 'Sair do modo de planejamento',
     'workspace.closeGoalMode': 'Sair do modo de objetivo',
+    'workspace.preferInteractiveUi': 'Priorizar UI interativa',
     'workspace.goalMode': 'Modo de objetivo',
     'workspace.goalModeDescription':
         'Execute e verifique o objetivo antes de concluir',
@@ -1367,6 +1373,7 @@ const _translations = <String, Map<String, String>>{
     'settings.defaultModel': 'Modelo predeterminado',
     'settings.setAsDefault': 'Establecer como predeterminado',
     'settings.currentDefault': 'Predeterminado actual',
+    'settings.defaultInteractiveUi': 'UI interactiva activada por defecto',
     'settings.defaultWorkspace': 'Espacio de trabajo predeterminado del agente',
     'settings.defaultWorkspacePath':
         'Ruta del espacio de trabajo predeterminado del agente',
@@ -1646,6 +1653,7 @@ const _translations = <String, Map<String, String>>{
     'workspace.goalModeShort': 'Objetivo',
     'workspace.closePlanMode': 'Salir del modo de planificación',
     'workspace.closeGoalMode': 'Salir del modo objetivo',
+    'workspace.preferInteractiveUi': 'Priorizar UI interactiva',
     'workspace.goalMode': 'Modo objetivo',
     'workspace.goalModeDescription':
         'Ejecuta y verifica el objetivo antes de finalizar',
@@ -1788,6 +1796,7 @@ const _translations = <String, Map<String, String>>{
     'settings.defaultModel': 'Modèle par défaut',
     'settings.setAsDefault': 'Définir par défaut',
     'settings.currentDefault': 'Valeur par défaut actuelle',
+    'settings.defaultInteractiveUi': 'Interface interactive activée par défaut',
     'settings.defaultWorkspace': 'Espace de travail par défaut de l’agent',
     'settings.defaultWorkspacePath':
         'Chemin de l’espace de travail par défaut de l’agent',
@@ -2066,6 +2075,7 @@ const _translations = <String, Map<String, String>>{
     'workspace.goalModeShort': 'Objectif',
     'workspace.closePlanMode': 'Quitter le mode planification',
     'workspace.closeGoalMode': 'Quitter le mode objectif',
+    'workspace.preferInteractiveUi': 'Privilégier l’interface interactive',
     'workspace.goalMode': 'Mode objectif',
     'workspace.goalModeDescription':
         'Exécutez et vérifiez l’objectif avant de terminer',
@@ -2207,6 +2217,7 @@ const _translations = <String, Map<String, String>>{
     'settings.defaultModel': 'Standardmodell',
     'settings.setAsDefault': 'Als Standard festlegen',
     'settings.currentDefault': 'Aktueller Standard',
+    'settings.defaultInteractiveUi': 'Interaktive UI standardmäßig aktivieren',
     'settings.defaultWorkspace': 'Standard-Arbeitsbereich des Agenten',
     'settings.defaultWorkspacePath':
         'Pfad zum Standard-Arbeitsbereich des Agenten',
@@ -2484,6 +2495,7 @@ const _translations = <String, Map<String, String>>{
     'workspace.goalModeShort': 'Ziel',
     'workspace.closePlanMode': 'Planungsmodus beenden',
     'workspace.closeGoalMode': 'Zielmodus beenden',
+    'workspace.preferInteractiveUi': 'Interaktive UI bevorzugen',
     'workspace.goalMode': 'Zielmodus',
     'workspace.goalModeDescription':
         'Ziel ausführen und prüfen, bevor der Lauf endet',
@@ -2624,6 +2636,7 @@ const _translations = <String, Map<String, String>>{
     'settings.defaultModel': 'デフォルトモデル',
     'settings.setAsDefault': 'デフォルトに設定',
     'settings.currentDefault': '現在のデフォルト',
+    'settings.defaultInteractiveUi': 'インタラクティブ UI をデフォルトで有効化',
     'settings.defaultWorkspace': 'エージェントのデフォルトワークスペース',
     'settings.defaultWorkspacePath': 'エージェントのデフォルトワークスペースのパス',
     'settings.chooseDirectory': 'フォルダを選択',
@@ -2869,6 +2882,7 @@ const _translations = <String, Map<String, String>>{
     'workspace.goalModeShort': '目標',
     'workspace.closePlanMode': '計画モードを終了',
     'workspace.closeGoalMode': '目標モードを終了',
+    'workspace.preferInteractiveUi': 'インタラクティブ UI を優先',
     'workspace.goalMode': '目標モード',
     'workspace.goalModeDescription': '目標を実行・検証し、完了後に終了',
     'workspace.planModeDescription': 'ワークスペースを変更せずに実行可能な計画を作成',
@@ -2999,6 +3013,7 @@ const _translations = <String, Map<String, String>>{
     'settings.defaultModel': '기본 모델',
     'settings.setAsDefault': '기본값으로 설정',
     'settings.currentDefault': '현재 기본값',
+    'settings.defaultInteractiveUi': '대화형 UI 기본 활성화',
     'settings.defaultWorkspace': '에이전트 기본 워크스페이스',
     'settings.defaultWorkspacePath': '에이전트 기본 워크스페이스 경로',
     'settings.chooseDirectory': '폴더 선택',
@@ -3246,6 +3261,7 @@ const _translations = <String, Map<String, String>>{
     'workspace.goalModeShort': '목표',
     'workspace.closePlanMode': '계획 모드 종료',
     'workspace.closeGoalMode': '목표 모드 종료',
+    'workspace.preferInteractiveUi': '대화형 UI 우선',
     'workspace.goalMode': '목표 모드',
     'workspace.goalModeDescription': '목표를 실행하고 검증한 뒤 완료',
     'workspace.planModeDescription': '워크스페이스를 변경하지 않고 실행 가능한 계획 만들기',
@@ -3377,6 +3393,7 @@ const _translations = <String, Map<String, String>>{
     'settings.defaultModel': 'Модель по умолчанию',
     'settings.setAsDefault': 'Сделать по умолчанию',
     'settings.currentDefault': 'Текущее значение по умолчанию',
+    'settings.defaultInteractiveUi': 'Интерактивный интерфейс по умолчанию',
     'settings.defaultWorkspace': 'Рабочая область агента по умолчанию',
     'settings.defaultWorkspacePath':
         'Путь к рабочей области агента по умолчанию',
@@ -3653,6 +3670,7 @@ const _translations = <String, Map<String, String>>{
     'workspace.goalModeShort': 'Цель',
     'workspace.closePlanMode': 'Выйти из режима планирования',
     'workspace.closeGoalMode': 'Выйти из режима цели',
+    'workspace.preferInteractiveUi': 'Предпочитать интерактивный интерфейс',
     'workspace.goalMode': 'Режим цели',
     'workspace.goalModeDescription':
         'Выполните и проверьте цель перед завершением',

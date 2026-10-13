@@ -37,6 +37,12 @@ jobs:
           python scripts/release/check_v2_release.py
           python docs/scripts/check_docs.py
           python scripts/checks/check_architecture.py
+      - name: Build and test official OpenUI parser bundle
+        working-directory: app/v2/desktop/backend/openui_runtime
+        run: |
+          npm ci --ignore-scripts --no-audit --no-fund
+          npm run build
+          npm test
       - name: Build Python distributions
         run: python -m build --outdir release-assets
       - name: Verify distribution contents
@@ -88,6 +94,9 @@ jobs:
           name: sage-v2-packages
           path: python-packages
       - uses: astral-sh/setup-uv@v6
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
       - name: Install managed relocatable Python
         run: uv python install 3.13
       - uses: actions/setup-python@v5

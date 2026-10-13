@@ -1,0 +1,1933 @@
+[
+  {
+    "model": "gpt-6.1-sol",
+    "case": "coffee",
+    "surface": {
+      "tree": {
+        "component": "Stack",
+        "props": {
+          "children": [
+            {
+              "component": "Heading",
+              "props": {
+                "content": "咖啡店经营测算",
+                "level": 1
+              }
+            },
+            {
+              "component": "Text",
+              "props": {
+                "content": "按每月营业30天计算，金额单位为元；利润未扣除税费及未列入的其他支出。"
+              }
+            },
+            {
+              "component": "Card",
+              "props": {
+                "title": "经营参数",
+                "children": [
+                  {
+                    "component": "Row",
+                    "props": {
+                      "children": [
+                        {
+                          "component": "NumberInput",
+                          "props": {
+                            "name": "daily_sales",
+                            "label": "每天销量（杯）",
+                            "value": 100,
+                            "min": 0,
+                            "max": 10000,
+                            "step": 1
+                          },
+                          "id": "dailySales"
+                        },
+                        {
+                          "component": "NumberInput",
+                          "props": {
+                            "name": "price",
+                            "label": "每杯售价（元）",
+                            "value": 25,
+                            "min": 0,
+                            "max": 1000,
+                            "step": 0.5
+                          },
+                          "id": "price"
+                        }
+                      ]
+                    }
+                  },
+                  {
+                    "component": "Row",
+                    "props": {
+                      "children": [
+                        {
+                          "component": "NumberInput",
+                          "props": {
+                            "name": "unit_cost",
+                            "label": "单杯成本（元）",
+                            "value": 8,
+                            "min": 0,
+                            "max": 1000,
+                            "step": 0.5
+                          },
+                          "id": "unitCost"
+                        },
+                        {
+                          "component": "NumberInput",
+                          "props": {
+                            "name": "fixed_cost",
+                            "label": "每月固定成本（元）",
+                            "value": 20000,
+                            "min": 0,
+                            "max": 10000000,
+                            "step": 1000
+                          },
+                          "id": "fixedCost"
+                        }
+                      ]
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "component": "Row",
+              "props": {
+                "children": [
+                  {
+                    "component": "Computed",
+                    "props": {
+                      "label": "月收入",
+                      "operation": "product",
+                      "inputs": [
+                        {
+                          "component": "Computed",
+                          "props": {
+                            "label": "月销量",
+                            "operation": "product",
+                            "inputs": [
+                              {
+                                "component": "NumberInput",
+                                "props": {
+                                  "name": "daily_sales",
+                                  "label": "每天销量（杯）",
+                                  "value": 100,
+                                  "min": 0,
+                                  "max": 10000,
+                                  "step": 1
+                                },
+                                "id": "dailySales"
+                              },
+                              30
+                            ],
+                            "precision": 0,
+                            "prefix": "",
+                            "suffix": " 杯"
+                          },
+                          "id": "monthlyCups"
+                        },
+                        {
+                          "component": "NumberInput",
+                          "props": {
+                            "name": "price",
+                            "label": "每杯售价（元）",
+                            "value": 25,
+                            "min": 0,
+                            "max": 1000,
+                            "step": 0.5
+                          },
+                          "id": "price"
+                        }
+                      ],
+                      "precision": 2,
+                      "prefix": "",
+                      "suffix": " 元"
+                    },
+                    "id": "revenue"
+                  },
+                  {
+                    "component": "Computed",
+                    "props": {
+                      "label": "月总成本",
+                      "operation": "sum",
+                      "inputs": [
+                        {
+                          "component": "Computed",
+                          "props": {
+                            "label": "月变动成本",
+                            "operation": "product",
+                            "inputs": [
+                              {
+                                "component": "Computed",
+                                "props": {
+                                  "label": "月销量",
+                                  "operation": "product",
+                                  "inputs": [
+                                    {
+                                      "component": "NumberInput",
+                                      "props": {
+                                        "name": "daily_sales",
+                                        "label": "每天销量（杯）",
+                                        "value": 100,
+                                        "min": 0,
+                                        "max": 10000,
+                                        "step": 1
+                                      },
+                                      "id": "dailySales"
+                                    },
+                                    30
+                                  ],
+                                  "precision": 0,
+                                  "prefix": "",
+                                  "suffix": " 杯"
+                                },
+                                "id": "monthlyCups"
+                              },
+                              {
+                                "component": "NumberInput",
+                                "props": {
+                                  "name": "unit_cost",
+                                  "label": "单杯成本（元）",
+                                  "value": 8,
+                                  "min": 0,
+                                  "max": 1000,
+                                  "step": 0.5
+                                },
+                                "id": "unitCost"
+                              }
+                            ],
+                            "precision": 2,
+                            "prefix": "",
+                            "suffix": " 元"
+                          },
+                          "id": "variableCost"
+                        },
+                        {
+                          "component": "NumberInput",
+                          "props": {
+                            "name": "fixed_cost",
+                            "label": "每月固定成本（元）",
+                            "value": 20000,
+                            "min": 0,
+                            "max": 10000000,
+                            "step": 1000
+                          },
+                          "id": "fixedCost"
+                        }
+                      ],
+                      "precision": 2,
+                      "prefix": "",
+                      "suffix": " 元"
+                    },
+                    "id": "totalCost"
+                  },
+                  {
+                    "component": "Computed",
+                    "props": {
+                      "label": "月利润",
+                      "operation": "difference",
+                      "inputs": [
+                        {
+                          "component": "Computed",
+                          "props": {
+                            "label": "月收入",
+                            "operation": "product",
+                            "inputs": [
+                              {
+                                "component": "Computed",
+                                "props": {
+                                  "label": "月销量",
+                                  "operation": "product",
+                                  "inputs": [
+                                    {
+                                      "component": "NumberInput",
+                                      "props": {
+                                        "name": "daily_sales",
+                                        "label": "每天销量（杯）",
+                                        "value": 100,
+                                        "min": 0,
+                                        "max": 10000,
+                                        "step": 1
+                                      },
+                                      "id": "dailySales"
+                                    },
+                                    30
+                                  ],
+                                  "precision": 0,
+                                  "prefix": "",
+                                  "suffix": " 杯"
+                                },
+                                "id": "monthlyCups"
+                              },
+                              {
+                                "component": "NumberInput",
+                                "props": {
+                                  "name": "price",
+                                  "label": "每杯售价（元）",
+                                  "value": 25,
+                                  "min": 0,
+                                  "max": 1000,
+                                  "step": 0.5
+                                },
+                                "id": "price"
+                              }
+                            ],
+                            "precision": 2,
+                            "prefix": "",
+                            "suffix": " 元"
+                          },
+                          "id": "revenue"
+                        },
+                        {
+                          "component": "Computed",
+                          "props": {
+                            "label": "月总成本",
+                            "operation": "sum",
+                            "inputs": [
+                              {
+                                "component": "Computed",
+                                "props": {
+                                  "label": "月变动成本",
+                                  "operation": "product",
+                                  "inputs": [
+                                    {
+                                      "component": "Computed",
+                                      "props": {
+                                        "label": "月销量",
+                                        "operation": "product",
+                                        "inputs": [
+                                          {
+                                            "component": "NumberInput",
+                                            "props": {
+                                              "name": "daily_sales",
+                                              "label": "每天销量（杯）",
+                                              "value": 100,
+                                              "min": 0,
+                                              "max": 10000,
+                                              "step": 1
+                                            },
+                                            "id": "dailySales"
+                                          },
+                                          30
+                                        ],
+                                        "precision": 0,
+                                        "prefix": "",
+                                        "suffix": " 杯"
+                                      },
+                                      "id": "monthlyCups"
+                                    },
+                                    {
+                                      "component": "NumberInput",
+                                      "props": {
+                                        "name": "unit_cost",
+                                        "label": "单杯成本（元）",
+                                        "value": 8,
+                                        "min": 0,
+                                        "max": 1000,
+                                        "step": 0.5
+                                      },
+                                      "id": "unitCost"
+                                    }
+                                  ],
+                                  "precision": 2,
+                                  "prefix": "",
+                                  "suffix": " 元"
+                                },
+                                "id": "variableCost"
+                              },
+                              {
+                                "component": "NumberInput",
+                                "props": {
+                                  "name": "fixed_cost",
+                                  "label": "每月固定成本（元）",
+                                  "value": 20000,
+                                  "min": 0,
+                                  "max": 10000000,
+                                  "step": 1000
+                                },
+                                "id": "fixedCost"
+                              }
+                            ],
+                            "precision": 2,
+                            "prefix": "",
+                            "suffix": " 元"
+                          },
+                          "id": "totalCost"
+                        }
+                      ],
+                      "precision": 2,
+                      "prefix": "",
+                      "suffix": " 元"
+                    },
+                    "id": "profit"
+                  }
+                ]
+              }
+            },
+            {
+              "component": "Chart",
+              "props": {
+                "title": "月收入、成本与利润（元）",
+                "type": "bar",
+                "labels": [
+                  "月收入",
+                  "月总成本",
+                  "月利润"
+                ],
+                "series": [
+                  {
+                    "name": "金额",
+                    "values": [
+                      {
+                        "component": "Computed",
+                        "props": {
+                          "label": "月收入",
+                          "operation": "product",
+                          "inputs": [
+                            {
+                              "component": "Computed",
+                              "props": {
+                                "label": "月销量",
+                                "operation": "product",
+                                "inputs": [
+                                  {
+                                    "component": "NumberInput",
+                                    "props": {
+                                      "name": "daily_sales",
+                                      "label": "每天销量（杯）",
+                                      "value": 100,
+                                      "min": 0,
+                                      "max": 10000,
+                                      "step": 1
+                                    },
+                                    "id": "dailySales"
+                                  },
+                                  30
+                                ],
+                                "precision": 0,
+                                "prefix": "",
+                                "suffix": " 杯"
+                              },
+                              "id": "monthlyCups"
+                            },
+                            {
+                              "component": "NumberInput",
+                              "props": {
+                                "name": "price",
+                                "label": "每杯售价（元）",
+                                "value": 25,
+                                "min": 0,
+                                "max": 1000,
+                                "step": 0.5
+                              },
+                              "id": "price"
+                            }
+                          ],
+                          "precision": 2,
+                          "prefix": "",
+                          "suffix": " 元"
+                        },
+                        "id": "revenue"
+                      },
+                      {
+                        "component": "Computed",
+                        "props": {
+                          "label": "月总成本",
+                          "operation": "sum",
+                          "inputs": [
+                            {
+                              "component": "Computed",
+                              "props": {
+                                "label": "月变动成本",
+                                "operation": "product",
+                                "inputs": [
+                                  {
+                                    "component": "Computed",
+                                    "props": {
+                                      "label": "月销量",
+                                      "operation": "product",
+                                      "inputs": [
+                                        {
+                                          "component": "NumberInput",
+                                          "props": {
+                                            "name": "daily_sales",
+                                            "label": "每天销量（杯）",
+                                            "value": 100,
+                                            "min": 0,
+                                            "max": 10000,
+                                            "step": 1
+                                          },
+                                          "id": "dailySales"
+                                        },
+                                        30
+                                      ],
+                                      "precision": 0,
+                                      "prefix": "",
+                                      "suffix": " 杯"
+                                    },
+                                    "id": "monthlyCups"
+                                  },
+                                  {
+                                    "component": "NumberInput",
+                                    "props": {
+                                      "name": "unit_cost",
+                                      "label": "单杯成本（元）",
+                                      "value": 8,
+                                      "min": 0,
+                                      "max": 1000,
+                                      "step": 0.5
+                                    },
+                                    "id": "unitCost"
+                                  }
+                                ],
+                                "precision": 2,
+                                "prefix": "",
+                                "suffix": " 元"
+                              },
+                              "id": "variableCost"
+                            },
+                            {
+                              "component": "NumberInput",
+                              "props": {
+                                "name": "fixed_cost",
+                                "label": "每月固定成本（元）",
+                                "value": 20000,
+                                "min": 0,
+                                "max": 10000000,
+                                "step": 1000
+                              },
+                              "id": "fixedCost"
+                            }
+                          ],
+                          "precision": 2,
+                          "prefix": "",
+                          "suffix": " 元"
+                        },
+                        "id": "totalCost"
+                      },
+                      {
+                        "component": "Computed",
+                        "props": {
+                          "label": "月利润",
+                          "operation": "difference",
+                          "inputs": [
+                            {
+                              "component": "Computed",
+                              "props": {
+                                "label": "月收入",
+                                "operation": "product",
+                                "inputs": [
+                                  {
+                                    "component": "Computed",
+                                    "props": {
+                                      "label": "月销量",
+                                      "operation": "product",
+                                      "inputs": [
+                                        {
+                                          "component": "NumberInput",
+                                          "props": {
+                                            "name": "daily_sales",
+                                            "label": "每天销量（杯）",
+                                            "value": 100,
+                                            "min": 0,
+                                            "max": 10000,
+                                            "step": 1
+                                          },
+                                          "id": "dailySales"
+                                        },
+                                        30
+                                      ],
+                                      "precision": 0,
+                                      "prefix": "",
+                                      "suffix": " 杯"
+                                    },
+                                    "id": "monthlyCups"
+                                  },
+                                  {
+                                    "component": "NumberInput",
+                                    "props": {
+                                      "name": "price",
+                                      "label": "每杯售价（元）",
+                                      "value": 25,
+                                      "min": 0,
+                                      "max": 1000,
+                                      "step": 0.5
+                                    },
+                                    "id": "price"
+                                  }
+                                ],
+                                "precision": 2,
+                                "prefix": "",
+                                "suffix": " 元"
+                              },
+                              "id": "revenue"
+                            },
+                            {
+                              "component": "Computed",
+                              "props": {
+                                "label": "月总成本",
+                                "operation": "sum",
+                                "inputs": [
+                                  {
+                                    "component": "Computed",
+                                    "props": {
+                                      "label": "月变动成本",
+                                      "operation": "product",
+                                      "inputs": [
+                                        {
+                                          "component": "Computed",
+                                          "props": {
+                                            "label": "月销量",
+                                            "operation": "product",
+                                            "inputs": [
+                                              {
+                                                "component": "NumberInput",
+                                                "props": {
+                                                  "name": "daily_sales",
+                                                  "label": "每天销量（杯）",
+                                                  "value": 100,
+                                                  "min": 0,
+                                                  "max": 10000,
+                                                  "step": 1
+                                                },
+                                                "id": "dailySales"
+                                              },
+                                              30
+                                            ],
+                                            "precision": 0,
+                                            "prefix": "",
+                                            "suffix": " 杯"
+                                          },
+                                          "id": "monthlyCups"
+                                        },
+                                        {
+                                          "component": "NumberInput",
+                                          "props": {
+                                            "name": "unit_cost",
+                                            "label": "单杯成本（元）",
+                                            "value": 8,
+                                            "min": 0,
+                                            "max": 1000,
+                                            "step": 0.5
+                                          },
+                                          "id": "unitCost"
+                                        }
+                                      ],
+                                      "precision": 2,
+                                      "prefix": "",
+                                      "suffix": " 元"
+                                    },
+                                    "id": "variableCost"
+                                  },
+                                  {
+                                    "component": "NumberInput",
+                                    "props": {
+                                      "name": "fixed_cost",
+                                      "label": "每月固定成本（元）",
+                                      "value": 20000,
+                                      "min": 0,
+                                      "max": 10000000,
+                                      "step": 1000
+                                    },
+                                    "id": "fixedCost"
+                                  }
+                                ],
+                                "precision": 2,
+                                "prefix": "",
+                                "suffix": " 元"
+                              },
+                              "id": "totalCost"
+                            }
+                          ],
+                          "precision": 2,
+                          "prefix": "",
+                          "suffix": " 元"
+                        },
+                        "id": "profit"
+                      }
+                    ]
+                  }
+                ]
+              }
+            },
+            {
+              "component": "Card",
+              "props": {
+                "title": "成本与销量明细",
+                "children": [
+                  {
+                    "component": "Computed",
+                    "props": {
+                      "label": "月销量",
+                      "operation": "product",
+                      "inputs": [
+                        {
+                          "component": "NumberInput",
+                          "props": {
+                            "name": "daily_sales",
+                            "label": "每天销量（杯）",
+                            "value": 100,
+                            "min": 0,
+                            "max": 10000,
+                            "step": 1
+                          },
+                          "id": "dailySales"
+                        },
+                        30
+                      ],
+                      "precision": 0,
+                      "prefix": "",
+                      "suffix": " 杯"
+                    },
+                    "id": "monthlyCups"
+                  },
+                  {
+                    "component": "Computed",
+                    "props": {
+                      "label": "月变动成本",
+                      "operation": "product",
+                      "inputs": [
+                        {
+                          "component": "Computed",
+                          "props": {
+                            "label": "月销量",
+                            "operation": "product",
+                            "inputs": [
+                              {
+                                "component": "NumberInput",
+                                "props": {
+                                  "name": "daily_sales",
+                                  "label": "每天销量（杯）",
+                                  "value": 100,
+                                  "min": 0,
+                                  "max": 10000,
+                                  "step": 1
+                                },
+                                "id": "dailySales"
+                              },
+                              30
+                            ],
+                            "precision": 0,
+                            "prefix": "",
+                            "suffix": " 杯"
+                          },
+                          "id": "monthlyCups"
+                        },
+                        {
+                          "component": "NumberInput",
+                          "props": {
+                            "name": "unit_cost",
+                            "label": "单杯成本（元）",
+                            "value": 8,
+                            "min": 0,
+                            "max": 1000,
+                            "step": 0.5
+                          },
+                          "id": "unitCost"
+                        }
+                      ],
+                      "precision": 2,
+                      "prefix": "",
+                      "suffix": " 元"
+                    },
+                    "id": "variableCost"
+                  },
+                  {
+                    "component": "Text",
+                    "props": {
+                      "content": "月总成本＝月销量×单杯成本＋每月固定成本；月利润＝月收入－月总成本。"
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      },
+      "complete": true,
+      "surface_id": "local-only-coffee"
+    }
+  },
+  {
+    "model": "gpt-6.1-sol",
+    "case": "saving",
+    "surface": {
+      "tree": {
+        "component": "Stack",
+        "props": {
+          "children": [
+            {
+              "component": "Heading",
+              "props": {
+                "content": "储蓄目标测算",
+                "level": 2
+              }
+            },
+            {
+              "component": "Row",
+              "props": {
+                "children": [
+                  {
+                    "component": "NumberInput",
+                    "props": {
+                      "name": "initial_savings",
+                      "label": "初始积蓄（元）",
+                      "value": 20000,
+                      "min": 0,
+                      "max": 10000000,
+                      "step": 1000
+                    },
+                    "id": "initial"
+                  },
+                  {
+                    "component": "NumberInput",
+                    "props": {
+                      "name": "monthly_savings",
+                      "label": "每月储蓄（元）",
+                      "value": 3000,
+                      "min": 0,
+                      "max": 1000000,
+                      "step": 100
+                    },
+                    "id": "monthly"
+                  },
+                  {
+                    "component": "NumberInput",
+                    "props": {
+                      "name": "saving_months",
+                      "label": "计划月数",
+                      "value": 12,
+                      "min": 1,
+                      "max": 600,
+                      "step": 1
+                    },
+                    "id": "months"
+                  }
+                ]
+              }
+            },
+            {
+              "component": "Row",
+              "props": {
+                "children": [
+                  {
+                    "component": "Computed",
+                    "props": {
+                      "label": "新增储蓄",
+                      "operation": "product",
+                      "inputs": [
+                        {
+                          "component": "NumberInput",
+                          "props": {
+                            "name": "monthly_savings",
+                            "label": "每月储蓄（元）",
+                            "value": 3000,
+                            "min": 0,
+                            "max": 1000000,
+                            "step": 100
+                          },
+                          "id": "monthly"
+                        },
+                        {
+                          "component": "NumberInput",
+                          "props": {
+                            "name": "saving_months",
+                            "label": "计划月数",
+                            "value": 12,
+                            "min": 1,
+                            "max": 600,
+                            "step": 1
+                          },
+                          "id": "months"
+                        }
+                      ],
+                      "precision": 0,
+                      "prefix": "¥",
+                      "suffix": ""
+                    },
+                    "id": "added"
+                  },
+                  {
+                    "component": "Computed",
+                    "props": {
+                      "label": "期末总额（不计利息）",
+                      "operation": "sum",
+                      "inputs": [
+                        {
+                          "component": "NumberInput",
+                          "props": {
+                            "name": "initial_savings",
+                            "label": "初始积蓄（元）",
+                            "value": 20000,
+                            "min": 0,
+                            "max": 10000000,
+                            "step": 1000
+                          },
+                          "id": "initial"
+                        },
+                        {
+                          "component": "Computed",
+                          "props": {
+                            "label": "新增储蓄",
+                            "operation": "product",
+                            "inputs": [
+                              {
+                                "component": "NumberInput",
+                                "props": {
+                                  "name": "monthly_savings",
+                                  "label": "每月储蓄（元）",
+                                  "value": 3000,
+                                  "min": 0,
+                                  "max": 1000000,
+                                  "step": 100
+                                },
+                                "id": "monthly"
+                              },
+                              {
+                                "component": "NumberInput",
+                                "props": {
+                                  "name": "saving_months",
+                                  "label": "计划月数",
+                                  "value": 12,
+                                  "min": 1,
+                                  "max": 600,
+                                  "step": 1
+                                },
+                                "id": "months"
+                              }
+                            ],
+                            "precision": 0,
+                            "prefix": "¥",
+                            "suffix": ""
+                          },
+                          "id": "added"
+                        }
+                      ],
+                      "precision": 0,
+                      "prefix": "¥",
+                      "suffix": ""
+                    },
+                    "id": "total"
+                  }
+                ]
+              }
+            },
+            {
+              "component": "Chart",
+              "props": {
+                "title": "期末储蓄构成（元）",
+                "type": "pie",
+                "labels": [
+                  "初始积蓄",
+                  "新增储蓄"
+                ],
+                "series": [
+                  {
+                    "name": "储蓄金额",
+                    "values": [
+                      {
+                        "component": "NumberInput",
+                        "props": {
+                          "name": "initial_savings",
+                          "label": "初始积蓄（元）",
+                          "value": 20000,
+                          "min": 0,
+                          "max": 10000000,
+                          "step": 1000
+                        },
+                        "id": "initial"
+                      },
+                      {
+                        "component": "Computed",
+                        "props": {
+                          "label": "新增储蓄",
+                          "operation": "product",
+                          "inputs": [
+                            {
+                              "component": "NumberInput",
+                              "props": {
+                                "name": "monthly_savings",
+                                "label": "每月储蓄（元）",
+                                "value": 3000,
+                                "min": 0,
+                                "max": 1000000,
+                                "step": 100
+                              },
+                              "id": "monthly"
+                            },
+                            {
+                              "component": "NumberInput",
+                              "props": {
+                                "name": "saving_months",
+                                "label": "计划月数",
+                                "value": 12,
+                                "min": 1,
+                                "max": 600,
+                                "step": 1
+                              },
+                              "id": "months"
+                            }
+                          ],
+                          "precision": 0,
+                          "prefix": "¥",
+                          "suffix": ""
+                        },
+                        "id": "added"
+                      }
+                    ]
+                  }
+                ]
+              }
+            },
+            {
+              "component": "Button",
+              "props": {
+                "action": "confirm_savings_plan",
+                "label": "确认储蓄计划"
+              }
+            }
+          ]
+        }
+      },
+      "complete": true,
+      "surface_id": "regression-saving"
+    }
+  },
+  {
+    "model": "mimo-v2.6-pro",
+    "case": "coffee",
+    "surface": {
+      "tree": {
+        "component": "Stack",
+        "props": {
+          "children": [
+            {
+              "component": "Row",
+              "props": {
+                "children": [
+                  {
+                    "component": "Card",
+                    "props": {
+                      "title": "月收入",
+                      "children": [
+                        {
+                          "component": "Computed",
+                          "props": {
+                            "label": "月收入",
+                            "operation": "product",
+                            "inputs": [
+                              {
+                                "component": "NumberInput",
+                                "props": {
+                                  "name": "cups",
+                                  "label": "每天销量（杯）",
+                                  "value": 100,
+                                  "min": 1,
+                                  "max": 5000,
+                                  "step": 1
+                                },
+                                "id": "cupsInput"
+                              },
+                              {
+                                "component": "NumberInput",
+                                "props": {
+                                  "name": "price",
+                                  "label": "每杯售价（元）",
+                                  "value": 25,
+                                  "min": 1,
+                                  "max": 200,
+                                  "step": 0.5
+                                },
+                                "id": "priceInput"
+                              },
+                              {
+                                "component": "NumberInput",
+                                "props": {
+                                  "name": "days",
+                                  "label": "每月营业天数",
+                                  "value": 30,
+                                  "min": 1,
+                                  "max": 31,
+                                  "step": 1
+                                },
+                                "id": "daysInput"
+                              }
+                            ],
+                            "precision": 2,
+                            "prefix": "¥",
+                            "suffix": ""
+                          },
+                          "id": "incomeMetric"
+                        }
+                      ]
+                    }
+                  },
+                  {
+                    "component": "Card",
+                    "props": {
+                      "title": "月变动成本",
+                      "children": [
+                        {
+                          "component": "Computed",
+                          "props": {
+                            "label": "月变动成本",
+                            "operation": "product",
+                            "inputs": [
+                              {
+                                "component": "NumberInput",
+                                "props": {
+                                  "name": "cups",
+                                  "label": "每天销量（杯）",
+                                  "value": 100,
+                                  "min": 1,
+                                  "max": 5000,
+                                  "step": 1
+                                },
+                                "id": "cupsInput"
+                              },
+                              {
+                                "component": "NumberInput",
+                                "props": {
+                                  "name": "cost",
+                                  "label": "单杯成本（元）",
+                                  "value": 8,
+                                  "min": 0.5,
+                                  "max": 100,
+                                  "step": 0.5
+                                },
+                                "id": "costInput"
+                              },
+                              {
+                                "component": "NumberInput",
+                                "props": {
+                                  "name": "days",
+                                  "label": "每月营业天数",
+                                  "value": 30,
+                                  "min": 1,
+                                  "max": 31,
+                                  "step": 1
+                                },
+                                "id": "daysInput"
+                              }
+                            ],
+                            "precision": 2,
+                            "prefix": "¥",
+                            "suffix": ""
+                          },
+                          "id": "varMetric"
+                        }
+                      ]
+                    }
+                  },
+                  {
+                    "component": "Card",
+                    "props": {
+                      "title": "月固定成本",
+                      "children": [
+                        {
+                          "component": "Computed",
+                          "props": {
+                            "label": "固定成本合计",
+                            "operation": "sum",
+                            "inputs": [
+                              {
+                                "component": "NumberInput",
+                                "props": {
+                                  "name": "fix",
+                                  "label": "每月固定成本（元）",
+                                  "value": 20000,
+                                  "min": 0,
+                                  "max": 200000,
+                                  "step": 500
+                                },
+                                "id": "fixInput"
+                              }
+                            ],
+                            "precision": 2,
+                            "prefix": "¥",
+                            "suffix": ""
+                          },
+                          "id": "fixMetric"
+                        }
+                      ]
+                    }
+                  },
+                  {
+                    "component": "Card",
+                    "props": {
+                      "title": "月利润",
+                      "children": [
+                        {
+                          "component": "Computed",
+                          "props": {
+                            "label": "月利润",
+                            "operation": "difference",
+                            "inputs": [
+                              {
+                                "component": "Computed",
+                                "props": {
+                                  "label": "月收入",
+                                  "operation": "product",
+                                  "inputs": [
+                                    {
+                                      "component": "NumberInput",
+                                      "props": {
+                                        "name": "cups",
+                                        "label": "每天销量（杯）",
+                                        "value": 100,
+                                        "min": 1,
+                                        "max": 5000,
+                                        "step": 1
+                                      },
+                                      "id": "cupsInput"
+                                    },
+                                    {
+                                      "component": "NumberInput",
+                                      "props": {
+                                        "name": "price",
+                                        "label": "每杯售价（元）",
+                                        "value": 25,
+                                        "min": 1,
+                                        "max": 200,
+                                        "step": 0.5
+                                      },
+                                      "id": "priceInput"
+                                    },
+                                    {
+                                      "component": "NumberInput",
+                                      "props": {
+                                        "name": "days",
+                                        "label": "每月营业天数",
+                                        "value": 30,
+                                        "min": 1,
+                                        "max": 31,
+                                        "step": 1
+                                      },
+                                      "id": "daysInput"
+                                    }
+                                  ],
+                                  "precision": 2,
+                                  "prefix": "¥",
+                                  "suffix": ""
+                                },
+                                "id": "incomeMetric"
+                              },
+                              {
+                                "component": "Computed",
+                                "props": {
+                                  "label": "月总成本",
+                                  "operation": "sum",
+                                  "inputs": [
+                                    {
+                                      "component": "Computed",
+                                      "props": {
+                                        "label": "月变动成本",
+                                        "operation": "product",
+                                        "inputs": [
+                                          {
+                                            "component": "NumberInput",
+                                            "props": {
+                                              "name": "cups",
+                                              "label": "每天销量（杯）",
+                                              "value": 100,
+                                              "min": 1,
+                                              "max": 5000,
+                                              "step": 1
+                                            },
+                                            "id": "cupsInput"
+                                          },
+                                          {
+                                            "component": "NumberInput",
+                                            "props": {
+                                              "name": "cost",
+                                              "label": "单杯成本（元）",
+                                              "value": 8,
+                                              "min": 0.5,
+                                              "max": 100,
+                                              "step": 0.5
+                                            },
+                                            "id": "costInput"
+                                          },
+                                          {
+                                            "component": "NumberInput",
+                                            "props": {
+                                              "name": "days",
+                                              "label": "每月营业天数",
+                                              "value": 30,
+                                              "min": 1,
+                                              "max": 31,
+                                              "step": 1
+                                            },
+                                            "id": "daysInput"
+                                          }
+                                        ],
+                                        "precision": 2,
+                                        "prefix": "¥",
+                                        "suffix": ""
+                                      },
+                                      "id": "varMetric"
+                                    },
+                                    {
+                                      "component": "Computed",
+                                      "props": {
+                                        "label": "固定成本合计",
+                                        "operation": "sum",
+                                        "inputs": [
+                                          {
+                                            "component": "NumberInput",
+                                            "props": {
+                                              "name": "fix",
+                                              "label": "每月固定成本（元）",
+                                              "value": 20000,
+                                              "min": 0,
+                                              "max": 200000,
+                                              "step": 500
+                                            },
+                                            "id": "fixInput"
+                                          }
+                                        ],
+                                        "precision": 2,
+                                        "prefix": "¥",
+                                        "suffix": ""
+                                      },
+                                      "id": "fixMetric"
+                                    }
+                                  ],
+                                  "precision": 2,
+                                  "prefix": "¥",
+                                  "suffix": ""
+                                },
+                                "id": "totalCostMetric"
+                              }
+                            ],
+                            "precision": 2,
+                            "prefix": "¥",
+                            "suffix": ""
+                          },
+                          "id": "profitMetric"
+                        }
+                      ]
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "component": "Chart",
+              "props": {
+                "title": "月度收支构成（元）",
+                "type": "bar",
+                "labels": [
+                  "月收入",
+                  "变动成本",
+                  "固定成本",
+                  "月利润"
+                ],
+                "series": [
+                  {
+                    "name": "金额",
+                    "values": [
+                      {
+                        "component": "Computed",
+                        "props": {
+                          "label": "月收入",
+                          "operation": "product",
+                          "inputs": [
+                            {
+                              "component": "NumberInput",
+                              "props": {
+                                "name": "cups",
+                                "label": "每天销量（杯）",
+                                "value": 100,
+                                "min": 1,
+                                "max": 5000,
+                                "step": 1
+                              },
+                              "id": "cupsInput"
+                            },
+                            {
+                              "component": "NumberInput",
+                              "props": {
+                                "name": "price",
+                                "label": "每杯售价（元）",
+                                "value": 25,
+                                "min": 1,
+                                "max": 200,
+                                "step": 0.5
+                              },
+                              "id": "priceInput"
+                            },
+                            {
+                              "component": "NumberInput",
+                              "props": {
+                                "name": "days",
+                                "label": "每月营业天数",
+                                "value": 30,
+                                "min": 1,
+                                "max": 31,
+                                "step": 1
+                              },
+                              "id": "daysInput"
+                            }
+                          ],
+                          "precision": 2,
+                          "prefix": "¥",
+                          "suffix": ""
+                        },
+                        "id": "incomeMetric"
+                      },
+                      {
+                        "component": "Computed",
+                        "props": {
+                          "label": "月变动成本",
+                          "operation": "product",
+                          "inputs": [
+                            {
+                              "component": "NumberInput",
+                              "props": {
+                                "name": "cups",
+                                "label": "每天销量（杯）",
+                                "value": 100,
+                                "min": 1,
+                                "max": 5000,
+                                "step": 1
+                              },
+                              "id": "cupsInput"
+                            },
+                            {
+                              "component": "NumberInput",
+                              "props": {
+                                "name": "cost",
+                                "label": "单杯成本（元）",
+                                "value": 8,
+                                "min": 0.5,
+                                "max": 100,
+                                "step": 0.5
+                              },
+                              "id": "costInput"
+                            },
+                            {
+                              "component": "NumberInput",
+                              "props": {
+                                "name": "days",
+                                "label": "每月营业天数",
+                                "value": 30,
+                                "min": 1,
+                                "max": 31,
+                                "step": 1
+                              },
+                              "id": "daysInput"
+                            }
+                          ],
+                          "precision": 2,
+                          "prefix": "¥",
+                          "suffix": ""
+                        },
+                        "id": "varMetric"
+                      },
+                      {
+                        "component": "Computed",
+                        "props": {
+                          "label": "固定成本合计",
+                          "operation": "sum",
+                          "inputs": [
+                            {
+                              "component": "NumberInput",
+                              "props": {
+                                "name": "fix",
+                                "label": "每月固定成本（元）",
+                                "value": 20000,
+                                "min": 0,
+                                "max": 200000,
+                                "step": 500
+                              },
+                              "id": "fixInput"
+                            }
+                          ],
+                          "precision": 2,
+                          "prefix": "¥",
+                          "suffix": ""
+                        },
+                        "id": "fixMetric"
+                      },
+                      {
+                        "component": "Computed",
+                        "props": {
+                          "label": "月利润",
+                          "operation": "difference",
+                          "inputs": [
+                            {
+                              "component": "Computed",
+                              "props": {
+                                "label": "月收入",
+                                "operation": "product",
+                                "inputs": [
+                                  {
+                                    "component": "NumberInput",
+                                    "props": {
+                                      "name": "cups",
+                                      "label": "每天销量（杯）",
+                                      "value": 100,
+                                      "min": 1,
+                                      "max": 5000,
+                                      "step": 1
+                                    },
+                                    "id": "cupsInput"
+                                  },
+                                  {
+                                    "component": "NumberInput",
+                                    "props": {
+                                      "name": "price",
+                                      "label": "每杯售价（元）",
+                                      "value": 25,
+                                      "min": 1,
+                                      "max": 200,
+                                      "step": 0.5
+                                    },
+                                    "id": "priceInput"
+                                  },
+                                  {
+                                    "component": "NumberInput",
+                                    "props": {
+                                      "name": "days",
+                                      "label": "每月营业天数",
+                                      "value": 30,
+                                      "min": 1,
+                                      "max": 31,
+                                      "step": 1
+                                    },
+                                    "id": "daysInput"
+                                  }
+                                ],
+                                "precision": 2,
+                                "prefix": "¥",
+                                "suffix": ""
+                              },
+                              "id": "incomeMetric"
+                            },
+                            {
+                              "component": "Computed",
+                              "props": {
+                                "label": "月总成本",
+                                "operation": "sum",
+                                "inputs": [
+                                  {
+                                    "component": "Computed",
+                                    "props": {
+                                      "label": "月变动成本",
+                                      "operation": "product",
+                                      "inputs": [
+                                        {
+                                          "component": "NumberInput",
+                                          "props": {
+                                            "name": "cups",
+                                            "label": "每天销量（杯）",
+                                            "value": 100,
+                                            "min": 1,
+                                            "max": 5000,
+                                            "step": 1
+                                          },
+                                          "id": "cupsInput"
+                                        },
+                                        {
+                                          "component": "NumberInput",
+                                          "props": {
+                                            "name": "cost",
+                                            "label": "单杯成本（元）",
+                                            "value": 8,
+                                            "min": 0.5,
+                                            "max": 100,
+                                            "step": 0.5
+                                          },
+                                          "id": "costInput"
+                                        },
+                                        {
+                                          "component": "NumberInput",
+                                          "props": {
+                                            "name": "days",
+                                            "label": "每月营业天数",
+                                            "value": 30,
+                                            "min": 1,
+                                            "max": 31,
+                                            "step": 1
+                                          },
+                                          "id": "daysInput"
+                                        }
+                                      ],
+                                      "precision": 2,
+                                      "prefix": "¥",
+                                      "suffix": ""
+                                    },
+                                    "id": "varMetric"
+                                  },
+                                  {
+                                    "component": "Computed",
+                                    "props": {
+                                      "label": "固定成本合计",
+                                      "operation": "sum",
+                                      "inputs": [
+                                        {
+                                          "component": "NumberInput",
+                                          "props": {
+                                            "name": "fix",
+                                            "label": "每月固定成本（元）",
+                                            "value": 20000,
+                                            "min": 0,
+                                            "max": 200000,
+                                            "step": 500
+                                          },
+                                          "id": "fixInput"
+                                        }
+                                      ],
+                                      "precision": 2,
+                                      "prefix": "¥",
+                                      "suffix": ""
+                                    },
+                                    "id": "fixMetric"
+                                  }
+                                ],
+                                "precision": 2,
+                                "prefix": "¥",
+                                "suffix": ""
+                              },
+                              "id": "totalCostMetric"
+                            }
+                          ],
+                          "precision": 2,
+                          "prefix": "¥",
+                          "suffix": ""
+                        },
+                        "id": "profitMetric"
+                      }
+                    ]
+                  }
+                ]
+              }
+            },
+            {
+              "component": "Section",
+              "props": {
+                "title": "经营参数",
+                "children": [
+                  {
+                    "component": "NumberInput",
+                    "props": {
+                      "name": "cups",
+                      "label": "每天销量（杯）",
+                      "value": 100,
+                      "min": 1,
+                      "max": 5000,
+                      "step": 1
+                    },
+                    "id": "cupsInput"
+                  },
+                  {
+                    "component": "NumberInput",
+                    "props": {
+                      "name": "price",
+                      "label": "每杯售价（元）",
+                      "value": 25,
+                      "min": 1,
+                      "max": 200,
+                      "step": 0.5
+                    },
+                    "id": "priceInput"
+                  },
+                  {
+                    "component": "NumberInput",
+                    "props": {
+                      "name": "cost",
+                      "label": "单杯成本（元）",
+                      "value": 8,
+                      "min": 0.5,
+                      "max": 100,
+                      "step": 0.5
+                    },
+                    "id": "costInput"
+                  },
+                  {
+                    "component": "NumberInput",
+                    "props": {
+                      "name": "fix",
+                      "label": "每月固定成本（元）",
+                      "value": 20000,
+                      "min": 0,
+                      "max": 200000,
+                      "step": 500
+                    },
+                    "id": "fixInput"
+                  },
+                  {
+                    "component": "NumberInput",
+                    "props": {
+                      "name": "days",
+                      "label": "每月营业天数",
+                      "value": 30,
+                      "min": 1,
+                      "max": 31,
+                      "step": 1
+                    },
+                    "id": "daysInput"
+                  }
+                ]
+              }
+            },
+            {
+              "component": "Button",
+              "props": {
+                "action": "submit",
+                "label": "提交测算方案"
+              }
+            }
+          ]
+        }
+      },
+      "complete": true,
+      "surface_id": "regression-coffee"
+    }
+  },
+  {
+    "model": "mimo-v2.6-pro",
+    "case": "saving",
+    "surface": {
+      "tree": {
+        "component": "Stack",
+        "props": {
+          "children": [
+            {
+              "component": "Card",
+              "props": {
+                "title": "储蓄构成",
+                "children": [
+                  {
+                    "component": "Chart",
+                    "props": {
+                      "title": "初始积蓄与新增储蓄",
+                      "type": "bar",
+                      "labels": [
+                        "构成"
+                      ],
+                      "series": [
+                        {
+                          "name": "初始积蓄",
+                          "values": [
+                            {
+                              "component": "NumberInput",
+                              "props": {
+                                "name": "init_amount",
+                                "label": "初始积蓄（元）",
+                                "value": 20000,
+                                "min": 0,
+                                "max": 1000000,
+                                "step": 1000
+                              },
+                              "id": "initInput"
+                            }
+                          ]
+                        },
+                        {
+                          "name": "新增储蓄",
+                          "values": [
+                            {
+                              "component": "Computed",
+                              "props": {
+                                "label": "新增储蓄（元）",
+                                "operation": "product",
+                                "inputs": [
+                                  {
+                                    "component": "NumberInput",
+                                    "props": {
+                                      "name": "monthly_amount",
+                                      "label": "每月储蓄（元）",
+                                      "value": 3000,
+                                      "min": 0,
+                                      "max": 100000,
+                                      "step": 500
+                                    },
+                                    "id": "monthlyInput"
+                                  },
+                                  {
+                                    "component": "NumberInput",
+                                    "props": {
+                                      "name": "months",
+                                      "label": "计划期限（月）",
+                                      "value": 12,
+                                      "min": 1,
+                                      "max": 600,
+                                      "step": 1
+                                    },
+                                    "id": "monthsInput"
+                                  }
+                                ],
+                                "precision": 2,
+                                "prefix": "¥ ",
+                                "suffix": ""
+                              },
+                              "id": "addedComputed"
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "component": "Card",
+              "props": {
+                "title": "调整参数",
+                "children": [
+                  {
+                    "component": "NumberInput",
+                    "props": {
+                      "name": "init_amount",
+                      "label": "初始积蓄（元）",
+                      "value": 20000,
+                      "min": 0,
+                      "max": 1000000,
+                      "step": 1000
+                    },
+                    "id": "initInput"
+                  },
+                  {
+                    "component": "NumberInput",
+                    "props": {
+                      "name": "monthly_amount",
+                      "label": "每月储蓄（元）",
+                      "value": 3000,
+                      "min": 0,
+                      "max": 100000,
+                      "step": 500
+                    },
+                    "id": "monthlyInput"
+                  },
+                  {
+                    "component": "NumberInput",
+                    "props": {
+                      "name": "months",
+                      "label": "计划期限（月）",
+                      "value": 12,
+                      "min": 1,
+                      "max": 600,
+                      "step": 1
+                    },
+                    "id": "monthsInput"
+                  },
+                  {
+                    "component": "Computed",
+                    "props": {
+                      "label": "期末总额（元）",
+                      "operation": "sum",
+                      "inputs": [
+                        {
+                          "component": "NumberInput",
+                          "props": {
+                            "name": "init_amount",
+                            "label": "初始积蓄（元）",
+                            "value": 20000,
+                            "min": 0,
+                            "max": 1000000,
+                            "step": 1000
+                          },
+                          "id": "initInput"
+                        },
+                        {
+                          "component": "Computed",
+                          "props": {
+                            "label": "新增储蓄（元）",
+                            "operation": "product",
+                            "inputs": [
+                              {
+                                "component": "NumberInput",
+                                "props": {
+                                  "name": "monthly_amount",
+                                  "label": "每月储蓄（元）",
+                                  "value": 3000,
+                                  "min": 0,
+                                  "max": 100000,
+                                  "step": 500
+                                },
+                                "id": "monthlyInput"
+                              },
+                              {
+                                "component": "NumberInput",
+                                "props": {
+                                  "name": "months",
+                                  "label": "计划期限（月）",
+                                  "value": 12,
+                                  "min": 1,
+                                  "max": 600,
+                                  "step": 1
+                                },
+                                "id": "monthsInput"
+                              }
+                            ],
+                            "precision": 2,
+                            "prefix": "¥ ",
+                            "suffix": ""
+                          },
+                          "id": "addedComputed"
+                        }
+                      ],
+                      "precision": 2,
+                      "prefix": "¥ ",
+                      "suffix": ""
+                    },
+                    "id": "totalComputed"
+                  },
+                  {
+                    "component": "Computed",
+                    "props": {
+                      "label": "新增储蓄（元）",
+                      "operation": "product",
+                      "inputs": [
+                        {
+                          "component": "NumberInput",
+                          "props": {
+                            "name": "monthly_amount",
+                            "label": "每月储蓄（元）",
+                            "value": 3000,
+                            "min": 0,
+                            "max": 100000,
+                            "step": 500
+                          },
+                          "id": "monthlyInput"
+                        },
+                        {
+                          "component": "NumberInput",
+                          "props": {
+                            "name": "months",
+                            "label": "计划期限（月）",
+                            "value": 12,
+                            "min": 1,
+                            "max": 600,
+                            "step": 1
+                          },
+                          "id": "monthsInput"
+                        }
+                      ],
+                      "precision": 2,
+                      "prefix": "¥ ",
+                      "suffix": ""
+                    },
+                    "id": "addedComputed"
+                  },
+                  {
+                    "component": "Button",
+                    "props": {
+                      "action": "submit",
+                      "label": "按当前参数提交测算"
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      },
+      "complete": true,
+      "surface_id": "regression-saving"
+    }
+  }
+]

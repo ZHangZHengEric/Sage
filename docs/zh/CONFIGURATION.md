@@ -67,3 +67,9 @@ runtime:
 以上片段需加入完整 manifest。插件配置经过 schema 校验；能力取决于实际注册的实现，只有元数据声明不代表组件可运行。
 
 [插件扩展](architecture/PLUGINS.md) · [环境变量](ENV_VARS.md) · [完整集成手册](https://github.com/ZHangZHengEric/Sage/blob/main/sagents/v2/使用手册.md)
+
+## Desktop 交互式 UI 默认值
+
+桌面设置通过布尔字段 `default_interactive_ui` 持久化，初始为 `false`，可在“设置 → 通用”修改。它用于初始化新建普通聊天，不覆盖已有聊天的偏好。聊天保存 `prefer_interactive_ui`；请求传入 `ui_preference: "interactive"` 或 `"auto"`。开启时宿主在上下文中预加载内置 OpenUI Skill 正文。此设置属于 Desktop，不改变嵌入式 SAgents 或 Server 的行为。
+
+参见 [Desktop 使用说明](applications/DESKTOP.md)。

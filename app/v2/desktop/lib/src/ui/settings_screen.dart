@@ -133,13 +133,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
     try {
       _desktopSaveTail = widget.controller.saveSettings(next);
       await _desktopSaveTail;
-      if (mounted && revision == _desktopSaveRevision) setState(() => _draft = widget.controller.settings);
+      if (mounted && revision == _desktopSaveRevision)
+        setState(() => _draft = widget.controller.settings);
     } catch (_) {
-      if (mounted && revision == _desktopSaveRevision) setState(() => _draft = widget.controller.settings);
+      if (mounted && revision == _desktopSaveRevision)
+        setState(() => _draft = widget.controller.settings);
       rethrow;
     } finally {
-      if (revision == _desktopSaveRevision) _desktopSaveTail = Future<void>.value();
-      if (mounted && revision == _desktopSaveRevision) setState(() => _saving = false);
+      if (revision == _desktopSaveRevision)
+        _desktopSaveTail = Future<void>.value();
+      if (mounted && revision == _desktopSaveRevision)
+        setState(() => _saving = false);
     }
   }
 
@@ -215,21 +219,35 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _runtimeDirty = true;
     _debounce?.cancel();
     _debounce = Timer(const Duration(milliseconds: 650), () async {
-      try { await _saveRuntimeFields(); } on Object { /* Shared error banner. */ }
+      try {
+        await _saveRuntimeFields();
+      } on Object {
+        /* Shared error banner. */
+      }
     });
   }
 
   Future<void> _saveRuntimeFields() async {
     final preview = int.tryParse(_previewBytes.text.trim());
     final entries = int.tryParse(_treeEntries.text.trim());
-    if (preview == null || preview < 1 || preview > 20000000 ||
-        entries == null || entries < 100 || entries > 50000) {
-      throw FormatException(context.l10n.languageCode == 'zh'
-          ? '预览大小需为 1–20000000，文件数量需为 100–50000。'
-          : 'Preview bytes must be 1–20000000 and tree entries 100–50000.');
+    if (preview == null ||
+        preview < 1 ||
+        preview > 20000000 ||
+        entries == null ||
+        entries < 100 ||
+        entries > 50000) {
+      throw FormatException(
+        context.l10n.languageCode == 'zh'
+            ? '预览大小需为 1–20000000，文件数量需为 100–50000。'
+            : 'Preview bytes must be 1–20000000 and tree entries 100–50000.',
+      );
     }
-    await _saveDesktopSettings(_draft.copyWith(maxPreviewBytes: preview, maxTreeEntries: entries));
-    if (_previewBytes.text.trim() == '$preview' && _treeEntries.text.trim() == '$entries') _runtimeDirty = false;
+    await _saveDesktopSettings(
+      _draft.copyWith(maxPreviewBytes: preview, maxTreeEntries: entries),
+    );
+    if (_previewBytes.text.trim() == '$preview' &&
+        _treeEntries.text.trim() == '$entries')
+      _runtimeDirty = false;
   }
 
   Map<String, Object?> get _sandboxConfig => {
@@ -294,18 +312,21 @@ class _SettingsScreenState extends State<SettingsScreen> {
           : null;
     });
     if (invalid) return;
-    _sandboxDebounce = Timer(
-      const Duration(milliseconds: 650),
-      () async {
-        try {
-          await _saveSandbox(workspaceRoot: value);
-          if (_sandboxRoot.text.trim().replaceAll('\\', '/') == value) _sandboxDirty = false;
-        } on Object { /* Shared error banner; keep the dirty value for retry. */ }
-      },
-    );
+    _sandboxDebounce = Timer(const Duration(milliseconds: 650), () async {
+      try {
+        await _saveSandbox(workspaceRoot: value);
+        if (_sandboxRoot.text.trim().replaceAll('\\', '/') == value)
+          _sandboxDirty = false;
+      } on Object {
+        /* Shared error banner; keep the dirty value for retry. */
+      }
+    });
   }
 
-  Future<void> _openRsi(AgentConfiguration agent, {bool historyOnly = false}) async {
+  Future<void> _openRsi(
+    AgentConfiguration agent, {
+    bool historyOnly = false,
+  }) async {
     await _flushAgentText();
     if (!mounted) return;
     setState(() {
@@ -429,9 +450,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
     setState(() => _saving = true);
     try {
       final created = sourceId == null
-          ? await widget.controller.createAgent(context.l10n.text('settings.newAgent'))
-          : await widget.controller.cloneAgent(sourceId,
-              '${_name.text} (${context.l10n.text('common.copy')})');
+          ? await widget.controller.createAgent(
+              context.l10n.text('settings.newAgent'),
+            )
+          : await widget.controller.cloneAgent(
+              sourceId,
+              '${_name.text} (${context.l10n.text('common.copy')})',
+            );
       if (!mounted) return;
       setState(() {
         _settingsAgentId = created.id;
@@ -512,18 +537,27 @@ class _SettingsScreenState extends State<SettingsScreen> {
       if (!mounted) return;
       if (_workspaceDirty) {
         final path = _workspacePath.text.trim();
-        if (path.isEmpty) throw FormatException(context.l10n.text('settings.pathRequired'));
+        if (path.isEmpty)
+          throw FormatException(context.l10n.text('settings.pathRequired'));
         await _saveDesktopSettings(_draft.copyWith(agentWorkspacePath: path));
         _workspaceDirty = false;
       }
       if (_sandboxDirty) {
-        if (_sandboxRootError != null) throw FormatException(_sandboxRootError!);
-        await _saveSandbox(workspaceRoot: _sandboxRoot.text.trim().replaceAll('\\', '/'));
+        if (_sandboxRootError != null)
+          throw FormatException(_sandboxRootError!);
+        await _saveSandbox(
+          workspaceRoot: _sandboxRoot.text.trim().replaceAll('\\', '/'),
+        );
         _sandboxDirty = false;
       }
       if (mounted) widget.onClose();
     } on Object catch (exception) {
-      if (mounted) DesktopNoticeHost.show(context, message: exception.toString(), isError: true);
+      if (mounted)
+        DesktopNoticeHost.show(
+          context,
+          message: exception.toString(),
+          isError: true,
+        );
     }
   }
 
@@ -544,9 +578,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
           _syncedAgentId = '';
         }),
         frameBuilder: (title, action, body) => _SettingsContent(
-          title: title, action: action, fillRemaining: true, children: [body],
+          title: title,
+          action: action,
+          fillRemaining: true,
+          children: [body],
         ),
-        fieldBuilder: (label, control) => _SettingsRow(label: label, control: control),
+        fieldBuilder: (label, control) =>
+            _SettingsRow(label: label, control: control),
       );
     }
     return switch (_section) {
@@ -796,7 +834,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
           setState(() => _saving = true);
           try {
             await widget.controller.selectComponent(
-              componentId, pluginId, config: config,
+              componentId,
+              pluginId,
+              config: config,
             );
           } finally {
             if (mounted) setState(() => _saving = false);
@@ -861,6 +901,31 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   ),
               ],
               onChanged: _saveLanguage,
+            ),
+          ),
+          _SettingsRow(
+            label: context.l10n.text('settings.defaultInteractiveUi'),
+            control: Semantics(
+              label: context.l10n.text('settings.defaultInteractiveUi'),
+              child: AbsorbPointer(
+                absorbing: _saving,
+                child: GlassSwitch(
+                  key: const ValueKey('settings-default-interactive-ui'),
+                  value: _draft.defaultInteractiveUi,
+                  activeColor: Theme.of(context).colorScheme.primary,
+                  settings: _glass(context),
+                  useOwnLayer: true,
+                  onChanged: (value) async {
+                    try {
+                      await _saveDesktopSettings(
+                        _draft.copyWith(defaultInteractiveUi: value),
+                      );
+                    } on Object {
+                      // The existing settings save path reports errors and restores the draft.
+                    }
+                  },
+                ),
+              ),
             ),
           ),
           _SettingsRow(
@@ -1048,7 +1113,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
             for (final value in widget.controller.agents)
               _SettingsChoice(
                 id: value.id,
-                label: value.rsiStatus == null ? value.name : '${value.name} · RSI',
+                label: value.rsiStatus == null
+                    ? value.name
+                    : '${value.name} · RSI',
                 marked: _draft.defaultAgentId?.isNotEmpty == true
                     ? value.id == _draft.defaultAgentId
                     : value.isDefault,
@@ -1084,26 +1151,45 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   children: [
                     Align(
                       alignment: Alignment.centerRight,
-                      child: Wrap(spacing: 10, crossAxisAlignment: WrapCrossAlignment.center, children: [
-                        _SettingsActionButton(
-                          key: const ValueKey('settings-agent-rsi'),
-                          onTap: _saving || _editingAgent ? null : () => _openRsi(agent),
-                          icon: const Icon(CupertinoIcons.arrow_2_circlepath, size: 15),
-                          label: 'RSI',
-                        ),
-                        _SettingsActionButton(
-                          key: const ValueKey('settings-agent-history'),
-                          onTap: _saving || _editingAgent ? null : () => _openRsi(agent, historyOnly: true),
-                          icon: const Icon(CupertinoIcons.clock, size: 15),
-                          label: context.l10n.languageCode == 'zh' ? '版本历史' : 'Version history',
-                          width: 116,
-                        ),
-                        TextButton.icon(
-                        key: const ValueKey('settings-agent-clone'),
-                        onPressed: _saving ? null : () => _createAgent(sourceId: agent.id),
-                        icon: const Icon(CupertinoIcons.doc_on_doc, size: 16),
-                        label: Text(context.l10n.text('common.copy')),
-                      ),]),
+                      child: Wrap(
+                        spacing: 10,
+                        crossAxisAlignment: WrapCrossAlignment.center,
+                        children: [
+                          _SettingsActionButton(
+                            key: const ValueKey('settings-agent-rsi'),
+                            onTap: _saving || _editingAgent
+                                ? null
+                                : () => _openRsi(agent),
+                            icon: const Icon(
+                              CupertinoIcons.arrow_2_circlepath,
+                              size: 15,
+                            ),
+                            label: 'RSI',
+                          ),
+                          _SettingsActionButton(
+                            key: const ValueKey('settings-agent-history'),
+                            onTap: _saving || _editingAgent
+                                ? null
+                                : () => _openRsi(agent, historyOnly: true),
+                            icon: const Icon(CupertinoIcons.clock, size: 15),
+                            label: context.l10n.languageCode == 'zh'
+                                ? '版本历史'
+                                : 'Version history',
+                            width: 116,
+                          ),
+                          TextButton.icon(
+                            key: const ValueKey('settings-agent-clone'),
+                            onPressed: _saving
+                                ? null
+                                : () => _createAgent(sourceId: agent.id),
+                            icon: const Icon(
+                              CupertinoIcons.doc_on_doc,
+                              size: 16,
+                            ),
+                            label: Text(context.l10n.text('common.copy')),
+                          ),
+                        ],
+                      ),
                     ),
                     _SettingsRowGroup(
                       children: [
@@ -2040,6 +2126,7 @@ class _RuntimeComponentsPaneState extends State<_RuntimeComponentsPane> {
     },
   );
 }
+
 class _ComponentSettingsCard extends StatelessWidget {
   const _ComponentSettingsCard({
     required this.component,
@@ -2333,10 +2420,15 @@ class _ComponentSettingsCard extends StatelessWidget {
                                 height: 1.35,
                               ),
                         ),
-                        if (selectable && plugin.id == selected &&
-                            _editablePluginProperties(plugin.configSchema).isNotEmpty)
+                        if (selectable &&
+                            plugin.id == selected &&
+                            _editablePluginProperties(
+                              plugin.configSchema,
+                            ).isNotEmpty)
                           Padding(
-                            key: ValueKey('settings-plugin-fields-${component.id}-${plugin.id}'),
+                            key: ValueKey(
+                              'settings-plugin-fields-${component.id}-${plugin.id}',
+                            ),
                             padding: const EdgeInsets.only(top: 12, bottom: 8),
                             child: _PluginConfigEditor(
                               key: ValueKey('${component.id}:${plugin.id}'),
@@ -2537,18 +2629,23 @@ Map<String, Map<String, Object?>> _editablePluginProperties(
       if (entry.value is Map &&
           ((entry.value as Map)['readOnly'] != true ||
               (entry.value as Map)['default'] != null) &&
-          ((entry.value as Map)['enum'] is List || const {
-            'string',
-            'integer',
-            'number',
-            'boolean',
-          }.contains((entry.value as Map)['type'])))
+          ((entry.value as Map)['enum'] is List ||
+              const {
+                'string',
+                'integer',
+                'number',
+                'boolean',
+              }.contains((entry.value as Map)['type'])))
         entry.key.toString(): (entry.value as Map).cast<String, Object?>(),
   };
 }
 
 class _PluginConfigEditor extends StatefulWidget {
-  const _PluginConfigEditor({super.key, required this.component, required this.onSave});
+  const _PluginConfigEditor({
+    super.key,
+    required this.component,
+    required this.onSave,
+  });
 
   final ComponentSummary component;
   final ValueChanged<Map<String, Object?>> onSave;
@@ -2563,20 +2660,24 @@ class _PluginConfigEditorState extends State<_PluginConfigEditor> {
   String _configFingerprint = '';
 
   ComponentPluginSummary? get _plugin {
-    final selected = widget.component.selectedPluginId ?? widget.component.activePluginId;
+    final selected =
+        widget.component.selectedPluginId ?? widget.component.activePluginId;
     for (final plugin in widget.component.plugins) {
       if (plugin.id == selected) return plugin;
     }
     return null;
   }
 
-  Map<String, Object?> get _config => widget.component.selectedConfig ?? {
-    for (final entry in widget.component.activeConfig.entries)
-      if (_properties.containsKey(entry.key) &&
-          (widget.component.selectedPluginId == null ||
-              widget.component.selectedPluginId == widget.component.activePluginId))
-        entry.key: entry.value,
-  };
+  Map<String, Object?> get _config =>
+      widget.component.selectedConfig ??
+      {
+        for (final entry in widget.component.activeConfig.entries)
+          if (_properties.containsKey(entry.key) &&
+              (widget.component.selectedPluginId == null ||
+                  widget.component.selectedPluginId ==
+                      widget.component.activePluginId))
+            entry.key: entry.value,
+      };
 
   Map<String, Map<String, Object?>> get _properties =>
       _editablePluginProperties(_plugin?.configSchema ?? const {});
@@ -2613,9 +2714,9 @@ class _PluginConfigEditorState extends State<_PluginConfigEditor> {
     ]);
     for (final entry in _properties.entries) {
       final schema = entry.value;
-      final value =
-          schema['readOnly'] == true ? schema['default'] :
-              (_config[entry.key] ?? schema['default']);
+      final value = schema['readOnly'] == true
+          ? schema['default']
+          : (_config[entry.key] ?? schema['default']);
       if (schema['type'] == 'boolean') {
         _booleans[entry.key] = value == true;
       } else {
@@ -2630,7 +2731,9 @@ class _PluginConfigEditorState extends State<_PluginConfigEditor> {
     final result = <String, Object?>{
       for (final entry in _config.entries)
         if ((_plugin?.configSchema['properties'] as Map?)?[entry.key] is! Map ||
-            (((_plugin?.configSchema['properties'] as Map)[entry.key] as Map)['readOnly'] != true))
+            (((_plugin?.configSchema['properties'] as Map)[entry.key]
+                    as Map)['readOnly'] !=
+                true))
           entry.key: entry.value,
     };
     for (final entry in _properties.entries) {
@@ -2666,7 +2769,8 @@ class _PluginConfigEditorState extends State<_PluginConfigEditor> {
         result.remove(entry.key);
         continue;
       }
-      if (value == null && !(choices is List && choices.contains(null))) return null;
+      if (value == null && !(choices is List && choices.contains(null)))
+        return null;
       if (choices is List && !choices.contains(value)) return null;
       if (value is num) {
         final minimum = schema['minimum'];
@@ -2775,9 +2879,12 @@ class _PluginConfigEditorState extends State<_PluginConfigEditor> {
                               style: Theme.of(context).textTheme.labelMedium,
                             ),
                             const SizedBox(height: 5),
-                            if (entry.value['enum'] is List && (entry.value['enum'] as List).isNotEmpty)
+                            if (entry.value['enum'] is List &&
+                                (entry.value['enum'] as List).isNotEmpty)
                               _SettingsPicker<String>(
-                                key: ValueKey('settings-plugin-enum-${widget.component.id}-${entry.key}'),
+                                key: ValueKey(
+                                  'settings-plugin-enum-${widget.component.id}-${entry.key}',
+                                ),
                                 fallbackToFirst: false,
                                 width: fieldWidth,
                                 enabled: entry.value['readOnly'] != true,
@@ -2785,8 +2892,12 @@ class _PluginConfigEditorState extends State<_PluginConfigEditor> {
                                     ? (_booleans[entry.key] ?? false).toString()
                                     : (_controllers[entry.key]?.text ?? ''),
                                 options: [
-                                  for (final option in entry.value['enum'] as List)
-                                    _PickerOption(value: option.toString(), label: option.toString()),
+                                  for (final option
+                                      in entry.value['enum'] as List)
+                                    _PickerOption(
+                                      value: option.toString(),
+                                      label: option.toString(),
+                                    ),
                                 ],
                                 onChanged: (value) => setState(() {
                                   if (entry.value['type'] == 'boolean') {
@@ -2799,9 +2910,11 @@ class _PluginConfigEditorState extends State<_PluginConfigEditor> {
                             else if (entry.value['type'] == 'boolean')
                               Switch(
                                 value: _booleans[entry.key] ?? false,
-                                onChanged: entry.value['readOnly'] == true ? null : (value) => setState(
-                                  () => _booleans[entry.key] = value,
-                                ),
+                                onChanged: entry.value['readOnly'] == true
+                                    ? null
+                                    : (value) => setState(
+                                        () => _booleans[entry.key] = value,
+                                      ),
                               )
                             else
                               GlassTextField(
@@ -5488,6 +5601,7 @@ class _ModelSettingsState extends State<_ModelSettings> {
   bool _saving = false;
   bool _checking = false;
   bool _dirty = false;
+  bool _configurationDirty = false;
   bool _apiKeyVisible = false;
   bool _revealingApiKey = false;
   String? _deletingId;
@@ -5557,6 +5671,7 @@ class _ModelSettingsState extends State<_ModelSettings> {
     _compatibilityProfile = null;
     _capabilityReport = null;
     _dirty = false;
+    _configurationDirty = false;
   }
 
   Future<void> _toggleApiKey(ModelProviderSummary selected) async {
@@ -5662,10 +5777,15 @@ class _ModelSettingsState extends State<_ModelSettings> {
     }
   }
 
-  void _markDraftChanged({bool rebuild = false}) {
+  void _markDraftChanged({bool rebuild = false, bool nameOnly = false}) {
+    if (nameOnly) {
+      setState(() => _dirty = true);
+      return;
+    }
     if (!rebuild && _dirty && _detectionError == null && !_detected) return;
     setState(() {
       _dirty = true;
+      _configurationDirty = true;
       _detectionError = null;
       _detected = false;
       _compatibilityProfile = null;
@@ -5693,6 +5813,7 @@ class _ModelSettingsState extends State<_ModelSettings> {
       _topP.clear();
       _maxModelLength.text = '128000';
       _dirty = true;
+      _configurationDirty = true;
       _apiKeyVisible = false;
       _detectionError = null;
       _detected = false;
@@ -5745,7 +5866,8 @@ class _ModelSettingsState extends State<_ModelSettings> {
         (!_creating && _selectedId.isEmpty) ||
         _saving ||
         _checking ||
-        !_dirty) {
+        !_dirty ||
+        !_configurationDirty) {
       return;
     }
     final providerId = _selectedId;
@@ -5798,18 +5920,22 @@ class _ModelSettingsState extends State<_ModelSettings> {
         _saving ||
         _checking ||
         !_dirty ||
-        !_detected) {
+        (_configurationDirty && !_detected)) {
       return;
     }
     final providerId = _selectedId;
-    final patch = _draftPatch();
+    final patch = _configurationDirty
+        ? _draftPatch()
+        : <String, Object?>{'name': _name.text.trim()};
     if (patch == null) return;
-    patch
-      ..['supports_multimodal'] = _supportsMultimodal
-      ..['supports_structured_output'] = _supportsStructuredOutput
-      ..['supports_tool_calling'] = _supportsToolCalling;
-    if (_compatibilityProfile case final compatibility?) {
-      patch['compatibility_profile'] = compatibility;
+    if (_configurationDirty) {
+      patch
+        ..['supports_multimodal'] = _supportsMultimodal
+        ..['supports_structured_output'] = _supportsStructuredOutput
+        ..['supports_tool_calling'] = _supportsToolCalling;
+      if (_compatibilityProfile case final compatibility?) {
+        patch['compatibility_profile'] = compatibility;
+      }
     }
     setState(() => _saving = true);
     try {
@@ -5882,7 +6008,7 @@ class _ModelSettingsState extends State<_ModelSettings> {
     if (!_creating) _sync(displayed);
     final activeCompatibilityProfile =
         _compatibilityProfile ??
-        (!_dirty ? displayed.compatibilityProfile : null);
+        (!_configurationDirty ? displayed.compatibilityProfile : null);
     Widget field(
       String label,
       String value,
@@ -5956,7 +6082,8 @@ class _ModelSettingsState extends State<_ModelSettings> {
                   onSuffixTap: secret && canReveal
                       ? () => _toggleApiKey(displayed)
                       : null,
-                  onChanged: (_) => _markDraftChanged(),
+                  onChanged: (_) =>
+                      _markDraftChanged(nameOnly: controller == _name),
                 ),
               )
             : Row(
@@ -6003,7 +6130,7 @@ class _ModelSettingsState extends State<_ModelSettings> {
             _SettingsActionButton(
               key: const ValueKey('settings-model-capability-check'),
               width: 124,
-              onTap: _saving || _checking || !_dirty
+              onTap: _saving || _checking || !_dirty || !_configurationDirty
                   ? null
                   : _verifyCapabilities,
               icon: _checking
@@ -6025,7 +6152,11 @@ class _ModelSettingsState extends State<_ModelSettings> {
             const SizedBox(width: 10),
             _SettingsActionButton(
               key: const ValueKey('settings-model-save'),
-              onTap: _saving || _checking || !_dirty || !_detected
+              onTap:
+                  _saving ||
+                      _checking ||
+                      !_dirty ||
+                      (_configurationDirty && !_detected)
                   ? null
                   : _save,
               icon: const Icon(CupertinoIcons.checkmark, size: 15),
@@ -6106,7 +6237,12 @@ class _ModelSettingsState extends State<_ModelSettings> {
           onSetDefault: _setDefaultProvider,
           detail: _SettingsRowGroup(
             children: [
-              field(context.l10n.text('common.name'), displayed.name, _name),
+              field(
+                context.l10n.text('common.name'),
+                displayed.name,
+                _name,
+                fieldKey: const ValueKey('settings-model-name-field'),
+              ),
               _SettingsRow(
                 label: context.l10n.text('model.protocol'),
                 control: _editing
