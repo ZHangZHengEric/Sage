@@ -1,6 +1,6 @@
 <script setup>
 import { onMounted, ref } from 'vue'
-import { api } from '../api.js'
+import { api, isForeign } from '../api.js'
 import InteractionPrompt from '../components/InteractionPrompt.vue'
 
 const items = ref([]), offset = ref(0), nextOffset = ref(null), busy = ref(false), error = ref(''), message = ref('')
@@ -13,6 +13,7 @@ async function load(next = offset.value) {
   try { await refresh() } catch (e) { error.value = e.message } finally { busy.value = false }
 }
 async function decide(item, answer) {
+  if (isForeign(item)) return
   busy.value = true; error.value = ''; message.value = ''
   try {
     await api.decideApproval(item.run_id, { ...answer, expected: item.expected })
@@ -33,9 +34,9 @@ onMounted(() => load())
     <p v-if="busy" role="status">处理中…</p>
     <p v-else-if="!items.length" class="panel muted">本页没有待审批操作。</p>
     <article v-for="item in items" :key="item.interaction.interaction_id" class="panel stack">
-      <h2>{{ item.title }}</h2>
+      <h2><span v-if="item._owner" class="tag">{{ item._owner.username }}</span> {{ item.title }}</h2>
       <small class="muted">申请时间：{{ date(item.interaction.requested_at) }} · 有效期至：{{ date(item.expires_at) }}</small>
-      <InteractionPrompt :interaction="item.interaction" :busy="busy" @decide="answer => decide(item, answer)" />
+      <InteractionPrompt :interaction="item.interaction" :busy="busy || isForeign(item)" @decide="answer => decide(item, answer)" />
     </article>
     <div class="row">
       <button class="btn ghost" :disabled="busy || offset === 0" @click="load(Math.max(0, offset - 50))">上一页</button>

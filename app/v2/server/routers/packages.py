@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field
 from app.v2.server.routers.deps import (
     AdminUser,
     PackageContextDep,
+    PackageReadContextDep,
     PackageDep,
     PackageQueriesDep,
 )
@@ -96,7 +97,7 @@ class Control(BaseModel):
 
 
 @router.get("/schema")
-async def schema(context: PackageContextDep, packages: PackageDep):
+async def schema(context: PackageReadContextDep, packages: PackageDep):
     return success(packages.schema())
 
 
@@ -106,13 +107,13 @@ async def capacity(user: AdminUser, packages: PackageDep, queries: PackageQuerie
 
 
 @router.get("/resources")
-async def resources(context: PackageContextDep, packages: PackageDep):
+async def resources(context: PackageReadContextDep, packages: PackageDep):
     return await result(packages.resources(context))
 
 
 @router.get("/template")
 async def template(
-    context: PackageContextDep,
+    context: PackageReadContextDep,
     queries: PackageQueriesDep,
     agent_id: str | None = None,
 ):
@@ -121,7 +122,7 @@ async def template(
 
 @router.get("")
 async def inventory(
-    context: PackageContextDep,
+    context: PackageReadContextDep,
     packages: PackageDep,
     limit: int = Query(50, ge=1, le=100),
     offset: int = Query(0, ge=0),
@@ -145,7 +146,7 @@ async def save(
 
 @router.get("/runs")
 async def runs(
-    context: PackageContextDep,
+    context: PackageReadContextDep,
     packages: PackageDep,
     limit: int = Query(50, ge=1, le=100),
     offset: int = Query(0, ge=0),
@@ -168,14 +169,14 @@ async def run(body: Invocation, context: PackageContextDep, packages: PackageDep
 
 
 @router.get("/runs/{operation}")
-async def status(operation: str, context: PackageContextDep, packages: PackageDep):
+async def status(operation: str, context: PackageReadContextDep, packages: PackageDep):
     return await result(packages.status(operation, context))
 
 
 @router.get("/runs/{operation}/events")
 async def events(
     operation: str,
-    context: PackageContextDep,
+    context: PackageReadContextDep,
     packages: PackageDep,
     after_sequence: int = Query(0, ge=0),
     limit: int = Query(200, ge=1, le=200),
@@ -208,7 +209,7 @@ async def control(
 
 
 @router.get("/{ref}")
-async def get(ref: str, context: PackageContextDep, packages: PackageDep):
+async def get(ref: str, context: PackageReadContextDep, packages: PackageDep):
     async def read():
         return (await packages.get(ref, context)).model_dump(mode="json")
 

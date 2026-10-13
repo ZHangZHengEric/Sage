@@ -1,6 +1,7 @@
 <script setup>
 import { computed, onMounted, ref } from 'vue'
-import { api } from '../api.js'
+import { api, isForeign } from '../api.js'
+import ResourceDetails from '../components/ResourceDetails.vue'
 import FormDrawer from '../components/FormDrawer.vue'
 
 const drawerOpen = ref(false)
@@ -107,10 +108,11 @@ function startNew() {
       <p v-if="!hasServers" class="empty">还没有 MCP。添加后它的工具对本租户的智能体全部可用。</p>
       <table v-else>
         <thead>
-          <tr><th>名称</th><th>协议</th><th>工具</th><th></th></tr>
+          <tr><th v-if="servers[0]?._owner">用户</th><th>名称</th><th>协议</th><th>工具</th><th></th></tr>
         </thead>
         <tbody>
-          <tr v-for="item in servers" :key="item.name">
+          <tr v-for="item in servers" :key="`${item._owner?.user_id || ''}:${item.name}`">
+            <td v-if="servers[0]?._owner">{{ item._owner?.username }}</td>
             <td>
               {{ item.name }}
               <div class="muted">{{ item.description || item.url }}</div>
@@ -118,9 +120,10 @@ function startNew() {
             <td>{{ item.protocol }}</td>
             <td class="muted">{{ (item.tools || []).join(', ') || '未刷新' }}</td>
             <td class="row">
-              <button class="btn ghost" type="button" @click="refreshTools(item.name)">刷新工具</button>
-              <button class="btn ghost" type="button" @click="edit(item)">编辑</button>
-              <button class="btn ghost" type="button" @click="remove(item.name)">删除</button>
+              <ResourceDetails :item="item" kind="mcp" />
+              <button class="btn ghost" type="button" v-if="!isForeign(item)" @click="refreshTools(item.name)">刷新工具</button>
+              <button class="btn ghost" type="button" v-if="!isForeign(item)" @click="edit(item)">编辑</button>
+              <button class="btn ghost" type="button" v-if="!isForeign(item)" @click="remove(item.name)">删除</button>
             </td>
           </tr>
         </tbody>

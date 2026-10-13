@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Query, Request
 from fastapi.responses import StreamingResponse
 
-from app.v2.server.routers.deps import ConversationDep, CurrentUser, ChatCallerDep
+from app.v2.server.routers.deps import ReadUser, ConversationDep, CurrentUser, ChatCallerDep
 from app.v2.server.routers.schemas.common import AUTH_ERRORS, ApiResponse
 from app.v2.server.routers.schemas.conversations import ThreadEventPage, ThreadPublic, ThreadResumeBody
 from app.v2.server.routers.render import success
@@ -17,7 +17,7 @@ router = APIRouter(
 
 
 @router.get("", response_model=ApiResponse[list[ThreadPublic]])
-async def list_threads(user: CurrentUser, service: ConversationDep):
+async def list_threads(user: ReadUser, service: ConversationDep):
     return success(
         [item.model_dump(mode="json") for item in await service.list_threads(user.user_id)]
     )
@@ -26,7 +26,7 @@ async def list_threads(user: CurrentUser, service: ConversationDep):
 @router.get("/{thread_id}/events", response_model=ApiResponse[ThreadEventPage])
 async def get_thread_events(
     thread_id: str,
-    user: CurrentUser,
+    user: ReadUser,
     service: ConversationDep,
     limit: int = Query(default=500, ge=1, le=2000),
     offset: int | None = Query(

@@ -29,7 +29,7 @@ const emit = defineEmits(['select', 'create'])
         :aria-current="item.thread_id === activeId ? 'true' : undefined"
         @click="emit('select', item.thread_id)"
       >
-        <span>{{ item.title || '未命名' }}</span>
+        <span><span v-if="item._owner" class="tag">{{ item._owner.username }}</span> {{ item.title || '未命名' }}</span>
         <small>{{ item.agent_id ? item.agent_id : item.thread_id }}</small>
       </button>
     </div>

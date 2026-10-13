@@ -1,6 +1,7 @@
 <script setup>
 import { computed, onMounted, ref } from 'vue'
-import { api } from '../api.js'
+import { api, isForeign } from '../api.js'
+import ResourceDetails from '../components/ResourceDetails.vue'
 import FormDrawer from '../components/FormDrawer.vue'
 
 const drawerOpen = ref(false)
@@ -25,7 +26,7 @@ async function save() {
   error.value = ''
   pending.value = true
   try {
-    await api.saveModel({ ...form.value, is_default: !hasModels.value })
+    await api.saveModel({ ...form.value, is_default: !models.value.some(item => !isForeign(item)) })
     form.value.api_key = ''
     await refresh()
     drawerOpen.value = false
@@ -77,10 +78,11 @@ function startNew() {
       <p v-if="!hasModels" class="empty">还没有模型</p>
       <table v-else>
         <thead>
-          <tr><th>模型</th><th>协议</th><th>地址</th><th></th></tr>
+          <tr><th v-if="models[0]?._owner">用户</th><th>模型</th><th>协议</th><th>地址</th><th></th></tr>
         </thead>
         <tbody>
-          <tr v-for="item in models" :key="item.id">
+          <tr v-for="item in models" :key="`${item._owner?.user_id || ''}:${item.id}`">
+            <td v-if="models[0]?._owner">{{ item._owner?.username }}</td>
             <td>
               {{ item.model }}
               <span v-if="item.is_default && models.length > 1" class="tag">当前</span>
@@ -88,15 +90,16 @@ function startNew() {
             <td class="mono">{{ item.protocol }}</td>
             <td class="mono">{{ item.base_url }}</td>
             <td class="row">
+              <ResourceDetails :item="item" kind="models" />
               <button
-                v-if="!item.is_default && models.length > 1"
+                v-if="!isForeign(item) && !item.is_default && models.length > 1"
                 class="btn ghost"
                 type="button"
                 @click="makeCurrent(item)"
               >
                 设为当前
               </button>
-              <button class="btn ghost" type="button" @click="remove(item.id)">删除</button>
+              <button class="btn ghost" type="button" v-if="!isForeign(item)" @click="remove(item.id)">删除</button>
             </td>
           </tr>
         </tbody>

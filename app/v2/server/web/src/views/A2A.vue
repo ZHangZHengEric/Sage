@@ -1,6 +1,7 @@
 <script setup>
 import { computed, onMounted, ref } from 'vue'
-import { api } from '../api.js'
+import { api, isForeign } from '../api.js'
+import ResourceDetails from '../components/ResourceDetails.vue'
 import FormDrawer from '../components/FormDrawer.vue'
 
 const drawerOpen = ref(false)
@@ -132,10 +133,11 @@ onMounted(async () => {
       </p>
       <table v-else>
         <thead>
-          <tr><th>名称</th><th>凭据</th><th>技能</th><th></th></tr>
+          <tr><th v-if="peers[0]?._owner">用户</th><th>名称</th><th>凭据</th><th>技能</th><th></th></tr>
         </thead>
         <tbody>
-          <tr v-for="item in peers" :key="item.name">
+          <tr v-for="item in peers" :key="`${item._owner?.user_id || ''}:${item.name}`">
+            <td v-if="peers[0]?._owner">{{ item._owner?.username }}</td>
             <td>
               {{ item.name }}
               <span v-if="item.disabled" class="muted">（已停用）</span>
@@ -144,12 +146,13 @@ onMounted(async () => {
             <td class="muted">{{ item.has_api_key ? '已保存' : '无' }}</td>
             <td class="muted">{{ (item.skills || []).join(', ') || '未刷新' }}</td>
             <td class="row">
-              <button class="btn ghost" type="button" @click="refreshSkills(item.name)">刷新技能</button>
-              <button class="btn ghost" type="button" @click="toggle(item)">
+              <ResourceDetails :item="item" kind="a2a" />
+              <button class="btn ghost" type="button" v-if="!isForeign(item)" @click="refreshSkills(item.name)">刷新技能</button>
+              <button class="btn ghost" type="button" v-if="!isForeign(item)" @click="toggle(item)">
                 {{ item.disabled ? '启用' : '停用' }}
               </button>
-              <button class="btn ghost" type="button" @click="edit(item)">编辑</button>
-              <button class="btn ghost" type="button" @click="remove(item.name)">删除</button>
+              <button class="btn ghost" type="button" v-if="!isForeign(item)" @click="edit(item)">编辑</button>
+              <button class="btn ghost" type="button" v-if="!isForeign(item)" @click="remove(item.name)">删除</button>
             </td>
           </tr>
         </tbody>

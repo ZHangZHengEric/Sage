@@ -1,6 +1,7 @@
 <script setup>
 import { onMounted, ref } from 'vue'
-import { api } from '../api.js'
+import { api, isForeign } from '../api.js'
+import ResourceDetails from '../components/ResourceDetails.vue'
 import FormDrawer from '../components/FormDrawer.vue'
 
 const drawerOpen = ref(false)
@@ -9,7 +10,7 @@ const keys = ref([]), agents = ref([]), busy = ref(false), error = ref(''), issu
 const form = ref({ name: '', agent_id: '', approve: false })
 
 async function refresh() {
-  const [nextKeys, nextAgents] = await Promise.all([api.listKeys(), api.listAgents()])
+  const [nextKeys, nextAgents] = await Promise.all([api.listKeys(), api.listAgents(false)])
   keys.value = nextKeys; agents.value = nextAgents
   if (!form.value.agent_id) form.value.agent_id = nextAgents[0]?.id || ''
 }
@@ -46,10 +47,12 @@ function startNew() {
       <p v-if="error && !drawerOpen" class="error" role="alert">{{ error }}</p>
       <p v-if="!keys.length" class="muted">还没有密钥。</p>
       <article v-for="item in keys" :key="item.key_id" class="stack">
+        <span v-if="item._owner" class="tag">{{ item._owner.username }}</span>
+        <ResourceDetails :item="item" kind="keys" />
         <strong>{{ item.name || item.key_id }} {{ item.revoked_at ? '（已撤销）' : '' }}</strong>
         <p class="muted">{{ item.scopes.includes('a2a:approve') ? '可通过 API 审批' : '由用户审批' }}</p>
         <small class="mono">{{ item.agent_id }}</small>
-        <button v-if="!item.revoked_at" class="btn ghost" type="button" :disabled="busy" @click="revoke(item)">撤销</button>
+        <button v-if="!isForeign(item) && !item.revoked_at" class="btn ghost" type="button" :disabled="busy" @click="revoke(item)">撤销</button>
       </article>
     </div>
     <FormDrawer v-model="drawerOpen" title="新增密钥" :busy="busy">

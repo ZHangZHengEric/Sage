@@ -1,6 +1,6 @@
 <script setup>
 import { computed, nextTick, onMounted, onUnmounted, ref, shallowRef } from 'vue'
-import { api } from '../api.js'
+import { api, isForeign } from '../api.js'
 import { createAguiAgent, resumeAgui, runAgui } from '../agui/session.js'
 import { messagesBeforeLastRun, messagesFromEvents, pendingInteraction } from '../agui/replay.js'
 import AguiTranscript from '../components/AguiTranscript.vue'
@@ -10,6 +10,8 @@ import ThreadList from '../components/ThreadList.vue'
 const threads = ref([])
 const threadId = ref('')
 const text = ref('')
+const historyEvents = shallowRef([]), historyOffset = ref(0), historyTotal = ref(0), historyLoading = ref(false)
+let historyRevision = 0
 // AG-UI owns message objects and clones them with structuredClone. Keep Vue
 // proxies out of the SDK; transcript updates replace the entire array.
 const messages = shallowRef([])
@@ -29,6 +31,7 @@ const agent = shallowRef(null)
 const currentThread = computed(() =>
   threads.value.find((item) => item.thread_id === threadId.value)
 )
+const readOnly = computed(() => isForeign(currentThread.value))
 const threadTitle = computed(() => currentThread.value?.title || '新对话')
 const agentLocked = computed(() => Boolean(currentThread.value?.agent_id))
 
@@ -53,7 +56,7 @@ function bindAgent() {
 }
 
 async function loadAgents() {
-  agents.value = await api.listAgents()
+  agents.value = await api.listAgents(false)
   if (!agents.value.some((item) => item.id === selectedAgentId.value)) {
     selectedAgentId.value = agents.value[0]?.id || ''
   }
@@ -80,7 +83,7 @@ async function loadThreads() {
 }
 
 async function loadModels() {
-  const items = await api.listModels()
+  const items = await api.listModels(false)
   hasModel.value = items.length > 0
 }
 
@@ -93,22 +96,39 @@ function applyThreadAgent(id) {
 }
 
 async function openThread(id) {
-  threadId.value = id
-  error.value = ''
+  ++historyRevision
+  threadId.value = id; error.value = ''
+  historyEvents.value = []; historyOffset.value = 0; historyTotal.value = 0
+  messages.value = []; interaction.value = null
   applyThreadAgent(id)
-  const page = await api.threadEvents(id)
-  const events = page?.events || []
-  const history = messagesFromEvents(events)
-  messages.value = history
-  interaction.value = pendingInteraction(events)
-  baseline.value = messagesBeforeLastRun(events) || history
-  agent.value.threadId = id
-  agent.value.setMessages(history)
-  await nextTick()
-  scroller.value?.scrollTo(0, scroller.value.scrollHeight)
+  await loadHistory()
+}
+
+async function loadHistory() {
+  const revision = historyRevision, id = threadId.value
+  historyLoading.value = true
+  try {
+    const page = await api.threadEvents(id, 500, currentThread.value?._owner, historyOffset.value)
+    if (revision !== historyRevision) return
+    historyEvents.value = [...historyEvents.value, ...page.events]
+    historyOffset.value = page.offset + page.limit; historyTotal.value = page.total
+    const events = historyEvents.value, history = messagesFromEvents(events)
+    messages.value = history
+    interaction.value = pendingInteraction(events)
+    baseline.value = messagesBeforeLastRun(events) || history
+    agent.value.threadId = id; agent.value.setMessages(history)
+    await nextTick()
+    scroller.value?.scrollTo(0, scroller.value.scrollHeight)
+  } catch (exc) { if (revision === historyRevision) error.value = exc.message }
+  finally { if (revision === historyRevision) historyLoading.value = false }
 }
 
 function startNew() {
+  ++historyRevision
+  historyLoading.value = false; historyEvents.value = []; historyOffset.value = 0; historyTotal.value = 0
+  if (!agents.value.some(item => item.id === selectedAgentId.value)) {
+    selectedAgentId.value = agents.value[0]?.id || ''; bindAgent()
+  }
   threadId.value = newId('thread')
   messages.value = []
   interaction.value = null
@@ -121,7 +141,7 @@ function startNew() {
 
 async function send() {
   const content = text.value.trim()
-  if (!content || pending.value || interaction.value) return
+  if (readOnly.value || historyLoading.value || historyOffset.value < historyTotal.value || !content || pending.value || interaction.value) return
   if (!threadId.value) threadId.value = newId('thread')
   text.value = ''
   nextTick(resizeInput)
@@ -148,7 +168,7 @@ async function send() {
 }
 
 async function decide({ decision, payload }) {
-  if (pending.value || !interaction.value) return
+  if (readOnly.value || pending.value || !interaction.value) return
   const asked = interaction.value
   interaction.value = null
   pending.value = true
@@ -189,6 +209,7 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
+  ++historyRevision
   agent.value?.abortRun?.()
 })
 </script>
@@ -203,7 +224,7 @@ onUnmounted(() => {
     />
     <div class="thread-root">
       <header class="thread-bar">
-        <h1>{{ threadTitle }}</h1>
+        <h1>{{ threadTitle }} <span v-if="currentThread?._owner" class="tag">{{ currentThread._owner.username }}</span></h1>
         <label class="agent-pick">
           <span class="sr-only">智能体</span>
           <select
@@ -212,6 +233,7 @@ onUnmounted(() => {
             :title="agentLocked ? '本会话已绑定智能体' : '选择智能体'"
             @change="selectAgent"
           >
+            <option v-if="readOnly" :value="selectedAgentId">{{ currentThread.agent_id }}</option>
             <option v-for="item in agents" :key="item.id" :value="item.id">
               {{ item.name }}
             </option>
@@ -224,13 +246,15 @@ onUnmounted(() => {
           :pending="pending"
         />
       </div>
-      <p v-if="!hasModel" class="notice thread-error">
+      <p v-if="!hasModel && !readOnly" class="notice thread-error">
         还没有可用模型，请先到
         <router-link to="/models">模型</router-link>
         页配置后再发送。
       </p>
       <p v-if="error" class="error thread-error" role="alert">{{ error }}</p>
-      <footer class="thread-footer">
+      <p v-if="historyLoading" role="status">加载会话中…</p>
+      <button v-if="historyOffset < historyTotal" class="btn ghost" :disabled="historyLoading" @click="loadHistory">加载后续记录</button>
+      <footer v-if="!readOnly && historyOffset >= historyTotal && !historyLoading" class="thread-footer">
         <InteractionPrompt :interaction="interaction" :busy="pending" @decide="decide" />
         <form class="composer" @submit.prevent="send">
           <label class="sr-only" for="chat-input">消息</label>

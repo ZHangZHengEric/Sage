@@ -1,7 +1,9 @@
 <script setup>
 import { onMounted, ref } from 'vue'
+import { isAdmin } from '../auth.js'
 import { api } from '../api.js'
 
+const users = ref([])
 const form = ref({ shell: 'ask', on_approval_required: 'suspend', timeout: 1440 })
 const busy = ref(false), ready = ref(false), error = ref(''), message = ref('')
 async function save() {
@@ -10,12 +12,14 @@ async function save() {
     await api.saveExecutionPolicy({ shell: form.value.shell,
       on_approval_required: form.value.on_approval_required,
       approval_timeout_seconds: form.value.timeout * 60 })
+    if (isAdmin()) users.value = await api.adminUsers()
     message.value = '已保存。新任务使用此策略；已有任务的权限不会因放宽设置而扩大。'
   } catch (e) { error.value = e.message } finally { busy.value = false }
 }
 onMounted(async () => {
   busy.value = true
   try {
+    if (isAdmin()) users.value = await api.adminUsers()
     const policy = await api.executionPolicy()
     form.value = { shell: policy.shell, on_approval_required: policy.on_approval_required,
       timeout: policy.approval_timeout_seconds / 60 }
@@ -30,6 +34,14 @@ onMounted(async () => {
     <p class="muted">这是当前账号的执行策略，网页对话和所有 API 密钥发起的任务共用。</p>
     <p v-if="error" class="error" role="alert">{{ error }}</p>
     <p v-if="message" role="status">{{ message }}</p>
+    <div v-if="users.length" class="panel">
+      <table><thead><tr><th>用户</th><th>执行权限</th><th>需要审批时</th><th>有效期（分钟）</th></tr></thead>
+        <tbody><tr v-for="user in users" :key="user.user_id"><td>{{ user.username }}</td>
+          <td>{{ { ask: '每次确认', sandboxed: '工作区内自动执行', deny: '禁止命令执行' }[user.execution_policy.shell] }}</td>
+          <td>{{ user.execution_policy.on_approval_required === 'suspend' ? '暂停' : '拒绝' }}</td><td>{{ user.execution_policy.approval_timeout_seconds / 60 }}</td>
+        </tr></tbody>
+      </table>
+    </div>
     <form class="panel stack" @submit.prevent="save">
       <fieldset class="stack" :disabled="busy || !ready">
         <legend>用户执行策略</legend>

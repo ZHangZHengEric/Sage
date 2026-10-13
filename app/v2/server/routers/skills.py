@@ -1,6 +1,6 @@
 from fastapi import APIRouter, File, UploadFile
 
-from app.v2.server.routers.deps import CatalogDep, CurrentUser, SkillDep
+from app.v2.server.routers.deps import ReadUser, CatalogDep, CurrentUser, SkillDep
 from app.v2.server.routers.render import success
 from app.v2.server.routers.schemas.common import (
     AUTH_ERRORS,
@@ -21,7 +21,7 @@ router = APIRouter(tags=["skills"], responses={**AUTH_ERRORS, **VALIDATION_ERROR
 
 
 @router.get("/api/skills", response_model=ApiResponse[list[SkillPublic]])
-async def list_skills(user: CurrentUser, service: SkillDep):
+async def list_skills(user: ReadUser, service: SkillDep):
     skills = await service.list_visible(
         user_id=user.user_id, role=user.role
     )
@@ -69,7 +69,7 @@ async def publish_skill(body: SkillPublishBody, user: CurrentUser, service: Skil
 
 
 @router.get("/api/skills/{skill_id}", response_model=ApiResponse[SkillPublic])
-async def get_skill(skill_id: str, user: CurrentUser, service: SkillDep):
+async def get_skill(skill_id: str, user: ReadUser, service: SkillDep):
     record = await service.get(
         skill_id, user_id=user.user_id, role=user.role
     )
@@ -99,7 +99,7 @@ async def delete_skill(skill_id: str, user: CurrentUser, service: SkillDep):
 @router.get(
     "/api/agents/{agent_id}/skills", response_model=ApiResponse[list[SkillPublic]]
 )
-async def list_agent_skills(agent_id: str, user: CurrentUser, service: SkillDep):
+async def list_agent_skills(agent_id: str, user: ReadUser, service: SkillDep):
     bound = await service.bound_skills(
         owner_user_id=user.user_id, agent_id=agent_id
     )

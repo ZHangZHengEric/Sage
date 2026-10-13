@@ -1,6 +1,6 @@
 from fastapi import APIRouter
 
-from app.v2.server.routers.deps import CredentialDep, CurrentUser
+from app.v2.server.routers.deps import ReadUser, CredentialDep, CurrentUser
 from app.v2.server.routers.render import success
 from app.v2.server.routers.schemas.common import AUTH_ERRORS, VALIDATION_ERRORS, ApiResponse
 from app.v2.server.routers.schemas.identity import ApiKeyBody, ApiKeyCreated, ApiKeyPublic
@@ -9,7 +9,7 @@ router = APIRouter(tags=["api-keys"], responses={**AUTH_ERRORS, **VALIDATION_ERR
 
 
 @router.get("/api/keys", response_model=ApiResponse[list[ApiKeyPublic]])
-async def list_keys(user: CurrentUser, service: CredentialDep):
+async def list_keys(user: ReadUser, service: CredentialDep):
     keys = await service.list_for(user.user_id)
     return success([item.public_dict() for item in keys])
 

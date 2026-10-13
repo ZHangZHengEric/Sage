@@ -1,6 +1,7 @@
 <script setup>
 import { computed, onMounted, ref } from 'vue'
-import { api } from '../api.js'
+import { api, isForeign } from '../api.js'
+import ResourceDetails from '../components/ResourceDetails.vue'
 import FormDrawer from '../components/FormDrawer.vue'
 
 const drawerOpen = ref(false)
@@ -23,13 +24,13 @@ const currentAgent = computed(
 )
 
 async function refresh() {
-  const [nextSkills, nextAgents] = await Promise.all([api.listSkills(), api.listAgents()])
+  const [nextSkills, nextAgents] = await Promise.all([api.listSkills(), api.listAgents(false)])
   skills.value = nextSkills
   agents.value = nextAgents
   if (!agents.value.some((item) => item.id === agentId.value)) {
     agentId.value = agents.value[0]?.id || ''
   }
-  bound.value = await api.listAgentSkills(agentId.value)
+  bound.value = agentId.value ? await api.listAgentSkills(agentId.value) : []
 }
 
 function changeAgent() {
@@ -139,10 +140,11 @@ function startNew() {
       <p v-if="!hasSkills" class="empty">还没有技能。上传 ZIP 后勾选即可给对话使用，未修改时不会拷到工作区。</p>
       <table v-else>
         <thead>
-          <tr><th>技能</th><th>路径</th><th>对话</th><th></th></tr>
+          <tr><th v-if="skills[0]?._owner">用户</th><th>技能</th><th>路径</th><th>对话</th><th></th></tr>
         </thead>
         <tbody>
-          <tr v-for="item in skills" :key="item.skill_id">
+          <tr v-for="item in skills" :key="`${item._owner?.user_id || ''}:${item.skill_id}`">
+            <td v-if="skills[0]?._owner">{{ item.dimension === 'system' ? '系统' : item._owner?.username }}</td>
             <td>
               {{ item.name }}
               <div class="muted">{{ item.description }}</div>
@@ -152,14 +154,16 @@ function startNew() {
               <label>
                 <input
                   type="checkbox"
-                  :checked="boundNames.has(item.name)"
+                  :disabled="!agentId || (isForeign(item) && item.dimension !== 'system')"
+                  :checked="(!isForeign(item) || item.dimension === 'system') && boundNames.has(item.name)"
                   @change="toggleBind(item)"
                 />
                 关联 {{ currentAgent }}
               </label>
             </td>
             <td class="row">
-              <button class="btn ghost" type="button" @click="remove(item.skill_id)">删除</button>
+              <ResourceDetails :item="item" kind="skills" />
+              <button class="btn ghost" type="button" v-if="!isForeign(item)" @click="remove(item.skill_id)">删除</button>
             </td>
           </tr>
         </tbody>
