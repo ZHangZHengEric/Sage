@@ -1,7 +1,21 @@
+import tempfile
 import unittest
 
 from check_translations import load_pages, translation_errors
 from pathlib import Path
+
+
+class PageLoadingChecks(unittest.TestCase):
+    def test_nested_page_without_translation_is_rejected(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            page = root / "en" / "nested" / "guide.md"
+            page.parent.mkdir(parents=True)
+            page.write_text("---\nlang: en\nref: guide\n---\n# Guide\n")
+            errors = translation_errors(load_pages(root))
+        self.assertEqual(
+            errors, ["nested/guide.md: missing English/Chinese counterpart"]
+        )
 
 
 class TranslationChecks(unittest.TestCase):
