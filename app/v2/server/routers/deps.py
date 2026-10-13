@@ -177,13 +177,13 @@ class ChatCaller:
 
 async def get_chat_caller(
     user: OptionalUser,
-    agent_id: Annotated[str | None, Header(alias="SAGE_AGENT_ID", min_length=1, max_length=128)] = None,
-    user_id: Annotated[str | None, Header(alias="SAGE_TENANT_ID", min_length=1, max_length=128)] = None,
+    agent_id: Annotated[str | None, Header(alias="SAGE-AGENT-ID", min_length=1, max_length=128)] = None,
+    user_id: Annotated[str | None, Header(alias="SAGE-TENANT-ID", min_length=1, max_length=128)] = None,
 ) -> ChatCaller:
     if agent_id is not None or user_id is not None:
         if not agent_id or not user_id or not agent_id.strip() or not user_id.strip():
             raise SageV2Error(RuntimeErrorInfo(code="server.chat.invalid_identity",
-                category=ErrorCategory.VALIDATION, message="SAGE_AGENT_ID and SAGE_TENANT_ID headers are required together"))
+                category=ErrorCategory.VALIDATION, message="SAGE-AGENT-ID and SAGE-TENANT-ID headers are required together"))
         return ChatCaller(user_id, agent_id)
     if user is None:
         raise SageV2Error(RuntimeErrorInfo(code="server.chat.unauthenticated",

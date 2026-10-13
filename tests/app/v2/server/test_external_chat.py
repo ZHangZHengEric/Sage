@@ -29,11 +29,11 @@ def setup_agent(client):
     )
     assert response.status_code == 200, response.text
     client.cookies.clear()
-    client.headers["SAGE_AGENT_ID"] = response.json()["data"]["id"]
+    client.headers["SAGE-AGENT-ID"] = response.json()["data"]["id"]
 
 
 def headers(user="business-user-123"):
-    return {"SAGE_TENANT_ID": user}
+    return {"SAGE-TENANT-ID": user}
 
 
 def send(client, session="work-1", request="create-1", user="business-user-123"):
@@ -59,7 +59,7 @@ def result(client, session="work-1", request=None, user="business-user-123"):
 def test_external_chat_unregistered_user_edits_and_restart(tmp_path):
     with TestClient(create_app(make_host(tmp_path))) as client:
         setup_agent(client)
-        agent_id = client.headers["SAGE_AGENT_ID"]
+        agent_id = client.headers["SAGE-AGENT-ID"]
         first = send(client)
         assert first.status_code == 200, first.text
         events = _parse_sse(first.text)
@@ -94,7 +94,7 @@ def test_external_chat_unregistered_user_edits_and_restart(tmp_path):
         )
     # Reopen both runtime and SQL repositories; no Python objects carry the results.
     with TestClient(create_app(make_host(tmp_path))) as restarted:
-        restarted.headers["SAGE_AGENT_ID"] = agent_id
+        restarted.headers["SAGE-AGENT-ID"] = agent_id
         restored = result(restarted, request="edit-2")
         assert restored.status_code == 200, restored.text
         assert restored.json()["data"] == latest
@@ -104,7 +104,7 @@ def test_external_chat_unregistered_user_edits_and_restart(tmp_path):
 def test_external_headers_required_and_existing_chat_still_authenticated(tmp_path):
     with TestClient(create_app(make_host(tmp_path))) as client:
         setup_agent(client)
-        del client.headers["SAGE_AGENT_ID"]
+        del client.headers["SAGE-AGENT-ID"]
         body = {
             "threadId": "work-1",
             "runId": "create-1",
@@ -115,7 +115,7 @@ def test_external_headers_required_and_existing_chat_still_authenticated(tmp_pat
             client.post(
                 "/api/agent",
                 json=body,
-                headers={"SAGE_AGENT_ID": "unknown", "SAGE_TENANT_ID": "business-user"},
+                headers={"SAGE-AGENT-ID": "unknown", "SAGE-TENANT-ID": "business-user"},
             ).status_code
             == 404
         )
@@ -210,12 +210,12 @@ def test_original_chat_result_and_header_contract(tmp_path):
         assert result.status_code == 200 and result.json()["data"]["text"] == "hello"
         client.cookies.clear()
         assert client.get("/api/threads/native-thread/result").status_code == 401
-        partial = client.post("/api/agent", headers={"SAGE_TENANT_ID": "business"}, json=body)
+        partial = client.post("/api/agent", headers={"SAGE-TENANT-ID": "business"}, json=body)
         assert partial.status_code == 422
         parameters = client.get("/openapi.json").json()["paths"]["/api/agent"]["post"][
             "parameters"
         ]
         assert {p["name"] for p in parameters if p["in"] == "header"} >= {
-            "SAGE_AGENT_ID",
-            "SAGE_TENANT_ID",
+            "SAGE-AGENT-ID",
+            "SAGE-TENANT-ID",
         }
