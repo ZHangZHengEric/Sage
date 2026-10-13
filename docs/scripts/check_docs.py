@@ -81,7 +81,9 @@ def main() -> None:
             else:
                 dest = (path.parent / target).resolve()
             if not dest.exists():
-                errors.append(f"{path.relative_to(ROOT)}: missing link {target}")
+                errors.append(
+                    f"{path.relative_to(ROOT).as_posix()}: missing link {target}"
+                )
             # Local links to excluded pages would break on the built website.
             if (
                 path in pages
