@@ -6,6 +6,10 @@ ENV TZ=Asia/Shanghai \
     PYTHONPATH=/app
 WORKDIR /app
 
+# Use the Tsinghua Debian mirror before refreshing package indexes.
+RUN sed -i 's@deb.debian.org@mirrors.tuna.tsinghua.edu.cn@g' \
+    /etc/apt/sources.list.d/debian.sources
+
 # Runtime tools for local sandbox execution and MCP subprocesses.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates curl git bubblewrap util-linux nodejs npm build-essential \
