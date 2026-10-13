@@ -116,6 +116,7 @@ parent: API
 | `GET` | `/api/threads` | `threads` |
 | `DELETE` | `/api/threads/{thread_id}` | `threads` |
 | `GET` | `/api/threads/{thread_id}/events` | `threads` |
+| `GET` | `/api/threads/{thread_id}/result` | `threads` |
 | `POST` | `/api/threads/{thread_id}/resume` | `threads` |
 
 宿主基础设施还提供 `GET /livez`、`GET /readyz` 和 `GET /metrics`，这些不展示在 OpenAPI 中。就绪检查会探测宿主数据库和应用状态。
