@@ -35,6 +35,8 @@ python -m pip install -e '.[server-v2]'
 python -m app.v2.server --data-root /tmp/sage-server-v2
 ```
 
+Docker 部署可使用仓库中的 `deploy/compose_v2.sh`，仅启动 v2 后端和 Web，连接外部 MySQL；配置与命令见 [部署指南](../../../deploy/README.md)。
+
 Web 开发时可单独启动：在 `app/v2/server/web` 执行 `npm install && npm run dev`，Vite 将 API 请求代理到后端 `8090` 端口。执行 `npm run build` 后再启动后端，后端会托管 `web/dist`，可直接访问 `http://localhost:8090` 或 `/studio`。也可使用独立静态文件服务部署，并代理 API 请求到后端。
 
 启动时会幂等升级旧数据库：补齐 `threads.agent_id`、`users.execution_policy`，将 Skill 描述列扩展为 `LONGTEXT`。旧用户采用需要确认的默认执行策略。升级账号需要对应表的 `ALTER` 权限。Skill 列表描述不截断，加载内容仍受 Skill 文件大小限制。已有的截断描述可重新导入原 Skill 文件修复。

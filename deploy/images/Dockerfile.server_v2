@@ -1,0 +1,19 @@
+FROM docker.m.daocloud.io/python:3.12-slim-trixie
+
+ENV TZ=Asia/Shanghai \
+    PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONPATH=/app
+WORKDIR /app
+
+# Runtime tools for local sandbox execution and MCP subprocesses.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates curl git bubblewrap util-linux nodejs npm build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY . .
+RUN python -m pip install --no-cache-dir '.[server-v2,otel]'
+
+EXPOSE 8090
+ENTRYPOINT ["python", "-m", "app.v2.server"]
+CMD ["--host", "0.0.0.0", "--port", "8090", "--data-root", "/app/data"]

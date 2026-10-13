@@ -2,9 +2,11 @@
 
 面向版本用户的完整说明保存在 [`release_notes/`](release_notes/)；本文件记录持续开发变更。
 
+- **2026-10-13** 修正 `compose_v2.sh` 部署为真实 Server v2：新增 Python 3.12 后端与 v2 Web 镜像、独立 Nginx 路由及 SSE 代理，环境模板改用 v2 MySQL URL 和认证配置，保留 32000/32001 端口。
+
 - **2026-10-13** 新增 `deploy/compose_v2.sh`，统一调用仅 Web 和后端的独立 Compose，支持自定义环境文件及透传 Compose 命令。
 
-- **2026-10-13** 新增 standalone Docker Compose，仅部署 Web 和 v1 后端，连接单独部署的 MySQL，不启动基础服务，无需外部共享网络；容器名使用 `_v2` 后缀，后端和 Web 默认端口分别为 32000、32001。
+- **2026-10-13** 新增 standalone Docker Compose，仅部署 Web 和后端，连接单独部署的 MySQL，不启动基础服务，无需外部共享网络；容器名使用 `_v2` 后缀，后端和 Web 默认端口分别为 32000、32001。
 
 - **2026-10-09** Responses 不再下发对不上的 output_schema；load_skill 只保留文本结果，避免下一轮 422。
 
