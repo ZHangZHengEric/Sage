@@ -10,7 +10,9 @@ import ThreadList from '../components/ThreadList.vue'
 const threads = ref([])
 const threadId = ref('')
 const text = ref('')
-const messages = ref([])
+// AG-UI owns message objects and clones them with structuredClone. Keep Vue
+// proxies out of the SDK; transcript updates replace the entire array.
+const messages = shallowRef([])
 const pending = ref(false)
 const error = ref('')
 const hasModel = ref(true)
@@ -18,7 +20,7 @@ const agents = ref([])
 const interaction = ref(null)
 // Where the Run in flight began. A resumed Run replays from its first event,
 // so answering a question means rewinding the transcript back to here first.
-const baseline = ref([])
+const baseline = shallowRef([])
 const selectedAgentId = ref(localStorage.getItem('sage.server_v2.agent') || '')
 const scroller = ref(null)
 const input = ref(null)
