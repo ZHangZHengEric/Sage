@@ -56,16 +56,19 @@ class AgentSummary {
     required this.id,
     required this.name,
     this.isDefault = false,
+    this.rsiStatus,
   });
 
   final String id;
   final String name;
   final bool isDefault;
+  final String? rsiStatus;
 
   factory AgentSummary.fromJson(Map<String, Object?> json) => AgentSummary(
     id: json['id']?.toString() ?? '',
     name: json['name']?.toString() ?? '',
     isDefault: json['is_default'] == true,
+    rsiStatus: json['rsi_status']?.toString(),
   );
 }
 

@@ -12,11 +12,11 @@
 [![DeepWiki](https://img.shields.io/badge/DeepWiki-查看文档-purple.svg)](https://deepwiki.com/ZHangZHengEric/Sage)
 [![Slack](https://img.shields.io/badge/Slack-加入社区-4A154B?logo=slack)](https://join.slack.com/t/sage-b021145/shared_invite/zt-3t8nabs6c-qCEDzNUYtMblPshQTKSWOA)
 
-# 🧠 **Sage 智能体平台**
+# 🧠 **Sage · 自定义、自进化智能体**
 
-### 🎯 **让复杂工作走向可靠交付**
+### 🎯 **定义智能体，评测能力，迭代进化**
 
-> 🌟 **面向项目工作、工具执行与多智能体协作的开源平台，支持桌面端、Web 与自建应用。**
+> 🌟 **构建自定义、自进化智能体的开源平台。定义 Agent package，通过 RSI 多轮评测与调优持续迭代，保留完整版本历史，由你选择采用哪个版本。**
 
 </div>
 
@@ -24,8 +24,9 @@
 
 ## ✨ **核心优势**
 
+- 📦 **自定义 Agent 包** — 用 `sage.yaml` 定义指令、Skills、工具与运行配置，在 Desktop、Server 或自己的 Python 应用中复用。
+- 🧬 **RSI 自进化** — 通过独立 Session 的评测、调优和审查 Agent，按设定轮数测试与改进 package；保留每轮完整记录，由用户选择版本。
 - 🧩 **插件化架构** — 按需组合模型、记忆、存储、工具和调度实现，统一管理扩展契约与组件生命周期。
-- 📦 **声明式 Agent 包** — 用 `sage.yaml` 定义指令、能力和运行配置，在 Server Studio 中管理不可变版本。
 - 🔄 **有状态、可交互的执行** — 持久化 Session 历史，流式输出事件，支持暂停、恢复、人工输入与审批。
 - 🤝 **多智能体编排** — 通过定向消息协调 Studio 成员，或在运行时中组合 Agent Flow。
 - 🔌 **可扩展的工具生态** — 将内置工具、可复用 Skills 与 [MCP](https://modelcontextprotocol.io/) 服务接入同一智能体工作流程。
@@ -33,13 +34,26 @@
 
 ---
 
+## 🧬 **RSI：从自定义到自进化**
+
+输入 Agent package，设置优化目标、轮数和允许修改的范围，就可以启动独立的 RSI（Recursive Self-Improvement）循环。
+
+- **按需调优** — 可只优化 Skills，或开放指令指导、工具启用列表与步数预算。支持用户提供测试集，也可由测试设计 Agent 生成，支持单轮任务与设有轮数上限的多轮对话。
+- **独立评测与审查** — 运行目标 Agent 前，独立 Session 的审查 Agent 先检查测试集与授权目标的一致性。评测和候选语义审查分别检查任务完成、背题和目标漂移；独立最终测试集在基线前封存。
+- **每次迭代可追溯** — 保留原始版本、每轮完整 package、测试回答、评测及审查结果。Desktop 显示后台进度和 RSI 运行历史。Agent 配置层级单独保存人工编辑与确认应用的版本，未应用的候选保留在对应 RSI 记录中。
+- **用户决定采用版本** — 优化不会直接替换原配置。用户查看对比结果、选择版本并确认后，Desktop 才应用该版本；没有更好的候选时保留原版本。
+
+参见 [RSI 流程指南](docs/zh/applications/RSI.md)。从 [Python API](sagents/v2/optimization/README.md) 使用 `AgentPackageOptimizer`，或在 [Desktop 的 Agent 配置](app/v2/desktop/README.md#rsi-与-agent-版本)中打开 RSI。当前 Desktop RSI 支持 simple Agent 与原生工具，安装包支持范围以对应版本说明为准。
+
+---
+
 ## 🚀 **快速开始**
 
 | 选择你的入口 | 从这里开始 |
 | --- | --- |
-| 💻 **Desktop v2** — 本地项目工作与智能体协作 | [桌面端指南](app/v2/desktop/README.md) |
+| 💻 **Desktop v2** — 配置智能体、运行 RSI、选择版本 | [桌面端指南](app/v2/desktop/README.md) |
 | 🌐 **Server v2** — 多用户 Web 应用与 Agent Studio | [服务端指南](app/v2/server/README.md) |
-| 🧠 **SAgents v2** — 将智能体能力集成到自己的应用 | [运行时快速开始](sagents/v2/README.md#quick-start) |
+| 🧠 **SAgents v2** — 通过 Python 构建与调优智能体 | [运行时快速开始](sagents/v2/README.md#quick-start) |
 | 📦 **桌面安装包** — 已发布版本 | [下载与版本说明](https://github.com/ZHangZHengEric/Sage/releases/tag/v2.0.0) |
 
 ### 📦 安装桌面端

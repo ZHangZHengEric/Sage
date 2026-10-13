@@ -30,9 +30,11 @@ class SidecarClientLeases:
         *,
         ttl_seconds: float = 30.0,
         monotonic: Callable[[], float] = time.monotonic,
+        keep_alive: Callable[[], bool] = lambda: False,
     ) -> None:
         if ttl_seconds <= 0:
             raise ValueError("sidecar client lease TTL must be positive")
+        self.keep_alive = keep_alive
         self.ttl_seconds = ttl_seconds
         self._monotonic = monotonic
         self._unclaimed_deadline = monotonic() + ttl_seconds
@@ -111,7 +113,7 @@ class SidecarClientLeases:
     def _request_shutdown_if_empty_locked(
         self, *, require_prior_client: bool = True
     ) -> bool:
-        if self._closing or self._clients:
+        if self._closing or self._clients or self.keep_alive():
             return False
         if require_prior_client and not self._ever_attached:
             return False

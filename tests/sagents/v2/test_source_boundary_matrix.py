@@ -94,6 +94,7 @@ def test_every_v2_domain_imports_only_v2_first_party_code():
         "interfaces",
         "memory",
         "model",
+        "optimization",
         "package",
         "plan",
         "runtime",

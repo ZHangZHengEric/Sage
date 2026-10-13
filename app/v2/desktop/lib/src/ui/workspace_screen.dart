@@ -291,6 +291,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
                   child: widget.controller.selectedStudio != null
                       ? _StudioThread(
                           key: ValueKey(widget.controller.selectedStudioId),
+                          compact: true,
                           controller: widget.controller,
                           onDetails: _openStudioDetails,
                           workspaceCollapsed: _workspaceCollapsed,
