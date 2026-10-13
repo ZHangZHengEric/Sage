@@ -61,6 +61,38 @@ def test_cache_is_bounded_by_eviction():
     assert cache.get("user_1", [_server("a")]) is not first
 
 
+def test_lru_refresh_protects_recently_used_entry():
+    """Accessing an entry moves it to the end so the least-recently-used is evicted.
+
+    With capacity 2, insert A and B, then re-access A before inserting C.
+    A must still be the original object; B must have been evicted.
+    This distinguishes true LRU from pure insertion-order (FIFO) eviction.
+    """
+    cache = McpPluginCache(max_entries=2)
+    a = cache.get("user_1", [_server("a")])
+    b = cache.get("user_1", [_server("b")])
+    # Refresh A so it becomes most-recently-used.
+    assert cache.get("user_1", [_server("a")]) is a
+    # Inserting C should evict B (the least recently used), not A.
+    cache.get("user_1", [_server("c")])
+
+    assert cache.get("user_1", [_server("a")]) is a
+    assert cache.get("user_1", [_server("b")]) is not b
+
+
+def test_order_independent_server_set_reuses_plugin():
+    """The same set of servers requested in opposite orders must hit the same cache entry.
+
+    servers_fingerprint sorts by name, so order must not affect identity.
+    """
+    cache = McpPluginCache()
+    forward = cache.get("user_1", [_server("alpha"), _server("beta")])
+    reverse = cache.get("user_1", [_server("beta"), _server("alpha")])
+
+    assert forward is not None
+    assert reverse is forward
+
+
 def test_invalidate_forces_rediscovery_for_that_user_only():
     cache = McpPluginCache()
     mine = cache.get("user_1", [_server("files")])
