@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Query, Request
 from fastapi.responses import StreamingResponse
 
-from app.v2.server.routers.deps import ConversationDep, CurrentUser
+from app.v2.server.routers.deps import ConversationDep, CurrentUser, ChatCallerDep
 from app.v2.server.routers.schemas.common import AUTH_ERRORS, ApiResponse
 from app.v2.server.routers.schemas.conversations import ThreadEventPage, ThreadPublic, ThreadResumeBody
 from app.v2.server.routers.render import success
@@ -92,3 +92,12 @@ async def resume_thread(
 async def delete_thread(thread_id: str, user: CurrentUser, service: ConversationDep):
     await service.delete(thread_id, user.user_id, admin=user.role == "admin")
     return success()
+
+
+@router.get("/{thread_id}/result")
+async def get_thread_result(thread_id: str, caller: ChatCallerDep,
+                            service: ConversationDep,
+                            request_id: str | None = Query(default=None, min_length=1, max_length=128)):
+    result = await service.result(user_id=caller.user_id, agent_id=caller.agent_id,
+        session_id=thread_id, request_id=request_id)
+    return success(result)

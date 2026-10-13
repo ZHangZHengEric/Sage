@@ -2,6 +2,10 @@
 
 面向版本用户的完整说明保存在 [`release_notes/`](release_notes/)；本文件记录持续开发变更。
 
+- **2026-10-13** v2 后端 pip 切换为清华源；先复制 `pyproject.toml` 安装运行和构建依赖，再复制源码安装项目，使代码修改可以复用依赖层缓存。
+
+- **2026-10-13** v2 后端 Dockerfile 的 pip 默认安装源切换为阿里云 PyPI 镜像。
+
 - **2026-10-13** v2 后端 Dockerfile 的 Debian 软件源切换为清华镜像源。
 
 - **2026-10-13** 修正 `compose_v2.sh` 部署为真实 Server v2：新增 Python 3.12 后端与 v2 Web 镜像、独立 Nginx 路由及 SSE 代理，环境模板改用 v2 MySQL URL 和认证配置，保留 32000/32001 端口。

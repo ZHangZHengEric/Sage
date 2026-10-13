@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Request
 from fastapi.responses import StreamingResponse
 
-from app.v2.server.routers.deps import ConversationDep, CurrentUser
+from app.v2.server.routers.deps import ConversationDep, ChatCallerDep
 from app.v2.server.routers.schemas.common import AUTH_ERRORS, ErrorBody
 from app.v2.server.routers.schemas.conversations import AgentRunBody
 
@@ -23,13 +23,12 @@ router = APIRouter(prefix="/api", tags=["agent"], responses=AUTH_ERRORS)
 async def run_agent(
     body: AgentRunBody,
     request: Request,
-    user: CurrentUser,
+    caller: ChatCallerDep,
     service: ConversationDep,
 ):
     last_event_id = (request.headers.get("last-event-id") or "").strip() or None
-    stream = await service.start(
-        body.to_agui(), user_id=user.user_id, last_event_id=last_event_id
-    )
+    stream = await service.start(body.to_agui(), user_id=caller.user_id,
+        agent_id=caller.agent_id, last_event_id=last_event_id)
     return StreamingResponse(
         stream,
         media_type="text/event-stream",
