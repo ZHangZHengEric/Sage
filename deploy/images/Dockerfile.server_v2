@@ -17,6 +17,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 ENV PIP_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple/
 
+# The supervisor stays root; sandbox subprocesses drop to this dedicated user.
+RUN groupadd --gid 10001 sage-sandbox \
+    && useradd --uid 10001 --gid sage-sandbox --no-create-home \
+       --home-dir /nonexistent --shell /usr/sbin/nologin sage-sandbox
+ENV SAGE_SERVER_LINUX_EXECUTION_UID=10001 \
+    SAGE_SERVER_LINUX_EXECUTION_GID=10001
+
 # Cache runtime and build dependencies independently of application source.
 COPY deploy/images/requirements.server_v2.txt /tmp/sage-server-requirements.txt
 RUN python -m pip install --no-cache-dir -r /tmp/sage-server-requirements.txt \

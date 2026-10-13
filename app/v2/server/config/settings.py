@@ -82,9 +82,16 @@ class ServerSettings:
     max_managed_applications: int = 32
     max_managed_builds: int = 4
     execution_shell_mode: str = "sandboxed"
+    linux_execution_uid: int | None = None
+    linux_execution_gid: int | None = None
     approval_timeout_seconds: int = 86400
 
     def __post_init__(self) -> None:
+        ids = (self.linux_execution_uid, self.linux_execution_gid)
+        if any(value is not None for value in ids) and not all(
+            type(value) is int and 0 < value < 2**32 - 1 for value in ids
+        ):
+            raise ValueError("linux_execution_uid and linux_execution_gid must both be positive non-root IDs")
         if self.trace_backend not in {None, "noop", "otlp", "langfuse"}:
             raise ValueError("trace_backend must be noop, otlp or langfuse")
         if self.trace_otlp_protocol not in {"grpc", "http"}:
@@ -175,6 +182,8 @@ class ServerSettings:
             max_managed_builds=int(_env("SAGE_SERVER_MAX_MANAGED_BUILDS", "4")),
             execution_shell_mode=_choice_env("SAGE_SERVER_EXECUTION_SHELL_MODE", "sandboxed", frozenset({"ask", "sandboxed", "deny"})),
             approval_timeout_seconds=int(_env("SAGE_SERVER_APPROVAL_TIMEOUT_SECONDS", "86400")),
+            linux_execution_uid=int(value) if (value := _env("SAGE_SERVER_LINUX_EXECUTION_UID")) else None,
+            linux_execution_gid=int(value) if (value := _env("SAGE_SERVER_LINUX_EXECUTION_GID")) else None,
             mysql_url=mysql_url,
             trace_backend=_env("SAGE_SERVER_TRACE_BACKEND") or None,
             trace_otlp_endpoint=_env("SAGE_SERVER_TRACE_OTLP_ENDPOINT"),

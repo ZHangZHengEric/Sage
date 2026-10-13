@@ -77,16 +77,14 @@ class PackageBindings:
         ):
             raise PermissionError("execution identity does not match package owner")
         policy = getattr(request.workspace_policy, "value", request.workspace_policy)
-        workspace = self.paths.workspace_dir(self.user_id)
         if policy == "private_child":
-            workspace = (
-                workspace
-                / ".runs"
-                / hashlib.sha256(request.run_id.encode()).hexdigest()
+            workspace = self.paths.workspace_dir(
+                self.user_id, private_run_id=request.run_id
             )
-        elif policy != "shared_parent":
+        elif policy == "shared_parent":
+            workspace = self.paths.workspace_dir(self.user_id)
+        else:
             raise ValueError("unsupported workspace policy")
-        workspace.mkdir(parents=True, exist_ok=True)
         handle = await provision_workspace(
             self.execution, workspace, request.context, run_id=request.run_id
         )

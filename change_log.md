@@ -2,6 +2,8 @@
 
 面向版本用户的完整说明保存在 [`release_notes/`](release_notes/)；本文件记录持续开发变更。
 
+- **2026-10-13** Server V2 Docker 自动创建非 root 沙箱用户，接通 Linux 执行 UID/GID 配置；root 服务仅为受管会话及子 Agent 工作目录设置属主，拒绝符号链接，不递归变更挂载数据权限。
+
 - **2026-10-13** 修复 MySQL 会话持久化构造增量时漏传 `session_id` 导致对话接口返回 500；新增无需数据库的回归测试，覆盖创建运行、后续快照/增量写入及会话隔离。
 
 - **2026-10-13** 仅精简 Server V2 Docker 镜像依赖：新增独立 `deploy/images/requirements.server_v2.txt`，补齐 Pillow、AnyIO、PyJWT 和 Starlette，保留 MCP、A2A、MySQL、OTel 及依赖层缓存。公共 `pyproject.toml`、其他端安装和构建方式保持不变。
