@@ -64,7 +64,10 @@ def main() -> None:
     quickstart_pages = [
         ROOT / "README.md", ROOT / "README_CN.md", ROOT / "sagents/v2/README.md"
     ]
-    link_pages = pages + quickstart_pages + [ROOT / "CONTRIBUTING.md"]
+    # The knowledge hub is checked for links only: it has no front matter,
+    # translations or quick-start copies, and is not part of the published set.
+    knowledge_pages = sorted((ROOT / "knowledge").rglob("*.md"))
+    link_pages = pages + quickstart_pages + [ROOT / "CONTRIBUTING.md"] + knowledge_pages
     for path in link_pages:
         text = path.read_text()
         for link in re.findall(r'\]\(([^)\s]+)\)|src="([^"]+)"', text):
