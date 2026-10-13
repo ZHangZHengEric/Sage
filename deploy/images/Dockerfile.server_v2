@@ -15,9 +15,16 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates curl git bubblewrap util-linux nodejs npm build-essential \
     && rm -rf /var/lib/apt/lists/*
 
+ENV PIP_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple/
+
+# Cache runtime and build dependencies independently of application source.
+COPY pyproject.toml ./
+RUN python -c 'import pathlib, tomllib; cfg = tomllib.loads(pathlib.Path("pyproject.toml").read_text()); project = cfg["project"]; deps = cfg["build-system"]["requires"] + project["dependencies"] + project["optional-dependencies"]["server-v2"] + project["optional-dependencies"]["otel"]; pathlib.Path("/tmp/sage-server-requirements.txt").write_text("\n".join(deps) + "\n")' \
+    && python -m pip install --no-cache-dir -r /tmp/sage-server-requirements.txt \
+    && rm /tmp/sage-server-requirements.txt
+
 COPY . .
-ENV PIP_INDEX_URL=https://mirrors.aliyun.com/pypi/simple/
-RUN python -m pip install --no-cache-dir '.[server-v2,otel]'
+RUN python -m pip install --no-cache-dir --no-deps --no-build-isolation '.[server-v2,otel]'
 
 EXPOSE 8090
 ENTRYPOINT ["python", "-m", "app.v2.server"]

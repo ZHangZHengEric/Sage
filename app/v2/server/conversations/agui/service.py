@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
+
 from app.v2.server.conversations.agui.mapping import to_start_run, validate_agui_id
 from app.v2.server.conversations.agui.sse import (
     canonical_agui_sse,
@@ -11,9 +14,18 @@ from app.v2.server.conversations.agui.sse import (
 from app.v2.server.conversations.sessions import page_session_events
 from app.v2.server.observability.context import get_request_id
 from sagents.v2.contracts.errors import ErrorCategory, RuntimeErrorInfo, SageV2Error
-from sagents.v2.contracts.run_state import EventCursor, RunState
+from sagents.v2.contracts.items import MessageItemData, TextBlock
+from sagents.v2.contracts.run_state import EventCursor, RunState, TERMINAL_RUN_STATES
 from sagents.v2.interfaces.protocols.ag_ui import AgUiProtocolAdapter
 from sagents.v2.runtime.observability import StructuredLogger, structured_log_context
+
+
+def _error(code, message, category=ErrorCategory.VALIDATION):
+    return SageV2Error(
+        RuntimeErrorInfo(
+            code="server.chat." + code, category=category, message=message
+        )
+    )
 
 
 class ConversationService:
@@ -37,6 +49,79 @@ class ConversationService:
         self.session_access = session_access
         self.log_sink = log_sink
         self.context_for = context_for
+
+    async def _scope(self, user_id, agent_id, session_id):
+        # External user IDs need not exist in Sage. The Agent owner supplies
+        # model, tools and skills; the external identity supplies session isolation.
+        if not user_id.strip() or not agent_id.strip():
+            raise _error("invalid_identity", "user_id and agent_id are required")
+        validate_agui_id(session_id, field="session_id")
+        owner_id = None
+        for owner in await self.runs.users.list_users():
+            catalog = await self.runs.catalog.get(owner.user_id)
+            if any(agent.id == agent_id for agent in catalog.agents):
+                owner_id = owner.user_id
+                break
+        if owner_id is None:
+            raise _error("agent_not_found", "agent not found")
+        identity = json.dumps(
+            [user_id, agent_id, session_id], ensure_ascii=False, separators=(",", ":")
+        )
+        internal_id = "external_" + hashlib.sha256(identity.encode()).hexdigest()
+        return owner_id, internal_id
+
+
+    async def result(self, *, user_id, session_id, agent_id=None, request_id=None):
+        owner, internal_id = user_id, session_id
+        if agent_id is not None:
+            owner, internal_id = await self._scope(user_id, agent_id, session_id)
+        access = self.session_access
+        context = self.context_for(owner)
+        runs = await access.list_session_runs(internal_id, context)
+        selected = None
+        selected_request = None
+        for run in sorted(
+            runs,
+            key=lambda item: (item.accepted_session_revision, item.created_at, item.run_id),
+            reverse=True,
+        ):
+            command = await access.get_start_command(run.run_id, context)
+            client_request = command.config.metadata.get(
+                "server_v2.external.request_id", command.idempotency_key
+            )
+            if request_id is None or client_request == request_id:
+                selected, selected_request = run, client_request
+                break
+        if selected is None:
+            raise _error("result_not_found", "request not found")
+        payload = {
+            "session_id": session_id,
+            "request_id": selected_request,
+            "run_id": selected.run_id,
+            "state": selected.state.value,
+            "text": "",
+            "error": None,
+        }
+        if selected.state in TERMINAL_RUN_STATES:
+            result = await access.get_run_result(selected.run_id, context)
+            payload["error"] = (
+                result.error.model_dump(mode="json") if result.error else None
+            )
+            if selected.state == RunState.COMPLETED:
+                for item in reversed(result.final_items):
+                    if (
+                        isinstance(item.data, MessageItemData)
+                        and item.data.role == "assistant"
+                    ):
+                        text = "".join(
+                            block.text
+                            for block in item.data.content
+                            if isinstance(block, TextBlock)
+                        )
+                        if text.strip():
+                            payload["text"] = text
+                            break
+        return payload
 
     async def list_threads(self, user_id: str):
         return await self.threads.list_for(user_id)
@@ -130,7 +215,17 @@ class ConversationService:
             "limit": limit,
         }
 
-    async def start(self, request, *, user_id: str, last_event_id: str | None):
+    async def start(self, request, *, user_id: str, last_event_id: str | None = None, agent_id: str | None = None):
+        stream_thread_id = stream_run_id = None
+        if agent_id is not None:
+            stream_thread_id, stream_run_id = request.thread_id, request.run_id
+            validate_agui_id(stream_run_id, field="runId")
+            user_id, internal_id = await self._scope(user_id, agent_id, stream_thread_id)
+            internal_run_id = "external_" + hashlib.sha256((internal_id + ":" + stream_run_id).encode()).hexdigest()
+            request = request.model_copy(update={
+                "thread_id": internal_id, "run_id": internal_run_id,
+                "forwarded_props": {**(request.forwarded_props or {}), "agentId": agent_id},
+            })
         props = (
             request.forwarded_props if isinstance(request.forwarded_props, dict) else {}
         )
@@ -150,6 +245,9 @@ class ConversationService:
             enabled_skills=enabled,
             metadata=admitted.metadata,
         )
+        if stream_run_id is not None:
+            command = command.model_copy(update={"config": command.config.model_copy(update={
+                "metadata": {**command.config.metadata, "server_v2.external.request_id": stream_run_id}})})
         if command.agent_id != admitted.agent_id:
             command = command.model_copy(update={"agent_id": admitted.agent_id})
             agent_id = admitted.agent_id
@@ -190,8 +288,8 @@ class ConversationService:
             )
             return canonical_agui_sse(
                 events,
-                thread_id=thread_id,
-                run_id=run_id,
+                thread_id=stream_thread_id or thread_id,
+                run_id=stream_run_id or run_id,
                 last_event_id=last_event_id,
             )
 

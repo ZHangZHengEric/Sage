@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import Depends, Request
+from fastapi import Depends, Header, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from app.v2.server.bootstrap import ServerHost
@@ -167,3 +167,28 @@ def require_admin(user: CurrentUser) -> UserRecord:
 
 
 AdminUser = Annotated[UserRecord, Depends(require_admin)]
+
+
+class ChatCaller:
+    def __init__(self, user_id: str, agent_id: str | None = None):
+        self.user_id = user_id
+        self.agent_id = agent_id
+
+
+async def get_chat_caller(
+    user: OptionalUser,
+    agent_id: Annotated[str | None, Header(alias="SAGE_AGENT_ID", min_length=1, max_length=128)] = None,
+    user_id: Annotated[str | None, Header(alias="SAGE_TENANT_ID", min_length=1, max_length=128)] = None,
+) -> ChatCaller:
+    if agent_id is not None or user_id is not None:
+        if not agent_id or not user_id or not agent_id.strip() or not user_id.strip():
+            raise SageV2Error(RuntimeErrorInfo(code="server.chat.invalid_identity",
+                category=ErrorCategory.VALIDATION, message="SAGE_AGENT_ID and SAGE_TENANT_ID headers are required together"))
+        return ChatCaller(user_id, agent_id)
+    if user is None:
+        raise SageV2Error(RuntimeErrorInfo(code="server.chat.unauthenticated",
+            category=ErrorCategory.AUTHENTICATION, message="authentication required"))
+    return ChatCaller(user.user_id)
+
+
+ChatCallerDep = Annotated[ChatCaller, Depends(get_chat_caller)]

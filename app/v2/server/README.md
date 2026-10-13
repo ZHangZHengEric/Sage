@@ -144,3 +144,18 @@ MCP 与 A2A 这类租户自己的目录，工具授权按目录整体授予而�
 ## 模型观测
 
 支持 `sage.trace.otlp` 和 `sage.trace.langfuse`，共用运行、工具、模型输入输出、token 与首 token 观测。配置见 [V2 观测说明](../../../docs/zh/architecture/sagents-v2-observability.md) 和 `.env.example`。Langfuse/OTLP 需要安装 `.[otel]`；管理页按选中的后端显示入口。
+
+
+### 内网业务调用 V2 chat
+
+原 `POST /api/agent` 同时支持 Sage 登录态和内网业务头部身份。内网调用同时提供 `SAGE_AGENT_ID`、`SAGE_TENANT_ID`，无需 `Authorization`；`SAGE_TENANT_ID` 是外部业务用户唯一标识，无需在 Sage 注册。`SAGE_AGENT_ID` 全局唯一，由该 Agent 所属 Sage 账号提供模型、提示词、工具和技能配置。接口按受控内网部署，头部身份由业务后端负责传入。
+
+请求继续使用 AG-UI：`threadId` 即业务 session_id，`runId` 即本次请求唯一 ID，`messages` 中传用户文字和文件 URL。新任务新建 threadId；编辑复用 threadId、使用新的 runId。相同 runId 重试不会重复生成；不同业务用户即使使用相同 threadId/runId，也隔离为不同内部会话。请求头中的 SAGE_AGENT_ID 优先于 forwardedProps.agentId。
+
+```json
+{"threadId":"work-123","runId":"request-456","messages":[{"id":"request-456","role":"user","content":"用户文字与素材 URL"}],"state":{},"tools":[],"context":[],"forwardedProps":{}}
+```
+
+后端可消费 SSE 而不向 App 展示；读取端断开不终止后台生成。`GET /api/threads/{session_id}/result?request_id={runId}` 使用相同请求头查询本次结果；省略 request_id 返回会话最新请求。返回 data 包含 session_id、request_id、内部 run_id、state、text、error；仅 completed 返回完整助手结果，运行中 text 为空。结果由现有持久化 SessionStore 重建，服务重启后仍可查询已落盘状态与结果，不增加额外结果表。未完成任务是否可继续执行取决于运行时持久化状态；不把重启视为成功完成。
+
+标准登录用户也可使用该结果接口查询自己的 threadId。反向代理须透传原样的 `SAGE_AGENT_ID` / `SAGE_TENANT_ID` 请求头（使用 Nginx 时开启 `underscores_in_headers on`）。
