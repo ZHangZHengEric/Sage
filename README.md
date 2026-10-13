@@ -52,6 +52,7 @@ See the [RSI workflow guide](docs/en/applications/RSI.md). Use `AgentPackageOpti
 
 ## 📰 **Latest updates**
 
+- **2026-10-13** — [Streaming UI: from an answer to a native interactive interface](docs/en/applications/STREAMING_UI.md) — Live generation, local calculations, Process Panel revisions, and editable PPTX export in Desktop 2.1.
 - **2026-10-12** — [MCP tools are visible, but calls fail: a five-step diagnostic](knowledge/tutorials/mcp-visible-calls-fail.md)
 - **2026-10-12** — RSI: multi-round Agent package optimization, test-suite alignment audits, independent final tests and semantic review, plus Desktop progress and Agent-level version history. [Python API](sagents/v2/optimization/README.md) · [Desktop guide](app/v2/desktop/README.md#rsi-与-agent-版本)
 - **2026-10-11** — [OpenRouter free models: selection and limits](knowledge/resources/openrouter-free-models.md)

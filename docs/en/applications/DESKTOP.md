@@ -73,3 +73,5 @@ Presentations stream into native 16:9 pages with navigation, thumbnails and full
 Local-only input interfaces do not require submit buttons. Computed results and bound charts update on input changes; a submit button is a separate handoff to the assistant, not a recalculation control.
 
 Local progress tracking supports explicit `Computed` operations: `count` counts selected checkbox options; `ratioPercent` returns completed / total * 100. `Progress` can bind numeric fields or computed results. Updates remain local. `sum` does not coerce selection arrays; the existing `percent` operation retains base * rate / 100 semantics.
+
+Read [Streaming UI: from an answer to an interface](STREAMING_UI.md) for examples and the rendering workflow.

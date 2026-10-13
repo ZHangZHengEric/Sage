@@ -71,3 +71,5 @@ Sage 使用 [OpenUI](https://github.com/thesysdev/openui) 官方流式解析器�
 演示文稿支持原生 16:9 流式预览、翻页、缩略图和全屏演示。验证完成后从同一份数据导出可编辑 PPTX，可用 PowerPoint 或 Keynote 打开。幻灯片支持文字、指标、表格和静态数据图表，暂不支持旧 PPTX 导入、自由拖拽编辑或动画。这是 Sage 的原生接入，并非上游完整渲染器或 OpenUI Cloud Reports API；2.1.0 桌面安装包包含这些功能。
 
 本地完成进度支持：`Computed` 的 `count` 对勾选项显式计数，`ratioPercent` 计算完成数 ÷ 总数 × 100；`Progress` 可绑定数值字段或计算结果。进度、指标和图表在输入变化时本地更新，无需提交。`sum` 不会隐式转换勾选数组，既有 `percent` 仍表示基数 × 百分比 ÷ 100。
+
+阅读 [Streaming UI：让回答直接成为交互界面](STREAMING_UI.md)，了解体验方式与渲染过程。
