@@ -13,23 +13,23 @@ const sageGlassConfig = GlassAdaptiveScopeConfig(
   allowStepUp: false,
 );
 
+Widget sageGlassRoot(Widget child) => LiquidGlassWidgets.wrap(
+  adaptiveQuality: true,
+  adaptiveConfig: sageGlassConfig,
+  theme: GlassThemeData.simple(
+    blur: 2,
+    thickness: 4,
+    quality: GlassQuality.standard,
+  ),
+  child: child,
+);
+
 Future<void> main() async {
   await runZonedGuarded(
     () async {
       WidgetsFlutterBinding.ensureInitialized();
       await LiquidGlassWidgets.initialize();
-      runApp(
-        LiquidGlassWidgets.wrap(
-          adaptiveQuality: false,
-          adaptiveConfig: sageGlassConfig,
-          theme: GlassThemeData.simple(
-            blur: 2,
-            thickness: 4,
-            quality: GlassQuality.standard,
-          ),
-          child: const SageDesktopV2App(),
-        ),
-      );
+      runApp(sageGlassRoot(const SageDesktopV2App()));
     },
     (error, stackTrace) {
       debugPrint('Unhandled Sage Desktop v2 error: $error\n$stackTrace');

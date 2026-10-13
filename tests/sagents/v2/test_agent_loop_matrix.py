@@ -1084,6 +1084,43 @@ async def test_judge_need_user_input_completes_without_suspension():
 
 
 @pytest.mark.asyncio
+async def test_openui_parser_feedback_reaches_the_next_model_request():
+    from unittest.mock import AsyncMock
+    from app.v2.desktop.backend.openui import OpenUiParser
+    from app.v2.desktop.backend.openui_completion import OpenUiCompletionGate
+
+    bad = '```openui\nroot = Deck("Deck", [Slide("Cover", [Text("A"), Text("B")], "cover")])\n```'
+    good = bad.replace(', Text("B")', '')
+
+    def assert_repair_request(request):
+        guidance = request.messages[-1]
+        assert guidance.metadata["runtime_continuation_guidance"]
+        assert "[openui.validation]" in guidance.content[0].text
+        assert "cover allows at most 1, got 2" in guidance.content[0].text
+        assert request.tool_choice == "auto"
+
+    model = ScriptedModelProvider((
+        ScriptedModelStep(events=(completed(bad),)),
+        ScriptedModelStep(assertion=assert_repair_request, events=(completed(good),)),
+    ))
+    delegate = AsyncMock()
+    delegate.decide.return_value = ContinuationDecision(
+        action=ContinuationAction.COMPLETE_RUN, reason_code="judge.completed", reason="done"
+    )
+    parser = OpenUiParser()
+    try:
+        runtime, handle, loop, executor = await setup_loop(
+            model, continuation_policy=OpenUiCompletionGate(delegate, parser)
+        )
+        result = await loop.execute(handle.run_id, CONTEXT)
+        assert result.state == RunState.COMPLETED
+        assert not executor.calls
+        assert len(model.requests) == 2
+    finally:
+        await parser.close()
+
+
+@pytest.mark.asyncio
 async def test_v1_judge_continue_keeps_tool_choice_auto_and_injects_guidance():
     def assert_first_request(request):
         assert request.tool_choice == "auto"

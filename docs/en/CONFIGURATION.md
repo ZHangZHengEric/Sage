@@ -70,3 +70,9 @@ runtime:
 This is a fragment to add to a complete manifest. Plugin configuration is schema-validated. Availability and behavior depend on actual registered implementations; a metadata-only declaration does not create a working provider.
 
 [Extensions](architecture/PLUGINS.md) · [Environment reference](ENV_VARS.md) · [Full integration manual](https://github.com/ZHangZHengEric/Sage/blob/main/sagents/v2/使用手册.md)
+
+## Desktop interactive UI default
+
+Desktop settings persist `default_interactive_ui` as a boolean, initially `false`. Change it in Settings → General. It initializes new ordinary chats and does not overwrite existing chat preferences. Each chat stores `prefer_interactive_ui`; requests carry `ui_preference: "interactive"` or `"auto"`. Enabled requests preload the bundled OpenUI Skill instructions in host context. This setting belongs to Desktop and does not change embedded SAgents or Server behavior.
+
+See [Desktop usage](applications/DESKTOP.md).

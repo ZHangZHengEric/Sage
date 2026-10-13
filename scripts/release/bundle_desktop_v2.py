@@ -31,6 +31,22 @@ def main() -> None:
     environment = {k: v for k, v in os.environ.items() if k not in {'PYTHONHOME', 'PYTHONPATH', 'LD_LIBRARY_PATH', 'DYLD_LIBRARY_PATH', 'DYLD_FALLBACK_LIBRARY_PATH'}}
     environment['PYTHONNOUSERSITE'] = '1'
     subprocess.run(['uv', 'pip', 'install', '--break-system-packages', '--python', str(python), '--constraint', str(Path(__file__).with_name('desktop-constraints.txt')), str(args.wheel.resolve())], env=environment, check=True)
+    # setup-node supplies the official relocatable binary on each release runner.
+    node = shutil.which('node')
+    if node is None:
+        raise RuntimeError('Desktop packaging requires Node.js 22+ for OpenUI')
+    major = int(subprocess.check_output([node, '-p', 'process.versions.node.split(".")[0]'], text=True).strip())
+    if major < 22:
+        raise RuntimeError('OpenUI requires Node.js 22+')
+    node_root = root / 'node'
+    node_root.mkdir()
+    shutil.copy2(Path(node).resolve(), node_root / ('node.exe' if os.name == 'nt' else 'node'))
+    # Include the Node distribution license with the bundled executable.
+    node_prefix = Path(node).resolve().parent
+    license_path = next((p for p in (node_prefix / 'LICENSE', node_prefix.parent / 'LICENSE', node_prefix.parent / 'share/doc/node/LICENSE') if p.is_file()), None)
+    if license_path is None:
+        raise RuntimeError('Node distribution LICENSE is required for packaging')
+    shutil.copy2(license_path, node_root / 'LICENSE')
     (root / 'sage-runtime.json').write_text(json.dumps({
         'version': args.version, 'commit': args.commit,
         'build_id': f'release-{args.version}-{args.commit}',

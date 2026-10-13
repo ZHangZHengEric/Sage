@@ -278,7 +278,7 @@ async def test_studio_tools_are_per_run_and_recovered_without_global_configurati
         await service.sync_studio("group", group(), "owner")
         await service._stop_studio_delivery_worker()
         resolved = CompositionResolver().resolve(
-            service._manifest(agent, provider, ("file_read",), ())
+            service._manifest(agent, provider, ("file_read", "load_skill"), tuple(agent.config.get("availableSkills") or ()))
         )
         request = DesktopRunRequest(
             agent_id="sage",

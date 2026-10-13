@@ -112,3 +112,4 @@ exclude = ["tests*", "app.v1.desktop*", "app.skills*", "app.wiki*", "assets*", "
 ]
 
 "app" = ["skills/**/*"]
+"app.v2.desktop.backend" = ["openui_runtime/*.cjs", "openui_runtime/*.json", "openui_runtime/*.txt", "openui_runtime/*LICENSE"]

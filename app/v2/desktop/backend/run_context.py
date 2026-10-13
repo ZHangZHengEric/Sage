@@ -172,6 +172,8 @@ class PreferredSkillsContextProvider:
     ) -> tuple[ContextSegment, ...]:
         del run_id
         selected = command.config.metadata.get("preferred_skills") or []
+        if command.config.metadata.get("ui_preference") == "interactive":
+            selected = [name for name in selected if name != "sage-openui"]
         if not selected:
             return ()
         return (
@@ -250,5 +252,3 @@ class AgentRosterContextProvider:
                 priority=-55,
             ),
         )
-
-

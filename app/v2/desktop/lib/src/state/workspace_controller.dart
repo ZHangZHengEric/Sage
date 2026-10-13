@@ -339,7 +339,10 @@ class WorkspaceController extends ChangeNotifier {
   }
 
   Future<void> initialize() async {
-    _agentStatusTimer ??= Timer.periodic(const Duration(seconds: 4), (_) => refreshAgentStatuses());
+    _agentStatusTimer ??= Timer.periodic(
+      const Duration(seconds: 4),
+      (_) => refreshAgentStatuses(),
+    );
     loading = true;
     error = null;
     notifyListeners();
@@ -362,6 +365,7 @@ class WorkspaceController extends ChangeNotifier {
       _adoptConversationAgent();
       await Future.wait([refreshSkills(), refreshFiles()]);
       await _reconnectRuns();
+      await _hydrateOpenUi();
       _startStudioPolling();
       await _hydrateSessionTrees();
     } on Object catch (exception) {
@@ -410,6 +414,7 @@ class WorkspaceController extends ChangeNotifier {
     final conversation = Conversation(
       id: _id('conversation'),
       agentId: selectedAgentId,
+      preferInteractiveUi: settings.defaultInteractiveUi,
     );
     _conversations
         .putIfAbsent(selectedGroupId, () => [])
@@ -932,19 +937,26 @@ class WorkspaceController extends ChangeNotifier {
     final after = value.toJson();
     final patch = <String, Object?>{
       for (final entry in after.entries)
-        if (jsonEncode(before[entry.key]) != jsonEncode(entry.value)) entry.key: entry.value,
+        if (jsonEncode(before[entry.key]) != jsonEncode(entry.value))
+          entry.key: entry.value,
     };
     _settingsIntent = value;
     final operation = _sendSettings(_settingsSaveTail, patch);
-    _settingsSaveTail = operation.then<void>((_) {
-      if (identical(_settingsIntent, value)) _settingsIntent = null;
-    }, onError: (Object _) {
-      if (identical(_settingsIntent, value)) _settingsIntent = null;
-    });
+    _settingsSaveTail = operation.then<void>(
+      (_) {
+        if (identical(_settingsIntent, value)) _settingsIntent = null;
+      },
+      onError: (Object _) {
+        if (identical(_settingsIntent, value)) _settingsIntent = null;
+      },
+    );
     return operation;
   }
 
-  Future<void> _sendSettings(Future<void> previous, Map<String, Object?> patch) async {
+  Future<void> _sendSettings(
+    Future<void> previous,
+    Map<String, Object?> patch,
+  ) async {
     await previous;
     try {
       if (_disposed) return;
@@ -1020,14 +1032,16 @@ class WorkspaceController extends ChangeNotifier {
       mcpConnections = values[4] as List<McpConnectionSummary>;
       components = values[5] as List<ComponentSummary>;
     } on Object catch (exception) {
-      if (!_disposed && catalogRevision == _settingsCatalogRevision &&
+      if (!_disposed &&
+          catalogRevision == _settingsCatalogRevision &&
           agentRevision == _settingsAgentRevision) {
         error = exception.toString();
       }
     } finally {
       if (!_disposed && catalogRevision == _settingsCatalogRevision) {
         settingsCatalogLoading = false;
-        if (agentRevision == _settingsAgentRevision) settingsAgentLoadingId = '';
+        if (agentRevision == _settingsAgentRevision)
+          settingsAgentLoadingId = '';
         notifyListeners();
       }
     }
@@ -1084,7 +1098,8 @@ class WorkspaceController extends ChangeNotifier {
   }
 
   Future<void> selectSettingsAgent(String agentId) async {
-    if (_disposed || agentId.isEmpty ||
+    if (_disposed ||
+        agentId.isEmpty ||
         (agentConfiguration?.id == agentId && settingsAgentLoadingId.isEmpty)) {
       return;
     }
@@ -1097,7 +1112,8 @@ class WorkspaceController extends ChangeNotifier {
       if (_disposed || revision != _settingsAgentRevision) return;
       _adoptAgentRead(value, writeRevision);
     } on Object catch (exception) {
-      if (!_disposed && revision == _settingsAgentRevision) error = exception.toString();
+      if (!_disposed && revision == _settingsAgentRevision)
+        error = exception.toString();
     } finally {
       if (!_disposed && revision == _settingsAgentRevision) {
         settingsAgentLoadingId = '';
@@ -1119,9 +1135,12 @@ class WorkspaceController extends ChangeNotifier {
   Future<void> patchAgentConfiguration(Map<String, Object?> patch) {
     final current = agentConfiguration;
     if (_disposed || current == null) return Future<void>.value();
-    if ((_pendingAgentWrites[current.id] ?? 0) == 0) _confirmedAgents[current.id] = current;
-    _pendingAgentWrites[current.id] = (_pendingAgentWrites[current.id] ?? 0) + 1;
-    _agentWriteVersions[current.id] = (_agentWriteVersions[current.id] ?? 0) + 1;
+    if ((_pendingAgentWrites[current.id] ?? 0) == 0)
+      _confirmedAgents[current.id] = current;
+    _pendingAgentWrites[current.id] =
+        (_pendingAgentWrites[current.id] ?? 0) + 1;
+    _agentWriteVersions[current.id] =
+        (_agentWriteVersions[current.id] ?? 0) + 1;
     final revision = ++_agentPatchRevision;
     final optimistic = current.applyPatch(patch);
     agentConfiguration = optimistic;
@@ -1152,14 +1171,16 @@ class WorkspaceController extends ChangeNotifier {
     try {
       final saved = await _api.patchAgentConfiguration(agentId, patch);
       _confirmedAgents[agentId] = saved;
-      if (!_disposed && agentConfiguration?.id == agentId &&
+      if (!_disposed &&
+          agentConfiguration?.id == agentId &&
           revision == _agentPatchRevision) {
         agentConfiguration = saved;
         _updateAgentSummary(saved);
       }
       if (!_disposed) notifyListeners();
     } on Object catch (exception) {
-      if (!_disposed && agentConfiguration?.id == agentId &&
+      if (!_disposed &&
+          agentConfiguration?.id == agentId &&
           revision == _agentPatchRevision) {
         final confirmed = _confirmedAgents[agentId]!;
         agentConfiguration = confirmed;
@@ -1202,7 +1223,9 @@ class WorkspaceController extends ChangeNotifier {
         return _api.cloneAgent(sourceId, name);
       });
 
-  Future<AgentConfiguration> _createAgent(Future<AgentConfiguration> Function() create) async {
+  Future<AgentConfiguration> _createAgent(
+    Future<AgentConfiguration> Function() create,
+  ) async {
     final revision = ++_settingsAgentRevision;
     try {
       final created = await create();
@@ -1628,14 +1651,16 @@ class WorkspaceController extends ChangeNotifier {
         .where((value) => value.id == messageId && value.role == 'user')
         .firstOrNull;
     if (message == null || !canRewriteLastUserMessage(source, message)) return;
-    if (prompt.isEmpty && !message.content.any((part) => part.isReference)) return;
+    if (prompt.isEmpty && !message.content.any((part) => part.isReference))
+      return;
     final updatedContent = <ChatMessageContent>[];
     var replacedText = false;
     for (final part in message.content) {
       if (part.isReference) {
         updatedContent.add(part);
       } else if (part.isText && !replacedText) {
-        if (prompt.isNotEmpty) updatedContent.add(ChatMessageContent.text(prompt));
+        if (prompt.isNotEmpty)
+          updatedContent.add(ChatMessageContent.text(prompt));
         replacedText = true;
       }
     }
@@ -1661,6 +1686,7 @@ class WorkspaceController extends ChangeNotifier {
         agentId: source.agentId,
         approvalMode: source.approvalMode,
         invocationMode: source.invocationMode,
+        preferInteractiveUi: source.preferInteractiveUi,
       );
       _replaceConversationHistory(source, replacement);
     } else {
@@ -1741,6 +1767,7 @@ class WorkspaceController extends ChangeNotifier {
       forkBaseSessionRevision: acceptedRevision + runRevision,
       approvalMode: source.approvalMode,
       invocationMode: source.invocationMode,
+      preferInteractiveUi: source.preferInteractiveUi,
       messages: [
         for (final value in source.messages.take(messageEnd))
           ChatMessage.fromJson(value.toJson()),
@@ -1792,8 +1819,171 @@ class WorkspaceController extends ChangeNotifier {
     notifyListeners();
   }
 
+  String? expandedOpenUiKey;
+  int expandedOpenUiRevision = 0;
+
+  Map<String, Object?>? get expandedOpenUiSurface {
+    for (final message in selectedConversation?.messages ?? <ChatMessage>[]) {
+      for (final surface in message.openUiSurfaces) {
+        if ('${surface['message_id']}:${surface['block_index']}' ==
+            expandedOpenUiKey) {
+          return surface;
+        }
+      }
+    }
+    return null;
+  }
+
+  void expandOpenUi(Map<String, Object?> surface) {
+    expandedOpenUiKey = '${surface['message_id']}:${surface['block_index']}';
+    expandedOpenUiRevision++;
+    notifyListeners();
+  }
+
+  bool canSubmitOpenUi(Map<String, Object?> surface) {
+    final conversation = selectedConversation;
+    return conversation != null &&
+        !viewingSubSession &&
+        selectedStudio == null &&
+        conversation.status == RunStatus.completed &&
+        conversation.runId == surface['run_id'] &&
+        selectedAgentId == surface['agent_id'] &&
+        surface['complete'] == true &&
+        surface['submitted'] != true &&
+        (surface['error']?.toString() ?? '').isEmpty;
+  }
+
+  void updateOpenUiDraft(
+    Map<String, Object?> surface,
+    Map<String, Object?> values,
+  ) {
+    surface['draft_values'] = values;
+    _persist();
+    notifyListeners();
+  }
+
+  Future<void> submitOpenUi(
+    Map<String, Object?> surface,
+    String action,
+    Map<String, Object?> values,
+  ) async {
+    if (!canSubmitOpenUi(surface)) {
+      throw StateError('This interface is not available for submission');
+    }
+    String label = action;
+    final fieldLabels = <String, String>{};
+    void find(Object? node) {
+      if (node is! Map || node['props'] is! Map) return;
+      final props = node['props'] as Map;
+      if (props['name'] is String) {
+        fieldLabels[props['name'] as String] =
+            props['label']?.toString() ?? props['name'].toString();
+      }
+      if (node['component'] == 'Button' && props['action'] == action) {
+        label = props['label']?.toString() ?? action;
+      }
+      if (props['children'] is List) {
+        for (final child in props['children'] as List) {
+          find(child);
+        }
+      }
+    }
+
+    find(surface['tree']);
+    surface['submitted'] = true;
+    surface['draft_values'] = values;
+    _persist();
+    await send(
+      [
+        label,
+        for (final entry in values.entries)
+          '${fieldLabels[entry.key] ?? entry.key}: ${entry.value}',
+      ].join('\n'),
+      openUiAction: {
+        'surface_id': surface['surface_id'],
+        'revision': surface['revision'],
+        'action': action,
+        'values': values,
+      },
+    );
+  }
+
+  Future<void> exportOpenUiDeck(Map<String, Object?> surface, bool dark) async {
+    final location = await file_selector.getSaveLocation(
+      suggestedName: 'sage-presentation.pptx',
+    );
+    if (location == null) return;
+    final bytes = await _api.exportOpenUiDeck(surface, dark);
+    await file_selector.XFile.fromData(
+      bytes,
+      mimeType:
+          'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+      name: 'sage-presentation.pptx',
+    ).saveTo(location.path);
+  }
+
+  void _applyOpenUiSurface(
+    Conversation conversation,
+    Map<String, Object?> surface,
+  ) {
+    final id = surface['message_id']?.toString() ?? '';
+    if (id.isEmpty) return;
+    var message = conversation.messages
+        .where((value) => value.id == id)
+        .firstOrNull;
+    if (message == null) {
+      message = ChatMessage(
+        id: id,
+        role: 'assistant',
+        text: surface['message_text']?.toString() ?? '',
+        sequence: (surface['source_sequence'] as num?)?.toInt() ?? 0,
+      );
+      conversation.messages.add(message);
+    }
+    final index = message.openUiSurfaces.indexWhere(
+      (value) => value['block_index'] == surface['block_index'],
+    );
+    if (index >= 0) {
+      final old = message.openUiSurfaces[index];
+      if ((old['source_sequence'] as num? ?? 0) >
+              (surface['source_sequence'] as num? ?? 0) &&
+          surface['source_sequence'] != null) {
+        return;
+      }
+      if (old['draft_values'] != null) {
+        surface['draft_values'] = old['draft_values'];
+      }
+      if (surface['tree'] == null &&
+          surface['complete'] != true) {
+        surface['tree'] = old['tree'];
+      }
+      message.openUiSurfaces[index] = surface;
+    } else {
+      message.openUiSurfaces.add(surface);
+    }
+    message.processOnly = false;
+  }
+
+  Future<void> _hydrateOpenUi() async {
+    for (final conversations in _conversations.values) {
+      for (final conversation in conversations) {
+        if (conversation.archived || conversation.sessionId == null) continue;
+        try {
+          for (final surface in await _api.getOpenUiSurfaces(
+            conversation.sessionId!,
+          )) {
+            _applyOpenUiSurface(conversation, surface);
+          }
+        } on Object {
+          /* Ordinary conversations remain usable if UI recovery fails. */
+        }
+      }
+    }
+  }
+
   Future<void> send(
     String text, {
+    Map<String, Object?>? openUiAction,
     List<ChatMessageContent> content = const [],
   }) async {
     final conversation = selectedConversation;
@@ -1887,11 +2077,33 @@ class WorkspaceController extends ChangeNotifier {
         'attachment_paths': [
           for (final value in selectedAttachments) value.virtualPath,
         ],
+      'ui_preference': conversation.preferInteractiveUi
+          ? 'interactive'
+          : 'auto',
       'approval_mode': conversation.approvalMode.wireValue,
       'invocation_mode': conversation.invocationMode.wireValue,
-      'idempotency_key': _id('desktop'),
+      if (openUiAction != null) 'openui_action': openUiAction,
+      'idempotency_key': openUiAction == null
+          ? _id('desktop')
+          : 'openui:${openUiAction['surface_id']}:${openUiAction['revision']}',
     };
     _listen(conversation, _api.startRun(body));
+  }
+
+  void setPreferInteractiveUi(bool enabled) {
+    final conversation = composerConversation;
+    if (conversation == null ||
+        {
+          RunStatus.starting,
+          RunStatus.running,
+          RunStatus.suspending,
+          RunStatus.suspended,
+        }.contains(conversation.status)) {
+      return;
+    }
+    conversation.preferInteractiveUi = enabled;
+    notifyListeners();
+    _persist();
   }
 
   void setApprovalMode(ApprovalMode mode) {
@@ -1989,12 +2201,7 @@ class WorkspaceController extends ChangeNotifier {
     }
     final runId = value.runId;
     try {
-      await _api.steer(
-        runId,
-        value.turnId,
-        prompt,
-        content: structuredContent,
-      );
+      await _api.steer(runId, value.turnId, prompt, content: structuredContent);
       final message = ChatMessage(
         id: _id('steer'),
         role: 'user',
@@ -2011,13 +2218,15 @@ class WorkspaceController extends ChangeNotifier {
         }
       }
       value.messages.add(message);
-      value.processPanels.add(RuntimeProcessPanel(
-        id: message.id,
-        anchorMessageId: message.id,
-        startedAt: now,
-        runId: runId,
-        running: value.runId == runId && value.status == RunStatus.running,
-      ));
+      value.processPanels.add(
+        RuntimeProcessPanel(
+          id: message.id,
+          anchorMessageId: message.id,
+          startedAt: now,
+          runId: runId,
+          running: value.runId == runId && value.status == RunStatus.running,
+        ),
+      );
       notifyListeners();
       _persist();
     } on Object catch (exception) {
@@ -2273,6 +2482,12 @@ class WorkspaceController extends ChangeNotifier {
   }
 
   void _applyEvent(Conversation conversation, Map<String, Object?> event) {
+    if (event['kind'] == 'openui.updated') {
+      final surface = event['surface'];
+      if (surface is Map)
+        _applyOpenUiSurface(conversation, surface.cast<String, Object?>());
+      return;
+    }
     if (event['kind'] == 'stream.opened') {
       final handle = event['handle'];
       if (handle is Map) {
@@ -2445,7 +2660,7 @@ class WorkspaceController extends ChangeNotifier {
       // instead of being coalesced into one visible jump.
       _queueTextReveal(existing);
       existing.streaming = true;
-      existing.processOnly = true;
+      existing.processOnly = existing.openUiSurfaces.isEmpty;
     }
   }
 
@@ -2541,7 +2756,7 @@ class WorkspaceController extends ChangeNotifier {
         }
       }
       existing.streaming = false;
-      existing.processOnly = true;
+      existing.processOnly = existing.openUiSurfaces.isEmpty;
     }
   }
 
@@ -2576,10 +2791,15 @@ class WorkspaceController extends ChangeNotifier {
         type.endsWith('.cancelled') ||
         type.endsWith('.completed');
     // A tool started before a steer must finish in its original segment.
-    final panel = conversation.processPanels.reversed
-        .where((panel) => panel.runId == conversation.runId &&
-            panel.activities.any((activity) => activity.id == id))
-        .firstOrNull ?? _activeProcessPanel(conversation);
+    final panel =
+        conversation.processPanels.reversed
+            .where(
+              (panel) =>
+                  panel.runId == conversation.runId &&
+                  panel.activities.any((activity) => activity.id == id),
+            )
+            .firstOrNull ??
+        _activeProcessPanel(conversation);
     final existing = panel.activities
         .where((value) => value.id == id)
         .firstOrNull;
@@ -2658,7 +2878,9 @@ class WorkspaceController extends ChangeNotifier {
     for (final segment in conversation.processPanels.where(
       (value) => value.runId == panel.runId,
     )) {
-      for (final activity in segment.activities.where((value) => value.active)) {
+      for (final activity in segment.activities.where(
+        (value) => value.active,
+      )) {
         activity.active = false;
         activity.completedAt = completedAt ?? DateTime.now();
       }

@@ -84,6 +84,7 @@ class _ToolActivityShimmerState extends State<_ToolActivityShimmer>
 class _MessageBubble extends StatefulWidget {
   const _MessageBubble({
     required this.message,
+    this.openUiController,
     this.onEdit,
     this.onBranch,
     this.onReference,
@@ -92,6 +93,7 @@ class _MessageBubble extends StatefulWidget {
   });
 
   final ChatMessage message;
+  final WorkspaceController? openUiController;
   final Future<void> Function(String value)? onEdit;
   final Future<bool> Function()? onBranch;
   final ValueChanged<String>? onReference;
@@ -113,7 +115,10 @@ class _MessageBubbleState extends State<_MessageBubble> {
   Future<void> _copy() async {
     await Clipboard.setData(ClipboardData(text: message.text));
     if (!mounted) return;
-    DesktopNoticeHost.show(context, message: context.l10n.text('common.copied'));
+    DesktopNoticeHost.show(
+      context,
+      message: context.l10n.text('common.copied'),
+    );
   }
 
   @override
@@ -133,7 +138,8 @@ class _MessageBubbleState extends State<_MessageBubble> {
   Future<void> _submitEdit() async {
     final value = _editor.text.trim();
     if (_submitting || widget.onEdit == null) return;
-    if (value.isEmpty && !message.content.any((part) => part.isReference)) return;
+    if (value.isEmpty && !message.content.any((part) => part.isReference))
+      return;
     setState(() => _submitting = true);
     try {
       await widget.onEdit!(value);
@@ -168,11 +174,17 @@ class _MessageBubbleState extends State<_MessageBubble> {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.end,
                         children: [
-                          if (message.content.any((part) => part.isReference)) ...[
+                          if (message.content.any(
+                            (part) => part.isReference,
+                          )) ...[
                             _UserMessageContent(
-                              key: ValueKey('message-edit-attachments:${message.id}'),
+                              key: ValueKey(
+                                'message-edit-attachments:${message.id}',
+                              ),
                               data: '',
-                              content: message.content.where((part) => part.isReference).toList(),
+                              content: message.content
+                                  .where((part) => part.isReference)
+                                  .toList(),
                               onLoadReference: widget.onLoadReference,
                             ),
                             const SizedBox(height: 8),
@@ -244,12 +256,10 @@ class _MessageBubbleState extends State<_MessageBubble> {
                               onReferenceSelection: widget.onReference,
                               onLoadReference: widget.onLoadReference,
                             )
-                          : _ConversationMarkdown(
-                              key: ValueKey('message-selection:${message.id}'),
-                              data:
-                                  _messageDisplayText(context, message) +
-                                  (message.streaming ? '\n\n▍' : ''),
-                              onReferenceSelection: widget.onReference,
+                          : _AssistantOpenUiContent(
+                              message: message,
+                              controller: widget.openUiController,
+                              onReference: widget.onReference,
                             ),
                     ),
             ),
@@ -303,6 +313,108 @@ class _MessageBubbleState extends State<_MessageBubble> {
           ],
         ),
       ),
+    );
+  }
+}
+
+class _AssistantOpenUiContent extends StatelessWidget {
+  const _AssistantOpenUiContent({
+    required this.message,
+    this.controller,
+    this.onReference,
+  });
+  final ChatMessage message;
+  final WorkspaceController? controller;
+  final ValueChanged<String>? onReference;
+  @override
+  Widget build(BuildContext context) {
+    final parts = splitOpenUiMessage(
+      message.text,
+      streaming: message.streaming,
+    );
+    if (!parts.any((part) => part.blockIndex != null)) {
+      return _ConversationMarkdown(
+        key: ValueKey('message-selection:${message.id}'),
+        data:
+            _messageDisplayText(context, message) +
+            (message.streaming ? '\n\n▍' : ''),
+        onReferenceSelection: onReference,
+      );
+    }
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      spacing: 12,
+      children: [
+        for (final part in parts)
+          if (part.blockIndex == null)
+            _ConversationMarkdown(
+              data: part.markdown,
+              onReferenceSelection: onReference,
+            )
+          else
+            OpenUiSurface(
+              key: ValueKey('openui:${message.id}:${part.blockIndex}'),
+              surface:
+                  message.openUiSurfaces
+                      .where(
+                        (surface) => surface['block_index'] == part.blockIndex,
+                      )
+                      .firstOrNull ??
+                  {
+                    'tree': null,
+                    if (!message.streaming) 'error': 'UI unavailable',
+                  },
+              enabled:
+                  controller != null &&
+                  controller!.canSubmitOpenUi(
+                    message.openUiSurfaces
+                            .where(
+                              (surface) =>
+                                  surface['block_index'] == part.blockIndex,
+                            )
+                            .firstOrNull ??
+                        {},
+                  ),
+              onExport: controller == null
+                  ? null
+                  : (dark) async {
+                      final surface = message.openUiSurfaces
+                          .where(
+                            (value) => value['block_index'] == part.blockIndex,
+                          )
+                          .firstOrNull;
+                      if (surface != null) {
+                        await controller!.exportOpenUiDeck(surface, dark);
+                      }
+                    },
+              onDraftChanged: (values) {
+                final surface = message.openUiSurfaces
+                    .where((value) => value['block_index'] == part.blockIndex)
+                    .firstOrNull;
+                if (surface != null) {
+                  controller?.updateOpenUiDraft(surface, values);
+                }
+              },
+              onSubmit: (action, values) async {
+                final surface = message.openUiSurfaces
+                    .where((value) => value['block_index'] == part.blockIndex)
+                    .firstOrNull;
+                if (surface != null) {
+                  await controller?.submitOpenUi(surface, action, values);
+                }
+              },
+              onExpand: controller == null
+                  ? null
+                  : () {
+                      final surface = message.openUiSurfaces
+                          .where(
+                            (value) => value['block_index'] == part.blockIndex,
+                          )
+                          .firstOrNull;
+                      if (surface != null) controller!.expandOpenUi(surface);
+                    },
+            ),
+      ],
     );
   }
 }

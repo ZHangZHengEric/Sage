@@ -557,6 +557,7 @@ class DesktopSettings {
     this.themeMode = 'system',
     this.language = 'system',
     this.defaultAgentId,
+    this.defaultInteractiveUi = false,
     this.projects = const [],
     this.agentWorkspacePath = '',
     this.maxPreviewBytes = 2000000,
@@ -568,6 +569,7 @@ class DesktopSettings {
   final String themeMode;
   final String language;
   final String? defaultAgentId;
+  final bool defaultInteractiveUi;
   final List<DesktopProject> projects;
   final String agentWorkspacePath;
   final int maxPreviewBytes;
@@ -596,6 +598,7 @@ class DesktopSettings {
         _ => 'system',
       },
       defaultAgentId: json['default_agent_id']?.toString(),
+      defaultInteractiveUi: json['default_interactive_ui'] == true,
       projects: rawProjects is List
           ? [
               for (final value in rawProjects)
@@ -628,6 +631,7 @@ class DesktopSettings {
     String? language,
     String? defaultAgentId,
     bool clearDefaultAgent = false,
+    bool? defaultInteractiveUi,
     List<DesktopProject>? projects,
     String? agentWorkspacePath,
     int? maxPreviewBytes,
@@ -640,6 +644,7 @@ class DesktopSettings {
     defaultAgentId: clearDefaultAgent
         ? null
         : (defaultAgentId ?? this.defaultAgentId),
+    defaultInteractiveUi: defaultInteractiveUi ?? this.defaultInteractiveUi,
     projects: projects ?? this.projects,
     agentWorkspacePath: agentWorkspacePath ?? this.agentWorkspacePath,
     maxPreviewBytes: maxPreviewBytes ?? this.maxPreviewBytes,
@@ -652,6 +657,7 @@ class DesktopSettings {
     'theme_mode': themeMode,
     'language': language,
     'default_agent_id': defaultAgentId,
+    'default_interactive_ui': defaultInteractiveUi,
     'projects': [for (final value in projects) value.toJson()],
     'agent_workspace_path': agentWorkspacePath,
     'max_preview_bytes': maxPreviewBytes,
@@ -819,8 +825,10 @@ class ChatMessage {
     this.processOnly = false,
     this.sequence = 0,
     this.content = const [],
+    List<Map<String, Object?>>? openUiSurfaces,
     DateTime? createdAt,
-  }) : renderedText = text,
+  }) : openUiSurfaces = openUiSurfaces ?? [],
+       renderedText = text,
        createdAt = createdAt ?? DateTime.now();
 
   final String id;
@@ -830,6 +838,7 @@ class ChatMessage {
   /// The presentation copy can trail [text] briefly while a large streamed
   /// delta is revealed. It is deliberately excluded from persistence.
   String renderedText;
+  final List<Map<String, Object?>> openUiSurfaces;
   bool streaming;
   bool processOnly;
   final int sequence;
@@ -842,6 +851,12 @@ class ChatMessage {
       id: json['id']?.toString() ?? '',
       role: json['role']?.toString() ?? 'assistant',
       text: json['text']?.toString() ?? '',
+      openUiSurfaces: json['openui_surfaces'] is List
+          ? [
+              for (final value in json['openui_surfaces'] as List)
+                if (value is Map) value.cast<String, Object?>(),
+            ]
+          : [],
       streaming: json['streaming'] == true,
       processOnly: json['process_only'] == true,
       sequence: (json['sequence'] as num?)?.toInt() ?? 0,
@@ -862,6 +877,7 @@ class ChatMessage {
     'text': text,
     if (content.isNotEmpty)
       'content': [for (final value in content) value.toJson()],
+    if (openUiSurfaces.isNotEmpty) 'openui_surfaces': openUiSurfaces,
     'streaming': false,
     'process_only': processOnly,
     'sequence': sequence,
@@ -1028,6 +1044,7 @@ class Conversation {
     this.pendingInteraction,
     this.approvalMode = ApprovalMode.highRisk,
     this.invocationMode = InvocationMode.normal,
+    this.preferInteractiveUi = false,
     this.pendingPlanExecution,
     this.lastCompletedGoalRunId,
     List<RuntimeProcessPanel>? processPanels,
@@ -1060,6 +1077,7 @@ class Conversation {
   PendingInteraction? pendingInteraction;
   ApprovalMode approvalMode;
   InvocationMode invocationMode;
+  bool preferInteractiveUi;
   Map<String, Object?>? pendingPlanExecution;
   String? lastCompletedGoalRunId;
   bool get planMode => invocationMode == InvocationMode.plan;
@@ -1164,6 +1182,7 @@ class Conversation {
         json['invocation_mode']?.toString() ??
             (json['plan_mode'] == true ? 'plan' : null),
       ),
+      preferInteractiveUi: json['prefer_interactive_ui'] == true,
       pendingPlanExecution: (json['pending_plan_execution'] as Map?)
           ?.cast<String, Object?>(),
       lastCompletedGoalRunId: json['last_completed_goal_run_id']?.toString(),
@@ -1198,6 +1217,7 @@ class Conversation {
     'pending_interaction': pendingInteraction?.toJson(),
     'approval_mode': approvalMode.wireValue,
     'invocation_mode': invocationMode.wireValue,
+    'prefer_interactive_ui': preferInteractiveUi,
     'pending_plan_execution': pendingPlanExecution,
     'last_completed_goal_run_id': lastCompletedGoalRunId,
     'process_panels': [for (final value in processPanels) value.toJson()],

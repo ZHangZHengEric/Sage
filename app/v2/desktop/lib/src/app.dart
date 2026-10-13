@@ -65,8 +65,8 @@ class _SageDesktopV2AppState extends State<SageDesktopV2App> {
       title: 'Sage v2',
       themeMode: _themeMode,
       locale: _language == 'system' ? null : Locale(_language),
-      theme: _theme(Brightness.light),
-      darkTheme: _theme(Brightness.dark),
+      theme: sageDesktopTheme(Brightness.light),
+      darkTheme: sageDesktopTheme(Brightness.dark),
       localizationsDelegates: const [
         SageLocalizations.delegate,
         ...GlobalMaterialLocalizations.delegates,
@@ -96,7 +96,7 @@ class _SageDesktopV2AppState extends State<SageDesktopV2App> {
   }
 }
 
-ThemeData _theme(Brightness brightness) {
+ThemeData sageDesktopTheme(Brightness brightness) {
   const seed = Color(0xFF0A84FF);
   final scheme = ColorScheme.fromSeed(
     seedColor: seed,
