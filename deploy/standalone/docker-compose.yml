@@ -26,6 +26,9 @@ services:
     security_opt:
       - seccomp=unconfined
       - apparmor=unconfined
+      # Nested bubblewrap mounts a private procfs in its own PID/user namespace.
+      # Docker's masked /proc submounts otherwise make the kernel reject it.
+      - systempaths=unconfined
     mem_limit: 4g
     cpus: 2.0
     extra_hosts:

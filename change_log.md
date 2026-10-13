@@ -1,6 +1,13 @@
+## 2026-10-13 Sage 业务身份请求头修复
+
+- 聊天与结果查询统一接收 `SAGE-AGENT-ID`、`SAGE-TENANT-ID`，避免 Caddy/Nginx 丢弃下划线请求头引起 401。
+- 同步业务身份接口测试、OpenAPI 断言和接入文档。
+
 # Changelog
 
 面向版本用户的完整说明保存在 [`release_notes/`](release_notes/)；本文件记录持续开发变更。
+
+- **2026-10-13** 为 V2 后端 Compose 配置 `systempaths=unconfined`，解决 Docker 遮蔽 `/proc` 子挂载导致非 root bubblewrap 无法挂载私有 procfs、所有 shell 命令启动失败的问题；保留内层命名空间与降权隔离。
 
 - **2026-10-13** 修复 Server V2 Web 点击“允许这一次”时的 `structuredClone` 异常：聊天消息和回放基线使用浅层响应式状态，避免 Vue Proxy 进入 AG-UI 客户端；新增审批恢复与切换智能体的回归验证。
 
