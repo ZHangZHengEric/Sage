@@ -75,6 +75,58 @@ class ContributorGuideLinks(unittest.TestCase):
             check_docs.main()
         self.assertIn("README.md: quick-start copy differs", str(raised.exception))
 
+    def test_nested_knowledge_pages_with_valid_links_pass(self):
+        self.write("knowledge/README.md", "[Guide](resources/guide.md)\n")
+        self.write(
+            "knowledge/resources/guide.md",
+            "[Hub](../README.md)\n"
+            "[Sibling](other.md#section)\n"
+            f"[Repo]({check_docs.REPO_URL}README.md)\n"
+            "[External](https://example.com/missing.md)\n",
+        )
+        self.write("knowledge/resources/other.md", "No links here.\n")
+        with redirect_stdout(io.StringIO()) as output:
+            check_docs.main()
+        # Knowledge pages are checked for links only: they need no Jekyll front
+        # matter, no Chinese counterpart and no copied quick-start example.
+        self.assertIn("5 quick-start copies", output.getvalue())
+
+    def test_missing_relative_link_in_knowledge_page_names_source_and_target(self):
+        self.write("knowledge/resources/guide.md", "[Gone](../missing-page.md)\n")
+        with self.assertRaises(SystemExit) as raised:
+            check_docs.main()
+        self.assertEqual(
+            str(raised.exception),
+            "knowledge/resources/guide.md: missing link ../missing-page.md",
+        )
+
+    def test_missing_repository_file_link_in_knowledge_page_is_reported(self):
+        self.write(
+            "knowledge/resources/guide.md",
+            f"[Gone]({check_docs.REPO_URL}docs/missing-file.md)\n",
+        )
+        with self.assertRaises(SystemExit) as raised:
+            check_docs.main()
+        message = str(raised.exception)
+        self.assertIn("knowledge/resources/guide.md: missing link", message)
+        self.assertIn("docs/missing-file.md", message)
+
+    def test_knowledge_hub_readme_links_are_checked(self):
+        self.write("knowledge/README.md", "[Gone](resources/missing.md)\n")
+        with self.assertRaises(SystemExit) as raised:
+            check_docs.main()
+        self.assertEqual(
+            str(raised.exception), "knowledge/README.md: missing link resources/missing.md"
+        )
+
+    def test_knowledge_links_resolve_relative_to_their_own_page(self):
+        # `other.md` exists next to the README but not next to the nested guide.
+        self.write("knowledge/other.md", "x\n")
+        self.write("knowledge/resources/guide.md", "[Sibling](other.md)\n")
+        with self.assertRaises(SystemExit) as raised:
+            check_docs.main()
+        self.assertIn("knowledge/resources/guide.md: missing link other.md", str(raised.exception))
+
 
 if __name__ == "__main__":
     unittest.main()
