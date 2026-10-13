@@ -8,7 +8,7 @@
 [![Chinese](https://img.shields.io/badge/Language-Chinese-red.svg)](README_CN.md)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?logo=opensourceinitiative)](LICENSE)
 [![Python 3.12+ (v2)](https://img.shields.io/badge/Python-3.12%2B%20(v2)-blue.svg?logo=python)](https://python.org)
-[![Version](https://img.shields.io/badge/Version-2.0.0-green.svg)](https://github.com/ZHangZHengEric/Sage)
+[![Version](https://img.shields.io/badge/Version-2.1.0-green.svg)](https://github.com/ZHangZHengEric/Sage)
 [![DeepWiki](https://img.shields.io/badge/DeepWiki-Learn%20More-purple.svg)](https://deepwiki.com/ZHangZHengEric/Sage)
 [![Slack](https://img.shields.io/badge/Slack-Join%20Community-4A154B?logo=slack)](https://join.slack.com/t/sage-b021145/shared_invite/zt-3t8nabs6c-qCEDzNUYtMblPshQTKSWOA)
 
@@ -29,7 +29,7 @@ New to RSI? [Inspect your first run](docs/en/applications/FIRST_RSI_RUN.md): a s
 - 📦 **Custom Agent packages** — Define your agent's instructions, Skills, tools, and runtime configuration in `sage.yaml`; reuse packages in Desktop, Server, or your Python application.
 - 🧬 **Self-evolution with RSI** — Test and refine packages over configurable rounds using evaluation, tuning, and review agents in separate Sessions. Retain every iteration and choose which version to use.
 - 🧩 **Plugin-based architecture** — Compose model, memory, storage, tool, and scheduling providers with explicit contracts and managed lifecycles.
-- 🪟 **Native streaming UI (Desktop v2 source)** — Uses the official [OpenUI](https://github.com/thesysdev/openui) parser with Sage’s Flutter Glass renderer. Assistant `openui` blocks render as output arrives, with light/dark themes and 31 native component types: charts, metrics, tabs, diagrams, rich inputs, and immediate local calculations. Local-only interfaces need no submit button or model round-trip; a submit button explicitly hands values back to the assistant. Users can ask naturally without mentioning OpenUI. Enable **Prefer interactive UI** in the composer plus menu, or set **Settings → General → Interactive UI on by default** for new chats; enabling it preloads the complete built-in Skill without a tool call. Presentations stream as native 16:9 slides and export editable PPTX from the same document. This is a supported component subset, not the upstream Web renderer; existing release binaries do not include this source update. [Integration details](app/v2/desktop/README.md#openui).
+- 🪟 **Native streaming UI (Desktop 2.1)** — Uses the official [OpenUI](https://github.com/thesysdev/openui) parser with Sage’s Flutter Glass renderer. Assistant `openui` blocks render as output arrives, with light/dark themes and 31 native component types: charts, metrics, tabs, diagrams, rich inputs, and immediate local calculations. Local-only interfaces need no submit button or model round-trip; a submit button explicitly hands values back to the assistant. Users can ask naturally without mentioning OpenUI. Enable **Prefer interactive UI** in the composer plus menu, or set **Settings → General → Interactive UI on by default** for new chats; enabling it preloads the complete built-in Skill without a tool call. Presentations stream as native 16:9 slides and export editable PPTX from the same document. This is a supported component subset, not the upstream Web renderer; included in the 2.1.0 desktop packages. [Integration details](app/v2/desktop/README.md#openui).
 - 🔄 **Stateful, interactive execution** — Durable Session history, streamed events, and pause/resume with human input and approvals.
 - 🤝 **Multi-agent orchestration** — Coordinate Studio members through directed messages, or compose Agent Flows in the runtime.
 - 🔌 **An extensible tool ecosystem** — Bring built-in tools, reusable Skills, and [MCP](https://modelcontextprotocol.io/) services into the same agent workflow.
@@ -69,14 +69,14 @@ See the [RSI workflow guide](docs/en/applications/RSI.md). Use `AgentPackageOpti
 | 💻 **Desktop v2** — Configure agents, run RSI, and choose versions | [Desktop guide](app/v2/desktop/README.md) |
 | 🌐 **Server v2** — Multi-user web access and Agent Studio | [Server guide](app/v2/server/README.md) |
 | 🧠 **SAgents v2** — Build and optimize agents through Python | [Runtime quick start](sagents/v2/README.md#quick-start) |
-| 📦 **Desktop installers** — Available release builds | [Downloads & release instructions](https://github.com/ZHangZHengEric/Sage/releases/tag/v2.0.0) |
+| 📦 **Desktop installers** — Available release builds | [Downloads & release instructions](https://github.com/ZHangZHengEric/Sage/releases/tag/v2.1.0) |
 
 ### 📦 Desktop installer
 
-1. Download [Sage 2.0.0](https://github.com/ZHangZHengEric/Sage/releases/tag/v2.0.0) for macOS (arm64/x86_64), Windows (x86_64), or Linux (arm64/x86_64).
+1. Download [Sage 2.1.0](https://github.com/ZHangZHengEric/Sage/releases/tag/v2.1.0) for macOS (arm64/x86_64), Windows (x86_64), or Linux (arm64/x86_64).
 2. Install and open Sage. Python and the backend are bundled; no repository checkout, system Python, or Flutter is needed. Linux still requires GTK and bubblewrap.
 3. Add your model in Settings → Configure an Agent → Start a conversation. Your model service may charge usage fees. See the [Desktop guide](docs/en/applications/DESKTOP.md#first-task).
-4. macOS packages are not notarized; Windows installers are not code-signed. See the [release notes](release_notes/v2.0.0.md) for package details.
+4. macOS packages are not notarized; Windows installers are not code-signed. See the [release notes](release_notes/v2.1.0.md) for package details.
 
 ### 💻 Desktop from source
 
@@ -97,7 +97,7 @@ flutter run -d macos
 
 The app starts its local backend automatically. Settings and session data live in `~/sage/runtime`; the default workspace is `~/sage/agent_workspace`.
 
-For Windows and Linux setup, see the [Desktop guide](app/v2/desktop/README.md). Sage 2.0 packages and the release boundary are documented in [v2.0.0 release notes](release_notes/v2.0.0.md). GitHub Actions builds Flutter v2 installers with an embedded Python runtime; the legacy Tauri installers belong to v1.
+For Windows and Linux setup, see the [Desktop guide](app/v2/desktop/README.md). Sage 2.1 packages and the release boundary are documented in [v2.1.0 release notes](release_notes/v2.1.0.md). GitHub Actions builds Flutter v2 installers with an embedded Python runtime; the legacy Tauri installers belong to v1.
 
 ### 🌐 Server from source
 

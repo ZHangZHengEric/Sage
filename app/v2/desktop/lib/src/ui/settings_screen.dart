@@ -133,17 +133,21 @@ class _SettingsScreenState extends State<SettingsScreen> {
     try {
       _desktopSaveTail = widget.controller.saveSettings(next);
       await _desktopSaveTail;
-      if (mounted && revision == _desktopSaveRevision)
+      if (mounted && revision == _desktopSaveRevision) {
         setState(() => _draft = widget.controller.settings);
+      }
     } catch (_) {
-      if (mounted && revision == _desktopSaveRevision)
+      if (mounted && revision == _desktopSaveRevision) {
         setState(() => _draft = widget.controller.settings);
+      }
       rethrow;
     } finally {
-      if (revision == _desktopSaveRevision)
+      if (revision == _desktopSaveRevision) {
         _desktopSaveTail = Future<void>.value();
-      if (mounted && revision == _desktopSaveRevision)
+      }
+      if (mounted && revision == _desktopSaveRevision) {
         setState(() => _saving = false);
+      }
     }
   }
 
@@ -246,8 +250,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
       _draft.copyWith(maxPreviewBytes: preview, maxTreeEntries: entries),
     );
     if (_previewBytes.text.trim() == '$preview' &&
-        _treeEntries.text.trim() == '$entries')
+        _treeEntries.text.trim() == '$entries') {
       _runtimeDirty = false;
+    }
   }
 
   Map<String, Object?> get _sandboxConfig => {
@@ -315,8 +320,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _sandboxDebounce = Timer(const Duration(milliseconds: 650), () async {
       try {
         await _saveSandbox(workspaceRoot: value);
-        if (_sandboxRoot.text.trim().replaceAll('\\', '/') == value)
+        if (_sandboxRoot.text.trim().replaceAll('\\', '/') == value) {
           _sandboxDirty = false;
+        }
       } on Object {
         /* Shared error banner; keep the dirty value for retry. */
       }
@@ -537,14 +543,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
       if (!mounted) return;
       if (_workspaceDirty) {
         final path = _workspacePath.text.trim();
-        if (path.isEmpty)
+        if (path.isEmpty) {
           throw FormatException(context.l10n.text('settings.pathRequired'));
+        }
         await _saveDesktopSettings(_draft.copyWith(agentWorkspacePath: path));
         _workspaceDirty = false;
       }
       if (_sandboxDirty) {
-        if (_sandboxRootError != null)
+        if (_sandboxRootError != null) {
           throw FormatException(_sandboxRootError!);
+        }
         await _saveSandbox(
           workspaceRoot: _sandboxRoot.text.trim().replaceAll('\\', '/'),
         );
@@ -552,12 +560,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
       }
       if (mounted) widget.onClose();
     } on Object catch (exception) {
-      if (mounted)
+      if (mounted) {
         DesktopNoticeHost.show(
           context,
           message: exception.toString(),
           isError: true,
         );
+      }
     }
   }
 
@@ -2769,8 +2778,9 @@ class _PluginConfigEditorState extends State<_PluginConfigEditor> {
         result.remove(entry.key);
         continue;
       }
-      if (value == null && !(choices is List && choices.contains(null)))
+      if (value == null && !(choices is List && choices.contains(null))) {
         return null;
+      }
       if (choices is List && !choices.contains(value)) return null;
       if (value is num) {
         final minimum = schema['minimum'];

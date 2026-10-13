@@ -48,7 +48,7 @@ Windows 或 Linux 使用 `-d windows`、`-d linux`。应用自动启动托管 Py
 
 设置自动保存，模型和 Agent 配置不接受环境变量覆盖。源码调试时可给后端传 `--data-root /absolute/path`。注册项目仍使用各自的文件根目录。
 
-Desktop v2 不导入 v1 数据。[Sage 2.0.0](https://github.com/ZHangZHengEric/Sage/releases/tag/v2.0.0) 安装包由 GitHub Actions 从 Flutter v2 客户端构建，包含 Python 与 v2 后端。旧 Tauri 发布仍属于 v1。macOS 包使用 ad-hoc 签名、未公证；Windows 包未做代码签名。
+Desktop v2 不导入 v1 数据。[Sage 2.1.0](https://github.com/ZHangZHengEric/Sage/releases/tag/v2.1.0) 安装包由 GitHub Actions 从 Flutter v2 客户端构建，包含 Python 与 v2 后端。旧 Tauri 发布仍属于 v1。macOS 包使用 ad-hoc 签名、未公证；Windows 包未做代码签名。
 
 [组件参考](https://github.com/ZHangZHengEric/Sage/blob/main/app/v2/desktop/README.md) · [故障排查](../TROUBLESHOOTING.md)
 
@@ -68,6 +68,6 @@ Desktop v2 不导入 v1 数据。[Sage 2.0.0](https://github.com/ZHangZHengEric/
 
 Sage 使用 [OpenUI](https://github.com/thesysdev/openui) 官方流式解析器和自己的 Flutter 原生 Glass 渲染器，支持深浅色和 31 类注册组件。每个收到的文本片段都会更新界面，实际逐 token 的粒度取决于模型服务。输入组件在验证与生成完成后可用；计算器和数字图表绑定在本地即时更新，纯本地交互无需提交按钮；只有需要交给助手继续处理的表单才提供按钮，将当前值作为下一轮消息发送。计算结果可继续用于其他计算和图表，依赖关系必须无循环。若最终校验失败，保留已生成的只读预览并标明未完成，禁止提交。
 
-演示文稿支持原生 16:9 流式预览、翻页、缩略图和全屏演示。验证完成后从同一份数据导出可编辑 PPTX，可用 PowerPoint 或 Keynote 打开。幻灯片支持文字、指标、表格和静态数据图表，暂不支持旧 PPTX 导入、自由拖拽编辑或动画。这是 Sage 的原生接入，并非上游完整渲染器或 OpenUI Cloud Reports API；此前发布的安装包不含这些源码新增功能。
+演示文稿支持原生 16:9 流式预览、翻页、缩略图和全屏演示。验证完成后从同一份数据导出可编辑 PPTX，可用 PowerPoint 或 Keynote 打开。幻灯片支持文字、指标、表格和静态数据图表，暂不支持旧 PPTX 导入、自由拖拽编辑或动画。这是 Sage 的原生接入，并非上游完整渲染器或 OpenUI Cloud Reports API；2.1.0 桌面安装包包含这些功能。
 
 本地完成进度支持：`Computed` 的 `count` 对勾选项显式计数，`ratioPercent` 计算完成数 ÷ 总数 × 100；`Progress` 可绑定数值字段或计算结果。进度、指标和图表在输入变化时本地更新，无需提交。`sum` 不会隐式转换勾选数组，既有 `percent` 仍表示基数 × 百分比 ÷ 100。

@@ -8,7 +8,7 @@
 [![简体中文](https://img.shields.io/badge/语言-简体中文-red.svg)](README_CN.md)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?logo=opensourceinitiative)](LICENSE)
 [![Python 3.12+ (v2)](https://img.shields.io/badge/Python-3.12%2B%20(v2)-blue.svg?logo=python)](https://python.org)
-[![Version](https://img.shields.io/badge/Version-2.0.0-green.svg)](https://github.com/ZHangZHengEric/Sage)
+[![Version](https://img.shields.io/badge/Version-2.1.0-green.svg)](https://github.com/ZHangZHengEric/Sage)
 [![DeepWiki](https://img.shields.io/badge/DeepWiki-查看文档-purple.svg)](https://deepwiki.com/ZHangZHengEric/Sage)
 [![Slack](https://img.shields.io/badge/Slack-加入社区-4A154B?logo=slack)](https://join.slack.com/t/sage-b021145/shared_invite/zt-3t8nabs6c-qCEDzNUYtMblPshQTKSWOA)
 
@@ -27,7 +27,7 @@
 - 📦 **自定义 Agent 包** — 用 `sage.yaml` 定义指令、Skills、工具与运行配置，在 Desktop、Server 或自己的 Python 应用中复用。
 - 🧬 **RSI 自进化** — 通过独立 Session 的评测、调优和审查 Agent，按设定轮数测试与改进 package；保留每轮完整记录，由用户选择版本。
 - 🧩 **插件化架构** — 按需组合模型、记忆、存储、工具和调度实现，统一管理扩展契约与组件生命周期。
-- 🪟 **原生流式界面（Desktop v2 源码）** — 使用 [OpenUI](https://github.com/thesysdev/openui) 官方解析器，将 Assistant 的 `openui` 代码块随输出增量渲染为 Flutter Glass 界面，支持深浅色和 31 类原生组件，含图表、指标、标签页、流程图、丰富输入及即时本地计算。纯本地交互不需要提交按钮或再次请求模型；提交按钮仅用于明确将参数交回助手。用户自然提问即可，无需提 OpenUI；可在加号菜单开启“优先交互 UI”，或在“设置 → 通用 → 默认开启交互式 UI”设置新聊天的默认值。开启后宿主自动预加载完整 Skill，无需工具调用。演示文稿支持原生 16:9 流式预览，并从同一份数据导出可编辑 PPTX。当前支持指定组件子集，使用 Sage 自己的原生渲染器；现有发布安装包不包含这次源码更新。[接入说明](app/v2/desktop/README.md#openui)。
+- 🪟 **原生流式界面（Desktop 2.1）** — 使用 [OpenUI](https://github.com/thesysdev/openui) 官方解析器，将 Assistant 的 `openui` 代码块随输出增量渲染为 Flutter Glass 界面，支持深浅色和 31 类原生组件，含图表、指标、标签页、流程图、丰富输入及即时本地计算。纯本地交互不需要提交按钮或再次请求模型；提交按钮仅用于明确将参数交回助手。用户自然提问即可，无需提 OpenUI；可在加号菜单开启“优先交互 UI”，或在“设置 → 通用 → 默认开启交互式 UI”设置新聊天的默认值。开启后宿主自动预加载完整 Skill，无需工具调用。演示文稿支持原生 16:9 流式预览，并从同一份数据导出可编辑 PPTX。当前支持指定组件子集，使用 Sage 自己的原生渲染器；2.1.0 桌面安装包包含这些功能。[接入说明](app/v2/desktop/README.md#openui)。
 - 🔄 **有状态、可交互的执行** — 持久化 Session 历史，流式输出事件，支持暂停、恢复、人工输入与审批。
 - 🤝 **多智能体编排** — 通过定向消息协调 Studio 成员，或在运行时中组合 Agent Flow。
 - 🔌 **可扩展的工具生态** — 将内置工具、可复用 Skills 与 [MCP](https://modelcontextprotocol.io/) 服务接入同一智能体工作流程。
@@ -55,14 +55,14 @@
 | 💻 **Desktop v2** — 配置智能体、运行 RSI、选择版本 | [桌面端指南](app/v2/desktop/README.md) |
 | 🌐 **Server v2** — 多用户 Web 应用与 Agent Studio | [服务端指南](app/v2/server/README.md) |
 | 🧠 **SAgents v2** — 通过 Python 构建与调优智能体 | [运行时快速开始](sagents/v2/README.md#quick-start) |
-| 📦 **桌面安装包** — 已发布版本 | [下载与版本说明](https://github.com/ZHangZHengEric/Sage/releases/tag/v2.0.0) |
+| 📦 **桌面安装包** — 已发布版本 | [下载与版本说明](https://github.com/ZHangZHengEric/Sage/releases/tag/v2.1.0) |
 
 ### 📦 安装桌面端
 
-1. 下载 [Sage 2.0.0](https://github.com/ZHangZHengEric/Sage/releases/tag/v2.0.0)：支持 macOS（arm64/x86_64）、Windows（x86_64）和 Linux（arm64/x86_64）。
+1. 下载 [Sage 2.1.0](https://github.com/ZHangZHengEric/Sage/releases/tag/v2.1.0)：支持 macOS（arm64/x86_64）、Windows（x86_64）和 Linux（arm64/x86_64）。
 2. 安装并打开 Sage。安装包已包含 Python 和后端，无需克隆仓库、安装系统 Python 或 Flutter；Linux 仍需 GTK 和 bubblewrap。
 3. 在设置中添加模型 → 配置 Agent → 开始对话。模型服务可能收取使用费用，操作步骤见[桌面端指南](docs/zh/applications/DESKTOP.md#第一个任务)。
-4. macOS 安装包未公证，Windows 安装包未做代码签名；各类安装包详情见 [版本说明](release_notes/v2.0.0.md)。
+4. macOS 安装包未公证，Windows 安装包未做代码签名；各类安装包详情见 [版本说明](release_notes/v2.1.0.md)。
 
 ### 💻 从源码启动桌面端
 
@@ -83,7 +83,7 @@ flutter run -d macos
 
 应用自动启动本机后端。设置与会话数据保存在 `~/sage/runtime`，默认工作区为 `~/sage/agent_workspace`。
 
-Windows、Linux 配置见 [桌面端指南](app/v2/desktop/README.md)。2.0 发布包与版本边界见 [v2.0.0 版本说明](release_notes/v2.0.0.md)。GitHub Actions 构建包含 Python 运行环境的 Flutter v2 安装包；旧 Tauri 安装包属于 v1。
+Windows、Linux 配置见 [桌面端指南](app/v2/desktop/README.md)。2.1 发布包与版本边界见 [v2.1.0 版本说明](release_notes/v2.1.0.md)。GitHub Actions 构建包含 Python 运行环境的 Flutter v2 安装包；旧 Tauri 安装包属于 v1。
 
 ### 🌐 从源码启动服务端
 
