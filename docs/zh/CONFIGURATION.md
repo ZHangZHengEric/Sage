@@ -32,6 +32,25 @@ manifest = SageManifestLoader().loads(yaml_text)
 
 `credentials` 声明密钥解析来源；`models` 引用凭据，不携带密钥明文。`agents` 选择指令和模型路由，`entrypoint` 指定入口 Agent。
 
+## OrcaRouter 模型
+
+`orcarouter` 是可选的 provider 预设，复用现有 OpenAI-compatible Chat Completions
+实现。在 Server v2 模型表单中选择 `orcarouter`，填写模型 ID 和 API Key。
+默认地址为 `https://api.orcarouter.ai/v1`，手动设置的自定义 Base URL 会保留。
+
+嵌入式 manifest 可添加以下模型路由，并在完整 manifest 中配置引用的凭据：
+
+```yaml
+models:
+  primary:
+    provider: orcarouter
+    model: your-model
+    credential: orcarouter_key
+```
+
+省略 `base_url` 时，路由使用同一 OrcaRouter 地址。该预设支持现有聊天协议，
+不新增图像或视频生成 API。
+
 ## 选择运行组件
 
 通过 `runtime.capabilities` 绑定实现。例如，为延迟加载 Skill 的组件设置 token 预算：

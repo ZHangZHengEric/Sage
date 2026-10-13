@@ -77,7 +77,12 @@ _DESCRIPTORS = (
         name=OpenAIChatCompletionsModelProvider.name,
         value=OpenAIChatCompletionsModelProvider.description,
         default_base_url="https://api.openai.com/v1",
-        aliases=("openai-compatible", "chat-completions", "completions"),
+        aliases=(
+            "openai-compatible",
+            "chat-completions",
+            "completions",
+            "orcarouter",
+        ),
         capabilities=("streaming", "tools", "structured-output", "multimodal"),
     ),
     ModelProtocolDescriptor(
@@ -149,6 +154,13 @@ def model_protocol_descriptor(provider_id: str) -> ModelProtocolDescriptor:
     return next(value for value in _DESCRIPTORS if value.protocol == protocol)
 
 
+def model_protocol_default_base_url(provider_id: str) -> str:
+    """Return the default endpoint for a protocol id or provider alias."""
+    if provider_id.strip().lower() == "orcarouter":
+        return "https://api.orcarouter.ai/v1"
+    return model_protocol_descriptor(provider_id).default_base_url
+
+
 def create_registered_model_provider(
     route: ModelRoute,
     credential: CredentialMaterial | None = None,
@@ -160,7 +172,6 @@ def create_registered_model_provider(
     """Construct the implementation selected by a real plugin registration."""
 
     protocol = resolve_model_protocol(route.provider)
-    descriptor = model_protocol_descriptor(route.provider)
     implementation = _PROTOCOL_PROVIDERS[protocol]
     capability_profile = capability_profile or route.capability_profile
     if capability_profile is not None:
@@ -183,7 +194,7 @@ def create_registered_model_provider(
     )
     common = {
         "provider_id": provider_instance_id or route.provider,
-        "base_url": route.base_url or descriptor.default_base_url,
+        "base_url": route.base_url or model_protocol_default_base_url(route.provider),
         "model": route.model,
         "capabilities": capabilities,
         "default_max_output_tokens": route.request.max_output_tokens,
