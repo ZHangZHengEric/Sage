@@ -3,8 +3,7 @@ FROM docker.m.daocloud.io/python:3.12-slim-trixie
 ENV TZ=Asia/Shanghai \
     PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONPATH=/app \
-    PIP_INDEX_URL=https://mirrors.aliyun.com/pypi/simple/
+    PYTHONPATH=/app
 WORKDIR /app
 
 # Use the Tsinghua Debian mirror before refreshing package indexes.
@@ -17,6 +16,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 COPY . .
+ENV PIP_INDEX_URL=https://mirrors.aliyun.com/pypi/simple/
 RUN python -m pip install --no-cache-dir '.[server-v2,otel]'
 
 EXPOSE 8090
