@@ -116,6 +116,7 @@ The inventory below follows the registered router source. Jaeger routes depend o
 | `GET` | `/api/threads` | `threads` |
 | `DELETE` | `/api/threads/{thread_id}` | `threads` |
 | `GET` | `/api/threads/{thread_id}/events` | `threads` |
+| `GET` | `/api/threads/{thread_id}/result` | `threads` |
 | `POST` | `/api/threads/{thread_id}/resume` | `threads` |
 
 Host infrastructure also exposes `GET /livez`, `GET /readyz`, and `GET /metrics` outside OpenAPI. Readiness probes the host database and application state.
