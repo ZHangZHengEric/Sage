@@ -386,7 +386,9 @@ class _MysqlSessionState(SessionStoreCoordinator):
 
     async def _commit_storage_locked(self, session_id: str) -> None:
         await self._ensure_ready()
-        mutation = self._session_mutation_locked().model_dump(mode="json", exclude={"kind"})
+        mutation = self._session_mutation_locked(session_id).model_dump(
+            mode="json", exclude={"kind"}
+        )
         location_rows = self._location_rows_after_mutation(session_id, mutation)
         start_rows = self._start_rows_after_mutation(session_id, mutation)
         appended = mutation["appends"].pop("run_events", {})

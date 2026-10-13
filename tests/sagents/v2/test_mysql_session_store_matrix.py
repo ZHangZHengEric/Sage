@@ -3,9 +3,10 @@ from __future__ import annotations
 import os
 import uuid
 import asyncio
+import json
 from contextlib import asynccontextmanager
 from pathlib import Path
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -85,6 +86,69 @@ def test_mysql_store_requires_explicit_dsn():
         MysqlSessionStore("postgresql://unused/unused")
     with pytest.raises(ValueError, match="table_prefix"):
         MysqlSessionStore("mysql://root@127.0.0.1/sage", table_prefix="Bad-Prefix")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("snapshot_interval", [1, 256])
+async def test_mysql_create_and_commit_persist_only_target_session(snapshot_interval):
+    store = MysqlSessionStore("mysql://root@127.0.0.1/sage")
+    state = store._coordinator
+    state.snapshot_interval = snapshot_interval
+    cursor = AsyncMock()
+    cursor.rowcount = 1
+    connection = AsyncMock()
+    connection.cursor = MagicMock()
+    connection.cursor.return_value.__aenter__.return_value = cursor
+
+    class Pool:
+        @asynccontextmanager
+        async def acquire(self):
+            yield connection
+
+    state._pool = Pool()
+    state._read_start_lookup = AsyncMock(return_value=None)
+
+    first = await store.create_run(command("first"), CONTEXT)
+    second = await store.create_run(command("second"), CONTEXT)
+    inserts = [
+        call.args[1]
+        for call in cursor.execute.await_args_list
+        if "INSERT INTO `sagent_sessions`" in call.args[0]
+    ]
+    assert len(inserts) == 2
+    for params, created in zip(inserts, (first, second), strict=True):
+        snapshot = json.loads(params[-1])
+        assert params[0] == created.handle.session_id
+        assert [row["session_id"] for row in snapshot["sessions"]] == [params[0]]
+        assert [row["run_id"] for row in snapshot["runs"]] == [created.handle.run_id]
+
+    cursor.execute.reset_mock()
+    await store.commit_run(
+        run_id=first.handle.run_id,
+        expected_revision=first.handle.run_revision,
+        expected_states={RunState.QUEUED},
+        new_state=RunState.RUNNING,
+        drafts=(),
+        context=CONTEXT,
+        idempotency_key="start-execution",
+    )
+    if snapshot_interval == 1:
+        params = next(
+            call.args[1] for call in cursor.execute.await_args_list
+            if "UPDATE `sagent_sessions`" in call.args[0]
+        )
+        payload = json.loads(params[4])
+    else:
+        params = next(
+            call.args[1] for call in cursor.execute.await_args_list
+            if "INSERT INTO `sagent_session_mutations`" in call.args[0]
+        )
+        assert params[0] == first.handle.session_id
+        payload = json.loads(params[2])["upserts"]
+    assert [row["session_id"] for row in payload["sessions"]] == [first.handle.session_id]
+    assert [row["run_id"] for row in payload["runs"]] == [first.handle.run_id]
+    assert connection.commit.await_count == 3
+    connection.rollback.assert_not_awaited()
 
 
 @pytest.mark.asyncio
