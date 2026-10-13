@@ -4,6 +4,7 @@ import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
 const props = defineProps({ modelValue: Boolean, title: String, busy: Boolean })
 const emit = defineEmits(['update:modelValue'])
 const dialog = ref(null)
+const body = ref(null)
 let previousOverflow = ''
 let locked = false
 function sync() {
@@ -13,6 +14,7 @@ function sync() {
     document.body.style.overflow = 'hidden'
     locked = true
     dialog.value.showModal()
+    body.value.scrollTop = 0
   } else if (!props.modelValue && dialog.value.open) {
     dialog.value.close()
     unlock()
@@ -38,7 +40,7 @@ onBeforeUnmount(unlock)
           <h2>{{ title }}</h2>
           <button class="btn ghost" type="button" aria-label="关闭侧窗" :disabled="busy" @click="close">关闭</button>
         </header>
-        <div class="form-drawer-body"><slot /></div>
+        <div ref="body" class="form-drawer-body"><slot /></div>
       </div>
     </dialog>
   </Teleport>
