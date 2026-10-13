@@ -83,7 +83,7 @@ npm run build
 npm test
 ```
 
-发布流水线将 Node 可执行文件、官方解析器和第三方许可证放入安装包；现有已发布的 2.0.0 安装包不包含这次源码更新。OpenUI 使用 MIT 许可证，版权及许可文本保留在 `backend/openui_runtime/THIRD_PARTY_NOTICES.txt` 中。
+发布流水线将 Node 可执行文件、官方解析器和第三方许可证放入安装包；2.1.0 安装包包含这些功能，2.0.0 安装包不包含。OpenUI 使用 MIT 许可证，版权及许可文本保留在 `backend/openui_runtime/THIRD_PARTY_NOTICES.txt` 中。
 
 Current source uses the official [OpenUI](https://github.com/thesysdev/openui) streaming parser with Sage's own native Flutter Glass renderer. Assistant `openui` fenced blocks update progressively as model output arrives, with light/dark themes, cards, tables, and input forms. No UI publishing tool is required. Ordinary chats have a “Prefer interactive UI” switch in the composer plus menu, persisted per chat. When enabled, the host preloads the full sage-openui Skill into the first model context without a tool call. When disabled, presentation is chosen automatically from natural requests; users do not need to mention OpenUI. Settings → General → Interactive UI on by default controls new chats (initially off), without changing existing chat choices. The plus menu overrides a chat, and branches inherit their source chat preference. Interactive UI normally carries the whole answer without introductory or repeated prose; only a necessary conclusion, exception, or next step gets one short sentence. The current library has 31 native component types listed above, including line/bar/pie charts, metrics, tabs, accordions, timelines, diagrams, images, and richer inputs. Computed results and numeric chart bindings update locally without a model round-trip. Input fields do not require a submit button; only task-required handoffs to the assistant should add one. Native computations use a bounded allowlist of arithmetic, compound growth, and loan payment operations, not arbitrary expressions. Images use anonymous HTTPS reads with public-address validation, size limits, and redirect checks; Studio and child-session surfaces are read-only. Form submissions are validated and routed as the next user turn in the same Session, with durable duplicate protection and existing tool approvals. Source mode requires Node.js 22+; release packaging embeds Node and the parser. Previously published binaries do not include this source change.
 
@@ -156,7 +156,7 @@ Agent 编辑页的“复制”会先提交待保存内容，再打开副本的�
 
 安装包由 `.github/workflows/release-v2.yml` 在 GitHub Actions 构建，包含 Flutter 客户端、独立 CPython、v2 后端和内置 skills；安装后无需源码目录或系统 Python。macOS 提供 arm64 / x86_64 DMG，Windows 提供 x86_64 安装程序，Linux 提供 arm64 / x86_64 DEB 与便携 tar.gz。Linux 仍需要 GTK 等系统动态库与 bubblewrap。
 
-每个平台在发布前将整个应用移动到另一个包含空格的路径，从仓库外启动内置 Python，验证 v2 导入、skills、带认证的 health 与客户端 lease 关闭。全部平台成功后才创建 `v2.0.0` tag 和 GitHub Release。手动验证运行不发布；选择 `publish` 才发布。
+每个平台在发布前将整个应用移动到另一个包含空格的路径，从仓库外启动内置 Python，验证 v2 导入、skills、带认证的 health 与客户端 lease 关闭。全部平台成功后才创建 `v2.1.0` tag 和 GitHub Release。手动验证运行不发布；选择 `publish` 才发布。
 
 macOS 包使用 ad-hoc 签名，未使用 Apple Developer ID 签名或公证；Windows 包未做代码签名。旧 Tauri 发布流水线已移出 GitHub Actions，不再构建 v1 应用；历史 updater feed 不向 v1 自动推送 Flutter v2。
 

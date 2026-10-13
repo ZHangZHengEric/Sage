@@ -1040,8 +1040,9 @@ class WorkspaceController extends ChangeNotifier {
     } finally {
       if (!_disposed && catalogRevision == _settingsCatalogRevision) {
         settingsCatalogLoading = false;
-        if (agentRevision == _settingsAgentRevision)
+        if (agentRevision == _settingsAgentRevision) {
           settingsAgentLoadingId = '';
+        }
         notifyListeners();
       }
     }
@@ -1112,8 +1113,9 @@ class WorkspaceController extends ChangeNotifier {
       if (_disposed || revision != _settingsAgentRevision) return;
       _adoptAgentRead(value, writeRevision);
     } on Object catch (exception) {
-      if (!_disposed && revision == _settingsAgentRevision)
+      if (!_disposed && revision == _settingsAgentRevision) {
         error = exception.toString();
+      }
     } finally {
       if (!_disposed && revision == _settingsAgentRevision) {
         settingsAgentLoadingId = '';
@@ -1135,8 +1137,9 @@ class WorkspaceController extends ChangeNotifier {
   Future<void> patchAgentConfiguration(Map<String, Object?> patch) {
     final current = agentConfiguration;
     if (_disposed || current == null) return Future<void>.value();
-    if ((_pendingAgentWrites[current.id] ?? 0) == 0)
+    if ((_pendingAgentWrites[current.id] ?? 0) == 0) {
       _confirmedAgents[current.id] = current;
+    }
     _pendingAgentWrites[current.id] =
         (_pendingAgentWrites[current.id] ?? 0) + 1;
     _agentWriteVersions[current.id] =
@@ -1651,16 +1654,18 @@ class WorkspaceController extends ChangeNotifier {
         .where((value) => value.id == messageId && value.role == 'user')
         .firstOrNull;
     if (message == null || !canRewriteLastUserMessage(source, message)) return;
-    if (prompt.isEmpty && !message.content.any((part) => part.isReference))
+    if (prompt.isEmpty && !message.content.any((part) => part.isReference)) {
       return;
+    }
     final updatedContent = <ChatMessageContent>[];
     var replacedText = false;
     for (final part in message.content) {
       if (part.isReference) {
         updatedContent.add(part);
       } else if (part.isText && !replacedText) {
-        if (prompt.isNotEmpty)
+        if (prompt.isNotEmpty) {
           updatedContent.add(ChatMessageContent.text(prompt));
+        }
         replacedText = true;
       }
     }
@@ -2082,7 +2087,7 @@ class WorkspaceController extends ChangeNotifier {
           : 'auto',
       'approval_mode': conversation.approvalMode.wireValue,
       'invocation_mode': conversation.invocationMode.wireValue,
-      if (openUiAction != null) 'openui_action': openUiAction,
+      'openui_action': ?openUiAction,
       'idempotency_key': openUiAction == null
           ? _id('desktop')
           : 'openui:${openUiAction['surface_id']}:${openUiAction['revision']}',
@@ -2484,8 +2489,9 @@ class WorkspaceController extends ChangeNotifier {
   void _applyEvent(Conversation conversation, Map<String, Object?> event) {
     if (event['kind'] == 'openui.updated') {
       final surface = event['surface'];
-      if (surface is Map)
+      if (surface is Map) {
         _applyOpenUiSurface(conversation, surface.cast<String, Object?>());
+      }
       return;
     }
     if (event['kind'] == 'stream.opened') {

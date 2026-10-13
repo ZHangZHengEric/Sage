@@ -2654,8 +2654,9 @@ void main() {
           messenger.setMockMethodCallHandler(SystemChannels.platform, (
             call,
           ) async {
-            if (call.method == 'Clipboard.getData')
+            if (call.method == 'Clipboard.getData') {
               return {'text': 'pasted text'};
+            }
             if (call.method == 'Clipboard.hasStrings') return {'value': !image};
             return null;
           });
@@ -2775,16 +2776,18 @@ void main() {
       await tester.tap(find.byKey(const ValueKey('settings-back-button')));
       await tester.pumpAndSettle();
       expect(find.byKey(const ValueKey('settings-back-button')), findsNothing);
-      if (field == 'workspace')
+      if (field == 'workspace') {
         expect(api.lastSettings?.agentWorkspacePath, value);
+      }
       if (field == 'preview') expect(api.lastSettings?.maxPreviewBytes, 12345);
-      if (field == 'sandbox')
+      if (field == 'sandbox') {
         expect(
           api
               .lastSettings
               ?.componentConfigs['execution.sandbox']?['workspace_root'],
           value,
         );
+      }
       expect(tester.takeException(), isNull);
     });
   }

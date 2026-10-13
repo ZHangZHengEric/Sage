@@ -138,8 +138,9 @@ class _MessageBubbleState extends State<_MessageBubble> {
   Future<void> _submitEdit() async {
     final value = _editor.text.trim();
     if (_submitting || widget.onEdit == null) return;
-    if (value.isEmpty && !message.content.any((part) => part.isReference))
+    if (value.isEmpty && !message.content.any((part) => part.isReference)) {
       return;
+    }
     setState(() => _submitting = true);
     try {
       await widget.onEdit!(value);
