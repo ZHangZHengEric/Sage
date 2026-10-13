@@ -7,7 +7,7 @@ from app.v2.server.runtime.policy import ExecutionPolicy
 class ModelBody(BaseModel):
     id: str | None = None
     protocol: str = "openai-chat-completions"
-    base_url: str = "https://api.openai.com/v1"
+    base_url: str | None = None
     model: str
     api_key: str = ""
     is_default: bool = True
