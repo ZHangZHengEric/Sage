@@ -1,6 +1,6 @@
 # Sage Deploy
 
-当前 Compose / Kubernetes 应用入口和 Web 镜像仍属于 v1，不是 Sage 2.0 Server 部署方案。Server v2 请按 [独立启动指南](../app/v2/server/README.md) 配置，当前仅支持单 worker。
+`deploy/compose_v2.sh` 部署 Sage Server v2 及其 Web。原有 `deploy/compose.sh` 和 Kubernetes 模板仍属于 v1。v2 配置详见 [服务指南](../app/v2/server/README.md)，仅支持单 worker。
 
 部署相关文件统一放在 `deploy/` 下：
 
@@ -16,23 +16,35 @@
 
 ## Docker Compose
 
-### 仅 Web 和后端（连接外部 MySQL）
+### Server v2：Web 和后端，连接外部 MySQL
 
-独立配置 `deploy/standalone/docker-compose.yml` 只包含 `sage-server` 和 `sage-web`，容器名分别为 `sage-server_v2` 和 `sage-web_v2`，沿用 v1 镜像入口。后端连接单独部署的 MySQL；Compose 自动创建项目网络，无需 shared 或 Ling 网络。
+`deploy/compose_v2.sh` 使用 `deploy/standalone/docker-compose.yml`，仅启动 `sage-server-v2`、`sage-web-v2`。后端通过 Python 3.12 执行 `python -m app.v2.server`；Web 构建自 `app/v2/server/web`，Nginx 代理 `/api`、`/a2a` 等 v2 路由并支持 SSE。
 
 在仓库根目录执行：
 
 ```bash
 cp deploy/standalone/.env.example deploy/standalone/.env
-# 编辑 .env，配置外部 MySQL 地址、账号、管理员密码和各项密钥
+# 编辑 .env，填写 MySQL URL、随机 JWT 密钥和管理员密码
+# JWT 密钥可用 openssl rand -hex 32 生成
 deploy/compose_v2.sh up -d --build
 ```
 
-`deploy/compose_v2.sh` 默认读取 `deploy/standalone/.env`，可用 `ENV_FILE=/path/to/.env` 指定其他配置；项目名默认为 `sage_standalone`，可用 `SAGE_COMPOSE_PROJECT_NAME` 覆盖。支持透传 Compose 参数，例如 `deploy/compose_v2.sh down`、`deploy/compose_v2.sh logs -f sage-server`。脚本可从任意工作目录调用。
+Web 地址为 `http://localhost:32001/`（Studio 为 `/studio`），后端为 `http://localhost:32000`。宿主机端口分别由 `SAGE_WEB_PORT`、`SAGE_SERVER_PUBLISHED_PORT` 控制；容器内部后端固定监听 `8090`。`SAGE_SERVER_PUBLIC_URL` 填浏览器/外部 Agent 实际可访问的 Web 地址。
 
-访问 `http://localhost:32001/sage/`，后端端口为 `32000`。可通过 `.env` 中的 `SAGE_WEB_PORT`、`SAGE_SERVER_PORT` 修改端口。示例允许本机 HTTP 登录；部署到 HTTPS 时将 `SAGE_SESSION_COOKIE_SECURE` 改为 `true`。`SAGE_ROOT` 的相对路径以 `deploy/standalone/` 为基准。
+v2 不读取旧版 MySQL 分项变量、`SAGE_JWT_KEY`、OpenSandbox 或 S3 配置。已有旧模板 `.env` 需要按新模板更新，必要配置为：
 
-此配置不启动 MySQL、Redis、RustFS 或观测服务。通过 `SAGE_MYSQL_HOST`、`SAGE_MYSQL_PORT` 及数据库账号连接你单独部署的 MySQL；同机数据库可使用 `host.docker.internal` 和宿主机映射端口，远程数据库填写可访问的 IP 或域名，不要使用容器内的 `localhost`。需要文件上传时，在 `.env` 配置可访问的外部 S3 服务。此入口通过 `deploy/compose_v2.sh` 调用独立 Compose，不经过 `deploy/compose.sh`。
+```dotenv
+SAGE_SERVER_MYSQL_URL=mysql://sage:password@host.docker.internal:3306/sage_v2
+SAGE_SERVER_JWT_SECRET=replace-with-a-random-secret-at-least-32-bytes
+SAGE_SERVER_ADMIN_USERNAME=admin
+SAGE_SERVER_ADMIN_PASSWORD=change_this_admin_password
+```
+
+MySQL 请准备独立的 `sage_v2` 数据库及账号权限，不与 v1 共用业务表。URL 中用户名和密码的特殊字符需要百分号编码，例如 `@` 写为 `%40`。同机 MySQL 使用 `host.docker.internal` 和宿主机映射端口；远程 MySQL 使用可访问的 IP 或域名。Compose 不启动 MySQL、Redis、RustFS 或观测服务，也不依赖外部共享网络。
+
+数据与日志分别持久化到 `${SAGE_ROOT}/sage-server/data`、`${SAGE_ROOT}/sage-server/logs`；相对路径以 `deploy/standalone/` 为基准。只运行单个后端进程，并发额度通过 `SAGE_SERVER_MAX_CONCURRENT_RUNS` 等变量设置。
+
+脚本默认读取 `deploy/standalone/.env`，可用 `ENV_FILE=/path/to/.env` 指定其他配置。项目名默认为 `sage_standalone`，可用 `SAGE_COMPOSE_PROJECT_NAME` 覆盖。支持 `deploy/compose_v2.sh down`、`deploy/compose_v2.sh logs -f sage-server` 等 Compose 命令，可从任意工作目录调用。
 
 ### 完整环境部署
 

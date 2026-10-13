@@ -7,7 +7,7 @@ if [ "$#" -eq 0 ] || [ "${1:-}" = "--help" ] || [ "${1:-}" = "-h" ]; then
   cat <<'EOF'
 Usage: deploy/compose_v2.sh [docker compose args...]
 
-Starts only Web and backend, using separately deployed MySQL.
+Starts Sage Server v2 and its Web UI, using separately deployed MySQL.
 
 Examples:
   deploy/compose_v2.sh up -d --build

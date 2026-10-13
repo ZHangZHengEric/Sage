@@ -1,0 +1,131 @@
+# =========================
+# Git
+# =========================
+.git
+.gitignore
+.github
+
+# =========================
+# Python
+# =========================
+__pycache__/
+*.py[cod]
+*.so
+*.egg
+*.egg-info/
+.eggs/
+*.whl
+
+.venv/
+venv/
+.conda/
+
+.tox/
+.nox/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+coverage/
+htmlcov/
+
+# =========================
+# Node.js
+# =========================
+node_modules
+**/node_modules
+
+dist
+build
+.next
+.nuxt
+.vite
+
+npm-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+.pnpm-store
+.npm
+
+# =========================
+# Rust
+# =========================
+target
+**/target
+
+# =========================
+# Tauri / Desktop
+# =========================
+.nuitka_cache/
+*.build/
+*.dist/
+*.onefile-build/
+
+app/v1/desktop/build/
+app/v1/desktop/dist/
+app/v1/desktop/tauri/sidecar/
+
+# =========================
+# IDE
+# =========================
+.vscode
+.idea
+.trae
+
+# =========================
+# OS
+# =========================
+.DS_Store
+
+# =========================
+# Logs / Temp
+# =========================
+*.log
+tmp/
+temp/
+
+# =========================
+# Env
+# =========================
+.env
+.env.local
+.env.*.local
+
+!.env.example
+!.env.sample
+
+# =========================
+# Build Cache
+# =========================
+.cache/
+.parcel-cache/
+
+# =========================
+# Docker
+# =========================
+docker-compose*.yml
+
+# 不要忽略 Dockerfile
+# Dockerfile
+
+# =========================
+# Workspace
+# =========================
+sage_demo_workspace/
+agent_workspace/
+
+# =========================
+# Large Data
+# =========================
+data/
+
+# =========================
+# Binary / Release
+# =========================
+release_notes/
+sidecar
+.env.*
+**/.env.*
+!**/.env.example
+!**/.env.sample

@@ -1,0 +1,12 @@
+**
+!app/
+!app/v2/
+!app/v2/server/
+!app/v2/server/web/
+!app/v2/server/web/**
+app/v2/server/web/node_modules
+app/v2/server/web/dist
+app/v2/server/web/.env*
+!deploy/
+!deploy/standalone/
+!deploy/standalone/nginx.conf
