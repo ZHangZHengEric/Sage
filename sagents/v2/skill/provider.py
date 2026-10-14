@@ -109,6 +109,7 @@ class SkillLoader:
             raise ValueError("max_active_tokens must be positive")
         self.inherited_skills = inherited_skills
         self._initialized_runs: set[str] = set()
+        self._requested_names: dict[str, set[str]] = {}
         self.catalog = catalog
         self.source = source
         self.workspace = workspace
@@ -123,6 +124,28 @@ class SkillLoader:
         lock = await self._load_lock(run_id, name)
         async with lock:
             return await self._load_once(name, run_id=run_id)
+
+    async def activate_requested(self, names: tuple[str, ...], *, run_id: str) -> None:
+        """Load user selectors once per Run, through the existing grant and budget.
+
+        Do not reload budget-evicted selectors on every model step. Unknown or
+        disabled historical selectors cannot grant access or fail a new Run.
+        """
+        if not names:
+            return
+        await self.loaded(run_id=run_id)
+        lock = await self._load_lock(run_id, "")
+        async with lock:
+            processed = self._requested_names.setdefault(run_id, set())
+            for name in names:
+                if name in processed:
+                    continue
+                try:
+                    await self._load_once(name, run_id=run_id)
+                except SageV2Error as exc:
+                    if exc.info.code not in {"skill.not_found", "skill.not_enabled"}:
+                        raise
+                processed.add(name)
 
     async def _load_once(
         self, name: str, *, run_id: str, budget_tokens: int | None = None

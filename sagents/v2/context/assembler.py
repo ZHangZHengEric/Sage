@@ -36,6 +36,7 @@ from sagents.v2.context.session_history import (
     SessionHistoryReader,
 )
 from sagents.v2.contracts.run_state import SessionConcurrencyMode
+from sagents.v2.skill.tags import strip_skill_tags
 
 
 class ContextAssembler(Protocol):
@@ -180,7 +181,12 @@ class DefaultContextAssembler:
 
         segments = []
         for provider in self.providers:
-            segments.extend(await provider.segments(command, run_id=run_id))
+            ledger_segments = getattr(provider, "segments_for_ledger", None)
+            segments.extend(
+                await ledger_segments(command, ledger, run_id=run_id)
+                if ledger_segments is not None
+                else await provider.segments(command, run_id=run_id)
+            )
         rank = {
             ContextStability.STABLE: 0,
             ContextStability.SEMI_STABLE: 1,
@@ -284,6 +290,7 @@ class DefaultContextAssembler:
         canonical_indices = tuple(
             positions[id(message)].popleft() for message in payload
         )
+        payload = tuple(strip_skill_tags(message) for message in payload)
         messages = (*system, *payload)
         # Resolved once and shared: the reduction scope and the projection
         # observer both need the owning Run, and neither should pay for a
@@ -452,6 +459,7 @@ class DefaultContextAssembler:
             if message.role not in {"system", "developer"}
         )
         payload = cls._sanitize_tool_pairs(cls._strip_historical_search_memory(payload))
+        payload = tuple(strip_skill_tags(message) for message in payload)
         if volatile:
             payload = cls._inject_latest_user(payload, volatile)
         return (*systems, *payload)

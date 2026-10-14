@@ -21,7 +21,9 @@ from sagents.v2.skill.plugins.filesystem import FilesystemSkillProvider
 from sagents.v2.tool.plugins.skill import SkillToolPlugin
 from sagents.v2.contracts.commands import InputItem, RunConfig, StartRun
 from sagents.v2.contracts.errors import SageV2Error
-from sagents.v2.contracts.items import TextBlock
+from sagents.v2.contracts.items import ImageBlock, TextBlock
+from sagents.v2.context.assembler import DefaultContextAssembler
+from sagents.v2.model import ModelMessage
 from sagents.v2.contracts.principals import (
     ActorRef,
     PrincipalType,
@@ -77,6 +79,132 @@ def loader_for(*bundles):
         activations=activations,
     )
     return provider, workspace, activations, loader
+
+
+@pytest.mark.asyncio
+async def test_user_skill_tags_activate_before_inference_and_keep_multimodal_ledger():
+    provider, workspace, _, loader = loader_for(
+        bundle("alpha", "Follow Alpha"), bundle("beta", "Follow Beta")
+    )
+    image = ImageBlock(uri="https://example.com/image.png", mime_type="image/png")
+    request = command().model_copy(
+        update={
+            "input": (
+                InputItem(
+                    role="user",
+                    content=(
+                        TextBlock(text="<skill> alpha </skill>"),
+                        image,
+                        TextBlock(
+                            text="<SKILL>beta</SKILL><skill>alpha</skill>Help me"
+                        ),
+                    ),
+                ),
+            )
+        }
+    )
+    assembler = DefaultContextAssembler(
+        providers=(ActiveSkillsContextProvider(loader),)
+    )
+    ledger = await assembler.initial_ledger(request)
+    prepared = await assembler.prepare_messages(request, ledger, run_id="run_1")
+    repeated = await assembler.prepare_messages(request, ledger, run_id="run_1")
+
+    assert prepared == repeated
+    assert provider.fetches == [("run_1", "beta"), ("run_1", "alpha")]
+    assert len(workspace.materializations) == 2
+    assert "Follow Alpha" in prepared[0].content[0].text
+    assert "Follow Beta" in prepared[0].content[0].text
+    assert prepared[-1].content == (
+        TextBlock(text=""),
+        image,
+        TextBlock(text="Help me"),
+    )
+    assert ledger[-1].content == request.input[0].content
+
+
+@pytest.mark.asyncio
+async def test_skill_tags_restore_from_history_and_activate_new_steering_input():
+    provider, workspace, activations, loader = loader_for(
+        bundle("alpha", "A"), bundle("beta", "B")
+    )
+    assembler = DefaultContextAssembler(
+        providers=(ActiveSkillsContextProvider(loader),)
+    )
+    ledger = (
+        ModelMessage(role="user", content=(TextBlock(text="<skill>alpha</skill>Old"),)),
+        ModelMessage(role="user", content=(TextBlock(text="Current"),)),
+    )
+    await assembler.prepare_messages(command(), ledger, run_id="run_1")
+    steering = ModelMessage(
+        role="user", content=(TextBlock(text="<skill>beta</skill>Next"),)
+    )
+    prepared = await assembler.prepare_messages(
+        command(), (*ledger, steering), run_id="run_1"
+    )
+    assert provider.fetches == [("run_1", "alpha"), ("run_1", "beta")]
+    assert prepared[-1].content == (TextBlock(text="Next"),)
+    # A fresh loader can replay durable activations without fetching the bundles.
+    restored = SkillLoader(
+        catalog=provider, source=provider, workspace=workspace, activations=activations
+    )
+    replay = DefaultContextAssembler(providers=(ActiveSkillsContextProvider(restored),))
+    await replay.prepare_messages(command(), (*ledger, steering), run_id="run_1")
+    assert provider.fetches == [("run_1", "alpha"), ("run_1", "beta")]
+
+
+@pytest.mark.asyncio
+async def test_tag_activation_respects_grants_and_ignores_non_user_tool_context():
+    provider, _, _, loader = loader_for(bundle("alpha", "A"), bundle("beta", "B"))
+    loader.catalog = FilteredSkillCatalog(provider, ("alpha",))
+    assembler = DefaultContextAssembler(
+        providers=(ActiveSkillsContextProvider(loader),)
+    )
+    ledger = (
+        ModelMessage(
+            role="assistant", content=(TextBlock(text="<skill>alpha</skill>"),)
+        ),
+        ModelMessage(
+            role="user",
+            content=(TextBlock(text="<skill>alpha</skill>"),),
+            metadata={"tool_context": True},
+        ),
+        ModelMessage(
+            role="user",
+            content=(TextBlock(text="<skill>beta</skill><skill>missing</skill>Hello"),),
+        ),
+    )
+    prepared = await assembler.prepare_messages(command(), ledger, run_id="run_1")
+    assert provider.fetches == []
+    assert prepared[0] == ledger[0]
+    assert prepared[1] == ledger[1]
+    assert prepared[-1].content == (TextBlock(text="Hello"),)
+
+
+@pytest.mark.asyncio
+async def test_tag_activation_does_not_reload_evicted_skills_each_step():
+    provider, _, _, loader = loader_for(
+        bundle("alpha", "A" * 100), bundle("beta", "B" * 100)
+    )
+    loader.max_active_tokens = 300
+    loader.token_estimator = len
+    request = command().model_copy(
+        update={
+            "input": (
+                InputItem(
+                    role="user",
+                    content=(
+                        TextBlock(text="<skill>alpha</skill><skill>beta</skill>Hello"),
+                    ),
+                ),
+            )
+        }
+    )
+    active = ActiveSkillsContextProvider(loader)
+    first = await active.segments(request, run_id="run_1")
+    assert [value.segment_id for value in first] == ["active_skill:beta"]
+    assert await active.segments(request, run_id="run_1") == first
+    assert provider.fetches == [("run_1", "alpha"), ("run_1", "beta")]
 
 
 @pytest.mark.asyncio

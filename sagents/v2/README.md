@@ -153,6 +153,12 @@ explicit `with_flow_tool_nodes()` implementations. `with_skill_provider()` wires
 standard Skill ports into lazy loading and active-skill context. Unsupported
 loop implementations and unbound Flow nodes fail explicitly.
 
+User messages can select Skills with `<skill>name</skill>`. The default context
+assembler activates these selectors before inference, including Session history
+and applied steering input, through the existing Skill grant and token budget.
+Selectors are removed only from the model-facing user text; canonical messages
+retain their original content. Unknown or disabled Skills are skipped.
+
 See the [implementation and host integration guide](../../docs/zh/architecture/SAGENTS_V2_AGENT_MANAGEMENT.md)
 and the [offline executable example](../../examples/sagents_v2_agent_management.py).
 
