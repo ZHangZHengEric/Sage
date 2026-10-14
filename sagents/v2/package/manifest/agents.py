@@ -4,9 +4,16 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
+from sagents.v2.agent.policy.approval_config import ToolApprovalConfig
 from pydantic import Field, model_validator
 
-from sagents.v2.contracts.common import Identifier, SkillName, StrictModel, ToolName, VerbatimText
+from sagents.v2.contracts.common import (
+    Identifier,
+    SkillName,
+    StrictModel,
+    ToolName,
+    VerbatimText,
+)
 
 
 class Instructions(StrictModel):
@@ -54,9 +61,12 @@ class AgentDefinition(StrictModel):
     models: dict[Identifier, Identifier] = Field(default_factory=dict)
     # Defaults in models do not override a parent's per-Run selection. Use this
     # explicit map when this Agent must select a different route as a child.
-    delegation_model_bindings: dict[Identifier, Identifier] = Field(default_factory=dict)
+    delegation_model_bindings: dict[Identifier, Identifier] = Field(
+        default_factory=dict
+    )
     entrypoint: AgentEntrypoint = Field(default_factory=AgentEntrypoint)
     tools: tuple[ToolName, ...] = ()
+    tool_approval: ToolApprovalConfig | None = None
     skills: tuple[SkillName, ...] = ()
     subagents: tuple[Identifier, ...] = ()
     budgets: AgentBudgets = Field(default_factory=AgentBudgets)

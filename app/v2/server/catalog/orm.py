@@ -29,4 +29,5 @@ class AgentRow(Base):
     )
     model_id: Mapped[str] = mapped_column(String(191), default="")
     tools: Mapped[list[Any]] = mapped_column(JSON)
+    tool_approval: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
     execution_policy: Mapped[dict[str, Any]] = mapped_column(JSON)

@@ -6,6 +6,7 @@ import hashlib
 import json
 from typing import Any, Literal
 
+from sagents.v2.agent.policy.approval_config import ToolApprovalConfig
 from pydantic import Field
 
 from sagents.v2.contracts.commands import RunConfig
@@ -31,6 +32,7 @@ class ResolvedAgent(StrictModel):
     entrypoint: AgentEntrypoint
     max_steps: int | None = None
     tools: tuple[str, ...] = ()
+    tool_approval: ToolApprovalConfig | None = None
     skills: tuple[str, ...] = ()
     subagents: tuple[str, ...] = ()
     memory: AgentMemoryBehavior = Field(default_factory=AgentMemoryBehavior)
@@ -146,6 +148,7 @@ class CompositionResolver:
                 entrypoint=agent.entrypoint,
                 max_steps=max_steps,
                 tools=agent.tools,
+                tool_approval=agent.tool_approval,
                 skills=agent.skills,
                 subagents=agent.subagents,
                 memory=agent.memory,

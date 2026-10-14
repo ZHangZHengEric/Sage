@@ -598,7 +598,8 @@ class McpToolPlugin:
                 side_effect_level=SideEffectLevel.WRITE,
                 idempotency_strategy=IdempotencyStrategy.RECONCILE_ONLY,
                 resume_strategy=ResumeStrategy.MANUAL_RESOLUTION,
-                requires_approval=True,
+                approval_key=cls.approval_key(server.name, remote_name),
+                requires_approval=False,
                 required_scopes=("tool.external_side_effect",),
             )
             routes[public_name] = (server, remote_name)
@@ -632,6 +633,12 @@ class McpToolPlugin:
             ),
             result=result,
         )
+
+    @staticmethod
+    def approval_key(server: str, tool: str) -> str:
+        from urllib.parse import quote
+
+        return f"mcp:{quote(server, safe='')}:{quote(tool, safe='')}"
 
     @classmethod
     def _public_name(cls, server: str, tool: str) -> str:

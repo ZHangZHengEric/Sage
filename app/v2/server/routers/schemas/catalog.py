@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import Literal
+from sagents.v2.agent.policy.approval_config import ToolApprovalConfig
 from pydantic import BaseModel, ConfigDict, Field
 from app.v2.server.runtime.policy import ExecutionPolicy
 
@@ -19,6 +20,7 @@ class AgentBody(BaseModel):
     instructions: str = ""
     model_id: str = ""
     tools: list[str] = Field(default_factory=list)
+    tool_approval: ToolApprovalConfig | None = None
     execution_policy: ExecutionPolicy | None = None
 
 class AgentPublic(BaseModel):
@@ -29,9 +31,11 @@ class AgentPublic(BaseModel):
     model_id: str | None = None
     tools: list[str] = Field(default_factory=list)
     skills: list[str] = Field(default_factory=list)
+    tool_approval: ToolApprovalConfig | None = None
     execution_policy: ExecutionPolicy = Field(default_factory=lambda: ExecutionPolicy(shell="sandboxed"))
 
 class ToolPublic(BaseModel):
+    approval_key: str | None = None
     name: str
     category: str = ""
     source: str = "official"
