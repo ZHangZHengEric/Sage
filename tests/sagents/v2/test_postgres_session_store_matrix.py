@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import uuid
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -24,6 +25,7 @@ from sagents.v2.runtime.session.plugins.postgres import (
     StoreInUseError,
     _PostgresSessionState,
 )
+from sagents.v2.runtime.session.state import SessionStoreCoordinator
 from sagents.v2.testing.plugins.scripted_model import ScriptedModelProvider
 
 
@@ -40,6 +42,32 @@ CONTEXT = RequestContext(
 
 def _schema() -> str:
     return f"sage_v2_{uuid.uuid4().hex[:12]}"
+
+
+@pytest.mark.asyncio
+async def test_postgres_authorization_loads_persisted_session_before_owner_check():
+    source = SessionStoreCoordinator()
+    created = await source.create_run(command(), CONTEXT)
+    session_id = created.handle.session_id
+    stored_state = source._dump_state_locked()
+
+    reopened = PostgresSessionStore("postgresql://unused/test")
+    reopened._coordinator._ensure_ready = AsyncMock()
+    reopened._coordinator._fetch_session = AsyncMock(return_value=stored_state)
+
+    assert session_id not in reopened._coordinator._sessions
+    await reopened.authorize_session_actor(session_id, CONTEXT)
+    assert session_id in reopened._coordinator._sessions
+    reopened._coordinator._fetch_session.assert_awaited_once_with(session_id)
+
+    other = RequestContext(
+        actor=ActorRef(principal_id="other_user", principal_type=PrincipalType.USER,
+                       tenant_id="tenant_test"),
+        trace=TraceContext(correlation_id="other_correlation"),
+    )
+    with pytest.raises(SageV2Error) as denied:
+        await reopened.authorize_session_actor(session_id, other)
+    assert denied.value.info.code == "session.actor_not_authorized"
 
 
 def command(
@@ -224,6 +252,7 @@ async def test_restart_round_trip_and_idempotent_start(postgres_dsn):
     await first.close()
 
     second = PostgresSessionStore(postgres_dsn, schema=schema)
+    await second.authorize_session_actor(created.handle.session_id, CONTEXT)
     run = await second.get_run(created.handle.run_id)
     session = await second.get_session(created.handle.session_id)
     events = await second.read_events(created.handle.run_id)
