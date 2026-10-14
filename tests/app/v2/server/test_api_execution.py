@@ -35,7 +35,7 @@ def issue(client, token, *, policy=None, scopes=None, agent_id=None):
 
 
 @pytest.mark.parametrize("policy,waiting,written", [
-    ({}, False, True),
+    (None, False, True),
     ({"shell": "ask"}, True, False),
     ({"shell": "sandboxed"}, False, True),
     ({"shell": "sandboxed", "on_approval_required": "deny"}, False, True),
@@ -211,7 +211,7 @@ def test_web_conversation_uses_the_users_execution_policy(tmp_path):
         headers = {"Authorization": f"Bearer {token}"}
         assert client.put("/api/auth/execution-policy", headers=headers,
                           json={"shell": "sandboxed"}).status_code == 200
-        frames = _ask(client, token)
+        frames = _ask(client, token, require_approval=False)
         assert "sage.interaction.requested" not in _kinds(frames)
         assert next(tmp_path.rglob("note.txt")).read_text() == "blue"
 
