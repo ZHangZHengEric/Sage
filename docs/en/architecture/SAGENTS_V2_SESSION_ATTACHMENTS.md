@@ -1,3 +1,13 @@
+---
+layout: default
+title: Session Attachments and History Summaries
+parent: Architecture
+lang: en
+ref: v2-detail-SAGENTS_V2_SESSION_ATTACHMENTS
+---
+
+{% include lang_switcher.html %}
+
 # Session attachments and history summaries
 
 `analyze_image` reads and normalizes an image through the sandbox, then stores an immutable JPEG snapshot through the current Run's SessionStore. The ledger keeps a `sage-image:<sha256>` reference. Inference loads pixels from that snapshot; summarization uses an attachment marker. Changing the original path cannot change a stored image. Legacy data URLs remain readable, with image bytes excluded from summary projections.
