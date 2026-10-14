@@ -106,12 +106,14 @@ test('agent editor saves V2 fields and selected skills before staying open or ex
   state.startNew()
   state.form.name = 'New agent'
   state.form.tools = ['file_read']
+  state.form.tool_approval.tools = { file_read: 'ask', 'mcp:drive:write': 'auto_approve' }
   state.selectedSkills = ['research']
   await state.save(false)
   assert.equal(state.drawerOpen, true)
   assert.equal(state.editing, 'new-agent')
   assert.deepEqual(api.bindAgentSkills.mock.calls[0].arguments, ['new-agent', ['research']])
-  assert.deepEqual(Object.keys(api.createAgent.mock.calls[0].arguments[0]).sort(), ['description', 'execution_policy', 'instructions', 'model_id', 'name', 'tools'])
+  assert.deepEqual(Object.keys(api.createAgent.mock.calls[0].arguments[0]).sort(), ['description', 'execution_policy', 'instructions', 'model_id', 'name', 'tool_approval', 'tools'])
+  assert.deepEqual(api.createAgent.mock.calls[0].arguments[0].tool_approval, { default: 'auto_approve', tools: { file_read: 'ask', 'mcp:drive:write': 'auto_approve' } })
   await state.save(true)
   assert.equal(state.drawerOpen, false)
   assert.equal(api.createAgent.mock.calls.length, 1)

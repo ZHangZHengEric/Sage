@@ -10,10 +10,15 @@ router = APIRouter(tags=["agents"], responses={**AUTH_ERRORS, **VALIDATION_ERROR
 
 
 @router.get("/api/tools", response_model=ApiResponse[list[ToolPublic]])
-async def list_tools(_: CurrentUser, packages: PackageDep):
+async def list_tools(user: CurrentUser, packages: PackageDep, service: CatalogDep):
     from sagents.v2.tool.plugins.agent_management import AgentManagementToolPlugin
     definitions = AgentManagementToolPlugin(packages).definitions
+    catalog = await service.get(user.user_id)
+    plugin = service.mcp_plugins.get(user.user_id, catalog.mcp_servers)
+    external = await plugin.list_tools(run_id="catalog") if plugin is not None else ()
     return success([*official_tool_catalog(), *[
+        dict(name=item.name, approval_key=item.approval_key, category="MCP", source="mcp", default=False)
+        for item in external], *[
         dict(name=item.name, category="agent-management", source="host", default=False)
         for item in definitions]])
 
@@ -26,7 +31,7 @@ async def list_agents(user: ReadUser, service: CatalogDep):
 
 @router.post("/api/agents", response_model=ApiResponse[AgentPublic])
 async def create_agent(body: AgentBody, user: CurrentUser, service: CatalogDep):
-    record = await service.create_agent(user.user_id, body.model_dump())
+    record = await service.create_agent(user.user_id, body.model_dump(exclude={"tool_approval"} if "tool_approval" not in body.model_fields_set else set()))
     return success(record.public_dict())
 
 
@@ -40,7 +45,7 @@ async def update_agent(
     agent_id: str, body: AgentBody, user: CurrentUser, service: CatalogDep
 ):
     record = await service.update_agent(
-        user.user_id, agent_id, body.model_dump()
+        user.user_id, agent_id, body.model_dump(exclude={"tool_approval"} if "tool_approval" not in body.model_fields_set else set())
     )
     return success(record.public_dict())
 

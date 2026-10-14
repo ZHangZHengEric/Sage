@@ -70,6 +70,7 @@ class ToolDefinition(StrictModel):
     cancel_semantics: CancelSemantics = CancelSemantics.NOT_STARTED_ONLY
     resume_strategy: ResumeStrategy = ResumeStrategy.REPLAY_RESULT
     supports_reconciliation: bool = False
+    approval_key: str | None = None
     requires_approval: bool = False
     # Explicit escape hatch for Run-control tools whose durable mutation is
     # part of planning itself (for example ``goal_submit``/``todo_write``).
