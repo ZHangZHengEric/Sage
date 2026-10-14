@@ -41,14 +41,12 @@ class CatalogSkillProvider:
         self.data_root = Path(data_root)
 
     async def list_skills(self, *, run_id: str) -> tuple[SkillDescriptor, ...]:
-        del run_id
         return tuple(
             _descriptor(item)
             for item in sorted(self._records.values(), key=lambda value: value.name)
         )
 
     async def get_skill(self, name: str, *, run_id: str) -> SkillDescriptor:
-        del run_id
         try:
             return _descriptor(self._records[name])
         except KeyError as exc:
@@ -90,18 +88,21 @@ class ReadThroughSkillWorkspace:
     """Expose edited Skills or lazily materialize immutable versions in /workspace."""
 
     def __init__(
-        self, data_root: Path, user_id: str, records: tuple[SkillRecord, ...]
+        self, data_root: Path, user_id: str, records: tuple[SkillRecord, ...], *, agent_id: str, workspace_for_run=None
     ) -> None:
         self.data_root = Path(data_root)
         self.user_id = user_id
+        self.agent_id = agent_id
+        self.workspace_for_run = workspace_for_run
         self._records = {item.name: item for item in records}
 
     async def materialize(
         self, bundle: SkillBundle, *, run_id: str, destination: str
     ) -> str:
-        del run_id
         name = bundle.descriptor.name
-        workspace = workspace_skill_path(self.data_root, self.user_id, name)
+        workspace = workspace_skill_path(self.data_root, self.user_id, self.agent_id, name)
+        if self.workspace_for_run is not None:
+            workspace = self.workspace_for_run(run_id) / "skills" / name
         if workspace.is_dir():
             return destination
         record = self._records.get(name)

@@ -116,9 +116,10 @@ def resolve_artifact_path(data_root: Path, relative: str) -> Path:
     return target
 
 
-def workspace_skill_path(data_root: Path, user_id: str, name: str) -> Path:
+def workspace_skill_path(data_root: Path, user_id: str, agent_id: str, name: str) -> Path:
     skill_name = normalize_skill_name(name)
-    root = (Path(data_root) / "tenants" / user_id / "workspace").resolve()
+    from app.v2.server.storage.paths import identity_segment
+    root = (Path(data_root) / "tenants" / identity_segment(user_id) / identity_segment(agent_id) / "workspace").resolve()
     target = (root / "skills" / skill_name).resolve()
     try:
         target.relative_to(root)

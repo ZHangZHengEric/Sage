@@ -158,11 +158,13 @@ def workspace_sandbox_spec(
 async def attach_official_tools(service, command: StartRun, *, user_id: str, run_id: str | None = None):
     """Provision a host-mapped sandbox and wrap it as OfficialToolPlugin."""
 
+    from app.v2.server.storage.workspaces import workspace_user
+
     install_sandbox(service.execution, service.settings)
     owner_run_id = run_id or command.idempotency_key
     handle = await provision_workspace(
         service.execution,
-        service.paths.workspace_dir(user_id),
+        service.paths.workspace_dir(workspace_user(command, user_id), command.agent_id),
         service.contexts.for_user(user_id),
         run_id=owner_run_id,
     )

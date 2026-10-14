@@ -62,7 +62,7 @@ python -m scripts.v2.migrate_agent_table --env app/v2/server/.env --backup /secu
 | 用户 / catalog / 会话索引 | MySQL `users` / `catalogs` / `threads` | Memory mock |
 | Sage Session | `sage.session.mysql`（无表前缀） | filesystem（`data_root/runtime/sessions`） |
 | AG-UI 回放 | Sage Session `run_events` | Sage Session `run_events` |
-| 工作区 | `{data_root}/tenants/{user_id}/workspace/` | 同左 |
+| 工作区 | `{data_root}/tenants/{user_id}/{agent_id}/workspace/` | 同左 |
 | Skill catalog | MySQL `skills` / `skill_versions` / `agent_skill_selections`；artifact 相对路径 `{data_root}/skills/...` | Memory mock + 同左磁盘 |
 | Agent / MCP / A2A peer | `catalogs` JSON：`agents[]`（提示词、model_id、tools、skills）+ `mcp_servers[]` + `a2a_agents[]` | 同左 |
 | A2A API Key | MySQL `api_keys`（只存哈希） | Memory mock |
@@ -111,7 +111,7 @@ Run 一律交给后台任务驱动，不跑在请求自己的任务上：Run 是
 
 受理时冻结实际策略与哈希，恢复和每次工具决策都会重新检查用户当前策略、原密钥是否撤销、Agent 是否存在及当前上限。后续放宽权限不会扩大已受理任务的权限。机器回复审批必须额外持有 `a2a:approve`；只调用或读取的密钥不能批准操作，默认签发不包含审批权限。执行设置接口只接受用户登录凭据，API Key 不能修改账号策略。托管包运行继续使用自身 manifest 的工具策略。
 
-用户可在「待审批」页查看跨会话的操作，或使用账号 JWT 调用 `GET /api/approvals?limit=50&offset=0`。分页按会话扫描，可能出现空页，应继续使用 `next_offset`。将条目的 `expected` 原样回传到 `POST /api/approvals/{run_id}/decisions`，body 为 `{"decision":"approve_once","expected":{...}}`，也支持 `deny`、`cancel`。过期或版本已改变返回 409；接口受理决定后由后台继续执行。
+用户可在对应会话中处理审批，或使用账号 JWT 调用 `GET /api/approvals?limit=50&offset=0`。分页按会话扫描，可能出现空页，应继续使用 `next_offset`。将条目的 `expected` 原样回传到 `POST /api/approvals/{run_id}/decisions`，body 为 `{"decision":"approve_once","expected":{...}}`，也支持 `deny`、`cancel`。过期或版本已改变返回 409；接口受理决定后由后台继续执行。
 
 挂起后保留持久化 Run、事件和审批记录；执行任务退出、释放调度槽并销毁本轮沙箱及其中进程，工作区文件保留。恢复时重建执行资源，因此旧后台 Shell 作业不会跨审批挂起继续存活。宿主共享服务仍常驻。一个宿主维护任务每分钟清理过期审批，答复入口也检查有效期；不为每条审批创建等待任务。
 
@@ -169,3 +169,7 @@ MCP 与 A2A 这类租户自己的目录，工具授权按目录整体授予而�
 后端可消费 SSE 而不向 App 展示；读取端断开不终止后台生成。`GET /api/threads/{session_id}/result?request_id={runId}` 使用相同请求头查询本次结果；省略 request_id 返回会话最新请求。返回 data 包含 session_id、request_id、内部 run_id、state、text、error；仅 completed 返回完整助手结果，运行中 text 为空。结果由现有持久化 SessionStore 重建，服务重启后仍可查询已落盘状态与结果，不增加额外结果表。未完成任务是否可继续执行取决于运行时持久化状态；不把重启视为成功完成。
 
 标准登录用户也可使用该结果接口查询自己的 threadId。反向代理须透传原样的 `SAGE-AGENT-ID` / `SAGE-TENANT-ID` 请求头（使用中划线头名，无需开启下划线请求头透传）。
+
+工作空间统一按用户与 Agent 隔离：同一用户的同一 Agent 跨 Session 共享，不同 Agent 不共享。外部 API 的用户身份取 `SAGE-TENANT-ID`，配置所有者只用于授权和配置读取，不作为外部用户的工作空间身份。用户/Agent ID 中的路径分隔符使用可逆 URL 编码，普通 ID 保持原样，不使用 SHA 目录。
+
+工作空间查询须提供 `thread_id` 或 `agent_id`；有 Session 时由后端从持久化身份解析目录。旧用户共享目录和旧 SHA 目录不自动合并或复制；历史外部 Session 缺少原始用户标识时需要明确迁移映射，不能从 SHA 反推用户。

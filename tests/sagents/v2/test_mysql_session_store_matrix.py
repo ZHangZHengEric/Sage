@@ -521,3 +521,40 @@ async def test_builder_can_select_mysql_session_store(mysql_dsn):
     }
     assert ("session.store", "sage.session.mysql") in bindings
     await application.close()
+
+
+@pytest.mark.asyncio
+async def test_mysql_export_reads_cold_durable_aggregate_without_loading_other_sessions():
+    from sagents.v2.runtime.session.state import SessionStoreCoordinator
+
+    source = SessionStoreCoordinator()
+    created = await source.create_run(command("export"), CONTEXT)
+    await source.create_run(command("unrelated"), CONTEXT)
+    session_id = created.handle.session_id
+    payload = source._dump_session_state_locked(session_id)
+    compact = _MysqlSessionState._compact_state(payload)
+    head = payload["sessions"][0]
+    cursor = AsyncMock()
+    cursor.fetchone.return_value = (json.dumps(compact), head["revision"], head["last_sequence"])
+    cursor.fetchall.side_effect = [[], [(run_id, json.dumps(event)) for run_id, events in payload["run_events"].items() for event in events]]
+    connection = AsyncMock()
+    connection.cursor = MagicMock()
+    connection.cursor.return_value.__aenter__.return_value = cursor
+
+    class Pool:
+        @asynccontextmanager
+        async def acquire(self):
+            yield connection
+
+    store = MysqlSessionStore("mysql://unused/test")
+    store._pool = Pool()
+    exported = await store.export_session_state(session_id)
+    assert [row["session_id"] for row in exported["sessions"]] == [session_id]
+    assert exported["run_events"] == payload["run_events"]
+    assert "_mutation_count" not in exported
+    assert not store._sessions
+    assert all(call.args[1] == (session_id,) for call in cursor.execute.await_args_list)
+    connection.rollback.assert_awaited_once()
+    cursor.fetchone.return_value = None
+    with pytest.raises(SageV2Error):
+        await store.export_session_state("missing")

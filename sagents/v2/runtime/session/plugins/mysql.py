@@ -1127,6 +1127,19 @@ class _MysqlSessionState(SessionStoreCoordinator):
                 row = await cursor.fetchone()
         return None if row is None else row[0]
 
+    async def export_session_state(self, session_id: str) -> dict[str, Any]:
+        """Read one durable aggregate, including replayed mutations and Run events.
+
+        Trusted host export tooling must authorize the Session before calling.
+        This intentionally excludes unrelated Sessions and derived caches.
+        """
+        await self._ensure_ready()
+        payload = await self._fetch_session(session_id)
+        if payload is None:
+            raise self._not_found("session.not_found", session_id)
+        payload.pop("_mutation_count", None)
+        return payload
+
     async def _fetch_session(self, session_id: str) -> dict[str, Any] | None:
         assert self._pool is not None
         async with self._reader_connection() as connection:

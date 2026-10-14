@@ -1,10 +1,17 @@
 from __future__ import annotations
 
-import hashlib
 import os
 import sys
 from dataclasses import dataclass
 from pathlib import Path
+from urllib.parse import quote
+
+
+def identity_segment(value: str) -> str:
+    """Keep IDs readable; escape separators reversibly, never hash identities."""
+    if not isinstance(value, str) or not value or "\0" in value:
+        raise ValueError("invalid workspace identity")
+    return "%2E" * len(value) if value in {".", ".."} else quote(value, safe="")
 
 
 @dataclass(frozen=True, slots=True)
@@ -21,23 +28,22 @@ class ServerPaths:
         path.mkdir(parents=True, exist_ok=True)
         return path
 
-    def workspace_dir(self, user_id: str, *, private_run_id: str | None = None) -> Path:
-        path = self.tenant_dir(user_id)
-        parts = ["workspace"]
-        if private_run_id is not None:
-            parts.extend((".runs", hashlib.sha256(private_run_id.encode()).hexdigest()))
-        if sys.platform != "linux" or self.linux_execution_uid is None:
-            path = path.joinpath(*parts)
-            path.mkdir(parents=True, exist_ok=True)
-            return path
+    def workspace_path(self, user_id: str, agent_id: str) -> Path:
+        return self.tenants_root / identity_segment(user_id) / identity_segment(agent_id) / "workspace"
 
+    def workspace_dir(self, user_id: str, agent_id: str, *, private_run_id: str | None = None) -> Path:
+        path = self.tenants_root
+        path.mkdir(parents=True, exist_ok=True)
+        parts = [identity_segment(user_id), identity_segment(agent_id), "workspace"]
+        if private_run_id is not None:
+            parts.extend((".runs", identity_segment(private_run_id)))
         # Only manage these directories, never recursively chown tenant files.
         # Open each component relative to its parent without following symlinks:
         # an Agent can create entries inside workspace, including .runs.
         flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
         fd = os.open(path, flags)
         try:
-            for part in parts:
+            for index, part in enumerate(parts):
                 try:
                     os.mkdir(part, mode=0o755, dir_fd=fd)
                 except FileExistsError:
@@ -46,7 +52,7 @@ class ServerPaths:
                 os.close(fd)
                 fd = child
                 stat = os.fstat(fd)
-                if (stat.st_uid, stat.st_gid) != (
+                if index >= 2 and sys.platform == "linux" and self.linux_execution_uid is not None and (stat.st_uid, stat.st_gid) != (
                     self.linux_execution_uid, self.linux_execution_gid
                 ):
                     if os.geteuid() != 0:

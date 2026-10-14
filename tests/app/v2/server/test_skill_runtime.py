@@ -41,7 +41,7 @@ async def _bound_loader(tmp_path: Path):
     )
     records = tuple(await catalog.bound_skills(owner_user_id="user_1", agent_id="main"))
     provider = CatalogSkillProvider(records, tmp_path)
-    workspace = ReadThroughSkillWorkspace(tmp_path, "user_1", records)
+    workspace = ReadThroughSkillWorkspace(tmp_path, "user_1", records, agent_id="agent_1")
     loader = SkillLoader(
         catalog=provider,
         source=provider,
@@ -61,7 +61,7 @@ async def test_listing_available_skills_does_not_copy_to_workspace(tmp_path: Pat
 
     assert [item.name for item in listed] == ["demo"]
     assert "Demo skill" in segments[0].content
-    workspace = workspace_skill_path(tmp_path, "user_1", "demo")
+    workspace = workspace_skill_path(tmp_path, "user_1", "agent_1", "demo")
     assert not workspace.exists()
     assert await loader.loaded(run_id="run_1") == ()
     assert record.artifact_path.startswith("users/user_1/demo/")
@@ -73,12 +73,12 @@ async def test_load_skill_materializes_content_addressed_workspace_bundle(
 ):
     _, record, _, loader = await _bound_loader(tmp_path)
     loaded = await loader.load("demo", run_id="run_1")
-    workspace = workspace_skill_path(tmp_path, "user_1", "demo")
+    workspace = workspace_skill_path(tmp_path, "user_1", "agent_1", "demo")
 
     assert loaded.workspace_path.startswith("/workspace/skills/.catalog/demo/")
     assert not workspace.exists()
     relative = loaded.workspace_path.removeprefix("/workspace/")
-    materialized = tmp_path / "tenants" / "user_1" / "workspace" / relative
+    materialized = tmp_path / "tenants" / "user_1" / "agent_1" / "workspace" / relative
     assert materialized.is_dir()
     assert (materialized / "SKILL.md").is_file()
     assert materialized != record.absolute_path(tmp_path)
@@ -89,11 +89,11 @@ async def test_load_skill_materializes_content_addressed_workspace_bundle(
 async def test_workspace_edit_is_copy_on_write(tmp_path: Path):
     catalog, record, provider, loader = await _bound_loader(tmp_path)
     path = await catalog.write_workspace_skill(
-        user_id="user_1",
+        user_id="user_1", agent_id="agent_1",
         name="demo",
         content="---\nname: demo\ndescription: edited\n---\n\n# Edited\n",
     )
-    workspace = workspace_skill_path(tmp_path, "user_1", "demo")
+    workspace = workspace_skill_path(tmp_path, "user_1", "agent_1", "demo")
     assert path == workspace
     assert workspace.is_dir()
     assert record.absolute_path(tmp_path).is_dir()
@@ -103,14 +103,14 @@ async def test_workspace_edit_is_copy_on_write(tmp_path: Path):
 
     loaded = await loader.load("demo", run_id="run_1")
     assert loaded.workspace_path == "/workspace/skills/demo"
-    assert await catalog.workspace_status(user_id="user_1", name="demo") == "modified"
+    assert await catalog.workspace_status(user_id="user_1", agent_id="agent_1", name="demo") == "modified"
 
 
 @pytest.mark.asyncio
 async def test_workspace_rejects_bundle_without_an_admitted_record(tmp_path: Path):
     _, _, provider, _ = await _bound_loader(tmp_path)
     bundle = await provider.fetch("demo", run_id="run_1")
-    workspace = ReadThroughSkillWorkspace(tmp_path, "user_1", ())
+    workspace = ReadThroughSkillWorkspace(tmp_path, "user_1", (), agent_id="agent_1")
 
     with pytest.raises(SageV2Error) as caught:
         await workspace.materialize(
