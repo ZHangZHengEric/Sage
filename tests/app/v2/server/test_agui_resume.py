@@ -56,10 +56,13 @@ def _custom(frames: list[dict], name: str) -> list[dict]:
     ]
 
 
-def _ask(client: TestClient, token: str) -> list[dict]:
+def _ask(client: TestClient, token: str, *, require_approval: bool = True) -> list[dict]:
     """Run a thread up to its approval question and return the AG-UI frames."""
 
     headers = {"Authorization": f"Bearer {token}"}
+    if require_approval:
+        policy = client.put("/api/auth/execution-policy", json={"shell": "ask"}, headers=headers)
+        assert policy.status_code == 200, policy.text
     agents = client.get("/api/agents", headers=headers).json()["data"]
     granted = client.put(
         f"/api/agents/{agents[0]['id']}",
