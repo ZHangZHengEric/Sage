@@ -9,10 +9,11 @@ from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from starlette.background import BackgroundTask
 
-from app.v2.server.routers.deps import AdminUser, HostDep, ReadUser
+from app.v2.server.routers.deps import AdminUser, HostDep, ReadUser, CurrentUser
 from app.v2.server.routers.render import success
-from app.v2.server.storage.downloads import list_directory, prepare_download
+from app.v2.server.storage.downloads import list_directory, prepare_download, prepare_session_export
 from sagents.v2.runtime.session.plugins.filesystem import FilesystemSessionStore
+from sagents.v2.runtime.session.plugins.mysql import MysqlSessionStore
 
 router = APIRouter(tags=["files"])
 
@@ -49,17 +50,53 @@ def download_response(prepared):
     )
 
 
+async def workspace_root(host, caller, read_user, thread_id, agent_id):
+    owner_id = read_user.user_id
+    if thread_id:
+        record = await host.threads.find(thread_id)
+        if record is None or (caller.role != "admin" and record.user_id != caller.user_id):
+            raise HTTPException(404, "thread not found")
+        await host.conversations.session_access.get_session(
+            thread_id, host.conversations.context_for(record.user_id)
+        )
+        owner_id = record.user_id
+        context = host.conversations.context_for(owner_id)
+        access = host.conversations.session_access
+        runs = await access.list_session_runs(thread_id, context)
+        if runs:
+            latest = max(runs, key=lambda run: (run.accepted_session_revision, run.created_at, run.run_id))
+            command = await access.get_start_command(latest.run_id, context)
+            from app.v2.server.storage.workspaces import workspace_user
+            owner_id = workspace_user(command, owner_id)
+            agent_id = command.agent_id
+        else:
+            agent_id = record.agent_id
+    elif agent_id:
+        catalog = await host.catalog.get(owner_id)
+        if not any(agent.id == agent_id for agent in catalog.agents):
+            raise HTTPException(404, "agent not found")
+    if not agent_id:
+        raise HTTPException(400, "agent_id or thread_id is required")
+    return host.paths.workspace_path(owner_id, agent_id)
+
+
 @router.get("/api/workspace/files")
-async def workspace_files(user: ReadUser, host: HostDep, path: str = Query(default="", max_length=4096)):
-    root = host.paths.tenants_root / user.user_id / "workspace"
+async def workspace_files(user: ReadUser, caller: CurrentUser, host: HostDep,
+                          path: str = Query(default="", max_length=4096),
+                          thread_id: str | None = Query(default=None, min_length=1, max_length=256),
+                          agent_id: str | None = Query(default=None, min_length=1, max_length=256)):
+    root = await workspace_root(host, caller, user, thread_id, agent_id)
     if not root.exists() and not path:
         return success([])
     return success(await file_operation(list_directory, root, path))
 
 
 @router.get("/api/workspace/download")
-async def workspace_download(user: ReadUser, host: HostDep, path: str = Query(default="", max_length=4096)):
-    root = host.paths.tenants_root / user.user_id / "workspace"
+async def workspace_download(user: ReadUser, caller: CurrentUser, host: HostDep,
+                             path: str = Query(default="", max_length=4096),
+                             thread_id: str | None = Query(default=None, min_length=1, max_length=256),
+                          agent_id: str | None = Query(default=None, min_length=1, max_length=256)):
+    root = await workspace_root(host, caller, user, thread_id, agent_id)
     return download_response(await file_operation(prepare_download, root, path))
 
 
@@ -72,6 +109,9 @@ async def session_download(thread_id: str, user: AdminUser, host: HostDep):
     # Validate the persisted Session owner before resolving its storage directory.
     await service.session_access.get_session(thread_id, service.context_for(record.user_id))
     store = service.application.entrypoint().runtime.session_store
+    if isinstance(store, MysqlSessionStore):
+        state = await store.export_session_state(thread_id)
+        return download_response(await file_operation(prepare_session_export, thread_id, state))
     if not isinstance(store, FilesystemSessionStore):
         raise HTTPException(409, "this Session store has no filesystem directory")
     root = await store.session_directory(thread_id)

@@ -30,12 +30,30 @@ const interaction = ref(null)
 const baseline = shallowRef([])
 const selectedAgentId = ref(localStorage.getItem('sage.server_v2.agent') || '')
 const scroller = ref(null)
+const historyEnd = ref(null)
+const historyFailed = ref(false)
+let historyObserver
+
+watch(historyEnd, (element) => {
+  historyObserver?.disconnect()
+  if (!element) return
+  historyObserver = new IntersectionObserver(([entry]) => {
+    if (entry.isIntersecting && !historyLoading.value && !historyFailed.value && historyOffset.value < historyTotal.value) {
+      void loadHistory()
+    }
+  }, { root: scroller.value })
+  historyObserver.observe(element)
+}, { flush: 'post' })
 const input = ref(null)
 const agent = shallowRef(null)
 
 const currentThread = computed(() =>
   threads.value.find((item) => item.thread_id === threadId.value)
 )
+// A fresh unsent conversation has no persisted Session yet. Existing links
+// still carry their Session id even while owner metadata is loading.
+const workspaceThreadId = computed(() => currentThread.value?.thread_id ||
+  (route?.query?.thread === threadId.value ? threadId.value : ''))
 const readOnly = computed(() => isForeign(currentThread.value))
 const threadTitle = computed(() => currentThread.value?.title || '新对话')
 const agentLocked = computed(() => Boolean(currentThread.value?.agent_id))
@@ -49,7 +67,7 @@ function bindAgent() {
     agentId: selectedAgentId.value,
     onMessages(next) {
       messages.value = next
-      nextTick(() => scroller.value?.scrollTo(0, scroller.value.scrollHeight))
+      if (!historyLoading.value) nextTick(() => scroller.value?.scrollTo(0, scroller.value.scrollHeight))
     },
     onInteraction(next) {
       interaction.value = next
@@ -103,6 +121,8 @@ function applyThreadAgent(id) {
 async function openThread(id) {
   ++historyRevision
   threadId.value = id; error.value = ''
+  historyLoading.value = false; historyFailed.value = false
+  scroller.value?.scrollTo(0, 0)
   historyEvents.value = []; historyOffset.value = 0; historyTotal.value = 0
   messages.value = []; interaction.value = null
   applyThreadAgent(id)
@@ -110,6 +130,10 @@ async function openThread(id) {
 }
 
 async function loadHistory() {
+  if (historyLoading.value) return
+  const firstPage = historyOffset.value === 0
+  historyFailed.value = false
+  error.value = ''
   const revision = historyRevision, id = threadId.value
   historyLoading.value = true
   try {
@@ -123,13 +147,21 @@ async function loadHistory() {
     baseline.value = messagesBeforeLastRun(events) || history
     agent.value.threadId = id; agent.value.setMessages(history)
     await nextTick()
-    scroller.value?.scrollTo(0, scroller.value.scrollHeight)
-  } catch (exc) { if (revision === historyRevision) error.value = exc.message }
+    if (firstPage && historyOffset.value >= historyTotal.value) {
+      scroller.value?.scrollTo(0, scroller.value.scrollHeight)
+    }
+  } catch (exc) {
+    if (revision === historyRevision) {
+      error.value = exc.message
+      historyFailed.value = true
+    }
+  }
   finally { if (revision === historyRevision) historyLoading.value = false }
 }
 
 function startNew() {
   ++historyRevision
+  historyFailed.value = false
   historyLoading.value = false; historyEvents.value = []; historyOffset.value = 0; historyTotal.value = 0
   if (!agents.value.some(item => item.id === selectedAgentId.value)) {
     selectedAgentId.value = agents.value[0]?.id || ''; bindAgent()
@@ -225,6 +257,7 @@ watch(() => [route?.query?.thread, route?.query?.new], async ([id, fresh]) => {
 
 onUnmounted(() => {
   ++historyRevision
+  historyObserver?.disconnect()
   agent.value?.abortRun?.()
 })
 </script>
@@ -261,6 +294,7 @@ onUnmounted(() => {
           :messages="messages"
           :pending="pending"
         />
+        <div v-if="historyOffset < historyTotal && !historyLoading && !historyFailed" ref="historyEnd" class="history-end" aria-hidden="true"></div>
       </div>
       <p v-if="!hasModel && !readOnly" class="notice thread-error">
         还没有可用模型，请先到
@@ -269,7 +303,7 @@ onUnmounted(() => {
       </p>
       <p v-if="error" class="error thread-error" role="alert">{{ error }}</p>
       <p v-if="historyLoading" role="status">加载会话中…</p>
-      <button v-if="historyOffset < historyTotal" class="btn ghost" :disabled="historyLoading" @click="loadHistory">加载后续记录</button>
+      <button v-if="historyFailed" class="btn ghost" @click="loadHistory">重试加载</button>
       <footer v-if="!readOnly && historyOffset >= historyTotal && !historyLoading" class="thread-footer">
         <InteractionPrompt :interaction="interaction" :busy="pending" @decide="decide" />
         <form class="composer" @submit.prevent="send">
@@ -298,11 +332,12 @@ onUnmounted(() => {
         </form>
       </footer>
     </div>
-    <WorkspacePanel v-if="workspaceOpen" :key="currentThread?._owner?.user_id || 'self'" :owner="currentThread?._owner" @close="workspaceOpen = false" />
+    <WorkspacePanel v-if="workspaceOpen" :key="workspaceThreadId || selectedAgentId" :thread-id="workspaceThreadId" :agent-id="selectedAgentId" :owner="currentThread?._owner" @close="workspaceOpen = false" />
   </section>
 </template>
 
 <style scoped>
+.history-end { height: 1px; }
 .chat-layout { position: relative; }
 .chat-layout.workspace-open { grid-template-columns: minmax(0, 1fr) 360px; }
 @media (max-width: 900px) { .chat-layout.workspace-open { grid-template-columns: minmax(0, 1fr); } }

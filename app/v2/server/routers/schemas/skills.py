@@ -38,6 +38,11 @@ class SkillPublic(BaseModel):
     workspace_status: str | None = None
 
 
+class SkillFilePublic(BaseModel):
+    path: str
+    size: int
+
+
 class SkillUploadItem(BaseModel):
     filename: str
     success: bool

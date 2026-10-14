@@ -1,4 +1,4 @@
-from fastapi import APIRouter, File, UploadFile
+from fastapi import APIRouter, File, Response, UploadFile, Query
 
 from app.v2.server.routers.deps import ReadUser, CatalogDep, CurrentUser, SkillDep
 from app.v2.server.routers.render import success
@@ -9,6 +9,7 @@ from app.v2.server.routers.schemas.common import (
 )
 from app.v2.server.routers.schemas.skills import (
     SkillBindBody,
+    SkillFilePublic,
     SkillPublic,
     SkillPublishBody,
     SkillUpdateBody,
@@ -79,6 +80,25 @@ async def get_skill(skill_id: str, user: ReadUser, service: SkillDep):
     return success(payload)
 
 
+@router.get("/api/skills/{skill_id}/files", response_model=ApiResponse[list[SkillFilePublic]])
+async def list_skill_files(skill_id: str, user: ReadUser, service: SkillDep):
+    return success(await service.list_files(
+        skill_id, user_id=user.user_id, role=user.role
+    ))
+
+
+@router.get("/api/skills/{skill_id}/files/{path:path}")
+async def read_skill_file(skill_id: str, path: str, user: ReadUser, service: SkillDep):
+    content = await service.read_file(
+        skill_id, path, user_id=user.user_id, role=user.role
+    )
+    return Response(
+        content=content,
+        media_type="application/octet-stream",
+        headers={"X-Content-Type-Options": "nosniff"},
+    )
+
+
 @router.put("/api/skills/{skill_id}", response_model=ApiResponse[SkillPublic])
 async def update_skill(
     skill_id: str, body: SkillUpdateBody, user: CurrentUser, service: SkillDep
@@ -107,7 +127,7 @@ async def list_agent_skills(agent_id: str, user: ReadUser, service: SkillDep):
             {
                 **item.public_dict(),
                 "workspace_status": await service.workspace_status(
-                    user_id=user.user_id, name=item.name
+                    user_id=user.user_id, agent_id=agent_id, name=item.name
                 ),
             }
             for item in bound
@@ -130,17 +150,19 @@ async def bind_agent_skills(
     response_model=ApiResponse[dict],
 )
 async def write_workspace_skill(
-    name: str, body: WorkspaceSkillBody, user: CurrentUser, service: SkillDep
+    name: str, body: WorkspaceSkillBody, user: CurrentUser, service: SkillDep,
+    catalog: CatalogDep, agent_id: str = Query(min_length=1)
 ):
+    await catalog.get_agent(user.user_id, agent_id)
     path = await service.write_workspace_skill(
-        user_id=user.user_id, name=name, content=body.content
+        user_id=user.user_id, agent_id=agent_id, name=name, content=body.content
     )
     return success(
         {
             "name": name,
             "workspace_path": str(path),
             "status": await service.workspace_status(
-                user_id=user.user_id, name=name
+                user_id=user.user_id, agent_id=agent_id, name=name
             ),
         }
     )

@@ -4,6 +4,8 @@ from __future__ import annotations
 from contextlib import contextmanager
 from datetime import datetime, timezone
 import os
+import json
+from urllib.parse import quote
 from pathlib import Path, PurePosixPath
 import stat
 from tempfile import SpooledTemporaryFile
@@ -119,3 +121,34 @@ def _archive_directory(fd: int, archive: ZipFile, prefix: str, total: list[int])
                             remaining -= len(chunk)
             finally:
                 os.close(child)
+
+
+def prepare_session_export(session_id: str, state: dict):
+    """Package a database-backed Session without creating business storage."""
+    name = quote(session_id, safe="")
+    if name in {"", ".", ".."}:
+        raise ValueError("invalid Session id")
+    output = SpooledTemporaryFile(max_size=8 * 1024 * 1024, mode="w+b")
+    total = 0
+    try:
+        with ZipFile(output, "w", compression=ZIP_DEFLATED) as archive:
+            def write_json(path, value):
+                nonlocal total
+                encoded = json.dumps(value, ensure_ascii=False, indent=2).encode("utf-8")
+                total += len(encoded)
+                if total > MAX_ARCHIVE_BYTES or len(archive.filelist) >= MAX_ARCHIVE_ENTRIES:
+                    raise OverflowError("Session is too large to archive")
+                archive.writestr(f"{name}/{path}", encoded)
+
+            # state.json is the full canonical aggregate, not just visible messages.
+            write_json("state.json", state)
+            write_json("session.json", state["sessions"][0])
+            for run in state.get("runs", []):
+                run_id = quote(run["run_id"], safe="")
+                write_json(f"runs/{run_id}.json", run)
+                write_json(f"events/{run_id}.json", state.get("run_events", {}).get(run["run_id"], []))
+        output.seek(0)
+        return output, f"{name}.zip"
+    except BaseException:
+        output.close()
+        raise

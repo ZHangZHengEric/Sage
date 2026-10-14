@@ -91,6 +91,9 @@ def prepare_tenant_binding(
     mcp_servers,
     a2a_agents,
     *,
+    agent_id: str,
+    workspace_user_id: str | None = None,
+    workspace_for_run=None,
     call_depth: int = 0,
 ):
     """Skill ports plus this tenant's MCP and A2A plugins, in catalog order."""
@@ -101,7 +104,7 @@ def prepare_tenant_binding(
     )
 
     provider = CatalogSkillProvider(records, paths.data_root)
-    workspace = ReadThroughSkillWorkspace(paths.data_root, user_id, records)
+    workspace = ReadThroughSkillWorkspace(paths.data_root, workspace_user_id or user_id, records, agent_id=agent_id, workspace_for_run=workspace_for_run)
     external = tuple(
         plugin
         for plugin in (
@@ -177,6 +180,8 @@ async def compose_catalog_loop(
                 reducer=ports.context_reducer,
             ),
         )
+        from app.v2.server.storage.workspaces import workspace_user
+
         binding = prepare_tenant_binding(
             service.paths,
             service.mcp_plugins,
@@ -185,6 +190,8 @@ async def compose_catalog_loop(
             records,
             selected_mcp_servers(catalog, frozen.mcp_servers),
             selected_a2a_agents(catalog, frozen.a2a_agents),
+            agent_id=command.agent_id,
+            workspace_user_id=workspace_user(command, user_id),
             call_depth=frozen.call_depth,
         )
 
@@ -254,10 +261,12 @@ async def compose_catalog_loop(
 
             from sagents.v2.tool.plugins.sandbox_mcp import SandboxMcpSessionFactory
 
+            from app.v2.server.storage.workspaces import workspace_user
+
             self_configuration = SelfConfigurationService(
                 store=SqliteSelfConfigurationStore(service.paths.runtime_root / "self-configuration.sqlite3"),
                 owner=json.dumps(["server", user_id, agent.id]),
-                workspace_root=service.paths.workspace_dir(user_id), workspace_alias="/workspace",
+                workspace_root=service.paths.workspace_dir(workspace_user(command, user_id), command.agent_id), workspace_alias="/workspace",
                 authorize=authorize_self_configuration,
                 mcp_session_factory=SandboxMcpSessionFactory(official_runtime.sandbox, service.execution.sandbox_grant_issuer),
             )

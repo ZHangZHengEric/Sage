@@ -12,8 +12,7 @@ import Mcp from './views/Mcp.vue'
 import A2A from './views/A2A.vue'
 import Skills from './views/Skills.vue'
 import ApiKeys from './views/ApiKeys.vue'
-import Approvals from './views/Approvals.vue'
-import ExecutionSettings from './views/ExecutionSettings.vue'
+import PersonalSettings from './views/PersonalSettings.vue'
 
 export const router = createRouter({
   history: createWebHistory(),
@@ -29,8 +28,9 @@ export const router = createRouter({
     { path: '/mcp', component: Mcp },
     { path: '/a2a', component: A2A },
     { path: '/keys', component: ApiKeys },
-    { path: '/settings/execution', component: ExecutionSettings },
-    { path: '/approvals', component: Approvals },
+    { path: '/settings', component: PersonalSettings },
+    { path: '/settings/execution', redirect: '/settings' },
+    { path: '/approvals', redirect: '/' },
     { path: '/skills', component: Skills },
     { path: '/admin', redirect: '/' },
   ],

@@ -40,13 +40,13 @@ def _linux_paths(tmp_path, monkeypatch):
 
 def test_only_workspace_directories_change_owner(tmp_path, monkeypatch):
     paths = _linux_paths(tmp_path, monkeypatch)
-    workspace = paths.tenant_dir("user") / "workspace"
-    workspace.mkdir()
+    workspace = paths.workspace_path("user", "agent")
+    workspace.mkdir(parents=True)
     existing = workspace / "existing.txt"
     existing.write_text("keep")
     changed = []
     monkeypatch.setattr(os, "fchown", lambda fd, uid, gid: changed.append((os.fstat(fd).st_ino, uid, gid)))
-    child = paths.workspace_dir("user", private_run_id="run_1")
+    child = paths.workspace_dir("user", "agent", private_run_id="run_1")
     assert changed == [
         (directory.stat().st_ino, 10001, 10002)
         for directory in (workspace, workspace / ".runs", child)
@@ -60,8 +60,8 @@ def test_workspace_ownership_never_follows_symlinks(tmp_path, monkeypatch, compo
     monkeypatch.setattr(os, "fchown", lambda *_: None)
     outside = tmp_path / "outside"
     outside.mkdir()
-    child = paths.workspace_dir("user", private_run_id="run_1")
-    workspace = paths.tenant_dir("user") / "workspace"
+    child = paths.workspace_dir("user", "agent", private_run_id="run_1")
+    workspace = paths.workspace_path("user", "agent")
     target = {"workspace": workspace, ".runs": workspace / ".runs", "child": child}[component]
     child.rmdir()
     if component != "child":
@@ -70,7 +70,7 @@ def test_workspace_ownership_never_follows_symlinks(tmp_path, monkeypatch, compo
         workspace.rmdir()
     target.symlink_to(outside, target_is_directory=True)
     with pytest.raises(OSError):
-        paths.workspace_dir("user", private_run_id="run_1")
+        paths.workspace_dir("user", "agent", private_run_id="run_1")
     assert list(outside.iterdir()) == []
 
 
@@ -78,4 +78,18 @@ def test_non_root_cannot_change_workspace_owner(tmp_path, monkeypatch):
     paths = _linux_paths(tmp_path, monkeypatch)
     monkeypatch.setattr(os, "geteuid", lambda: 501)
     with pytest.raises(PermissionError, match="workspace ownership"):
-        paths.workspace_dir("user")
+        paths.workspace_dir("user", "agent")
+
+
+def test_workspace_identity_is_readable_and_isolated(tmp_path):
+    paths = prepare_server_v2_storage(tmp_path)
+    first = paths.workspace_dir("user_123", "agent_a")
+    second = paths.workspace_dir("user_123", "agent_b")
+    other = paths.workspace_dir("user_456", "agent_a")
+    assert first == tmp_path / "tenants/user_123/agent_a/workspace"
+    (first / "private.txt").write_text("private")
+    assert not (second / "private.txt").exists()
+    assert not (other / "private.txt").exists()
+    assert paths.workspace_dir("user_123", "agent_a") == first
+    escaped = paths.workspace_dir("../outside", "a/b")
+    assert escaped == tmp_path / "tenants/..%2Foutside/a%2Fb/workspace"

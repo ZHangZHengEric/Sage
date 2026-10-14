@@ -97,7 +97,7 @@ async function openModel(item, readonly = true) {
 <template>
   <section>
     <header class="page-head">
-      <h1>模型配置</h1><button class="btn cta" type="button" :disabled="pending" @click="startNew">新增模型</button>
+      <h1>模型供应商</h1><button class="btn cta" type="button" :disabled="pending" @click="startNew">新增模型</button>
     </header>
     <div class="panel table-panel">
 

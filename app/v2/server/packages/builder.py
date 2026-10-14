@@ -69,6 +69,10 @@ class CatalogPackageModel:
 class PackageBindings:
     def __init__(self, paths, execution, user_id):
         self.paths, self.execution, self.user_id = paths, execution, user_id
+        self.workspaces = {}
+
+    def workspace_for_run(self, run_id):
+        return self.workspaces[run_id][0]
 
     async def acquire(self, request):
         if (
@@ -79,16 +83,18 @@ class PackageBindings:
         policy = getattr(request.workspace_policy, "value", request.workspace_policy)
         if policy == "private_child":
             workspace = self.paths.workspace_dir(
-                self.user_id, private_run_id=request.run_id
+                self.user_id, request.agent_id, private_run_id=request.run_id
             )
         elif policy == "shared_parent":
-            workspace = self.paths.workspace_dir(self.user_id)
+            workspace = self.paths.workspace_dir(self.user_id, request.agent_id)
         else:
             raise ValueError("unsupported workspace policy")
         handle = await provision_workspace(
             self.execution, workspace, request.context, run_id=request.run_id
         )
-        return RunExecutionBinding(
+        token = object()
+        self.workspaces[request.run_id] = (workspace, token)
+        binding = RunExecutionBinding(
             run_id=request.run_id,
             agent_id=request.agent_id,
             parent_run_id=request.parent_run_id,
@@ -98,6 +104,13 @@ class PackageBindings:
             grant_issuer=self.execution.sandbox_grant_issuer,
             lifecycle=request.lifecycle,
         )
+        # The runtime owns the binding; discard the lookup when it is released.
+        import weakref
+        def forget():
+            if self.workspaces.get(request.run_id, (None, None))[1] is token:
+                self.workspaces.pop(request.run_id, None)
+        weakref.finalize(binding, forget)
+        return binding
 
 
 class PackageBuilder(SAgentBuilder):
@@ -185,6 +198,7 @@ class ServerPackageBuilderFactory:
         from app.v2.server.packages.tool_policy import server_tool_policy
 
         user_id = context.actor.principal_id
+        bindings = PackageBindings(self.paths, self.execution, user_id)
         builder = (
             PackageBuilder(self.settings, self.run_quota, root)
             .with_defaults(session_root=root)
@@ -198,7 +212,7 @@ class ServerPackageBuilderFactory:
                 )
             )
             .with_execution_binding_provider(
-                PackageBindings(self.paths, self.execution, user_id)
+                bindings
             )
             .with_agent_management(management)
             .with_tool_policy(server_tool_policy(management))
@@ -215,6 +229,8 @@ class ServerPackageBuilderFactory:
             records,
             enabled_mcp_servers(catalog),
             enabled_a2a_agents(catalog),
+            agent_id=bundle.manifest.entrypoint.agent,
+            workspace_for_run=bindings.workspace_for_run,
         )
         builder.with_skill_provider(
             binding.provider, binding.provider, binding.workspace

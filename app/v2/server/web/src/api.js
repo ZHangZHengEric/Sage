@@ -44,7 +44,6 @@ async function list(path, all = true) {
   if (!all || !isAdmin()) return request(path)
   const users = await usersForView()
   const items = []
-  let nextOffset = null
   for (const owner of users) {
     const page = await read(path, owner)
     const rows = Array.isArray(page) ? page : page.items
@@ -54,14 +53,13 @@ async function list(path, all = true) {
       if (path === '/api/skills' && item.owner_user_id !== owner.user_id) continue
       items.push({ ...item, _owner: owner })
     }
-    if (page.next_offset != null) nextOffset = Math.max(nextOffset || 0, page.next_offset)
   }
-  return path.startsWith('/api/approvals') ? { items, next_offset: nextOffset } : items
+  return items
 }
 
 export const api = {
-  workspaceFiles: (path = '', owner) => read(`/api/workspace/files?path=${encodeURIComponent(path)}`, owner),
-  workspaceDownload: (path = '', owner) => request(`/api/workspace/download?path=${encodeURIComponent(path)}`, owner ? { headers: { 'X-Sage-View-User': owner.user_id } } : {}, true),
+  workspaceFiles: (path = '', owner, threadId = '', agentId = '') => read(`/api/workspace/files?path=${encodeURIComponent(path)}${threadId ? `&thread_id=${encodeURIComponent(threadId)}` : `&agent_id=${encodeURIComponent(agentId)}`}`, threadId ? undefined : owner),
+  workspaceDownload: (path = '', owner, threadId = '', agentId = '') => request(`/api/workspace/download?path=${encodeURIComponent(path)}${threadId ? `&thread_id=${encodeURIComponent(threadId)}` : `&agent_id=${encodeURIComponent(agentId)}`}`, !threadId && owner ? { headers: { 'X-Sage-View-User': owner.user_id } } : {}, true),
   downloadSession: id => request(`/api/threads/${encodeURIComponent(id)}/download`, {}, true),
   executionPolicy: () => request('/api/auth/execution-policy'),
   saveExecutionPolicy: (body) => request('/api/auth/execution-policy',
@@ -69,9 +67,6 @@ export const api = {
   listKeys: () => list('/api/keys'),
   createKey: (body) => request('/api/keys', { method: 'POST', body: JSON.stringify(body) }),
   revokeKey: (id) => request(`/api/keys/${encodeURIComponent(id)}`, { method: 'DELETE' }),
-  approvals: (offset = 0) => list(`/api/approvals?limit=50&offset=${offset}`),
-  decideApproval: (id, body) => request(`/api/approvals/${encodeURIComponent(id)}/decisions`,
-    { method: 'POST', body: JSON.stringify(body) }),
   packageSchema: () => request('/api/agent-packages/schema'),
   packageTemplate: (agentId = '') => request(`/api/agent-packages/template${agentId ? `?agent_id=${encodeURIComponent(agentId)}` : ''}`),
   packages: (offset = 0) => list(`/api/agent-packages?limit=50&offset=${offset}`),
@@ -138,6 +133,12 @@ export const api = {
     return request('/api/skills/upload', { method: 'POST', body })
   },
   getSkill: (id, owner) => read(`/api/skills/${id}`, owner),
+  skillFiles: (id, owner) => read(`/api/skills/${encodeURIComponent(id)}/files`, owner),
+  skillFile: (id, path, owner) => request(
+    `/api/skills/${encodeURIComponent(id)}/files/${path.split('/').map(encodeURIComponent).join('/')}`,
+    owner ? { headers: { 'X-Sage-View-User': owner.user_id } } : {},
+    true,
+  ),
   updateSkill: (id, body) =>
     request(`/api/skills/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
   deleteSkill: (id) => request(`/api/skills/${id}`, { method: 'DELETE' }),
@@ -147,8 +148,8 @@ export const api = {
       method: 'PUT',
       body: JSON.stringify({ names }),
     }),
-  writeWorkspaceSkill: (name, content) =>
-    request(`/api/workspace/skills/${name}`, {
+  writeWorkspaceSkill: (name, content, agentId) =>
+    request(`/api/workspace/skills/${name}?agent_id=${encodeURIComponent(agentId)}`, {
       method: 'PUT',
       body: JSON.stringify({ content }),
     }),

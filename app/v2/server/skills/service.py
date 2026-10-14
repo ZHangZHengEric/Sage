@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
 from pathlib import Path
+from pathlib import PurePosixPath
 
 from app.v2.server.catalog.records import AgentRecord, UserCatalog
 from app.v2.server.skills.files import (
@@ -261,13 +263,52 @@ class SkillCatalogService:
             )
         return skill_md.read_text(encoding="utf-8")
 
+    async def list_files(self, skill_id: str, *, user_id: str, role: str) -> list[dict]:
+        record = await self.get(skill_id, user_id=user_id, role=role)
+        root = record.absolute_path(self.data_root)
+        if not root.is_dir():
+            raise _missing_skill_file()
+        files = []
+        for candidate in sorted(root.rglob("*")):
+            if candidate.is_symlink():
+                raise _missing_skill_file()
+            if candidate.is_file():
+                files.append({
+                    "path": candidate.relative_to(root).as_posix(),
+                    "size": candidate.stat().st_size,
+                })
+        return files
+
+    async def read_file(
+        self, skill_id: str, path: str, *, user_id: str, role: str
+    ) -> bytes:
+        record = await self.get(skill_id, user_id=user_id, role=role)
+        root = record.absolute_path(self.data_root)
+        parts = PurePosixPath(path).parts
+        if (
+            not path or path.startswith("/") or "\\" in path
+            or any(part in {"", ".", ".."} for part in path.split("/"))
+            or not parts
+        ):
+            raise _missing_skill_file()
+        candidate = root
+        if root.is_symlink():
+            raise _missing_skill_file()
+        for part in parts:
+            candidate = candidate / part
+            if candidate.is_symlink():
+                raise _missing_skill_file()
+        if not candidate.is_file() or not candidate.resolve().is_relative_to(root.resolve()):
+            raise _missing_skill_file()
+        return await asyncio.to_thread(candidate.read_bytes)
+
     async def write_workspace_skill(
-        self, *, user_id: str, name: str, content: str
+        self, *, user_id: str, agent_id: str, name: str, content: str
     ) -> Path:
         """Copy-on-write into the tenant workspace. Catalog artifacts stay intact."""
 
         skill_name = normalize_skill_name(name)
-        target = workspace_skill_path(self.data_root, user_id, skill_name)
+        target = workspace_skill_path(self.data_root, user_id, agent_id, skill_name)
         if not target.is_dir():
             source = await self._catalog_source(user_id, skill_name)
             if source is None:
@@ -286,8 +327,8 @@ class SkillCatalogService:
         )
         return target
 
-    async def workspace_status(self, *, user_id: str, name: str) -> str:
-        target = workspace_skill_path(self.data_root, user_id, name)
+    async def workspace_status(self, *, user_id: str, agent_id: str, name: str) -> str:
+        target = workspace_skill_path(self.data_root, user_id, agent_id, name)
         if not target.is_dir():
             return "missing"
         source = await self._catalog_source(user_id, name)
@@ -363,6 +404,16 @@ def _can_see(record: SkillRecord, *, user_id: str, role: str) -> bool:
     if record.status != "active":
         return False
     return record.owner_user_id == user_id or role == "admin"
+
+
+def _missing_skill_file() -> SageV2Error:
+    return SageV2Error(
+        RuntimeErrorInfo(
+            code="server.skills.service.not_found",
+            category=ErrorCategory.VALIDATION,
+            message="skill file not found",
+        )
+    )
 
 
 def _package_from_files(

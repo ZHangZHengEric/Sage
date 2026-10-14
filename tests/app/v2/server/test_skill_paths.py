@@ -37,8 +37,8 @@ def test_absolute_path_is_joined_from_deployment_root(tmp_path: Path):
 
 
 def test_workspace_skill_stays_under_tenant_workspace(tmp_path: Path):
-    path = workspace_skill_path(tmp_path, "user_1", "demo")
-    assert path == tmp_path / "tenants" / "user_1" / "workspace" / "skills" / "demo"
+    path = workspace_skill_path(tmp_path, "user_1", "agent_1", "demo")
+    assert path == tmp_path / "tenants" / "user_1" / "agent_1" / "workspace" / "skills" / "demo"
 
 
 @pytest.mark.parametrize("owner", ["", " ", "../other", "user/other"])

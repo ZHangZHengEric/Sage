@@ -1,19 +1,20 @@
 <script setup>
 import { computed, onMounted, ref } from 'vue'
 import { api, isForeign } from '../api.js'
-import ResourceDetails from '../components/ResourceDetails.vue'
+import SkillBrowser from '../components/SkillBrowser.vue'
 import FormDrawer from '../components/FormDrawer.vue'
 import AppIcon from '../components/AppIcon.vue'
 
 const drawerOpen = ref(false)
 const displayMode = ref('cards'), search = ref(''), loading = ref(true)
 const visibleSkills = computed(() => skills.value.filter(item =>
+  (!filterAgentId.value || boundIds.value.has(item.skill_id)) &&
   `${item.name} ${item.description || ''}`.toLowerCase().includes(search.value.toLowerCase())))
 
 const skills = ref([])
 const agents = ref([])
-const agentId = ref(localStorage.getItem('sage.server_v2.agent') || '')
-const bound = ref([])
+const filterAgentId = ref('')
+const boundIds = ref(new Set())
 const error = ref('')
 const pending = ref(false)
 const files = ref([])
@@ -21,24 +22,22 @@ const results = ref([])
 const dragging = ref(false)
 const picker = ref(null)
 
-const boundNames = computed(() => new Set(bound.value.map((item) => item.name)))
-const currentAgent = computed(
-  () => agents.value.find((item) => item.id === agentId.value)?.name || agentId.value
-)
-
 async function refresh() {
   const [nextSkills, nextAgents] = await Promise.all([api.listSkills(), api.listAgents(false)])
   skills.value = nextSkills
   agents.value = nextAgents
-  if (!agents.value.some((item) => item.id === agentId.value)) {
-    agentId.value = agents.value[0]?.id || ''
-  }
-  bound.value = agentId.value ? await api.listAgentSkills(agentId.value) : []
+  if (filterAgentId.value && !agents.value.some((item) => item.id === filterAgentId.value)) filterAgentId.value = ''
+  await changeAgent()
 }
 
-function changeAgent() {
-  localStorage.setItem('sage.server_v2.agent', agentId.value)
-  refresh()
+async function changeAgent() {
+  const selected = filterAgentId.value
+  boundIds.value = new Set()
+  if (!selected) return
+  try {
+    const items = await api.listAgentSkills(selected)
+    if (filterAgentId.value === selected) boundIds.value = new Set(items.map(item => item.skill_id))
+  } catch (exc) { error.value = exc.message }
 }
 
 function isZip(file) {
@@ -102,16 +101,6 @@ async function remove(id) {
   await refresh()
 }
 
-async function toggleBind(item) {
-  if (!agentId.value || isForeign(item)) return
-  const names = bound.value.map((skill) => skill.name)
-  const next = names.includes(item.name)
-    ? names.filter((name) => name !== item.name)
-    : [...names, item.name]
-  await api.bindAgentSkills(agentId.value, next)
-  await refresh()
-}
-
 onMounted(async () => {
   try {
     await refresh()
@@ -129,21 +118,17 @@ function startNew() {
   <section>
     <header class="page-head">
       <h1>技能</h1>
-      <div class="page-actions"><div class="view-switch" aria-label="显示方式"><button :aria-pressed="displayMode === 'cards'" @click="displayMode = 'cards'"><AppIcon name="grid" />卡片</button><button :aria-pressed="displayMode === 'rows'" @click="displayMode = 'rows'"><AppIcon name="list" />列表</button></div><input v-model="search" class="search-input" placeholder="搜索技能" aria-label="搜索技能" /><button class="btn cta" :disabled="pending" @click="startNew"><AppIcon name="plus" /> 导入技能</button></div>
+      <div class="page-actions"><div class="view-switch" aria-label="显示方式"><button :aria-pressed="displayMode === 'cards'" @click="displayMode = 'cards'"><AppIcon name="grid" />卡片</button><button :aria-pressed="displayMode === 'rows'" @click="displayMode = 'rows'"><AppIcon name="list" />列表</button></div><select v-model="filterAgentId" aria-label="按智能体筛选技能" @change="changeAgent"><option value="">全部智能体</option><option v-for="item in agents" :key="item.id" :value="item.id">{{ item.name }}</option></select><input v-model="search" class="search-input" placeholder="搜索技能" aria-label="搜索技能" /><button class="btn cta" :disabled="pending" @click="startNew"><AppIcon name="plus" /> 导入技能</button></div>
     </header>
-    <div class="skill-filters">
-      <label class="skill-agent"><span>关联到智能体</span><select v-model="agentId" @change="changeAgent"><option v-for="item in agents" :key="item.id" :value="item.id">{{ item.name }}</option></select></label>
-    </div>
     <p v-if="error && !drawerOpen" class="error" role="alert">{{ error }}</p>
     <p v-if="loading" class="page-loading" role="status">加载中…</p>
-    <p v-else-if="!visibleSkills.length" class="empty">{{ search ? '没有匹配的技能' : '暂无技能' }}</p>
+    <p v-else-if="!visibleSkills.length" class="empty">{{ search ? '没有匹配的技能' : filterAgentId ? '该智能体未关联技能' : '暂无技能' }}</p>
     <div v-else :class="displayMode === 'cards' ? 'resource-grid' : 'skill-rows'">
       <article v-for="item in visibleSkills" :key="`${item._owner?.user_id || ''}:${item.skill_id}`" class="resource-card skill-card">
         <div class="resource-card-head"><span class="resource-icon"><AppIcon name="skill" /></span><h2>{{ item.name }}</h2><span v-if="item._owner" class="tag">{{ item._owner.username }}</span></div>
         <p>{{ item.description }}</p>
         <div class="resource-card-foot">
-          <label class="skill-binding"><input type="checkbox" :disabled="!agentId || isForeign(item)" :checked="!isForeign(item) && boundNames.has(item.name)" @change="toggleBind(item)" />关联 {{ currentAgent }}</label>
-          <div class="row"><ResourceDetails :item="item" kind="skills" /><button v-if="!isForeign(item)" class="btn ghost" @click="remove(item.skill_id)">删除</button></div>
+          <div class="row"><SkillBrowser :item="item" /><button v-if="!isForeign(item)" class="btn ghost" @click="remove(item.skill_id)">删除</button></div>
         </div>
       </article>
     </div>
@@ -192,10 +177,7 @@ function startNew() {
 </template>
 
 <style scoped>
-.skill-filters { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 20px; flex-wrap: wrap; }
-.skill-agent { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--muted-foreground); }
-.skill-agent select { max-width: 180px; padding: 6px 10px; }
-.skill-binding { display: flex; gap: 6px; align-items: center; }
+.page-actions select { max-width: 180px; padding: 6px 10px; }
 .skill-rows { display: flex; flex-direction: column; gap: 8px; }
 .skill-rows .skill-card { display: grid; grid-template-columns: minmax(180px, 1fr) minmax(160px, 2fr) minmax(200px, 1fr); gap: 16px; align-items: center; padding: 14px 20px; }
 .skill-rows .resource-card-foot { border: 0; padding: 0; margin: 0; }

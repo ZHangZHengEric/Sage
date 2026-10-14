@@ -68,7 +68,7 @@ function startNew() {
         <p v-if="!agents.length" class="muted">请先在「智能体」页创建智能体。</p>
         <p class="muted">执行策略继承「执行设置」中的用户配置，同一账号的所有密钥共用。</p>
         <label class="row"><input v-model="form.approve" type="checkbox" />允许此密钥通过 API 批准操作</label>
-        <small class="muted">未勾选时，用户可到「待审批」页处理。勾选会授予调用方独立审批权限。</small>
+        <small class="muted">未勾选时，用户可在对应会话中处理审批。勾选会授予调用方独立审批权限。</small>
         <button class="btn cta" type="submit" :disabled="!form.agent_id || Boolean(issued)">{{ busy ? '处理中…' : '创建密钥' }}</button>
       </fieldset>
     </form>

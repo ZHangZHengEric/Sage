@@ -5,21 +5,21 @@ import { saveDownload } from '../download.js'
 import AppIcon from './AppIcon.vue'
 import WorkspaceFileTree from './WorkspaceFileTree.vue'
 import FormDrawer from './FormDrawer.vue'
-const props = defineProps({ owner: Object })
+const props = defineProps({ owner: Object, threadId: String, agentId: String })
 defineEmits(['close'])
 const files = ref([]), busy = ref(false), error = ref(''), downloading = ref(''), revision = ref(0)
 const previewOpen = ref(false), previewName = ref(''), previewText = ref(''), previewImage = ref(''), previewBusy = ref(false)
 let disposed = false, previewRevision = 0
 async function refresh() {
   busy.value = true; error.value = ''
-  try { files.value = await api.workspaceFiles('', props.owner); revision.value++ }
+  try { files.value = await api.workspaceFiles('', props.owner, props.threadId, props.agentId); revision.value++ }
   catch (exc) { error.value = exc.message }
   finally { busy.value = false }
 }
 async function download(item = { path: '', name: 'workspace' }) {
   if (downloading.value) return
   downloading.value = item.name; error.value = ''
-  try { saveDownload(await api.workspaceDownload(item.path, props.owner)) }
+  try { saveDownload(await api.workspaceDownload(item.path, props.owner, props.threadId, props.agentId)) }
   catch (exc) { error.value = exc.message }
   finally { downloading.value = '' }
 }
@@ -30,7 +30,7 @@ async function preview(item) {
   if (previewImage.value) URL.revokeObjectURL(previewImage.value)
   previewImage.value = ''
   try {
-    const { blob } = await api.workspaceDownload(item.path, props.owner)
+    const { blob } = await api.workspaceDownload(item.path, props.owner, props.threadId, props.agentId)
     if (disposed || current !== previewRevision) return
     const imageType = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', webp: 'image/webp', gif: 'image/gif' }[item.name.split('.').pop().toLowerCase()]
     if (imageType) previewImage.value = URL.createObjectURL(new Blob([blob], { type: imageType }))
@@ -49,7 +49,7 @@ onBeforeUnmount(() => { disposed = true; previewRevision++; if (previewImage.val
   <aside class="workspace-panel" aria-label="工作空间">
     <header><h2><AppIcon name="folder" />工作空间</h2><button class="icon-button" aria-label="刷新工作空间" :disabled="busy" @click="refresh"><AppIcon name="refresh" /></button><button class="icon-button" aria-label="下载工作空间" :disabled="Boolean(downloading)" @click="download()"><AppIcon name="download" /></button><button class="icon-button" aria-label="关闭工作空间" @click="$emit('close')"><AppIcon name="close" /></button></header>
     <p v-if="error" class="error panel-message" role="alert">{{ error }}</p><p v-if="downloading" class="panel-message" role="status">正在下载 {{ downloading }}…</p>
-    <div class="workspace-files"><p v-if="busy" class="empty" role="status">加载中…</p><p v-else-if="!files.length" class="empty">工作空间暂无文件</p><div v-else :key="revision"><WorkspaceFileTree v-for="item in files" :key="item.path" :item="item" :owner="owner" :downloading="downloading" @download="download" @preview="preview" /></div></div>
+    <div class="workspace-files"><p v-if="busy" class="empty" role="status">加载中…</p><p v-else-if="!files.length" class="empty">工作空间暂无文件</p><div v-else :key="revision"><WorkspaceFileTree v-for="item in files" :key="item.path" :item="item" :owner="owner" :thread-id="threadId" :agent-id="agentId" :downloading="downloading" @download="download" @preview="preview" /></div></div>
     <FormDrawer v-model="previewOpen" :title="previewName"><p v-if="previewBusy" role="status">加载中…</p><img v-else-if="previewImage" class="file-preview-image" :src="previewImage" :alt="previewName" /><pre v-else class="file-preview-text">{{ previewText }}</pre></FormDrawer>
   </aside>
 </template>

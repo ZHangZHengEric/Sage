@@ -66,6 +66,9 @@ def test_external_chat_unregistered_user_edits_and_restart(tmp_path):
         assert events[0]["threadId"] == "work-1"
         assert events[-1]["type"] == "RUN_FINISHED"
         assert events[-1]["runId"] == "create-1"
+        workspace = tmp_path / "tenants" / "business-user-123" / agent_id / "workspace"
+        assert workspace.is_dir()
+        (workspace / "shared.txt").write_text("shared across this user's sessions")
         original = result(client, request="create-1")
         assert original.status_code == 200, original.text
         data = original.json()["data"]
@@ -86,8 +89,12 @@ def test_external_chat_unregistered_user_edits_and_restart(tmp_path):
         assert result(client, user="other-business-user").status_code == 404
         assert result(client, request="missing").status_code == 404
         assert send(client, session="work-2").status_code == 200
+        assert (workspace / "shared.txt").read_text() == "shared across this user's sessions"
         # Identical external session IDs owned by different business users stay separate.
         assert send(client, user="other-business-user").status_code == 200
+        other_workspace = tmp_path / "tenants" / "other-business-user" / agent_id / "workspace"
+        assert other_workspace.is_dir()
+        assert not (other_workspace / "shared.txt").exists()
         assert (
             result(client, user="other-business-user").json()["data"]["run_id"]
             != data["run_id"]

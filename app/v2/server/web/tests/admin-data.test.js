@@ -58,7 +58,7 @@ test('admin own-only selectors and writes do not inherit a foreign read scope', 
   assert.equal(fetch.mock.calls[8].arguments[1].headers['X-Sage-View-User'], undefined)
 })
 
-test('skills are attributed once and approval pagination advances across empty owners', async t => {
+test('skills are attributed once across owners', async t => {
   session(t)
   const own = { skill_id: 'own', owner_user_id: 'admin' }
   const foreign = { skill_id: 'foreign', owner_user_id: 'alice' }
@@ -67,10 +67,34 @@ test('skills are attributed once and approval pagination advances across empty o
     let data
     if (url === '/api/admin/users') data = users
     else if (url === '/api/skills') data = owner === 'admin' ? [own, foreign] : [foreign]
-    else data = owner === 'admin' ? { items: [], next_offset: null } : { items: [], next_offset: 100 }
     return Response.json({ data })
   })
   const skills = await api.listSkills()
   assert.deepEqual(skills.map(row => [row.skill_id, row._owner.user_id]), [['own', 'admin'], ['foreign', 'alice']])
-  assert.deepEqual(await api.approvals(50), { items: [], next_offset: 100 })
+})
+
+test('workspace reads bind to the Session even without owner metadata', async t => {
+  session(t)
+  t.mock.method(globalThis, 'fetch', async (url, init) => {
+    assert.equal(new URL(url, 'http://localhost').searchParams.get('thread_id'), 'external/session')
+    assert.equal(init.headers['X-Sage-View-User'], undefined)
+    return url.includes('/download') ? new Response('file') : Response.json({ data: [] })
+  })
+  await api.workspaceFiles('', undefined, 'external/session')
+  await api.workspaceFiles('nested', users[0], 'external/session')
+  await api.workspaceDownload('nested/file.txt', users[0], 'external/session')
+  assert.equal(fetch.mock.calls.length, 3)
+})
+
+
+test('new conversation workspace reads use the selected Agent', async t => {
+  session(t)
+  t.mock.method(globalThis, 'fetch', async url => {
+    const params = new URL(url, 'http://localhost').searchParams
+    assert.equal(params.get('agent_id'), 'agent_123')
+    assert.equal(params.has('thread_id'), false)
+    return url.includes('/download') ? new Response('file') : Response.json({ data: [] })
+  })
+  await api.workspaceFiles('', undefined, '', 'agent_123')
+  await api.workspaceDownload('file', undefined, '', 'agent_123')
 })

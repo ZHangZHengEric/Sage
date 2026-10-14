@@ -12,19 +12,16 @@ const user = computed(() => { route.path; return getUser() })
 const admin = computed(() => { route.path; return isAdmin() })
 const collapsed = ref(localStorage.getItem('sage.server_v2.sidebar.collapsed') === 'true')
 const mobileMenu = ref(false)
+const accountMenu = ref(null)
 const groups = [
-  { label: '个人中心', icon: 'user', links: [
-    { to: '/models', label: '模型配置', icon: 'model' },
+  { label: '工作空间', icon: 'grid', links: [
+    { to: '/models', label: '模型供应商', icon: 'model' },
     { to: '/tools', label: '工具', icon: 'tools', paths: ['/tools', '/mcp', '/a2a'] },
     { to: '/skills', label: '技能', icon: 'skill' },
   ] },
   { label: '开发者', icon: 'code', links: [
     { to: '/studio', label: 'Studio', icon: 'code' },
     { to: '/keys', label: 'API 密钥', icon: 'key' },
-  ] },
-  { label: '设置', icon: 'settings', links: [
-    { to: '/settings/execution', label: '执行设置', icon: 'settings' },
-    { to: '/approvals', label: '待审批', icon: 'check' },
   ] },
 ]
 function toggleSidebar() {
@@ -34,6 +31,10 @@ function toggleSidebar() {
 function newChat() {
   mobileMenu.value = false
   router.push({ path: '/', query: { new: String(Date.now()) } })
+}
+function closeAccountMenu() {
+  if (accountMenu.value) accountMenu.value.open = false
+  mobileMenu.value = false
 }
 async function logout() {
   try { await api.logout() } catch { /* Clear the local session even when offline. */ }
@@ -56,12 +57,12 @@ async function logout() {
             <router-link v-for="link in group.links" :key="link.to" :to="link.to" class="nav-item" :class="{ 'router-link-active': link.paths?.includes(route.path) }" :title="link.label"><AppIcon :name="link.icon" /><span>{{ link.label }}</span></router-link>
           </div>
         </details>
-        <router-link v-if="admin" class="nav-item" to="/users" title="用户列表"><AppIcon name="user" /><span>用户列表</span></router-link>
+        <router-link v-if="admin" class="nav-item" to="/users" title="用户管理"><AppIcon name="user" /><span>用户管理</span></router-link>
       </nav>
       <footer class="sidebar-footer">
-        <details class="account-menu">
+        <details ref="accountMenu" class="account-menu">
           <summary class="nav-item" :title="user?.username"><span class="account-avatar">{{ user?.username?.[0]?.toUpperCase() || 'U' }}</span><span class="account-name">{{ user?.username }}</span><AppIcon class="nav-chevron" name="chevron" /></summary>
-          <div class="account-actions"><button class="nav-item" type="button" @click="logout"><AppIcon name="logout" />退出登录</button></div>
+          <div class="account-actions"><router-link class="nav-item" to="/settings" @click="closeAccountMenu"><AppIcon name="settings" />个人设置</router-link><button class="nav-item" type="button" @click="logout"><AppIcon name="logout" />退出登录</button></div>
         </details>
         <div class="sidebar-brand"><img src="/sage_logo.svg" alt="Sage V2" /><span>Sage V2</span><button class="icon-button sidebar-toggle" type="button" :aria-label="collapsed ? '展开侧边栏' : '收起侧边栏'" :aria-expanded="!collapsed" @click="toggleSidebar"><AppIcon name="panel" /></button></div>
       </footer>

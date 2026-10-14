@@ -75,7 +75,7 @@ def test_workspace_write_does_not_change_catalog_artifact(tmp_path):
             f"/api/agents/{agent_id}/skills", json={"names": ["demo"]}, headers=headers
         )
         written = client.put(
-            "/api/workspace/skills/demo",
+            f"/api/workspace/skills/demo?agent_id={agent_id}",
             json={"content": "---\nname: demo\ndescription: local\n---\n\n# Local\n"},
             headers=headers,
         )
@@ -134,6 +134,40 @@ def test_upload_zip_batch_partial_success(tmp_path):
         assert payload["results"][1]["success"] is False
         listed = client.get("/api/skills", headers=headers)
         assert [item["name"] for item in listed.json()["data"]] == ["writer"]
+
+
+def test_skill_file_browser_lists_and_reads_nested_text_and_binary(tmp_path):
+    payload = io.BytesIO()
+    with zipfile.ZipFile(payload, "w") as archive:
+        archive.writestr("writer/SKILL.md", "---\nname: writer\ndescription: Writer\n---\n# Writer\n")
+        archive.writestr("writer/references/guide.md", "# Guide\nDetails\n")
+        archive.writestr("writer/assets/pixel.png", b"\x89PNG\r\n\x1a\n\x00")
+    with _client(tmp_path)[0] as client:
+        token = register_and_login(client)
+        headers = {"Authorization": f"Bearer {token}"}
+        uploaded = client.post(
+            "/api/skills/upload",
+            files=[("files", ("writer.zip", payload.getvalue(), "application/zip"))],
+            headers=headers,
+        )
+        skill_id = uploaded.json()["data"]["skills"][0]["skill_id"]
+        base = f"/api/skills/{skill_id}/files"
+        listed = client.get(base, headers=headers)
+        assert listed.status_code == 200
+        assert {item["path"] for item in listed.json()["data"]} == {
+            "SKILL.md", "references/guide.md", "assets/pixel.png"
+        }
+        guide = client.get(f"{base}/references/guide.md", headers=headers)
+        assert guide.status_code == 200
+        assert guide.content == b"# Guide\nDetails\n"
+        image = client.get(f"{base}/assets/pixel.png", headers=headers)
+        assert image.content == b"\x89PNG\r\n\x1a\n\x00"
+        assert image.headers["x-content-type-options"] == "nosniff"
+        other = register_and_login(client, "bob")
+        assert client.get(base, headers={"Authorization": f"Bearer {other}"}).status_code == 404
+        client.cookies.clear()
+        assert client.get(base).status_code == 401
+        assert client.get(f"{base}/references/missing.md", headers=headers).status_code == 404
 
 
 def test_publish_rejects_removed_dimension(tmp_path):

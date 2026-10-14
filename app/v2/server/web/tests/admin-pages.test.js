@@ -3,7 +3,7 @@ import { test } from 'node:test'
 import { createRenderer, nextTick, ssrContextKey } from 'vue'
 import { createServer } from 'vite'
 
-async function setup(t, name) {
+async function setup(t, name, directory = 'views') {
   const server = await createServer({ server: { middlewareMode: true, watch: null, hmr: false, ws: false } })
   t.after(() => server.close())
   const previous = Object.getOwnPropertyDescriptor(globalThis, 'localStorage')
@@ -15,10 +15,10 @@ async function setup(t, name) {
     else delete globalThis.localStorage
   })
   const { api } = await server.ssrLoadModule('/src/api.js')
-  const { default: Component } = await server.ssrLoadModule(`/src/views/${name}.vue`)
-  return { api, mount: async () => {
+  const { default: Component } = await server.ssrLoadModule(`/src/${directory}/${name}.vue`)
+  return { api, mount: async (props = {}) => {
     const renderer = createRenderer({ createComment: () => ({}), insert() {}, remove() {}, parentNode: () => null, nextSibling: () => null })
-    const app = renderer.createApp({ ...Component, render: () => null })
+    const app = renderer.createApp({ ...Component, render: () => null }, props)
     app.provide(ssrContextKey, {})
     const vm = app.mount({})
     t.after(() => app.unmount())
@@ -39,6 +39,7 @@ test('admin opens foreign chat pages read-only and new conversations use own age
   })
   const state = await mount()
   assert.equal(state.readOnly, true)
+  assert.equal(state.workspaceThreadId, 'foreign')
   assert.equal(state.historyOffset, 500)
   await state.loadHistory(); await state.loadHistory()
   assert.equal(state.historyOffset, 1500)
@@ -47,6 +48,7 @@ test('admin opens foreign chat pages read-only and new conversations use own age
   await state.send()
   assert.equal(state.text, 'must not send as Alice')
   state.startNew()
+  assert.equal(state.workspaceThreadId, '')
   assert.equal(state.readOnly, false)
   assert.equal(state.selectedAgentId, 'own-agent')
   assert.equal(state.historyTotal, 0)
@@ -116,20 +118,76 @@ test('agent editor saves V2 fields and selected skills before staying open or ex
   assert.equal(api.updateAgent.mock.calls.length, 1)
 })
 
-test('skills without a source category are searchable and foreign names cannot be bound', async t => {
+test('skills are searchable and can be filtered by agent without changing bindings', async t => {
   const { api, mount } = await setup(t, 'Skills')
   const own = { skill_id: 'own', name: 'demo', description: 'Own skill', _owner: { user_id: 'admin' } }
   const foreign = { skill_id: 'foreign', name: 'demo', description: 'Foreign skill', _owner: { user_id: 'alice' } }
   t.mock.method(api, 'listSkills', async () => [own, foreign])
   t.mock.method(api, 'listAgents', async () => [{ id: 'own-agent', name: 'My agent' }])
-  t.mock.method(api, 'listAgentSkills', async () => [])
-  t.mock.method(api, 'bindAgentSkills', async () => [])
+  t.mock.method(api, 'listAgentSkills', async () => [own])
+  t.mock.method(api, 'bindAgentSkills', async () => { throw new Error('must not change bindings') })
   const state = await mount()
   assert.equal(state.visibleSkills.length, 2)
   state.search = 'own skill'
   assert.deepEqual(state.visibleSkills.map(skill => skill.skill_id), ['own'])
-  await state.toggleBind(foreign)
+  state.search = ''
+  state.filterAgentId = 'own-agent'
+  await state.changeAgent()
+  assert.deepEqual(state.visibleSkills.map(skill => skill.skill_id), ['own'])
   assert.equal(api.bindAgentSkills.mock.calls.length, 0)
-  await state.toggleBind(own)
-  assert.deepEqual(api.bindAgentSkills.mock.calls[0].arguments, ['own-agent', ['demo']])
+  state.filterAgentId = ''
+  await state.changeAgent()
+  assert.equal(state.visibleSkills.length, 2)
+})
+
+test('skill browser opens every nested file and reads text and binary content', async t => {
+  const { api, mount } = await setup(t, 'SkillBrowser', 'components')
+  t.mock.method(api, 'skillFiles', async () => [
+    { path: 'SKILL.md', size: 8 },
+    { path: 'references/guide.txt', size: 5 },
+    { path: 'assets/raw.bin', size: 3 },
+  ])
+  t.mock.method(api, 'skillFile', async (id, path) => ({
+    blob: new Blob([path === 'SKILL.md' ? '# Skill\n' : path.endsWith('.txt') ? 'guide' : new Uint8Array([0, 1, 255])]),
+  }))
+  const state = await mount({ item: { skill_id: 'writer', name: 'writer' } })
+  await state.inspect()
+  assert.equal(state.selected, 'SKILL.md')
+  assert.deepEqual(state.tree.filter(entry => entry.folder).map(entry => entry.path), ['assets', 'references'])
+  await state.selectFile('references/guide.txt')
+  assert.equal(state.content, 'guide')
+  await state.selectFile('assets/raw.bin')
+  assert.equal(state.kind, 'binary')
+  assert.match(state.hexRows[0], /00 01 ff/)
+})
+
+test('personal settings reads and saves only the current account policy even for admins', async t => {
+  const { api, mount } = await setup(t, 'PersonalSettings')
+  t.mock.method(api, 'adminUsers', async () => { throw new Error('must not fetch other users') })
+  t.mock.method(api, 'executionPolicy', async () => ({ shell: 'ask', on_approval_required: 'suspend', approval_timeout_seconds: 3600 }))
+  t.mock.method(api, 'saveExecutionPolicy', async body => body)
+  const state = await mount()
+  assert.equal(state.form.timeout, 60)
+  state.form.shell = 'deny'
+  state.form.timeout = 30
+  await state.save()
+  assert.deepEqual(api.saveExecutionPolicy.mock.calls[0].arguments, [{ shell: 'deny', on_approval_required: 'suspend', approval_timeout_seconds: 1800 }])
+  assert.equal(api.adminUsers.mock.calls.length, 0)
+})
+
+test('user execution policy viewer switches to the selected row without changing policies', async t => {
+  const { api, mount } = await setup(t, 'Users')
+  const alice = { user_id: 'alice', username: 'Alice', execution_policy: { shell: 'ask', on_approval_required: 'suspend', approval_timeout_seconds: 3600 } }
+  const bob = { user_id: 'bob', username: 'Bob', execution_policy: { shell: 'deny', on_approval_required: 'deny', approval_timeout_seconds: 1800 } }
+  t.mock.method(api, 'adminUsers', async () => [alice, bob])
+  t.mock.method(api, 'saveExecutionPolicy', async () => { throw new Error('read-only viewer') })
+  const state = await mount()
+  state.showExecutionPolicy(state.users[0])
+  assert.equal(state.policyOpen, true)
+  assert.equal(state.selectedUser.execution_policy.shell, 'ask')
+  state.policyOpen = false
+  state.showExecutionPolicy(state.users[1])
+  assert.equal(state.selectedUser.username, 'Bob')
+  assert.equal(state.selectedUser.execution_policy.shell, 'deny')
+  assert.equal(api.saveExecutionPolicy.mock.calls.length, 0)
 })

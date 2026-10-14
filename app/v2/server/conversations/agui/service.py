@@ -211,6 +211,7 @@ class ConversationService:
         }
 
     async def start(self, request, *, user_id: str, last_event_id: str | None = None, agent_id: str | None = None):
+        workspace_user_id = user_id
         stream_thread_id = stream_run_id = None
         if agent_id is not None:
             stream_thread_id, stream_run_id = request.thread_id, request.run_id
@@ -238,7 +239,7 @@ class ConversationService:
             composition_hash=self.application.composition_hash,
             default_agent_id=admitted.agent_id,
             enabled_skills=enabled,
-            metadata=admitted.metadata,
+            metadata={**admitted.metadata, "server_v2.workspace_user_id": workspace_user_id},
         )
         if stream_run_id is not None:
             command = command.model_copy(update={"config": command.config.model_copy(update={

@@ -1,7 +1,7 @@
 <script setup>
 import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 
-const props = defineProps({ modelValue: Boolean, title: String, busy: Boolean })
+const props = defineProps({ modelValue: Boolean, title: String, busy: Boolean, centered: Boolean })
 const emit = defineEmits(['update:modelValue'])
 const dialog = ref(null)
 const body = ref(null)
@@ -41,11 +41,11 @@ onBeforeUnmount(() => { document.removeEventListener('focusin', rememberFocus); 
 
 <template>
   <Teleport to="body">
-    <dialog ref="dialog" class="form-drawer" :aria-label="title" @cancel.prevent="close" @click="event => { if (event.target === dialog) close() }">
+    <dialog ref="dialog" class="form-drawer" :class="{ 'form-dialog': centered }" :aria-label="title" @cancel.prevent="close" @click="event => { if (event.target === dialog) close() }">
       <div class="form-drawer-shell">
         <header class="form-drawer-head">
           <h2>{{ title }}</h2>
-          <button class="btn ghost" type="button" aria-label="关闭侧窗" :disabled="busy" @click="close">关闭</button>
+          <button class="btn ghost" type="button" :aria-label="centered ? '关闭弹框' : '关闭侧窗'" :disabled="busy" @click="close">关闭</button>
         </header>
         <div ref="body" class="form-drawer-body"><slot /></div>
       </div>
@@ -63,4 +63,9 @@ onBeforeUnmount(() => { document.removeEventListener('focusin', rememberFocus); 
 .form-drawer-body :deep(.panel) { box-shadow: none; margin: 0 0 1rem; }
 @media (max-width: 640px) { .form-drawer { width: 100vw; } .form-drawer-body { padding: 1rem; } }
 @media (prefers-reduced-motion: no-preference) { .form-drawer[open] { animation: drawer-enter 180ms ease-out; } @keyframes drawer-enter { from { transform: translateX(100%); } to { transform: translateX(0); } } }
+.form-dialog { inset: 0; width: min(32rem, calc(100vw - 2rem)); height: fit-content; max-height: calc(100dvh - 2rem); margin: auto; border: 1px solid var(--border); border-radius: var(--radius); }
+.form-dialog[open] { display: flex; animation: none; }
+.form-dialog .form-drawer-shell { width: 100%; height: auto; min-height: 0; max-height: calc(100dvh - 2rem); }
+.form-dialog .form-drawer-head h2 { overflow-wrap: anywhere; min-width: 0; }
+.form-dialog .form-drawer-head button { flex-shrink: 0; }
 </style>

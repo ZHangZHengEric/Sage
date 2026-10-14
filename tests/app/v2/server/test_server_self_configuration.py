@@ -76,7 +76,7 @@ def test_catalog_agent_registers_then_uses_local_skill_in_same_agui_run(
             "/api/auth/login", json={"username": "alice", "password": "secret1"}
         ).json()["data"]
         user_id = login["user"]["user_id"]
-        directory = host.paths.workspace_dir(user_id) / "downloads" / "review"
+        directory = host.paths.workspace_dir(user_id, client.get("/api/agents", headers={"Authorization": f"Bearer {login['access_token']}"}).json()["data"][0]["id"]) / "downloads" / "review"
         directory.mkdir(parents=True)
         (directory / "SKILL.md").write_text("# Review\nCheck actual deployed routes.")
         response = client.post(
