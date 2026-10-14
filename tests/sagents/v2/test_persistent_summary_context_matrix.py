@@ -953,3 +953,226 @@ async def test_long_run_summarizes_old_image_batches_and_reuses_exact_request(bu
     rolled = await reducer.reduce(continued, budget, scope=scope())
     assert rolled.messages[1] == request
     assert rolled.messages[-3:] == continued[-3:]
+
+
+class BoundedSummaryRecorder:
+    def __init__(self, fail_on=None):
+        self.requests = []
+        self.fail_on = fail_on
+
+    async def summarize(self, request):
+        self.requests.append(request)
+        if len(self.requests) == self.fail_on:
+            raise RuntimeError("summary provider failed")
+        return "bounded rolling summary"
+
+
+def oversized_parallel_unit():
+    return (
+        ModelMessage(
+            role="assistant",
+            tool_calls=(
+                ModelToolCall(
+                    tool_call_id="project", name="get_item", arguments={"id": "item"}
+                ),
+                ModelToolCall(
+                    tool_call_id="shell",
+                    name="execute_shell_command",
+                    arguments={"command": "inspect"},
+                ),
+            ),
+        ),
+        ModelMessage(
+            role="tool",
+            tool_call_id="project",
+            content=(TextBlock(text="PROJECT_BEGIN" + "p" * 13_745 + "PROJECT_END"),),
+        ),
+        ModelMessage(
+            role="tool",
+            tool_call_id="shell",
+            content=(TextBlock(text="SHELL_BEGIN" + "s" * 78_520 + "SHELL_END"),),
+        ),
+    )
+
+
+@pytest.mark.asyncio
+async def test_oversized_parallel_results_fragment_only_summary_and_cover_whole_unit():
+    from sagents.v2.context.plugins.estimator_json import JsonHeuristicTokenEstimator
+
+    original = oversized_parallel_unit()
+    snapshot = tuple(message.model_dump() for message in original)
+    summarizer = BoundedSummaryRecorder()
+    estimator = JsonHeuristicTokenEstimator()
+    reducer = PersistentSummaryContextReducer(
+        InMemoryConversationSummaryStore(),
+        summarizer=summarizer,
+        estimator=estimator,
+        summary_target_tokens=4096,
+        max_summary_source_tokens=24000,
+    )
+    assert estimator.estimate(original) > 24000 - 4096 - 256
+    checkpoints = []
+
+    async def checkpoint(text, count):
+        checkpoints.append(count)
+
+    result, covered = await reducer._hierarchical_summary(
+        scope(), None, original, on_batch_completed=checkpoint
+    )
+    assert result == "bounded rolling summary"
+    assert covered == 3
+    assert checkpoints == [3]
+    assert len(summarizer.requests) >= 2
+    for request in summarizer.requests:
+        prefix = (
+            (
+                ModelMessage(
+                    role="system", content=(TextBlock(text=request.previous_summary),)
+                ),
+            )
+            if request.previous_summary
+            else ()
+        )
+        assert estimator.estimate((*prefix, *request.messages)) <= 24000
+    text = "\n".join(
+        block.text
+        for request in summarizer.requests
+        for message in request.messages
+        for block in message.content
+    )
+    for marker in (
+        "PROJECT_BEGIN",
+        "PROJECT_END",
+        "SHELL_BEGIN",
+        "SHELL_END",
+        '"tool_call_id": "project"',
+        '"tool_call_id": "shell"',
+    ):
+        assert marker in text
+    # All result text remains present, even across fragment boundaries.
+    assert text.count("p") >= 13_745
+    assert text.count("s") >= 78_520
+    assert tuple(message.model_dump() for message in original) == snapshot
+
+
+@pytest.mark.asyncio
+async def test_fragment_failure_does_not_checkpoint_partial_parallel_unit():
+    summarizer = BoundedSummaryRecorder(fail_on=2)
+    reducer = PersistentSummaryContextReducer(
+        InMemoryConversationSummaryStore(),
+        summarizer=summarizer,
+        summary_target_tokens=4096,
+        max_summary_source_tokens=24000,
+    )
+    checkpoints = []
+
+    async def checkpoint(text, count):
+        checkpoints.append(count)
+
+    with pytest.raises(RuntimeError, match="summary provider failed"):
+        await reducer._hierarchical_summary(
+            scope(), None, oversized_parallel_unit(), on_batch_completed=checkpoint
+        )
+    assert checkpoints == []
+
+
+@pytest.mark.asyncio
+async def test_call_budget_never_claims_unprocessed_tool_fragments():
+    summarizer = BoundedSummaryRecorder()
+    reducer = PersistentSummaryContextReducer(
+        InMemoryConversationSummaryStore(),
+        summarizer=summarizer,
+        summary_target_tokens=4096,
+        max_summary_source_tokens=24000,
+        max_summary_calls=1,
+    )
+    with pytest.raises(SageV2Error) as caught:
+        await reducer._hierarchical_summary(scope(), None, oversized_parallel_unit())
+    assert caught.value.info.code == "context.summary_source_too_large"
+    assert summarizer.requests == []
+    preceding = ModelMessage(
+        role="user", content=(TextBlock(text="Earlier completed history"),)
+    )
+    _, count = await reducer._hierarchical_summary(
+        scope(), None, (preceding, *oversized_parallel_unit())
+    )
+    assert count == 1
+    assert len(summarizer.requests) == 1
+
+
+@pytest.mark.asyncio
+async def test_fragmented_summary_redacts_inline_media_in_tool_arguments_and_results():
+    summarizer = BoundedSummaryRecorder()
+    secret_uri = "data:image/png;base64," + "A" * 100_000
+    messages = (
+        ModelMessage(
+            role="assistant",
+            tool_calls=(
+                ModelToolCall(
+                    tool_call_id="image",
+                    name="inspect",
+                    arguments={"image": secret_uri},
+                ),
+            ),
+        ),
+        ModelMessage(
+            role="tool",
+            tool_call_id="image",
+            content=(JsonBlock(value={"image": secret_uri, "output": "x" * 100_000}),),
+        ),
+    )
+    reducer = PersistentSummaryContextReducer(
+        InMemoryConversationSummaryStore(),
+        summarizer=summarizer,
+        summary_target_tokens=4096,
+        max_summary_source_tokens=24000,
+    )
+    _, covered = await reducer._hierarchical_summary(scope(), None, messages)
+    assert covered == 2
+    serialized = json.dumps(
+        [
+            request.model_dump()
+            if hasattr(request, "model_dump")
+            else [m.model_dump() for m in request.messages]
+            for request in summarizer.requests
+        ]
+    )
+    assert "A" * 100 not in serialized
+    assert messages[0].tool_calls[0].arguments["image"] == secret_uri
+
+
+@pytest.mark.asyncio
+async def test_many_parallel_results_pack_into_bounded_summary_calls():
+    summarizer = BoundedSummaryRecorder()
+    calls = tuple(
+        ModelToolCall(tool_call_id=f"call_{index}", name="inspect", arguments={})
+        for index in range(10)
+    )
+    messages = (
+        ModelMessage(role="assistant", tool_calls=calls),
+        *(
+            ModelMessage(
+                role="tool",
+                tool_call_id=call.tool_call_id,
+                content=(TextBlock(text="r" * 20_000),),
+            )
+            for call in calls
+        ),
+    )
+    reducer = PersistentSummaryContextReducer(
+        InMemoryConversationSummaryStore(),
+        summarizer=summarizer,
+        summary_target_tokens=4096,
+        max_summary_source_tokens=24000,
+        max_summary_calls=4,
+    )
+    _, count = await reducer._hierarchical_summary(scope(), None, messages)
+    assert count == len(messages)
+    assert len(summarizer.requests) <= 4
+    result_ids = {
+        message.tool_call_id
+        for request in summarizer.requests
+        for message in request.messages
+        if message.role == "tool"
+    }
+    assert result_ids == {call.tool_call_id for call in calls}

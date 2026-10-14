@@ -341,7 +341,12 @@ class DefaultContextAssembler:
                 source_message_count=len(messages),
             )
         view = self._apply_inference_view(projection.messages, volatile)
-        view = await hydrate_image_blocks(view, self.artifact_store)
+        artifact_store = self.artifact_store
+        if artifact_store is None and run_id is not None and self.history is not None:
+            from sagents.v2.runtime.artifact.session import SessionArtifactStore
+
+            artifact_store = SessionArtifactStore(self.history.reader, run_id)
+        view = await hydrate_image_blocks(view, artifact_store)
         if view != projection.messages:
             projection = projection.model_copy(
                 update={

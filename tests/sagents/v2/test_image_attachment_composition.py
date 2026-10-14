@@ -27,7 +27,8 @@ from sagents.v2.runtime.execution.sandbox import (
     ResourceLimits,
     SandboxGrantIssuer,
 )
-from sagents.v2.runtime.artifact import ScopedArtifactStore, FilesystemArtifactStore
+from sagents.v2.runtime.artifact import InMemoryArtifactStore
+from sagents.v2.runtime.session import FilesystemSessionStore
 from sagents.v2.testing.plugins.scripted_model import (
     ScriptedModelProvider,
     ScriptedModelStep,
@@ -138,7 +139,7 @@ async def test_builder_wires_durable_images_from_tool_to_request_and_session(
         .build(package)
     )
     try:
-        assert isinstance(application.service("artifact.store"), FilesystemArtifactStore)
+        assert isinstance(application.service("artifact.store"), InMemoryArtifactStore)
         stream = await application.entrypoint().run_stream(
             StartRun(
                 agent_id=agent_id,
@@ -174,15 +175,40 @@ async def test_builder_wires_durable_images_from_tool_to_request_and_session(
         serialized = json.dumps([event.model_dump(mode="json") for event in events])
         assert "sage-image:" in serialized
         assert "data:image" not in serialized
-        # Reopen the host store in the namespace selected from the Run's tenant.
-        digest = images[0].uri.split(",", 1)[1]
+        # Images belong to the selected SessionStore, not the generic artifact service.
         import base64
         import hashlib
 
-        identifier = hashlib.sha256(base64.b64decode(digest)).hexdigest()
-        reference, _ = await ScopedArtifactStore(
-            FilesystemArtifactStore(root / "artifacts"), "tenant"
-        ).get(identifier)
+        identifier = hashlib.sha256(
+            base64.b64decode(images[0].uri.split(",", 1)[1])
+        ).hexdigest()
+        context = RequestContext(
+            actor=ActorRef(
+                principal_id="owner",
+                principal_type=PrincipalType.USER,
+                tenant_id="tenant",
+            )
+        )
+        (
+            reference,
+            _,
+        ) = await application.entrypoint().runtime.session_store.get_attachment(
+            run.session_id,
+            identifier,
+            context=context,
+        )
         assert reference.digest == "sha256:" + identifier
+        assert not (root / "artifacts").exists()
     finally:
         await application.close()
+
+    reopened = FilesystemSessionStore(root)
+    try:
+        reference, content = await reopened.get_attachment(
+            run.session_id, identifier, context=context
+        )
+        assert b"".join([chunk async for chunk in content]) == base64.b64decode(
+            images[0].uri.split(",", 1)[1]
+        )
+    finally:
+        await reopened.close()
