@@ -22,6 +22,7 @@ from sagents.v2.contracts.provider_state import make_provider_state, read_provid
 from sagents.v2.runtime.credentials.contracts import CredentialMaterial
 from sagents.v2.model.wire import (
     compact_json,
+    minimum_reasoning_control,
     parse_tool_arguments,
     provider_error,
     stream_incomplete_error,
@@ -69,6 +70,7 @@ class OpenAIResponsesConfig(StrictModel):
     default_temperature: float | None = None
     default_top_p: float | None = None
     reasoning_effort: str | None = None
+    invocation_strategy: dict[str, Any] = Field(default_factory=dict)
     timeout_seconds: float = Field(default=120, gt=0)
     store: bool = False
     extra_body: dict[str, Any] = Field(default_factory=dict)
@@ -101,6 +103,7 @@ class OpenAIResponsesModelProvider:
             reasoning_effort = "none"
         return config.model_copy(
             update={
+                "invocation_strategy": dict(profile.invocation_strategy),
                 "default_max_output_tokens": min(
                     config.default_max_output_tokens
                     or profile.effective_max_output_tokens,
@@ -256,11 +259,15 @@ class OpenAIResponsesModelProvider:
             payload["temperature"] = temperature
         if self.config.default_top_p is not None:
             payload["top_p"] = self.config.default_top_p
-        if (
-            self.config.reasoning_effort is not None
-            and not self._reasoning_control_rejected
-        ):
-            payload["reasoning"] = {"effort": self.config.reasoning_effort}
+        effort = self.config.reasoning_effort
+        if request.reasoning_mode == "minimum":
+            control, effort = minimum_reasoning_control(
+                self.config.invocation_strategy, default_disable="reasoning_effort_none"
+            )
+            if control == "reasoning_effort_none":
+                effort = "none"
+        if effort is not None and not self._reasoning_control_rejected:
+            payload["reasoning"] = {"effort": effort}
             if not self.config.store:
                 payload["include"] = ["reasoning.encrypted_content"]
         if request.response_format == "json_object":
@@ -405,6 +412,12 @@ class OpenAIResponsesModelProvider:
                 fragment["arguments"],
                 tool_call_id=fragment["id"],
                 name=fragment["name"],
+                diagnostic_context={
+                    "provider": self.config.provider_id,
+                    "response_id": response_id,
+                    "finish_reason": finish_reason,
+                    "usage": usage.model_dump(mode="json"),
+                },
             )
             for fragment in tool_fragments.values()
         )

@@ -39,6 +39,7 @@ from sagents.v2.model.contracts import (
 )
 from sagents.v2.model.wire import (
     compact_json,
+    minimum_reasoning_control,
     parse_tool_arguments,
     provider_error,
     stream_incomplete_error,
@@ -71,6 +72,7 @@ class GeminiGenerateContentConfig(StrictModel):
     default_temperature: float | None = None
     default_top_p: float | None = None
     reasoning_effort: str | None = None
+    invocation_strategy: dict[str, Any] = Field(default_factory=dict)
     # Gemini 2.5 uses budgets; Gemini 3 uses levels. Gateways can override the
     # dialect explicitly without pretending to implement another protocol.
     thinking_control: Literal["auto", "level", "budget"] = "auto"
@@ -132,6 +134,7 @@ class GeminiGenerateContentModelProvider:
     @classmethod
     def apply_capability_profile(cls, config, profile):
         updates: dict[str, Any] = {
+            "invocation_strategy": dict(profile.invocation_strategy),
             "default_max_output_tokens": min(
                 config.default_max_output_tokens or profile.effective_max_output_tokens,
                 profile.effective_max_output_tokens,
@@ -234,7 +237,10 @@ class GeminiGenerateContentModelProvider:
             thinking: dict[str, Any] = {"includeThoughts": self.config.include_thoughts}
             if self.config.thinking_budget is not None:
                 thinking["thinkingBudget"] = self.config.thinking_budget
-            elif self.config.reasoning_effort is not None:
+            elif (
+                self.config.reasoning_effort is not None
+                and request.reasoning_mode != "minimum"
+            ):
                 effort = self.config.reasoning_effort
                 if effort not in _EFFORT_BUDGETS:
                     raise self._error("model.reasoning_effort_unsupported", effort)
@@ -242,6 +248,25 @@ class GeminiGenerateContentModelProvider:
                     thinking["thinkingBudget"] = _EFFORT_BUDGETS[effort]
                 else:
                     thinking["thinkingLevel"] = effort
+            if request.reasoning_mode == "minimum":
+                control, effort = minimum_reasoning_control(
+                    self.config.invocation_strategy,
+                    default_disable=(
+                        "thinking_budget_zero"
+                        if self.thinking_control == "budget"
+                        else "thinking_level_minimal"
+                    ),
+                )
+                thinking = {"includeThoughts": False}
+                if control == "thinking_budget_zero":
+                    thinking["thinkingBudget"] = 0
+                elif effort is not None:
+                    if self.thinking_control == "budget":
+                        thinking["thinkingBudget"] = _EFFORT_BUDGETS[effort]
+                    else:
+                        thinking["thinkingLevel"] = effort
+                elif control != "omit":
+                    thinking["thinkingLevel"] = "minimal"
             generation["thinkingConfig"] = thinking
         if (
             request.response_format == "json_object"
