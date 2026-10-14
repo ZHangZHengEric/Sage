@@ -26,6 +26,8 @@ from sagents.v2.context.plugins.window import WindowContextReducer
 from sagents.v2.context.token_estimator import TokenEstimator, estimate_tokens_async
 from sagents.v2.context.calibration import input_usage_projection, input_usage_scope
 from sagents.v2.model import ModelMessage
+from sagents.v2.runtime.artifact.contracts import ArtifactStore
+from sagents.v2.runtime.artifact.images import hydrate_image_blocks
 from sagents.v2.contracts.items import ContentBlock
 from sagents.v2.contracts.commands import StartRun
 from sagents.v2.contracts.items import TextBlock
@@ -88,6 +90,7 @@ class DefaultContextAssembler:
         estimator: TokenEstimator | None = None,
         history_reader: SessionHistoryReader | None = None,
         projection_observer: ContextProjectionObserver | None = None,
+        artifact_store: ArtifactStore | None = None,
     ) -> None:
         static = []
         if system_instructions:
@@ -129,6 +132,7 @@ class DefaultContextAssembler:
             else None
         )
         self.projection_observer = projection_observer
+        self.artifact_store = artifact_store
 
     async def initial_ledger(
         self, command: StartRun, *, run_id: str | None = None
@@ -337,6 +341,12 @@ class DefaultContextAssembler:
                 source_message_count=len(messages),
             )
         view = self._apply_inference_view(projection.messages, volatile)
+        artifact_store = self.artifact_store
+        if artifact_store is None and run_id is not None and self.history is not None:
+            from sagents.v2.runtime.artifact.session import SessionArtifactStore
+
+            artifact_store = SessionArtifactStore(self.history.reader, run_id)
+        view = await hydrate_image_blocks(view, artifact_store)
         if view != projection.messages:
             projection = projection.model_copy(
                 update={

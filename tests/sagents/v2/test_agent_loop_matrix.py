@@ -3653,15 +3653,24 @@ async def test_output_limit_preserves_partial_answer_and_bounded_continuation(
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("decision", ["approve_once", "deny"])
-async def test_image_followup_survives_approval_and_engine_restart(decision):
+async def test_image_followup_survives_approval_and_engine_restart(decision, tmp_path):
+    from sagents.v2.runtime.artifact import FilesystemArtifactStore
+    from sagents.v2.runtime.artifact.images import snapshot_image
+    store = FilesystemArtifactStore(tmp_path / "artifacts")
+    uri = await snapshot_image(store, b"snapshot-image")
+
     async def image_handler(call, context):
         result = await tool_handler(call, context)
         return result.model_copy(update={"metadata": {"followup_user_message": {
             "content": [
                 {"kind": "text", "text": "Inspect frame"},
-                {"kind": "image", "uri": "data:image/png;base64,AAAA", "mime_type": "image/png"},
+                {"kind": "image", "uri": uri, "mime_type": "image/jpeg"},
             ],
-            "metadata": {"tool_source": "analyze_image", "tool_context": True},
+            "metadata": {
+                "tool_source": "analyze_image",
+                "tool_context": True,
+                "image_path": "/workspace/frame.png",
+            },
         }}})
 
     calls = (tool_call("read_value"), ModelToolCall(
@@ -3674,6 +3683,7 @@ async def test_image_followup_survives_approval_and_engine_restart(decision):
     runtime, handle, loop, executor = await setup_loop(model, handlers={
         "read_value": image_handler, "write_value": tool_handler,
     })
+    loop.context_assembler.artifact_store = store
     run = await loop.execute(handle.run_id, CONTEXT)
     assert run.state == RunState.SUSPENDED
     suspension, interaction = await _pending_interaction(runtime, run)
@@ -3681,13 +3691,17 @@ async def test_image_followup_survives_approval_and_engine_restart(decision):
         _approval_reply(run.run_id, run, suspension, interaction, decision, "image:approval"), CONTEXT,
     )
     loop = AgentLoopEngine(runtime=runtime, model=model,
-        tool_catalog=InMemoryToolCatalog((READ_TOOL, WRITE_TOOL)), tool_executor=executor)
+        tool_catalog=InMemoryToolCatalog((READ_TOOL, WRITE_TOOL)), tool_executor=executor,
+        context_assembler=DefaultContextAssembler(
+            history_reader=runtime.session_store,
+            artifact_store=FilesystemArtifactStore(tmp_path / "artifacts"),
+        ))
     run = await loop.resume(run.run_id, CONTEXT)
     assert run.state == RunState.COMPLETED
     messages = tuple(m for m in model.requests[-1].messages if m.role != "system")
     assert [m.role for m in messages] == ["user", "assistant", "tool", "tool", "user"]
     assert [m.tool_call_id for m in messages if m.role == "tool"] == ["call_1", "call_2"]
-    assert messages[-1].content[-1].uri == "data:image/png;base64,AAAA"
+    assert messages[-1].content[-1].uri.startswith("data:image/jpeg;base64,")
     assert len([call for call in executor.calls if call.tool_call_id == "call_1"]) == 1
 
     command = await runtime.session_store.get_start_command(run.run_id)
@@ -3698,7 +3712,11 @@ async def test_image_followup_survives_approval_and_engine_restart(decision):
     assert [message.role for message in replay[batch:batch + 4]] == [
         "assistant", "tool", "tool", "user",
     ]
-    assert replay[batch + 3].content[-1].uri == "data:image/png;base64,AAAA"
+    assert replay[batch + 3].content[-1].uri == uri
+    assert all(
+        not str(getattr(block, "uri", "")).startswith("data:")
+        for block in replay[batch + 3].content
+    )
 
 
 @pytest.mark.asyncio

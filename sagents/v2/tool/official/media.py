@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import base64
 import io
 import mimetypes
 from pathlib import PurePosixPath
@@ -14,6 +13,7 @@ from sagents.v2._concurrency import bounded_to_thread
 from sagents.v2.contracts.common import new_id
 from sagents.v2.contracts.errors import SageV2Error
 from sagents.v2.contracts.items import JsonBlock
+from sagents.v2.runtime.artifact.images import snapshot_image
 from sagents.v2.tool import SideEffectLevel, ToolExecutionResult, ToolInvocation, tool
 from sagents.v2.tool.official.runtime import OfficialToolRuntime
 
@@ -191,7 +191,13 @@ class MediaTools:
                     "invalid_image",
                 )
             mime = "image/jpeg"
-            uri = f"data:{mime};base64,{base64.b64encode(data).decode('ascii')}"
+            store = getattr(self.runtime, "artifact_store", None)
+            if store is None:
+                return self._error_result(
+                    invocation, image_path, "Image attachment storage is unavailable.",
+                    "attachment_store_unavailable",
+                )
+            uri = await snapshot_image(store, data)
             image_format = mime
         text = (
             prompt.strip()

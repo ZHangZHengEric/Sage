@@ -104,12 +104,26 @@ class LeaseFencedSessionStore:
             ),
         )
 
+    async def put_attachment(self, session_id, **kwargs):
+        return await self._execute_session_fenced(
+            session_id,
+            lambda: self.session_store.put_attachment(session_id, **kwargs),
+        )
+
+    async def copy_attachment(
+        self, source_session_id, target_session_id, artifact_id, **kwargs
+    ):
+        return await self._execute_session_fenced(
+            target_session_id,
+            lambda: self.session_store.copy_attachment(
+                source_session_id, target_session_id, artifact_id, **kwargs
+            ),
+        )
+
     async def delete_derived_state(self, session_id, namespace, key):
         return await self._execute_session_fenced(
             session_id,
-            lambda: self.session_store.delete_derived_state(
-                session_id, namespace, key
-            ),
+            lambda: self.session_store.delete_derived_state(session_id, namespace, key),
         )
 
     def _active_lease(self) -> WorkerLease:

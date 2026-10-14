@@ -136,6 +136,8 @@ class _FilesystemSessionState(SessionStoreCoordinator):
         }
 
     async def _commit_storage_locked(self, session_id: str) -> None:
+        # Publish immutable bytes before committing their canonical references.
+        await self._persist_attachment_files(session_id)
         mutation = self._session_mutation_locked(session_id)
         start_entries = list(mutation.upserts.get("start_idempotency", ()))
         storage_lock = self._storage_locks.setdefault(session_id, asyncio.Lock())
@@ -181,6 +183,46 @@ class _FilesystemSessionState(SessionStoreCoordinator):
                 self._persisted_states[session_id] = state
                 self._storage_recovery_required.discard(session_id)
         self._loaded_session_ids.add(session_id)
+        self._forget_attachment_bytes(session_id)
+
+    def _attachment_files(self, session_id):
+        from sagents.v2.runtime.artifact.plugins.filesystem import (
+            FilesystemArtifactStore,
+        )
+
+        state = {"sessions": [self._session_row_payload(self._sessions[session_id])]}
+        return FilesystemArtifactStore(
+            self._session_dir_for_state(session_id, state) / "attachments"
+        )
+
+    async def _persist_attachment_files(self, session_id):
+        pending = self._pending_attachments(session_id)
+        if not pending:
+            return
+        store = self._attachment_files(session_id)
+        for artifact_id, payload in pending:
+            reference = self._sessions[session_id].attachments[artifact_id]
+
+            async def content(data=payload):
+                yield data
+
+            await store.put(
+                artifact_id=artifact_id,
+                media_type=reference.media_type,
+                content=content(),
+                metadata=reference.metadata,
+            )
+
+    async def _read_attachment_bytes(self, session_id, artifact_id):
+        if (session_id, artifact_id) in self._attachment_payloads:
+            return self._attachment_payloads[(session_id, artifact_id)]
+        reference, content = await self._attachment_files(session_id).get(artifact_id)
+        if reference != self._sessions[session_id].attachments[artifact_id]:
+            raise self._attachment_error(
+                "artifact.integrity_failed",
+                "Attachment file differs from the session manifest.",
+            )
+        return b"".join([chunk async for chunk in content])
 
     def _persist_session_mutation(
         self,
@@ -1979,16 +2021,42 @@ class _SnapshotCodec(_FilesystemSessionState):
         state, _ = self._read_session_aggregate(snapshot)
         rows = state.get("sessions", ())
         if len(rows) != 1 or rows[0]["session_id"] != session_id:
-            raise self._corrupt("session_store.path_mismatch", "Historical Session identity does not match")
+            raise self._corrupt(
+                "session_store.path_mismatch",
+                "Historical Session identity does not match",
+            )
         return state
 
 
 async def read_session_history(root, session_id, context):
     """Return an authorized in-memory view; never modifies the source files."""
-    state = await asyncio.to_thread(_SnapshotCodec(root).load, session_id)
+    codec = _SnapshotCodec(root)
+    state = await asyncio.to_thread(codec.load, session_id)
     if state is None:
         return None
     view = SessionStoreCoordinator(persistence_can_fail=False)
     view._load_state_locked(state)
     await view.authorize_session_actor(session_id, context)
+    references = view._sessions[session_id].attachments
+    if references:
+        attachment_root = codec._session_dir(session_id) / "attachments"
+        if not attachment_root.is_dir():
+            raise view._attachment_error(
+                "artifact.not_found", "Historical session attachment bytes are missing."
+            )
+        from sagents.v2.runtime.artifact.plugins.filesystem import (
+            FilesystemArtifactStore,
+        )
+
+        artifacts = FilesystemArtifactStore(attachment_root)
+        for artifact_id, expected in references.items():
+            reference, stream = await artifacts.get(artifact_id)
+            if reference != expected:
+                raise view._attachment_error(
+                    "artifact.integrity_failed",
+                    "Historical attachment manifest does not match.",
+                )
+            payload = b"".join([chunk async for chunk in stream])
+            view._validate_attachment(expected, payload)
+            view._attachment_payloads[(session_id, artifact_id)] = payload
     return view
