@@ -9,7 +9,7 @@ import sys
 import tempfile
 
 ROOT = Path(__file__).resolve().parents[2]
-VERSION = '2.0.0'
+VERSION = '2.1.0'
 
 
 def main() -> None:

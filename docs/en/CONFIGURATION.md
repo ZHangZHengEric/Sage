@@ -32,6 +32,28 @@ manifest = SageManifestLoader().loads(yaml_text)
 
 `credentials` declares where to resolve a secret; `models` references credentials without embedding their values. `agents` selects instructions and model routes; `entrypoint` selects the initial Agent.
 
+## OrcaRouter models
+
+`orcarouter` is an optional provider preset using the existing OpenAI-compatible
+Chat Completions implementation. In Server v2, select `orcarouter` in the model
+form and enter your model ID and API key. The default endpoint is
+`https://api.orcarouter.ai/v1`; a custom Base URL is preserved.
+
+For an embedded manifest, add this model route and configure the referenced
+credential in the complete manifest:
+
+```yaml
+models:
+  primary:
+    provider: orcarouter
+    model: your-model
+    credential: orcarouter_key
+```
+
+When `base_url` is omitted, the route uses the same OrcaRouter endpoint.
+This preset supports the existing chat protocol; it does not add image or
+video generation APIs.
+
 ## Selecting runtime implementations
 
 Use `runtime.capabilities` for provider bindings. For example, the lazy Skill loader accepts a token budget:
@@ -48,3 +70,9 @@ runtime:
 This is a fragment to add to a complete manifest. Plugin configuration is schema-validated. Availability and behavior depend on actual registered implementations; a metadata-only declaration does not create a working provider.
 
 [Extensions](architecture/PLUGINS.md) · [Environment reference](ENV_VARS.md) · [Full integration manual](https://github.com/ZHangZHengEric/Sage/blob/main/sagents/v2/使用手册.md)
+
+## Desktop interactive UI default
+
+Desktop settings persist `default_interactive_ui` as a boolean, initially `false`. Change it in Settings → General. It initializes new ordinary chats and does not overwrite existing chat preferences. Each chat stores `prefer_interactive_ui`; requests carry `ui_preference: "interactive"` or `"auto"`. Enabled requests preload the bundled OpenUI Skill instructions in host context. This setting belongs to Desktop and does not change embedded SAgents or Server behavior.
+
+See [Desktop usage](applications/DESKTOP.md).

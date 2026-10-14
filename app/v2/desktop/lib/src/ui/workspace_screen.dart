@@ -16,6 +16,9 @@ import '../localization/app_localizations.dart';
 import '../services/terminal_service.dart';
 import '../state/workspace_controller.dart';
 import 'file_preview.dart';
+import 'openui_surface.dart';
+import 'openui_deck.dart';
+import 'openui_message_visibility.dart';
 import 'settings_screen.dart';
 import 'shared/desktop_shell.dart';
 import 'shared/desktop_notice.dart';
@@ -34,6 +37,7 @@ part 'workspace/files.dart';
 part 'workspace/chrome.dart';
 part 'workspace/studio.dart';
 part 'workspace_panels/studio_workspace_panel_plugin.dart';
+part 'workspace_panels/openui_workspace_panel_plugin.dart';
 
 const double _splitHandleHitWidth = 12;
 const double _minRailFraction = 0.16;
@@ -72,6 +76,16 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
   bool _workspaceCollapsed = false;
   bool _settingsOpen = false;
   String _lastStudioId = '';
+  int _lastOpenUiRevision = 0;
+
+  void _onOpenUiSelectionChanged() {
+    final key = widget.controller.expandedOpenUiKey;
+    final revision = widget.controller.expandedOpenUiRevision;
+    if (key == null || revision == _lastOpenUiRevision) return;
+    _lastOpenUiRevision = revision;
+    setState(() => _workspaceCollapsed = false);
+    _panelDockController.open('sage.workspace.openui');
+  }
 
   void _onStudioDockChanged() {
     if (widget.controller.selectedStudio != null &&
@@ -123,6 +137,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
     _rebuildPanelRegistry();
     _panelDockController.addListener(_onStudioDockChanged);
     widget.controller.addListener(_onStudioSelectionChanged);
+    widget.controller.addListener(_onOpenUiSelectionChanged);
   }
 
   @override
@@ -130,7 +145,9 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.controller != widget.controller) {
       oldWidget.controller.removeListener(_onStudioSelectionChanged);
+      oldWidget.controller.removeListener(_onOpenUiSelectionChanged);
       widget.controller.addListener(_onStudioSelectionChanged);
+      widget.controller.addListener(_onOpenUiSelectionChanged);
     }
     if (oldWidget.panelDockController != widget.panelDockController) {
       _panelDockController.removeListener(_onStudioDockChanged);
@@ -151,6 +168,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
   void dispose() {
     _panelDockController.removeListener(_onStudioDockChanged);
     widget.controller.removeListener(_onStudioSelectionChanged);
+    widget.controller.removeListener(_onOpenUiSelectionChanged);
     if (_ownsPanelDockController) _panelDockController.dispose();
     _planPreview.dispose();
     super.dispose();
@@ -162,6 +180,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
       const TerminalWorkspacePanelPlugin(),
       ...widget.panelPlugins,
       const _StudioDetailsPlugin(),
+      const _OpenUiWorkspacePanelPlugin(),
       const _PlanWorkspacePanelPlugin(),
     ]);
     _panelDockController.syncPlugins(

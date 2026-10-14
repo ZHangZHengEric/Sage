@@ -12,6 +12,8 @@ from typing import Any
 from pydantic import SecretStr
 from PIL import Image
 
+from app.v2.desktop.backend.openui_completion import OpenUiOutputChecker
+from sagents.v2.agent.policy.output_self_check import OutputSelfCheckPolicy
 from app.v2.desktop.backend.model_request_defaults import (
     build_llm_extra_body,
     is_openai_reasoning_model,
@@ -132,6 +134,7 @@ from app.v2.desktop.backend.run_context import (
     SandboxSkillWorkspace,
 )
 from app.v2.desktop.backend.run_environment import DesktopRunEnvironmentMixin
+from app.v2.desktop.backend.openui import OpenUiContextProvider
 from app.v2.desktop.backend.runtime_config import (
     _PLAN_BLOCKED_TOOLS,
     _REASONING_DISABLE_EXTRAS,
@@ -872,6 +875,7 @@ class DesktopRunCompositionMixin(DesktopRunEnvironmentMixin):
         async def compose_mode_loop(descriptor, run_id, catalog, executor):
             context_providers = (
                 RunMetadataContextProvider(),
+                OpenUiContextProvider(),
                 PlanContextProvider(goal_state_service),
                 GoalContextProvider(goal_state_service),
                 AgentRosterContextProvider(
@@ -887,7 +891,9 @@ class DesktopRunCompositionMixin(DesktopRunEnvironmentMixin):
                 context_providers = (
                     *context_providers,
                     StudioContextProvider(
-                        self.studio_store, agent.user_id, studio_binding,
+                        self.studio_store,
+                        agent.user_id,
+                        studio_binding,
                         refresh=self.reconcile_studio_results,
                     ),
                 )
@@ -907,7 +913,9 @@ class DesktopRunCompositionMixin(DesktopRunEnvironmentMixin):
                             "model": judge_models_by_agent.get(
                                 descriptor.agent_id, judge_recording_model
                             ),
-                            **DESKTOP_COMPONENT_CONFIG_LOCKS["agent.continuation-policy"],
+                            **DESKTOP_COMPONENT_CONFIG_LOCKS[
+                                "agent.continuation-policy"
+                            ],
                         }
                     },
                     cache_identities=run_cache_identities,
@@ -916,7 +924,9 @@ class DesktopRunCompositionMixin(DesktopRunEnvironmentMixin):
                 if owner is not None:
                     owner.extend(member_ports.scope_handles)
                 base_continuation_policy = member_ports.continuation_policy
-            continuation_policy = base_continuation_policy
+            continuation_policy = OutputSelfCheckPolicy(
+                base_continuation_policy, OpenUiOutputChecker(self.openui_parser),
+            )
             owns_invocation = descriptor.agent_id == agent.agent_id
             if invocation_mode == "plan" and owns_invocation:
                 continuation_policy = PlanCompletionGatePolicy(
@@ -929,23 +939,42 @@ class DesktopRunCompositionMixin(DesktopRunEnvironmentMixin):
                     goal_state_service,
                 )
             self_configuration = None
-            if (owns_invocation and invocation_mode != "plan" and not force_leaf
-                    and sandbox_plugin_id == "sage.sandbox.local-workspace"
-                    and sandbox_config["workspace_mapping"] == "active_workspace"):
-                from sagents.v2.agent.self_configuration import SelfConfigurationService, SqliteSelfConfigurationStore
+            if (
+                owns_invocation
+                and invocation_mode != "plan"
+                and not force_leaf
+                and sandbox_plugin_id == "sage.sandbox.local-workspace"
+                and sandbox_config["workspace_mapping"] == "active_workspace"
+            ):
+                from sagents.v2.agent.self_configuration import (
+                    SelfConfigurationService,
+                    SqliteSelfConfigurationStore,
+                )
 
                 async def authorize_self_configuration(request, context):
-                    if context.actor.principal_id != agent.user_id or context.actor.delegated_by:
-                        raise PermissionError("Only the Agent owner can change its capabilities")
+                    if (
+                        context.actor.principal_id != agent.user_id
+                        or context.actor.delegated_by
+                    ):
+                        raise PermissionError(
+                            "Only the Agent owner can change its capabilities"
+                        )
 
                 from sagents.v2.tool.plugins.sandbox_mcp import SandboxMcpSessionFactory
 
                 self_configuration = SelfConfigurationService(
-                    store=SqliteSelfConfigurationStore(self.runtime_root / "self-configuration.sqlite3"),
+                    store=SqliteSelfConfigurationStore(
+                        self.runtime_root / "self-configuration.sqlite3"
+                    ),
                     owner=json.dumps(["desktop", agent.user_id, agent.agent_id]),
-                    workspace_root=workspace, workspace_alias=workspace_root,
+                    workspace_root=workspace,
+                    workspace_alias=workspace_root,
                     authorize=authorize_self_configuration,
-                    mcp_session_factory=SandboxMcpSessionFactory(sandbox_handle, self._sandbox_grant_issuer, workspace_root=workspace_root),
+                    mcp_session_factory=SandboxMcpSessionFactory(
+                        sandbox_handle,
+                        self._sandbox_grant_issuer,
+                        workspace_root=workspace_root,
+                    ),
                 )
 
             return factory.create_engine(
@@ -1680,6 +1709,7 @@ class DesktopRunCompositionMixin(DesktopRunEnvironmentMixin):
         metadata = {
             "workspace_id": request.workspace_id,
             "preferred_skills": request.preferred_skills,
+            "ui_preference": request.ui_preference,
             "approval_mode": request.approval_mode,
             "invocation_mode": request.invocation_mode,
             "response_language": response_language,

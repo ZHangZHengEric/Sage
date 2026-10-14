@@ -58,6 +58,7 @@ from app.v2.desktop.backend.rsi import DesktopRsiMixin
 from app.v2.desktop.backend.catalog_service import DesktopCatalogServiceMixin
 from app.v2.desktop.backend.observability import create_desktop_log_sink
 from app.v2.desktop.backend.studio import DesktopStudioMixin, StudioStore
+from app.v2.desktop.backend.openui import OpenUiParser, OpenUiStore, OpenUiProjector
 from app.v2.desktop.backend.schemas import (
     AgentCreate as AgentCreate,
     AgentSettingsPatch as AgentSettingsPatch,
@@ -230,6 +231,8 @@ class DesktopV2Service(
         self.settings_path = self.runtime_root / "settings.json"
         self._initialize_rsi()
         self.studio_store = StudioStore(self.runtime_root / "studios.sqlite3")
+        self.openui_store = OpenUiStore(self.runtime_root / "openui.sqlite3")
+        self.openui_parser = OpenUiParser()
         self.extensions = builtin_extension_registry()
         self._workspace_initializations: dict[tuple[str, str, str], Path] = {}
         self._workspace_initialization_lock = asyncio.Lock()
@@ -474,6 +477,7 @@ class DesktopV2Service(
             self._closed = True
 
     async def _close_once(self) -> None:
+        await self.openui_parser.close()
         await self._close_rsi()
         await self._stop_studio_delivery_worker()
         observers = tuple(self._run_observers.values())
@@ -629,6 +633,30 @@ class DesktopV2Service(
                 "authoritative": False,
             },
         }
+
+    async def openui_surfaces(self, session_id: str, user_id: str):
+        await self.start()
+        context = self._context(user_id)
+        runs = await self.session_access.list_session_runs(session_id, context)
+        # Rebuild from durable completed messages if a stream had no subscriber.
+        for run in runs:
+            projector = OpenUiProjector(self, user_id)
+            after = 0
+            while True:
+                events = await self.session_access.read_events(run.run_id, context, after_sequence=after, limit=500)
+                if not events:
+                    break
+                for event in events:
+                    if event.type == "message.completed":
+                        await projector.project(event)
+                after = events[-1].run_sequence
+                if len(events) < 500:
+                    break
+        values = self.openui_store.list(user_id, session_id)
+        for surface in values:
+            message, index = surface["surface_key"].rsplit(":", 1)
+            surface.update(message_id=message, block_index=int(index), complete=True)
+        return values
 
     async def session_runs(self, session_id: str, user_id: str) -> list[dict[str, Any]]:
         await self.start()

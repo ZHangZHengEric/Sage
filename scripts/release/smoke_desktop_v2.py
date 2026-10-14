@@ -33,8 +33,20 @@ import importlib.metadata
 import sys
 import app
 from app.v2.desktop.backend.service import DesktopV2Service
+from app.v2.desktop.backend.openui import OpenUiParser
+import asyncio
+async def check_openui():
+    parser = OpenUiParser()
+    try:
+        partial = await parser.parse('root = Text("He', complete=False)
+        assert partial['props']['content'] == 'He'
+        complete = await parser.parse('root = Text("Hello")', complete=True)
+        assert complete['props']['content'] == 'Hello'
+    finally:
+        await parser.close()
+asyncio.run(check_openui())
 from sagents.v2 import SAgentBuilder
-assert importlib.metadata.version('sage') == '2.0.0'
+assert importlib.metadata.version('sage') == '2.1.0'
 assert any((Path(app.__file__).parent / 'skills').glob('*/SKILL.md'))
 assert not any(n.startswith(('app.v1.', 'sagents.v1.')) for n in sys.modules)
 # Verify native one-writer locks, including Windows, across processes.

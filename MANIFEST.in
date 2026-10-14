@@ -6,3 +6,9 @@ recursive-include app/clients/terminal/scripts *.sh
 
 recursive-include app/skills *
 global-exclude __pycache__ *.py[cod]
+
+include app/v2/desktop/backend/openui_runtime/*.mjs
+include app/v2/desktop/backend/openui_runtime/*.cjs
+include app/v2/desktop/backend/openui_runtime/*.json
+include app/v2/desktop/backend/openui_runtime/*.txt
+include app/v2/desktop/backend/openui_runtime/*LICENSE

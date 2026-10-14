@@ -58,6 +58,7 @@ from app.v2.desktop.backend.run_lifecycle import (
 )
 from app.v2.desktop.backend.run_composition import DesktopRunCompositionMixin
 from app.v2.desktop.backend.studio import STUDIO_TOOLS
+from app.v2.desktop.backend.openui import OpenUiProjector
 from app.v2.desktop.backend.runtime_config import (
     _SKILL_NAME,
     _TOOL_NAME,
@@ -78,6 +79,30 @@ class DesktopRunServiceMixin(DesktopRunCompositionMixin):
     ) -> AsyncIterator[str]:
         request = request.model_copy(deep=True)
         await self.start()
+        action_surface = None
+        if request.openui_action is not None:
+            action_surface, request, replay_run = await self._prepare_openui_action(
+                request, user_id
+            )
+            if replay_run:
+                run = await self.session_access.get_run(
+                    replay_run, self._context(user_id)
+                )
+                yield (
+                    json.dumps(
+                        {
+                            "kind": "stream.opened",
+                            "handle": {
+                                "run_id": run.run_id,
+                                "session_id": run.session_id,
+                            },
+                        }
+                    )
+                    + "\n"
+                )
+                async for line in self.subscribe_events(replay_run, 0, user_id):
+                    yield line
+                return
         accepted_handle = None
         driver: _DesktopDriver | None = None
         run_logger = self.logger.bind(correlation_id=request.idempotency_key)
@@ -154,6 +179,8 @@ class DesktopRunServiceMixin(DesktopRunCompositionMixin):
                 language=str(command.config.metadata.get("response_language") or "en"),
             )
             accepted_handle = await self.runtime.start_run(command, context)
+            if action_surface is not None:
+                self.openui_store.accepted(action_surface, accepted_handle.run_id)
             self._run_environments.setdefault(accepted_handle.run_id, environment)
 
             async def build_driver():
@@ -218,7 +245,9 @@ class DesktopRunServiceMixin(DesktopRunCompositionMixin):
             )
             # A failed Studio preflight must not allocate a replacement Session:
             # membership is durably bound to the original Session identity.
-            if accepted_handle is None and request.studio_id is not None:
+            if accepted_handle is None and (
+                request.studio_id is not None or action_surface is not None
+            ):
                 raise
             language = str(
                 request.response_language or self._read_settings_sync().language or "en"
@@ -316,10 +345,13 @@ class DesktopRunServiceMixin(DesktopRunCompositionMixin):
             )
             + "\n"
         )
+        projector = OpenUiProjector(self, user_id)
         observed_boundary = False
         try:
             async for event in stream.events:
                 yield event.model_dump_json() + "\n"
+                for frame in await projector.project(event):
+                    yield json.dumps(frame, ensure_ascii=False) + "\n"
             observed_boundary = True
         finally:
             if observed_boundary:
@@ -327,6 +359,57 @@ class DesktopRunServiceMixin(DesktopRunCompositionMixin):
             if stream.execution_done():
                 await self._discard_driver_if_terminal(stream.handle.run_id, driver)
             await self._index_session(stream.handle.session_id)
+
+    async def _prepare_openui_action(self, request, user_id):
+        action = request.openui_action
+        if (
+            not request.session_id
+            or request.session_concurrency_mode != SessionConcurrencyMode.SERIAL
+            or request.studio_id
+        ):
+            raise ValueError(
+                "UI submission requires its original, serial Desktop Session"
+            )
+        context = self._context(user_id)
+        runs = await self.session_access.list_session_runs(request.session_id, context)
+        surface = self.openui_store.get(user_id, request.session_id, action.surface_id)
+        if (
+            surface is None
+            or surface["revision"] != action.revision
+            or surface["agent_id"] != request.agent_id
+        ):
+            raise ValueError(
+                "UI does not belong to this Agent and Session, or has been replaced"
+            )
+        source = next((run for run in runs if run.run_id == surface["run_id"]), None)
+        if source is None or source.state != RunState.COMPLETED:
+            raise ValueError("Wait for the UI's Run to complete before submitting")
+        if (
+            not surface.get("submitted")
+            and max(runs, key=lambda run: run.created_at).run_id != source.run_id
+        ):
+            raise ValueError(
+                "This UI belongs to an earlier turn; use the latest result"
+            )
+        values, replay = self.openui_store.claim(surface, action.action, action.values)
+        from app.v2.desktop.backend.openui import validate_tree
+
+        fields, actions = validate_tree(surface["tree"])
+        text = actions[action.action]
+        if values:
+            text += "\n" + "\n".join(
+                f"{fields[key]['label']}: {json.dumps(value, ensure_ascii=False)}"
+                for key, value in values.items()
+            )
+        normalized = request.model_copy(
+            update={
+                "messages": [RunMessage(role="user", text=text)],
+                "attachment_paths": [],
+                "preferred_skills": [],
+                "idempotency_key": "openui:" + self.openui_store.submission_id(surface),
+            }
+        )
+        return surface, normalized, replay
 
     async def _normalize_desktop_fork_request(
         self, request: DesktopRunRequest, user_id: str
@@ -403,10 +486,26 @@ class DesktopRunServiceMixin(DesktopRunCompositionMixin):
     ) -> AsyncIterator[str]:
         await self.start()
         context = self._context(user_id)
+        projector = OpenUiProjector(self, user_id)
+        cursor = 0
+        while cursor < after_sequence:
+            previous = await self.session_access.read_events(
+                run_id, context, after_sequence=cursor, limit=500
+            )
+            previous = tuple(
+                event for event in previous if event.run_sequence <= after_sequence
+            )
+            if not previous:
+                break
+            for event in previous:
+                projector.remember(event)
+            cursor = previous[-1].run_sequence
         async for event in self.session_access.subscribe_events(
             EventCursor(run_id=run_id, run_sequence=after_sequence), context
         ):
             yield event.model_dump_json() + "\n"
+            for frame in await projector.project(event):
+                yield json.dumps(frame, ensure_ascii=False) + "\n"
             if event.type in {
                 "run.suspended",
                 "run.completed",
@@ -581,8 +680,12 @@ class DesktopRunServiceMixin(DesktopRunCompositionMixin):
         async with self._agent_update_lock:
             current = await self._agent(agent.agent_id, user_id)
             merged = dict(current.config)
-            merged["approvedShellCommands"] = sorted(set(merged.get("approvedShellCommands") or ()) | {command})
-            updated = current.model_copy(update={"config": merged, "updated_at": utc_now()})
+            merged["approvedShellCommands"] = sorted(
+                set(merged.get("approvedShellCommands") or ()) | {command}
+            )
+            updated = current.model_copy(
+                update={"config": merged, "updated_at": utc_now()}
+            )
             await self._record_agent_version(current)
             await self._record_agent_version(updated)
             await self.catalog.save_agent(updated)

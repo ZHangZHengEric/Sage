@@ -302,7 +302,7 @@ void main() {
       final registry = File('${directory.path}/desktop-v2-sidecar.json');
       await registry.writeAsString(
         '{"protocol":"sage.runtime/v2","host":"127.0.0.1",'
-        '"port":54321,"pid":123,"revision":7,"build_id":"test-build",'
+        '"port":54321,"pid":123,"revision":12,"build_id":"test-build",'
         '"auth_token":"registry-token"}',
       );
       final api = _RegistryApi();
@@ -331,7 +331,7 @@ void main() {
       final registry = File('${directory.path}/desktop-v2-sidecar.json');
       await registry.writeAsString(
         '{"protocol":"sage.runtime/v2","host":"127.0.0.1",'
-        '"port":54321,"pid":123,"revision":7,"build_id":"test-build",'
+        '"port":54321,"pid":123,"revision":12,"build_id":"test-build",'
         '"auth_token":"registry-token"}',
       );
       final killed = <(int, ProcessSignal)>[];
@@ -395,7 +395,7 @@ void main() {
       final registry = File('${directory.path}/desktop-v2-sidecar.json');
       await registry.writeAsString(
         '{"protocol":"sage.runtime/v2","host":"127.0.0.1",'
-        '"port":54321,"pid":123,"revision":7,"build_id":"test-build",'
+        '"port":54321,"pid":123,"revision":12,"build_id":"test-build",'
         '"auth_token":"registry-token"}',
       );
       final api = _RegistryApi(healthyPorts: const {54322});
@@ -435,7 +435,7 @@ void main() {
     final registry = File('${directory.path}/desktop-v2-sidecar.json');
     await registry.writeAsString(
       '{"protocol":"sage.runtime/v2","host":"127.0.0.1",'
-      '"port":54321,"pid":123,"revision":7,"build_id":"old-build",'
+      '"port":54321,"pid":123,"revision":12,"build_id":"old-build",'
       '"auth_token":"registry-token"}',
     );
     var spawned = false;
@@ -542,7 +542,7 @@ void main() {
     final registry = File('${directory.path}/desktop-v2-sidecar.json');
     await registry.writeAsString(
       '{"protocol":"sage.runtime/v2","host":"127.0.0.1",'
-      '"port":54321,"pid":123,"revision":7,"build_id":"test-build",'
+      '"port":54321,"pid":123,"revision":12,"build_id":"test-build",'
       '"auth_token":"registry-token"}',
     );
     final api = _BlockingRenewalApi();
@@ -598,7 +598,7 @@ void main() {
     final registry = File('${directory.path}/desktop-v2-sidecar.json');
     await registry.writeAsString(
       '{"protocol":"sage.runtime/v2","host":"127.0.0.1",'
-      '"port":54321,"pid":123,"revision":7,"build_id":"test-build",'
+      '"port":54321,"pid":123,"revision":12,"build_id":"test-build",'
       '"auth_token":"registry-token"}',
     );
     final host = RuntimeHost(
