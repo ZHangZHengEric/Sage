@@ -7,6 +7,7 @@ from sagents.v2.runtime.observability import StructuredLogger, structured_log_co
 
 from app.v2.server.main import create_app
 from app.v2.server.config.manifest import server_v2_manifest
+from app.v2.server.observability.context import request_context
 from app.v2.server.observability.logging import ServerLogSink, get_logger
 from tests.app.v2.server.conftest import make_settings, make_test_service
 
@@ -168,6 +169,49 @@ async def test_host_and_sagents_logs_share_record_and_outputs(tmp_path: Path, ca
         await service.close()
 
 
+async def test_uvicorn_access_log_has_only_request_details(tmp_path: Path, capsys):
+    service = make_test_service(tmp_path, log_directory=str(tmp_path / "logs"))
+    await service.start()
+    try:
+        capsys.readouterr()
+        access = logging.getLogger("uvicorn.access")
+        with request_context("request-123"):
+            access.info(
+                '%s - "%s %s HTTP/%s" %d',
+                "172.23.0.3:60068",
+                "DELETE",
+                "/api/threads/external_1?debug=1",
+                "1.1",
+                200,
+            )
+            access.info(
+                '%s - "%s %s HTTP/%s" %d',
+                "172.23.0.3:60068",
+                "GET",
+                "/readyz",
+                "1.1",
+                200,
+            )
+        rows = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
+        assert len(rows) == 1
+        assert rows[0] == {
+            "format_version": "sage.log/v1",
+            "timestamp": rows[0]["timestamp"],
+            "level": "info",
+            "event": "http.access",
+            "message": "DELETE /api/threads/external_1 200",
+            "component": "sage-server",
+            "request_id": "request-123",
+        }
+        file_rows = [
+            json.loads(line)
+            for line in (tmp_path / "logs" / "sage-server.log").read_text().splitlines()
+        ]
+        assert rows[0] in file_rows
+    finally:
+        await service.close()
+
+
 async def test_log_level_and_text_format_apply_to_both_outputs(tmp_path: Path, capsys):
     service = make_test_service(
         tmp_path,
@@ -181,7 +225,9 @@ async def test_log_level_and_text_format_apply_to_both_outputs(tmp_path: Path, c
         capsys.readouterr()
         logging.getLogger("test.host").info("filtered host message")
         logging.getLogger("test.host").warning("host warning")
-        StructuredLogger(sink, "test.agent").info("agent.filtered", "filtered agent message")
+        StructuredLogger(sink, "test.agent").info(
+            "agent.filtered", "filtered agent message"
+        )
         StructuredLogger(sink, "test.agent").warning("agent.warning", "agent warning")
         stdout = capsys.readouterr().out
         file_text = (tmp_path / "logs" / "sage-server.log").read_text()
