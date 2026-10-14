@@ -12,7 +12,8 @@ from typing import Any
 from pydantic import SecretStr
 from PIL import Image
 
-from app.v2.desktop.backend.openui_completion import OpenUiCompletionGate
+from app.v2.desktop.backend.openui_completion import OpenUiOutputChecker
+from sagents.v2.agent.policy.output_self_check import OutputSelfCheckPolicy
 from app.v2.desktop.backend.model_request_defaults import (
     build_llm_extra_body,
     is_openai_reasoning_model,
@@ -923,8 +924,8 @@ class DesktopRunCompositionMixin(DesktopRunEnvironmentMixin):
                 if owner is not None:
                     owner.extend(member_ports.scope_handles)
                 base_continuation_policy = member_ports.continuation_policy
-            continuation_policy = OpenUiCompletionGate(
-                base_continuation_policy, self.openui_parser
+            continuation_policy = OutputSelfCheckPolicy(
+                base_continuation_policy, OpenUiOutputChecker(self.openui_parser),
             )
             owns_invocation = descriptor.agent_id == agent.agent_id
             if invocation_mode == "plan" and owns_invocation:

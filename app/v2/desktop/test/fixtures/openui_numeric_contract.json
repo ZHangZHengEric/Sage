@@ -1,0 +1,285 @@
+[
+  {
+    "operation": "sum",
+    "inputs": [
+      1,
+      2
+    ],
+    "expected": 3,
+    "values": {
+      "done": [
+        "a",
+        "b"
+      ]
+    }
+  },
+  {
+    "operation": "product",
+    "inputs": [
+      100,
+      25,
+      30
+    ],
+    "expected": 75000,
+    "values": {
+      "done": [
+        "a",
+        "b"
+      ]
+    }
+  },
+  {
+    "operation": "difference",
+    "inputs": [
+      75000,
+      44000
+    ],
+    "expected": 31000,
+    "values": {
+      "done": [
+        "a",
+        "b"
+      ]
+    }
+  },
+  {
+    "operation": "divide",
+    "inputs": [
+      1,
+      0
+    ],
+    "expected": null,
+    "values": {
+      "done": [
+        "a",
+        "b"
+      ]
+    }
+  },
+  {
+    "operation": "divide",
+    "inputs": [
+      10,
+      4
+    ],
+    "expected": 2.5,
+    "values": {
+      "done": [
+        "a",
+        "b"
+      ]
+    }
+  },
+  {
+    "operation": "ratioPercent",
+    "inputs": [
+      1,
+      -2
+    ],
+    "expected": null,
+    "values": {
+      "done": [
+        "a",
+        "b"
+      ]
+    }
+  },
+  {
+    "operation": "ratioPercent",
+    "inputs": [
+      1,
+      4
+    ],
+    "expected": 25,
+    "values": {
+      "done": [
+        "a",
+        "b"
+      ]
+    }
+  },
+  {
+    "operation": "percent",
+    "inputs": [
+      200,
+      5
+    ],
+    "expected": 10,
+    "values": {
+      "done": [
+        "a",
+        "b"
+      ]
+    }
+  },
+  {
+    "operation": "compoundGrowth",
+    "inputs": [
+      100,
+      10,
+      2
+    ],
+    "expected": 121,
+    "values": {
+      "done": [
+        "a",
+        "b"
+      ]
+    }
+  },
+  {
+    "operation": "compoundGrowth",
+    "inputs": [
+      100,
+      -101,
+      2
+    ],
+    "expected": null,
+    "values": {
+      "done": [
+        "a",
+        "b"
+      ]
+    }
+  },
+  {
+    "operation": "loanPayment",
+    "inputs": [
+      1200,
+      0,
+      12
+    ],
+    "expected": 100,
+    "values": {
+      "done": [
+        "a",
+        "b"
+      ]
+    }
+  },
+  {
+    "operation": "loanPayment",
+    "inputs": [
+      10000,
+      12,
+      12
+    ],
+    "expected": 888.487886783416,
+    "values": {
+      "done": [
+        "a",
+        "b"
+      ]
+    }
+  },
+  {
+    "operation": "product",
+    "inputs": [
+      1000000000000000.0,
+      2
+    ],
+    "expected": null,
+    "values": {
+      "done": [
+        "a",
+        "b"
+      ]
+    }
+  },
+  {
+    "operation": "compoundGrowth",
+    "inputs": [
+      1000000000000000.0,
+      100,
+      1000
+    ],
+    "expected": null,
+    "values": {
+      "done": [
+        "a",
+        "b"
+      ]
+    }
+  },
+  {
+    "operation": "sum",
+    "inputs": [
+      true
+    ],
+    "expected": null,
+    "values": {
+      "done": [
+        "a",
+        "b"
+      ]
+    }
+  },
+  {
+    "operation": "count",
+    "inputs": [
+      "done"
+    ],
+    "expected": 2,
+    "values": {
+      "done": [
+        "a",
+        "b"
+      ]
+    }
+  },
+  {
+    "operation": "product",
+    "inputs": [
+      "price",
+      "cups"
+    ],
+    "values": {
+      "price": 25,
+      "cups": 200
+    },
+    "expected": 5000
+  },
+  {
+    "operation": "sum",
+    "inputs": [
+      "loop"
+    ],
+    "values": {
+      "loop": "loop"
+    },
+    "expected": null
+  },
+  {
+    "operation": "count",
+    "inputs": [
+      "done"
+    ],
+    "values": {
+      "done": [
+        "a",
+        "a",
+        "b"
+      ]
+    },
+    "expected": 2
+  },
+  {
+    "operation": "sum",
+    "inputs": [
+      {
+        "component": "Computed",
+        "props": {
+          "operation": "product",
+          "inputs": [
+            "cups",
+            25
+          ]
+        }
+      }
+    ],
+    "values": {
+      "cups": 200
+    },
+    "expected": 5000
+  }
+]

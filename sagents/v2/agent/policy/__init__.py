@@ -5,9 +5,14 @@ from sagents.v2._lazy import exported_names, resolve_export
 
 _CONTINUATION = "sagents.v2.agent.policy.continuation"
 _JUDGE = "sagents.v2.agent.policy.judge"
+_SELF_CHECK = "sagents.v2.agent.policy.output_self_check"
 _TOOL = "sagents.v2.agent.policy.tool_policy"
 _APPROVAL_MEMORY = "sagents.v2.agent.policy.approval_memory"
 _EXPORTS = {
+    "OutputCheck": (_SELF_CHECK, "OutputCheck"),
+    "OutputChecker": (_SELF_CHECK, "OutputChecker"),
+    "OutputSelfCheck": (_SELF_CHECK, "OutputSelfCheck"),
+    "OutputSelfCheckPolicy": (_SELF_CHECK, "OutputSelfCheckPolicy"),
     "ApprovalMatcher": (_TOOL, "ApprovalMatcher"),
     "ApprovalMemory": (_APPROVAL_MEMORY, "ApprovalMemory"),
     "ApprovalStrategy": (_TOOL, "ApprovalStrategy"),

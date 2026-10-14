@@ -3,7 +3,8 @@ from unittest.mock import AsyncMock
 import pytest
 
 from app.v2.desktop.backend.openui import OpenUiParser
-from app.v2.desktop.backend.openui_completion import OpenUiCompletionGate
+from app.v2.desktop.backend.openui_completion import OpenUiOutputChecker
+from sagents.v2.agent.policy.output_self_check import OutputSelfCheckPolicy
 from sagents.v2.agent.policy.continuation import (
     ContinuationAction,
     ContinuationContext,
@@ -22,7 +23,7 @@ async def test_actual_validation_overrides_completed_judge_and_bounds_repairs():
     )
     delegate = AsyncMock()
     delegate.decide.return_value = completed
-    gate = OpenUiCompletionGate(delegate, parser)
+    gate = OutputSelfCheckPolicy(delegate, OpenUiOutputChecker(parser))
     bad = '```openui\nroot = Deck("Deck", [Slide("Cover", [Text("Hello"), Metric("A", "B")], "cover", "blue")])\n```'
     context = ContinuationContext(
         run_id="test",
@@ -81,7 +82,7 @@ async def test_actual_validation_overrides_completed_judge_and_bounds_repairs():
                 ),
             }
         )
-        assert (await gate.decide(plain)).action == ContinuationAction.CONTINUE_STEP
+        assert await gate.decide(plain) == completed
         new_turn = plain.model_copy(
             update={
                 "ledger": (
@@ -113,7 +114,7 @@ async def test_native_output_repairs_are_progress_without_tools():
         reason="done",
     )
     policy = LLMJudgeContinuationPolicy(judge)
-    gate = OpenUiCompletionGate(policy, parser)
+    gate = OutputSelfCheckPolicy(policy, OpenUiOutputChecker(parser))
     good = '```openui\nroot = Stack([Computed("Total", "sum", [1, 2])])\n```'
     bad = '```openui\nroot = Stack([Metric("Total", Computed("Sum", "sum", [1, 2]))])\n```'
     context = ContinuationContext(
@@ -144,7 +145,7 @@ async def test_native_output_repairs_are_progress_without_tools():
             }
         )
         result = await gate.decide(invalid)
-        assert result.reason_code == "openui.validation_failed"
+        assert result.reason_code == "output.self_check_failed"
         assert result.action == ContinuationAction.FAIL
         assert "Metric" in result.reason
         # Validation progress cannot override hard budgets.
@@ -176,8 +177,8 @@ async def test_judge_continue_gets_actual_validation_error():
         ),
     )
     try:
-        result = await OpenUiCompletionGate(delegate, parser).decide(context)
-        assert result.reason_code == "openui.validation_retry"
+        result = await OutputSelfCheckPolicy(delegate, OpenUiOutputChecker(parser)).decide(context)
+        assert result.reason_code == "output.self_check_retry"
         assert "expects string" in result.reason
     finally:
         await parser.close()
