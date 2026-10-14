@@ -91,7 +91,11 @@ def encode_log_record(record: LogRecord) -> str:
     safe = _redacted_record(record)
     return (
         json.dumps(
-            safe.model_dump(mode="json", exclude_none=True),
+            safe.model_dump(
+                mode="json",
+                exclude_none=True,
+                exclude={"attributes"} if not safe.attributes else None,
+            ),
             ensure_ascii=False,
             separators=(",", ":"),
         )
