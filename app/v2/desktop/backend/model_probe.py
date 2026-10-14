@@ -251,8 +251,12 @@ async def probe_model_provider_capabilities(
                     plugin_profile.effective_max_output_tokens
                 ),
                 "supports_multimodal": plugin_profile.supports("multimodal"),
-                "supports_structured_output": plugin_profile.supports(
-                    "structured_output"
+                "supports_structured_output": (
+                    plugin_profile.supports("structured_output")
+                    or (
+                        provider.protocol == "openai-chat-completions"
+                        and plugin_profile.supports("json_object")
+                    )
                 ),
                 "supports_json_object": plugin_profile.supports("json_object"),
                 "supports_tool_calling": plugin_profile.supports("tool_calling"),

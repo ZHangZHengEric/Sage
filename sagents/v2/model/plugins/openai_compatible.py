@@ -211,14 +211,30 @@ class OpenAICompatibleModelProvider:
         if request.response_format == "json_object":
             kwargs["response_format"] = {"type": "json_object"}
         elif request.response_schema is not None:
-            kwargs["response_format"] = {
-                "type": "json_schema",
-                "json_schema": {
-                    "name": "sage_response",
-                    "strict": True,
-                    "schema": request.response_schema,
-                },
-            }
+            if (
+                self.config.invocation_strategy.get("structured_output_format")
+                == "json_object"
+            ):
+                kwargs["response_format"] = {"type": "json_object"}
+                kwargs["messages"].insert(
+                    0,
+                    {
+                        "role": "system",
+                        "content": (
+                            "Return only a JSON object matching this JSON schema: "
+                            + json.dumps(request.response_schema, ensure_ascii=False)
+                        ),
+                    },
+                )
+            else:
+                kwargs["response_format"] = {
+                    "type": "json_schema",
+                    "json_schema": {
+                        "name": "sage_response",
+                        "strict": True,
+                        "schema": request.response_schema,
+                    },
+                }
         validate_extra_body(
             self.config.extra_body,
             reserved_fields=_HOST_OWNED_REQUEST_FIELDS,
@@ -995,6 +1011,7 @@ class OpenAIChatCompletionsModelProvider(OpenAICompatibleModelProvider):
                     "reasoning_effort": reasoning_effort,
                     "extra_body": dict(extra_body or {}),
                     "image_detail_mode": image_detail_mode,
+                    "invocation_strategy": {},
                 }
             )
             return self.__class__(config, client=self.raw_client)
@@ -1098,6 +1115,11 @@ class OpenAIChatCompletionsModelProvider(OpenAICompatibleModelProvider):
                     "unsupported_efforts"
                 ],
                 "supports_json_object": report.supports_json_object,
+                "structured_output_format": (
+                    "json_schema"
+                    if report.supports_structured_output
+                    else "json_object" if report.supports_json_object else None
+                ),
                 "auxiliary_json_compatible": bool(
                     reasoning_metadata["auxiliary_json"].get("status") == "supported"
                 ),

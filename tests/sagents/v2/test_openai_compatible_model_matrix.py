@@ -7,6 +7,7 @@ from pydantic import SecretStr
 
 from sagents.v2.model import (
     ModelCapabilities,
+    ModelCapabilityProbeRequest,
     ModelEventKind,
     ModelMessage,
     ModelRequest,
@@ -14,11 +15,15 @@ from sagents.v2.model import (
     ModelToolDefinition,
     OpenAICompatibleConfig,
     OpenAICompatibleModelProvider,
+    OpenAIChatCompletionsConfig,
+    OpenAIChatCompletionsModelProvider,
 )
 from sagents.v2.contracts.errors import ErrorCategory, SageV2Error
 from sagents.v2.contracts.items import JsonBlock, TextBlock
 from sagents.v2.contracts.provider_state import make_provider_state
 from sagents.v2.runtime.credentials import CredentialMaterial
+from sagents.v2.model.protocols import create_registered_model_provider
+from sagents.v2.package.manifest.models import ModelRoute
 
 
 CAPABILITIES = ModelCapabilities(
@@ -78,6 +83,108 @@ class SequencedCompletions:
 class FakeClient:
     def __init__(self, completions):
         self.chat = SimpleNamespace(completions=completions)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("schema_supported", "object_text", "selected_format"),
+    [
+        (True, '{"ok":true}', "json_schema"),
+        (True, None, "json_schema"),
+        (False, '{"ok":true}', "json_object"),
+        (False, None, None),
+        (False, "not JSON", None),
+        (False, "[]", None),
+    ],
+)
+async def test_chat_probe_selects_and_reuses_the_verified_json_dialect(
+    schema_supported, object_text, selected_format
+):
+    class DialectCompletions:
+        def __init__(self):
+            self.calls = []
+
+        async def create(self, **kwargs):
+            self.calls.append(kwargs)
+            format_type = kwargs.get("response_format", {}).get("type")
+            if (format_type == "json_schema" and not schema_supported) or (
+                format_type == "json_object" and object_text is None
+            ):
+                error = RuntimeError(f"unsupported response_format: {format_type}")
+                error.status_code = 400
+                raise error
+            text = object_text if format_type == "json_object" else '{"ok":true}'
+            return FakeStream(
+                [{
+                    "id": "response_probe",
+                    "choices": [{
+                        "index": 0,
+                        "delta": {"content": text},
+                        "finish_reason": "stop",
+                    }],
+                }]
+            )
+
+    completions = DialectCompletions()
+    client = FakeClient(completions)
+    provider = OpenAIChatCompletionsModelProvider(
+        OpenAIChatCompletionsConfig(
+            base_url="https://gateway.invalid/v1",
+            model="test",
+            capabilities=CAPABILITIES,
+            # A previous probe must not mask the raw json_schema probe.
+            invocation_strategy={"structured_output_format": "json_object"},
+        ),
+        client=client,
+    )
+    profile = await provider.probe_capabilities(
+        ModelCapabilityProbeRequest(
+            model_binding="primary",
+            route_fingerprint="sha256:route",
+            reasoning_efforts=(),
+        )
+    )
+    assert profile.supports("structured_output") is schema_supported
+    assert profile.supports("json_object") is (object_text == '{"ok":true}')
+    assert profile.invocation_strategy["structured_output_format"] == selected_format
+    assert {"json_schema", "json_object"} <= {
+        call.get("response_format", {}).get("type") for call in completions.calls
+    }
+    if selected_format is None:
+        return
+
+    restored = create_registered_model_provider(
+        ModelRoute(
+            provider="openai-chat-completions",
+            model="test",
+            capability_profile=profile,
+        ),
+        client=client,
+    )
+    schema = {
+        "type": "object",
+        "properties": {"answer": {"type": "string"}},
+        "required": ["answer"],
+    }
+    schema_request = ModelRequest(
+        request_id="request_schema",
+        run_id="run_1",
+        model_binding="primary",
+        messages=(ModelMessage(role="user", content=(TextBlock(text="hi"),)),),
+        response_schema=schema,
+    )
+    payload = restored.diagnostic_request(schema_request)
+    assert payload["response_format"]["type"] == selected_format
+    if selected_format == "json_object":
+        assert payload["response_format"] == {"type": "json_object"}
+        assert '"answer"' in payload["messages"][0]["content"]
+        assert len(schema_request.messages) == 1
+    else:
+        assert payload["response_format"]["json_schema"]["schema"] == schema
+    explicit_object = restored.diagnostic_request(
+        schema_request.model_copy(update={"response_format": "json_object"})
+    )
+    assert explicit_object["response_format"] == {"type": "json_object"}
 
 
 @pytest.mark.asyncio
