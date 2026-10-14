@@ -10,7 +10,7 @@ import '../models.dart';
 import '../usage_models.dart';
 
 const sageSidecarProtocol = 'sage.runtime/v2';
-const sageSidecarRevision = 7;
+const sageSidecarRevision = 12;
 const _maxUploadBytes = 64 * 1024 * 1024;
 
 class SageApiException implements Exception {
@@ -657,6 +657,32 @@ class V2ApiClient {
       // after the authoritative Session state has already disappeared.
       if (exception.statusCode != HttpStatus.notFound) rethrow;
     }
+  }
+
+  Future<Uint8List> exportOpenUiDeck(
+    Map<String, Object?> surface,
+    bool dark,
+  ) async {
+    final value =
+        await _json(
+              'GET',
+              '/api/v2/sessions/${Uri.encodeComponent(surface['session_id'].toString())}/openui/${Uri.encodeComponent(surface['surface_id'].toString())}/pptx?revision=${surface['revision']}&dark=$dark',
+            )
+            as Map;
+    return base64Decode(value['base64'] as String);
+  }
+
+  Future<List<Map<String, Object?>>> getOpenUiSurfaces(String sessionId) async {
+    final value = await _json(
+      'GET',
+      '/api/v2/sessions/${Uri.encodeComponent(sessionId)}/openui',
+    );
+    return value is List
+        ? [
+            for (final surface in value)
+              if (surface is Map) surface.cast<String, Object?>(),
+          ]
+        : [];
   }
 
   Future<void> steer(

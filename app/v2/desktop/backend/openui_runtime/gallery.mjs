@@ -1,0 +1,29 @@
+// Synthetic component coverage and examples; no personal data or credentials.
+export const gallery = [
+ {name:'selection-tracker',code:`root = Stack([checks, count, rate, Progress("完成进度", rate), Chart("完成数量", "bar", ["已完成"], [{name: "数量", values: [count]}])])
+checks = CheckboxGroup("done", "完成打卡", ["设计", "实现", "验证"], [])
+count = Computed("完成次数", "count", [checks], 0)
+rate = Computed("完成率", "ratioPercent", [count, 3], 0, "", "%")`},
+ {name:'chained-calculator',code:`root = Card("旅行预算", [Row([total, perPerson]), Row([people, days]), Row([hotel, meal]), Row([hotelTotal, mealTotal]), chart, Button("save", "使用这些参数")])
+people = NumberInput("people", "人数", 4, 1, 50, 1)
+days = NumberInput("days", "天数", 5, 1, 60, 1)
+hotel = NumberInput("hotel", "住宿总费用 元/天", 600, 0, 10000, 50)
+meal = NumberInput("meal", "餐饮 元/人/天", 150, 0, 5000, 10)
+hotelTotal = Computed("住宿小计", "product", [days, hotel], 2, "¥")
+mealTotal = Computed("餐饮小计", "product", [people, days, meal], 2, "¥")
+total = Computed("总预算", "sum", [hotelTotal, mealTotal], 2, "¥")
+perPerson = Computed("人均费用", "divide", ["total", "people"], 2, "¥")
+chart = Chart("费用构成", "pie", ["住宿", "餐饮"], [{name: "金额", values: ["hotelTotal", mealTotal]}])`},
+ {name:"slides",code:`root = Deck("Sage", [cover, results, plan])
+cover = Slide("让想法成为作品", [Text("Sage Desktop · 原生流式演示")], "cover", "rose")
+results = Slide("增长一目了然", [Metric("本季收入", "¥128万", "+24%", "success"), Chart("季度收入", "bar", ["Q1", "Q2", "Q3"], [{name: "收入", values: [72, 96, 128]}])], "split", "blue")
+plan = Slide("下一步", [Text("完成技术验证，收集反馈，逐步发布。"), Table(["阶段", "目标"], [["验证", "流式预览"], ["发布", "可编辑导出"]])], "split", "emerald")`},
+ {name:'dashboard',code:`root = Stack([Heading("工作概览", 1), Row([Metric("完成任务", "128", "+18%", "success"), Metric("运行中", "6", "", "info"), Metric("待处理", "3", "", "warning")]), Badge("系统正常", "success"), Chart("本周任务", "line", ["周一", "周二", "周三", "周四"], [{name: "完成", values: [12, 24, 19, 32]}, {name: "新增", values: [18, 16, 25, 28]}]), Progress("发布准备", 72, "info"), Divider(), Alert("部署前需要确认目标环境。", "warning")])`},
+ {name:'calculator',code:`root = Card("复利计算", [Computed("预计余额", "compoundGrowth", ["principal", "rate", "years"], 2, "¥", ""), NumberInput("principal", "本金", 10000, 0, 1000000, 100), Slider("rate", "年利率 (%)", 5, 0, 20, 0.5), Slider("years", "年数", 10, 1, 40, 1), Chart("本金", "bar", ["当前"], [{name: "本金", values: ["principal"]}]), Button("save", "使用这些参数")])`},
+ {name:'form',code:`root = Card("行程偏好", [Input("city", "目的地", "上海", true), Select("travel", "交通", ["高铁", "飞机"], "高铁", true), DateInput("date", "出发日期", "2026-11-01", true), CheckboxGroup("interests", "兴趣", ["艺术", "美食", "自然"], ["艺术"], true), RadioGroup("pace", "节奏", ["放松", "紧凑"], "放松", true), Toggle("insurance", "保险", true), Button("plan", "生成行程")])`},
+ {name:'tabs',code:`root = Tabs([Tab("方案对比", [Table(["方案", "价格"], [["基础", 0], ["专业", 99]])]), Tab("进度", [Accordion([Section("准备", [Text("确认需求")]), Section("发布", [Timeline([{label: "设计", value: "已完成", tone: "success"}, {label: "验证", value: "进行中", tone: "info"}])])])])])`},
+ {name:'diagram',code:`root = Diagram("执行流程", [{id: "request", label: "请求"}, {id: "model", label: "模型生成"}, {id: "parser", label: "官方解析器"}, {id: "native", label: "原生界面"}], [["request", "model"], ["model", "parser"], ["parser", "native"]])`},
+ {name:'bar',code:`root = Chart("季度变化", "bar", ["Q1", "Q2", "Q3", "Q4"], [{name: "收益", values: [-4, 12, 0, 20]}, {name: "目标", values: [8, 10, 12, 15]}])`},
+ {name:'pie',code:`root = Chart("时间分配", "pie", ["设计", "开发", "验证"], [{name: "小时", values: [8, 20, 12]}])`},
+ {name:'image',code:`root = Image("https://flutter.github.io/assets-for-api-docs/assets/widgets/owl.jpg", "Flutter 官方示例图片", 180)`},
+];

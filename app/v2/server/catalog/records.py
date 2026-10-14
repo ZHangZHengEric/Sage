@@ -17,7 +17,10 @@ from app.v2.server.observability.logging import get_logger
 from app.v2.server.runtime.policy import ExecutionPolicy
 from sagents.v2.contracts.common import new_id
 from sagents.v2.contracts.errors import ErrorCategory, RuntimeErrorInfo, SageV2Error
-from sagents.v2.model.protocols import resolve_model_protocol
+from sagents.v2.model.protocols import (
+    model_protocol_default_base_url,
+    resolve_model_protocol,
+)
 
 _LOGGER = get_logger(__name__)
 
@@ -520,7 +523,9 @@ def apply_upsert(
     record = ModelRecord(
         id=model_id,
         protocol=protocol,
-        base_url=str(payload.get("base_url") or "https://api.openai.com/v1"),
+        base_url=str(
+            payload.get("base_url") or model_protocol_default_base_url(protocol)
+        ),
         model=str(payload.get("model") or "").strip(),
         api_key=SecretStr(str(payload.get("api_key") or "")),
         is_default=bool(payload.get("is_default", False) or not catalog.models),

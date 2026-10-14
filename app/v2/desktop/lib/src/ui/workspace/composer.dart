@@ -73,7 +73,8 @@ class _ComposerState extends State<_Composer> {
   }
 
   Future<void> _paste(VoidCallback fallback) async {
-    if (_pasting || (widget.studio != null && widget.controller.studioSending)) {
+    if (_pasting ||
+        (widget.studio != null && widget.controller.studioSending)) {
       return;
     }
     _pasting = true;
@@ -573,6 +574,7 @@ class _ComposerState extends State<_Composer> {
                   _SkillPicker(
                     controller: widget.controller,
                     conversation: widget.conversation,
+                    interactiveUiAvailable: widget.studio == null,
                     modeEnabled:
                         !approvalLocked &&
                         (widget.studio == null ||
@@ -1393,7 +1395,9 @@ class _AgentPickerState extends State<_AgentPicker> {
                       _ComposerMenuItem(
                         selected: agent.id == widget.controller.selectedAgentId,
                         icon: CupertinoIcons.person_crop_circle,
-                        label: agent.rsiStatus == null ? agent.name : '${agent.name} · RSI',
+                        label: agent.rsiStatus == null
+                            ? agent.name
+                            : '${agent.name} · RSI',
                         onTap: () {
                           _close();
                           widget.controller.selectAgent(agent.id);
@@ -1707,6 +1711,7 @@ class _ComposerMenuItem extends StatelessWidget {
     required this.label,
     required this.onTap,
     this.description,
+    this.trailing,
     this.enabled = true,
     super.key,
   });
@@ -1716,6 +1721,7 @@ class _ComposerMenuItem extends StatelessWidget {
   final IconData icon;
   final String label;
   final String? description;
+  final Widget? trailing;
   final VoidCallback onTap;
 
   @override
@@ -1783,15 +1789,18 @@ class _ComposerMenuItem extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(width: 8),
-                AnimatedOpacity(
-                  opacity: selected ? 1 : 0,
-                  duration: const Duration(milliseconds: 120),
-                  child: Icon(
-                    CupertinoIcons.check_mark,
-                    size: 13,
-                    color: colors.primary,
+                if (trailing != null)
+                  trailing!
+                else
+                  AnimatedOpacity(
+                    opacity: selected ? 1 : 0,
+                    duration: const Duration(milliseconds: 120),
+                    child: Icon(
+                      CupertinoIcons.check_mark,
+                      size: 13,
+                      color: colors.primary,
+                    ),
                   ),
-                ),
               ],
             ),
           ),
@@ -1826,11 +1835,13 @@ class _SkillPicker extends StatefulWidget {
     required this.controller,
     required this.conversation,
     required this.modeEnabled,
+    this.interactiveUiAvailable = true,
   });
 
   final WorkspaceController controller;
   final Conversation conversation;
   final bool modeEnabled;
+  final bool interactiveUiAvailable;
 
   @override
   State<_SkillPicker> createState() => _SkillPickerState();
@@ -1891,6 +1902,42 @@ class _SkillPickerState extends State<_SkillPicker> {
                         widget.controller.chooseAndUploadFile();
                       },
                     ),
+                    if (widget.interactiveUiAvailable)
+                      _ComposerMenuItem(
+                        key: const ValueKey('composer-interactive-ui-option'),
+                        selected: widget.conversation.preferInteractiveUi,
+                        enabled: widget.modeEnabled,
+                        icon: CupertinoIcons.rectangle_on_rectangle,
+                        label: context.l10n.text(
+                          'workspace.preferInteractiveUi',
+                        ),
+                        trailing: AbsorbPointer(
+                          child: SizedBox(
+                            width: 42,
+                            height: 24,
+                            child: FittedBox(
+                              child: GlassSwitch(
+                                key: const ValueKey(
+                                  'composer-interactive-ui-switch',
+                                ),
+                                value: widget.conversation.preferInteractiveUi,
+                                activeColor: Theme.of(
+                                  context,
+                                ).colorScheme.primary,
+                                useOwnLayer: true,
+                                onChanged:
+                                    widget.controller.setPreferInteractiveUi,
+                              ),
+                            ),
+                          ),
+                        ),
+                        onTap: () {
+                          widget.controller.setPreferInteractiveUi(
+                            !widget.conversation.preferInteractiveUi,
+                          );
+                          _overlayEntry?.markNeedsBuild();
+                        },
+                      ),
                     _ComposerMenuItem(
                       key: const ValueKey('composer-plan-mode-option'),
                       enabled: widget.modeEnabled,
@@ -1947,9 +1994,15 @@ class _SkillPickerState extends State<_SkillPicker> {
                     for (final skill in widget.controller.skills)
                       _ComposerMenuItem(
                         key: ValueKey('composer-skill-option:${skill.name}'),
-                        selected: widget.controller.preferredSkills.contains(
-                          skill.name,
-                        ),
+                        enabled:
+                            !(skill.name == 'sage-openui' &&
+                                widget.conversation.preferInteractiveUi),
+                        selected:
+                            (skill.name == 'sage-openui' &&
+                                widget.conversation.preferInteractiveUi) ||
+                            widget.controller.preferredSkills.contains(
+                              skill.name,
+                            ),
                         icon: CupertinoIcons.sparkles,
                         label: skill.name,
                         onTap: () {

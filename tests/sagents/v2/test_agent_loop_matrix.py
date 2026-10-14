@@ -1084,6 +1084,44 @@ async def test_judge_need_user_input_completes_without_suspension():
 
 
 @pytest.mark.asyncio
+async def test_openui_parser_feedback_reaches_the_next_model_request():
+    from unittest.mock import AsyncMock
+    from app.v2.desktop.backend.openui import OpenUiParser
+    from app.v2.desktop.backend.openui_completion import OpenUiOutputChecker
+    from sagents.v2.agent.policy.output_self_check import OutputSelfCheckPolicy
+
+    bad = '```openui\nroot = Deck("Deck", [Slide("Cover", [Text("A"), Text("B")], "cover")])\n```'
+    good = bad.replace(', Text("B")', '')
+
+    def assert_repair_request(request):
+        guidance = request.messages[-1]
+        assert guidance.metadata["runtime_continuation_guidance"]
+        assert "[output.self_check]" in guidance.content[0].text
+        assert "cover allows at most 1, got 2" in guidance.content[0].text
+        assert request.tool_choice == "auto"
+
+    model = ScriptedModelProvider((
+        ScriptedModelStep(events=(completed(bad),)),
+        ScriptedModelStep(assertion=assert_repair_request, events=(completed(good),)),
+    ))
+    delegate = AsyncMock()
+    delegate.decide.return_value = ContinuationDecision(
+        action=ContinuationAction.COMPLETE_RUN, reason_code="judge.completed", reason="done"
+    )
+    parser = OpenUiParser()
+    try:
+        runtime, handle, loop, executor = await setup_loop(
+            model, continuation_policy=OutputSelfCheckPolicy(delegate, OpenUiOutputChecker(parser))
+        )
+        result = await loop.execute(handle.run_id, CONTEXT)
+        assert result.state == RunState.COMPLETED
+        assert not executor.calls
+        assert len(model.requests) == 2
+    finally:
+        await parser.close()
+
+
+@pytest.mark.asyncio
 async def test_v1_judge_continue_keeps_tool_choice_auto_and_injects_guidance():
     def assert_first_request(request):
         assert request.tool_choice == "auto"
@@ -3787,3 +3825,37 @@ async def test_tool_failure_details_reach_model_and_durable_history(language, fa
             )
             assert path in restored.content[0].text
             assert "FileNotFoundError" in restored.content[0].text
+
+
+@pytest.mark.asyncio
+async def test_output_self_check_numeric_repair_reaches_author_and_completes():
+    from unittest.mock import AsyncMock
+    from app.v2.desktop.backend.openui import OpenUiParser
+    from app.v2.desktop.backend.openui_completion import OpenUiOutputChecker
+    from sagents.v2.agent.policy.output_self_check import OutputSelfCheckPolicy
+
+    bad = '```openui\nroot = Stack([NumberInput("cups", "Cups", 100, 0, 1000, 1), Computed("Unit cost", "divide", [1000, "cups"])])\n```'
+    good = bad.replace('100, 0, 1000, 1', '100, 1, 1000, 1')
+    def assert_feedback(request):
+        text = request.messages[-1].content[0].text
+        assert "[output.self_check]" in text
+        assert "When cups=0" in text
+        assert "complete replacement OpenUI block" in text
+
+    model = ScriptedModelProvider((
+        ScriptedModelStep(events=(completed(bad),)),
+        ScriptedModelStep(assertion=assert_feedback, events=(completed(good),)),
+    ))
+    delegate = AsyncMock()
+    delegate.decide.return_value = ContinuationDecision(action=ContinuationAction.COMPLETE_RUN, reason_code="done", reason="done")
+    parser = OpenUiParser()
+    try:
+        runtime, handle, loop, executor = await setup_loop(model, continuation_policy=OutputSelfCheckPolicy(
+            delegate, OpenUiOutputChecker(parser),
+        ))
+        result = await loop.execute(handle.run_id, CONTEXT)
+        assert result.state == RunState.COMPLETED
+        assert not executor.calls
+        assert len(model.requests) == 2
+    finally:
+        await parser.close()

@@ -53,7 +53,7 @@ def default_agent_config(*, model_provider_id: str = "model_main") -> dict[str, 
             "turn_status",
             "load_skill",
         ],
-        "availableSkills": [],
+        "availableSkills": ["sage-openui"],
     }
 
 

@@ -11,7 +11,9 @@ import 'package:file_selector/file_selector.dart' show XFile;
 import 'package:sage_desktop_v2/src/services/image_clipboard.dart';
 import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
 import 'package:flutter_test/flutter_test.dart' hide testWidgets;
-import 'package:flutter_test/flutter_test.dart' as widget_tests show testWidgets;
+import 'package:flutter_test/flutter_test.dart'
+    as widget_tests
+    show testWidgets;
 import 'package:liquid_glass_widgets/liquid_glass_widgets.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -30,22 +32,43 @@ class _SkillComponentApi extends _FakeApi {
   @override
   Future<List<ComponentSummary>> listComponents() async => [
     ComponentSummary(
-      id: 'skill.loading', name: 'Skill loading', value: '',
-      selectionMode: 'user', applyMode: 'next_run',
-      selectedPluginId: lastSelectedComponentPlugin ?? 'sage.skill.loading.lazy',
+      id: 'skill.loading',
+      name: 'Skill loading',
+      value: '',
+      selectionMode: 'user',
+      applyMode: 'next_run',
+      selectedPluginId:
+          lastSelectedComponentPlugin ?? 'sage.skill.loading.lazy',
       selectedConfig: lastSelectedComponentConfig ?? const {},
       activePluginId: 'sage.skill.loading.lazy',
-      plugins: [ComponentPluginSummary(
-        id: 'sage.skill.loading.lazy', name: 'Skill loading', value: '',
-        configSchema: {'type': 'object', 'properties': {
-          'max_active_tokens': {'type': 'integer', 'minimum': 1, 'default': 6000},
-        }},
-      ), ComponentPluginSummary(
-        id: 'test.skill.other', name: 'Custom Skill loading', value: '',
-        configSchema: {'type': 'object', 'properties': {
-          'cache_enabled': {'type': 'boolean', 'default': true},
-        }},
-      )],
+      plugins: [
+        ComponentPluginSummary(
+          id: 'sage.skill.loading.lazy',
+          name: 'Skill loading',
+          value: '',
+          configSchema: {
+            'type': 'object',
+            'properties': {
+              'max_active_tokens': {
+                'type': 'integer',
+                'minimum': 1,
+                'default': 6000,
+              },
+            },
+          },
+        ),
+        ComponentPluginSummary(
+          id: 'test.skill.other',
+          name: 'Custom Skill loading',
+          value: '',
+          configSchema: {
+            'type': 'object',
+            'properties': {
+              'cache_enabled': {'type': 'boolean', 'default': true},
+            },
+          },
+        ),
+      ],
     ),
   ];
 }
@@ -54,20 +77,48 @@ class _SummaryComponentApi extends _FakeApi {
   @override
   Future<List<ComponentSummary>> listComponents() async => const [
     ComponentSummary(
-      id: 'context.summarizer', name: 'Context summarizer',
-      selectionMode: 'user', selectedPluginId: 'sage.context.summarizer.model',
-      activePluginId: 'sage.context.summarizer.model', selectedConfig: {},
-      plugins: [ComponentPluginSummary(
-        id: 'sage.context.summarizer.model', name: 'Model summary', value: '',
-        configSchema: {'type': 'object', 'properties': {
-          'root': {'type': 'string', 'readOnly': true},
-          'format': {'enum': ['json', 'text'], 'default': 'json'},
-          'batch_size': {'enum': [1, 2, 4], 'default': 2},
-          'model_binding': {'type': 'string', 'default': 'summary', 'readOnly': true},
-          'max_source_tokens': {'type': 'integer', 'default': 24000, 'minimum': 1},
-          'timeout_seconds': {'type': 'number', 'default': 60, 'exclusiveMinimum': 0},
-        }},
-      )],
+      id: 'context.summarizer',
+      name: 'Context summarizer',
+      selectionMode: 'user',
+      selectedPluginId: 'sage.context.summarizer.model',
+      activePluginId: 'sage.context.summarizer.model',
+      selectedConfig: {},
+      plugins: [
+        ComponentPluginSummary(
+          id: 'sage.context.summarizer.model',
+          name: 'Model summary',
+          value: '',
+          configSchema: {
+            'type': 'object',
+            'properties': {
+              'root': {'type': 'string', 'readOnly': true},
+              'format': {
+                'enum': ['json', 'text'],
+                'default': 'json',
+              },
+              'batch_size': {
+                'enum': [1, 2, 4],
+                'default': 2,
+              },
+              'model_binding': {
+                'type': 'string',
+                'default': 'summary',
+                'readOnly': true,
+              },
+              'max_source_tokens': {
+                'type': 'integer',
+                'default': 24000,
+                'minimum': 1,
+              },
+              'timeout_seconds': {
+                'type': 'number',
+                'default': 60,
+                'exclusiveMinimum': 0,
+              },
+            },
+          },
+        ),
+      ],
     ),
   ];
 }
@@ -76,10 +127,18 @@ class _ClipboardApi extends _FakeApi {
   Uint8List? uploadedBytes;
 
   @override
-  Future<UploadedAttachment> upload({required String agentId, required XFile file, String workspaceId = ''}) async {
+  Future<UploadedAttachment> upload({
+    required String agentId,
+    required XFile file,
+    String workspaceId = '',
+  }) async {
     uploadedBytes = await file.readAsBytes();
-    return UploadedAttachment(name: file.name, path: 'uploads/${file.name}',
-      virtualPath: '/workspace/uploads/${file.name}', size: uploadedBytes!.length);
+    return UploadedAttachment(
+      name: file.name,
+      path: 'uploads/${file.name}',
+      virtualPath: '/workspace/uploads/${file.name}',
+      size: uploadedBytes!.length,
+    );
   }
 }
 
@@ -251,8 +310,12 @@ class _FakeApi extends V2ApiClient {
   Future<AgentConfiguration> cloneAgent(String sourceId, String name) async {
     lastClonedAgentId = sourceId;
     final source = await getAgentConfiguration(sourceId);
-    return AgentConfiguration(id: 'agent_cloned', name: name,
-        systemPrefix: source.systemPrefix, maxLoopCount: source.maxLoopCount);
+    return AgentConfiguration(
+      id: 'agent_cloned',
+      name: name,
+      systemPrefix: source.systemPrefix,
+      maxLoopCount: source.maxLoopCount,
+    );
   }
 
   @override
@@ -832,7 +895,9 @@ Inspect the complete diff before reporting findings.
 
   @override
   Future<DesktopSettings> patchSettings(Map<String, Object?> patch) =>
-      saveSettings(DesktopSettings.fromJson({...desktopSettings.toJson(), ...patch}));
+      saveSettings(
+        DesktopSettings.fromJson({...desktopSettings.toJson(), ...patch}),
+      );
 
   @override
   Future<void> removeProject(String projectId) async {
@@ -1008,8 +1073,12 @@ Inspect the complete diff before reporting findings.
 class _SteeringProcessApi extends _ControlledProcessApi {
   bool reject = false;
   @override
-  Future<void> steer(String runId, String turnId, String text,
-      {List<ChatMessageContent> content = const []}) async {
+  Future<void> steer(
+    String runId,
+    String turnId,
+    String text, {
+    List<ChatMessageContent> content = const [],
+  }) async {
     if (reject) throw StateError('steer rejected');
   }
 }
@@ -2098,9 +2167,15 @@ class _PatchFailuresApi extends _FakeApi {
   _PatchFailuresApi(this.failures);
   final Set<int> failures;
   int calls = 0;
-  AgentConfiguration saved = const AgentConfiguration(id: 'agent_main', name: 'Original');
+  AgentConfiguration saved = const AgentConfiguration(
+    id: 'agent_main',
+    name: 'Original',
+  );
   @override
-  Future<AgentConfiguration> patchAgentConfiguration(String id, Map<String, Object?> patch) async {
+  Future<AgentConfiguration> patchAgentConfiguration(
+    String id,
+    Map<String, Object?> patch,
+  ) async {
     if (failures.contains(++calls)) throw StateError('rejected');
     return saved = saved.applyPatch(patch);
   }
@@ -2108,8 +2183,10 @@ class _PatchFailuresApi extends _FakeApi {
 
 class _ReadAfterPatchApi extends _QueuedAgentApi {
   @override
-  Future<AgentConfiguration> patchAgentConfiguration(String id, Map<String, Object?> patch) async =>
-      const AgentConfiguration(id: 'agent_main', name: 'Saved');
+  Future<AgentConfiguration> patchAgentConfiguration(
+    String id,
+    Map<String, Object?> patch,
+  ) async => const AgentConfiguration(id: 'agent_main', name: 'Saved');
 }
 
 class _MissingProviderAgentApi extends _FakeApi {
@@ -2395,23 +2472,28 @@ Map<String, Object?> _persistedBranchableConversation() => {
 
 void main() {
   for (final fails in [false, true]) {
-    test('late usage overview ${fails ? "error" : "response"} is ignored after disposal', () async {
-      final api = _DelayedUsageApi();
-      final value = await api.fixture();
-      final controller = WorkspaceController(api: api);
-      final pending = controller.loadUsageOverview();
-      controller.dispose();
-      if (fails) {
-        api.response.completeError(StateError('late statistics failure'));
-      } else {
-        api.response.complete(value);
-      }
-      await pending;
-      expect(controller.usageOverview, isNull);
-      api.close();
-    });
+    test(
+      'late usage overview ${fails ? "error" : "response"} is ignored after disposal',
+      () async {
+        final api = _DelayedUsageApi();
+        final value = await api.fixture();
+        final controller = WorkspaceController(api: api);
+        final pending = controller.loadUsageOverview();
+        controller.dispose();
+        if (fails) {
+          api.response.completeError(StateError('late statistics failure'));
+        } else {
+          api.response.complete(value);
+        }
+        await pending;
+        expect(controller.usageOverview, isNull);
+        api.close();
+      },
+    );
   }
-  testWidgets('steer splits timeline and keeps in-flight tool ownership', (tester) async {
+  testWidgets('steer splits timeline and keeps in-flight tool ownership', (
+    tester,
+  ) async {
     SharedPreferences.setMockInitialValues({});
     final api = _SteeringProcessApi();
     final controller = await _controller(api: api);
@@ -2424,8 +2506,10 @@ void main() {
     final conversation = controller.selectedConversation!;
     conversation.turnId = 'turn_controlled';
     void tool(String type, int sequence, String id) => api._events.add({
-      'type': type, 'run_id': 'run_controlled',
-      'session_id': 'session_controlled', 'run_sequence': sequence,
+      'type': type,
+      'run_id': 'run_controlled',
+      'session_id': 'session_controlled',
+      'run_sequence': sequence,
       'data': {'tool_call_id': id, 'tool_name': 'shell'},
     });
     tool('tool.call.started', 10, 'old-tool');
@@ -2443,14 +2527,25 @@ void main() {
     expect(oldPanel.activities.single.active, isFalse);
     expect(newPanel.activities.single.id, 'new-tool');
     final restored = Conversation.fromJson(conversation.toJson());
-    expect(restored.processPanels.last.anchorMessageId, newPanel.anchorMessageId);
+    expect(
+      restored.processPanels.last.anchorMessageId,
+      newPanel.anchorMessageId,
+    );
     api.reject = true;
     await controller.steer('rejected direction');
-    expect(conversation.messages.any((m) => m.text == 'rejected direction'), isFalse);
+    expect(
+      conversation.messages.any((m) => m.text == 'rejected direction'),
+      isFalse,
+    );
     expect(conversation.processPanels, hasLength(2));
     expect(controller.error, contains('steer rejected'));
-    api._events.add({'type': 'run.completed', 'run_id': 'run_controlled',
-      'session_id': 'session_controlled', 'run_sequence': 13, 'data': {}});
+    api._events.add({
+      'type': 'run.completed',
+      'run_id': 'run_controlled',
+      'session_id': 'session_controlled',
+      'run_sequence': 13,
+      'data': {},
+    });
     await tester.pump();
     expect(newPanel.running, isFalse);
     expect(newPanel.activities.single.active, isFalse);
@@ -2461,128 +2556,196 @@ void main() {
 
   for (final first in [true, false]) {
     for (final replacement in ['changed question', '']) {
-      test('rewrite preserves image and file references first=$first empty=${replacement.isEmpty}', () async {
-        final persisted = jsonDecode(jsonEncode(_persistedBranchableConversation())) as Map<String, dynamic>;
-        if (first) {
-          persisted['run_id'] = 'run_branch_1';
-          persisted['messages'] = (persisted['messages'] as List).take(2).toList();
-          persisted['process_panels'] = (persisted['process_panels'] as List).take(1).toList();
-        }
-        final id = first ? 'user-branch-1' : 'user-branch-2';
-        final original = (persisted['messages'] as List).cast<Map>().singleWhere((m) => m['id'] == id);
-        final references = [
-          const ChatMessageContent.reference(fileName: 'image.png', path: '/workspace/uploads/image.png').toJson(),
-          const ChatMessageContent.reference(fileName: 'notes.md', path: '/workspace/notes.md', quote: 'retain this quote', citationLabel: 'source').toJson(),
-        ];
-        original['content'] = [references[0], {'type': 'text', 'text': original['text']}, references[1]];
-        SharedPreferences.setMockInitialValues({
-          'sage.desktop_v2.conversations.v1': jsonEncode({WorkspaceController.agentWorkspaceId: [persisted]}),
-        });
-        final api = _BranchingApi();
-        final controller = _newController(api: api, preferencesLoader: SharedPreferences.getInstance);
-        addTearDown(() => _disposeController(controller));
-        await controller.initialize();
-        await controller.rewriteLastUserMessage(id, replacement);
-        await pumpEventQueue();
-        final sent = (api.lastRunBody!['messages'] as List).single as Map;
-        expect((sent['content'] as List).where((part) => part['type'] == 'reference').toList(), references);
-        expect(sent['text'], replacement);
-        final restored = ChatMessage.fromJson(controller.selectedConversation!.messages.last.toJson());
-        expect(restored.content.where((part) => part.isReference).map((part) => part.toJson()).toList(), references);
-      });
+      test(
+        'rewrite preserves image and file references first=$first empty=${replacement.isEmpty}',
+        () async {
+          final persisted =
+              jsonDecode(jsonEncode(_persistedBranchableConversation()))
+                  as Map<String, dynamic>;
+          if (first) {
+            persisted['run_id'] = 'run_branch_1';
+            persisted['messages'] = (persisted['messages'] as List)
+                .take(2)
+                .toList();
+            persisted['process_panels'] = (persisted['process_panels'] as List)
+                .take(1)
+                .toList();
+          }
+          final id = first ? 'user-branch-1' : 'user-branch-2';
+          final original = (persisted['messages'] as List)
+              .cast<Map>()
+              .singleWhere((m) => m['id'] == id);
+          final references = [
+            const ChatMessageContent.reference(
+              fileName: 'image.png',
+              path: '/workspace/uploads/image.png',
+            ).toJson(),
+            const ChatMessageContent.reference(
+              fileName: 'notes.md',
+              path: '/workspace/notes.md',
+              quote: 'retain this quote',
+              citationLabel: 'source',
+            ).toJson(),
+          ];
+          original['content'] = [
+            references[0],
+            {'type': 'text', 'text': original['text']},
+            references[1],
+          ];
+          SharedPreferences.setMockInitialValues({
+            'sage.desktop_v2.conversations.v1': jsonEncode({
+              WorkspaceController.agentWorkspaceId: [persisted],
+            }),
+          });
+          final api = _BranchingApi();
+          final controller = _newController(
+            api: api,
+            preferencesLoader: SharedPreferences.getInstance,
+          );
+          addTearDown(() => _disposeController(controller));
+          await controller.initialize();
+          await controller.rewriteLastUserMessage(id, replacement);
+          await pumpEventQueue();
+          final sent = (api.lastRunBody!['messages'] as List).single as Map;
+          expect(
+            (sent['content'] as List)
+                .where((part) => part['type'] == 'reference')
+                .toList(),
+            references,
+          );
+          expect(sent['text'], replacement);
+          final restored = ChatMessage.fromJson(
+            controller.selectedConversation!.messages.last.toJson(),
+          );
+          expect(
+            restored.content
+                .where((part) => part.isReference)
+                .map((part) => part.toJson())
+                .toList(),
+            references,
+          );
+        },
+      );
     }
   }
 
   for (final brightness in Brightness.values) {
     for (final image in [true, false]) {
-      testWidgets('composer paste ${image ? "image" : "text"} in ${brightness.name}', (tester) async {
-        tester.platformDispatcher.platformBrightnessTestValue = brightness;
-        addTearDown(tester.platformDispatcher.clearPlatformBrightnessTestValue);
-        tester.view.physicalSize = const Size(1200, 800);
-        tester.view.devicePixelRatio = 1;
-        addTearDown(tester.view.resetPhysicalSize);
-        addTearDown(tester.view.resetDevicePixelRatio);
-        final png = base64Decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aZfoAAAAASUVORK5CYII=');
-        final messenger = TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
-        messenger.setMockMethodCallHandler(ImageClipboard.channel, (call) async => image ? png : null);
-        messenger.setMockMethodCallHandler(SystemChannels.platform, (call) async {
-          if (call.method == 'Clipboard.getData') return {'text': 'pasted text'};
-          if (call.method == 'Clipboard.hasStrings') return {'value': !image};
-          return null;
-        });
-        addTearDown(() {
-          messenger.setMockMethodCallHandler(ImageClipboard.channel, null);
-          messenger.setMockMethodCallHandler(SystemChannels.platform, null);
-        });
-        final api = _ClipboardApi();
-        final controller = await _controller(api: api);
-        addTearDown(() => _disposeController(controller));
-        await tester.pumpWidget(SageDesktopV2App(controller: controller));
-        await tester.pumpAndSettle();
-        final field = find.byKey(const ValueKey('agent-composer'));
-        await tester.enterText(field, 'draft ');
-        if (brightness == Brightness.light) {
-          final editable = tester.state<EditableTextState>(
-            find.descendant(of: field, matching: find.byType(EditableText)),
+      testWidgets(
+        'composer paste ${image ? "image" : "text"} in ${brightness.name}',
+        (tester) async {
+          tester.platformDispatcher.platformBrightnessTestValue = brightness;
+          addTearDown(
+            tester.platformDispatcher.clearPlatformBrightnessTestValue,
           );
-          editable.showToolbar();
+          tester.view.physicalSize = const Size(1200, 800);
+          tester.view.devicePixelRatio = 1;
+          addTearDown(tester.view.resetPhysicalSize);
+          addTearDown(tester.view.resetDevicePixelRatio);
+          final png = base64Decode(
+            'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aZfoAAAAASUVORK5CYII=',
+          );
+          final messenger =
+              TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+          messenger.setMockMethodCallHandler(
+            ImageClipboard.channel,
+            (call) async => image ? png : null,
+          );
+          messenger.setMockMethodCallHandler(SystemChannels.platform, (
+            call,
+          ) async {
+            if (call.method == 'Clipboard.getData') {
+              return {'text': 'pasted text'};
+            }
+            if (call.method == 'Clipboard.hasStrings') return {'value': !image};
+            return null;
+          });
+          addTearDown(() {
+            messenger.setMockMethodCallHandler(ImageClipboard.channel, null);
+            messenger.setMockMethodCallHandler(SystemChannels.platform, null);
+          });
+          final api = _ClipboardApi();
+          final controller = await _controller(api: api);
+          addTearDown(() => _disposeController(controller));
+          await tester.pumpWidget(SageDesktopV2App(controller: controller));
           await tester.pumpAndSettle();
-          final toolbar = tester.widget<AdaptiveTextSelectionToolbar>(
-            find.byType(AdaptiveTextSelectionToolbar).last,
-          );
-          toolbar.buttonItems!.singleWhere(
-            (item) => item.type == ContextMenuButtonType.paste,
-          ).onPressed!();
-        } else {
-          await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
-          await tester.sendKeyEvent(LogicalKeyboardKey.keyV);
-          await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
-        }
-        await tester.pumpAndSettle();
-        final text = tester.widget<TextField>(field).controller!.text;
-        if (image) {
-          expect(api.uploadedBytes, png);
-          expect(controller.attachments, hasLength(1));
-          expect(controller.composerReferences.single.path, startsWith('/workspace/uploads/clipboard-'));
-          expect(text, contains('draft '));
-          expect(text, isNot(contains('pasted text')));
-        } else {
-          expect(api.uploadedBytes, isNull);
-          expect(text, 'draft pasted text');
-        }
-      }, variant: TargetPlatformVariant.only(TargetPlatform.macOS));
+          final field = find.byKey(const ValueKey('agent-composer'));
+          await tester.enterText(field, 'draft ');
+          if (brightness == Brightness.light) {
+            final editable = tester.state<EditableTextState>(
+              find.descendant(of: field, matching: find.byType(EditableText)),
+            );
+            editable.showToolbar();
+            await tester.pumpAndSettle();
+            final toolbar = tester.widget<AdaptiveTextSelectionToolbar>(
+              find.byType(AdaptiveTextSelectionToolbar).last,
+            );
+            toolbar.buttonItems!
+                .singleWhere((item) => item.type == ContextMenuButtonType.paste)
+                .onPressed!();
+          } else {
+            await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
+            await tester.sendKeyEvent(LogicalKeyboardKey.keyV);
+            await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
+          }
+          await tester.pumpAndSettle();
+          final text = tester.widget<TextField>(field).controller!.text;
+          if (image) {
+            expect(api.uploadedBytes, png);
+            expect(controller.attachments, hasLength(1));
+            expect(
+              controller.composerReferences.single.path,
+              startsWith('/workspace/uploads/clipboard-'),
+            );
+            expect(text, contains('draft '));
+            expect(text, isNot(contains('pasted text')));
+          } else {
+            expect(api.uploadedBytes, isNull);
+            expect(text, 'draft pasted text');
+          }
+        },
+        variant: TargetPlatformVariant.only(TargetPlatform.macOS),
+      );
     }
   }
 
-  testWidgets('clone agent flushes pending edits and opens independent editor', (tester) async {
-    tester.view.physicalSize = const Size(1200, 800);
-    tester.view.devicePixelRatio = 1;
-    addTearDown(tester.view.resetPhysicalSize);
-    addTearDown(tester.view.resetDevicePixelRatio);
-    final api = _FakeApi();
-    final controller = await _controller(api: api);
-    addTearDown(() => _disposeController(controller));
-    await tester.pumpWidget(SageDesktopV2App(controller: controller));
-    await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const ValueKey('settings-button')));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('智能体').first);
-    await tester.pumpAndSettle();
-    final source = controller.agentConfiguration!.id;
-    await tester.tap(find.byKey(const ValueKey('settings-agent-edit')));
-    await tester.pumpAndSettle();
-    await tester.enterText(find.byKey(const ValueKey('agent-name-field')), 'Customized');
-    await tester.tap(find.byKey(const ValueKey('settings-agent-clone')));
-    await tester.pumpAndSettle();
-    expect(api.lastAgentPatch, {'name': 'Customized'});
-    expect(api.lastClonedAgentId, source);
-    expect(controller.agentConfiguration?.id, 'agent_cloned');
-    expect(controller.agentConfiguration?.name, contains('Customized'));
-    expect(find.byKey(const ValueKey('agent-name-field')), findsOneWidget);
-  });
+  testWidgets(
+    'clone agent flushes pending edits and opens independent editor',
+    (tester) async {
+      tester.view.physicalSize = const Size(1200, 800);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final api = _FakeApi();
+      final controller = await _controller(api: api);
+      addTearDown(() => _disposeController(controller));
+      await tester.pumpWidget(SageDesktopV2App(controller: controller));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('settings-button')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('智能体').first);
+      await tester.pumpAndSettle();
+      final source = controller.agentConfiguration!.id;
+      await tester.tap(find.byKey(const ValueKey('settings-agent-edit')));
+      await tester.pumpAndSettle();
+      await tester.enterText(
+        find.byKey(const ValueKey('agent-name-field')),
+        'Customized',
+      );
+      await tester.tap(find.byKey(const ValueKey('settings-agent-clone')));
+      await tester.pumpAndSettle();
+      expect(api.lastAgentPatch, {'name': 'Customized'});
+      expect(api.lastClonedAgentId, source);
+      expect(controller.agentConfiguration?.id, 'agent_cloned');
+      expect(controller.agentConfiguration?.name, contains('Customized'));
+      expect(find.byKey(const ValueKey('agent-name-field')), findsOneWidget);
+    },
+  );
 
   for (final field in ['workspace', 'preview', 'sandbox']) {
-    testWidgets('closing settings flushes pending $field edits', (tester) async {
+    testWidgets('closing settings flushes pending $field edits', (
+      tester,
+    ) async {
       tester.view.physicalSize = const Size(1400, 900);
       tester.view.devicePixelRatio = 1;
       addTearDown(tester.view.resetPhysicalSize);
@@ -2596,10 +2759,16 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(find.text(field == 'sandbox' ? '沙箱' : '通用').first);
       await tester.pumpAndSettle();
-      final key = field == 'workspace' ? 'settings-agent-workspace-path' :
-          field == 'preview' ? 'settings-preview-bytes' : 'settings-sandbox-workspace-root';
-      final value = field == 'workspace' ? '/tmp/close_workspace' :
-          field == 'preview' ? '12345' : '/closed';
+      final key = field == 'workspace'
+          ? 'settings-agent-workspace-path'
+          : field == 'preview'
+          ? 'settings-preview-bytes'
+          : 'settings-sandbox-workspace-root';
+      final value = field == 'workspace'
+          ? '/tmp/close_workspace'
+          : field == 'preview'
+          ? '12345'
+          : '/closed';
       final input = find.byKey(ValueKey(key));
       await tester.ensureVisible(input);
       await tester.pumpAndSettle();
@@ -2607,67 +2776,111 @@ void main() {
       await tester.tap(find.byKey(const ValueKey('settings-back-button')));
       await tester.pumpAndSettle();
       expect(find.byKey(const ValueKey('settings-back-button')), findsNothing);
-      if (field == 'workspace') expect(api.lastSettings?.agentWorkspacePath, value);
+      if (field == 'workspace') {
+        expect(api.lastSettings?.agentWorkspacePath, value);
+      }
       if (field == 'preview') expect(api.lastSettings?.maxPreviewBytes, 12345);
-      if (field == 'sandbox') expect(api.lastSettings?.componentConfigs['execution.sandbox']?['workspace_root'], value);
+      if (field == 'sandbox') {
+        expect(
+          api
+              .lastSettings
+              ?.componentConfigs['execution.sandbox']?['workspace_root'],
+          value,
+        );
+      }
       expect(tester.takeException(), isNull);
     });
   }
-  test('settings writes are serialized and contain only edited fields', () async {
-    final api = _SerializedSettingsApi();
-    final controller = await _controller(api: api);
-    addTearDown(() => _disposeController(controller));
-    final first = controller.saveSettings(controller.settings.copyWith(themeMode: 'dark'));
-    final second = controller.saveSettings(controller.settings.copyWith(themeMode: 'light'));
-    await Future<void>.delayed(Duration.zero);
-    expect(api.patches, [{'theme_mode': 'dark'}]);
-    api.releaseFirst.complete();
-    await Future.wait([first, second]);
-    expect(controller.settings.themeMode, 'light');
-    expect(controller.settings.projects.single.id, 'project_demo');
-    expect(api.patches.last, {'theme_mode': 'light'});
-  });
-
-  for (final failures in [<int>{1, 2}, <int>{1}, <int>{2}]) {
-    test('agent patch rollback uses confirmed server state $failures', () async {
-      final api = _PatchFailuresApi(failures);
+  test(
+    'settings writes are serialized and contain only edited fields',
+    () async {
+      final api = _SerializedSettingsApi();
       final controller = await _controller(api: api);
       addTearDown(() => _disposeController(controller));
-      controller.agentConfiguration = api.saved;
-      final first = controller.patchAgentConfiguration({'name': 'Edited'}).catchError((Object _) {});
-      final second = controller.patchAgentConfiguration({'description': 'Details'}).catchError((Object _) {});
+      final first = controller.saveSettings(
+        controller.settings.copyWith(themeMode: 'dark'),
+      );
+      final second = controller.saveSettings(
+        controller.settings.copyWith(themeMode: 'light'),
+      );
+      await Future<void>.delayed(Duration.zero);
+      expect(api.patches, [
+        {'theme_mode': 'dark'},
+      ]);
+      api.releaseFirst.complete();
       await Future.wait([first, second]);
-      expect(controller.agentConfiguration?.name, api.saved.name);
-      expect(controller.agentConfiguration?.description, api.saved.description);
-    });
+      expect(controller.settings.themeMode, 'light');
+      expect(controller.settings.projects.single.id, 'project_demo');
+      expect(api.patches.last, {'theme_mode': 'light'});
+    },
+  );
+
+  for (final failures in [
+    <int>{1, 2},
+    <int>{1},
+    <int>{2},
+  ]) {
+    test(
+      'agent patch rollback uses confirmed server state $failures',
+      () async {
+        final api = _PatchFailuresApi(failures);
+        final controller = await _controller(api: api);
+        addTearDown(() => _disposeController(controller));
+        controller.agentConfiguration = api.saved;
+        final first = controller
+            .patchAgentConfiguration({'name': 'Edited'})
+            .catchError((Object _) {});
+        final second = controller
+            .patchAgentConfiguration({'description': 'Details'})
+            .catchError((Object _) {});
+        await Future.wait([first, second]);
+        expect(controller.agentConfiguration?.name, api.saved.name);
+        expect(
+          controller.agentConfiguration?.description,
+          api.saved.description,
+        );
+      },
+    );
   }
 
   test('older settings read cannot overwrite successful agent write', () async {
     final api = _ReadAfterPatchApi();
     final controller = await _controller(api: api);
     addTearDown(() => _disposeController(controller));
-    controller.agentConfiguration = const AgentConfiguration(id: 'agent_main', name: 'Old');
+    controller.agentConfiguration = const AgentConfiguration(
+      id: 'agent_main',
+      name: 'Old',
+    );
     final read = controller.loadSettingsCatalog(agentId: 'agent_main');
     await controller.patchAgentConfiguration({'name': 'Saved'});
-    api.pending.single.complete(const AgentConfiguration(id: 'agent_main', name: 'Old'));
+    api.pending.single.complete(
+      const AgentConfiguration(id: 'agent_main', name: 'Old'),
+    );
     await read;
     expect(controller.agentConfiguration?.name, 'Saved');
     expect(controller.settingsAgentLoadingId, isEmpty);
   });
-  test('settings catalog response cannot overwrite a newer agent selection', () async {
-    final api = _QueuedAgentApi();
-    final controller = await _controller(api: api);
-    addTearDown(() => _disposeController(controller));
-    final catalog = controller.loadSettingsCatalog(agentId: 'agent_main');
-    final selection = controller.selectSettingsAgent('agent_review');
-    api.pending[1].complete(const AgentConfiguration(id: 'agent_review', name: 'Review'));
-    await selection;
-    api.pending[0].complete(const AgentConfiguration(id: 'agent_main', name: 'Old'));
-    await catalog;
-    expect(controller.agentConfiguration?.id, 'agent_review');
-    expect(controller.settingsAgentLoadingId, isEmpty);
-    expect(controller.settingsCatalogLoading, isFalse);
-  });
+  test(
+    'settings catalog response cannot overwrite a newer agent selection',
+    () async {
+      final api = _QueuedAgentApi();
+      final controller = await _controller(api: api);
+      addTearDown(() => _disposeController(controller));
+      final catalog = controller.loadSettingsCatalog(agentId: 'agent_main');
+      final selection = controller.selectSettingsAgent('agent_review');
+      api.pending[1].complete(
+        const AgentConfiguration(id: 'agent_review', name: 'Review'),
+      );
+      await selection;
+      api.pending[0].complete(
+        const AgentConfiguration(id: 'agent_main', name: 'Old'),
+      );
+      await catalog;
+      expect(controller.agentConfiguration?.id, 'agent_review');
+      expect(controller.settingsAgentLoadingId, isEmpty);
+      expect(controller.settingsCatalogLoading, isFalse);
+    },
+  );
 
   test('settings selection A B A ignores the first A response', () async {
     final api = _QueuedAgentApi();
@@ -2676,13 +2889,19 @@ void main() {
     final first = controller.selectSettingsAgent('agent_main');
     final second = controller.selectSettingsAgent('agent_review');
     final third = controller.selectSettingsAgent('agent_main');
-    api.pending[0].complete(const AgentConfiguration(id: 'agent_main', name: 'Stale'));
+    api.pending[0].complete(
+      const AgentConfiguration(id: 'agent_main', name: 'Stale'),
+    );
     await first;
     expect(controller.agentConfiguration, isNull);
     expect(controller.settingsAgentLoadingId, 'agent_main');
-    api.pending[2].complete(const AgentConfiguration(id: 'agent_main', name: 'Latest'));
+    api.pending[2].complete(
+      const AgentConfiguration(id: 'agent_main', name: 'Latest'),
+    );
     await third;
-    api.pending[1].complete(const AgentConfiguration(id: 'agent_review', name: 'Review'));
+    api.pending[1].complete(
+      const AgentConfiguration(id: 'agent_review', name: 'Review'),
+    );
     await second;
     expect(controller.agentConfiguration?.name, 'Latest');
   });
@@ -2693,7 +2912,9 @@ void main() {
     final catalog = controller.loadSettingsCatalog(agentId: 'agent_main');
     final selection = controller.selectSettingsAgent('agent_review');
     _disposeController(controller);
-    api.pending[0].complete(const AgentConfiguration(id: 'agent_main', name: 'Old'));
+    api.pending[0].complete(
+      const AgentConfiguration(id: 'agent_main', name: 'Old'),
+    );
     api.pending[1].completeError(StateError('late failure'));
     await Future.wait([catalog, selection]);
     expect(controller.agentConfiguration, isNull);
@@ -4397,7 +4618,10 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const ValueKey('settings-agent-edit')));
     await tester.pumpAndSettle();
-    await tester.enterText(find.byKey(const ValueKey('agent-name-field')), 'Expert');
+    await tester.enterText(
+      find.byKey(const ValueKey('agent-name-field')),
+      'Expert',
+    );
     // A second field changes before the first field's debounce expires.
     final description = find.byType(EditableText).at(1);
     await tester.enterText(description, 'Specialist description');
@@ -4413,7 +4637,9 @@ void main() {
   });
 
   for (final navigation in ['switch', 'close']) {
-    testWidgets('agent text autosave flushes before $navigation', (tester) async {
+    testWidgets('agent text autosave flushes before $navigation', (
+      tester,
+    ) async {
       tester.view.physicalSize = const Size(1400, 900);
       tester.view.devicePixelRatio = 1;
       addTearDown(tester.view.resetPhysicalSize);
@@ -4429,10 +4655,15 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(find.byKey(const ValueKey('settings-agent-edit')));
       await tester.pumpAndSettle();
-      await tester.enterText(find.byKey(const ValueKey('agent-name-field')), 'Expert');
-      await tester.tap(navigation == 'switch'
-          ? find.text('Review Agent')
-          : find.byKey(const ValueKey('settings-back-button')));
+      await tester.enterText(
+        find.byKey(const ValueKey('agent-name-field')),
+        'Expert',
+      );
+      await tester.tap(
+        navigation == 'switch'
+            ? find.text('Review Agent')
+            : find.byKey(const ValueKey('settings-back-button')),
+      );
       await tester.pumpAndSettle();
       await tester.pump(const Duration(milliseconds: 700));
       expect(api.patchedAgentIds, ['agent_main']);
@@ -4445,7 +4676,9 @@ void main() {
   }
 
   for (final scenario in ['in-flight', 'retry']) {
-    testWidgets('agent text autosave handles $scenario before switching', (tester) async {
+    testWidgets('agent text autosave handles $scenario before switching', (
+      tester,
+    ) async {
       tester.view.physicalSize = const Size(1400, 900);
       tester.view.devicePixelRatio = 1;
       addTearDown(tester.view.resetPhysicalSize);
@@ -4466,7 +4699,10 @@ void main() {
       } else {
         api.failNextPatch = true;
       }
-      await tester.enterText(find.byKey(const ValueKey('agent-name-field')), 'Expert');
+      await tester.enterText(
+        find.byKey(const ValueKey('agent-name-field')),
+        'Expert',
+      );
       await tester.pump(const Duration(milliseconds: 700));
       await tester.pump();
       await tester.tap(find.text('Review Agent'));
@@ -4697,7 +4933,11 @@ void main() {
             findsNothing,
           );
           if (interrupted) {
-            await tester.tap(find.byKey(const ValueKey('interaction-question-recovery_action')));
+            await tester.tap(
+              find.byKey(
+                const ValueKey('interaction-question-recovery_action'),
+              ),
+            );
             await tester.pumpAndSettle();
             expect(find.text('重试'), findsOneWidget);
             await tester.tap(find.text('重试'));
@@ -5884,6 +6124,73 @@ void main() {
     },
   );
 
+  testWidgets(
+    'interactive UI preference lives in plus menu, persists and reaches run',
+    (tester) async {
+      tester.view.physicalSize = const Size(1200, 800);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final api = _FakeApi();
+      final controller = await _controller(api: api);
+      addTearDown(() => _disposeController(controller));
+      await tester.pumpWidget(SageDesktopV2App(controller: controller));
+      await tester.pumpAndSettle();
+      final first = controller.selectedConversation!;
+      expect(first.preferInteractiveUi, isFalse);
+      expect(
+        find.byKey(const ValueKey('composer-interactive-ui-switch')),
+        findsNothing,
+      );
+      await tester.tap(find.byKey(const ValueKey('composer-upload-button')));
+      await tester.pumpAndSettle();
+      await tester.tap(
+        find.byKey(const ValueKey('composer-interactive-ui-option')),
+      );
+      await tester.pumpAndSettle();
+      expect(first.preferInteractiveUi, isTrue);
+      expect(
+        tester
+            .widget<GlassSwitch>(
+              find.byKey(const ValueKey('composer-interactive-ui-switch')),
+            )
+            .value,
+        isTrue,
+      );
+      expect(Conversation.fromJson(first.toJson()).preferInteractiveUi, isTrue);
+      controller.createConversation();
+      await tester.pumpAndSettle();
+      expect(controller.selectedConversation!.preferInteractiveUi, isFalse);
+      await controller.selectConversation(controller.selectedGroupId, first.id);
+      await tester.pumpAndSettle();
+      expect(controller.selectedConversation!.preferInteractiveUi, isTrue);
+      controller.selectedConversation!.status = RunStatus.running;
+      controller.setPreferInteractiveUi(false);
+      expect(first.preferInteractiveUi, isTrue);
+      controller.selectedConversation!.status = RunStatus.idle;
+      await tester.tap(find.byKey(const ValueKey('composer-upload-button')));
+      await tester.pumpAndSettle();
+      await controller.send('帮我比较两种方案');
+      await tester.pumpAndSettle();
+      expect(api.lastRunBody?['ui_preference'], 'interactive');
+      final restored = _newController(
+        api: _FakeApi(),
+        preferencesLoader: SharedPreferences.getInstance,
+      );
+      addTearDown(() => _disposeController(restored));
+      await tester.pumpWidget(const SizedBox());
+      await tester.pumpWidget(
+        SageDesktopV2App(
+          key: const ValueKey('restored-ui-preference'),
+          controller: restored,
+        ),
+      );
+      await tester.pumpAndSettle();
+      await restored.selectConversation(restored.selectedGroupId, first.id);
+      expect(restored.selectedConversation!.preferInteractiveUi, isTrue);
+    },
+  );
+
   testWidgets('composer mode chip and open menu lock with execution status', (
     tester,
   ) async {
@@ -6280,16 +6587,21 @@ void main() {
         addTearDown(tester.platformDispatcher.clearPlatformBrightnessTestValue);
         addTearDown(tester.view.resetPhysicalSize);
         addTearDown(tester.view.resetDevicePixelRatio);
-        final persisted = jsonDecode(jsonEncode(_persistedBranchableConversation())) as Map<String, dynamic>;
-        ((persisted['messages'] as List).cast<Map>().singleWhere((value) => value['id'] == 'user-branch-2'))['content'] = [
-          const ChatMessageContent.reference(fileName: 'image.png', path: '/workspace/uploads/image.png').toJson(),
+        final persisted =
+            jsonDecode(jsonEncode(_persistedBranchableConversation()))
+                as Map<String, dynamic>;
+        ((persisted['messages'] as List).cast<Map>().singleWhere(
+          (value) => value['id'] == 'user-branch-2',
+        ))['content'] = [
+          const ChatMessageContent.reference(
+            fileName: 'image.png',
+            path: '/workspace/uploads/image.png',
+          ).toJson(),
           const ChatMessageContent.text('第二轮问题').toJson(),
         ];
         SharedPreferences.setMockInitialValues({
           'sage.desktop_v2.conversations.v1': jsonEncode({
-            WorkspaceController.agentWorkspaceId: [
-              persisted,
-            ],
+            WorkspaceController.agentWorkspaceId: [persisted],
           }),
         });
         final controller = _newController(
@@ -6375,8 +6687,18 @@ void main() {
           find.byKey(const ValueKey('message-edit-card:user-branch-2')),
           findsOneWidget,
         );
-        expect(find.byKey(const ValueKey('message-edit-attachments:user-branch-2')), findsOneWidget);
-        expect(find.byKey(const ValueKey('message-reference-chip:/workspace/uploads/image.png')), findsOneWidget);
+        expect(
+          find.byKey(const ValueKey('message-edit-attachments:user-branch-2')),
+          findsOneWidget,
+        );
+        expect(
+          find.byKey(
+            const ValueKey(
+              'message-reference-chip:/workspace/uploads/image.png',
+            ),
+          ),
+          findsOneWidget,
+        );
         expect(tester.takeException(), isNull);
       },
     );
@@ -7267,14 +7589,103 @@ void main() {
 
   for (final brightness in [Brightness.light, Brightness.dark]) {
     for (final width in [1200.0, 760.0]) {
-      testWidgets('component navigation tracks scrolling ${brightness.name} $width', (tester) async {
+      testWidgets(
+        'component navigation tracks scrolling ${brightness.name} $width',
+        (tester) async {
+          tester.platformDispatcher.platformBrightnessTestValue = brightness;
+          tester.view.physicalSize = Size(width, 520);
+          tester.view.devicePixelRatio = 1;
+          addTearDown(
+            tester.platformDispatcher.clearPlatformBrightnessTestValue,
+          );
+          addTearDown(tester.view.resetPhysicalSize);
+          addTearDown(tester.view.resetDevicePixelRatio);
+          final controller = await _controller();
+          try {
+            await tester.pumpWidget(SageDesktopV2App(controller: controller));
+            await tester.pumpAndSettle();
+            await tester.tap(find.byKey(const ValueKey('settings-button')));
+            await tester.pumpAndSettle();
+            await tester.tap(find.text('运行组件'));
+            await tester.pumpAndSettle();
+            final nav = find.byKey(
+              const ValueKey('settings-components-navigation'),
+            );
+            final body = find.byKey(const ValueKey('settings-body-scroll'));
+            final bodyController = tester
+                .widget<SingleChildScrollView>(body)
+                .controller!;
+            final navController = tester
+                .widget<SingleChildScrollView>(nav)
+                .controller!;
+            Finder link(String id) =>
+                find.byKey(ValueKey('settings-component-nav-$id'));
+            bool selected(String id) =>
+                tester.widget<Semantics>(link(id)).properties.selected == true;
+            expect(selected('agent.continuation-policy'), isTrue);
+            expect(
+              tester.widget<SingleChildScrollView>(nav).scrollDirection,
+              width == 1200 ? Axis.vertical : Axis.horizontal,
+            );
+            final tool = link('tool.selection-policy');
+            await tester.ensureVisible(tool);
+            await tester.tap(tool);
+            await tester.pumpAndSettle();
+            expect(selected('tool.selection-policy'), isTrue);
+            expect(bodyController.offset, greaterThan(0));
+            // All sections stay mounted: jumping never replaces the right pane.
+            expect(
+              find.byKey(
+                const ValueKey('settings-component-workspace.initializer'),
+              ),
+              findsOneWidget,
+            );
+            final offsetBeforeSave = bodyController.offset;
+            final save = find.byKey(
+              const ValueKey('settings-tool-selection-save'),
+            );
+            await tester.ensureVisible(save);
+            await tester.tap(save);
+            await tester.pumpAndSettle();
+            expect(
+              bodyController.offset,
+              greaterThanOrEqualTo(offsetBeforeSave),
+            );
+            // Direct scrolling updates selection and keeps the nav item visible.
+            bodyController.jumpTo(bodyController.position.maxScrollExtent);
+            await tester.pumpAndSettle();
+            expect(selected('workspace.initializer'), isTrue);
+            expect(navController.offset, greaterThan(0));
+            expect(
+              tester
+                  .getRect(link('workspace.initializer'))
+                  .overlaps(tester.getRect(nav)),
+              isTrue,
+            );
+            bodyController.jumpTo(0);
+            await tester.pumpAndSettle();
+            expect(selected('agent.continuation-policy'), isTrue);
+            expect(navController.offset, 0);
+            expect(tester.takeException(), isNull);
+          } finally {
+            await tester.pumpWidget(const SizedBox.shrink());
+            _disposeController(controller);
+          }
+        },
+      );
+    }
+
+    testWidgets(
+      'plugin defaults read-only fields and enum controls ${brightness.name}',
+      (tester) async {
         tester.platformDispatcher.platformBrightnessTestValue = brightness;
-        tester.view.physicalSize = Size(width, 520);
+        tester.view.physicalSize = const Size(1200, 800);
         tester.view.devicePixelRatio = 1;
         addTearDown(tester.platformDispatcher.clearPlatformBrightnessTestValue);
         addTearDown(tester.view.resetPhysicalSize);
         addTearDown(tester.view.resetDevicePixelRatio);
-        final controller = await _controller();
+        final api = _SummaryComponentApi();
+        final controller = await _controller(api: api);
         try {
           await tester.pumpWidget(SageDesktopV2App(controller: controller));
           await tester.pumpAndSettle();
@@ -7282,104 +7693,74 @@ void main() {
           await tester.pumpAndSettle();
           await tester.tap(find.text('运行组件'));
           await tester.pumpAndSettle();
-          final nav = find.byKey(const ValueKey('settings-components-navigation'));
-          final body = find.byKey(const ValueKey('settings-body-scroll'));
-          final bodyController = tester.widget<SingleChildScrollView>(body).controller!;
-          final navController = tester.widget<SingleChildScrollView>(nav).controller!;
-          Finder link(String id) => find.byKey(ValueKey('settings-component-nav-$id'));
-          bool selected(String id) => tester.widget<Semantics>(link(id)).properties.selected == true;
-          expect(selected('agent.continuation-policy'), isTrue);
-          expect(tester.widget<SingleChildScrollView>(nav).scrollDirection,
-              width == 1200 ? Axis.vertical : Axis.horizontal);
-          final tool = link('tool.selection-policy');
-          await tester.ensureVisible(tool);
-          await tester.tap(tool);
+          expect(find.text('root'), findsNothing);
+          final binding = find.byKey(
+            const ValueKey('settings-plugin-context.summarizer-model_binding'),
+          );
+          expect(tester.widget<GlassTextField>(binding).readOnly, isTrue);
+          expect(find.text('summary'), findsOneWidget);
+          expect(find.text('24000'), findsOneWidget);
+          expect(find.text('60'), findsOneWidget);
+          final timeout = find.byKey(
+            const ValueKey(
+              'settings-plugin-context.summarizer-timeout_seconds',
+            ),
+          );
+          final save = find.byKey(
+            const ValueKey('settings-plugin-save-context.summarizer'),
+          );
+          await tester.enterText(timeout, '0');
           await tester.pumpAndSettle();
-          expect(selected('tool.selection-policy'), isTrue);
-          expect(bodyController.offset, greaterThan(0));
-          // All sections stay mounted: jumping never replaces the right pane.
-          expect(find.byKey(const ValueKey('settings-component-workspace.initializer')), findsOneWidget);
-          final offsetBeforeSave = bodyController.offset;
-          final save = find.byKey(const ValueKey('settings-tool-selection-save'));
+          expect(tester.widget<FilledButton>(save).onPressed, isNull);
+          await tester.tap(find.text('恢复默认阈值'));
+          await tester.pumpAndSettle();
+          expect(find.text('60'), findsOneWidget);
           await tester.ensureVisible(save);
           await tester.tap(save);
           await tester.pumpAndSettle();
-          expect(bodyController.offset, greaterThanOrEqualTo(offsetBeforeSave));
-          // Direct scrolling updates selection and keeps the nav item visible.
-          bodyController.jumpTo(bodyController.position.maxScrollExtent);
+          expect(api.lastSelectedComponentConfig, {
+            'max_source_tokens': 24000,
+            'timeout_seconds': 60.0,
+            'format': 'json',
+            'batch_size': 2,
+          });
+          final format = find.byKey(
+            const ValueKey('settings-plugin-enum-context.summarizer-format'),
+          );
+          await tester.ensureVisible(format);
+          await tester.tap(format);
           await tester.pumpAndSettle();
-          expect(selected('workspace.initializer'), isTrue);
-          expect(navController.offset, greaterThan(0));
-          expect(tester.getRect(link('workspace.initializer')).overlaps(tester.getRect(nav)), isTrue);
-          bodyController.jumpTo(0);
+          await tester.tap(find.text('text').last);
           await tester.pumpAndSettle();
-          expect(selected('agent.continuation-policy'), isTrue);
-          expect(navController.offset, 0);
-          expect(tester.takeException(), isNull);
+          final batch = find.byKey(
+            const ValueKey(
+              'settings-plugin-enum-context.summarizer-batch_size',
+            ),
+          );
+          await tester.ensureVisible(batch);
+          await tester.tap(batch);
+          await tester.pumpAndSettle();
+          await tester.tap(find.text('4').last);
+          await tester.pumpAndSettle();
+          await tester.ensureVisible(save);
+          await tester.tap(save);
+          await tester.pumpAndSettle();
+          expect(api.lastSelectedComponentConfig, {
+            'max_source_tokens': 24000,
+            'timeout_seconds': 60.0,
+            'format': 'text',
+            'batch_size': 4,
+          });
         } finally {
           await tester.pumpWidget(const SizedBox.shrink());
           _disposeController(controller);
         }
-      });
-    }
+      },
+    );
 
-    testWidgets('plugin defaults read-only fields and enum controls ${brightness.name}', (tester) async {
-      tester.platformDispatcher.platformBrightnessTestValue = brightness;
-      tester.view.physicalSize = const Size(1200, 800);
-      tester.view.devicePixelRatio = 1;
-      addTearDown(tester.platformDispatcher.clearPlatformBrightnessTestValue);
-      addTearDown(tester.view.resetPhysicalSize);
-      addTearDown(tester.view.resetDevicePixelRatio);
-      final api = _SummaryComponentApi();
-      final controller = await _controller(api: api);
-      try {
-        await tester.pumpWidget(SageDesktopV2App(controller: controller));
-        await tester.pumpAndSettle();
-        await tester.tap(find.byKey(const ValueKey('settings-button')));
-        await tester.pumpAndSettle();
-        await tester.tap(find.text('运行组件'));
-        await tester.pumpAndSettle();
-        expect(find.text('root'), findsNothing);
-        final binding = find.byKey(const ValueKey('settings-plugin-context.summarizer-model_binding'));
-        expect(tester.widget<GlassTextField>(binding).readOnly, isTrue);
-        expect(find.text('summary'), findsOneWidget);
-        expect(find.text('24000'), findsOneWidget);
-        expect(find.text('60'), findsOneWidget);
-        final timeout = find.byKey(const ValueKey('settings-plugin-context.summarizer-timeout_seconds'));
-        final save = find.byKey(const ValueKey('settings-plugin-save-context.summarizer'));
-        await tester.enterText(timeout, '0');
-        await tester.pumpAndSettle();
-        expect(tester.widget<FilledButton>(save).onPressed, isNull);
-        await tester.tap(find.text('恢复默认阈值'));
-        await tester.pumpAndSettle();
-        expect(find.text('60'), findsOneWidget);
-        await tester.ensureVisible(save);
-        await tester.tap(save);
-        await tester.pumpAndSettle();
-        expect(api.lastSelectedComponentConfig, {'max_source_tokens': 24000, 'timeout_seconds': 60.0, 'format': 'json', 'batch_size': 2});
-        final format = find.byKey(const ValueKey('settings-plugin-enum-context.summarizer-format'));
-        await tester.ensureVisible(format);
-        await tester.tap(format);
-        await tester.pumpAndSettle();
-        await tester.tap(find.text('text').last);
-        await tester.pumpAndSettle();
-        final batch = find.byKey(const ValueKey('settings-plugin-enum-context.summarizer-batch_size'));
-        await tester.ensureVisible(batch);
-        await tester.tap(batch);
-        await tester.pumpAndSettle();
-        await tester.tap(find.text('4').last);
-        await tester.pumpAndSettle();
-        await tester.ensureVisible(save);
-        await tester.tap(save);
-        await tester.pumpAndSettle();
-        expect(api.lastSelectedComponentConfig, {'max_source_tokens': 24000, 'timeout_seconds': 60.0, 'format': 'text', 'batch_size': 4});
-      } finally {
-        await tester.pumpWidget(const SizedBox.shrink());
-        _disposeController(controller);
-      }
-    });
-
-    testWidgets('skill plugin schema form in ${brightness.name}', (tester) async {
+    testWidgets('skill plugin schema form in ${brightness.name}', (
+      tester,
+    ) async {
       tester.platformDispatcher.platformBrightnessTestValue = brightness;
       tester.view.physicalSize = const Size(1200, 800);
       tester.view.devicePixelRatio = 1;
@@ -7395,8 +7776,12 @@ void main() {
         await tester.pumpAndSettle();
         await tester.tap(find.text('运行组件'));
         await tester.pumpAndSettle();
-        final field = find.byKey(const ValueKey('settings-plugin-skill.loading-max_active_tokens'));
-        final save = find.byKey(const ValueKey('settings-plugin-save-skill.loading'));
+        final field = find.byKey(
+          const ValueKey('settings-plugin-skill.loading-max_active_tokens'),
+        );
+        final save = find.byKey(
+          const ValueKey('settings-plugin-save-skill.loading'),
+        );
         expect(field, findsOneWidget);
         expect(find.text('6000'), findsOneWidget);
         await tester.enterText(field, '0');
@@ -7410,10 +7795,15 @@ void main() {
         expect(api.lastSelectedComponent, 'skill.loading');
         expect(api.lastSelectedComponentConfig, {'max_active_tokens': 12000});
         expect(find.text('12000'), findsOneWidget);
-        final owner = find.byKey(const ValueKey(
-          'settings-plugin-fields-skill.loading-sage.skill.loading.lazy'));
+        final owner = find.byKey(
+          const ValueKey(
+            'settings-plugin-fields-skill.loading-sage.skill.loading.lazy',
+          ),
+        );
         expect(find.descendant(of: owner, matching: field), findsOneWidget);
-        final picker = find.byKey(const ValueKey('settings-component-picker-skill.loading'));
+        final picker = find.byKey(
+          const ValueKey('settings-component-picker-skill.loading'),
+        );
         await tester.ensureVisible(picker);
         await tester.tap(picker);
         await tester.pumpAndSettle();
@@ -7421,10 +7811,16 @@ void main() {
         await tester.pumpAndSettle();
         expect(field, findsNothing);
         expect(owner, findsNothing);
-        final otherOwner = find.byKey(const ValueKey(
-          'settings-plugin-fields-skill.loading-test.skill.other'));
+        final otherOwner = find.byKey(
+          const ValueKey(
+            'settings-plugin-fields-skill.loading-test.skill.other',
+          ),
+        );
         expect(otherOwner, findsOneWidget);
-        expect(find.descendant(of: otherOwner, matching: find.byType(Switch)), findsOneWidget);
+        expect(
+          find.descendant(of: otherOwner, matching: find.byType(Switch)),
+          findsOneWidget,
+        );
         await tester.ensureVisible(save);
         await tester.tap(save);
         await tester.pumpAndSettle();
@@ -8381,7 +8777,9 @@ void main() {
         'preferences': {'concise': true},
       },
     });
-    await tester.ensureVisible(find.byKey(const ValueKey('agent-deep-thinking')));
+    await tester.ensureVisible(
+      find.byKey(const ValueKey('agent-deep-thinking')),
+    );
     await tester.pumpAndSettle();
     await tester.tap(
       find.descendant(
@@ -8601,6 +8999,45 @@ void main() {
     );
   });
 
+  testWidgets('model rename saves without capability verification', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1200, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    SharedPreferences.setMockInitialValues({});
+    final api = _FakeApi();
+    final controller = _newController(
+      api: api,
+      preferencesLoader: SharedPreferences.getInstance,
+    );
+    addTearDown(() => _disposeController(controller));
+
+    await tester.pumpWidget(SageDesktopV2App(controller: controller));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('settings-button')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byIcon(CupertinoIcons.slider_horizontal_3).first);
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('settings-model-edit')));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.byKey(const ValueKey('settings-model-name-field')),
+      'Renamed model',
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('settings-model-save')));
+    await tester.pumpAndSettle();
+
+    expect(api.lastModelCapabilityDraft, isNull);
+    expect(api.lastModelPatch, {'name': 'Renamed model'});
+    expect(
+      find.byKey(const ValueKey('settings-model-name-field')),
+      findsNothing,
+    );
+  });
+
   testWidgets('model draft is validated before explicit save', (tester) async {
     tester.view.physicalSize = const Size(1200, 800);
     tester.view.devicePixelRatio = 1;
@@ -8662,6 +9099,12 @@ void main() {
     expect(find.text('低 · 高'), findsOneWidget);
     expect(find.text('极高'), findsOneWidget);
     expect(find.text('辅助 JSON'), findsOneWidget);
+    await tester.enterText(
+      find.byKey(const ValueKey('settings-model-name-field')),
+      'Verified renamed model',
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('max_completion_tokens'), findsOneWidget);
     await tester.tap(find.byKey(const ValueKey('settings-model-save')));
     await tester.pumpAndSettle();
 
@@ -9243,6 +9686,321 @@ void main() {
     expect(tester.getTopLeft(selector).dy, selectorTop);
     expect(find.text('skill_23'), findsOneWidget);
   });
+
+  for (final mode in ['light', 'dark']) {
+    testWidgets('local calculator edits never create a model run in $mode', (
+      tester,
+    ) async {
+      tester.view.physicalSize = const Size(1440, 900);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final api = _FakeApi()
+        ..desktopSettings = DesktopSettings(language: 'zh', themeMode: mode);
+      final controller = await _controller(api: api);
+      addTearDown(() => _disposeController(controller));
+      await tester.pumpWidget(SageDesktopV2App(controller: controller));
+      await tester.pumpAndSettle();
+      final conversation = controller.selectedConversation!;
+      conversation.status = RunStatus.completed;
+      conversation.runId = 'local-run';
+      final surface = <String, Object?>{
+        'message_id': 'local-ui',
+        'block_index': 0,
+        'complete': true,
+        'surface_id': 'local-surface',
+        'run_id': 'local-run',
+        'agent_id': controller.selectedAgentId,
+        'tree': {
+          'component': 'Stack',
+          'props': {
+            'children': [
+              {
+                'component': 'NumberInput',
+                'props': {
+                  'name': 'cups',
+                  'label': '每天销量',
+                  'value': 100,
+                  'min': 0,
+                  'max': 2000,
+                  'step': 1,
+                },
+              },
+              {
+                'component': 'Computed',
+                'props': {
+                  'label': '月利润',
+                  'operation': 'difference',
+                  'inputs': [
+                    {
+                      'component': 'Computed',
+                      'props': {
+                        'operation': 'product',
+                        'inputs': ['cups', 510],
+                      },
+                    },
+                    20000,
+                  ],
+                  'precision': 0,
+                },
+              },
+            ],
+          },
+        },
+      };
+      conversation.messages.add(
+        ChatMessage(
+          id: 'local-ui',
+          role: 'assistant',
+          text: '```openui\nroot = Stack([])\n```',
+          openUiSurfaces: [surface],
+        ),
+      );
+      controller.updateOpenUiDraft(surface, {});
+      await tester.pumpAndSettle();
+      final count = conversation.messages.length;
+      final input = find.descendant(
+        of: find.byKey(const ValueKey('openui-field:cups')),
+        matching: find.byType(EditableText),
+      );
+      await tester.enterText(input, '200');
+      await tester.pumpAndSettle();
+      expect(find.text('82000'), findsOneWidget);
+      expect(api.lastRunBody, isNull);
+      expect(conversation.messages.length, count);
+      expect(conversation.status, RunStatus.completed);
+      await tester.tap(find.byKey(const ValueKey('openui-open-in-sidebar')));
+      await tester.pumpAndSettle();
+      expect(find.text('82000'), findsNWidgets(2));
+      await tester.enterText(
+        find.descendant(
+          of: find.byKey(const ValueKey('openui-field:cups')).last,
+          matching: find.byType(EditableText),
+        ),
+        '150',
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('56500'), findsNWidgets(2));
+      expect(api.lastRunBody, isNull);
+      expect(conversation.runId, 'local-run');
+      expect(tester.takeException(), isNull);
+    });
+  }
+
+  for (final mode in ['light', 'dark']) {
+    testWidgets('interactive UI sidebar action and opaque panel in $mode', (
+      tester,
+    ) async {
+      tester.view.physicalSize = const Size(1440, 900);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final api = _FakeApi()
+        ..desktopSettings = DesktopSettings(language: 'zh', themeMode: mode);
+      final controller = await _controller(api: api);
+      addTearDown(() => _disposeController(controller));
+      await tester.pumpWidget(SageDesktopV2App(controller: controller));
+      await tester.pumpAndSettle();
+      final surface = <String, Object?>{
+        'message_id': 'ui-message',
+        'block_index': 0,
+        'complete': true,
+        'tree': {
+          'component': 'Text',
+          'props': {'content': 'Panel content'},
+        },
+      };
+      controller.selectedConversation!.messages.add(
+        ChatMessage(
+          id: 'ui-message',
+          role: 'assistant',
+          text: '```openui\nroot = Text("Panel content")\n```',
+          openUiSurfaces: [surface],
+        ),
+      );
+      controller.updateOpenUiDraft(surface, {});
+      await tester.pumpAndSettle();
+      final action = find.byKey(const ValueKey('openui-open-in-sidebar'));
+      expect(find.text('在侧栏打开'), findsOneWidget);
+      expect(
+        tester.getTopLeft(action).dy,
+        lessThan(tester.getTopLeft(find.text('Panel content')).dy),
+      );
+      await tester.tap(action);
+      await tester.pumpAndSettle();
+      expect(controller.expandedOpenUiKey, 'ui-message:0');
+      final background = find.byKey(const ValueKey('openui-panel-background'));
+      expect(background, findsOneWidget);
+      final color = tester.widget<ColoredBox>(background).color;
+      expect(color.a, 1);
+      expect(
+        color,
+        Theme.of(
+          tester.element(background),
+        ).colorScheme.surface.withValues(alpha: 1),
+      );
+      expect(find.text('交互界面'), findsOneWidget);
+      expect(find.text('Panel content'), findsNWidgets(2));
+      expect(tester.takeException(), isNull);
+    });
+  }
+
+  testWidgets(
+    'deck preview opens a bounded presentation workspace in sidebar',
+    (tester) async {
+      tester.view.physicalSize = const Size(1440, 900);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final api = _FakeApi()
+        ..desktopSettings = const DesktopSettings(language: 'zh');
+      final controller = await _controller(api: api);
+      addTearDown(() => _disposeController(controller));
+      await tester.pumpWidget(SageDesktopV2App(controller: controller));
+      await tester.pumpAndSettle();
+      final surface = <String, Object?>{
+        'message_id': 'deck-message',
+        'block_index': 0,
+        'complete': false,
+        'error': 'Unsupported slide block',
+        'tree': {
+          'component': 'Deck',
+          'props': {
+            'title': '演示文稿',
+            'children': [
+              for (final title in ['封面', '市场机会'])
+                {
+                  'component': 'Slide',
+                  'props': {
+                    'title': title,
+                    'layout': 'cover',
+                    'accent': 'blue',
+                    'children': [],
+                  },
+                },
+            ],
+          },
+        },
+      };
+      controller.selectedConversation!.messages.add(
+        ChatMessage(
+          id: 'deck-message',
+          role: 'assistant',
+          text: '```openui\nroot = Deck("演示文稿", [])\n```',
+          openUiSurfaces: [surface],
+        ),
+      );
+      controller.updateOpenUiDraft(surface, {});
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('openui-open-in-sidebar')));
+      await tester.pumpAndSettle();
+      final workspace = find.byKey(const ValueKey('openui-deck-workspace'));
+      expect(workspace, findsOneWidget);
+      expect(tester.getSize(workspace).height, greaterThan(400));
+      await tester.tap(find.byKey(const ValueKey('openui-slide-thumbnail:1')));
+      await tester.pumpAndSettle();
+      expect(
+        find.descendant(of: workspace, matching: find.text('2 / 2')),
+        findsOneWidget,
+      );
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets('intermediate UI is one process row opening original preview in sidebar', (tester) async {
+    tester.view.physicalSize = const Size(1440, 1000);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final controller = await _controller(api: _FakeApi());
+    addTearDown(() => _disposeController(controller));
+    await tester.pumpWidget(SageDesktopV2App(controller: controller));
+    await tester.pumpAndSettle();
+    final c = controller.selectedConversation!;
+    c.messages.add(ChatMessage(id: 'ui-user', role: 'user', text: 'Create slides'));
+    c.processPanels.add(RuntimeProcessPanel(id: 'ui-process', anchorMessageId: 'ui-user', runId: 'ui-run', running: false, startedAt: DateTime.now()));
+    for (final id in ['old-ui', 'new-ui']) {
+      final surface = <String, Object?>{'message_id': id, 'block_index': 0, 'run_id': 'ui-run', 'complete': false, 'error': 'invalid',
+        'tree': {'component': 'Deck', 'props': {'title': id, 'children': [
+          {'component': 'Slide', 'props': {'title': id, 'layout': 'cover', 'accent': 'blue', 'children': []}}
+        ]}}};
+      c.messages.add(ChatMessage(id: id, role: 'assistant', text: '```openui\nroot = Deck("Title", [])\n```', openUiSurfaces: [surface]));
+      controller.updateOpenUiDraft(surface, {});
+    }
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('old-ui')), findsNothing);
+    expect(find.byKey(const ValueKey('new-ui')), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('process-panel-toggle')).last);
+    await tester.pumpAndSettle();
+    final row = find.byKey(const ValueKey('process-openui:old-ui:0'));
+    expect(row, findsOneWidget);
+    expect(tester.getSize(row).height, lessThan(60));
+    await tester.tap(row);
+    await tester.pumpAndSettle();
+    expect(controller.expandedOpenUiKey, 'old-ui:0');
+    expect(find.byKey(const ValueKey('openui-deck-workspace')), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets(
+    'general interactive UI default auto-saves and affects only new chats',
+    (tester) async {
+      tester.view.physicalSize = const Size(1200, 800);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      SharedPreferences.setMockInitialValues({});
+      final api = _FakeApi()
+        ..desktopSettings = const DesktopSettings(
+          language: 'zh',
+          defaultInteractiveUi: true,
+        );
+      final controller = _newController(
+        api: api,
+        preferencesLoader: SharedPreferences.getInstance,
+      );
+      addTearDown(() => _disposeController(controller));
+      await tester.pumpWidget(SageDesktopV2App(controller: controller));
+      await tester.pumpAndSettle();
+      final existing = controller.selectedConversation!;
+      expect(existing.preferInteractiveUi, isTrue);
+      await tester.tap(find.byKey(const ValueKey('settings-button')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('通用').first);
+      await tester.pumpAndSettle();
+      final toggle = find.byKey(
+        const ValueKey('settings-default-interactive-ui'),
+      );
+      expect(tester.widget<GlassSwitch>(toggle).value, isTrue);
+      await tester.tap(toggle);
+      await tester.pumpAndSettle();
+      expect(api.lastSettings!.defaultInteractiveUi, isFalse);
+      expect(existing.preferInteractiveUi, isTrue);
+      controller.createConversation();
+      expect(controller.selectedConversation!.preferInteractiveUi, isFalse);
+      await tester.tap(toggle);
+      await tester.pumpAndSettle();
+      expect(api.lastSettings!.defaultInteractiveUi, isTrue);
+      controller.createConversation();
+      expect(controller.selectedConversation!.preferInteractiveUi, isTrue);
+      final restored = _newController(
+        api: api,
+        preferencesLoader: SharedPreferences.getInstance,
+      );
+      addTearDown(() => _disposeController(restored));
+      await tester.pumpWidget(const SizedBox());
+      await tester.pumpWidget(
+        SageDesktopV2App(
+          key: const ValueKey('restored-ui-default'),
+          controller: restored,
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(restored.settings.defaultInteractiveUi, isTrue);
+      restored.createConversation();
+      expect(restored.selectedConversation!.preferInteractiveUi, isTrue);
+    },
+  );
 
   testWidgets('appearance restores and auto-saves from general settings', (
     tester,

@@ -1612,10 +1612,15 @@ class AgentLoopEngine:
                     "judge.continue",
                     "judge.explanation_required",
                     "judge.v1_must_continue",
+                    "openui.validation_retry",
+                    "output.self_check_retry",
                 }
             ):
                 continuation_reason = self._normalized_continuation_reason(
-                    decision.reason
+                    decision.reason,
+                    limit=6000 if decision.reason_code in {
+                        "openui.validation_retry", "output.self_check_retry"
+                    } else 240,
                 )
             state = state.model_copy(
                 update={
@@ -1677,11 +1682,11 @@ class AgentLoopEngine:
         return "\n".join(value for value in values if value.strip())
 
     @staticmethod
-    def _normalized_continuation_reason(reason: str) -> str | None:
+    def _normalized_continuation_reason(reason: str, *, limit: int = 240) -> str | None:
         value = " ".join(str(reason or "").split()).strip()
         if not value:
             return None
-        return value[:240].replace("<", "[").replace(">", "]").strip()
+        return value[:limit].replace("<", "[").replace(">", "]").strip()
 
     async def _continuation_signals(
         self, run_id: str, state: AgentLoopCheckpointState

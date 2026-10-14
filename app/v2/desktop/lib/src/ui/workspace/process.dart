@@ -6,6 +6,7 @@ class _ProcessPanel extends StatefulWidget {
     required this.messages,
     this.subSessions = const [],
     this.forceCollapsed = false,
+    this.onOpenUi,
     super.key,
   });
 
@@ -13,6 +14,7 @@ class _ProcessPanel extends StatefulWidget {
   final List<ChatMessage> messages;
   final List<Conversation> subSessions;
   final bool forceCollapsed;
+  final ValueChanged<Map<String, Object?>>? onOpenUi;
 
   @override
   State<_ProcessPanel> createState() => _ProcessPanelState();
@@ -153,6 +155,7 @@ class _ProcessPanelState extends State<_ProcessPanel> {
               const SizedBox(height: 12),
               _ProcessStreamLog(
                 items: items,
+                onOpenUi: widget.onOpenUi,
                 subSessions: rootSubSessions,
                 allSubSessions: widget.subSessions,
               ),
@@ -227,11 +230,13 @@ List<_ProcessStreamItem> _orderedProcessItems(
 class _ProcessStreamLog extends StatelessWidget {
   const _ProcessStreamLog({
     required this.items,
+    this.onOpenUi,
     this.subSessions = const [],
     this.allSubSessions = const [],
   });
 
   final List<_ProcessStreamItem> items;
+  final ValueChanged<Map<String, Object?>>? onOpenUi;
   final List<Conversation> subSessions;
   final List<Conversation> allSubSessions;
 
@@ -244,6 +249,7 @@ class _ProcessStreamLog extends StatelessWidget {
     final entries = _processStreamEntries(
       items,
       separateActivityIds: anchoredActivityIds,
+      onOpenUi: onOpenUi,
     );
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -271,6 +277,7 @@ class _ProcessStreamLog extends StatelessWidget {
 List<_ProcessStreamEntry> _processStreamEntries(
   List<_ProcessStreamItem> items, {
   Set<String> separateActivityIds = const {},
+  ValueChanged<Map<String, Object?>>? onOpenUi,
 }) {
   final entries = <_ProcessStreamEntry>[];
   var pendingActivities = <RuntimeActivity>[];
@@ -301,6 +308,13 @@ List<_ProcessStreamEntry> _processStreamEntries(
       continue;
     }
     final message = (item as _ProcessMessageItem).message;
+    if (message.openUiSurfaces.isNotEmpty) {
+      flushActivities();
+      for (final surface in message.openUiSurfaces) {
+        entries.add(_ProcessOpenUiEntry(message, surface, onOpenUi));
+      }
+      continue;
+    }
     if (message.text.trim().isEmpty) continue;
     flushActivities();
     entries.add(_ProcessMessageEntry(message));
@@ -346,6 +360,58 @@ class _GroupedProcessActivityEntry extends _ProcessStreamEntry {
   );
 }
 
+class _ProcessOpenUiEntry extends _ProcessStreamEntry {
+  _ProcessOpenUiEntry(this.message, this.surface, this.onOpen);
+  final ChatMessage message;
+  final Map<String, Object?> surface;
+  final ValueChanged<Map<String, Object?>>? onOpen;
+
+  @override
+  Widget build(BuildContext context) {
+    final tree = surface['tree'];
+    final props = tree is Map ? tree['props'] : null;
+    final zh = Localizations.localeOf(context).languageCode == 'zh';
+    final title = props is Map ? props['title']?.toString() : null;
+    return Tooltip(
+      message: zh ? '在侧栏查看中间结果' : 'View intermediate result in sidebar',
+      child: InkWell(
+        key: ValueKey('process-openui:${message.id}:${surface['block_index']}'),
+        borderRadius: BorderRadius.circular(6),
+        onTap: onOpen == null || tree is! Map ? null : () => onOpen!(surface),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 6),
+          child: Row(
+            children: [
+              Icon(
+                CupertinoIcons.rectangle_on_rectangle,
+                size: 16,
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  title?.isNotEmpty == true
+                      ? title!
+                      : (zh ? '交互界面' : 'Interactive UI'),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(context).textTheme.bodyMedium,
+                ),
+              ),
+              const SizedBox(width: 8),
+              Icon(
+                CupertinoIcons.sidebar_right,
+                size: 14,
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class _ProcessMessageEntry extends _ProcessStreamEntry {
   _ProcessMessageEntry(this.message);
 
@@ -355,11 +421,7 @@ class _ProcessMessageEntry extends _ProcessStreamEntry {
   Widget build(BuildContext context) => SizedBox(
     key: ValueKey('process-message:${message.id}'),
     width: double.infinity,
-    child: _ConversationMarkdown(
-      data:
-          _messageDisplayText(context, message) +
-          (message.streaming ? '\n\n▍' : ''),
-    ),
+    child: _AssistantOpenUiContent(message: message),
   );
 }
 

@@ -256,3 +256,6 @@ app/v1/desktop/scripts/certs
 
 # Required Flutter Windows source, not a generated application manifest.
 !app/v2/desktop/windows/runner/runner.exe.manifest
+
+# Local QA screenshots, recordings and runtime traces
+/artifacts/

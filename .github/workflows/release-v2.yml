@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
     inputs:
       publish:
-        description: Publish v2.0.0 after every package passes verification
+        description: Publish v2.1.0 after every package passes verification
         type: boolean
         default: false
 
@@ -32,11 +32,17 @@ jobs:
           cache-dependency-path: app/v2/server/web/package-lock.json
       - name: Check release metadata and documentation
         run: |
-          if [ "$GITHUB_REF_TYPE" = "tag" ]; then test "$GITHUB_REF_NAME" = "v2.0.0"; fi
+          if [ "$GITHUB_REF_TYPE" = "tag" ]; then test "$GITHUB_REF_NAME" = "v2.1.0"; fi
           python -m pip install build pyyaml
           python scripts/release/check_v2_release.py
           python docs/scripts/check_docs.py
           python scripts/checks/check_architecture.py
+      - name: Build and test official OpenUI parser bundle
+        working-directory: app/v2/desktop/backend/openui_runtime
+        run: |
+          npm ci --ignore-scripts --no-audit --no-fund
+          npm run build
+          npm test
       - name: Build Python distributions
         run: python -m build --outdir release-assets
       - name: Verify distribution contents
@@ -48,8 +54,8 @@ jobs:
           npm run build
       - name: Package source and Web
         run: |
-          git archive --format=tar.gz --prefix=Sage-2.0.0/ HEAD > release-assets/Sage-2.0.0-source.tar.gz
-          tar -czf release-assets/Sage-2.0.0-server-web.tar.gz -C app/v2/server/web dist
+          git archive --format=tar.gz --prefix=Sage-2.1.0/ HEAD > release-assets/Sage-2.1.0-source.tar.gz
+          tar -czf release-assets/Sage-2.1.0-server-web.tar.gz -C app/v2/server/web dist
       - uses: actions/upload-artifact@v4
         with:
           name: sage-v2-packages
@@ -88,6 +94,9 @@ jobs:
           name: sage-v2-packages
           path: python-packages
       - uses: astral-sh/setup-uv@v6
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
       - name: Install managed relocatable Python
         run: uv python install 3.13
       - uses: actions/setup-python@v5
@@ -121,9 +130,9 @@ jobs:
           flutter test
       - name: Build Flutter v2 client
         working-directory: app/v2/desktop
-        run: flutter build ${{ matrix.platform }} --release --build-name=2.0.0 --build-number=1
+        run: flutter build ${{ matrix.platform }} --release --build-name=2.1.0 --build-number=1
       - name: Bundle, relocate and verify Desktop v2
-        run: python scripts/release/package_desktop_v2.py --platform '${{ matrix.platform }}' --arch '${{ matrix.arch }}' --commit '${{ github.sha }}' --wheel python-packages/sage-2.0.0-py3-none-any.whl --out release-assets
+        run: python scripts/release/package_desktop_v2.py --platform '${{ matrix.platform }}' --arch '${{ matrix.arch }}' --commit '${{ github.sha }}' --wheel python-packages/sage-2.1.0-py3-none-any.whl --out release-assets
       - uses: actions/upload-artifact@v4
         with:
           name: sage-v2-desktop-${{ matrix.platform }}-${{ matrix.arch }}
@@ -152,4 +161,4 @@ jobs:
           cd release-assets
           sha256sum * > SHA256SUMS
           cd ..
-          gh release create v2.0.0 release-assets/* --target '${{ github.sha }}' --title 'Sage 2.0.0' --notes-file release_notes/v2.0.0.md --latest
+          gh release create v2.1.0 release-assets/* --target '${{ github.sha }}' --title 'Sage 2.1.0' --notes-file release_notes/v2.1.0.md --latest
