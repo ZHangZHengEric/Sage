@@ -3659,9 +3659,13 @@ async def test_image_followup_survives_approval_and_engine_restart(decision):
         return result.model_copy(update={"metadata": {"followup_user_message": {
             "content": [
                 {"kind": "text", "text": "Inspect frame"},
-                {"kind": "image", "uri": "data:image/png;base64,AAAA", "mime_type": "image/png"},
+                {"kind": "image", "uri": "/workspace/frame.png", "mime_type": "image/png"},
             ],
-            "metadata": {"tool_source": "analyze_image", "tool_context": True},
+            "metadata": {
+                "tool_source": "analyze_image",
+                "tool_context": True,
+                "image_path": "/workspace/frame.png",
+            },
         }}})
 
     calls = (tool_call("read_value"), ModelToolCall(
@@ -3687,7 +3691,7 @@ async def test_image_followup_survives_approval_and_engine_restart(decision):
     messages = tuple(m for m in model.requests[-1].messages if m.role != "system")
     assert [m.role for m in messages] == ["user", "assistant", "tool", "tool", "user"]
     assert [m.tool_call_id for m in messages if m.role == "tool"] == ["call_1", "call_2"]
-    assert messages[-1].content[-1].uri == "data:image/png;base64,AAAA"
+    assert messages[-1].content[-1].uri == "/workspace/frame.png"
     assert len([call for call in executor.calls if call.tool_call_id == "call_1"]) == 1
 
     command = await runtime.session_store.get_start_command(run.run_id)
@@ -3698,7 +3702,11 @@ async def test_image_followup_survives_approval_and_engine_restart(decision):
     assert [message.role for message in replay[batch:batch + 4]] == [
         "assistant", "tool", "tool", "user",
     ]
-    assert replay[batch + 3].content[-1].uri == "data:image/png;base64,AAAA"
+    assert replay[batch + 3].content[-1].uri == "/workspace/frame.png"
+    assert all(
+        not str(getattr(block, "uri", "")).startswith("data:")
+        for block in replay[batch + 3].content
+    )
 
 
 @pytest.mark.asyncio

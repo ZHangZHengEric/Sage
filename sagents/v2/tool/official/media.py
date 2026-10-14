@@ -6,14 +6,15 @@ import base64
 import io
 import mimetypes
 from pathlib import PurePosixPath
-from urllib.parse import urlparse
+from urllib.parse import unquote, urlparse
 
 from PIL import Image, ImageOps
 
 from sagents.v2._concurrency import bounded_to_thread
 from sagents.v2.contracts.common import new_id
 from sagents.v2.contracts.errors import SageV2Error
-from sagents.v2.contracts.items import JsonBlock
+from sagents.v2.contracts.items import ImageBlock, JsonBlock
+from sagents.v2.model.contracts import ModelMessage
 from sagents.v2.tool import SideEffectLevel, ToolExecutionResult, ToolInvocation, tool
 from sagents.v2.tool.official.runtime import OfficialToolRuntime
 
@@ -26,6 +27,13 @@ _TARGET_IMAGE_BYTES = 4 * 1024 * 1024
 _JPEG_QUALITY = 85
 _MIN_JPEG_QUALITY = 60
 _FALLBACK_IMAGE_EDGES = (1280, 1024, 768, 512)
+_IMAGE_HEADERS = (
+    b"\x89PNG\r\n\x1a\n",
+    b"\xff\xd8\xff",
+    b"GIF87a",
+    b"GIF89a",
+    b"BM",
+)
 
 
 def _normalize_image_for_jpeg(image: Image.Image) -> Image.Image:
@@ -77,6 +85,85 @@ def compress_image_to_jpeg_bytes_for_llm(
                 return data
     assert best is not None
     return best
+
+
+def local_image_path(uri: str) -> str | None:
+    """Return a filesystem path for a local image URI; remote and data URLs stay None."""
+
+    value = str(uri or "")
+    if not value or value.startswith("data:"):
+        return None
+    parsed = urlparse(value)
+    if parsed.scheme in {"http", "https"}:
+        return None
+    if parsed.scheme == "file":
+        path = unquote(parsed.path)
+        if parsed.netloc and parsed.netloc not in {"", "localhost"}:
+            path = f"/{parsed.netloc}{path}"
+        return path or None
+    if parsed.scheme:
+        return None
+    return value
+
+
+def ledger_image_uri(uri: str, *, image_path: str | None = None) -> str | None:
+    """Keep a path or remote URL; never persist inline JPEG bytes."""
+
+    value = str(uri or "")
+    if value.startswith("data:"):
+        path = str(image_path or "").strip()
+        return path or None
+    return value or None
+
+
+async def hydrate_image_blocks(messages: tuple[ModelMessage, ...]):
+    """Copy ledger messages and inline local files for one model request only."""
+
+    hydrated = []
+    changed = False
+    for message in messages:
+        if not any(
+            isinstance(block, ImageBlock) and local_image_path(block.uri)
+            for block in message.content
+        ):
+            hydrated.append(message)
+            continue
+        blocks = []
+        message_changed = False
+        for block in message.content:
+            if not isinstance(block, ImageBlock):
+                blocks.append(block)
+                continue
+            path = local_image_path(block.uri)
+            if path is None:
+                blocks.append(block)
+                continue
+            inlined = await _inline_local_image(block, path)
+            blocks.append(inlined)
+            message_changed = message_changed or inlined is not block
+        if message_changed:
+            hydrated.append(message.model_copy(update={"content": tuple(blocks)}))
+            changed = True
+        else:
+            hydrated.append(message)
+    return tuple(hydrated) if changed else messages
+
+
+async def _inline_local_image(block: ImageBlock, path: str) -> ImageBlock:
+    def encode():
+        with Image.open(path) as image:
+            return compress_image_to_jpeg_bytes_for_llm(image)
+
+    try:
+        data = await bounded_to_thread("context-cpu", encode)
+    except (OSError, ValueError, Image.DecompressionBombError):
+        return block
+    return block.model_copy(
+        update={
+            "uri": f"data:image/jpeg;base64,{base64.b64encode(data).decode('ascii')}",
+            "mime_type": "image/jpeg",
+        }
+    )
 
 
 class MediaTools:
@@ -177,12 +264,17 @@ class MediaTools:
                     "unsupported_type",
                 )
 
-            def normalize():
+            def validate():
+                if not (
+                    any(data.startswith(header) for header in _IMAGE_HEADERS)
+                    or (data.startswith(b"RIFF") and data[8:12] == b"WEBP")
+                ):
+                    raise ValueError("unrecognized image header")
                 with Image.open(io.BytesIO(data)) as image:
-                    return compress_image_to_jpeg_bytes_for_llm(image)
+                    _normalize_image_for_jpeg(image)
 
             try:
-                data = await bounded_to_thread("context-cpu", normalize)
+                await bounded_to_thread("context-cpu", validate)
             except (OSError, ValueError, Image.DecompressionBombError) as exc:
                 return self._error_result(
                     invocation,
@@ -191,7 +283,7 @@ class MediaTools:
                     "invalid_image",
                 )
             mime = "image/jpeg"
-            uri = f"data:{mime};base64,{base64.b64encode(data).decode('ascii')}"
+            uri = image_path
             image_format = mime
         text = (
             prompt.strip()

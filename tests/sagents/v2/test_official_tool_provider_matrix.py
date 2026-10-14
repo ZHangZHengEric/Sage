@@ -365,18 +365,17 @@ async def test_analyze_image_queues_a_user_followup_and_keeps_tool_result_small(
         "kind": "text",
         "text": "Check the frame.",
     }
-    assert followup["content"][1]["kind"] == "image"
-    assert followup["content"][1]["uri"].startswith("data:image/jpeg;base64,")
+    assert followup["content"][1] == {
+        "kind": "image",
+        "uri": str(image),
+        "mime_type": "image/jpeg",
+        "alt": str(image),
+    }
     assert followup["metadata"]["hidden_from_chat"] is True
-    import base64
-    import io
-
-    encoded = followup["content"][1]["uri"].split(",", 1)[1]
-    with Image.open(io.BytesIO(base64.b64decode(encoded))) as normalized:
-        assert normalized.format == "JPEG"
-        assert max(normalized.size) <= 1536
+    assert "data:image" not in json.dumps(followup)
 
     from sagents.v2.agent.engine import AgentLoopEngine
+    from sagents.v2.tool.official.media import hydrate_image_blocks
 
     tool_message, user_message = AgentLoopEngine._ledger_messages_for_tool_result(
         result
@@ -385,7 +384,18 @@ async def test_analyze_image_queues_a_user_followup_and_keeps_tool_result_small(
     assert "followup_user_message" not in tool_message.metadata
     assert "base64" not in json.dumps(tool_message.model_dump(mode="json"))
     assert user_message.role == "user"
-    assert user_message.content[1].uri.startswith("data:image/jpeg;base64,")
+    assert user_message.content[1].uri == str(image)
+    assert "data:image" not in json.dumps(user_message.model_dump(mode="json"))
+
+    hydrated = await hydrate_image_blocks((user_message,))
+    assert hydrated[0].content[1].uri.startswith("data:image/jpeg;base64,")
+    import base64
+    import io
+
+    encoded = hydrated[0].content[1].uri.split(",", 1)[1]
+    with Image.open(io.BytesIO(base64.b64decode(encoded))) as normalized:
+        assert normalized.format == "JPEG"
+        assert max(normalized.size) <= 1536
 
 
 @pytest.mark.asyncio
@@ -441,14 +451,46 @@ def test_analyze_image_followups_are_grouped_after_all_tool_results():
 
     messages = AgentLoopEngine._ledger_messages_for_tool_batch(
         (
-            image_result("call_1", "data:image/png;base64,aaa"),
+            image_result("call_1", "/workspace/a.png"),
             image_result("call_2", "https://example.invalid/b.png"),
         )
     )
     assert [message.role for message in messages] == ["tool", "tool", "user", "user"]
     assert "base64" not in json.dumps(messages[0].model_dump(mode="json"))
-    assert messages[2].content[1].uri == "data:image/png;base64,aaa"
+    assert messages[2].content[1].uri == "/workspace/a.png"
     assert messages[3].content[1].uri == "https://example.invalid/b.png"
+    assert "data:image" not in json.dumps([m.model_dump(mode="json") for m in messages])
+
+
+def test_analyze_image_ledger_followup_drops_inline_data_url():
+    from sagents.v2.agent.engine import AgentLoopEngine
+    from sagents.v2.contracts.items import JsonBlock
+    from sagents.v2.tool import ToolExecutionResult
+
+    result = ToolExecutionResult(
+        tool_call_id="call_1",
+        operation_id="operation_call_1",
+        content=(JsonBlock(value={"status": "success"}),),
+        metadata={
+            "followup_user_message": {
+                "content": [
+                    {"kind": "text", "text": "Inspect the frame."},
+                    {
+                        "kind": "image",
+                        "uri": "data:image/png;base64,aaa",
+                        "mime_type": "image/png",
+                    },
+                ],
+                "metadata": {
+                    "tool_source": "analyze_image",
+                    "image_path": "/workspace/frame.png",
+                },
+            }
+        },
+    )
+    _tool, user_message = AgentLoopEngine._ledger_messages_for_tool_result(result)
+    assert user_message.content[1].uri == "/workspace/frame.png"
+    assert "data:image" not in json.dumps(user_message.model_dump(mode="json"))
 
 
 @pytest.mark.asyncio

@@ -112,6 +112,30 @@ async def test_volatile_context_wraps_latest_user_and_preserves_multimodal_block
 
 
 @pytest.mark.asyncio
+async def test_prepare_messages_inlines_local_image_paths_without_changing_ledger(
+    tmp_path,
+):
+    from PIL import Image
+
+    image = tmp_path / "frame.png"
+    Image.new("RGB", (32, 32), "red").save(image)
+    ledger = (
+        ModelMessage(
+            role="user",
+            content=(
+                TextBlock(text="Inspect the frame."),
+                ImageBlock(uri=str(image), mime_type="image/png", alt=str(image)),
+            ),
+            metadata={"tool_source": "analyze_image", "tool_context": True},
+        ),
+    )
+    prepared = await DefaultContextAssembler().prepare_messages(command(), ledger)
+    assert ledger[0].content[1].uri == str(image)
+    assert prepared[0].content[1].uri.startswith("data:image/jpeg;base64,")
+    assert "data:image" not in ledger[0].content[1].uri
+
+
+@pytest.mark.asyncio
 async def test_tool_pair_sanitizer_keeps_complete_pairs_and_drops_orphans():
     complete_call = ModelToolCall(tool_call_id="call_1", name="one", arguments={})
     incomplete_call = ModelToolCall(tool_call_id="call_2", name="two", arguments={})

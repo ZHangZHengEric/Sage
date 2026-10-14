@@ -3579,9 +3579,12 @@ class AgentLoopEngine:
 
     @staticmethod
     def _followup_user_messages(result):
+        from sagents.v2.tool.official.media import ledger_image_uri
+
         raw = result.metadata.get("followup_user_message")
         if not isinstance(raw, dict):
             return ()
+        metadata = raw.get("metadata") if isinstance(raw.get("metadata"), dict) else {}
         blocks = []
         for block in raw.get("content") or ():
             if not isinstance(block, dict):
@@ -3590,24 +3593,26 @@ class AgentLoopEngine:
             if kind == "text":
                 blocks.append(TextBlock(text=str(block.get("text") or "")))
             elif kind == "image":
-                uri = block.get("uri")
+                uri = ledger_image_uri(
+                    str(block.get("uri") or ""),
+                    image_path=metadata.get("image_path"),
+                )
                 if not uri:
                     continue
                 blocks.append(
                     ImageBlock(
-                        uri=str(uri),
+                        uri=uri,
                         mime_type=str(block.get("mime_type") or "image/jpeg"),
-                        alt=block.get("alt"),
+                        alt=block.get("alt") or metadata.get("image_path"),
                     )
                 )
         if not blocks:
             return ()
-        metadata = raw.get("metadata")
         return (
             ModelMessage(
                 role="user",
                 content=tuple(blocks),
-                metadata=metadata if isinstance(metadata, dict) else {},
+                metadata=metadata,
             ),
         )
 
