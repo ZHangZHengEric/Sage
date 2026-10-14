@@ -33,6 +33,12 @@ class ContextSegment(StrictModel):
 
 
 class ContextSegmentProvider(Protocol):
+    """Provide context from the command, optionally from the current ledger.
+
+    Providers may also expose ``segments_for_ledger(command, ledger, *, run_id)``.
+    The default assembler uses that hook for history and applied steering input.
+    """
+
     async def segments(
         self, command: StartRun, *, run_id: str | None = None
     ) -> tuple[ContextSegment, ...]: ...

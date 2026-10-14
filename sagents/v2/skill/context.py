@@ -11,6 +11,8 @@ from sagents.v2.context import (
 from sagents.v2.skill.contracts import SkillCatalog
 from sagents.v2.skill.provider import SkillLoader
 from sagents.v2.contracts.commands import StartRun
+from sagents.v2.model import ModelMessage
+from sagents.v2.skill.tags import requested_skills
 
 
 class AvailableSkillsContextProvider:
@@ -58,7 +60,7 @@ class AvailableSkillsContextProvider:
 
 
 class ActiveSkillsContextProvider:
-    """Projects only skills that have already been copied by SkillLoader.load()."""
+    """Activate user selectors and project loaded Skill instructions."""
 
     def __init__(self, loader: SkillLoader) -> None:
         self.loader = loader
@@ -66,6 +68,22 @@ class ActiveSkillsContextProvider:
     async def segments(
         self, command: StartRun, *, run_id: str | None = None
     ) -> tuple[ContextSegment, ...]:
+        ledger = tuple(
+            ModelMessage(role=item.role, content=item.content, metadata=item.metadata)
+            for item in command.input
+        )
+        return await self.segments_for_ledger(command, ledger, run_id=run_id)
+
+    async def segments_for_ledger(
+        self,
+        command: StartRun,
+        ledger: tuple[ModelMessage, ...],
+        *,
+        run_id: str | None = None,
+    ) -> tuple[ContextSegment, ...]:
+        await self.loader.activate_requested(
+            requested_skills(ledger), run_id=run_id or command.idempotency_key
+        )
         values = await self.loader.loaded(run_id=run_id or command.idempotency_key)
         return tuple(
             ContextSegment(
