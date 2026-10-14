@@ -196,9 +196,7 @@ class _PostgresSessionState(SessionStoreCoordinator):
             try:
                 await self._acquire_writer_lock(lock_conn)
                 await self._bootstrap(lock_conn)
-                pool = await asyncpg.create_pool(
-                    self.dsn, min_size=1, max_size=8
-                )
+                pool = await asyncpg.create_pool(self.dsn, min_size=1, max_size=8)
                 LOGGER.info(
                     "session.postgres.ready",
                     "postgres session store ready",
@@ -327,6 +325,15 @@ class _PostgresSessionState(SessionStoreCoordinator):
             """
         )
 
+        await connection.execute(f"""
+            CREATE TABLE IF NOT EXISTS {self._table("attachments")} (
+                session_id text NOT NULL REFERENCES {sessions}(session_id) ON DELETE CASCADE,
+                artifact_id text NOT NULL,
+                payload bytea NOT NULL,
+                PRIMARY KEY (session_id, artifact_id)
+            )
+        """)
+
     async def close(self) -> None:
         if self._closed:
             return
@@ -359,8 +366,7 @@ class _PostgresSessionState(SessionStoreCoordinator):
         compact = self._compact_state(state)
         session_row = compact["sessions"][0]
         events = {
-            run_id: list(rows)
-            for run_id, rows in state.get("run_events", {}).items()
+            run_id: list(rows) for run_id, rows in state.get("run_events", {}).items()
         }
         expected = self._persisted_session_revisions.get(session_id)
         new_revision = int(session_row["revision"])
@@ -437,12 +443,17 @@ class _PostgresSessionState(SessionStoreCoordinator):
                                     f"expected {expected}"
                                 ),
                             )
+                    for artifact_id, payload in self._pending_attachments(session_id):
+                        await connection.execute(
+                            f"INSERT INTO {self._table('attachments')} (session_id, artifact_id, payload) VALUES ($1, $2, $3)",
+                            session_id,
+                            artifact_id,
+                            payload,
+                        )
                     next_run_sequences = await self._persist_events(
                         connection, session_id, events, event_totals=event_totals
                     )
-                    await self._replace_locations(
-                        connection, session_id, compact
-                    )
+                    await self._replace_locations(connection, session_id, compact)
                     await self._replace_start_idempotency(
                         connection, session_id, compact
                     )
@@ -455,6 +466,7 @@ class _PostgresSessionState(SessionStoreCoordinator):
                     f"session {session_id} was written by another writer",
                 ) from exc
             raise
+        self._forget_attachment_bytes(session_id)
         self._remember_persisted_session(session_id, new_revision, next_run_sequences)
 
     async def _replace_locations(self, connection, session_id, compact) -> None:
@@ -478,9 +490,7 @@ class _PostgresSessionState(SessionStoreCoordinator):
                 location_rows,
             )
 
-    async def _replace_start_idempotency(
-        self, connection, session_id, compact
-    ) -> None:
+    async def _replace_start_idempotency(self, connection, session_id, compact) -> None:
         await connection.execute(
             f"DELETE FROM {self._table('start_idempotency')} WHERE session_id = $1",
             session_id,
@@ -588,6 +598,22 @@ class _PostgresSessionState(SessionStoreCoordinator):
                 )
         for value in deleted_session_ids:
             self._forget_persisted_session(value)
+
+    async def _read_attachment_bytes(self, session_id, artifact_id):
+        if (session_id, artifact_id) in self._attachment_payloads:
+            return self._attachment_payloads[(session_id, artifact_id)]
+        await self._ensure_ready()
+        async with self._writer_connection() as connection:
+            payload = await connection.fetchval(
+                f"SELECT payload FROM {self._table('attachments')} WHERE session_id = $1 AND artifact_id = $2",
+                session_id,
+                artifact_id,
+            )
+        if payload is None:
+            raise self._attachment_error(
+                "artifact.not_found", "Session attachment bytes were not found."
+            )
+        return bytes(payload)
 
     async def get_derived_state(
         self, session_id: str, namespace: str, key: str
@@ -820,9 +846,7 @@ class _PostgresSessionState(SessionStoreCoordinator):
         async for event in super().subscribe_events(cursor):
             yield event
 
-    def _session_id_for_loaded(
-        self, identity_key: str, identity: str
-    ) -> str | None:
+    def _session_id_for_loaded(self, identity_key: str, identity: str) -> str | None:
         if identity_key == "run_id":
             row = self._runs.get(identity)
             return None if row is None else row.session_id
@@ -987,9 +1011,7 @@ class _PostgresSessionState(SessionStoreCoordinator):
         payload = dict(_decode_json(compact))
         run_events: dict[str, list[dict[str, Any]]] = {}
         for row in event_rows:
-            run_events.setdefault(row["run_id"], []).append(
-                _decode_json(row["event"])
-            )
+            run_events.setdefault(row["run_id"], []).append(_decode_json(row["event"]))
         payload["run_events"] = run_events
         return payload
 
@@ -1201,9 +1223,7 @@ class PostgresSessionStore(metaclass=_PostgresSessionStoreMeta):
     )
 
     def __init__(self, *args, **kwargs) -> None:
-        object.__setattr__(
-            self, "_coordinator", _PostgresSessionState(*args, **kwargs)
-        )
+        object.__setattr__(self, "_coordinator", _PostgresSessionState(*args, **kwargs))
 
     async def start(self, context, dependencies):
         del context, dependencies

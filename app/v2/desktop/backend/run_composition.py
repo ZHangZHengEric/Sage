@@ -41,7 +41,7 @@ from sagents.v2.agent.multi_agent import (
     WorkspaceSharingPolicy,
 )
 from sagents.v2.tool.official import OfficialToolRuntime
-from sagents.v2.runtime.artifact import ScopedArtifactStore, FilesystemArtifactStore
+from sagents.v2.runtime.artifact import SessionArtifactStore
 from sagents.v2.contracts.commands import (
     InputItem,
     StartRun,
@@ -650,8 +650,9 @@ class DesktopRunCompositionMixin(DesktopRunEnvironmentMixin):
         )
         goal_state_service = GoalStateService(self.driver_session_store)
         multimodal_by_agent = {agent.agent_id: provider.supports_multimodal}
-        artifact_store = ScopedArtifactStore(
-            FilesystemArtifactStore(self.runtime_root / "artifacts"), agent.user_id,
+        artifact_store = SessionArtifactStore(
+            self.driver_session_store,
+            run_id or sandbox_handle.ref.owner_run_id,
         )
         official_runtime = OfficialToolRuntime(
             sandbox_handle,
@@ -930,7 +931,8 @@ class DesktopRunCompositionMixin(DesktopRunEnvironmentMixin):
                     owner.extend(member_ports.scope_handles)
                 base_continuation_policy = member_ports.continuation_policy
             continuation_policy = OutputSelfCheckPolicy(
-                base_continuation_policy, OpenUiOutputChecker(self.openui_parser),
+                base_continuation_policy,
+                OpenUiOutputChecker(self.openui_parser),
             )
             owns_invocation = descriptor.agent_id == agent.agent_id
             if invocation_mode == "plan" and owns_invocation:

@@ -168,6 +168,39 @@ class SessionStore(Protocol):
     async def get_run_result(self, run_id: str) -> RunResult: ...
     async def get_session(self, session_id: str) -> SessionSnapshot: ...
     async def get_start_command(self, run_id: str) -> StartRun: ...
+    async def get_run_context(self, run_id: str) -> RequestContext: ...
+
+    async def put_attachment(
+        self,
+        session_id: str,
+        *,
+        artifact_id: str,
+        media_type: str,
+        content: AsyncIterator[bytes],
+        context: RequestContext,
+        metadata: dict | None = None,
+    ): ...
+
+    async def get_attachment(
+        self, session_id: str, artifact_id: str, *, context: RequestContext
+    ): ...
+
+    async def copy_attachment(
+        self,
+        source_session_id: str,
+        target_session_id: str,
+        artifact_id: str,
+        *,
+        context: RequestContext,
+    ): ...
+
+    async def export_session_backup(
+        self, session_id: str, *, context: RequestContext
+    ) -> dict: ...
+
+    async def restore_session_backup(
+        self, backup: dict, *, context: RequestContext
+    ): ...
     async def get_checkpoint(self, checkpoint_id: str) -> Checkpoint: ...
     async def get_suspension(self, suspension_id: str) -> Suspension: ...
     async def get_interaction(self, interaction_id: str) -> InteractionRequest: ...

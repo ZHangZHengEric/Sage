@@ -293,7 +293,15 @@ async def test_mysql_plugin_start_opens_schema_before_first_write():
 async def test_bootstrap_skips_existing_tables():
     state = _MysqlSessionState("mysql://root@127.0.0.1/sage", table_prefix="")
     connection = _FakeConnection(
-        {"sessions", "session_mutations", "run_events", "locations", "start_idempotency", "derived_state"}
+        {
+            "sessions",
+            "session_mutations",
+            "run_events",
+            "locations",
+            "start_idempotency",
+            "derived_state",
+            "attachments",
+        }
     )
     created = await state._bootstrap(connection)
     assert created == ()
@@ -316,13 +324,14 @@ async def test_bootstrap_creates_missing_tables_only():
         "locations",
         "start_idempotency",
         "derived_state",
+        "attachments",
     )
     creates = [
         statement
         for statement in connection.cursor_obj.statements
         if "CREATE TABLE" in statement
     ]
-    assert len(creates) == 5
+    assert len(creates) == 6
     assert all("IF NOT EXISTS" in statement for statement in creates)
 
 

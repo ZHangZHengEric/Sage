@@ -23,7 +23,7 @@ from sagents.v2.runtime.execution.sandbox import (
 )
 from sagents.v2.runtime.extensions import ExtensionScope, ExtensionScopeContext
 from sagents.v2.tool.official import OfficialToolRuntime
-from sagents.v2.runtime.artifact import FilesystemArtifactStore
+from sagents.v2.runtime.artifact import SessionArtifactStore
 from sagents.v2.tool.plugins.official import (
     OfficialToolPlugin,
     official_tool_categories,
@@ -156,11 +156,12 @@ def workspace_sandbox_spec(
     )
 
 
-async def attach_official_tools(service, command: StartRun, *, user_id: str, run_id: str | None = None):
+async def attach_official_tools(
+    service, command: StartRun, *, user_id: str, run_id: str | None = None
+):
     """Provision a host-mapped sandbox and wrap it as OfficialToolPlugin."""
 
     install_sandbox(service.execution, service.settings)
-    artifact_store = FilesystemArtifactStore(service.paths.tenant_dir(user_id) / "artifacts")
     owner_run_id = run_id or command.idempotency_key
     handle = await provision_workspace(
         service.execution,
@@ -169,8 +170,11 @@ async def attach_official_tools(service, command: StartRun, *, user_id: str, run
         run_id=owner_run_id,
     )
     runtime = OfficialToolRuntime(
-        handle, service.execution.sandbox_grant_issuer,
-        artifact_store=artifact_store,
+        handle,
+        service.execution.sandbox_grant_issuer,
+        artifact_store=SessionArtifactStore(
+            service.application.entrypoint().runtime.session_store, owner_run_id
+        ),
     )
     plugin = OfficialToolPlugin(
         ExtensionScopeContext(
@@ -179,7 +183,11 @@ async def attach_official_tools(service, command: StartRun, *, user_id: str, run
             config={"runtime": runtime},
         )
     )
-    return plugin, runtime, OwnedWorkspaceSandbox(handle, service.execution.sandbox_provider)
+    return (
+        plugin,
+        runtime,
+        OwnedWorkspaceSandbox(handle, service.execution.sandbox_provider),
+    )
 
 
 class OwnedWorkspaceSandbox:

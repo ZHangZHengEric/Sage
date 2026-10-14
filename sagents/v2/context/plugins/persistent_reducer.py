@@ -26,7 +26,11 @@ from sagents.v2.context.summary import (
     message_digests_async,
     summary_safe_block_text,
 )
-from sagents.v2.context.token_estimator import TokenEstimator, MessageTokenCounter
+from sagents.v2.context.token_estimator import (
+    TokenEstimator,
+    MessageTokenCounter,
+    estimate_tokens_async,
+)
 from sagents.v2.context.estimation import WireSizeTokenEstimator
 from sagents.v2.context.partition import (
     conversation_units,
@@ -492,6 +496,7 @@ class PersistentSummaryContextReducer:
         batches = []
         batch = []
         batch_tokens = 0
+        batch_coverage = 0
         # Reserve room for the rolling summary as well as framing on every call.
         previous_tokens = (
             counter.estimate((self._summary_message(previous),)) if previous else 0
@@ -504,6 +509,7 @@ class PersistentSummaryContextReducer:
                 "rolling summary consumes the source budget",
             )
         for unit in self._units(messages):
+            source_count = len(unit)
             cost = counter.estimate(unit)
             if cost > limit:
                 replacement = await self.unit_compactor.compact(unit)
@@ -511,28 +517,42 @@ class PersistentSummaryContextReducer:
                     unit = replacement
                     cost = counter.estimate(unit)
                 if cost > limit:
-                    raise self._error(
-                        "context.summary_source_too_large",
-                        "indivisible history unit exceeds the summary source budget",
+                    if batch:
+                        batches.append((tuple(batch), batch_coverage))
+                        batch, batch_tokens, batch_coverage = [], 0, 0
+                    fragments = await self._summary_fragments(unit, limit)
+                    # Canonical coverage advances only after the complete unit.
+                    batches.extend(
+                        (fragment, source_count if index == len(fragments) - 1 else 0)
+                        for index, fragment in enumerate(fragments)
                     )
+                    continue
             candidate_tokens = (
                 batch_tokens + cost
                 if counter.costs is not None
                 else counter.estimate((*batch, *unit))
             )
             if batch and candidate_tokens > limit:
-                batches.append(tuple(batch))
-                batch, batch_tokens = [], 0
+                batches.append((tuple(batch), batch_coverage))
+                batch, batch_tokens, batch_coverage = [], 0, 0
             batch.extend(unit)
             batch_tokens += cost
+            batch_coverage += source_count
         if batch:
-            batches.append(tuple(batch))
+            batches.append((tuple(batch), batch_coverage))
         # One projection may only spend max_summary_calls. Cover that prefix,
         # persist it, and let the next turn continue. Do not fail the Run.
         work = batches[: self.max_summary_calls]
+        while work and not work[-1][1]:
+            work.pop()
+        if not work:
+            raise self._error(
+                "context.summary_source_too_large",
+                "history unit requires more fragments than the summary call budget",
+            )
         rolling = previous.text if previous else None
         covered = 0
-        for batch in work:
+        for batch, source_count in work:
             # Intermediate output can be larger than the requested target. Check
             # its actual size before sending it to the next summary request.
             prefix = (
@@ -557,8 +577,8 @@ class PersistentSummaryContextReducer:
                 raise self._error(
                     "context.summary_empty", "summarizer returned an empty summary"
                 )
-            covered += len(batch)
-            if on_batch_completed is not None:
+            covered += source_count
+            if on_batch_completed is not None and source_count:
                 await on_batch_completed(rolling.strip(), covered)
         return rolling.strip(), covered
 
@@ -661,6 +681,79 @@ class PersistentSummaryContextReducer:
                 "context.summary_not_reducing",
                 "summary did not reduce the compressible conversation content",
             )
+
+    async def _summary_fragments(self, unit, limit):
+        """Split only summary text; never rewrite canonical messages or tool pairs."""
+        from sagents.v2.context.summary import _redact_data_urls
+
+        fragments = []
+        for index, message in enumerate(unit):
+            text = "\n".join(
+                summary_safe_block_text(block) for block in message.content
+            )
+            if message.tool_calls:
+                calls = [
+                    {
+                        "tool_call_id": call.tool_call_id,
+                        "name": call.name,
+                        "arguments": call.arguments,
+                    }
+                    for call in message.tool_calls
+                ]
+                text += "\nTool calls: " + _redact_data_urls(
+                    json.dumps(calls, ensure_ascii=False, sort_keys=True)
+                )
+            header = f"[history message {index + 1}/{len(unit)}; role={message.role}; tool_call_id={message.tool_call_id or '-'}]"
+            part = 1
+            remaining = text or "[empty message]"
+            while remaining:
+
+                def projected(length):
+                    return ModelMessage(
+                        role=message.role,
+                        tool_call_id=message.tool_call_id,
+                        content=(
+                            TextBlock(
+                                text=f"{header} fragment={part}\n{remaining[:length]}"
+                            ),
+                        ),
+                    )
+
+                low, high = 0, len(remaining)
+                while low < high:
+                    middle = (low + high + 1) // 2
+                    if (
+                        await estimate_tokens_async(
+                            self.estimator, (projected(middle),)
+                        )
+                        <= limit
+                    ):
+                        low = middle
+                    else:
+                        high = middle - 1
+                if not low:
+                    raise self._error(
+                        "context.summary_source_too_large",
+                        "summary fragment framing exceeds its budget",
+                    )
+                fragments.append((projected(low),))
+                remaining = remaining[low:]
+                part += 1
+        # Several small tool records can share one summary request. Splitting
+        # a parallel batch must not consume one model call per tool by default.
+        batches, current = [], []
+        for fragment in fragments:
+            if (
+                current
+                and await estimate_tokens_async(self.estimator, (*current, *fragment))
+                > limit
+            ):
+                batches.append(tuple(current))
+                current = []
+            current.extend(fragment)
+        if current:
+            batches.append(tuple(current))
+        return batches
 
     _units = staticmethod(conversation_units)
 

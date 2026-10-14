@@ -34,7 +34,7 @@ from sagents.v2.context import (
 from sagents.v2.interfaces.protocols.native import NativeProtocolAdapter
 from sagents.v2.package.registry import InMemoryAgentPackageRegistry
 from sagents.v2.runtime.artifact import InMemoryArtifactStore
-from sagents.v2.runtime.artifact import ScopedArtifactStore, FilesystemArtifactStore
+from sagents.v2.runtime.artifact import SessionArtifactStore
 from sagents.v2.runtime.credentials import EnvironmentCredentialProvider
 from sagents.v2.runtime.execution.jobs import InMemoryJobRuntime
 from sagents.v2.runtime.execution.scheduler import InMemoryScheduler
@@ -703,9 +703,6 @@ class SAgentBuilder:
             session_store=session_store,
             credential_provider=credential_provider,
         )
-        artifact_store = ScopedArtifactStore(
-            services["artifact.store"], tenant_id or "application",
-        )
         memory_provider = self._memory_provider
         if memory_provider is None:
             memory_provider = await self._create_memory_provider(
@@ -866,9 +863,9 @@ class SAgentBuilder:
         driver_session_store = LeaseFencedSessionStore(session_store, scheduler)
         goal_state_service = GoalStateService(driver_session_store)
         if self._tool_runtime is not None:
-            self._tool_runtime.artifact_store = ScopedArtifactStore(
-                services["artifact.store"],
-                self._tool_runtime.sandbox.ref.tenant_id or tenant_id or "application",
+            self._tool_runtime.artifact_store = SessionArtifactStore(
+                driver_session_store,
+                self._tool_runtime.sandbox.ref.owner_run_id,
             )
             self._tool_runtime.memory_service = memory_service
             self._tool_runtime.session_memory_service = session_memory_service
@@ -1022,9 +1019,9 @@ class SAgentBuilder:
         )
 
         def configure_official_runtime(value: OfficialToolRuntime) -> None:
-            value.artifact_store = ScopedArtifactStore(
-                services["artifact.store"],
-                value.sandbox.ref.tenant_id or tenant_id or "application",
+            value.artifact_store = SessionArtifactStore(
+                driver_session_store,
+                value.sandbox.ref.owner_run_id,
             )
             value.memory_service = memory_service
             value.session_memory_service = session_memory_service
@@ -1133,8 +1130,9 @@ class SAgentBuilder:
                     effective_resolved,
                     definition_id,
                     artifact_store=(
-                        active_runtime.artifact_store if active_runtime is not None
-                        else artifact_store
+                        active_runtime.artifact_store
+                        if active_runtime is not None
+                        else SessionArtifactStore(driver_session_store, run_id)
                     ),
                     model=models_by_agent[descriptor.agent_id],
                     tool_catalog=catalog,
@@ -1607,23 +1605,6 @@ class SAgentBuilder:
             default_scope=ExtensionScope.PROCESS,
         )
 
-    async def _create_artifact_store(self, host, parent, handles, runtime, declarations):
-        selection = self._selection(runtime, "artifact.store")
-        plugin_id = selection.plugin if selection else (
-            FilesystemArtifactStore.plugin_id if self._session_root is not None
-            else InMemoryArtifactStore.plugin_id
-        )
-        config = dict(selection.config if selection else {})
-        if plugin_id == FilesystemArtifactStore.plugin_id and "root" not in config:
-            if self._session_root is None:
-                raise ValueError("Filesystem ArtifactStore requires a root")
-            config["root"] = str(self._session_root / "artifacts")
-        return await self._create_capability(
-            host, parent, handles, runtime, declarations,
-            capability="artifact.store", default_plugin=plugin_id,
-            default_config=config, default_scope=ExtensionScope.PROCESS,
-        )
-
     async def _create_memory_provider(
         self, host, parent, handles, runtime, declarations
     ) -> MemoryProvider:
@@ -1994,7 +1975,9 @@ class SAgentBuilder:
         credential_provider,
     ):
         services = {
-            "execution.scheduler": self._scheduler if self._scheduler is not None else await self._create_capability(
+            "execution.scheduler": self._scheduler
+            if self._scheduler is not None
+            else await self._create_capability(
                 host,
                 parent,
                 handles,
@@ -2003,7 +1986,9 @@ class SAgentBuilder:
                 capability="execution.scheduler",
                 default_plugin=InMemoryScheduler.plugin_id,
             ),
-            "execution.job-runtime": self._job_runtime if self._job_runtime is not None else await self._create_capability(
+            "execution.job-runtime": self._job_runtime
+            if self._job_runtime is not None
+            else await self._create_capability(
                 host,
                 parent,
                 handles,
@@ -2013,8 +1998,14 @@ class SAgentBuilder:
                 default_plugin=InMemoryJobRuntime.plugin_id,
                 default_config={"runners": {}},
             ),
-            "artifact.store": await self._create_artifact_store(
-                host, parent, handles, runtime, declarations,
+            "artifact.store": await self._create_capability(
+                host,
+                parent,
+                handles,
+                runtime,
+                declarations,
+                capability="artifact.store",
+                default_plugin=InMemoryArtifactStore.plugin_id,
             ),
             "package.registry": await self._create_capability(
                 host,
