@@ -355,7 +355,6 @@ def test_run_composition_rejects_a_user_skill_owned_by_another_tenant():
                                 "skill_id": "skill_1",
                                 "version_id": "version_1",
                                 "revision": 1,
-                                "dimension": "user",
                                 "owner_user_id": "other-user",
                                 "name": "demo",
                                 "description": "Demo",

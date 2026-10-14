@@ -60,18 +60,17 @@ test('admin own-only selectors and writes do not inherit a foreign read scope', 
 
 test('skills are attributed once and approval pagination advances across empty owners', async t => {
   session(t)
-  const system = { skill_id: 'system', owner_user_id: null, dimension: 'system' }
   const own = { skill_id: 'own', owner_user_id: 'admin' }
   const foreign = { skill_id: 'foreign', owner_user_id: 'alice' }
   t.mock.method(globalThis, 'fetch', async (url, init) => {
     const owner = init.headers['X-Sage-View-User']
     let data
     if (url === '/api/admin/users') data = users
-    else if (url === '/api/skills') data = owner === 'admin' ? [system, own, foreign] : [system, foreign]
+    else if (url === '/api/skills') data = owner === 'admin' ? [own, foreign] : [foreign]
     else data = owner === 'admin' ? { items: [], next_offset: null } : { items: [], next_offset: 100 }
     return Response.json({ data })
   })
   const skills = await api.listSkills()
-  assert.deepEqual(skills.map(row => [row.skill_id, row._owner.user_id]), [['system', 'admin'], ['own', 'admin'], ['foreign', 'alice']])
+  assert.deepEqual(skills.map(row => [row.skill_id, row._owner.user_id]), [['own', 'admin'], ['foreign', 'alice']])
   assert.deepEqual(await api.approvals(50), { items: [], next_offset: 100 })
 })

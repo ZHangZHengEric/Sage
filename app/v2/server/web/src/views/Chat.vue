@@ -1,11 +1,16 @@
 <script setup>
-import { computed, nextTick, onMounted, onUnmounted, ref, shallowRef } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref, shallowRef, watch } from 'vue'
 import { api, isForeign } from '../api.js'
 import { createAguiAgent, resumeAgui, runAgui } from '../agui/session.js'
 import { messagesBeforeLastRun, messagesFromEvents, pendingInteraction } from '../agui/replay.js'
 import AguiTranscript from '../components/AguiTranscript.vue'
 import InteractionPrompt from '../components/InteractionPrompt.vue'
-import ThreadList from '../components/ThreadList.vue'
+import WorkspacePanel from '../components/WorkspacePanel.vue'
+import AppIcon from '../components/AppIcon.vue'
+const workspaceOpen = ref(false)
+import { useRoute } from 'vue-router'
+const route = useRoute()
+const ready = ref(false)
 
 const threads = ref([])
 const threadId = ref('')
@@ -201,11 +206,21 @@ onMounted(async () => {
   bindAgent()
   try {
     await Promise.all([loadThreads(), loadModels(), loadAgents()])
-    if (threads.value[0]) await openThread(threads.value[0].thread_id)
+    if (route?.query?.thread) await openThread(String(route.query.thread))
+    else if (route?.query?.new) startNew()
+    else if (threads.value[0]) await openThread(threads.value[0].thread_id)
     else startNew()
+    ready.value = true
   } catch (exc) {
     error.value = exc.message
   }
+})
+
+watch(() => [route?.query?.thread, route?.query?.new], async ([id, fresh]) => {
+  if (!ready.value) return
+  agent.value?.abortRun?.()
+  if (id) await openThread(String(id))
+  else if (fresh) startNew()
 })
 
 onUnmounted(() => {
@@ -215,19 +230,15 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <section class="chat-layout">
-    <ThreadList
-      :threads="threads"
-      :active-id="threadId"
-      @select="openThread"
-      @create="startNew"
-    />
+  <section class="chat-layout" :class="{ 'workspace-open': workspaceOpen }">
     <div class="thread-root">
       <header class="thread-bar">
         <div class="thread-heading">
           <h1 :title="threadTitle">{{ threadTitle }}</h1>
           <span v-if="currentThread?._owner" class="thread-owner" :title="`所属用户：${currentThread._owner.username}`">{{ currentThread._owner.username }}</span>
         </div>
+        <div class="page-actions">
+        <button class="icon-button" type="button" aria-label="工作空间" :aria-expanded="workspaceOpen" @click="workspaceOpen = !workspaceOpen"><AppIcon name="folder" /></button>
         <label class="agent-pick">
           <span class="sr-only">智能体</span>
           <select
@@ -242,8 +253,10 @@ onUnmounted(() => {
             </option>
           </select>
         </label>
+        </div>
       </header>
       <div ref="scroller" class="thread-viewport">
+        <div v-if="!messages.length && !historyLoading && !pending" class="chat-empty"><img src="/sage_logo.svg" alt="" /><h2>有什么可以帮你？</h2></div>
         <AguiTranscript
           :messages="messages"
           :pending="pending"
@@ -285,5 +298,12 @@ onUnmounted(() => {
         </form>
       </footer>
     </div>
+    <WorkspacePanel v-if="workspaceOpen" :key="currentThread?._owner?.user_id || 'self'" :owner="currentThread?._owner" @close="workspaceOpen = false" />
   </section>
 </template>
+
+<style scoped>
+.chat-layout { position: relative; }
+.chat-layout.workspace-open { grid-template-columns: minmax(0, 1fr) 360px; }
+@media (max-width: 900px) { .chat-layout.workspace-open { grid-template-columns: minmax(0, 1fr); } }
+</style>

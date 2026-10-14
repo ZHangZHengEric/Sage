@@ -41,9 +41,9 @@ function startNew() {
 
 <template>
   <section>
-    <header class="page-head"><h1>API 密钥</h1></header>
+    <header class="page-head"><h1>API 密钥</h1><button class="btn cta" type="button" :disabled="busy" @click="startNew">新增密钥</button></header>
     <div class="panel stack" :aria-busy="busy">
-      <div class="list-toolbar"><h2>已创建密钥</h2><button class="btn cta" type="button" :disabled="busy" @click="startNew">新增密钥</button></div>
+
       <p v-if="error && !drawerOpen" class="error" role="alert">{{ error }}</p>
       <p v-if="!keys.length" class="muted">还没有密钥。</p>
       <article v-for="item in keys" :key="item.key_id" class="stack">
