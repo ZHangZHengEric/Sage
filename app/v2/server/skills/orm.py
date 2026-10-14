@@ -11,7 +11,6 @@ class SkillRow(Base):
     __tablename__ = "skills"
     __table_args__ = (
         UniqueConstraint(
-            "dimension",
             "owner_user_id",
             "name",
             name="uq_skills_scope_name",
@@ -19,8 +18,7 @@ class SkillRow(Base):
     )
 
     skill_id: Mapped[str] = mapped_column(String(64), primary_key=True)
-    dimension: Mapped[str] = mapped_column(String(16), index=True)
-    owner_user_id: Mapped[str] = mapped_column(String(128), default="")
+    owner_user_id: Mapped[str] = mapped_column(String(128))
     name: Mapped[str] = mapped_column(String(191))
     description: Mapped[str] = mapped_column(
         Text().with_variant(LONGTEXT(), "mysql", "mariadb"), default=""

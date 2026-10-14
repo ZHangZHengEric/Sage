@@ -14,7 +14,6 @@ from app.v2.server.skills.files import (
 )
 from app.v2.server.skills.records import (
     AgentSkillBinding,
-    SkillDimension,
     SkillPackage,
     SkillRecord,
     artifact_relative_path,
@@ -60,21 +59,11 @@ class SkillCatalogService:
         content: str,
         user_id: str,
         role: str,
-        dimension: SkillDimension = "user",
     ) -> SkillRecord:
-        if dimension == "system" and role != "admin":
-            raise SageV2Error(
-                RuntimeErrorInfo(
-                    code="server.skills.service.forbidden",
-                    category=ErrorCategory.AUTHORIZATION,
-                    message="only admin can publish system skills",
-                )
-            )
         package = inspect_skill_markdown(name=name, content=content)
         return await self._publish_package(
             package,
-            dimension=dimension,
-            owner_user_id="" if dimension == "system" else user_id,
+            owner_user_id=user_id,
         )
 
     async def publish_zip(
@@ -84,21 +73,11 @@ class SkillCatalogService:
         filename: str,
         user_id: str,
         role: str,
-        dimension: SkillDimension = "user",
     ) -> SkillRecord:
-        if dimension == "system" and role != "admin":
-            raise SageV2Error(
-                RuntimeErrorInfo(
-                    code="server.skills.service.forbidden",
-                    category=ErrorCategory.AUTHORIZATION,
-                    message="only admin can publish system skills",
-                )
-            )
         package = inspect_skill_zip(payload, filename=filename)
         return await self._publish_package(
             package,
-            dimension=dimension,
-            owner_user_id="" if dimension == "system" else user_id,
+            owner_user_id=user_id,
         )
 
     async def publish_zips(
@@ -107,7 +86,6 @@ class SkillCatalogService:
         *,
         user_id: str,
         role: str,
-        dimension: SkillDimension = "user",
     ) -> dict[str, object]:
         results: list[dict[str, object]] = []
         skills: list[SkillRecord] = []
@@ -126,7 +104,6 @@ class SkillCatalogService:
                     filename=filename,
                     user_id=user_id,
                     role=role,
-                    dimension=dimension,
                 )
                 skills.append(record)
                 results.append(
@@ -159,40 +136,18 @@ class SkillCatalogService:
         *,
         user_id: str,
         role: str,
-        dimension: SkillDimension = "user",
     ) -> SkillRecord:
-        if dimension == "system" and role != "admin":
-            raise SageV2Error(
-                RuntimeErrorInfo(
-                    code="server.skills.service.forbidden",
-                    category=ErrorCategory.AUTHORIZATION,
-                    message="only admin can publish system skills",
-                )
-            )
         package = inspect_skill_directory(source)
         return await self._publish_package(
             package,
-            dimension=dimension,
-            owner_user_id="" if dimension == "system" else user_id,
+            owner_user_id=user_id,
         )
 
     async def update_content(
         self, skill_id: str, content: str, *, user_id: str, role: str
     ) -> SkillRecord:
         current = await self.get(skill_id, user_id=user_id, role=role)
-        if current.dimension == "system" and role != "admin":
-            raise SageV2Error(
-                RuntimeErrorInfo(
-                    code="server.skills.service.forbidden",
-                    category=ErrorCategory.AUTHORIZATION,
-                    message="only admin can edit system skills",
-                )
-            )
-        if (
-            current.dimension == "user"
-            and current.owner_user_id != user_id
-            and role != "admin"
-        ):
+        if current.owner_user_id != user_id and role != "admin":
             raise SageV2Error(
                 RuntimeErrorInfo(
                     code="server.skills.service.forbidden",
@@ -220,7 +175,6 @@ class SkillCatalogService:
             )
         return await self._publish_package(
             package,
-            dimension=current.dimension,
             owner_user_id=current.owner_user_id,
             skill_id=current.skill_id,
             revision=current.revision + 1,
@@ -228,19 +182,7 @@ class SkillCatalogService:
 
     async def disable(self, skill_id: str, *, user_id: str, role: str) -> None:
         current = await self.get(skill_id, user_id=user_id, role=role)
-        if current.dimension == "system" and role != "admin":
-            raise SageV2Error(
-                RuntimeErrorInfo(
-                    code="server.skills.service.forbidden",
-                    category=ErrorCategory.AUTHORIZATION,
-                    message="only admin can delete system skills",
-                )
-            )
-        if (
-            current.dimension == "user"
-            and current.owner_user_id != user_id
-            and role != "admin"
-        ):
+        if current.owner_user_id != user_id and role != "admin":
             raise SageV2Error(
                 RuntimeErrorInfo(
                     code="server.skills.service.forbidden",
@@ -370,15 +312,13 @@ class SkillCatalogService:
         self,
         package: SkillPackage,
         *,
-        dimension: SkillDimension,
         owner_user_id: str,
         skill_id: str | None = None,
         revision: int = 1,
     ) -> SkillRecord:
         visible = await self.store.list_visible(
             user_id=owner_user_id or "",
-            role="admin" if dimension == "system" else "user",
-            dimension=dimension,
+            role="user",
         )
         existing = next(
             (
@@ -396,7 +336,6 @@ class SkillCatalogService:
             return existing
         version_id = new_version_id()
         relative = artifact_relative_path(
-            dimension=dimension,
             owner_user_id=owner_user_id,
             name=package.name,
             version_id=version_id,
@@ -408,7 +347,6 @@ class SkillCatalogService:
             or (existing.skill_id if existing is not None else new_skill_id()),
             version_id=version_id,
             revision=revision if existing is None else existing.revision + 1,
-            dimension=dimension,
             owner_user_id=owner_user_id,
             name=package.name,
             description=package.description,
@@ -424,8 +362,6 @@ class SkillCatalogService:
 def _can_see(record: SkillRecord, *, user_id: str, role: str) -> bool:
     if record.status != "active":
         return False
-    if record.dimension == "system":
-        return True
     return record.owner_user_id == user_id or role == "admin"
 
 

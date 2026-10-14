@@ -9,12 +9,9 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal
 
 from sagents.v2.contracts.common import new_id
 from sagents.v2.contracts.errors import ErrorCategory, RuntimeErrorInfo, SageV2Error
-
-SkillDimension = Literal["system", "user"]
 
 SKILL_NAME = re.compile(r"^[A-Za-z][A-Za-z0-9._-]{0,191}$")
 _UNSAFE_RELATIVE = re.compile(r"(^|/)\.\.(/|$)")
@@ -43,7 +40,6 @@ def normalize_skill_names(names: list[str] | tuple[str, ...] | None) -> list[str
 
 def artifact_relative_path(
     *,
-    dimension: SkillDimension,
     owner_user_id: str,
     name: str,
     version_id: str,
@@ -60,8 +56,6 @@ def artifact_relative_path(
                 message="invalid skill version id",
             )
         )
-    if dimension == "system":
-        return f"system/{skill_name}/{version}"
     owner = str(owner_user_id or "").strip()
     if not owner or "/" in owner or "\\" in owner:
         raise SageV2Error(
@@ -144,7 +138,6 @@ class SkillRecord:
     skill_id: str
     version_id: str
     revision: int
-    dimension: SkillDimension
     owner_user_id: str
     name: str
     description: str
@@ -160,8 +153,7 @@ class SkillRecord:
             "skill_id": self.skill_id,
             "version_id": self.version_id,
             "revision": self.revision,
-            "dimension": self.dimension,
-            "owner_user_id": self.owner_user_id or None,
+            "owner_user_id": self.owner_user_id,
             "name": self.name,
             "description": self.description,
             "artifact_path": self.artifact_path,
@@ -209,27 +201,14 @@ def pick_visible_skill(
     name: str,
     user_id: str,
 ) -> SkillRecord | None:
-    """User-owned skill wins over the system skill of the same name."""
+    """Resolve an active skill owned by this user."""
 
-    user_hit = next(
-        (
-            item
-            for item in candidates
-            if item.name == name
-            and item.dimension == "user"
-            and item.owner_user_id == user_id
-            and item.status == "active"
-        ),
-        None,
-    )
-    if user_hit is not None:
-        return user_hit
     return next(
         (
             item
             for item in candidates
             if item.name == name
-            and item.dimension == "system"
+            and item.owner_user_id == user_id
             and item.status == "active"
         ),
         None,

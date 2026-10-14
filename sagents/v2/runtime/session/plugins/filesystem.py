@@ -1945,6 +1945,15 @@ class FilesystemSessionStore(metaclass=_FilesystemSessionStoreMeta):
             self, "_coordinator", _FilesystemSessionState(*args, **kwargs)
         )
 
+    async def session_directory(self, session_id: str) -> Path:
+        """Resolve a persisted Session folder for trusted host export tooling.
+
+        This is a low-level storage capability; hosts must authorize the Session
+        through AuthorizedSessionAccess before exposing any files to a caller.
+        """
+        await self._coordinator.get_session(session_id)
+        return await asyncio.to_thread(self._coordinator._session_dir, session_id)
+
     def __getattr__(self, name):
         return getattr(self._coordinator, name)
 
