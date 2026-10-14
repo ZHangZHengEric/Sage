@@ -337,6 +337,9 @@ class DefaultContextAssembler:
                 source_message_count=len(messages),
             )
         view = self._apply_inference_view(projection.messages, volatile)
+        from sagents.v2.tool.official.media import hydrate_image_blocks
+
+        view = await hydrate_image_blocks(view)
         if view != projection.messages:
             projection = projection.model_copy(
                 update={
