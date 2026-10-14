@@ -265,6 +265,7 @@ async def compose_catalog_loop(
         loop = factory.create_loop(
             resolved,
             agent.id,
+            artifact_store=official_runtime.artifact_store,
             model=model,
             tool_catalog=CompositeToolCatalog(tuple(catalogs)),
             tool_executor=CompositeToolExecutor(tuple(executors)),

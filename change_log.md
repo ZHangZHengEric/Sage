@@ -19,7 +19,7 @@
 
 面向版本用户的完整说明保存在 [`release_notes/`](release_notes/)；本文件记录持续开发变更。
 
-- **2026-10-14 12:00** analyze_image 账本只留路径/mime/prompt，组请求时再读文件挂图，不再把 JPEG data URL 写入 ledger。
+- **2026-10-14** analyze_image 经沙箱读取后保存不可变图片附件，账本只保留附件引用；模型请求从附件快照加载图片，不再回读原路径或将 JPEG data URL 写入账本。新增 SQLite 持久附件存储，并隔离用户附件。
 
 - **2026-10-13** 为 V2 后端 Compose 配置 `systempaths=unconfined`，解决 Docker 遮蔽 `/proc` 子挂载导致非 root bubblewrap 无法挂载私有 procfs、所有 shell 命令启动失败的问题；保留内层命名空间与降权隔离。
 

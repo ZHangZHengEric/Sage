@@ -44,6 +44,7 @@ from sagents.v2.interfaces.protocols.mcp import McpProtocolAdapter
 from sagents.v2.interfaces.protocols.native import NativeProtocolAdapter
 from sagents.v2.package.registry import InMemoryAgentPackageRegistry
 from sagents.v2.runtime.artifact import InMemoryArtifactStore
+from sagents.v2.runtime.artifact import SqliteArtifactStore
 from sagents.v2.runtime.credentials import (
     EnvironmentCredentialProvider,
     MappingCredentialProvider,
@@ -870,6 +871,22 @@ def _register_infrastructure(registry: ExtensionRegistry) -> None:
         capabilities={
             "durable_across_process_restart": False,
             "shared_across_processes": False,
+        },
+    )
+    _one(
+        registry,
+        SqliteArtifactStore,
+        "artifact.store",
+        lambda context, dependencies: SqliteArtifactStore(context.config["root"]),
+        scopes={ExtensionScope.PROCESS},
+        config_schema={
+            "type": "object", "required": ["root"],
+            "properties": {"root": {"type": "string", "minLength": 1}},
+            "additionalProperties": False,
+        },
+        capabilities={
+            "durable_across_process_restart": True,
+            "shared_across_processes": True,
         },
     )
     _one(
