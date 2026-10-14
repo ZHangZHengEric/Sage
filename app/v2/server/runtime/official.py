@@ -23,6 +23,7 @@ from sagents.v2.runtime.execution.sandbox import (
 )
 from sagents.v2.runtime.extensions import ExtensionScope, ExtensionScopeContext
 from sagents.v2.tool.official import OfficialToolRuntime
+from sagents.v2.runtime.artifact import SqliteArtifactStore
 from sagents.v2.tool.plugins.official import (
     OfficialToolPlugin,
     official_tool_categories,
@@ -159,6 +160,7 @@ async def attach_official_tools(service, command: StartRun, *, user_id: str, run
     """Provision a host-mapped sandbox and wrap it as OfficialToolPlugin."""
 
     install_sandbox(service.execution, service.settings)
+    artifact_store = SqliteArtifactStore(service.paths.tenant_dir(user_id) / "artifacts")
     owner_run_id = run_id or command.idempotency_key
     handle = await provision_workspace(
         service.execution,
@@ -166,7 +168,10 @@ async def attach_official_tools(service, command: StartRun, *, user_id: str, run
         service.contexts.for_user(user_id),
         run_id=owner_run_id,
     )
-    runtime = OfficialToolRuntime(handle, service.execution.sandbox_grant_issuer)
+    runtime = OfficialToolRuntime(
+        handle, service.execution.sandbox_grant_issuer,
+        artifact_store=artifact_store,
+    )
     plugin = OfficialToolPlugin(
         ExtensionScopeContext(
             scope=ExtensionScope.RUN,

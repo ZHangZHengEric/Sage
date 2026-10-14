@@ -112,27 +112,105 @@ async def test_volatile_context_wraps_latest_user_and_preserves_multimodal_block
 
 
 @pytest.mark.asyncio
-async def test_prepare_messages_inlines_local_image_paths_without_changing_ledger(
+async def test_prepare_messages_inlines_image_attachment_without_changing_ledger(
     tmp_path,
 ):
     from PIL import Image
 
-    image = tmp_path / "frame.png"
-    Image.new("RGB", (32, 32), "red").save(image)
+    from sagents.v2.runtime.artifact import SqliteArtifactStore
+    from sagents.v2.runtime.artifact.images import snapshot_image
+    from sagents.v2.tool.official.media import compress_image_to_jpeg_bytes_for_llm
+
+    store = SqliteArtifactStore(tmp_path / "artifacts")
+    uri = await snapshot_image(store, compress_image_to_jpeg_bytes_for_llm(Image.new("RGB", (32, 32), "red")))
     ledger = (
         ModelMessage(
             role="user",
             content=(
                 TextBlock(text="Inspect the frame."),
-                ImageBlock(uri=str(image), mime_type="image/png", alt=str(image)),
+                ImageBlock(uri=uri, mime_type="image/jpeg"),
             ),
             metadata={"tool_source": "analyze_image", "tool_context": True},
         ),
     )
-    prepared = await DefaultContextAssembler().prepare_messages(command(), ledger)
-    assert ledger[0].content[1].uri == str(image)
+    prepared = await DefaultContextAssembler(artifact_store=store).prepare_messages(command(), ledger)
+    assert ledger[0].content[1].uri == uri
     assert prepared[0].content[1].uri.startswith("data:image/jpeg;base64,")
     assert "data:image" not in ledger[0].content[1].uri
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("uri", ["/workspace/frame.png", "file:///tmp/frame.png", "frame.png"])
+async def test_context_rejects_local_image_paths_without_opening_host_files(uri, monkeypatch):
+    from PIL import Image
+
+    def forbidden(*args, **kwargs):
+        pytest.fail("context assembler must not open host paths")
+
+    monkeypatch.setattr(Image, "open", forbidden)
+    ledger = (ModelMessage(role="user", content=(ImageBlock(uri=uri, mime_type="image/png"),)),)
+    with pytest.raises(SageV2Error) as error:
+        await DefaultContextAssembler().prepare_messages(command(), ledger)
+    assert error.value.info.code == "image.local_path_unsupported"
+
+
+@pytest.mark.asyncio
+async def test_image_attachment_is_tenant_scoped_and_missing_is_explicit(tmp_path):
+    from sagents.v2.runtime.artifact import ScopedArtifactStore, SqliteArtifactStore
+    from sagents.v2.runtime.artifact.images import snapshot_image
+
+    store = SqliteArtifactStore(tmp_path)
+    owner = ScopedArtifactStore(store, "user-a")
+    other = ScopedArtifactStore(store, "user-b")
+    uri = await snapshot_image(owner, b"image")
+    ledger = (ModelMessage(role="user", content=(ImageBlock(uri=uri, mime_type="image/jpeg"),)),)
+    with pytest.raises(SageV2Error) as denied:
+        await DefaultContextAssembler(artifact_store=other).prepare_messages(command(), ledger)
+    assert denied.value.info.code == "artifact.not_found"
+    await owner.delete(uri.removeprefix("sage-image:"))
+    with pytest.raises(SageV2Error) as missing:
+        await DefaultContextAssembler(artifact_store=owner).prepare_messages(command(), ledger)
+    assert missing.value.info.code == "artifact.not_found"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("uri,code", [
+    ("sage-image:" + "a" * 64, "image.store_unavailable"),
+    ("sage-image:../../secret", "image.invalid_reference"),
+])
+async def test_invalid_image_attachment_never_reaches_provider(uri, code):
+    ledger = (ModelMessage(role="user", content=(ImageBlock(uri=uri, mime_type="image/jpeg"),)),)
+    with pytest.raises(SageV2Error) as error:
+        await DefaultContextAssembler().prepare_messages(command(), ledger)
+    assert error.value.info.code == code
+
+
+@pytest.mark.asyncio
+async def test_legacy_inline_images_still_project_without_attachment_storage():
+    uri = "data:image/png;base64,AAAA"
+    ledger = (ModelMessage(role="user", content=(ImageBlock(uri=uri, mime_type="image/png"),)),)
+    assert (await DefaultContextAssembler().prepare_messages(command(), ledger))[0].content[0].uri == uri
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("media_type,code", [
+    ("image/jpeg", "image.integrity_failed"),
+    ("text/plain", "image.invalid_attachment"),
+])
+async def test_image_loader_checks_bytes_against_reference_for_custom_stores(media_type, code):
+    from sagents.v2.runtime.artifact import InMemoryArtifactStore
+
+    store = InMemoryArtifactStore()
+    identifier = "a" * 64
+
+    async def content():
+        yield b"wrong image content"
+
+    await store.put(artifact_id=identifier, media_type=media_type, content=content())
+    ledger = (ModelMessage(role="user", content=(ImageBlock(uri="sage-image:" + identifier, mime_type="image/jpeg"),)),)
+    with pytest.raises(SageV2Error) as error:
+        await DefaultContextAssembler(artifact_store=store).prepare_messages(command(), ledger)
+    assert error.value.info.code == code
 
 
 @pytest.mark.asyncio

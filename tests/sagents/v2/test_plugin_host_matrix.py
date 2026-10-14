@@ -247,7 +247,8 @@ def test_builtin_only_uses_host_provenance_not_plugin_self_report():
 def test_builtin_only_accepts_host_registered_official_plugin():
     host = ExtensionHost(builtin_extension_registry(), built_in_only=True)
 
-    plan = host.plan((requirement("artifact.store"),))
+    plan = host.plan((requirement("artifact.store"),),
+                     selections={"artifact.store": "sage.artifact.ephemeral"})
 
     assert plan.graph.plugin_ids == ("sage.artifact.ephemeral",)
 
