@@ -3654,9 +3654,9 @@ async def test_output_limit_preserves_partial_answer_and_bounded_continuation(
 @pytest.mark.asyncio
 @pytest.mark.parametrize("decision", ["approve_once", "deny"])
 async def test_image_followup_survives_approval_and_engine_restart(decision, tmp_path):
-    from sagents.v2.runtime.artifact import SqliteArtifactStore
+    from sagents.v2.runtime.artifact import FilesystemArtifactStore
     from sagents.v2.runtime.artifact.images import snapshot_image
-    store = SqliteArtifactStore(tmp_path / "artifacts")
+    store = FilesystemArtifactStore(tmp_path / "artifacts")
     uri = await snapshot_image(store, b"snapshot-image")
 
     async def image_handler(call, context):
@@ -3694,7 +3694,7 @@ async def test_image_followup_survives_approval_and_engine_restart(decision, tmp
         tool_catalog=InMemoryToolCatalog((READ_TOOL, WRITE_TOOL)), tool_executor=executor,
         context_assembler=DefaultContextAssembler(
             history_reader=runtime.session_store,
-            artifact_store=SqliteArtifactStore(tmp_path / "artifacts"),
+            artifact_store=FilesystemArtifactStore(tmp_path / "artifacts"),
         ))
     run = await loop.resume(run.run_id, CONTEXT)
     assert run.state == RunState.COMPLETED

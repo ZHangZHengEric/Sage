@@ -41,7 +41,7 @@ from sagents.v2.agent.multi_agent import (
     WorkspaceSharingPolicy,
 )
 from sagents.v2.tool.official import OfficialToolRuntime
-from sagents.v2.runtime.artifact import ScopedArtifactStore, SqliteArtifactStore
+from sagents.v2.runtime.artifact import ScopedArtifactStore, FilesystemArtifactStore
 from sagents.v2.contracts.commands import (
     InputItem,
     StartRun,
@@ -651,7 +651,7 @@ class DesktopRunCompositionMixin(DesktopRunEnvironmentMixin):
         goal_state_service = GoalStateService(self.driver_session_store)
         multimodal_by_agent = {agent.agent_id: provider.supports_multimodal}
         artifact_store = ScopedArtifactStore(
-            SqliteArtifactStore(self.runtime_root / "artifacts"), agent.user_id,
+            FilesystemArtifactStore(self.runtime_root / "artifacts"), agent.user_id,
         )
         official_runtime = OfficialToolRuntime(
             sandbox_handle,

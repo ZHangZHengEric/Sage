@@ -429,13 +429,13 @@ async def test_image_snapshot_uses_sandbox_paths_and_survives_source_changes(
     from sagents.v2.agent.engine import AgentLoopEngine
     from sagents.v2.context import DefaultContextAssembler
     from sagents.v2.contracts.commands import StartRun
-    from sagents.v2.runtime.artifact import SqliteArtifactStore
+    from sagents.v2.runtime.artifact import FilesystemArtifactStore
 
     root = tmp_path / "workspace"
     root.mkdir()
     plugin = (await plugin_for(root) if provider == "local" else
               await ephemeral_plugin_for(FileSystemPolicy(allowed_operations=frozenset(FileOperation))))
-    plugin.runtime.artifact_store = SqliteArtifactStore(tmp_path / "artifacts")
+    plugin.runtime.artifact_store = FilesystemArtifactStore(tmp_path / "artifacts")
     original = io.BytesIO()
     Image.new("RGB", (32, 32), "red").save(original, format="PNG")
     invocation = ToolInvocation(call("analyze_image", {}), CONTEXT)
@@ -455,21 +455,21 @@ async def test_image_snapshot_uses_sandbox_paths_and_survives_source_changes(
     assert await assembler.prepare_messages(command, ledger) == first
     await plugin.runtime.delete_file("frame.png", invocation)
     await plugin.runtime.sandbox.destroy()
-    restarted = DefaultContextAssembler(artifact_store=SqliteArtifactStore(tmp_path / "artifacts"))
+    restarted = DefaultContextAssembler(artifact_store=FilesystemArtifactStore(tmp_path / "artifacts"))
     assert await restarted.prepare_messages(command, ledger) == first
 
 
 @pytest.mark.asyncio
 async def test_image_snapshot_cannot_read_outside_sandbox(tmp_path):
     from PIL import Image
-    from sagents.v2.runtime.artifact import SqliteArtifactStore
+    from sagents.v2.runtime.artifact import FilesystemArtifactStore
 
     root = tmp_path / "workspace"
     root.mkdir()
     outside = tmp_path / "secret.png"
     Image.new("RGB", (32, 32), "red").save(outside)
     plugin = await plugin_for(root)
-    plugin.runtime.artifact_store = SqliteArtifactStore(tmp_path / "artifacts")
+    plugin.runtime.artifact_store = FilesystemArtifactStore(tmp_path / "artifacts")
     result = await MediaTools(plugin.runtime).analyze_image(
         str(outside), "session_1", invocation=ToolInvocation(call("analyze_image", {}), CONTEXT),
     )

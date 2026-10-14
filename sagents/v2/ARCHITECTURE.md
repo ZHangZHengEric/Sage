@@ -240,9 +240,9 @@ depending on one in-process lifecycle implementation.
 Durable Session state does not imply durable execution. The default Scheduler,
 JobRuntime and package registry are single-process/ephemeral reference
 implementations. With `with_defaults(session_root=...)`, the ArtifactStore
-defaults to SQLite snapshots under `session_root/artifacts`; hosts without a
-storage root may explicitly use the ephemeral store. SQLite supports processes
-sharing one local database, not independent hosts. `analyze_image` reads through
+defaults to binary file snapshots under `session_root/artifacts`; hosts without a
+storage root may explicitly use the ephemeral store. The filesystem store supports
+processes sharing one local directory, not independent hosts. `analyze_image` reads through
 the sandbox, normalizes once, and stores an immutable content-addressed snapshot.
 The ledger carries `sage-image:<sha256>` and only inference projections contain
 base64. Tenant-scoped stores isolate references; missing or corrupt attachments

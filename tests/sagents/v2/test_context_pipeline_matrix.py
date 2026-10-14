@@ -117,11 +117,11 @@ async def test_prepare_messages_inlines_image_attachment_without_changing_ledger
 ):
     from PIL import Image
 
-    from sagents.v2.runtime.artifact import SqliteArtifactStore
+    from sagents.v2.runtime.artifact import FilesystemArtifactStore
     from sagents.v2.runtime.artifact.images import snapshot_image
     from sagents.v2.tool.official.media import compress_image_to_jpeg_bytes_for_llm
 
-    store = SqliteArtifactStore(tmp_path / "artifacts")
+    store = FilesystemArtifactStore(tmp_path / "artifacts")
     uri = await snapshot_image(store, compress_image_to_jpeg_bytes_for_llm(Image.new("RGB", (32, 32), "red")))
     ledger = (
         ModelMessage(
@@ -156,10 +156,10 @@ async def test_context_rejects_local_image_paths_without_opening_host_files(uri,
 
 @pytest.mark.asyncio
 async def test_image_attachment_is_tenant_scoped_and_missing_is_explicit(tmp_path):
-    from sagents.v2.runtime.artifact import ScopedArtifactStore, SqliteArtifactStore
+    from sagents.v2.runtime.artifact import ScopedArtifactStore, FilesystemArtifactStore
     from sagents.v2.runtime.artifact.images import snapshot_image
 
-    store = SqliteArtifactStore(tmp_path)
+    store = FilesystemArtifactStore(tmp_path)
     owner = ScopedArtifactStore(store, "user-a")
     other = ScopedArtifactStore(store, "user-b")
     uri = await snapshot_image(owner, b"image")
