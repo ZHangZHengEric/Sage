@@ -46,7 +46,19 @@ def test_non_chat_probe_does_not_use_chat_diagnostic() -> None:
 
 
 @pytest.mark.asyncio
-async def test_desktop_delegates_capability_detection_to_the_selected_plugin():
+@pytest.mark.parametrize(
+    ("protocol", "schema_supported", "object_supported", "json_supported"),
+    [
+        ("openai-chat-completions", True, True, True),
+        ("openai-chat-completions", False, True, True),
+        ("openai-chat-completions", True, False, True),
+        ("openai-chat-completions", False, False, False),
+        ("openai-responses", False, True, False),
+    ],
+)
+async def test_desktop_delegates_capability_detection_to_the_selected_plugin(
+    protocol, schema_supported, object_supported, json_supported
+):
     calls = []
 
     class PluginProvider:
@@ -57,7 +69,12 @@ async def test_desktop_delegates_capability_detection_to_the_selected_plugin():
             outcomes = tuple(
                 ModelCapabilityProbeOutcome(
                     name=name,
-                    status=ModelCapabilityProbeStatus.SUPPORTED,
+                    status=(
+                        ModelCapabilityProbeStatus.UNSUPPORTED
+                        if (name == "structured_output" and not schema_supported)
+                        or (name == "json_object" and not object_supported)
+                        else ModelCapabilityProbeStatus.SUPPORTED
+                    ),
                     response="ok",
                 )
                 for name in (
@@ -70,16 +87,16 @@ async def test_desktop_delegates_capability_detection_to_the_selected_plugin():
                 )
             )
             return ModelCapabilityProfile(
-                plugin_id="sage.model.openai-chat-completions",
+                plugin_id=f"sage.model.{protocol}",
                 plugin_version="3.0.0",
-                protocol="openai-chat-completions",
+                protocol=protocol,
                 route_fingerprint=request.route_fingerprint,
                 effective_max_output_tokens=512,
                 outcomes=outcomes,
                 invocation_strategy={
                     "max_output_tokens_field": "max_tokens",
                     "image_detail_mode": "omit",
-                    "supports_json_object": True,
+                    "supports_json_object": object_supported,
                     "auxiliary_json_compatible": True,
                 },
             )
@@ -88,7 +105,7 @@ async def test_desktop_delegates_capability_detection_to_the_selected_plugin():
         id="deepseek_vision",
         user_id="user_1",
         name="DeepSeek Vision",
-        protocol="openai-chat-completions",
+        protocol=protocol,
         model="DeepSeek-V4-Flash-Vision-Exp",
         base_url="https://example.invalid/v1",
         api_key="secret",
@@ -106,7 +123,10 @@ async def test_desktop_delegates_capability_detection_to_the_selected_plugin():
     assert len(calls) == 1
     assert calls[0].model_binding == "deepseek_vision"
     assert result["supports_multimodal"] is True
+    assert result["supports_structured_output"] is json_supported
+    assert result["supports_json_object"] is object_supported
+    assert result["structured_output"]["supported"] is schema_supported
     assert result["effective_max_output_tokens"] == 512
     profile = result["compatibility_profile"]["plugin_profile"]
-    assert profile["plugin_id"] == "sage.model.openai-chat-completions"
+    assert profile["plugin_id"] == f"sage.model.{protocol}"
     assert profile["invocation_strategy"]["image_detail_mode"] == "omit"
