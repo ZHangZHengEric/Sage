@@ -210,6 +210,7 @@ def _agent_record(row: AgentRow, skills: list[str]) -> AgentRecord:
         instructions=row.instructions,
         model_id=row.model_id,
         tools=row.tools,
+        tool_approval=row.tool_approval,
         execution_policy=row.execution_policy,
         skills=skills,
     )

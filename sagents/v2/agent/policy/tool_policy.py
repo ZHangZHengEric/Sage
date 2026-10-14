@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import hashlib
 import json
 from collections.abc import Callable
@@ -16,6 +17,9 @@ from sagents.v2.tool.contracts import (
 )
 from sagents.v2.contracts.common import Identifier, StrictModel
 from sagents.v2.contracts.principals import ActorRef
+
+
+from sagents.v2.agent.policy.approval_config import ToolApprovalConfig
 
 
 class ToolPolicyAction(str, Enum):
@@ -40,7 +44,7 @@ class ToolPolicyContext(StrictModel):
 
 
 class ApprovalMatcher(StrictModel):
-    """"记住审批"时保存的精确匹配器：工具名 + 规范化参数指纹。
+    """ "记住审批"时保存的精确匹配器：工具名 + 规范化参数指纹。
 
     只保存宿主能解释、用户能看懂的精确匹配，不保存内部 risk category，
     以免策略升级后旧的记忆意外放宽。
@@ -122,6 +126,7 @@ class DefaultToolPolicy:
     def __init__(
         self,
         *,
+        tool_approval: ToolApprovalConfig | None = None,
         policy_version: str = "1",
         approval_levels: frozenset[SideEffectLevel] | None = None,
         approval_strategy: ApprovalStrategy = ApprovalStrategy.CONFIGURED,
@@ -133,6 +138,7 @@ class DefaultToolPolicy:
         approval_matcher: ApprovalMatcherBuilder | None = None,
         approval_matcher_id: str | None = None,
     ) -> None:
+        self.tool_approval = tool_approval
         self.policy_version = policy_version
         self.approval_strategy = approval_strategy
         self.operation_assessor = operation_assessor
@@ -157,21 +163,37 @@ class DefaultToolPolicy:
                 }
             )
         )
+        self.policy_hash = self._configuration_hash()
+
+    def _configuration_hash(self) -> str:
         encoded = json.dumps(
             {
-                "version": policy_version,
-                "approval_strategy": approval_strategy.value,
+                "tool_approval": self.tool_approval.model_dump()
+                if self.tool_approval
+                else None,
+                "version": self.policy_version,
+                "approval_strategy": self.approval_strategy.value,
                 "approval_levels": sorted(
                     value.value for value in self.approval_levels
                 ),
-                "operation_assessor_id": operation_assessor_id,
-                "allow_persistent_approval": allow_persistent_approval,
+                "operation_assessor_id": self.operation_assessor_id,
+                "allow_persistent_approval": self.allow_persistent_approval,
                 "approval_matcher_id": self.approval_matcher_id,
             },
             separators=(",", ":"),
             sort_keys=True,
         ).encode()
-        self.policy_hash = f"sha256:{hashlib.sha256(encoded).hexdigest()}"
+        return f"sha256:{hashlib.sha256(encoded).hexdigest()}"
+
+    def with_approval_config(
+        self, config: ToolApprovalConfig | None
+    ) -> DefaultToolPolicy:
+        if config is None or config == self.tool_approval:
+            return self
+        policy = copy.copy(self)
+        policy.tool_approval = config
+        policy.policy_hash = policy._configuration_hash()
+        return policy
 
     def composition_identity(self) -> str:
         """宿主直接注入时，让组合身份（composition hash）纳入策略本身。"""
@@ -237,7 +259,11 @@ class DefaultToolPolicy:
                 if assessment.category is not None:
                     interaction_payload["risk_category"] = assessment.category
             allowed_decisions = ["approve_once"]
-            if assessment is not None and assessment.persistent_approval_allowed:
+            if (
+                self.tool_approval is None
+                and assessment is not None
+                and assessment.persistent_approval_allowed
+            ):
                 # 宿主 assessor 明确允许：沿用既有行为，由宿主自行落地记忆。
                 allowed_decisions.append("approve_and_remember")
                 interaction_payload["persistent_approval_allowed"] = True
@@ -253,7 +279,9 @@ class DefaultToolPolicy:
                 policy_version=self.policy_version,
                 policy_hash=self.policy_hash,
                 reason=(
-                    assessment.reason
+                    "Agent tool approval configuration requires confirmation"
+                    if self.tool_approval is not None
+                    else assessment.reason
                     if assessment is not None
                     else "tool side effect requires approval"
                 ),
@@ -281,7 +309,10 @@ class DefaultToolPolicy:
     ) -> ApprovalMatcher | None:
         """本次调用允许被记住时返回匹配器；返回 None 表示只能 approve_once。"""
 
-        if self.approval_strategy == ApprovalStrategy.ALWAYS_ASK:
+        if (
+            self.tool_approval is not None
+            or self.approval_strategy == ApprovalStrategy.ALWAYS_ASK
+        ):
             return None
         allowed = (
             assessment.persistent_approval_allowed
@@ -300,6 +331,19 @@ class DefaultToolPolicy:
         definition = context.definition
         if context.invocation_mode == "plan" and definition.name == "goal_submit":
             return True
+        if self.tool_approval is not None:
+            return (
+                self.tool_approval.mode_for(definition.approval_key or definition.name)
+                == "ask"
+            )
+        # MCP transport metadata never decides approval; absent an Agent rule,
+        # generic MCP calls do not ask. Scopes, plan and host denials ran first.
+        if (
+            self.approval_strategy == ApprovalStrategy.CONFIGURED
+            and definition.approval_key
+            and definition.approval_key.startswith("mcp:")
+        ):
+            return False
         if self.approval_strategy == ApprovalStrategy.ALWAYS_ASK:
             return True
         if self.approval_strategy == ApprovalStrategy.HIGH_RISK:

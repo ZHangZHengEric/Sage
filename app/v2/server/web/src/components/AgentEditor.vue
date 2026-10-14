@@ -6,6 +6,7 @@ const props = defineProps({
   agentId: String, readonly: Boolean, canEdit: Boolean, busy: Boolean, error: String, message: String,
   models: { type: Array, default: () => [] }, tools: { type: Array, default: () => [] },
   skills: { type: Array, default: () => [] }, selectedSkills: { type: Array, default: () => [] },
+  approvalTools: { type: Array, default: () => [] },
   externalTools: { type: Array, default: () => [] },
 })
 const emit = defineEmits(['close', 'edit', 'save', 'update:form', 'update:selectedSkills'])
@@ -16,6 +17,7 @@ const sections = [
   { id: 'model', label: '模型配置', icon: 'model' },
   { id: 'tools', label: '可用工具', icon: 'tools' },
   { id: 'skills', label: '可用技能', icon: 'skill' },
+  { id: 'approval', label: '工具审批', icon: 'settings' },
   { id: 'execution', label: '执行权限', icon: 'settings' },
 ]
 const categories = computed(() => [...new Set(props.tools.map(tool => tool.category).filter(Boolean))])
@@ -42,6 +44,20 @@ function selectTools(select) {
   const selected = new Set(props.form.tools)
   for (const tool of displayedTools.value) { if (select) selected.add(tool.name); else selected.delete(tool.name) }
   update('tools', [...selected])
+}
+const approvalRules = computed(() => {
+  const tools = new Map(props.approvalTools.map(tool => [tool.approval_key || tool.name, tool.name]))
+  for (const key of Object.keys(props.form.tool_approval?.tools || {})) {
+    if (!tools.has(key)) tools.set(key, key)
+  }
+  return [...tools].map(([key, name]) => ({ key, name }))
+})
+function setApprovalDefault(value) {
+  update('tool_approval', value ? { default: value, tools: { ...(props.form.tool_approval?.tools || {}) } } : null)
+}
+function setToolApproval(key, value) {
+  const config = props.form.tool_approval || { default: 'auto_approve', tools: {} }
+  update('tool_approval', { ...config, tools: { ...config.tools, [key]: value } })
 }
 function toggleSkill(name) {
   if (props.readonly) return
@@ -81,6 +97,10 @@ function toggleSkill(name) {
               <div class="selection-list"><label v-for="skill in displayedSkills" :key="skill.skill_id || skill.name" class="selection-row"><input type="checkbox" :checked="selectedSkills.includes(skill.name)" :disabled="readonly || busy" @change="toggleSkill(skill.name)" /><span>{{ skill.name }}<small>{{ skill.description }}</small></span></label><p v-if="!displayedSkills.length" class="empty">没有匹配的技能</p></div>
             </div>
           </div></section>
+          <section id="agent-approval"><h2><span class="section-icon"><AppIcon name="settings" /></span>工具审批</h2><div class="section-fields">
+            <label class="field"><span>默认审批模式</span><select :value="form.tool_approval?.default || ''" :disabled="readonly || busy" @change="setApprovalDefault($event.target.value)"><option v-if="!form.tool_approval" value="">沿用旧配置</option><option value="ask">需要询问</option><option value="auto_approve">免审批</option></select></label>
+            <div v-if="form.tool_approval" class="selection-box"><div class="selection-list"><label v-for="tool in approvalRules" :key="tool.key" class="selection-row approval-row"><span>{{ tool.name }}</span><select :aria-label="`${tool.name} 审批模式`" :value="form.tool_approval.tools[tool.key] || 'inherit'" :disabled="readonly || busy" @change="setToolApproval(tool.key, $event.target.value)"><option value="inherit">继承默认</option><option value="ask">需要询问</option><option value="auto_approve">免审批</option></select></label></div></div>
+          </div></section>
           <section id="agent-execution"><h2><span class="section-icon"><AppIcon name="settings" /></span>执行权限</h2><div class="section-fields"><label class="field"><span>命令权限上限</span><select :value="form.execution_policy.shell" :disabled="readonly || busy" @change="update('execution_policy', { ...form.execution_policy, shell: $event.target.value })"><option value="sandboxed">允许用户设置工作区内自动执行</option><option value="ask">命令必须审批</option><option value="deny">禁止命令执行</option></select></label></div></section>
         </div>
       </div>
@@ -88,7 +108,10 @@ function toggleSkill(name) {
   </div>
 </template>
 <style scoped>
-.agent-editor { display: flex; flex-direction: column; height: 100%; min-height: 0; border: 1px solid var(--border); background: var(--background); overflow: hidden; }
+.approval-row { justify-content: space-between; gap: 12px; }
+.approval-row > span { overflow-wrap: anywhere; min-width: 0; }
+.approval-row select { flex-shrink: 0; width: auto; }
+.agent-editor { display: flex; flex-direction: column; height: 100%; min-height: 0; border: 1px solid var(--border); background: var(--background); color: var(--foreground); overflow: hidden; }
 .agent-editor-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 16px; border-bottom: 1px solid var(--border); flex-shrink: 0; }
 .editor-title { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .editor-title h1 { font-size: 14px; font-weight: 500; margin: 0; white-space: nowrap; }
@@ -97,26 +120,26 @@ function toggleSkill(name) {
 .agent-editor-head .btn { padding: 5px 12px; font-size: 12px; }
 .editor-feedback { padding: 8px 16px; margin: 0; font-size: 13px; }
 .agent-editor-layout { display: flex; flex: 1; min-height: 0; }
-.editor-nav { flex: 0 0 192px; padding: 12px 8px; border-right: 1px solid var(--border); background: color-mix(in srgb, var(--muted) 20%, white); overflow-y: auto; }
+.editor-nav { flex: 0 0 192px; padding: 12px 8px; border-right: 1px solid var(--border); background: color-mix(in srgb, var(--muted) 20%, var(--background)); overflow-y: auto; }
 .editor-nav button { display: flex; gap: 10px; align-items: center; width: 100%; padding: 10px 12px; font-size: 12px; background: transparent; color: var(--muted-foreground); border: 0; border-radius: 6px; text-align: left; }
-.editor-nav button.active { background: color-mix(in srgb, var(--primary) 10%, white); color: var(--primary); font-weight: 500; }
+.editor-nav button.active { background: color-mix(in srgb, var(--primary) 10%, var(--background)); color: var(--primary); font-weight: 500; }
 .editor-nav .app-icon { width: 14px; height: 14px; }
 .editor-scroll { flex: 1; min-width: 0; overflow-y: auto; }
 .editor-sections { width: 100%; padding: 32px; }
 .editor-sections > section { margin-bottom: 40px; scroll-margin-top: 24px; }
 .editor-sections h2 { display: flex; align-items: center; gap: 8px; font-size: 16px; margin: 0 0 20px; }
-.section-icon { width: 32px; height: 32px; border-radius: 8px; display: grid; place-items: center; background: color-mix(in srgb, var(--primary) 10%, white); }
+.section-icon { width: 32px; height: 32px; border-radius: 8px; display: grid; place-items: center; background: color-mix(in srgb, var(--primary) 10%, var(--background)); }
 .section-fields { padding-left: 40px; }
 .field { gap: 8px; margin-bottom: 20px; }
 .field > span { color: var(--foreground); font-size: 13px; }
 .field input, .field select, .field textarea { font-size: 14px; padding: 10px 12px; }
-.field input:read-only, .field textarea:read-only { background: color-mix(in srgb, var(--muted) 30%, white); }
+.field input:read-only, .field textarea:read-only { background: color-mix(in srgb, var(--muted) 30%, var(--background)); }
 .field textarea { resize: vertical; }
 .selection-count { margin-left: auto; color: var(--muted-foreground); font-size: 12px; font-weight: 400; }
 .selected-tags { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 12px; }
 .selected-tags .tag { margin: 0; border-radius: 6px; padding: 3px 8px; overflow-wrap: anywhere; }
 .selection-box { border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
-.selection-toolbar { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; padding: 12px; background: color-mix(in srgb, var(--muted) 30%, white); border-bottom: 1px solid var(--border); }
+.selection-toolbar { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; padding: 12px; background: color-mix(in srgb, var(--muted) 30%, var(--background)); border-bottom: 1px solid var(--border); }
 .selection-toolbar input { flex: 1; min-width: 120px; width: 120px; }
 .selection-toolbar input, .selection-toolbar select { padding: 6px 8px; font-size: 12px; }
 .selection-toolbar .btn { font-size: 12px; padding: 5px 8px; }
@@ -128,4 +151,17 @@ function toggleSkill(name) {
 .external-tools h3 { font-size: 13px; margin-top: 20px; }
 @media (max-width: 900px) { .editor-nav { flex-basis: 140px; } .editor-sections { padding: 24px 16px; } .section-fields { padding-left: 0; } }
 @media (max-width: 640px) { .agent-editor-head { flex-wrap: wrap; } .editor-title > span { display: none; } .agent-editor-layout { flex-direction: column; } .editor-nav { display: flex; flex: 0 0 auto; overflow-x: auto; padding: 6px; border-right: 0; border-bottom: 1px solid var(--border); } .editor-nav button { width: auto; white-space: nowrap; } }
+@media (prefers-color-scheme: dark) {
+  .agent-editor {
+    color-scheme: dark;
+    --background: #0f172a;
+    --foreground: #f1f5f9;
+    --card: #111827;
+    --muted: #1e293b;
+    --muted-foreground: #cbd5e1;
+    --primary: #e2e8f0;
+    --primary-foreground: #0f172a;
+    --border: #475569;
+  }
+}
 </style>

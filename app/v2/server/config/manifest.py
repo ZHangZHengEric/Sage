@@ -46,6 +46,7 @@ def server_v2_run_manifest(
             else source.description,
             "skills": tuple(skills),
             "tools": tuple(selected_tools),
+            "tool_approval": agent.tool_approval if agent is not None else source.tool_approval,
             "instructions": Instructions(
                 inline=instructions
                 or source.instructions.inline

@@ -4,6 +4,7 @@ import re
 from typing import Literal
 from urllib.parse import urlsplit
 
+from sagents.v2.agent.policy.approval_config import ToolApprovalConfig
 from pydantic import (
     BaseModel,
     Field,
@@ -61,6 +62,7 @@ class AgentRecord(BaseModel):
     instructions: str = ""
     model_id: str = ""
     tools: list[str] = Field(default_factory=list)
+    tool_approval: ToolApprovalConfig | None = None
     skills: list[str] = Field(default_factory=list)
     # A ceiling, not a grant: API Keys still default to asking for approval.
     execution_policy: ExecutionPolicy = Field(default_factory=lambda: ExecutionPolicy(shell="sandboxed"))
@@ -74,6 +76,7 @@ class AgentRecord(BaseModel):
             "model_id": self.model_id or None,
             "tools": list(self.tools),
             "skills": list(self.skills),
+            "tool_approval": self.tool_approval.model_dump() if self.tool_approval else None,
             "execution_policy": self.execution_policy.model_dump(),
         }
 
@@ -302,6 +305,7 @@ def upsert_agent(
         instructions=str(payload.get("instructions") or ""),
         model_id=str(payload.get("model_id") or ""),
         tools=_unique_names(payload.get("tools")),
+        tool_approval=payload.get("tool_approval", existing.tool_approval if existing else None),
         execution_policy=ExecutionPolicy.model_validate(payload.get("execution_policy") or
             (existing.execution_policy.model_dump() if existing else {"shell": "sandboxed"})),
         skills=list(existing.skills)
