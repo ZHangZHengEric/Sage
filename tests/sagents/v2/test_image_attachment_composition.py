@@ -27,7 +27,7 @@ from sagents.v2.runtime.execution.sandbox import (
     ResourceLimits,
     SandboxGrantIssuer,
 )
-from sagents.v2.runtime.artifact import ScopedArtifactStore, SqliteArtifactStore
+from sagents.v2.runtime.artifact import ScopedArtifactStore, FilesystemArtifactStore
 from sagents.v2.testing.plugins.scripted_model import (
     ScriptedModelProvider,
     ScriptedModelStep,
@@ -138,7 +138,7 @@ async def test_builder_wires_durable_images_from_tool_to_request_and_session(
         .build(package)
     )
     try:
-        assert isinstance(application.service("artifact.store"), SqliteArtifactStore)
+        assert isinstance(application.service("artifact.store"), FilesystemArtifactStore)
         stream = await application.entrypoint().run_stream(
             StartRun(
                 agent_id=agent_id,
@@ -181,7 +181,7 @@ async def test_builder_wires_durable_images_from_tool_to_request_and_session(
 
         identifier = hashlib.sha256(base64.b64decode(digest)).hexdigest()
         reference, _ = await ScopedArtifactStore(
-            SqliteArtifactStore(root / "artifacts"), "tenant"
+            FilesystemArtifactStore(root / "artifacts"), "tenant"
         ).get(identifier)
         assert reference.digest == "sha256:" + identifier
     finally:

@@ -6,7 +6,7 @@ _EXPORTS = {
     "ArtifactRef": ("sagents.v2.runtime.artifact.contracts", "ArtifactRef"),
     "ArtifactStore": ("sagents.v2.runtime.artifact.contracts", "ArtifactStore"),
     "InMemoryArtifactStore": ("sagents.v2.runtime.artifact.plugins.ephemeral", "InMemoryArtifactStore"),
-    "SqliteArtifactStore": ("sagents.v2.runtime.artifact.plugins.sqlite", "SqliteArtifactStore"),
+    "FilesystemArtifactStore": ("sagents.v2.runtime.artifact.plugins.filesystem", "FilesystemArtifactStore"),
     "ScopedArtifactStore": ("sagents.v2.runtime.artifact.scoped", "ScopedArtifactStore"),
 }
 __all__ = list(_EXPORTS)

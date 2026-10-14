@@ -44,7 +44,7 @@ from sagents.v2.interfaces.protocols.mcp import McpProtocolAdapter
 from sagents.v2.interfaces.protocols.native import NativeProtocolAdapter
 from sagents.v2.package.registry import InMemoryAgentPackageRegistry
 from sagents.v2.runtime.artifact import InMemoryArtifactStore
-from sagents.v2.runtime.artifact import SqliteArtifactStore
+from sagents.v2.runtime.artifact import FilesystemArtifactStore
 from sagents.v2.runtime.credentials import (
     EnvironmentCredentialProvider,
     MappingCredentialProvider,
@@ -875,9 +875,9 @@ def _register_infrastructure(registry: ExtensionRegistry) -> None:
     )
     _one(
         registry,
-        SqliteArtifactStore,
+        FilesystemArtifactStore,
         "artifact.store",
-        lambda context, dependencies: SqliteArtifactStore(context.config["root"]),
+        lambda context, dependencies: FilesystemArtifactStore(context.config["root"]),
         scopes={ExtensionScope.PROCESS},
         config_schema={
             "type": "object", "required": ["root"],

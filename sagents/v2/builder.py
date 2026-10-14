@@ -34,7 +34,7 @@ from sagents.v2.context import (
 from sagents.v2.interfaces.protocols.native import NativeProtocolAdapter
 from sagents.v2.package.registry import InMemoryAgentPackageRegistry
 from sagents.v2.runtime.artifact import InMemoryArtifactStore
-from sagents.v2.runtime.artifact import ScopedArtifactStore, SqliteArtifactStore
+from sagents.v2.runtime.artifact import ScopedArtifactStore, FilesystemArtifactStore
 from sagents.v2.runtime.credentials import EnvironmentCredentialProvider
 from sagents.v2.runtime.execution.jobs import InMemoryJobRuntime
 from sagents.v2.runtime.execution.scheduler import InMemoryScheduler
@@ -1610,13 +1610,13 @@ class SAgentBuilder:
     async def _create_artifact_store(self, host, parent, handles, runtime, declarations):
         selection = self._selection(runtime, "artifact.store")
         plugin_id = selection.plugin if selection else (
-            SqliteArtifactStore.plugin_id if self._session_root is not None
+            FilesystemArtifactStore.plugin_id if self._session_root is not None
             else InMemoryArtifactStore.plugin_id
         )
         config = dict(selection.config if selection else {})
-        if plugin_id == SqliteArtifactStore.plugin_id and "root" not in config:
+        if plugin_id == FilesystemArtifactStore.plugin_id and "root" not in config:
             if self._session_root is None:
-                raise ValueError("SQLite ArtifactStore requires a root")
+                raise ValueError("Filesystem ArtifactStore requires a root")
             config["root"] = str(self._session_root / "artifacts")
         return await self._create_capability(
             host, parent, handles, runtime, declarations,

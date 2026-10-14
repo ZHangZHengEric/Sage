@@ -36,7 +36,7 @@ def test_builtin_inventory_contains_only_real_factories():
         "sage.agent.continuation.hybrid",
         "sage.agent.continuation.explicit-status",
         "sage.artifact.ephemeral",
-        "sage.artifact.sqlite",
+        "sage.artifact.filesystem",
         "sage.context.reducer.persistent-summary",
         "sage.context.reducer.window",
         "sage.context.summarizer.extractive",
