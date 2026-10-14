@@ -23,6 +23,7 @@ from sagents.v2.runtime.execution.sandbox import (
 )
 from sagents.v2.runtime.extensions import ExtensionScope, ExtensionScopeContext
 from sagents.v2.tool.official import OfficialToolRuntime
+from sagents.v2.runtime.artifact import SessionArtifactStore
 from sagents.v2.tool.plugins.official import (
     OfficialToolPlugin,
     official_tool_categories,
@@ -155,7 +156,9 @@ def workspace_sandbox_spec(
     )
 
 
-async def attach_official_tools(service, command: StartRun, *, user_id: str, run_id: str | None = None):
+async def attach_official_tools(
+    service, command: StartRun, *, user_id: str, run_id: str | None = None
+):
     """Provision a host-mapped sandbox and wrap it as OfficialToolPlugin."""
 
     install_sandbox(service.execution, service.settings)
@@ -166,7 +169,13 @@ async def attach_official_tools(service, command: StartRun, *, user_id: str, run
         service.contexts.for_user(user_id),
         run_id=owner_run_id,
     )
-    runtime = OfficialToolRuntime(handle, service.execution.sandbox_grant_issuer)
+    runtime = OfficialToolRuntime(
+        handle,
+        service.execution.sandbox_grant_issuer,
+        artifact_store=SessionArtifactStore(
+            service.application.entrypoint().runtime.session_store, owner_run_id
+        ),
+    )
     plugin = OfficialToolPlugin(
         ExtensionScopeContext(
             scope=ExtensionScope.RUN,
@@ -174,7 +183,11 @@ async def attach_official_tools(service, command: StartRun, *, user_id: str, run
             config={"runtime": runtime},
         )
     )
-    return plugin, runtime, OwnedWorkspaceSandbox(handle, service.execution.sandbox_provider)
+    return (
+        plugin,
+        runtime,
+        OwnedWorkspaceSandbox(handle, service.execution.sandbox_provider),
+    )
 
 
 class OwnedWorkspaceSandbox:

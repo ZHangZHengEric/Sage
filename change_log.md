@@ -51,6 +51,8 @@
 
 面向版本用户的完整说明保存在 [`release_notes/`](release_notes/)；本文件记录持续开发变更。
 
+- **2026-10-14** 修复超大并行工具结果导致会话总结失败：只拆分总结输入，保留工具并行执行与完整账本，完成整组分片后才推进总结覆盖位置。图片通过 SessionStore 插件保存不可变附件；文件后端随 session 目录保存，数据库后端使用同一事务；补齐 fork、跨 session 复制、树备份恢复和级联删除，不新增 SQLite。
+
 - **2026-10-13** 为 V2 后端 Compose 配置 `systempaths=unconfined`，解决 Docker 遮蔽 `/proc` 子挂载导致非 root bubblewrap 无法挂载私有 procfs、所有 shell 命令启动失败的问题；保留内层命名空间与降权隔离。
 
 - **2026-10-13** 修复 Server V2 Web 点击“允许这一次”时的 `structuredClone` 异常：聊天消息和回放基线使用浅层响应式状态，避免 Vue Proxy 进入 AG-UI 客户端；新增审批恢复与切换智能体的回归验证。
