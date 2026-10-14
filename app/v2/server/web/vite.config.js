@@ -7,8 +7,8 @@ export default defineConfig({
     host: '127.0.0.1',
     port: 5174,
     proxy: {
-      '/api': 'http://127.0.0.1:8090',
-      '/health': 'http://127.0.0.1:8090',
+      '/api': 'https://api.sage-v2.withyi.life',
+      '/health': 'https://health.sage-v2.withyi.life',
     },
   },
 })

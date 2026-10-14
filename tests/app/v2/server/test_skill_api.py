@@ -37,8 +37,12 @@ def test_publish_bind_and_keep_relative_artifact_path(tmp_path):
         )
         assert created.status_code == 200
         skill = created.json()["data"]
+        assert "dimension" not in skill
+        assert skill["owner_user_id"]
         assert skill["artifact_path"].startswith("users/")
-        assert "/" != skill["artifact_path"][0] or skill["artifact_path"].startswith("users/")
+        assert "/" != skill["artifact_path"][0] or skill["artifact_path"].startswith(
+            "users/"
+        )
         assert not skill["artifact_path"].startswith("/")
 
         bound = client.put(
@@ -67,7 +71,9 @@ def test_workspace_write_does_not_change_catalog_artifact(tmp_path):
             },
             headers=headers,
         ).json()["data"]
-        client.put(f"/api/agents/{agent_id}/skills", json={"names": ["demo"]}, headers=headers)
+        client.put(
+            f"/api/agents/{agent_id}/skills", json={"names": ["demo"]}, headers=headers
+        )
         written = client.put(
             "/api/workspace/skills/demo",
             json={"content": "---\nname: demo\ndescription: local\n---\n\n# Local\n"},
@@ -76,10 +82,7 @@ def test_workspace_write_does_not_change_catalog_artifact(tmp_path):
         assert written.status_code == 200
         assert written.json()["data"]["status"] == "modified"
         catalog_text = (
-            service.paths.data_root
-            / "skills"
-            / created["artifact_path"]
-            / "SKILL.md"
+            service.paths.data_root / "skills" / created["artifact_path"] / "SKILL.md"
         ).read_text(encoding="utf-8")
         assert "# Demo" in catalog_text
         assert "# Local" not in catalog_text
@@ -131,3 +134,14 @@ def test_upload_zip_batch_partial_success(tmp_path):
         assert payload["results"][1]["success"] is False
         listed = client.get("/api/skills", headers=headers)
         assert [item["name"] for item in listed.json()["data"]] == ["writer"]
+
+
+def test_publish_rejects_removed_dimension(tmp_path):
+    with _client(tmp_path)[0] as client:
+        token = register_and_login(client)
+        response = client.post(
+            "/api/skills",
+            json={"name": "demo", "content": "# Demo", "dimension": "system"},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert response.status_code == 422

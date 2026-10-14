@@ -2,10 +2,16 @@
 import { computed, onMounted, ref } from 'vue'
 import { getUser } from '../auth.js'
 import { api, isForeign } from '../api.js'
-import ResourceDetails from '../components/ResourceDetails.vue'
-import FormDrawer from '../components/FormDrawer.vue'
+import AgentEditor from '../components/AgentEditor.vue'
+import AppIcon from '../components/AppIcon.vue'
 
 const drawerOpen = ref(false)
+const viewOnly = ref(false), selectedAgent = ref(null), selectedSkills = ref([]), savedMessage = ref('')
+const viewModels = ref([]), viewSkills = ref([]), viewExternalTools = ref([])
+const editorModels = computed(() => viewOnly.value ? viewModels.value : models.value)
+const editorSkills = computed(() => viewOnly.value ? viewSkills.value : skills.value)
+const editorExternalTools = computed(() => viewOnly.value ? viewExternalTools.value : externalTools.value)
+const loading = ref(true)
 
 const agents = ref([])
 const models = ref([])
@@ -13,7 +19,6 @@ const mcp = ref([])
 const peers = ref([])
 const skills = ref([])
 const officialTools = ref([])
-const bound = ref([])
 const error = ref('')
 const pending = ref(false)
 const editing = ref('')
@@ -29,17 +34,6 @@ const externalTools = computed(() => [
     ...peers.value.flatMap((item) => (item.disabled ? [] : item.skills || [])),
   ]),
 ])
-const boundNames = computed(() => new Set(bound.value.map((item) => item.name)))
-const officialGroups = computed(() => {
-  const groups = new Map()
-  for (const item of officialTools.value) {
-    const key = item.category || 'other'
-    if (!groups.has(key)) groups.set(key, [])
-    groups.get(key).push(item)
-  }
-  return [...groups.entries()]
-})
-
 function emptyForm() {
   return {
     name: '',
@@ -67,13 +61,12 @@ async function refresh() {
   peers.value = nextPeers
   skills.value = nextSkills.filter(item => !item.owner_user_id || item.owner_user_id === getUser()?.user_id)
   officialTools.value = nextTools
-  if (editing.value) {
-    bound.value = await api.listAgentSkills(editing.value)
-  }
 }
 
-async function save() {
+async function save(exit = true) {
+  if (viewOnly.value || isForeign(selectedAgent.value) || pending.value) return
   error.value = ''
+  savedMessage.value = ''
   pending.value = true
   try {
     const payload = { ...form.value }
@@ -81,8 +74,11 @@ async function save() {
       ? await api.updateAgent(editing.value, payload)
       : await api.createAgent(payload)
     editing.value = saved.id
+    selectedAgent.value = saved
+    await api.bindAgentSkills(saved.id, selectedSkills.value)
     await refresh()
-    drawerOpen.value = false
+    savedMessage.value = '已保存'
+    if (exit) drawerOpen.value = false
   } catch (exc) {
     error.value = exc.message
   } finally {
@@ -90,28 +86,37 @@ async function save() {
   }
 }
 
-async function edit(item) {
-  const detail = await api.getAgent(item.id)
-  drawerOpen.value = true
-  error.value = ''
-  editing.value = item.id
-  form.value = {
-    name: detail.name,
-    description: detail.description || '',
-    instructions: detail.instructions || '',
-    model_id: detail.model_id || '',
-    tools: [...(detail.tools || [])],
-    execution_policy: detail.execution_policy || emptyForm().execution_policy,
-  }
-  bound.value = await api.listAgentSkills(item.id)
+async function openAgent(item, readonly = true) {
+  error.value = ''; savedMessage.value = ''; pending.value = true
+  try {
+    const [detail, assigned] = await Promise.all([
+      api.getAgent(item.id, item._owner), api.listAgentSkills(item.id, item._owner),
+    ])
+    selectedAgent.value = item
+    viewOnly.value = readonly || isForeign(item)
+    editing.value = item.id
+    form.value = {
+      name: detail.name, description: detail.description || '', instructions: detail.instructions || '',
+      model_id: detail.model_id || '', tools: [...(detail.tools || [])],
+      execution_policy: { ...(detail.execution_policy || emptyForm().execution_policy) },
+    }
+    selectedSkills.value = assigned.map(skill => skill.name)
+    viewModels.value = isForeign(item) ? [] : models.value
+    viewSkills.value = isForeign(item) ? assigned : skills.value
+    viewExternalTools.value = isForeign(item) ? [] : externalTools.value
+    drawerOpen.value = true
+  } catch (exc) { error.value = exc.message }
+  finally { pending.value = false }
 }
+function edit(item) { return openAgent(item, false) }
+function enableEdit() { if (!isForeign(selectedAgent.value)) viewOnly.value = false }
 
 function startNew() {
+  viewOnly.value = false; selectedAgent.value = null; selectedSkills.value = []; savedMessage.value = ''
   drawerOpen.value = true
   error.value = ''
   editing.value = ''
   form.value = emptyForm()
-  bound.value = []
 }
 
 async function remove(id) {
@@ -120,137 +125,52 @@ async function remove(id) {
   await refresh()
 }
 
-function toggleTool(name) {
-  const current = new Set(form.value.tools)
-  if (current.has(name)) current.delete(name)
-  else current.add(name)
-  form.value.tools = [...current]
-}
-
-async function toggleSkill(item) {
-  if (!editing.value) {
-    error.value = '请先保存智能体，再关联技能'
-    return
-  }
-  const names = bound.value.map((skill) => skill.name)
-  const next = names.includes(item.name)
-    ? names.filter((name) => name !== item.name)
-    : [...names, item.name]
-  await api.bindAgentSkills(editing.value, next)
-  bound.value = await api.listAgentSkills(editing.value)
-  await refresh()
-}
-
 onMounted(async () => {
   try {
     await refresh()
   } catch (exc) {
     error.value = exc.message
-  }
+  } finally { loading.value = false }
 })
 </script>
 
 <template>
-  <section>
+  <section class="agents-page" :class="{ 'editing-agent': drawerOpen }">
+    <template v-if="!drawerOpen">
     <header class="page-head">
       <h1>智能体</h1>
+      <div class="page-actions">
+        <button class="btn cta" :disabled="pending" @click="startNew"><AppIcon name="plus" /> 创建智能体</button>
+      </div>
     </header>
-    <div class="panel stack">
-      <div class="list-toolbar"><h2>已配置</h2><button class="btn cta" type="button" :disabled="pending" @click="startNew">新增智能体</button></div>
-      <p v-if="error && !drawerOpen" class="error" role="alert">{{ error }}</p>
-      <p v-if="!hasAgents" class="empty">还没有智能体</p>
-      <table v-else>
-        <thead>
-          <tr><th v-if="agents[0]?._owner">用户</th><th>智能体</th><th>模型</th><th>工具 / 技能</th><th></th></tr>
-        </thead>
-        <tbody>
-          <tr v-for="item in agents" :key="`${item._owner?.user_id || ''}:${item.id}`">
-            <td v-if="agents[0]?._owner">{{ item._owner?.username }}</td>
-            <td>
-              {{ item.name }}
-              <div class="muted">{{ item.description || item.id }}</div>
-            </td>
-            <td class="mono">{{ item.model_id || '默认' }}</td>
-            <td class="muted">{{ item.tools.length }} 工具 · {{ item.skills.length }} 技能</td>
-            <td class="row">
-              <ResourceDetails :item="item" kind="agents" />
-              <button class="btn ghost" type="button" v-if="!isForeign(item)" @click="edit(item)">编辑</button>
-              <button class="btn ghost" type="button" v-if="!isForeign(item)" @click="remove(item.id)">删除</button>
-            </td>
-          </tr>
-        </tbody>
+    <p v-if="error && !drawerOpen" class="error" role="alert">{{ error }}</p>
+    <p v-if="loading" class="page-loading" role="status">加载中…</p>
+    <p v-else-if="!hasAgents" class="empty">还没有智能体</p>
+    <div v-else class="panel table-panel">
+      <table>
+        <thead><tr><th>ID</th><th>智能体</th><th>模型</th><th>工具 / 技能</th><th v-if="agents[0]?._owner">用户</th><th>操作</th></tr></thead>
+        <tbody><tr v-for="item in agents" :key="`${item._owner?.user_id || ''}:${item.id}`">
+          <td class="agent-id">{{ item.id }}</td>
+          <td><button class="agent-name" :disabled="pending" @click="openAgent(item)">{{ item.name }}</button><div v-if="item.description" class="muted">{{ item.description }}</div></td>
+          <td class="agent-model">{{ (!isForeign(item) && models.find(model => model.id === item.model_id)?.model) || item.model_id || '默认' }}</td>
+          <td class="muted">{{ item.tools?.length || 0 }} 工具 · {{ item.skills?.length || 0 }} 技能</td>
+          <td v-if="agents[0]?._owner">{{ item._owner?.username }}</td>
+          <td class="row"><button class="btn ghost" :disabled="pending" @click="openAgent(item)">查看</button><button v-if="!isForeign(item)" class="btn ghost" @click="edit(item)">编辑</button><button v-if="!isForeign(item)" class="btn ghost" @click="remove(item.id)">删除</button></td>
+        </tr></tbody>
       </table>
     </div>
-    <FormDrawer v-model="drawerOpen" :title="editing ? '编辑智能体' : '新增智能体'" :busy="pending">
-    <form class="panel" @submit.prevent="save">
-      <label class="field">
-        <span>名称</span>
-        <input v-model="form.name" required />
-      </label>
-      <label class="field">
-        <span>描述</span>
-        <input v-model="form.description" />
-      </label>
-      <label class="field">
-        <span>提示词</span>
-        <textarea v-model="form.instructions" rows="6" />
-      </label>
-      <label class="field">
-        <span>模型</span>
-        <select v-model="form.model_id">
-          <option value="">使用默认模型</option>
-          <option v-for="item in models" :key="item.id" :value="item.id">
-            {{ item.model }}
-          </option>
-        </select>
-      </label>
-      <div v-if="officialGroups.length" class="field">
-        <span>官方工具</span>
-        <p class="muted">未勾选时对话默认启用文件 / 搜索 / Shell。</p>
-        <div v-for="[category, items] in officialGroups" :key="category" class="stack">
-          <small class="muted">{{ category }}</small>
-          <label v-for="item in items" :key="item.name" class="row">
-            <input
-              type="checkbox"
-              :checked="form.tools.includes(item.name)"
-              @change="toggleTool(item.name)"
-            />
-            {{ item.name }}
-          </label>
-        </div>
-      </div>
-      <label class="field"><span>命令权限上限</span><select v-model="form.execution_policy.shell">
-        <option value="sandboxed">允许用户设置工作区内自动执行</option>
-        <option value="ask">命令必须审批</option>
-        <option value="deny">禁止执行命令</option>
-      </select><small class="muted">这是权限上限，实际授权取当前用户的执行设置，网页对话和 API 调用共用。</small></label>
-      <div v-if="externalTools.length" class="field">
-        <span>外部工具</span>
-        <p class="muted">
-          MCP 与 A2A 的工具由租户目录整体授予，本租户的每个智能体都能用，无需在这里勾选。
-        </p>
-        <p class="muted mono">{{ externalTools.join(', ') }}</p>
-      </div>
-      <p v-if="error" class="error" role="alert">{{ error }}</p>
-      <div class="row">
-        <button class="btn cta" type="submit" :disabled="pending">
-          {{ editing ? '保存智能体' : '新建智能体' }}
-        </button>
-        <button v-if="editing" class="btn ghost" type="button" @click="startNew">新建另一份</button>
-      </div>
-    </form>
-    <div v-if="editing && skills.length" class="panel stack">
-      <h2>关联技能</h2>
-      <label v-for="item in skills" :key="item.skill_id" class="row">
-        <input
-          type="checkbox"
-          :checked="boundNames.has(item.name)"
-          @change="toggleSkill(item)"
-        />
-        {{ item.name }}
-        <span class="muted">{{ item.description }}</span>
-      </label>
-    </div>
-    </FormDrawer>
+    </template>
+    <AgentEditor v-else v-model:form="form" v-model:selected-skills="selectedSkills"
+      :agent-id="editing" :readonly="viewOnly" :can-edit="!isForeign(selectedAgent)" :busy="pending"
+      :error="error" :message="savedMessage" :models="editorModels" :tools="officialTools"
+      :skills="editorSkills" :external-tools="editorExternalTools"
+      @save="save" @edit="enableEdit" @close="drawerOpen = false" />
   </section>
 </template>
+<style scoped>
+.agents-page.editing-agent { height: 100%; max-width: none; margin: 0; }
+.agent-name { font: inherit; text-align: left; color: inherit; border: 0; background: none; padding: 0; overflow-wrap: anywhere; }
+.agent-name:hover { text-decoration: underline; text-underline-offset: 3px; }
+.agent-id { font-size: 12px; color: var(--muted-foreground); overflow-wrap: anywhere; user-select: text; }
+.agent-model { white-space: nowrap; }
+</style>

@@ -1,6 +1,6 @@
 import { clearSession, getToken, getUser, isAdmin } from './auth.js'
 
-async function request(path, options = {}) {
+async function request(path, options = {}, binary = false) {
   const headers = { ...(options.headers || {}) }
   const token = getToken()
   if (token) headers.Authorization = `Bearer ${token}`
@@ -8,7 +8,7 @@ async function request(path, options = {}) {
     headers['Content-Type'] = 'application/json'
   }
   const response = await fetch(path, { ...options, headers })
-  const payload = await response.json().catch(() => ({}))
+  const payload = binary && response.ok ? null : await response.json().catch(() => ({}))
   if (response.status === 401 && !path.startsWith('/api/auth/')) {
     clearSession()
     if (window.location.pathname !== '/login') {
@@ -17,6 +17,11 @@ async function request(path, options = {}) {
   }
   if (!response.ok) {
     throw new Error(payload.message || `HTTP ${response.status}`)
+  }
+  if (binary) {
+    const disposition = response.headers.get('Content-Disposition') || ''
+    const encoded = disposition.match(/filename\*=UTF-8''([^;]+)/i)?.[1]
+    return { blob: await response.blob(), filename: encoded ? decodeURIComponent(encoded) : 'download' }
   }
   return payload.data
 }
@@ -46,8 +51,7 @@ async function list(path, all = true) {
     for (const item of rows) {
       // System skills appear once; admin's visible skill list also includes
       // other owners, who are read in their own scope below.
-      if (path === '/api/skills' && (item.owner_user_id
-        ? item.owner_user_id !== owner.user_id : owner.role !== 'admin')) continue
+      if (path === '/api/skills' && item.owner_user_id !== owner.user_id) continue
       items.push({ ...item, _owner: owner })
     }
     if (page.next_offset != null) nextOffset = Math.max(nextOffset || 0, page.next_offset)
@@ -56,6 +60,9 @@ async function list(path, all = true) {
 }
 
 export const api = {
+  workspaceFiles: (path = '', owner) => read(`/api/workspace/files?path=${encodeURIComponent(path)}`, owner),
+  workspaceDownload: (path = '', owner) => request(`/api/workspace/download?path=${encodeURIComponent(path)}`, owner ? { headers: { 'X-Sage-View-User': owner.user_id } } : {}, true),
+  downloadSession: id => request(`/api/threads/${encodeURIComponent(id)}/download`, {}, true),
   executionPolicy: () => request('/api/auth/execution-policy'),
   saveExecutionPolicy: (body) => request('/api/auth/execution-policy',
     { method: 'PUT', body: JSON.stringify(body) }),
@@ -91,6 +98,7 @@ export const api = {
   session: () => request('/api/auth/session'),
   logout: () => request('/api/auth/logout', { method: 'POST' }),
   listModels: (all = true) => list('/api/models', all),
+  getModel: (id, owner) => read(`/api/models/${encodeURIComponent(id)}`, owner),
   saveModel: (body) =>
     request('/api/models', { method: 'POST', body: JSON.stringify(body) }),
   deleteModel: (id) => request(`/api/models/${id}`, { method: 'DELETE' }),
@@ -148,8 +156,5 @@ export const api = {
   threadEvents: (id, limit = 500, owner, offset) => read(`/api/threads/${encodeURIComponent(id)}/events?limit=${limit}${offset === undefined ? "" : `&offset=${offset}`}`, owner),
   deleteThread: (id) => request(`/api/threads/${id}`, { method: 'DELETE' }),
   adminUsers: () => request('/api/admin/users'),
-  adminThreads: () => request('/api/admin/threads'),
-  adminModels: () => request('/api/admin/models'),
-  adminThreadEvents: (id, limit = 500, offset = 0) => request(`/api/admin/threads/${encodeURIComponent(id)}/events?limit=${limit}&offset=${offset}`),
   health: () => request('/health'),
 }

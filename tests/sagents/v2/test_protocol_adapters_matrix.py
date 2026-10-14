@@ -33,6 +33,7 @@ from sagents.v2.contracts.items import (
     ArtifactRef,
     ItemSnapshot,
     ItemStatus,
+    JsonBlock,
     MessageItemData,
     ReasoningItemData,
     TextBlock,
@@ -278,6 +279,48 @@ def test_ag_ui_completed_snapshots_cover_text_reasoning_tool_and_result():
             )
         )
         assert [frame.name for frame in result.frames] == names
+
+
+@pytest.mark.parametrize(
+    "content, expected",
+    [
+        ((TextBlock(text='{"status":"success"}'),), '{"status":"success"}'),
+        ((JsonBlock(value={"status": "success", "message": "写入成功"}),),
+         '{"status": "success", "message": "写入成功"}'),
+        ((JsonBlock(value=[1, "中文"]),), '[1, "中文"]'),
+        ((JsonBlock(value={}),), '{}'),
+        ((JsonBlock(value=[]),), '[]'),
+        ((JsonBlock(value=False),), 'false'),
+        ((JsonBlock(value=0),), '0'),
+        ((JsonBlock(value=None),), 'null'),
+        ((TextBlock(text="before"), JsonBlock(value={"ok": True}),
+          TextBlock(text="after")), 'before\n{"ok": true}\nafter'),
+        ((), ''),
+    ],
+)
+def test_ag_ui_tool_results_preserve_text_and_structured_values(content, expected):
+    result = AgUiProtocolAdapter().translate(
+        event(
+            "item.completed",
+            item_id="item_result",
+            data=ItemEventData(
+                operation="completed",
+                item=item_snapshot(
+                    "item_result",
+                    ToolResultItemData(tool_call_id="call_1", content=content),
+                ),
+            ),
+        )
+    )
+    assert len(result.frames) == 1
+    frame = result.frames[0]
+    assert frame.name == "TOOL_CALL_RESULT"
+    assert frame.payload == {
+        "messageId": "item_result",
+        "toolCallId": "call_1",
+        "content": expected,
+        "role": "tool",
+    }
 
 
 def test_ag_ui_pause_is_extension_or_explicit_loss_never_run_finished():

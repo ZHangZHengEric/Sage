@@ -42,14 +42,17 @@ export function messagesFromEvents(events) {
         break
       }
       case 'TOOL_CALL_START': {
-        const parent =
-          [...messages].reverse().find((item) => item.role === 'assistant') || {
-            id: event.toolCallId,
+        let parent = byId.get(event.parentMessageId)
+        if (parent?.role !== 'assistant') {
+          parent = {
+            id: event.parentMessageId || event.toolCallId,
             role: 'assistant',
             content: '',
             toolCalls: [],
           }
-        if (!messages.includes(parent)) messages.push(parent)
+          messages.push(parent)
+          byId.set(parent.id, parent)
+        }
         const call = {
           id: event.toolCallId,
           type: 'function',
@@ -75,13 +78,20 @@ export function messagesFromEvents(events) {
         })
         break
       }
+      case 'REASONING_MESSAGE_END':
+      case 'REASONING_END': {
+        const message = byId.get(event.messageId)
+        if (message) message.reasoningStreaming = false
+        break
+      }
       case 'REASONING_MESSAGE_CONTENT': {
         const id = event.messageId || 'reasoning'
         const existing = byId.get(id)
         if (existing) {
           existing.content += event.delta || ''
+          existing.reasoningStreaming = true
         } else {
-          const created = { id, role: 'reasoning', content: event.delta || '' }
+          const created = { id, role: 'reasoning', content: event.delta || '', reasoningStreaming: true }
           byId.set(id, created)
           messages.push(created)
         }

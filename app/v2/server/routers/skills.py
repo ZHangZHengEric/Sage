@@ -63,7 +63,6 @@ async def publish_skill(body: SkillPublishBody, user: CurrentUser, service: Skil
         content=body.content,
         user_id=user.user_id,
         role=user.role,
-        dimension=body.dimension,
     )
     return success(record.public_dict())
 

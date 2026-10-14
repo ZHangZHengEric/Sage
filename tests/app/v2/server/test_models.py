@@ -118,3 +118,27 @@ def test_orcarouter_model_api_saves_default_or_custom_endpoint(client, base_url)
     assert model["base_url"] == (base_url or "https://api.orcarouter.ai/v1")
     assert "api_key" not in model
     assert client.get("/api/models", headers=headers).json()["data"] == [model]
+
+
+@pytest.mark.timeout(30)
+def test_model_detail_exposes_key_only_in_authorized_detail_scope(client):
+    alice_token = register_and_login(client, "alice")
+    alice_headers = {"Authorization": f"Bearer {alice_token}"}
+    alice_id = client.get("/api/auth/session", headers=alice_headers).json()["data"]["user_id"]
+    created = client.post("/api/models", headers=alice_headers, json={
+        "model": "demo", "api_key": "detail-test-key", "base_url": "https://example.invalid/v1",
+    }).json()["data"]
+    path = f"/api/models/{created['id']}"
+    detail = client.get(path, headers=alice_headers)
+    assert detail.status_code == 200
+    assert detail.json()["data"]["api_key"] == "detail-test-key"
+    assert detail.headers["cache-control"] == "no-store"
+    assert "api_key" not in client.get("/api/models", headers=alice_headers).json()["data"][0]
+    bob_token = register_and_login(client, "bob")
+    bob_headers = {"Authorization": f"Bearer {bob_token}"}
+    assert client.get(path, headers=bob_headers).status_code == 404
+    assert client.get(path, headers={**bob_headers, "X-Sage-View-User": alice_id}).status_code == 403
+    admin_token = client.post("/api/auth/login", json={"username": "admin", "password": "admin12345"}).json()["data"]["access_token"]
+    admin_view = {"Authorization": f"Bearer {admin_token}", "X-Sage-View-User": alice_id}
+    assert client.get(path, headers=admin_view).json()["data"]["api_key"] == "detail-test-key"
+    assert client.get("/api/models/missing", headers=alice_headers).status_code == 404

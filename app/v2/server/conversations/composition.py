@@ -138,12 +138,9 @@ def _skills(raw: object, *, user_id: str) -> tuple[SkillRecord, ...]:
             raise TypeError("skill snapshot entries must be objects")
         record = SkillRecord(**value)
         normalize_skill_name(record.name)
-        if record.dimension not in {"system", "user"}:
-            raise ValueError(f"invalid skill dimension: {record.dimension!r}")
-        if record.dimension == "user" and record.owner_user_id != user_id:
+        if record.owner_user_id != user_id:
             raise ValueError(f"skill {record.name!r} belongs to another user")
         expected_path = artifact_relative_path(
-            dimension=record.dimension,
             owner_user_id=record.owner_user_id,
             name=record.name,
             version_id=record.version_id,

@@ -72,3 +72,64 @@ test('Studio reads identical operation names using the selected owner and resets
   assert.equal(state.foreignBundle, true)
   assert.equal(api.package.mock.calls[0].arguments[1].user_id, 'alice')
 })
+
+test('agent detail reads the selected owner and keeps foreign configurations read-only', async t => {
+  const { api, mount } = await setup(t, 'Agents')
+  const owner = { user_id: 'alice', username: 'alice' }
+  const agent = { id: 'agent-1', name: 'Alice agent', description: '', instructions: 'Instructions', tools: ['file_read'], model_id: 'alice-model', _owner: owner }
+  for (const method of ['listModels', 'listMcp', 'listA2aAgents', 'listSkills', 'listTools']) t.mock.method(api, method, async () => [])
+  t.mock.method(api, 'listAgents', async () => [agent])
+  t.mock.method(api, 'getAgent', async (id, actualOwner) => { assert.equal(actualOwner.user_id, 'alice'); return agent })
+  t.mock.method(api, 'listAgentSkills', async (id, actualOwner) => { assert.equal(actualOwner.user_id, 'alice'); return [{ name: 'research' }] })
+  t.mock.method(api, 'updateAgent', async () => { throw new Error('foreign write') })
+  const state = await mount()
+  await state.openAgent(agent)
+  assert.equal(state.drawerOpen, true)
+  assert.equal(state.viewOnly, true)
+  assert.equal(state.form.instructions, 'Instructions')
+  assert.deepEqual(state.selectedSkills, ['research'])
+  state.enableEdit()
+  await state.save(false)
+  assert.equal(state.viewOnly, true)
+  assert.equal(api.updateAgent.mock.calls.length, 0)
+})
+
+test('agent editor saves V2 fields and selected skills before staying open or exiting', async t => {
+  const { api, mount } = await setup(t, 'Agents')
+  for (const method of ['listAgents', 'listModels', 'listMcp', 'listA2aAgents', 'listSkills', 'listTools', 'listAgentSkills']) t.mock.method(api, method, async () => [])
+  t.mock.method(api, 'createAgent', async body => ({ ...body, id: 'new-agent' }))
+  t.mock.method(api, 'updateAgent', async (id, body) => ({ ...body, id }))
+  t.mock.method(api, 'bindAgentSkills', async () => [])
+  const state = await mount()
+  state.startNew()
+  state.form.name = 'New agent'
+  state.form.tools = ['file_read']
+  state.selectedSkills = ['research']
+  await state.save(false)
+  assert.equal(state.drawerOpen, true)
+  assert.equal(state.editing, 'new-agent')
+  assert.deepEqual(api.bindAgentSkills.mock.calls[0].arguments, ['new-agent', ['research']])
+  assert.deepEqual(Object.keys(api.createAgent.mock.calls[0].arguments[0]).sort(), ['description', 'execution_policy', 'instructions', 'model_id', 'name', 'tools'])
+  await state.save(true)
+  assert.equal(state.drawerOpen, false)
+  assert.equal(api.createAgent.mock.calls.length, 1)
+  assert.equal(api.updateAgent.mock.calls.length, 1)
+})
+
+test('skills without a source category are searchable and foreign names cannot be bound', async t => {
+  const { api, mount } = await setup(t, 'Skills')
+  const own = { skill_id: 'own', name: 'demo', description: 'Own skill', _owner: { user_id: 'admin' } }
+  const foreign = { skill_id: 'foreign', name: 'demo', description: 'Foreign skill', _owner: { user_id: 'alice' } }
+  t.mock.method(api, 'listSkills', async () => [own, foreign])
+  t.mock.method(api, 'listAgents', async () => [{ id: 'own-agent', name: 'My agent' }])
+  t.mock.method(api, 'listAgentSkills', async () => [])
+  t.mock.method(api, 'bindAgentSkills', async () => [])
+  const state = await mount()
+  assert.equal(state.visibleSkills.length, 2)
+  state.search = 'own skill'
+  assert.deepEqual(state.visibleSkills.map(skill => skill.skill_id), ['own'])
+  await state.toggleBind(foreign)
+  assert.equal(api.bindAgentSkills.mock.calls.length, 0)
+  await state.toggleBind(own)
+  assert.deepEqual(api.bindAgentSkills.mock.calls[0].arguments, ['own-agent', ['demo']])
+})

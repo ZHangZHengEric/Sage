@@ -30,17 +30,23 @@ async def test_publish_stores_relative_path_under_data_root(tmp_path: Path):
 
 
 @pytest.mark.asyncio
-async def test_user_skill_wins_over_system_and_disabled_source_does_not_fall_back(
+async def test_same_name_skills_are_owner_scoped_and_disabled_binding_does_not_fall_back(
     tmp_path: Path,
 ):
     service = _service(tmp_path)
-    system = await service.publish_markdown(
+    admin_skill = await service.publish_markdown(
         name="shared",
-        content="---\nname: shared\ndescription: system\n---\n# System\n",
+        content="---\nname: shared\ndescription: admin\n---\n# Admin\n",
         user_id="admin",
         role="admin",
-        dimension="system",
     )
+    assert await service.list_visible(user_id="user_1", role="user") == []
+    with pytest.raises(SageV2Error, match="unknown skill"):
+        await service.bind_agent_skills(
+            owner_user_id="user_1", agent_id="main", names=["shared"]
+        )
+    with pytest.raises(SageV2Error, match="not found"):
+        await service.get(admin_skill.skill_id, user_id="user_1", role="user")
     user = await service.publish_markdown(
         name="shared",
         content="---\nname: shared\ndescription: user\n---\n# User\n",
@@ -52,21 +58,20 @@ async def test_user_skill_wins_over_system_and_disabled_source_does_not_fall_bac
     )
     assert [item.skill_id for item in bound] == [user.skill_id]
 
-    await service.disable(system.skill_id, user_id="admin", role="admin")
+    await service.disable(admin_skill.skill_id, user_id="admin", role="admin")
     still = await service.bound_skills(owner_user_id="user_1", agent_id="main")
     assert [item.skill_id for item in still] == [user.skill_id]
 
     await service.disable(user.skill_id, user_id="user_1", role="user")
-    later_system = await service.publish_markdown(
+    later_admin = await service.publish_markdown(
         name="shared",
-        content="---\nname: shared\ndescription: later system\n---\n# Later\n",
+        content="---\nname: shared\ndescription: later admin\n---\n# Later\n",
         user_id="admin",
         role="admin",
-        dimension="system",
     )
     empty = await service.bound_skills(owner_user_id="user_1", agent_id="main")
     assert empty == []
-    assert later_system.skill_id != user.skill_id
+    assert later_admin.skill_id != user.skill_id
 
 
 @pytest.mark.asyncio

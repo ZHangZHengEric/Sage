@@ -153,7 +153,7 @@ onUnmounted(() => { disposed = true; statusRevision++; clearInterval(timer) })
 </template>
 
 <style scoped>
-.studio { max-width: 1100px; margin: auto; padding: 24px; }
+.studio { width: 100%; margin: 0; }
 fieldset { border: 1px solid #8885; border-radius: 12px; margin: 20px 0; padding: 20px; min-width: 0; }
 label { display: block; margin: 12px 0; } textarea { width: 100%; box-sizing: border-box; }
 .editor textarea, pre { font-family: monospace; } pre { overflow: auto; max-height: 500px; white-space: pre-wrap; overflow-wrap: anywhere; }

@@ -3,8 +3,12 @@ import { computed, onMounted, ref } from 'vue'
 import { api, isForeign } from '../api.js'
 import ResourceDetails from '../components/ResourceDetails.vue'
 import FormDrawer from '../components/FormDrawer.vue'
+import AppIcon from '../components/AppIcon.vue'
 
 const drawerOpen = ref(false)
+const displayMode = ref('cards'), search = ref(''), loading = ref(true)
+const visibleSkills = computed(() => skills.value.filter(item =>
+  `${item.name} ${item.description || ''}`.toLowerCase().includes(search.value.toLowerCase())))
 
 const skills = ref([])
 const agents = ref([])
@@ -17,7 +21,6 @@ const results = ref([])
 const dragging = ref(false)
 const picker = ref(null)
 
-const hasSkills = computed(() => skills.value.length > 0)
 const boundNames = computed(() => new Set(bound.value.map((item) => item.name)))
 const currentAgent = computed(
   () => agents.value.find((item) => item.id === agentId.value)?.name || agentId.value
@@ -100,6 +103,7 @@ async function remove(id) {
 }
 
 async function toggleBind(item) {
+  if (!agentId.value || isForeign(item)) return
   const names = bound.value.map((skill) => skill.name)
   const next = names.includes(item.name)
     ? names.filter((name) => name !== item.name)
@@ -113,7 +117,7 @@ onMounted(async () => {
     await refresh()
   } catch (exc) {
     error.value = exc.message
-  }
+  } finally { loading.value = false }
 })
 function startNew() {
   error.value = ''; files.value = []; results.value = []
@@ -125,49 +129,23 @@ function startNew() {
   <section>
     <header class="page-head">
       <h1>技能</h1>
-      <label class="field" style="margin:0;min-width:12rem">
-        <span>关联到智能体</span>
-        <select v-model="agentId" @change="changeAgent">
-          <option v-for="item in agents" :key="item.id" :value="item.id">
-            {{ item.name }}
-          </option>
-        </select>
-      </label>
+      <div class="page-actions"><div class="view-switch" aria-label="显示方式"><button :aria-pressed="displayMode === 'cards'" @click="displayMode = 'cards'"><AppIcon name="grid" />卡片</button><button :aria-pressed="displayMode === 'rows'" @click="displayMode = 'rows'"><AppIcon name="list" />列表</button></div><input v-model="search" class="search-input" placeholder="搜索技能" aria-label="搜索技能" /><button class="btn cta" :disabled="pending" @click="startNew"><AppIcon name="plus" /> 导入技能</button></div>
     </header>
-    <div class="panel stack">
-      <div class="list-toolbar"><h2>已发布</h2><button class="btn cta" type="button" :disabled="pending" @click="startNew">上传技能</button></div>
-      <p v-if="error && !drawerOpen" class="error" role="alert">{{ error }}</p>
-      <p v-if="!hasSkills" class="empty">还没有技能。上传 ZIP 后勾选即可给对话使用，未修改时不会拷到工作区。</p>
-      <table v-else>
-        <thead>
-          <tr><th v-if="skills[0]?._owner">用户</th><th>技能</th><th>路径</th><th>对话</th><th></th></tr>
-        </thead>
-        <tbody>
-          <tr v-for="item in skills" :key="`${item._owner?.user_id || ''}:${item.skill_id}`">
-            <td v-if="skills[0]?._owner">{{ item.dimension === 'system' ? '系统' : item._owner?.username }}</td>
-            <td>
-              {{ item.name }}
-              <div class="muted">{{ item.description }}</div>
-            </td>
-            <td class="mono">{{ item.artifact_path }}</td>
-            <td>
-              <label>
-                <input
-                  type="checkbox"
-                  :disabled="!agentId || (isForeign(item) && item.dimension !== 'system')"
-                  :checked="(!isForeign(item) || item.dimension === 'system') && boundNames.has(item.name)"
-                  @change="toggleBind(item)"
-                />
-                关联 {{ currentAgent }}
-              </label>
-            </td>
-            <td class="row">
-              <ResourceDetails :item="item" kind="skills" />
-              <button class="btn ghost" type="button" v-if="!isForeign(item)" @click="remove(item.skill_id)">删除</button>
-            </td>
-          </tr>
-        </tbody>
-      </table>
+    <div class="skill-filters">
+      <label class="skill-agent"><span>关联到智能体</span><select v-model="agentId" @change="changeAgent"><option v-for="item in agents" :key="item.id" :value="item.id">{{ item.name }}</option></select></label>
+    </div>
+    <p v-if="error && !drawerOpen" class="error" role="alert">{{ error }}</p>
+    <p v-if="loading" class="page-loading" role="status">加载中…</p>
+    <p v-else-if="!visibleSkills.length" class="empty">{{ search ? '没有匹配的技能' : '暂无技能' }}</p>
+    <div v-else :class="displayMode === 'cards' ? 'resource-grid' : 'skill-rows'">
+      <article v-for="item in visibleSkills" :key="`${item._owner?.user_id || ''}:${item.skill_id}`" class="resource-card skill-card">
+        <div class="resource-card-head"><span class="resource-icon"><AppIcon name="skill" /></span><h2>{{ item.name }}</h2><span v-if="item._owner" class="tag">{{ item._owner.username }}</span></div>
+        <p>{{ item.description }}</p>
+        <div class="resource-card-foot">
+          <label class="skill-binding"><input type="checkbox" :disabled="!agentId || isForeign(item)" :checked="!isForeign(item) && boundNames.has(item.name)" @change="toggleBind(item)" />关联 {{ currentAgent }}</label>
+          <div class="row"><ResourceDetails :item="item" kind="skills" /><button v-if="!isForeign(item)" class="btn ghost" @click="remove(item.skill_id)">删除</button></div>
+        </div>
+      </article>
     </div>
     <FormDrawer v-model="drawerOpen" title="上传技能" :busy="pending">
     <div class="panel">
@@ -212,3 +190,15 @@ function startNew() {
     </FormDrawer>
   </section>
 </template>
+
+<style scoped>
+.skill-filters { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 20px; flex-wrap: wrap; }
+.skill-agent { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--muted-foreground); }
+.skill-agent select { max-width: 180px; padding: 6px 10px; }
+.skill-binding { display: flex; gap: 6px; align-items: center; }
+.skill-rows { display: flex; flex-direction: column; gap: 8px; }
+.skill-rows .skill-card { display: grid; grid-template-columns: minmax(180px, 1fr) minmax(160px, 2fr) minmax(200px, 1fr); gap: 16px; align-items: center; padding: 14px 20px; }
+.skill-rows .resource-card-foot { border: 0; padding: 0; margin: 0; }
+.skill-card .row { margin: 0; }
+@media (max-width: 900px) { .skill-rows .skill-card { display: flex; align-items: stretch; } }
+</style>
