@@ -1,3 +1,4 @@
+import { updateToolStates } from './tool-state.js'
 import { HttpAgent } from '@ag-ui/client'
 import { getToken } from '../auth.js'
 import { createResumableFetch } from './resume.js'
@@ -48,12 +49,19 @@ export function createAguiAgent({ onMessages, onError, onInteraction, agentId = 
       return { messages: messages.map(message => message.id === event.messageId
         ? { ...message, reasoningStreaming: false } : message) }
     },
-    onCustomEvent({ event }) {
+    onToolCallEndEvent({ event, messages }) {
+      return { messages: updateToolStates(messages, event) }
+    },
+    onToolCallResultEvent({ event, messages }) {
+      return { messages: updateToolStates(messages, event) }
+    },
+    onCustomEvent({ event, messages }) {
       if (event?.name === 'sage.interaction.requested') {
         onInteraction?.(event.value || null)
       } else if (INTERACTION_CLOSED.has(event?.name)) {
         onInteraction?.(null)
       }
+      return { messages: updateToolStates(messages, event) }
     },
     onRunErrorEvent({ event }) {
       onError?.(messageForAguiError(event))

@@ -35,10 +35,11 @@ def issue(client, token, *, policy=None, scopes=None, agent_id=None):
 
 
 @pytest.mark.parametrize("policy,waiting,written", [
-    ({}, True, False),
+    ({}, False, True),
+    ({"shell": "ask"}, True, False),
     ({"shell": "sandboxed"}, False, True),
     ({"shell": "sandboxed", "on_approval_required": "deny"}, False, True),
-    ({"on_approval_required": "deny"}, False, False),
+    ({"shell": "ask", "on_approval_required": "deny"}, False, False),
 ])
 def test_api_workspace_authorization_and_drive_cleanup(tmp_path, policy, waiting, written):
     provider = ScriptedModelProvider((_step(1, "write", "file_write",
@@ -69,7 +70,7 @@ def test_api_workspace_authorization_and_drive_cleanup(tmp_path, policy, waiting
 def test_request_cannot_expand_user_authorization(tmp_path):
     with asking_client(tmp_path) as client:
         token = register_and_login(client)
-        record = issue(client, token)
+        record = issue(client, token, policy={"shell": "ask"})
         task = send(client, record["api_key"], "write",
                     metadata={"sage.executionPolicy": {"shell": "sandboxed"}})["result"]["task"]
         assert task["status"]["state"] == "TASK_STATE_INPUT_REQUIRED"
@@ -194,7 +195,7 @@ def test_user_settings_are_isolated_and_keys_cannot_change_them(client):
     key = issue(client, token, policy={"shell": "sandboxed"})
     assert "execution_policy" not in key
     other_headers = {"Authorization": f"Bearer {other}"}
-    assert client.get("/api/auth/execution-policy", headers=other_headers).json()["data"]["shell"] == "ask"
+    assert client.get("/api/auth/execution-policy", headers=other_headers).json()["data"]["shell"] == "sandboxed"
     response = client.put("/api/auth/execution-policy",
         headers={"Authorization": f"Bearer {key['api_key']}"}, json={"shell": "deny"})
     assert response.status_code == 401
