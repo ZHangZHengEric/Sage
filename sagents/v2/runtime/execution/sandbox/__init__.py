@@ -47,6 +47,10 @@ _LAZY_EXPORTS = {
         "sagents.v2.runtime.execution.sandbox.plugins.local",
         "LocalWorkspaceSandboxProvider",
     ),
+    "CubeVolumeSandboxProvider": (
+        "sagents.v2.runtime.execution.sandbox.plugins.cube",
+        "CubeVolumeSandboxProvider",
+    ),
     "SandboxGrantIssuer": (
         "sagents.v2.runtime.execution.sandbox.plugins.ephemeral",
         "SandboxGrantIssuer",
@@ -61,6 +65,7 @@ __all__ = [
     "IsolationLevel",
     "LifecyclePolicy",
     "LocalWorkspaceSandboxProvider",
+    "CubeVolumeSandboxProvider",
     "NetworkMode",
     "NetworkPolicy",
     "NetworkRequest",

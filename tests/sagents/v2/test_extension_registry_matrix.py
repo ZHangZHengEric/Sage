@@ -92,6 +92,7 @@ def test_builtin_inventory_contains_only_real_factories():
         "sage.protocol.native",
         "sage.sandbox.ephemeral",
         "sage.sandbox.local-workspace",
+        "sage.sandbox.cube-volume",
         "sage.scheduler.ephemeral",
         "sage.scheduler.filesystem",
         "sage.workspace.initializer.bare",
@@ -133,7 +134,7 @@ def test_builtin_inventory_contains_only_real_factories():
     )
     assert inventory["sage.tool.ephemeral"]["capabilities"]["durable"] is False
     assert inventory["sage.tool.ephemeral"]["capabilities"]["testing"] is True
-    for plugin_id in ("sage.sandbox.ephemeral", "sage.sandbox.local-workspace"):
+    for plugin_id in ("sage.sandbox.ephemeral", "sage.sandbox.local-workspace", "sage.sandbox.cube-volume"):
         assert inventory[plugin_id]["version"] == "3.0.0"
         assert inventory[plugin_id]["provides"][0]["capability"] == "execution.sandbox"
         assert inventory[plugin_id]["provides"][0]["api_version"] == "3"

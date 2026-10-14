@@ -1,3 +1,9 @@
+## 2026-10-14 新增 CubeSandbox Volume 可选沙盒插件
+
+- 注册 `sage.sandbox.cube-volume` 为 SAgents V2 沙盒插件，按可信用户与 Agent 身份生成持久 Volume，并在远程 Cube 沙盒内挂载 `/workspace`；私有子 Run 使用独立 Volume。
+- 通过 Cube SDK 接入沙盒生命周期、受授权文件操作与命令执行；不支持的网络、快照、交互进程和资源策略在能力声明或准入时明确拒绝。
+- 添加可选 `cube` 依赖，在 `sagents/v2/使用手册.md` 补充选择和使用说明，并增加插件技术说明及 22 项相关测试验证。未接入 Server V2 或 Desktop 默认运行链路，未连接真实 Cube 集群。
+
 ## 2026-10-14 调大工具状态图标
 
 - 工具状态图标及执行中旋转圈统一调整为 18px。

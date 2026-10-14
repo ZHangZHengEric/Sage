@@ -51,6 +51,7 @@ from sagents.v2.runtime.credentials import (
 )
 from sagents.v2.runtime.execution.jobs import InMemoryJobRuntime
 from sagents.v2.runtime.execution.sandbox import (
+    CubeVolumeSandboxProvider,
     InMemorySandboxProvider,
     LocalWorkspaceSandboxProvider,
 )
@@ -633,6 +634,41 @@ def _register_infrastructure(registry: ExtensionRegistry) -> None:
             "supports_terminal_purge": True,
             "supports_automatic_terminal_retention": True,
         },
+    )
+    _one(
+        registry,
+        CubeVolumeSandboxProvider,
+        "execution.sandbox",
+        lambda context, dependencies: CubeVolumeSandboxProvider(
+            _bytes(context.config["verification_key"]),
+            api_url=context.config["api_url"],
+            template_id=context.config["template_id"],
+            proxy_node_ip=context.config["proxy_node_ip"],
+            api_key=context.config.get("api_key"),
+            volume_driver=context.config.get("volume_driver"),
+        ),
+        scopes={ExtensionScope.PROCESS},
+        api_version="3",
+        version="3.0.0",
+        availability=ExtensionAvailability(
+            available=importlib.util.find_spec("cubesandbox") is not None,
+            reason=(None if importlib.util.find_spec("cubesandbox") is not None
+                    else "optional cubesandbox>=0.6.0 package is not installed"),
+        ),
+        config_schema={
+            "type": "object",
+            "properties": {
+                "verification_key": {},
+                "api_url": {"type": "string", "minLength": 1},
+                "template_id": {"type": "string", "minLength": 1},
+                "proxy_node_ip": {"type": "string", "minLength": 1},
+                "api_key": {"type": "string", "writeOnly": True},
+                "volume_driver": {"type": "string"},
+            },
+            "required": ["verification_key", "api_url", "template_id", "proxy_node_ip"],
+            "additionalProperties": False,
+        },
+        capabilities={"supports_terminal_purge": True},
     )
 
     _one(
