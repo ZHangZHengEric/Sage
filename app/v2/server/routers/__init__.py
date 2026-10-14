@@ -9,6 +9,7 @@ from . import (
     approvals,
     auth,
     health,
+    files,
     mcp,
     models,
     observability,
@@ -32,6 +33,7 @@ def register_routers(app: FastAPI, *, jaeger: bool = False, trace_console: bool 
     app.include_router(a2a_agents.router)
     app.include_router(skills.router)
     app.include_router(threads.router)
+    app.include_router(files.router)
     app.include_router(agent.router)
     app.include_router(api_keys.router)
     app.include_router(approvals.router)

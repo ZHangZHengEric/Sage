@@ -83,3 +83,7 @@ class ModelPublic(BaseModel):
     base_url: str
     model: str
     is_default: bool
+
+
+class ModelDetail(ModelPublic):
+    api_key: str

@@ -52,3 +52,22 @@ test('transcript joins tool results, hides empty assistants, and folds completed
   html = await render()
   assert.match(html, /Standalone result/)
 })
+
+test('JSON tool results remain strings and render in both stream and history', async (t) => {
+  const content = JSON.stringify({ status: 'success', message: '写入成功', count: 0 })
+  const structuredEvents = events.map(event => event.type === 'TOOL_CALL_RESULT'
+    ? { ...event, content } : event)
+  t.mock.method(globalThis, 'fetch', async () => new Response(structuredEvents.map(event =>
+    `data: ${JSON.stringify(event)}\n\n`).join(''), { headers: { 'Content-Type': 'text/event-stream' } }))
+  const agent = createAguiAgent()
+  await agent.runAgent({ runId: 'run', tools: [], context: [] })
+  const server = await createServer({ server: { middlewareMode: true, watch: null, hmr: false, ws: false } })
+  t.after(() => server.close())
+  const { default: Transcript } = await server.ssrLoadModule('/src/components/AguiTranscript.vue')
+  for (const messages of [agent.messages, messagesFromEvents(structuredEvents)]) {
+    assert.equal(messages.find(message => message.role === 'tool').content, content)
+    const html = await renderToString(createSSRApp(Transcript, { messages }))
+    assert.equal((html.match(/写入成功/g) || []).length, 1)
+    assert.doesNotMatch(html, /data-role="tool"/)
+  }
+})

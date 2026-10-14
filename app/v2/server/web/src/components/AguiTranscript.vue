@@ -1,6 +1,7 @@
 <script setup>
 import { computed } from 'vue'
 import { marked } from 'marked'
+import AppIcon from './AppIcon.vue'
 
 const props = defineProps({
   messages: { type: Array, default: () => [] },
@@ -83,15 +84,17 @@ function roleLabel(role) {
             :key="`${message.id}-${Boolean(message.reasoningStreaming && pending)}`"
             :open="Boolean(message.reasoningStreaming && pending)"
           >
-            <summary class="msg-meta">思考过程</summary>
+            <summary class="reasoning-summary"><AppIcon name="model" /><span>思考过程</span><AppIcon v-if="!message.reasoningStreaming" name="check" /><AppIcon name="chevron" /></summary>
             <p class="reason">{{ textOf(message) }}</p>
           </details>
           <p v-else class="plain">{{ textOf(message) }}</p>
           <ul v-if="message.toolCalls?.length" class="tools">
             <li v-for="call in message.toolCalls" :key="call.id">
-              <strong>{{ toolName(call) }}</strong>
-              <pre class="tool-args"><code>{{ toolArgs(call) }}</code></pre>
-              <pre v-if="textOf(results.get(call.id) || {})">{{ textOf(results.get(call.id)) }}</pre>
+              <details class="tool-detail">
+                <summary><AppIcon name="tools" /><strong>{{ toolName(call) }}</strong><AppIcon v-if="results.has(call.id)" name="check" /><AppIcon name="chevron" /></summary>
+                <div class="tool-detail-body"><pre class="tool-args"><code>{{ toolArgs(call) }}</code></pre>
+                <pre v-if="textOf(results.get(call.id) || {})">{{ textOf(results.get(call.id)) }}</pre></div>
+              </details>
             </li>
           </ul>
         </div>

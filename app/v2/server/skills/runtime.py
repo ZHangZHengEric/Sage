@@ -230,7 +230,6 @@ def _descriptor(record: SkillRecord) -> SkillDescriptor:
         version=record.version_id,
         metadata={
             "skill_id": record.skill_id,
-            "dimension": record.dimension,
             "artifact_path": record.artifact_path,
         },
     )

@@ -3,6 +3,7 @@ import { computed, onMounted, ref } from 'vue'
 import { api, isForeign } from '../api.js'
 import ResourceDetails from '../components/ResourceDetails.vue'
 import FormDrawer from '../components/FormDrawer.vue'
+import ToolSources from '../components/ToolSources.vue'
 
 const drawerOpen = ref(false)
 
@@ -123,10 +124,11 @@ onMounted(async () => {
 <template>
   <section>
     <header class="page-head">
-      <h1>A2A</h1>
+      <h1>工具</h1><button class="btn cta" type="button" :disabled="pending" @click="startNew">新增远端智能体</button>
     </header>
-    <div class="panel stack">
-      <div class="list-toolbar"><h2>可委派</h2><button class="btn cta" type="button" :disabled="pending" @click="startNew">新增远端智能体</button></div>
+    <ToolSources />
+    <div class="panel table-panel">
+
       <p v-if="error && !drawerOpen" class="error" role="alert">{{ error }}</p>
       <p v-if="!hasPeers" class="empty">
         还没有远端智能体。添加后每个技能会成为一个 <code>a2a_&lt;名称&gt;_&lt;技能&gt;</code> 工具。

@@ -3,13 +3,12 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Protocol
 
-from sqlalchemy import or_, select
+from sqlalchemy import select
 
 from app.v2.server.database import Database
 from app.v2.server.skills.orm import AgentSkillSelectionRow, SkillRow, SkillVersionRow
 from app.v2.server.skills.records import (
     AgentSkillBinding,
-    SkillDimension,
     SkillRecord,
     normalize_skill_name,
     reject_absolute_artifact_path,
@@ -22,9 +21,7 @@ def _now() -> str:
 
 class SkillStore(Protocol):
     async def get(self, skill_id: str) -> SkillRecord | None: ...
-    async def list_visible(
-        self, *, user_id: str, role: str, dimension: SkillDimension | None = None
-    ) -> list[SkillRecord]: ...
+    async def list_visible(self, *, user_id: str, role: str) -> list[SkillRecord]: ...
     async def publish(self, record: SkillRecord) -> SkillRecord: ...
     async def disable(self, skill_id: str) -> None: ...
     async def replace_bindings(
@@ -53,25 +50,19 @@ class DatabaseSkillStore:
             return None
         return _record(row, version)
 
-    async def list_visible(
-        self, *, user_id: str, role: str, dimension: SkillDimension | None = None
-    ) -> list[SkillRecord]:
+    async def list_visible(self, *, user_id: str, role: str) -> list[SkillRecord]:
         # Visibility is a WHERE clause, not a full scan: this runs on every chat
         # turn, so it must stay proportional to the caller's own Skills.
         statement = (
             select(SkillRow, SkillVersionRow)
-            .join(SkillVersionRow, SkillRow.current_version_id == SkillVersionRow.version_id)
+            .join(
+                SkillVersionRow,
+                SkillRow.current_version_id == SkillVersionRow.version_id,
+            )
             .where(SkillRow.status == "active")
         )
-        if dimension is not None:
-            statement = statement.where(SkillRow.dimension == dimension)
         if role != "admin":
-            statement = statement.where(
-                or_(
-                    SkillRow.dimension == "system",
-                    SkillRow.owner_user_id == user_id,
-                )
-            )
+            statement = statement.where(SkillRow.owner_user_id == user_id)
         async with self.database.session() as session:
             rows = (await session.execute(statement)).all()
         return [_record(row, version) for row, version in rows]
@@ -82,19 +73,21 @@ class DatabaseSkillStore:
         skill_id = record.skill_id
         async with self.database.transaction() as session:
             existing = (
-                await session.execute(
-                    select(SkillRow).where(
-                        SkillRow.dimension == record.dimension,
-                        SkillRow.owner_user_id == record.owner_user_id,
-                        SkillRow.name == record.name,
+                (
+                    await session.execute(
+                        select(SkillRow).where(
+                            SkillRow.owner_user_id == record.owner_user_id,
+                            SkillRow.name == record.name,
+                        )
                     )
                 )
-            ).scalars().first()
+                .scalars()
+                .first()
+            )
             if existing is None:
                 session.add(
                     SkillRow(
                         skill_id=record.skill_id,
-                        dimension=record.dimension,
                         owner_user_id=record.owner_user_id,
                         name=record.name,
                         description=record.description,
@@ -144,13 +137,17 @@ class DatabaseSkillStore:
     ) -> None:
         async with self.database.transaction() as session:
             current = (
-                await session.execute(
-                    select(AgentSkillSelectionRow).where(
-                        AgentSkillSelectionRow.owner_user_id == owner_user_id,
-                        AgentSkillSelectionRow.agent_id == agent_id,
+                (
+                    await session.execute(
+                        select(AgentSkillSelectionRow).where(
+                            AgentSkillSelectionRow.owner_user_id == owner_user_id,
+                            AgentSkillSelectionRow.agent_id == agent_id,
+                        )
                     )
                 )
-            ).scalars().all()
+                .scalars()
+                .all()
+            )
             for row in current:
                 await session.delete(row)
             for binding in bindings:
@@ -169,13 +166,17 @@ class DatabaseSkillStore:
     ) -> list[AgentSkillBinding]:
         async with self.database.session() as session:
             rows = (
-                await session.execute(
-                    select(AgentSkillSelectionRow).where(
-                        AgentSkillSelectionRow.owner_user_id == owner_user_id,
-                        AgentSkillSelectionRow.agent_id == agent_id,
+                (
+                    await session.execute(
+                        select(AgentSkillSelectionRow).where(
+                            AgentSkillSelectionRow.owner_user_id == owner_user_id,
+                            AgentSkillSelectionRow.agent_id == agent_id,
+                        )
                     )
                 )
-            ).scalars().all()
+                .scalars()
+                .all()
+            )
         return [
             AgentSkillBinding(
                 owner_user_id=row.owner_user_id,
@@ -193,7 +194,6 @@ def _record(row: SkillRow, version: SkillVersionRow) -> SkillRecord:
         skill_id=row.skill_id,
         version_id=version.version_id,
         revision=version.revision,
-        dimension=row.dimension,  # type: ignore[arg-type]
         owner_user_id=row.owner_user_id,
         name=row.name,
         description=row.description,
@@ -214,19 +214,12 @@ class MemorySkillStore:
     async def get(self, skill_id: str) -> SkillRecord | None:
         return self._skills.get(skill_id)
 
-    async def list_visible(
-        self, *, user_id: str, role: str, dimension: SkillDimension | None = None
-    ) -> list[SkillRecord]:
+    async def list_visible(self, *, user_id: str, role: str) -> list[SkillRecord]:
         return [
             item
             for item in self._skills.values()
             if item.status == "active"
-            and (dimension is None or item.dimension == dimension)
-            and (
-                item.dimension == "system"
-                or item.owner_user_id == user_id
-                or role == "admin"
-            )
+            and (item.owner_user_id == user_id or role == "admin")
         ]
 
     async def publish(self, record: SkillRecord) -> SkillRecord:
@@ -235,8 +228,7 @@ class MemorySkillStore:
             (
                 item
                 for item in self._skills.values()
-                if item.dimension == record.dimension
-                and item.owner_user_id == record.owner_user_id
+                if item.owner_user_id == record.owner_user_id
                 and item.name == record.name
             ),
             None,
@@ -247,7 +239,6 @@ class MemorySkillStore:
                 skill_id=current.skill_id,
                 version_id=record.version_id,
                 revision=record.revision,
-                dimension=record.dimension,
                 owner_user_id=record.owner_user_id,
                 name=record.name,
                 description=record.description,
@@ -270,7 +261,6 @@ class MemorySkillStore:
             skill_id=current.skill_id,
             version_id=current.version_id,
             revision=current.revision,
-            dimension=current.dimension,
             owner_user_id=current.owner_user_id,
             name=current.name,
             description=current.description,

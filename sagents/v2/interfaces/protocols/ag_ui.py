@@ -23,6 +23,7 @@ from sagents.v2.contracts.events import (
 from sagents.v2.contracts.items import (
     ActivityItemData,
     ErrorItemData,
+    JsonBlock,
     MessageItemData,
     ReasoningItemData,
     TextBlock,
@@ -319,7 +320,7 @@ class AgUiProtocolAdapter:
                         {
                             "messageId": item_id,
                             "toolCallId": item.tool_call_id,
-                            "content": self._text(item.content),
+                            "content": self._tool_result_text(item.content),
                             "role": "tool",
                         },
                     ),
@@ -391,6 +392,17 @@ class AgUiProtocolAdapter:
             version=self.version,
             name=name,
             payload=payload,
+        )
+
+    @staticmethod
+    def _tool_result_text(blocks):
+        # AG-UI tool results carry structured data as JSON-encoded text.
+        return "\n".join(
+            block.text
+            if isinstance(block, TextBlock)
+            else json.dumps(block.value, ensure_ascii=False)
+            for block in blocks
+            if isinstance(block, (TextBlock, JsonBlock))
         )
 
     @staticmethod

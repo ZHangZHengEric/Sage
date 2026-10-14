@@ -2,6 +2,9 @@ import { createRouter, createWebHistory } from 'vue-router'
 import { getToken, isAdmin } from './auth.js'
 import Login from './views/Login.vue'
 import Chat from './views/Chat.vue'
+import History from './views/History.vue'
+import Tools from './views/Tools.vue'
+import Users from './views/Users.vue'
 import Models from './views/Models.vue'
 import Agents from './views/Agents.vue'
 import Studio from './views/Studio.vue'
@@ -17,6 +20,9 @@ export const router = createRouter({
   routes: [
     { path: '/login', component: Login, meta: { public: true } },
     { path: '/', component: Chat },
+    { path: '/history', component: History },
+    { path: '/tools', component: Tools },
+    { path: '/users', component: Users, meta: { admin: true } },
     { path: '/agents', component: Agents },
     { path: '/studio', component: Studio },
     { path: '/models', component: Models },

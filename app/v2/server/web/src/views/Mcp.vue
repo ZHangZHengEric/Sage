@@ -3,6 +3,7 @@ import { computed, onMounted, ref } from 'vue'
 import { api, isForeign } from '../api.js'
 import ResourceDetails from '../components/ResourceDetails.vue'
 import FormDrawer from '../components/FormDrawer.vue'
+import ToolSources from '../components/ToolSources.vue'
 
 const drawerOpen = ref(false)
 
@@ -100,10 +101,11 @@ function startNew() {
 <template>
   <section>
     <header class="page-head">
-      <h1>MCP</h1>
+      <h1>工具</h1><button class="btn cta" type="button" :disabled="pending" @click="startNew">新增 MCP</button>
     </header>
-    <div class="panel stack">
-      <div class="list-toolbar"><h2>已连接</h2><button class="btn cta" type="button" :disabled="pending" @click="startNew">新增 MCP</button></div>
+    <ToolSources />
+    <div class="panel table-panel">
+
       <p v-if="error && !drawerOpen" class="error" role="alert">{{ error }}</p>
       <p v-if="!hasServers" class="empty">还没有 MCP。添加后它的工具对本租户的智能体全部可用。</p>
       <table v-else>
