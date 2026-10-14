@@ -1,9 +1,22 @@
 <script setup>
+import { computed } from 'vue'
 import { marked } from 'marked'
 
-defineProps({
+const props = defineProps({
   messages: { type: Array, default: () => [] },
   pending: { type: Boolean, default: false },
+})
+
+// Join only for display: the SDK still receives the original protocol messages.
+const results = computed(() => new Map(props.messages
+  .filter(message => message.role === 'tool' && message.toolCallId)
+  .map(message => [message.toolCallId, message])))
+const visibleMessages = computed(() => {
+  const calls = new Set(props.messages.flatMap(message => (message.toolCalls || []).map(call => call.id)))
+  return props.messages.filter(message => {
+    if (message.role === 'tool' && calls.has(message.toolCallId)) return false
+    return textOf(message).trim() || message.toolCalls?.length
+  })
 })
 
 marked.setOptions({ breaks: true, gfm: true })
@@ -29,7 +42,13 @@ function toolName(call) {
 }
 
 function toolArgs(call) {
-  return call?.function?.arguments || call?.arguments || ''
+  const args = call?.function?.arguments ?? call?.arguments ?? ''
+  try {
+    return JSON.stringify(typeof args === 'string' ? JSON.parse(args) : args, null, 2)
+  } catch {
+    // Streaming arguments may not form a complete JSON value yet.
+    return args
+  }
 }
 
 function roleLabel(role) {
@@ -44,7 +63,7 @@ function roleLabel(role) {
 <template>
   <div class="transcript" role="log" aria-live="polite" aria-relevant="additions">
     <article
-      v-for="message in messages"
+      v-for="message in visibleMessages"
       :key="message.id"
       class="msg"
       :data-role="message.role"
@@ -52,19 +71,27 @@ function roleLabel(role) {
       <div class="msg-row">
         <div v-if="message.role === 'assistant'" class="msg-avatar" aria-hidden="true">S</div>
         <div class="msg-stack">
-          <header class="msg-meta">{{ roleLabel(message.role) }}</header>
+          <header v-if="message.role !== 'reasoning'" class="msg-meta">{{ roleLabel(message.role) }}</header>
           <div
             v-if="message.role === 'assistant'"
             class="md"
             v-html="markdown(textOf(message))"
           />
           <pre v-else-if="message.role === 'tool'" class="tool-body">{{ textOf(message) }}</pre>
-          <p v-else-if="message.role === 'reasoning'" class="reason">{{ textOf(message) }}</p>
+          <details
+            v-else-if="message.role === 'reasoning'"
+            :key="`${message.id}-${Boolean(message.reasoningStreaming && pending)}`"
+            :open="Boolean(message.reasoningStreaming && pending)"
+          >
+            <summary class="msg-meta">思考过程</summary>
+            <p class="reason">{{ textOf(message) }}</p>
+          </details>
           <p v-else class="plain">{{ textOf(message) }}</p>
           <ul v-if="message.toolCalls?.length" class="tools">
             <li v-for="call in message.toolCalls" :key="call.id">
               <strong>{{ toolName(call) }}</strong>
-              <pre>{{ toolArgs(call) }}</pre>
+              <pre class="tool-args"><code>{{ toolArgs(call) }}</code></pre>
+              <pre v-if="textOf(results.get(call.id) || {})">{{ textOf(results.get(call.id)) }}</pre>
             </li>
           </ul>
         </div>

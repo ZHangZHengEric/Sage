@@ -335,6 +335,8 @@ input, textarea, select {
 }
 
 .msg { width: 100%; }
+.msg-stack { min-width: 0; }
+.msg .plain, .msg .md, .msg .reason { overflow-wrap: anywhere; }
 .msg-row {
   display: flex;
   align-items: flex-start;
@@ -395,6 +397,12 @@ input, textarea, select {
 .md pre code { background: transparent; padding: 0; }
 
 .tools { list-style: none; padding: 0; margin: 8px 0 0; }
+.tools .tool-args {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  line-height: 1.6;
+  tab-size: 2;
+}
 .tools li {
   border: 1px solid var(--border);
   background: var(--muted);
