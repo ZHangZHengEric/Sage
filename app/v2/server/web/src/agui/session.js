@@ -37,6 +37,17 @@ export function createAguiAgent({ onMessages, onError, onInteraction, agentId = 
     onMessagesChanged({ messages }) {
       onMessages?.([...messages])
     },
+    onReasoningMessageStartEvent({ event, messages }) {
+      const existing = messages.find(message => message.id === event.messageId)
+      return { messages: existing
+        ? messages.map(message => message.id === event.messageId
+          ? { ...message, reasoningStreaming: true } : message)
+        : [...messages, { id: event.messageId, role: 'reasoning', content: '', reasoningStreaming: true }] }
+    },
+    onReasoningMessageEndEvent({ event, messages }) {
+      return { messages: messages.map(message => message.id === event.messageId
+        ? { ...message, reasoningStreaming: false } : message) }
+    },
     onCustomEvent({ event }) {
       if (event?.name === 'sage.interaction.requested') {
         onInteraction?.(event.value || null)

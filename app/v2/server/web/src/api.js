@@ -148,8 +148,5 @@ export const api = {
   threadEvents: (id, limit = 500, owner, offset) => read(`/api/threads/${encodeURIComponent(id)}/events?limit=${limit}${offset === undefined ? "" : `&offset=${offset}`}`, owner),
   deleteThread: (id) => request(`/api/threads/${id}`, { method: 'DELETE' }),
   adminUsers: () => request('/api/admin/users'),
-  adminThreads: () => request('/api/admin/threads'),
-  adminModels: () => request('/api/admin/models'),
-  adminThreadEvents: (id, limit = 500, offset = 0) => request(`/api/admin/threads/${encodeURIComponent(id)}/events?limit=${limit}&offset=${offset}`),
   health: () => request('/health'),
 }

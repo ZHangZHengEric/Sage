@@ -2,7 +2,7 @@
 import { computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { api } from './api.js'
-import { clearSession, getUser, isAdmin } from './auth.js'
+import { clearSession, getUser } from './auth.js'
 
 const route = useRoute()
 const router = useRouter()
@@ -38,7 +38,6 @@ async function logout() {
         <router-link to="/settings/execution">执行设置</router-link>
         <router-link to="/approvals">待审批</router-link>
         <router-link to="/skills">技能</router-link>
-        <router-link v-if="isAdmin()" to="/admin">总览</router-link>
       </nav>
       <div class="userbox">
         <span>{{ user?.username }}</span>

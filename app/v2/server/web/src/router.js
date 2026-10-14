@@ -8,7 +8,6 @@ import Studio from './views/Studio.vue'
 import Mcp from './views/Mcp.vue'
 import A2A from './views/A2A.vue'
 import Skills from './views/Skills.vue'
-import Admin from './views/Admin.vue'
 import ApiKeys from './views/ApiKeys.vue'
 import Approvals from './views/Approvals.vue'
 import ExecutionSettings from './views/ExecutionSettings.vue'
@@ -27,7 +26,7 @@ export const router = createRouter({
     { path: '/settings/execution', component: ExecutionSettings },
     { path: '/approvals', component: Approvals },
     { path: '/skills', component: Skills },
-    { path: '/admin', component: Admin, meta: { admin: true } },
+    { path: '/admin', redirect: '/' },
   ],
 })
 
