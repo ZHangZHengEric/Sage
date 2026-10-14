@@ -207,9 +207,10 @@ class SAgent:
         self._ensure_open()
         if self._dispatcher is None:
             return self.drive_accepted_run(handle, context, resume=resume)
-        execution = await self._dispatcher.submit(
-            self, handle, context, resume=resume
-        )
+        if handle.state in TERMINAL_RUN_STATES or handle.state == RunState.SUSPENDED:
+            execution = await self._settled_execution(handle.run_id)
+        else:
+            execution = await self._submit_or_fail(handle, context, resume=resume)
         return SAgentRunStream(
             handle=handle,
             events=self._terminal_stream(
@@ -440,12 +441,8 @@ class SAgent:
         current = self._tasks.get(run_id)
         if current is not None and not current.done():
             return current
-        driver = self._drivers.get(run_id)
-        if driver is None:
-            driver = self.driver_factory(run_id)
-            self._drivers[run_id] = driver
         task = asyncio.create_task(
-            self._drive(driver, run_id, context, resume=resume),
+            self._create_and_drive(run_id, context, resume=resume),
             name=f"sagent-v2:{run_id}",
         )
         self._tasks[run_id] = task
@@ -453,6 +450,21 @@ class SAgent:
             lambda completed, key=run_id: self._discard_task(key, completed)
         )
         return task
+
+    async def _create_and_drive(self, run_id, context, *, resume):
+        # Composition happens after acceptance. A synchronous factory failure
+        # must therefore become a durable failure visible to stream subscribers.
+        current = await self.runtime.get_run(run_id)
+        if current.state in TERMINAL_RUN_STATES or current.state == RunState.SUSPENDED:
+            return current
+        driver = self._drivers.get(run_id)
+        if driver is None:
+            try:
+                driver = self.driver_factory(run_id)
+            except Exception as exc:
+                return await self._fail_driver_crash(run_id, exc, context)
+            self._drivers[run_id] = driver
+        return await self._drive(driver, run_id, context, resume=resume)
 
     async def _recover_interrupted_run(self, run_id, context):
         """Ask the concrete driver to rebuild a crossed durable barrier."""

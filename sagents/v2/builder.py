@@ -34,6 +34,7 @@ from sagents.v2.context import (
 from sagents.v2.interfaces.protocols.native import NativeProtocolAdapter
 from sagents.v2.package.registry import InMemoryAgentPackageRegistry
 from sagents.v2.runtime.artifact import InMemoryArtifactStore
+from sagents.v2.runtime.artifact import SessionArtifactStore
 from sagents.v2.runtime.credentials import EnvironmentCredentialProvider
 from sagents.v2.runtime.execution.jobs import InMemoryJobRuntime
 from sagents.v2.runtime.execution.scheduler import InMemoryScheduler
@@ -862,6 +863,10 @@ class SAgentBuilder:
         driver_session_store = LeaseFencedSessionStore(session_store, scheduler)
         goal_state_service = GoalStateService(driver_session_store)
         if self._tool_runtime is not None:
+            self._tool_runtime.artifact_store = SessionArtifactStore(
+                driver_session_store,
+                self._tool_runtime.sandbox.ref.owner_run_id,
+            )
             self._tool_runtime.memory_service = memory_service
             self._tool_runtime.session_memory_service = session_memory_service
             self._tool_runtime.goal_state_service = goal_state_service
@@ -1014,6 +1019,10 @@ class SAgentBuilder:
         )
 
         def configure_official_runtime(value: OfficialToolRuntime) -> None:
+            value.artifact_store = SessionArtifactStore(
+                driver_session_store,
+                value.sandbox.ref.owner_run_id,
+            )
             value.memory_service = memory_service
             value.session_memory_service = session_memory_service
             value.goal_state_service = goal_state_service
@@ -1120,6 +1129,11 @@ class SAgentBuilder:
                 return factory.create_loop(
                     effective_resolved,
                     definition_id,
+                    artifact_store=(
+                        active_runtime.artifact_store
+                        if active_runtime is not None
+                        else SessionArtifactStore(driver_session_store, run_id)
+                    ),
                     model=models_by_agent[descriptor.agent_id],
                     tool_catalog=catalog,
                     tool_executor=executor,
@@ -1961,7 +1975,9 @@ class SAgentBuilder:
         credential_provider,
     ):
         services = {
-            "execution.scheduler": self._scheduler if self._scheduler is not None else await self._create_capability(
+            "execution.scheduler": self._scheduler
+            if self._scheduler is not None
+            else await self._create_capability(
                 host,
                 parent,
                 handles,
@@ -1970,7 +1986,9 @@ class SAgentBuilder:
                 capability="execution.scheduler",
                 default_plugin=InMemoryScheduler.plugin_id,
             ),
-            "execution.job-runtime": self._job_runtime if self._job_runtime is not None else await self._create_capability(
+            "execution.job-runtime": self._job_runtime
+            if self._job_runtime is not None
+            else await self._create_capability(
                 host,
                 parent,
                 handles,

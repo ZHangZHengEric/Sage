@@ -332,12 +332,16 @@ async def test_turn_status_publishes_one_shot_continuation_signals(tmp_path: Pat
 class _ImageRuntime:
     image_context_publisher = None
 
+    def __init__(self):
+        from sagents.v2.runtime.artifact import InMemoryArtifactStore
+        self.artifact_store = InMemoryArtifactStore()
+
     async def read_bytes(self, path: str, invocation: ToolInvocation) -> bytes:
         return Path(path).read_bytes()
 
 
-async def _analyze_image(image_path: str, prompt: str | None = None):
-    return await MediaTools(_ImageRuntime()).analyze_image(
+async def _analyze_image(image_path: str, prompt: str | None = None, *, runtime=None):
+    return await MediaTools(runtime or _ImageRuntime()).analyze_image(
         image_path=image_path,
         session_id="session_1",
         prompt=prompt,
@@ -353,7 +357,8 @@ async def test_analyze_image_queues_a_user_followup_and_keeps_tool_result_small(
     from PIL import Image
 
     Image.new("RGB", (2048, 1024), "red").save(image)
-    result = await _analyze_image(str(image), "Check the frame.")
+    runtime = _ImageRuntime()
+    result = await _analyze_image(str(image), "Check the frame.", runtime=runtime)
 
     payload = result.content[0].value
     followup = result.metadata["followup_user_message"]
@@ -365,18 +370,19 @@ async def test_analyze_image_queues_a_user_followup_and_keeps_tool_result_small(
         "kind": "text",
         "text": "Check the frame.",
     }
-    assert followup["content"][1]["kind"] == "image"
-    assert followup["content"][1]["uri"].startswith("data:image/jpeg;base64,")
+    uri = followup["content"][1]["uri"]
+    assert uri.startswith("sage-image:")
+    assert followup["content"][1] == {
+        "kind": "image",
+        "uri": uri,
+        "mime_type": "image/jpeg",
+        "alt": str(image),
+    }
     assert followup["metadata"]["hidden_from_chat"] is True
-    import base64
-    import io
-
-    encoded = followup["content"][1]["uri"].split(",", 1)[1]
-    with Image.open(io.BytesIO(base64.b64decode(encoded))) as normalized:
-        assert normalized.format == "JPEG"
-        assert max(normalized.size) <= 1536
+    assert "data:image" not in json.dumps(followup)
 
     from sagents.v2.agent.engine import AgentLoopEngine
+    from sagents.v2.runtime.artifact.images import hydrate_image_blocks
 
     tool_message, user_message = AgentLoopEngine._ledger_messages_for_tool_result(
         result
@@ -385,7 +391,18 @@ async def test_analyze_image_queues_a_user_followup_and_keeps_tool_result_small(
     assert "followup_user_message" not in tool_message.metadata
     assert "base64" not in json.dumps(tool_message.model_dump(mode="json"))
     assert user_message.role == "user"
-    assert user_message.content[1].uri.startswith("data:image/jpeg;base64,")
+    assert user_message.content[1].uri == uri
+    assert "data:image" not in json.dumps(user_message.model_dump(mode="json"))
+
+    hydrated = await hydrate_image_blocks((user_message,), runtime.artifact_store)
+    assert hydrated[0].content[1].uri.startswith("data:image/jpeg;base64,")
+    import base64
+    import io
+
+    encoded = hydrated[0].content[1].uri.split(",", 1)[1]
+    with Image.open(io.BytesIO(base64.b64decode(encoded))) as normalized:
+        assert normalized.format == "JPEG"
+        assert max(normalized.size) <= 1536
 
 
 @pytest.mark.asyncio
@@ -399,6 +416,87 @@ async def test_analyze_image_keeps_remote_url_without_downloading():
     assert payload["data"]["image_path"] == remote
     assert followup["content"][1]["uri"] == remote
     assert "base64" not in json.dumps(payload)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("image_path", ["frame.png", "/workspace/frame.png"])
+@pytest.mark.parametrize("provider", ["local", "memory"])
+async def test_image_snapshot_uses_sandbox_paths_and_survives_source_changes(
+    tmp_path, image_path, provider,
+):
+    from PIL import Image
+    import io
+    from sagents.v2.agent.engine import AgentLoopEngine
+    from sagents.v2.context import DefaultContextAssembler
+    from sagents.v2.contracts.commands import StartRun
+    from sagents.v2.runtime.artifact import FilesystemArtifactStore
+
+    root = tmp_path / "workspace"
+    root.mkdir()
+    plugin = (await plugin_for(root) if provider == "local" else
+              await ephemeral_plugin_for(FileSystemPolicy(allowed_operations=frozenset(FileOperation))))
+    plugin.runtime.artifact_store = FilesystemArtifactStore(tmp_path / "artifacts")
+    original = io.BytesIO()
+    Image.new("RGB", (32, 32), "red").save(original, format="PNG")
+    invocation = ToolInvocation(call("analyze_image", {}), CONTEXT)
+    await plugin.runtime.write_bytes("frame.png", original.getvalue(), invocation)
+    result = await MediaTools(plugin.runtime).analyze_image(
+        image_path, "session_1", invocation=invocation,
+    )
+    assert result.content[0].value["status"] == "success"
+    ledger = AgentLoopEngine._ledger_messages_for_tool_result(result)
+    assert "data:image" not in json.dumps(result.model_dump(mode="json"))
+    assert "data:image" not in json.dumps([m.model_dump(mode="json") for m in ledger])
+    command = StartRun(agent_id="agent_1", input=(), resolved_spec_hash="sha256:spec", idempotency_key="image")
+    assembler = DefaultContextAssembler(artifact_store=plugin.runtime.artifact_store)
+    first = await assembler.prepare_messages(command, ledger)
+    assert first[-1].content[-1].uri.startswith("data:image/jpeg;base64,")
+    await plugin.runtime.write_bytes("frame.png", b"overwritten", invocation)
+    assert await assembler.prepare_messages(command, ledger) == first
+    await plugin.runtime.delete_file("frame.png", invocation)
+    await plugin.runtime.sandbox.destroy()
+    restarted = DefaultContextAssembler(artifact_store=FilesystemArtifactStore(tmp_path / "artifacts"))
+    assert await restarted.prepare_messages(command, ledger) == first
+
+
+@pytest.mark.asyncio
+async def test_image_snapshot_cannot_read_outside_sandbox(tmp_path):
+    from PIL import Image
+    from sagents.v2.runtime.artifact import FilesystemArtifactStore
+
+    root = tmp_path / "workspace"
+    root.mkdir()
+    outside = tmp_path / "secret.png"
+    Image.new("RGB", (32, 32), "red").save(outside)
+    plugin = await plugin_for(root)
+    plugin.runtime.artifact_store = FilesystemArtifactStore(tmp_path / "artifacts")
+    result = await MediaTools(plugin.runtime).analyze_image(
+        str(outside), "session_1", invocation=ToolInvocation(call("analyze_image", {}), CONTEXT),
+    )
+    assert result.content[0].value["data"]["reason"] == "permission_denied"
+    assert "followup_user_message" not in result.metadata
+
+
+@pytest.mark.asyncio
+async def test_image_snapshot_requires_configured_store(tmp_path):
+    from PIL import Image
+    image = tmp_path / "frame.png"
+    Image.new("RGB", (32, 32), "red").save(image)
+    runtime = _ImageRuntime()
+    runtime.artifact_store = None
+    result = await _analyze_image(str(image), runtime=runtime)
+    assert result.content[0].value["data"]["reason"] == "attachment_store_unavailable"
+    assert "followup_user_message" not in result.metadata
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("image_format", ["TIFF", "ICO"])
+async def test_image_snapshot_preserves_pillow_supported_formats(tmp_path, image_format):
+    from PIL import Image
+    image = tmp_path / ("frame." + image_format.lower())
+    Image.new("RGB", (32, 32), "red").save(image, format=image_format)
+    result = await _analyze_image(str(image))
+    assert result.content[0].value["status"] == "success"
 
 
 @pytest.mark.asyncio
@@ -441,14 +539,45 @@ def test_analyze_image_followups_are_grouped_after_all_tool_results():
 
     messages = AgentLoopEngine._ledger_messages_for_tool_batch(
         (
-            image_result("call_1", "data:image/png;base64,aaa"),
+            image_result("call_1", "/workspace/a.png"),
             image_result("call_2", "https://example.invalid/b.png"),
         )
     )
     assert [message.role for message in messages] == ["tool", "tool", "user", "user"]
     assert "base64" not in json.dumps(messages[0].model_dump(mode="json"))
-    assert messages[2].content[1].uri == "data:image/png;base64,aaa"
+    assert messages[2].content[1].uri == "/workspace/a.png"
     assert messages[3].content[1].uri == "https://example.invalid/b.png"
+    assert "data:image" not in json.dumps([m.model_dump(mode="json") for m in messages])
+
+
+def test_legacy_inline_followup_is_preserved_without_reopening_source():
+    from sagents.v2.agent.engine import AgentLoopEngine
+    from sagents.v2.contracts.items import JsonBlock
+    from sagents.v2.tool import ToolExecutionResult
+
+    result = ToolExecutionResult(
+        tool_call_id="call_1",
+        operation_id="operation_call_1",
+        content=(JsonBlock(value={"status": "success"}),),
+        metadata={
+            "followup_user_message": {
+                "content": [
+                    {"kind": "text", "text": "Inspect the frame."},
+                    {
+                        "kind": "image",
+                        "uri": "data:image/png;base64,aaa",
+                        "mime_type": "image/png",
+                    },
+                ],
+                "metadata": {
+                    "tool_source": "analyze_image",
+                    "image_path": "/workspace/frame.png",
+                },
+            }
+        },
+    )
+    _tool, user_message = AgentLoopEngine._ledger_messages_for_tool_result(result)
+    assert user_message.content[1].uri == "data:image/png;base64,aaa"
 
 
 @pytest.mark.asyncio

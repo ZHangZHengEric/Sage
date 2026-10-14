@@ -265,3 +265,38 @@ async def test_root_lease_can_create_and_execute_descendant_runs_only():
 
     assert child_run.state == RunState.RUNNING
     assert grandchild_run.state == RunState.RUNNING
+
+
+@pytest.mark.asyncio
+async def test_session_attachment_write_requires_current_worker_fence():
+    clock, scheduler, fenced, _, handle = await setup()
+
+    async def payload():
+        yield b"snapshot"
+
+    async def put():
+        return await fenced.put_attachment(
+            handle.session_id,
+            artifact_id="image",
+            media_type="image/jpeg",
+            content=payload(),
+            context=CONTEXT,
+        )
+
+    with pytest.raises(SageV2Error):
+        await put()
+    lease = await scheduler.claim(
+        "old", lease_duration=timedelta(seconds=5), wait_timeout=0
+    )
+    async with fenced.lease_scope(lease):
+        await put()
+        clock.now += timedelta(seconds=6)
+        await scheduler.reap_expired()
+        with pytest.raises(SageV2Error) as caught:
+            await put()
+        assert caught.value.info.code == "scheduler.fence_rejected"
+    ref, stream = await fenced.get_attachment(
+        handle.session_id, "image", context=CONTEXT
+    )
+    assert ref.size_bytes == 8
+    assert b"".join([chunk async for chunk in stream]) == b"snapshot"

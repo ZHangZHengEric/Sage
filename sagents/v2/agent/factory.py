@@ -32,6 +32,7 @@ from sagents.v2.model import ModelProvider
 from sagents.v2.package.manifest.resolver import ResolvedSageManifest
 from sagents.v2.plan import PlanCompletionGatePolicy, PlanContextProvider
 from sagents.v2.runtime.contracts import RuntimePort
+from sagents.v2.runtime.artifact.contracts import ArtifactStore
 from sagents.v2.session_memory import SessionMemoryService
 from sagents.v2.skill import (
     ActiveSkillsContextProvider,
@@ -238,6 +239,7 @@ class AgentCompositionFactory:
         additional_runtime_tools: tuple[str, ...] = (),
         granted_catalogs: tuple[ToolCatalog, ...] = (),
         additional_context_providers: tuple[ContextSegmentProvider, ...] = (),
+        artifact_store: ArtifactStore | None = None,
         trace_sink=None,
         log_sink=None,
     ) -> AgentLoopEngine:
@@ -350,6 +352,7 @@ class AgentCompositionFactory:
                 estimator=self.context_components.token_estimator,
                 history_reader=self.runtime.session_store,
                 projection_observer=session_memory_service,
+                artifact_store=artifact_store,
             ),
             expected_resolved_spec_hash=resolved.manifest_hash,
             trace_sink=trace_sink,

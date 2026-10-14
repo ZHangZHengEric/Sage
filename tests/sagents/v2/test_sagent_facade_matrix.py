@@ -15,7 +15,7 @@ from sagents.v2.model import (
 from sagents.v2.testing.plugins.scripted_model import ScriptedModelStep
 from sagents.v2.tool import InMemoryToolCatalog, InMemoryToolExecutor
 from sagents.v2.contracts.commands import InputItem, StartRun
-from sagents.v2.contracts.errors import SageV2Error
+from sagents.v2.contracts.errors import ErrorCategory, RuntimeErrorInfo, SageV2Error
 from sagents.v2.contracts.items import TextBlock
 from sagents.v2.contracts.principals import ActorRef, PrincipalType, RequestContext
 from sagents.v2.contracts.run_state import RunState
@@ -436,3 +436,158 @@ async def test_stream_closes_at_suspension_so_a_client_can_resume_by_cursor():
 
     assert events[-1].type == "run.suspended"
     assert (await stream.wait()).state == RunState.SUSPENDED
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "entrypoint", ["run_stream", "start_run", "drive_accepted_run"]
+)
+async def test_driver_factory_failure_after_acceptance_is_streamed_and_replayable(
+    entrypoint,
+):
+    runtime = ephemeral_runtime()
+
+    def factory(run_id):
+        raise ConnectionError("model endpoint unreachable")
+
+    agent = SAgent(runtime=runtime, driver_factory=factory)
+    if entrypoint == "run_stream":
+        stream = await agent.run_stream(command(), CONTEXT)
+    else:
+        handle = (
+            await agent.start_run(command(), CONTEXT)
+            if entrypoint == "start_run"
+            else await runtime.start_run(command(), CONTEXT)
+        )
+        stream = agent.drive_accepted_run(handle, CONTEXT)
+
+    async def collect():
+        return [event async for event in stream.events]
+
+    events = await asyncio.wait_for(collect(), timeout=2)
+    final = await stream.wait()
+    assert final.state == RunState.FAILED
+    assert events[-1].type == "run.failed"
+    error = events[-1].data.error
+    assert error.metadata["recovery_questionnaire"]["questions"]
+    assert error.metadata["recovery_questionnaire"]["resumable"] is False
+    replay = await runtime.session_store.read_events(final.run_id)
+    assert replay[-1] == events[-1]
+    assert not any(event.type == "run.completed" for event in events)
+    await agent.close()
+
+
+@pytest.mark.asyncio
+async def test_schedule_accepted_run_submission_failure_is_durable():
+    runtime = ephemeral_runtime()
+
+    class FailingDispatcher:
+        async def submit(self, agent, handle, context, *, resume=False):
+            raise ConnectionError("queue unreachable")
+
+    agent = SAgent(
+        runtime=runtime,
+        driver_factory=lambda run_id: None,
+        dispatcher=FailingDispatcher(),
+    )
+    handle = await runtime.start_run(command(), CONTEXT)
+    with pytest.raises(ConnectionError, match="queue unreachable"):
+        await agent.schedule_accepted_run(handle, CONTEXT)
+    final = await runtime.get_run(handle.run_id)
+    events = await runtime.session_store.read_events(handle.run_id)
+    assert final.state == RunState.FAILED
+    assert events[-1].type == "run.failed"
+    assert events[-1].data.error.metadata["recovery_questionnaire"]["questions"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("phase", ["primary", "tool_selection"])
+async def test_model_connection_failure_streams_recovery_before_suspension(phase):
+    from sagents.v2.tool.plugins.selection_recent import RecentToolSelectionPolicy
+
+    failure = RuntimeErrorInfo(
+        code="model.provider_transient",
+        category=ErrorCategory.PROVIDER_TRANSIENT,
+        message="model endpoint unreachable",
+        retryable=True,
+        safe_to_resume=True,
+    )
+
+    class Selection(RecentToolSelectionPolicy):
+        async def prepare(self, context):
+            if phase == "tool_selection":
+                raise SageV2Error(failure)
+            await super().prepare(context)
+
+    runtime = ephemeral_runtime()
+    model = ScriptedModelProvider((ScriptedModelStep(events=(), error=failure),))
+    agent = SAgent(
+        runtime=runtime,
+        driver_factory=lambda run_id: AgentLoopEngine(
+            runtime=runtime,
+            model=model,
+            tool_catalog=InMemoryToolCatalog(()),
+            tool_executor=InMemoryToolExecutor({}, {}),
+            tool_selection_policy=Selection(),
+        ),
+    )
+    stream = await agent.run_stream(command(), CONTEXT)
+
+    async def collect():
+        return [event async for event in stream.events]
+
+    events = await asyncio.wait_for(collect(), timeout=2)
+    final = await stream.wait()
+    assert final.state == RunState.SUSPENDED
+    assert events[-1].type == "run.suspended"
+    interaction = next(
+        event for event in events if event.type == "interaction.requested"
+    )
+    assert interaction.data.payload["reason_code"] == failure.code
+    assert interaction.data.payload["questions"]
+    assert interaction.data.allowed_decisions == ("retry", "change_direction", "cancel")
+    assert not any(event.type == "run.completed" for event in events)
+    assert len(model.requests) == (1 if phase == "primary" else 0)
+    replay = await runtime.session_store.read_events(final.run_id)
+    assert any(event.event_id == interaction.event_id for event in replay)
+    await agent.close()
+
+
+@pytest.mark.asyncio
+async def test_factory_failure_survives_filesystem_store_reopen(tmp_path):
+    from sagents.v2.runtime.kernel import HarnessRuntime
+    from sagents.v2.runtime.session.plugins.filesystem import FilesystemSessionStore
+
+    store = FilesystemSessionStore(tmp_path / "sessions")
+    runtime = HarnessRuntime(store)
+
+    def factory(run_id):
+        raise SageV2Error(
+            RuntimeErrorInfo(
+                code="model.provider_permanent",
+                category=ErrorCategory.PROVIDER_PERMANENT,
+                message="model authorization failed",
+                safe_to_resume=True,
+            )
+        )
+
+    agent = SAgent(runtime=runtime, driver_factory=factory)
+    stream = await agent.run_stream(command(), CONTEXT)
+
+    async def collect():
+        return [event async for event in stream.events]
+
+    events = await asyncio.wait_for(collect(), timeout=2)
+    final = await stream.wait()
+    await agent.close()
+    await store.close()
+    reopened = FilesystemSessionStore(tmp_path / "sessions")
+    try:
+        restored = await reopened.get_run(final.run_id)
+        replay = await reopened.read_events(final.run_id)
+        assert restored.state == RunState.FAILED
+        assert replay[-1].event_id == events[-1].event_id
+        assert replay[-1].data.error.code == "model.provider_permanent"
+        assert replay[-1].data.error.metadata["recovery_questionnaire"]["questions"]
+    finally:
+        await reopened.close()

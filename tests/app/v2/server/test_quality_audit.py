@@ -36,7 +36,7 @@ async def _attach_without_host_sandbox(*args, **kwargs):
     async def close():
         pass
 
-    runtime = SimpleNamespace(sandbox=object(), close=close)
+    runtime = SimpleNamespace(sandbox=object(), close=close, artifact_store=None)
     return EphemeralToolPlugin(), runtime, None
 
 

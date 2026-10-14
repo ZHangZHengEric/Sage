@@ -3653,15 +3653,24 @@ async def test_output_limit_preserves_partial_answer_and_bounded_continuation(
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("decision", ["approve_once", "deny"])
-async def test_image_followup_survives_approval_and_engine_restart(decision):
+async def test_image_followup_survives_approval_and_engine_restart(decision, tmp_path):
+    from sagents.v2.runtime.artifact import FilesystemArtifactStore
+    from sagents.v2.runtime.artifact.images import snapshot_image
+    store = FilesystemArtifactStore(tmp_path / "artifacts")
+    uri = await snapshot_image(store, b"snapshot-image")
+
     async def image_handler(call, context):
         result = await tool_handler(call, context)
         return result.model_copy(update={"metadata": {"followup_user_message": {
             "content": [
                 {"kind": "text", "text": "Inspect frame"},
-                {"kind": "image", "uri": "data:image/png;base64,AAAA", "mime_type": "image/png"},
+                {"kind": "image", "uri": uri, "mime_type": "image/jpeg"},
             ],
-            "metadata": {"tool_source": "analyze_image", "tool_context": True},
+            "metadata": {
+                "tool_source": "analyze_image",
+                "tool_context": True,
+                "image_path": "/workspace/frame.png",
+            },
         }}})
 
     calls = (tool_call("read_value"), ModelToolCall(
@@ -3674,6 +3683,7 @@ async def test_image_followup_survives_approval_and_engine_restart(decision):
     runtime, handle, loop, executor = await setup_loop(model, handlers={
         "read_value": image_handler, "write_value": tool_handler,
     })
+    loop.context_assembler.artifact_store = store
     run = await loop.execute(handle.run_id, CONTEXT)
     assert run.state == RunState.SUSPENDED
     suspension, interaction = await _pending_interaction(runtime, run)
@@ -3681,13 +3691,17 @@ async def test_image_followup_survives_approval_and_engine_restart(decision):
         _approval_reply(run.run_id, run, suspension, interaction, decision, "image:approval"), CONTEXT,
     )
     loop = AgentLoopEngine(runtime=runtime, model=model,
-        tool_catalog=InMemoryToolCatalog((READ_TOOL, WRITE_TOOL)), tool_executor=executor)
+        tool_catalog=InMemoryToolCatalog((READ_TOOL, WRITE_TOOL)), tool_executor=executor,
+        context_assembler=DefaultContextAssembler(
+            history_reader=runtime.session_store,
+            artifact_store=FilesystemArtifactStore(tmp_path / "artifacts"),
+        ))
     run = await loop.resume(run.run_id, CONTEXT)
     assert run.state == RunState.COMPLETED
     messages = tuple(m for m in model.requests[-1].messages if m.role != "system")
     assert [m.role for m in messages] == ["user", "assistant", "tool", "tool", "user"]
     assert [m.tool_call_id for m in messages if m.role == "tool"] == ["call_1", "call_2"]
-    assert messages[-1].content[-1].uri == "data:image/png;base64,AAAA"
+    assert messages[-1].content[-1].uri.startswith("data:image/jpeg;base64,")
     assert len([call for call in executor.calls if call.tool_call_id == "call_1"]) == 1
 
     command = await runtime.session_store.get_start_command(run.run_id)
@@ -3698,7 +3712,11 @@ async def test_image_followup_survives_approval_and_engine_restart(decision):
     assert [message.role for message in replay[batch:batch + 4]] == [
         "assistant", "tool", "tool", "user",
     ]
-    assert replay[batch + 3].content[-1].uri == "data:image/png;base64,AAAA"
+    assert replay[batch + 3].content[-1].uri == uri
+    assert all(
+        not str(getattr(block, "uri", "")).startswith("data:")
+        for block in replay[batch + 3].content
+    )
 
 
 @pytest.mark.asyncio
@@ -3859,3 +3877,112 @@ async def test_output_self_check_numeric_repair_reaches_author_and_completes():
         assert len(model.requests) == 2
     finally:
         await parser.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "phase", ["tool_selection", "memory_recall", "request_preparation"]
+)
+@pytest.mark.parametrize("typed", [True, False])
+async def test_pre_model_failure_requests_recovery_and_retry_completes(phase, typed):
+    failure = RuntimeErrorInfo(
+        code="model.provider_transient",
+        category=ErrorCategory.PROVIDER_TRANSIENT,
+        message="model endpoint unreachable",
+        retryable=True,
+        safe_to_resume=True,
+    )
+    should_fail = True
+
+    def fail():
+        if should_fail:
+            raise SageV2Error(failure) if typed else ConnectionError(failure.message)
+
+    class Selection(RecentToolSelectionPolicy):
+        async def prepare(self, context):
+            if phase == "tool_selection":
+                fail()
+            await super().prepare(context)
+
+    class Recall:
+        async def generate(self, user_input, *, run_id):
+            fail()
+            return "hello"
+
+    model = ScriptedModelProvider((ScriptedModelStep(events=(completed("hello"),)),))
+    runtime, handle, loop, executor = await setup_loop(
+        model,
+        tool_selection_policy=Selection(),
+        automatic_memory_recall=phase == "memory_recall",
+        memory_recall_query_generator=Recall(),
+    )
+    original_prepare = loop.step_request_builder.prepare
+
+    async def prepare(**kwargs):
+        fail()
+        return await original_prepare(**kwargs)
+
+    if phase == "request_preparation":
+        loop.step_request_builder.prepare = prepare
+    suspended = await loop.execute(handle.run_id, CONTEXT)
+    assert suspended.state == RunState.SUSPENDED
+    events = await runtime.session_store.read_events(handle.run_id)
+    assert events[-1].type == "run.suspended"
+    assert any(event.type == "interaction.requested" for event in events)
+    assert not any(event.type in {"run.completed", "run.failed"} for event in events)
+    assert model.requests == []
+    assert executor.calls == []
+    suspension = await runtime.session_store.get_suspension(suspended.suspension_id)
+    interaction = await runtime.session_store.get_interaction(suspension.interaction_id)
+    assert interaction.payload["questions"]
+    assert interaction.payload["error"]["code"] == (
+        failure.code
+        if typed
+        else "loop.request_preparation_failed"
+        if phase == "request_preparation"
+        else "loop.preparation_failed"
+    )
+    assert interaction.payload["resumable"] is True
+    assert interaction.allowed_decisions == ("retry", "change_direction", "cancel")
+    should_fail = False
+    await runtime.reply_interaction(
+        ReplyInteraction(
+            run_id=handle.run_id,
+            suspension_id=suspension.suspension_id,
+            interaction_id=interaction.interaction_id,
+            expected_revision=suspended.revision,
+            expected_suspension_revision=suspension.expected_revision,
+            expected_interaction_revision=interaction.expected_revision,
+            decision="retry",
+            idempotency_key="retry_preparation",
+        ),
+        CONTEXT,
+    )
+    result = await loop.resume(handle.run_id, CONTEXT)
+    assert result.state == RunState.COMPLETED
+    assert len(model.requests) == 1
+
+
+@pytest.mark.asyncio
+async def test_nonresumable_request_preparation_failure_emits_terminal_questionnaire():
+    runtime, handle, loop, _ = await setup_loop(ScriptedModelProvider(()))
+
+    async def prepare(**kwargs):
+        raise SageV2Error(
+            RuntimeErrorInfo(
+                code="context.summarizer.source_too_large",
+                category=ErrorCategory.VALIDATION,
+                message="summary source exceeds budget",
+                safe_to_resume=False,
+            )
+        )
+
+    loop.step_request_builder.prepare = prepare
+    result = await loop.execute(handle.run_id, CONTEXT)
+    events = await runtime.session_store.read_events(handle.run_id)
+    assert result.state == RunState.FAILED
+    assert events[-1].type == "run.failed"
+    assert (
+        events[-1].data.error.metadata["recovery_questionnaire"]["resumable"] is False
+    )
+    assert events[-1].data.error.metadata["recovery_questionnaire"]["questions"]
