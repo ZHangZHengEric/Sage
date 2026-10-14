@@ -1,94 +1,66 @@
-"""Desktop completion gate backed by the same parser used for publication."""
+"""OpenUI adapter for the shared output self-check policy."""
 
-from sagents.v2.agent.policy.continuation import (
-    ContinuationAction,
-    ContinuationDecision,
-)
+import asyncio
+
+from sagents.v2.agent.policy.output_self_check import OutputCheck
 from sagents.v2.contracts.conversation import is_user_request
 from .openui import openui_blocks
+from .openui_checks import probe_tree
 
 
-class OpenUiCompletionGate:
-    def __init__(self, delegate, parser):
-        self.delegate = delegate
+class OpenUiOutputChecker:
+    def __init__(self, parser):
         self.parser = parser
 
-    async def decide(self, context):
-        decision = await self.delegate.decide(context)
-        if (
-            decision.action
-            not in {
-                ContinuationAction.COMPLETE_RUN,
-                ContinuationAction.COMPLETE_TURN,
-                ContinuationAction.CONTINUE_STEP,
-            }
-            and decision.reason_code != "judge.plain_text_no_progress"
-            or context.response.tool_calls
-        ):
-            return decision
+    async def check(self, context):
+        # Only the latest assistant body is a validation target. History is
+        # consulted solely for the bounded repair counter, never for source.
         blocks = openui_blocks(context.response.text)
         if not blocks:
-            # A later prose-only "done" must not bypass a failed UI from this turn.
-            for message in reversed(context.ledger):
-                if is_user_request(message):
-                    break
-                if message.role != "assistant":
-                    continue
-                text = "\n".join(
-                    getattr(block, "text", "") for block in message.content
-                )
-                blocks = openui_blocks(text)
-                if blocks:
-                    break
-        if not blocks:
-            return decision
-        errors = []
-        for index, block in enumerate(blocks):
-            try:
-                if not block["closed"]:
-                    raise ValueError("OpenUI fence was not closed")
-                await self.parser.parse(
-                    block["code"],
-                    complete=True,
-                    stream_id=f"completion:{context.run_id}:{context.step_number}:{index}",
-                )
-            except (ValueError, RuntimeError) as exc:
-                errors.append(f"Block {index + 1}: {str(exc)[:1200]}")
-        if not errors:
-            if decision.reason_code == "judge.plain_text_no_progress" and openui_blocks(
-                context.response.text
-            ):
-                # A validated replacement is progress without a tool call. Still
-                # ask the normal judge to assess whether it fulfills the request.
-                return await self.delegate.decide(
-                    context.model_copy(update={"validated_output_progress": True})
-                )
-            return decision
-        # Count UI-bearing responses from this user turn in the persisted ledger.
-        # Runtime continuation guidance is inference-only and cannot be a counter.
-        generations = 0
+            return None
+        current_turn = []
         for message in reversed(context.ledger):
+            text = "\n".join(getattr(block, "text", "") for block in message.content)
             if is_user_request(message):
                 break
-            if message.role == "assistant" and any(
-                openui_blocks(getattr(block, "text", "")) for block in message.content
-            ):
-                generations += 1
-        exhausted = generations >= 3 or context.step_number >= context.max_steps
-        return ContinuationDecision(
-            action=ContinuationAction.FAIL
-            if exhausted
-            else ContinuationAction.CONTINUE_STEP,
-            reason_code="openui.validation_failed"
-            if exhausted
-            else "openui.validation_retry",
-            reason="[openui.validation] Generated UI failed the actual parser/renderer contract. "
-            + "\n".join(errors)
-            + (
-                " Repair budget exhausted."
-                if exhausted
-                else "\nCorrect the reported constraints and output one complete replacement OpenUI block. "
-                "Do not repeat earlier versions or use tools merely to render it."
+            if message.role == "assistant":
+                current_turn.append(text)
+        # Keep parser IPC serialized inside OpenUiParser; overlap each completed
+        # block's CPU probes with other blocks rather than blocking the event loop.
+        semaphore = asyncio.Semaphore(4)
+
+        async def check_block(index, block):
+            async with semaphore:
+                try:
+                    if not block["closed"]:
+                        raise ValueError("OpenUI fence was not closed")
+                    tree = await self.parser.parse(
+                        block["code"],
+                        complete=True,
+                        stream_id=f"completion:{context.run_id}:{context.step_number}:{index}",
+                    )
+                    failures, probes = await asyncio.to_thread(probe_tree, tree)
+                    return (
+                        [f"Block {index + 1}: {failure}" for failure in failures],
+                        probes,
+                    )
+                except (ValueError, RuntimeError) as exc:
+                    return ([f"Block {index + 1}: {str(exc)[:1200]}"], {})
+
+        async with asyncio.TaskGroup() as group:
+            tasks = [
+                group.create_task(check_block(index, block))
+                for index, block in enumerate(blocks)
+            ]
+        errors = [error for task in tasks for error in task.result()[0]]
+        evidence = [task.result()[1] for task in tasks]
+        return OutputCheck(
+            errors=errors,
+            current_output=True,
+            evidence={"outputs": evidence},
+            generations=max(1, sum(bool(openui_blocks(text)) for text in current_turn)),
+            repair_instruction=(
+                "Correct the reported constraints and output one complete replacement OpenUI block. "
+                "Preserve the user's requirements. Do not repeat earlier versions or use tools merely to render it."
             ),
-            usage=decision.usage,
         )

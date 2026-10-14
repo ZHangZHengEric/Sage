@@ -34,3 +34,7 @@ Input fields do not require a submission button. Omit submission controls when t
 Use a Deck root for presentations. Keep content concise, organize it into slides within the generated limits, and choose supported layouts and accents to express the hierarchy. Native controls provide navigation, presentation mode and editable PPTX export after validation; these are host capabilities rather than Agent tool workflows.
 
 Upstream: https://github.com/thesysdev/openui (MIT). Sage uses the official parser with its own native renderer and a documented component subset.
+
+## Output self-check
+
+Before finishing, verify that formulas, units and dependencies express the user's request, that editable inputs update every dependent result locally, and that declared input ranges keep those results meaningful. Protocol validity alone does not establish correctness. The host runs deterministic protocol validation and bounded native arithmetic probes through the output self-check pipeline. When it returns concrete defects, correct their underlying cause and emit one complete replacement using the same contract. Do not hide a defect with prose, a frozen result, or an unnecessary model-submission action. Self-check makes no model calls. Passing these bounded checks does not prove that every business assumption or formula matches the user's intent.
