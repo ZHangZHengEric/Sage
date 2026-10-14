@@ -41,6 +41,7 @@ function emptyForm() {
     instructions: 'Be helpful, concise, and explicit about uncertainty.',
     model_id: '',
     tools: [],
+    tool_approval: { default: 'auto_approve', tools: {} },
     execution_policy: { shell: 'sandboxed', on_approval_required: 'suspend', approval_timeout_seconds: 86400 },
   }
 }
@@ -98,6 +99,7 @@ async function openAgent(item, readonly = true) {
     form.value = {
       name: detail.name, description: detail.description || '', instructions: detail.instructions || '',
       model_id: detail.model_id || '', tools: [...(detail.tools || [])],
+      tool_approval: detail.tool_approval ? structuredClone(detail.tool_approval) : null,
       execution_policy: { ...(detail.execution_policy || emptyForm().execution_policy) },
     }
     selectedSkills.value = assigned.map(skill => skill.name)
@@ -162,7 +164,7 @@ onMounted(async () => {
     </template>
     <AgentEditor v-else v-model:form="form" v-model:selected-skills="selectedSkills"
       :agent-id="editing" :readonly="viewOnly" :can-edit="!isForeign(selectedAgent)" :busy="pending"
-      :error="error" :message="savedMessage" :models="editorModels" :tools="officialTools"
+      :error="error" :message="savedMessage" :models="editorModels" :tools="officialTools.filter(tool => tool.source !== 'mcp')" :approval-tools="officialTools"
       :skills="editorSkills" :external-tools="editorExternalTools"
       @save="save" @edit="enableEdit" @close="drawerOpen = false" />
   </section>

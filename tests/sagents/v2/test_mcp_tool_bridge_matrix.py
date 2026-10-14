@@ -73,7 +73,8 @@ async def test_mcp_bridge_namespaces_discovers_executes_and_deduplicates():
     tools = await bridge.list_tools(run_id="run_1")
 
     assert [value.name for value in tools] == ["mcp_drive_search_files"]
-    assert tools[0].requires_approval is True
+    assert tools[0].requires_approval is False
+    assert tools[0].approval_key == "mcp:drive:search%20files"
     assert tools[0].idempotency_strategy.value == "reconcile_only"
     assert tools[0].resume_strategy.value == "manual_resolution"
     call = ToolCall(

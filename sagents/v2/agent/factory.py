@@ -331,7 +331,9 @@ class AgentCompositionFactory:
             tool_executor=tool_executor,
             self_configuration=self_configuration,
             skill_loader=skill_loader,
-            tool_policy=tool_policy,
+            tool_policy=(tool_policy or DefaultToolPolicy()).with_approval_config(
+                agent.tool_approval
+            ),
             approval_memory=approval_memory,
             continuation_policy=selected_continuation_policy,
             continuation_signal_provider=continuation_signal_provider,

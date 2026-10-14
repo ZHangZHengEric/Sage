@@ -1,5 +1,6 @@
 """Management tools use the package authorizer; other tools retain normal approvals."""
 
+from sagents.v2.agent.policy.approval_config import ToolApprovalConfig
 from sagents.v2.agent.policy import (
     DefaultToolPolicy,
     ToolOperationAssessment,
@@ -52,8 +53,14 @@ def server_tool_policy(management, *, execution_policy=None, current_policy=None
                 effective = intersect_policies(configured, live)
             # Rebuild with the complete effective configuration in the audit hash.
             policy = server_tool_policy(management, execution_policy=effective,
-                machine_invocation=machine_invocation) if effective != configured else self
+                machine_invocation=machine_invocation).with_approval_config(self.tool_approval) if effective != configured else self
             decision = await DefaultToolPolicy.decide(policy, context)
+            # Explicit shell grants requiring confirmation remain a ceiling,
+            # even when the Agent prefers automatic tool approval.
+            if (context.definition.name == "execute_shell_command" and effective.shell == "ask"
+                    and decision.action == ToolPolicyAction.ALLOW):
+                decision = await DefaultToolPolicy.decide(
+                    policy.with_approval_config(ToolApprovalConfig(default="ask")), context)
             if decision.action == ToolPolicyAction.REQUIRE_INTERACTION and effective.on_approval_required == "deny":
                 return decision.model_copy(update={"action": ToolPolicyAction.DENY,
                     "reason": "This execution grant rejects operations requiring approval",

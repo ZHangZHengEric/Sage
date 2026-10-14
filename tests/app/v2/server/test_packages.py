@@ -89,6 +89,7 @@ def settled(client, headers, operation):
 def test_flow_feedback_and_human_only_approval(client, kind):
     headers = {"Authorization": f"Bearer {register_and_login(client)}"}
     bundle = client.get("/api/agent-packages/template", headers=headers).json()["data"]
+    bundle["manifest"]["agents"]["assistant"]["tool_approval"] = {"default": "auto_approve"}
     bundle["manifest"]["agents"]["assistant"]["entrypoint"] = {
         "type": "flow",
         "flow": "main",

@@ -72,3 +72,12 @@ async def test_agent_json_is_not_part_of_catalog_schema(store):
         assert (await session.scalar(select(CatalogRow))).default_agent_id.startswith(
             "agent_"
         )
+
+
+async def test_approval_preferences_survive_database_reload(store):
+    from sagents.v2.agent.policy.approval_config import ToolApprovalConfig
+    rules = ToolApprovalConfig(default="auto_approve", tools={"file_write": "ask", "mcp:drive:write": "inherit"})
+    agent = AgentRecord(id=new_id("agent"), name="Configured", tool_approval=rules)
+    await store.create_agent("alice", agent)
+    reloaded = await DatabaseCatalogStore(store.database).get("alice")
+    assert next(a for a in reloaded.agents if a.id == agent.id).tool_approval == rules

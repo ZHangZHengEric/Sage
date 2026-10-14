@@ -116,6 +116,7 @@ class ServerPackageQueries:
                 tools=list(
                     resolve_agent_tools(agent.tools, has_skills=bool(agent.skills))
                 ),
+                tool_approval=agent.tool_approval.model_dump() if agent.tool_approval else None,
                 skills=list(
                     await self.skill_catalog.bound_names(
                         context.actor.principal_id, agent_id

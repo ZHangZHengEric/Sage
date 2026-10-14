@@ -15,6 +15,10 @@ _EXPORTS = {
     "OutputSelfCheckPolicy": (_SELF_CHECK, "OutputSelfCheckPolicy"),
     "ApprovalMatcher": (_TOOL, "ApprovalMatcher"),
     "ApprovalMemory": (_APPROVAL_MEMORY, "ApprovalMemory"),
+    "ToolApprovalConfig": (
+        "sagents.v2.agent.policy.approval_config",
+        "ToolApprovalConfig",
+    ),
     "ApprovalStrategy": (_TOOL, "ApprovalStrategy"),
     "BudgetRule": (_CONTINUATION, "BudgetRule"),
     "CompositeContinuationPolicy": (_CONTINUATION, "CompositeContinuationPolicy"),
