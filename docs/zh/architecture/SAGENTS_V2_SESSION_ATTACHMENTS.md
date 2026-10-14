@@ -1,3 +1,13 @@
+---
+layout: default
+title: Session 附件与历史总结
+parent: 架构
+lang: zh
+ref: v2-detail-SAGENTS_V2_SESSION_ATTACHMENTS
+---
+
+{% include lang_switcher.html %}
+
 # Session 附件与历史总结
 
 `analyze_image` 在沙箱内读取并标准化图片，把 JPEG 快照写入当前 Run 所属的 SessionStore。消息账本保存 `sage-image:<sha256>` 引用；模型推理时从附件快照加载图片，总结时只保留附件标记。原图片路径变化不会改变已保存的快照。旧消息内的 data URL 仍可读取，总结投影会移除其中的图片字节。
