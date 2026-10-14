@@ -701,6 +701,11 @@ class _PostgresSessionState(SessionStoreCoordinator):
             await self._ensure_session_loaded(session_id)
             return await super().get_session(session_id)
 
+    async def authorize_session_actor(self, session_id, context):
+        async with self._session_scope(session_id):
+            await self._ensure_session_loaded(session_id)
+            await super().authorize_session_actor(session_id, context)
+
     async def delete_session(self, session_id):
         async with self._session_scope(session_id):
             await self._ensure_session_loaded(session_id)

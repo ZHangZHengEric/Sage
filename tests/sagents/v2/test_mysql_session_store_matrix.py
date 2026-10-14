@@ -30,6 +30,7 @@ from sagents.v2.runtime.session.plugins.mysql import (
     _MysqlSessionState,
     parse_mysql_dsn,
 )
+from sagents.v2.runtime.session.state import SessionStoreCoordinator
 from sagents.v2.testing.plugins.scripted_model import ScriptedModelProvider
 
 
@@ -86,6 +87,32 @@ def test_mysql_store_requires_explicit_dsn():
         MysqlSessionStore("postgresql://unused/unused")
     with pytest.raises(ValueError, match="table_prefix"):
         MysqlSessionStore("mysql://root@127.0.0.1/sage", table_prefix="Bad-Prefix")
+
+
+@pytest.mark.asyncio
+async def test_mysql_authorization_loads_persisted_session_before_owner_check():
+    source = SessionStoreCoordinator()
+    created = await source.create_run(command(), CONTEXT)
+    session_id = created.handle.session_id
+    stored_state = source._dump_state_locked()
+
+    reopened = MysqlSessionStore("mysql://unused/test")
+    reopened._coordinator._ensure_ready = AsyncMock()
+    reopened._coordinator._fetch_session = AsyncMock(return_value=stored_state)
+
+    assert session_id not in reopened._coordinator._sessions
+    await reopened.authorize_session_actor(session_id, CONTEXT)
+    assert session_id in reopened._coordinator._sessions
+    reopened._coordinator._fetch_session.assert_awaited_once_with(session_id)
+
+    other = RequestContext(
+        actor=ActorRef(principal_id="other_user", principal_type=PrincipalType.USER,
+                       tenant_id="tenant_test"),
+        trace=TraceContext(correlation_id="other_correlation"),
+    )
+    with pytest.raises(SageV2Error) as denied:
+        await reopened.authorize_session_actor(session_id, other)
+    assert denied.value.info.code == "session.actor_not_authorized"
 
 
 @pytest.mark.asyncio
@@ -400,6 +427,7 @@ async def test_restart_round_trip_and_idempotent_start(mysql_dsn):
     await first.close()
 
     second = MysqlSessionStore(mysql_dsn, table_prefix=prefix)
+    await second.authorize_session_actor(created.handle.session_id, CONTEXT)
     run = await second.get_run(created.handle.run_id)
     session = await second.get_session(created.handle.session_id)
     events = await second.read_events(created.handle.run_id)
