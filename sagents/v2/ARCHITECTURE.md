@@ -238,8 +238,17 @@ code constructs `HarnessRuntime`. This keeps Agent and Flow orchestration from
 depending on one in-process lifecycle implementation.
 
 Durable Session state does not imply durable execution. The default Scheduler,
-JobRuntime, artifact store, and package registry are single-process/ephemeral
-reference implementations. The optional filesystem Scheduler persists pending
+JobRuntime and package registry are single-process/ephemeral reference
+implementations. With `with_defaults(session_root=...)`, the ArtifactStore
+defaults to binary file snapshots under `session_root/artifacts`; hosts without a
+storage root may explicitly use the ephemeral store. The filesystem store supports
+processes sharing one local directory, not independent hosts. `analyze_image` reads through
+the sandbox, normalizes once, and stores an immutable content-addressed snapshot.
+The ledger carries `sage-image:<sha256>` and only inference projections contain
+base64. Tenant-scoped stores isolate references; missing or corrupt attachments
+fail explicitly. Source file edits, deletion, and sandbox release do not change
+the snapshot. Remote image URLs and legacy inline messages retain their existing
+behavior. The optional filesystem Scheduler persists pending
 work, leases, and fencing counters for single-host restart recovery. Dispatcher
 recovery executes only queued/resuming work; an uncheckpointed running Run is
 failed as `execution.worker_restarted` instead of being replayed. This is not a

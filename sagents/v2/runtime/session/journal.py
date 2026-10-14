@@ -25,6 +25,7 @@ from sagents.v2.contracts.interactions import InteractionRequest, InteractionRes
 from sagents.v2.contracts.principals import ActorRef, PrincipalType, RequestContext
 from sagents.v2.contracts.session_commit import SessionCommitProposal
 from sagents.v2.runtime.execution.resources import ExecutionResourceRecord
+from sagents.v2.runtime.artifact.contracts import ArtifactRef as StoredAttachmentRef
 
 
 FILESYSTEM_SESSION_STORE_FORMAT_V1: Literal["sage.filesystem-session-store/v1"] = (
@@ -53,6 +54,7 @@ class SessionRowSnapshot(StrictModel):
     parent_session_id: str | None = None
     owner: ActorRef | None = None
     revision_sequences: dict[str, int]
+    attachments: dict[str, StoredAttachmentRef] = {}
 
 
 class RunRowSnapshot(StrictModel):

@@ -33,6 +33,7 @@ from sagents.v2.contracts.jobs import (
     JobState,
 )
 from sagents.v2.runtime.execution.jobs import InMemoryJobRuntime, JobRuntime
+from sagents.v2.runtime.artifact.contracts import ArtifactStore
 from sagents.v2.runtime.execution.sandbox import (
     FileOperation,
     NetworkRequest,
@@ -152,6 +153,7 @@ class OfficialToolRuntime:
         tool_selection_policy: ToolSelectionPolicy | None = None,
         job_runtime: JobRuntime | None = None,
         goal_state_service: GoalStateService | None = None,
+        artifact_store: ArtifactStore | None = None,
     ) -> None:
         self.sandbox = sandbox
         self.grant_issuer = grant_issuer
@@ -162,6 +164,7 @@ class OfficialToolRuntime:
         self.tool_catalog_resolver = tool_catalog_resolver
         self.tool_selection_policy = tool_selection_policy
         self.goal_state_service = goal_state_service
+        self.artifact_store = artifact_store
         self._owns_job_runtime = job_runtime is None
         self._shell_job_runner = self._run_shell_job
         self._registered_shell_owner: str | None = None

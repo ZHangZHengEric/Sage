@@ -18,6 +18,9 @@ from dataclasses import dataclass, field, replace
 from datetime import datetime
 from typing import Any
 
+from sagents.v2.runtime.session.attachments import SessionAttachmentMixin
+from sagents.v2.runtime.artifact.contracts import ArtifactRef as StoredAttachmentRef
+
 from sagents.v2.contracts.checkpoint import (
     Checkpoint,
     Suspension,
@@ -111,6 +114,7 @@ class _SessionRow:
     active_serial_run_id: str | None = None
     parent_session_id: str | None = None
     owner: ActorRef | None = None
+    attachments: dict[str, StoredAttachmentRef] = field(default_factory=dict)
     # Maps optimistic Session revisions to the last durable event visible at
     # that revision. This turns a CAS revision into a stable replay boundary for
     # snapshot and fork context construction.
@@ -183,6 +187,7 @@ class _SessionUndo:
     proposal_results: dict[tuple[str, str], SessionCommitProposal]
     proposal_digests: dict[tuple[str, str], str]
     topology_revision: int
+    attachment_payloads: dict[str, bytes] = field(default_factory=dict)
 
 
 @dataclass
@@ -191,7 +196,7 @@ class _SessionOperation:
     cancellation: asyncio.CancelledError | None = None
 
 
-class SessionStoreCoordinator:
+class SessionStoreCoordinator(SessionAttachmentMixin):
     """Atomic reference state machine for the SessionStore contract.
 
     The default persistence hooks retain process-local state. Concrete adapters
@@ -200,6 +205,10 @@ class SessionStoreCoordinator:
     """
 
     api_version = "2"
+
+    @staticmethod
+    def _backup_probe():
+        return SessionStoreCoordinator()
 
     @property
     def capabilities(self) -> dict[str, bool | str]:
@@ -212,6 +221,7 @@ class SessionStoreCoordinator:
             "supports_bounded_subscription": True,
             "supports_snapshot_publication": True,
             "supports_actor_authorization": True,
+            "supports_session_attachments": True,
             "multi_process_writes": False,
             "cross_process_subscribe": False,
             "transactional_outbox": False,
@@ -239,6 +249,7 @@ class SessionStoreCoordinator:
         ] = WeakValueDictionary()
         self._topology_revision = 0
         self._sessions: dict[str, _SessionRow] = {}
+        self._attachment_payloads: dict[tuple[str, str], bytes] = {}
         self._runs: dict[str, _RunRow] = {}
         self._run_events: dict[str, list[RuntimeEvent]] = {}
         self._session_events: dict[str, list[RuntimeEvent]] = {}
@@ -458,7 +469,9 @@ class SessionStoreCoordinator:
             session_id=session_id,
             existed=True,
             session=replace(
-                session, revision_sequences=dict(session.revision_sequences)
+                session,
+                revision_sequences=dict(session.revision_sequences),
+                attachments=dict(session.attachments),
             ),
             runs={run_id: replace(self._runs[run_id]) for run_id in run_ids},
             run_event_lens={
@@ -532,12 +545,20 @@ class SessionStoreCoordinator:
                 key: self._session_commit_command_digests[key] for key in proposal_keys
             },
             topology_revision=self._topology_revision,
+            attachment_payloads=dict(self._pending_attachments(session_id)),
         )
 
     def _restore_session_undos_locked(self, undos: dict[str, _SessionUndo]) -> None:
         for session_id in undos:
             self._drop_session_objects_locked(session_id)
+            self._forget_attachment_bytes(session_id)
         for undo in undos.values():
+            self._attachment_payloads.update(
+                {
+                    (undo.session_id, key): value
+                    for key, value in undo.attachment_payloads.items()
+                }
+            )
             if not undo.existed:
                 continue
             assert undo.session is not None
@@ -1005,6 +1026,10 @@ class SessionStoreCoordinator:
             "updated_at": session.updated_at.isoformat(),
             "active_serial_run_id": session.active_serial_run_id,
             "parent_session_id": session.parent_session_id,
+            "attachments": {
+                key: value.model_dump(mode="json")
+                for key, value in session.attachments.items()
+            },
             "owner": (
                 session.owner.model_dump(mode="json")
                 if session.owner is not None
@@ -1101,7 +1126,13 @@ class SessionStoreCoordinator:
         combined["command_results"] = [
             row for row in combined["command_results"] if row["run_id"] not in run_ids
         ]
-        for key in ("checkpoints", "suspensions", "interactions"):
+        for key in (
+            "checkpoints",
+            "suspensions",
+            "interactions",
+            "execution_resources",
+            "execution_resource_command_results",
+        ):
             combined[key] = [
                 row for row in combined[key] if row["run_id"] not in run_ids
             ]
@@ -1131,6 +1162,8 @@ class SessionStoreCoordinator:
                 "checkpoints",
                 "suspensions",
                 "interactions",
+                "execution_resources",
+                "execution_resource_command_results",
                 "interaction_resolutions",
                 "session_commit_proposals",
                 "session_commit_command_results",
@@ -1266,6 +1299,10 @@ class SessionStoreCoordinator:
                     ),
                 )
                 self._sessions[session_id] = session
+                if parent_session_id is not None:
+                    await self._inherit_attachments_locked(
+                        parent_session_id, session_id
+                    )
             else:
                 self._authorize_session_actor_locked(session_id, context)
 
@@ -2388,6 +2425,8 @@ class SessionStoreCoordinator:
             await self._settle_storage(
                 self._delete_storage_locked(session_id, frozenset(session_ids))
             )
+            for removed_session_id in session_ids:
+                self._forget_attachment_bytes(removed_session_id)
 
     async def list_session_runs(self, session_id: str) -> tuple[RunSnapshot, ...]:
         async with self._session_read(session_id):
@@ -2402,7 +2441,9 @@ class SessionStoreCoordinator:
     async def has_nonterminal_runs(self) -> bool:
         """Optional host reclamation probe, including suspended and child Runs."""
         async with self._lock:
-            return any(row.state not in TERMINAL_RUN_STATES for row in self._runs.values())
+            return any(
+                row.state not in TERMINAL_RUN_STATES for row in self._runs.values()
+            )
 
     async def list_dispatchable_runs(self) -> tuple[DispatchableRun, ...]:
         """Return root execution intents whose Scheduler work can be rebuilt."""
@@ -3184,6 +3225,10 @@ class SessionStoreCoordinator:
                     "updated_at": row.updated_at.isoformat(),
                     "active_serial_run_id": row.active_serial_run_id,
                     "parent_session_id": row.parent_session_id,
+                    "attachments": {
+                        key: value.model_dump(mode="json")
+                        for key, value in row.attachments.items()
+                    },
                     "owner": (
                         row.owner.model_dump(mode="json")
                         if row.owner is not None
@@ -3347,6 +3392,10 @@ class SessionStoreCoordinator:
                     "updated_at": session.updated_at.isoformat(),
                     "active_serial_run_id": session.active_serial_run_id,
                     "parent_session_id": session.parent_session_id,
+                    "attachments": {
+                        key: value.model_dump(mode="json")
+                        for key, value in session.attachments.items()
+                    },
                     "owner": (
                         session.owner.model_dump(mode="json")
                         if session.owner is not None
@@ -3515,6 +3564,10 @@ class SessionStoreCoordinator:
                 updated_at=datetime.fromisoformat(value["updated_at"]),
                 active_serial_run_id=value.get("active_serial_run_id"),
                 parent_session_id=value.get("parent_session_id"),
+                attachments={
+                    key: StoredAttachmentRef.model_validate(ref)
+                    for key, ref in value.get("attachments", {}).items()
+                },
                 owner=(
                     ActorRef.model_validate(value["owner"])
                     if value.get("owner") is not None
@@ -4098,7 +4151,8 @@ class SessionStoreCoordinator:
         }
         if completed_items and run_id in self._stream_previews:
             self._stream_previews[run_id] = [
-                event for event in self._stream_previews[run_id]
+                event
+                for event in self._stream_previews[run_id]
                 if event.item_id not in completed_items
             ]
         if any(

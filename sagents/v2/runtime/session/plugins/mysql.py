@@ -71,6 +71,7 @@ _SCHEMA_TABLES = (
     "locations",
     "start_idempotency",
     "derived_state",
+    "attachments",
 )
 LOGGER = get_logger(__name__)
 
@@ -362,6 +363,20 @@ class _MysqlSessionState(SessionStoreCoordinator):
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
             """,
             ),
+            (
+                "attachments",
+                f"""
+            CREATE TABLE IF NOT EXISTS {self._table("attachments")} (
+                session_id VARCHAR(128) NOT NULL,
+                artifact_id VARCHAR(128) NOT NULL,
+                payload LONGBLOB NOT NULL,
+                PRIMARY KEY (session_id, artifact_id),
+                CONSTRAINT {self._constraint("attachments_session")}
+                    FOREIGN KEY (session_id) REFERENCES {self._table("sessions")} (session_id)
+                    ON DELETE CASCADE
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+            """,
+            ),
         )
         created: list[str] = []
         async with connection.cursor() as cursor:
@@ -395,9 +410,7 @@ class _MysqlSessionState(SessionStoreCoordinator):
         replaced = mutation["replacements"].pop("run_events", {})
         mutation["map_deletes"].pop("run_events", None)
         run_ids = self._session_run_ids_locked(session_id)
-        event_totals = {
-            run_id: len(self._run_events[run_id]) for run_id in run_ids
-        }
+        event_totals = {run_id: len(self._run_events[run_id]) for run_id in run_ids}
         events = {
             run_id: list(replaced.get(run_id, appended.get(run_id, ())))
             for run_id in run_ids
@@ -490,6 +503,11 @@ class _MysqlSessionState(SessionStoreCoordinator):
                                 "session.revision_conflict",
                                 f"expected session revision {expected_revision} for {session_id}",
                             )
+                    for artifact_id, payload in self._pending_attachments(session_id):
+                        await cursor.execute(
+                            f"INSERT INTO {self._table('attachments')} (session_id, artifact_id, payload) VALUES (%s, %s, %s)",
+                            (session_id, artifact_id, payload),
+                        )
                     next_run_sequences = await self._persist_events(
                         cursor, session_id, events, event_totals=event_totals
                     )
@@ -501,7 +519,7 @@ class _MysqlSessionState(SessionStoreCoordinator):
                     else:
                         await cursor.execute(
                             f"""
-                            INSERT INTO {self._table('session_mutations')}
+                            INSERT INTO {self._table("session_mutations")}
                                 (session_id, revision, mutation)
                             VALUES (%s, %s, CAST(%s AS JSON))
                             """,
@@ -523,13 +541,16 @@ class _MysqlSessionState(SessionStoreCoordinator):
         if failure is not None:
             await self._reload_session_from_storage_locked(session_id)
             raise failure
+        self._forget_attachment_bytes(session_id)
         self._remember_persisted_session(
             session_id,
             new_revision,
             next_run_sequences,
             location_rows,
             start_rows,
-            0 if should_snapshot else self._persisted_mutation_counts.get(session_id, 0) + 1,
+            0
+            if should_snapshot
+            else self._persisted_mutation_counts.get(session_id, 0) + 1,
         )
         LOGGER.debug(
             "session.mysql.commit",
@@ -537,7 +558,9 @@ class _MysqlSessionState(SessionStoreCoordinator):
             session_id=session_id,
             revision=new_revision,
             snapshot=should_snapshot,
-            payload_bytes=len((encoded_compact or encoded_mutation or "").encode("utf-8")),
+            payload_bytes=len(
+                (encoded_compact or encoded_mutation or "").encode("utf-8")
+            ),
             event_count=sum(len(rows) for rows in events.values()),
             duration_ms=round((time.perf_counter() - started_at) * 1000, 2),
         )
@@ -648,8 +671,7 @@ class _MysqlSessionState(SessionStoreCoordinator):
 
     def _start_rows_after_mutation(self, session_id, mutation):
         current = {
-            row[:3]: row
-            for row in self._persisted_start_keys.get(session_id, set())
+            row[:3]: row for row in self._persisted_start_keys.get(session_id, set())
         }
         for tenant_id, principal_type, principal_id, key in mutation["deletes"].get(
             "start_idempotency", ()
@@ -674,7 +696,7 @@ class _MysqlSessionState(SessionStoreCoordinator):
         if removed:
             await cursor.executemany(
                 f"""
-                DELETE FROM {self._table('start_idempotency')}
+                DELETE FROM {self._table("start_idempotency")}
                 WHERE tenant_id = %s AND principal_id = %s AND idempotency_key = %s
                 """,
                 [row[:3] for row in removed],
@@ -721,6 +743,23 @@ class _MysqlSessionState(SessionStoreCoordinator):
                 raise
         for value in deleted_session_ids:
             self._forget_persisted_session(value)
+
+    async def _read_attachment_bytes(self, session_id, artifact_id):
+        if (session_id, artifact_id) in self._attachment_payloads:
+            return self._attachment_payloads[(session_id, artifact_id)]
+        await self._ensure_ready()
+        async with self._writer_connection() as connection:
+            async with connection.cursor() as cursor:
+                await cursor.execute(
+                    f"SELECT payload FROM {self._table('attachments')} WHERE session_id = %s AND artifact_id = %s",
+                    (session_id, artifact_id),
+                )
+                row = await cursor.fetchone()
+        if row is None:
+            raise self._attachment_error(
+                "artifact.not_found", "Session attachment bytes were not found."
+            )
+        return bytes(row[0])
 
     async def get_derived_state(
         self, session_id: str, namespace: str, key: str
@@ -888,17 +927,17 @@ class _MysqlSessionState(SessionStoreCoordinator):
         await self._ensure_resource_loaded("runs", "run_id", run_id)
         return await super().publish_stream_preview(run_id=run_id, **kwargs)
 
-    async def commit_model_stream_batch(
-        self, *, run, drafts, context, idempotency_key
-    ):
+    async def commit_model_stream_batch(self, *, run, drafts, context, idempotency_key):
         """Persist item starts; send model deltas from the in-process buffer."""
 
         started = tuple(
-            draft for draft in drafts
+            draft
+            for draft in drafts
             if draft.type in {"message.started", "reasoning.started"}
         )
         previews = tuple(
-            draft for draft in drafts
+            draft
+            for draft in drafts
             if draft.type in {"message.delta", "reasoning.delta"}
         )
         if started:
@@ -1185,14 +1224,18 @@ class _MysqlSessionState(SessionStoreCoordinator):
     @staticmethod
     def _replay_mutations(compact, mutation_rows, revision, last_sequence):
         try:
-            aggregate = SessionAggregate(SessionAggregateSnapshotV2.model_validate(compact))
+            aggregate = SessionAggregate(
+                SessionAggregateSnapshotV2.model_validate(compact)
+            )
             current_revision = aggregate.revision
             for next_revision, encoded in mutation_rows:
                 if int(next_revision) != current_revision + 1:
                     raise ValueError("non-contiguous Session mutation revisions")
                 delta = dict(_decode_json(encoded))
                 session_rows = delta.get("upserts", {}).get("sessions", ())
-                if len(session_rows) != 1 or int(session_rows[0]["revision"]) != int(next_revision):
+                if len(session_rows) != 1 or int(session_rows[0]["revision"]) != int(
+                    next_revision
+                ):
                     raise ValueError("Session mutation has an invalid head")
                 head = dict(session_rows[0])
                 head["revision_sequences"] = {
@@ -1203,7 +1246,10 @@ class _MysqlSessionState(SessionStoreCoordinator):
                 aggregate = aggregate.apply(SessionStateDeltaMutation(**delta))
                 current_revision = int(next_revision)
             state = aggregate.snapshot.model_dump(mode="json")
-            if current_revision != revision or state["sessions"][0]["last_sequence"] != last_sequence:
+            if (
+                current_revision != revision
+                or state["sessions"][0]["last_sequence"] != last_sequence
+            ):
                 raise ValueError("Session head disagrees with its mutations")
             return state
         except (KeyError, TypeError, ValueError) as exc:

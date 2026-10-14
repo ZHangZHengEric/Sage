@@ -39,6 +39,7 @@ from sagents.v2.contracts.provider_state import make_provider_state, read_provid
 from sagents.v2.model.wire import (
     provider_error,
     stream_incomplete_error,
+    minimum_reasoning_control,
     validate_extra_body,
     wire_json_value,
     wire_value,
@@ -82,6 +83,7 @@ class OpenAICompatibleConfig(StrictModel):
     default_temperature: float | None = None
     default_top_p: float | None = None
     reasoning_effort: str | None = None
+    invocation_strategy: dict[str, Any] = Field(default_factory=dict)
     max_output_tokens_field: Literal["auto", "max_tokens", "max_completion_tokens"] = (
         "auto"
     )
@@ -225,6 +227,33 @@ class OpenAICompatibleModelProvider:
         extra_body = dict(self.config.extra_body)
         if self.config.reasoning_effort is not None:
             extra_body.setdefault("reasoning_effort", self.config.reasoning_effort)
+        if request.reasoning_mode == "minimum":
+            for key in (
+                "reasoning_effort",
+                "thinking",
+                "enable_thinking",
+                "chat_template_kwargs",
+            ):
+                extra_body.pop(key, None)
+            control, effort = minimum_reasoning_control(
+                self.config.invocation_strategy, default_disable="reasoning_effort_none"
+            )
+            controls = {
+                "omit": {},
+                "reasoning_effort_none": {"reasoning_effort": "none"},
+                "thinking_type_disabled": {"thinking": {"type": "disabled"}},
+                "enable_thinking_false": {"enable_thinking": False},
+                "thinking_false": {"thinking": False},
+                "chat_template_enable_thinking_false": {
+                    "chat_template_kwargs": {"enable_thinking": False}
+                },
+            }
+            extra_body.update(controls.get(control, {}))
+            if effort is not None:
+                if control == "chat_template_reasoning_effort":
+                    extra_body["chat_template_kwargs"] = {"reasoning_effort": effort}
+                else:
+                    extra_body["reasoning_effort"] = effort
         extra_body = self._without_rejected_reasoning_controls(extra_body)
         if extra_body:
             kwargs["extra_body"] = extra_body
@@ -386,6 +415,16 @@ class OpenAICompatibleModelProvider:
                         category=ErrorCategory.PROVIDER_PERMANENT,
                         message=f"model returned invalid tool arguments: {exc}",
                         safe_to_resume=True,
+                        metadata={
+                            "provider": self.config.provider_id,
+                            "response_id": response_id,
+                            "finish_reason": finish_reason,
+                            "usage": usage.model_dump(mode="json"),
+                            "tool_call_id": fragment["id"],
+                            "tool_name": fragment["name"],
+                            "raw_arguments": fragment["arguments"],
+                            "arguments_length": len(fragment["arguments"]),
+                        },
                     )
                 ) from exc
             if not isinstance(arguments, dict):
@@ -799,7 +838,9 @@ class OpenAICompatibleModelProvider:
         )
 
     def _message(self, message: ModelMessage) -> dict[str, Any]:
-        value: dict[str, Any] = {"role": message.role}
+        value: dict[str, Any] = {
+            "role": "system" if message.role == "developer" else message.role
+        }
         if message.role == "assistant":
             state = read_provider_state(message.provider_state, "openai_compatible")
             if state is not None:
@@ -906,6 +947,7 @@ class OpenAIChatCompletionsModelProvider(OpenAICompatibleModelProvider):
             reasoning_effort = None
         return config.model_copy(
             update={
+                "invocation_strategy": dict(profile.invocation_strategy),
                 "default_max_output_tokens": min(
                     config.default_max_output_tokens
                     or profile.effective_max_output_tokens,

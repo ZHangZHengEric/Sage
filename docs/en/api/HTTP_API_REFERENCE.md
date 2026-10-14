@@ -75,6 +75,9 @@ The inventory below follows the registered router source. Jaeger routes depend o
 | `POST` | `/api/auth/logout` | `auth` |
 | `POST` | `/api/auth/register` | `auth` |
 | `GET` | `/api/auth/session` | `auth` |
+| `GET` | `/api/threads/{thread_id}/download` | `files` |
+| `GET` | `/api/workspace/download` | `files` |
+| `GET` | `/api/workspace/files` | `files` |
 | `GET` | `/active` | `health` |
 | `GET` | `/health` | `health` |
 | `GET` | `/api/mcp` | `mcp` |
@@ -85,6 +88,7 @@ The inventory below follows the registered router source. Jaeger routes depend o
 | `GET` | `/api/models` | `models` |
 | `POST` | `/api/models` | `models` |
 | `DELETE` | `/api/models/{model_id}` | `models` |
+| `GET` | `/api/models/{model_id}` | `models` |
 | `GET` | `/api/observability/jaeger` | `observability` |
 | `GET` | `/api/observability/jaeger/auth` | `observability` |
 | `GET` | `/api/observability/jaeger/login` | `observability` |

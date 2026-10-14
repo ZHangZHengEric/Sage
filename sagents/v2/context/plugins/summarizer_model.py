@@ -302,6 +302,8 @@ arrays of strings. Do not invent facts and do not wrap the JSON in Markdown."""
                                     + "\n"
                                     + language_instruction
                                     + " Preserve identifiers, paths, commands, errors, and quoted user text verbatim."
+                                    + f" Keep the complete JSON compact, aiming for {request.target_tokens} tokens."
+                                    + " Deduplicate repeated commands and paths; preserve only execution-relevant entries."
                                     + retry
                                 )
                             ),
@@ -312,7 +314,12 @@ arrays of strings. Do not invent facts and do not wrap the JSON in Markdown."""
                 response_schema=(
                     self._SCHEMA if capabilities.supports_structured_output else None
                 ),
-                max_output_tokens=request.target_tokens,
+                max_output_tokens=min(
+                    max(8192, request.target_tokens * 2) * (attempt + 1),
+                    capabilities.max_output_tokens or 32768,
+                    32768,
+                ),
+                reasoning_mode="minimum",
                 metadata={
                     "purpose": "conversation_summary",
                     "attempt": attempt + 1,
@@ -343,6 +350,12 @@ arrays of strings. Do not invent facts and do not wrap the JSON in Markdown."""
                 closer = getattr(stream, "aclose", None)
                 if closer is not None:
                     await closer()
+            if completed is not None and completed.finish_reason in {
+                "max_output_tokens",
+                "length",
+            }:
+                last_error = "summary output was truncated at the model output limit"
+                continue
             if completed is None or not completed.text.strip():
                 last_error = "summary model completed without usable text"
                 continue

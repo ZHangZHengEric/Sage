@@ -44,6 +44,7 @@ from sagents.v2.interfaces.protocols.mcp import McpProtocolAdapter
 from sagents.v2.interfaces.protocols.native import NativeProtocolAdapter
 from sagents.v2.package.registry import InMemoryAgentPackageRegistry
 from sagents.v2.runtime.artifact import InMemoryArtifactStore
+from sagents.v2.runtime.artifact import FilesystemArtifactStore
 from sagents.v2.runtime.credentials import (
     EnvironmentCredentialProvider,
     MappingCredentialProvider,
@@ -874,6 +875,22 @@ def _register_infrastructure(registry: ExtensionRegistry) -> None:
     )
     _one(
         registry,
+        FilesystemArtifactStore,
+        "artifact.store",
+        lambda context, dependencies: FilesystemArtifactStore(context.config["root"]),
+        scopes={ExtensionScope.PROCESS},
+        config_schema={
+            "type": "object", "required": ["root"],
+            "properties": {"root": {"type": "string", "minLength": 1}},
+            "additionalProperties": False,
+        },
+        capabilities={
+            "durable_across_process_restart": True,
+            "shared_across_processes": True,
+        },
+    )
+    _one(
+        registry,
         InMemoryAgentPackageRegistry,
         "package.registry",
         lambda context, dependencies: InMemoryAgentPackageRegistry(),
@@ -1168,6 +1185,7 @@ def _register_session_and_memory(registry: ExtensionRegistry) -> None:
                     "global_session_index": False,
                     "multi_process_writes": False,
                     "supports_actor_authorization": True,
+                    "supports_session_attachments": True,
                     "cross_process_subscribe": False,
                     "transactional_outbox": False,
                     "atomic_session_cas": True,
@@ -1203,6 +1221,7 @@ def _register_session_and_memory(registry: ExtensionRegistry) -> None:
                     "global_session_index": False,
                     "multi_process_writes": False,
                     "supports_actor_authorization": True,
+                    "supports_session_attachments": True,
                     "cross_process_subscribe": False,
                     "transactional_outbox": False,
                     "atomic_session_cas": True,
@@ -1247,6 +1266,7 @@ def _register_session_and_memory(registry: ExtensionRegistry) -> None:
                     "global_session_index": False,
                     "multi_process_writes": False,
                     "supports_actor_authorization": True,
+                    "supports_session_attachments": True,
                     "cross_process_subscribe": False,
                     "transactional_outbox": False,
                     "atomic_session_cas": True,

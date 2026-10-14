@@ -26,6 +26,7 @@ from sagents.v2.contracts.provider_state import make_provider_state, read_provid
 from sagents.v2.runtime.credentials.contracts import CredentialMaterial
 from sagents.v2.model.wire import (
     compact_json,
+    minimum_reasoning_control,
     parse_tool_arguments,
     provider_error,
     stream_incomplete_error,
@@ -69,6 +70,7 @@ class AnthropicMessagesConfig(StrictModel):
     default_temperature: float | None = None
     default_top_p: float | None = None
     reasoning_effort: str | None = None
+    invocation_strategy: dict[str, Any] = Field(default_factory=dict)
     timeout_seconds: float = Field(default=120, gt=0)
     prompt_cache: bool = True
     extra_headers: dict[str, str] = Field(default_factory=dict)
@@ -101,6 +103,7 @@ class AnthropicMessagesModelProvider:
             extra_body["thinking"] = {"type": "disabled"}
         return config.model_copy(
             update={
+                "invocation_strategy": dict(profile.invocation_strategy),
                 "default_max_output_tokens": min(
                     config.default_max_output_tokens,
                     profile.effective_max_output_tokens,
@@ -243,7 +246,13 @@ class AnthropicMessagesModelProvider:
                         "none": "none",
                     }[request.tool_choice]
                 }
-        if self.config.reasoning_effort is None:
+        effort = self.config.reasoning_effort
+        if request.reasoning_mode == "minimum":
+            _, effort = minimum_reasoning_control(
+                self.config.invocation_strategy,
+                default_disable="thinking_type_disabled",
+            )
+        if effort is None:
             temperature = (
                 request.temperature
                 if request.temperature is not None
@@ -254,12 +263,8 @@ class AnthropicMessagesModelProvider:
             if self.config.default_top_p is not None:
                 payload["top_p"] = self.config.default_top_p
         output_config: dict[str, Any] = {}
-        if self.config.reasoning_effort is not None:
-            effort = (
-                "low"
-                if self.config.reasoning_effort == "minimal"
-                else self.config.reasoning_effort
-            )
+        if effort is not None:
+            effort = "low" if effort == "minimal" else effort
             payload["thinking"] = {"type": "adaptive", "display": "summarized"}
             output_config["effort"] = effort
         if request.response_format == "json_object":
@@ -279,6 +284,12 @@ class AnthropicMessagesModelProvider:
             provider=self.config.provider_id,
         )
         payload.update(self.config.extra_body)
+        if request.reasoning_mode == "minimum":
+            payload["thinking"] = (
+                {"type": "adaptive", "display": "summarized"}
+                if effort is not None
+                else {"type": "disabled"}
+            )
         return payload
 
     async def _stream(self, request: ModelRequest) -> AsyncIterator[ModelStreamEvent]:

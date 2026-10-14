@@ -20,6 +20,28 @@ from sagents.v2.contracts.errors import (
 from sagents.v2.model.contracts import ModelToolCall
 
 
+def minimum_reasoning_control(
+    strategy: Mapping[str, Any], *, default_disable: str
+) -> tuple[str, str | None]:
+    """Prefer a probed disable dialect, otherwise the lowest verified effort.
+
+    Unprobed routes try the protocol's explicit disable control. A profile whose
+    default is non-reasoning needs no explicit effort parameter.
+    """
+    disable = strategy.get("reasoning_disable_strategy")
+    if disable and disable != "omit":
+        return str(disable), None
+    if strategy.get("reasoning_behavior") in {"none", "controllable"}:
+        return "omit", None
+    supported = strategy.get("supported_reasoning_efforts", ())
+    for effort in ("none", "minimal", "low", "medium", "high", "xhigh", "max"):
+        if effort in supported:
+            return str(
+                strategy.get("reasoning_effort_strategy", "reasoning_effort")
+            ), effort
+    return default_disable, None
+
+
 def validate_extra_body(
     extra_body: Mapping[str, Any],
     *,
@@ -57,8 +79,7 @@ def stream_incomplete_error(*, provider: str, response_started: bool) -> SageV2E
             code="model.stream_incomplete",
             category=ErrorCategory.PROVIDER_TRANSIENT,
             message=(
-                f"{provider} stream ended before a terminal response event was "
-                "received"
+                f"{provider} stream ended before a terminal response event was received"
             ),
             retryable=not response_started,
             safe_to_resume=True,
@@ -111,6 +132,7 @@ def parse_tool_arguments(
     *,
     tool_call_id: str | None,
     name: str | None,
+    diagnostic_context: Mapping[str, Any] | None = None,
 ) -> ModelToolCall:
     """Decode one provider tool call into the strict v2 contract."""
 
@@ -123,6 +145,13 @@ def parse_tool_arguments(
                 category=ErrorCategory.PROVIDER_PERMANENT,
                 message=f"model returned invalid tool arguments: {exc}",
                 safe_to_resume=True,
+                metadata={
+                    **dict(diagnostic_context or {}),
+                    "tool_call_id": tool_call_id,
+                    "tool_name": name,
+                    "raw_arguments": raw,
+                    "arguments_length": len(raw or ""),
+                },
             )
         ) from exc
     if not isinstance(arguments, dict):
