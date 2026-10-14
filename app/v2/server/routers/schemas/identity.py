@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pydantic import BaseModel, ConfigDict, Field
+from app.v2.server.identity.users import default_user_execution_policy
 from app.v2.server.runtime.policy import ExecutionPolicy
 
 class LoginBody(BaseModel):
@@ -34,7 +35,7 @@ class UserPublic(BaseModel):
     user_id: str
     username: str
     role: str
-    execution_policy: ExecutionPolicy = Field(default_factory=ExecutionPolicy)
+    execution_policy: ExecutionPolicy = Field(default_factory=default_user_execution_policy)
 
 class TokenPayload(BaseModel):
     access_token: str

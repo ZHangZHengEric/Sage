@@ -1,3 +1,4 @@
+import { updateToolStates } from './tool-state.js'
 const TEXT_MESSAGE_EVENTS = new Set([
   'TEXT_MESSAGE_START',
   'TEXT_MESSAGE_CONTENT',
@@ -11,7 +12,7 @@ const INTERACTION_CLOSED = new Set([
 
 /** Rebuild AG-UI Message[] from persisted protocol events. */
 export function messagesFromEvents(events) {
-  const messages = []
+  let messages = []
   const byId = new Map()
 
   for (const event of events || []) {
@@ -99,6 +100,14 @@ export function messagesFromEvents(events) {
       }
       default:
         break
+    }
+    const updated = updateToolStates(messages, event)
+    if (updated !== messages) {
+      messages = updated
+      for (const message of messages) {
+        byId.set(message.id, message)
+        for (const call of message.toolCalls || []) byId.set(call.id, call)
+      }
     }
   }
   return messages

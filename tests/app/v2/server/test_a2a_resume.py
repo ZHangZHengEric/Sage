@@ -55,8 +55,8 @@ def _step(index: int, text: str, tool: str = "", arguments: dict | None = None):
 def asking_client(tmp_path):
     """A client whose agent immediately asks to do something that needs approval.
 
-    ``file_write`` is a write-level tool, so the default policy suspends the Run
-    and asks before it happens. That is the only path in this host that produces
+    ``file_write`` is a write-level tool, so this fixture explicitly sets the
+    user's policy to ask before it happens. That is the path in this host that produces
     a real pending Interaction, which is what makes it the honest fixture here:
     the Task a client sees is the one the product actually produces.
     """
@@ -78,6 +78,9 @@ def asking_client(tmp_path):
 def ask(client: TestClient, token: str, **key_options) -> tuple[str, dict]:
     """Drive one agent up to its approval question. Returns (api_key, task)."""
 
+    policy = client.put("/api/auth/execution-policy",
+        json={"shell": "ask"}, headers={"Authorization": f"Bearer {token}"})
+    assert policy.status_code == 200, policy.text
     key_options.setdefault("scopes", ["a2a:invoke", "a2a:read", "a2a:approve"])
     agent_id, api_key = mint_key(client, token, **key_options)
     granted = client.put(

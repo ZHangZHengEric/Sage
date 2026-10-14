@@ -293,6 +293,7 @@ onUnmounted(() => {
         <AguiTranscript
           :messages="messages"
           :pending="pending"
+          :interaction="interaction"
         />
         <div v-if="historyOffset < historyTotal && !historyLoading && !historyFailed" ref="historyEnd" class="history-end" aria-hidden="true"></div>
       </div>

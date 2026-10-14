@@ -22,6 +22,9 @@
   --cta: var(--primary);
   --cta-ink: var(--primary-foreground);
   --danger: var(--destructive);
+  --status-success: #15803d;
+  --status-warning: #a16207;
+  --status-active: #2563eb;
   --space-1: 0.25rem;
   --space-2: 0.5rem;
   --space-3: 0.75rem;
@@ -586,3 +589,16 @@ th, td { text-align: left; padding: var(--space-3) var(--space-2); border-bottom
 fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
 legend { font-size: 15px; font-weight: 600; margin-bottom: 16px; }
 @media (prefers-reduced-motion: reduce) { .app-sidebar { transition: none; } }
+
+/* Compact tool rows follow v1; colored state icons stay beside the tool name. */
+.tool-status { display: inline-flex; align-items: center; gap: 4px; flex-shrink: 0; font-size: 12px; font-weight: 400; color: var(--muted-foreground); }
+.tool-status[data-state="running"] { color: var(--status-active); }
+.tool-status[data-state="completed"] { color: var(--status-success); }
+.tool-status[data-state="awaiting_approval"], .tool-status[data-state="unknown"], .tool-status[data-state="reconciling"], .tool-status[data-state="incomplete"] { color: var(--status-warning); }
+.tool-detail > summary .tool-status .app-icon { width: 18px; height: 18px; color: inherit; }
+.tool-status[data-state="failed"], .tool-status[data-state="denied"] { color: var(--danger); }
+.tool-detail > summary { flex-wrap: wrap; cursor: pointer; }
+.tool-detail > summary:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+.tool-spinner { width: 18px; height: 18px; border: 1.5px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: tool-spin 1s linear infinite; }
+@keyframes tool-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .tool-spinner { animation: none; } }

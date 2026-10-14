@@ -37,7 +37,7 @@ async def test_old_thread_schema_is_upgraded_without_losing_rows(tmp_path):
         await database.stop()
 
 
-async def test_legacy_user_receives_safe_default_execution_policy(tmp_path):
+async def test_legacy_user_receives_default_execution_policy(tmp_path):
     from app.v2.server.identity.repository import DatabaseUserStore
     from app.v2.server.runtime.policy import ExecutionPolicy
 
@@ -56,7 +56,7 @@ async def test_legacy_user_receives_safe_default_execution_policy(tmp_path):
         await create_host_schema(database)
         user = await DatabaseUserStore(database).get_by_id("legacy")
         assert user.username == "alice"
-        assert user.execution_policy == ExecutionPolicy()
+        assert user.execution_policy == ExecutionPolicy(shell="sandboxed")
     finally:
         await database.stop()
 

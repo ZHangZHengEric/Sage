@@ -49,7 +49,7 @@ python -m scripts.v2.migrate_agent_table --env app/v2/server/.env --backup /secu
 
 迁移后必须启动这版 Server v2；旧服务和旧客户端使用的 `main` 或自定义 Agent ID 不再有效，客户端从 `/api/agents` 获取新 ID。运行包 manifest 内的 Agent 名称不属于用户目录 ID，不受此变更影响。
 
-启动时会幂等升级旧数据库：补齐 `threads.agent_id`、`users.execution_policy`，将 Skill 描述列扩展为 `LONGTEXT`。旧用户采用需要确认的默认执行策略。升级账号需要对应表的 `ALTER` 权限。Skill 列表描述不截断，加载内容仍受 Skill 文件大小限制。已有的截断描述可重新导入原 Skill 文件修复。
+启动时会幂等升级旧数据库：补齐 `threads.agent_id`、`users.execution_policy`，将 Skill 描述列扩展为 `LONGTEXT`。没有已保存执行设置的旧用户采用工作区内自动执行的默认策略；已保存的设置不变。升级账号需要对应表的 `ALTER` 权限。Skill 列表描述不截断，加载内容仍受 Skill 文件大小限制。已有的截断描述可重新导入原 Skill 文件修复。
 
 读 `app/v2/server/.env`（进程环境变量优先）。生产必须设置 `SAGE_SERVER_JWT_SECRET`（至少 32 字节）。默认管理员：`admin` / `admin12345`。OpenAPI 在 `/docs`。
 
@@ -99,15 +99,15 @@ Run 一律交给后台任务驱动，不跑在请求自己的任务上：Run 是
 
 ```json
 {
-  "shell": "ask",
+  "shell": "sandboxed",
   "on_approval_required": "suspend",
   "approval_timeout_seconds": 86400
 }
 ```
 
-`shell` 默认为 `ask`，命令和文件修改需要审批；`sandboxed` 允许官方 Shell、文件修改工具在该用户工作区内执行；`deny` 禁止 Shell，其他工具仍按各自策略审核。Shell 网络禁用，`sandboxed` 允许工作区内代码执行及文件删除，MCP/A2A 等外部工具仍保留原审批要求。机器调用不能管理 Agent 包。`on_approval_required=deny` 将所有需要审批的操作直接拒绝，适合无人值守。
+用户的 `shell` 默认为 `sandboxed`，允许官方 Shell、文件修改工具在该用户工作区内执行；`ask` 要求命令和文件修改先审批；`deny` 禁止 Shell，其他工具仍按各自策略审核。Shell 网络禁用，`sandboxed` 允许工作区内代码执行及文件删除，MCP/A2A 等外部工具仍保留原审批要求。机器调用不能管理 Agent 包。`on_approval_required=deny` 将所有需要审批的操作直接拒绝，适合无人值守。
 
-生效策略取服务上限、Agent 上限、用户设置和请求限制的交集。服务上限由 `SAGE_SERVER_EXECUTION_SHELL_MODE`（默认 `sandboxed`）及 `SAGE_SERVER_APPROVAL_TIMEOUT_SECONDS`（默认 86400，允许 60–604800 秒）指定。Agent 的 `execution_policy` 是上限，默认允许用户自行选择；用户默认仍需确认。A2A 消息的 `metadata["sage.executionPolicy"]` 可提供相同结构收紧本次请求，不能扩大授权。
+生效策略取服务上限、Agent 上限、用户设置和请求限制的交集。服务上限由 `SAGE_SERVER_EXECUTION_SHELL_MODE`（默认 `sandboxed`）及 `SAGE_SERVER_APPROVAL_TIMEOUT_SECONDS`（默认 86400，允许 60–604800 秒）指定。Agent 的 `execution_policy` 是上限，默认允许用户自行选择；新用户默认允许工作区内自动执行。A2A 消息的 `metadata["sage.executionPolicy"]` 可提供相同结构收紧本次请求，不能扩大授权。
 
 受理时冻结实际策略与哈希，恢复和每次工具决策都会重新检查用户当前策略、原密钥是否撤销、Agent 是否存在及当前上限。后续放宽权限不会扩大已受理任务的权限。机器回复审批必须额外持有 `a2a:approve`；只调用或读取的密钥不能批准操作，默认签发不包含审批权限。执行设置接口只接受用户登录凭据，API Key 不能修改账号策略。托管包运行继续使用自身 manifest 的工具策略。
 

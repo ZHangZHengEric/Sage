@@ -10,13 +10,17 @@ from sagents.v2.contracts.errors import ErrorCategory, RuntimeErrorInfo, SageV2E
 Role = Literal["admin", "user"]
 
 
+def default_user_execution_policy() -> ExecutionPolicy:
+    return ExecutionPolicy(shell="sandboxed")
+
+
 @dataclass(frozen=True, slots=True)
 class UserRecord:
     user_id: str
     username: str
     password_hash: str
     role: Role = "user"
-    execution_policy: ExecutionPolicy = field(default_factory=ExecutionPolicy)
+    execution_policy: ExecutionPolicy = field(default_factory=default_user_execution_policy)
 
     def public_dict(self) -> dict[str, object]:
         return {

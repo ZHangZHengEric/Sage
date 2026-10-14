@@ -1,6 +1,11 @@
 <script setup>
 defineProps({ name: String })
 const paths = {
+  clock: 'M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18Zm0 4v5l3 2',
+  shield: 'm12 3 8 3v6c0 5-8 9-8 9s-8-4-8-9V6l8-3Zm0 5v5m0 3h.01',
+  alert: 'M12 3 2 21h20L12 3Zm0 6v5m0 3h.01',
+  ban: 'M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18ZM6 6l12 12',
+  more: 'M5 12h.01M12 12h.01M19 12h.01',
   folder: 'M3 7V4h6l2 3h10v13H3V7Z',
   download: 'M12 3v12m-5-5 5 5 5-5M4 16v5h16v-5',
   file: 'M14 2H4v20h16V8l-6-6Zm0 0v6h6M8 13h8M8 17h8',

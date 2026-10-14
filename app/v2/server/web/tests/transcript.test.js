@@ -71,3 +71,42 @@ test('JSON tool results remain strings and render in both stream and history', a
     assert.doesNotMatch(html, /data-role="tool"/)
   }
 })
+
+test('tool execution states agree in live streams and history, including approval and denial', async (t) => {
+  const custom = (name, id, extra = {}) => ({ type: 'CUSTOM', name, value: { tool_call_id: id, ...extra } })
+  const frames = id => [
+    { type: 'TOOL_CALL_START', toolCallId: id, toolCallName: id, parentMessageId: `p-${id}` },
+    { type: 'TOOL_CALL_ARGS', toolCallId: id, delta: '{}' },
+    { type: 'TOOL_CALL_END', toolCallId: id },
+  ]
+  let sequence = [events[0], ...frames('load_skill'), ...frames('list_dir'),
+    custom('tool.call.awaiting_approval', 'load_skill'), custom('sage.run.suspended'), events.at(-1)]
+  t.mock.method(globalThis, 'fetch', async () => new Response(sequence.map(event =>
+    `data: ${JSON.stringify(event)}\n\n`).join(''), { headers: { 'Content-Type': 'text/event-stream' } }))
+  const server = await createServer({ server: { middlewareMode: true, watch: null, hmr: false, ws: false } })
+  t.after(() => server.close())
+  const { default: Transcript } = await server.ssrLoadModule('/src/components/AguiTranscript.vue')
+  const agent = createAguiAgent()
+  await agent.runAgent({ runId: 'run', tools: [], context: [] })
+  for (const messages of [agent.messages, messagesFromEvents(sequence)]) {
+    assert.deepEqual(messages.flatMap(m => m.toolCalls || []).map(c => c.executionState), ['awaiting_approval', 'queued'])
+    const html = await renderToString(createSSRApp(Transcript, { messages, pending: true, interaction: { interaction_type: 'approval' } }))
+    assert.match(html, /待审批/)
+    assert.match(html, /待执行/)
+    assert.match(html, /等待审批/)
+    assert.doesNotMatch(html, /执行中|正在生成|tool-spinner/)
+  }
+  sequence.splice(-1, 1,
+    custom('tool.call.started', 'load_skill'),
+    custom('tool.call.failed', 'load_skill', { error: { code: 'skill.not_found' } }),
+    { type: 'TOOL_CALL_RESULT', messageId: 'r1', toolCallId: 'load_skill', content: 'Missing' },
+    custom('tool.call.cancelled', 'list_dir', { error: { code: 'tool.policy_denied' } }),
+    { type: 'TOOL_CALL_RESULT', messageId: 'r2', toolCallId: 'list_dir', content: 'Denied' }, events.at(-1))
+  const snapshots = []
+  const resumed = createAguiAgent({ onMessages: m => snapshots.push(structuredClone(m)) })
+  await resumed.runAgent({ runId: 'run', tools: [], context: [] })
+  assert.ok(snapshots.some(m => m.some(m => m.toolCalls?.some(c => c.executionState === 'running'))))
+  for (const messages of [resumed.messages, messagesFromEvents(sequence)]) {
+    assert.deepEqual(messages.flatMap(m => m.toolCalls || []).map(c => c.executionState), ['failed', 'denied'])
+  }
+})
