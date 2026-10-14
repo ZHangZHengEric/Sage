@@ -75,6 +75,7 @@ class ModelRequest(StrictModel):
     tools: tuple[ModelToolDefinition, ...] = ()
     temperature: float | None = Field(default=None, ge=0, le=2)
     max_output_tokens: int | None = Field(default=None, gt=0)
+    reasoning_mode: Literal["minimum"] | None = None
     response_format: Literal["json_object"] | None = None
     response_schema: dict[str, Any] | None = None
     tool_choice: Literal["auto", "required", "none"] | None = None
