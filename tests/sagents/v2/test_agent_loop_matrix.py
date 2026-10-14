@@ -3877,3 +3877,112 @@ async def test_output_self_check_numeric_repair_reaches_author_and_completes():
         assert len(model.requests) == 2
     finally:
         await parser.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "phase", ["tool_selection", "memory_recall", "request_preparation"]
+)
+@pytest.mark.parametrize("typed", [True, False])
+async def test_pre_model_failure_requests_recovery_and_retry_completes(phase, typed):
+    failure = RuntimeErrorInfo(
+        code="model.provider_transient",
+        category=ErrorCategory.PROVIDER_TRANSIENT,
+        message="model endpoint unreachable",
+        retryable=True,
+        safe_to_resume=True,
+    )
+    should_fail = True
+
+    def fail():
+        if should_fail:
+            raise SageV2Error(failure) if typed else ConnectionError(failure.message)
+
+    class Selection(RecentToolSelectionPolicy):
+        async def prepare(self, context):
+            if phase == "tool_selection":
+                fail()
+            await super().prepare(context)
+
+    class Recall:
+        async def generate(self, user_input, *, run_id):
+            fail()
+            return "hello"
+
+    model = ScriptedModelProvider((ScriptedModelStep(events=(completed("hello"),)),))
+    runtime, handle, loop, executor = await setup_loop(
+        model,
+        tool_selection_policy=Selection(),
+        automatic_memory_recall=phase == "memory_recall",
+        memory_recall_query_generator=Recall(),
+    )
+    original_prepare = loop.step_request_builder.prepare
+
+    async def prepare(**kwargs):
+        fail()
+        return await original_prepare(**kwargs)
+
+    if phase == "request_preparation":
+        loop.step_request_builder.prepare = prepare
+    suspended = await loop.execute(handle.run_id, CONTEXT)
+    assert suspended.state == RunState.SUSPENDED
+    events = await runtime.session_store.read_events(handle.run_id)
+    assert events[-1].type == "run.suspended"
+    assert any(event.type == "interaction.requested" for event in events)
+    assert not any(event.type in {"run.completed", "run.failed"} for event in events)
+    assert model.requests == []
+    assert executor.calls == []
+    suspension = await runtime.session_store.get_suspension(suspended.suspension_id)
+    interaction = await runtime.session_store.get_interaction(suspension.interaction_id)
+    assert interaction.payload["questions"]
+    assert interaction.payload["error"]["code"] == (
+        failure.code
+        if typed
+        else "loop.request_preparation_failed"
+        if phase == "request_preparation"
+        else "loop.preparation_failed"
+    )
+    assert interaction.payload["resumable"] is True
+    assert interaction.allowed_decisions == ("retry", "change_direction", "cancel")
+    should_fail = False
+    await runtime.reply_interaction(
+        ReplyInteraction(
+            run_id=handle.run_id,
+            suspension_id=suspension.suspension_id,
+            interaction_id=interaction.interaction_id,
+            expected_revision=suspended.revision,
+            expected_suspension_revision=suspension.expected_revision,
+            expected_interaction_revision=interaction.expected_revision,
+            decision="retry",
+            idempotency_key="retry_preparation",
+        ),
+        CONTEXT,
+    )
+    result = await loop.resume(handle.run_id, CONTEXT)
+    assert result.state == RunState.COMPLETED
+    assert len(model.requests) == 1
+
+
+@pytest.mark.asyncio
+async def test_nonresumable_request_preparation_failure_emits_terminal_questionnaire():
+    runtime, handle, loop, _ = await setup_loop(ScriptedModelProvider(()))
+
+    async def prepare(**kwargs):
+        raise SageV2Error(
+            RuntimeErrorInfo(
+                code="context.summarizer.source_too_large",
+                category=ErrorCategory.VALIDATION,
+                message="summary source exceeds budget",
+                safe_to_resume=False,
+            )
+        )
+
+    loop.step_request_builder.prepare = prepare
+    result = await loop.execute(handle.run_id, CONTEXT)
+    events = await runtime.session_store.read_events(handle.run_id)
+    assert result.state == RunState.FAILED
+    assert events[-1].type == "run.failed"
+    assert (
+        events[-1].data.error.metadata["recovery_questionnaire"]["resumable"] is False
+    )
+    assert events[-1].data.error.metadata["recovery_questionnaire"]["questions"]

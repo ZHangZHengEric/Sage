@@ -287,10 +287,24 @@ class AgentLoopEngine:
                     run, state, command, context
                 )
             await tool_selection_task
-        except BaseException:
+        except BaseException as exc:
             if not tool_selection_task.done():
                 tool_selection_task.cancel()
-                await asyncio.gather(tool_selection_task, return_exceptions=True)
+            await asyncio.gather(tool_selection_task, return_exceptions=True)
+            if isinstance(exc, Exception):
+                error = (
+                    exc.info
+                    if isinstance(exc, SageV2Error)
+                    else RuntimeErrorInfo(
+                        code="loop.preparation_failed",
+                        category=ErrorCategory.PROVIDER_PERMANENT,
+                        message=exception_diagnostic_message(exc),
+                        safe_to_resume=True,
+                    )
+                )
+                return await self._fail(
+                    run, state, new_id("step_preparation"), error, context
+                )
             raise
         return await self._drive(run, state, context)
 
@@ -1120,22 +1134,38 @@ class AgentLoopEngine:
                 # Resume/recovery can use a fresh engine whose selection plugin has
                 # no process-local preparation state. Expanded tools were restored
                 # from the checkpoint; prepare the current catalog before select().
-                await self._prepare_tool_selection(
-                    command=command,
-                    run_id=run.run_id,
-                    messages=state.messages,
-                    language=context.language,
-                )
-                prepared_step = await self.step_request_builder.prepare(
-                    command=command,
-                    run_id=run.run_id,
-                    turn_id=state.turn_id,
-                    step_id=step_id,
-                    messages=state.messages,
-                    pending_continuation_reason=state.pending_continuation_reason,
-                    language=context.language,
-                    additional_input_reserve_tokens=additional_input_reserve_tokens,
-                )
+                try:
+                    await self._prepare_tool_selection(
+                        command=command,
+                        run_id=run.run_id,
+                        messages=state.messages,
+                        language=context.language,
+                    )
+                    prepared_step = await self.step_request_builder.prepare(
+                        command=command,
+                        run_id=run.run_id,
+                        turn_id=state.turn_id,
+                        step_id=step_id,
+                        messages=state.messages,
+                        pending_continuation_reason=state.pending_continuation_reason,
+                        language=context.language,
+                        additional_input_reserve_tokens=additional_input_reserve_tokens,
+                    )
+                except SageV2Error as exc:
+                    return await self._fail(run, state, step_id, exc.info, context)
+                except Exception as exc:
+                    return await self._fail(
+                        run,
+                        state,
+                        step_id,
+                        RuntimeErrorInfo(
+                            code="loop.request_preparation_failed",
+                            category=ErrorCategory.PROVIDER_PERMANENT,
+                            message=exception_diagnostic_message(exc),
+                            safe_to_resume=True,
+                        ),
+                        context,
+                    )
                 request = prepared_step.request
                 tools = prepared_step.tools
                 system_requirements = self._system_requirements(request.messages)
