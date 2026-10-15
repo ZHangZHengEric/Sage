@@ -124,6 +124,7 @@ from sagents.v2.contracts.run_state import (
 from sagents.v2.contracts.commands import CancelRun, InputItem
 from sagents.v2.runtime.contracts import RuntimePort
 from sagents.v2.runtime.session.contracts import EventDraft
+from sagents.v2.runtime.observability.logs import get_logger
 from sagents.v2.i18n import (
     error_recovery_payload,
     localize_error,
@@ -2297,6 +2298,25 @@ class AgentLoopEngine:
                 execution.cancel()
                 await asyncio.gather(execution, return_exceptions=True)
 
+    @staticmethod
+    def _log_tool_exception(exc, run, call, turn_id, step_id):
+        # Keep private stacks out of the model-facing result and durable ledger.
+        # Explicit scope also works when dispatch runs outside a request context.
+        get_logger("sagents.agent.tools").exception(
+            "tool.execution.exception",
+            "Tool execution raised an exception.",
+            exc,
+            session_id=run.session_id,
+            run_id=run.run_id,
+            turn_id=turn_id,
+            step_id=step_id,
+            tool_call_id=call.tool_call_id,
+            attributes={
+                "tool_name": call.tool_name,
+                "operation_id": call.operation_id,
+            },
+        )
+
     async def dispatch_tool_call(
         self, run, call, context, turn_id, step_id=None, state=None
     ):
@@ -2377,6 +2397,7 @@ class AgentLoopEngine:
                     pass
             raise
         except SageV2Error as exc:
+            self._log_tool_exception(exc, run, call, turn_id, step_id)
             localized = localize_error(exc.info, context.language)
             result = ToolExecutionResult(
                 tool_call_id=call.tool_call_id,
@@ -2385,6 +2406,7 @@ class AgentLoopEngine:
                 error=localized,
             )
         except Exception as exc:
+            self._log_tool_exception(exc, run, call, turn_id, step_id)
             localized = localize_error(
                 RuntimeErrorInfo(
                     code="tool.provider_error",

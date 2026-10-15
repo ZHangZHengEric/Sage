@@ -162,6 +162,13 @@ def test_bundle_contains_actual_tool_proposal_and_result_and_legacy_gaps():
             manifest = json.loads(archive.read("external_old/manifest.json"))
             assert manifest["models_missing_for_runs"] == ["r"]
             assert manifest["restorable_backup"] is False
+            assert manifest["tool_failures"] == 1
+            assert manifest["tool_failures_without_stack_trace"] == [
+                {"run_id": "r", "tool_call_id": "m"}
+            ]
+            failures = json.loads(archive.read("external_old/failures.json"))
+            assert failures[0]["stack_trace_available"] is False
+            assert failures[0]["exceptions"] == []
     finally:
         stream.close()
     with pytest.raises(ValueError, match="identity mismatch"):
@@ -194,6 +201,82 @@ def test_web_export_captures_real_model_response_and_correlated_logs(client, ser
         manifest = json.loads(archive.read("thread-1/manifest.json"))
         assert not manifest["models_missing_for_runs"]
         assert not manifest["logs_missing_for_runs"]
+
+
+@pytest.mark.timeout(30)
+@pytest.mark.parametrize("typed_error", [False, True])
+def test_web_export_captures_image_tool_exception_stack(tmp_path, monkeypatch, typed_error):
+    from fastapi.testclient import TestClient
+    from PIL import Image
+
+    from app.v2.server.main import create_app
+    from sagents.v2.contracts.errors import ErrorCategory, RuntimeErrorInfo, SageV2Error
+    from sagents.v2.testing.plugins import ScriptedModelProvider
+    from tests.app.v2.server.conftest import make_test_service
+    from tests.app.v2.server.test_a2a_resume import _step
+
+    def broken_image_encoder(image):
+        if typed_error:
+            raise SageV2Error(RuntimeErrorInfo(
+                code="image.test_failure", category=ErrorCategory.PROVIDER_PERMANENT,
+                message="encoder failed password=diagnostic-secret",
+            ))
+        callback = "encoder"
+        callback()  # Reproduce the exact exception from the reported Session.
+
+    monkeypatch.setattr(
+        "sagents.v2.tool.official.media.compress_image_to_jpeg_bytes_for_llm",
+        broken_image_encoder,
+    )
+    provider = ScriptedModelProvider((
+        _step(1, "", "analyze_image", {"image_path": "/workspace/frame.png"}),
+        _step(2, "Image tool failed."),
+    ))
+    service = make_test_service(tmp_path, model_provider=provider)
+    with TestClient(create_app(service=service)) as client:
+        alice, owner = identity(client, "alice")
+        agent = client.get("/api/agents", headers=alice).json()["data"][0]
+        agent_id = agent["id"]
+        updated = client.put(
+            f"/api/agents/{agent_id}", headers=alice,
+            json={"name": agent["name"], "tools": ["analyze_image"]},
+        )
+        assert updated.status_code == 200, updated.text
+        root = service.paths.workspace_dir(owner, agent_id)
+        Image.new("RGB", (32, 32), "red").save(root / "frame.png")
+        response = client.post("/api/agent", json=_run_input(), headers=alice)
+        assert response.status_code == 200, response.text
+        download = client.get(
+            "/api/threads/thread-1/download", headers=admin_headers(client)
+        )
+        assert download.status_code == 200, download.text
+        with ZipFile(BytesIO(download.content)) as archive:
+            failures = json.loads(archive.read("thread-1/failures.json"))
+            assert len(failures) == 1
+            failure = failures[0]
+            assert failure["tool_name"] == "analyze_image"
+            assert failure["stack_trace_available"]
+            exception = failure["exceptions"][0]
+            assert exception["type"] == ("SageV2Error" if typed_error else "TypeError")
+            assert "broken_image_encoder" in exception["stack_trace"]
+            assert "media.py" in exception["stack_trace"]
+            if not typed_error:
+                assert "'str' object is not callable" in exception["stack_trace"]
+            logs = json.loads(archive.read("thread-1/logs.json"))
+            log = next(row for row in logs if row["event"] == "tool.execution.exception")
+            assert log["session_id"] == "thread-1"
+            assert log["run_id"] == failure["run_id"]
+            assert log["tool_call_id"] == failure["tool_call_id"]
+            assert log["step_id"] and log["turn_id"]
+            manifest = json.loads(archive.read("thread-1/manifest.json"))
+            assert not manifest["tool_failures_without_stack_trace"]
+            assert not manifest["logs_missing_for_runs"]
+            state = archive.read("thread-1/state.json")
+            assert b"broken_image_encoder" not in state
+            assert b"stack_trace" not in state
+            assert b"diagnostic-secret" not in b"".join(
+                archive.read(name) for name in archive.namelist()
+            )
 
 
 def test_download_is_admin_only_and_excludes_other_sessions(client, service):
