@@ -197,10 +197,10 @@ async def session_download(thread_id: str, user: AdminUser, host: HostDep):
         tenant = (
             command.get("config", {})
             .get("metadata", {})
-            .get("server_v2.workspace_user_id", record.user_id)
+            .get("server_v2.workspace_user_id")
         )
         if command.get("agent_id") != record.agent_id or (
-            binding is not None and tenant != binding.tenant_id
+            binding is not None and tenant is not None and tenant != binding.tenant_id
         ):
             raise HTTPException(404, "thread not found")
     run_ids = {run["run_id"] for run in state.get("runs", [])}

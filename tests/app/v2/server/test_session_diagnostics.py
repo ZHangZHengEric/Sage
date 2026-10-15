@@ -297,3 +297,45 @@ def test_corrupt_diagnostic_database_does_not_block_startup_or_download(tmp_path
     sink = SessionDiagnostics(root)
     assert not sink.available
     assert sink.snapshot("s", {"r"})["unavailable"]
+
+
+def test_legacy_binding_without_run_tenant_metadata_remains_downloadable(
+    client, service, monkeypatch
+):
+    from unittest.mock import AsyncMock
+    from app.v2.server.conversations.bindings import SessionBinding
+
+    alice, owner = identity(client, "alice")
+    legacy_id = "external_" + "a" * 64
+    assert (
+        client.post(
+            "/api/agent", json={**_run_input(), "threadId": legacy_id}, headers=alice
+        ).status_code
+        == 200
+    )
+    store = service.application.entrypoint().runtime.session_store
+    state = client.portal.call(store.export_session_state, legacy_id)
+    for run in state["runs"]:
+        run["start_command"]["config"]["metadata"].pop(
+            "server_v2.workspace_user_id", None
+        )
+    record = client.portal.call(service.threads.find, legacy_id)
+    monkeypatch.setattr(
+        service.threads,
+        "binding",
+        AsyncMock(
+            return_value=SessionBinding(
+                legacy_id, owner, "historical-business-tenant", record.agent_id
+            )
+        ),
+    )
+    monkeypatch.setattr(store, "export_session_state", AsyncMock(return_value=state))
+    response = client.get(
+        f"/api/threads/{legacy_id}/download", headers=admin_headers(client)
+    )
+    assert response.status_code == 200, response.text
+    with ZipFile(BytesIO(response.content)) as archive:
+        assert (
+            json.loads(archive.read(f"{legacy_id}/manifest.json"))["session_id"]
+            == legacy_id
+        )
