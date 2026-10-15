@@ -413,7 +413,12 @@ async def test_sql_attachment_blob_and_manifest_share_transaction(
             statements.append(query)
             params = values[0] if backend == "mysql" else values
             if "INSERT INTO" in query and "attachments" in query:
-                pending[params[1]] = params[2]
+                if backend == "mysql":
+                    assert "UNHEX(%s)" in query
+                    assert isinstance(params[2], str)
+                    pending[params[1]] = bytes.fromhex(params[2])
+                else:
+                    pending[params[1]] = params[2]
             return "UPDATE 1"
 
         async def fetchval(self, query, *values):

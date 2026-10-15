@@ -1,6 +1,8 @@
 """Exercise image attachment wiring through the public builder and host loops."""
 
 from pathlib import Path
+import os
+import uuid
 
 import pytest
 from PIL import Image
@@ -29,6 +31,7 @@ from sagents.v2.runtime.execution.sandbox import (
 )
 from sagents.v2.runtime.artifact import InMemoryArtifactStore
 from sagents.v2.runtime.session import FilesystemSessionStore
+from sagents.v2.runtime.session.plugins.mysql import MysqlSessionStore
 from sagents.v2.testing.plugins.scripted_model import (
     ScriptedModelProvider,
     ScriptedModelStep,
@@ -36,9 +39,20 @@ from sagents.v2.testing.plugins.scripted_model import (
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("storage_backend", ["filesystem", "mysql", "mysql-broken-escaper"])
 async def test_builder_wires_durable_images_from_tool_to_request_and_session(
-    tmp_path: Path,
+    tmp_path: Path, monkeypatch, storage_backend,
 ):
+    mysql_dsn = os.environ.get("SAGE_V2_TEST_MYSQL_DSN", "").strip()
+    if storage_backend.startswith("mysql") and not mysql_dsn:
+        pytest.skip("set SAGE_V2_TEST_MYSQL_DSN to run live MySQL tests")
+    if storage_backend == "mysql-broken-escaper":
+        import aiomysql.connection
+
+        # Reproduce the deployed aiomysql/PyMySQL incompatibility against a
+        # real server; the attachment adapter must never call this symbol.
+        monkeypatch.setattr(aiomysql.connection, "escape_bytes_prefixed", "DO NOT IMPORT THIS!!!")
+    prefix = "image_" + uuid.uuid4().hex[:12]
     workspace = tmp_path / "workspace"
     workspace.mkdir()
     Image.new("RGB", (32, 32), "red").save(workspace / "frame.png")
@@ -131,6 +145,10 @@ async def test_builder_wires_durable_images_from_tool_to_request_and_session(
         }
     )
     root = tmp_path / "sessions"
+    if storage_backend.startswith("mysql"):
+        package.runtime.capabilities["session.store"] = CapabilitySelection(
+            plugin="sage.session.mysql", config={"dsn": mysql_dsn, "table_prefix": prefix}
+        )
     application = await (
         SAgentBuilder()
         .with_defaults(session_root=root)
@@ -202,7 +220,11 @@ async def test_builder_wires_durable_images_from_tool_to_request_and_session(
     finally:
         await application.close()
 
-    reopened = FilesystemSessionStore(root)
+    (workspace / "frame.png").unlink()
+    reopened = (
+        MysqlSessionStore(mysql_dsn, table_prefix=prefix)
+        if storage_backend.startswith("mysql") else FilesystemSessionStore(root)
+    )
     try:
         reference, content = await reopened.get_attachment(
             run.session_id, identifier, context=context
@@ -210,5 +232,16 @@ async def test_builder_wires_durable_images_from_tool_to_request_and_session(
         assert b"".join([chunk async for chunk in content]) == base64.b64decode(
             images[0].uri.split(",", 1)[1]
         )
+        from sagents.v2.model.contracts import ModelMessage
+        from sagents.v2.runtime.artifact import SessionArtifactStore
+        from sagents.v2.runtime.artifact.images import hydrate_image_blocks
+
+        restored_messages = await hydrate_image_blocks(
+            (ModelMessage(role="user", content=(ImageBlock(
+                uri="sage-image:" + identifier, mime_type="image/jpeg"
+            ),)),),
+            SessionArtifactStore(reopened, run.run_id),
+        )
+        assert restored_messages[0].content[0].uri == images[0].uri
     finally:
         await reopened.close()
