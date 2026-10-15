@@ -482,7 +482,13 @@ class DesktopRunServiceMixin(DesktopRunCompositionMixin):
             )
 
     async def subscribe_events(
-        self, run_id: str, after_sequence: int, user_id: str
+        self,
+        run_id: str,
+        after_sequence: int,
+        user_id: str,
+        *,
+        preview_sequence: int = 0,
+        preview_epoch: str | None = None,
     ) -> AsyncIterator[str]:
         await self.start()
         context = self._context(user_id)
@@ -500,8 +506,24 @@ class DesktopRunServiceMixin(DesktopRunCompositionMixin):
             for event in previous:
                 projector.remember(event)
             cursor = previous[-1].run_sequence
+        # The projector needs the already-delivered prefix as well as the
+        # suffix sent over the wire, since text previews are not in the ledger.
+        if preview_epoch is not None and preview_sequence:
+            previews = await self.session_access.read_stream_previews(run_id, context)
+            for event in previews:
+                if (
+                    event.preview_epoch == preview_epoch
+                    and (event.preview_sequence or 0) <= preview_sequence
+                ):
+                    projector.remember(event)
         async for event in self.session_access.subscribe_events(
-            EventCursor(run_id=run_id, run_sequence=after_sequence), context
+            EventCursor(
+                run_id=run_id,
+                run_sequence=after_sequence,
+                preview_sequence=preview_sequence,
+                preview_epoch=preview_epoch,
+            ),
+            context,
         ):
             yield event.model_dump_json() + "\n"
             for frame in await projector.project(event):

@@ -27,6 +27,7 @@ from sagents.v2.contracts.errors import (
     RuntimeErrorInfo,
     SageV2Error,
 )
+from sagents.v2.contracts.run_state import TERMINAL_RUN_STATES
 from sagents.v2.runtime.session.state import SessionStoreCoordinator
 from sagents.v2.runtime.observability.logs import get_logger
 from sagents.v2.runtime.session.aggregate import SessionAggregate
@@ -56,6 +57,11 @@ except ImportError:  # pragma: no cover - POSIX uses fcntl above.
 
 LOGGER = get_logger(__name__)
 SESSION_LAYOUT_FORMAT = "sage.filesystem-session-layout/v1"
+SESSION_INDEX_FORMAT = "sage.filesystem-session-index/v1"
+_TERMINAL_RUN_STATE_VALUES = frozenset(state.value for state in TERMINAL_RUN_STATES)
+_DISPATCHABLE_RUN_STATE_VALUES = frozenset(
+    {"queued", "running", "suspend_requested", "resuming"}
+)
 JOURNAL_COMPACT_COMMITS = 256
 JOURNAL_COMPACT_BYTES = 8 * 1024 * 1024
 _FILE_OPERATION_VALUES = frozenset(
@@ -89,6 +95,8 @@ class _FilesystemSessionState(SessionStoreCoordinator):
     def __init__(
         self,
         root: str | Path,
+        *,
+        durable_stream_deltas: bool = False,
         **kwargs: Any,
     ) -> None:
         self.root = Path(root).expanduser().resolve()
@@ -96,9 +104,20 @@ class _FilesystemSessionState(SessionStoreCoordinator):
         self.control_root = self.root / ".session-store"
         self.idempotency_root = self.control_root / "idempotency" / "start"
         self.locations_root = self.control_root / "locations"
+        self.index_root = self.control_root / "session-index"
         self.transactions_root = self.control_root / "transactions"
         self.trash_root = self.control_root / "trash"
+        self._durable_stream_deltas = durable_stream_deltas
         self._filesystem_lock = threading.RLock()
+        # Summaries of every persisted Session, keyed by session_id. The writer
+        # lock makes this process the only mutator, so an unloaded Session can
+        # change only through ``_write_session_state``, which refreshes it.
+        self._index_lock = threading.Lock()
+        self._session_index: dict[str, dict[str, Any]] = {}
+        self._index_paths: dict[str, Path] = {}
+        self._index_dirty: set[str] = set()
+        self._index_uncertain: set[str] = set()
+        self._unreadable_snapshots: list[Path] = []
         self._loaded_session_ids: set[str] = set()
         self._persisted_states: dict[str, dict[str, Any]] = {}
         # A failed write may have reached any point between journal append and
@@ -118,6 +137,7 @@ class _FilesystemSessionState(SessionStoreCoordinator):
         try:
             self._upgrade_store_metadata()
             self._recover_transactions()
+            self._scan_session_index()
             self._normalize_existing_session_locations()
             super().__init__(**kwargs)
         except Exception:
@@ -377,7 +397,10 @@ class _FilesystemSessionState(SessionStoreCoordinator):
         if self._closed:
             return
         self._closed = True
-        await asyncio.to_thread(self._release_writer_lock)
+        try:
+            await asyncio.to_thread(self._flush_session_index)
+        finally:
+            await asyncio.to_thread(self._release_writer_lock)
 
     async def create_run(self, command, context):
         """Load only the explicitly addressed parent/Session before mutation."""
@@ -414,40 +437,67 @@ class _FilesystemSessionState(SessionStoreCoordinator):
         # Read unloaded Sessions too; a suspended Run is not dispatchable.
         if await super().has_nonterminal_runs():
             return True
-        return await asyncio.to_thread(self._has_persisted_nonterminal_runs)
+        loaded = frozenset(self._loaded_session_ids)
+        return await asyncio.to_thread(self._has_persisted_nonterminal_runs, loaded)
 
-    def _has_persisted_nonterminal_runs(self) -> bool:
-        from sagents.v2.contracts.run_state import TERMINAL_RUN_STATES
-
-        terminal = {state.value for state in TERMINAL_RUN_STATES}
-        for snapshot in self.sessions_root.rglob("state.json"):
-            # Fail closed on corrupt data; the lenient peek helper is unsafe here.
+    def _has_persisted_nonterminal_runs(self, loaded: frozenset[str]) -> bool:
+        with self._index_lock:
+            if any(
+                summary["nonterminal_runs"]
+                for session_id, summary in self._session_index.items()
+                if session_id not in loaded
+            ):
+                return True
+            uncertain = sorted(self._index_uncertain - loaded)
+            unreadable = list(self._unreadable_snapshots)
+        # Fail closed on corrupt data; the lenient peek helper is unsafe here.
+        snapshots = [self._session_dir(value) / "state.json" for value in uncertain]
+        for snapshot in [*snapshots, *unreadable]:
+            if not snapshot.is_file():
+                continue
             state, _ = self._read_session_aggregate(snapshot)
-            if any(run.get("state") not in terminal for run in state.get("runs", ())):
+            if any(
+                run.get("state") not in _TERMINAL_RUN_STATE_VALUES
+                for run in state.get("runs", ())
+            ):
                 return True
         return False
 
     async def list_dispatchable_runs(self):
-        """Load only snapshots advertising an active root execution intent."""
+        """Load only Sessions whose summary advertises a root execution intent."""
 
-        active = {"queued", "running", "suspend_requested", "resuming"}
-        for snapshot in self.sessions_root.rglob("state.json"):
-            state = self._peek_snapshot_state(snapshot)
-            should_load = False
-            for run in state.get("runs", ()):
-                command = run.get("start_command") or {}
-                if (
-                    run.get("state") in active
-                    and command.get("parent_run_id") is None
-                    and run.get("request_context") is not None
-                ):
-                    should_load = True
-                    break
-            if should_load:
-                rows = state.get("sessions", ())
-                if len(rows) == 1 and rows[0].get("session_id"):
-                    await self._ensure_session_loaded(str(rows[0]["session_id"]))
+        with self._index_lock:
+            session_ids = sorted(
+                {
+                    session_id
+                    for session_id, summary in self._session_index.items()
+                    if any(run["dispatchable"] for run in summary["nonterminal_runs"])
+                }
+                | self._index_uncertain
+            )
+        for session_id in session_ids:
+            await self._ensure_session_loaded(session_id, missing_ok=True)
         return await super().list_dispatchable_runs()
+
+    async def commit_model_stream_batch(self, *, run, drafts, context, idempotency_key):
+        await self._ensure_resource_loaded("runs", "run_id", run.run_id)
+        if self._durable_stream_deltas:
+            return await super().commit_model_stream_batch(
+                run=run,
+                drafts=drafts,
+                context=context,
+                idempotency_key=idempotency_key,
+            )
+        return await self._commit_model_stream_with_previews(
+            run=run,
+            drafts=drafts,
+            context=context,
+            idempotency_key=idempotency_key,
+        )
+
+    async def publish_stream_preview(self, *, run_id, **kwargs):
+        await self._ensure_resource_loaded("runs", "run_id", run_id)
+        return await super().publish_stream_preview(run_id=run_id, **kwargs)
 
     async def list_descendant_sessions(self, session_id):
         await self._ensure_session_loaded(session_id)
@@ -629,25 +679,19 @@ class _FilesystemSessionState(SessionStoreCoordinator):
         """
 
         records: dict[str, tuple[str | None, Path]] = {}
-        for snapshot in sorted(self.sessions_root.rglob("state.json")):
-            state = self._peek_snapshot_state(snapshot)
-            rows = state.get("sessions", ())
-            if len(rows) != 1 or not rows[0].get("session_id"):
-                continue
-            session_id = str(rows[0]["session_id"])
-            if session_id in records:
-                raise self._corrupt(
-                    "session_store.duplicate_session",
-                    f"Session {session_id!r} has more than one snapshot",
-                )
-            parent_id = rows[0].get("parent_session_id")
+        for session_id, summary in self._session_index.items():
+            parent_id = summary.get("parent_session_id")
             records[session_id] = (
                 str(parent_id) if parent_id is not None else None,
-                snapshot.parent,
+                self._index_paths[session_id],
             )
 
+        expected_locations = {
+            f"{self._safe_segment(session_id)}.json" for session_id in records
+        }
         for location in self.locations_root.glob("*.json"):
-            location.unlink(missing_ok=True)
+            if location.name not in expected_locations:
+                location.unlink(missing_ok=True)
 
         desired: dict[str, Path] = {}
         resolving: set[str] = set()
@@ -678,23 +722,9 @@ class _FilesystemSessionState(SessionStoreCoordinator):
         for session_id in records:
             desired_path(session_id)
 
-        def current_path(session_id: str) -> Path:
-            target = desired[session_id]
-            if self._snapshot_belongs_to(target / "state.json", session_id):
-                return target
-            original = records[session_id][1]
-            if self._snapshot_belongs_to(original / "state.json", session_id):
-                return original
-            for candidate in self.sessions_root.rglob("state.json"):
-                if self._snapshot_belongs_to(candidate, session_id):
-                    return candidate.parent
-            raise self._corrupt(
-                "session_store.session_missing",
-                f"Session {session_id!r} disappeared while normalizing its layout",
-            )
-
+        current = {session_id: path for session_id, (_, path) in records.items()}
         for session_id in sorted(desired, key=lambda key: len(desired[key].parts)):
-            source = current_path(session_id)
+            source = current[session_id]
             target = desired[session_id]
             if source != target:
                 if target.exists():
@@ -706,13 +736,211 @@ class _FilesystemSessionState(SessionStoreCoordinator):
                 source.replace(target)
                 self._fsync_directory(source.parent)
                 self._fsync_directory(target.parent)
+                # Nested descendants travel with their moved ancestor.
+                for other, path in current.items():
+                    if path == source or path.is_relative_to(source):
+                        current[other] = target / path.relative_to(source)
             self._write_location(session_id, target)
+            self._index_paths[session_id] = target
 
-    def _snapshot_belongs_to(self, snapshot: Path, session_id: str) -> bool:
-        if not snapshot.is_file():
+    def _scan_session_index(self) -> None:
+        """Summarize every persisted Session, reading full state only on a miss.
+
+        A cached summary is trusted only while the snapshot and journal file
+        identities still match the ones recorded with it, so external edits,
+        crashes, and older writers all fall back to an authoritative read.
+        """
+
+        index: dict[str, dict[str, Any]] = {}
+        paths: dict[str, Path] = {}
+        unreadable: list[Path] = []
+        for snapshot in sorted(self.sessions_root.rglob("state.json")):
+            session_dir = snapshot.parent
+            if (
+                session_dir.parent != self.sessions_root
+                and session_dir.parent.name != "sub_sessions"
+            ):
+                continue
+            summary = self._read_cached_summary(session_dir)
+            if summary is None:
+                try:
+                    state, _journal_count = self._read_session_aggregate(snapshot)
+                except Exception:
+                    # Full validation reports the typed corruption error when
+                    # this Session is requested; it must not block healthy ones.
+                    unreadable.append(snapshot)
+                    continue
+                summary = self._session_summary(state)
+                if summary is None:
+                    unreadable.append(snapshot)
+                    continue
+                self._write_summary_file(session_dir, summary)
+            session_id = summary["session_id"]
+            if session_id in index:
+                raise self._corrupt(
+                    "session_store.duplicate_session",
+                    f"Session {session_id!r} has more than one snapshot",
+                )
+            index[session_id] = summary
+            paths[session_id] = session_dir
+
+        expected = {f"{self._safe_segment(session_id)}.json" for session_id in index}
+        for path in self.index_root.glob("*.json"):
+            if path.name not in expected:
+                path.unlink(missing_ok=True)
+        with self._index_lock:
+            self._session_index = index
+            self._index_paths = paths
+            self._unreadable_snapshots = unreadable
+
+    @staticmethod
+    def _session_summary(state: dict[str, Any]) -> dict[str, Any] | None:
+        rows = state.get("sessions", ())
+        if len(rows) != 1 or not rows[0].get("session_id"):
+            return None
+        runs = state.get("runs", ())
+        nonterminal = []
+        for run in runs:
+            run_state = run.get("state")
+            if run_state in _TERMINAL_RUN_STATE_VALUES:
+                continue
+            command = run.get("start_command")
+            nonterminal.append(
+                {
+                    "run_id": str(run["run_id"]),
+                    "state": run_state,
+                    "dispatchable": run_state in _DISPATCHABLE_RUN_STATE_VALUES
+                    and run.get("request_context") is not None
+                    and command is not None
+                    and command.get("parent_run_id") is None,
+                }
+            )
+        parent_id = rows[0].get("parent_session_id")
+        return {
+            "session_id": str(rows[0]["session_id"]),
+            "parent_session_id": str(parent_id) if parent_id is not None else None,
+            "run_ids": [str(run["run_id"]) for run in runs],
+            "nonterminal_runs": nonterminal,
+        }
+
+    @staticmethod
+    def _storage_fingerprint(session_dir: Path) -> list[Any] | None:
+        values: list[Any] = []
+        for name in ("state.json", "journal.jsonl"):
+            try:
+                stat = (session_dir / name).stat()
+            except FileNotFoundError:
+                values.append(None)
+                continue
+            except OSError:
+                return None
+            values.append([stat.st_ino, stat.st_size, stat.st_mtime_ns])
+        return values
+
+    def _summary_path(self, session_id: str) -> Path:
+        return self.index_root / f"{self._safe_segment(session_id)}.json"
+
+    def _read_cached_summary(self, session_dir: Path) -> dict[str, Any] | None:
+        try:
+            payload = json.loads(
+                (self.index_root / f"{session_dir.name}.json").read_bytes()
+            )
+        except (OSError, ValueError):
+            return None
+        if not isinstance(payload, dict) or payload.get("format") != SESSION_INDEX_FORMAT:
+            return None
+        fingerprint = self._storage_fingerprint(session_dir)
+        if fingerprint is None or payload.get("fingerprint") != fingerprint:
+            return None
+        summary = payload.get("summary")
+        if (
+            not isinstance(summary, dict)
+            or not isinstance(summary.get("session_id"), str)
+            or self._safe_segment(summary["session_id"]) != session_dir.name
+            or not isinstance(summary.get("run_ids"), list)
+            or not isinstance(summary.get("nonterminal_runs"), list)
+        ):
+            return None
+        return summary
+
+    def _write_summary_file(self, session_dir: Path, summary: dict[str, Any]) -> bool:
+        """Persist one summary stamped with the files it was derived from."""
+
+        fingerprint = self._storage_fingerprint(session_dir)
+        if fingerprint is None:
             return False
-        rows = self._peek_snapshot_state(snapshot).get("sessions", ())
-        return len(rows) == 1 and rows[0].get("session_id") == session_id
+        try:
+            self._atomic_json_write(
+                self._summary_path(summary["session_id"]),
+                {
+                    "format": SESSION_INDEX_FORMAT,
+                    "fingerprint": fingerprint,
+                    "summary": summary,
+                },
+            )
+        except OSError as exc:
+            LOGGER.warning(
+                "session.filesystem.index_write_failed",
+                "failed to persist Session index summary",
+                session_id=summary["session_id"],
+                error=str(exc),
+            )
+            return False
+        return True
+
+    def _record_session_summary(
+        self, session_id: str, session_dir: Path, state: dict[str, Any]
+    ) -> None:
+        """Refresh the summary in the same critical section as the durable write."""
+
+        summary = self._session_summary(state)
+        if summary is None:
+            return
+        with self._index_lock:
+            previous = self._session_index.get(session_id)
+            self._session_index[session_id] = summary
+            self._index_paths[session_id] = session_dir
+            self._index_uncertain.discard(session_id)
+            self._index_dirty.add(session_id)
+        # Run boundaries are rare; persisting them immediately keeps the cache
+        # valid when the host is killed after a Run finishes.
+        if previous != summary and self._write_summary_file(session_dir, summary):
+            with self._index_lock:
+                self._index_dirty.discard(session_id)
+
+    def _mark_summary_uncertain(self, session_id: str) -> None:
+        # A persisted summary self-invalidates once the files it was stamped
+        # with change, so only the in-memory view needs to be distrusted.
+        with self._index_lock:
+            self._index_uncertain.add(session_id)
+            self._index_dirty.discard(session_id)
+
+    def _forget_session_summaries(self, session_ids) -> None:
+        with self._index_lock:
+            for session_id in session_ids:
+                self._session_index.pop(session_id, None)
+                self._index_paths.pop(session_id, None)
+                self._index_dirty.discard(session_id)
+                self._index_uncertain.discard(session_id)
+        for session_id in session_ids:
+            self._summary_path(session_id).unlink(missing_ok=True)
+
+    def _flush_session_index(self) -> None:
+        with self._filesystem_lock:
+            with self._index_lock:
+                pending = [
+                    (session_id, self._session_index.get(session_id))
+                    for session_id in sorted(self._index_dirty)
+                ]
+                self._index_dirty.clear()
+            for session_id, summary in pending:
+                if summary is None:
+                    continue
+                try:
+                    session_dir = self._session_dir(session_id)
+                except SessionStoreCorruptionError:
+                    continue
+                self._write_summary_file(session_dir, summary)
 
     def _acquire_writer_lock(self) -> None:
         if fcntl is None and msvcrt is None:
@@ -911,15 +1139,6 @@ class _FilesystemSessionState(SessionStoreCoordinator):
             path.mkdir(parents=True, exist_ok=True)
 
         runs = [dict(value) for value in state.get("runs", ())]
-        self._atomic_json_write(
-            session_dir / "session.json",
-            {
-                "format": SESSION_LAYOUT_FORMAT,
-                "authoritative_state": "state.json",
-                "session": session,
-                "run_ids": [value["run_id"] for value in runs],
-            },
-        )
         session_events = sorted(
             (
                 event
@@ -999,6 +1218,38 @@ class _FilesystemSessionState(SessionStoreCoordinator):
                 commits_dir / f"{self._safe_segment(proposal_id)}.json",
                 {"format": SESSION_LAYOUT_FORMAT, "proposal": proposal},
             )
+        # Written last: a manifest matching the aggregate proves every view
+        # above was completed for this revision.
+        self._atomic_json_write(
+            session_dir / "session.json",
+            self._session_manifest(session, runs),
+        )
+
+    @staticmethod
+    def _session_manifest(session: dict[str, Any], runs) -> dict[str, Any]:
+        return {
+            "format": SESSION_LAYOUT_FORMAT,
+            "authoritative_state": "state.json",
+            "session": session,
+            "run_ids": [value["run_id"] for value in runs],
+        }
+
+    def _session_views_current(
+        self, session_dir: Path, state: dict[str, Any]
+    ) -> bool:
+        runs = state.get("runs", ())
+        expected = self._session_manifest(dict(state["sessions"][0]), runs)
+        try:
+            manifest = json.loads((session_dir / "session.json").read_bytes())
+        except (OSError, ValueError):
+            return False
+        if manifest != expected:
+            return False
+        return all(
+            (session_dir / "runs" / self._safe_segment(str(run["run_id"])) / name).is_file()
+            for run in runs
+            for name in ("run.json", "events.jsonl")
+        )
 
     @staticmethod
     def _group_by_run(values) -> dict[str, list[dict[str, Any]]]:
@@ -1046,6 +1297,25 @@ class _FilesystemSessionState(SessionStoreCoordinator):
         start_entries: list[dict[str, Any]],
         previous: dict[str, Any] | None,
     ) -> None:
+        with self._filesystem_lock:
+            try:
+                session_dir = self._write_session_files(
+                    session_id, state, start_entries, previous
+                )
+            except BaseException:
+                # The journal may or may not hold this commit; only a full
+                # read can tell which Runs are still active.
+                self._mark_summary_uncertain(session_id)
+                raise
+            self._record_session_summary(session_id, session_dir, state)
+
+    def _write_session_files(
+        self,
+        session_id: str,
+        state: dict[str, Any],
+        start_entries: list[dict[str, Any]],
+        previous: dict[str, Any] | None,
+    ) -> Path:
         with self._filesystem_lock:
             session_dir = self._session_dir_for_state(session_id, state)
             snapshot = session_dir / "state.json"
@@ -1104,6 +1374,7 @@ class _FilesystemSessionState(SessionStoreCoordinator):
             if transaction is not None:
                 transaction.unlink(missing_ok=True)
                 self._fsync_directory(self.transactions_root)
+            return session_dir
 
     @classmethod
     def _append_journal_line(cls, path: Path, payload: dict[str, Any]) -> None:
@@ -1273,9 +1544,17 @@ class _FilesystemSessionState(SessionStoreCoordinator):
         )
         if not snapshots:
             return
+        with self._index_lock:
+            indexed = {path: value for value, path in self._index_paths.items()}
         async with self._load_lock:
             async with self._lock:
                 for snapshot in snapshots:
+                    known_session_id = indexed.get(snapshot.parent)
+                    if known_session_id is not None and (
+                        known_session_id in self._loaded_session_ids
+                        or self._repair_loaded_session_marker_locked(known_session_id)
+                    ):
+                        continue
                     state = await asyncio.to_thread(self._peek_snapshot_state, snapshot)
                     rows = state.get("sessions", ())
                     if len(rows) != 1:
@@ -1352,6 +1631,8 @@ class _FilesystemSessionState(SessionStoreCoordinator):
         # This is a compatibility locator for APIs that carry only a Run or
         # checkpoint ID. It peeks at one snapshot at a time and loads only
         # the matching Session; it never constructs a Session catalog.
+        if collection == "runs" and identity_key == "run_id":
+            return self._locate_run_snapshot(identity)
         for snapshot in self.sessions_root.rglob("state.json"):
             state = self._peek_snapshot_state(snapshot)
             if any(
@@ -1361,6 +1642,29 @@ class _FilesystemSessionState(SessionStoreCoordinator):
                 rows = state.get("sessions", ())
                 if len(rows) == 1 and rows[0].get("session_id"):
                     self._write_location(str(rows[0]["session_id"]), snapshot.parent)
+                return snapshot
+        return None
+
+    def _locate_run_snapshot(self, run_id: str) -> Path | None:
+        # The index covers every readable persisted Session, so a miss is
+        # authoritative; unreadable snapshots were never locatable by peeking.
+        with self._index_lock:
+            indexed = [
+                session_id
+                for session_id, summary in self._session_index.items()
+                if run_id in summary["run_ids"]
+            ]
+            uncertain = sorted(self._index_uncertain)
+        for session_id in indexed:
+            snapshot = self._session_dir(session_id) / "state.json"
+            if snapshot.is_file():
+                return snapshot
+        for session_id in uncertain:
+            snapshot = self._session_dir(session_id) / "state.json"
+            if snapshot.is_file() and any(
+                value.get("run_id") == run_id
+                for value in self._peek_snapshot_state(snapshot).get("runs", ())
+            ):
                 return snapshot
         return None
 
@@ -1377,7 +1681,9 @@ class _FilesystemSessionState(SessionStoreCoordinator):
     def _load_one_session(
         self, snapshot: Path, expected_session_id: str | None
     ) -> None:
-        aggregate_state, journal_count = self._read_session_aggregate(snapshot)
+        aggregate_state, journal_count, snapshot_format = (
+            self._read_session_aggregate_with_format(snapshot)
+        )
         session_rows = aggregate_state.get("sessions", ())
         if len(session_rows) != 1:
             raise self._corrupt(
@@ -1409,14 +1715,15 @@ class _FilesystemSessionState(SessionStoreCoordinator):
         self._loaded_session_ids.add(session_id)
         self._persisted_states[session_id] = deepcopy(aggregate_state)
         self._journal_commits[session_id] = journal_count
-        if self._snapshot_format(snapshot) != self.format_version:
+        if snapshot_format != self.format_version:
             # A legacy aggregate is safe to read but must never receive a v4
             # delta. Its first mutation atomically rewrites a v4 snapshot and
             # resets the journal before normal incremental writes resume.
             self._storage_recovery_required.add(session_id)
         for entry in aggregate_state.get("start_idempotency", ()):
             self._write_start_idempotency(entry, session_id)
-        self._refresh_session_views(session_id, aggregate_state)
+        if not self._session_views_current(snapshot.parent, aggregate_state):
+            self._refresh_session_views(session_id, aggregate_state)
 
     def _read_start_lookup(self, command, context) -> dict[str, Any] | None:
         identity = {
@@ -1484,14 +1791,15 @@ class _FilesystemSessionState(SessionStoreCoordinator):
             )
         return payload
 
-    def _snapshot_format(self, snapshot: Path) -> str | None:
-        try:
-            payload = json.loads(snapshot.read_bytes())
-        except Exception:
-            return None
-        return str(payload.get("format")) if isinstance(payload, dict) else None
-
     def _read_session_aggregate(self, snapshot: Path) -> tuple[dict[str, Any], int]:
+        state, journal_count, _format = self._read_session_aggregate_with_format(
+            snapshot
+        )
+        return state, journal_count
+
+    def _read_session_aggregate_with_format(
+        self, snapshot: Path
+    ) -> tuple[dict[str, Any], int, str | None]:
         payload = self._read_snapshot_payload(snapshot)
         snapshot_format = payload.get("format")
         try:
@@ -1519,9 +1827,11 @@ class _FilesystemSessionState(SessionStoreCoordinator):
                     "session_store.journal_corrupt",
                     f"v2 snapshot {snapshot} unexpectedly has a journal",
                 )
-            return self._normalize_snapshot_state(state, snapshot, revision), 0
+            normalized = self._normalize_snapshot_state(state, snapshot, revision)
+            return normalized, 0, snapshot_format
         if not journal.exists():
-            return self._normalize_snapshot_state(state, snapshot, revision), 0
+            normalized = self._normalize_snapshot_state(state, snapshot, revision)
+            return normalized, 0, snapshot_format
         try:
             encoded = journal.read_bytes()
         except OSError as exc:
@@ -1594,7 +1904,8 @@ class _FilesystemSessionState(SessionStoreCoordinator):
                     f"journal {journal} record {index + 1} produced revision {applied_revision}",
                 )
             revision = mutation.current_session_revision
-        return self._normalize_snapshot_state(state, snapshot, revision), complete_count
+        normalized = self._normalize_snapshot_state(state, snapshot, revision)
+        return normalized, complete_count, snapshot_format
 
     def _normalize_snapshot_state(
         self,
@@ -1704,6 +2015,7 @@ class _FilesystemSessionState(SessionStoreCoordinator):
             for deleted_session_id in deleted_session_ids:
                 self._remove_start_lookups(deleted_session_id)
                 self._location_path(deleted_session_id).unlink(missing_ok=True)
+            self._forget_session_summaries(deleted_session_ids)
             if target.exists():
                 shutil.rmtree(target)
             transaction.unlink(missing_ok=True)

@@ -10,6 +10,18 @@ from sagents.v2.contracts.events import RuntimeEvent
 from sagents.v2.interfaces.protocols.ag_ui import AgUiProtocolAdapter
 from sagents.v2.interfaces.protocols.contracts import ProtocolFrame
 
+# Completion frame positions must not depend on whether live deltas were
+# observed. Replaying durable history may need to restore their full content.
+_ITEM_COMPLETION_FRAME_INDEX = {
+    "TEXT_MESSAGE_START": 0,
+    "TEXT_MESSAGE_CONTENT": 1,
+    "TEXT_MESSAGE_END": 2,
+    "REASONING_START": 0,
+    "REASONING_MESSAGE_START": 1,
+    "REASONING_MESSAGE_CONTENT": 2,
+    "REASONING_MESSAGE_END": 3,
+    "REASONING_END": 4,
+}
 _RUN_ID_EVENTS = {"RUN_STARTED", "RUN_FINISHED"}
 _TEXT_MESSAGE_EVENTS = {
     "TEXT_MESSAGE_START",
@@ -156,6 +168,10 @@ async def canonical_agui_sse(
                     # AG-UI requires its run lifecycle frame first. Native
                     # accepted/queued/input facts remain in the canonical log.
                     continue
+            if event.type in {
+                "message.completed", "reasoning.completed", "item.completed"
+            }:
+                frame_index = _ITEM_COMPLETION_FRAME_INDEX.get(frame.name, frame_index)
             position = CanonicalSseCursor(
                 event.run_sequence,
                 frame_index,

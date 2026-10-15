@@ -165,6 +165,8 @@ class LostHandleStudioApi extends StudioApi {
   Stream<Map<String, Object?>> subscribeRun(
     String runId, {
     int afterSequence = 0,
+    int previewSequence = 0,
+    String? previewEpoch,
   }) {
     subscribed = runId;
     return Stream.fromIterable([
