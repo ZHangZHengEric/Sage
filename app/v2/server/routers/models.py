@@ -22,12 +22,48 @@ async def list_models(user: ReadUser, service: CatalogDep):
 
 @router.post("", response_model=ApiResponse[ModelPublic])
 async def upsert_model(body: ModelBody, user: CurrentUser, service: CatalogDep):
-    record = await service.upsert_model(user.user_id, body.model_dump())
+    record = await service.upsert_model(user.user_id, body.model_dump(exclude_unset=True))
     return success(record.public_dict())
 
 
+@router.post("/probe")
+async def probe_model(
+    body: ModelBody, user: CurrentUser, service: CatalogDep, response: Response
+):
+    from app.v2.server.catalog.records import apply_upsert
+    from app.v2.server.runtime.models import (
+        create_catalog_provider,
+        close_model_provider,
+    )
+    from sagents.v2.model.capability_contracts import ModelCapabilityProbeRequest
+
+    # Resolve blank keys only within the caller's own catalog; probing never saves a draft.
+    catalog = (await service.get(user.user_id)).model_copy(deep=True)
+    record, _ = apply_upsert(
+        catalog, {**body.model_dump(exclude_unset=True), "capability_profile": None}
+    )
+    async with service.model_probe_slot(user.user_id):
+        provider = await create_catalog_provider(record)
+        response.headers["Cache-Control"] = "no-store"
+        try:
+            profile = await provider.probe_capabilities(
+                ModelCapabilityProbeRequest(
+                    model_binding=record.id,
+                    route_fingerprint=record.fingerprint(),
+                    max_output_tokens=record.request.max_output_tokens
+                    or record.limits.max_output_tokens
+                    or 8192,
+                )
+            )
+            return success(profile.model_dump(mode="json"))
+        finally:
+            await close_model_provider(provider)
+
+
 @router.get("/{model_id}", response_model=ApiResponse[ModelDetail])
-async def get_model(model_id: str, user: ReadUser, service: CatalogDep, response: Response):
+async def get_model(
+    model_id: str, user: ReadUser, service: CatalogDep, response: Response
+):
     catalog = await service.get(user.user_id)
     record = next((item for item in catalog.models if item.id == model_id), None)
     if record is None:

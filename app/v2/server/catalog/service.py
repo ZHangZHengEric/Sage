@@ -29,6 +29,8 @@ class CatalogService:
         self.mcp_plugins = mcp_plugins
         self.a2a_plugins = a2a_plugins
         self.skills = skills
+        self._probe_slots = asyncio.Semaphore(4)
+        self._probing_users: set[str] = set()
 
     async def agent_owner(self, agent_id: str) -> str | None:
         return await self.store.agent_owner(agent_id)
@@ -48,6 +50,23 @@ class CatalogService:
         async with self.locks[index]:
             yield
 
+    @asynccontextmanager
+    async def model_probe_slot(self, user_id: str):
+        if self._probe_slots.locked() or user_id in self._probing_users:
+            raise SageV2Error(
+                RuntimeErrorInfo(
+                    code="server.model_probe.busy",
+                    category=ErrorCategory.RATE_LIMITED,
+                    message="模型能力探测正在进行，请稍后再试",
+                )
+            )
+        async with self._probe_slots:
+            self._probing_users.add(user_id)
+            try:
+                yield
+            finally:
+                self._probing_users.discard(user_id)
+
     async def upsert_model(self, user_id: str, payload: dict) -> ModelRecord:
         async with self._lock(user_id, "models"):
             return await self.store.upsert_model(user_id, payload)
@@ -56,7 +75,19 @@ class CatalogService:
         async with self._lock(user_id, "models"):
             await self.store.delete_model(user_id, model_id)
 
+    def _validate_agent_options(self, payload):
+        budgets = payload.get("budgets") or {}
+        if (budgets.get("max_steps") or 100) > 10000:
+            raise SageV2Error(
+                RuntimeErrorInfo(
+                    code="server.catalog.validation",
+                    category=ErrorCategory.VALIDATION,
+                    message="max_steps exceeds host ceiling 10000",
+                )
+            )
+
     async def create_agent(self, user_id: str, payload: dict) -> AgentRecord:
+        self._validate_agent_options(payload)
         async with self._lock(user_id, "agents"):
             catalog = await self.store.get(user_id)
             record, catalog = upsert_agent(catalog, {**payload, "id": new_id("agent")})
@@ -73,6 +104,7 @@ class CatalogService:
     async def update_agent(
         self, user_id: str, agent_id: str, payload: dict
     ) -> AgentRecord:
+        self._validate_agent_options(payload)
         async with self._lock(user_id, "agents"):
             catalog = await self.store.get(user_id)
             require_agent(catalog, agent_id)

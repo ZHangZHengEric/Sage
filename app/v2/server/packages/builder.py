@@ -42,6 +42,8 @@ class CatalogPackageModel:
                 )
             yield self.execution.fallback_model
             return
+        if route is not None:
+            record = record.for_route(route)
         _provider, scope = await open_model_lease(self.execution, self.user_id, record)
         try:
             yield scope.provider

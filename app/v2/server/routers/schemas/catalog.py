@@ -4,10 +4,12 @@ from typing import Literal
 from sagents.v2.agent.policy.approval_config import ToolApprovalConfig
 from pydantic import BaseModel, ConfigDict, Field
 from app.v2.server.runtime.policy import ExecutionPolicy
-from sagents.v2.package.manifest.agents import AgentSandboxConfig
+from sagents.v2.package.manifest.agents import AgentSandboxConfig, AgentBudgets
 from sagents.v2.agent.management import AgentPackageBundle
 
-class ModelBody(BaseModel):
+from app.v2.server.catalog.records import ModelConfiguration
+
+class ModelBody(ModelConfiguration):
     id: str | None = None
     protocol: str = "openai-chat-completions"
     base_url: str | None = None
@@ -25,6 +27,7 @@ class AgentBody(BaseModel):
     tool_approval: ToolApprovalConfig | None = None
     execution_policy: ExecutionPolicy | None = None
     sandbox: AgentSandboxConfig | None = None
+    budgets: AgentBudgets | None = None
 
 class AgentPublic(BaseModel):
     id: str
@@ -89,7 +92,7 @@ class A2AAgentPublic(BaseModel):
     skills: list[str] = Field(default_factory=list)
     has_api_key: bool = False
 
-class ModelPublic(BaseModel):
+class ModelPublic(ModelConfiguration):
     id: str
     protocol: str
     base_url: str

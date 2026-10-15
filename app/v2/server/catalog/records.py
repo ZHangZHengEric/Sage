@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import re
+import hashlib
+import json
 from typing import Literal
 from urllib.parse import urlsplit
 
@@ -8,6 +10,7 @@ from sagents.v2.agent.policy.approval_config import ToolApprovalConfig
 from sagents.v2.agent.management import AgentPackageBundle
 from pydantic import (
     BaseModel,
+    ConfigDict,
     Field,
     SecretStr,
     ValidationError,
@@ -21,13 +24,32 @@ from sagents.v2.contracts.common import new_id
 from sagents.v2.contracts.errors import ErrorCategory, RuntimeErrorInfo, SageV2Error
 from sagents.v2.model.protocols import (
     model_protocol_default_base_url,
+    model_protocol_implementation,
     resolve_model_protocol,
 )
+
+from sagents.v2.package.manifest.models import (
+    ModelRequestDefaults,
+    ModelLimits,
+    ModelCapabilityDeclaration,
+    ModelRoute,
+)
+from sagents.v2.model.capability_contracts import ModelCapabilityProfile
 
 _LOGGER = get_logger(__name__)
 
 
-class ModelRecord(BaseModel):
+class ModelConfiguration(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    request: ModelRequestDefaults = Field(default_factory=ModelRequestDefaults)
+    limits: ModelLimits = Field(default_factory=ModelLimits)
+    capabilities: ModelCapabilityDeclaration = Field(
+        default_factory=ModelCapabilityDeclaration
+    )
+    capability_profile: ModelCapabilityProfile | None = None
+
+
+class ModelRecord(ModelConfiguration):
     id: str
     protocol: str = "openai-chat-completions"
     base_url: str = "https://api.openai.com/v1"
@@ -35,25 +57,74 @@ class ModelRecord(BaseModel):
     api_key: SecretStr
     is_default: bool = True
 
+    def fingerprint(self) -> str:
+        data = [
+            self.protocol,
+            self.base_url,
+            self.model,
+            self.api_key.get_secret_value(),
+            self.request.model_dump(mode="json"),
+            self.limits.model_dump(mode="json"),
+        ]
+        return hashlib.sha256(json.dumps(data, sort_keys=True).encode()).hexdigest()
+
     def cache_key(self) -> str:
-        return "|".join(
-            (
-                self.id,
-                self.protocol,
-                self.base_url,
-                self.model,
-                self.api_key.get_secret_value(),
-            )
+        return hashlib.sha256(
+            self.model_dump_json().encode() + self.api_key.get_secret_value().encode()
+        ).hexdigest()
+
+    def current_profile(self):
+        profile = self.capability_profile
+        implementation = model_protocol_implementation(
+            resolve_model_protocol(self.protocol)
+        )
+        if profile is not None and (
+            profile.protocol != resolve_model_protocol(self.protocol).value
+            or profile.plugin_id != implementation.plugin_id
+            or profile.plugin_version != implementation.plugin_version
+        ):
+            return None
+        return profile
+
+    def route(self) -> ModelRoute:
+        return ModelRoute(
+            provider=resolve_model_protocol(self.protocol).value,
+            base_url=self.base_url,
+            model=self.model,
+            **self.model_dump(include={"request", "limits", "capabilities"}),
+            capability_profile=self.current_profile(),
+        )
+
+    def for_route(self, route):
+        request = self.request.model_dump()
+        request.update(
+            {
+                key: value
+                for key, value in route.request.model_dump(exclude={"extra"}).items()
+                if value is not None
+            }
+        )
+        request["extra"] = {**self.request.extra, **route.request.extra}
+        limits = self.limits.model_dump()
+        limits.update(
+            {
+                key: value
+                for key, value in route.limits.model_dump().items()
+                if value is not None
+            }
+        )
+        return self.model_copy(
+            update={
+                "request": ModelRequestDefaults.model_validate(request),
+                "limits": ModelLimits.model_validate(limits),
+            }
         )
 
     def public_dict(self) -> dict[str, object]:
-        return {
-            "id": self.id,
-            "protocol": self.protocol,
-            "base_url": self.base_url,
-            "model": self.model,
-            "is_default": self.is_default,
-        }
+        data = self.model_dump(mode="json", exclude={"api_key"})
+        if self.current_profile() is None:
+            data["capability_profile"] = None
+        return data
 
 
 class AgentRecord(BaseModel):
@@ -346,6 +417,14 @@ def upsert_agent(
                                              sandbox=payload.get("sandbox"))
     elif payload.get("sandbox") is not None:
         record = record.with_configuration(sandbox=payload["sandbox"])
+    advanced = {key: payload[key] for key in ("budgets",)
+                if payload.get(key) is not None}
+    if advanced:
+        data = record.package.model_dump(mode="json")
+        data["manifest"]["agents"][record.id].update(advanced)
+        record = record.model_copy(update={"package": AgentPackageBundle.model_validate(data)})
+        # Recompute the content version after updating canonical fields.
+        record = record.with_configuration()
     if record.model_id and not any(
         item.id == record.model_id for item in catalog.models
     ):
@@ -560,7 +639,10 @@ def apply_upsert(
     model_id = str(payload.get("id") or new_id("model"))
     protocol = str(payload.get("protocol") or "openai-chat-completions")
     resolve_model_protocol(protocol)
+    existing = next((item for item in catalog.models if item.id == model_id), None)
     record = ModelRecord(
+        **{key: payload.get(key, getattr(existing, key) if existing else field.get_default(call_default_factory=True))
+           for key, field in ModelConfiguration.model_fields.items()},
         id=model_id,
         protocol=protocol,
         base_url=str(
@@ -589,6 +671,15 @@ def apply_upsert(
                 )
             )
         record = record.model_copy(update={"api_key": existing.api_key})
+    if record.capability_profile and record.capability_profile.route_fingerprint != record.fingerprint():
+        record = record.model_copy(update={"capability_profile": None})
+    try:
+        record.route()  # Validate endpoints and route configuration before persistence.
+    except ValueError as exc:
+        raise SageV2Error(RuntimeErrorInfo(
+            code="server.catalog.records.validation", category=ErrorCategory.VALIDATION,
+            message=str(exc),
+        )) from exc
     models = [
         item.model_copy(update={"is_default": False}) if record.is_default else item
         for item in catalog.models

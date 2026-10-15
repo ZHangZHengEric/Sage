@@ -12,10 +12,8 @@ from sagents.v2.contracts.errors import ErrorCategory, RuntimeErrorInfo, SageV2E
 from sagents.v2.model.contracts import ModelCapabilities, ModelRequest
 from sagents.v2.model.protocols import (
     create_registered_model_provider,
-    resolve_model_protocol,
 )
 from sagents.v2.model.provider import ModelProvider
-from sagents.v2.package.manifest.models import ModelRoute
 from sagents.v2.runtime.credentials.contracts import CredentialMaterial
 from sagents.v2.runtime.session.contracts import SessionStore
 
@@ -159,11 +157,7 @@ async def create_catalog_provider(record):
 
 
 def _build_catalog_provider(record):
-    route = ModelRoute(
-        provider=resolve_model_protocol(record.protocol).value,
-        base_url=record.base_url,
-        model=record.model,
-    )
+    route = record.route()
     credential = CredentialMaterial(
         credential_id=f"catalog-{record.id}",
         secret=record.api_key,

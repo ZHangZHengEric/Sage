@@ -86,6 +86,7 @@ class ModelClientPool:
             record.base_url,
             record.model,
             record.api_key.get_secret_value(),
+            record.model_dump(mode="json", include={"request", "limits", "capabilities", "capability_profile"}),
         )
         return hashlib.sha256(
             json.dumps(value, ensure_ascii=False, separators=(",", ":")).encode()

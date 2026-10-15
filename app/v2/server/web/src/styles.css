@@ -602,3 +602,47 @@ legend { font-size: 15px; font-weight: 600; margin-bottom: 16px; }
 .tool-spinner { width: 18px; height: 18px; border: 1.5px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: tool-spin 1s linear infinite; }
 @keyframes tool-spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .tool-spinner { animation: none; } }
+
+/* Configuration surfaces use the same glass treatment in both color schemes. */
+.glass-config { padding: 18px; border: 1px solid var(--border); border-radius: 18px; background: color-mix(in srgb, var(--card) 92%, transparent); backdrop-filter: blur(16px); margin-block: 16px; }
+.config-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 18px; }
+.config-toggles { display: flex; flex-wrap: wrap; gap: 12px 20px; margin-block: 16px; }
+.config-toggles label, .config-check { display: flex; align-items: center; gap: 8px; }
+.config-toggles input, .config-check input { width: auto; }
+.config-tabs { display: flex; flex-wrap: wrap; gap: 6px; margin-block: 16px; }
+.schema-field { min-width: 0; flex: 1; }
+.schema-group { border: 1px solid var(--border); border-radius: 12px; margin-block: 8px; }
+.schema-group > summary { padding: 10px 14px; font-weight: 500; overflow-wrap: anywhere; }
+.schema-body { padding: 4px 14px 14px; min-width: 0; }
+.schema-property { display: flex; gap: 8px; align-items: flex-start; min-width: 0; margin-block: 8px; }
+.schema-property > .icon-button { flex-shrink: 0; }
+.schema-field .field { margin-block: 6px; }
+.schema-field input, .schema-field textarea, .schema-field select { min-width: 0; max-width: 100%; }
+.schema-field textarea { width: 100%; resize: vertical; }
+.value-kind { width: auto; margin-block: 4px; }
+.probe-outcome { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; }
+.probe-outcome .error { width: 100%; overflow-wrap: anywhere; }
+.capability-report .supported { color: var(--status-success); }
+.capability-report .unsupported, .capability-report .error { color: var(--destructive); }
+.capability-report dl { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 8px 16px; }
+.capability-report dd { margin: 0; overflow-wrap: anywhere; }
+@media (max-width: 600px) { .config-grid { grid-template-columns: minmax(0, 1fr); } .glass-config { padding: 12px; } .schema-body { padding-inline: 8px; } }
+@media (prefers-color-scheme: dark) {
+  :root {
+    color-scheme: dark;
+    --background: #0d1119;
+    --foreground: #edf2f9;
+    --card: #151c28;
+    --muted: #202b3c;
+    --muted-foreground: #abb8cc;
+    --primary: #dbeafe;
+    --primary-foreground: #101827;
+    --border: #354257;
+    --sidebar: rgba(16, 23, 35, .92);
+    --destructive: #fb9292;
+    --status-success: #86efac;
+    --status-warning: #fcd34d;
+    --status-active: #93c5fd;
+  }
+}
+:focus-visible { outline: 2px solid var(--status-active); outline-offset: 3px; }
