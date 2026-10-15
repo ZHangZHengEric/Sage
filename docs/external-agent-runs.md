@@ -17,6 +17,6 @@
 | `GET /api/agents/{agent_id}/runs/{thread_id}/{run_id}` | 无 | 返回 `threadId`、`runId`、状态、最终条目和当前交互及其预期修订号。`run_id` 是提交时的 AG-UI `runId`。 |
 | `POST /api/agents/{agent_id}/runs/{thread_id}/{run_id}/reply` | `{interaction_id, decision, payload, expected}` | 仅在交互 ID 和修订号仍匹配时恢复。 |
 | `POST /api/agents/{agent_id}/runs/{thread_id}/{run_id}/cancel` | 无 | 仅取消该运行；已终止运行不再改变。 |
-| `GET /api/agents/{agent_id}/runs/{thread_id}/{run_id}/files` | 无 | 下载该运行绑定的工作目录，最多 32 MiB、512 项；旧运行在同会话出现新运行后返回 409，避免把新文件误标为旧运行产物。 |
+| `GET /api/agents/{agent_id}/runs/{thread_id}/{run_id}/files` | 无 | 下载该运行绑定的工作目录，最多 32 MiB、512 项；旧运行在同会话出现新运行后返回 409。打包期间文件发生变化时返回可重试的 503，调用方不得使用不完整快照。 |
 
 工作区是 Agent 可以修改的运行目录；执行中的文件下载只是读取时的快照，不能视作稳定构建。调用方必须检查自身的产物清单与 `runId`，并持久化通过校验的构建。Sage 不执行项目构建，也不解释业务清单。

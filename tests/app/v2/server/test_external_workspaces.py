@@ -4,6 +4,8 @@ import base64
 
 import pytest
 
+from app.v2.server.storage import downloads
+from app.v2.server.storage.downloads import SnapshotChangedError, prepare_download
 from app.v2.server.storage.external_workspaces import (
     ensure_workspace_directory, import_workspace_files, workspace_parts,
 )
@@ -55,3 +57,35 @@ def test_workspace_import_enforces_total_limit_before_writing(tmp_path):
         import_workspace_files(paths, "tenant", "agent", "project",
                                {f"{index}.txt": encoded for index in range(5)})
     assert not (paths.workspace_path("tenant", "agent") / "project").exists()
+
+
+def test_download_rejects_file_modified_during_snapshot(tmp_path, monkeypatch):
+    project = tmp_path / "projects" / "site"
+    project.mkdir(parents=True)
+    page = project / "index.html"
+    page.write_bytes(b"before")
+    original_open = downloads.ZipFile.open
+
+    class MutatingWriter:
+        def __init__(self, inner):
+            self.inner = inner
+
+        def __enter__(self):
+            self.inner.__enter__()
+            return self
+
+        def __exit__(self, *args):
+            return self.inner.__exit__(*args)
+
+        def write(self, data):
+            written = self.inner.write(data)
+            page.write_bytes(b"after with a different size")
+            return written
+
+    def open_and_mutate(archive, name, mode="r", *args, **kwargs):
+        opened = original_open(archive, name, mode, *args, **kwargs)
+        return MutatingWriter(opened) if mode == "w" else opened
+
+    monkeypatch.setattr(downloads.ZipFile, "open", open_and_mutate)
+    with pytest.raises(SnapshotChangedError):
+        prepare_download(tmp_path, "projects/site")

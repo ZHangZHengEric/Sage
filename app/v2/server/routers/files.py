@@ -11,7 +11,7 @@ from starlette.background import BackgroundTask
 
 from app.v2.server.routers.deps import HostDep, ReadUser, CurrentUser
 from app.v2.server.routers.render import success
-from app.v2.server.storage.downloads import list_directory, prepare_download
+from app.v2.server.storage.downloads import SnapshotChangedError, list_directory, prepare_download
 
 router = APIRouter(tags=["files"])
 
@@ -19,6 +19,8 @@ router = APIRouter(tags=["files"])
 async def file_operation(function, *args, **kwargs):
     try:
         return await asyncio.to_thread(partial(function, *args, **kwargs))
+    except SnapshotChangedError as exc:
+        raise HTTPException(503, str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
     except (OSError, RecursionError) as exc:
