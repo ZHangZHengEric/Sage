@@ -273,6 +273,42 @@ Skills are loaded lazily from a skill provider. Official filesystem, shell,
 network, and media tools execute only through host-provided sandbox interfaces;
 they do not fall back to unrestricted process or filesystem access.
 
+Tool calls bind matching keys from `StartRun.config.metadata["system_context"]`
+before policy evaluation and execution, for both native/decorated and MCP tools:
+
+```python
+RunConfig(metadata={"system_context": {"user_id": "host-user", "locale": "zh-CN"}})
+```
+
+As in v1, only declared top-level input parameters (`properties` or `required`)
+are matched. Non-`None` context values override model arguments and fill omitted
+arguments; `False`, `0`, empty strings and empty containers remain valid overrides.
+Unrelated keys are not forwarded, and nested parameter names are not recursively
+matched. Injected values still pass the tool's input schema validation. This also
+applies to automatic `search_memory` calls. Decorated tools continue to receive
+runtime-owned `invocation` and `request_context` objects through their dedicated
+injection path.
+
+All built-in tools declare a `session_id` parameter, including goal, package
+management, Skill loading, delegation and self-configuration tools. At execution,
+a missing, null or blank `system_context.session_id` is filled from the Run's
+actual Session ID, including newly allocated and forked Sessions. A supplied
+nonblank string is preserved. The resolved context feeds both the model prompt
+and tool argument binding without mutating the admitted command.
+
+`agent_package_run.session_id` identifies the current caller Session and follows
+normal system-context binding. Use `target_session_id` to continue the target
+Agent's existing conversation; omitting it starts a new target Session. The tool
+passes only `target_session_id` to the managed-run service's `session_id` argument.
+Existing tool callers that used `session_id` for the target must switch that
+argument to `target_session_id`. The underlying service and HTTP API are unchanged.
+
+The host supplies this context when admitting a Run. Actual bound arguments are
+recorded in `tool.call.proposed` and used for policy, approval matching and dispatch.
+Checkpoints preserve those arguments, so approval resume and interrupted-call
+reconciliation use the original bound call. Original model output remains in the
+conversation ledger for provider replay; it is not the execution argument record.
+
 Tool failure content is model-facing: it retains diagnostic error types, paths,
 and structured provider output. The separate `error.message` is a localized
 host/UI summary. Both the live model ledger and Session replay preserve the

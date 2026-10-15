@@ -18,6 +18,7 @@ from sagents.v2 import SAgentBuilder
 from sagents.v2.contracts.errors import ErrorCategory, RuntimeErrorInfo, SageV2Error
 from sagents.v2.package.manifest.runtime import CapabilitySelection
 from sagents.v2.runtime.execution import RunExecutionBinding
+from sagents.v2.runtime.execution.sandbox import NetworkMode, NetworkPolicy
 
 
 class CatalogPackageModel:
@@ -67,8 +68,9 @@ class CatalogPackageModel:
 
 
 class PackageBindings:
-    def __init__(self, paths, execution, user_id):
+    def __init__(self, paths, execution, user_id, *, agents, settings):
         self.paths, self.execution, self.user_id = paths, execution, user_id
+        self.agents, self.settings = agents, settings
         self.workspaces = {}
 
     def workspace_for_run(self, run_id):
@@ -89,8 +91,19 @@ class PackageBindings:
             workspace = self.paths.workspace_dir(self.user_id, request.agent_id)
         else:
             raise ValueError("unsupported workspace policy")
+        # Resolve on every acquisition, including child Runs and resumed Runs.
+        # Indexing fails closed if the runtime asks for an undeclared Agent.
+        requested = self.agents[request.agent_id].sandbox.network
+        mode = (
+            NetworkMode.UNRESTRICTED
+            if requested == self.settings.sandbox_network_mode == "unrestricted"
+            else NetworkMode.NONE
+        )
         handle = await provision_workspace(
-            self.execution, workspace, request.context, run_id=request.run_id
+            self.execution, workspace, request.context, run_id=request.run_id,
+            network=NetworkPolicy(
+                mode=mode, deny_private_networks=mode != NetworkMode.UNRESTRICTED,
+            ),
         )
         token = object()
         self.workspaces[request.run_id] = (workspace, token)
@@ -198,7 +211,10 @@ class ServerPackageBuilderFactory:
         from app.v2.server.packages.tool_policy import server_tool_policy
 
         user_id = context.actor.principal_id
-        bindings = PackageBindings(self.paths, self.execution, user_id)
+        bindings = PackageBindings(
+            self.paths, self.execution, user_id,
+            agents=bundle.manifest.agents, settings=self.settings,
+        )
         builder = (
             PackageBuilder(self.settings, self.run_quota, root)
             .with_defaults(session_root=root)

@@ -28,6 +28,7 @@ from sagents.v2.agent.step_request import (
     tools_for_invocation_mode,
 )
 from sagents.v2.context import ContextAssembler, DefaultContextAssembler
+from sagents.v2.context.system_context import with_session_context
 from sagents.v2.context.session_history import (
     RunLedgerRebuilder,
     SessionHistoryLedgerBuilder,
@@ -66,6 +67,7 @@ from sagents.v2.tool.contracts import (
     ToolCancellationState,
     ToolExecutionResult,
 )
+from sagents.v2.tool.arguments import apply_system_context_overrides
 from sagents.v2.tool.provider import ToolCatalog, ToolExecutor
 from sagents.v2.tool.plugins.selection_recent import RecentToolSelectionPolicy
 from sagents.v2.tool.selection import (
@@ -250,6 +252,7 @@ class AgentLoopEngine:
                 "loop.run_not_runnable", f"run is {run.state.value}, not running"
             )
         command = await self.runtime.session_store.get_start_command(run_id)
+        command = with_session_context(command, run.session_id)
         context = self._context_for_command(context, command)
         await self._prepare_self_configuration(run_id, context)
         turn_id = new_id("turn")
@@ -375,7 +378,9 @@ class AgentLoopEngine:
         model_call = ModelToolCall(
             tool_call_id=new_id("call_memory_recall"),
             name="search_memory",
-            arguments={"query": query, "top_k": limit},
+            arguments=apply_system_context_overrides(
+                definition, {"query": query, "top_k": limit}, command.config.metadata
+            ),
         )
         call = ToolCall(
             tool_call_id=model_call.tool_call_id,
@@ -517,6 +522,7 @@ class AgentLoopEngine:
         if run.state not in {RunState.RUNNING, RunState.SUSPEND_REQUESTED}:
             return run
         command = await self.runtime.session_store.get_start_command(run_id)
+        command = with_session_context(command, run.session_id)
         context = self._context_for_command(context, command)
         events = await self.runtime.session_store.read_events(run_id)
         if any(event.type in {"tool.call.succeeded", "tool.call.reconciled"}
@@ -750,6 +756,7 @@ class AgentLoopEngine:
             run_id, state.expanded_tool_names
         )
         command = await self.runtime.session_store.get_start_command(run_id)
+        command = with_session_context(command, run.session_id)
         context = self._context_for_command(context, command)
         await self._prepare_self_configuration(run_id, context)
         rebuilt_messages = await self.ledger_rebuilder.rebuild(
@@ -1061,6 +1068,7 @@ class AgentLoopEngine:
         """
 
         command = await self.runtime.session_store.get_start_command(run.run_id)
+        command = with_session_context(command, run.session_id)
         context = self._context_for_command(context, command)
         max_steps = command.config.max_steps or 24
         empty_response_retries = 0
@@ -1403,7 +1411,9 @@ class AgentLoopEngine:
                     tool_call = ToolCall(
                         tool_call_id=model_call.tool_call_id,
                         tool_name=model_call.name,
-                        arguments=model_call.arguments,
+                        arguments=apply_system_context_overrides(
+                            definition, model_call.arguments, command.config.metadata
+                        ),
                         operation_id=new_id("operation"),
                         idempotency_key=f"{run.run_id}:{model_call.tool_call_id}",
                         owner_run_id=run.run_id,
@@ -1842,6 +1852,7 @@ class AgentLoopEngine:
         response = None
         stream = self.model.stream(request)
         command = await self.runtime.session_store.get_start_command(run.run_id)
+        command = with_session_context(command, run.session_id)
         controlled_events = self._control_aware_model_events(stream, run, command)
 
         async def commit_delta_batch(batch_run, drafts):
@@ -2207,6 +2218,7 @@ class AgentLoopEngine:
 
         definition = await self.tool_catalog.get_tool(call.tool_name, run_id=run.run_id)
         command = await self.runtime.session_store.get_start_command(run.run_id)
+        command = with_session_context(command, run.session_id)
         execution = asyncio.create_task(self.tool_executor.execute(call, context))
         cancellable = definition.cancel_semantics in {
             CancelSemantics.COOPERATIVE,

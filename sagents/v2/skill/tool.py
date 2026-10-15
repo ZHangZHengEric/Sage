@@ -42,7 +42,8 @@ class SkillLoadTool:
                     "type": "string",
                     "minLength": 1,
                     "description": "Exact name of the enabled skill to load.",
-                }
+                },
+                "session_id": {"type": ["string", "null"], "default": None},
             },
             "required": ["skill_name"],
             "additionalProperties": False,
@@ -58,7 +59,9 @@ class SkillLoadTool:
         self,
         skill_name: str,
         invocation: ToolInvocation,
+        session_id: str | None = None,
     ) -> ToolExecutionResult:
+        del session_id
         if not skill_name:
             from sagents.v2.contracts.errors import ErrorCategory, RuntimeErrorInfo
 

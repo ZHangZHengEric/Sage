@@ -123,7 +123,10 @@ class PlanningTools:
         ),
         input_schema={
             "type": "object",
-            "properties": {"content": {"type": "string", "minLength": 1}},
+            "properties": {
+                "content": {"type": "string", "minLength": 1},
+                "session_id": {"type": ["string", "null"], "default": None},
+            },
             "required": ["content"],
             "additionalProperties": False,
         },
@@ -134,7 +137,9 @@ class PlanningTools:
         self,
         content: str,
         invocation: ToolInvocation,
+        session_id: str | None = None,
     ) -> dict[str, Any]:
+        del session_id
         goals = self.runtime.goal_state_service
         if goals is None:
             raise RuntimeError("goal state service is unavailable")
@@ -164,7 +169,10 @@ class PlanningTools:
         ),
         input_schema={
             "type": "object",
-            "properties": {"summary": {"type": "string", "minLength": 1}},
+            "properties": {
+                "summary": {"type": "string", "minLength": 1},
+                "session_id": {"type": ["string", "null"], "default": None},
+            },
             "required": ["summary"],
             "additionalProperties": False,
         },
@@ -174,7 +182,9 @@ class PlanningTools:
         self,
         summary: str,
         invocation: ToolInvocation,
+        session_id: str | None = None,
     ) -> dict[str, Any]:
+        del session_id
         goals = self.runtime.goal_state_service
         if goals is None:
             raise RuntimeError("goal state service is unavailable")
