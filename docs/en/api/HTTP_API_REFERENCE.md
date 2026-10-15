@@ -58,6 +58,7 @@ The inventory below follows the registered router source. Jaeger routes depend o
 | `GET` | `/api/admin/threads/{thread_id}/events` | `admin` |
 | `GET` | `/api/admin/users` | `admin` |
 | `POST` | `/api/agent` | `agent` |
+| `PUT` | `/api/agents/{agent_id}/guidance` | `agent_guidance` |
 | `GET` | `/api/agents` | `agents` |
 | `POST` | `/api/agents` | `agents` |
 | `DELETE` | `/api/agents/{agent_id}` | `agents` |
@@ -116,6 +117,8 @@ The inventory below follows the registered router source. Jaeger routes depend o
 | `DELETE` | `/api/skills/{skill_id}` | `skills` |
 | `GET` | `/api/skills/{skill_id}` | `skills` |
 | `PUT` | `/api/skills/{skill_id}` | `skills` |
+| `GET` | `/api/skills/{skill_id}/files` | `skills` |
+| `GET` | `/api/skills/{skill_id}/files/{path:path}` | `skills` |
 | `PUT` | `/api/workspace/skills/{name}` | `skills` |
 | `GET` | `/api/threads` | `threads` |
 | `DELETE` | `/api/threads/{thread_id}` | `threads` |
