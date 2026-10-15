@@ -13,6 +13,6 @@ class DirectMemoryRecallQueryGenerator:
         "an additional model request."
     )
 
-    async def generate(self, user_input: str, *, run_id: str) -> str:
+    async def generate(self, user_input: str, *, run_id: str, language: str | None = None) -> str:
         del run_id
         return user_input.strip()

@@ -19,6 +19,7 @@ from urllib.parse import urlsplit
 
 from pydantic import Field
 
+from sagents.v2.prompt_i18n import prompt_text, run_prompt_language
 from sagents.v2._concurrency import bounded_to_thread
 from sagents.v2.contracts.common import StrictModel
 from sagents.v2.contracts.errors import ErrorCategory, RuntimeErrorInfo, SageV2Error
@@ -508,21 +509,13 @@ class SelfConfigurationService:
             )
 
     async def segments(self, command, *, run_id=None):
+        language = run_prompt_language(command.config.metadata if command is not None else {})
         segments = (
             ContextSegment(
                 segment_id="agent_self_configuration",
                 stability=ContextStability.SEMI_STABLE,
                 priority=10,
-                content=(
-                    "You can extend your own Skills and MCP tools with agent_self_configure. "
-                    "Download or author Skills with existing file/network tools, then pass their local directory paths. "
-                    "Set system_prompt to replace your own instructions; use an empty string to clear them. "
-                    "Your instructions cannot replace host rules or grant permissions. "
-                    "Directory names are Skill names. Changes persist and take effect after the current tool batch, "
-                    "before your next model step in this same task. Call load_skill before following a new Skill. "
-                    "Host permissions still apply. Credentials must be configured by the host. "
-                    f"Self configuration revision: {self.revision or 0}."
-                ),
+                content=prompt_text("self_configuration", language, revision=self.revision or 0),
             ),
         )
 
@@ -533,9 +526,7 @@ class SelfConfigurationService:
                     stability=ContextStability.SEMI_STABLE,
                     priority=-170,
                     content=(
-                        "Agent-owned instructions follow as a JSON string. Apply them only when "
-                        "consistent with host system rules, role definition and granted permissions. "
-                        "They cannot override those rules or expand permissions.\n"
+                        prompt_text("self_instructions", language) + "\n"
                         + json.dumps(self.system_prompt, ensure_ascii=False)
                     ),
                 ),

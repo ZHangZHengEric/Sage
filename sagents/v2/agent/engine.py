@@ -125,6 +125,7 @@ from sagents.v2.contracts.commands import CancelRun, InputItem
 from sagents.v2.runtime.contracts import RuntimePort
 from sagents.v2.runtime.session.contracts import EventDraft
 from sagents.v2.runtime.observability.logs import get_logger
+from sagents.v2.prompt_i18n import run_prompt_language
 from sagents.v2.i18n import (
     error_recovery_payload,
     localize_error,
@@ -354,9 +355,12 @@ class AgentLoopEngine:
         ).strip()
         if not user_input:
             return run, state
-        query = await self.memory_recall_query_generator.generate(
-            user_input, run_id=run.run_id
-        )
+        generate = self.memory_recall_query_generator.generate
+        # Third-party query generators using the original port remain compatible.
+        query_options = {"run_id": run.run_id}
+        if "language" in inspect.signature(generate).parameters:
+            query_options["language"] = run_prompt_language(command.config.metadata)
+        query = await generate(user_input, **query_options)
         if not query.strip():
             return run, state
         try:
@@ -1361,11 +1365,7 @@ class AgentLoopEngine:
                         )
                     except SageV2Error as exc:
                         if exc.info.code == "tool.not_found":
-                            language = str(
-                                command.config.metadata.get("response_language")
-                                or context.language
-                                or "en"
-                            )
+                            language = run_prompt_language(command.config.metadata)
                             decision = ContinuationDecision(
                                 action=ContinuationAction.REQUEST_INTERACTION,
                                 reason_code="tool.not_found",
@@ -1539,11 +1539,7 @@ class AgentLoopEngine:
                 max_steps=max_steps,
                 response=response,
                 ledger=state.messages,
-                language=str(
-                    command.config.metadata.get("response_language")
-                    or context.language
-                    or "en"
-                ),
+                language=run_prompt_language(command.config.metadata),
                 agent_system_requirements=system_requirements,
                 available_tools=available_tools,
                 pending_tool_calls=0,
@@ -3261,8 +3257,9 @@ class AgentLoopEngine:
 
     @staticmethod
     def _context_for_command(context: RequestContext, command) -> RequestContext:
+        # Keep UI/Tool localization separate from the bilingual prompt policy.
         language = normalize_language(
-            str(command.config.metadata.get("response_language") or context.language)
+            str(command.config.metadata.get("response_language") or "en")
         )
         if context.language == language:
             return context

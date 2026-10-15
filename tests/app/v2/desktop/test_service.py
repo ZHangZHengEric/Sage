@@ -4454,8 +4454,9 @@ async def test_loop_composition_includes_enabled_configured_mcp_tools(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("requested_language,expected_language", [("zh-CN", "zh"), ("en-US", "en"), ("system", "en"), ("unknown", "en")])
 async def test_desktop_command_freezes_language_identity_time_and_workspace_context(
-    tmp_path: Path,
+    tmp_path: Path, requested_language, expected_language,
 ):
     service = DesktopV2Service(tmp_path)
     await service.initialize_agent_workspace()
@@ -4482,7 +4483,7 @@ async def test_desktop_command_freezes_language_identity_time_and_workspace_cont
         DesktopRunRequest(
             agent_id="sage",
             messages=[RunMessage(role="user", text="hello")],
-            response_language="zh-CN",
+            response_language=requested_language,
             session_concurrency_mode=SessionConcurrencyMode.SNAPSHOT_ISOLATED,
             base_session_revision=0,
         ),
@@ -4494,7 +4495,7 @@ async def test_desktop_command_freezes_language_identity_time_and_workspace_cont
     metadata = command.config.metadata
     assert command.session_concurrency_mode == SessionConcurrencyMode.SNAPSHOT_ISOLATED
     assert command.base_session_revision == 0
-    assert metadata["response_language"] == "zh"
+    assert metadata["response_language"] == expected_language
     assert metadata["system_context"] == {"preference": "concise"}
     assert metadata["identity_documents"]["SOUL"] == "Be precise"
     assert set(metadata["identity_documents"]) == {

@@ -6,6 +6,7 @@ the replaceable projection from canonical loop state to one model request.
 
 from __future__ import annotations
 
+from sagents.v2.prompt_i18n import prompt_text, run_prompt_language
 from sagents.v2.context.token_estimator import estimate_tokens_async
 
 import json
@@ -135,7 +136,7 @@ class DefaultAgentStepRequestBuilder:
             else ()
         )
         continuation_messages = (
-            (self._continuation_message(pending_continuation_reason),)
+            (self._continuation_message(pending_continuation_reason, run_prompt_language(command.config.metadata)),)
             if pending_continuation_reason
             else ()
         )
@@ -371,17 +372,14 @@ class DefaultAgentStepRequestBuilder:
         )
 
     @staticmethod
-    def _continuation_message(reason: str) -> ModelMessage:
+    def _continuation_message(reason: str, language: str | None = None) -> ModelMessage:
         return ModelMessage(
             role="user",
             content=(
                 TextBlock(
                     text=(
                         "<runtime_continuation_guidance>\n"
-                        "Internal runtime note, not a user request. Do not mention it.\n"
-                        f"Continue because: {reason}\n"
-                        "Perform the next unfinished action. Do not repeat the last "
-                        "visible update or already reported artifacts.\n"
+                        f"{prompt_text('continuation', language, reason=reason)}\n"
                         "</runtime_continuation_guidance>"
                     )
                 ),

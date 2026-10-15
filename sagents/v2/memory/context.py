@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from sagents.v2.prompt_i18n import prompt_text, run_prompt_language
 from sagents.v2.context.contracts import ContextSegment, ContextStability
 from sagents.v2.contracts.commands import StartRun
 from sagents.v2.contracts.items import TextBlock
@@ -51,7 +52,7 @@ class MemoryContextSource:
         return (
             ContextSegment(
                 segment_id="memory_recall",
-                content="Relevant long-term memory:\n" + "\n".join(lines),
+                content=prompt_text("memory_heading", run_prompt_language(command.config.metadata)) + "\n" + "\n".join(lines),
                 stability=ContextStability.VOLATILE,
                 priority=-30,
                 sensitive=True,

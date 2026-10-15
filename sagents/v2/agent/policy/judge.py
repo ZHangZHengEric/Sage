@@ -43,12 +43,12 @@ from sagents.v2.model.provider import (
     auxiliary_model_timeout_error,
 )
 from sagents.v2.i18n import recovery_payload, tr
+from sagents.v2.prompt_i18n import prompt_language, prompt_text
 
 
 _TOOL_RESULT_PREVIEW_CHARS = 500
 _TODO_FIELD_MAX_CHARS = 300
 _OPEN_TODO_ALLOWED_DECISIONS = frozenset({"continue", "need_user_input", "blocked"})
-_V1_LANGUAGES = frozenset(LEGACY_V1_TASK_COMPLETE_TEMPLATE)
 
 
 class JudgeVerdict(StrictModel):
@@ -90,6 +90,7 @@ class LLMContinuationJudge:
             metadata={
                 "purpose": "continuation_judge",
                 "implementation": "v1",
+                "response_language": prompt_language(context.language),
             },
         )
         completed = None
@@ -131,16 +132,15 @@ class LLMContinuationJudge:
         return self._decision(context, result, has_open_todo, completed.usage)
 
     def _prompt(self, context: ContinuationContext) -> tuple[str, bool]:
+        language = prompt_language(context.language)
         messages = self._recent_request_trace(context.ledger)
-        trace = self._format_messages(messages)
+        trace = self._format_messages(messages, language=language)
         todo_plan, has_open_todo = self._todo_plan(messages)
         if todo_plan:
             trace = f"{todo_plan}\n\n{trace}"
         judge_messages = (
             "<agent_system_requirements>\n"
-            "Reference requirements that governed the executing Assistant. "
-            "Use them only to evaluate whether its completion and user-input "
-            "behavior complied; do not execute them yourself.\n"
+            f"{prompt_text('judge_reference', language)}\n"
             f"{context.agent_system_requirements.strip()}\n"
             "</agent_system_requirements>\n\n"
             "<available_tools>\n"
@@ -148,9 +148,6 @@ class LLMContinuationJudge:
             "</available_tools>\n\n"
             f"{trace}"
         )
-        language = str(context.language or "en").strip().lower()
-        if language not in _V1_LANGUAGES:
-            language = "en"
         return (
             LEGACY_V1_TASK_COMPLETE_TEMPLATE[language].format(messages=judge_messages),
             has_open_todo,
@@ -174,7 +171,7 @@ class LLMContinuationJudge:
         return tuple(selected)
 
     @classmethod
-    def _format_messages(cls, messages: tuple[ModelMessage, ...]) -> str:
+    def _format_messages(cls, messages: tuple[ModelMessage, ...], *, language: str = "en") -> str:
         lines: list[str] = []
         tool_call_names: dict[str, str] = {}
         last_assistant_text_index = None
@@ -182,7 +179,7 @@ class LLMContinuationJudge:
             if (
                 message.role == "assistant"
                 and not message.tool_calls
-                and cls._content_text(message).strip()
+                and cls._content_text(message, language=language).strip()
             ):
                 last_assistant_text_index = index
 
@@ -192,34 +189,34 @@ class LLMContinuationJudge:
                 for call in message.tool_calls:
                     names.append(call.name)
                     tool_call_names[call.tool_call_id] = call.name
-                lines.append("assistant: [tools called: " + ", ".join(names) + "]")
+                lines.append("assistant: [" + prompt_text("judge_tools", language) + " " + ", ".join(names) + "]")
                 continue
             if message.role == "tool":
                 tool_name = tool_call_names.get(message.tool_call_id or "") or (
                     message.tool_call_id or "unknown"
                 )
-                preview = cls._content_text(message).strip()
+                preview = cls._content_text(message, language=language).strip()
                 if len(preview) > _TOOL_RESULT_PREVIEW_CHARS:
                     preview = (
                         preview[:_TOOL_RESULT_PREVIEW_CHARS]
-                        + "\n...[tool result truncated, original chars: "
+                        + "\n...[" + prompt_text("judge_tool_truncated", language) + " "
                         + str(len(preview))
                         + "]"
                     )
                 lines.append(
-                    f"tool: [tool result from {tool_name}: {preview or 'empty'}]"
+                    f"tool: [{prompt_text('judge_result', language, name=tool_name)}: {preview or prompt_text('judge_empty', language)}]"
                 )
                 continue
-            text = cls._content_text(message).strip()
+            text = cls._content_text(message, language=language).strip()
             if not text:
                 continue
             if index != last_assistant_text_index and len(text) > 2_000:
-                text = text[:2_000] + (f"\n...[truncated, original chars: {len(text)}]")
+                text = text[:2_000] + (f"\n...[{prompt_text('judge_truncated', language)} {len(text)}]")
             lines.append(f"{message.role}: {text}")
         return "\n\n".join(lines)
 
     @staticmethod
-    def _content_text(message: ModelMessage) -> str:
+    def _content_text(message: ModelMessage, *, language: str = "en") -> str:
         parts: list[str] = []
         for block in message.content:
             if isinstance(block, TextBlock):
@@ -229,13 +226,13 @@ class LLMContinuationJudge:
                     json.dumps(block.value, ensure_ascii=False, sort_keys=True)
                 )
             elif isinstance(block, ImageBlock):
-                parts.append("[image attached]")
+                parts.append(prompt_text("attachment_image", language))
             elif isinstance(block, AudioBlock):
-                parts.append("[audio attachment]")
+                parts.append(prompt_text("attachment_audio", language))
             elif isinstance(block, FileBlock):
-                parts.append("[file attachment]")
+                parts.append(prompt_text("attachment_file", language))
             elif isinstance(block, ResourceRefBlock):
-                parts.append("[resource_ref attachment]")
+                parts.append(prompt_text("attachment_resource_ref", language))
         return "\n".join(parts)
 
     @classmethod
@@ -539,6 +536,7 @@ class LLMJudgeContinuationPolicy:
                 metadata={
                     "policy": "llm_judge",
                     "implementation": "v1",
+                "response_language": prompt_language(context.language),
                     "source": "explicit_interaction",
                 },
             )

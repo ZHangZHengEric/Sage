@@ -1711,8 +1711,6 @@ class DesktopRunCompositionMixin(DesktopRunEnvironmentMixin):
             or settings.language
             or "en"
         )
-        if response_language == "system":
-            response_language = "zh"
         response_language = normalize_language(response_language)
         metadata = {
             "workspace_id": request.workspace_id,
