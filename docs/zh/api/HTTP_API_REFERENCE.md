@@ -25,8 +25,11 @@ parent: API
 
 `POST /api/agent` 接收 AG-UI `RunAgentInput`，返回 `text/event-stream`。新对话通过 `forwardedProps.agentId` 选择 Agent，首次 Run 会固定该 thread 的 Agent。重连已接受的 Run 时发送 `Last-Event-ID`。回放读取权威 Session 事件，不使用 Redis 保存另一份事件流。
 
+`session_id` 是统一的会话身份：传入时原样使用，省略时由 Sage 生成。`threadId` 是兼容别名，两者同时传入时必须一致。SSE 生命周期帧和结果响应返回最终使用的 `session_id`，后续请求复用该值。归属绑定 tenant、Agent 和 Session；全局 ID 已被其他归属占用时拒绝请求。旧哈希会话通过兼容映射访问，并返回原持久化 ID。
+
 ```json
 {
+  "session_id": "example-thread",
   "threadId": "example-thread",
   "runId": "example-run",
   "state": {},
@@ -57,26 +60,39 @@ parent: API
 | `GET` | `/api/admin/threads` | `admin` |
 | `GET` | `/api/admin/threads/{thread_id}/events` | `admin` |
 | `GET` | `/api/admin/users` | `admin` |
-| `POST` | `/api/agent` | `agent` |
-| `PUT` | `/api/agents/{agent_id}/guidance` | `agent_guidance` |
 | `GET` | `/api/agents` | `agents` |
 | `POST` | `/api/agents` | `agents` |
 | `DELETE` | `/api/agents/{agent_id}` | `agents` |
 | `GET` | `/api/agents/{agent_id}` | `agents` |
 | `PUT` | `/api/agents/{agent_id}` | `agents` |
+| `PUT` | `/api/agents/{agent_id}/guidance` | `agents` |
+| `GET` | `/api/agents/{agent_id}/skills` | `agents` |
+| `PUT` | `/api/agents/{agent_id}/skills` | `agents` |
 | `GET` | `/api/tools` | `agents` |
 | `GET` | `/api/keys` | `api_keys` |
 | `POST` | `/api/keys` | `api_keys` |
 | `DELETE` | `/api/keys/{key_id}` | `api_keys` |
-| `GET` | `/api/approvals` | `approvals` |
-| `POST` | `/api/approvals/{run_id}/decisions` | `approvals` |
 | `GET` | `/api/auth/execution-policy` | `auth` |
 | `PUT` | `/api/auth/execution-policy` | `auth` |
 | `POST` | `/api/auth/login` | `auth` |
 | `POST` | `/api/auth/logout` | `auth` |
 | `POST` | `/api/auth/register` | `auth` |
 | `GET` | `/api/auth/session` | `auth` |
-| `GET` | `/api/threads/{thread_id}/download` | `files` |
+| `POST` | `/api/agent` | `conversations` |
+| `POST` | `/api/agents/{agent_id}/runs` | `conversations` |
+| `GET` | `/api/agents/{agent_id}/runs/{thread_id}/{run_id}` | `conversations` |
+| `POST` | `/api/agents/{agent_id}/runs/{thread_id}/{run_id}/cancel` | `conversations` |
+| `GET` | `/api/agents/{agent_id}/runs/{thread_id}/{run_id}/files` | `conversations` |
+| `POST` | `/api/agents/{agent_id}/runs/{thread_id}/{run_id}/reply` | `conversations` |
+| `PUT` | `/api/agents/{agent_id}/workspace/files` | `conversations` |
+| `GET` | `/api/approvals` | `conversations` |
+| `POST` | `/api/approvals/{run_id}/decisions` | `conversations` |
+| `GET` | `/api/threads` | `conversations` |
+| `DELETE` | `/api/threads/{thread_id}` | `conversations` |
+| `GET` | `/api/threads/{thread_id}/download` | `conversations` |
+| `GET` | `/api/threads/{thread_id}/events` | `conversations` |
+| `GET` | `/api/threads/{thread_id}/result` | `conversations` |
+| `POST` | `/api/threads/{thread_id}/resume` | `conversations` |
 | `GET` | `/api/workspace/download` | `files` |
 | `GET` | `/api/workspace/files` | `files` |
 | `GET` | `/active` | `health` |
@@ -90,6 +106,7 @@ parent: API
 | `POST` | `/api/models` | `models` |
 | `DELETE` | `/api/models/{model_id}` | `models` |
 | `GET` | `/api/models/{model_id}` | `models` |
+| `GET` | `/api/observability/console` | `observability` |
 | `GET` | `/api/observability/jaeger` | `observability` |
 | `GET` | `/api/observability/jaeger/auth` | `observability` |
 | `GET` | `/api/observability/jaeger/login` | `observability` |
@@ -109,8 +126,6 @@ parent: API
 | `GET` | `/api/agent-packages/{ref}` | `packages` |
 | `POST` | `/api/agent-packages/{ref}/activate` | `packages` |
 | `POST` | `/api/agent-packages/{ref}/fork` | `packages` |
-| `GET` | `/api/agents/{agent_id}/skills` | `skills` |
-| `PUT` | `/api/agents/{agent_id}/skills` | `skills` |
 | `GET` | `/api/skills` | `skills` |
 | `POST` | `/api/skills` | `skills` |
 | `POST` | `/api/skills/upload` | `skills` |
@@ -120,11 +135,6 @@ parent: API
 | `GET` | `/api/skills/{skill_id}/files` | `skills` |
 | `GET` | `/api/skills/{skill_id}/files/{path:path}` | `skills` |
 | `PUT` | `/api/workspace/skills/{name}` | `skills` |
-| `GET` | `/api/threads` | `threads` |
-| `DELETE` | `/api/threads/{thread_id}` | `threads` |
-| `GET` | `/api/threads/{thread_id}/events` | `threads` |
-| `GET` | `/api/threads/{thread_id}/result` | `threads` |
-| `POST` | `/api/threads/{thread_id}/resume` | `threads` |
 
 宿主基础设施还提供 `GET /livez`、`GET /readyz` 和 `GET /metrics`，这些不展示在 OpenAPI 中。就绪检查会探测宿主数据库和应用状态。
 

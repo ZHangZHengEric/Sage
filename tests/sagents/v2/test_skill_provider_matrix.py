@@ -409,9 +409,9 @@ async def test_load_skill_exposes_a_strict_native_v2_schema_and_loads_lazily():
                 "minLength": 1,
                 "description": "Exact name of the enabled skill to load.",
             },
-            "session_id": {"type": ["string", "null"], "default": None},
+            "session_id": {"type": ["string", "null"]},
         },
-        "required": ["skill_name"],
+        "required": ["skill_name", "session_id"],
         "additionalProperties": False,
     }
 
@@ -419,7 +419,7 @@ async def test_load_skill_exposes_a_strict_native_v2_schema_and_loads_lazily():
         ToolCall(
             tool_call_id="call_1",
             tool_name="load_skill",
-            arguments={"skill_name": "alpha"},
+            arguments={"skill_name": "alpha", "session_id": "session_1"},
             operation_id="operation_1",
             idempotency_key="key_1",
             owner_run_id="run_1",

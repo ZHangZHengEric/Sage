@@ -65,21 +65,21 @@ async def run_details(service, *, tenant_id: str, agent_id: str,
 
 
 async def cancel_run(service, *, tenant_id: str, agent_id: str,
-                     thread_id: str, run_id: str) -> bool:
-    _, native_run_id, _, _, context, access, _ = await selected_run(
+                     thread_id: str, run_id: str) -> dict:
+    selected, native_run_id, _, _, context, access, _ = await selected_run(
         service, tenant_id=tenant_id, agent_id=agent_id,
         thread_id=thread_id, run_id=run_id,
     )
     run = await access.get_run(native_run_id, context)
     if run.state in TERMINAL_RUN_STATES:
-        return False
+        return {"session_id": selected["session_id"], "cancelled": False}
     await service.runs.cancel_run(run.run_id, context, expected_revision=run.revision)
-    return True
+    return {"session_id": selected["session_id"], "cancelled": True}
 
 
 async def reply_run(service, *, tenant_id: str, agent_id: str, thread_id: str,
                     run_id: str, interaction_id: str, decision: str,
-                    payload: dict, expected: dict) -> None:
+                    payload: dict, expected: dict) -> str:
     selected, native_run_id, owner, internal_thread, context, _, _ = await selected_run(
         service, tenant_id=tenant_id, agent_id=agent_id,
         thread_id=thread_id, run_id=run_id,
@@ -94,6 +94,8 @@ async def reply_run(service, *, tenant_id: str, agent_id: str, thread_id: str,
         if interaction.interaction_id == interaction_id
         and decision in interaction.allowed_decisions else None,
     )
+
+    return internal_thread
 
 
 async def current_run_workspace(service, *, tenant_id: str, agent_id: str,

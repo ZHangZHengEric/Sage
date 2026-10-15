@@ -896,8 +896,9 @@ async def test_todo_session_paths_are_encoded_and_owner_is_enforced(tmp_path: Pa
             request = call(name, arguments, index=index * 10 + offset).model_copy(
                 update={"owner_session_id": "current_session"}
             )
-            with pytest.raises(ValueError, match="session_id"):
+            with pytest.raises(SageV2Error, match="session_id") as caught:
                 await plugin.executor.execute(request, CONTEXT)
+            assert caught.value.info.metadata["side_effect_state"] == "not_applied"
     assert len(list((tmp_path / ".sage" / "todos").iterdir())) == 2
 
     request = call("todo_read", {"session_id": "../other"}, index=200).model_copy(
@@ -1331,3 +1332,16 @@ async def test_web_fetch_reports_partial_batch_failure():
     )
     assert result["status"] == "partial"
     assert [row["status"] for row in result["results"]] == ["error", "success"]
+
+
+@pytest.mark.parametrize("tasks", [
+    [{"id": "new"}],
+    [{"id": "1", "content": "one", "status": "in_progress"},
+     {"id": "2", "content": "two", "status": "in_progress"}],
+])
+async def test_todo_preflight_validation_is_not_applied(tmp_path: Path, tasks):
+    plugin = await plugin_for(tmp_path)
+    with pytest.raises(SageV2Error) as caught:
+        await plugin.executor.execute(call("todo_write", {"session_id": "session_1", "tasks": tasks}), CONTEXT)
+    assert caught.value.info.metadata["side_effect_state"] == "not_applied"
+    assert not (tmp_path / ".sage" / "todos" / "session_1.json").exists()

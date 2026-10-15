@@ -12,6 +12,7 @@ from app.v2.server.conversations.agui.sse import (
     single_error_sse,
 )
 from app.v2.server.conversations.sessions import page_session_events
+from app.v2.server.conversations.bindings import SessionBinding, require_binding
 from app.v2.server.observability.context import get_request_id
 from sagents.v2.contracts.errors import ErrorCategory, RuntimeErrorInfo, SageV2Error
 from sagents.v2.contracts.items import MessageItemData, TextBlock
@@ -23,7 +24,8 @@ from sagents.v2.runtime.observability import StructuredLogger, structured_log_co
 def _error(code, message, category=ErrorCategory.VALIDATION):
     return SageV2Error(
         RuntimeErrorInfo(
-            code="server.chat." + code, category=category, message=message
+            code="server.chat." + code, category=category, message=message,
+            metadata={"side_effect_state": "not_applied"}
         )
     )
 
@@ -50,21 +52,52 @@ class ConversationService:
         self.log_sink = log_sink
         self.context_for = context_for
 
-    async def _scope(self, user_id, agent_id, session_id):
-        # External user IDs need not exist in Sage. The Agent owner supplies
-        # model, tools and skills; the external identity supplies session isolation.
+    async def _scope(self, user_id, agent_id, session_id, *, for_start=False):
         if not user_id.strip() or not agent_id.strip():
             raise _error("invalid_identity", "user_id and agent_id are required")
         validate_agui_id(session_id, field="session_id")
         owner_id = await self.runs.catalog.agent_owner(agent_id)
         if owner_id is None:
             raise _error("agent_not_found", "agent not found")
-        identity = json.dumps(
-            [user_id, agent_id, session_id], ensure_ascii=False, separators=(",", ":")
-        )
-        internal_id = "external_" + hashlib.sha256(identity.encode()).hexdigest()
-        return owner_id, internal_id
-
+        # Only probe the old hash for compatibility; never mint a hashed Session.
+        identity = json.dumps([user_id, agent_id, session_id], ensure_ascii=False,
+                              separators=(",", ":"))
+        legacy_id = "external_" + hashlib.sha256(identity.encode()).hexdigest()
+        for candidate in (legacy_id, session_id):
+            record = await self.threads.find(candidate)
+            binding = await self.threads.binding(candidate)
+            if record is None and binding is None:
+                try:
+                    await self.session_access.get_session(candidate, self.context_for(owner_id))
+                except SageV2Error as exc:
+                    if exc.info.code.endswith("not_found"):
+                        continue
+                    raise _error("result_not_found", "run not found") from exc
+            expected = SessionBinding(candidate, owner_id, user_id, agent_id)
+            valid = record is None or (record.user_id == owner_id and record.agent_id == agent_id)
+            if binding is not None:
+                valid = valid and binding == expected
+            elif valid:
+                # Upgrade old bindings from durable Run metadata. A native
+                # thread owned by the Agent owner is not an external tenant's.
+                runs = await self.session_access.list_session_runs(candidate, self.context_for(owner_id))
+                for run in runs:
+                    command = await self.session_access.get_start_command(run.run_id, self.context_for(owner_id))
+                    tenant = command.config.metadata.get("server_v2.workspace_user_id")
+                    if (command.agent_id != agent_id or tenant not in {None, user_id}
+                            or (tenant is None and candidate != legacy_id)):
+                        valid = False
+                        break
+                if not runs and candidate != legacy_id:
+                    valid = False
+            if not valid:
+                if for_start:
+                    require_binding(binding, expected)
+                raise _error("result_not_found", "run not found")
+            if binding is None and not for_start:
+                await self.threads.bind(expected)
+            return owner_id, candidate
+        return owner_id, session_id
 
     async def result(self, *, user_id, session_id, agent_id=None, run_id=None):
         payload, _ = await self._result_with_native_run(
@@ -78,6 +111,10 @@ class ConversationService:
         owner, internal_id = user_id, session_id
         if agent_id is not None:
             owner, internal_id = await self._scope(user_id, agent_id, session_id)
+        if agent_id is None:
+            binding = await self.threads.binding(internal_id)
+            if binding is not None and (binding.owner_id != user_id or binding.tenant_id != user_id):
+                raise _error("result_not_found", "run not found")
         access = self.session_access
         context = self.context_for(owner)
         runs = await access.list_session_runs(internal_id, context)
@@ -98,7 +135,8 @@ class ConversationService:
         if selected is None:
             raise _error("result_not_found", "run not found")
         payload = {
-            "threadId": session_id,
+            "session_id": internal_id,
+            "threadId": internal_id,
             "runId": selected_run_id,
             "state": selected.state.value,
             "text": "",
@@ -168,7 +206,7 @@ class ConversationService:
             session_id=run.session_id, label="approval",
             expected=expected,
             decide=lambda interaction: (decision, payload) if decision in interaction.allowed_decisions else None)
-        return {"run_id": run_id, "accepted": True}
+        return {"run_id": run_id, "session_id": run.session_id, "accepted": True}
 
     async def events(
         self,
@@ -233,7 +271,7 @@ class ConversationService:
         if agent_id is not None:
             stream_thread_id, stream_run_id = request.thread_id, request.run_id
             validate_agui_id(stream_run_id, field="runId")
-            user_id, internal_id = await self._scope(user_id, agent_id, stream_thread_id)
+            user_id, internal_id = await self._scope(user_id, agent_id, stream_thread_id, for_start=True)
             internal_run_id = "external_" + hashlib.sha256((internal_id + ":" + stream_run_id).encode()).hexdigest()
             request = request.model_copy(update={
                 "thread_id": internal_id, "run_id": internal_run_id,
@@ -249,13 +287,18 @@ class ConversationService:
             session_id=thread_id,
             agent_id=requested_agent,
             pin_existing=True,
+            tenant_id=workspace_user_id if agent_id is not None else None,
         )
         enabled = tuple(item.name for item in admitted.skills)
         metadata = {**admitted.metadata, "server_v2.workspace_user_id": workspace_user_id}
         if runtime_context:
             if agent_id is None or len(runtime_context) > 32:
                 raise _error("invalid_runtime_context", "invalid external runtime context")
-            metadata["system_context"] = runtime_context
+            supplied_session = runtime_context.get("session_id")
+            if supplied_session is not None and supplied_session != thread_id and supplied_session != stream_thread_id:
+                raise _error("session_mismatch", "runtimeContext.session_id must match session_id")
+            metadata["system_context"] = {**runtime_context, "session_id": thread_id}
+        metadata["system_context"] = {**metadata.get("system_context", {}), "session_id": thread_id}
         if workspace_directory is not None:
             metadata["server_v2.external.workspace_path"] = workspace_directory
             metadata["working_directory"] = "/workspace/" + workspace_directory
@@ -272,6 +315,34 @@ class ConversationService:
         if command.agent_id != admitted.agent_id:
             command = command.model_copy(update={"agent_id": admitted.agent_id})
             agent_id = admitted.agent_id
+        if stream_run_id is not None:
+            # Freeze retries to their original admitted command. Upgrades must
+            # not change its idempotency digest or silently accept new input.
+            try:
+                previous_runs = await self.session_access.list_session_runs(
+                    thread_id, self.context_for(user_id))
+            except SageV2Error as exc:
+                if not exc.info.code.endswith("not_found"):
+                    raise
+                previous_runs = ()
+            for previous in previous_runs:
+                stored = await self.session_access.get_start_command(previous.run_id, self.context_for(user_id))
+                if stored.config.metadata.get("server_v2.external.run_id") != stream_run_id:
+                    continue
+                old_context = dict(stored.config.metadata.get("system_context") or {})
+                new_context = dict(runtime_context or {})
+                old_context.pop("session_id", None)
+                new_context.pop("session_id", None)
+                if (stored.input != command.input or stored.agent_id != command.agent_id
+                        or stored.config.metadata.get("server_v2.external.workspace_path") != workspace_directory
+                        or old_context != new_context):
+                    raise _error("idempotency_conflict", "runId is already bound to a different request", ErrorCategory.CONFLICT)
+                command = stored
+                break
+        # Validate and claim ownership before Run creation or workspace writes.
+        await self.threads.bind(SessionBinding(
+            thread_id, user_id, workspace_user_id, admitted.agent_id,
+        ))
         await self.threads.upsert(
             thread_id, user_id, title="", agent_id=admitted.agent_id
         )
@@ -282,7 +353,7 @@ class ConversationService:
                     if self.language.lower().startswith("zh")
                     else "Configure a model on the Models page before sending"
                 ),
-                code="server.model_not_configured",
+                code="server.model_not_configured", session_id=thread_id,
             )
 
         correlation_id = get_request_id()
@@ -309,7 +380,7 @@ class ConversationService:
             )
             return canonical_agui_sse(
                 events,
-                thread_id=stream_thread_id or thread_id,
+                thread_id=thread_id,
                 run_id=stream_run_id or run_id,
                 last_event_id=last_event_id,
             )

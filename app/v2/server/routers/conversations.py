@@ -28,7 +28,6 @@ from app.v2.server.routers.schemas.conversations import (
 )
 from app.v2.server.storage.downloads import prepare_download, prepare_session_export
 from app.v2.server.storage.external_workspaces import (
-    ensure_workspace_directory,
     import_workspace_files,
     workspace_parts,
 )
@@ -218,6 +217,7 @@ class ApprovalPage(BaseModel):
 
 
 class ApprovalAccepted(BaseModel):
+    session_id: str
     run_id: str
     accepted: bool
 
@@ -277,7 +277,7 @@ class ExternalRunBody(AgentRunBody):
     runtimeContext: dict = Field(default_factory=dict)
 
     def to_agui(self) -> RunAgentInput:
-        return RunAgentInput.model_validate(self.model_dump(exclude={"runtimeContext"}))
+        return RunAgentInput.model_validate(self.model_dump(exclude={"runtimeContext", "session_id"}))
 
 
 class InteractionReply(BaseModel):
@@ -309,8 +309,6 @@ async def start_run(body: ExternalRunBody, request: Request, caller: CallerDep,
     if workspace_path is not None:
         try:
             workspace_path = "/".join(workspace_parts(workspace_path))
-            await asyncio.to_thread(ensure_workspace_directory, host.paths,
-                                    caller.tenant_id, caller.agent_id, workspace_path)
         except (ValueError, OSError) as exc:
             raise _error("invalid_workspace", ErrorCategory.VALIDATION,
                          "invalid workspace directory") from exc
@@ -337,21 +335,21 @@ async def get_run(thread_id: str, run_id: str, caller: CallerDep,
 @external_router.post("/runs/{thread_id}/{run_id}/reply")
 async def reply_run(thread_id: str, run_id: str, body: InteractionReply,
                     caller: CallerDep, service: ConversationDep):
-    await access.reply_run(service, tenant_id=caller.tenant_id,
+    session_id = await access.reply_run(service, tenant_id=caller.tenant_id,
                            agent_id=caller.agent_id, thread_id=thread_id,
                            run_id=run_id, interaction_id=body.interaction_id,
                            decision=body.decision, payload=body.payload,
                            expected=body.expected)
-    return success({"accepted": True})
+    return success({"session_id": session_id, "accepted": True})
 
 
 @external_router.post("/runs/{thread_id}/{run_id}/cancel")
 async def cancel_run(thread_id: str, run_id: str, caller: CallerDep,
                      service: ConversationDep):
-    cancelled = await access.cancel_run(service, tenant_id=caller.tenant_id,
+    result = await access.cancel_run(service, tenant_id=caller.tenant_id,
                                         agent_id=caller.agent_id, thread_id=thread_id,
                                         run_id=run_id)
-    return success({"cancelled": cancelled})
+    return success(result)
 
 
 @external_router.get("/runs/{thread_id}/{run_id}/files")

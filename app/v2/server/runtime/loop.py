@@ -80,6 +80,7 @@ class CatalogRunDependencies:
     agent_management: ServerAgentManagement | None
     users: object
     keys: object = None
+    threads: object = None
 
 
 def prepare_tenant_binding(
@@ -142,6 +143,8 @@ async def open_model_lease(
 async def compose_catalog_loop(
     service: CatalogRunDependencies, command: StartRun, *, user_id: str, run_id: str | None = None
 ):
+    from app.v2.server.storage.workspaces import with_workspace_binding
+    command = await with_workspace_binding(command, user_id, service.threads)
     catalog = await service.catalog.get(user_id)
     frozen = await _composition(service, command, catalog, user_id=user_id)
     agent, records = frozen.agent, frozen.skills

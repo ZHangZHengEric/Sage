@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any, Literal
 
 from sagents.v2.i18n import tr
+from sagents.v2.contracts.errors import ErrorCategory, RuntimeErrorInfo, SageV2Error
 from sagents.v2.tool import SideEffectLevel, ToolInvocation, tool
 from sagents.v2.tool.official.runtime import OfficialToolRuntime
 
@@ -39,6 +40,13 @@ _TODO_WRITE_INPUT_SCHEMA = {
 }
 
 
+def _not_executed(message: str) -> SageV2Error:
+    return SageV2Error(RuntimeErrorInfo(
+        code="tool.arguments_invalid", category=ErrorCategory.VALIDATION,
+        message=message, metadata={"side_effect_state": "not_applied"}, safe_to_resume=True,
+    ))
+
+
 class PlanningTools:
     def __init__(self, runtime: OfficialToolRuntime) -> None:
         self.runtime = runtime
@@ -61,15 +69,15 @@ class PlanningTools:
         updated = 0
         for index, task in enumerate(tasks):
             if not isinstance(task, dict):
-                raise ValueError(f"task {index} must be an object")
+                raise _not_executed(f"task {index} must be an object")
             identifier = str(task.get("id") or "").strip()
             if not identifier:
-                raise ValueError(f"task {index} requires id")
+                raise _not_executed(f"task {index} requires id")
             existing = task_map.get(identifier)
             if existing is None:
                 content = task.get("content")
                 if not isinstance(content, str) or not content.strip():
-                    raise ValueError(f"new task {identifier} requires content")
+                    raise _not_executed(f"new task {identifier} requires content")
                 existing = {
                     "id": identifier,
                     "content": content,
@@ -83,13 +91,13 @@ class PlanningTools:
                     existing[field] = task[field]
             status = str(existing.get("status") or "pending").lower()
             if status not in _TODO_STATUSES:
-                raise ValueError(f"task {identifier} has invalid status {status!r}")
+                raise _not_executed(f"task {identifier} has invalid status {status!r}")
             existing["status"] = status
             task_map[identifier] = existing
         normalized = list(task_map.values())
         active = sum(value.get("status") == "in_progress" for value in normalized)
         if active > 1:
-            raise ValueError("only one task may be in_progress")
+            raise _not_executed("only one task may be in_progress")
         path = await self.runtime.save_todos(
             normalized, invocation, session_id=session_id
         )
@@ -125,9 +133,9 @@ class PlanningTools:
             "type": "object",
             "properties": {
                 "content": {"type": "string", "minLength": 1},
-                "session_id": {"type": ["string", "null"], "default": None},
+                "session_id": {"type": ["string", "null"]},
             },
-            "required": ["content"],
+            "required": ["content", "session_id"],
             "additionalProperties": False,
         },
         strict=True,
@@ -171,9 +179,9 @@ class PlanningTools:
             "type": "object",
             "properties": {
                 "summary": {"type": "string", "minLength": 1},
-                "session_id": {"type": ["string", "null"], "default": None},
+                "session_id": {"type": ["string", "null"]},
             },
-            "required": ["summary"],
+            "required": ["summary", "session_id"],
             "additionalProperties": False,
         },
         strict=True,

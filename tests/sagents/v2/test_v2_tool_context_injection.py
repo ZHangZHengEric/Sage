@@ -230,12 +230,12 @@ async def test_official_memory_tool_and_automatic_recall_bind_context(automatic)
     assert result.state == RunState.COMPLETED
     assert len(received) == 1
     assert received[0]["text"] == "host-query"
-    assert received[0]["session_id"] == "host-session"
+    assert received[0]["session_id"] == handle.session_id
     assert received[0]["limit"] == 3
     proposals = [e for e in await runtime.session_store.read_events(handle.run_id)
                  if e.type == "tool.call.proposed"]
     assert proposals[0].data.arguments == {
-        "query": "host-query", "session_id": "host-session", "top_k": 3,
+        "query": "host-query", "session_id": handle.session_id, "top_k": 3,
     }
 
 
@@ -331,9 +331,7 @@ async def test_missing_session_context_uses_real_run_session_in_prompt_and_tool(
     )
     result = await loop.execute(handle.run_id, CONTEXT)
     assert result.state == RunState.COMPLETED
-    expected = (configured or {}).get("session_id") or handle.session_id
-    if not expected.strip():
-        expected = handle.session_id
+    expected = handle.session_id
     assert received == [expected]
     prompt = "\n".join(block.text for message in model.requests[0].messages
                        for block in message.content if isinstance(block, TextBlock))
