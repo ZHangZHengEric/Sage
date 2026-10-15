@@ -124,7 +124,7 @@ class ServerHost:
             a2a_plugins=self.a2a_plugins,
             contexts=self.contexts,
             agent_management=self.agent_management,
-            users=self.users, keys=self.credentials.keys,
+            users=self.users, keys=self.credentials.keys, threads=self.threads,
         )
 
     async def ready(self) -> bool:
@@ -203,6 +203,7 @@ class ServerHost:
                 skills=self.skill_catalog,
                 execution=self.execution,
                 users=self.users, settings=self.settings,
+                session_access=session_access, context_for=self.contexts.for_user,
             )
             runs = RunService(
                 application=self._application,

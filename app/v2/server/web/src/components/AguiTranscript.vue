@@ -42,7 +42,7 @@ function markdown(text) {
 
 const statusIcons = {
   preparing: 'more', queued: 'clock', awaiting_approval: 'shield',
-  completed: 'check', failed: 'alert', denied: 'ban', cancelled: 'close',
+  not_executed: 'ban', completed: 'check', failed: 'alert', denied: 'ban', cancelled: 'close',
   unknown: 'alert', reconciling: 'search', incomplete: 'alert',
 }
 

@@ -53,14 +53,14 @@ def server_routes() -> list[tuple[str, str, str]]:
     routes = []
     for path in sorted((ROOT / "app/v2/server/routers").glob("*.py")):
         tree = ast.parse(path.read_text())
-        prefix = ""
+        prefixes = {}
         for n in tree.body:
             if isinstance(n, ast.Assign) and isinstance(n.value, ast.Call):
                 if (
                     isinstance(n.value.func, ast.Name)
                     and n.value.func.id == "APIRouter"
                 ):
-                    prefix = next(
+                    prefixes[n.targets[0].id] = next(
                         (value(k.value) for k in n.value.keywords if k.arg == "prefix"),
                         "",
                     )
@@ -72,7 +72,7 @@ def server_routes() -> list[tuple[str, str, str]]:
                     isinstance(d, ast.Call)
                     and isinstance(d.func, ast.Attribute)
                     and isinstance(d.func.value, ast.Name)
-                    and d.func.value.id == "router"
+                    and d.func.value.id in prefixes
                 ):
                     continue
                 methods = [d.func.attr.upper()]
@@ -82,7 +82,7 @@ def server_routes() -> list[tuple[str, str, str]]:
                         for k in d.keywords
                         if k.arg == "methods"
                     )
-                routes.append(("/".join(methods), prefix + value(d.args[0]), path.stem))
+                routes.append(("/".join(methods), prefixes[d.func.value.id] + value(d.args[0]), path.stem))
     return sorted(routes, key=lambda row: (row[2], row[1], row[0]))
 
 

@@ -6,6 +6,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 import check_docs
+from v2_reference import server_routes
 
 
 class ContributorGuideLinks(unittest.TestCase):
@@ -126,6 +127,20 @@ class ContributorGuideLinks(unittest.TestCase):
         with self.assertRaises(SystemExit) as raised:
             check_docs.main()
         self.assertIn("knowledge/resources/guide.md: missing link other.md", str(raised.exception))
+
+
+class GroupedConversationRoutes(unittest.TestCase):
+    def test_all_conversation_router_groups_retain_their_prefixes(self):
+        routes = set(server_routes())
+        expected = {
+            ("POST", "/api/agent", "conversations"),
+            ("GET", "/api/threads", "conversations"),
+            ("POST", "/api/threads/{thread_id}/resume", "conversations"),
+            ("GET", "/api/approvals", "conversations"),
+            ("GET", "/api/threads/{thread_id}/download", "conversations"),
+            ("POST", "/api/agents/{agent_id}/runs", "conversations"),
+        }
+        self.assertTrue(expected <= routes, expected - routes)
 
 
 if __name__ == "__main__":

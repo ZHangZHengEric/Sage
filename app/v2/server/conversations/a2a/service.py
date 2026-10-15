@@ -277,6 +277,8 @@ class A2AService:
             enabled_skills=tuple(item.name for item in admitted.skills),
             metadata={**admitted.metadata, **await self._execution_metadata(message, key, admitted)},
         )
+        from app.v2.server.conversations.bindings import SessionBinding
+        await self._threads.bind(SessionBinding(session_id, user_id, user_id, admitted.agent_id))
         await self._threads.upsert(
             session_id, user_id, title=_title_of(command), agent_id=admitted.agent_id
         )

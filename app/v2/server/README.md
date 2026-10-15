@@ -200,7 +200,13 @@ MCP 与 A2A 这类租户自己的目录，工具授权按目录整体授予而�
 
 原 `POST /api/agent` 同时支持 Sage 登录态和内网业务头部身份。内网调用同时提供 `SAGE-AGENT-ID`、`SAGE-TENANT-ID`，无需 `Authorization`；`SAGE-TENANT-ID` 是外部业务用户唯一标识，无需在 Sage 注册。`SAGE-AGENT-ID` 全局唯一，由该 Agent 所属 Sage 账号提供模型、提示词、工具和技能配置。接口按受控内网部署，头部身份由业务后端负责传入。
 
-请求继续使用 AG-UI：`threadId` 即业务 session_id，`runId` 即本次请求唯一 ID，`messages` 中传用户文字和文件 URL。新任务新建 threadId；编辑复用 threadId、使用新的 runId。相同 runId 重试不会重复生成；不同业务用户即使使用相同 threadId/runId，也隔离为不同内部会话。请求头中的 SAGE-AGENT-ID 优先于 forwardedProps.agentId。
+请求继续使用 AG-UI：`session_id` 是唯一会话身份，传入时原样使用；省略时由 Sage 生成。`threadId` 是兼容别名，两者同时传入必须完全一致，否则在启动 Run 前返回 422。空字符串、首尾空格及无效 ID 会被拒绝，不会静默规范化。`runId` 是本次请求唯一 ID，`messages` 中传用户文字和文件 URL。编辑复用响应中的 `session_id`，使用新的 `runId`；相同 `runId` 重试不会重复生成。SSE 的 `RUN_STARTED` / `RUN_FINISHED` 和结果接口同时返回 `session_id`、兼容字段 `threadId`，二者都指向实际持久化会话。
+
+页面、`POST /api/agent`、`POST /api/agents/{agent_id}/runs` 共享以上契约。A2A 的 `contextId` 同样原样作为 session ID，缺省生成后通过 Task.contextId 返回。工具参数及模型上下文中的 `session_id` 由实际 Run 统一绑定，调用方和模型不能指定其他会话。`runtimeContext.session_id` 如有传入必须匹配请求会话。请求头中的 SAGE-AGENT-ID 优先于 forwardedProps.agentId。
+
+当前 SessionStore 的 session ID 是全局主键，因此同一个 ID 不能被另一个 tenant 或 Agent 复用。`session_bindings` 以数据库唯一约束持久化 owner、tenant、Agent 归属；冲突启动返回 409，越权读取返回 404，不再通过改写 ID 实现隔离。绑定不会随会话删除转让给其他归属。部署时自动创建绑定表并将 MySQL threads.thread_id 扩为 VARCHAR(192)。
+
+旧 `external_<hash>` 会话采用原位兼容，升级前应备份业务数据库、SessionStore 和 tenants 工作空间：携带原 tenant、Agent 和业务 ID 请求时，只探测已有旧哈希记录，不创建新的哈希会话；命中后返回旧的实际 `session_id`，后续应复用这个返回值。历史 Run、检查点、问卷、审批、事件及 `.sage/todos/<旧ID>.json` 都留在原位，workspace 仍使用原 `server_v2.workspace_user_id`。这是兼容读取和继续执行方案，不重写活动会话或 Todo 文件。若历史数据缺少 workspace 身份元数据，使用原 tenant/Agent/业务 ID 可验证已有旧哈希并建立可信绑定；恢复和工作空间浏览从该绑定补全身份，不修改旧命令。仅知道哈希时无法反推出 tenant，必须先核对原始身份，禁止猜测或把文件移到别的租户目录。旧 runId 重试复用持久化启动命令，输入、workspace 或运行上下文不同则明确拒绝，避免升级后幂等摘要改变。
 
 ```json
 {"threadId":"work-123","runId":"request-456","messages":[{"id":"request-456","role":"user","content":"用户文字与素材 URL"}],"state":{},"tools":[],"context":[],"forwardedProps":{}}
