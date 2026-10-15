@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from sagents.v2.prompt_i18n import prompt_text, run_prompt_language
 from sagents.v2.agent.multi_agent.contracts import AgentMode
 from sagents.v2.agent.multi_agent.registry import AgentRegistry
 from sagents.v2.context.contracts import ContextSegment, ContextStability
@@ -20,17 +21,15 @@ class AgentRosterContextProvider:
         self.allow_delegation = allow_delegation
 
     async def segments(self, request, *, run_id: str):
-        del request, run_id
+        del run_id
+        language = run_prompt_language(request.config.metadata)
         if not self.allow_delegation:
             return (
                 ContextSegment(
                     segment_id="agent_delegation_boundary",
                     content=(
                         "<multi_agent_mode>\n"
-                        "You are executing a delegated task as a leaf agent. "
-                        "Do not create, spawn, or delegate to other agents; "
-                        "complete the assigned task directly with your available "
-                        "non-delegation tools.\n"
+                        f"{prompt_text('leaf', language)}\n"
                         "</multi_agent_mode>"
                     ),
                     stability=ContextStability.STABLE,
@@ -43,16 +42,12 @@ class AgentRosterContextProvider:
         roster = (
             "\n".join(
                 f"- {member.agent_id}: {member.name} — "
-                f"{member.description or 'no description'} (leaf execution)"
+                f"{member.description or prompt_text('no_description', language)} ({prompt_text('leaf_label', language)})"
                 for member in members
             )
-            or "- No existing agents are registered."
+            or "- " + prompt_text("no_agents", language)
         )
-        behavior = (
-            "Fibre may create Session-scoped agents and delegate work."
-            if self.mode == AgentMode.FIBRE
-            else "Team has a fixed roster and cannot create agents."
-        )
+        behavior = prompt_text("fibre" if self.mode == AgentMode.FIBRE else "team", language)
         return (
             ContextSegment(
                 segment_id="agent_roster",

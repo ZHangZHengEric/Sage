@@ -10,7 +10,8 @@ from sagents.v2.agent.policy import (
 )
 from sagents.v2.context.contracts import ContextSegment, ContextStability
 from sagents.v2.contracts.commands import StartRun
-from sagents.v2.i18n import normalize_language, tr
+from sagents.v2.i18n import tr
+from sagents.v2.prompt_i18n import run_prompt_language
 from xml.sax.saxutils import escape
 
 from sagents.v2.goal import GoalStateService
@@ -28,9 +29,7 @@ class PlanContextProvider:
         state = await self.goals.get(run_id)
         if state is None:
             return ()
-        language = normalize_language(
-            str(command.config.metadata.get("response_language") or "en")
-        )
+        language = run_prompt_language(command.config.metadata)
         instruction = tr("plan.submitted_instruction", language)
         return (
             ContextSegment(

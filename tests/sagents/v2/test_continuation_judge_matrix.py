@@ -110,6 +110,7 @@ async def test_llm_judge_uses_v1_prompt_contract_and_reports_usage():
         assert request.metadata == {
             "purpose": "continuation_judge",
             "implementation": "v1",
+            "response_language": "en",
         }
         prompt = request.messages[0].content[0].text
         assert "Apply the Todo invariant first" in prompt

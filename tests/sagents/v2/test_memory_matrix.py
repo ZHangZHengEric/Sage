@@ -227,7 +227,10 @@ async def test_automatic_recall_is_a_real_tool_pair_not_runtime_context():
     assert len(executor.calls) == 1
     assert executor.calls[0].tool_name == "search_memory"
     assert executor.calls[0].arguments == {"query": "remember me", "top_k": 4}
-    messages = model.requests[0].messages
+    model_messages = model.requests[0].messages
+    assert model_messages[0].role == "system"
+    assert "The response language is en." in model_messages[0].content[0].text
+    messages = tuple(message for message in model_messages if message.role != "system")
     assert [message.role for message in messages] == ["user", "assistant", "tool"]
     assert messages[1].tool_calls[0].name == "search_memory"
     assert "memory_1" in messages[2].content[0].text

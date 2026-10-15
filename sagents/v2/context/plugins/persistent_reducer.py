@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 
+from sagents.v2.prompt_i18n import prompt_text
 from sagents.v2.contracts.errors import (
     ErrorCategory,
     RuntimeErrorInfo,
@@ -45,21 +46,9 @@ LOGGER = get_logger(__name__)
 
 class _ExtractiveConversationSummarizer:
     async def summarize(self, request: SummarizationRequest) -> str:
-        labels = {
-            "en": (
-                "Previous summary:",
-                "New history:",
-                "Tool calls:",
-                "[...history condensed...]",
-            ),
-            "zh": ("之前的摘要：", "新增历史：", "工具调用：", "[……历史已压缩……]"),
-            "pt": (
-                "Resumo anterior:",
-                "Novo histórico:",
-                "Chamadas de ferramentas:",
-                "[...histórico condensado...]",
-            ),
-        }[request.response_language]
+        labels = tuple(prompt_text(key, request.response_language) for key in (
+            "summary_previous", "summary_history", "summary_tools", "summary_condensed"
+        ))
         lines = []
         if request.previous_summary:
             lines.extend([labels[0], request.previous_summary.strip(), labels[1]])

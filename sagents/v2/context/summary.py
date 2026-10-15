@@ -11,6 +11,7 @@ from typing import Any, Protocol
 
 from pydantic import Field
 
+from sagents.v2.prompt_i18n import prompt_language
 from sagents.v2.contracts.common import StrictModel, new_id, utc_now
 from sagents.v2.context.contracts import ContextReductionScope
 from sagents.v2.context.token_estimator import TokenEstimator
@@ -131,12 +132,7 @@ class SummarizationRequest(StrictModel):
 
 
 def _summary_language(value: str | None) -> str:
-    normalized = str(value or "en").strip().lower().replace("_", "-")
-    if normalized.startswith("zh"):
-        return "zh"
-    if normalized.startswith("pt"):
-        return "pt"
-    return "en"
+    return prompt_language(value)
 
 
 class ConversationSummarizer(Protocol):

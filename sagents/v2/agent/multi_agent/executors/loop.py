@@ -120,9 +120,7 @@ class LoopChildRunExecutor:
                 "parent_tool_call_id": task.parent_tool_call_id or "",
                 "workspace_policy": workspace_policy.value,
                 "agent_mode": descriptor.mode.value,
-                "response_language": str(
-                    parent_metadata.get("response_language") or context.language
-                ),
+                "response_language": str(parent_metadata.get("response_language") or "en"),
             }
         )
         input_metadata = {}

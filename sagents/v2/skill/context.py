@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from xml.sax.saxutils import escape
 
+from sagents.v2.prompt_i18n import prompt_text, run_prompt_language
 from sagents.v2.context import (
     ContextSegment,
     ContextStability,
@@ -45,7 +46,7 @@ class AvailableSkillsContextProvider:
             (
                 "</available_skills>",
                 "<skill_usage>",
-                "Call load_skill with the exact skill name before following a Skill.",
+                prompt_text("skills", run_prompt_language(command.config.metadata)),
                 "</skill_usage>",
             )
         )

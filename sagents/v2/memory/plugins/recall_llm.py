@@ -5,6 +5,8 @@ from __future__ import annotations
 import asyncio
 import json
 
+from sagents.v2.prompt_i18n import prompt_language, prompt_text
+
 from sagents.v2.contracts.common import new_id
 from sagents.v2.contracts.errors import ErrorCategory, RuntimeErrorInfo, SageV2Error
 from sagents.v2.contracts.items import TextBlock
@@ -38,25 +40,13 @@ class LLMMemoryRecallQueryGenerator:
         self.language = language
         self.timeout_seconds = float(timeout_seconds)
 
-    async def generate(self, user_input: str, *, run_id: str) -> str:
+    async def generate(self, user_input: str, *, run_id: str, language: str | None = None) -> str:
         source = user_input.strip()
         if not source:
             return ""
-        chinese = self.language.lower().startswith("zh")
-        system = (
-            "你是 Sage AI 的记忆召回专家。请把用户当前请求转换成精准、简短的记忆检索词。"
-            if chinese
-            else "You are Sage AI's Memory recall expert. Convert the current user request into a precise, compact Memory search query."
-        )
-        prompt = (
-            "提取 3-10 个关键词。优先保留项目名、文件名、路径、函数名、产品名和核心需求；忽略客套、运行时信息和已完成的旧动作。"
-            '如果没有值得检索的内容（例如简短确认），返回 {"query":""}。'
-            '只返回 JSON：{"query":"检索词"}\n\n用户请求：\n'
-            if chinese
-            else "Extract 3-10 keywords. Prefer project names, filenames, paths, functions, products, and the core request; ignore chatter, runtime details, and completed old actions. "
-            'If there is nothing worth searching for (such as a brief acknowledgement), return {"query":""}. '
-            'Return JSON only: {"query":"search terms"}\n\nUser request:\n'
-        )
+        language = prompt_language(language if language is not None else self.language)
+        system = prompt_text("memory_system", language)
+        prompt = prompt_text("memory_request", language)
         request = ModelRequest(
             request_id=new_id("memory_query"),
             run_id=run_id,
@@ -67,7 +57,7 @@ class LLMMemoryRecallQueryGenerator:
             ),
             tools=(),
             tool_choice="none",
-            metadata={"purpose": "memory_recall_query"},
+            metadata={"purpose": "memory_recall_query", "response_language": language},
         )
         response = None
         try:

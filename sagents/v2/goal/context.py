@@ -12,7 +12,8 @@ from sagents.v2.agent.policy import (
 )
 from sagents.v2.context.contracts import ContextSegment, ContextStability
 from sagents.v2.contracts.commands import StartRun
-from sagents.v2.i18n import normalize_language, tr
+from sagents.v2.i18n import tr
+from sagents.v2.prompt_i18n import run_prompt_language
 
 from .state import GoalStateService
 
@@ -29,9 +30,7 @@ class GoalContextProvider:
             and command.config.metadata.get("goal_mode") is not True
         ):
             return ()
-        language = normalize_language(
-            str(command.config.metadata.get("response_language") or "en")
-        )
+        language = run_prompt_language(command.config.metadata)
         state = await self.goals.get(run_id) if run_id is not None else None
         if state is None:
             instructions = tr("goal.create_instruction", language)

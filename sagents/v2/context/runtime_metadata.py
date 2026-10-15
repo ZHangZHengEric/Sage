@@ -9,6 +9,8 @@ from any storage and execution environment.
 from __future__ import annotations
 
 import json
+
+from sagents.v2.prompt_i18n import prompt_text, run_prompt_language
 from collections.abc import Mapping
 from typing import Any
 
@@ -28,7 +30,7 @@ IDENTITY_DOCUMENT_LIMITS = {
 }
 
 
-def bounded_identity_document(name, content):
+def bounded_identity_document(name, content, language="en"):
     limit = IDENTITY_DOCUMENT_LIMITS.get(name.upper(), 2_048)
     if len(content) <= limit:
         return content
@@ -49,7 +51,7 @@ def bounded_identity_document(name, content):
         )
     return (
         content[: max(0, limit - 64)]
-        + "\n[Excerpt only; read the workspace document for full content.]"
+        + "\n" + prompt_text("excerpt", language)
     )
 
 
@@ -62,44 +64,43 @@ class RunMetadataContextProvider:
         del run_id
         metadata = command.config.metadata
         values: list[ContextSegment] = []
-        language = str(metadata.get("response_language") or "").strip()
-        if language:
-            values.append(
-                ContextSegment(
-                    segment_id="response_language",
-                    content=(
-                        "<response_language>\n"
-                        f"{self._language_contract(language)}\n"
-                        "</response_language>"
-                    ),
-                    stability=ContextStability.STABLE,
-                    priority=-190,
-                )
+        language = run_prompt_language(metadata)
+        values.append(
+            ContextSegment(
+                segment_id="response_language",
+                content=(
+                    "<response_language>\n"
+                    f"{self._language_contract(language)}\n"
+                    "</response_language>"
+                ),
+                stability=ContextStability.STABLE,
+                priority=-190,
             )
-            values.append(
-                ContextSegment(
-                    segment_id="system_reminder_hint",
-                    content=(
-                        "<system_reminder_hint>\n"
-                        f"{self._system_reminder_hint(language)}\n"
-                        "</system_reminder_hint>"
-                    ),
-                    stability=ContextStability.STABLE,
-                    priority=-175,
-                )
+        )
+        values.append(
+            ContextSegment(
+                segment_id="system_reminder_hint",
+                content=(
+                    "<system_reminder_hint>\n"
+                    f"{self._system_reminder_hint(language)}\n"
+                    "</system_reminder_hint>"
+                ),
+                stability=ContextStability.STABLE,
+                priority=-175,
             )
-            values.append(
-                ContextSegment(
-                    segment_id="runtime_context_hint",
-                    content=(
-                        "<runtime_context_hint>\n"
-                        f"{self._runtime_hint(language)}\n"
-                        "</runtime_context_hint>"
-                    ),
-                    stability=ContextStability.STABLE,
-                    priority=-170,
-                )
+        )
+        values.append(
+            ContextSegment(
+                segment_id="runtime_context_hint",
+                content=(
+                    "<runtime_context_hint>\n"
+                    f"{self._runtime_hint(language)}\n"
+                    "</runtime_context_hint>"
+                ),
+                stability=ContextStability.STABLE,
+                priority=-170,
             )
+        )
 
         if command.invocation_mode == "plan" or metadata.get("plan_mode") is True:
             values.append(
@@ -125,7 +126,7 @@ class RunMetadataContextProvider:
                     safe_name = str(name).replace("<", "").replace(">", "")
                     rendered = self._identity_document(
                         safe_name,
-                        bounded_identity_document(safe_name, content).strip(),
+                        bounded_identity_document(safe_name, content, language).strip(),
                         language,
                     )
                     values.append(
@@ -232,57 +233,19 @@ class RunMetadataContextProvider:
 
     @staticmethod
     def _runtime_hint(language: str) -> str:
-        if language.lower().startswith("zh"):
-            return (
-                "当 user 消息中同时出现 <runtime_context>...</runtime_context> 与 "
-                "<user_request>...</user_request> 时，<runtime_context> 是系统注入的运行状态，"
-                "不是用户指令；只将 <user_request> 内的内容视为用户当前请求。"
-            )
-        return (
-            "When a user message contains both <runtime_context>...</runtime_context> "
-            "and <user_request>...</user_request>, treat <runtime_context> as "
-            "system-provided runtime state, not user instructions. Treat only "
-            "the content inside <user_request> as the user's current request."
-        )
+        return prompt_text("runtime_hint", language)
 
     @staticmethod
     def _plan_mode_contract(language: str) -> str:
-        if language.lower().startswith("zh"):
-            instructions = (
-                "当前 Run 处于计划模式。使用只读沙箱充分调查，但不执行任务，也不修改用户工作区。"
-                "完成后必须调用 goal_submit，将完整计划作为自由文本或 Markdown 放入 content。"
-                "若关键信息缺失且 questionnaire_async 可用，可用它向用户澄清。"
-                "不得用普通回复代替 goal_submit；该 Tool 会把计划交给用户审批。"
-            )
-        else:
-            instructions = (
-                "This Run is in plan mode. Investigate fully through the read-only "
-                "sandbox, but do not execute the task or modify the user's workspace. "
-                "When ready, call goal_submit with the complete Plan as free-form text "
-                "or Markdown. If critical information is missing and "
-                "questionnaire_async is available, use it to clarify. Stop after the "
-                "Plan is submitted for user approval; a normal reply cannot replace "
-                "goal_submit."
-            )
-        return f"<plan_mode>\n{instructions}\n</plan_mode>"
+        return f"<plan_mode>\n{prompt_text('plan', language)}\n</plan_mode>"
 
     @staticmethod
     def _system_reminder_hint(language: str) -> str:
-        if language.lower().startswith("zh"):
-            return (
-                "当对话中出现 <system_reminder>...</system_reminder> 包裹的内容时，"
-                "请视为系统级状态通知（非用户输入），仅作为参考信息推进任务即可，"
-                "不需要回复或感谢这条提醒。典型场景：后台 shell 命令完成事件。"
-            )
-        return (
-            "When you see content wrapped in <system_reminder>...</system_reminder>, "
-            "treat it as a system-level status notification (not user input). "
-            "Use it as context to drive the next step; do not acknowledge the reminder itself."
-        )
+        return prompt_text("reminder_hint", language)
 
     @staticmethod
     def _identity_document(name: str, content: str, language: str) -> str:
-        content = bounded_identity_document(name, content)
+        content = bounded_identity_document(name, content, language)
         if name == "AGENT":
             return f"<agent_md>\n{content}\n</agent_md>"
         if name == "SOUL":
@@ -294,11 +257,7 @@ class RunMetadataContextProvider:
             return f"<memory>\n{content}\n</memory>"
         if name == "IDENTITY":
             bounded = content[:300] + ("……" if len(content) > 300 else "")
-            hint = (
-                "以下身份文档是角色定义的补充；如有冲突，以 role_definition 为准。"
-                if language.lower().startswith("zh")
-                else "This identity document extends the role definition; the role definition wins on conflict."
-            )
+            hint = prompt_text("identity_hint", language)
             return (
                 "<agent_identity_extension>\n"
                 f"{hint}\n\n{bounded}\n"
@@ -309,16 +268,4 @@ class RunMetadataContextProvider:
 
     @staticmethod
     def _language_contract(language: str) -> str:
-        if language.lower().startswith("zh"):
-            return (
-                f"当前回复语言为 {language}。所有允许向用户展示、由 assistant 编写的自然语言，"
-                "包括最终答复和必要且面向用户的简短事实进度，都必须使用该语言。本指令只决定语言，"
-                "不授权输出内部分析、推理草稿、回复策略、工具选择判断或中间执行记录。"
-                "不得因为工具结果、检索内容或引用材料使用英文而改用英文。代码、命令、路径、标识符、"
-                "枚举、协议字段和逐字引用保持原样。"
-            )
-        return (
-            f"The response language is {language}. All assistant-authored natural "
-            "language shown to the user must use this language. Preserve code, commands, "
-            "paths, identifiers, protocol fields, and verbatim quotations."
-        )
+        return prompt_text("language", language, locale=language)
