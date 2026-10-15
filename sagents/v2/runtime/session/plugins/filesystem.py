@@ -413,6 +413,10 @@ class _FilesystemSessionState(SessionStoreCoordinator):
                 await self._ensure_session_loaded(lookup["session_id"])
         return await super().create_run(command, context)
 
+    async def export_session_state(self, session_id):
+        await self._ensure_session_loaded(session_id)
+        return await super().export_session_state(session_id)
+
     async def get_session(self, session_id):
         await self._ensure_session_loaded(session_id)
         return await super().get_session(session_id)

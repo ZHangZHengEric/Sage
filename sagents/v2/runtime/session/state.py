@@ -3329,6 +3329,11 @@ class SessionStoreCoordinator(SessionAttachmentMixin):
                 subscriber.closed = True
                 self._subscribers.get(cursor.run_id, set()).discard(subscriber)
 
+    async def export_session_state(self, session_id: str) -> dict[str, Any]:
+        """Trusted host snapshot of one aggregate; caller must authorize first."""
+        async with self._lock:
+            return self._dump_session_state_locked(session_id)
+
     async def export_state(self) -> dict[str, Any]:
         async with self._lock:
             return self._dump_state_locked()

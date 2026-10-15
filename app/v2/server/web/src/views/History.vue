@@ -36,7 +36,7 @@ onMounted(async () => {
         <router-link class="history-title" :to="{ path: '/', query: { thread: item.thread_id } }">{{ item.title || '未命名' }}</router-link>
         <span v-if="item._owner" class="tag">{{ item._owner.username }}</span>
         <time :datetime="item.updated_at">{{ date(item.updated_at) }}</time>
-        <button v-if="isAdmin()" class="btn ghost" :disabled="downloading.has(item.thread_id)" @click="download(item)"><AppIcon name="download" /> {{ downloading.has(item.thread_id) ? '下载中…' : '下载 session' }}</button>
+        <button v-if="isAdmin()" class="btn ghost" :disabled="downloading.has(item.thread_id)" @click="download(item)"><AppIcon name="download" /> {{ downloading.has(item.thread_id) ? '下载中…' : '下载诊断包' }}</button>
         <button v-if="!isForeign(item)" class="btn ghost" @click="remove(item)">删除</button>
       </article>
     </div>

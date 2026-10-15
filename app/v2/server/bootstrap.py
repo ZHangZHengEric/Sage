@@ -61,6 +61,7 @@ class ServerHost:
             raise RuntimeError("database is required")
         self.settings = settings
         self.log_sink: LogSink | None = None
+        self.diagnostics = None
         self.contexts = RequestContexts(settings.language)
         self.package_authorizer = package_authorizer
         self.package_extensions = tuple(package_extensions)
@@ -138,6 +139,10 @@ class ServerHost:
     async def start(self) -> None:
         if self._application is not None:
             return
+        if self.diagnostics is None:
+            from app.v2.server.observability.diagnostics import SessionDiagnostics
+
+            self.diagnostics = SessionDiagnostics(self.paths.runtime_root / "diagnostics")
         if self.log_sink is None:
             from app.v2.server.observability.logging import LoggingSettings, init_logging
 
@@ -148,7 +153,12 @@ class ServerHost:
                     directory=self.settings.log_directory,
                 ),
                 service_name="sage-server",
+                diagnostics=self.diagnostics,
             )
+        from app.v2.server.observability.logging import ServerLogSink
+
+        if isinstance(self.log_sink, ServerLogSink):
+            self.log_sink.diagnostics = self.diagnostics
         from app.v2.server.database.schema import create_host_schema
 
         await create_host_schema(self.database)
@@ -185,6 +195,7 @@ class ServerHost:
                 .with_defaults(session_root=self.paths.sessions_root)
                 .with_model_provider(host_models)
                 .with_log_sink(self.log_sink)
+                .with_diagnostic_sink(self.diagnostics)
                 .with_model_budget(model_budget)
                 .with_scheduler(scheduler)
                 .with_run_driver_factory(

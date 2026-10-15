@@ -82,3 +82,11 @@ Session 使用核心 MySQL SessionStore。managed Application 以宿主持久路
 实现入口：[bootstrap.py](https://github.com/ZHangZHengEric/Sage/blob/main/app/v2/server/bootstrap.py)。
 
 包权限规则：[policy.py](https://github.com/ZHangZHengEric/Sage/blob/main/app/v2/server/packages/policy.py)。
+
+## Session 诊断包
+
+管理员通过历史页“下载诊断包”或 `GET /api/threads/{thread_id}/download` 获取 `<session>-diagnostics.zip`。MySQL 与文件 SessionStore 使用相同格式：`manifest.json`、脱敏后的 `state.json` / `session.json`、`runs/`、`events/`、`models.json`、`tools.json` 和 `logs.json`。状态包含检查点、暂停与交互，工具事件包含参数替换后的实际参数及结果项（包括原生和 MCP 工具）。此包供诊断使用，不是可导入恢复的备份；不修改实际会话、workspace 或 Todo。
+
+Server 默认在数据目录 `runtime/diagnostics/evidence.sqlite3` 持久化模型诊断和具有 Session、Run 关联的结构化日志。目录权限 0700、数据库 0600，位于 Agent workspace 外，重启后仍可导出；单机数据目录需要随服务保存。模型请求优先记录提供方 wire payload，否则标记为 normalized；响应是提供方适配器归一化后的响应。采集失败不会中断执行。历史未采集的请求和日志无法补回，清单列出缺失的 Run、截断记录和本进程采集失败次数。每条诊断最多 8 MiB，每 Run 日志保留最近 10000 条，淘汰数量写入清单；模型诊断随数据目录保留。ZIP 沿用下载大小与条目上限，超限返回 413。
+
+采集与导出均脱敏凭证字段、嵌套 JSON、常见 Bearer / API token、URL 用户信息和标记过的内联凭证；无标签的自然语言秘密仍需分享前检查。下载保持管理员权限，并先校验持久化 Session owner、Agent 绑定；仅导出该 Session 的状态及其 Run 白名单对应的诊断，不读取共享日志全文、其他租户的会话或 workspace 文件。运行中导出是状态快照与诊断快照，期间可能继续产生事件，不能视为事务一致的恢复备份。

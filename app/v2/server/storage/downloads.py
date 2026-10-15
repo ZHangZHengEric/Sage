@@ -140,8 +140,17 @@ def _archive_directory(fd: int, archive: ZipFile, prefix: str, total: list[int],
                 os.close(child)
 
 
-def prepare_session_export(session_id: str, state: dict):
-    """Package a database-backed Session without creating business storage."""
+def prepare_session_export(session_id: str, state: dict, evidence: dict | None = None):
+    """Package a redacted diagnostic snapshot independent of storage backend."""
+    from app.v2.server.observability.diagnostics import redact
+
+    evidence = evidence or {"models": [], "logs": [], "unavailable": True}
+    if [row["session_id"] for row in state.get("sessions", [])] != [session_id]:
+        raise ValueError("diagnostic Session identity mismatch")
+    if any(run["session_id"] != session_id for run in state.get("runs", [])):
+        raise ValueError("diagnostic Run ownership mismatch")
+    sanitized = redact({"state": state, "evidence": evidence})
+    state, evidence = sanitized["state"], sanitized["evidence"]
     name = quote(session_id, safe="")
     if name in {"", ".", ".."}:
         raise ValueError("invalid Session id")
@@ -149,23 +158,93 @@ def prepare_session_export(session_id: str, state: dict):
     total = 0
     try:
         with ZipFile(output, "w", compression=ZIP_DEFLATED) as archive:
+
             def write_json(path, value):
                 nonlocal total
-                encoded = json.dumps(value, ensure_ascii=False, indent=2).encode("utf-8")
+                encoded = json.dumps(value, ensure_ascii=False, indent=2).encode(
+                    "utf-8"
+                )
                 total += len(encoded)
-                if total > MAX_ARCHIVE_BYTES or len(archive.filelist) >= MAX_ARCHIVE_ENTRIES:
+                if (
+                    total > MAX_ARCHIVE_BYTES
+                    or len(archive.filelist) >= MAX_ARCHIVE_ENTRIES
+                ):
                     raise OverflowError("Session is too large to archive")
                 archive.writestr(f"{name}/{path}", encoded)
 
-            # state.json is the full canonical aggregate, not just visible messages.
+            run_ids = {run["run_id"] for run in state.get("runs", [])}
+            tools = []
+            for run_id in sorted(run_ids):
+                events = state.get("run_events", {}).get(run_id, [])
+                tools.extend(
+                    {"run_id": run_id, "event": event}
+                    for event in events
+                    if event.get("type", "").startswith("tool.call.")
+                    or (
+                        event.get("type") == "item.completed"
+                        and event.get("data", {})
+                        .get("item", {})
+                        .get("data", {})
+                        .get("tool_call_id")
+                    )
+                )
+            write_json("models.json", evidence.get("models", []))
+            write_json("logs.json", evidence.get("logs", []))
+            write_json("tools.json", tools)
+            write_json(
+                "manifest.json",
+                {
+                    "format_version": "sage.session-diagnostic-bundle/v1",
+                    "session_id": session_id,
+                    "generated_at": datetime.now(timezone.utc).isoformat(),
+                    "redacted": True,
+                    "restorable_backup": False,
+                    "diagnostic_storage_available": not evidence.get(
+                        "unavailable", False
+                    ),
+                    "run_ids": sorted(run_ids),
+                    "model_records": len(evidence.get("models", [])),
+                    "log_records": len(evidence.get("logs", [])),
+                    "tool_events": len(tools),
+                    "truncated_model_records": sum(
+                        bool(row.get("truncated")) for row in evidence.get("models", [])
+                    ),
+                    "truncated_log_records": sum(
+                        bool(row.get("truncated")) for row in evidence.get("logs", [])
+                    ),
+                    "dropped_logs": evidence.get("dropped_logs", 0),
+                    "capture_failures_since_start": evidence.get(
+                        "capture_failures_since_start", 0
+                    ),
+                    "models_missing_for_runs": sorted(
+                        run_ids
+                        - {row.get("run_id") for row in evidence.get("models", [])}
+                    ),
+                    "logs_missing_for_runs": sorted(
+                        run_ids
+                        - {row.get("run_id") for row in evidence.get("logs", [])}
+                    ),
+                    "limitations": [
+                        "Historical evidence not captured before diagnostics were enabled is unavailable.",
+                        "Model responses are normalized provider responses; request_format identifies wire requests.",
+                        "Only logs with an exact Session and Run association are included.",
+                        "Credential fields and recognizable inline secrets are redacted; review unlabelled prose before sharing.",
+                        "Live Runs may advance after this state snapshot; records are bounded by this Run allowlist.",
+                    ],
+                },
+            )
+            # Sanitized canonical aggregate retains checkpoints/interactions and Todo events.
             write_json("state.json", state)
             write_json("session.json", state["sessions"][0])
             for run in state.get("runs", []):
                 run_id = quote(run["run_id"], safe="")
                 write_json(f"runs/{run_id}.json", run)
-                write_json(f"events/{run_id}.json", state.get("run_events", {}).get(run["run_id"], []))
+                write_json(
+                    f"events/{run_id}.json",
+                    state.get("run_events", {}).get(run["run_id"], []),
+                )
         output.seek(0)
-        return output, f"{name}.zip"
+        return output, f"{name}-diagnostics.zip"
     except BaseException:
         output.close()
         raise
