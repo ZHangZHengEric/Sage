@@ -4,8 +4,11 @@ from typing import Protocol
 
 from app.v2.server.database import Database
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 
-from app.v2.server.conversations.orm import ThreadRow
+from app.v2.server.conversations.bindings import SessionBinding, require_binding
+
+from app.v2.server.conversations.orm import ThreadRow, SessionBindingRow
 from app.v2.server.conversations.records import (
     ThreadRecord,
     apply_thread_upsert,
@@ -14,6 +17,8 @@ from app.v2.server.conversations.records import (
 
 
 class ThreadIndex(Protocol):
+    async def binding(self, session_id: str) -> SessionBinding | None: ...
+    async def bind(self, binding: SessionBinding) -> None: ...
     async def list_all(self) -> list[ThreadRecord]: ...
     async def list_for(self, user_id: str) -> list[ThreadRecord]: ...
     async def find(self, thread_id: str) -> ThreadRecord | None: ...
@@ -31,6 +36,28 @@ class ThreadIndex(Protocol):
 class DatabaseThreadIndex:
     def __init__(self, database: Database) -> None:
         self.database = database
+
+    async def binding(self, session_id: str) -> SessionBinding | None:
+        async with self.database.session() as session:
+            row = await session.get(SessionBindingRow, session_id)
+            return None if row is None else SessionBinding(
+                row.session_id, row.owner_id, row.tenant_id, row.agent_id,
+            )
+
+    async def bind(self, binding: SessionBinding) -> None:
+        existing = await self.binding(binding.session_id)
+        if existing is not None:
+            require_binding(existing, binding)
+            return
+        try:
+            async with self.database.transaction() as session:
+                session.add(SessionBindingRow(**vars(binding)))
+        except IntegrityError:
+            # A concurrent claimant won. Never overwrite their identity.
+            existing = await self.binding(binding.session_id)
+            if existing is None:
+                raise
+            require_binding(existing, binding)
 
     async def list_all(self) -> list[ThreadRecord]:
         async with self.database.session() as session:

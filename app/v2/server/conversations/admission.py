@@ -29,13 +29,16 @@ class AdmittedRun:
 
 
 class RunAdmission:
-    def __init__(self, *, threads, catalog, skills, execution, users=None, settings=None) -> None:
+    def __init__(self, *, threads, catalog, skills, execution, users=None, settings=None,
+                 session_access=None, context_for=None) -> None:
         self.threads = threads
         self.catalog = catalog
         self.skills = skills
         self.execution = execution
         self.users = users
         self.settings = settings
+        self.session_access = session_access
+        self.context_for = context_for
 
     async def prepare(
         self,
@@ -46,6 +49,7 @@ class RunAdmission:
         pin_existing: bool,
         call_depth: int = 0,
         absent: str = "thread not found",
+        tenant_id: str | None = None,
     ) -> AdmittedRun:
         existing = await self.threads.find(session_id)
         if existing is not None and existing.user_id != user_id:
@@ -56,6 +60,35 @@ class RunAdmission:
                     message=absent,
                 )
             )
+        binding = await self.threads.binding(session_id)
+        if binding is not None and (
+            binding.owner_id != user_id or binding.tenant_id != (tenant_id or user_id)
+            or (agent_id and agent_id != binding.agent_id and not pin_existing)
+        ):
+            raise SageV2Error(RuntimeErrorInfo(
+                code="server.session.ownership_conflict", category=ErrorCategory.CONFLICT,
+                message="session_id is already bound to another tenant or Agent",
+                metadata={"side_effect_state": "not_applied"},
+            ))
+        if binding is None and self.session_access is not None and tenant_id is None:
+            # Pre-upgrade or orphaned Sessions may have no SQL claim yet.
+            # Validate their durable commands before adopting an identity.
+            context = self.context_for(user_id)
+            try:
+                runs = await self.session_access.list_session_runs(session_id, context)
+            except SageV2Error as exc:
+                if not exc.info.code.endswith("not_found"):
+                    raise
+                runs = ()
+            for run in runs:
+                command = await self.session_access.get_start_command(run.run_id, context)
+                if (command.config.metadata.get("server_v2.workspace_user_id", user_id) != user_id
+                        or (agent_id and command.agent_id != agent_id and not pin_existing)):
+                    raise SageV2Error(RuntimeErrorInfo(
+                        code="server.session.ownership_conflict", category=ErrorCategory.CONFLICT,
+                        message="Session belongs to another tenant or Agent",
+                        metadata={"side_effect_state": "not_applied"},
+                    ))
         catalog = await self.catalog.get(user_id)
         requested = (
             resolve_thread_agent_id(existing, agent_id) if pin_existing else agent_id

@@ -486,10 +486,18 @@ class OfficialToolRuntime:
     @staticmethod
     def _todo_path(session_id: str, invocation: ToolInvocation) -> str:
         if not session_id or not session_id.strip():
-            raise ValueError("todo operations require a non-empty session_id")
+            raise SageV2Error(RuntimeErrorInfo(
+                code="tool.arguments_invalid", category=ErrorCategory.VALIDATION,
+                message="todo operations require a non-empty session_id",
+                metadata={"side_effect_state": "not_applied"}, safe_to_resume=True,
+            ))
         owner = invocation.call.owner_session_id
         if owner is not None and session_id != owner:
-            raise ValueError("todo session_id must match the current Session")
+            raise SageV2Error(RuntimeErrorInfo(
+                code="tool.session_mismatch", category=ErrorCategory.AUTHORIZATION,
+                message="todo session_id must match the current Session",
+                metadata={"side_effect_state": "not_applied"}, safe_to_resume=True,
+            ))
         # Encode separators and percent signs to keep Session identifiers distinct
         # without allowing them to introduce path components.
         return f".sage/todos/{quote(session_id, safe='')}.json"

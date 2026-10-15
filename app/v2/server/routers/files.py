@@ -66,7 +66,8 @@ async def workspace_root(host, caller, read_user, thread_id, agent_id):
         if runs:
             latest = max(runs, key=lambda run: (run.accepted_session_revision, run.created_at, run.run_id))
             command = await access.get_start_command(latest.run_id, context)
-            from app.v2.server.storage.workspaces import workspace_user
+            from app.v2.server.storage.workspaces import workspace_user, with_workspace_binding
+            command = await with_workspace_binding(command, owner_id, host.threads)
             owner_id = workspace_user(command, owner_id)
             agent_id = command.agent_id
         else:

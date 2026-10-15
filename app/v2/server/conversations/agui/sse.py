@@ -26,6 +26,7 @@ def frame_to_agui_event(
 ) -> dict[str, Any]:
     payload = dict(frame.payload)
     if frame.name in _RUN_ID_EVENTS:
+        payload["session_id"] = thread_id
         payload["threadId"] = thread_id
         payload["runId"] = run_id
     return {"type": frame.name, **payload}
@@ -199,11 +200,14 @@ async def _events_with_heartbeats(
             await closer()
 
 
-async def single_error_sse(message: str, *, code: str) -> AsyncIterator[str]:
+async def single_error_sse(message: str, *, code: str, session_id: str | None = None) -> AsyncIterator[str]:
     """Return a pre-acceptance error; it has no canonical Run cursor."""
 
+    event = run_error_event(message, code=code)
+    if session_id is not None:
+        event.update(session_id=session_id, threadId=session_id)
     body = json.dumps(
-        run_error_event(message, code=code),
+        event,
         ensure_ascii=False,
         separators=(",", ":"),
     )
