@@ -1,4 +1,4 @@
-FROM docker.m.daocloud.io/python:3.12-slim-trixie
+FROM docker.m.daocloud.io/library/python:3.12-slim-trixie
 
 ENV TZ=Asia/Shanghai \
     PYTHONUNBUFFERED=1 \
