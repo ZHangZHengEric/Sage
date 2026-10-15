@@ -133,9 +133,9 @@ class PlanningTools:
             "type": "object",
             "properties": {
                 "content": {"type": "string", "minLength": 1},
-                "session_id": {"type": ["string", "null"], "default": None},
+                "session_id": {"type": ["string", "null"]},
             },
-            "required": ["content"],
+            "required": ["content", "session_id"],
             "additionalProperties": False,
         },
         strict=True,
@@ -179,9 +179,9 @@ class PlanningTools:
             "type": "object",
             "properties": {
                 "summary": {"type": "string", "minLength": 1},
-                "session_id": {"type": ["string", "null"], "default": None},
+                "session_id": {"type": ["string", "null"]},
             },
-            "required": ["summary"],
+            "required": ["summary", "session_id"],
             "additionalProperties": False,
         },
         strict=True,
