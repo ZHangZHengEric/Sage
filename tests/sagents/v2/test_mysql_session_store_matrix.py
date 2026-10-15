@@ -13,6 +13,7 @@ import pytest
 from sagents.v2 import SAgentBuilder
 from sagents.v2.contracts.commands import InputItem, StartRun
 from sagents.v2.contracts.errors import SageV2Error
+from sagents.v2.contracts.events import RunEventData
 from sagents.v2.contracts.items import TextBlock
 from sagents.v2.contracts.principals import (
     ActorRef,
@@ -31,6 +32,7 @@ from sagents.v2.runtime.session.plugins.mysql import (
     parse_mysql_dsn,
 )
 from sagents.v2.runtime.session.state import SessionStoreCoordinator
+from sagents.v2.runtime.session.contracts import EventDraft
 from sagents.v2.testing.plugins.scripted_model import ScriptedModelProvider
 
 
@@ -418,6 +420,38 @@ def mysql_dsn():
     return dsn
 
 
+async def test_reload_does_not_expose_an_eviction_gap_to_lazy_readers():
+    source = SessionStoreCoordinator()
+    created = await source.create_run(command(), CONTEXT)
+    session_id = created.handle.session_id
+    payload = source._dump_state_locked()
+    state = _MysqlSessionState("mysql://unused/test")
+    state._install_session_locked(payload)
+    state._ensure_ready = AsyncMock()
+    fetching, release = asyncio.Event(), asyncio.Event()
+    calls = 0
+
+    async def fetch(_):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            fetching.set()
+            await release.wait()
+        return payload
+
+    state._fetch_session = fetch
+    recovery = asyncio.create_task(state._reload_session_from_storage_locked(session_id))
+    try:
+        await asyncio.wait_for(fetching.wait(), timeout=1)
+        await state._ensure_session_loaded(session_id)
+    finally:
+        release.set()
+        await recovery
+    assert calls == 1
+    assert len(state._runs) == 1
+    assert state._runs[created.handle.run_id].session_id == session_id
+
+
 @pytest.mark.asyncio
 async def test_restart_round_trip_and_idempotent_start(mysql_dsn):
     prefix = _prefix()
@@ -461,7 +495,7 @@ async def test_run_events_are_appended_across_commits(mysql_dsn):
         expected_revision=created.handle.run_revision,
         expected_states={RunState.QUEUED},
         new_state=RunState.RUNNING,
-        drafts=(),
+        drafts=(EventDraft(type="run.started", data=RunEventData(state="running")),),
         context=CONTEXT,
         idempotency_key="start-execution",
     )
@@ -478,6 +512,98 @@ async def test_run_events_are_appended_across_commits(mysql_dsn):
         "run.started",
     ]
     await restored.close()
+
+
+@pytest.mark.parametrize("recovery_fails", [False, True])
+async def test_attachment_write_failure_rolls_back_and_preserves_original_error(mysql_dsn, recovery_fails):
+    import aiomysql
+
+    store = MysqlSessionStore(mysql_dsn, table_prefix=_prefix())
+    try:
+        created = await store.create_run(command(), CONTEXT)
+        sid = created.handle.session_id
+        before = await store.get_session(sid)
+        state = store._coordinator
+        original_fetch = state._fetch_session
+        fetching, release = asyncio.Event(), asyncio.Event()
+
+        async def fetch(session_id):
+            fetching.set()
+            await release.wait()
+            if recovery_fails:
+                raise ValueError("recovery fetch failed")
+            return await original_fetch(session_id)
+
+        state._fetch_session = fetch
+
+        async def content():
+            yield b"\x00\xff'image\\snapshot"
+
+        # A MySQL column overflow forces a real transaction rollback, after
+        # the Session revision update but before attachment publication.
+        write = asyncio.create_task(store.put_attachment(
+            sid, artifact_id="x" * 129, media_type="image/jpeg",
+            content=content(), context=CONTEXT,
+        ))
+        try:
+            await asyncio.wait_for(fetching.wait(), timeout=5)
+            await state._ensure_session_loaded(sid)
+        finally:
+            release.set()
+        if recovery_fails:
+            with pytest.raises(ValueError, match="recovery fetch failed") as caught:
+                await write
+            assert isinstance(caught.value.__cause__, aiomysql.DataError)
+        else:
+            with pytest.raises(aiomysql.DataError, match="Data too long"):
+                await write
+        state._fetch_session = original_fetch
+        after = await store.get_session(sid)
+        assert after.revision == before.revision
+        assert not state._sessions[sid].attachments
+        # Fresh storage reads must also see the original revision and no bytes.
+        stored = await original_fetch(sid)
+        assert stored["sessions"][0]["revision"] == before.revision
+        async with state._reader_connection() as connection:
+            async with connection.cursor() as cursor:
+                await cursor.execute(f"SELECT COUNT(*) FROM {state._table('attachments')}")
+                assert (await cursor.fetchone())[0] == 0
+    finally:
+        await store.close()
+
+
+async def test_binary_attachment_round_trip_is_exact_and_durable(mysql_dsn):
+    import hashlib
+
+    prefix = _prefix()
+    store = MysqlSessionStore(mysql_dsn, table_prefix=prefix)
+    # All byte values, including NUL, quotes, backslashes and invalid UTF-8.
+    payload = bytes(range(256)) * 8192
+
+    async def content():
+        yield payload
+
+    try:
+        created = await store.create_run(command(), CONTEXT)
+        sid = created.handle.session_id
+        reference = await store.put_attachment(
+            sid, artifact_id="binary-image", media_type="image/jpeg",
+            content=content(), context=CONTEXT,
+        )
+        assert reference.digest == "sha256:" + hashlib.sha256(payload).hexdigest()
+    finally:
+        await store.close()
+    reopened = MysqlSessionStore(mysql_dsn, table_prefix=prefix)
+    try:
+        restored, chunks = await reopened.get_attachment(sid, "binary-image", context=CONTEXT)
+        assert restored == reference
+        assert b"".join([chunk async for chunk in chunks]) == payload
+        assert await reopened.put_attachment(
+            sid, artifact_id="binary-image", media_type="image/jpeg",
+            content=content(), context=CONTEXT,
+        ) == reference
+    finally:
+        await reopened.close()
 
 
 @pytest.mark.asyncio

@@ -2420,6 +2420,13 @@ class AgentLoopEngine:
             )
         if result.error is not None:
             localized = localize_error(result.error, context.language)
+            if not localized.safe_to_resume:
+                # An unsafe runtime/storage failure must never become ordinary
+                # model feedback or be reclassified as a retryable Tool effect.
+                result = result.model_copy(update={"error": localized})
+                return await self._stop_for_unsafe_tool_error(
+                    run, call, result, context, turn_id, step_id, state
+                )
             if await self._tool_failure_is_uncertain(run, call, localized):
                 uncertainty = self._as_uncertain_tool_error(localized)
                 run = await self._record_tool_unknown(
@@ -2521,6 +2528,23 @@ class AgentLoopEngine:
             run, call, result, context, turn_id, step_id=step_id
         )
         return run, result
+
+    async def _stop_for_unsafe_tool_error(
+        self, run, call, result, context, turn_id, step_id, state
+    ):
+        current = await self.runtime.get_run(run.run_id)
+        if current.state in TERMINAL_RUN_STATES:
+            await self._release_run_resources(run.run_id)
+            return current, None
+        run, _ = await self._commit_tool_result(
+            current, call, result, context, turn_id, step_id=step_id,
+            expected_states={RunState.RUNNING, RunState.SUSPEND_REQUESTED},
+        )
+        if state is None:
+            raise SageV2Error(result.error)
+        return await self._fail(
+            run, state, step_id, result.error, context, allow_recovery=False
+        ), None
 
     async def _tool_failure_is_uncertain(self, run, call, error) -> bool:
         """Classify post-dispatch failures without assuming a write was rolled back."""
@@ -2741,6 +2765,13 @@ class AgentLoopEngine:
                     else await self.tool_executor.reconcile(call.operation_id, context)
                 )
             except Exception as exc:
+                if isinstance(exc, SageV2Error) and not exc.info.safe_to_resume:
+                    return await self._stop_for_unsafe_tool_error(
+                        run, call, ToolExecutionResult(
+                            tool_call_id=call.tool_call_id,
+                            operation_id=call.operation_id, error=exc.info,
+                        ), context, turn_id, step_id, state,
+                    )
                 reconciled = ReconcileResult(
                     operation_id=call.operation_id,
                     state=ReconcileState.UNKNOWN,
@@ -2751,6 +2782,17 @@ class AgentLoopEngine:
                         retryable=True,
                         safe_to_resume=True,
                     ),
+                )
+            fatal_error = (
+                reconciled.result.error if reconciled.result and reconciled.result.error
+                else reconciled.error
+            )
+            if fatal_error is not None and not fatal_error.safe_to_resume:
+                return await self._stop_for_unsafe_tool_error(
+                    run, call, ToolExecutionResult(
+                        tool_call_id=call.tool_call_id,
+                        operation_id=call.operation_id, error=fatal_error,
+                    ), context, turn_id, step_id, state,
                 )
             if reconciled.state == ReconcileState.SUCCEEDED and reconciled.result:
                 run, result = await self._commit_tool_result(
@@ -3421,13 +3463,13 @@ class AgentLoopEngine:
         await self._release_run_resources(run.run_id)
         return completed
 
-    async def _fail(self, run, state, step_id, error, context):
+    async def _fail(self, run, state, step_id, error, context, *, allow_recovery=True):
         error = localize_error(error, context.language)
         current = await self.runtime.get_run(run.run_id)
         if current.state in TERMINAL_RUN_STATES:
             await self._release_run_resources(run.run_id)
             return current
-        resumable = error.safe_to_resume or error.retryable
+        resumable = allow_recovery and (error.safe_to_resume or error.retryable)
         if current.state == RunState.RUNNING and resumable:
             decision = ContinuationDecision(
                 action=ContinuationAction.REQUEST_INTERACTION,

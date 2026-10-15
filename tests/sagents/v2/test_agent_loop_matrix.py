@@ -3770,6 +3770,7 @@ async def test_tool_failure_details_reach_model_and_durable_history(language, fa
                 code="tool.arguments_invalid",
                 category=ErrorCategory.VALIDATION,
                 message=detail,
+                safe_to_resume=True,
                 metadata={"side_effect_state": "not_applied"},
             )
             if failure == "validation":

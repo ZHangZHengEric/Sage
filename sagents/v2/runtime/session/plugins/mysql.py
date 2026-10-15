@@ -503,9 +503,12 @@ class _MysqlSessionState(SessionStoreCoordinator):
                                 f"expected session revision {expected_revision} for {session_id}",
                             )
                     for artifact_id, payload in self._pending_attachments(session_id):
+                        # aiomysql calls PyMySQL's removed bytes escaper on some
+                        # dependency combinations. Bind ASCII hex instead;
+                        # UNHEX restores the exact bytes in the LONGBLOB column.
                         await cursor.execute(
-                            f"INSERT INTO {self._table('attachments')} (session_id, artifact_id, payload) VALUES (%s, %s, %s)",
-                            (session_id, artifact_id, payload),
+                            f"INSERT INTO {self._table('attachments')} (session_id, artifact_id, payload) VALUES (%s, %s, UNHEX(%s))",
+                            (session_id, artifact_id, payload.hex()),
                         )
                     next_run_sequences = await self._persist_events(
                         cursor, session_id, events, event_totals=event_totals
@@ -538,7 +541,11 @@ class _MysqlSessionState(SessionStoreCoordinator):
                     )
                 failure = exc
         if failure is not None:
-            await self._reload_session_from_storage_locked(session_id)
+            try:
+                await self._reload_session_from_storage_locked(session_id)
+            except Exception as recovery_error:
+                # Preserve the write failure even when recovery itself fails.
+                raise recovery_error from failure
             raise failure
         self._forget_attachment_bytes(session_id)
         self._remember_persisted_session(
@@ -1034,7 +1041,8 @@ class _MysqlSessionState(SessionStoreCoordinator):
                     return
                 raise self._not_found("session.not_found", session_id)
             async with self._lock:
-                self._install_session_locked(payload)
+                if session_id not in self._loaded_session_ids:
+                    self._install_session_locked(payload)
 
     async def _ensure_descendants_loaded(self, session_id: str) -> None:
         await self._ensure_ready()
@@ -1230,11 +1238,16 @@ class _MysqlSessionState(SessionStoreCoordinator):
             ) from exc
 
     async def _reload_session_from_storage_locked(self, session_id: str) -> None:
-        if session_id in self._sessions:
-            self._evict_session_locked(session_id)
+        # Keep the aggregate installed during I/O. Otherwise lazy readers can
+        # install it in the eviction gap and recovery installs it a second time.
+        # The caller holds the Session operation lock; replacement of the shared
+        # state must also be atomic with respect to other Session loaders.
         payload = await self._fetch_session(session_id)
-        if payload is not None:
-            self._install_session_locked(payload)
+        async with self._lock:
+            if session_id in self._sessions:
+                self._evict_session_locked(session_id)
+            if payload is not None:
+                self._install_session_locked(payload)
 
     def _evict_session_locked(self, session_id: str) -> None:
         combined = self._filter_session_state(self._dump_state_locked(), session_id)
