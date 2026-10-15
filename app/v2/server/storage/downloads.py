@@ -62,6 +62,10 @@ def list_directory(root: Path, value: str) -> list[dict]:
         return sorted(items, key=lambda item: (not item["is_directory"], item["name"].casefold()))
 
 
+class SnapshotChangedError(ValueError):
+    """The workspace changed while a download was being assembled."""
+
+
 def prepare_download(root: Path, value: str, *, archive_name: str = "workspace",
                      max_bytes: int = MAX_ARCHIVE_BYTES, max_entries: int = MAX_ARCHIVE_ENTRIES):
     path = relative_path(value)
@@ -118,7 +122,8 @@ def _archive_directory(fd: int, archive: ZipFile, prefix: str, total: list[int],
                     if total[0] > max_entries or total[1] > max_bytes:
                         raise OverflowError("directory is too large to archive")
                     with os.fdopen(os.dup(child), "rb") as source, archive.open(name, "w") as target:
-                        # Read the size observed at open, even if a running tool appends.
+                        # Reject files changed during this snapshot; the caller
+                        # may retry after the Agent finishes writing.
                         remaining = opened.st_size
                         while remaining:
                             chunk = source.read(min(remaining, 1024 * 1024))
@@ -126,6 +131,11 @@ def _archive_directory(fd: int, archive: ZipFile, prefix: str, total: list[int],
                                 break
                             target.write(chunk)
                             remaining -= len(chunk)
+                    after = os.fstat(child)
+                    if (remaining or opened.st_size != after.st_size
+                            or opened.st_mtime_ns != after.st_mtime_ns
+                            or opened.st_ctime_ns != after.st_ctime_ns):
+                        raise SnapshotChangedError("file changed while creating workspace snapshot")
             finally:
                 os.close(child)
 

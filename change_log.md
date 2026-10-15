@@ -1,5 +1,6 @@
 ## 2026-10-15 集中 Server V2 对话路由
 
+- 外部 Run 工作区 ZIP 在打包期间检测文件大小与修改状态；发现并发写入时返回可重试的 503，避免将正在变化的文件作为预览或最终产物交付。
 - 外部 Agent Run 统一以 AG-UI `threadId/runId` 作为对外标识；结果查询返回这两个字段，Sage 原生运行主键仅供内部控制使用。旧结果查询参数同步改为 `runId`，HTTP 追踪 `request_id` 保持独立。
 - 将对话发起、线程管理（含会话下载）、审批和外部 Agent Run 接口集中到 `app/v2/server/routers/conversations.py`，保持现有 API 路径、鉴权和 OpenAPI 分组；工作区文件操作继续独立注册。
 - 将 Agent 配置的 guidance 与技能绑定接口并入 `app/v2/server/routers/agents.py`；技能库发布、查询及工作区技能编辑仍由 `skills.py` 负责，保留原有 URL 与 OpenAPI 分组。
