@@ -232,6 +232,8 @@ Your application owns the UI, authentication, and credentials. Built-in runtime 
 | [Versioned source layout](docs/VERSIONED_LAYOUT.md) | v1 directories and import migration |
 | [Release notes](release_notes/) | [Development changelog](change_log.md) |
 
+[Model inference provider resources](knowledge/resources/model-inference-providers.md)
+
 Some component guides are currently in Chinese. Use the guide for your chosen entry point.
 
 ## 🛠️ **Contributing**

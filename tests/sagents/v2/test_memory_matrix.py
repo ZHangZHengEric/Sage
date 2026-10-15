@@ -238,7 +238,7 @@ async def test_automatic_recall_is_a_real_tool_pair_not_runtime_context():
 
 
 @pytest.mark.asyncio
-async def test_automatic_recall_propagates_selected_query_plugin_failure():
+async def test_automatic_recall_preserves_selected_query_failure_for_recovery():
     class FailingRecallQuery:
         async def generate(self, user_input: str, *, run_id: str) -> str:
             raise SageV2Error(
@@ -262,10 +262,20 @@ async def test_automatic_recall_propagates_selected_query_plugin_failure():
         memory_recall_query_generator=FailingRecallQuery(),
     )
 
-    with pytest.raises(SageV2Error) as caught:
-        await loop.execute(handle.run_id, CONTEXT)
+    result = await loop.execute(handle.run_id, CONTEXT)
 
-    assert caught.value.info.code == "memory.recall_query.test_failure"
+    assert result.state.value == "suspended"
+    events = await runtime.session_store.read_events(handle.run_id)
+    assert events[-1].type == "run.suspended"
+    assert not any(event.type == "run.failed" for event in events)
+    suspension = await runtime.session_store.get_suspension(result.suspension_id)
+    interaction = await runtime.session_store.get_interaction(suspension.interaction_id)
+    error = interaction.payload["error"]
+    assert error["code"] == "memory.recall_query.test_failure"
+    assert error["retryable"] is True
+    assert interaction.payload["resumable"] is True
+    assert interaction.allowed_decisions == ("retry", "change_direction", "cancel")
+    assert loop.model.requests == []
 
 
 @pytest.mark.asyncio

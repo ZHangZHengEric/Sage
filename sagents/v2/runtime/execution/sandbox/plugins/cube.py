@@ -27,7 +27,7 @@ from sagents.v2.runtime.execution.sandbox.contracts import (
     SandboxDurability, SandboxReleaseDisposition, SandboxReleaseReceipt, SandboxSnapshot,
     SandboxState, TerminateMode,
 )
-from .cube_files import cube_file_call, relative_parts
+from sagents.v2.runtime.execution.sandbox.cube_files import cube_file_call, relative_parts
 
 
 def cube_volume_name(user_id: str, agent_id: str, *, private_run_id: str | None = None) -> str:
