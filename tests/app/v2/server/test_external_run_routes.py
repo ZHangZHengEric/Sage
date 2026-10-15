@@ -110,3 +110,77 @@ def test_external_run_passes_runtime_context_separately_from_agui(tmp_path):
         )
         assert response.status_code == 200, response.text
         assert received == [{"project": {"id": "site", "revision": 1}}]
+
+
+@pytest.mark.parametrize(
+    "agent_steps,package_steps,entrypoint_steps,expected",
+    [
+        (1000, None, None, 1000),
+        (1000, 100, None, 100),
+        (100, 1000, None, 100),
+        (None, 1000, None, 1000),
+        (None, None, 1000, 1000),
+        (None, 100, 1000, 100),
+        (None, None, None, None),
+    ],
+)
+def test_external_run_uses_effective_package_step_budget(
+    tmp_path, monkeypatch, agent_steps, package_steps, entrypoint_steps, expected
+):
+    from app.v2.server.conversations.external_runs import selected_run
+    from sagents.v2.agent.management import AgentPackageBundle
+    from sagents.v2.agent.policy.continuation import BudgetRule
+
+    host = make_host(tmp_path)
+    observed_limits = []
+    evaluate = BudgetRule.evaluate
+
+    async def capture(self, context):
+        # This is the execution engine's actual continuation budget, after
+        # loading the durable StartRun, rather than the HTTP request mapping.
+        observed_limits.append(context.max_steps)
+        return await evaluate(self, context)
+
+    monkeypatch.setattr(BudgetRule, "evaluate", capture)
+    with TestClient(create_app(host)) as client:
+        setup_agent(client)
+        agent_id = client.headers["SAGE-AGENT-ID"]
+
+        async def configure(agent_limit, package_limit, entrypoint_limit):
+            owner = await host.catalog.agent_owner(agent_id)
+            agent = next(
+                a for a in (await host.catalog.get(owner)).agents if a.id == agent_id
+            )
+            data = agent.package.model_dump(mode="json")
+            definition = data["manifest"]["agents"][agent_id]
+            definition["budgets"]["max_steps"] = agent_limit
+            definition["entrypoint"]["config"]["max_steps"] = entrypoint_limit
+            data["manifest"]["policies"]["budgets"]["max_steps"] = package_limit
+            data["manifest"]["metadata"]["version"] = (
+                f"budget-{agent_limit}-{package_limit}-{entrypoint_limit}"
+            )
+            updated = agent.model_copy(update={"package": AgentPackageBundle.model_validate(data)})
+            await host.catalog.store.update_agent(owner, updated)
+
+        client.portal.call(configure, agent_steps, package_steps, entrypoint_steps)
+        response = _run(client, agent_id)
+        assert response.status_code == 200, response.text
+        assert "RUN_FINISHED" in response.text
+
+        async def stored_command():
+            selected = await selected_run(
+                host.conversations, tenant_id="tenant-a", agent_id=agent_id,
+                thread_id="thread-a", run_id="run-a",
+            )
+            return selected[-1]
+
+        command = client.portal.call(stored_command)
+        assert command.config.max_steps == expected
+        assert observed_limits and set(observed_limits) == {expected or 24}
+
+        # Retrying the same Run after a package update reuses its frozen budget.
+        client.portal.call(configure, 2, 2, None)
+        replay = _run(client, agent_id)
+        assert replay.status_code == 200, replay.text
+        assert client.portal.call(stored_command) == command
+        assert set(observed_limits) == {expected or 24}

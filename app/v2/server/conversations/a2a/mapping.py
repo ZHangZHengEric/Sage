@@ -48,6 +48,7 @@ def to_start_run(
     agent_id: str,
     composition_hash: str,
     enabled_skills: tuple[str, ...] | None = None,
+    max_steps: int | None = None,
     metadata: dict[str, object] | None = None,
 ) -> StartRun:
     return StartRun(
@@ -55,6 +56,7 @@ def to_start_run(
         agent_id=agent_id,
         input=(InputItem(role="user", content=to_blocks(message.parts)),),
         config=RunConfig(
+            max_steps=max_steps,
             enabled_skills=enabled_skills,
             metadata=dict(metadata or {}),
         ),

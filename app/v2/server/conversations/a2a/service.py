@@ -275,6 +275,7 @@ class A2AService:
             agent_id=admitted.agent_id,
             composition_hash=self._application.composition_hash,
             enabled_skills=tuple(item.name for item in admitted.skills),
+            max_steps=admitted.max_steps,
             metadata={**admitted.metadata, **await self._execution_metadata(message, key, admitted)},
         )
         from app.v2.server.conversations.bindings import SessionBinding

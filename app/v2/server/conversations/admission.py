@@ -15,6 +15,7 @@ from app.v2.server.conversations.records import resolve_thread_agent_id
 from app.v2.server.skills.records import SkillRecord
 from app.v2.server.runtime.policy import ExecutionPolicy, execution_metadata, intersect_policies, server_ceiling
 from sagents.v2.contracts.errors import ErrorCategory, RuntimeErrorInfo, SageV2Error
+from sagents.v2.package.manifest import CompositionResolver
 
 
 @dataclass(frozen=True, slots=True)
@@ -26,6 +27,7 @@ class AdmittedRun:
     catalog: UserCatalog
     metadata: dict
     model_ready: bool
+    max_steps: int | None
 
 
 class RunAdmission:
@@ -94,6 +96,9 @@ class RunAdmission:
             resolve_thread_agent_id(existing, agent_id) if pin_existing else agent_id
         )
         agent = require_agent(catalog, requested or None)
+        # Freeze the effective package budget with the admitted Agent. The
+        # resolver intersects Agent budgets with the package policy ceiling.
+        resolved = CompositionResolver().resolve(agent.package.resolved_manifest())
         skills = tuple(
             await self.skills.bound_skills(owner_user_id=user_id, agent_id=agent.id)
         )
@@ -120,4 +125,5 @@ class RunAdmission:
                 call_depth=call_depth,
             ), **execution_metadata(policy, user_id=user_id, agent_id=agent.id)},
             model_ready=self.execution.has_model(catalog),
+            max_steps=resolved.policy_ceilings[agent.id].max_steps,
         )
