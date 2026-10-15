@@ -191,6 +191,40 @@ def prepare_session_export(session_id: str, state: dict, evidence: dict | None =
             write_json("models.json", evidence.get("models", []))
             write_json("logs.json", evidence.get("logs", []))
             write_json("tools.json", tools)
+            # Join private exception records to authoritative failed calls. Old
+            # Runs retain an explicit gap rather than implying an empty log is OK.
+            exception_logs = {}
+            for record in evidence.get("logs", []):
+                if (
+                    record.get("session_id") == session_id
+                    and record.get("run_id") in run_ids
+                    and record.get("event") == "tool.execution.exception"
+                    and (record.get("error") or {}).get("stack_trace")
+                ):
+                    exception_logs.setdefault(
+                        (record["run_id"], record.get("tool_call_id")), []
+                    ).append(record["error"])
+            failures = []
+            for row in tools:
+                event = row["event"]
+                if event.get("type") not in {"tool.call.failed", "tool.call.unknown"}:
+                    continue
+                data = event.get("data", {})
+                exceptions = exception_logs.get(
+                    (row["run_id"], data.get("tool_call_id")), []
+                )
+                failures.append({
+                    "run_id": row["run_id"],
+                    "tool_call_id": data.get("tool_call_id"),
+                    "tool_name": data.get("tool_name"),
+                    "operation_id": data.get("operation_id"),
+                    "event_type": event["type"],
+                    "occurred_at": event.get("occurred_at"),
+                    "error": data.get("error"),
+                    "exceptions": exceptions,
+                    "stack_trace_available": bool(exceptions),
+                })
+            write_json("failures.json", failures)
             write_json(
                 "manifest.json",
                 {
@@ -206,6 +240,11 @@ def prepare_session_export(session_id: str, state: dict, evidence: dict | None =
                     "model_records": len(evidence.get("models", [])),
                     "log_records": len(evidence.get("logs", [])),
                     "tool_events": len(tools),
+                    "tool_failures": len(failures),
+                    "tool_failures_without_stack_trace": [
+                        {"run_id": row["run_id"], "tool_call_id": row["tool_call_id"]}
+                        for row in failures if not row["stack_trace_available"]
+                    ],
                     "truncated_model_records": sum(
                         bool(row.get("truncated")) for row in evidence.get("models", [])
                     ),
