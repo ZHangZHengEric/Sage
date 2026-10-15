@@ -17,7 +17,7 @@ from sagents.v2.runtime.execution.sandbox.contracts import (
 from sagents.v2.runtime.execution.sandbox.plugins.cube import (
     CubeVolumeClient, CubeVolumeSandboxProvider, cube_volume_name,
 )
-from sagents.v2.runtime.execution.sandbox.plugins.cube_files import cube_file_call
+from sagents.v2.runtime.execution.sandbox.cube_files import cube_file_call
 
 
 class LocalCommandSandbox:
