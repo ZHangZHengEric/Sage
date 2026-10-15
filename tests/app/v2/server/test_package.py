@@ -192,6 +192,19 @@ async def test_uvicorn_access_log_has_only_request_details(tmp_path: Path, capsy
                 "1.1",
                 200,
             )
+            for method, path, status in (
+                ("GET", "/health", 200),
+                ("GET", "/health?probe=1", 503),
+                ("POST", "/health", 405),
+            ):
+                access.info(
+                    '%s - "%s %s HTTP/%s" %d',
+                    "172.23.0.3:60068",
+                    method,
+                    path,
+                    "1.1",
+                    status,
+                )
         rows = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
         assert len(rows) == 1
         assert rows[0] == {
@@ -207,7 +220,7 @@ async def test_uvicorn_access_log_has_only_request_details(tmp_path: Path, capsy
             json.loads(line)
             for line in (tmp_path / "logs" / "sage-server.log").read_text().splitlines()
         ]
-        assert rows[0] in file_rows
+        assert [row for row in file_rows if row["event"] == "http.access"] == rows
     finally:
         await service.close()
 
