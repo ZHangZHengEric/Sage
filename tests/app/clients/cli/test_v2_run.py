@@ -678,7 +678,8 @@ async def test_second_run_in_same_session_sees_previous_history(tmp_path):
     texts = _request_texts(model.requests[1])
     assert "first task" in texts
     assert "first answer" in texts
-    assert texts[-1] == "second task"
+    assert "<user_request>\nsecond task\n</user_request>" in texts[-1]
+    assert f"<session_id>{first.session_id}</session_id>" in texts[-1]
 
 
 def model_session_id(text: str) -> str:
@@ -1865,7 +1866,10 @@ async def test_typing_during_a_run_steers_the_next_model_step(tmp_path):
     assert outcome.state == RunState.COMPLETED
     assert "steer.accepted" in outcome.event_types
     assert "steer.applied" in outcome.event_types
-    assert "also check the tests" in _request_texts(model.requests[1])
+    assert any(
+        "<user_request>\nalso check the tests\n</user_request>" in text
+        for text in _request_texts(model.requests[1])
+    )
     assert "(steer) queued for the next model step: also check the tests" in err.getvalue()
 
 

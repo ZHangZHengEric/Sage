@@ -42,6 +42,14 @@ class RsiModel(ScriptedModelProvider):
         raw = "".join(
             block.text for block in messages[-1].content if hasattr(block, "text")
         )
+        # Runtime context wraps the latest user request. Judge/tuner payloads
+        # remain JSON inside that envelope, rather than being the entire text.
+        if "<user_request>" in raw:
+            raw = (
+                raw.split("<user_request>", 1)[1]
+                .rsplit("</user_request>", 1)[0]
+                .strip()
+            )
         try:
             properties = (
                 json.loads(raw).get("response_schema", {}).get("properties", {})

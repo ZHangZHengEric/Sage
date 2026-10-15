@@ -609,9 +609,19 @@ class V2ApiClient {
   Stream<Map<String, Object?>> subscribeRun(
     String runId, {
     required int afterSequence,
+    int previewSequence = 0,
+    String? previewEpoch,
   }) => _ndjson(
     'GET',
-    '/api/v2/runs/${Uri.encodeComponent(runId)}/events?after_sequence=$afterSequence',
+    Uri.parse('/api/v2/runs/${Uri.encodeComponent(runId)}/events').replace(
+      queryParameters: {
+        'after_sequence': '$afterSequence',
+        if (previewEpoch != null) ...{
+          'preview_sequence': '$previewSequence',
+          'preview_epoch': previewEpoch,
+        },
+      },
+    ).toString(),
   );
 
   Future<Map<String, Object?>> getRun(String runId) async =>
