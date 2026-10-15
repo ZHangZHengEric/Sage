@@ -52,7 +52,6 @@ See the [RSI workflow guide](docs/en/applications/RSI.md). Use `AgentPackageOpti
 
 ## 📰 **Latest updates**
 
-- **2026-10-15** — [Model inference provider resources](knowledge/resources/model-inference-providers.md)
 - **2026-10-13** — [Streaming UI: from an answer to a native interactive interface](docs/en/applications/STREAMING_UI.md) — Live generation, local calculations, Process Panel revisions, and editable PPTX export in Desktop 2.1.
 - **2026-10-12** — [MCP tools are visible, but calls fail: a five-step diagnostic](knowledge/tutorials/mcp-visible-calls-fail.md)
 - **2026-10-12** — RSI: multi-round Agent package optimization, test-suite alignment audits, independent final tests and semantic review, plus Desktop progress and Agent-level version history. [Python API](sagents/v2/optimization/README.md) · [Desktop guide](app/v2/desktop/README.md#rsi-与-agent-版本)
@@ -232,6 +231,8 @@ Your application owns the UI, authentication, and credentials. Built-in runtime 
 | [Server v2](app/v2/server/README.md) | [Deployment](deploy/README.md) |
 | [Versioned source layout](docs/VERSIONED_LAYOUT.md) | v1 directories and import migration |
 | [Release notes](release_notes/) | [Development changelog](change_log.md) |
+
+[Model inference provider resources](knowledge/resources/model-inference-providers.md)
 
 Some component guides are currently in Chinese. Use the guide for your chosen entry point.
 

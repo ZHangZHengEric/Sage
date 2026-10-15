@@ -7,13 +7,13 @@ from sagents.v2.agent.policy.approval_config import ToolApprovalConfig
 from sagents.v2.contracts.commands import InputItem, StartRun
 from sagents.v2.contracts.items import TextBlock
 from sagents.v2.package.manifest.root import SageManifest
-from sagents.v2.testing.plugins import ScriptedModelProvider
+from sagents.v2.model.contracts import ModelEventKind, ModelResponse, ModelStreamEvent
+from sagents.v2.testing.plugins import ScriptedModelProvider, ScriptedModelStep
 from sagents.v2.tool.plugins.ephemeral import InMemoryToolCatalog, InMemoryToolExecutor
 from sagents.v2.tool import McpServerConfig, McpToolPlugin, ToolExecutionResult
 from sagents.v2.tool.plugins.official import official_tool_definitions
 from tests.sagents.v2.test_builder_matrix import _policy_package, _POLICY_USER
 from tests.sagents.v2.test_agent_management_matrix import tool_step
-from tests.app.v2.server.conftest import scripted_hello
 from tests.sagents.v2.test_mcp_tool_bridge_matrix import FakeSession
 
 
@@ -72,7 +72,20 @@ async def test_restored_package_rules_control_actual_loop_dispatch(tmp_path, kin
     package = package.model_copy(update={"agents": {agent_id: agent}})
     package = SageManifest.model_validate_json(package.model_dump_json())
     provider = ScriptedModelProvider(
-        (tool_step(definition.name, arguments, "call"), *scripted_hello()._steps)
+        (
+            tool_step(definition.name, arguments, "call"),
+            ScriptedModelStep(
+                events=(
+                    ModelStreamEvent(kind=ModelEventKind.TEXT_DELTA, delta="hello"),
+                    ModelStreamEvent(
+                        kind=ModelEventKind.COMPLETED,
+                        response=ModelResponse(
+                            response_id="done", text="hello", finish_reason="stop"
+                        ),
+                    ),
+                )
+            ),
+        )
     )
     app = (
         await SAgentBuilder()
