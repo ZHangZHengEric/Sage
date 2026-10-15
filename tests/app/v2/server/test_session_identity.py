@@ -97,6 +97,24 @@ def test_todo_write_uses_durable_id_instead_of_model_argument(tmp_path):
         events = client.portal.call(store.read_events, runs[0].run_id)
         assert all(event.session_id == "Todo-ID" for event in events)
         assert not any(event.type == "tool.call.unknown" for event in events)
+        # The Web diagnostic bundle includes the dispatched override and result
+        # after suspension/resume, while the model request keeps its original proposal.
+        from io import BytesIO
+        from zipfile import ZipFile
+        from tests.app.v2.server.test_session_diagnostics import admin_headers
+
+        download = client.get("/api/threads/Todo-ID/download", headers=admin_headers(client))
+        assert download.status_code == 200, download.text
+        with ZipFile(BytesIO(download.content)) as archive:
+            tools = json.loads(archive.read("Todo-ID/tools.json"))
+            proposals = [row["event"]["data"] for row in tools
+                         if row["event"]["type"] == "tool.call.proposed"]
+            assert proposals[0]["arguments"]["session_id"] == "Todo-ID"
+            assert any(row["event"]["type"] == "tool.call.succeeded" for row in tools)
+            assert any(row["event"]["type"] == "item.completed" for row in tools)
+            assert json.loads(archive.read("Todo-ID/models.json"))
+            assert json.loads(archive.read("Todo-ID/logs.json"))
+
 
 
 def test_runtime_context_mismatch_has_no_run_or_workspace_side_effect(tmp_path):

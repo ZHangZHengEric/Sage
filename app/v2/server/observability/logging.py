@@ -30,7 +30,8 @@ class ServerLogSink:
 
     format_version = "sage.log/v1"
 
-    def __init__(self, settings: LoggingSettings, *, service_name: str) -> None:
+    def __init__(self, settings: LoggingSettings, *, service_name: str, diagnostics=None) -> None:
+        self.diagnostics = diagnostics
         self.stdout = StdoutLogSink(min_level=settings.level, format=settings.format)
         self.file = (
             FilesystemLogSink(
@@ -44,6 +45,8 @@ class ServerLogSink:
         )
 
     def write(self, record: LogRecord) -> None:
+        if self.diagnostics is not None:
+            self.diagnostics.write(record)
         self.stdout.write(record)
         if self.file is not None:
             self.file.write(record)
@@ -106,8 +109,8 @@ class _AccessLoggingHandler(StructuredLoggingHandler):
             self.handleError(record)
 
 
-def init_logging(settings: LoggingSettings, *, service_name: str) -> LogSink:
-    sink = ServerLogSink(settings, service_name=service_name)
+def init_logging(settings: LoggingSettings, *, service_name: str, diagnostics=None) -> LogSink:
+    sink = ServerLogSink(settings, service_name=service_name, diagnostics=diagnostics)
     set_process_log_sink(sink)
     level = getattr(logging, settings.level.upper())
     handler = StructuredLoggingHandler(StructuredLogger(sink, service_name))

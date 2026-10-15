@@ -108,10 +108,11 @@ def test_mysql_session_download_contains_canonical_state_and_events(client, serv
     assert response.status_code == 200
     with ZipFile(BytesIO(response.content)) as archive:
         exported = json.loads(archive.read("thread-1/state.json"))
-        assert exported == state
+        from app.v2.server.observability.diagnostics import redact
+        assert exported == redact(state)
         assert exported["run_events"]
         for run_id, events in state["run_events"].items():
-            assert json.loads(archive.read(f"thread-1/events/{run_id}.json")) == events
+            assert json.loads(archive.read(f"thread-1/events/{run_id}.json")) == redact(events)
     store.export_session_state.assert_awaited_once_with("thread-1")
 
 

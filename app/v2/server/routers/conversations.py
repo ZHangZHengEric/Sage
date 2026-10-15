@@ -176,16 +176,38 @@ async def session_download(thread_id: str, user: AdminUser, host: HostDep):
         raise HTTPException(404, "thread not found")
     service = host.conversations
     # Validate the persisted Session owner before resolving its storage directory.
-    await service.session_access.get_session(thread_id, service.context_for(record.user_id))
+    await service.session_access.get_session(
+        thread_id, service.context_for(record.user_id)
+    )
+    binding = await host.threads.binding(thread_id)
+    if binding is not None and (
+        binding.owner_id != record.user_id or binding.agent_id != record.agent_id
+    ):
+        raise HTTPException(404, "thread not found")
     store = service.application.entrypoint().runtime.session_store
-    if isinstance(store, MysqlSessionStore):
-        state = await store.export_session_state(thread_id)
-        return download_response(await file_operation(prepare_session_export, thread_id, state))
-    if not isinstance(store, FilesystemSessionStore):
-        raise HTTPException(409, "this Session store has no filesystem directory")
-    root = await store.session_directory(thread_id)
-    name = root.name
-    return download_response(await file_operation(prepare_download, root, "", archive_name=name))
+    if not isinstance(store, (MysqlSessionStore, FilesystemSessionStore)):
+        raise HTTPException(
+            409, "this Session store does not support diagnostic export"
+        )
+    state = await store.export_session_state(thread_id)
+    for run in state.get("runs", []):
+        command = run.get("start_command")
+        if not command:
+            continue
+        tenant = (
+            command.get("config", {})
+            .get("metadata", {})
+            .get("server_v2.workspace_user_id", record.user_id)
+        )
+        if command.get("agent_id") != record.agent_id or (
+            binding is not None and tenant != binding.tenant_id
+        ):
+            raise HTTPException(404, "thread not found")
+    run_ids = {run["run_id"] for run in state.get("runs", [])}
+    evidence = await file_operation(host.diagnostics.snapshot, thread_id, run_ids)
+    return download_response(
+        await file_operation(prepare_session_export, thread_id, state, evidence)
+    )
 
 
 class ApprovalExpected(BaseModel):
