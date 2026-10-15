@@ -191,6 +191,8 @@ python quickstart.py
 
 `loads()` parses YAML text; `build()` accepts the manifest object directly. This prints events and the final state, without file or shell tools. [More configuration options →](docs/en/applications/GETTING_STARTED.md)
 
+For an alternative OpenAI Responses-compatible gateway such as [A2Agent](https://a2agent.me/), keep `provider: openai-responses`, set `base_url` to `https://a2agent.me/v1`, and set `MODEL_API_KEY` and `model` to values from that gateway. Check that your chosen model supports the Responses API before running the example.
+
 ---
 
 ## 🧠 **Built on SAgents v2**
