@@ -1,3 +1,9 @@
+## 2026-10-15 集中 Server V2 对话路由
+
+- 外部 Agent Run 统一以 AG-UI `threadId/runId` 作为对外标识；结果查询返回这两个字段，Sage 原生运行主键仅供内部控制使用。旧结果查询参数同步改为 `runId`，HTTP 追踪 `request_id` 保持独立。
+- 将对话发起、线程管理（含会话下载）、审批和外部 Agent Run 接口集中到 `app/v2/server/routers/conversations.py`，保持现有 API 路径、鉴权和 OpenAPI 分组；工作区文件操作继续独立注册。
+- 将 Agent 配置的 guidance 与技能绑定接口并入 `app/v2/server/routers/agents.py`；技能库发布、查询及工作区技能编辑仍由 `skills.py` 负责，保留原有 URL 与 OpenAPI 分组。
+
 ## 2026-10-14 新增 CubeSandbox Volume 可选沙盒插件
 
 - 注册 `sage.sandbox.cube-volume` 为 SAgents V2 沙盒插件，按可信用户与 Agent 身份生成持久 Volume，并在远程 Cube 沙盒内挂载 `/workspace`；私有子 Run 使用独立 Volume。

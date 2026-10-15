@@ -66,7 +66,15 @@ class ConversationService:
         return owner_id, internal_id
 
 
-    async def result(self, *, user_id, session_id, agent_id=None, request_id=None):
+    async def result(self, *, user_id, session_id, agent_id=None, run_id=None):
+        payload, _ = await self._result_with_native_run(
+            user_id=user_id, session_id=session_id, agent_id=agent_id,
+            run_id=run_id,
+        )
+        return payload
+
+    async def _result_with_native_run(self, *, user_id, session_id,
+                                      agent_id=None, run_id=None):
         owner, internal_id = user_id, session_id
         if agent_id is not None:
             owner, internal_id = await self._scope(user_id, agent_id, session_id)
@@ -74,25 +82,24 @@ class ConversationService:
         context = self.context_for(owner)
         runs = await access.list_session_runs(internal_id, context)
         selected = None
-        selected_request = None
+        selected_run_id = None
         for run in sorted(
             runs,
             key=lambda item: (item.accepted_session_revision, item.created_at, item.run_id),
             reverse=True,
         ):
             command = await access.get_start_command(run.run_id, context)
-            client_request = command.config.metadata.get(
-                "server_v2.external.request_id", command.idempotency_key
+            client_run_id = command.config.metadata.get(
+                "server_v2.external.run_id", command.idempotency_key
             )
-            if request_id is None or client_request == request_id:
-                selected, selected_request = run, client_request
+            if run_id is None or client_run_id == run_id:
+                selected, selected_run_id = run, client_run_id
                 break
         if selected is None:
-            raise _error("result_not_found", "request not found")
+            raise _error("result_not_found", "run not found")
         payload = {
-            "session_id": session_id,
-            "request_id": selected_request,
-            "run_id": selected.run_id,
+            "threadId": session_id,
+            "runId": selected_run_id,
             "state": selected.state.value,
             "text": "",
             "error": None,
@@ -116,7 +123,7 @@ class ConversationService:
                         if text.strip():
                             payload["text"] = text
                             break
-        return payload
+        return payload, selected.run_id
 
     async def list_threads(self, user_id: str):
         return await self.threads.list_for(user_id)
@@ -210,7 +217,17 @@ class ConversationService:
             "limit": limit,
         }
 
-    async def start(self, request, *, user_id: str, last_event_id: str | None = None, agent_id: str | None = None):
+    async def start(self, request, *, user_id: str, last_event_id: str | None = None,
+                    agent_id: str | None = None, workspace_directory: str | None = None,
+                    runtime_context: dict | None = None):
+        if workspace_directory is not None:
+            from app.v2.server.storage.external_workspaces import workspace_parts
+            if agent_id is None:
+                raise _error("workspace_requires_external_agent", "workspace directory requires an external Agent")
+            try:
+                workspace_directory = "/".join(workspace_parts(workspace_directory))
+            except ValueError as exc:
+                raise _error("invalid_workspace_path", "invalid workspace directory") from exc
         workspace_user_id = user_id
         stream_thread_id = stream_run_id = None
         if agent_id is not None:
@@ -234,16 +251,24 @@ class ConversationService:
             pin_existing=True,
         )
         enabled = tuple(item.name for item in admitted.skills)
+        metadata = {**admitted.metadata, "server_v2.workspace_user_id": workspace_user_id}
+        if runtime_context:
+            if agent_id is None or len(runtime_context) > 32:
+                raise _error("invalid_runtime_context", "invalid external runtime context")
+            metadata["system_context"] = runtime_context
+        if workspace_directory is not None:
+            metadata["server_v2.external.workspace_path"] = workspace_directory
+            metadata["working_directory"] = "/workspace/" + workspace_directory
         thread_id, run_id, agent_id, command = to_start_run(
             request,
             composition_hash=self.application.composition_hash,
             default_agent_id=admitted.agent_id,
             enabled_skills=enabled,
-            metadata={**admitted.metadata, "server_v2.workspace_user_id": workspace_user_id},
+            metadata=metadata,
         )
         if stream_run_id is not None:
             command = command.model_copy(update={"config": command.config.model_copy(update={
-                "metadata": {**command.config.metadata, "server_v2.external.request_id": stream_run_id}})})
+                "metadata": {**command.config.metadata, "server_v2.external.run_id": stream_run_id}})})
         if command.agent_id != admitted.agent_id:
             command = command.model_copy(update={"agent_id": admitted.agent_id})
             agent_id = admitted.agent_id

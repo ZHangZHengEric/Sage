@@ -166,7 +166,7 @@ MCP 与 A2A 这类租户自己的目录，工具授权按目录整体授予而�
 {"threadId":"work-123","runId":"request-456","messages":[{"id":"request-456","role":"user","content":"用户文字与素材 URL"}],"state":{},"tools":[],"context":[],"forwardedProps":{}}
 ```
 
-后端可消费 SSE 而不向 App 展示；读取端断开不终止后台生成。`GET /api/threads/{session_id}/result?request_id={runId}` 使用相同请求头查询本次结果；省略 request_id 返回会话最新请求。返回 data 包含 session_id、request_id、内部 run_id、state、text、error；仅 completed 返回完整助手结果，运行中 text 为空。结果由现有持久化 SessionStore 重建，服务重启后仍可查询已落盘状态与结果，不增加额外结果表。未完成任务是否可继续执行取决于运行时持久化状态；不把重启视为成功完成。
+后端可消费 SSE 而不向 App 展示；读取端断开不终止后台生成。`GET /api/threads/{threadId}/result?runId={runId}` 使用相同请求头查询本次结果；省略 `runId` 返回会话最新运行。返回 data 包含 `threadId`、`runId`、`state`、`text`、`error`；仅 completed 返回完整助手结果，运行中 text 为空。Sage 原生运行主键不对外返回。结果由现有持久化 SessionStore 重建，服务重启后仍可查询已落盘状态与结果，不增加额外结果表。未完成任务是否可继续执行取决于运行时持久化状态；不把重启视为成功完成。
 
 标准登录用户也可使用该结果接口查询自己的 threadId。反向代理须透传原样的 `SAGE-AGENT-ID` / `SAGE-TENANT-ID` 请求头（使用中划线头名，无需开启下划线请求头透传）。
 

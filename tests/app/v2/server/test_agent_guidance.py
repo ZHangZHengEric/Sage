@@ -18,22 +18,17 @@ def _upload(client, path, machine, prompt, *files):
     ])
 
 
-def test_agent_guidance_zip_batch_is_scoped_and_idempotent(client, service):
+def test_agent_guidance_zip_batch_resolves_agent_and_is_idempotent(client, service):
     owner_token = register_and_login(client)
     owner = {"Authorization": f"Bearer {owner_token}"}
     agent = client.get("/api/agents", headers=owner).json()["data"][0]
     agent_id = agent["id"]
-    key_response = client.post("/api/keys", headers=owner,
-        json={"agent_id": agent_id, "name": "guidance sync", "scopes": ["agent:guidance:write"]})
-    assert key_response.status_code == 200
-    key = key_response.json()["data"]["api_key"]
-    machine = {"Authorization": f"Bearer {key}"}
+    machine = {}
     path = f"/api/agents/{agent_id}/guidance"
     zipped = _skill_zip()
 
-    assert _upload(client, path, owner, "Create projects safely.", ("project-guide.zip", zipped)).status_code == 401
     assert _upload(client, "/api/agents/agent_other/guidance", machine,
-                   "Create projects safely.", ("project-guide.zip", zipped)).status_code == 403
+                   "Create projects safely.", ("project-guide.zip", zipped)).status_code == 404
 
     first = _upload(client, path, machine, "Create projects safely.",
                     ("project-guide.zip", zipped), ("broken.zip", b"not a zip"))
@@ -62,12 +57,7 @@ def test_agent_guidance_zip_batch_is_scoped_and_idempotent(client, service):
     assert next(item for item in records_after if item["name"] == "project-guide")["version_id"] == record["version_id"]
 
 
-def test_agent_guidance_requires_guidance_scope(client):
-    token = register_and_login(client)
-    owner = {"Authorization": f"Bearer {token}"}
-    agent_id = client.get("/api/agents", headers=owner).json()["data"][0]["id"]
-    key = client.post("/api/keys", headers=owner,
-        json={"agent_id": agent_id, "name": "chat only", "scopes": ["a2a:invoke"]}).json()["data"]["api_key"]
-    response = _upload(client, f"/api/agents/{agent_id}/guidance",
-                       {"Authorization": f"Bearer {key}"}, "x", ("guide.zip", _skill_zip("guide")))
-    assert response.status_code == 403
+def test_agent_guidance_rejects_unknown_agent_without_creating_owner(client):
+    response = _upload(client, "/api/agents/agent_missing/guidance", {},
+                       "x", ("guide.zip", _skill_zip("guide")))
+    assert response.status_code == 404

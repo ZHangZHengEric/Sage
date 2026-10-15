@@ -8,7 +8,6 @@ from app.v2.server.routers.schemas.common import (
     ApiResponse,
 )
 from app.v2.server.routers.schemas.skills import (
-    SkillBindBody,
     SkillFilePublic,
     SkillPublic,
     SkillPublishBody,
@@ -113,36 +112,6 @@ async def update_skill(
 async def delete_skill(skill_id: str, user: CurrentUser, service: SkillDep):
     await service.disable(skill_id, user_id=user.user_id, role=user.role)
     return success()
-
-
-@router.get(
-    "/api/agents/{agent_id}/skills", response_model=ApiResponse[list[SkillPublic]]
-)
-async def list_agent_skills(agent_id: str, user: ReadUser, service: SkillDep):
-    bound = await service.bound_skills(
-        owner_user_id=user.user_id, agent_id=agent_id
-    )
-    return success(
-        [
-            {
-                **item.public_dict(),
-                "workspace_status": await service.workspace_status(
-                    user_id=user.user_id, agent_id=agent_id, name=item.name
-                ),
-            }
-            for item in bound
-        ]
-    )
-
-
-@router.put(
-    "/api/agents/{agent_id}/skills", response_model=ApiResponse[list[SkillPublic]]
-)
-async def bind_agent_skills(
-    agent_id: str, body: SkillBindBody, user: CurrentUser, service: CatalogDep
-):
-    skills = await service.bind_agent_skills(user.user_id, agent_id, body.names)
-    return success([item.public_dict() for item in skills])
 
 
 @router.put(

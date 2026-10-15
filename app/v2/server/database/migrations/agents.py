@@ -170,7 +170,7 @@ def migrate(connection) -> dict:
                 if aid is None:
                     raise ValueError("unresolved session Agent reference")
                 config = command.get("config", {}).get("metadata", {})
-                if "server_v2.external.request_id" in config:
+                if "server_v2.external.run_id" in config:
                     raise ValueError(
                         "external sessions require external identity migration"
                     )
