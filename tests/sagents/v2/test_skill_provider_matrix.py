@@ -408,7 +408,8 @@ async def test_load_skill_exposes_a_strict_native_v2_schema_and_loads_lazily():
                 "type": "string",
                 "minLength": 1,
                 "description": "Exact name of the enabled skill to load.",
-            }
+            },
+            "session_id": {"type": ["string", "null"], "default": None},
         },
         "required": ["skill_name"],
         "additionalProperties": False,

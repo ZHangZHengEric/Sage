@@ -55,6 +55,7 @@ class SelfMcpServer(StrictModel):
 
 
 class SelfConfigurationRequest(StrictModel):
+    session_id: str | None = None
     # None preserves the current value; an empty string clears the overlay.
     system_prompt: str | None = Field(default=None, max_length=32768)
     add_skill_paths: tuple[str, ...] = Field(default=(), max_length=16)
@@ -86,6 +87,7 @@ class _Tools:
         add_mcp_servers: list[dict] | None = None,
         system_prompt: str | None = None,
         invocation: ToolInvocation | None = None,
+        session_id: str | None = None,
     ) -> dict:
         if invocation is None:
             raise RuntimeError("ToolInvocation is required")
@@ -94,6 +96,7 @@ class _Tools:
                 "add_skill_paths": add_skill_paths or [],
                 "add_mcp_servers": add_mcp_servers or [],
                 "system_prompt": system_prompt,
+                "session_id": session_id,
             }
         )
         return await self.service.configure(request, invocation)

@@ -29,16 +29,16 @@ class AgentManagementTools:
         description="Inspect the complete agent package schema and host-provided plugin inventory.",
         plan_safe=True,
     )
-    async def agent_package_schema(self) -> dict[str, Any]:
+    async def agent_package_schema(self, session_id: str | None = None) -> dict[str, Any]:
         return self.service.schema()
 
     @tool(description="Inspect caller-visible model routes, tools and skills supplied by the host.", plan_safe=True)
-    async def agent_package_resources(self, invocation: ToolInvocation | None = None) -> dict[str, Any]:
+    async def agent_package_resources(self, invocation: ToolInvocation | None = None, session_id: str | None = None) -> dict[str, Any]:
         return await self.service.resources(_context(invocation))
 
     @tool(description="Read a bounded page of an owned operation's runtime events; use the returned cursor for the next page.", plan_safe=True)
     async def agent_package_events(self, operation: str, after_sequence: int = 0, limit: int = 100,
-                                   invocation: ToolInvocation | None = None) -> dict[str, Any]:
+                                   invocation: ToolInvocation | None = None, session_id: str | None = None) -> dict[str, Any]:
         return await self.service.events(operation, _context(invocation), after_sequence=after_sequence, limit=limit)
 
     @tool(
@@ -46,7 +46,7 @@ class AgentManagementTools:
         plan_safe=True,
     )
     async def agent_package_list(
-        self, limit: int = 50, offset: int = 0, invocation: ToolInvocation | None = None
+        self, limit: int = 50, offset: int = 0, invocation: ToolInvocation | None = None, session_id: str | None = None
     ) -> dict[str, Any]:
         return {
             "packages": await self.service.list(
@@ -59,7 +59,7 @@ class AgentManagementTools:
         plan_safe=True,
     )
     async def agent_package_get(
-        self, ref: str, invocation: ToolInvocation | None = None
+        self, ref: str, invocation: ToolInvocation | None = None, session_id: str | None = None
     ) -> dict[str, Any]:
         return (await self.service.get(ref, _context(invocation))).model_dump(
             mode="json"
@@ -70,7 +70,7 @@ class AgentManagementTools:
         side_effect_level=SideEffectLevel.REVERSIBLE,
     )
     async def agent_package_validate(
-        self, bundle: dict[str, Any], readiness: bool = False, invocation: ToolInvocation | None = None
+        self, bundle: dict[str, Any], readiness: bool = False, invocation: ToolInvocation | None = None, session_id: str | None = None
     ) -> dict[str, Any]:
         return await self.service.validate(
             AgentPackageBundle.model_validate(bundle), _context(invocation), readiness=readiness
@@ -81,7 +81,7 @@ class AgentManagementTools:
         side_effect_level=SideEffectLevel.WRITE,
     )
     async def agent_package_save(
-        self, bundle: dict[str, Any], invocation: ToolInvocation | None = None
+        self, bundle: dict[str, Any], invocation: ToolInvocation | None = None, session_id: str | None = None
     ) -> dict[str, Any]:
         return await self.service.save(
             AgentPackageBundle.model_validate(bundle), _context(invocation)
@@ -97,6 +97,7 @@ class AgentManagementTools:
         package_id: str,
         version: str,
         invocation: ToolInvocation | None = None,
+        session_id: str | None = None,
     ) -> dict[str, Any]:
         return await self.service.fork(ref, package_id, version, _context(invocation))
 
@@ -105,14 +106,14 @@ class AgentManagementTools:
         side_effect_level=SideEffectLevel.WRITE,
     )
     async def agent_package_activate(
-        self, ref: str, expected_ref: str = "", invocation: ToolInvocation | None = None
+        self, ref: str, expected_ref: str = "", invocation: ToolInvocation | None = None, session_id: str | None = None
     ) -> dict[str, Any]:
         return await self.service.activate(
             ref, expected_ref or None, _context(invocation)
         )
 
     @tool(
-        description="Start a task on an exact package ref and agent_id. Returns immediately; read agent_package_status for results. Reuse operation for retries only. session_id continues the same agent/version conversation.",
+        description="Start a task on an exact package ref and agent_id. Returns immediately; read agent_package_status for results. Reuse operation for retries only. session_id identifies the current Session; target_session_id continues the target agent/version conversation, or omit it to start a new Session.",
         side_effect_level=SideEffectLevel.WRITE,
     )
     async def agent_package_run(
@@ -123,6 +124,7 @@ class AgentManagementTools:
         operation: str,
         session_id: str = "",
         invocation: ToolInvocation | None = None,
+        target_session_id: str | None = None,
     ) -> dict[str, Any]:
         return await self.service.run(
             ref,
@@ -130,7 +132,7 @@ class AgentManagementTools:
             content,
             operation,
             _context(invocation),
-            session_id=session_id or None,
+            session_id=target_session_id or None,
         )
 
     @tool(
@@ -138,7 +140,7 @@ class AgentManagementTools:
         plan_safe=True,
     )
     async def agent_package_status(
-        self, operation: str, invocation: ToolInvocation | None = None
+        self, operation: str, invocation: ToolInvocation | None = None, session_id: str | None = None
     ) -> dict[str, Any]:
         return await self.service.status(operation, _context(invocation))
 
@@ -153,6 +155,7 @@ class AgentManagementTools:
         interaction_id: str,
         payload: dict[str, Any],
         invocation: ToolInvocation | None = None,
+        session_id: str | None = None,
     ) -> dict[str, Any]:
         return await self.service.control(
             operation,
@@ -168,7 +171,7 @@ class AgentManagementTools:
         side_effect_level=SideEffectLevel.WRITE,
     )
     async def agent_package_cancel(
-        self, operation: str, invocation: ToolInvocation | None = None
+        self, operation: str, invocation: ToolInvocation | None = None, session_id: str | None = None
     ) -> dict[str, Any]:
         return await self.service.control(operation, "cancel", _context(invocation))
 

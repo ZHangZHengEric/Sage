@@ -81,6 +81,26 @@ ServerHost 必须注入 Database；生产库存使用 MySQL `managed_agent_recor
 
 包模型使用 `provider=server`，`model` 指向本人模型 ID 或 `default`，不携带凭据和地址。源码插件默认关闭，只有宿主注册与明确授权后才能加载，且属于可信宿主代码。能力、API、部署成本和验证边界见 [Server V2 Agent 平台](../../../docs/zh/architecture/SERVER_V2_AGENT_PLATFORM.md)。
 
+### 包沙箱网络
+
+在 `sage.yaml`（Studio JSON 对应 `manifest`）中按 Agent 声明：
+
+```yaml
+agents:
+  assistant:
+    name: Assistant
+    instructions:
+      inline: Be helpful.
+    sandbox:
+      network: unrestricted
+```
+
+`agents.<id>.sandbox.network` 只接受 `none` 和 `unrestricted`，省略时为 `none`。该字段沿用 package Schema、导入、校验及版本库存机制；其他值或未知沙箱字段会被拒绝。每个 Agent 单独配置，子 Agent 不继承父 Agent 的网络声明。
+
+Server 在托管包每个 Run 创建实际工作区沙箱时读取该 Agent 的配置，包括子 Run 和恢复后重建的沙箱。实际权限取包声明与服务端上限的交集：任一为 `none` 即禁网。宿主可在构造 `ServerSettings(sandbox_network_mode="none", ...)` 时收紧全服务上限；默认上限为 `unrestricted`，仅允许包显式申请联网，未配置的包仍禁网。此上限没有环境变量入口。普通 catalog Agent 对话仍使用原有禁网沙箱。
+
+`unrestricted` 允许沙箱进程直接联网（包括私网），不提供域名白名单过滤；`none` 由实际沙箱隔离网络。网络模式参与沙箱 spec/policy 哈希，无法实施策略的宿主不会退化为无隔离执行。该配置控制沙箱内进程，不控制宿主侧模型、MCP、A2A 或可信源码插件的网络。
+
 ## A2A
 
 外部 Agent 通过 JSON-RPC 入口 `/a2a/v1` 调用本机 Agent，Agent Card 在 `/a2a/v1/card` 与 `/.well-known/agent-card.json`。两个 card 路径都要鉴权：一个 Sage 宿主服务多租户，匿名 card 只能描述某个任意租户的 Agent。

@@ -82,11 +82,15 @@ class ServerSettings:
     max_managed_applications: int = 32
     max_managed_builds: int = 4
     execution_shell_mode: str = "sandboxed"
+    # Host-only ceiling; deliberately has no environment-variable binding.
+    sandbox_network_mode: str = "unrestricted"
     linux_execution_uid: int | None = None
     linux_execution_gid: int | None = None
     approval_timeout_seconds: int = 86400
 
     def __post_init__(self) -> None:
+        if self.sandbox_network_mode not in {"none", "unrestricted"}:
+            raise ValueError("sandbox_network_mode must be none or unrestricted")
         ids = (self.linux_execution_uid, self.linux_execution_gid)
         if any(value is not None for value in ids) and not all(
             type(value) is int and 0 < value < 2**32 - 1 for value in ids

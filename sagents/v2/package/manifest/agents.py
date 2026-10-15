@@ -50,6 +50,11 @@ class AgentEntrypoint(StrictModel):
     config: dict[str, Any] = Field(default_factory=dict)
 
 
+class AgentSandboxConfig(StrictModel):
+    # A request to the host, never an authorization to exceed host policy.
+    network: Literal["none", "unrestricted"] = "none"
+
+
 class AgentDefinition(StrictModel):
     name: str
     description: str | None = None
@@ -71,6 +76,7 @@ class AgentDefinition(StrictModel):
     subagents: tuple[Identifier, ...] = ()
     budgets: AgentBudgets = Field(default_factory=AgentBudgets)
     memory: AgentMemoryBehavior = Field(default_factory=AgentMemoryBehavior)
+    sandbox: AgentSandboxConfig = Field(default_factory=AgentSandboxConfig)
 
 
 class ApplicationEntrypoint(StrictModel):
