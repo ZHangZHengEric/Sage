@@ -52,7 +52,7 @@ def result(client, session="work-1", request=None, user="business-user-123"):
     return client.get(
         f"/api/threads/{session}/result",
         headers=headers(user),
-        params={"request_id": request} if request else {},
+        params={"runId": request} if request else {},
     )
 
 
@@ -73,19 +73,18 @@ def test_external_chat_unregistered_user_edits_and_restart(tmp_path):
         assert original.status_code == 200, original.text
         data = original.json()["data"]
         assert data["state"] == "completed" and data["text"] == "hello"
+        assert data["threadId"] == "work-1" and data["runId"] == "create-1"
+        assert "request_id" not in data and "run_id" not in data
         assert send(client, request="edit-2").status_code == 200
         latest = result(client).json()["data"]
-        assert latest["request_id"] == "edit-2" and latest["run_id"] != data["run_id"]
-        assert (
-            result(client, request="create-1").json()["data"]["run_id"]
-            == data["run_id"]
-        )
+        assert latest["runId"] == "edit-2"
+        assert result(client, request="create-1").json()["data"] == data
         replay = send(client, request="edit-2")
         assert (
             replay.status_code == 200
             and _parse_sse(replay.text)[-1]["type"] == "RUN_FINISHED"
         )
-        assert result(client).json()["data"]["run_id"] == latest["run_id"]
+        assert result(client).json()["data"] == latest
         assert result(client, user="other-business-user").status_code == 404
         assert result(client, request="missing").status_code == 404
         assert send(client, session="work-2").status_code == 200
@@ -95,10 +94,7 @@ def test_external_chat_unregistered_user_edits_and_restart(tmp_path):
         other_workspace = tmp_path / "tenants" / "other-business-user" / agent_id / "workspace"
         assert other_workspace.is_dir()
         assert not (other_workspace / "shared.txt").exists()
-        assert (
-            result(client, user="other-business-user").json()["data"]["run_id"]
-            != data["run_id"]
-        )
+        assert result(client, user="other-business-user").json()["data"]["runId"] == "create-1"
     # Reopen both runtime and SQL repositories; no Python objects carry the results.
     with TestClient(create_app(make_host(tmp_path))) as restarted:
         restarted.headers["SAGE-AGENT-ID"] = agent_id

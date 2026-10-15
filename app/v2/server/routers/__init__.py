@@ -3,20 +3,17 @@ from fastapi import FastAPI
 from . import (
     a2a_agents,
     admin,
-    agent,
-    agent_guidance,
     agents,
     api_keys,
-    approvals,
     auth,
-    health,
+    conversations,
     files,
+    health,
     mcp,
     models,
     observability,
     packages,
     skills,
-    threads,
 )
 
 from app.v2.server.observability.logging import get_logger
@@ -29,16 +26,13 @@ def register_routers(app: FastAPI, *, jaeger: bool = False, trace_console: bool 
     app.include_router(auth.router)
     app.include_router(models.router)
     app.include_router(agents.router)
-    app.include_router(agent_guidance.router)
     app.include_router(packages.router)
     app.include_router(mcp.router)
     app.include_router(a2a_agents.router)
     app.include_router(skills.router)
-    app.include_router(threads.router)
     app.include_router(files.router)
-    app.include_router(agent.router)
+    app.include_router(conversations.router)
     app.include_router(api_keys.router)
-    app.include_router(approvals.router)
     app.include_router(admin.router)
     _register_a2a(app)
     if trace_console:

@@ -1,4 +1,4 @@
-"""Authenticated workspace browsing and administrator Session folder downloads."""
+"""Authenticated workspace browsing and downloads."""
 from __future__ import annotations
 
 import asyncio
@@ -9,11 +9,9 @@ from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from starlette.background import BackgroundTask
 
-from app.v2.server.routers.deps import AdminUser, HostDep, ReadUser, CurrentUser
+from app.v2.server.routers.deps import HostDep, ReadUser, CurrentUser
 from app.v2.server.routers.render import success
-from app.v2.server.storage.downloads import list_directory, prepare_download, prepare_session_export
-from sagents.v2.runtime.session.plugins.filesystem import FilesystemSessionStore
-from sagents.v2.runtime.session.plugins.mysql import MysqlSessionStore
+from app.v2.server.storage.downloads import list_directory, prepare_download
 
 router = APIRouter(tags=["files"])
 
@@ -98,22 +96,3 @@ async def workspace_download(user: ReadUser, caller: CurrentUser, host: HostDep,
                           agent_id: str | None = Query(default=None, min_length=1, max_length=256)):
     root = await workspace_root(host, caller, user, thread_id, agent_id)
     return download_response(await file_operation(prepare_download, root, path))
-
-
-@router.get("/api/threads/{thread_id}/download")
-async def session_download(thread_id: str, user: AdminUser, host: HostDep):
-    record = await host.threads.find(thread_id)
-    if record is None:
-        raise HTTPException(404, "thread not found")
-    service = host.conversations
-    # Validate the persisted Session owner before resolving its storage directory.
-    await service.session_access.get_session(thread_id, service.context_for(record.user_id))
-    store = service.application.entrypoint().runtime.session_store
-    if isinstance(store, MysqlSessionStore):
-        state = await store.export_session_state(thread_id)
-        return download_response(await file_operation(prepare_session_export, thread_id, state))
-    if not isinstance(store, FilesystemSessionStore):
-        raise HTTPException(409, "this Session store has no filesystem directory")
-    root = await store.session_directory(thread_id)
-    name = root.name
-    return download_response(await file_operation(prepare_download, root, "", archive_name=name))

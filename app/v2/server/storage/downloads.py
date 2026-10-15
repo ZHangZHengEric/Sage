@@ -62,12 +62,15 @@ def list_directory(root: Path, value: str) -> list[dict]:
         return sorted(items, key=lambda item: (not item["is_directory"], item["name"].casefold()))
 
 
-def prepare_download(root: Path, value: str, *, archive_name: str = "workspace"):
+def prepare_download(root: Path, value: str, *, archive_name: str = "workspace",
+                     max_bytes: int = MAX_ARCHIVE_BYTES, max_entries: int = MAX_ARCHIVE_ENTRIES):
     path = relative_path(value)
     output = SpooledTemporaryFile(max_size=8 * 1024 * 1024, mode="w+b")
     try:
         with open_entry(root, path) as fd:
             if stat.S_ISREG(os.fstat(fd).st_mode):
+                if os.fstat(fd).st_size > max_bytes:
+                    raise OverflowError("file is too large to download")
                 with os.fdopen(os.dup(fd), "rb") as source:
                     remaining = os.fstat(fd).st_size
                     while remaining:
@@ -81,7 +84,8 @@ def prepare_download(root: Path, value: str, *, archive_name: str = "workspace")
                 filename = f"{path.name or archive_name}.zip"
                 total = [0, 0]
                 with ZipFile(output, "w", compression=ZIP_DEFLATED) as archive:
-                    _archive_directory(fd, archive, path.name or archive_name, total)
+                    _archive_directory(fd, archive, path.name or archive_name, total,
+                                       max_bytes=max_bytes, max_entries=max_entries)
         output.seek(0)
         return output, filename
     except BaseException:
@@ -89,9 +93,11 @@ def prepare_download(root: Path, value: str, *, archive_name: str = "workspace")
         raise
 
 
-def _archive_directory(fd: int, archive: ZipFile, prefix: str, total: list[int]):
+def _archive_directory(fd: int, archive: ZipFile, prefix: str, total: list[int],
+                       *, max_bytes: int = MAX_ARCHIVE_BYTES,
+                       max_entries: int = MAX_ARCHIVE_ENTRIES):
     total[0] += 1
-    if total[0] > MAX_ARCHIVE_ENTRIES:
+    if total[0] > max_entries:
         raise OverflowError("directory is too large to archive")
     archive.writestr(f"{prefix}/", b"")
     with os.scandir(fd) as entries:
@@ -104,11 +110,12 @@ def _archive_directory(fd: int, archive: ZipFile, prefix: str, total: list[int])
                 opened = os.fstat(child)
                 name = f"{prefix}/{entry.name}"
                 if stat.S_ISDIR(opened.st_mode):
-                    _archive_directory(child, archive, name, total)
+                    _archive_directory(child, archive, name, total,
+                                       max_bytes=max_bytes, max_entries=max_entries)
                 elif stat.S_ISREG(opened.st_mode):
                     total[0] += 1
                     total[1] += opened.st_size
-                    if total[0] > MAX_ARCHIVE_ENTRIES or total[1] > MAX_ARCHIVE_BYTES:
+                    if total[0] > max_entries or total[1] > max_bytes:
                         raise OverflowError("directory is too large to archive")
                     with os.fdopen(os.dup(child), "rb") as source, archive.open(name, "w") as target:
                         # Read the size observed at open, even if a running tool appends.

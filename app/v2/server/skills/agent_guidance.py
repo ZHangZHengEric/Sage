@@ -1,4 +1,4 @@
-"""Agent-scoped prompt and Skill ZIP synchronization for machine credentials."""
+"""Agent-scoped prompt and Skill ZIP synchronization."""
 
 from __future__ import annotations
 
@@ -18,8 +18,8 @@ async def sync_agent_guidance(host, *, owner_id: str, agent_id: str, prompt: str
                               files: list[tuple[str, bytes]]) -> dict:
     """Update the prompt, then report each Skill ZIP independently.
 
-    The router authenticates the Agent-bound key. This service never accepts
-    an owner or workspace path from the request body.
+    The router resolves the Agent owner from the catalog. This service never
+    accepts an owner or workspace path from the request body.
     """
     if not prompt.strip() or len(prompt.encode()) > _MAX_PROMPT_BYTES:
         raise ValueError("Agent prompt is empty or exceeds 128 KiB")
