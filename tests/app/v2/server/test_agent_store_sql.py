@@ -51,7 +51,7 @@ async def test_single_agent_update_does_not_replace_other_agents_or_default(stor
     second = AgentRecord(id=new_id("agent"), name="Second")
     await store.create_agent("alice", first)
     await store.create_agent("alice", second)
-    await store.update_agent("alice", first.model_copy(update={"name": "Updated"}))
+    await store.update_agent("alice", first.with_configuration(name="Updated"))
     current = await store.get("alice")
     assert {a.name for a in current.agents} == {"Main Assistant", "Updated", "Second"}
     assert current.default_agent_id == catalog.default_agent_id

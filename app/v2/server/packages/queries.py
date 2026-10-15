@@ -7,7 +7,6 @@ from sagents.v2.package.presets import BuiltinPackageFactory
 
 from app.v2.server.runtime.official import (
     official_tool_catalog,
-    resolve_agent_tools,
 )
 from app.v2.server.catalog.records import (
     enabled_a2a_agents,
@@ -107,24 +106,7 @@ class ServerPackageQueries:
             agent = require_agent(
                 await self.catalog.get(context.actor.principal_id), agent_id
             )
-            data["metadata"].update(id=f"user.{agent.id}", name=agent.name)
-            definition = data["agents"]["assistant"]
-            definition.update(
-                name=agent.name,
-                description=agent.description,
-                instructions={"inline": agent.instructions or "Be helpful."},
-                tools=list(
-                    resolve_agent_tools(agent.tools, has_skills=bool(agent.skills))
-                ),
-                tool_approval=agent.tool_approval.model_dump() if agent.tool_approval else None,
-                skills=list(
-                    await self.skill_catalog.bound_names(
-                        context.actor.principal_id, agent_id
-                    )
-                ),
-            )
-            for route in data["models"].values():
-                route["model"] = agent.model_id or "default"
+            return agent.package.model_dump(mode="json")
         return AgentPackageBundle.model_validate({"manifest": data}).model_dump(
             mode="json"
         )

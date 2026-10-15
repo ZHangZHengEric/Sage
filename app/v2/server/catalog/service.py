@@ -88,7 +88,7 @@ class CatalogService:
             current = require_agent(catalog, agent_id)
             if current.instructions == instructions:
                 return current
-            updated = current.model_copy(update={"instructions": instructions})
+            updated = current.with_configuration(instructions=instructions)
             await self.store.update_agent(user_id, updated)
             return updated
 
@@ -198,4 +198,8 @@ class CatalogService:
                 names=names,
                 catalog=catalog,
             )
+            current = require_agent(await self.store.get(user_id), agent_id)
+            bound = [item.name for item in skills]
+            if current.skills != bound:
+                await self.store.update_agent(user_id, current.with_configuration(skills=bound))
             return skills

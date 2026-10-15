@@ -8,6 +8,10 @@ from app.v2.server.database import Database
 from sqlalchemy import delete, select, update
 
 from app.v2.server.catalog.orm import AgentRow, CatalogRow
+from app.v2.server.catalog.packages import package_owner
+from app.v2.server.packages.repository import DatabasePackageStore
+from app.v2.server.packages.orm import ManagedRecordRow
+from sagents.v2.agent.management import AgentPackageBundle
 from app.v2.server.identity.orm import UserRow
 from app.v2.server.identity.orm import ApiKeyRow
 from app.v2.server.skills.orm import AgentSkillSelectionRow
@@ -47,6 +51,7 @@ class CatalogStore(Protocol):
 class DatabaseCatalogStore:
     def __init__(self, database: Database) -> None:
         self.database = database
+        self.packages = DatabasePackageStore(database)
 
     async def agent_owner(self, agent_id: str) -> str | None:
         async with self.database.session() as session:
@@ -63,7 +68,8 @@ class DatabaseCatalogStore:
         row = await session.get(CatalogRow, user_id, with_for_update=True)
         if row is None:
             initial = empty_catalog()
-            session.add(_agent_row(user_id, initial.agents[0]))
+            initial_record = initial.agents[0]
+            session.add(await self._new_agent_row(session, user_id, initial_record))
             row = CatalogRow(
                 user_id=user_id,
                 default_agent_id=initial.default_agent_id,
@@ -95,9 +101,27 @@ class DatabaseCatalogStore:
             skills: dict[str, list[str]] = {}
             for binding in bindings:
                 skills.setdefault(binding.agent_id, []).append(binding.skill_name)
-            records = [
-                _agent_record(agent, skills.get(agent.id, [])) for agent in agents
-            ]
+            refs = {agent.package_ref for agent in agents if agent.package_ref}
+            package_rows = (await session.scalars(select(ManagedRecordRow).where(
+                ManagedRecordRow.owner == package_owner(user_id),
+                ManagedRecordRow.kind == "bundle", ManagedRecordRow.ref.in_(refs),
+            ))).all() if refs else []
+            packages = {row.ref: row for row in package_rows}
+            records = []
+            for agent in agents:
+                if agent.package_ref:
+                    stored = packages.get(agent.package_ref)
+                    if stored is None:
+                        raise ValueError("catalog Agent package is missing; refusing legacy fallback")
+                    package = AgentPackageBundle.model_validate(stored.payload)
+                    if package.content_hash != agent.package_ref:
+                        raise ValueError("catalog Agent package hash mismatch")
+                    record = _agent_record(agent, [], package=package)
+                else:
+                    record = _agent_record(agent, skills.get(agent.id, []))
+                    agent.package_ref = await self.packages.save_in_transaction(
+                        session, package_owner(user_id), record.package)
+                records.append(record)
             records.sort(key=lambda agent: agent.id != row.default_agent_id)
             return UserCatalog(
                 default_agent_id=row.default_agent_id,
@@ -110,16 +134,30 @@ class DatabaseCatalogStore:
     async def create_agent(self, user_id: str, record: AgentRecord) -> None:
         async with self.database.transaction() as session:
             await self._catalog(session, user_id)
-            session.add(_agent_row(user_id, record))
+            session.add(await self._new_agent_row(session, user_id, record))
 
     async def update_agent(self, user_id: str, record: AgentRecord) -> None:
+        record = AgentRecord.model_validate(record.model_dump(mode="json"))
         async with self.database.transaction() as session:
             await self._catalog(session, user_id)
             row = await session.get(AgentRow, record.id, with_for_update=True)
             if row is None or row.owner_user_id != user_id:
                 raise _not_found("agent not found")
+            row.package_ref = await self.packages.save_in_transaction(session, package_owner(user_id), record.package)
             for key, value in _agent_values(record).items():
                 setattr(row, key, value)
+
+    async def _new_agent_row(self, session, user_id, record):
+        record = AgentRecord.model_validate(record.model_dump(mode="json"))
+        row = _agent_row(user_id, record)
+        row.package_ref = await self.packages.save_in_transaction(session, package_owner(user_id), record.package)
+        return row
+
+    async def migrate_packages(self):
+        async with self.database.session() as session:
+            owners = list((await session.scalars(select(AgentRow.owner_user_id).distinct())).all())
+        for owner in owners:
+            await self.get(owner)
 
     async def delete_agent(self, user_id: str, agent_id: str) -> None:
         async with self.database.transaction() as session:
@@ -195,16 +233,17 @@ class DatabaseCatalogStore:
 
 
 def _agent_values(record: AgentRecord) -> dict:
-    return record.model_dump(mode="json", exclude={"id", "skills"})
+    return record.model_dump(mode="json", exclude={"id", "skills", "package"})
 
 
 def _agent_row(user_id: str, record: AgentRecord) -> AgentRow:
     return AgentRow(id=record.id, owner_user_id=user_id, **_agent_values(record))
 
 
-def _agent_record(row: AgentRow, skills: list[str]) -> AgentRecord:
+def _agent_record(row: AgentRow, skills: list[str], *, package=None) -> AgentRecord:
     return AgentRecord(
         id=row.id,
+        package=package,
         name=row.name,
         description=row.description,
         instructions=row.instructions,

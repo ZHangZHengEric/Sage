@@ -14,6 +14,7 @@ from sagents.v2.runtime.execution.sandbox import (
     LifecyclePolicy,
     LocalWorkspaceSandboxProvider,
     NetworkPolicy,
+    NetworkMode,
     ProcessPolicy,
     ResolvedSandboxSpec,
     ResourceLimits,
@@ -156,8 +157,17 @@ def workspace_sandbox_spec(
     )
 
 
+def agent_network_policy(sandbox, settings, *, live=None):
+    mode = NetworkMode.UNRESTRICTED if (
+        sandbox.network == settings.sandbox_network_mode == "unrestricted"
+        and (live is None or live.network == "unrestricted")
+    ) else NetworkMode.NONE
+    return NetworkPolicy(mode=mode, deny_private_networks=mode != NetworkMode.UNRESTRICTED)
+
+
 async def attach_official_tools(
-    service, command: StartRun, *, user_id: str, run_id: str | None = None
+    service, command: StartRun, *, user_id: str, run_id: str | None = None,
+    network: NetworkPolicy | None = None,
 ):
     """Provision a host-mapped sandbox and wrap it as OfficialToolPlugin."""
 
@@ -170,6 +180,7 @@ async def attach_official_tools(
         service.paths.workspace_dir(workspace_user(command, user_id), command.agent_id),
         service.contexts.for_user(user_id),
         run_id=owner_run_id,
+        network=network,
     )
     runtime = OfficialToolRuntime(
         handle,

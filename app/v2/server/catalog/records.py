@@ -5,6 +5,7 @@ from typing import Literal
 from urllib.parse import urlsplit
 
 from sagents.v2.agent.policy.approval_config import ToolApprovalConfig
+from sagents.v2.agent.management import AgentPackageBundle
 from pydantic import (
     BaseModel,
     Field,
@@ -67,10 +68,36 @@ class AgentRecord(BaseModel):
     # A ceiling, not a grant: API Keys still default to asking for approval.
     execution_policy: ExecutionPolicy = Field(default_factory=lambda: ExecutionPolicy(shell="sandboxed"))
 
+    package: AgentPackageBundle | None = None
+
+    @model_validator(mode="after")
+    def canonical_package(self):
+        from app.v2.server.catalog.packages import build_package, project_package
+        if self.package is None:
+            self.package = build_package(self)
+        return project_package(self)
+
+    @property
+    def sandbox(self):
+        return self.package.manifest.agents[self.id].sandbox
+
+    def with_configuration(self, **updates):
+        from app.v2.server.catalog.packages import build_package
+        sandbox = updates.pop("sandbox", None)
+        projection = self.model_copy(update=updates)
+        projection.execution_policy = ExecutionPolicy.model_validate(projection.execution_policy)
+        if projection.tool_approval is not None:
+            projection.tool_approval = ToolApprovalConfig.model_validate(projection.tool_approval)
+        projection.package = build_package(projection, sandbox=sandbox, previous=self.package)
+        return AgentRecord.model_validate(projection.model_dump(mode="json"))
+
     def public_dict(self) -> dict[str, object]:
         return {
             "id": self.id,
             "name": self.name,
+            "package": self.package.model_dump(mode="json"),
+            "package_ref": self.package.content_hash,
+            "sandbox": self.sandbox.model_dump(mode="json"),
             "description": self.description,
             "instructions": self.instructions,
             "model_id": self.model_id or None,
@@ -314,6 +341,11 @@ def upsert_agent(
         if existing is not None
         else _unique_names(payload.get("skills")),
     )
+    if existing is not None:
+        record = existing.with_configuration(**record.model_dump(exclude={"id", "package"}),
+                                             sandbox=payload.get("sandbox"))
+    elif payload.get("sandbox") is not None:
+        record = record.with_configuration(sandbox=payload["sandbox"])
     if record.model_id and not any(
         item.id == record.model_id for item in catalog.models
     ):

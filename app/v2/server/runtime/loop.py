@@ -166,8 +166,15 @@ async def compose_catalog_loop(
             run_id=command.idempotency_key,
             model=model,
         )
+        from app.v2.server.runtime.official import agent_network_policy
+        from sagents.v2.package.manifest.agents import AgentSandboxConfig
+        live_agent = next((item for item in catalog.agents if item.id == agent.id), None)
+        network = agent_network_policy(
+            manifest.agents[agent.id].sandbox, service.settings,
+            live=live_agent.sandbox if live_agent else AgentSandboxConfig(),
+        )
         official, official_runtime, sandbox_handle = await attach_official_tools(
-            service, command, user_id=user_id, run_id=run_id
+            service, command, user_id=user_id, run_id=run_id, network=network,
         )
         # ExitStack unwinds in reverse: stop Jobs, then destroy the sandbox.
         extra.extend([sandbox_handle, official_runtime])

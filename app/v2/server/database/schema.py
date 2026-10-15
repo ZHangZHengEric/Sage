@@ -28,6 +28,8 @@ def _upgrade_legacy_schema(connection) -> None:
             "Legacy Agent catalog detected; run scripts.v2.migrate_agent_table before starting Server v2"
         )
     agent_columns = {column["name"] for column in inspector.get_columns("agents")}
+    if "package_ref" not in agent_columns:
+        connection.execute(text("ALTER TABLE agents ADD COLUMN package_ref VARCHAR(80)"))
     if "tool_approval" not in agent_columns:
         connection.execute(text("ALTER TABLE agents ADD COLUMN tool_approval JSON"))
     user_columns = {column["name"] for column in inspector.get_columns("users")}

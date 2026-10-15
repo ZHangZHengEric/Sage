@@ -131,7 +131,7 @@ def test_api_and_package_round_trip_approval_rules(client):
     bundle = client.get(
         f"/api/agent-packages/template?agent_id={agent['id']}", headers=headers
     ).json()["data"]
-    assert bundle["manifest"]["agents"]["assistant"]["tool_approval"] == rules
+    assert bundle["manifest"]["agents"][agent["id"]]["tool_approval"] == rules
     imported = client.post("/api/agent-packages", headers=headers, json=bundle)
     assert imported.status_code == 200, imported.text
     ref = imported.json()["data"]["ref"]
@@ -142,7 +142,7 @@ def test_api_and_package_round_trip_approval_rules(client):
     )
     assert restored.status_code == 200, restored.text
     exported = client.get(f"/api/agent-packages/{ref}", headers=headers).json()["data"]
-    assert exported["manifest"]["agents"]["assistant"]["tool_approval"] == rules
+    assert exported["manifest"]["agents"][agent["id"]]["tool_approval"] == rules
     invalid = client.put(
         f"/api/agents/{agent['id']}",
         headers=headers,

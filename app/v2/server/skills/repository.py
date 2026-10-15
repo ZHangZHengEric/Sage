@@ -160,6 +160,25 @@ class DatabaseSkillStore:
                         position=binding.position,
                     )
                 )
+            # Binding index and canonical package must commit or roll back together.
+            from app.v2.server.catalog.repository import DatabaseCatalogStore, _agent_record, _agent_values
+            from app.v2.server.catalog.orm import AgentRow
+            from app.v2.server.catalog.packages import package_owner
+            from sagents.v2.agent.management import AgentPackageBundle
+            agent = await session.get(AgentRow, agent_id, with_for_update=True)
+            if agent is not None:
+                if agent.owner_user_id != owner_user_id:
+                    raise ValueError("Skill binding owner does not match Agent")
+                store = DatabaseCatalogStore(self.database)
+                package_row = await store.packages._get(session, package_owner(owner_user_id), "bundle", agent.package_ref) if agent.package_ref else None
+                if agent.package_ref and package_row is None:
+                    raise ValueError("catalog Agent package is missing")
+                record = _agent_record(agent, [], package=AgentPackageBundle.model_validate(package_row.payload) if package_row else None)
+                record = record.with_configuration(skills=[binding.skill_name for binding in bindings])
+                agent.package_ref = await store.packages.save_in_transaction(session, package_owner(owner_user_id), record.package)
+                for field, value in _agent_values(record).items():
+                    setattr(agent, field, value)
+
 
     async def list_bindings(
         self, *, owner_user_id: str, agent_id: str

@@ -301,9 +301,7 @@ async def test_catalog_loop_uses_the_agent_config_accepted_with_the_run(
     await service.start()
     agent_id = (await service.catalog.get("user")).default_agent_id
     catalog = await service.catalog.store.get("user")
-    admitted = require_agent(catalog, agent_id).model_copy(
-        update={"instructions": "Admitted instructions"}
-    )
+    admitted = require_agent(catalog, agent_id).with_configuration(instructions="Admitted instructions")
     command = _command().model_copy(
         update={
             "agent_id": agent_id,
@@ -315,7 +313,7 @@ async def test_catalog_loop_uses_the_agent_config_accepted_with_the_run(
             )
         }
     )
-    catalog.agents[0].instructions = "Edited after the Run was admitted"
+    catalog.agents[0] = catalog.agents[0].with_configuration(instructions="Edited after the Run was admitted")
     await service.catalog.store.save("user", catalog)
     captured = {}
     original = AgentCompositionFactory.create_loop
