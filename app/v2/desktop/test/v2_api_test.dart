@@ -15,6 +15,43 @@ class _NamedUploadFile extends XFile {
 }
 
 void main() {
+  test('run reconnect sends canonical and preview cursors', () async {
+    final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    addTearDown(() => server.close(force: true));
+    server.listen((request) async {
+      expect(request.uri.path, '/api/v2/runs/run_1/events');
+      expect(request.uri.queryParameters, {
+        'after_sequence': '4',
+        'preview_sequence': '7',
+        'preview_epoch': 'host+1/epoch',
+      });
+      expect(
+        request.headers.value(HttpHeaders.authorizationHeader),
+        'Bearer preview-token',
+      );
+      request.response.headers.contentType = ContentType(
+        'application',
+        'x-ndjson',
+      );
+      request.response.write('{"type":"run.cancelled"}\n');
+      await request.response.close();
+    });
+    final api = V2ApiClient(
+      baseUri: Uri.parse('http://127.0.0.1:${server.port}'),
+      authToken: 'preview-token',
+    );
+    addTearDown(api.close);
+    final events = await api
+        .subscribeRun(
+          'run_1',
+          afterSequence: 4,
+          previewSequence: 7,
+          previewEpoch: 'host+1/epoch',
+        )
+        .toList();
+    expect(events.single['type'], 'run.cancelled');
+  });
+
   test('clone agent sends source identity and preserves returned settings', () async {
     final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
     addTearDown(() => server.close(force: true));

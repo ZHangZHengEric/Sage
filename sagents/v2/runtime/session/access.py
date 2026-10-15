@@ -140,6 +140,11 @@ class AuthorizedSessionAccess:
             session_id, after_sequence=after_sequence, limit=limit
         )
 
+    async def read_stream_previews(self, run_id: str, context: RequestContext):
+        run = await self._session_store.get_run(run_id)
+        await self._authorize(run.session_id, context)
+        return await self._session_store.read_stream_previews(run_id)
+
     async def subscribe_events(
         self, cursor: EventCursor, context: RequestContext
     ) -> AsyncIterator:

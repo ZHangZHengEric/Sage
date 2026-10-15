@@ -285,5 +285,29 @@ def test_last_event_id_can_resume_inside_one_canonical_runtime_event(
         },
     )
 
+    # The start is now a durable boundary, even when text deltas are previews.
+    assert cursor.startswith("v1:")
     assert replay.status_code == 200
     assert _parse_sse(replay.text)[0]["type"] == "TEXT_MESSAGE_CONTENT"
+
+
+@pytest.mark.timeout(30)
+def test_last_event_id_after_streamed_message_end_does_not_replay_text(
+    client: TestClient,
+):
+    token = register_and_login(client)
+    headers = {"Authorization": f"Bearer {token}"}
+    first = client.post("/api/agent", json=_run_input(), headers=headers)
+    assert first.status_code == 200
+    frames = _parse_sse_frames(first.text)
+    cursor = next(
+        cursor for cursor, event in frames if event["type"] == "TEXT_MESSAGE_END"
+    )
+    assert cursor and cursor.endswith(":2")
+    replay = client.post(
+        "/api/agent", json=_run_input(), headers={**headers, "Last-Event-ID": cursor}
+    )
+    assert replay.status_code == 200
+    events = _parse_sse(replay.text)
+    assert not any(event["type"].startswith("TEXT_MESSAGE_") for event in events)
+    assert events[-1]["type"] == "RUN_FINISHED"

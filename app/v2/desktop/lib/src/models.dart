@@ -1038,6 +1038,8 @@ class Conversation {
     this.runId = '',
     this.turnId = '',
     this.runSequence = 0,
+    this.previewSequence = 0,
+    this.previewEpoch,
     this.status = RunStatus.idle,
     this.thinking = false,
     List<ChatMessage>? messages,
@@ -1068,6 +1070,8 @@ class Conversation {
   String runId;
   String turnId;
   int runSequence;
+  int previewSequence;
+  String? previewEpoch;
   RunStatus status;
 
   /// Transient UI state driven by reasoning lifecycle events.
@@ -1172,6 +1176,8 @@ class Conversation {
       runId: json['run_id']?.toString() ?? '',
       turnId: json['turn_id']?.toString() ?? '',
       runSequence: (json['run_sequence'] as num?)?.toInt() ?? 0,
+      previewSequence: (json['preview_sequence'] as num?)?.toInt() ?? 0,
+      previewEpoch: json['preview_epoch']?.toString(),
       status: runStatusFromWire(json['status']?.toString()),
       messages: messages,
       pendingInteraction: rawInteraction is Map
@@ -1212,6 +1218,8 @@ class Conversation {
     'run_id': runId,
     'turn_id': turnId,
     'run_sequence': runSequence,
+    'preview_sequence': previewSequence,
+    'preview_epoch': previewEpoch,
     'status': status.name,
     'messages': [for (final value in messages) value.toJson()],
     'pending_interaction': pendingInteraction?.toJson(),

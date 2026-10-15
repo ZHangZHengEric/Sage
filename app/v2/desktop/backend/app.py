@@ -991,10 +991,20 @@ def create_app(
         )
 
     @app.get("/api/v2/runs/{run_id}/events")
-    async def subscribe_events(run_id: str, request: Request, after_sequence: int = 0):
+    async def subscribe_events(
+        run_id: str,
+        request: Request,
+        after_sequence: int = 0,
+        preview_sequence: int = 0,
+        preview_epoch: str | None = None,
+    ):
         return StreamingResponse(
             runtime_service.subscribe_events(
-                run_id, after_sequence, get_desktop_user_id(request)
+                run_id,
+                after_sequence,
+                get_desktop_user_id(request),
+                preview_sequence=preview_sequence,
+                preview_epoch=preview_epoch,
             ),
             media_type="application/x-ndjson",
             headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no"},
