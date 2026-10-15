@@ -1,6 +1,7 @@
 <script setup>
 import { computed, ref } from 'vue'
 import AppIcon from './AppIcon.vue'
+import SchemaField from './SchemaField.vue'
 const props = defineProps({
   form: { type: Object, required: true },
   agentId: String, readonly: Boolean, canEdit: Boolean, busy: Boolean, error: String, message: String,
@@ -9,12 +10,14 @@ const props = defineProps({
   approvalTools: { type: Array, default: () => [] },
   externalTools: { type: Array, default: () => [] },
 })
+const budgetSchema = { type: 'object', properties: Object.fromEntries(['max_steps', 'input_tokens', 'system_tokens', 'protected_recent_tokens', 'output_tokens', 'total_tokens', 'wall_time_seconds'].map(key => [key, { type: key === 'wall_time_seconds' ? 'number' : 'integer', minimum: key === 'protected_recent_tokens' ? 0 : 1, ...(key === 'max_steps' ? { maximum: 10000 } : {}) }])) }
 const emit = defineEmits(['close', 'edit', 'save', 'update:form', 'update:selectedSkills'])
 const activeSection = ref('basic'), content = ref(null), toolCategory = ref('')
 const toolSearch = ref(''), skillSearch = ref('')
 const sections = [
   { id: 'basic', label: '基本信息', icon: 'user' },
   { id: 'model', label: '模型配置', icon: 'model' },
+  { id: 'budgets', label: '运行预算', icon: 'settings' },
   { id: 'tools', label: '可用工具', icon: 'tools' },
   { id: 'skills', label: '可用技能', icon: 'skill' },
   { id: 'approval', label: '工具审批', icon: 'settings' },
@@ -83,6 +86,7 @@ function toggleSkill(name) {
             <label class="field"><span>系统提示词</span><textarea class="mono" :value="form.instructions" :readonly="readonly" :disabled="busy" rows="10" @input="update('instructions', $event.target.value)" /></label>
           </div></section>
           <section id="agent-model"><h2><span class="section-icon"><AppIcon name="model" /></span>模型配置</h2><div class="section-fields"><label class="field"><span>模型</span><select :value="form.model_id" :disabled="readonly || busy" @change="update('model_id', $event.target.value)"><option value="">使用默认模型</option><option v-if="form.model_id && !models.some(model => model.id === form.model_id)" :value="form.model_id">{{ form.model_id }}</option><option v-for="model in models" :key="model.id" :value="model.id">{{ model.model }}</option></select></label></div></section>
+          <section id="agent-budgets"><h2>运行预算</h2><div class="section-fields"><SchemaField :model-value="form.budgets || {}" :schema="budgetSchema" label="预算" :disabled="readonly || busy" @update:model-value="update('budgets', $event)" /></div></section>
           <section id="agent-tools"><h2><span class="section-icon"><AppIcon name="tools" /></span>可用工具<span class="selection-count">{{ form.tools.length }}</span></h2><div class="section-fields">
             <div v-if="form.tools.length" class="selected-tags"><span v-for="name in form.tools" :key="name" class="tag">{{ name }}</span></div>
             <div class="selection-box"><div class="selection-toolbar"><select v-model="toolCategory" aria-label="工具分类"><option value="">全部工具</option><option v-for="category in categories" :key="category">{{ category }}</option></select><input v-model="toolSearch" placeholder="搜索工具" aria-label="搜索工具" /><template v-if="!readonly"><button class="btn ghost" :disabled="busy" @click="selectTools(true)">全选</button><button class="btn ghost" :disabled="busy" @click="selectTools(false)">取消全选</button></template></div>

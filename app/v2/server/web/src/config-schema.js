@@ -1,0 +1,40 @@
+export const labels = {
+  metadata: '包信息', id: 'ID', version: '版本', name: '名称', description: '描述', kind: '类型',
+  agents: '智能体', models: '模型路由', credentials: '凭据绑定', runtime: '运行时', policies: '全局策略',
+  plugins: '插件', flows: '工作流', entrypoint: '入口', interfaces: '接口', tests: '测试', environments: '环境', files: '资源文件',
+  instructions: '系统提示词', inline: '提示词内容', path: '文件路径', mode: '模式', subagents: '子智能体',
+  tools: '工具', skills: '技能', budgets: '预算', memory: '记忆', sandbox: '沙箱', network: '网络',
+  tool_approval: '工具审批', default: '默认', recall: '自动召回', auto_write: '自动写入', scope: '作用域',
+  max_steps: '最大步数', input_tokens: '输入 Token', system_tokens: '系统 Token', protected_recent_tokens: '保留近期 Token',
+  output_tokens: '输出 Token', total_tokens: '总 Token', wall_time_seconds: '运行时间（秒）',
+  provider: '协议', plugin: '插件', base_url: 'API 地址', credential: '凭据', model: '模型',
+  request: '请求参数', limits: '模型限制', capabilities: '能力', capability_profile: '能力探测档案',
+  max_output_tokens: '最大输出 Token', context_window: '上下文窗口', temperature: 'Temperature', top_p: 'Top P', reasoning_effort: '推理强度', extra: '扩展参数',
+  multimodal: '多模态', structured_output: '结构化输出', tool_calling: '工具调用', reasoning: '推理', parallel_tool_calls: '并行工具调用',
+  type: '类型', loop: '循环', flow: '工作流', config: '配置', preset: '预设', deployment_profile: '部署模式',
+  plugin_trust_policy: '插件信任策略', required_guarantees: '运行保障', delegation_model_bindings: '委派模型绑定',
+  enabled: '启用', agent: '智能体', scenarios: '场景', gates: '质量门禁', nodes: '节点', edges: '连线', schema_version: 'Schema 版本',
+}
+export function resolveSchema(schema = {}, root = {}) {
+  if (schema.$ref) return resolveSchema(root.$defs?.[schema.$ref.split('/').at(-1)] || {}, root)
+  return schema
+}
+export function chooseSchema(schema, value, root) {
+  schema = resolveSchema(schema, root)
+  if (schema.anyOf || schema.oneOf) {
+    const options = (schema.anyOf || schema.oneOf).map(item => resolveSchema(item, root)).filter(item => item.type !== 'null')
+    return options.find(item => (item.type === 'array' && Array.isArray(value)) || (item.type === 'object' && value && typeof value === 'object' && !Array.isArray(value))) || options[0] || {}
+  }
+  return schema
+}
+export function initialValue(schema, root) {
+  schema = chooseSchema(schema, undefined, root)
+  if (schema.default !== undefined && schema.default !== null) return JSON.parse(JSON.stringify(schema.default))
+  if (schema.const !== undefined) return schema.const
+  if (schema.enum) return schema.enum[0]
+  if (schema.type === 'object' || schema.properties) return Object.fromEntries((schema.required || []).map(key => [key, initialValue(schema.properties?.[key], root)]))
+  if (schema.type === 'array') return []
+  if (schema.type === 'boolean') return false
+  if (schema.type === 'integer' || schema.type === 'number') return schema.minimum ?? (schema.exclusiveMinimum !== undefined ? schema.exclusiveMinimum + 1 : 0)
+  return ''
+}

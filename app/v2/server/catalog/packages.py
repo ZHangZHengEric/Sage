@@ -60,6 +60,7 @@ def build_package(record, *, sandbox=None, previous=None) -> AgentPackageBundle:
         definition["sandbox"] = sandbox
     route_id = definition["models"].get("primary", "primary")
     manifest["models"][route_id] = {
+        **manifest["models"].get(route_id, {}),
         "provider": "server",
         "model": record.model_id or "default",
     }

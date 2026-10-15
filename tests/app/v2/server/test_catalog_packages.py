@@ -284,3 +284,17 @@ async def test_agent_edit_rolls_back_if_package_write_fails(store, monkeypatch):
             "alice", agent.with_configuration(name="must not persist")
         )
     assert (await store.get("alice")).agents[0].package == agent.package
+
+
+async def test_model_request_options_survive_database_reload(store):
+    saved = await store.upsert_model("alice", {
+        "model": "demo", "api_key": "database-test-key",
+        "request": {"max_output_tokens": 4096, "temperature": 0, "top_p": 0.7, "extra": {"seed": 7}},
+        "limits": {"context_window": 128000}, "capabilities": {"multimodal": True},
+    })
+    reloaded = await DatabaseCatalogStore(store.database).get("alice")
+    model = next(item for item in reloaded.models if item.id == saved.id)
+    assert model.request == saved.request
+    assert model.limits == saved.limits
+    assert model.capabilities == saved.capabilities
+    assert model.api_key.get_secret_value() == "database-test-key"

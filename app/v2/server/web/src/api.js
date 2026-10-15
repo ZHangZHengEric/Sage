@@ -67,6 +67,7 @@ export const api = {
   listKeys: () => list('/api/keys'),
   createKey: (body) => request('/api/keys', { method: 'POST', body: JSON.stringify(body) }),
   revokeKey: (id) => request(`/api/keys/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+  packageResources: () => request('/api/agent-packages/resources'),
   packageSchema: () => request('/api/agent-packages/schema'),
   packageTemplate: (agentId = '') => request(`/api/agent-packages/template${agentId ? `?agent_id=${encodeURIComponent(agentId)}` : ''}`),
   packages: (offset = 0) => list(`/api/agent-packages?limit=50&offset=${offset}`),
@@ -94,6 +95,7 @@ export const api = {
   logout: () => request('/api/auth/logout', { method: 'POST' }),
   listModels: (all = true) => list('/api/models', all),
   getModel: (id, owner) => read(`/api/models/${encodeURIComponent(id)}`, owner),
+  probeModel: (body) => request('/api/models/probe', { method: 'POST', body: JSON.stringify(body) }),
   saveModel: (body) =>
     request('/api/models', { method: 'POST', body: JSON.stringify(body) }),
   deleteModel: (id) => request(`/api/models/${id}`, { method: 'DELETE' }),

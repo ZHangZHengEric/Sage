@@ -2,10 +2,12 @@
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { api, isForeign } from '../api.js'
 import FormDrawer from '../components/FormDrawer.vue'
+import PackageEditor from '../components/PackageEditor.vue'
 
 const definitionOpen = ref(false), runOpen = ref(false)
 import { onBeforeRouteLeave } from 'vue-router'
 
+const resources = ref({})
 const packages = ref([]), runs = ref([]), agents = ref([]), schema = ref(null)
 const editor = ref(''), savedRef = ref(''), savedText = ref(''), selectedAgent = ref('assistant')
 const content = ref(''), sessionId = ref(''), operation = ref(''), status = ref(null)
@@ -36,9 +38,9 @@ async function refresh() {
 }
 function canReplaceDraft() { return editor.value === savedText.value || window.confirm('当前修改尚未保存，确定放弃吗？') }
 onBeforeRouteLeave(() => canReplaceDraft())
-async function startNew() { if (canReplaceDraft()) await action(async () => { setBundle(await api.packageTemplate()); definitionOpen.value = true }) }
+async function startNew() { if (canReplaceDraft()) await action(async () => { const [bundle, available] = await Promise.all([api.packageTemplate(), api.packageResources()]); resources.value = available; setBundle(bundle); definitionOpen.value = true }) }
 async function importDraft() { if (canReplaceDraft()) await action(async () => setBundle(await api.packageTemplate(importId.value))) }
-async function load(row) { if (canReplaceDraft()) await action(async () => { setBundle(await api.package(row.ref, row._owner), row.ref, row._owner); definitionOpen.value = true }) }
+async function load(row) { if (canReplaceDraft()) await action(async () => { setBundle(await api.package(row.ref, row._owner), row.ref, row._owner); if (!isForeign(row)) resources.value = await api.packageResources(); definitionOpen.value = true }) }
 async function inspect(op, owner = runOwner.value) {
   const revision = ++statusRevision
   const result = await api.packageRun(op, owner)
@@ -125,14 +127,14 @@ onUnmounted(() => { disposed = true; statusRevision++; clearInterval(timer) })
       </template>
     </fieldset>
     <FormDrawer v-model="definitionOpen" title="定义与版本" :busy="busy">
-      <pre v-if="foreignBundle" aria-label="完整包定义">{{ editor }}</pre>
+      <PackageEditor v-if="foreignBundle" :model-value="editor" :schema="schema" disabled />
       <fieldset v-else :disabled="busy">
       <p v-if="error" class="error" role="alert">{{ error }}</p>
       <p v-if="message" role="status">{{ message }}</p>
       <label>导入现有 Agent <select v-model="importId"><option value="">空白模板</option><option v-for="a in agents" :key="a.id" :value="a.id">{{ a.name }}</option></select></label>
       <button @click="importDraft">导入为草稿</button>
-      <label class="editor">完整包定义<textarea aria-label="完整包定义" v-model="editor" spellcheck="false" rows="22" /></label>
-      <button @click="action(async () => { const r = await api.validatePackage(JSON.parse(editor)); message = JSON.stringify(r, null, 2) })">验证与资源检查</button>
+      <PackageEditor v-model="editor" :schema="schema" :resources="resources" :disabled="busy" />
+      <button @click="action(async () => { const r = await api.validatePackage(JSON.parse(editor)); message = r.valid ? (r.readiness?.ready ? '配置验证通过，资源已就绪' : '配置验证通过') : '配置验证未通过' })">验证与资源检查</button>
       <button @click="save">保存版本</button>
       <details><summary>宿主能力与完整 Schema</summary><pre>{{ JSON.stringify(schema, null, 2) }}</pre></details>
       <label>复制为新包 <input v-model="forkId" placeholder="新包 ID" /></label><input aria-label="新版本" v-model="forkVersion" />
@@ -157,5 +159,5 @@ onUnmounted(() => { disposed = true; statusRevision++; clearInterval(timer) })
 fieldset { border: 1px solid #8885; border-radius: 12px; margin: 20px 0; padding: 20px; min-width: 0; }
 label { display: block; margin: 12px 0; } textarea { width: 100%; box-sizing: border-box; }
 .editor textarea, pre { font-family: monospace; } pre { overflow: auto; max-height: 500px; white-space: pre-wrap; overflow-wrap: anywhere; }
-button, input, select { margin: 5px; padding: 7px 12px; } button { border: 1px solid #8885; border-radius: 8px; cursor: pointer; background: #f6f6f6; } button:disabled { cursor: default; opacity: .5; } .error { color: #c44; }
+button, input, select { margin: 5px; padding: 7px 12px; } button { border: 1px solid #8885; border-radius: 8px; cursor: pointer; background: var(--card); color: var(--foreground); } button:disabled { cursor: default; opacity: .5; } .error { color: var(--destructive); }
 </style>

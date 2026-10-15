@@ -5,9 +5,9 @@ import Chat from './views/Chat.vue'
 import History from './views/History.vue'
 import Tools from './views/Tools.vue'
 import Users from './views/Users.vue'
-import Models from './views/Models.vue'
-import Agents from './views/Agents.vue'
-import Studio from './views/Studio.vue'
+const Models = () => import('./views/Models.vue')
+const Agents = () => import('./views/Agents.vue')
+const Studio = () => import('./views/Studio.vue')
 import Mcp from './views/Mcp.vue'
 import A2A from './views/A2A.vue'
 import Skills from './views/Skills.vue'

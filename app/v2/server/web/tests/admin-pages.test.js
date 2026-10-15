@@ -112,7 +112,7 @@ test('agent editor saves V2 fields and selected skills before staying open or ex
   assert.equal(state.drawerOpen, true)
   assert.equal(state.editing, 'new-agent')
   assert.deepEqual(api.bindAgentSkills.mock.calls[0].arguments, ['new-agent', ['research']])
-  assert.deepEqual(Object.keys(api.createAgent.mock.calls[0].arguments[0]).sort(), ['description', 'execution_policy', 'instructions', 'model_id', 'name', 'sandbox', 'tool_approval', 'tools'])
+  assert.deepEqual(Object.keys(api.createAgent.mock.calls[0].arguments[0]).sort(), ['budgets', 'description', 'execution_policy', 'instructions', 'model_id', 'name', 'sandbox', 'tool_approval', 'tools'])
   assert.deepEqual(api.createAgent.mock.calls[0].arguments[0].tool_approval, { default: 'auto_approve', tools: { file_read: 'ask', 'mcp:drive:write': 'auto_approve' } })
   await state.save(true)
   assert.equal(state.drawerOpen, false)
@@ -192,4 +192,41 @@ test('user execution policy viewer switches to the selected row without changing
   assert.equal(state.selectedUser.username, 'Bob')
   assert.equal(state.selectedUser.execution_policy.shell, 'deny')
   assert.equal(api.saveExecutionPolicy.mock.calls.length, 0)
+})
+
+test('model edits preserve request options and probe facts through save and default selection', async t => {
+  const { api, mount } = await setup(t, 'Models')
+  const model = { id: 'model-1', protocol: 'openai-chat-completions', base_url: 'https://example.invalid/v1', model: 'demo', is_default: false,
+    request: { temperature: 0, max_output_tokens: 8192, extra: { seed: 7 } }, limits: { context_window: 128000 }, capabilities: { tool_calling: true } }
+  t.mock.method(api, 'listModels', async () => [model])
+  t.mock.method(api, 'getModel', async () => ({ ...model, api_key: 'key' }))
+  t.mock.method(api, 'saveModel', async body => body)
+  t.mock.method(api, 'probeModel', async () => ({ route_fingerprint: 'fingerprint', outcomes: [{ name: 'tool_calling', status: 'supported' }, { name: 'multimodal', status: 'unsupported' }] }))
+  const state = await mount()
+  await state.openModel(model, false)
+  assert.equal(state.form.request.temperature, 0)
+  await state.probe()
+  assert.equal(state.form.capability_profile.route_fingerprint, 'fingerprint')
+  assert.equal(state.form.capabilities.multimodal, false)
+  await state.save()
+  assert.equal(api.saveModel.mock.calls[0].arguments[0].request.extra.seed, 7)
+  await state.makeCurrent(model)
+  assert.deepEqual(api.saveModel.mock.calls[1].arguments[0].request, model.request)
+  state.startNew()
+  assert.equal(state.form.capability_profile, undefined)
+  state.form.protocol = 'gemini-generate-content'
+  state.onProtocolChange()
+  assert.equal(state.form.base_url, 'https://generativelanguage.googleapis.com/v1beta')
+})
+
+test('package form edits retain unrelated agents, files and runtime selections', async t => {
+  const { mount } = await setup(t, 'PackageEditor', 'components')
+  const bundle = { manifest: { metadata: { id: 'demo', version: '1' }, agents: { main: { name: 'Main' }, child: { name: 'Child' } }, runtime: { capabilities: { 'memory.provider': { plugin: 'memory' } } } }, files: { 'prompts/main.md': 'Keep me' } }
+  let changed
+  const state = await mount({ modelValue: JSON.stringify(bundle), schema: { bundle_schema: { properties: { manifest: { type: 'object' } } } }, 'onUpdate:modelValue': value => { changed = JSON.parse(value) } })
+  state.update({ id: 'demo', version: '2' })
+  assert.equal(changed.manifest.metadata.version, '2')
+  assert.deepEqual(changed.manifest.agents, bundle.manifest.agents)
+  assert.deepEqual(changed.files, bundle.files)
+  assert.deepEqual(changed.manifest.runtime, bundle.manifest.runtime)
 })

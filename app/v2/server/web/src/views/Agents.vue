@@ -40,6 +40,7 @@ function emptyForm() {
     description: '',
     instructions: 'Be helpful, concise, and explicit about uncertainty.',
     model_id: '',
+    budgets: {},
     tools: [],
     sandbox: { network: 'none' },
     tool_approval: { default: 'auto_approve', tools: {} },
@@ -99,6 +100,7 @@ async function openAgent(item, readonly = true) {
     editing.value = item.id
     form.value = {
       name: detail.name, description: detail.description || '', instructions: detail.instructions || '',
+      budgets: structuredClone(detail.package?.manifest?.agents?.[item.id]?.budgets || {}),
       model_id: detail.model_id || '', tools: [...(detail.tools || [])],
       tool_approval: detail.tool_approval ? structuredClone(detail.tool_approval) : null,
       execution_policy: { ...(detail.execution_policy || emptyForm().execution_policy) },
