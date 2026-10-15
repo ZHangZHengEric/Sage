@@ -49,6 +49,17 @@ def test_a_valid_server_keeps_its_transport():
     assert [item.name for item in catalog.mcp_servers] == ["files"]
 
 
+def test_mcp_timeout_is_configurable_and_bounded():
+    record, catalog = upsert_mcp(empty_catalog(), _payload(timeout_seconds=700))
+    assert record.timeout_seconds == 700
+    assert mcp_server_configs([record])[0].timeout_seconds == 700
+    unchanged, _ = upsert_mcp(catalog, _payload(timeout_seconds=None))
+    assert unchanged.timeout_seconds == 700
+    with pytest.raises(SageV2Error) as exc:
+        upsert_mcp(empty_catalog(), _payload(timeout_seconds=901))
+    assert exc.value.info.category == ErrorCategory.VALIDATION
+
+
 def test_a_legacy_stdio_row_is_skipped_instead_of_breaking_the_catalog():
     catalog = UserCatalog.model_validate(
         {

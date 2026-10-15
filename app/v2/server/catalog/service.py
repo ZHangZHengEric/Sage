@@ -81,6 +81,17 @@ class CatalogService:
             await self.store.update_agent(user_id, record)
             return record
 
+    async def update_agent_instructions(self, user_id: str, agent_id: str, instructions: str) -> AgentRecord:
+        """Update one field while preserving current Agent configuration."""
+        async with self._lock(user_id, "agents"):
+            catalog = await self.store.get(user_id)
+            current = require_agent(catalog, agent_id)
+            if current.instructions == instructions:
+                return current
+            updated = current.model_copy(update={"instructions": instructions})
+            await self.store.update_agent(user_id, updated)
+            return updated
+
     async def delete_agent(self, user_id: str, agent_id: str) -> None:
         async with self._lock(user_id, "agents"):
             await self.store.delete_agent(user_id, agent_id)
