@@ -825,6 +825,89 @@ async def test_shell_and_todo_tools_use_v2_runtime_state(tmp_path: Path):
     ]
 
 
+@pytest.mark.asyncio
+async def test_todos_are_isolated_by_session_and_restored_after_runtime_restart(tmp_path: Path):
+    plugin = await plugin_for(tmp_path)
+    legacy = tmp_path / ".sage" / "todos.json"
+    legacy.parent.mkdir(parents=True)
+    legacy.write_text(json.dumps([{"id": "legacy", "content": "Unowned"}]))
+
+    for index, session in enumerate(("session_a", "session_b"), start=1):
+        result = await plugin.executor.execute(
+            call("todo_read", {"session_id": session}, index=index), CONTEXT
+        )
+        assert result.error is None
+        assert result.content[0].value["tasks"] == []
+        result = await plugin.executor.execute(
+            call(
+                "todo_write",
+                {"session_id": session, "tasks": [{"id": "t1", "content": session}]},
+                index=index + 10,
+            ),
+            CONTEXT,
+        )
+        assert result.error is None
+
+    restored = await plugin_for(tmp_path)
+    result = await restored.executor.execute(
+        call(
+            "todo_write",
+            {"session_id": "session_a", "tasks": [{"id": "t1", "status": "completed"}]},
+            index=30,
+        ),
+        CONTEXT,
+    )
+    assert result.error is None
+    for index, session in enumerate(("session_a", "session_b"), start=40):
+        result = await restored.executor.execute(
+            call("todo_read", {"session_id": session}, index=index), CONTEXT
+        )
+        assert result.error is None
+        assert result.content[0].value["tasks"] == [{
+            "id": "t1",
+            "content": session,
+            "status": "completed" if session == "session_a" else "pending",
+        }]
+        assert (tmp_path / ".sage" / "todos" / f"{session}.json").is_file()
+    assert json.loads(legacy.read_text()) == [{"id": "legacy", "content": "Unowned"}]
+
+
+@pytest.mark.asyncio
+async def test_todo_session_paths_are_encoded_and_owner_is_enforced(tmp_path: Path):
+    plugin = await plugin_for(tmp_path)
+    for index, session in enumerate(("../other", "..%2Fother"), start=1):
+        result = await plugin.executor.execute(
+            call(
+                "todo_write",
+                {"session_id": session, "tasks": [{"id": "t1", "content": session}]},
+                index=index,
+            ),
+            CONTEXT,
+        )
+        assert result.error is None
+    assert (tmp_path / ".sage" / "todos" / "..%2Fother.json").is_file()
+    assert (tmp_path / ".sage" / "todos" / "..%252Fother.json").is_file()
+
+    for index, name in enumerate(("todo_read", "todo_write"), start=10):
+        for offset, session in enumerate(("", " ", "other_session")):
+            arguments = {"session_id": session}
+            if name == "todo_write":
+                arguments["tasks"] = [{"id": "t1", "content": "Wrong session"}]
+            request = call(name, arguments, index=index * 10 + offset).model_copy(
+                update={"owner_session_id": "current_session"}
+            )
+            with pytest.raises(ValueError, match="session_id"):
+                await plugin.executor.execute(request, CONTEXT)
+    assert len(list((tmp_path / ".sage" / "todos").iterdir())) == 2
+
+    request = call("todo_read", {"session_id": "../other"}, index=200).model_copy(
+        update={"owner_session_id": "../other"}
+    )
+    result = await plugin.executor.execute(request, CONTEXT)
+    assert result.error is None
+    assert result.content[0].value["tasks"][0]["content"] == "../other"
+
+
 def test_v2_tool_decorator_infers_arguments_and_hides_runtime_injection():
     class ExampleTools:
         @tool(description="Echo text")
