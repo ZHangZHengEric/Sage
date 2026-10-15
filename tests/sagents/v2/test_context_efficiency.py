@@ -496,7 +496,7 @@ def test_manifest_system_and_protected_limits_respect_global_ceiling():
 
 
 @pytest.mark.asyncio
-async def test_public_builder_rejects_unbounded_input_before_model_request(tmp_path):
+async def test_public_builder_suspends_unbounded_input_before_model_request(tmp_path):
     from sagents.v2 import SAgentBuilder
     from sagents.v2.contracts.commands import InputItem, StartRun
     from sagents.v2.contracts.principals import ActorRef, PrincipalType, RequestContext
@@ -534,8 +534,15 @@ async def test_public_builder_rejects_unbounded_input_before_model_request(tmp_p
         events = await application.entrypoint().runtime.session_store.read_events(
             result.run_id
         )
-        failure = next(event for event in events if event.type == "run.failed")
-        assert failure.data.error.code == "context.budget_exhausted"
+        assert result.state.value == "suspended"
+        assert events[-1].type == "run.suspended"
+        assert not any(event.type == "run.failed" for event in events)
+        store = application.entrypoint().runtime.session_store
+        suspension = await store.get_suspension(result.suspension_id)
+        interaction = await store.get_interaction(suspension.interaction_id)
+        assert interaction.payload["error"]["code"] == "context.budget_exhausted"
+        assert interaction.payload["resumable"] is True
+        assert interaction.allowed_decisions == ("retry", "change_direction", "cancel")
         assert model.requests == []
     finally:
         await application.close()
