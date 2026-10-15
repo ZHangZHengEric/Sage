@@ -37,7 +37,7 @@ from sagents.v2.contracts.commands import (
     StartRun,
 )
 from sagents.v2.contracts.errors import SageV2Error
-from sagents.v2.contracts.events import RunEventData
+from sagents.v2.contracts.events import ItemEventData, RunEventData
 from sagents.v2.contracts.run_state import EventCursor
 from sagents.v2.runtime.session.contracts import EventDraft
 from sagents.v2.contracts.common import utc_now
@@ -67,7 +67,10 @@ from sagents.v2.runtime.execution.sandbox import (
 from sagents.v2.flow import FlowNodeResult, FlowRuntime
 from sagents.v2.package.manifest.flows import FlowDefinition, FlowEdge, FlowNode
 from sagents.v2.runtime.session.plugins.ephemeral import EphemeralSessionStore
-from sagents.v2.runtime.session.plugins.filesystem import FilesystemSessionStore
+from sagents.v2.runtime.session.plugins.filesystem import (
+    FilesystemSessionStore,
+    _FilesystemSessionState,
+)
 
 
 CONTEXT = RequestContext(
@@ -861,6 +864,31 @@ async def test_readable_session_views_are_repaired_from_authoritative_state(tmp_
     assert (session_dir / "runs" / created.handle.run_id / "events.jsonl").is_file()
 
 
+@pytest.mark.asyncio
+async def test_loading_a_session_skips_views_that_are_already_current(
+    tmp_path, monkeypatch
+):
+    path = tmp_path / "session-store"
+    first = FilesystemSessionStore(path)
+    created = await first.create_run(command("current-views"), CONTEXT)
+    await first.close()
+
+    materialized = []
+    original = _FilesystemSessionState._materialize_session_views
+
+    def counted(self, session_id, state):
+        materialized.append(session_id)
+        return original(self, session_id, state)
+
+    monkeypatch.setattr(
+        _FilesystemSessionState, "_materialize_session_views", counted
+    )
+    reopened = FilesystemSessionStore(path)
+    await reopened.get_session(created.handle.session_id)
+    await reopened.close()
+    assert materialized == []
+
+
 WRITE_TOOL = ToolDefinition(
     name="write_value",
     description="write",
@@ -1317,3 +1345,286 @@ async def test_subscription_replay_waits_for_commit_and_does_not_duplicate(
         )
         await stream.aclose()
         await store.close()
+
+
+async def _cancel(store, created, key):
+    await store.commit_run(
+        run_id=created.handle.run_id,
+        expected_revision=created.handle.run_revision,
+        expected_states={RunState.QUEUED},
+        new_state=RunState.CANCELLED,
+        drafts=(),
+        context=CONTEXT,
+        idempotency_key=key,
+    )
+
+
+def _count_full_reads(monkeypatch):
+    reads = []
+    original = _FilesystemSessionState._read_session_aggregate_with_format
+
+    def counted(self, snapshot):
+        reads.append(snapshot)
+        return original(self, snapshot)
+
+    monkeypatch.setattr(
+        _FilesystemSessionState, "_read_session_aggregate_with_format", counted
+    )
+    return reads
+
+
+@pytest.mark.asyncio
+async def test_reopen_and_recovery_do_not_read_finished_sessions(
+    tmp_path, monkeypatch
+):
+    path = tmp_path / "startup-index"
+    store = FilesystemSessionStore(path)
+    finished = []
+    for index in range(5):
+        created = await store.create_run(command(f"finished-{index}"), CONTEXT)
+        await _cancel(store, created, f"cancel-{index}")
+        finished.append(created)
+    active = await store.create_run(command("active"), CONTEXT)
+    await store.close()
+
+    reads = _count_full_reads(monkeypatch)
+    reopened = FilesystemSessionStore(path)
+    assert reads == []
+
+    dispatchable = await reopened.list_dispatchable_runs()
+    assert [value.run.run_id for value in dispatchable] == [active.handle.run_id]
+    assert reopened._loaded_session_ids == {active.handle.session_id}
+    assert len(reads) == 1
+    assert await reopened.has_nonterminal_runs() is True
+
+    with pytest.raises(SageV2Error) as missing:
+        await reopened.get_run("run_missing")
+    assert missing.value.info.code == "run_id.not_found"
+    assert len(reads) == 1
+
+    run = await reopened.get_run(finished[0].handle.run_id)
+    assert run.state == RunState.CANCELLED
+    assert len(reads) == 2
+    await reopened.close()
+
+
+@pytest.mark.asyncio
+async def test_stale_session_index_falls_back_to_authoritative_state(tmp_path):
+    path = tmp_path / "stale-index"
+    store = FilesystemSessionStore(path)
+    created = await store.create_run(command("stale"), CONTEXT)
+    await store.close()
+    summary = (
+        path / ".session-store" / "session-index" / f"{created.handle.session_id}.json"
+    )
+    queued_summary = summary.read_bytes()
+
+    store = FilesystemSessionStore(path)
+    await _cancel(store, created, "cancel-stale")
+    await store.close()
+    # An older writer or a crash can leave a summary describing earlier files.
+    summary.write_bytes(queued_summary)
+
+    reopened = FilesystemSessionStore(path)
+    assert await reopened.list_dispatchable_runs() == ()
+    assert await reopened.has_nonterminal_runs() is False
+    assert json.loads(summary.read_bytes())["summary"]["nonterminal_runs"] == []
+    await reopened.close()
+
+
+@pytest.mark.asyncio
+async def test_unclean_shutdown_keeps_new_runs_recoverable(tmp_path):
+    path = tmp_path / "crash-index"
+    store = FilesystemSessionStore(path)
+    first = await store.create_run(command("before-crash"), CONTEXT)
+    second = await store.create_run(
+        command(
+            "after-crash",
+            session_id=first.handle.session_id,
+            mode=SessionConcurrencyMode.SNAPSHOT_ISOLATED,
+        ),
+        CONTEXT,
+    )
+    await _cancel(store, first, "cancel-before-crash")
+    # Simulate a killed host: the writer lock disappears without close().
+    store._release_writer_lock()
+
+    reopened = FilesystemSessionStore(path)
+    dispatchable = await reopened.list_dispatchable_runs()
+    assert [value.run.run_id for value in dispatchable] == [second.handle.run_id]
+    await reopened.close()
+
+
+@pytest.mark.asyncio
+async def test_deleted_session_leaves_no_index_summary(tmp_path):
+    path = tmp_path / "deleted-index"
+    store = FilesystemSessionStore(path)
+    created = await store.create_run(command("delete-me"), CONTEXT)
+    await _cancel(store, created, "cancel-delete-me")
+    await store.delete_session(created.handle.session_id)
+    await store.close()
+
+    assert not tuple((path / ".session-store" / "session-index").glob("*.json"))
+    reopened = FilesystemSessionStore(path)
+    assert await reopened.has_nonterminal_runs() is False
+    with pytest.raises(SageV2Error):
+        await reopened.get_run(created.handle.run_id)
+    await reopened.close()
+
+
+def _stream_drafts(item_id):
+    return (
+        EventDraft(
+            type="message.started",
+            item_id=item_id,
+            data=ItemEventData(operation="started"),
+        ),
+        EventDraft(
+            type="message.delta",
+            item_id=item_id,
+            data=ItemEventData(operation="delta", delta="partial"),
+        ),
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("durable_stream_deltas", [False, True])
+async def test_model_stream_deltas_stay_out_of_the_durable_ledger_by_default(
+    tmp_path, durable_stream_deltas
+):
+    store = FilesystemSessionStore(
+        tmp_path / "stream-deltas", durable_stream_deltas=durable_stream_deltas
+    )
+    created = await store.create_run(command("stream"), CONTEXT)
+    running = await store.commit_run(
+        run_id=created.handle.run_id,
+        expected_revision=created.handle.run_revision,
+        expected_states={RunState.QUEUED},
+        new_state=RunState.RUNNING,
+        drafts=(),
+        context=CONTEXT,
+        idempotency_key="stream:start",
+    )
+    await store.commit_model_stream_batch(
+        run=running.run,
+        drafts=_stream_drafts("item_stream"),
+        context=CONTEXT,
+        idempotency_key="stream:batch",
+    )
+
+    durable = [event.type for event in await store.read_events(created.handle.run_id)]
+    previews = await store.read_stream_previews(created.handle.run_id)
+    assert "item.completed" not in durable
+    assert "message.started" in durable
+    if durable_stream_deltas:
+        assert "message.delta" in durable
+        assert previews == ()
+    else:
+        assert "message.delta" not in durable
+        assert [event.type for event in previews] == ["message.delta"]
+    await store.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("new_state", "item_status"),
+    [(RunState.CANCELLED, "cancelled"), (RunState.FAILED, "failed")],
+)
+async def test_interrupted_stream_keeps_partial_text_in_history(
+    tmp_path, new_state, item_status
+):
+    path = tmp_path / "interrupted-stream"
+    store = FilesystemSessionStore(path)
+    created = await store.create_run(command("interrupted"), CONTEXT)
+    running = await store.commit_run(
+        run_id=created.handle.run_id,
+        expected_revision=created.handle.run_revision,
+        expected_states={RunState.QUEUED},
+        new_state=RunState.RUNNING,
+        drafts=(),
+        context=CONTEXT,
+        idempotency_key="interrupted:start",
+    )
+    run = await store.commit_model_stream_batch(
+        run=running.run,
+        drafts=_stream_drafts("item_partial")
+        + (
+            EventDraft(
+                type="reasoning.started",
+                item_id="reasoning_partial",
+                data=ItemEventData(operation="started"),
+            ),
+            EventDraft(
+                type="reasoning.delta",
+                item_id="reasoning_partial",
+                data=ItemEventData(operation="delta", delta="private thought"),
+            ),
+        )
+        + (
+            EventDraft(
+                type="message.delta",
+                item_id="item_partial",
+                data=ItemEventData(operation="delta", delta=" answer"),
+            ),
+        ),
+        context=CONTEXT,
+        idempotency_key="interrupted:batch",
+    )
+    stop = await store.commit_run(
+        run_id=created.handle.run_id,
+        expected_revision=run.revision,
+        expected_states={RunState.RUNNING},
+        new_state=new_state,
+        drafts=(
+            EventDraft(
+                type=f"run.{item_status}",
+                data=RunEventData(state=new_state.value),
+            ),
+        ),
+        context=CONTEXT,
+        idempotency_key="interrupted:stop",
+    )
+    assert await store.read_stream_previews(created.handle.run_id) == ()
+    await store.close()
+
+    reopened = FilesystemSessionStore(path)
+    events = await reopened.read_events(created.handle.run_id)
+    partial = [
+        event
+        for event in events
+        if event.type == "message.completed" and event.item_id == "item_partial"
+    ]
+    assert len(partial) == 1
+    item = partial[0].data.item
+    assert item.status.value == item_status
+    assert item.data.role == "assistant"
+    assert item.data.content[0].text == "partial answer"
+    assert events[-1].type == f"run.{item_status}"
+    reasoning = [event for event in events if event.type == "reasoning.completed"]
+    assert len(reasoning) == 1
+    assert reasoning[0].data.item.status.value == item_status
+    assert reasoning[0].data.item.data.kind == "reasoning"
+    from app.v2.cli.sessions import transcript_entries
+
+    assert [
+        entry.text
+        for entry in transcript_entries(None, events)
+        if entry.kind == "assistant"
+    ] == ["partial answer"]
+    duplicate = await reopened.commit_run(
+        run_id=created.handle.run_id,
+        expected_revision=run.revision,
+        expected_states={RunState.RUNNING},
+        new_state=new_state,
+        drafts=(
+            EventDraft(
+                type=f"run.{item_status}", data=RunEventData(state=new_state.value)
+            ),
+        ),
+        context=CONTEXT,
+        idempotency_key="interrupted:stop",
+    )
+    assert duplicate.duplicate is True
+    assert duplicate.events == stop.events
+    assert await reopened.read_events(created.handle.run_id) == events
+    await reopened.close()
