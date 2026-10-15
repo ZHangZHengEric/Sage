@@ -48,6 +48,7 @@ class McpBody(BaseModel):
     api_key: str = ""
     disabled: bool = False
     description: str = ""
+    timeout_seconds: float | None = Field(default=None, gt=0, le=900)
 
 class McpPublic(BaseModel):
     name: str
@@ -55,6 +56,7 @@ class McpPublic(BaseModel):
     url: str | None = None
     disabled: bool = False
     description: str = ""
+    timeout_seconds: float = 30
     tools: list[str] = Field(default_factory=list)
     has_api_key: bool = False
 

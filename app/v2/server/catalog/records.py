@@ -100,6 +100,7 @@ class McpServerRecord(BaseModel):
     disabled: bool = False
     description: str = ""
     tools: list[str] = Field(default_factory=list)
+    timeout_seconds: float = Field(default=30, gt=0, le=900)
 
     @model_validator(mode="after")
     def validate_transport(self) -> McpServerRecord:
@@ -123,6 +124,7 @@ class McpServerRecord(BaseModel):
             "disabled": self.disabled,
             "description": self.description,
             "tools": list(self.tools),
+            "timeout_seconds": self.timeout_seconds,
             "has_api_key": self.api_key is not None
             and bool(self.api_key.get_secret_value()),
         }
@@ -387,6 +389,8 @@ def upsert_mcp(
             api_key=secret,
             disabled=bool(payload.get("disabled", False)),
             description=str(payload.get("description") or "")[:500],
+            timeout_seconds=(payload.get("timeout_seconds") if payload.get("timeout_seconds") is not None
+                else (existing.timeout_seconds if existing is not None else 30)),
             tools=_unique_names(
                 tools
                 if tools is not None
