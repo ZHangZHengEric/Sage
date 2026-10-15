@@ -76,7 +76,7 @@ async def test_desktop_root_exposes_live_self_configuration_only_outside_plan(
                 idempotency_key="load",
                 tool_name="load_skill",
                 owner_run_id=handle.run_id,
-                arguments={"skill_name": "review"},
+                arguments={"skill_name": "review", "session_id": handle.session_id},
             ),
             context,
         )
