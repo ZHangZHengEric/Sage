@@ -85,6 +85,8 @@ from sagents.v2.contracts.items import (
     ItemSnapshot,
     ItemStatus,
     MessageItemData,
+    ReasoningItemData,
+    TextBlock,
     UsageSummary,
 )
 from sagents.v2.runtime.session.contracts import (
@@ -1831,6 +1833,8 @@ class SessionStoreCoordinator(SessionAttachmentMixin):
                         "suspension must reference the committed interaction"
                     )
 
+            if new_state in {RunState.CANCELLED, RunState.FAILED}:
+                drafts = self._interrupted_item_drafts_locked(row, new_state) + drafts
             events = self._prepare_events_locked(
                 row,
                 session,
@@ -1900,6 +1904,127 @@ class SessionStoreCoordinator(SessionAttachmentMixin):
             expected_states={RunState.RUNNING},
             return_terminal_on_conflict=True,
         )
+
+    def _interrupted_item_drafts_locked(
+        self, row: _RunRow, new_state: RunState
+    ) -> tuple[EventDraft, ...]:
+        """Keep visible preview text that a terminal transition would discard.
+
+        Previews are retained only for Items without a ``*.completed`` event,
+        so each remaining Item is committed once with its partial content.
+        """
+
+        partial: dict[str, list[RuntimeEvent]] = {}
+        for event in self._stream_previews.get(row.run_id, ()):
+            if event.item_id is not None and isinstance(event.data, ItemEventData):
+                partial.setdefault(event.item_id, []).append(event)
+        status = (
+            ItemStatus.CANCELLED
+            if new_state == RunState.CANCELLED
+            else ItemStatus.FAILED
+        )
+        now = self._clock()
+        drafts = []
+        for item_id, events in partial.items():
+            text = "".join(
+                event.data.delta
+                for event in events
+                if isinstance(event.data.delta, str)
+            )
+            if not text:
+                continue
+            first = events[0]
+            data = (
+                ReasoningItemData(content=(TextBlock(text=text),))
+                if first.type == "reasoning.delta"
+                else MessageItemData(role="assistant", content=(TextBlock(text=text),))
+            )
+            encoded = json.dumps(
+                data.model_dump(mode="json"),
+                sort_keys=True,
+                separators=(",", ":"),
+                ensure_ascii=False,
+            ).encode()
+            item = ItemSnapshot(
+                item_id=item_id,
+                run_id=row.run_id,
+                turn_id=first.turn_id,
+                step_id=first.step_id,
+                status=status,
+                data=data,
+                content_hash=f"sha256:{hashlib.sha256(encoded).hexdigest()}",
+                created_at=first.occurred_at,
+                updated_at=now,
+            )
+            drafts.append(
+                EventDraft(
+                    type="item.completed",
+                    turn_id=first.turn_id,
+                    step_id=first.step_id,
+                    item_id=item_id,
+                    data=ItemEventData(operation="completed", item=item),
+                )
+            )
+        return tuple(drafts)
+
+    async def _commit_model_stream_with_previews(
+        self,
+        *,
+        run: RunSnapshot,
+        drafts: tuple[EventDraft, ...],
+        context: RequestContext,
+        idempotency_key: str,
+    ) -> RunSnapshot:
+        """Persist item starts; send model deltas from the in-process buffer.
+
+        The matching ``*.completed`` event carries the full item, so deltas
+        never enter the durable Run ledger.
+        """
+
+        started = tuple(
+            draft
+            for draft in drafts
+            if draft.type in {"message.started", "reasoning.started"}
+        )
+        previews = tuple(
+            draft
+            for draft in drafts
+            if draft.type in {"message.delta", "reasoning.delta"}
+        )
+        if started:
+            run = await self._commit_model_stream_drafts(
+                run=run,
+                drafts=started,
+                context=context,
+                idempotency_key=idempotency_key,
+                expected_states={run.state},
+                return_terminal_on_conflict=True,
+            )
+            if run.state in TERMINAL_RUN_STATES:
+                return run
+        if not previews:
+            return run
+        try:
+            return await self.publish_stream_preview(
+                run_id=run.run_id,
+                expected_revision=run.revision,
+                drafts=previews,
+                context=context,
+            )
+        except SageV2Error as exc:
+            if exc.info.category != ErrorCategory.CONFLICT:
+                raise
+            latest = await self.get_run(run.run_id)
+            if latest.state in TERMINAL_RUN_STATES:
+                return latest
+            if latest.state not in {RunState.RUNNING, RunState.SUSPEND_REQUESTED}:
+                raise
+            return await self.publish_stream_preview(
+                run_id=latest.run_id,
+                expected_revision=latest.revision,
+                drafts=previews,
+                context=context,
+            )
 
     async def _commit_model_stream_drafts(
         self,
