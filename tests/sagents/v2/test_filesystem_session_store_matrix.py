@@ -1550,6 +1550,18 @@ async def test_interrupted_stream_keeps_partial_text_in_history(
         drafts=_stream_drafts("item_partial")
         + (
             EventDraft(
+                type="reasoning.started",
+                item_id="reasoning_partial",
+                data=ItemEventData(operation="started"),
+            ),
+            EventDraft(
+                type="reasoning.delta",
+                item_id="reasoning_partial",
+                data=ItemEventData(operation="delta", delta="private thought"),
+            ),
+        )
+        + (
+            EventDraft(
                 type="message.delta",
                 item_id="item_partial",
                 data=ItemEventData(operation="delta", delta=" answer"),
@@ -1558,7 +1570,7 @@ async def test_interrupted_stream_keeps_partial_text_in_history(
         context=CONTEXT,
         idempotency_key="interrupted:batch",
     )
-    await store.commit_run(
+    stop = await store.commit_run(
         run_id=created.handle.run_id,
         expected_revision=run.revision,
         expected_states={RunState.RUNNING},
@@ -1580,7 +1592,7 @@ async def test_interrupted_stream_keeps_partial_text_in_history(
     partial = [
         event
         for event in events
-        if event.type == "item.completed" and event.item_id == "item_partial"
+        if event.type == "message.completed" and event.item_id == "item_partial"
     ]
     assert len(partial) == 1
     item = partial[0].data.item
@@ -1588,4 +1600,31 @@ async def test_interrupted_stream_keeps_partial_text_in_history(
     assert item.data.role == "assistant"
     assert item.data.content[0].text == "partial answer"
     assert events[-1].type == f"run.{item_status}"
+    reasoning = [event for event in events if event.type == "reasoning.completed"]
+    assert len(reasoning) == 1
+    assert reasoning[0].data.item.status.value == item_status
+    assert reasoning[0].data.item.data.kind == "reasoning"
+    from app.v2.cli.sessions import transcript_entries
+
+    assert [
+        entry.text
+        for entry in transcript_entries(None, events)
+        if entry.kind == "assistant"
+    ] == ["partial answer"]
+    duplicate = await reopened.commit_run(
+        run_id=created.handle.run_id,
+        expected_revision=run.revision,
+        expected_states={RunState.RUNNING},
+        new_state=new_state,
+        drafts=(
+            EventDraft(
+                type=f"run.{item_status}", data=RunEventData(state=new_state.value)
+            ),
+        ),
+        context=CONTEXT,
+        idempotency_key="interrupted:stop",
+    )
+    assert duplicate.duplicate is True
+    assert duplicate.events == stop.events
+    assert await reopened.read_events(created.handle.run_id) == events
     await reopened.close()

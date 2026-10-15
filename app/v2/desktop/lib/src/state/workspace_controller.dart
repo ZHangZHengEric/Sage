@@ -1798,6 +1798,8 @@ class WorkspaceController extends ChangeNotifier {
       ..runId = ''
       ..turnId = ''
       ..runSequence = 0
+      ..previewSequence = 0
+      ..previewEpoch = null
       ..status = RunStatus.idle
       ..thinking = false
       ..messages = replacement.messages
@@ -2451,6 +2453,8 @@ class WorkspaceController extends ChangeNotifier {
       _api.subscribeRun(
         conversation.runId,
         afterSequence: conversation.runSequence,
+        previewSequence: conversation.previewSequence,
+        previewEpoch: conversation.previewEpoch,
       ),
     );
   }
@@ -2497,7 +2501,12 @@ class WorkspaceController extends ChangeNotifier {
     if (event['kind'] == 'stream.opened') {
       final handle = event['handle'];
       if (handle is Map) {
-        conversation.runId = handle['run_id']?.toString() ?? conversation.runId;
+        final runId = handle['run_id']?.toString() ?? conversation.runId;
+        if (runId != conversation.runId) {
+          conversation.previewSequence = 0;
+          conversation.previewEpoch = null;
+        }
+        conversation.runId = runId;
         _acknowledgeStudioRun(conversation);
         if (conversation.pendingPlanExecution != null &&
             conversation.runId !=
@@ -2524,8 +2533,19 @@ class WorkspaceController extends ChangeNotifier {
     final occurredAt = DateTime.tryParse(
       event['occurred_at']?.toString() ?? '',
     );
-    if (sequence <= conversation.runSequence) return;
-    conversation.runSequence = sequence;
+    final previewSequence = (event['preview_sequence'] as num?)?.toInt();
+    final previewEpoch = event['preview_epoch']?.toString();
+    if (previewSequence != null && previewEpoch != null) {
+      if (conversation.previewEpoch == previewEpoch &&
+          previewSequence <= conversation.previewSequence) {
+        return;
+      }
+      conversation.previewEpoch = previewEpoch;
+      conversation.previewSequence = previewSequence;
+    } else {
+      if (sequence <= conversation.runSequence) return;
+      conversation.runSequence = sequence;
+    }
     conversation.runId = event['run_id']?.toString() ?? conversation.runId;
     conversation.sessionId = event['session_id']?.toString();
     conversation.turnId = event['turn_id']?.toString() ?? conversation.turnId;
@@ -3270,6 +3290,8 @@ class WorkspaceController extends ChangeNotifier {
       if (runId.isNotEmpty && runId != child.runId) {
         child.runId = runId;
         child.runSequence = 0;
+        child.previewSequence = 0;
+        child.previewEpoch = null;
       }
     }
     _syncSubSessionRunPresentation(
