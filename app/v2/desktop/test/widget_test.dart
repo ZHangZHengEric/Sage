@@ -1647,6 +1647,8 @@ class _SessionTreeApi extends _ControlledProcessApi {
   Stream<Map<String, Object?>> subscribeRun(
     String runId, {
     int afterSequence = 0,
+    int previewSequence = 0,
+    String? previewEpoch,
   }) => Stream.value({
     'protocol_version': 'sage.runtime/v2',
     'type': 'run.completed',
@@ -1822,6 +1824,76 @@ class _TeamAgentApi extends _FakeApi {
   }
 }
 
+class _PreviewApi extends _ControlledProcessApi {
+  final cursors = <Map<String, Object?>>[];
+  final connections = <StreamController<Map<String, Object?>>>[];
+
+  @override
+  Future<Map<String, Object?>> getRun(String runId) async => {
+    'run': {
+      'run_id': runId,
+      'session_id': 'session_preview',
+      'state': 'running',
+      'last_run_sequence': 4,
+    },
+  };
+
+  @override
+  Stream<Map<String, Object?>> subscribeRun(
+    String runId, {
+    int afterSequence = 0,
+    int previewSequence = 0,
+    String? previewEpoch,
+  }) {
+    cursors.add({
+      'run_sequence': afterSequence,
+      'preview_sequence': previewSequence,
+      'preview_epoch': previewEpoch,
+    });
+    final connection = StreamController<Map<String, Object?>>();
+    connections.add(connection);
+    return connection.stream;
+  }
+
+  Map<String, Object?> frame(
+    String type, {
+    int sequence = 4,
+    int? preview,
+    String epoch = 'host-1',
+    String text = '',
+    String status = 'completed',
+  }) => {
+    'type': type,
+    'run_id': 'run_preview',
+    'session_id': 'session_preview',
+    'turn_id': 'turn_preview',
+    'item_id': type == 'reasoning.delta' ? 'reasoning_preview' : 'item_preview',
+    'run_sequence': sequence,
+    if (preview != null) ...{
+      'preview_sequence': preview,
+      'preview_epoch': epoch,
+      'durability': 'replay_buffered',
+    },
+    'data': {
+      'kind': 'item',
+      'operation': type.endsWith('.delta') ? 'delta' : 'completed',
+      'delta': text,
+      if (type == 'message.completed')
+        'item': {
+          'item_id': 'item_preview',
+          'status': status,
+          'data': {
+            'kind': 'message',
+            'role': 'assistant',
+            'content': [
+              {'kind': 'text', 'text': text},
+            ],
+          },
+        },
+    },
+  };
+}
+
 class _ReconnectApi extends _FakeApi {
   int? subscribedAfterSequence;
 
@@ -1840,6 +1912,8 @@ class _ReconnectApi extends _FakeApi {
   Stream<Map<String, Object?>> subscribeRun(
     String runId, {
     int afterSequence = 0,
+    int previewSequence = 0,
+    String? previewEpoch,
   }) {
     subscribedAfterSequence = afterSequence;
     return Stream.fromIterable([
@@ -1923,6 +1997,8 @@ class _SuspendedRunApi extends _FakeApi {
   Stream<Map<String, Object?>> subscribeRun(
     String runId, {
     int afterSequence = 0,
+    int previewSequence = 0,
+    String? previewEpoch,
   }) => Stream.value({
     'protocol_version': 'sage.runtime/v2',
     'type': cancelled ? 'run.cancelled' : 'run.completed',
@@ -2048,6 +2124,8 @@ class _DeferredPlanApi extends _PlanSuspendedRunApi {
   Stream<Map<String, Object?>> subscribeRun(
     String runId, {
     int afterSequence = 0,
+    int previewSequence = 0,
+    String? previewEpoch,
   }) => events.stream;
 
   @override
@@ -2471,6 +2549,176 @@ Map<String, Object?> _persistedBranchableConversation() => {
 };
 
 void main() {
+  for (final terminal in ['completed', 'cancelled', 'failed']) {
+    test('preview stream retains $terminal text exactly once', () async {
+      final api = _PreviewApi();
+      final controller = await _controller(api: api);
+      addTearDown(() => _disposeController(controller));
+      await controller.initialize();
+      await controller.send('test previews');
+      api._events.add({
+        'kind': 'stream.opened',
+        'handle': {
+          'run_id': 'run_preview',
+          'session_id': 'session_preview',
+          'event_cursor': {'run_sequence': 3},
+        },
+      });
+      api._events.add(api.frame('message.started'));
+      api._events.add(
+        api.frame('reasoning.delta', preview: 1, text: 'private'),
+      );
+      api._events.add(api.frame('message.delta', preview: 2, text: 'partial'));
+      api._events.add(api.frame('message.delta', preview: 2, text: 'partial'));
+      api._events.add(api.frame('message.delta', preview: 3, text: ' answer'));
+      await pumpEventQueue();
+      final conversation = controller.selectedConversation!;
+      expect(conversation.runSequence, 4);
+      expect(conversation.previewSequence, 3);
+      expect(conversation.thinking, isFalse);
+      expect(conversation.messages.last.text, 'partial answer');
+      expect(conversation.messages.last.streaming, isTrue);
+      expect(
+        conversation.messages.any((m) => m.text.contains('private')),
+        isFalse,
+      );
+
+      api._events.add(
+        api.frame(
+          'message.completed',
+          sequence: 5,
+          text: 'partial answer',
+          status: terminal,
+        ),
+      );
+      api._events.add(api.frame('run.$terminal', sequence: 6));
+      await api._events.close();
+      await pumpEventQueue();
+      expect(conversation.status.name, terminal);
+      expect(
+        conversation.messages.where((m) => m.id == 'item_preview').length,
+        1,
+      );
+      expect(conversation.messages.last.text, 'partial answer');
+      expect(conversation.messages.last.streaming, isFalse);
+      final restored = Conversation.fromJson(conversation.toJson());
+      expect(restored.messages.last.text, 'partial answer');
+      expect(restored.previewSequence, 3);
+      expect(restored.previewEpoch, 'host-1');
+    });
+  }
+
+  test(
+    'preview connection loss resumes from the last preview cursor',
+    () async {
+      final api = _PreviewApi();
+      final controller = await _controller(api: api);
+      addTearDown(() => _disposeController(controller));
+      await controller.initialize();
+      await controller.send('test connection loss');
+      api._events.add({
+        'kind': 'stream.opened',
+        'handle': {
+          'run_id': 'run_preview',
+          'session_id': 'session_preview',
+          'event_cursor': {'run_sequence': 3},
+        },
+      });
+      api._events.add(api.frame('message.started'));
+      api._events.add(api.frame('message.delta', preview: 1, text: 'partial'));
+      await pumpEventQueue();
+      await api._events.close();
+      await Future<void>.delayed(const Duration(milliseconds: 1100));
+      await pumpEventQueue();
+      expect(api.cursors.single, {
+        'run_sequence': 4,
+        'preview_sequence': 1,
+        'preview_epoch': 'host-1',
+      });
+      final events = api.connections.single;
+      events.add(api.frame('message.delta', preview: 2, text: ' answer'));
+      events.add(
+        api.frame('message.completed', sequence: 5, text: 'partial answer'),
+      );
+      events.add(api.frame('run.completed', sequence: 6));
+      await events.close();
+      await pumpEventQueue();
+      expect(
+        controller.selectedConversation!.messages.last.text,
+        'partial answer',
+      );
+      expect(controller.selectedConversation!.status, RunStatus.completed);
+    },
+  );
+
+  test(
+    'preview reconnect restores its cursor and ignores duplicate deltas',
+    () async {
+      final api = _PreviewApi();
+      final controller = await _controller(api: api);
+      addTearDown(() => _disposeController(controller));
+      await controller.initialize();
+      await controller.send('test reconnect');
+      api._events.add({
+        'kind': 'stream.opened',
+        'handle': {
+          'run_id': 'run_preview',
+          'session_id': 'session_preview',
+          'event_cursor': {'run_sequence': 3},
+        },
+      });
+      api._events.add(api.frame('message.started'));
+      api._events.add(api.frame('message.delta', preview: 1, text: 'partial'));
+      await pumpEventQueue();
+      final saved = controller.selectedConversation!.toJson();
+      _disposeController(controller);
+      await api._events.close();
+      SharedPreferences.setMockInitialValues({
+        'sage.desktop_v2.conversations.v1': jsonEncode({
+          WorkspaceController.agentWorkspaceId: [saved],
+        }),
+      });
+      final nextApi = _PreviewApi();
+      final next = _newController(
+        api: nextApi,
+        preferencesLoader: SharedPreferences.getInstance,
+      );
+      addTearDown(() => _disposeController(next));
+      await next.initialize();
+      await pumpEventQueue();
+      expect(nextApi.cursors.single, {
+        'run_sequence': 4,
+        'preview_sequence': 1,
+        'preview_epoch': 'host-1',
+      });
+      final events = nextApi.connections.single;
+      events.add(nextApi.frame('message.delta', preview: 1, text: 'partial'));
+      events.add(nextApi.frame('message.delta', preview: 2, text: ' answer'));
+      await pumpEventQueue();
+      expect(next.selectedConversation!.messages.last.text, 'partial answer');
+      expect(next.selectedConversation!.runSequence, 4);
+      // A new host epoch can restart preview numbering without being discarded.
+      events.add(
+        nextApi.frame(
+          'reasoning.delta',
+          preview: 1,
+          epoch: 'host-2',
+          text: 'private',
+        ),
+      );
+      events.add(
+        nextApi.frame('message.completed', sequence: 5, text: 'partial answer'),
+      );
+      events.add(nextApi.frame('run.completed', sequence: 6));
+      await events.close();
+      await pumpEventQueue();
+      expect(next.selectedConversation!.status, RunStatus.completed);
+      expect(next.selectedConversation!.previewEpoch, 'host-2');
+      expect(next.selectedConversation!.messages.last.text, 'partial answer');
+      expect(next.selectedConversation!.messages.last.processOnly, isFalse);
+    },
+  );
+
   for (final fails in [false, true]) {
     test(
       'late usage overview ${fails ? "error" : "response"} is ignored after disposal',

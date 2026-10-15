@@ -429,6 +429,8 @@ extension StudioWorkspace on WorkspaceController {
         execution.runId = '';
         execution.turnId = '';
         execution.runSequence = 0;
+        execution.previewSequence = 0;
+        execution.previewEpoch = null;
         execution.status = RunStatus.starting;
         execution.processPanels.removeWhere(
           (p) =>
@@ -619,6 +621,8 @@ extension StudioWorkspace on WorkspaceController {
             await _streams.remove(execution.id)?.cancel();
             execution.runId = runId;
             execution.runSequence = 0;
+            execution.previewSequence = 0;
+            execution.previewEpoch = null;
             execution.status = RunStatus.starting;
             execution.pendingInteraction = null;
             _subscribe(execution);

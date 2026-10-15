@@ -1958,7 +1958,11 @@ class SessionStoreCoordinator(SessionAttachmentMixin):
             )
             drafts.append(
                 EventDraft(
-                    type="item.completed",
+                    type=(
+                        "reasoning.completed"
+                        if first.type == "reasoning.delta"
+                        else "message.completed"
+                    ),
                     turn_id=first.turn_id,
                     step_id=first.step_id,
                     item_id=item_id,
