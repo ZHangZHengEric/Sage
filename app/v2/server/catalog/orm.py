@@ -22,6 +22,7 @@ class AgentRow(Base):
 
     id: Mapped[str] = mapped_column(String(64), primary_key=True)
     owner_user_id: Mapped[str] = mapped_column(String(64), index=True)
+    package_ref: Mapped[str | None] = mapped_column(String(80), nullable=True)
     name: Mapped[str] = mapped_column(String(191))
     description: Mapped[str] = mapped_column(Text, default="")
     instructions: Mapped[str] = mapped_column(

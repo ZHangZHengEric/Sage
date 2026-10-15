@@ -152,6 +152,9 @@ class ServerHost:
         from app.v2.server.database.schema import create_host_schema
 
         await create_host_schema(self.database)
+        migrate_packages = getattr(self.catalog.store, "migrate_packages", None)
+        if migrate_packages is not None:
+            await migrate_packages()
         await self.identity.ensure_admin(
             self.settings.admin_username, self.settings.admin_password
         )

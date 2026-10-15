@@ -36,8 +36,9 @@ def server_v2_run_manifest(
         if not tools:
             tools = tuple(agent.tools)
     selected_tools = list(resolve_agent_tools(tools, has_skills=bool(skills)))
-    base = server_v2_manifest(settings)
-    source = base.agents.get("main") or next(iter(base.agents.values()))
+    host = server_v2_manifest(settings)
+    base = agent.package.resolved_manifest() if agent is not None else host
+    source = base.agents.get(agent_id) or next(iter(base.agents.values()))
     composed = source.model_copy(
         update={
             "name": name or source.name,
@@ -56,6 +57,8 @@ def server_v2_run_manifest(
     )
     return base.model_copy(
         update={
+            "runtime": host.runtime,
+            "interfaces": host.interfaces,
             "agents": {agent_id: composed},
             "entrypoint": ApplicationEntrypoint(agent=agent_id),
         }

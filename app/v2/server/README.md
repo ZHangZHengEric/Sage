@@ -81,6 +81,26 @@ ServerHost 必须注入 Database；生产库存使用 MySQL `managed_agent_recor
 
 包模型使用 `provider=server`，`model` 指向本人模型 ID 或 `default`，不携带凭据和地址。源码插件默认关闭，只有宿主注册与明确授权后才能加载，且属于可信宿主代码。能力、API、部署成本和验证边界见 [Server V2 Agent 平台](../../../docs/zh/architecture/SERVER_V2_AGENT_PLATFORM.md)。
 
+### 统一 Agent package 配置
+
+页面及 `POST/PUT /api/agents` 保存标准 `AgentPackageBundle` 到现有 `managed_agent_records` 不可变版本库存，`agents.package_ref` 引用当前内容哈希。`agents` 的旧配置列仅为兼容投影，读取、组装 manifest、Run 受理均以该引用的 package 为准；引用缺失或哈希不符会拒绝执行，不退回旧配置。`GET /api/agents/{id}` 返回 `package`、`package_ref` 和从 package 投影的 `sandbox`。
+
+编辑产生新的内容版本，旧版本仍可读；不改变 Agent ID、已有 Session、API Key、默认 Agent 或 workspace 路径。Skill 绑定索引和 package 的 Skill 声明在同一数据库事务内更新。Run 受理冻结 package 和 Skill 版本；排队或审批后不会切换到之后编辑的包。网络在创建沙箱时取冻结配置、当前 Agent 上限和 Server 上限的交集。
+
+现有 `POST /api/agents/{id}/runs`、AG-UI 和 A2A 入口均沿用上述来源，无需业务方换接口。每次 Run 只解析配置、复用宿主服务，不重新创建一个托管 Application；目录中的 package 批量读取，避免逐 Agent 查询。
+
+启动会幂等添加可空 `agents.package_ref` 并回填旧 Agent 的标准包，默认网络 `none`，保留原 ID、模型、工具、审批及 Skill/source/version 绑定。旧列、线程、会话和文件不会被迁移重写。显式迁移可先停写再执行：
+
+```bash
+python -m scripts.v2.migrate_agent_packages --env deploy/standalone/.env --backup /secure/agent-packages-before.json
+```
+
+备份使用 `0600` 权限且禁止覆盖。升级后旧客户端省略 `sandbox` 字段的编辑会保留现有网络配置。API 配置示例：
+
+```json
+{"name": "Agent", "sandbox": {"network": "unrestricted"}}
+```
+
 ### 包沙箱网络
 
 在 `sage.yaml`（Studio JSON 对应 `manifest`）中按 Agent 声明：
@@ -97,7 +117,7 @@ agents:
 
 `agents.<id>.sandbox.network` 只接受 `none` 和 `unrestricted`，省略时为 `none`。该字段沿用 package Schema、导入、校验及版本库存机制；其他值或未知沙箱字段会被拒绝。每个 Agent 单独配置，子 Agent 不继承父 Agent 的网络声明。
 
-Server 在托管包每个 Run 创建实际工作区沙箱时读取该 Agent 的配置，包括子 Run 和恢复后重建的沙箱。实际权限取包声明与服务端上限的交集：任一为 `none` 即禁网。宿主可在构造 `ServerSettings(sandbox_network_mode="none", ...)` 时收紧全服务上限；默认上限为 `unrestricted`，仅允许包显式申请联网，未配置的包仍禁网。此上限没有环境变量入口。普通 catalog Agent 对话仍使用原有禁网沙箱。
+Server 在托管包每个 Run 创建实际工作区沙箱时读取该 Agent 的配置，包括子 Run 和恢复后重建的沙箱。实际权限取包声明与服务端上限的交集：任一为 `none` 即禁网。宿主可在构造 `ServerSettings(sandbox_network_mode="none", ...)` 时收紧全服务上限；默认上限为 `unrestricted`，仅允许包显式申请联网，未配置的包仍禁网。此上限没有环境变量入口。普通页面/API Agent 和托管包使用相同的网络策略；未配置的 Agent 保持禁网。
 
 `unrestricted` 允许沙箱进程直接联网（包括私网），不提供域名白名单过滤；`none` 由实际沙箱隔离网络。网络模式参与沙箱 spec/policy 哈希，无法实施策略的宿主不会退化为无隔离执行。该配置控制沙箱内进程，不控制宿主侧模型、MCP、A2A 或可信源码插件的网络。
 
@@ -125,7 +145,7 @@ Run 一律交给后台任务驱动，不跑在请求自己的任务上：Run 是
 }
 ```
 
-用户的 `shell` 默认为 `sandboxed`，允许官方 Shell、文件修改工具在该用户工作区内执行；`ask` 要求命令和文件修改先审批；`deny` 禁止 Shell，其他工具仍按各自策略审核。Shell 网络禁用，`sandboxed` 允许工作区内代码执行及文件删除，MCP/A2A 等外部工具仍保留原审批要求。机器调用不能管理 Agent 包。`on_approval_required=deny` 将所有需要审批的操作直接拒绝，适合无人值守。
+用户的 `shell` 默认为 `sandboxed`，允许官方 Shell、文件修改工具在该用户工作区内执行；`ask` 要求命令和文件修改先审批；`deny` 禁止 Shell，其他工具仍按各自策略审核。Shell 网络取自 Agent package 的 `sandbox.network`（默认禁网），`sandboxed` 允许工作区内代码执行及文件删除，MCP/A2A 等外部工具仍保留原审批要求。机器调用不能管理 Agent 包。`on_approval_required=deny` 将所有需要审批的操作直接拒绝，适合无人值守。
 
 生效策略取服务上限、Agent 上限、用户设置和请求限制的交集。服务上限由 `SAGE_SERVER_EXECUTION_SHELL_MODE`（默认 `sandboxed`）及 `SAGE_SERVER_APPROVAL_TIMEOUT_SECONDS`（默认 86400，允许 60–604800 秒）指定。Agent 的 `execution_policy` 是上限，默认允许用户自行选择；新用户默认允许工作区内自动执行。A2A 消息的 `metadata["sage.executionPolicy"]` 可提供相同结构收紧本次请求，不能扩大授权。
 

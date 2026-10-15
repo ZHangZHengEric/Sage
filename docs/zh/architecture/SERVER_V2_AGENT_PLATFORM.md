@@ -34,9 +34,11 @@ Studio 支持 JSON 定义编辑、Schema/资源检查、保存、复制、分页
 
 `ServerHost(package_extensions=..., package_authorizer=...)` 注册扩展并设置授权。包可选择已授权的 flow.node、tool.catalog、memory.provider，其余基础设施由宿主固定。源码扩展默认关闭；启用时执行可信宿主 Python 代码，不能视为非可信代码隔离，也不自动 pip 安装。
 
+页面/API Agent 也持久化为库存内的标准 `AgentPackageBundle`，`agents.package_ref` 是配置引用，旧列仅为兼容投影；目录批量解析包，Skill 索引和包更新共用事务。启动幂等回填既有记录，ID、Session 和 workspace 保持不变。旧 `/api/agents/{id}/runs` 受理时冻结包，执行时使用冻结定义，网络再与当前 Agent/Server 上限取交集。
+
 官方工具由 ExecutionBindingProvider 按真实 Run ID 绑定用户工作区与沙箱，子 Run 独立绑定。MCP、Skill 与模型来自当前用户目录，模型从宿主池借用租约，凭据不写入包库存。Skill 列表描述不截断，加载后的活跃内容另受 token 预算限制。
 
-包内 `agents.<id>.sandbox.network` 支持 `none`（默认）和 `unrestricted`。使用既有严格 manifest Schema 校验并随不可变版本保存；运行时 `PackageBindings.acquire` 按实际 Agent ID 解析，主 Run、子 Run、恢复 Run 都在 provision 前与宿主 `ServerSettings.sandbox_network_mode` 上限取交集。宿主上限默认 `unrestricted`，可通过构造配置收紧到 `none`，无新增环境变量。`unrestricted` 使用直接网络并允许私网；未配置的包和普通对话保持禁网。模式参与沙箱哈希；不改变宿主侧模型/MCP/A2A 的联网行为。示例见 [Server README](../../../app/v2/server/README.md#包沙箱网络)。
+包内 `agents.<id>.sandbox.network` 支持 `none`（默认）和 `unrestricted`。使用既有严格 manifest Schema 校验并随不可变版本保存；运行时 `PackageBindings.acquire` 按实际 Agent ID 解析，主 Run、子 Run、恢复 Run 都在 provision 前与宿主 `ServerSettings.sandbox_network_mode` 上限取交集。宿主上限默认 `unrestricted`，可通过构造配置收紧到 `none`，无新增环境变量。`unrestricted` 使用直接网络并允许私网；未配置的包和普通 Agent 保持禁网。模式参与沙箱哈希；不改变宿主侧模型/MCP/A2A 的联网行为。示例见 [Server README](../../../app/v2/server/README.md#包沙箱网络)。
 
 Server MCP 仅支持 sse、streamable_http，不接受租户 stdio 命令；非法配置保存时返回 422，历史 stdio 记录读取时跳过。单个 MCP 不可用不阻断整个 Run，按用户/配置指纹复用发现缓存；`POST /api/mcp/{name}/refresh` 可使缓存失效。
 

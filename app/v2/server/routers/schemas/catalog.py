@@ -4,6 +4,8 @@ from typing import Literal
 from sagents.v2.agent.policy.approval_config import ToolApprovalConfig
 from pydantic import BaseModel, ConfigDict, Field
 from app.v2.server.runtime.policy import ExecutionPolicy
+from sagents.v2.package.manifest.agents import AgentSandboxConfig
+from sagents.v2.agent.management import AgentPackageBundle
 
 class ModelBody(BaseModel):
     id: str | None = None
@@ -22,6 +24,7 @@ class AgentBody(BaseModel):
     tools: list[str] = Field(default_factory=list)
     tool_approval: ToolApprovalConfig | None = None
     execution_policy: ExecutionPolicy | None = None
+    sandbox: AgentSandboxConfig | None = None
 
 class AgentPublic(BaseModel):
     id: str
@@ -33,6 +36,9 @@ class AgentPublic(BaseModel):
     skills: list[str] = Field(default_factory=list)
     tool_approval: ToolApprovalConfig | None = None
     execution_policy: ExecutionPolicy = Field(default_factory=lambda: ExecutionPolicy(shell="sandboxed"))
+    sandbox: AgentSandboxConfig = Field(default_factory=AgentSandboxConfig)
+    package: AgentPackageBundle | None = None
+    package_ref: str | None = None
 
 class ToolPublic(BaseModel):
     approval_key: str | None = None

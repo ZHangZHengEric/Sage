@@ -51,21 +51,18 @@ class DatabasePackageStore:
             return row.payload["ref"] if row else None
 
     async def save(self, owner, bundle):
-        meta, ref = bundle.manifest.metadata, bundle.content_hash
         async with self.transaction() as db:
-            old = await self._get(db, owner, "version", meta.id, meta.version)
-            if old and old.payload["ref"] != ref:
-                raise ValueError("package version is immutable; choose a new version")
-            await self._put(db, owner, "version", [meta.id, meta.version], {"ref": ref})
-            await self._put(
-                db,
-                owner,
-                "bundle",
-                [ref],
-                bundle.model_dump(mode="json"),
-                ref=ref,
-                name=f"{meta.id}:{meta.version}",
-            )
+            return await self.save_in_transaction(db, owner, bundle)
+
+    async def save_in_transaction(self, db, owner, bundle):
+        """Share the inventory write with an Agent-row/Skill-binding transaction."""
+        meta, ref = bundle.manifest.metadata, bundle.content_hash
+        old = await self._get(db, owner, "version", meta.id, meta.version)
+        if old and old.payload["ref"] != ref:
+            raise ValueError("package version is immutable; choose a new version")
+        await self._put(db, owner, "version", [meta.id, meta.version], {"ref": ref})
+        await self._put(db, owner, "bundle", [ref], bundle.model_dump(mode="json"),
+                        ref=ref, name=f"{meta.id}:{meta.version}")
         return ref
 
     async def get(self, owner, ref):

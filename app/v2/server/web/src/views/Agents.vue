@@ -41,6 +41,7 @@ function emptyForm() {
     instructions: 'Be helpful, concise, and explicit about uncertainty.',
     model_id: '',
     tools: [],
+    sandbox: { network: 'none' },
     tool_approval: { default: 'auto_approve', tools: {} },
     execution_policy: { shell: 'sandboxed', on_approval_required: 'suspend', approval_timeout_seconds: 86400 },
   }
@@ -101,6 +102,7 @@ async function openAgent(item, readonly = true) {
       model_id: detail.model_id || '', tools: [...(detail.tools || [])],
       tool_approval: detail.tool_approval ? structuredClone(detail.tool_approval) : null,
       execution_policy: { ...(detail.execution_policy || emptyForm().execution_policy) },
+      sandbox: { ...(detail.sandbox || emptyForm().sandbox) },
     }
     selectedSkills.value = assigned.map(skill => skill.name)
     viewModels.value = isForeign(item) ? [] : models.value

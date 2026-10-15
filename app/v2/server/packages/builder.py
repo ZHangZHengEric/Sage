@@ -13,12 +13,11 @@ from app.v2.server.runtime.loop import (
     package_model_record,
     prepare_tenant_binding,
 )
-from app.v2.server.runtime.official import provision_workspace
+from app.v2.server.runtime.official import provision_workspace, agent_network_policy
 from sagents.v2 import SAgentBuilder
 from sagents.v2.contracts.errors import ErrorCategory, RuntimeErrorInfo, SageV2Error
 from sagents.v2.package.manifest.runtime import CapabilitySelection
 from sagents.v2.runtime.execution import RunExecutionBinding
-from sagents.v2.runtime.execution.sandbox import NetworkMode, NetworkPolicy
 
 
 class CatalogPackageModel:
@@ -93,17 +92,10 @@ class PackageBindings:
             raise ValueError("unsupported workspace policy")
         # Resolve on every acquisition, including child Runs and resumed Runs.
         # Indexing fails closed if the runtime asks for an undeclared Agent.
-        requested = self.agents[request.agent_id].sandbox.network
-        mode = (
-            NetworkMode.UNRESTRICTED
-            if requested == self.settings.sandbox_network_mode == "unrestricted"
-            else NetworkMode.NONE
-        )
+        network = agent_network_policy(self.agents[request.agent_id].sandbox, self.settings)
         handle = await provision_workspace(
             self.execution, workspace, request.context, run_id=request.run_id,
-            network=NetworkPolicy(
-                mode=mode, deny_private_networks=mode != NetworkMode.UNRESTRICTED,
-            ),
+            network=network,
         )
         token = object()
         self.workspaces[request.run_id] = (workspace, token)
