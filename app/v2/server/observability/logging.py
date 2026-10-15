@@ -54,7 +54,7 @@ class ServerLogSink:
             self.file.close()
 
 
-class _SuccessfulHealthProbeFilter(logging.Filter):
+class _HealthAccessFilter(logging.Filter):
     def filter(self, record: logging.LogRecord) -> bool:
         if not isinstance(record.args, tuple) or len(record.args) < 5:
             return True
@@ -62,6 +62,8 @@ class _SuccessfulHealthProbeFilter(logging.Filter):
         if not isinstance(raw_path, str) or not isinstance(status_code, int):
             return True
         path = raw_path.partition("?")[0]
+        if path == "/health":
+            return False
         return not (
             method == "GET"
             and path in {"/livez", "/readyz"}
@@ -120,7 +122,7 @@ def init_logging(settings: LoggingSettings, *, service_name: str) -> LogSink:
         )
         uvicorn_handler.setLevel(level)
         if name == "uvicorn.access":
-            uvicorn_handler.addFilter(_SuccessfulHealthProbeFilter())
+            uvicorn_handler.addFilter(_HealthAccessFilter())
         standard.handlers = [uvicorn_handler]
         standard.setLevel(level)
         standard.propagate = False
