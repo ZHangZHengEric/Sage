@@ -307,6 +307,7 @@ class ConversationService:
             composition_hash=self.application.composition_hash,
             default_agent_id=admitted.agent_id,
             enabled_skills=enabled,
+            max_steps=admitted.max_steps,
             metadata=metadata,
         )
         if stream_run_id is not None:

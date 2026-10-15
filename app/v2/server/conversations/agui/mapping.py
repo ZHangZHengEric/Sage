@@ -141,6 +141,7 @@ def to_start_run(
     composition_hash: str,
     default_agent_id: str,
     enabled_skills: tuple[str, ...] | None = None,
+    max_steps: int | None = None,
     metadata: dict[str, object] | None = None,
 ) -> tuple[str, str, str, StartRun]:
     thread_id = validate_agui_id(request.thread_id, field="threadId")
@@ -152,6 +153,7 @@ def to_start_run(
         agent_id=agent_id,
         input=(latest_user_input(request),),
         config=RunConfig(
+            max_steps=max_steps,
             enabled_skills=enabled_skills,
             metadata=dict(metadata or {}),
         ),
