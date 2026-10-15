@@ -52,6 +52,8 @@ class AgUiProtocolAdapter:
         self.enable_sage_extensions = enable_sage_extensions
         self._started_text: set[str] = set()
         self._started_reasoning: set[str] = set()
+        self._streamed_text: set[str] = set()
+        self._streamed_reasoning: set[str] = set()
 
     async def capabilities(self) -> AdapterCapabilities:
         return AdapterCapabilities(
@@ -190,7 +192,39 @@ class AgUiProtocolAdapter:
         """Maintain AG-UI start/content/end framing for one canonical Item."""
 
         item_id = event.item_id or (data.item.item_id if data.item else event.event_id)
+        if event.type == "message.started":
+            if item_id in self._started_text:
+                return self._extension(
+                    event, f"sage.{event.type}", data.model_dump(mode="json")
+                )
+            self._started_text.add(item_id)
+            return AdapterResult(
+                frames=(
+                    self._frame(
+                        event,
+                        "TEXT_MESSAGE_START",
+                        {"messageId": item_id, "role": "assistant"},
+                    ),
+                )
+            )
+        if event.type == "reasoning.started":
+            if item_id in self._started_reasoning:
+                return self._extension(
+                    event, f"sage.{event.type}", data.model_dump(mode="json")
+                )
+            self._started_reasoning.add(item_id)
+            return AdapterResult(
+                frames=(
+                    self._frame(event, "REASONING_START", {"messageId": item_id}),
+                    self._frame(
+                        event,
+                        "REASONING_MESSAGE_START",
+                        {"messageId": item_id, "role": "reasoning"},
+                    ),
+                )
+            )
         if event.type == "message.delta":
+            self._streamed_text.add(item_id)
             frames = []
             if item_id not in self._started_text:
                 self._started_text.add(item_id)
@@ -210,6 +244,7 @@ class AgUiProtocolAdapter:
             )
             return AdapterResult(frames=tuple(frames))
         if event.type == "reasoning.delta":
+            self._streamed_reasoning.add(item_id)
             frames = []
             if item_id not in self._started_reasoning:
                 self._started_reasoning.add(item_id)
@@ -240,24 +275,26 @@ class AgUiProtocolAdapter:
             text = self._text(item.content)
             frames = []
             if item_id not in self._started_text:
-                frames.extend(
-                    (
-                        self._frame(
-                            event,
-                            "TEXT_MESSAGE_START",
-                            {"messageId": item_id, "role": item.role},
-                        ),
-                        self._frame(
-                            event,
-                            "TEXT_MESSAGE_CONTENT",
-                            {"messageId": item_id, "delta": text},
-                        ),
+                frames.append(
+                    self._frame(
+                        event,
+                        "TEXT_MESSAGE_START",
+                        {"messageId": item_id, "role": item.role},
+                    )
+                )
+            if item_id not in self._streamed_text:
+                frames.append(
+                    self._frame(
+                        event,
+                        "TEXT_MESSAGE_CONTENT",
+                        {"messageId": item_id, "delta": text},
                     )
                 )
             frames.append(
                 self._frame(event, "TEXT_MESSAGE_END", {"messageId": item_id})
             )
             self._started_text.discard(item_id)
+            self._streamed_text.discard(item_id)
             return AdapterResult(frames=tuple(frames))
         if isinstance(item, ReasoningItemData):
             text = self._text(item.content)
@@ -271,11 +308,14 @@ class AgUiProtocolAdapter:
                             "REASONING_MESSAGE_START",
                             {"messageId": item_id, "role": "reasoning"},
                         ),
-                        self._frame(
-                            event,
-                            "REASONING_MESSAGE_CONTENT",
-                            {"messageId": item_id, "delta": text},
-                        ),
+                    )
+                )
+            if item_id not in self._streamed_reasoning:
+                frames.append(
+                    self._frame(
+                        event,
+                        "REASONING_MESSAGE_CONTENT",
+                        {"messageId": item_id, "delta": text},
                     )
                 )
             frames.extend(
@@ -285,6 +325,7 @@ class AgUiProtocolAdapter:
                 )
             )
             self._started_reasoning.discard(item_id)
+            self._streamed_reasoning.discard(item_id)
             return AdapterResult(frames=tuple(frames))
         if isinstance(item, ToolCallItemData):
             arguments = item.arguments_json or json.dumps(

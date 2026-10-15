@@ -462,3 +462,60 @@ def test_mcp_explicitly_refuses_to_masquerade_as_run_protocol():
 def test_a2a_task_status_mapping_matrix(event_type, state):
     result = A2AProtocolAdapter().translate(event(event_type))
     assert result.frames[0].payload["status"]["state"] == state
+
+
+@pytest.mark.parametrize("reasoning", [False, True])
+@pytest.mark.parametrize("with_preview", [False, True])
+def test_agui_durable_start_restores_content_when_previews_are_unavailable(
+    reasoning,
+    with_preview,
+):
+    family = "reasoning" if reasoning else "message"
+    adapter = AgUiProtocolAdapter()
+    started = event(f"{family}.started", item_id="item_1")
+    frames = list(adapter.translate(started).frames)
+    duplicate = adapter.translate(started)
+    assert all("START" not in frame.name for frame in duplicate.frames)
+    if with_preview:
+        frames.extend(
+            adapter.translate(
+                event(
+                    f"{family}.delta",
+                    item_id="item_1",
+                    sequence=2,
+                    data=ItemEventData(operation="delta", delta="answer"),
+                )
+            ).frames
+        )
+    data = (
+        ReasoningItemData(content=(TextBlock(text="answer"),))
+        if reasoning
+        else MessageItemData(role="assistant", content=(TextBlock(text="answer"),))
+    )
+    frames.extend(
+        adapter.translate(
+            event(
+                f"{family}.completed",
+                item_id="item_1",
+                sequence=3,
+                data=ItemEventData(
+                    operation="completed", item=item_snapshot("item_1", data)
+                ),
+            )
+        ).frames
+    )
+    expected = (
+        [
+            "REASONING_START",
+            "REASONING_MESSAGE_START",
+            "REASONING_MESSAGE_CONTENT",
+            "REASONING_MESSAGE_END",
+            "REASONING_END",
+        ]
+        if reasoning
+        else ["TEXT_MESSAGE_START", "TEXT_MESSAGE_CONTENT", "TEXT_MESSAGE_END"]
+    )
+    assert [frame.name for frame in frames] == expected
+    assert [frame.payload["delta"] for frame in frames if "delta" in frame.payload] == [
+        "answer"
+    ]
