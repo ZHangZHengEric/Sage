@@ -55,8 +55,7 @@ class PlanningTools:
         session_id: str,
         invocation: ToolInvocation,
     ) -> dict[str, Any]:
-        del session_id
-        current = await self.runtime.load_todos(invocation)
+        current = await self.runtime.load_todos(invocation, session_id=session_id)
         task_map = {str(value.get("id")): dict(value) for value in current}
         added = 0
         updated = 0
@@ -91,7 +90,9 @@ class PlanningTools:
         active = sum(value.get("status") == "in_progress" for value in normalized)
         if active > 1:
             raise ValueError("only one task may be in_progress")
-        path = await self.runtime.save_todos(normalized, invocation)
+        path = await self.runtime.save_todos(
+            normalized, invocation, session_id=session_id
+        )
         return {
             "status": "success",
             "tasks": normalized,
@@ -109,10 +110,9 @@ class PlanningTools:
         session_id: str,
         invocation: ToolInvocation,
     ) -> dict[str, Any]:
-        del session_id
         return {
             "status": "success",
-            "tasks": await self.runtime.load_todos(invocation),
+            "tasks": await self.runtime.load_todos(invocation, session_id=session_id),
         }
 
     @tool(

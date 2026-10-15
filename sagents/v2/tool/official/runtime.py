@@ -15,7 +15,7 @@ import json
 import re
 from contextlib import contextmanager
 from typing import TYPE_CHECKING, Any, Awaitable, Callable, Iterator, Protocol
-from urllib.parse import urlsplit
+from urllib.parse import quote, urlsplit
 
 from sagents.v2.contracts.errors import ErrorCategory, RuntimeErrorInfo, SageV2Error
 from sagents.v2.memory import MemoryService
@@ -483,14 +483,32 @@ class OfficialToolRuntime:
             request, intent=intent, grant=self._grant(intent)
         )
 
-    async def save_todos(
-        self, tasks: list[dict[str, Any]], invocation: ToolInvocation
-    ) -> str:
-        payload = json.dumps(tasks, ensure_ascii=False, indent=2) + "\n"
-        return await self.write_text(".sage/todos.json", payload, invocation)
+    @staticmethod
+    def _todo_path(session_id: str, invocation: ToolInvocation) -> str:
+        if not session_id or not session_id.strip():
+            raise ValueError("todo operations require a non-empty session_id")
+        owner = invocation.call.owner_session_id
+        if owner is not None and session_id != owner:
+            raise ValueError("todo session_id must match the current Session")
+        # Encode separators and percent signs to keep Session identifiers distinct
+        # without allowing them to introduce path components.
+        return f".sage/todos/{quote(session_id, safe='')}.json"
 
-    async def load_todos(self, invocation: ToolInvocation) -> list[dict[str, Any]]:
-        target = ".sage/todos.json"
+    async def save_todos(
+        self,
+        tasks: list[dict[str, Any]],
+        invocation: ToolInvocation,
+        *,
+        session_id: str,
+    ) -> str:
+        target = self._todo_path(session_id, invocation)
+        payload = json.dumps(tasks, ensure_ascii=False, indent=2) + "\n"
+        return await self.write_text(target, payload, invocation)
+
+    async def load_todos(
+        self, invocation: ToolInvocation, *, session_id: str
+    ) -> list[dict[str, Any]]:
+        target = self._todo_path(session_id, invocation)
         if not await self.exists(target, invocation):
             return []
         value = json.loads(await self.read_text(target, invocation))
