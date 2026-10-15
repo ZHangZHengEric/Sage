@@ -16,7 +16,9 @@ class SageHttpAgent extends HttpAgent {
 
   requestInit(input) {
     const init = super.requestInit(input)
-    if (!this.answer) return init
+    if (!this.answer) {
+      return { ...init, body: JSON.stringify({ ...JSON.parse(init.body), session_id: input.threadId }) }
+    }
     // The resume endpoint takes an answer, not a Run: which of the pending
     // question's decisions this is, plus the run id of the stream it opens.
     // Which Run is waiting is the thread's to know, not the client's to say.

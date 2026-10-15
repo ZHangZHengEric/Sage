@@ -41,6 +41,9 @@ def _upgrade_legacy_schema(connection) -> None:
             text("ALTER TABLE threads ADD COLUMN agent_id VARCHAR(191) DEFAULT ''")
         )
     if connection.dialect.name in {"mysql", "mariadb"}:
+        thread_id = next(c for c in inspector.get_columns("threads") if c["name"] == "thread_id")
+        if thread_id["type"].length < 192:
+            connection.execute(text("ALTER TABLE threads MODIFY COLUMN thread_id VARCHAR(192) NOT NULL"))
         description = next(
             column
             for column in inspector.get_columns("skills")

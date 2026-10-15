@@ -30,6 +30,7 @@ def setup_agent(client):
     assert response.status_code == 200, response.text
     client.cookies.clear()
     client.headers["SAGE-AGENT-ID"] = response.json()["data"]["id"]
+    return token
 
 
 def headers(user="business-user-123"):
@@ -89,12 +90,13 @@ def test_external_chat_unregistered_user_edits_and_restart(tmp_path):
         assert result(client, request="missing").status_code == 404
         assert send(client, session="work-2").status_code == 200
         assert (workspace / "shared.txt").read_text() == "shared across this user's sessions"
-        # Identical external session IDs owned by different business users stay separate.
-        assert send(client, user="other-business-user").status_code == 200
+        # Global IDs cannot be claimed by a second tenant.
+        assert send(client, user="other-business-user").status_code == 409
+        assert send(client, session="other-work", user="other-business-user").status_code == 200
         other_workspace = tmp_path / "tenants" / "other-business-user" / agent_id / "workspace"
         assert other_workspace.is_dir()
         assert not (other_workspace / "shared.txt").exists()
-        assert result(client, user="other-business-user").json()["data"]["runId"] == "create-1"
+        assert result(client, session="other-work", user="other-business-user").json()["data"]["runId"] == "create-1"
     # Reopen both runtime and SQL repositories; no Python objects carry the results.
     with TestClient(create_app(make_host(tmp_path))) as restarted:
         restarted.headers["SAGE-AGENT-ID"] = agent_id

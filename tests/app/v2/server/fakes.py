@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from app.v2.server.conversations.bindings import require_binding
+
 from app.v2.server.catalog.records import (
     ModelRecord,
     UserCatalog,
@@ -125,9 +127,19 @@ class MemoryCatalogStore:
         await self.replace_section(user_id, "models", catalog)
 
 
+
+
 class MemoryThreadIndex:
     def __init__(self) -> None:
         self._threads: dict[str, ThreadRecord] = {}
+        self._bindings = {}
+
+    async def binding(self, session_id):
+        return self._bindings.get(session_id)
+
+    async def bind(self, binding):
+        existing = self._bindings.setdefault(binding.session_id, binding)
+        require_binding(existing, binding)
 
     async def list_all(self) -> list[ThreadRecord]:
         return sorted(

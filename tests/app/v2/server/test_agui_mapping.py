@@ -118,6 +118,7 @@ def test_rewrites_client_run_identity():
     event = frame_to_agui_event(frame, thread_id="thread-1", run_id="run-1")
     assert event == {
         "type": "RUN_STARTED",
+        "session_id": "thread-1",
         "threadId": "thread-1",
         "runId": "run-1",
     }

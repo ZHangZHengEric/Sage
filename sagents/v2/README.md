@@ -291,9 +291,9 @@ injection path.
 
 All built-in tools declare a `session_id` parameter, including goal, package
 management, Skill loading, delegation and self-configuration tools. At execution,
-a missing, null or blank `system_context.session_id` is filled from the Run's
-actual Session ID, including newly allocated and forked Sessions. A supplied
-nonblank string is preserved. The resolved context feeds both the model prompt
+`system_context.session_id` always uses the Run's actual Session ID, including
+newly allocated, forked and historical Sessions. Caller metadata cannot override
+this identity. The resolved context feeds both the model prompt
 and tool argument binding without mutating the admitted command.
 
 `agent_package_run.session_id` identifies the current caller Session and follows

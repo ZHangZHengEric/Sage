@@ -7,7 +7,7 @@ from ag_ui.core import RunAgentInput
 from pydantic import TypeAdapter
 
 from sagents.v2.contracts.commands import InputItem, RunConfig, StartRun
-from sagents.v2.contracts.common import Identifier
+from sagents.v2.contracts.common import Identifier, new_id
 from sagents.v2.contracts.errors import ErrorCategory, RuntimeErrorInfo, SageV2Error
 from sagents.v2.contracts.items import ImageBlock, TextBlock
 
@@ -15,8 +15,8 @@ _ID = TypeAdapter(Identifier)
 
 
 def validate_agui_id(value: str, *, field: str) -> str:
-    candidate = str(value or "").strip()
-    if candidate in {".", ".."} or "/" in candidate or "\\" in candidate:
+    candidate = value if isinstance(value, str) else ""
+    if candidate != candidate.strip() or candidate in {".", ".."} or "/" in candidate or "\\" in candidate:
         raise SageV2Error(
             RuntimeErrorInfo(
                 code="server.conversations.agui.mapping.validation",
@@ -34,6 +34,17 @@ def validate_agui_id(value: str, *, field: str) -> str:
                 message=f"{field} is invalid",
             )
         ) from exc
+
+
+def resolve_session_id(session_id: str | None, thread_id: str | None = None) -> str:
+    if session_id is not None and thread_id is not None and session_id != thread_id:
+        raise SageV2Error(RuntimeErrorInfo(
+            code="server.session.id_mismatch", category=ErrorCategory.VALIDATION,
+            message="session_id and threadId must match",
+            metadata={"side_effect_state": "not_applied"},
+        ))
+    value = session_id if session_id is not None else thread_id
+    return validate_agui_id(value, field="session_id") if value is not None else new_id("session")
 
 
 def _forwarded_props(request: RunAgentInput) -> Mapping[str, Any]:
