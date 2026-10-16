@@ -251,3 +251,25 @@ async def test_probe_admission_limits_parallel_work_and_releases_after_error():
     async with service.model_probe_slot("alice"):
         assert service._probing_users == {"alice"}
     assert service._probing_users == set()
+
+
+def test_agent_fast_model_create_update_and_clear_use_app_model_ids(client):
+    headers = {"Authorization": f"Bearer {register_and_login(client)}"}
+    ids = []
+    for name in ("primary", "fast"):
+        response = client.post("/api/models", headers=headers, json={"model": name, "api_key": "test-key"})
+        assert response.status_code == 200, response.text
+        ids.append(response.json()["data"]["id"])
+    response = client.post("/api/agents", headers=headers, json={"name": "With fast model", "model_id": ids[0], "fast_model_id": ids[1]})
+    assert response.status_code == 200, response.text
+    agent = response.json()["data"]
+    for fast_id in (ids[1], ids[0], ""):
+        response = client.put(f"/api/agents/{agent['id']}", headers=headers, json={"name": agent["name"], "model_id": ids[0], "fast_model_id": fast_id})
+        assert response.status_code == 200, response.text
+        saved = response.json()["data"]
+        manifest = saved["package"]["manifest"]
+        assert "models" not in manifest and "credentials" not in manifest
+        bindings = manifest["agents"][agent["id"]]["models"]
+        assert bindings["primary"] == ids[0]
+        assert bindings.get("fast", "") == fast_id
+        assert saved["fast_model_id"] == (fast_id or None)
