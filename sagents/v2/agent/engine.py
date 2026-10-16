@@ -16,6 +16,7 @@ from collections.abc import Callable
 from sagents.v2.contracts.conversation import order_tool_context
 from sagents.v2.agent.state import AgentLoopCheckpointCodec, AgentLoopCheckpointState
 from sagents.v2.agent.stream_batcher import StreamEventBatcher
+from sagents.v2.agent.model_recovery import can_repair_model_arguments, argument_recovery_guidance
 from sagents.v2.model.contracts import (
     ModelEventKind,
     ModelMessage,
@@ -114,6 +115,7 @@ from sagents.v2.contracts.items import (
     TextBlock,
     ToolCallItemData,
     ToolResultItemData,
+    UsageSummary,
 )
 from sagents.v2.contracts.principals import RequestContext
 from sagents.v2.contracts.run_state import (
@@ -141,6 +143,7 @@ class AgentLoopEngine:
     # contained no usable semantic fields, where replay cannot duplicate a
     # Tool call or other external side effect.
     _MAX_TRANSPARENT_EMPTY_RESPONSE_RETRIES = 2
+    _MAX_MODEL_ARGUMENT_RECOVERIES = 2
 
     """Composable model/tool loop with durable, resumable side-effect barriers."""
 
@@ -605,6 +608,13 @@ class AgentLoopEngine:
             turn_id=started.turn_id or new_id("turn"),
             step_number=step_number,
             messages=messages,
+            model_argument_recovery_attempts=sum(
+                event.type == "step.retry_scheduled"
+                and isinstance(event.data, StepEventData)
+                and event.data.error is not None
+                and can_repair_model_arguments(event.data.error)
+                for event in events
+            ),
             pending_flow_boundary=command.config.flow_boundary,
             pending_response_step_id=started.step_id,
             pending_response_system_requirements=self._system_requirements(messages),
@@ -1190,6 +1200,22 @@ class AgentLoopEngine:
                         run, request, context, state, step_id
                     )
                 except SageV2Error as exc:
+                    if (
+                        can_repair_model_arguments(exc.info)
+                        and state.pending_tool_call is None
+                        and state.pending_response_step_id is None
+                    ):
+                        run, state = await self._recover_model_arguments(
+                            run,
+                            state,
+                            step_id,
+                            exc.info,
+                            command,
+                            context,
+                        )
+                        if run.state != RunState.RUNNING:
+                            return run
+                        continue
                     if (
                         exc.info.code == "model.context_window_exceeded"
                         and exc.info.retryable
@@ -1780,6 +1806,133 @@ class AgentLoopEngine:
             and payload.get("should_end") is True
         )
 
+    async def _recover_model_arguments(
+        self, run, state, step_id, error, command, context
+    ):
+        """Checkpoint a bounded inference repair; never retry a Tool execution."""
+        run = await self.runtime.get_run(run.run_id)
+        if run.state in TERMINAL_RUN_STATES:
+            return run, state
+        usage = UsageSummary.model_validate(error.metadata.get("usage") or {})
+        state = state.model_copy(
+            update={
+                "total_input_tokens": state.total_input_tokens + usage.input_tokens,
+                "total_output_tokens": state.total_output_tokens + usage.output_tokens,
+            }
+        )
+        usage_draft = EventDraft(
+            type="usage.recorded",
+            turn_id=state.turn_id,
+            step_id=step_id,
+            data=UsageEventData(usage=usage),
+        )
+        max_tokens = command.config.max_total_tokens or command.config.metadata.get(
+            "max_total_tokens"
+        )
+        budget_error = None
+        if (
+            max_tokens
+            and state.total_input_tokens + state.total_output_tokens >= max_tokens
+        ):
+            budget_error = "budget.max_tokens"
+        elif (
+            command.config.deadline_seconds is not None
+            and (self.clock() - run.created_at).total_seconds()
+            >= command.config.deadline_seconds
+        ):
+            budget_error = "budget.deadline"
+        exhausted = (
+            state.model_argument_recovery_attempts
+            >= self._MAX_MODEL_ARGUMENT_RECOVERIES
+        )
+        if (
+            budget_error
+            or exhausted
+            or state.step_number >= (command.config.max_steps or 24)
+        ):
+            run = await self._commit_running(
+                run, context, (usage_draft,), expected_states={run.state}
+            )
+            if budget_error:
+                error = RuntimeErrorInfo(
+                    code=budget_error,
+                    category=ErrorCategory.VALIDATION,
+                    message=tr("error." + budget_error, context.language),
+                    safe_to_resume=True,
+                    metadata={"model_error_code": error.code},
+                )
+            else:
+                error = error.model_copy(
+                    update={
+                        "message_key": "error.model.argument_recovery_exhausted"
+                        if exhausted
+                        else "recovery.max_steps",
+                        "metadata": {
+                            **error.metadata,
+                            "transparent_retries_exhausted": True,
+                            "transparent_retry_limit": self._MAX_MODEL_ARGUMENT_RECOVERIES,
+                        },
+                    }
+                )
+            return await self._fail(run, state, step_id, error, context), state
+        attempt = state.model_argument_recovery_attempts + 1
+        state = state.model_copy(
+            update={
+                "model_argument_recovery_attempts": attempt,
+                "pending_continuation_reason": argument_recovery_guidance(error),
+                "retry_model_step": True,
+                "step_number": state.step_number + 1,
+            }
+        )
+        if run.state == RunState.SUSPEND_REQUESTED:
+            run = await self._commit_running(
+                run,
+                context,
+                (usage_draft,),
+                expected_states={RunState.SUSPEND_REQUESTED},
+            )
+            return await self._suspend_at_safe_point(run, state, context), state
+        retry_error = error.model_copy(
+            update={
+                "metadata": {
+                    **{
+                        key: value
+                        for key, value in error.metadata.items()
+                        if key != "raw_arguments"
+                    },
+                    "transparent_retry_attempt": attempt,
+                    "transparent_retry_limit": self._MAX_MODEL_ARGUMENT_RECOVERIES,
+                }
+            }
+        )
+        checkpoint, _ = self._checkpoint_records(
+            run, state, reason=SuspensionReason.MANUAL_PAUSE
+        )
+        committed = await self.runtime.session_store.commit_run(
+            run_id=run.run_id,
+            expected_revision=run.revision,
+            expected_states={RunState.RUNNING},
+            new_state=RunState.RUNNING,
+            drafts=(
+                usage_draft,
+                EventDraft(
+                    type="step.retry_scheduled",
+                    turn_id=state.turn_id,
+                    step_id=step_id,
+                    data=StepEventData(
+                        state="retry_scheduled",
+                        attempt=attempt,
+                        retry_at=self.clock(),
+                        error=retry_error,
+                    ),
+                ),
+            ),
+            checkpoint=checkpoint,
+            context=context,
+            idempotency_key=f"model-argument-repair:{run.run_id}:{step_id}",
+        )
+        return committed.run, state
+
     async def _stream_model(self, run, request, context, state, step_id):
         return await self.stream_model_step(run, request, context, state, step_id)
 
@@ -1965,6 +2118,31 @@ class AgentLoopEngine:
                         run = await batcher.add(draft)
                 else:
                     response = model_event.response
+        except SageV2Error as exc:
+            if can_repair_model_arguments(exc.info):
+                run = await batcher.flush()
+                current = await self.runtime.get_run(run.run_id)
+                if current.state == RunState.RUNNING:
+                    drafts = tuple(
+                        self._partial_item_draft(
+                            run.run_id,
+                            state.turn_id,
+                            step_id,
+                            item_id,
+                            content,
+                            reasoning=is_reasoning,
+                            status=ItemStatus.CANCELLED,
+                        )
+                        for item_id, content, is_reasoning, started in (
+                            (text_item_id, text, False, text_started),
+                            (reasoning_item_id, reasoning, True, reasoning_started),
+                        )
+                        if started
+                    )
+                    if drafts:
+                        run = await self._commit_running(current, context, drafts)
+                        await batcher.observe_run(run)
+            raise
         finally:
             try:
                 run = await batcher.flush()
@@ -3592,7 +3770,15 @@ class AgentLoopEngine:
         )
 
     def _partial_item_draft(
-        self, run_id, turn_id, step_id, item_id, content, *, reasoning
+        self,
+        run_id,
+        turn_id,
+        step_id,
+        item_id,
+        content,
+        *,
+        reasoning,
+        status=ItemStatus.SUSPENDED,
     ):
         data = (
             ReasoningItemData(content=(TextBlock(text=content),))
@@ -3605,7 +3791,7 @@ class AgentLoopEngine:
             turn_id,
             step_id,
             data,
-            status=ItemStatus.SUSPENDED,
+            status=status,
         )
         return EventDraft(
             type="item.completed",

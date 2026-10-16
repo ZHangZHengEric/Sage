@@ -935,3 +935,31 @@ def test_config_has_no_credential_field_and_mutable_defaults_are_isolated():
     first.extra_body["x"] = 1
     assert second.extra_body == {}
     assert "api_key" not in OpenAICompatibleConfig.model_fields
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("arguments", ['{"value":"partial', '{"value":"complete"}'])
+async def test_length_limited_tool_arguments_are_not_exposed_for_execution(arguments):
+    stream = FakeStream(
+        (
+            chunk(
+                tool_calls=(
+                    tool_delta(
+                        0, call_id="call_cut", name="lookup", arguments=arguments
+                    ),
+                ),
+                finish="length",
+            ),
+        )
+    )
+    provider = OpenAICompatibleModelProvider(
+        config(), client=FakeClient(FakeCompletions(stream=stream))
+    )
+    with pytest.raises(SageV2Error) as caught:
+        _ = [event async for event in provider.stream(request())]
+    error = caught.value.info
+    assert error.code == "model.tool_arguments_truncated"
+    assert error.category == ErrorCategory.VALIDATION
+    assert error.metadata["tool_execution_started"] is False
+    assert error.metadata["finish_reason"] == "length"
+    assert stream.closed

@@ -45,6 +45,8 @@ class AgentLoopCheckpointState(StrictModel):
     pending_response_tool_names: tuple[str, ...] = ()
     pending_questionnaire_completed: bool = False
     retry_model_step: bool = False
+    # Run-wide recovery budget, persisted before another inference is sent.
+    model_argument_recovery_attempts: int = Field(default=0, ge=0)
     # V1 LLM-Judge continuation requires the next direct model response to use
     # a Tool and injects the Judge reason only into that inference request.
     force_tool_choice_required_next: bool = False

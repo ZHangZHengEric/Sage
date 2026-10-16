@@ -63,6 +63,9 @@ _EN = {
     "error.internal": "An internal runtime error stopped the run. Diagnostic details were recorded.",
     "error.model.stream_incomplete": "The reply was interrupted before it was complete.",
     "error.model.empty_semantic_response": "The model returned token usage but no usable text, reasoning, or Tool call. Sage retried automatically but still received an empty response.",
+    "error.model.tool_arguments_truncated": "The model reached its output limit before completing Tool arguments. No Tool from that response was executed.",
+    "error.model.tool_arguments_invalid_json": "The model generated invalid Tool arguments. The rejected calls were not executed.",
+    "error.model.argument_recovery_exhausted": "Automatic Tool argument repair reached its limit. Split the task into smaller parts or adjust the output budget before retrying.",
     "error.model.provider_error": "The model provider could not complete the request.",
     "error.model.queue_full": "The model request queue is full. Try again later.",
     "error.model.queue_timeout": "The model request timed out waiting for capacity. Try again later.",
@@ -133,6 +136,9 @@ _TRANSLATIONS: dict[str, dict[str, str]] = {
             "error.authorization": "当前用户无权执行该操作。",
             "error.rate_limited": "模型服务暂时限制请求频率，请稍后重试。",
             "error.provider_transient": "当前服务暂时不可用，请稍后重试。",
+            "error.model.tool_arguments_truncated": "模型输出额度耗尽，工具参数未生成完整；该响应中的工具尚未执行。",
+            "error.model.tool_arguments_invalid_json": "模型生成的工具参数格式无效，未执行这些调用。",
+            "error.model.argument_recovery_exhausted": "工具参数自动修复已达到次数上限，请拆分任务或调整输出额度后重试。",
             "error.provider_permanent": "这次请求未能完成，请检查服务设置。",
             "error.resource_lost": "运行所需的资源已不可用。",
             "error.unsupported_schema": "该运行使用了当前版本不支持的数据格式。",
@@ -866,6 +872,68 @@ for _locale, _values in _RECOVERY_REASON_LOCALE_TEXT.items():
 _EN.update(_RECOVERY_REASON_LOCALE_TEXT["en"])
 
 
+_MODEL_ARGUMENT_LOCALE_TEXT = {
+    "pt": (
+        "O modelo atingiu o limite de saída antes de concluir os argumentos. Nenhuma ferramenta "
+        "dessa resposta foi executada.",
+        "O modelo gerou argumentos de ferramenta inválidos. Nenhuma ferramenta dessa resposta foi "
+        "executada.",
+        "O reparo automático dos argumentos atingiu o limite. Divida a tarefa ou ajuste o "
+        "orçamento de saída antes de tentar novamente.",
+    ),
+    "es": (
+        "El modelo alcanzó el límite de salida antes de completar los argumentos. No se ejecutó "
+        "ninguna herramienta de esa respuesta.",
+        "El modelo generó argumentos de herramienta no válidos. No se ejecutó ninguna herramienta "
+        "de esa respuesta.",
+        "La reparación automática de argumentos alcanzó el límite. Divide la tarea o ajusta el "
+        "presupuesto de salida antes de reintentar.",
+    ),
+    "fr": (
+        "Le modèle a atteint sa limite de sortie avant de terminer les arguments. Aucun outil de "
+        "cette réponse n’a été exécuté.",
+        "Le modèle a généré des arguments d’outil invalides. Aucun outil de cette réponse n’a été "
+        "exécuté.",
+        "La réparation automatique des arguments a atteint sa limite. Divisez la tâche ou ajustez "
+        "le budget de sortie avant de réessayer.",
+    ),
+    "de": (
+        "Das Modell hat die Ausgabegrenze vor Abschluss der Werkzeugargumente erreicht. Kein "
+        "Werkzeug dieser Antwort wurde ausgeführt.",
+        "Das Modell hat ungültige Werkzeugargumente erzeugt. Kein Werkzeug dieser Antwort wurde "
+        "ausgeführt.",
+        "Die automatische Reparatur der Werkzeugargumente hat ihr Limit erreicht. Teilen Sie die "
+        "Aufgabe auf oder passen Sie das Ausgabebudget vor dem erneuten Versuch an.",
+    ),
+    "ja": (
+        "ツール引数の生成が完了する前に出力上限に達しました。この応答のツールは実行されていません。",
+        "モデルが無効なツール引数を生成しました。この応答のツールは実行されていません。",
+        "ツール引数の自動修復回数が上限に達しました。タスクを分割するか出力予算を調整して再試行してください。",
+    ),
+    "ko": (
+        "도구 인수가 완성되기 전에 모델 출력 한도에 도달했습니다. 이 응답의 도구는 실행되지 않았습니다.",
+        "모델이 잘못된 도구 인수를 생성했습니다. 이 응답의 도구는 실행되지 않았습니다.",
+        "도구 인수 자동 복구 횟수가 한도에 도달했습니다. 작업을 나누거나 출력 예산을 조정한 후 다시 시도하세요.",
+    ),
+    "ru": (
+        "Модель достигла лимита вывода до завершения аргументов инструмента. Ни один инструмент из "
+        "этого ответа не был выполнен.",
+        "Модель создала некорректные аргументы инструмента. Ни один инструмент из этого ответа не "
+        "был выполнен.",
+        "Достигнут лимит автоматического исправления аргументов. Разделите задачу или измените "
+        "бюджет вывода перед повторной попыткой.",
+    ),
+}
+for _locale, (_truncated, _invalid, _exhausted) in _MODEL_ARGUMENT_LOCALE_TEXT.items():
+    _TRANSLATIONS[_locale].update(
+        {
+            "error.model.tool_arguments_truncated": _truncated,
+            "error.model.tool_arguments_invalid_json": _invalid,
+            "error.model.argument_recovery_exhausted": _exhausted,
+        }
+    )
+
+
 def tr(key: str, language: str | None, **params: Any) -> str:
     locale = normalize_language(language)
     localized = _TRANSLATIONS[locale]
@@ -893,6 +961,10 @@ def tr(key: str, language: str | None, **params: Any) -> str:
 
 
 _ERROR_KEYS = {
+    "model.tool_arguments_truncated": "error.model.tool_arguments_truncated",
+    "model.tool_arguments_invalid_json": "error.model.tool_arguments_invalid_json",
+    "model.tool_arguments_not_object": "error.model.tool_arguments_invalid_json",
+    "model.tool_name_missing": "error.model.tool_arguments_invalid_json",
     "model.empty_semantic_response": "error.model.empty_semantic_response",
     "model.stream_incomplete": "error.model.stream_incomplete",
     "model.provider_error": "error.model.provider_error",

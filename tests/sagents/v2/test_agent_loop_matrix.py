@@ -3987,3 +3987,237 @@ async def test_nonresumable_request_preparation_failure_emits_terminal_questionn
         events[-1].data.error.metadata["recovery_questionnaire"]["resumable"] is False
     )
     assert events[-1].data.error.metadata["recovery_questionnaire"]["questions"]
+
+
+def argument_error(*, truncated=True, usage=None):
+    from sagents.v2.model.wire import parse_tool_arguments
+
+    try:
+        parse_tool_arguments(
+            '{"value":"unfinished',
+            tool_call_id="partial",
+            name="write_value",
+            diagnostic_context={
+                "finish_reason": "length" if truncated else "tool_calls",
+                "usage": usage or {},
+            },
+        )
+    except SageV2Error as exc:
+        return exc.info
+    raise AssertionError("expected invalid arguments")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("truncated", [True, False])
+async def test_model_argument_repair_preserves_prior_tools_and_accounts_failed_usage(
+    truncated,
+):
+    executions = []
+
+    async def write(call, context):
+        executions.append(call.arguments["value"])
+        return await tool_handler(call, context)
+
+    error = argument_error(
+        truncated=truncated, usage={"input_tokens": 20, "output_tokens": 50}
+    )
+    model = ScriptedModelProvider(
+        (
+            ScriptedModelStep(
+                events=(completed("", calls=(tool_call("write_value"),)),)
+            ),
+            ScriptedModelStep(events=(), error=error),
+            ScriptedModelStep(
+                events=(
+                    completed(
+                        "",
+                        calls=(
+                            ModelToolCall(
+                                tool_call_id="repaired",
+                                name="write_value",
+                                arguments={"key": "b", "value": "2"},
+                            ),
+                        ),
+                    ),
+                )
+            ),
+            ScriptedModelStep(events=(completed("done"),)),
+        )
+    )
+    runtime, handle, loop, _ = await setup_loop(
+        model,
+        handlers={"write_value": write},
+        tool_policy=DefaultToolPolicy(approval_strategy=ApprovalStrategy.AUTO_APPROVE),
+    )
+    result = await loop.execute(handle.run_id, CONTEXT)
+    assert result.state == RunState.COMPLETED
+    assert executions == ["1", "2"]
+    request = model.requests[2]
+    guidance = "\n".join(
+        getattr(b, "text", "") for m in request.messages for b in m.content
+    )
+    assert "Do not continue its partial JSON" in guidance
+    assert "incremental edits" in guidance
+    assert not any(
+        call.tool_call_id == "partial"
+        for m in request.messages
+        for call in m.tool_calls
+    )
+    assert any(m.role == "tool" for m in request.messages)
+    events = await runtime.session_store.read_events(handle.run_id)
+    assert sum(e.type == "step.retry_scheduled" for e in events) == 1
+    assert (
+        sum(e.data.usage.output_tokens for e in events if e.type == "usage.recorded")
+        == 56
+    )
+    assert not any(e.type == "interaction.requested" for e in events)
+    checkpoint = await runtime.session_store.get_checkpoint(result.checkpoint_id)
+    assert checkpoint.state["model_argument_recovery_attempts"] == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("max_steps", "max_total_tokens", "expected_calls"),
+    [(10, None, 3), (1, None, 1), (10, 10, 1)],
+)
+async def test_model_argument_repair_is_bounded_by_attempts_steps_and_tokens(
+    max_steps, max_total_tokens, expected_calls
+):
+    error = argument_error(usage={"input_tokens": 10, "output_tokens": 10})
+    model = ScriptedModelProvider(
+        tuple(ScriptedModelStep(events=(), error=error) for _ in range(5))
+    )
+    runtime, handle, loop, _ = await setup_loop(
+        model, max_steps=max_steps, max_total_tokens=max_total_tokens
+    )
+    result = await loop.execute(handle.run_id, CONTEXT)
+    assert result.state == RunState.SUSPENDED
+    assert len(model.requests) == expected_calls
+    events = await runtime.session_store.read_events(handle.run_id)
+    assert not any(e.type == "tool.call.started" for e in events)
+    assert (
+        sum(e.data.usage.output_tokens for e in events if e.type == "usage.recorded")
+        == expected_calls * 10
+    )
+    checkpoint = await runtime.session_store.get_checkpoint(result.checkpoint_id)
+    assert checkpoint.state["total_output_tokens"] == expected_calls * 10
+
+
+@pytest.mark.asyncio
+async def test_argument_recovery_budget_survives_pause_and_new_engine():
+    model = ScriptedModelProvider(
+        (
+            ScriptedModelStep(events=(), error=argument_error()),
+            ScriptedModelStep(events=(completed("not emitted"),), delay_yields=100000),
+        )
+    )
+    runtime, handle, loop, executor = await setup_loop(model)
+    task = asyncio.create_task(loop.execute(handle.run_id, CONTEXT))
+    while len(model.requests) < 2 and not task.done():
+        await asyncio.sleep(0)
+    current = await runtime.get_run(handle.run_id)
+    await runtime.pause_run(
+        PauseRun(
+            run_id=handle.run_id,
+            expected_revision=current.revision,
+            idempotency_key="pause-argument-recovery",
+        ),
+        CONTEXT,
+    )
+    suspended = await asyncio.wait_for(task, timeout=5)
+    assert suspended.state == RunState.SUSPENDED
+    checkpoint = await runtime.session_store.get_checkpoint(suspended.checkpoint_id)
+    assert checkpoint.state["model_argument_recovery_attempts"] == 1
+    suspension = await runtime.session_store.get_suspension(suspended.suspension_id)
+    await runtime.resume_run(
+        ResumeRun(
+            run_id=handle.run_id,
+            suspension_id=suspension.suspension_id,
+            expected_revision=suspended.revision,
+            expected_suspension_revision=suspension.expected_revision,
+            idempotency_key="resume-argument-recovery",
+        ),
+        CONTEXT,
+    )
+    fresh_model = ScriptedModelProvider(
+        tuple(ScriptedModelStep(events=(), error=argument_error()) for _ in range(4))
+    )
+    fresh = AgentLoopEngine(
+        runtime=runtime,
+        model=fresh_model,
+        tool_catalog=loop.tool_catalog,
+        tool_executor=executor,
+    )
+    result = await fresh.resume(handle.run_id, CONTEXT)
+    assert result.state == RunState.SUSPENDED
+    assert len(fresh_model.requests) == 2
+    final_checkpoint = await runtime.session_store.get_checkpoint(result.checkpoint_id)
+    assert final_checkpoint.state["model_argument_recovery_attempts"] == 2
+
+
+@pytest.mark.asyncio
+async def test_unsafe_model_error_with_similar_code_is_not_automatically_retried():
+    error = argument_error().model_copy(
+        update={
+            "category": ErrorCategory.UNCERTAIN_SIDE_EFFECT,
+            "metadata": {"side_effect_state": "unknown"},
+        }
+    )
+    model = ScriptedModelProvider((ScriptedModelStep(events=(), error=error),))
+    runtime, handle, loop, _ = await setup_loop(model)
+    result = await loop.execute(handle.run_id, CONTEXT)
+    assert result.state == RunState.SUSPENDED
+    assert len(model.requests) == 1
+    assert not any(
+        e.type == "step.retry_scheduled"
+        for e in await runtime.session_store.read_events(handle.run_id)
+    )
+
+
+@pytest.mark.asyncio
+async def test_repaired_step_discards_partial_stream_items_from_model_history():
+    class PartialErrorModel(ScriptedModelProvider):
+        async def _stream(self, request):
+            step = await self._claim_step(request)
+            for event in step.events:
+                yield event
+            if step.error:
+                raise SageV2Error(step.error)
+
+    model = PartialErrorModel(
+        (
+            ScriptedModelStep(
+                events=(
+                    ModelStreamEvent(
+                        kind=ModelEventKind.TEXT_DELTA, delta="unfinished preview"
+                    ),
+                    ModelStreamEvent(
+                        kind=ModelEventKind.REASONING_DELTA, delta="abandoned reasoning"
+                    ),
+                ),
+                error=argument_error(),
+            ),
+            ScriptedModelStep(events=(completed("done"),)),
+        )
+    )
+    runtime, handle, loop, _ = await setup_loop(model)
+    result = await loop.execute(handle.run_id, CONTEXT)
+    assert result.state == RunState.COMPLETED
+    events = await runtime.session_store.read_events(handle.run_id)
+    abandoned = [
+        e.data.item
+        for e in events
+        if e.type == "item.completed" and e.data.item.status == ItemStatus.CANCELLED
+    ]
+    assert len(abandoned) == 2
+    prompt = "\n".join(
+        getattr(b, "text", "") for m in model.requests[1].messages for b in m.content
+    )
+    assert "unfinished preview" not in prompt
+    assert "abandoned reasoning" not in prompt
+    checkpoint = await runtime.session_store.get_checkpoint(result.checkpoint_id)
+    command = await runtime.session_store.get_start_command(handle.run_id)
+    ledger = await loop.ledger_rebuilder.rebuild(
+        command, run_id=handle.run_id, through_run_sequence=checkpoint.run_sequence
+    )
+    assert loop._ledger_digest(ledger) == checkpoint.state["ledger_digest"]
