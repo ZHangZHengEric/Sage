@@ -66,7 +66,7 @@ class ModelConversationSummarizer:
         self,
         model: ModelProvider,
         *,
-        model_binding: str = "summary",
+        model_binding: str = "primary",
         max_source_tokens: int = 24_000,
         timeout_seconds: float = DEFAULT_SUMMARY_MODEL_TIMEOUT_SECONDS,
         idle_timeout_seconds: float = DEFAULT_AUXILIARY_MODEL_TIMEOUT_SECONDS,
@@ -77,6 +77,8 @@ class ModelConversationSummarizer:
             raise ValueError("idle_timeout_seconds must be greater than zero")
         if max_source_tokens <= 0:
             raise ValueError("max_source_tokens must be greater than zero")
+        if model_binding != "primary":
+            raise ValueError("history summarization must use the Agent primary model")
         self.model = model
         self.model_binding = model_binding
         self.max_source_tokens = max_source_tokens

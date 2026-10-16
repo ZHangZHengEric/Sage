@@ -37,7 +37,8 @@ def test_package_has_no_yaml_credentials_or_model_routes():
     assert summarizer.config == {"model_binding": "primary"}
     from app.v2.server.catalog.plugins import AGENT_DEFAULTS
     assert set(manifest.runtime.capabilities) == set(AGENT_DEFAULTS) | {
-        "artifact.store", "observability.log-sink",
+        "artifact.store", "observability.log-sink", "context.summary-store",
+        "observability.trace-sink", "package.registry",
     }
     assert manifest.runtime.capabilities["artifact.store"].plugin == "sage.artifact.session"
 
@@ -87,7 +88,7 @@ def test_package_skips_jaeger_when_endpoint_missing(tmp_path: Path):
             mysql_url="mysql://sage:sage@127.0.0.1:3306/sage",
         )
     )
-    assert "observability.trace-sink" not in manifest.runtime.capabilities
+    assert manifest.runtime.capabilities["observability.trace-sink"].plugin == "sage.trace.noop"
     assert manifest.runtime.capabilities["session.store"].plugin == "sage.session.mysql"
     assert _stdout_log_sink(manifest).plugin == "sage.logging.stdout"
 

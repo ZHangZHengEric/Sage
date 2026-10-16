@@ -196,6 +196,7 @@ async def test_summary_retries_truncation_with_larger_allowance_and_minimum_reas
         )
     )
     assert json.loads(value) == payload
+    assert all(r.model_binding == "primary" for r in model.requests)
     assert [r.max_output_tokens for r in model.requests] == [8192, 16384]
     assert all(r.reasoning_mode == "minimum" for r in model.requests)
 
@@ -316,3 +317,9 @@ async def test_summary_output_allowance_respects_model_limit():
         )
     )
     assert model.requests[0].max_output_tokens == 2048
+
+
+@pytest.mark.parametrize("binding", ["summary", "fast", "another-model"])
+def test_summary_rejects_independent_model_binding(binding):
+    with pytest.raises(ValueError, match="Agent primary model"):
+        ModelConversationSummarizer(object(), model_binding=binding)
