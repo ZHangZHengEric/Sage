@@ -136,41 +136,48 @@ def parse_tool_arguments(
 ) -> ModelToolCall:
     """Decode one provider tool call into the strict v2 contract."""
 
+    diagnostic = {
+        **dict(diagnostic_context or {}),
+        "tool_call_id": tool_call_id,
+        "tool_name": name,
+        "raw_arguments": raw,
+        "arguments_length": len(raw or ""),
+        "side_effect_state": "not_applied",
+        "tool_execution_started": False,
+    }
+
+    def invalid(code, message):
+        return SageV2Error(
+            RuntimeErrorInfo(
+                code=code,
+                category=ErrorCategory.VALIDATION,
+                message=message,
+                retryable=True,
+                safe_to_resume=True,
+                metadata=diagnostic,
+            )
+        )
+
+    if diagnostic.get("finish_reason") in {"length", "max_tokens", "max_output_tokens"}:
+        raise invalid(
+            "model.tool_arguments_truncated",
+            "model output limit interrupted tool arguments before execution",
+        )
     try:
         arguments = json.loads(raw or "{}")
     except json.JSONDecodeError as exc:
-        raise SageV2Error(
-            RuntimeErrorInfo(
-                code="model.tool_arguments_invalid_json",
-                category=ErrorCategory.PROVIDER_PERMANENT,
-                message=f"model returned invalid tool arguments: {exc}",
-                safe_to_resume=True,
-                metadata={
-                    **dict(diagnostic_context or {}),
-                    "tool_call_id": tool_call_id,
-                    "tool_name": name,
-                    "raw_arguments": raw,
-                    "arguments_length": len(raw or ""),
-                },
-            )
+        raise invalid(
+            "model.tool_arguments_invalid_json",
+            f"model returned invalid tool arguments: {exc}",
         ) from exc
     if not isinstance(arguments, dict):
-        raise SageV2Error(
-            RuntimeErrorInfo(
-                code="model.tool_arguments_not_object",
-                category=ErrorCategory.PROVIDER_PERMANENT,
-                message="model tool arguments must decode to an object",
-                safe_to_resume=True,
-            )
+        raise invalid(
+            "model.tool_arguments_not_object",
+            "model tool arguments must decode to an object",
         )
     if not name:
-        raise SageV2Error(
-            RuntimeErrorInfo(
-                code="model.tool_name_missing",
-                category=ErrorCategory.PROVIDER_PERMANENT,
-                message="model returned a tool call without a name",
-                safe_to_resume=True,
-            )
+        raise invalid(
+            "model.tool_name_missing", "model returned a tool call without a name"
         )
     return ModelToolCall(
         tool_call_id=tool_call_id or new_id("tool_call"),

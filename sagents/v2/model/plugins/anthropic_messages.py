@@ -419,9 +419,26 @@ class AnthropicMessagesModelProvider:
             )
 
         usage = canonical_token_usage(provider_usage, input_mode="disjoint")
+        usage_summary = UsageSummary(
+            reported=usage_reported,
+            input_tokens=usage.input_tokens,
+            output_tokens=usage.output_tokens,
+            cached_input_tokens=usage.cached_input_tokens,
+            reasoning_tokens=usage.reasoning_tokens,
+            models=(self.config.model,),
+            provider_usage=provider_usage,
+        )
         calls = tuple(
             parse_tool_arguments(
-                value["arguments"], tool_call_id=value["id"], name=value["name"]
+                value["arguments"],
+                tool_call_id=value["id"],
+                name=value["name"],
+                diagnostic_context={
+                    "provider": self.config.provider_id,
+                    "response_id": response_id,
+                    "finish_reason": finish_reason,
+                    "usage": usage_summary.model_dump(mode="json"),
+                },
             )
             for _, value in sorted(tools.items())
         )
@@ -433,15 +450,7 @@ class AnthropicMessagesModelProvider:
                 reasoning=reasoning,
                 tool_calls=calls,
                 finish_reason=finish_reason,
-                usage=UsageSummary(
-                    reported=usage_reported,
-                    input_tokens=usage.input_tokens,
-                    output_tokens=usage.output_tokens,
-                    cached_input_tokens=usage.cached_input_tokens,
-                    reasoning_tokens=usage.reasoning_tokens,
-                    models=(self.config.model,),
-                    provider_usage=provider_usage,
-                ),
+                usage=usage_summary,
                 provider_metadata={
                     "provider_id": self.config.provider_id,
                     "model": self.config.model,

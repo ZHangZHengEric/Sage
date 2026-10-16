@@ -37,6 +37,7 @@ from sagents.v2.contracts.items import (
 )
 from sagents.v2.contracts.provider_state import make_provider_state, read_provider_state
 from sagents.v2.model.wire import (
+    parse_tool_arguments,
     provider_error,
     stream_incomplete_error,
     minimum_reasoning_control,
@@ -422,41 +423,17 @@ class OpenAICompatibleModelProvider:
         tool_calls: list[ModelToolCall] = []
         for index in sorted(tool_fragments):
             fragment = tool_fragments[index]
-            try:
-                arguments = json.loads(fragment["arguments"] or "{}")
-            except json.JSONDecodeError as exc:
-                raise SageV2Error(
-                    RuntimeErrorInfo(
-                        code="model.tool_arguments_invalid_json",
-                        category=ErrorCategory.PROVIDER_PERMANENT,
-                        message=f"model returned invalid tool arguments: {exc}",
-                        safe_to_resume=True,
-                        metadata={
-                            "provider": self.config.provider_id,
-                            "response_id": response_id,
-                            "finish_reason": finish_reason,
-                            "usage": usage.model_dump(mode="json"),
-                            "tool_call_id": fragment["id"],
-                            "tool_name": fragment["name"],
-                            "raw_arguments": fragment["arguments"],
-                            "arguments_length": len(fragment["arguments"]),
-                        },
-                    )
-                ) from exc
-            if not isinstance(arguments, dict):
-                raise SageV2Error(
-                    RuntimeErrorInfo(
-                        code="model.tool_arguments_not_object",
-                        category=ErrorCategory.PROVIDER_PERMANENT,
-                        message="model tool arguments must decode to an object",
-                        safe_to_resume=True,
-                    )
-                )
             tool_calls.append(
-                ModelToolCall(
-                    tool_call_id=fragment["id"] or new_id("tool_call"),
+                parse_tool_arguments(
+                    fragment["arguments"],
+                    tool_call_id=fragment["id"],
                     name=fragment["name"],
-                    arguments=arguments,
+                    diagnostic_context={
+                        "provider": self.config.provider_id,
+                        "response_id": response_id,
+                        "finish_reason": finish_reason,
+                        "usage": usage.model_dump(mode="json"),
+                    },
                 )
             )
         if (
