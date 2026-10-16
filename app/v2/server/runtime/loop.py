@@ -1,41 +1,18 @@
-"""Shared Run assembly for catalog chat and managed packages.
-
-Chat keeps a pinned catalog Agent and materializes a loop on the process
-Application. A package keeps an immutable version and its own table prefix.
-Both call ``prepare_tenant_binding`` and ``open_model_lease`` for skills,
-MCP, A2A peers, and the model lease. Sandbox provisioning lives next to the
-official tool plugin.
-"""
+"""Server adapters for tenant resources and the common SAgents Package pipeline."""
 
 from __future__ import annotations
 
-import json
-from contextlib import AsyncExitStack
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from sagents.v2.agent.factory import AgentCompositionFactory
-from sagents.v2.context.components import ContextComponentBundle
 from sagents.v2.contracts.commands import StartRun
-from sagents.v2.model import RecordingModelProvider
-from sagents.v2.package.manifest.resolver import CompositionResolver
-from sagents.v2.skill.plugins.session import SessionDerivedSkillActivationRepository
-from sagents.v2.tool.composite import CompositeToolCatalog, CompositeToolExecutor
-from sagents.v2.tool.plugins.skill import SkillToolPlugin
 
 from app.v2.server.conversations.composition import (
     RunComposition,
     load_composition,
-    selected_a2a_agents,
-    selected_mcp_servers,
 )
 from app.v2.server.config.manifest import server_v2_run_manifest
-from app.v2.server.runtime.official import (
-    attach_official_tools,
-    resolve_agent_tools,
-)
 from app.v2.server.catalog.records import (
-    catalog_model,
     enabled_a2a_agents,
     enabled_mcp_servers,
     require_agent,
@@ -143,174 +120,39 @@ async def open_model_lease(
 async def compose_catalog_loop(
     service: CatalogRunDependencies, command: StartRun, *, user_id: str, run_id: str | None = None
 ):
+    """Resolve the catalog ID to a Package, then use the shared Package builder."""
+    from types import SimpleNamespace
     from app.v2.server.storage.workspaces import with_workspace_binding
+
     command = await with_workspace_binding(command, user_id, service.threads)
     catalog = await service.catalog.get(user_id)
     frozen = await _composition(service, command, catalog, user_id=user_id)
-    agent, records = frozen.agent, frozen.skills
-    names = tuple(record.name for record in records)
-    tools = resolve_agent_tools(agent.tools, has_skills=bool(names))
-    manifest = server_v2_run_manifest(
-        service.settings,
-        agent=agent,
-        skills=names,
-        tools=tools,
+    bundle = frozen.package or frozen.agent.package
+    manifest = bundle.resolved_manifest() if frozen.package is not None else server_v2_run_manifest(
+        service.settings, agent=frozen.agent,
+        skills=tuple(record.name for record in frozen.skills),
     )
-    resolved = CompositionResolver().resolve(manifest)
-    raw_model, model_scope = await _run_model(service, catalog, agent, user_id=user_id)
-    extra = [model_scope] if model_scope is not None else []
-    ports = None
-    try:
-        model = _recorded_model(service, service.execution.model_budget.wrap(raw_model))
-        ports = await service.application.materialize_agent(
-            manifest,
-            tenant_id=user_id,
-            agent_id=agent.id,
-            run_id=command.idempotency_key,
-            model=model,
-        )
-        from app.v2.server.runtime.official import agent_network_policy
-        from sagents.v2.package.manifest.agents import AgentSandboxConfig
-        live_agent = next((item for item in catalog.agents if item.id == agent.id), None)
-        network = agent_network_policy(
-            manifest.agents[agent.id].sandbox, service.settings,
-            live=live_agent.sandbox if live_agent else AgentSandboxConfig(),
-        )
-        official, official_runtime, sandbox_handle = await attach_official_tools(
-            service, command, user_id=user_id, run_id=run_id, network=network,
-        )
-        # ExitStack unwinds in reverse: stop Jobs, then destroy the sandbox.
-        extra.extend([sandbox_handle, official_runtime])
-        factory = AgentCompositionFactory(
-            service.application.entrypoint().runtime,
-            context_components=ContextComponentBundle(
-                token_estimator=ports.token_estimator,
-                summary_store=_optional_service(service, "context.summary-store"),
-                summarizer=ports.summarizer,
-                reducer=ports.context_reducer,
-            ),
-        )
-        from app.v2.server.storage.workspaces import workspace_user
+    owner_run_id = run_id or command.idempotency_key
+    factory = service.agent_management.package_builder_factory
+    context = service.contexts.for_user(user_id)
+    builder = await factory.build(
+        bundle, service.paths.runtime_root, context,
+        service.agent_management, catalog_run=(service, command, frozen),
+    )
+    builder.with_admitted_run_contract(owner_run_id, command.resolved_spec_hash)
+    application = await builder.build(manifest, tenant_id=user_id)
+    return PackageRunDriver(application), SimpleNamespace(scope_handles=(application,))
 
-        binding = prepare_tenant_binding(
-            service.paths,
-            service.mcp_plugins,
-            service.a2a_plugins,
-            user_id,
-            records,
-            selected_mcp_servers(catalog, frozen.mcp_servers),
-            selected_a2a_agents(catalog, frozen.a2a_agents),
-            agent_id=command.agent_id,
-            workspace_user_id=workspace_user(command, user_id),
-            call_depth=frozen.call_depth,
-        )
 
-        async def resolve_session_id(run_id: str) -> str:
-            run = await service.application.entrypoint().runtime.session_store.get_run(
-                run_id
-            )
-            return run.session_id
+class PackageRunDriver:
+    def __init__(self, application):
+        self.application = application
 
-        loader = factory.create_skill_loader(
-            resolved,
-            agent.id,
-            catalog=binding.provider,
-            source=binding.provider,
-            workspace=binding.workspace,
-            activations=SessionDerivedSkillActivationRepository(
-                service.application.service("derived-state.store"),
-                resolve_session_id,
-            ),
-            enabled_skills=names,
-            workspace_root="/workspace",
-            skill_loading=ports.skill_loading,
-        )
-        catalogs = [official.catalog]
-        executors = [official.executor]
-        if service.agent_management is not None:
-            from sagents.v2.tool.plugins.agent_management import (
-                AgentManagementToolPlugin,
-            )
+    async def execute(self, run_id, context):
+        return await self.application.entrypoint().drive_admitted_run(run_id, context)
 
-            management = AgentManagementToolPlugin(service.agent_management)
-            catalogs.append(management.catalog)
-            executors.append(management.executor)
-        if names:
-            skill_tool = SkillToolPlugin(loader, language=service.settings.language)
-            catalogs.append(skill_tool.catalog)
-            executors.append(skill_tool.executor)
-        # Tools from the tenant's own catalogs are granted per catalog rather
-        # than per Agent: the Agent's ``tools`` list names official tools, which
-        # is all the product lets it choose from. Without this they would be
-        # composed into the Run and then refused at call time, so configuring a
-        # peer or an MCP server would look like it worked and never do anything.
-        for tool in binding.external:
-            catalogs.append(tool)
-            executors.append(tool)
-        from app.v2.server.packages.tool_policy import server_tool_policy
-        from app.v2.server.runtime.policy import frozen_execution, live_execution_policy
-
-        key_id, admitted_policy = frozen_execution(command)
-
-        async def current_policy():
-            return await live_execution_policy(command, users=service.users, keys=service.keys,
-                catalog=service.catalog, settings=service.settings, user_id=user_id)
-
-        self_configuration = None
-        if (command.invocation_mode != "plan" and key_id is None
-                and command.parent_run_id is None and admitted_policy.shell != "deny"):
-            from sagents.v2.agent.self_configuration import SelfConfigurationService, SqliteSelfConfigurationStore
-
-            async def authorize_self_configuration(request, context):
-                if (context.actor.principal_id != user_id or context.actor.tenant_id != user_id
-                        or context.actor.delegated_by or await service.users.get_by_id(user_id) is None):
-                    raise PermissionError("Only the authenticated owner can configure this Agent")
-                live = await current_policy()
-                if live is None or live.shell == "deny":
-                    raise PermissionError("The live execution grant does not permit capability changes")
-
-            from sagents.v2.tool.plugins.sandbox_mcp import SandboxMcpSessionFactory
-
-            from app.v2.server.storage.workspaces import workspace_user
-
-            self_configuration = SelfConfigurationService(
-                store=SqliteSelfConfigurationStore(service.paths.runtime_root / "self-configuration.sqlite3"),
-                owner=json.dumps(["server", user_id, agent.id]),
-                workspace_root=service.paths.workspace_dir(workspace_user(command, user_id), command.agent_id), workspace_alias="/workspace",
-                authorize=authorize_self_configuration,
-                mcp_session_factory=SandboxMcpSessionFactory(official_runtime.sandbox, service.execution.sandbox_grant_issuer),
-            )
-
-        loop = factory.create_loop(
-            resolved,
-            agent.id,
-            artifact_store=official_runtime.artifact_store,
-            model=model,
-            tool_catalog=CompositeToolCatalog(tuple(catalogs)),
-            tool_executor=CompositeToolExecutor(tuple(executors)),
-            granted_catalogs=binding.external,
-            skill_loader=loader if names or self_configuration is not None else None,
-            self_configuration=self_configuration,
-            tool_policy=server_tool_policy(service.agent_management,
-                execution_policy=admitted_policy, current_policy=current_policy,
-                machine_invocation=key_id is not None),
-            continuation_policy=ports.continuation_policy,
-            tool_selection_policy=ports.tool_selection_policy,
-            log_sink=service.application.service("observability.log-sink"),
-            trace_sink=_optional_service(service, "observability.trace-sink"),
-        )
-        # The host manifest hash, not a per-Run one: it catches a Run routed
-        # to a restarted process with different backends. Drift in the Agent's
-        # own configuration is handled by the frozen composition instead.
-        loop.expected_resolved_spec_hash = command.resolved_spec_hash
-        return loop, replace(ports, scope_handles=(*extra, *ports.scope_handles))
-    except BaseException:
-        async with AsyncExitStack() as stack:
-            for handle in (*extra, *(ports.scope_handles if ports else ())):
-                closer = getattr(handle, "close", None)
-                if closer is not None:
-                    stack.push_async_callback(closer)
-        raise
+    async def resume(self, run_id, context):
+        return await self.application.entrypoint().drive_admitted_run(run_id, context, resume=True)
 
 
 async def _composition(service, command: StartRun, catalog, *, user_id: str):
@@ -340,41 +182,6 @@ async def _composition(service, command: StartRun, catalog, *, user_id: str):
         mcp_servers=tuple(item.name for item in enabled_mcp_servers(catalog)),
         a2a_agents=tuple(item.name for item in enabled_a2a_agents(catalog)),
     )
-
-
-async def _run_model(service, catalog, agent, *, user_id):
-    record = catalog_model(catalog, agent.model_id)
-    provider, scope = await open_model_lease(
-        service.execution, user_id, record, allow_standalone=True
-    )
-    if provider is not None:
-        return provider, scope
-    pool = service.execution.model_pool
-    return pool or service.application.service("model.provider"), None
-
-
-def _recorded_model(service, model):
-    if isinstance(model, RecordingModelProvider):
-        return model
-    runtime = service.application.entrypoint().runtime
-
-    async def resolve_session_id(run_id: str) -> str:
-        return (await runtime.session_store.get_run(run_id)).session_id
-
-    return RecordingModelProvider(
-        model,
-        sink=service.application.service("observability.diagnostic-sink"),
-        log_sink=service.application.service("observability.log-sink"),
-        trace_sink=_optional_service(service, "observability.trace-sink"),
-        session_id_resolver=resolve_session_id,
-    )
-
-
-def _optional_service(service, name: str):
-    try:
-        return service.application.service(name)
-    except KeyError:
-        return None
 
 
 class _OwnedModelScope:

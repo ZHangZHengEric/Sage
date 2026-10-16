@@ -188,7 +188,21 @@ def prepare_session_export(session_id: str, state: dict, evidence: dict | None =
                         .get("tool_call_id")
                     )
                 )
-            write_json("models.json", evidence.get("models", []))
+            models = sorted(evidence.get("models", []), key=lambda row: (row.get("started_at", ""), row.get("request_id", "")))
+            requests_index = []
+            for sequence, row in enumerate(models, 1):
+                row["sequence"] = sequence
+                path = f"requests/{sequence:06d}-{quote(str(row.get('request_id', 'unknown')), safe='')}.json"
+                write_json(path, row)
+                requests_index.append({key: row.get(key) for key in (
+                    "sequence", "run_id", "request_id", "step_id", "purpose", "started_at", "completed_at", "status"
+                )} | {"path": path})
+            write_json("requests/index.json", requests_index)
+            captured_ids = {row.get("request_id") for row in models}
+            expected_ids = {row.get("request_id") for row in evidence.get("logs", [])
+                            if row.get("event") == "model.request.started" and row.get("request_id")}
+            missing_requests = sorted(expected_ids - captured_ids)
+            write_json("models.json", models)
             write_json("logs.json", evidence.get("logs", []))
             write_json("tools.json", tools)
             # Join private exception records to authoritative failed calls. Old
@@ -237,7 +251,12 @@ def prepare_session_export(session_id: str, state: dict, evidence: dict | None =
                         "unavailable", False
                     ),
                     "run_ids": sorted(run_ids),
-                    "model_records": len(evidence.get("models", [])),
+                    "model_records": len(models),
+                    "model_request_ids_missing": missing_requests,
+                    "model_request_coverage": "incomplete" if missing_requests or evidence.get("dropped_logs", 0) or evidence.get("unavailable") else "matched_captured_start_logs",
+                    "unfinished_model_request_ids": [row.get("request_id") for row in models if row.get("status") == "started"],
+                    "stream_evidence_missing_for_requests": [row.get("request_id") for row in models if not row.get("stream", {}).get("wire_capture_available")],
+                    "stream_events_dropped": sum(row.get("stream", {}).get("dropped_wire_events", 0) + row.get("stream", {}).get("dropped_normalized_events", 0) for row in models),
                     "log_records": len(evidence.get("logs", [])),
                     "tool_events": len(tools),
                     "tool_failures": len(failures),
@@ -265,7 +284,7 @@ def prepare_session_export(session_id: str, state: dict, evidence: dict | None =
                     ),
                     "limitations": [
                         "Historical evidence not captured before diagnostics were enabled is unavailable.",
-                        "Model responses are normalized provider responses; request_format identifies wire requests.",
+                        "Model responses are normalized; stream.wire_events contains SDK-decoded provider events when capture is available, not HTTP bytes. requests/index.json lists chronological attempts.",
                         "Only logs with an exact Session and Run association are included.",
                         "Credential fields and recognizable inline secrets are redacted; review unlabelled prose before sharing.",
                         "Live Runs may advance after this state snapshot; records are bounded by this Run allowlist.",

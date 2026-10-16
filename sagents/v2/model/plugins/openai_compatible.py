@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+from sagents.v2.model.wire_diagnostics import record_wire_event
+
 from collections.abc import AsyncIterator, Mapping
 from typing import Any, Literal
 
@@ -307,6 +309,7 @@ class OpenAICompatibleModelProvider:
                 compatibility_fallback,
             ) = await self._create_with_compatibility_negotiation(kwargs)
             async for chunk in upstream:
+                record_wire_event(chunk)
                 response_id = str(wire_value(chunk, "id") or response_id)
                 raw_usage = wire_value(chunk, "usage")
                 if raw_usage is not None:
@@ -512,6 +515,7 @@ class OpenAICompatibleModelProvider:
         token_fallback_used = False
         while True:
             try:
+                record_wire_event({"diagnostic_event": "request_attempt", "payload": current})
                 upstream = await self._client.chat.completions.create(**current)
                 self._learn_output_token_field(current)
                 if not fallbacks:
@@ -523,6 +527,7 @@ class OpenAICompatibleModelProvider:
                     "attempts": fallbacks,
                 }
             except Exception as exc:
+                record_wire_event({"diagnostic_event": "request_error", "error": {"type": type(exc).__name__, "message": str(exc)}})
                 if not token_fallback_used:
                     fallback, change = self._token_field_fallback_request(current, exc)
                     if fallback is not None:

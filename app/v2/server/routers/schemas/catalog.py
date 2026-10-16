@@ -4,11 +4,12 @@ from typing import Literal
 from sagents.v2.agent.policy.approval_config import ToolApprovalConfig
 from pydantic import BaseModel, ConfigDict, Field
 from app.v2.server.runtime.policy import ExecutionPolicy
-from sagents.v2.package.manifest.agents import AgentSandboxConfig, AgentBudgets
+from sagents.v2.package.manifest.agents import AgentSandboxConfig, AgentBudgets, AgentMemoryBehavior
 from sagents.v2.agent.management import AgentPackageBundle
 from sagents.v2.package.manifest.runtime import CapabilitySelection
 
 from app.v2.server.catalog.records import ModelConfiguration
+from app.v2.server.runtime.official import default_agent_tools
 
 class ModelBody(ModelConfiguration):
     id: str | None = None
@@ -24,11 +25,13 @@ class AgentBody(BaseModel):
     description: str = ""
     instructions: str = ""
     model_id: str = ""
-    tools: list[str] = Field(default_factory=list)
+    fast_model_id: str | None = None
+    tools: list[str] = Field(default_factory=default_agent_tools)
     tool_approval: ToolApprovalConfig | None = None
     execution_policy: ExecutionPolicy | None = None
     sandbox: AgentSandboxConfig | None = None
     budgets: AgentBudgets | None = None
+    memory: AgentMemoryBehavior | None = None
     plugins: dict[str, CapabilitySelection] | None = None
 
 class AgentPublic(BaseModel):
@@ -37,6 +40,7 @@ class AgentPublic(BaseModel):
     description: str = ""
     instructions: str = ""
     model_id: str | None = None
+    fast_model_id: str | None = None
     tools: list[str] = Field(default_factory=list)
     skills: list[str] = Field(default_factory=list)
     tool_approval: ToolApprovalConfig | None = None

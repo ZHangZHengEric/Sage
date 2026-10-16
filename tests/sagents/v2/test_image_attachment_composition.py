@@ -29,7 +29,7 @@ from sagents.v2.runtime.execution.sandbox import (
     ResourceLimits,
     SandboxGrantIssuer,
 )
-from sagents.v2.runtime.artifact import InMemoryArtifactStore
+from sagents.v2.runtime.artifact import SessionArtifactStore
 from sagents.v2.runtime.session import FilesystemSessionStore
 from sagents.v2.runtime.session.plugins.mysql import MysqlSessionStore
 from sagents.v2.testing.plugins.scripted_model import (
@@ -157,7 +157,7 @@ async def test_builder_wires_durable_images_from_tool_to_request_and_session(
         .build(package)
     )
     try:
-        assert isinstance(application.service("artifact.store"), InMemoryArtifactStore)
+        assert isinstance(application.service("artifact.store"), SessionArtifactStore)
         stream = await application.entrypoint().run_stream(
             StartRun(
                 agent_id=agent_id,
@@ -233,7 +233,6 @@ async def test_builder_wires_durable_images_from_tool_to_request_and_session(
             images[0].uri.split(",", 1)[1]
         )
         from sagents.v2.model.contracts import ModelMessage
-        from sagents.v2.runtime.artifact import SessionArtifactStore
         from sagents.v2.runtime.artifact.images import hydrate_image_blocks
 
         restored_messages = await hydrate_image_blocks(

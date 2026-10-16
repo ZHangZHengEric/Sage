@@ -4,8 +4,9 @@ import { api, isForeign } from '../api.js'
 import FormDrawer from '../components/FormDrawer.vue'
 import PackageEditor from '../components/PackageEditor.vue'
 
-const definitionOpen = ref(false), runOpen = ref(false)
-import { onBeforeRouteLeave } from 'vue-router'
+const definitionOpen = ref(false), runOpen = ref(false), legacyContinuation = ref(false)
+import { onBeforeRouteLeave, useRouter } from 'vue-router'
+const router = useRouter()
 
 const resources = ref({})
 const packages = ref([]), runs = ref([]), agents = ref([]), schema = ref(null)
@@ -22,6 +23,7 @@ const answer = computed(() => (status.value?.result?.final_items || []).flatMap(
 const clean = computed(() => savedRef.value && editor.value === savedText.value)
 const definitions = computed(() => { try { return Object.keys(JSON.parse(editor.value).manifest.agents) } catch { return [] } })
 function setBundle(bundle, reference = '', owner = null) {
+  legacyContinuation.value = false
   bundleOwner.value = owner; runOwner.value = null
   editor.value = JSON.stringify(bundle, null, 2); savedText.value = editor.value; savedRef.value = reference
   selectedAgent.value = bundle.manifest.entrypoint.agent || Object.keys(bundle.manifest.agents)[0]
@@ -59,6 +61,7 @@ async function continueConversation() {
     const bundle = await api.package(previous.ref)
     setBundle(bundle, previous.ref)
     selectedAgent.value = previous.agent_id || runs.value.find(r => r.operation === previous.operation)?.agent || selectedAgent.value
+    legacyContinuation.value = true
     sessionId.value = previous.run.session_id
     runOpen.value = true
     content.value = ''; message.value = '已选择原版本和会话，请输入下一轮任务。'
@@ -76,9 +79,16 @@ async function save() {
 }
 async function run() {
   await action(async () => {
-    const id = `${Date.now()}-${crypto.randomUUID()}`
-    await api.runPackage({ ref: savedRef.value, agent_id: selectedAgent.value, content: content.value, operation: id, session_id: sessionId.value || null })
-    await inspect(id, null); await refresh(); runOpen.value = false
+    if (legacyContinuation.value) {
+      const id = `${Date.now()}-${crypto.randomUUID()}`
+      await api.runPackage({ ref: savedRef.value, agent_id: selectedAgent.value, content: content.value, operation: id, session_id: sessionId.value })
+      await inspect(id, null); await refresh(); runOpen.value = false
+      return
+    }
+    const key = `sage.package-run.${crypto.randomUUID()}`
+    sessionStorage.setItem(key, JSON.stringify({ content: content.value }))
+    await router.push({ path: '/', query: { package: savedRef.value, packageAgent: selectedAgent.value,
+      draft: key, ...(sessionId.value ? { thread: sessionId.value } : {}) } })
   })
 }
 async function activate(row) {

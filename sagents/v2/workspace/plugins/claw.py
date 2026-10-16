@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import hashlib
+import os
+import stat
 from pathlib import Path
 
 from sagents.v2.workspace.claw_templates import claw_workspace_documents
@@ -103,21 +105,79 @@ class ClawWorkspaceInitializer:
         self.language = language
 
     def initialize(self, root: Path) -> tuple[str, ...]:
+        if os.name == "nt":
+            return self._initialize_portable(root)
         root.mkdir(parents=True, exist_ok=True)
         created: list[str] = []
+        root_fd = os.open(root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+        owner = os.fstat(root_fd)
+        try:
+            for name in self._directories:
+                try:
+                    os.mkdir(name, dir_fd=root_fd)
+                except FileExistsError:
+                    continue
+                created.append(name)
+                if os.geteuid() == 0:
+                    os.chown(name, owner.st_uid, owner.st_gid, dir_fd=root_fd, follow_symlinks=False)
+            for name, content in claw_workspace_documents(self.language).items():
+                try:
+                    fd = os.open(name, os.O_RDWR | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+                                 0o644, dir_fd=root_fd)
+                    fresh = True
+                except FileExistsError:
+                    # Tenant-created symlinks and special files must never be followed.
+                    info = os.stat(name, dir_fd=root_fd, follow_symlinks=False)
+                    if not stat.S_ISREG(info.st_mode):
+                        continue
+                    fd = os.open(name, os.O_RDWR | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=root_fd)
+                    fresh = False
+                try:
+                    if not stat.S_ISREG(os.fstat(fd).st_mode):
+                        continue
+                    old = os.read(fd, 262144) if not fresh else b""
+                    replacement = content.encode("utf-8")
+                    managed = old == _INITIAL_V2_PLACEHOLDERS[name].encode() or (
+                        hashlib.sha256(old).hexdigest() in _MANAGED_CLAW_TEMPLATE_DIGESTS[name]
+                    )
+                    if not fresh and (old == replacement or not managed):
+                        continue
+                    os.lseek(fd, 0, os.SEEK_SET)
+                    with os.fdopen(os.dup(fd), "wb", closefd=True) as output:
+                        output.write(replacement)
+                        output.flush()
+                        os.ftruncate(fd, len(replacement))
+                    if fresh and os.geteuid() == 0:
+                        os.fchown(fd, owner.st_uid, owner.st_gid)
+                    created.append(name)
+                finally:
+                    os.close(fd)
+        finally:
+            os.close(root_fd)
+        return tuple(created)
+
+    def _initialize_portable(self, root: Path) -> tuple[str, ...]:
+        """Windows Desktop has no dir_fd/O_NOFOLLOW support."""
+        if root.is_symlink():
+            raise ValueError("workspace root must not be a symlink")
+        root.mkdir(parents=True, exist_ok=True)
+        created = []
         for name in self._directories:
             path = root / name
-            if path.exists():
+            if path.is_symlink() or path.exists():
                 continue
             path.mkdir()
             created.append(name)
         for name, content in claw_workspace_documents(self.language).items():
             path = root / name
-            if path.exists():
+            if path.is_symlink():
+                continue
+            try:
+                with path.open("x", encoding="utf-8") as output:
+                    output.write(content)
+                created.append(name)
+            except FileExistsError:
                 if _is_replaceable_v2_seed(path, name, content):
                     path.write_text(content, encoding="utf-8")
                     created.append(name)
-                continue
-            path.write_text(content, encoding="utf-8")
-            created.append(name)
         return tuple(created)

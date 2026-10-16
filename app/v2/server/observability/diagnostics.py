@@ -193,6 +193,10 @@ class SessionDiagnostics:
                     request, wire_request
                 ),
                 "metadata": dict(provider),
+                "request_metadata": dict(request.metadata),
+                "step_id": request.metadata.get("step_id"),
+                "turn_id": request.metadata.get("turn_id"),
+                "model_binding": getattr(request, "model_binding", None),
                 "purpose": request.metadata.get("purpose", "agent"),
             },
         )
@@ -218,9 +222,13 @@ class SessionDiagnostics:
             {
                 "status": "failed",
                 "completed_at": utc_now().isoformat(),
-                "error": {"type": type(error).__name__, "message": str(error)},
+                "error": {"type": type(error).__name__, "message": str(error),
+                          "info": error.info.model_dump(mode="json") if hasattr(error, "info") else None},
             },
         )
+
+    async def record_model_stream(self, *, session_id, request, evidence):
+        await asyncio.to_thread(self._update, session_id, request, {"stream": evidence})
 
     async def record_model_first_token(
         self, *, session_id, request, observed_at: datetime
@@ -292,6 +300,9 @@ class SessionDiagnostics:
                     "SELECT count FROM dropped WHERE session_id=? AND run_id=?", scope
                 ).fetchone()
                 dropped += row[0] if row else 0
+        models.sort(key=lambda row: (row.get("started_at", ""), row.get("request_id", "")))
+        for index, row in enumerate(models, 1):
+            row["sequence"] = index
         return {
             "models": models,
             "logs": logs,

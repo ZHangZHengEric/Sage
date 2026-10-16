@@ -46,6 +46,7 @@ class ContinuationContext(StrictModel):
     available_tools: tuple[str, ...] = ()
     pending_tool_calls: int = Field(default=0, ge=0)
     repeated_fingerprint_count: int = Field(default=0, ge=0)
+    no_progress_steps: int = Field(default=0, ge=0)
     # Host validators may certify a structured answer as actual output progress.
     # This only bypasses the plain-text loop heuristic, never runtime budgets.
     validated_output_progress: bool = False
@@ -296,6 +297,37 @@ class ExplicitStatusRule:
         )
 
 
+class InspectionProgressRule:
+    async def evaluate(self, context: ContinuationContext):
+        if not context.response.tool_calls or context.no_progress_steps < 6:
+            return None
+        reason = (
+            "Recent Tool calls repeated inspections without obtaining new evidence or advancing the task. "
+            "Use the results already collected. Identify the next unfinished deliverable and implement it, "
+            "or finish the answer if enough evidence exists. Read again only for a specific unresolved question; "
+            "do not repeat completed operations."
+        )
+        if context.no_progress_steps < 12:
+            return ContinuationDecision(action=ContinuationAction.CONTINUE_STEP,
+                reason_code="loop.inspection_correction", reason=reason)
+        return ContinuationDecision(
+            action=ContinuationAction.REQUEST_INTERACTION,
+            reason_code="loop.no_progress", reason=reason,
+            interaction=InteractionDraft(interaction_type="loop_recovery", allowed_decisions=("submit", "cancel"),
+                payload=recovery_payload("recovery.loop_tools", context.language,
+                    reason_code="loop.no_progress", count=context.no_progress_steps)),
+        )
+
+
+class LoopCorrectionRule:
+    async def evaluate(self, context: ContinuationContext):
+        if context.response.tool_calls and 3 <= context.repeated_fingerprint_count < 6:
+            return ContinuationDecision(action=ContinuationAction.CONTINUE_STEP,
+                reason_code="loop.pattern_correction",
+                reason="A repeated Tool cycle was detected. Reuse the existing results and choose a different action that advances the unfinished task. Do not repeat completed operations.")
+        return None
+
+
 class LoopRecoveryRule:
     def __init__(self, threshold: int = 3) -> None:
         if threshold < 2:
@@ -421,6 +453,8 @@ class CompositeContinuationPolicy:
             BudgetRule(),
             ResponseLimitRule(),
             ExplicitStatusRule(),
+            InspectionProgressRule(),
+            LoopCorrectionRule(),
             LoopRecoveryRule(),
             FlowBoundaryRule(),
             ToolOrTextRule(),

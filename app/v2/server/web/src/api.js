@@ -79,6 +79,7 @@ export const api = {
   validatePackage: (bundle) => request('/api/agent-packages/validate', { method: 'POST', body: JSON.stringify({ bundle, readiness: true }) }),
   activatePackage: (ref, expected_ref) => request(`/api/agent-packages/${encodeURIComponent(ref)}/activate`, { method: 'POST', body: JSON.stringify({ expected_ref }) }),
   forkPackage: (ref, package_id, version) => request(`/api/agent-packages/${encodeURIComponent(ref)}/fork`, { method: 'POST', body: JSON.stringify({ package_id, version }) }),
+  threadPackage: (id, owner) => read(`/api/threads/${encodeURIComponent(id)}/package`, owner),
   packageRuns: (offset = 0) => list(`/api/agent-packages/runs?limit=50&offset=${offset}`),
   runPackage: (body) => request('/api/agent-packages/runs', { method: 'POST', body: JSON.stringify(body) }),
   packageEvents: (operation, cursor = 0, owner) => read(`/api/agent-packages/runs/${encodeURIComponent(operation)}/events?after_sequence=${cursor}`, owner),

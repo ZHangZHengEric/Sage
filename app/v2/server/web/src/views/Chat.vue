@@ -8,8 +8,8 @@ import InteractionPrompt from '../components/InteractionPrompt.vue'
 import WorkspacePanel from '../components/WorkspacePanel.vue'
 import AppIcon from '../components/AppIcon.vue'
 const workspaceOpen = ref(false)
-import { useRoute } from 'vue-router'
-const route = useRoute()
+import { useRoute, useRouter } from 'vue-router'
+const route = useRoute(), router = useRouter()
 const ready = ref(false)
 
 const threads = ref([])
@@ -46,6 +46,7 @@ watch(historyEnd, (element) => {
 }, { flush: 'post' })
 const input = ref(null)
 const agent = shallowRef(null)
+const agentPackage = shallowRef(null)
 
 const currentThread = computed(() =>
   threads.value.find((item) => item.thread_id === threadId.value)
@@ -56,7 +57,7 @@ const workspaceThreadId = computed(() => currentThread.value?.thread_id ||
   (route?.query?.thread === threadId.value ? threadId.value : ''))
 const readOnly = computed(() => isForeign(currentThread.value))
 const threadTitle = computed(() => currentThread.value?.title || '新对话')
-const agentLocked = computed(() => Boolean(currentThread.value?.agent_id))
+const agentLocked = computed(() => Boolean(currentThread.value?.agent_id || agentPackage.value))
 
 function newId(prefix) {
   return `${prefix}-${crypto.randomUUID()}`
@@ -120,6 +121,7 @@ function applyThreadAgent(id) {
 
 async function openThread(id) {
   ++historyRevision
+  agentPackage.value = null
   threadId.value = id; error.value = ''
   historyLoading.value = false; historyFailed.value = false
   scroller.value?.scrollTo(0, 0)
@@ -139,6 +141,11 @@ async function loadHistory() {
   try {
     const page = await api.threadEvents(id, 500, currentThread.value?._owner, historyOffset.value)
     if (revision !== historyRevision) return
+    if (firstPage && page.has_package) {
+      const bundle = await api.threadPackage(id, currentThread.value?._owner)
+      if (revision !== historyRevision) return
+      agentPackage.value = bundle
+    }
     historyEvents.value = [...historyEvents.value, ...page.events]
     historyOffset.value = page.offset + page.limit; historyTotal.value = page.total
     const events = historyEvents.value, history = messagesFromEvents(events)
@@ -160,6 +167,7 @@ async function loadHistory() {
 }
 
 function startNew() {
+  agentPackage.value = null
   ++historyRevision
   historyFailed.value = false
   historyLoading.value = false; historyEvents.value = []; historyOffset.value = 0; historyTotal.value = 0
@@ -192,8 +200,10 @@ async function send() {
       runId: newId('run'),
       message,
       agentId: selectedAgentId.value,
+      agentPackage: agentPackage.value,
     })
     await loadThreads()
+    if (route?.query?.package) await router.replace({ path: '/', query: { thread: threadId.value } })
   } catch (exc) {
     error.value = exc.message
   } finally {
@@ -242,6 +252,29 @@ onMounted(async () => {
     else if (route?.query?.new) startNew()
     else if (threads.value[0]) await openThread(threads.value[0].thread_id)
     else startNew()
+    if (route?.query?.package) {
+      const bundle = await api.package(String(route.query.package))
+      const selected = String(route.query.packageAgent || bundle.manifest.entrypoint.agent)
+      if (!bundle.manifest.agents[selected]) throw new Error('Package 中没有此智能体')
+      bundle.manifest.entrypoint = { agent: selected }
+      agentPackage.value = bundle
+      selectedAgentId.value = selected
+      bindAgent()
+      agent.value.threadId = threadId.value
+      agent.value.setMessages(messages.value)
+      if (!route.query.thread) {
+        threadId.value = newId('thread')
+        messages.value = []; baseline.value = []; interaction.value = null
+        historyEvents.value = []; historyOffset.value = 0; historyTotal.value = 0
+        agent.value.setMessages([])
+      }
+      if (route.query.draft) {
+        const key = String(route.query.draft)
+        if (!key.startsWith('sage.package-run.')) throw new Error('无效的运行草稿')
+        const draft = JSON.parse(sessionStorage.getItem(key) || 'null')
+        if (draft) { sessionStorage.removeItem(key); text.value = draft.content; await send() }
+      }
+    }
     ready.value = true
   } catch (exc) {
     error.value = exc.message
@@ -280,7 +313,8 @@ onUnmounted(() => {
             :title="agentLocked ? '本会话已绑定智能体' : '选择智能体'"
             @change="selectAgent"
           >
-            <option v-if="readOnly" :value="selectedAgentId">{{ currentThread.agent_id }}</option>
+            <option v-if="agentPackage" :value="selectedAgentId">{{ agentPackage.manifest.agents[selectedAgentId]?.name || selectedAgentId }}</option>
+            <option v-else-if="readOnly" :value="selectedAgentId">{{ currentThread.agent_id }}</option>
             <option v-for="item in agents" :key="item.id" :value="item.id">
               {{ item.name }}
             </option>

@@ -14,7 +14,7 @@ from sagents.v2.package.manifest.runtime import CapabilitySelection, RuntimeConf
 
 from app.v2.server.config.settings import ServerSettings
 from app.v2.server.catalog.records import AgentRecord
-from app.v2.server.runtime.official import resolve_agent_tools
+from app.v2.server.runtime.official import default_agent_tools
 
 
 def server_v2_run_manifest(
@@ -35,7 +35,7 @@ def server_v2_run_manifest(
         instructions = instructions if instructions is not None else agent.instructions
         if not tools:
             tools = tuple(agent.tools)
-    selected_tools = list(resolve_agent_tools(tools, has_skills=bool(skills)))
+    selected_tools = list(tools) if agent is not None or tools else default_agent_tools()
     host = server_v2_manifest(settings)
     base = agent.package.resolved_manifest() if agent is not None else host
     source = base.agents.get(agent_id) or next(iter(base.agents.values()))
@@ -57,23 +57,17 @@ def server_v2_run_manifest(
             ),
         }
     )
-    from app.v2.server.catalog.plugins import AGENT_DEFAULTS
+    from app.v2.server.catalog.plugins import validate_agent_plugins
 
-    selections = {
-        key: value
-        for key, value in base.runtime.capabilities.items()
-        if key in AGENT_DEFAULTS
-    }
-    for key, selection in selections.items():
-        default = host.runtime.capabilities.get(key)
-        if default is not None and default.plugin == selection.plugin:
-            selections[key] = selection.model_copy(update={
-                "config": {**default.config, **selection.config},
-            })
+    selections = dict(base.runtime.capabilities) if agent is not None else {}
+    validate_agent_plugins(selections)
+    from sagents.v2.package.manifest.runtime import merge_capability_selections
+
+    selections = merge_capability_selections(host.runtime.capabilities, selections)
     return base.model_copy(
         update={
             "runtime": host.runtime.model_copy(
-                update={"capabilities": {**host.runtime.capabilities, **selections}}
+                update={"capabilities": selections}
             ),
             "interfaces": host.interfaces,
             "agents": {agent_id: composed},
@@ -152,7 +146,12 @@ def _runtime_capabilities(
 ) -> dict[str, CapabilitySelection]:
     log_level = settings.log_level if settings is not None else "info"
     log_format = settings.log_format if settings is not None else "json"
+    from app.v2.server.catalog.plugins import AGENT_DEFAULTS, DEFAULT_CONFIG
+
     capabilities: dict[str, CapabilitySelection] = {
+        **{key: CapabilitySelection(plugin=plugin, config=DEFAULT_CONFIG.get(key, {}))
+           for key, plugin in AGENT_DEFAULTS.items()},
+        "artifact.store": CapabilitySelection(plugin="sage.artifact.session"),
         "context.summarizer": CapabilitySelection(
             plugin="sage.context.summarizer.model",
             config={"model_binding": "primary"},
@@ -171,6 +170,19 @@ def _runtime_capabilities(
         )
     }
     if settings is not None:
+        capabilities.update({
+            "memory.provider": CapabilitySelection(
+                plugin="sage.memory.filesystem-bm25",
+                config={"root": str(settings.data_root / "runtime" / "memory")},
+            ),
+            "session-memory.provider": CapabilitySelection(
+                plugin="sage.session-memory.sqlite-bm25",
+                config={"root": str(settings.data_root / "runtime" / "session-memory")},
+            ),
+            "workspace.initializer": CapabilitySelection(
+                plugin="sage.workspace.initializer.claw", config={"language": settings.language},
+            ),
+        })
         capabilities["execution.scheduler"] = CapabilitySelection(
             plugin="sage.scheduler.ephemeral",
             config={

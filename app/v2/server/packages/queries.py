@@ -41,6 +41,8 @@ class ServerPackageQueries:
         }
 
     def schema(self, base_schema: dict) -> dict:
+        from app.v2.server.catalog.plugins import AGENT_DEFAULTS
+
         return {
             **base_schema,
             "host_policy": {
@@ -48,7 +50,7 @@ class ServerPackageQueries:
                 "runtime_capabilities": [
                     "flow.node",
                     "tool.catalog",
-                    "memory.provider",
+                    *AGENT_DEFAULTS,
                 ],
                 "plugin_selection": "must be declared and explicitly host-authorized",
                 "max_steps": 10000,

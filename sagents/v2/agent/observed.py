@@ -229,7 +229,29 @@ class ObservedRunDriver(AgentLoopEngine):
             )
         return snapshot
 
-    async def _dispatch_tool(
+    def _log_tool_exception(self, exc, run, call, turn_id, step_id):
+        # Keep private stacks out of the model-facing result and durable ledger.
+        # Explicit scope also works when dispatch runs outside a request context.
+        logger = self._structured_logger()
+        if logger is None:
+            return
+        logger.exception(
+            "tool.execution.exception",
+            "Tool execution raised an exception.",
+            exc,
+            session_id=run.session_id,
+            run_id=run.run_id,
+            turn_id=turn_id,
+            step_id=step_id,
+            tool_call_id=call.tool_call_id,
+            attributes={
+                "tool_name": call.tool_name,
+                "operation_id": call.operation_id,
+            },
+        )
+
+
+    async def dispatch_tool_call(
         self, run, call, context, turn_id, step_id=None, state=None
     ):
         return await self._observe_tool_call(
@@ -239,7 +261,7 @@ class ObservedRunDriver(AgentLoopEngine):
             turn_id,
             step_id=step_id,
             state=state,
-            body=super()._dispatch_tool,
+            body=super().dispatch_tool_call,
         )
 
     async def _observe_tool_call(
@@ -290,9 +312,21 @@ class ObservedRunDriver(AgentLoopEngine):
                     attributes={"tool_name": call.tool_name},
                 )
             raise
+        returned_result = result
+        if result is None:
+            # Terminal/uncertain failures deliberately stop the engine with no
+            # result. Observe their durable Tool failure instead of reporting success.
+            from sagents.v2.tool.contracts import ToolExecutionResult
+            for event in reversed(await self.runtime.session_store.read_events(run.run_id)):
+                data = event.data
+                if (getattr(data, "tool_call_id", None) == call.tool_call_id
+                        and getattr(data, "error", None) is not None):
+                    result = ToolExecutionResult(tool_call_id=call.tool_call_id,
+                        operation_id=call.operation_id, error=data.error)
+                    break
         handle.end(
             TraceStatus.ERROR
-            if getattr(result, "error", None) is not None
+            if result is None or getattr(result, "error", None) is not None
             else TraceStatus.OK,
             attributes={
                 "result": trace_content(
@@ -323,11 +357,13 @@ class ObservedRunDriver(AgentLoopEngine):
                     ),
                 },
             }
-            if failed:
+            if result is None:
+                logger.warning("tool.call.interrupted", "tool call stopped without a returned result", **fields)
+            elif failed:
                 logger.error("tool.call.failed", "tool call failed", **fields)
             else:
                 logger.info("tool.call.completed", "tool call completed", **fields)
-        return run, result
+        return run, returned_result
 
 
 __all__ = ["ObservedRunDriver"]

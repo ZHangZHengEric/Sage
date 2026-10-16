@@ -21,6 +21,8 @@ from sagents.v2.agent.policy.continuation import (
     FlowBoundaryRule,
     InteractionDraft,
     LoopRecoveryRule,
+    InspectionProgressRule,
+    LoopCorrectionRule,
     ToolOrTextRule,
     ToolOrTextRuleForPendingCalls,
 )
@@ -520,6 +522,7 @@ class LLMJudgeContinuationPolicy:
         self._output_limit = ResponseLimitRule()
         self._flow = FlowBoundaryRule()
         self._pending_tools = ToolOrTextRuleForPendingCalls()
+        self._tool_guards = (InspectionProgressRule(), LoopCorrectionRule(), LoopRecoveryRule(6))
 
     async def decide(self, context: ContinuationContext) -> ContinuationDecision:
         if context.requested_interaction is not None:
@@ -547,6 +550,10 @@ class LLMJudgeContinuationPolicy:
         if output_limit is not None:
             return output_limit
         if context.response.tool_calls:
+            for rule in self._tool_guards:
+                decision = await rule.evaluate(context)
+                if decision is not None:
+                    return decision
             pending = await self._pending_tools.evaluate(context)
             assert pending is not None
             return pending
@@ -601,6 +608,8 @@ class HybridContinuationPolicy:
             BudgetRule(),
             ResponseLimitRule(),
             ExplicitStatusRule(),
+            InspectionProgressRule(),
+            LoopCorrectionRule(),
             LoopRecoveryRule(repeat_threshold),
             FlowBoundaryRule(),
         )

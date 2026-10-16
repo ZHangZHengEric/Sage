@@ -450,7 +450,7 @@ def test_workspace_memory_is_bounded_but_core_instructions_are_not_silently_cut(
     provider = RunMetadataContextProvider()
     memory = provider._identity_document("MEMORY", "记忆" * 100000, "zh")
     assert len(memory) < 4200
-    assert "Excerpt only" in memory
+    assert "仅为节选" in memory
     with pytest.raises(SageV2Error):
         provider._identity_document("AGENT", "instruction " * 5000, "en")
 

@@ -78,9 +78,16 @@ async def server_plugins(user: AdminUser, host: HostDep):
             implementation = None
         if implementation is not None:
             row["implementation"] = type(implementation).__name__
-            if row["plugin_id"] is None:
+            if provider.source == "host":
+                row["plugin_id"] = getattr(implementation, "plugin_id", None)
+            elif row["plugin_id"] is None:
                 row["plugin_id"] = getattr(implementation, "plugin_id", None)
         providers.append(row)
+    sandbox = host.execution.sandbox_provider
+    if sandbox is not None:
+        providers.append({"capability": "execution.sandbox", "name": "default",
+            "api_version": "2", "plugin_id": sandbox.plugin_id,
+            "scope": "process", "source": "host", "implementation": type(sandbox).__name__})
     from app.v2.server.config.plugins import ServerPluginConfig, SERVER_CONFIGURABLE, SERVER_DEFAULTS, revision
     saved = ServerPluginConfig(host.paths.data_root).read()
     active = host.settings.plugin_overrides
@@ -177,7 +184,7 @@ async def list_agents(user: ReadUser, service: CatalogDep):
 
 @agent_router.post("/api/agents", response_model=ApiResponse[AgentPublic])
 async def create_agent(body: AgentBody, user: CurrentUser, service: CatalogDep):
-    record = await service.create_agent(user.user_id, body.model_dump(exclude={"tool_approval"} if "tool_approval" not in body.model_fields_set else set()))
+    record = await service.create_agent(user.user_id, body.model_dump(exclude={key for key in ("tool_approval", "fast_model_id", "tools") if key not in body.model_fields_set}))
     return success(record.public_dict())
 
 
@@ -191,7 +198,7 @@ async def update_agent(
     agent_id: str, body: AgentBody, user: CurrentUser, service: CatalogDep
 ):
     record = await service.update_agent(
-        user.user_id, agent_id, body.model_dump(exclude={"tool_approval"} if "tool_approval" not in body.model_fields_set else set())
+        user.user_id, agent_id, body.model_dump(exclude={key for key in ("tool_approval", "fast_model_id", "tools") if key not in body.model_fields_set})
     )
     return success(record.public_dict())
 

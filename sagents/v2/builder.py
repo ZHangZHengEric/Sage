@@ -34,8 +34,8 @@ from sagents.v2.context import (
 )
 from sagents.v2.interfaces.protocols.native import NativeProtocolAdapter
 from sagents.v2.package.registry import InMemoryAgentPackageRegistry
-from sagents.v2.runtime.artifact import InMemoryArtifactStore
 from sagents.v2.runtime.artifact import SessionArtifactStore
+from sagents.v2.runtime.artifact.binding import bind_artifact_store
 from sagents.v2.runtime.credentials import EnvironmentCredentialProvider
 from sagents.v2.runtime.execution.jobs import InMemoryJobRuntime
 from sagents.v2.runtime.execution.scheduler import InMemoryScheduler
@@ -344,6 +344,7 @@ class SAgentBuilder:
         self._memory_provider: MemoryProvider | None = None
         self._session_memory_provider: SessionMemoryProvider | None = None
         self._model_provider: ModelProvider | None = None
+        self._model_provider_factory = None
         self._extra_tools = []
         self._scheduler = None
         self._tool_catalog: ToolCatalog | None = None
@@ -366,6 +367,7 @@ class SAgentBuilder:
         self._model_budget = None
         self._job_runtime = None
         self._run_driver_factory: DriverFactory | None = None
+        self._admitted_run_contract = None
         self._owned_resources: list[ApplicationResource] = []
         self._check_readiness = False
 
@@ -377,6 +379,15 @@ class SAgentBuilder:
     def with_job_runtime(self, runtime) -> "SAgentBuilder":
         """Use a host-owned JobRuntime shared across Applications; host closes it."""
         self._job_runtime = runtime
+        return self
+
+    def with_admitted_run_contract(self, run_id: str, spec_hash: str) -> "SAgentBuilder":
+        """Bind one already-admitted Run to its owning application's contract.
+
+        The Package plan retains its own identity. Only this Run uses the outer
+        admission hash; child Runs inherit this execution contract.
+        """
+        self._admitted_run_contract = (run_id, spec_hash)
         return self
 
     def with_run_driver_factory(self, factory: DriverFactory) -> "SAgentBuilder":
@@ -470,6 +481,17 @@ class SAgentBuilder:
 
     def with_model_provider(self, value: ModelProvider) -> "SAgentBuilder":
         self._model_provider = value
+        self._model_provider_factory = None
+        return self
+
+    def with_model_provider_factory(self, factory) -> "SAgentBuilder":
+        """Supply a host provider for each resolved Agent's model bindings.
+
+        The callable receives (resolved_package, agent_id). Providers remain
+        host-owned, just like values passed to with_model_provider.
+        """
+        self._model_provider_factory = factory
+        self._model_provider = None
         return self
 
     def with_model_client(self, value: Any) -> "SAgentBuilder":
@@ -729,7 +751,8 @@ class SAgentBuilder:
                 plugin_declarations,
             )
         session_memory_service = SessionMemoryService(session_memory_provider)
-        model = self._model_provider
+        model = (self._model_provider_factory(resolved, selected_agent)
+                 if self._model_provider_factory is not None else self._model_provider)
         if model is None:
             model = await self._create_model(
                 extension_host,
@@ -753,7 +776,9 @@ class SAgentBuilder:
             if member_id in models_by_agent:
                 continue
             member_model = (
-                self._model_provider
+                self._model_provider_factory(resolved, member_id)
+                if self._model_provider_factory is not None
+                else self._model_provider
                 if self._model_provider is not None
                 else await self._create_model(
                     extension_host,
@@ -767,6 +792,12 @@ class SAgentBuilder:
                 )
             )
             models_by_agent[member_id] = member_model
+
+        memory_services_by_agent = {
+            member_id: MemoryService(memory_provider, scope_mode=resolved.agents[member_id].memory.scope)
+            for member_id in models_by_agent
+        }
+        memory_service = memory_services_by_agent[selected_agent]
 
         if self._model_budget is not None:
             models_by_agent = {
@@ -864,9 +895,8 @@ class SAgentBuilder:
         driver_session_store = LeaseFencedSessionStore(session_store, scheduler)
         goal_state_service = GoalStateService(driver_session_store)
         if self._tool_runtime is not None:
-            self._tool_runtime.artifact_store = SessionArtifactStore(
-                driver_session_store,
-                self._tool_runtime.sandbox.ref.owner_run_id,
+            self._tool_runtime.artifact_store = bind_artifact_store(
+                services["artifact.store"], self._tool_runtime.sandbox.ref.owner_run_id
             )
             self._tool_runtime.memory_service = memory_service
             self._tool_runtime.session_memory_service = session_memory_service
@@ -880,103 +910,118 @@ class SAgentBuilder:
             driver_session_store,
             job_runtime=services["execution.job-runtime"],
         )
-        token_estimator = await self._create_capability(
-            extension_host,
-            process_root,
-            scope_handles,
-            runtime_config,
-            plugin_declarations,
-            capability="context.token-estimator",
-            default_plugin=JsonHeuristicTokenEstimator.plugin_id,
-            default_scope=ExtensionScope.AGENT,
-            tenant_id=tenant_id,
-            agent_id=selected_agent,
-        )
-        summary_store = await self._create_capability(
-            extension_host,
-            process_root,
-            scope_handles,
-            runtime_config,
-            plugin_declarations,
-            capability="context.summary-store",
-            default_plugin=SessionDerivedConversationSummaryStore.plugin_id,
-            default_scope=ExtensionScope.AGENT,
-            locked_config={"derived_state": derived_state},
-            tenant_id=tenant_id,
-            agent_id=selected_agent,
-        )
-        summarizer = await self._create_capability(
-            extension_host,
-            process_root,
-            scope_handles,
-            runtime_config,
-            plugin_declarations,
-            capability="context.summarizer",
-            default_plugin=ModelConversationSummarizer.plugin_id,
-            default_scope=ExtensionScope.AGENT,
-            locked_config={"model": models_by_agent[selected_agent]},
-            tenant_id=tenant_id,
-            agent_id=selected_agent,
-        )
-        unit_compactor = await self._create_capability(
-            extension_host,
-            process_root,
-            scope_handles,
-            runtime_config,
-            plugin_declarations,
-            capability="context.unit-compactor",
-            default_plugin=ReferenceContextUnitCompactor.plugin_id,
-            default_scope=ExtensionScope.AGENT,
-            locked_config={"estimator": token_estimator},
-            tenant_id=tenant_id,
-            agent_id=selected_agent,
-        )
-        context_reducer = await self._create_capability(
-            extension_host,
-            process_root,
-            scope_handles,
-            runtime_config,
-            plugin_declarations,
-            capability="context.reducer",
-            default_plugin=PersistentSummaryContextReducer.plugin_id,
-            default_scope=ExtensionScope.AGENT,
-            locked_config={
-                "store": summary_store,
-                "summarizer": summarizer,
-                "estimator": token_estimator,
-                "unit_compactor": unit_compactor,
-            },
-            tenant_id=tenant_id,
-            agent_id=selected_agent,
-        )
-        skill_loading = await self._create_capability(
-            extension_host, process_root, scope_handles,
-            runtime_config, plugin_declarations,
-            capability="skill.loading",
-            default_plugin=SkillLoadingPlugin.plugin_id,
-            default_scope=ExtensionScope.AGENT,
-            tenant_id=tenant_id, agent_id=selected_agent,
-        )
-        continuation_policy = await self._create_capability(
-            extension_host,
-            process_root,
-            scope_handles,
-            runtime_config,
-            plugin_declarations,
-            capability="agent.continuation-policy",
-            default_plugin=CompositeContinuationPolicy.plugin_id,
-            default_scope=ExtensionScope.AGENT,
-            locked_config={"model": models_by_agent[selected_agent]},
-            tenant_id=tenant_id,
-            agent_id=selected_agent,
-        )
-        components = ContextComponentBundle(
-            token_estimator=token_estimator,
-            summary_store=summary_store,
-            summarizer=summarizer,
-            reducer=context_reducer,
-        )
-        factory = AgentCompositionFactory(driver_runtime, context_components=components)
+        async def create_agent_components(selected_agent):
+            token_estimator = await self._create_capability(
+                extension_host,
+                process_root,
+                scope_handles,
+                runtime_config,
+                plugin_declarations,
+                capability="context.token-estimator",
+                default_plugin=JsonHeuristicTokenEstimator.plugin_id,
+                default_scope=ExtensionScope.AGENT,
+                tenant_id=tenant_id,
+                agent_id=selected_agent,
+            )
+            summary_store = await self._create_capability(
+                extension_host,
+                process_root,
+                scope_handles,
+                runtime_config,
+                plugin_declarations,
+                capability="context.summary-store",
+                default_plugin=SessionDerivedConversationSummaryStore.plugin_id,
+                default_scope=ExtensionScope.AGENT,
+                locked_config={"derived_state": derived_state},
+                tenant_id=tenant_id,
+                agent_id=selected_agent,
+            )
+            summarizer = await self._create_capability(
+                extension_host,
+                process_root,
+                scope_handles,
+                runtime_config,
+                plugin_declarations,
+                capability="context.summarizer",
+                default_plugin=ModelConversationSummarizer.plugin_id,
+                default_scope=ExtensionScope.AGENT,
+                locked_config={"model": models_by_agent[selected_agent]},
+                tenant_id=tenant_id,
+                agent_id=selected_agent,
+            )
+            unit_compactor = await self._create_capability(
+                extension_host,
+                process_root,
+                scope_handles,
+                runtime_config,
+                plugin_declarations,
+                capability="context.unit-compactor",
+                default_plugin=ReferenceContextUnitCompactor.plugin_id,
+                default_scope=ExtensionScope.AGENT,
+                locked_config={"estimator": token_estimator},
+                tenant_id=tenant_id,
+                agent_id=selected_agent,
+            )
+            context_reducer = await self._create_capability(
+                extension_host,
+                process_root,
+                scope_handles,
+                runtime_config,
+                plugin_declarations,
+                capability="context.reducer",
+                default_plugin=PersistentSummaryContextReducer.plugin_id,
+                default_scope=ExtensionScope.AGENT,
+                locked_config={
+                    "store": summary_store,
+                    "summarizer": summarizer,
+                    "estimator": token_estimator,
+                    "unit_compactor": unit_compactor,
+                },
+                tenant_id=tenant_id,
+                agent_id=selected_agent,
+            )
+            skill_loading = await self._create_capability(
+                extension_host, process_root, scope_handles,
+                runtime_config, plugin_declarations,
+                capability="skill.loading",
+                default_plugin=SkillLoadingPlugin.plugin_id,
+                default_scope=ExtensionScope.AGENT,
+                tenant_id=tenant_id, agent_id=selected_agent,
+            )
+            continuation_policy = await self._create_capability(
+                extension_host,
+                process_root,
+                scope_handles,
+                runtime_config,
+                plugin_declarations,
+                capability="agent.continuation-policy",
+                default_plugin=CompositeContinuationPolicy.plugin_id,
+                default_scope=ExtensionScope.AGENT,
+                locked_config={"model": models_by_agent[selected_agent]},
+                tenant_id=tenant_id,
+                agent_id=selected_agent,
+            )
+            components = ContextComponentBundle(
+                token_estimator=token_estimator,
+                summary_store=summary_store,
+                summarizer=summarizer,
+                reducer=context_reducer,
+            )
+            factory = AgentCompositionFactory(driver_runtime, context_components=components)
+            memory_query_generator = await self._create_capability(
+                extension_host, process_root, scope_handles, runtime_config, plugin_declarations,
+                capability="memory.recall-query",
+                default_plugin=DirectMemoryRecallQueryGenerator.plugin_id,
+                default_scope=ExtensionScope.AGENT,
+                locked_config={"model": models_by_agent[selected_agent]},
+                tenant_id=tenant_id, agent_id=selected_agent,
+            )
+            return (factory, skill_loading, continuation_policy, memory_query_generator, components, token_estimator, summary_store, summarizer, unit_compactor, context_reducer)
+
+        component_sets = {}
+        for member_id in models_by_agent:
+            component_sets[member_id] = await create_agent_components(member_id)
+        (factory, skill_loading, continuation_policy, memory_query_generator, components, token_estimator, summary_store, summarizer, unit_compactor, context_reducer) = component_sets[selected_agent]
         flow_tool_nodes = dict(self._flow_tool_nodes)
         if uses_flow:
             for selection in runtime_config.selections("flow.node"):
@@ -1019,12 +1064,11 @@ class SAgentBuilder:
             for member_id in composition_members
         )
 
-        def configure_official_runtime(value: OfficialToolRuntime) -> None:
-            value.artifact_store = SessionArtifactStore(
-                driver_session_store,
-                value.sandbox.ref.owner_run_id,
+        def configure_official_runtime(value: OfficialToolRuntime, agent_id=selected_agent) -> None:
+            value.artifact_store = bind_artifact_store(
+                services["artifact.store"], value.sandbox.ref.owner_run_id
             )
-            value.memory_service = memory_service
+            value.memory_service = memory_services_by_agent.get(agent_id, memory_service)
             value.session_memory_service = session_memory_service
             value.goal_state_service = goal_state_service
             value.tool_selection_policy = tool_selection
@@ -1097,6 +1141,9 @@ class SAgentBuilder:
                     )
                     models_by_agent[definition_id] = models_by_agent[selected_agent]
                 definition = effective_resolved.agents[definition_id]
+                member_factory, member_skill_loading, member_continuation, member_memory_query = (
+                    component_sets.get(definition_id, component_sets[selected_agent])[:4]
+                )
                 skill_loader = None
                 self_configuration = (
                     self._self_configuration_factory(definition_id)
@@ -1114,10 +1161,10 @@ class SAgentBuilder:
                     from sagents.v2.tool import CompositeToolCatalog, CompositeToolExecutor
 
                     skill_catalog, skill_source, skill_workspace = self._skill_provider
-                    skill_loader = factory.create_skill_loader(
+                    skill_loader = member_factory.create_skill_loader(
                         effective_resolved, definition_id,
                         catalog=skill_catalog, source=skill_source, workspace=skill_workspace,
-                        skill_loading=skill_loading,
+                        skill_loading=member_skill_loading,
                         activations=SessionDerivedSkillActivationRepository(
                             derived_state, resolve_session_id,
                         ),
@@ -1127,19 +1174,26 @@ class SAgentBuilder:
                     executor = CompositeToolExecutor((executor, skill_tools.executor))
                     runtime_tools = (*runtime_tools, "load_skill")
                 member_memory_enabled = "search_memory" in definition.tools
-                return factory.create_loop(
+                return member_factory.create_loop(
                     effective_resolved,
                     definition_id,
+                    expected_resolved_spec_hash=(
+                        self._admitted_run_contract[1]
+                        if self._admitted_run_contract and self._admitted_run_contract[0] == run_id
+                        else None
+                    ),
+                    memory_recall_query_generator=member_memory_query,
+                    tool_selection_model=models_by_agent[descriptor.agent_id],
                     artifact_store=(
                         active_runtime.artifact_store
                         if active_runtime is not None
-                        else SessionArtifactStore(driver_session_store, run_id)
+                        else bind_artifact_store(services["artifact.store"], run_id)
                     ),
                     model=models_by_agent[descriptor.agent_id],
                     tool_catalog=catalog,
                     tool_executor=executor,
                     memory_service=(
-                        memory_service
+                        memory_services_by_agent.get(definition_id, memory_service)
                         if member_memory_enabled and definition.memory.recall
                         else None
                     ),
@@ -1148,7 +1202,7 @@ class SAgentBuilder:
                     ),
                     tool_policy=self._tool_policy,
                     approval_memory=approval_memory,
-                    continuation_policy=continuation_policy,
+                    continuation_policy=member_continuation,
                     continuation_signal_provider=(
                         active_runtime.consume_continuation_signals
                         if active_runtime is not None
@@ -1198,12 +1252,13 @@ class SAgentBuilder:
                 binding = await self._execution_binding_provider.acquire(request)
                 try:
                     binding.validate_for(request)
+                    await binding.initialize_workspace(services["workspace.initializer"])
                     child_runtime = OfficialToolRuntime(
                         binding.sandbox,
                         binding.grant_issuer,
                         job_runtime=services["execution.job-runtime"],
                     )
-                    configure_official_runtime(child_runtime)
+                    configure_official_runtime(child_runtime, descriptor.agent_id)
                     (
                         child_catalog,
                         child_executor,
@@ -1264,7 +1319,10 @@ class SAgentBuilder:
                 base_catalog=selected_catalog,
                 base_executor=selected_executor,
                 registry=registry,
-                resolved_spec_hash=(runtime_composition_hash or resolved.manifest_hash),
+                resolved_spec_hash=(
+                    self._admitted_run_contract[1] if self._admitted_run_contract
+                    else runtime_composition_hash or resolved.manifest_hash
+                ),
                 delegation_concurrency_limiter=delegation_limiter,
                 loop_composer=compose,
                 child_loop_factory=child_factory,
@@ -1321,6 +1379,7 @@ class SAgentBuilder:
                 return loop
 
             async def loop_builder(binding: RunExecutionBinding):
+                await binding.initialize_workspace(services["workspace.initializer"])
                 official_runtime = OfficialToolRuntime(
                     binding.sandbox,
                     binding.grant_issuer,
@@ -1458,7 +1517,7 @@ class SAgentBuilder:
                     ("derived-state.store", self._derived_state_store),
                     ("memory.provider", self._memory_provider),
                     ("session-memory.provider", self._session_memory_provider),
-                    ("model.provider", self._model_provider),
+                    ("model.provider", self._model_provider or self._model_provider_factory),
                     ("execution.job-runtime", self._job_runtime),
                     ("execution.scheduler", self._scheduler),
                     ("tool.catalog", self._tool_catalog),
@@ -2006,7 +2065,8 @@ class SAgentBuilder:
                 runtime,
                 declarations,
                 capability="artifact.store",
-                default_plugin=InMemoryArtifactStore.plugin_id,
+                default_plugin=SessionArtifactStore.plugin_id,
+                locked_config={"session_store": session_store},
             ),
             "package.registry": await self._create_capability(
                 host,

@@ -37,11 +37,11 @@ async function reloadServer() {
   catch (e) { saveError.value = e.message } finally { saving.value = false }
 }
 function savedName(group) { const selection = server.value?.saved?.[group.id] || server.value?.defaults?.[group.id]; return selection ? pluginName(selection.plugin) : '部署默认' }
-const groups = computed(() => componentGroups(catalog.value, server.value?.providers).filter(group => !query.value || `${group.name} ${group.id} ${group.plugins.map(p => `${pluginName(p)} ${p.name} ${p.id}`).join(' ')}`.toLowerCase().includes(query.value.toLowerCase())))
+const groups = computed(() => componentGroups(catalog.value, server.value?.providers).filter(group => group.plugins.length !== 1).filter(group => !query.value || `${group.name} ${group.id} ${group.plugins.map(p => `${pluginName(p)} ${p.name} ${p.id}`).join(' ')}`.toLowerCase().includes(query.value.toLowerCase())))
 function bindings(group) { return server.value?.providers.filter(item => item.capability === group.id) || [] }
-function currentIds(group) { const live = bindings(group).map(item => item.plugin_id).filter(Boolean); return live.length ? [...new Set(live)] : [catalog.value?.defaults[group.id]].filter(Boolean) }
-function currentNames(group) { return currentIds(group).map(id => pluginName(group.plugins.find(p => p.id === id) || id)).join('、') || (bindings(group).length ? 'Server 提供' : '') || '未指定' }
-function inspecting(group) { return group.plugins.find(p => p.id === (preview.value[group.id] || currentIds(group)[0])) || group.plugins[0] }
+function currentIds(group) { const rows = bindings(group); return rows.length ? [...new Set(rows.map(item => item.plugin_id).filter(Boolean))] : [catalog.value?.defaults[group.id]].filter(Boolean) }
+function currentNames(group) { return currentIds(group).map(id => pluginName(group.plugins.find(p => p.id === id) || id)).join('、') || bindings(group).map(item => item.implementation).filter(Boolean).join('、') || '未指定' }
+function inspecting(group) { return group.plugins.find(p => p.id === (preview.value[group.id] || currentIds(group)[0])) }
 function parameterRows(group) {
   const plugin = inspecting(group)
   if (!plugin) return []
@@ -75,7 +75,7 @@ onMounted(async () => { try { [catalog.value, server.value] = await Promise.all(
       <div ref="content" class="component-content" @scroll="trackSection">
         <article v-for="group in groups" :key="group.id" :data-component="group.id" class="panel component-card">
           <div class="component-head"><h2>{{ group.name }}</h2><div class="row"><button v-if="server?.configurable?.includes(group.id)" class="btn ghost" :disabled="!!editing" @click="startEdit(group)">配置 Server</button><router-link v-if="catalog.configurable?.includes(group.id)" class="btn ghost" to="/agents">配置智能体</router-link><router-link v-else-if="group.id === 'model.provider'" class="btn ghost" to="/models">模型配置</router-link></div></div>
-          <div class="current-choice"><span class="status-dot"></span><span>当前：<strong>{{ currentNames(group) }}</strong></span></div>
+          <div class="current-choice"><span class="status-dot"></span><span>Server 默认：<strong>{{ currentNames(group) }}</strong></span></div>
           <div v-if="server?.pending?.includes(group.id)" class="pending-config">已保存：{{ savedName(group) }} · 待重启</div>
           <form v-if="editing === group.id" class="server-editor stack" @submit.prevent="saveServer">
             <label class="field"><span>Server 默认插件</span><select :value="draft?.plugin || ''" :disabled="saving" @change="choosePlugin($event.target.value)"><option value="">跟随部署默认 · {{ deploymentName }}</option><option v-for="plugin in editOptions" :key="plugin.id" :value="plugin.id" :disabled="plugin.available === false">{{ pluginName(plugin) }}{{ plugin.available === false ? '（不可用）' : '' }}</option></select></label>

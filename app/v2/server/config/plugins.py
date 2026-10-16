@@ -23,15 +23,16 @@ from sagents.v2.runtime.extensions.official import builtin_extension_registry
 # execution grants and tenant catalogs. A saved choice there would be ignored.
 SERVER_CONFIGURABLE = frozenset(AGENT_DEFAULTS) | {
     "memory.provider", "session-memory.provider", "context.summary-store",
-    "observability.trace-sink", "workspace.initializer", "package.registry",
+    "observability.trace-sink", "workspace.initializer", "package.registry", "artifact.store",
 }
 SERVER_DEFAULTS = {
     **AGENT_DEFAULTS,
-    "memory.provider": "sage.memory.noop",
-    "session-memory.provider": "sage.session-memory.noop",
+    "artifact.store": "sage.artifact.session",
+    "memory.provider": "sage.memory.filesystem-bm25",
+    "session-memory.provider": "sage.session-memory.sqlite-bm25",
     "context.summary-store": "sage.context.summary-store.session-derived",
     "observability.trace-sink": "sage.trace.noop",
-    "workspace.initializer": "sage.workspace.initializer.bare",
+    "workspace.initializer": "sage.workspace.initializer.claw",
     "package.registry": "sage.package-registry.ephemeral",
 }
 

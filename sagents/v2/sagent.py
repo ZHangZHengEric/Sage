@@ -135,6 +135,18 @@ class SAgent:
         self._closed = False
         self._closing = False
 
+    async def drive_admitted_run(self, run_id: str, context: RequestContext, *, resume=False):
+        """Drive an existing Run under its host dispatcher, using this Package.
+
+        Admission and scheduling remain with the caller. Session authorization,
+        failure settlement, committed memory ingestion and cleanup stay here.
+        """
+        self._ensure_open()
+        await self._session_access.get_run(run_id, context)
+        driver = self.driver_factory(run_id)
+        self._drivers[run_id] = driver
+        return await self._drive(driver, run_id, context, resume=resume)
+
     async def start_run(self, command: StartRun, context: RequestContext) -> RunHandle:
         """Accept a Run and start its driver without creating an observer."""
 

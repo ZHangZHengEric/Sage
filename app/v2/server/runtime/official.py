@@ -1,4 +1,4 @@
-"""Desktop Official runtime: local-workspace sandbox + official file/shell tools."""
+"""Server Official runtime: local-workspace sandbox + official file/shell tools."""
 
 from __future__ import annotations
 
@@ -6,7 +6,6 @@ import hashlib
 import json
 from pathlib import Path
 
-from sagents.v2.contracts.commands import StartRun
 from sagents.v2.runtime.execution.sandbox import (
     FileOperation,
     FileSystemMode,
@@ -22,11 +21,7 @@ from sagents.v2.runtime.execution.sandbox import (
     SandboxGrantIssuer,
     SandboxReleaseDisposition,
 )
-from sagents.v2.runtime.extensions import ExtensionScope, ExtensionScopeContext
-from sagents.v2.tool.official import OfficialToolRuntime
-from sagents.v2.runtime.artifact import SessionArtifactStore
 from sagents.v2.tool.plugins.official import (
-    OfficialToolPlugin,
     official_tool_categories,
     official_tool_definitions,
 )
@@ -76,15 +71,9 @@ async def provision_workspace(
     )
 
 
-def resolve_agent_tools(
-    configured: tuple[str, ...] | list[str], *, has_skills: bool
-) -> tuple[str, ...]:
-    selected = [name for name in configured if str(name).strip()]
-    if not selected:
-        selected = list(DEFAULT_OFFICIAL_TOOLS)
-    if has_skills and "load_skill" not in selected:
-        selected.append("load_skill")
-    return tuple(selected)
+def default_agent_tools() -> list[str]:
+    """Initial Package configuration; execution never expands an empty list."""
+    return list(DEFAULT_OFFICIAL_TOOLS)
 
 
 def official_tool_catalog() -> list[dict[str, object]]:
@@ -165,44 +154,6 @@ def agent_network_policy(sandbox, settings, *, live=None):
     return NetworkPolicy(mode=mode, deny_private_networks=mode != NetworkMode.UNRESTRICTED)
 
 
-async def attach_official_tools(
-    service, command: StartRun, *, user_id: str, run_id: str | None = None,
-    network: NetworkPolicy | None = None,
-):
-    """Provision a host-mapped sandbox and wrap it as OfficialToolPlugin."""
-
-    from app.v2.server.storage.workspaces import workspace_user
-
-    install_sandbox(service.execution, service.settings)
-    owner_run_id = run_id or command.idempotency_key
-    handle = await provision_workspace(
-        service.execution,
-        service.paths.workspace_dir(workspace_user(command, user_id), command.agent_id),
-        service.contexts.for_user(user_id),
-        run_id=owner_run_id,
-        network=network,
-    )
-    runtime = OfficialToolRuntime(
-        handle,
-        service.execution.sandbox_grant_issuer,
-        artifact_store=SessionArtifactStore(
-            service.application.entrypoint().runtime.session_store, owner_run_id
-        ),
-    )
-    plugin = OfficialToolPlugin(
-        ExtensionScopeContext(
-            scope=ExtensionScope.RUN,
-            scope_id=owner_run_id,
-            config={"runtime": runtime},
-        )
-    )
-    return (
-        plugin,
-        runtime,
-        OwnedWorkspaceSandbox(handle, service.execution.sandbox_provider),
-    )
-
-
 class OwnedWorkspaceSandbox:
     """End per-drive compute on suspension too; preserve the user's files."""
 
@@ -217,3 +168,17 @@ class OwnedWorkspaceSandbox:
         await self.handle.destroy()
         await self.provider.purge_terminated(self.handle.ref)
         self.closed = True
+
+
+class BoundWorkspaceHandle:
+    """Keep provider operations intact; release per-drive compute on close."""
+
+    def __init__(self, handle, provider):
+        self._handle = handle
+        self._owner = OwnedWorkspaceSandbox(handle, provider)
+
+    def __getattr__(self, name):
+        return getattr(self._handle, name)
+
+    async def close(self):
+        await self._owner.close()

@@ -18,7 +18,9 @@ def prompt_language(value: str | None = None) -> str:
 
 
 def run_prompt_language(metadata: Mapping[str, Any]) -> str:
-    return prompt_language(metadata.get("response_language"))
+    context = metadata.get("system_context")
+    nested = context.get("response_language") if isinstance(context, Mapping) else None
+    return prompt_language(metadata.get("response_language") or nested)
 
 
 def prompt_text(key: str, language: str | None = None, **params: Any) -> str:

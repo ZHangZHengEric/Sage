@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from sagents.v2.model.wire_diagnostics import record_wire_event
+
 from collections.abc import AsyncIterator
 from typing import Any
 
@@ -307,11 +309,14 @@ class OpenAIResponsesModelProvider:
         compatibility_fallback: dict[str, Any] | None = None
         try:
             try:
+                record_wire_event({"diagnostic_event": "request_attempt", "payload": payload})
                 upstream = await self._client.responses.create(**payload)
             except Exception as exc:
+                record_wire_event({"diagnostic_event": "request_error", "error": {"type": type(exc).__name__, "message": str(exc)}})
                 fallback_payload = self._reasoning_fallback_request(payload, exc)
                 if fallback_payload is None:
                     raise
+                record_wire_event({"diagnostic_event": "request_attempt", "payload": fallback_payload})
                 upstream = await self._client.responses.create(**fallback_payload)
                 self._reasoning_control_rejected = True
                 compatibility_fallback = {
@@ -320,6 +325,7 @@ class OpenAIResponsesModelProvider:
                     "provider_status": self._provider_status(exc),
                 }
             async for event in upstream:
+                record_wire_event(event)
                 event_type = str(wire_value(event, "type", ""))
                 if event_type == "response.output_text.delta":
                     delta = str(wire_value(event, "delta", "") or "")

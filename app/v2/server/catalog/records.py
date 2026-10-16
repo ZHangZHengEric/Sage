@@ -127,13 +127,18 @@ class ModelRecord(ModelConfiguration):
         return data
 
 
+def _default_agent_tools():
+    from app.v2.server.runtime.official import default_agent_tools
+    return default_agent_tools()
+
+
 class AgentRecord(BaseModel):
     id: str
     name: str
     description: str = ""
     instructions: str = ""
     model_id: str = ""
-    tools: list[str] = Field(default_factory=list)
+    tools: list[str] = Field(default_factory=_default_agent_tools)
     tool_approval: ToolApprovalConfig | None = None
     skills: list[str] = Field(default_factory=list)
     # A ceiling, not a grant: API Keys still default to asking for approval.
@@ -147,6 +152,12 @@ class AgentRecord(BaseModel):
         if self.package is None:
             self.package = build_package(self)
         return project_package(self)
+
+    @property
+    def fast_model_id(self):
+        definition = self.package.manifest.agents[self.id]
+        route = self.package.manifest.models.get(definition.models.get("fast", ""))
+        return route.model if route and route.model != "default" else ""
 
     @property
     def sandbox(self):
@@ -172,6 +183,7 @@ class AgentRecord(BaseModel):
             "description": self.description,
             "instructions": self.instructions,
             "model_id": self.model_id or None,
+            "fast_model_id": self.fast_model_id or None,
             "tools": list(self.tools),
             "skills": list(self.skills),
             "tool_approval": self.tool_approval.model_dump() if self.tool_approval else None,
@@ -404,7 +416,7 @@ def upsert_agent(
         description=str(payload.get("description") or "")[:500],
         instructions=str(payload.get("instructions") or ""),
         model_id=str(payload.get("model_id") or ""),
-        tools=_unique_names(payload.get("tools")),
+        tools=_unique_names(payload.get("tools", existing.tools if existing else _default_agent_tools())),
         tool_approval=payload.get("tool_approval", existing.tool_approval if existing else None),
         execution_policy=ExecutionPolicy.model_validate(payload.get("execution_policy") or
             (existing.execution_policy.model_dump() if existing else {"shell": "sandboxed"})),
@@ -417,8 +429,22 @@ def upsert_agent(
                                              sandbox=payload.get("sandbox"))
     elif payload.get("sandbox") is not None:
         record = record.with_configuration(sandbox=payload["sandbox"])
+    if "fast_model_id" in payload:
+        fast_id = str(payload.get("fast_model_id") or "")
+        if fast_id and not any(item.id == fast_id for item in catalog.models):
+            raise SageV2Error(RuntimeErrorInfo(code="server.catalog.validation",
+                category=ErrorCategory.VALIDATION, message=f"unknown fast model {fast_id}"))
+        data = record.package.model_dump(mode="json")
+        definition = data["manifest"]["agents"][record.id]
+        route_id = definition["models"].get("fast", "fast")
+        if fast_id:
+            definition["models"]["fast"] = route_id
+            data["manifest"]["models"][route_id] = {"provider": "server", "model": fast_id}
+        else:
+            definition["models"].pop("fast", None)
+        record = record.model_copy(update={"package": AgentPackageBundle.model_validate(data)}).with_configuration()
     advanced = {
-        key: payload[key] for key in ("budgets",) if payload.get(key) is not None
+        key: payload[key] for key in ("budgets", "memory") if payload.get(key) is not None
     }
     if advanced:
         data = record.package.model_dump(mode="json")

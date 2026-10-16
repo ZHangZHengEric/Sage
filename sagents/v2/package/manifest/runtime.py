@@ -54,3 +54,19 @@ class BudgetConfig(StrictModel):
 
 class PolicyConfig(StrictModel):
     budgets: BudgetConfig = Field(default_factory=BudgetConfig)
+
+
+def merge_capability_selections(defaults, overrides):
+    """Merge one declared configuration; a changed implementation replaces params."""
+    merged = dict(defaults)
+    for capability, selection in overrides.items():
+        previous = merged.get(capability)
+        if (isinstance(previous, CapabilitySelection)
+                and isinstance(selection, CapabilitySelection)
+                and previous.plugin == selection.plugin
+                and previous.name == selection.name):
+            selection = selection.model_copy(update={
+                "config": {**previous.config, **selection.config},
+            })
+        merged[capability] = selection
+    return merged

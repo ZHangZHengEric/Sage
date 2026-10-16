@@ -55,6 +55,7 @@ class ThreadPublic(BaseModel):
 class ThreadEventPage(BaseModel):
     """One bounded window of AG-UI frames plus the source event count."""
 
+    has_package: bool = False
     events: list[dict[str, Any]]
     total: int
     offset: int

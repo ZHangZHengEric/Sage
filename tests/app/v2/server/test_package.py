@@ -35,11 +35,12 @@ def test_package_has_no_yaml_credentials_or_model_routes():
     summarizer = manifest.runtime.capabilities["context.summarizer"]
     assert summarizer.plugin == "sage.context.summarizer.model"
     assert summarizer.config == {"model_binding": "primary"}
-    assert list(manifest.runtime.capabilities) == [
-        "context.summarizer",
-        "agent.continuation-policy",
-        "observability.log-sink",
-    ]
+    from app.v2.server.catalog.plugins import AGENT_DEFAULTS
+    assert set(manifest.runtime.capabilities) == set(AGENT_DEFAULTS) | {
+        "artifact.store", "observability.log-sink",
+    }
+    assert manifest.runtime.capabilities["artifact.store"].plugin == "sage.artifact.session"
+
 
 
 def test_package_always_registers_stdout_log_sink(tmp_path: Path):
