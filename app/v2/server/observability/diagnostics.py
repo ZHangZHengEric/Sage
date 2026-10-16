@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 from contextlib import closing
 from datetime import datetime
+from functools import lru_cache
 import json
 from pathlib import Path
 import re
@@ -61,6 +62,23 @@ def redact(value: Any) -> Any:
                 pass
 
     collect(value)
+    ordered_secrets = sorted(secrets, key=len, reverse=True)
+
+    @lru_cache(maxsize=32)
+    def clean_text(item: str) -> str:
+        # Wire and normalized streams often contain the same multi-MiB text.
+        # Reuse its sanitized value within this snapshot only: another snapshot
+        # may discover a different set of sibling secrets. Keep the cache bounded.
+        if item.lstrip().startswith(("{", "[")):
+            try:
+                return json.dumps(clean(json.loads(item)), ensure_ascii=False)
+            except (ValueError, RecursionError):
+                pass
+        for secret in ordered_secrets:
+            item = item.replace(secret, REDACTED)
+        item = _PRIVATE_KEY.sub(REDACTED, _SECRET_TEXT.sub(REDACTED, item))
+        item = _URL_QUERY_SECRET.sub(r"\1[REDACTED]", item)
+        return _URL_AUTH.sub(r"\1[REDACTED]@", item)
 
     def clean(item):
         if isinstance(item, dict):
@@ -71,19 +89,15 @@ def redact(value: Any) -> Any:
         if isinstance(item, (tuple, list)):
             return [clean(v) for v in item]
         if isinstance(item, str):
-            if item.lstrip().startswith(("{", "[")):
-                try:
-                    return json.dumps(clean(json.loads(item)), ensure_ascii=False)
-                except (ValueError, RecursionError):
-                    pass
-            for secret in sorted(secrets, key=len, reverse=True):
-                item = item.replace(secret, REDACTED)
-            item = _PRIVATE_KEY.sub(REDACTED, _SECRET_TEXT.sub(REDACTED, item))
-            item = _URL_QUERY_SECRET.sub(r"\1[REDACTED]", item)
-            return _URL_AUTH.sub(r"\1[REDACTED]@", item)
+            return clean_text(item)
         return item
 
-    return clean(value)
+    try:
+        return clean(value)
+    finally:
+        # The recursive closures form a cycle; release large cached strings now
+        # rather than waiting for cyclic garbage collection.
+        clean_text.cache_clear()
 
 
 class SessionDiagnostics:

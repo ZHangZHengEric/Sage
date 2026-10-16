@@ -4,10 +4,25 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncIterator, Mapping
+from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
-from typing import Any, Protocol
+from typing import Any, TypeVar
 
+from sagents.v2.composition.contracts import (
+    ApplicationResource as ApplicationResource,
+)
+from sagents.v2.composition.contracts import (
+    MaterializedAgentPorts as MaterializedAgentPorts,
+)
+from sagents.v2.composition.contracts import (
+    ResolvedApplicationPlan as ResolvedApplicationPlan,
+)
+from sagents.v2.composition.contracts import (
+    ResolvedProviderBinding as ResolvedProviderBinding,
+)
+from sagents.v2.composition.resources import ComposedRun, RunResources
+from sagents.v2.package.manifest.runtime import CapabilitySelection, RuntimeConfig
 from sagents.v2.contracts.commands import StartRun
 from sagents.v2.contracts.events import RuntimeEvent
 from sagents.v2.contracts.principals import RequestContext
@@ -16,54 +31,7 @@ from sagents.v2.interfaces.protocols.contracts import AdapterResult, ProtocolAda
 from sagents.v2.runtime.extensions import ExtensionScopeHandle, StopReason
 from sagents.v2.sagent import SAgent, SAgentRunStream
 
-
-class ApplicationResource(Protocol):
-    """Async lifecycle resource owned exclusively by the application root."""
-
-    async def close(self) -> None: ...
-
-
-@dataclass(frozen=True, order=True)
-class ResolvedProviderBinding:
-    """One inspectable capability binding with no secret configuration."""
-
-    capability: str
-    name: str
-    api_version: str
-    plugin_id: str | None
-    scope: str
-    source: str
-
-
-@dataclass(frozen=True)
-class ResolvedApplicationPlan:
-    """Frozen final composition identity exposed by an application root."""
-
-    package_id: str
-    manifest_hash: str
-    entrypoint_agent_id: str
-    providers: tuple[ResolvedProviderBinding, ...]
-    dependencies: tuple[tuple[str, str], ...]
-    composition_hash: str
-
-
-@dataclass(frozen=True)
-class MaterializedAgentPorts:
-    """Agent/Run ports rematerialized on a live process Application."""
-
-    token_estimator: Any
-    summarizer: Any
-    context_reducer: Any
-    continuation_policy: Any
-    tool_selection_policy: Any
-    memory_query_generator: Any | None
-    workspace_initializer: Any | None
-    resolved_plan: ResolvedApplicationPlan
-    scope_handles: tuple[Any, ...]
-    skill_loading: Any | None = None
-    tool_catalog: Any | None = None
-    tool_executor: Any | None = None
-
+T = TypeVar("T")
 
 @dataclass
 class InterfaceRunStream:
@@ -134,6 +102,52 @@ class SAgentApplication:
         self._composer = composer
         composer.application = self
 
+    def retain_scope(self, scope: ExtensionScopeHandle) -> None:
+        """Register a scope created by an in-flight assembly operation.
+
+        Close waits for assembly to settle, so registration is valid while
+        closing, but never after the application has closed.
+        """
+        if self._closed:
+            raise RuntimeError("SAgentApplication is closed")
+        if self._closing and not self._materialize_inflight:
+            raise RuntimeError("SAgentApplication is closing")
+        if all(scope is not existing for existing in self._scope_handles):
+            self._scope_handles.append(scope)
+
+    @asynccontextmanager
+    async def _assembly_operation(self):
+        async with self._close_lock:
+            self._ensure_open()
+            self._materialize_inflight += 1
+        try:
+            yield
+        finally:
+            async with self._close_lock:
+                self._materialize_inflight -= 1
+                self._materialize_idle.notify_all()
+
+    async def compose_run(
+        self, compose: Callable[[RunResources], Awaitable[T]]
+    ) -> ComposedRun[T]:
+        """Compose a host-admitted Run under one resource ownership boundary.
+
+        The host resolves its catalog and policy; the callback registers only
+        newly owned resources. No Run is admitted, replayed, resumed or cancelled
+        here. Success transfers resources to the caller. Failure rolls back and
+        retains failed cleanup for application shutdown. Close waits for assembly.
+        """
+        async with self._assembly_operation():
+            resources = RunResources()
+            try:
+                value = await compose(resources)
+                return ComposedRun(value, resources)
+            except BaseException as exc:
+                await resources.rollback(exc)
+                if resources.pending:
+                    self._owned_resources.append(resources)
+                raise
+
     async def adopt_resource(
         self,
         resource: ApplicationResource,
@@ -156,10 +170,31 @@ class SAgentApplication:
             else:
                 self._owned_resources.append(resource)
 
+    async def process_provider(
+        self,
+        capability: str,
+        selection: CapabilitySelection | dict,
+        *,
+        dependencies: Mapping[str, Any] | None = None,
+    ) -> Any:
+        """Resolve a pre-registered process plugin using standard config/lifecycle.
+
+        The application owns the provider. Dependencies are trusted host objects,
+        not user configuration. Identical selections reuse a process instance.
+        """
+        selection = CapabilitySelection.model_validate(selection)
+        async with self._assembly_operation():
+            if self._composer is None:
+                raise RuntimeError("process_provider requires a Builder-built application")
+            return await self._composer.process_provider(
+                capability, selection, dependencies=dependencies,
+            )
+
     async def materialize_agent(
         self,
         package: Any,
         *,
+        runtime: RuntimeConfig | dict | None = None,
         tenant_id: str | None = None,
         agent_id: str | None = None,
         run_id: str | None = None,
@@ -175,16 +210,14 @@ class SAgentApplication:
         Run-scoped ``scope_handles``.
         """
 
-        async with self._close_lock:
-            self._ensure_open()
+        async with self._assembly_operation():
             if self._composer is None:
                 raise RuntimeError(
                     "SAgentApplication.materialize_agent requires a Builder-built application"
                 )
-            self._materialize_inflight += 1
-        try:
             return await self._composer.materialize_agent(
                 package,
+                runtime=RuntimeConfig.model_validate(runtime) if runtime is not None else None,
                 tenant_id=tenant_id,
                 agent_id=agent_id,
                 run_id=run_id,
@@ -194,10 +227,6 @@ class SAgentApplication:
                 locked_configs=locked_configs,
                 cache_identities=cache_identities,
             )
-        finally:
-            async with self._close_lock:
-                self._materialize_inflight -= 1
-                self._materialize_idle.notify_all()
 
     def entrypoint(self) -> SAgent:
         self._ensure_open()

@@ -63,3 +63,8 @@ Shared pytest setup
 -------------------
 The root conftest.py adds the repository root to sys.path, so test files do not need
 their own path setup or hard-coded user directories.
+
+pytest.ini gives each test a default 30-second hang guard. This is not a
+performance target: filesystem, database and large diagnostic-export tests may
+legitimately take more than two seconds. Use @pytest.mark.timeout(seconds) for a
+test-specific bound, and explicit elapsed-time assertions for performance contracts.

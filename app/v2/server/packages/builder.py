@@ -17,7 +17,7 @@ from app.v2.server.runtime.loop import (
 from app.v2.server.runtime.official import provision_workspace, agent_network_policy, BoundWorkspaceHandle
 from sagents.v2 import SAgentBuilder
 from sagents.v2.contracts.errors import ErrorCategory, RuntimeErrorInfo, SageV2Error
-from sagents.v2.package.manifest.runtime import CapabilitySelection
+from sagents.v2.package.manifest.runtime import CapabilitySelection, RuntimeConfig
 from sagents.v2.runtime.execution import RunExecutionBinding
 
 
@@ -148,7 +148,8 @@ class PackageBuilder(SAgentBuilder):
         self.host_application = application
         self.catalog_snapshot = None
 
-    async def build(self, manifest, **kwargs):
+    async def build(self, manifest, *, runtime=None, **kwargs):
+        runtime_override = RuntimeConfig.model_validate(runtime) if runtime is not None else None
         # Temporary validation never creates permanent MySQL table families.
         settings = self.settings
         if self.root.name.startswith("validate-"):
@@ -179,31 +180,20 @@ class PackageBuilder(SAgentBuilder):
                         "capabilities": selected.capabilities,
                         "capability_profile": selected.current_profile(),
                     })
-        effective = manifest.model_copy(
+        effective_runtime = runtime.model_copy(
             update={
-                "models": models,
-                "runtime": runtime.model_copy(
-                    update={
-                        "capabilities": capabilities,
-                        "plugin_trust_policy": manifest.runtime.plugin_trust_policy,
-                    }
-                )
+                "capabilities": capabilities,
+                "plugin_trust_policy": manifest.runtime.plugin_trust_policy,
             }
         )
+        effective = manifest.model_copy(update={"models": models})
         from sagents.v2.runtime.execution.scheduler.plugins.ephemeral import (
             InMemoryScheduler,
         )
 
         if self.host_application is not None:
-            host = self.host_application
-            self.with_session_store(host.entrypoint().runtime.session_store)
-            self.with_derived_state_store(host.service("derived-state.store"))
-            self.with_scheduler(host.service("execution.scheduler"))
-            self.with_job_runtime(host.service("execution.job-runtime"))
-            self.with_memory_provider(host.service("memory.provider"))
-            self.with_session_memory_provider(host.service("session-memory.provider"))
-            self.with_diagnostic_sink(host.service("observability.diagnostic-sink"))
-            return await super().build(effective, **kwargs)
+            self.with_shared_runtime(self.host_application)
+            return await super().build(effective, runtime=runtime_override if runtime_override is not None else effective_runtime, **kwargs)
 
         scheduler = InMemoryScheduler(
             quota_group=self.run_quota,
@@ -211,7 +201,7 @@ class PackageBuilder(SAgentBuilder):
         )
         self.with_scheduler(scheduler)
         try:
-            app = await super().build(effective, **kwargs)
+            app = await super().build(effective, runtime=runtime_override if runtime_override is not None else effective_runtime, **kwargs)
             await app.adopt_resource(scheduler, close_after_existing=True)
             return app
         except BaseException:

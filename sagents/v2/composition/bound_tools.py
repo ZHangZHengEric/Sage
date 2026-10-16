@@ -1,0 +1,77 @@
+"""Wire run-owned official tools after the execution binding is acquired.
+
+The execution driver owns acquisition, validation and cleanup. This composer
+only initializes the bound workspace and injects run/Agent-scoped services;
+plugin scopes remain registered by the application-supplied opener.
+"""
+
+from __future__ import annotations
+
+from collections.abc import Awaitable, Callable, Mapping
+from dataclasses import dataclass
+
+from sagents.v2.goal import GoalStateService
+from sagents.v2.session_memory import SessionMemoryService
+from sagents.v2.runtime.artifact.contracts import ArtifactStore
+from sagents.v2.runtime.execution.jobs import JobRuntime
+from sagents.v2.runtime.extensions.scope import ExtensionScopeHandle
+from sagents.v2.workspace.contracts import WorkspaceInitializer
+from sagents.v2.memory import MemoryService
+from sagents.v2.runtime.artifact.binding import bind_artifact_store
+from sagents.v2.runtime.execution import RunExecutionBinding
+from sagents.v2.tool import ToolCatalog, ToolExecutor, ToolSelectionPolicy
+from sagents.v2.tool.official import OfficialToolRuntime
+
+
+@dataclass(frozen=True)
+class BoundTools:
+    catalog: ToolCatalog
+    executor: ToolExecutor
+    runtime: OfficialToolRuntime
+    scope: ExtensionScopeHandle | None
+
+
+@dataclass(frozen=True)
+class BoundToolComposer:
+    open_tools: Callable[
+        ..., Awaitable[tuple[ToolCatalog, ToolExecutor, ExtensionScopeHandle | None]]
+    ]
+    workspace_initializer: WorkspaceInitializer
+    artifact_store: ArtifactStore
+    job_runtime: JobRuntime
+    memory_services: Mapping[str, MemoryService]
+    default_memory_service: MemoryService | None
+    session_memory_service: SessionMemoryService | None
+    goal_state_service: GoalStateService | None
+    tool_selection: ToolSelectionPolicy | None
+
+    async def compose(
+        self,
+        binding: RunExecutionBinding,
+        *,
+        tenant_id: str | None,
+        agent_id: str,
+    ) -> BoundTools:
+        await binding.initialize_workspace(self.workspace_initializer)
+        runtime = OfficialToolRuntime(
+            binding.sandbox,
+            binding.grant_issuer,
+            job_runtime=self.job_runtime,
+        )
+        runtime.artifact_store = bind_artifact_store(
+            self.artifact_store, binding.sandbox.ref.owner_run_id
+        )
+        runtime.memory_service = self.memory_services.get(
+            agent_id, self.default_memory_service
+        )
+        runtime.session_memory_service = self.session_memory_service
+        runtime.goal_state_service = self.goal_state_service
+        runtime.tool_selection_policy = self.tool_selection
+        runtime.bind_job_runtime(self.job_runtime)
+        catalog, executor, scope = await self.open_tools(
+            runtime_override=runtime,
+            tenant_id=tenant_id,
+            agent_id=agent_id,
+            run_id=binding.run_id,
+        )
+        return BoundTools(catalog, executor, runtime, scope)

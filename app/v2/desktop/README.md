@@ -1,5 +1,8 @@
 # Sage Desktop v2
 
+[v2 code reading guide](../../../docs/en/architecture/code-reading-guide.md) · [中文阅读指南](../../../docs/zh/architecture/code-reading-guide.md)
+
+
 Sage Desktop 2.0 是使用 `sagents/v2` 的独立 Flutter 客户端。旧 `app/v1/desktop` 保留为历史实现。
 
 ## 目录
@@ -86,6 +89,26 @@ npm test
 发布流水线将 Node 可执行文件、官方解析器和第三方许可证放入安装包；2.1.0 安装包包含这些功能，2.0.0 安装包不包含。OpenUI 使用 MIT 许可证，版权及许可文本保留在 `backend/openui_runtime/THIRD_PARTY_NOTICES.txt` 中。
 
 Current source uses the official [OpenUI](https://github.com/thesysdev/openui) streaming parser with Sage's own native Flutter Glass renderer. Assistant `openui` fenced blocks update progressively as model output arrives, with light/dark themes, cards, tables, and input forms. No UI publishing tool is required. Ordinary chats have a “Prefer interactive UI” switch in the composer plus menu, persisted per chat. When enabled, the host preloads the full sage-openui Skill into the first model context without a tool call. When disabled, presentation is chosen automatically from natural requests; users do not need to mention OpenUI. Settings → General → Interactive UI on by default controls new chats (initially off), without changing existing chat choices. The plus menu overrides a chat, and branches inherit their source chat preference. Interactive UI normally carries the whole answer without introductory or repeated prose; only a necessary conclusion, exception, or next step gets one short sentence. The current library has 31 native component types listed above, including line/bar/pie charts, metrics, tabs, accordions, timelines, diagrams, images, and richer inputs. Computed results and numeric chart bindings update locally without a model round-trip. Input fields do not require a submit button; only task-required handoffs to the assistant should add one. Native computations use a bounded allowlist of arithmetic, compound growth, and loan payment operations, not arbitrary expressions. Images use anonymous HTTPS reads with public-address validation, size limits, and redirect checks; Studio and child-session surfaces are read-only. Form submissions are validated and routed as the next user turn in the same Session, with durable duplicate protection and existing tool approvals. Source mode requires Node.js 22+; release packaging embeds Node and the parser. Previously published binaries do not include this source change.
+
+## 打包默认配置与对话验收
+
+安装包和源码使用同一份 `backend/package.py` 运行组件默认值，不复制开发者的
+`~/sage/runtime/settings.json`、模型密钥或 Agent 私人配置。同一用户升级继续读取
+已有 `~/sage`；全新安装使用代码默认值。默认本地沙箱现在使用真实工作区路径，
+显式配置的虚拟路径仍然生效。旧 Run 快照未声明路径模式时按原来的虚拟路径恢复，
+新 Run 会记录实际采用的路径模式。本机专用的 `command_path` 不写入安装包。
+
+从 `app/v2/desktop` 执行 `flutter test` 验证界面、对话和流式状态。
+仓库根目录已有 `.venv` 和 Python 后端依赖时，以下测试还会启动独立临时数据目录的
+真实 Desktop HTTP sidecar，通过 Flutter API 客户端向 Agent 连续提问两轮，验证回复、
+完成状态和第二轮持久化历史；只替换模型响应，不替换装配和会话实现：
+
+```bash
+flutter test test/unified_sidecar_test.dart
+```
+
+没有仓库 Python 虚拟环境时这项跨语言测试明确跳过，普通 Flutter 测试不受影响。
+这是确定性对话验收，不代表已验证真实模型供应商或安装包中所有外部命令。
 
 ## 契约边界
 

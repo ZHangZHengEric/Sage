@@ -6,7 +6,8 @@ from types import SimpleNamespace
 import pytest
 
 from sagents.v2 import RunExecutionBinding, SAgentApplication, SAgentBuilder
-from sagents.v2.builder import _ExecutionBoundDriver
+from sagents.v2.composition.drivers import _ExecutionBoundDriver
+from sagents.v2.composition.assembler import ApplicationAssembler
 from sagents.v2.contracts.commands import InputItem, StartRun
 from sagents.v2.contracts.items import TextBlock
 from sagents.v2.contracts.run_state import RunState
@@ -398,12 +399,12 @@ def test_distributed_profile_rejects_weaker_explicit_guarantee():
     )
 
     with pytest.raises(SageV2Error) as conflict:
-        SAgentBuilder._effective_required_guarantees(runtime)
+        ApplicationAssembler._effective_required_guarantees(runtime)
 
     assert conflict.value.info.code == "runtime.deployment_profile_conflict"
     assert conflict.value.info.metadata["capability"] == "session.store"
 
-    effective = SAgentBuilder._effective_required_guarantees(
+    effective = ApplicationAssembler._effective_required_guarantees(
         RuntimeConfig(deployment_profile="distributed")
     )
     assert effective["artifact.store"]["shared_across_processes"] is True

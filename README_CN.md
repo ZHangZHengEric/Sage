@@ -20,6 +20,10 @@
 
 </div>
 
+首次阅读代码？从 [v2 代码阅读指南](docs/zh/architecture/code-reading-guide.md) 开始，按运行链路定位 sagents、desktop、server 和相关测试。
+
+基于 sagents 开发新项目：[统一开发入口、配置与调试规范](docs/zh/architecture/sagents-host-development.md)，附可离线运行的参考项目。
+
 ---
 
 ## ✨ **核心优势**

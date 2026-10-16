@@ -7,6 +7,8 @@ from pathlib import Path
 from typing import Any
 
 from sagents.v2 import SAgentApplication, SAgentBuilder
+from sagents.v2.runtime.extensions import ExtensionRegistration
+from sagents.v2.package.manifest.runtime import RuntimeConfig
 from sagents.v2.model import ModelProvider
 from sagents.v2.model.contracts import ModelCapabilities
 from sagents.v2.runtime.observability import DiagnosticSink, LogSink
@@ -52,6 +54,8 @@ async def build_desktop_application(
     component_configs: Mapping[str, Mapping[str, Any]] | None = None,
     language: str = "en",
     bindings: DesktopExecutionBindingProvider | None = None,
+    extensions: tuple[ExtensionRegistration, ...] = (),
+    runtime: RuntimeConfig | dict | None = None,
 ) -> SAgentApplication:
     """Assemble Desktop runtime as Manifest + host bindings.
 
@@ -75,6 +79,8 @@ async def build_desktop_application(
         .with_model_provider(model_provider or UnusableProcessModelProvider())
         .with_execution_binding_provider(provider)
     )
+    for registration in extensions:
+        builder.register(registration)
     if session_store is not None:
         builder = builder.with_session_store(session_store)
     if derived_state_store is not None:
@@ -89,7 +95,8 @@ async def build_desktop_application(
             component_selections=component_selections,
             component_configs=component_configs,
             language=language,
-        )
+        ),
+        runtime=runtime,
     )
     if owns_bindings:
         # Application closes owned resources in reverse order. The dispatcher

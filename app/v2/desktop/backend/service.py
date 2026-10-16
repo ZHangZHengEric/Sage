@@ -213,6 +213,7 @@ class DesktopV2Service(
         model_queue_timeout_seconds: float = 60,
         sidecar_port: int | None = None,
         sidecar_auth_token: str | None = None,
+        extensions=(),
     ) -> None:
         """Create one process service. Injected stores are borrowed, never closed.
 
@@ -235,6 +236,9 @@ class DesktopV2Service(
         self.openui_store = OpenUiStore(self.runtime_root / "openui.sqlite3")
         self.openui_parser = OpenUiParser()
         self.extensions = builtin_extension_registry()
+        self._host_extensions = tuple(extensions)
+        for registration in self._host_extensions:
+            self.extensions.register(registration)
         self._workspace_initializations: dict[tuple[str, str, str], Path] = {}
         self._workspace_initialization_lock = asyncio.Lock()
         self._sandbox_grant_issuer = SandboxGrantIssuer()
@@ -244,8 +248,9 @@ class DesktopV2Service(
             max_concurrent_model_calls, max_waiting=max_waiting_model_calls,
             wait_timeout_seconds=model_queue_timeout_seconds,
         )
-        self._host_model_providers: dict[tuple[Any, ...], Any] = {}
-        self._sandbox_providers: dict[str, Any] = {}
+        from app.v2.desktop.backend.model_providers import DesktopModelProviders
+
+        self.model_providers = DesktopModelProviders(self.model_budget)
         self._last_run_plan = None
         self._mcp_plugin_cache: dict[tuple[str, str], Any] = {}
         if log_sink is None:
@@ -387,6 +392,7 @@ class DesktopV2Service(
                 component_configs=settings.component_configs,
                 language=language,
                 bindings=execution_binding_provider,
+                extensions=self._host_extensions,
             )
             try:
                 self.execution_binding_provider = execution_binding_provider
@@ -521,8 +527,7 @@ class DesktopV2Service(
         if self._owns_session_store:
             await self.session_store.close()
         self._run_environments.clear()
-        self._host_model_providers.clear()
-        self._sandbox_providers.clear()
+        self.model_providers.clear()
         self._workspace_initializations.clear()
         self.logger.info("service.closed", "Desktop v2 service closed")
         if self._owns_log_sink:

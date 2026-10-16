@@ -904,7 +904,7 @@ class DesktopRunServiceMixin(DesktopRunCompositionMixin):
                         command.config.metadata.get("response_language") or "en"
                     ),
                 )
-                provider = self._sandbox_provider(record.sandbox_ref.provider_id)
+                provider = await self._sandbox_provider(record.sandbox_ref.provider_id)
                 lifecycle = ExecutionBindingLifecycleCoordinator(
                     sandbox_provider=provider,
                     session_store=self.driver_session_store,

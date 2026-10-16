@@ -19,10 +19,8 @@ from app.v2.server.runtime.models import (
     reset_model_user,
 )
 from app.v2.server.conversations.composition import composition_metadata, load_composition
-from app.v2.server.skills.runtime import (
-    CatalogRunDriver,
-    compose_catalog_loop,
-)
+from app.v2.server.runtime.driver import CatalogRunDriver
+from app.v2.server.runtime.loop import compose_catalog_loop
 from tests.app.v2.server.conftest import make_test_service, scripted_hello
 from tests.app.v2.server.fakes import MemoryCatalogStore
 from tests.app.v2.server.test_models import _save_demo_model
@@ -145,9 +143,9 @@ async def test_package_composition_never_opens_an_inference_client(
         else:
             _, ports = await compose_catalog_loop(service, _command().model_copy(update={"agent_id": agent_id}), user_id="user")
             driver = CatalogRunDriver(service, "run")
-            driver._ports = ports
-            await driver._close_ports()
-            await driver._close_ports()
+            driver._resources = ports
+            await driver._close_resources()
+            await driver._close_resources()
         assert closed == []
         assert (await service.execution.model_pool.pool.snapshot())["active_leases"] == 0
     finally:
@@ -170,11 +168,16 @@ async def test_cleanup_failure_does_not_skip_other_run_resources():
                 raise ValueError("close failed")
 
     driver = CatalogRunDriver(None, "run")
-    driver._ports = SimpleNamespace(scope_handles=tuple(Resource(i) for i in range(3)))
+    from sagents.v2.composition.resources import RunResources
+    driver._resources = RunResources()
+    for i in range(3):
+        driver._resources.own(Resource(i))
     with pytest.raises(ValueError, match="close failed"):
-        await driver._close_ports()
+        await driver._close_resources()
     assert closed == [2, 1, 0]
-    await driver._close_ports()
+    with pytest.raises(ValueError, match="close failed"):
+        await driver._close_resources()
+    assert closed == [2, 1, 0, 2]
 
 
 @pytest.mark.asyncio
@@ -205,12 +208,12 @@ async def test_catalog_loop_uses_materialized_skill_plugin_and_derived_activatio
 
     try:
         _, ports = await compose_catalog_loop(service, _command().model_copy(update={"agent_id": agent_id}), user_id="user")
-        app = ports.scope_handles[0]
+        app = ports.services[0]
         assert app.service("skill.loading").plugin_id == "sage.skill.loading.lazy"
         assert (await captured["catalog"].get_skill("demo", run_id="run")).name == "demo"
         driver = CatalogRunDriver(service, "run")
-        driver._ports = ports
-        await driver._close_ports()
+        driver._resources = ports
+        await driver._close_resources()
     finally:
         await service.close()
 
@@ -271,8 +274,8 @@ async def test_catalog_loop_uses_the_skill_versions_accepted_with_the_run(
         assert descriptor.version == first.version_id
         assert descriptor.version != second.version_id
         driver = CatalogRunDriver(service, "run")
-        driver._ports = ports
-        await driver._close_ports()
+        driver._resources = ports
+        await driver._close_resources()
     finally:
         await service.close()
 
@@ -312,8 +315,8 @@ async def test_catalog_loop_uses_the_agent_config_accepted_with_the_run(
         _, ports = await compose_catalog_loop(service, command, user_id="user")
         assert captured["instructions"] == "Admitted instructions"
         driver = CatalogRunDriver(service, "run")
-        driver._ports = ports
-        await driver._close_ports()
+        driver._resources = ports
+        await driver._close_resources()
     finally:
         await service.close()
 

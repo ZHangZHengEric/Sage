@@ -31,7 +31,7 @@ async def list_plugins(user: CurrentUser, host: HostDep):
         for provider in host.application.resolved_plan.providers
         if provider.plugin_id
     }
-    for option in plugin_options():
+    for option in plugin_options(host.extensions):
         for capability in option["capabilities"]:
             try:
                 implementation = host.application.service(capability)
@@ -50,7 +50,7 @@ async def list_plugins(user: CurrentUser, host: HostDep):
             default_config[key] = selection.config
     return success(
         {
-            "plugins": plugin_options(),
+            "plugins": plugin_options(host.extensions),
             "defaults": defaults,
             "configurable": list(AGENT_DEFAULTS),
             "default_config": default_config,
@@ -86,10 +86,10 @@ async def server_plugins(user: AdminUser, host: HostDep):
     sandbox = host.execution.sandbox_provider
     if sandbox is not None:
         providers.append({"capability": "execution.sandbox", "name": "default",
-            "api_version": "2", "plugin_id": sandbox.plugin_id,
+            "api_version": "3", "plugin_id": sandbox.plugin_id,
             "scope": "process", "source": "host", "implementation": type(sandbox).__name__})
     from app.v2.server.config.plugins import ServerPluginConfig, SERVER_CONFIGURABLE, SERVER_DEFAULTS, revision
-    saved = ServerPluginConfig(host.paths.data_root).read()
+    saved = ServerPluginConfig(host.paths.data_root, registry=host.extensions).read()
     active = host.settings.plugin_overrides
     pending = sorted(key for key in set(saved) | set(active) if saved.get(key) != active.get(key))
     deployment_defaults = {key: {"plugin": plugin, "config": {}} for key, plugin in SERVER_DEFAULTS.items()}
@@ -130,7 +130,7 @@ async def save_server_plugins(body: ServerPluginBody, user: AdminUser, host: Hos
 
     try:
         await asyncio.to_thread(
-            ServerPluginConfig(host.paths.data_root).save,
+            ServerPluginConfig(host.paths.data_root, registry=host.extensions).save,
             {key: value.model_dump(mode="json", exclude_none=True) if value else None
              for key, value in body.changes.items()},
             body.revision,

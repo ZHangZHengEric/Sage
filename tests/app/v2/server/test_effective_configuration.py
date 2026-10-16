@@ -172,12 +172,13 @@ async def test_model_factory_resolves_each_agent_binding(tmp_path, monkeypatch):
                 "child": AgentDefinition(name="Child", instructions={"inline": "Child"}, models={"primary": "custom-child"})},
         entrypoint=ApplicationEntrypoint(agent="main"))
     injected = {}
-    original = SAgentBuilder._create_capability
+    from sagents.v2.composition.assembler import ApplicationAssembler
+    original = ApplicationAssembler._create_capability
     async def capture(self, *args, **kwargs):
         if kwargs.get("capability") in {"context.summarizer", "agent.continuation-policy", "memory.recall-query"}:
             injected[(kwargs["agent_id"], kwargs["capability"])] = kwargs["locked_config"]["model"]
         return await original(self, *args, **kwargs)
-    monkeypatch.setattr(SAgentBuilder, "_create_capability", capture)
+    monkeypatch.setattr(ApplicationAssembler, "_create_capability", capture)
     seen = {}
     def factory(resolved, agent_id):
         seen[agent_id] = resolved.agents[agent_id].model_bindings

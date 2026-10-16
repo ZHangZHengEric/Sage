@@ -1,5 +1,8 @@
 # Sage Server v2
 
+[v2 code reading guide](../../../docs/en/architecture/code-reading-guide.md) · [中文阅读指南](../../../docs/zh/architecture/code-reading-guide.md)
+
+
 多用户 AG-UI 服务。后端代码在 `app/v2/server/`，前端在 `web/`。
 
 ```text
@@ -67,7 +70,7 @@ python -m scripts.v2.migrate_agent_table --env app/v2/server/.env --backup /secu
 | Agent / MCP / A2A peer | `catalogs` JSON：`agents[]`（提示词、model_id、tools、skills）+ `mcp_servers[]` + `a2a_agents[]` | 同左 |
 | A2A API Key | MySQL `api_keys`（只存哈希） | Memory mock |
 
-对话：首次 run 把 `agent_id` 钉在会话上（之后忽略下拉/`forwardedProps`）；读 catalog Agent → Official 文件/沙箱工具 + MCP + A2A peer + skill 组成 Composite，再 `materialize_agent` 加载 sagents/v2 loop。进程 Application 只 build 一次。
+对话：首次 run 把 `agent_id` 钉在会话上（之后忽略下拉/`forwardedProps`）；读 catalog Agent → Official 文件/沙箱工具 + MCP + A2A peer + skill 组成 Composite，通过 Package Builder 的统一 `build(package, runtime=...)` 装配，并借用进程 Application 的共享服务；循环走统一 `create_loop(...)`。进程 Application 只 build 一次。
 
 `/health` 返回就绪状态与 `trace_enabled`；配置 `SAGE_SERVER_JAEGER_URL` 时管理页显示 Jaeger 入口。Server V2 与 sagents/v2 运行时直接通过 `StructuredLogger` 调用统一日志接口；Uvicorn 和第三方标准日志经适配器转换成 `sage.log/v1` 记录。所有记录由同一 LogSink 写入 stdout 和 `SAGE_SERVER_LOG_DIRECTORY` 指定的轮转文件。`SAGE_SERVER_LOG_LEVEL` 控制最低级别，`SAGE_SERVER_LOG_FORMAT` 控制两处输出的 `json` 或 `text` 格式。stdout 也可由容器日志驱动或 Alloy/Loki 持久化，不写审计业务表。
 

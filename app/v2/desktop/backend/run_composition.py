@@ -9,15 +9,12 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from pydantic import SecretStr
 from PIL import Image
 
+from app.v2.desktop.backend.model_providers import DesktopModelProviders, thinking_config
+from app.v2.desktop.backend.component_plan import DesktopComponentPlan
 from app.v2.desktop.backend.openui_completion import OpenUiOutputChecker
 from sagents.v2.agent.policy.output_self_check import OutputSelfCheckPolicy
-from app.v2.desktop.backend.model_request_defaults import (
-    build_llm_extra_body,
-    is_openai_reasoning_model,
-)
 from sagents.v2.tool.official.media import compress_image_to_jpeg_bytes_for_llm
 from app.v2.desktop.backend.catalog import (
     DesktopAgentRecord,
@@ -30,7 +27,6 @@ from app.v2.desktop.backend.shell_policy import (
 from sagents.v2.tool.plugins.skill import SkillToolPlugin
 from app.v2.desktop.backend.package import (
     DESKTOP_COMPONENT_DEFAULTS as _DESKTOP_COMPONENT_DEFAULTS,
-    DESKTOP_COMPONENT_CONFIG_LOCKS,
     stable_component_id as _stable_component_id,
 )
 from sagents.v2.agent.modes import ModeAwareAgentLoopFactory
@@ -59,35 +55,23 @@ from sagents.v2.package.manifest.agents import (
     Instructions,
 )
 from sagents.v2.package.manifest.credentials import CredentialDeclaration
-from sagents.v2.package.manifest.models import (
-    ModelCapabilityDeclaration,
-    ModelLimits,
-    ModelRequestDefaults,
-    ModelRoute,
-)
 from sagents.v2.package.manifest.resolver import CompositionResolver
 from sagents.v2.package.manifest.root import ManifestMetadata, SageManifest
 from sagents.v2.package.manifest.runtime import PolicyConfig
 from sagents.v2.context import (
-    ContextBudget,
-    DefaultContextAssembler,
     RunMetadataContextProvider,
 )
 from sagents.v2.goal import (
-    GoalCompletionGatePolicy,
     GoalContextProvider,
     GoalStateService,
 )
 from sagents.v2.i18n import normalize_language
 from sagents.v2.plan import (
-    PlanCompletionGatePolicy,
     PlanContextProvider,
 )
-from sagents.v2.runtime.credentials import CredentialMaterial
 from sagents.v2.model import (
     RecordingModelProvider,
 )
-from sagents.v2.model.protocols import create_registered_model_provider
 from sagents.v2.agent.policy import (
     ApprovalStrategy,
     DefaultToolPolicy,
@@ -96,9 +80,7 @@ from sagents.v2.runtime.execution.sandbox import (
     FileSystemMode,
     FileOperation,
     FileSystemPolicy,
-    InMemorySandboxProvider,
     LifecyclePolicy,
-    LocalWorkspaceSandboxProvider,
     NetworkPolicy,
     ProcessPolicy,
     ResolvedSandboxSpec,
@@ -117,7 +99,6 @@ from sagents.v2.tool import (
     CompositeToolExecutor,
 )
 from app.v2.desktop.backend.studio import STUDIO_TOOLS, StudioContextProvider
-from app.v2.desktop.backend.package import desktop_v2_manifest
 from app.v2.desktop.backend.schemas import (
     DesktopRunRequest,
     DesktopV2Settings,
@@ -139,13 +120,11 @@ from app.v2.desktop.backend.openui import OpenUiContextProvider
 from app.v2.desktop.backend.runtime_config import (
     _PLAN_BLOCKED_TOOLS,
     _agent_memory_behavior,
-    _REASONING_DISABLE_EXTRAS,
     _SKILL_NAME,
     _TOOL_NAME,
     _continuation_agent_instructions,
     _resolved_sandbox_config,
     _sandbox_workspace_root,
-    _tool_selection_component_config,
 )
 from app.v2.desktop.backend.usage_analytics import (
     _usage_percentile as _usage_percentile,
@@ -176,63 +155,50 @@ class DesktopRunCompositionMixin(DesktopRunEnvironmentMixin):
         environment=None,
     ):
         await self.start()
-        provisioned: list[Any] = []
-        scope_handles: list[Any] = []
-        token = _ACTIVE_EXTENSION_SCOPE_HANDLES.set(scope_handles)
-        try:
-            (
-                resolved,
-                loop,
-                sandbox_handle,
-                sandbox_provider,
-                sandbox_spec,
-                job_runtime,
-            ) = await self._compose_run_driver(
-                agent=agent,
-                provider=provider,
-                workspace=workspace,
-                preferred_skills=preferred_skills,
-                approval_mode=approval_mode,
-                invocation_mode=invocation_mode,
-                session_id=session_id,
-                run_id=run_id,
-                resolved_spec_hash=resolved_spec_hash,
-                component_snapshot=component_snapshot,
-                force_leaf=force_leaf,
-                environment=environment,
-                sandbox_observer=provisioned.append,
-            )
-            lifecycle = None
-            if run_id is not None and resolved_spec_hash is not None:
-                lifecycle = ExecutionBindingLifecycleCoordinator(
-                    sandbox_provider=sandbox_provider,
-                    session_store=self.driver_session_store,
-                    job_runtime=job_runtime,
+        async def compose(resources):
+            token = _ACTIVE_EXTENSION_SCOPE_HANDLES.set(resources.services)
+            try:
+                (
+                    resolved,
+                    loop,
+                    sandbox_handle,
+                    sandbox_provider,
+                    sandbox_spec,
+                    job_runtime,
+                ) = await self._compose_run_driver(
+                    agent=agent,
+                    provider=provider,
+                    workspace=workspace,
+                    preferred_skills=preferred_skills,
+                    approval_mode=approval_mode,
+                    invocation_mode=invocation_mode,
+                    session_id=session_id,
+                    run_id=run_id,
+                    resolved_spec_hash=resolved_spec_hash,
+                    component_snapshot=component_snapshot,
+                    force_leaf=force_leaf,
+                    environment=environment,
+                    sandbox_observer=lambda handle: resources.own(handle, dependency=True),
                 )
-            return (
-                resolved,
-                loop,
-                _DesktopRunResources(sandbox_handle, scope_handles, lifecycle),
-            )
-        except BaseException as exc:
-            cleanup_errors: list[BaseException] = []
-            # Run-scoped services may still own jobs against the sandbox, so
-            # release them before tearing down the execution boundary.
-            for handle in reversed(scope_handles):
-                try:
-                    await handle.close()
-                except BaseException as close_exc:
-                    cleanup_errors.append(close_exc)
-            for sandbox_handle in reversed(provisioned):
-                try:
-                    await sandbox_handle.close()
-                except BaseException as close_exc:
-                    cleanup_errors.append(close_exc)
-            if cleanup_errors:
-                raise exc from cleanup_errors[0]
-            raise
-        finally:
-            _ACTIVE_EXTENSION_SCOPE_HANDLES.reset(token)
+                lifecycle = None
+                if run_id is not None and resolved_spec_hash is not None:
+                    lifecycle = ExecutionBindingLifecycleCoordinator(
+                        sandbox_provider=sandbox_provider,
+                        session_store=self.driver_session_store,
+                        job_runtime=job_runtime,
+                    )
+                return (
+                    resolved,
+                    loop,
+                    _DesktopRunResources(
+                        sandbox_handle, resources.services, lifecycle, resources=resources
+                    ),
+                )
+            finally:
+                _ACTIVE_EXTENSION_SCOPE_HANDLES.reset(token)
+
+        assembly = await self.application.compose_run(compose)
+        return assembly.value
 
     async def _compose_run_driver(
         self,
@@ -306,15 +272,6 @@ class DesktopRunCompositionMixin(DesktopRunEnvironmentMixin):
         current_resolved_spec_hash = self._desktop_spec_hash(
             resolved.manifest_hash, settings
         )
-        estimator_id = settings.component_selections.get(
-            "context.token-estimator",
-            _DESKTOP_COMPONENT_DEFAULTS["context.token-estimator"],
-        )
-        reducer_id = settings.component_selections.get(
-            "context.reducer", _DESKTOP_COMPONENT_DEFAULTS["context.reducer"]
-        )
-        estimator_id = _stable_component_id("context.token-estimator", estimator_id)
-        reducer_id = _stable_component_id("context.reducer", reducer_id)
         # Desktop compression uses the configured route itself. The summary is
         # derived state in SummaryStore; canonical Session events remain intact.
         # Recording the secondary request also keeps provider diagnostics honest.
@@ -350,13 +307,6 @@ class DesktopRunCompositionMixin(DesktopRunEnvironmentMixin):
                 "model_type": "fast",
             },
         )
-        memory_query_plugin_id = _stable_component_id(
-            "memory.recall-query",
-            settings.component_selections.get(
-                "memory.recall-query",
-                _DESKTOP_COMPONENT_DEFAULTS["memory.recall-query"],
-            ),
-        )
         memory_query_model = RecordingModelProvider(
             await self._model_provider(judge_provider, agent, enable_thinking=False),
             sink=self.diagnostics,
@@ -385,115 +335,27 @@ class DesktopRunCompositionMixin(DesktopRunEnvironmentMixin):
                 "model_type": "fast",
             },
         )
-        summarizer_plugin_id = _stable_component_id(
-            "context.summarizer",
-            settings.component_selections.get(
-                "context.summarizer",
-                _DESKTOP_COMPONENT_DEFAULTS["context.summarizer"],
-            ),
+        component_plan = DesktopComponentPlan.resolve(
+            settings=settings,
+            agent=agent,
+            provider=provider,
+            judge_provider=judge_provider,
+            runtime_root=self.runtime_root,
+            summary_store_plugin_id=self.summary_store_plugin_id,
         )
-        continuation_plugin_id = _stable_component_id(
-            "agent.continuation-policy",
-            settings.component_selections.get(
-                "agent.continuation-policy",
-                _DESKTOP_COMPONENT_DEFAULTS["agent.continuation-policy"],
-            ),
-        )
-        raw_tool_selection = agent.config.get("toolSelection")
-        legacy_tool_selection_config = (
-            dict(raw_tool_selection) if isinstance(raw_tool_selection, dict) else {}
-        )
-        legacy_plugin_id = str(
-            legacy_tool_selection_config.pop(
-                "plugin", _DESKTOP_COMPONENT_DEFAULTS["tool.selection-policy"]
-            )
-        )
-        tool_selection_plugin_id = _stable_component_id(
-            "tool.selection-policy",
-            settings.component_selections.get(
-                "tool.selection-policy", legacy_plugin_id
-            ),
-        )
-        configured_tool_selection = settings.component_configs.get(
-            "tool.selection-policy"
-        )
-        tool_selection_config = _tool_selection_component_config(
-            tool_selection_plugin_id,
-            configured_tool_selection
-            if configured_tool_selection is not None
-            else legacy_tool_selection_config,
-        )
-        run_manifest = desktop_v2_manifest(
-            session_root=self.runtime_root,
-            component_selections={
-                **settings.component_selections,
-                "context.token-estimator": estimator_id,
-                "context.reducer": reducer_id,
-                "context.summarizer": summarizer_plugin_id,
-                "agent.continuation-policy": continuation_plugin_id,
-                "tool.selection-policy": tool_selection_plugin_id,
-                "memory.recall-query": memory_query_plugin_id,
-            },
-            component_configs=settings.component_configs,
-            language=settings.language,
-        )
-        run_cache_identities = {
-            "context.summarizer": {
-                "plugin": summarizer_plugin_id,
-                "provider": provider.id,
-                "model": provider.model,
-                "base_url": provider.base_url,
-                "credential": SecretStr(provider.api_key or ""),
-                "model_binding": "primary",
-            },
-            "memory.recall-query": {
-                "plugin": memory_query_plugin_id,
-                "language": settings.language,
-                "provider": judge_provider.id,
-                "model": judge_provider.model,
-                "base_url": judge_provider.base_url,
-                "credential": SecretStr(judge_provider.api_key or ""),
-            },
-            "context.reducer": {
-                "plugin": reducer_id,
-                "estimator": estimator_id,
-                "summarizer": summarizer_plugin_id,
-                "summary_store": self.summary_store_plugin_id,
-                "provider": provider.id,
-                "model": provider.model,
-            },
-            "tool.selection-policy": {
-                "plugin": tool_selection_plugin_id,
-                **tool_selection_config,
-            },
-        }
+        continuation_plugin_id = component_plan.continuation_plugin_id
         ports = await self.application.materialize_agent(
-            run_manifest,
+            component_plan.manifest,
             tenant_id=agent.user_id,
             agent_id=agent.agent_id,
             run_id=run_id,
             model=recording_model,
-            locked_configs={
-                "context.summarizer": {
-                    "model": recording_model,
-                    **DESKTOP_COMPONENT_CONFIG_LOCKS["context.summarizer"],
-                },
-                "memory.recall-query": (
-                    {
-                        "model": memory_query_model,
-                        "language": settings.language,
-                    }
-                    if memory_query_plugin_id == "sage.memory.recall-query.llm"
-                    else {}
-                ),
-                "tool.selection-policy": tool_selection_config,
-                "agent.continuation-policy": {
-                    "model": judge_recording_model,
-                    **DESKTOP_COMPONENT_CONFIG_LOCKS["agent.continuation-policy"],
-                },
-                "workspace.initializer": {"language": settings.language},
-            },
-            cache_identities=run_cache_identities,
+            locked_configs=component_plan.locked_configs(
+                primary=recording_model,
+                judge=judge_recording_model,
+                memory_query=memory_query_model,
+            ),
+            cache_identities=component_plan.cache_identities,
         )
         self._last_run_plan = ports.resolved_plan
         owner_handles = _ACTIVE_EXTENSION_SCOPE_HANDLES.get()
@@ -510,6 +372,7 @@ class DesktopRunCompositionMixin(DesktopRunEnvironmentMixin):
                 token_estimator=token_estimator,
                 summary_store=self.summary_store,
                 summarizer=summarizer,
+                reducer=context_reducer,
             ),
         )
         await self._ensure_agent_workspace(
@@ -517,10 +380,18 @@ class DesktopRunCompositionMixin(DesktopRunEnvironmentMixin):
             component_selections=settings.component_selections,
             language=settings.language,
         )
-        sandbox_plugin_id, sandbox_config = _resolved_sandbox_config(settings)
+        sandbox_plugin_id, sandbox_config = _resolved_sandbox_config(
+            settings,
+            # Old snapshots predate the host-path default. Keep their virtual
+            # mapping unless the admitted config explicitly selected host paths.
+            frozen_path_mode=(
+                component_snapshot.get("sandbox_path_mode", "virtual")
+                if component_snapshot is not None else None
+            ),
+        )
         workspace_root = _sandbox_workspace_root(sandbox_config, workspace)
         issuer = self._sandbox_grant_issuer
-        sandbox_provider = self._sandbox_provider(sandbox_plugin_id, sandbox_config)
+        sandbox_provider = await self._sandbox_provider(sandbox_plugin_id, sandbox_config)
         capabilities = await sandbox_provider.capabilities()
         architecture = str(
             sandbox_config.get("architecture") or capabilities.architectures[0]
@@ -806,41 +677,6 @@ class DesktopRunCompositionMixin(DesktopRunEnvironmentMixin):
                 },
             )
 
-        resolved_agent = resolved.agents[agent.agent_id]
-        route_id = resolved_agent.model_bindings.get("primary")
-        route = resolved.model_routes.get(route_id, {})
-        limits = route.get("limits", {})
-        request_defaults = route.get("request", {})
-        ceiling = resolved.policy_ceilings[agent.agent_id]
-        context_limits = [
-            value
-            for value in (
-                limits.get("context_window"),
-                ceiling.max_input_tokens,
-            )
-            if value is not None
-        ]
-        context_limits = context_limits or [32_768]
-        context_budget = (
-            ContextBudget(
-                max_system_tokens=ceiling.max_system_tokens or 16_384,
-                protected_recent_tokens=(
-                    ceiling.protected_recent_tokens
-                    if ceiling.protected_recent_tokens is not None
-                    else 8_192
-                ),
-                max_input_tokens=min(int(value) for value in context_limits),
-                reserve_output_tokens=int(
-                    request_defaults.get("max_output_tokens")
-                    or limits.get("max_output_tokens")
-                    or ceiling.max_output_tokens
-                    or 0
-                ),
-            )
-            if context_limits
-            else None
-        )
-
         if mode == AgentMode.FIBRE and session_id:
             try:
                 dynamic_members = await self.dynamic_agent_roster.load(session_id)
@@ -902,24 +738,17 @@ class DesktopRunCompositionMixin(DesktopRunEnvironmentMixin):
                 base_continuation_policy = ports.continuation_policy
             else:
                 member_ports = await self.application.materialize_agent(
-                    run_manifest,
+                    component_plan.manifest,
                     tenant_id=agent.user_id,
                     agent_id=descriptor.agent_id,
                     run_id=run_id,
                     model=judge_models_by_agent.get(
                         descriptor.agent_id, judge_recording_model
                     ),
-                    locked_configs={
-                        "agent.continuation-policy": {
-                            "model": judge_models_by_agent.get(
-                                descriptor.agent_id, judge_recording_model
-                            ),
-                            **DESKTOP_COMPONENT_CONFIG_LOCKS[
-                                "agent.continuation-policy"
-                            ],
-                        }
-                    },
-                    cache_identities=run_cache_identities,
+                    locked_configs=component_plan.continuation_config(
+                        judge_models_by_agent.get(descriptor.agent_id, judge_recording_model)
+                    ),
+                    cache_identities=component_plan.cache_identities,
                 )
                 owner = _ACTIVE_EXTENSION_SCOPE_HANDLES.get()
                 if owner is not None:
@@ -930,16 +759,11 @@ class DesktopRunCompositionMixin(DesktopRunEnvironmentMixin):
                 OpenUiOutputChecker(self.openui_parser),
             )
             owns_invocation = descriptor.agent_id == agent.agent_id
-            if invocation_mode == "plan" and owns_invocation:
-                continuation_policy = PlanCompletionGatePolicy(
-                    continuation_policy,
-                    goal_state_service,
-                )
-            elif invocation_mode == "goal" and owns_invocation:
-                continuation_policy = GoalCompletionGatePolicy(
-                    continuation_policy,
-                    goal_state_service,
-                )
+            completion_gates = (
+                (invocation_mode,)
+                if owns_invocation and invocation_mode in {"plan", "goal"}
+                else ()
+            )
             self_configuration = None
             if (
                 owns_invocation
@@ -979,7 +803,42 @@ class DesktopRunCompositionMixin(DesktopRunEnvironmentMixin):
                     ),
                 )
 
-            return factory.create_engine(
+            # The host translates its authorized roster into a package view.
+            # Keep the admitted identity and root budgets; never re-resolve live
+            # configuration while restoring a Run.
+            definition = resolved.agents[agent.agent_id].model_copy(update={
+                "instructions": descriptor.instructions,
+                "tools": descriptor.tools,
+                "skills": descriptor.skills,
+            })
+            ceiling = resolved.policy_ceilings[agent.agent_id].model_copy(update={
+                "allowed_tools": frozenset(descriptor.tools),
+                "allowed_skills": frozenset(descriptor.skills),
+            })
+            loop_package = resolved.model_copy(update={
+                "agents": {**resolved.agents, descriptor.agent_id: definition},
+                "policy_ceilings": {**resolved.policy_ceilings, descriptor.agent_id: ceiling},
+            })
+            delegation_tools = (
+                ("sys_spawn_agent", "sys_delegate_task")
+                if descriptor.mode == AgentMode.FIBRE else ("sys_team_delegate_task",)
+                if descriptor.mode == AgentMode.TEAM else ()
+            ) if descriptor.allow_delegation else ()
+            return factory.create_loop(
+                loop_package,
+                descriptor.agent_id,
+                additional_runtime_tools=delegation_tools,
+                fallback_invocation_mode=invocation_mode,
+                context_agent_id=agent.agent_id,
+                context_providers=context_providers,
+                developer_instructions=(
+                    descriptor.instructions
+                    + _continuation_agent_instructions(continuation_plugin_id)
+                ),
+                completion_gates=completion_gates,
+                goal_state_service=goal_state_service,
+                session_memory_service=self.session_memory_service,
+                artifact_store=artifact_store,
                 model=models_by_agent.get(descriptor.agent_id, recording_model),
                 tool_catalog=catalog,
                 tool_executor=executor,
@@ -1012,20 +871,6 @@ class DesktopRunCompositionMixin(DesktopRunEnvironmentMixin):
                 ),
                 memory_recall_limit=8,
                 memory_recall_query_generator=memory_query_generator,
-                context_assembler=DefaultContextAssembler(
-                    max_system_tokens=ceiling.max_system_tokens or 16_384,
-                    developer_instructions=(
-                        descriptor.instructions
-                        + _continuation_agent_instructions(continuation_plugin_id)
-                    ),
-                    providers=context_providers,
-                    budget=context_budget,
-                    reducer=(context_reducer if context_budget is not None else None),
-                    estimator=token_estimator,
-                    history_reader=self.driver_session_store,
-                    projection_observer=self.session_memory_service,
-                    artifact_store=artifact_store,
-                ),
                 expected_resolved_spec_hash=current_resolved_spec_hash,
             )
 
@@ -1103,33 +948,21 @@ class DesktopRunCompositionMixin(DesktopRunEnvironmentMixin):
             official_runtime.job_runtime,
         )
 
-    def _sandbox_provider(self, plugin_id: str, config=None):
-        options = {
-            key: value
-            for key, value in (config or {}).items()
-            if key
-            in {
-                "command_path",
-                "read_paths",
-                "linux_cgroup_root",
-                "linux_quota_mount",
-                "linux_execution_uid",
-                "linux_execution_gid",
-            }
+    async def _sandbox_provider(self, plugin_id: str, config=None):
+        # Workspace/resource policies belong to the Run spec, not the provider
+        # constructor. Legacy settings store both in one object.
+        provider_fields = {
+            "command_path", "read_paths", "linux_cgroup_root", "linux_quota_mount",
+            "linux_execution_uid", "linux_execution_gid",
         }
-        cache_key = plugin_id + json.dumps(options, sort_keys=True)
-        cached = self._sandbox_providers.get(cache_key)
-        if cached is not None:
-            return cached
-        verification_key = self._sandbox_grant_issuer.verification_key
-        if plugin_id == LocalWorkspaceSandboxProvider.plugin_id:
-            provider = LocalWorkspaceSandboxProvider(verification_key, **options)
-        elif plugin_id == InMemorySandboxProvider.plugin_id:
-            provider = InMemorySandboxProvider(verification_key)
-        else:
-            raise ValueError(f"unsupported sandbox plugin {plugin_id!r}")
-        self._sandbox_providers[cache_key] = provider
-        return provider
+        options = {key: value for key, value in (config or {}).items() if key in provider_fields}
+        # New third-party constructor parameters have an explicit namespace;
+        # their schema is validated by the same ExtensionHost as built-ins.
+        options.update((config or {}).get("provider_config", {}))
+        return await self.application.process_provider(
+            "execution.sandbox", {"plugin": plugin_id, "config": options},
+            dependencies={"verification_key": self._sandbox_grant_issuer.verification_key},
+        )
 
     async def _session_id_for_run(self, run_id: str) -> str:
         return (await self.session_store.get_run(run_id)).session_id
@@ -1137,71 +970,13 @@ class DesktopRunCompositionMixin(DesktopRunEnvironmentMixin):
     def _manifest(self, agent, provider, tools, skills):
         tools = tuple(name for name in tools if name not in STUDIO_TOOLS)
         max_steps = max(1, min(int(agent.config.get("maxLoopCount") or 24), 10_000))
-        deep_thinking, thinking_level = self._thinking_config(agent)
-        compatibility_profile = self._verified_model_compatibility_profile(provider)
-        plugin_profile = (
-            compatibility_profile.plugin_profile
-            if compatibility_profile is not None
-            else None
-        )
-        legacy_profile = compatibility_profile if plugin_profile is None else None
-        effective_max_output_tokens = self._effective_model_output_tokens(
-            provider, compatibility_profile
-        )
-        reasoning_effort = self._effective_reasoning_effort(
-            compatibility_profile,
-            enabled=deep_thinking,
-            requested=thinking_level,
-            legacy=thinking_level if deep_thinking else None,
-        )
-        request_extra: dict[str, Any] = {}
-        if (
-            provider.protocol == "openai-chat-completions"
-            and legacy_profile is not None
-        ):
-            request_extra["max_output_tokens_field"] = (
-                legacy_profile.max_output_tokens_field
-            )
-        if legacy_profile is not None and not deep_thinking:
-            request_extra.update(
-                self._reasoning_disable_extra(legacy_profile.reasoning_disable_strategy)
-            )
-        elif legacy_profile is not None:
-            request_extra.update(
-                self._reasoning_effort_extra(
-                    legacy_profile,
-                    enabled=deep_thinking,
-                    requested=thinking_level,
-                )
-            )
         memory_enabled = (
             self.memory_plugin_id != "sage.memory.noop" and "search_memory" in tools
         )
         memory_behavior = _agent_memory_behavior(agent)
-        route = ModelRoute(
-            provider=provider.protocol,
-            base_url=provider.base_url,
-            credential="desktop_model",
-            model=provider.model,
-            request=ModelRequestDefaults(
-                max_output_tokens=effective_max_output_tokens,
-                temperature=provider.temperature,
-                top_p=provider.top_p,
-                reasoning_effort=reasoning_effort,
-                extra=request_extra,
-            ),
-            limits=ModelLimits(
-                context_window=provider.max_model_len,
-                max_output_tokens=effective_max_output_tokens,
-            ),
-            capabilities=ModelCapabilityDeclaration(
-                multimodal=provider.supports_multimodal,
-                structured_output=provider.supports_structured_output,
-                tool_calling=provider.supports_tool_calling,
-                reasoning=True,
-                parallel_tool_calls=provider.supports_tool_calling,
-            ),
-            capability_profile=plugin_profile,
+        route = DesktopModelProviders.route(
+            provider, agent,
+            compatibility_profile=self._verified_model_compatibility_profile(provider),
         )
         return SageManifest(
             kind="agent-package",
@@ -1242,146 +1017,11 @@ class DesktopRunCompositionMixin(DesktopRunEnvironmentMixin):
     async def _model_provider(
         self, provider, agent, *, enable_thinking: bool | None = None
     ):
-        deep_thinking, thinking_level = self._thinking_config(agent)
-        if enable_thinking is not None:
-            deep_thinking = enable_thinking
-        request_extra: dict[str, Any] = {}
-        compatibility_profile = self._verified_model_compatibility_profile(provider)
-        plugin_profile = (
-            compatibility_profile.plugin_profile
-            if compatibility_profile is not None
-            else None
+        return self.model_providers.get(
+            provider, agent,
+            compatibility_profile=self._verified_model_compatibility_profile(provider),
+            enable_thinking=enable_thinking,
         )
-        legacy_profile = compatibility_profile if plugin_profile is None else None
-        effective_max_output_tokens = self._effective_model_output_tokens(
-            provider, compatibility_profile
-        )
-        reasoning_effort = self._effective_reasoning_effort(
-            compatibility_profile,
-            enabled=deep_thinking,
-            requested=thinking_level,
-            legacy=thinking_level if deep_thinking else None,
-        )
-        if provider.protocol == "openai-chat-completions":
-            if legacy_profile is not None:
-                request_extra["max_output_tokens_field"] = (
-                    legacy_profile.max_output_tokens_field
-                )
-                if not deep_thinking:
-                    request_extra.update(
-                        self._reasoning_disable_extra(
-                            legacy_profile.reasoning_disable_strategy
-                        )
-                    )
-                else:
-                    request_extra.update(
-                        self._reasoning_effort_extra(
-                            legacy_profile,
-                            enabled=True,
-                            requested=thinking_level,
-                        )
-                    )
-            elif enable_thinking is not None:
-                request_extra["reasoning_parameter_fallback"] = enable_thinking is False
-                # There is no portable "thinking disabled" field. In
-                # particular, minimal is still reasoning and some compatible
-                # gateways reject reasoning_effort entirely. Auxiliary
-                # requests therefore use provider defaults for OpenAI
-                # reasoning models; vendor-specific disable controls remain for
-                # protocols where Sage has an explicit mapping.
-                if enable_thinking or not is_openai_reasoning_model(provider.model):
-                    request_extra.update(
-                        build_llm_extra_body(
-                            provider.model,
-                            base_url=provider.base_url,
-                            enable_thinking=enable_thinking,
-                            thinking_level=(
-                                thinking_level if enable_thinking else None
-                            ),
-                            default_off="minimal",
-                        )
-                    )
-        elif provider.protocol == "openai-responses":
-            if legacy_profile is not None and not deep_thinking:
-                request_extra.update(
-                    self._reasoning_disable_extra(
-                        legacy_profile.reasoning_disable_strategy
-                    )
-                )
-            elif legacy_profile is not None:
-                request_extra.update(
-                    self._reasoning_effort_extra(
-                        legacy_profile,
-                        enabled=True,
-                        requested=thinking_level,
-                    )
-                )
-            elif enable_thinking is not None:
-                request_extra["reasoning_parameter_fallback"] = enable_thinking is False
-        elif legacy_profile is not None and not deep_thinking:
-            request_extra.update(
-                self._reasoning_disable_extra(legacy_profile.reasoning_disable_strategy)
-            )
-        elif legacy_profile is not None:
-            request_extra.update(
-                self._reasoning_effort_extra(
-                    legacy_profile,
-                    enabled=True,
-                    requested=thinking_level,
-                )
-            )
-        route = ModelRoute(
-            provider=provider.protocol,
-            base_url=provider.base_url,
-            credential="desktop_model",
-            model=provider.model,
-            request=ModelRequestDefaults(
-                max_output_tokens=effective_max_output_tokens,
-                temperature=provider.temperature,
-                top_p=provider.top_p,
-                reasoning_effort=reasoning_effort,
-                extra=request_extra,
-            ),
-            limits=ModelLimits(
-                context_window=provider.max_model_len,
-                max_output_tokens=effective_max_output_tokens,
-            ),
-            capabilities=ModelCapabilityDeclaration(
-                multimodal=provider.supports_multimodal,
-                structured_output=provider.supports_structured_output,
-                tool_calling=provider.supports_tool_calling,
-                reasoning=True,
-                parallel_tool_calls=provider.supports_tool_calling,
-            ),
-            capability_profile=plugin_profile,
-        )
-        cache_key = (
-            provider.id,
-            agent.agent_id,
-            bool(deep_thinking),
-            json.dumps(route.model_dump(mode="json"), sort_keys=True),
-            json.dumps(
-                plugin_profile.model_dump(mode="json") if plugin_profile else None,
-                sort_keys=True,
-            ),
-            hashlib.sha256((provider.api_key or "").encode()).hexdigest(),
-        )
-        cached = self._host_model_providers.get(cache_key)
-        if cached is not None:
-            return cached
-        model = create_registered_model_provider(
-            route,
-            CredentialMaterial(
-                credential_id=f"llm-provider:{provider.id}",
-                secret=SecretStr(provider.api_key or ""),
-                source="desktop-catalog",
-            ),
-            provider_instance_id=provider.id,
-            capability_profile=plugin_profile,
-        )
-        model = self.model_budget.wrap(model)
-        self._host_model_providers[cache_key] = model
-        return model
 
     @classmethod
     def _verified_model_compatibility_profile(
@@ -1395,15 +1035,6 @@ class DesktopRunCompositionMixin(DesktopRunEnvironmentMixin):
             return None
         return profile
 
-    @staticmethod
-    def _effective_model_output_tokens(
-        provider: DesktopModelProviderRecord,
-        profile: DesktopModelCompatibilityProfile | None,
-    ) -> int:
-        if profile is not None and profile.effective_max_output_tokens is not None:
-            return profile.effective_max_output_tokens
-        return provider.max_tokens
-
     @classmethod
     def _auxiliary_json_compatible(
         cls,
@@ -1415,51 +1046,6 @@ class DesktopRunCompositionMixin(DesktopRunEnvironmentMixin):
             or profile.schema_version < 2
             or profile.auxiliary_json_compatible
         )
-
-    @staticmethod
-    def _effective_reasoning_effort(
-        profile: DesktopModelCompatibilityProfile | None,
-        *,
-        enabled: bool,
-        requested: str,
-        legacy: str | None,
-    ) -> str | None:
-        if not enabled:
-            return None
-        if profile is None:
-            return legacy
-        if profile.schema_version < 2:
-            return None
-        if profile.reasoning_effort_strategy != "reasoning_effort":
-            return None
-        if requested in profile.supported_reasoning_efforts:
-            return requested
-        return None
-
-    @staticmethod
-    def _reasoning_disable_extra(strategy: str) -> dict[str, Any]:
-        return dict(_REASONING_DISABLE_EXTRAS.get(strategy, {}))
-
-    @staticmethod
-    def _reasoning_effort_extra(
-        profile: DesktopModelCompatibilityProfile,
-        *,
-        enabled: bool,
-        requested: str,
-    ) -> dict[str, Any]:
-        if (
-            enabled
-            and profile.schema_version >= 2
-            and profile.reasoning_effort_strategy == "chat_template_reasoning_effort"
-            and requested in profile.supported_reasoning_efforts
-        ):
-            return {
-                "chat_template_kwargs": {
-                    "thinking": True,
-                    "reasoning_effort": requested,
-                }
-            }
-        return {}
 
     async def _fast_provider(
         self,
@@ -1474,19 +1060,7 @@ class DesktopRunCompositionMixin(DesktopRunEnvironmentMixin):
             return fallback
         return provider
 
-    @staticmethod
-    def _thinking_config(agent) -> tuple[bool, str]:
-        enabled = bool(
-            agent.config.get("deepThinking", agent.config.get("deep_thinking", False))
-        )
-        level = str(
-            agent.config.get("thinkingLevel")
-            or agent.config.get("thinking_level")
-            or "medium"
-        ).lower()
-        if level not in {"minimal", "low", "medium", "high", "xhigh", "max"}:
-            level = "medium"
-        return enabled, level
+    _thinking_config = staticmethod(thinking_config)
 
     @staticmethod
     def _attachment_host_path(
@@ -1725,6 +1299,7 @@ class DesktopRunCompositionMixin(DesktopRunEnvironmentMixin):
                 self._agent_workspace_path(settings.agent_workspace_path)
             ),
             "runtime_components": {
+                "sandbox_path_mode": sandbox_config["workspace_path_mode"],
                 "selections": dict(settings.component_selections),
                 "configs": dict(settings.component_configs),
             },

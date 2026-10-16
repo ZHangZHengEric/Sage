@@ -37,8 +37,8 @@ SERVER_DEFAULTS = {
 }
 
 
-def validate_selections(selections: dict) -> dict:
-    registry = builtin_extension_registry()
+def validate_selections(selections: dict, *, registry=None) -> dict:
+    registry = registry if registry is not None else builtin_extension_registry()
     result = {}
     for capability, raw in selections.items():
         if capability not in SERVER_CONFIGURABLE:
@@ -73,7 +73,8 @@ def revision(selections: dict) -> str:
 
 
 class ServerPluginConfig:
-    def __init__(self, data_root: Path):
+    def __init__(self, data_root: Path, *, registry=None):
+        self.registry = registry
         self.path = data_root / "config" / "plugins.json"
 
     def read(self) -> dict:
@@ -82,7 +83,7 @@ class ServerPluginConfig:
         value = json.loads(self.path.read_text())
         if not isinstance(value, dict):
             raise ValueError("Server 插件配置格式错误")
-        return validate_selections(value)
+        return validate_selections(value, registry=self.registry)
 
     def save(self, changes: dict, expected_revision: str) -> dict:
         # Serialize host-local maintenance as well as HTTP writes. Lock around
@@ -103,7 +104,7 @@ class ServerPluginConfig:
                     candidate.pop(capability, None)
                 else:
                     candidate[capability] = selection
-            candidate = validate_selections(candidate)
+            candidate = validate_selections(candidate, registry=self.registry)
             descriptor, name = tempfile.mkstemp(dir=self.path.parent, prefix=".plugins-")
             try:
                 with os.fdopen(descriptor, "w") as output:

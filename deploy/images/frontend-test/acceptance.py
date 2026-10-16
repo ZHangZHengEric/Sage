@@ -15,6 +15,9 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from app.v2.server.runtime.official import install_sandbox, provision_workspace
+from sagents.v2 import SAgentBuilder
+from sagents.v2.package.presets import BuiltinPackageFactory
+from sagents.v2.testing.plugins.scripted_model import ScriptedModelProvider
 from sagents.v2.contracts.principals import ActorRef, PrincipalType, RequestContext
 from sagents.v2.runtime.execution.sandbox import OperationIntent, ProcessRequest
 
@@ -93,8 +96,12 @@ async def main():
     if os.geteuid() == 0:
         os.chown(workspace, uid, gid)
     execution = SimpleNamespace(sandbox_grant_issuer=None)
-    install_sandbox(
-        execution, SimpleNamespace(linux_execution_uid=uid, linux_execution_gid=gid)
+    application = await (
+        SAgentBuilder().with_defaults(session_root=parent / "runtime")
+        .with_model_provider(ScriptedModelProvider(()))
+        .build(BuiltinPackageFactory.create(
+            "assistant", package_id="frontend.acceptance", model="unused",
+        ))
     )
     context = RequestContext(
         actor=ActorRef(
@@ -104,6 +111,11 @@ async def main():
     summary = {"workspace": str(workspace), "network": "none", "checks": {}}
     handle = None
     try:
+        await install_sandbox(
+            execution, application, SimpleNamespace(
+                linux_execution_uid=uid, linux_execution_gid=gid, plugin_overrides={},
+            ),
+        )
         handle = await provision_workspace(
             execution, workspace, context, run_id="frontend_acceptance"
         )
@@ -175,8 +187,11 @@ async def main():
     except Exception as error:
         summary["error"] = f"{type(error).__name__}: {error}"
     finally:
-        if handle is not None:
-            await handle.destroy()
+        try:
+            if handle is not None:
+                await handle.destroy()
+        finally:
+            await application.close()
     (parent / "acceptance.json").write_text(
         json.dumps(summary, ensure_ascii=False, indent=2)
     )

@@ -1,5 +1,10 @@
 # SAgents V2
 
+[Code reading guide](../../docs/en/architecture/code-reading-guide.md) · [中文阅读指南](../../docs/zh/architecture/code-reading-guide.md) · [Composition internals](composition/README.md)
+
+**Building a new host?** Start with the [host development guide](../../docs/en/architecture/sagents-host-development.md) / [统一开发入口、配置与调试规范](../../docs/zh/architecture/sagents-host-development.md) and [runnable starter](../../examples/sagents_v2_host/).
+
+
 SAgents V2 is an embeddable runtime for building and running tool-using AI
 agents. It provides the execution loop, durable session history, event
 streaming, tools, skills, memory, and extension points. A desktop app, server,

@@ -389,7 +389,7 @@ def require_agent(catalog: UserCatalog, agent_id: str | None) -> AgentRecord:
 
 
 def upsert_agent(
-    catalog: UserCatalog, payload: dict[str, object]
+    catalog: UserCatalog, payload: dict[str, object], *, registry=None
 ) -> tuple[AgentRecord, UserCatalog]:
     agent_id = str(payload.get("id") or "").strip() or new_id("agent")
     if not _AGENT_ID.fullmatch(agent_id):
@@ -457,7 +457,7 @@ def upsert_agent(
     if payload.get("plugins") is not None:
         from app.v2.server.catalog.plugins import validate_agent_plugins, AGENT_DEFAULTS
 
-        validate_agent_plugins(payload["plugins"])
+        validate_agent_plugins(payload["plugins"], registry=registry)
         data = record.package.model_dump(mode="json")
         current = data["manifest"]["runtime"].get("capabilities", {})
         data["manifest"]["runtime"]["capabilities"] = {
@@ -507,7 +507,7 @@ def delete_agent(catalog: UserCatalog, agent_id: str) -> UserCatalog:
 
 
 def upsert_mcp(
-    catalog: UserCatalog, payload: dict[str, object]
+    catalog: UserCatalog, payload: dict[str, object], *, registry=None
 ) -> tuple[McpServerRecord, UserCatalog]:
     name = str(payload.get("name") or "").strip()
     if not _AGENT_ID.fullmatch(name):
@@ -564,7 +564,7 @@ def upsert_mcp(
 
 
 def upsert_a2a_agent(
-    catalog: UserCatalog, payload: dict[str, object]
+    catalog: UserCatalog, payload: dict[str, object], *, registry=None
 ) -> tuple[A2AAgentRecord, UserCatalog]:
     name = str(payload.get("name") or "").strip()
     if not _AGENT_ID.fullmatch(name):
@@ -675,7 +675,7 @@ def _unique_names(values) -> list[str]:
 
 
 def apply_upsert(
-    catalog: UserCatalog, payload: dict[str, object]
+    catalog: UserCatalog, payload: dict[str, object], *, registry=None
 ) -> tuple[ModelRecord, UserCatalog]:
     model_id = str(payload.get("id") or new_id("model"))
     protocol = str(payload.get("protocol") or "openai-chat-completions")

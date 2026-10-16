@@ -2187,7 +2187,7 @@ async def test_component_inventory_explains_plugins_and_locks_model_protocol(
         "workspace_root": "/workspace",
         "workspace_mapping": "active_workspace",
         "filesystem_mode": "workspace",
-        "workspace_path_mode": "virtual",
+        "workspace_path_mode": "host",
         "resources": {
             "cpu_percent": 100.0,
             "memory_mb": 1024,
@@ -3978,23 +3978,25 @@ async def test_confirmed_plan_becomes_the_goal_system_context(
     await service.close()
 
 @pytest.mark.asyncio
-async def test_sandbox_workspace_path_can_match_the_real_workspace(tmp_path: Path):
+@pytest.mark.parametrize("explicit", [False, True])
+async def test_sandbox_workspace_path_can_match_the_real_workspace(tmp_path: Path, explicit):
     service = DesktopV2Service(tmp_path)
-    settings = await service.get_settings()
-    await service.save_settings(
-        settings.model_copy(
-            update={
-                "component_configs": {
-                    "execution.sandbox": {
-                        "workspace_root": "/workspace",
-                        "workspace_path_mode": "host",
-                        "workspace_mapping": "active_workspace",
-                        "filesystem_mode": "workspace",
+    if explicit:
+        settings = await service.get_settings()
+        await service.save_settings(
+            settings.model_copy(
+                update={
+                    "component_configs": {
+                        "execution.sandbox": {
+                            "workspace_root": "/workspace",
+                            "workspace_path_mode": "host",
+                            "workspace_mapping": "active_workspace",
+                            "filesystem_mode": "workspace",
+                        }
                     }
                 }
-            }
+            )
         )
-    )
     await service.list_agents("user_1")
     await service.patch_model_provider(
         "model_main", ModelProviderPatch(api_keys=["test-key"]), "user_1"
@@ -4540,12 +4542,12 @@ async def test_desktop_command_freezes_language_identity_time_and_workspace_cont
         "USER",
         "MEMORY",
     }
-    assert metadata["working_directory"] == "/workspace"
+    assert metadata["working_directory"] == workspace.resolve().as_posix()
     assert (
         datetime.strptime(metadata["current_time"], "%a, %d %b %Y %H:%M:%S %z").tzinfo
         is not None
     )
-    assert metadata["workspace_files"].startswith("Working directory: /workspace\n")
+    assert metadata["workspace_files"].startswith(f"Working directory: {workspace.resolve().as_posix()}\n")
     await service.session_store.close()
 
 
@@ -5126,43 +5128,47 @@ async def test_all_user_plugin_fields_have_defaults_or_are_host_owned(tmp_path):
         await service.session_store.close()
 
 
-def test_local_sandbox_command_path_config_is_forwarded_and_separates_cache():
-    from app.v2.desktop.backend.run_composition import DesktopRunCompositionMixin
-    from sagents.v2.runtime.execution.sandbox import SandboxGrantIssuer
+@pytest.fixture
+async def sandbox_composition_host(tmp_path):
+    service = DesktopV2Service(tmp_path)
+    await service.start()
+    try:
+        yield service
+    finally:
+        await service.close()
 
-    host = SimpleNamespace(
-        _sandbox_grant_issuer=SandboxGrantIssuer(), _sandbox_providers={}
-    )
+
+async def test_local_sandbox_command_path_config_is_forwarded_and_separates_cache(sandbox_composition_host):
+    from app.v2.desktop.backend.run_composition import DesktopRunCompositionMixin
+
+    host = sandbox_composition_host
     factory = DesktopRunCompositionMixin._sandbox_provider
-    first = factory(
+    first = await factory(
         host, "sage.sandbox.local-workspace", {"command_path": "/first/bin"}
     )
-    second = factory(
+    second = await factory(
         host, "sage.sandbox.local-workspace", {"command_path": "/second/bin"}
     )
     assert first.command_path == "/first/bin"
     assert second.command_path == "/second/bin"
     assert first is not second
     assert (
-        factory(host, "sage.sandbox.local-workspace", {"command_path": "/first/bin"})
+        await factory(host, "sage.sandbox.local-workspace", {"command_path": "/first/bin"})
         is first
     )
 
 
-def test_local_sandbox_read_paths_config_is_forwarded_and_separates_cache():
+async def test_local_sandbox_read_paths_config_is_forwarded_and_separates_cache(sandbox_composition_host):
     from app.v2.desktop.backend.run_composition import DesktopRunCompositionMixin
-    from sagents.v2.runtime.execution.sandbox import SandboxGrantIssuer
 
-    host = SimpleNamespace(
-        _sandbox_grant_issuer=SandboxGrantIssuer(), _sandbox_providers={}
-    )
+    host = sandbox_composition_host
     factory = DesktopRunCompositionMixin._sandbox_provider
-    first = factory(
+    first = await factory(
         host,
         "sage.sandbox.local-workspace",
         {"read_paths": ["/opt/first-runtime"]},
     )
-    second = factory(
+    second = await factory(
         host,
         "sage.sandbox.local-workspace",
         {"read_paths": ["/opt/second-runtime"]},
@@ -5171,7 +5177,7 @@ def test_local_sandbox_read_paths_config_is_forwarded_and_separates_cache():
     assert second.read_paths == ("/opt/second-runtime",)
     assert first is not second
     assert (
-        factory(
+        await factory(
             host,
             "sage.sandbox.local-workspace",
             {"read_paths": ["/opt/first-runtime"]},

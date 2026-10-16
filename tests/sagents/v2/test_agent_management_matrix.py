@@ -1491,7 +1491,8 @@ async def test_flow_build_only_initializes_reachable_agents(tmp_path, monkeypatc
         calls.append(agent_id)
         return model()
 
-    monkeypatch.setattr(SAgentBuilder, "_create_model", create_model)
+    from sagents.v2.composition.assembler import ApplicationAssembler
+    monkeypatch.setattr(ApplicationAssembler, "_create_model", create_model)
     app = await SAgentBuilder().with_defaults(session_root=tmp_path).build(
         AgentPackageBundle.model_validate(data).resolved_manifest())
     try:

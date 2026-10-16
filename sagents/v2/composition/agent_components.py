@@ -1,0 +1,131 @@
+"""Agent capability dependencies, independent of application services and drivers.
+
+The injected opener owns plugin selection and scope registration. This composer
+only defines dependency order; it never opens, caches or closes resources itself.
+"""
+
+from __future__ import annotations
+
+from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
+from typing import Any
+
+from sagents.v2.agent.factory import AgentCompositionFactory
+from sagents.v2.agent.policy import CompositeContinuationPolicy
+from sagents.v2.agent.policy.continuation import ContinuationPolicy
+from sagents.v2.context import (
+    JsonHeuristicTokenEstimator,
+    PersistentSummaryContextReducer,
+    ReferenceContextUnitCompactor,
+    SessionDerivedConversationSummaryStore,
+)
+from sagents.v2.context.contracts import ContextUnitCompactor
+from sagents.v2.runtime.session.contracts import DerivedStateStore
+from sagents.v2.context.components import ContextComponentBundle
+from sagents.v2.context.plugins.summarizer_model import ModelConversationSummarizer
+from sagents.v2.memory import (
+    DirectMemoryRecallQueryGenerator,
+    MemoryRecallQueryGenerator,
+)
+from sagents.v2.model import ModelProvider
+from sagents.v2.runtime.contracts import RuntimePort
+from sagents.v2.skill.plugins.loading import SkillLoadingPlugin
+
+
+@dataclass(frozen=True)
+class AgentComponents:
+    factory: AgentCompositionFactory
+    context: ContextComponentBundle
+    skill_loading: Any
+    continuation_policy: ContinuationPolicy
+    memory_query_generator: MemoryRecallQueryGenerator
+    unit_compactor: ContextUnitCompactor
+
+    def services(self) -> dict[str, Any]:
+        """Expose the root Agent's providers for readiness and plan inspection."""
+        return {
+            "context.token-estimator": self.context.token_estimator,
+            "context.summary-store": self.context.summary_store,
+            "context.summarizer": self.context.summarizer,
+            "context.unit-compactor": self.unit_compactor,
+            "context.reducer": self.context.reducer,
+            "skill.loading": self.skill_loading,
+            "agent.continuation-policy": self.continuation_policy,
+        }
+
+    @classmethod
+    async def compose(
+        cls,
+        *,
+        open_capability: Callable[..., Awaitable[Any]],
+        agent_id: str,
+        model: ModelProvider,
+        runtime: RuntimePort,
+        derived_state: DerivedStateStore,
+    ) -> AgentComponents:
+        token_estimator = await open_capability(
+            capability="context.token-estimator",
+            default_plugin=JsonHeuristicTokenEstimator.plugin_id,
+            agent_id=agent_id,
+        )
+        summary_store = await open_capability(
+            capability="context.summary-store",
+            default_plugin=SessionDerivedConversationSummaryStore.plugin_id,
+            locked_config={"derived_state": derived_state},
+            agent_id=agent_id,
+        )
+        summarizer = await open_capability(
+            capability="context.summarizer",
+            default_plugin=ModelConversationSummarizer.plugin_id,
+            locked_config={"model": model},
+            agent_id=agent_id,
+        )
+        unit_compactor = await open_capability(
+            capability="context.unit-compactor",
+            default_plugin=ReferenceContextUnitCompactor.plugin_id,
+            locked_config={"estimator": token_estimator},
+            agent_id=agent_id,
+        )
+        context_reducer = await open_capability(
+            capability="context.reducer",
+            default_plugin=PersistentSummaryContextReducer.plugin_id,
+            locked_config={
+                "store": summary_store,
+                "summarizer": summarizer,
+                "estimator": token_estimator,
+                "unit_compactor": unit_compactor,
+            },
+            agent_id=agent_id,
+        )
+        skill_loading = await open_capability(
+            capability="skill.loading",
+            default_plugin=SkillLoadingPlugin.plugin_id,
+            agent_id=agent_id,
+        )
+        continuation_policy = await open_capability(
+            capability="agent.continuation-policy",
+            default_plugin=CompositeContinuationPolicy.plugin_id,
+            locked_config={"model": model},
+            agent_id=agent_id,
+        )
+        components = ContextComponentBundle(
+            token_estimator=token_estimator,
+            summary_store=summary_store,
+            summarizer=summarizer,
+            reducer=context_reducer,
+        )
+        factory = AgentCompositionFactory(runtime, context_components=components)
+        memory_query_generator = await open_capability(
+            capability="memory.recall-query",
+            default_plugin=DirectMemoryRecallQueryGenerator.plugin_id,
+            locked_config={"model": model},
+            agent_id=agent_id,
+        )
+        return cls(
+            factory=factory,
+            context=components,
+            skill_loading=skill_loading,
+            continuation_policy=continuation_policy,
+            memory_query_generator=memory_query_generator,
+            unit_compactor=unit_compactor,
+        )

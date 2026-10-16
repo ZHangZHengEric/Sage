@@ -2,6 +2,11 @@
 
 This directory contains the standalone examples for the Sage project.
 
+For a new **SAgents v2 host**, start with [sagents_v2_host](sagents_v2_host/)
+and the [configuration/debugging guide](../docs/en/architecture/sagents-host-development.md)
+([中文](../docs/zh/architecture/sagents-host-development.md)). Run
+`python -m examples.sagents_v2_host --offline` from the repository root (Python 3.12+).
+
 For the v2 public-API, offline multi-project concurrency example, see
 [MULTI_PROJECT.md](MULTI_PROJECT.md) and `sagents_v2_multi_project.py`.
 

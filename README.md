@@ -24,6 +24,11 @@
 
 New to RSI? [Inspect your first run](docs/en/applications/FIRST_RSI_RUN.md): a scripted Python walkthrough with no model API key.
 
+
+New to the code? [Start with the v2 code reading guide](docs/en/architecture/code-reading-guide.md): runtime, host call chains, ownership and tests.
+
+Build your own host: [SAgents configuration and debugging guide](docs/en/architecture/sagents-host-development.md) with a runnable offline starter.
+
 ## ✨ **Why Sage**
 
 - 📦 **Custom Agent packages** — Define your agent's instructions, Skills, tools, and runtime configuration in `sage.yaml`; reuse packages in Desktop, Server, or your Python application.
