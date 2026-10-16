@@ -193,6 +193,11 @@ def test_web_export_captures_real_model_response_and_correlated_logs(client, ser
     assert response.status_code == 200
     with ZipFile(BytesIO(response.content)) as archive:
         models = json.loads(archive.read("thread-1/models.json"))
+        index = json.loads(archive.read("thread-1/requests/index.json"))
+        assert len(index) == len(models)
+        for attempt, model in zip(index, models, strict=True):
+            assert json.loads(archive.read("thread-1/" + attempt["path"])) == model
+            assert attempt["request_id"] == model["request_id"]
         assert any(row["response"].get("text") == "hello" for row in models)
         assert all(row["request"] and row["status"] == "completed" for row in models)
         logs = json.loads(archive.read("thread-1/logs.json"))

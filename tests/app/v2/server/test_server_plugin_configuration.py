@@ -24,9 +24,9 @@ def test_admin_save_pending_reset_and_conflict(client):
     saved = response.json()["data"]
     assert saved["pending"] == ["memory.provider"]
     assert saved["saved"]["memory.provider"]["plugin"] == selection["plugin"]
-    assert next(p for p in saved["providers"] if p["capability"] == "memory.provider")["plugin_id"] == "sage.memory.noop"
+    assert next(p for p in saved["providers"] if p["capability"] == "memory.provider")["plugin_id"] == "sage.memory.filesystem-bm25"
     assert store.read() == saved["saved"]
-    assert "memory.provider" not in server_v2_manifest(client.app.state.service.settings).runtime.capabilities
+    assert server_v2_manifest(client.app.state.service.settings).runtime.capabilities["memory.provider"].config["root"] != selection["config"]["root"]
     assert client.put("/api/plugins/server", headers=admin, json=body).status_code == 409
     reset = client.put("/api/plugins/server", headers=admin, json={"revision": saved["revision"], "changes": {"memory.provider": None}})
     assert reset.status_code == 200

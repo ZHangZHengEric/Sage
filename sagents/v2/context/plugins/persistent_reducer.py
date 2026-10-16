@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import json
 
-from sagents.v2.prompt_i18n import prompt_text
+from sagents.v2.context.progress_summary import bounded_snapshot
+
 from sagents.v2.contracts.errors import (
     ErrorCategory,
     RuntimeErrorInfo,
@@ -44,31 +45,11 @@ from sagents.v2.runtime.observability.logs import get_logger
 LOGGER = get_logger(__name__)
 
 
+
+
 class _ExtractiveConversationSummarizer:
     async def summarize(self, request: SummarizationRequest) -> str:
-        labels = tuple(prompt_text(key, request.response_language) for key in (
-            "summary_previous", "summary_history", "summary_tools", "summary_condensed"
-        ))
-        lines = []
-        if request.previous_summary:
-            lines.extend([labels[0], request.previous_summary.strip(), labels[1]])
-        for message in request.messages:
-            values = [summary_safe_block_text(block) for block in message.content]
-            content = "\n".join(values)
-            if message.tool_calls:
-                calls = ", ".join(
-                    f"{call.name}({json.dumps(call.arguments, ensure_ascii=False, sort_keys=True)})"
-                    for call in message.tool_calls
-                )
-                content = f"{content}\n{labels[2]} {calls}".strip()
-            lines.append(f"{message.role.upper()}: {content}".strip())
-        maximum = max(256, request.target_tokens * 4)
-        value = "\n".join(lines).strip()
-        if len(value) <= maximum:
-            return value
-        head = value[: maximum // 3]
-        tail = value[-(maximum - len(head) - 32) :]
-        return f"{head}\n{labels[3]}\n{tail}"
+        return bounded_snapshot(request)
 
 
 class _ReferenceContextUnitCompactor:

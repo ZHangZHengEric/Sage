@@ -10,6 +10,7 @@ from typing import Any
 
 import httpx
 
+from sagents.v2.context.progress_summary import bounded_snapshot
 from sagents.v2.context.summary import SummarizationRequest, summary_safe_block_text
 from sagents.v2.contracts.common import new_id
 from sagents.v2.contracts.errors import ErrorCategory, RuntimeErrorInfo, SageV2Error
@@ -346,9 +347,7 @@ class ModelConversationSummarizer:
                 last_error = str(exc)
                 continue
             bounded = self._bound_payload(payload, request.target_tokens)
-            return json.dumps(
-                bounded, ensure_ascii=False, sort_keys=True, separators=(",", ":")
-            )
+            return bounded_snapshot(request, bounded)
         raise RuntimeError(
             f"summary model returned invalid structured output: {last_error}"
         )

@@ -235,11 +235,14 @@ class AgentCompositionFactory:
         self_configuration=None,
         memory_service: MemoryService | None = None,
         session_memory_service: SessionMemoryService | None = None,
+        memory_recall_limit: int = 8,
+        memory_recall_query_generator: MemoryRecallQueryGenerator | None = None,
         goal_state_service: GoalStateService | None = None,
         additional_runtime_tools: tuple[str, ...] = (),
         granted_catalogs: tuple[ToolCatalog, ...] = (),
         additional_context_providers: tuple[ContextSegmentProvider, ...] = (),
         artifact_store: ArtifactStore | None = None,
+        expected_resolved_spec_hash: str | None = None,
         trace_sink=None,
         log_sink=None,
     ) -> AgentLoopEngine:
@@ -306,7 +309,8 @@ class AgentCompositionFactory:
                 ActiveSkillsContextProvider(skill_loader),
             )
         automatic_memory_recall = (
-            memory_service is not None and "search_memory" in selected_tools
+            (memory_service is not None or session_memory_service is not None)
+            and "search_memory" in selected_tools and agent.memory.recall
         )
         selected_continuation_policy = (
             continuation_policy or CompositeContinuationPolicy()
@@ -341,6 +345,8 @@ class AgentCompositionFactory:
             tool_selection_model=tool_selection_model,
             step_request_builder=step_request_builder,
             automatic_memory_recall=automatic_memory_recall,
+            memory_recall_limit=memory_recall_limit,
+            memory_recall_query_generator=memory_recall_query_generator,
             context_assembler=DefaultContextAssembler(
                 max_system_tokens=ceiling.max_system_tokens or 16_384,
                 developer_instructions=agent.instructions,
@@ -356,7 +362,7 @@ class AgentCompositionFactory:
                 projection_observer=session_memory_service,
                 artifact_store=artifact_store,
             ),
-            expected_resolved_spec_hash=resolved.manifest_hash,
+            expected_resolved_spec_hash=expected_resolved_spec_hash or resolved.manifest_hash,
             trace_sink=trace_sink,
             log_sink=log_sink,
         )

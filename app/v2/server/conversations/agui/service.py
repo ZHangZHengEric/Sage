@@ -166,6 +166,16 @@ class ConversationService:
     async def list_threads(self, user_id: str):
         return await self.threads.list_for(user_id)
 
+    async def package_for_thread(self, thread_id, user_id):
+        from app.v2.server.conversations.records import require_owned_thread
+        require_owned_thread(await self.threads.find(thread_id), user_id)
+        context = self.context_for(user_id)
+        runs = await self.session_access.list_session_runs(thread_id, context)
+        if not runs:
+            return None
+        command = await self.session_access.get_start_command(runs[-1].run_id, context)
+        return command.config.metadata.get("server_v2.composition", {}).get("package")
+
     async def pending_approvals(self, user_id, *, limit=50, offset=0):
         from datetime import timedelta
         from app.v2.server.runtime.policy import frozen_execution
@@ -248,7 +258,9 @@ class ConversationService:
                 frames.append(
                     frame_to_agui_event(frame, thread_id=thread_id, run_id=event.run_id)
                 )
+        package = await self.package_for_thread(thread_id, record.user_id) if offset in (None, 0) else None
         return {
+            "has_package": package is not None,
             "events": frames,
             "total": page.total,
             "offset": page.after_sequence,
@@ -257,7 +269,7 @@ class ConversationService:
 
     async def start(self, request, *, user_id: str, last_event_id: str | None = None,
                     agent_id: str | None = None, workspace_directory: str | None = None,
-                    runtime_context: dict | None = None):
+                    runtime_context: dict | None = None, package=None):
         if workspace_directory is not None:
             from app.v2.server.storage.external_workspaces import workspace_parts
             if agent_id is None:
@@ -287,6 +299,7 @@ class ConversationService:
             session_id=thread_id,
             agent_id=requested_agent,
             pin_existing=True,
+            package=package,
             tenant_id=workspace_user_id if agent_id is not None else None,
         )
         enabled = tuple(item.name for item in admitted.skills)

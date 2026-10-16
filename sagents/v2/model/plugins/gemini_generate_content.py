@@ -10,6 +10,8 @@ from __future__ import annotations
 import base64
 import copy
 import json
+from sagents.v2.model.wire_diagnostics import record_wire_event
+
 from collections.abc import AsyncIterator
 from typing import Any, Literal
 from urllib.parse import quote
@@ -323,6 +325,7 @@ class GeminiGenerateContentModelProvider:
         terminal = started = False
         finish_reason = "completed"
         try:
+            record_wire_event({"diagnostic_event": "request_attempt", "payload": payload})
             async with self._client.stream("POST", path, json=payload) as response:
                 if response.status_code >= 400:
                     await response.aread()
@@ -332,6 +335,7 @@ class GeminiGenerateContentModelProvider:
                         response=response,
                     )
                 async for event in self._events(response):
+                    record_wire_event(event)
                     if event.get("error"):
                         error = event["error"]
                         failed = httpx.Response(

@@ -13,11 +13,12 @@ const INTERACTION_CLOSED = new Set([
 class SageHttpAgent extends HttpAgent {
   /** The answer the next run carries, or null when it starts fresh work. */
   answer = null
+  agentPackage = null
 
   requestInit(input) {
     const init = super.requestInit(input)
     if (!this.answer) {
-      return { ...init, body: JSON.stringify({ ...JSON.parse(init.body), session_id: input.threadId }) }
+      return { ...init, body: JSON.stringify({ ...JSON.parse(init.body), session_id: input.threadId, ...(this.agentPackage ? { agent_package: this.agentPackage } : {}) }) }
     }
     // The resume endpoint takes an answer, not a Run: which of the pending
     // question's decisions this is, plus the run id of the stream it opens.
@@ -75,9 +76,11 @@ export function createAguiAgent({ onMessages, onError, onInteraction, agentId = 
   return agent
 }
 
-export async function runAgui(agent, { threadId, runId, message, agentId = '' }) {
+export async function runAgui(agent, { threadId, runId, message, agentId = '', agentPackage = null }) {
   agent.headers = { Authorization: `Bearer ${getToken()}` }
   agent.threadId = threadId
+  agent.agentPackage = agentPackage
+  agent.url = agentPackage ? '/api/agent-package' : AGENT_URL
   agent.addMessage(message)
   return agent.runAgent({
     runId,
@@ -95,7 +98,7 @@ export async function resumeAgui(agent, { threadId, runId, decision, payload = {
   try {
     return await agent.runAgent({ runId, tools: [], context: [] })
   } finally {
-    agent.url = AGENT_URL
+    agent.url = agent.agentPackage ? '/api/agent-package' : AGENT_URL
     agent.answer = null
   }
 }

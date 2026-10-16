@@ -62,6 +62,8 @@ class AgentLoopCheckpointState(StrictModel):
     # Stable response fingerprints allow ContinuationPolicy to detect a loop
     # without depending on provider-specific text formatting.
     response_fingerprints: tuple[str, ...] = ()
+    inspection_evidence: tuple[str, ...] = ()
+    no_progress_steps: int = Field(default=0, ge=0)
     total_input_tokens: int = Field(default=0, ge=0)
     total_output_tokens: int = Field(default=0, ge=0)
 

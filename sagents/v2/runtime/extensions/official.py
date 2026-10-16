@@ -44,7 +44,7 @@ from sagents.v2.interfaces.protocols.mcp import McpProtocolAdapter
 from sagents.v2.interfaces.protocols.native import NativeProtocolAdapter
 from sagents.v2.package.registry import InMemoryAgentPackageRegistry
 from sagents.v2.runtime.artifact import InMemoryArtifactStore
-from sagents.v2.runtime.artifact import FilesystemArtifactStore
+from sagents.v2.runtime.artifact import FilesystemArtifactStore, SessionArtifactStore
 from sagents.v2.runtime.credentials import (
     EnvironmentCredentialProvider,
     MappingCredentialProvider,
@@ -897,6 +897,17 @@ def _register_infrastructure(registry: ExtensionRegistry) -> None:
         "workspace.initializer",
         lambda context, dependencies: BareWorkspaceInitializer(),
         scopes={ExtensionScope.PROCESS, ExtensionScope.AGENT},
+    )
+    _one(
+        registry,
+        SessionArtifactStore,
+        "artifact.store",
+        lambda context, dependencies: SessionArtifactStore(context.config["session_store"]),
+        scopes={ExtensionScope.PROCESS},
+        config_schema={
+            "type": "object", "required": ["session_store"],
+            "properties": {"session_store": {}}, "additionalProperties": False,
+        },
     )
     _one(
         registry,

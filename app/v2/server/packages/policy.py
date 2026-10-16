@@ -6,6 +6,9 @@ from sagents.v2.tool.plugins.agent_management import AgentManagementToolPlugin
 
 from app.v2.server.runtime.official import official_tool_catalog
 from app.v2.server.catalog.records import enabled_a2a_agents, enabled_mcp_servers
+from app.v2.server.catalog.plugins import AGENT_DEFAULTS, validate_agent_plugins
+
+PACKAGE_COMPOSITION_CAPABILITIES = {"flow.node", "tool.catalog"}
 
 
 class ServerPackagePolicy:
@@ -29,23 +32,24 @@ class ServerPackagePolicy:
         manifest = bundle.manifest
         if manifest.runtime.deployment_profile != "controlled_host":
             raise PermissionError("Server supports a single controlled host")
-        if (
-            set(manifest.runtime.capabilities)
-            - {"flow.node", "tool.catalog", "memory.provider"}
-            or manifest.runtime.required_guarantees
-        ):
-            raise PermissionError("runtime backends and guarantees are host owned")
+        forbidden = sorted(set(manifest.runtime.capabilities) - set(AGENT_DEFAULTS) - PACKAGE_COMPOSITION_CAPABILITIES)
+        if forbidden:
+            raise PermissionError(f"{', '.join(forbidden)} 由 Server 管理，不允许在 Agent Package 中修改")
+        if manifest.runtime.required_guarantees:
+            raise PermissionError("runtime.required_guarantees 由 Server 管理，不允许修改")
         if manifest.credentials or manifest.environments:
             raise PermissionError(
                 "credentials and environment overrides are host owned"
             )
         if manifest.interfaces:
             raise PermissionError("protocol interfaces are provided by Server")
+        validate_agent_plugins({key: value for key, value in manifest.runtime.capabilities.items() if key in AGENT_DEFAULTS})
         declared = {item.id for item in manifest.plugins}
         if any(
             selection.plugin not in declared
             for capability in manifest.runtime.capabilities
             for selection in manifest.runtime.selections(capability)
+            if capability in PACKAGE_COMPOSITION_CAPABILITIES
         ):
             raise PermissionError(
                 "Selected plugins must be explicitly declared and authorized"
@@ -87,12 +91,6 @@ class ServerPackagePolicy:
                 agent.skills
             ) - skills:
                 raise PermissionError("package requests unavailable tools or skills")
-            if (
-                agent.memory.recall or agent.memory.auto_write
-            ) and not manifest.runtime.selections("memory.provider"):
-                raise PermissionError(
-                    "memory behavior requires a host-authorized memory provider"
-                )
             if (agent.budgets.max_steps or 100) > 10000:
                 raise PermissionError("max_steps exceeds host ceiling 10000")
         if manifest.plugins or action == "load_source_plugin":

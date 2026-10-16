@@ -17,9 +17,6 @@ from sagents.v2.context.plugins.summarizer_extractive import (
     ExtractiveConversationSummarizer,
 )
 from sagents.v2.context.plugins.summarizer_model import ModelConversationSummarizer
-from sagents.v2.context.plugins.persistent_reducer import (
-    _ExtractiveConversationSummarizer,
-)
 from sagents.v2.context.summary import SummarizationRequest
 from sagents.v2.contracts.commands import StartRun
 from sagents.v2.contracts.items import TextBlock
@@ -169,14 +166,12 @@ async def test_summary_initial_retry_and_extractive_fallback_share_locale(
         _TEXT[expected]["summary_retry"]
         in model.requests[1].messages[0].content[0].text
     )
-    for summarizer in (
-        ExtractiveConversationSummarizer(),
-        _ExtractiveConversationSummarizer(),
-    ):
-        value = await summarizer.summarize(request)
-        assert value.startswith(_TEXT[expected]["summary_previous"])
-        assert _TEXT[expected]["summary_history"] in value
-        assert "/project/file.py" in value
+    value = await ExtractiveConversationSummarizer().summarize(request)
+    snapshot = json.loads(value)
+    assert snapshot["summary"] == "old evidence"
+    assert "/project/file.py" in " ".join(snapshot["user_requirements"])
+    assert "Previous summary" not in value
+
 
 
 @pytest.mark.parametrize(

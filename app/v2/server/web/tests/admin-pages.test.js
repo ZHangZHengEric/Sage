@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { createRenderer, createSSRApp, nextTick, ssrContextKey } from 'vue'
 import { renderToString } from 'vue/server-renderer'
+import { routerKey } from 'vue-router'
 import { createServer } from 'vite'
 
 async function setup(t, name, directory = 'views') {
@@ -15,12 +16,14 @@ async function setup(t, name, directory = 'views') {
     if (previous) Object.defineProperty(globalThis, 'localStorage', previous)
     else delete globalThis.localStorage
   })
+  const navigation = { push: t.mock.fn(async () => {}), replace: t.mock.fn(async () => {}) }
   const { api } = await server.ssrLoadModule('/src/api.js')
   const { default: Component } = await server.ssrLoadModule(`/src/${directory}/${name}.vue`)
-  return { api, Component, mount: async (props = {}) => {
+  return { api, navigation, Component, mount: async (props = {}) => {
     const renderer = createRenderer({ createComment: () => ({}), insert() {}, remove() {}, parentNode: () => null, nextSibling: () => null })
     const app = renderer.createApp({ ...Component, render: () => null }, props)
     app.provide(ssrContextKey, {})
+    app.provide(routerKey, navigation)
     const vm = app.mount({})
     t.after(() => app.unmount())
     await new Promise(resolve => setImmediate(resolve)); await nextTick()
@@ -115,7 +118,7 @@ test('agent editor saves V2 fields and selected skills before staying open or ex
   assert.equal(state.drawerOpen, true)
   assert.equal(state.editing, 'new-agent')
   assert.deepEqual(api.bindAgentSkills.mock.calls[0].arguments, ['new-agent', ['research']])
-  assert.deepEqual(Object.keys(api.createAgent.mock.calls[0].arguments[0]).sort(), ['budgets', 'description', 'execution_policy', 'instructions', 'model_id', 'name', 'plugins', 'sandbox', 'tool_approval', 'tools'])
+  assert.deepEqual(Object.keys(api.createAgent.mock.calls[0].arguments[0]).sort(), ['budgets', 'description', 'execution_policy', 'fast_model_id', 'instructions', 'memory', 'model_id', 'name', 'plugins', 'sandbox', 'tool_approval', 'tools'])
   assert.deepEqual(api.createAgent.mock.calls[0].arguments[0].tool_approval, { default: 'auto_approve', tools: { file_read: 'ask', 'mcp:drive:write': 'auto_approve' } })
   await state.save(true)
   assert.equal(state.drawerOpen, false)
@@ -289,23 +292,25 @@ test('plugin settings handle Server injected components without descriptors or s
   ], selections: {} }))
   const state = await mount()
   assert.equal(state.error, '')
-  assert.equal(state.groups.length, 4)
+  assert.equal(state.groups.length, 3)
+  assert.ok(!state.groups.some(group => group.id === 'context.summarizer'))
   for (const group of state.groups) {
     const rows = state.parameterRows(group)
     if (group.id === 'context.summarizer') assert.equal(rows[0].value, '30')
     else {
       assert.deepEqual(rows, [])
-      assert.equal(state.currentNames(group), 'Server 提供')
+      assert.equal(state.currentNames(group), '未指定')
     }
   }
   state.server = null
-  assert.doesNotThrow(() => state.parameterRows(state.groups[0]))
+  assert.doesNotThrow(() => state.parameterRows({ id: 'derived-state.store', plugins: [] }))
 })
 
 test('Server plugin editor saves a real selection, preserves failed drafts, and resets defaults', async t => {
   const { api, Component, mount } = await setup(t, 'Plugins')
   const id = 'sage.memory.filesystem-bm25'
   t.mock.method(api, 'listPlugins', async () => ({ defaults: { 'memory.provider': 'sage.memory.noop' }, plugins: [
+    { id: 'sage.memory.noop', capabilities: ['memory.provider'], schema: {} },
     { id, capabilities: ['memory.provider'], schema: { properties: { root: { type: 'string' } } } },
   ] }))
   const initial = { providers: [], selections: {}, saved: { 'memory.provider': { plugin: id, config: { root: '/data/original' } } }, defaults: {}, configurable: ['memory.provider'], pending: ['memory.provider'], revision: 'first', storage_root: '/data/plugins' }
@@ -340,4 +345,27 @@ test('Server plugin editor saves a real selection, preserves failed drafts, and 
   await state.saveServer()
   assert.equal(api.saveServerPlugins.mock.calls.at(-1).arguments[0].changes['memory.provider'], null)
   assert.equal(state.server.pending.length, 0)
+})
+
+
+test('Studio starts new Package runs through the ordinary chat page', async t => {
+  const { api, navigation, mount } = await setup(t, 'Studio')
+  const bundle = { manifest: { entrypoint: { agent: 'assistant' }, agents: { assistant: {} } } }
+  for (const method of ['packages', 'packageRuns', 'listAgents']) t.mock.method(api, method, async () => [])
+  t.mock.method(api, 'packageSchema', async () => ({}))
+  t.mock.method(api, 'packageTemplate', async () => bundle)
+  t.mock.method(api, 'runPackage', async () => { throw new Error('must not use the legacy run path') })
+  const previous = Object.getOwnPropertyDescriptor(globalThis, 'sessionStorage')
+  const drafts = new Map()
+  Object.defineProperty(globalThis, 'sessionStorage', { configurable: true, value: { setItem: (key, value) => drafts.set(key, value) } })
+  t.after(() => previous ? Object.defineProperty(globalThis, 'sessionStorage', previous) : delete globalThis.sessionStorage)
+  const state = await mount()
+  state.savedRef = 'package@1.0.0'; state.content = 'Run this package'
+  await state.run()
+  assert.equal(state.error, '')
+  assert.equal(api.runPackage.mock.calls.length, 0)
+  const target = navigation.push.mock.calls[0].arguments[0]
+  assert.equal(target.path, '/')
+  assert.equal(target.query.package, 'package@1.0.0')
+  assert.deepEqual(JSON.parse(drafts.get(target.query.draft)), { content: 'Run this package' })
 })

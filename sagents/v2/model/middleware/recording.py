@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import inspect
+import json
+
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
 from datetime import datetime
 from typing import Any
@@ -15,6 +18,7 @@ from sagents.v2.model.contracts import (
     ModelStreamEvent,
 )
 from sagents.v2.model.provider import ModelProvider
+from sagents.v2.model.wire_diagnostics import WireCapture, wire_capture
 from sagents.v2.runtime.observability.content import trace_content
 from sagents.v2.runtime.observability.contracts import (
     DiagnosticSink,
@@ -151,6 +155,8 @@ class RecordingModelProvider:
             wire_request = (
                 diagnostic_request(request) if diagnostic_request is not None else None
             )
+            if inspect.isawaitable(wire_request):
+                wire_request = await wire_request
         except Exception as exc:
             try:
                 await self._diagnose(
@@ -220,6 +226,10 @@ class RecordingModelProvider:
             first_token_persisted = True
 
         provider_stream = None
+        capture = WireCapture() if callable(getattr(self.sink, "record_model_stream", None)) else None
+        normalized_events = []
+        normalized_bytes = 0
+        normalized_dropped = 0
         try:
             await self._diagnose(
                 "begin_model_request",
@@ -229,7 +239,17 @@ class RecordingModelProvider:
                 wire_request=wire_request,
             )
             provider_stream = self.provider.stream(request)
-            async for event in provider_stream:
+            events = _captured_events(provider_stream, capture) if capture else provider_stream
+            async for event in events:
+                # Keep partial output even if normalization later rejects Tool JSON.
+                if capture is not None and event.kind != ModelEventKind.COMPLETED:
+                    value = event.model_dump(mode="json")
+                    size = len(json.dumps(value, ensure_ascii=False).encode())
+                    if normalized_bytes + size <= capture.max_bytes:
+                        normalized_events.append(value)
+                        normalized_bytes += size
+                    else:
+                        normalized_dropped += 1
                 if (
                     first_token_at is None
                     and event.kind
@@ -299,6 +319,15 @@ class RecordingModelProvider:
             finalized = True
             raise
         finally:
+            if capture is not None:
+                await self._diagnose(
+                    "record_model_stream", session_id=session_id, request=request,
+                    evidence={"wire_events": capture.events, "wire_event_count": capture.observed,
+                              "dropped_wire_events": capture.dropped,
+                              "wire_capture_available": bool(capture.observed),
+                              "normalized_events": normalized_events,
+                              "dropped_normalized_events": normalized_dropped},
+                )
             try:
                 closer = getattr(provider_stream, "aclose", None)
                 if closer is not None:
@@ -375,3 +404,18 @@ def _end_model_span(
             key: value for key, value in attributes.items() if value is not None
         },
     )
+
+
+async def _captured_events(stream, capture):
+    iterator = stream.__aiter__()
+    while True:
+        token = wire_capture.set(capture)
+        try:
+            event = await anext(iterator)
+        except StopAsyncIteration:
+            return
+        finally:
+            # Never keep a ContextVar token across yield: consumers may resume
+            # the generator from another control-polling task.
+            wire_capture.reset(token)
+        yield event

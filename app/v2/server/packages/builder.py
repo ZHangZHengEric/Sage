@@ -8,12 +8,13 @@ from dataclasses import replace
 
 from app.v2.server.catalog.records import enabled_a2a_agents, enabled_mcp_servers
 from app.v2.server.config.manifest import server_v2_manifest
+from app.v2.server.conversations.composition import selected_mcp_servers, selected_a2a_agents
 from app.v2.server.runtime.loop import (
     open_model_lease,
     package_model_record,
     prepare_tenant_binding,
 )
-from app.v2.server.runtime.official import provision_workspace, agent_network_policy
+from app.v2.server.runtime.official import provision_workspace, agent_network_policy, BoundWorkspaceHandle
 from sagents.v2 import SAgentBuilder
 from sagents.v2.contracts.errors import ErrorCategory, RuntimeErrorInfo, SageV2Error
 from sagents.v2.package.manifest.runtime import CapabilitySelection
@@ -21,14 +22,15 @@ from sagents.v2.runtime.execution import RunExecutionBinding
 
 
 class CatalogPackageModel:
-    def __init__(self, catalog, execution, user_id, routes):
+    def __init__(self, catalog, execution, user_id, routes, *, snapshot=None):
         self.catalog, self.execution = catalog, execution
         self.user_id, self.routes = user_id, routes
+        self.snapshot = snapshot
 
     @asynccontextmanager
     async def provider(self, binding):
-        catalog = await self.catalog.get(self.user_id)
-        route = self.routes.get(binding)
+        catalog = self.snapshot if self.snapshot is not None else await self.catalog.get(self.user_id)
+        route = self.routes.get(binding) or self.routes.get("primary")
         selected = route.model if route else "default"
         record = package_model_record(catalog, selected)
         if record is None:
@@ -50,6 +52,13 @@ class CatalogPackageModel:
         finally:
             await scope.close()
 
+    async def diagnostic_request(self, request):
+        import inspect
+        async with self.provider(request.model_binding) as provider:
+            preview = getattr(provider, "diagnostic_request", None)
+            value = preview(request) if preview is not None else None
+            return await value if inspect.isawaitable(value) else value
+
     async def capabilities(self, binding):
         async with self.provider(binding) as provider:
             return await provider.capabilities(binding)
@@ -69,10 +78,12 @@ class CatalogPackageModel:
 
 
 class PackageBindings:
-    def __init__(self, paths, execution, user_id, *, agents, settings):
+    def __init__(self, paths, execution, user_id, *, agents, settings, command=None, catalog=None):
         self.paths, self.execution, self.user_id = paths, execution, user_id
         self.agents, self.settings = agents, settings
+        self.command, self.catalog = command, catalog
         self.workspaces = {}
+        self.handles = {}
 
     def workspace_for_run(self, run_id):
         return self.workspaces[run_id][0]
@@ -83,31 +94,41 @@ class PackageBindings:
             or request.context.actor.tenant_id != self.user_id
         ):
             raise PermissionError("execution identity does not match package owner")
+        from app.v2.server.storage.workspaces import workspace_user
+        owner = workspace_user(self.command, self.user_id) if self.command else self.user_id
         policy = getattr(request.workspace_policy, "value", request.workspace_policy)
         if policy == "private_child":
             workspace = self.paths.workspace_dir(
-                self.user_id, request.agent_id, private_run_id=request.run_id
+                owner, request.agent_id, private_run_id=request.run_id
             )
         elif policy == "shared_parent":
-            workspace = self.paths.workspace_dir(self.user_id, request.agent_id)
+            workspace = self.paths.workspace_dir(owner, request.agent_id)
         else:
             raise ValueError("unsupported workspace policy")
         # Resolve on every acquisition, including child Runs and resumed Runs.
         # Indexing fails closed if the runtime asks for an undeclared Agent.
-        network = agent_network_policy(self.agents[request.agent_id].sandbox, self.settings)
+        live = None
+        if self.command is not None:
+            catalog = await self.catalog.get(self.user_id)
+            live_agent = next((item for item in catalog.agents if item.id == request.agent_id), None)
+            from sagents.v2.package.manifest.agents import AgentSandboxConfig
+            live = live_agent.sandbox if live_agent else AgentSandboxConfig()
+        network = agent_network_policy(self.agents[request.agent_id].sandbox, self.settings, live=live)
         handle = await provision_workspace(
             self.execution, workspace, request.context, run_id=request.run_id,
             network=network,
         )
         token = object()
         self.workspaces[request.run_id] = (workspace, token)
+        self.handles[request.agent_id] = handle
         binding = RunExecutionBinding(
             run_id=request.run_id,
             agent_id=request.agent_id,
             parent_run_id=request.parent_run_id,
             workspace_root="/workspace",
+            host_workspace=str(workspace),
             workspace_policy=request.workspace_policy,
-            sandbox=handle,
+            sandbox=BoundWorkspaceHandle(handle, self.execution.sandbox_provider),
             grant_issuer=self.execution.sandbox_grant_issuer,
             lifecycle=request.lifecycle,
         )
@@ -121,9 +142,11 @@ class PackageBindings:
 
 
 class PackageBuilder(SAgentBuilder):
-    def __init__(self, settings, run_quota, root):
+    def __init__(self, settings, run_quota, root, *, application=None):
         super().__init__()
         self.settings, self.run_quota, self.root = settings, run_quota, root
+        self.host_application = application
+        self.catalog_snapshot = None
 
     async def build(self, manifest, **kwargs):
         # Temporary validation never creates permanent MySQL table families.
@@ -131,9 +154,10 @@ class PackageBuilder(SAgentBuilder):
         if self.root.name.startswith("validate-"):
             settings = replace(settings, mysql_url=None)
         runtime = server_v2_manifest(settings).runtime
-        capabilities = dict(runtime.capabilities)
-        capabilities.update(manifest.runtime.capabilities)
-        if "session.store" in capabilities:
+        from sagents.v2.package.manifest.runtime import merge_capability_selections
+
+        capabilities = merge_capability_selections(runtime.capabilities, manifest.runtime.capabilities)
+        if self.host_application is None and "session.store" in capabilities:
             selection = capabilities["session.store"]
             suffix = hashlib.sha256(str(self.root).encode()).hexdigest()[:24]
             capabilities["session.store"] = selection.model_copy(
@@ -144,8 +168,20 @@ class PackageBuilder(SAgentBuilder):
         capabilities.setdefault(
             "tool.catalog", CapabilitySelection(plugin="sage.tool.official")
         )
+        models = dict(manifest.models)
+        if self.catalog_snapshot is not None:
+            for key, route in models.items():
+                record = package_model_record(self.catalog_snapshot, route.model)
+                if record is not None:
+                    selected = record.for_route(route)
+                    models[key] = route.model_copy(update={
+                        "request": selected.request, "limits": selected.limits,
+                        "capabilities": selected.capabilities,
+                        "capability_profile": selected.current_profile(),
+                    })
         effective = manifest.model_copy(
             update={
+                "models": models,
                 "runtime": runtime.model_copy(
                     update={
                         "capabilities": capabilities,
@@ -157,6 +193,17 @@ class PackageBuilder(SAgentBuilder):
         from sagents.v2.runtime.execution.scheduler.plugins.ephemeral import (
             InMemoryScheduler,
         )
+
+        if self.host_application is not None:
+            host = self.host_application
+            self.with_session_store(host.entrypoint().runtime.session_store)
+            self.with_derived_state_store(host.service("derived-state.store"))
+            self.with_scheduler(host.service("execution.scheduler"))
+            self.with_job_runtime(host.service("execution.job-runtime"))
+            self.with_memory_provider(host.service("memory.provider"))
+            self.with_session_memory_provider(host.service("session-memory.provider"))
+            self.with_diagnostic_sink(host.service("observability.diagnostic-sink"))
+            return await super().build(effective, **kwargs)
 
         scheduler = InMemoryScheduler(
             quota_group=self.run_quota,
@@ -200,25 +247,33 @@ class ServerPackageBuilderFactory:
         self.policy = policy
         self.log_sink = log_sink
 
-    async def build(self, bundle, root, context, management):
+    async def build(self, bundle, root, context, management, *, catalog_run=None):
         await self.policy.authorize("restore", bundle, context, management)
         from app.v2.server.packages.tool_policy import server_tool_policy
 
         user_id = context.actor.principal_id
+        catalog = (await self.catalog.get(user_id)).model_copy(deep=True)
+        command = catalog_run[1] if catalog_run is not None else None
+        service = catalog_run[0] if catalog_run is not None else None
         bindings = PackageBindings(
             self.paths, self.execution, user_id,
             agents=bundle.manifest.agents, settings=self.settings,
+            command=command, catalog=self.catalog,
         )
         builder = (
-            PackageBuilder(self.settings, self.run_quota, root)
+            PackageBuilder(self.settings, self.run_quota, root,
+                           application=service.application if service else None)
             .with_defaults(session_root=root)
             .with_log_sink(self.log_sink)
-            .with_model_provider(
-                CatalogPackageModel(
+            .with_model_budget(self.execution.model_budget)
+            .with_model_provider_factory(
+                lambda resolved, agent_id: CatalogPackageModel(
                     self.catalog,
                     self.execution,
                     user_id,
-                    bundle.manifest.models,
+                    {binding: bundle.manifest.models[route]
+                     for binding, route in resolved.agents[agent_id].model_bindings.items()},
+                    snapshot=catalog,
                 )
             )
             .with_execution_binding_provider(
@@ -229,22 +284,62 @@ class ServerPackageBuilderFactory:
         )
         for registration in self.extensions:
             builder.register(registration)
-        records = tuple(await self.skills.list_visible(user_id=user_id, role="user"))
-        catalog = await self.catalog.get(user_id)
+        builder.catalog_snapshot = catalog
+        frozen = catalog_run[2] if catalog_run is not None else None
+        records = frozen.skills if frozen is not None else tuple(await self.skills.list_visible(user_id=user_id, role="user"))
         binding = prepare_tenant_binding(
             self.paths,
             self.mcp_plugins,
             self.a2a_plugins,
             user_id,
             records,
-            enabled_mcp_servers(catalog),
-            enabled_a2a_agents(catalog),
+            selected_mcp_servers(catalog, frozen.mcp_servers) if frozen else enabled_mcp_servers(catalog),
+            selected_a2a_agents(catalog, frozen.a2a_agents) if frozen else enabled_a2a_agents(catalog),
             agent_id=bundle.manifest.entrypoint.agent,
             workspace_for_run=bindings.workspace_for_run,
+            call_depth=frozen.call_depth if frozen else 0,
         )
         builder.with_skill_provider(
             binding.provider, binding.provider, binding.workspace
         )
         for tool in binding.external:
             builder.with_additional_tools(tool, tool)
+        if catalog_run is not None:
+            from app.v2.server.runtime.policy import frozen_execution, live_execution_policy
+
+            key_id, admitted_policy = frozen_execution(command)
+            async def current_policy():
+                return await live_execution_policy(command, users=service.users, keys=service.keys,
+                    catalog=self.catalog, settings=self.settings, user_id=user_id)
+            builder.with_tool_policy(server_tool_policy(management,
+                execution_policy=admitted_policy, current_policy=current_policy,
+                machine_invocation=key_id is not None))
+            if (command.invocation_mode != "plan" and key_id is None
+                    and command.parent_run_id is None and admitted_policy.shell != "deny"):
+                import json
+                from sagents.v2.agent.self_configuration import SelfConfigurationService, SqliteSelfConfigurationStore
+                from sagents.v2.tool.plugins.sandbox_mcp import SandboxMcpSessionFactory
+                from app.v2.server.storage.workspaces import workspace_user
+
+                async def authorize_self_configuration(request, request_context):
+                    if (request_context.actor.principal_id != user_id
+                            or request_context.actor.tenant_id != user_id
+                            or request_context.actor.delegated_by
+                            or await service.users.get_by_id(user_id) is None):
+                        raise PermissionError("Only the authenticated owner can configure this Agent")
+                    live = await current_policy()
+                    if live is None or live.shell == "deny":
+                        raise PermissionError("The live execution grant does not permit capability changes")
+
+                def self_configuration(agent_id):
+                    if agent_id != command.agent_id:
+                        return None
+                    return SelfConfigurationService(
+                        store=SqliteSelfConfigurationStore(self.paths.runtime_root / "self-configuration.sqlite3"),
+                        owner=json.dumps(["server", user_id, agent_id]),
+                        workspace_root=self.paths.workspace_dir(workspace_user(command, user_id), agent_id),
+                        workspace_alias="/workspace", authorize=authorize_self_configuration,
+                        mcp_session_factory=SandboxMcpSessionFactory(bindings.handles[agent_id], self.execution.sandbox_grant_issuer),
+                    )
+                builder.with_self_configuration(self_configuration)
         return builder

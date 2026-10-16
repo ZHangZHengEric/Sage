@@ -41,7 +41,7 @@ from sagents.v2.agent.multi_agent import (
     WorkspaceSharingPolicy,
 )
 from sagents.v2.tool.official import OfficialToolRuntime
-from sagents.v2.runtime.artifact import SessionArtifactStore
+from sagents.v2.runtime.artifact.binding import bind_artifact_store
 from sagents.v2.contracts.commands import (
     InputItem,
     StartRun,
@@ -650,8 +650,8 @@ class DesktopRunCompositionMixin(DesktopRunEnvironmentMixin):
         )
         goal_state_service = GoalStateService(self.driver_session_store)
         multimodal_by_agent = {agent.agent_id: provider.supports_multimodal}
-        artifact_store = SessionArtifactStore(
-            self.driver_session_store,
+        artifact_store = bind_artifact_store(
+            self.application.service("artifact.store"),
             run_id or sandbox_handle.ref.owner_run_id,
         )
         official_runtime = OfficialToolRuntime(

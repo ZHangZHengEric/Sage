@@ -199,14 +199,10 @@ def test_a_peer_that_is_not_in_the_catalog_gives_the_agent_no_tools(tmp_path):
     with delegating_client(tmp_path, transport) as client:
         token = register_and_login(client)
 
-        interactions = [
-            frame["value"]
-            for frame in run_agui(client, token)
-            if frame.get("name") == "sage.interaction.requested"
-        ]
+        events = run_agui(client, token)
 
-    # The Run asks what to do instead of delegating: the Tool the model named
-    # is not one this Run was granted, because no peer was configured.
-    assert interactions
-    assert interactions[0]["payload"]["reason_code"] == "tool.not_found"
+    # Unknown names are model feedback, never a delegation or a blocking question.
+    assert any(frame.get("type") == "RUN_FINISHED" for frame in events)
+    assert not any(frame.get("name") == "sage.interaction.requested" for frame in events)
+    assert any(frame.get("type") == "TOOL_CALL_RESULT" and "tool.not_found" in frame.get("content", "") for frame in events)
     assert transport.sent == []

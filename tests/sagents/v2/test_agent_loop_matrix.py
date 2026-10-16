@@ -1356,36 +1356,20 @@ async def test_run_config_output_and_deadline_budgets_are_enforced_by_loop():
 
 
 @pytest.mark.asyncio
-async def test_model_call_to_unavailable_tool_requests_recovery_guidance():
-    model = ScriptedModelProvider(
-        (
-            ScriptedModelStep(
-                events=(
-                    completed(
-                        "",
-                        calls=(
-                            ModelToolCall(
-                                tool_call_id="call_missing",
-                                name="not_enabled",
-                                arguments={},
-                            ),
-                        ),
-                    ),
-                )
-            ),
-        )
-    )
+async def test_model_call_to_unavailable_tool_returns_feedback_without_execution():
+    model = ScriptedModelProvider((
+        ScriptedModelStep(events=(completed("", calls=(ModelToolCall(tool_call_id="missing", name="not_enabled", arguments={}),)),)),
+        ScriptedModelStep(events=(completed("corrected"),)),
+    ))
     runtime, handle, loop, executor = await setup_loop(model, tools=(READ_TOOL,))
-
     run = await loop.execute(handle.run_id, CONTEXT)
     events = await runtime.session_store.read_events(handle.run_id)
-
-    assert run.state == RunState.SUSPENDED
+    assert run.state == RunState.COMPLETED
     assert executor.calls == []
-    assert events[-1].type == "run.suspended"
-    suspension = await runtime.session_store.get_suspension(run.suspension_id)
-    interaction = await runtime.session_store.get_interaction(suspension.interaction_id)
-    assert interaction.payload["reason_code"] == "tool.not_found"
+    assert not any(e.type == "interaction.requested" for e in events)
+    assert not any(e.type == "tool.call.started" for e in events)
+    assert "read_value" in str(model.requests[1].messages[-1].content)
+    assert "not_enabled" in str(model.requests[1].messages[-1].content)
 
 
 @pytest.mark.asyncio
@@ -3287,40 +3271,17 @@ async def test_questionnaire_completion_survives_batch_approval(questionnaire_fi
 
 
 @pytest.mark.asyncio
-async def test_unavailable_tool_guidance_starts_new_model_decision():
-    model = ScriptedModelProvider(
-        (
-            ScriptedModelStep(
-                events=(
-                    completed(
-                        "",
-                        calls=(
-                            ModelToolCall(
-                                tool_call_id="missing", name="not_enabled", arguments={}
-                            ),
-                        ),
-                    ),
-                )
-            ),
-            ScriptedModelStep(events=(completed("done without that tool"),)),
-        )
-    )
+async def test_unavailable_tool_feedback_preserves_valid_siblings():
+    missing = ModelToolCall(tool_call_id="missing", name="not_enabled", arguments={})
+    model = ScriptedModelProvider((
+        ScriptedModelStep(events=(completed("", calls=(missing, tool_call())),)),
+        ScriptedModelStep(events=(completed("done"),)),
+    ))
     runtime, handle, loop, executor = await setup_loop(model, tools=(READ_TOOL,))
     run = await loop.execute(handle.run_id, CONTEXT)
-    suspension, interaction = await _pending_interaction(runtime, run)
-    reply = _approval_reply(
-        run.run_id, run, suspension, interaction, "submit", "missing-tool-guidance"
-    )
-    await runtime.reply_interaction(
-        reply.model_copy(update={"payload": {"text": "Skip that tool."}}), CONTEXT
-    )
-    run = await loop.resume(run.run_id, CONTEXT)
     assert run.state == RunState.COMPLETED
-    assert len(model.requests) == 2
-    assert model.requests[-1].messages[-1].content == (
-        TextBlock(text="Skip that tool."),
-    )
-    assert executor.calls == []
+    assert len(executor.calls) == 1
+    assert [m.tool_call_id for m in model.requests[-1].messages if m.role == "tool"] == ["missing", "call_1"]
 
 
 async def reply_pending_interaction(runtime, handle, snapshot, decision, key):

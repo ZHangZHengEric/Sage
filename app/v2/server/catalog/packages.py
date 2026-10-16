@@ -36,6 +36,7 @@ def build_package(record, *, sandbox=None, previous=None) -> AgentPackageBundle:
                     "name": record.name,
                     "instructions": {"inline": record.instructions},
                     "models": {"primary": "primary"},
+                    "memory": {"recall": True, "auto_write": True, "scope": "agent"},
                 }
             },
         }

@@ -6,11 +6,10 @@ from types import SimpleNamespace
 
 import pytest
 
-from sagents.v2.agent.factory import AgentCompositionFactory
 from sagents.v2.contracts.commands import RunConfig
 from sagents.v2.contracts.errors import ErrorCategory, RuntimeErrorInfo, SageV2Error
-from sagents.v2.skill.plugins.session import SessionDerivedSkillActivationRepository
-from sagents.v2.tool.plugins.ephemeral import EphemeralToolPlugin
+from app.v2.server.identity.users import UserRecord
+from app.v2.server.packages.builder import PackageBuilder
 
 from app.v2.server.catalog.records import require_agent
 from app.v2.server.runtime.models import (
@@ -28,16 +27,6 @@ from tests.app.v2.server.conftest import make_test_service, scripted_hello
 from tests.app.v2.server.fakes import MemoryCatalogStore
 from tests.app.v2.server.test_models import _save_demo_model
 from tests.app.v2.server.test_skill_runtime import _command
-
-
-async def _attach_without_host_sandbox(*args, **kwargs):
-    del args, kwargs
-
-    async def close():
-        pass
-
-    runtime = SimpleNamespace(sandbox=object(), close=close, artifact_store=None)
-    return EphemeralToolPlugin(), runtime, None
 
 
 @pytest.mark.asyncio
@@ -125,11 +114,12 @@ async def test_cancelled_sdk_construction_closes_result_and_stays_off_event_loop
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("fail_materialization", [False, True])
-async def test_dynamic_model_is_closed_after_run_or_composition_failure(
+async def test_package_composition_never_opens_an_inference_client(
     tmp_path, monkeypatch, fail_materialization
 ):
     service = make_test_service(tmp_path)
     await service.start()
+    await service.users.save(UserRecord(user_id="user", username="user", password_hash="unused"))
     agent_id = (await service.catalog.get("user")).default_agent_id
     await _save_demo_model(service.catalog, "user")
     provider = scripted_hello()
@@ -147,7 +137,7 @@ async def test_dynamic_model_is_closed_after_run_or_composition_failure(
         async def fail(*args, **kwargs):
             raise ValueError("materialization failed")
 
-        monkeypatch.setattr(service.application, "materialize_agent", fail)
+        monkeypatch.setattr(PackageBuilder, "build", fail)
     try:
         if fail_materialization:
             with pytest.raises(ValueError, match="materialization failed"):
@@ -162,7 +152,8 @@ async def test_dynamic_model_is_closed_after_run_or_composition_failure(
         assert (await service.execution.model_pool.pool.snapshot())["active_leases"] == 0
     finally:
         await service.close()
-    assert closed == [True]
+    # Building a Package no longer opens an inference client.
+    assert closed == []
 
 
 @pytest.mark.asyncio
@@ -192,6 +183,7 @@ async def test_catalog_loop_uses_materialized_skill_plugin_and_derived_activatio
 ):
     service = make_test_service(tmp_path)
     await service.start()
+    await service.users.save(UserRecord(user_id="user", username="user", password_hash="unused"))
     agent_id = (await service.catalog.get("user")).default_agent_id
     await service.skill_catalog.publish_markdown(
         name="demo",
@@ -203,24 +195,19 @@ async def test_catalog_loop_uses_materialized_skill_plugin_and_derived_activatio
         owner_user_id="user", agent_id=agent_id, names=["demo"]
     )
     captured = {}
-    original = AgentCompositionFactory.create_skill_loader
+    original = PackageBuilder.with_skill_provider
 
-    def capture(self, *args, **kwargs):
-        captured.update(kwargs)
-        return original(self, *args, **kwargs)
+    def capture(self, catalog, source, workspace):
+        captured["catalog"] = catalog
+        return original(self, catalog, source, workspace)
 
-    monkeypatch.setattr(AgentCompositionFactory, "create_skill_loader", capture)
+    monkeypatch.setattr(PackageBuilder, "with_skill_provider", capture)
 
-    monkeypatch.setattr(
-        "app.v2.server.runtime.loop.attach_official_tools",
-        _attach_without_host_sandbox,
-    )
     try:
         _, ports = await compose_catalog_loop(service, _command().model_copy(update={"agent_id": agent_id}), user_id="user")
-        assert captured["skill_loading"] is ports.skill_loading
-        assert isinstance(
-            captured["activations"], SessionDerivedSkillActivationRepository
-        )
+        app = ports.scope_handles[0]
+        assert app.service("skill.loading").plugin_id == "sage.skill.loading.lazy"
+        assert (await captured["catalog"].get_skill("demo", run_id="run")).name == "demo"
         driver = CatalogRunDriver(service, "run")
         driver._ports = ports
         await driver._close_ports()
@@ -234,6 +221,7 @@ async def test_catalog_loop_uses_the_skill_versions_accepted_with_the_run(
 ):
     service = make_test_service(tmp_path)
     await service.start()
+    await service.users.save(UserRecord(user_id="user", username="user", password_hash="unused"))
     agent_id = (await service.catalog.get("user")).default_agent_id
     first = await service.skill_catalog.publish_markdown(
         name="demo",
@@ -270,17 +258,13 @@ async def test_catalog_loop_uses_the_skill_versions_accepted_with_the_run(
         owner_user_id="user", agent_id=agent_id, names=[]
     )
     captured = {}
-    original = AgentCompositionFactory.create_skill_loader
+    original = PackageBuilder.with_skill_provider
 
-    def capture(self, *args, **kwargs):
-        captured["catalog"] = kwargs["catalog"]
-        return original(self, *args, **kwargs)
+    def capture(self, catalog, source, workspace):
+        captured["catalog"] = catalog
+        return original(self, catalog, source, workspace)
 
-    monkeypatch.setattr(AgentCompositionFactory, "create_skill_loader", capture)
-    monkeypatch.setattr(
-        "app.v2.server.runtime.loop.attach_official_tools",
-        _attach_without_host_sandbox,
-    )
+    monkeypatch.setattr(PackageBuilder, "with_skill_provider", capture)
     try:
         _, ports = await compose_catalog_loop(service, command, user_id="user")
         descriptor = await captured["catalog"].get_skill("demo", run_id="run")
@@ -299,6 +283,7 @@ async def test_catalog_loop_uses_the_agent_config_accepted_with_the_run(
 ):
     service = make_test_service(tmp_path)
     await service.start()
+    await service.users.save(UserRecord(user_id="user", username="user", password_hash="unused"))
     agent_id = (await service.catalog.get("user")).default_agent_id
     catalog = await service.catalog.store.get("user")
     admitted = require_agent(catalog, agent_id).with_configuration(instructions="Admitted instructions")
@@ -316,17 +301,13 @@ async def test_catalog_loop_uses_the_agent_config_accepted_with_the_run(
     catalog.agents[0] = catalog.agents[0].with_configuration(instructions="Edited after the Run was admitted")
     await service.catalog.store.save("user", catalog)
     captured = {}
-    original = AgentCompositionFactory.create_loop
+    original = PackageBuilder.build
 
-    def capture(self, resolved, agent_id, **kwargs):
-        captured["instructions"] = resolved.agents[agent_id].instructions
-        return original(self, resolved, agent_id, **kwargs)
+    async def capture(self, manifest, **kwargs):
+        captured["instructions"] = manifest.agents[agent_id].instructions.inline
+        return await original(self, manifest, **kwargs)
 
-    monkeypatch.setattr(AgentCompositionFactory, "create_loop", capture)
-    monkeypatch.setattr(
-        "app.v2.server.runtime.loop.attach_official_tools",
-        _attach_without_host_sandbox,
-    )
+    monkeypatch.setattr(PackageBuilder, "build", capture)
     try:
         _, ports = await compose_catalog_loop(service, command, user_id="user")
         assert captured["instructions"] == "Admitted instructions"

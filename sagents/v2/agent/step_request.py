@@ -208,6 +208,9 @@ class DefaultAgentStepRequestBuilder:
                 "turn_id": turn_id,
                 "step_id": step_id,
                 "request_budget": {
+                    "context_budget": self.context_budget.model_dump(mode="json") if self.context_budget else None,
+                    "canonical_message_count": len(messages),
+                    "projected_message_count": len(prepared_messages),
                     "estimated_input_tokens": estimated_input_tokens,
                     "accounting_method": "reported_prefix_plus_estimated_delta"
                     if calibrated

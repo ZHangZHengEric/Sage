@@ -40,6 +40,7 @@ class RunExecutionBinding:
     sandbox: SandboxHandle
     grant_issuer: SandboxGrantIssuer
     parent_run_id: str | None = None
+    host_workspace: str | None = None
     # 宿主可选携带的生命周期协调器：挂起时释放可安全暂停的算力。
     # 缺省为 None，`on_suspended` 即为空操作。
     lifecycle: ExecutionBindingLifecycleCoordinator | None = None
@@ -60,6 +61,12 @@ class RunExecutionBinding:
                     ),
                 )
             )
+
+    async def initialize_workspace(self, initializer):
+        """Apply the selected initializer to the host-bound workspace."""
+        if self.host_workspace is not None:
+            from pathlib import Path
+            await asyncio.to_thread(initializer.initialize, Path(self.host_workspace))
 
     def validate_for(self, request: ExecutionBindingRequest) -> None:
         """Reject Host bindings that do not satisfy the requested identity/policy."""

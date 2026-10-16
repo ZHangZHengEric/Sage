@@ -19,6 +19,7 @@ const sections = [
   { id: 'basic', label: '基本信息', icon: 'user' },
   { id: 'model', label: '模型配置', icon: 'model' },
   { id: 'plugins', label: '插件配置', icon: 'settings' },
+  { id: 'memory', label: '记忆', icon: 'settings' },
   { id: 'budgets', label: '运行预算', icon: 'settings' },
   { id: 'tools', label: '可用工具', icon: 'tools' },
   { id: 'skills', label: '可用技能', icon: 'skill' },
@@ -87,8 +88,13 @@ function toggleSkill(name) {
             <label class="field"><span>描述</span><textarea :value="form.description" :readonly="readonly" :disabled="busy" rows="3" @input="update('description', $event.target.value)" /></label>
             <label class="field"><span>系统提示词</span><textarea class="mono" :value="form.instructions" :readonly="readonly" :disabled="busy" rows="10" @input="update('instructions', $event.target.value)" /></label>
           </div></section>
-          <section id="agent-model"><h2><span class="section-icon"><AppIcon name="model" /></span>模型配置</h2><div class="section-fields"><label class="field"><span>模型</span><select :value="form.model_id" :disabled="readonly || busy" @change="update('model_id', $event.target.value)"><option value="">使用默认模型</option><option v-if="form.model_id && !models.some(model => model.id === form.model_id)" :value="form.model_id">{{ form.model_id }}</option><option v-for="model in models" :key="model.id" :value="model.id">{{ model.model }}</option></select></label></div></section>
+          <section id="agent-model"><h2><span class="section-icon"><AppIcon name="model" /></span>模型配置</h2><div class="section-fields"><label class="field"><span>模型</span><select :value="form.model_id" :disabled="readonly || busy" @change="update('model_id', $event.target.value)"><option value="">使用默认模型</option><option v-if="form.model_id && !models.some(model => model.id === form.model_id)" :value="form.model_id">{{ form.model_id }}</option><option v-for="model in models" :key="model.id" :value="model.id">{{ model.model }}</option></select></label><label class="field"><span>辅助模型</span><select :value="form.fast_model_id || ''" :disabled="readonly || busy" @change="update('fast_model_id', $event.target.value)"><option value="">跟随主模型</option><option v-for="model in models" :key="model.id" :value="model.id">{{ model.model }}</option></select></label></div></section>
           <section id="agent-plugins"><h2>插件配置</h2><div class="section-fields"><PluginConfig :model-value="form.plugins || {}" :disabled="readonly || busy" @update:model-value="update('plugins', $event)" /></div></section>
+          <section id="agent-memory"><h2>记忆</h2><div class="section-fields">
+            <label class="selection-row"><input type="checkbox" :checked="form.memory?.recall" :disabled="readonly || busy" @change="update('memory', { ...form.memory, recall: $event.target.checked })" />检索历史记忆</label>
+            <label class="selection-row"><input type="checkbox" :checked="form.memory?.auto_write" :disabled="readonly || busy" @change="update('memory', { ...form.memory, auto_write: $event.target.checked })" />自动保存记忆</label>
+            <label class="field"><span>记忆范围</span><select :value="form.memory?.scope || 'agent'" :disabled="readonly || busy" @change="update('memory', { ...form.memory, scope: $event.target.value })"><option value="agent">当前智能体</option><option value="session">当前会话</option><option value="principal">当前用户</option></select></label>
+          </div></section>
           <section id="agent-budgets"><h2>运行预算</h2><div class="section-fields"><SchemaField :model-value="form.budgets || {}" :schema="budgetSchema" label="预算" :disabled="readonly || busy" @update:model-value="update('budgets', $event)" /></div></section>
           <section id="agent-tools"><h2><span class="section-icon"><AppIcon name="tools" /></span>可用工具<span class="selection-count">{{ form.tools.length }}</span></h2><div class="section-fields">
             <div v-if="form.tools.length" class="selected-tags"><span v-for="name in form.tools" :key="name" class="tag">{{ name }}</span></div>

@@ -35,6 +35,7 @@ def test_builtin_inventory_contains_only_real_factories():
         "sage.agent.continuation.llm-judge",
         "sage.agent.continuation.hybrid",
         "sage.agent.continuation.explicit-status",
+        "sage.artifact.session",
         "sage.artifact.ephemeral",
         "sage.artifact.filesystem",
         "sage.context.reducer.persistent-summary",

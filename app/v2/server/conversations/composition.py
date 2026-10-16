@@ -17,6 +17,7 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 
 from sagents.v2.contracts.commands import StartRun
+from sagents.v2.agent.management import AgentPackageBundle
 from sagents.v2.contracts.errors import ErrorCategory, RuntimeErrorInfo, SageV2Error
 
 from app.v2.server.catalog.records import (
@@ -43,6 +44,7 @@ class RunComposition:
     mcp_servers: tuple[str, ...]
     a2a_agents: tuple[str, ...] = ()
     call_depth: int = 0
+    package: AgentPackageBundle | None = None
 
 
 def composition_metadata(
@@ -52,12 +54,14 @@ def composition_metadata(
     mcp_servers: tuple[str, ...],
     a2a_agents: tuple[str, ...] = (),
     call_depth: int = 0,
+    package: AgentPackageBundle | None = None,
 ) -> dict[str, object]:
     """Serialize the composition admitted with a Run into Run metadata."""
 
     return {
         RUN_COMPOSITION_METADATA_KEY: {
             "agent": agent.model_dump(mode="json"),
+            **({"package": package.model_dump(mode="json")} if package is not None else {}),
             "skills": [asdict(record) for record in skills],
             "mcp_servers": list(mcp_servers),
             "a2a_agents": list(a2a_agents),
@@ -97,6 +101,7 @@ def load_composition(command: StartRun, *, user_id: str) -> RunComposition | Non
         mcp_servers=mcp_servers,
         a2a_agents=a2a_agents,
         call_depth=call_depth,
+        package=AgentPackageBundle.model_validate(raw["package"]) if raw.get("package") else None,
     )
 
 

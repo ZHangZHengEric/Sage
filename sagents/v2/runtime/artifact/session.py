@@ -4,11 +4,20 @@ from sagents.v2.contracts.errors import ErrorCategory, RuntimeErrorInfo, SageV2E
 
 
 class SessionArtifactStore:
-    def __init__(self, session_store, run_id):
+    plugin_id = "sage.artifact.session"
+    name = "Session artifact storage"
+    description = "Artifacts retained by the owning Session store."
+
+    def __init__(self, session_store, run_id=None):
         self.session_store = session_store
         self.run_id = run_id
 
+    def for_run(self, run_id):
+        return type(self)(self.session_store, run_id)
+
     async def _scope(self):
+        if self.run_id is None:
+            raise RuntimeError("Session artifact storage requires a Run binding")
         if not all(
             callable(getattr(self.session_store, name, None))
             for name in (

@@ -35,6 +35,7 @@ from app.v2.server.storage.external_workspaces import (
     import_workspace_files,
     workspace_parts,
 )
+from sagents.v2.agent.management import AgentPackageBundle
 from sagents.v2.contracts.errors import ErrorCategory, RuntimeErrorInfo, SageV2Error
 from sagents.v2.runtime.session.plugins.filesystem import FilesystemSessionStore
 from sagents.v2.runtime.session.plugins.mysql import MysqlSessionStore
@@ -89,11 +90,43 @@ async def run_agent(
     )
 
 
+
+
+class PackageRunBody(AgentRunBody):
+    agent_package: AgentPackageBundle
+
+    def to_agui(self):
+        payload = self.model_dump(exclude={"session_id", "agent_package"})
+        payload["forwardedProps"] = {**self.forwardedProps,
+            "agentId": self.agent_package.manifest.entrypoint.agent}
+        return RunAgentInput.model_validate(payload)
+
+
+@agent_router.post("/agent-package", response_class=StreamingResponse)
+async def run_agent_package(body: PackageRunBody, request: Request,
+                            user: CurrentUser, host: HostDep, service: ConversationDep):
+    context = host.contexts.for_user(user.user_id)
+    from app.v2.server.routers.packages import result
+    await result(host.agent_management.authorize_package("run", body.agent_package, context))
+    stream = await service.start(body.to_agui(), user_id=user.user_id,
+        package=body.agent_package,
+        last_event_id=(request.headers.get("last-event-id") or "").strip() or None)
+    return StreamingResponse(stream, media_type="text/event-stream", headers={
+        "Cache-Control": "no-cache", "X-Accel-Buffering": "no",
+        "X-Sage-AG-UI-Replay": "session-store",
+    })
+
+
 @thread_router.get("", response_model=ApiResponse[list[ThreadPublic]])
 async def list_threads(user: ReadUser, service: ConversationDep):
     return success(
         [item.model_dump(mode="json") for item in await service.list_threads(user.user_id)]
     )
+
+
+@thread_router.get("/{thread_id}/package")
+async def get_thread_package(thread_id: str, user: ReadUser, service: ConversationDep):
+    return success(await service.package_for_thread(thread_id, user.user_id))
 
 
 @thread_router.get("/{thread_id}/events", response_model=ApiResponse[ThreadEventPage])

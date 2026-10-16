@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import base64
 import json
+from sagents.v2.model.wire_diagnostics import record_wire_event
+
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import Any
@@ -307,11 +309,13 @@ class AnthropicMessagesModelProvider:
         response_started = False
         terminal_event_received = False
         try:
+            record_wire_event({"diagnostic_event": "request_attempt", "payload": payload})
             async with self._open_stream(payload) as response:
                 raise_for_status = getattr(response, "raise_for_status", None)
                 if raise_for_status is not None:
                     raise_for_status()
                 async for event in self._events(response):
+                    record_wire_event(event)
                     event_type = str(event.get("type") or "")
                     if event_type == "message_start":
                         message = event.get("message") or {}

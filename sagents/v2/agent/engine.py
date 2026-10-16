@@ -14,6 +14,7 @@ import json
 from collections.abc import Callable
 
 from sagents.v2.contracts.conversation import order_tool_context
+from sagents.v2.agent.progress import inspection_progress, repeated_cycles
 from sagents.v2.agent.state import AgentLoopCheckpointCodec, AgentLoopCheckpointState
 from sagents.v2.agent.stream_batcher import StreamEventBatcher
 from sagents.v2.agent.model_recovery import can_repair_model_arguments, argument_recovery_guidance
@@ -126,7 +127,6 @@ from sagents.v2.contracts.run_state import (
 from sagents.v2.contracts.commands import CancelRun, InputItem
 from sagents.v2.runtime.contracts import RuntimePort
 from sagents.v2.runtime.session.contracts import EventDraft
-from sagents.v2.runtime.observability.logs import get_logger
 from sagents.v2.prompt_i18n import run_prompt_language
 from sagents.v2.i18n import (
     error_recovery_payload,
@@ -1362,7 +1362,7 @@ class AgentLoopEngine:
                         "response_fingerprints": (
                             *state.response_fingerprints,
                             self._response_fingerprint(response),
-                        ),
+                        )[-48:],
                         "retry_model_step": False,
                         "force_tool_choice_required_next": False,
                         "pending_continuation_reason": None,
@@ -1375,6 +1375,7 @@ class AgentLoopEngine:
 
             questionnaire_completed = state.pending_questionnaire_completed
             completed_tool_results: list[ToolExecutionResult] = []
+            read_tools: set[str] = set()
             if response.tool_calls:
                 # Phase 4: proposal and policy decision are committed before any
                 # external ToolExecutor receives the call.
@@ -1391,50 +1392,32 @@ class AgentLoopEngine:
                         )
                     except SageV2Error as exc:
                         if exc.info.code == "tool.not_found":
-                            language = run_prompt_language(command.config.metadata)
-                            decision = ContinuationDecision(
-                                action=ContinuationAction.REQUEST_INTERACTION,
-                                reason_code="tool.not_found",
-                                reason=tr("recovery.tool_not_found", language),
-                                interaction=InteractionDraft(
-                                    interaction_type="agent_recovery",
-                                    allowed_decisions=("submit", "cancel"),
-                                    payload={
-                                        **recovery_payload(
-                                            "recovery.tool_not_found",
-                                            language,
-                                            reason_code="tool.not_found",
-                                        ),
-                                        "tool_name": model_call.name,
-                                    },
-                                ),
+                            # A rejected name has never crossed the execution barrier.
+                            # Settle it as Tool feedback, then execute valid siblings.
+                            call = ToolCall(
+                                tool_call_id=model_call.tool_call_id,
+                                tool_name=model_call.name, arguments=model_call.arguments,
+                                operation_id=new_id("operation"),
+                                idempotency_key=f"{run.run_id}:{model_call.tool_call_id}",
+                                owner_run_id=run.run_id, owner_agent_id=command.agent_id,
+                                owner_session_id=run.session_id,
                             )
-                            run = await self._record_continuation(
-                                run, decision, context, state.turn_id, step_id
+                            run = await self._record_tool_proposal(run, call, context, state.turn_id, step_id)
+                            error = RuntimeErrorInfo(
+                                code="tool.not_found", category=ErrorCategory.VALIDATION,
+                                message=f"Tool {model_call.name!r} is unavailable. Use an exact available Tool name: {', '.join(available_tools)}. No execution occurred.",
+                                safe_to_resume=True,
+                                metadata={"side_effect_state": "not_applied", "tool_execution_started": False},
                             )
-                            # Guidance for an unavailable Tool starts a new
-                            # model decision; retrying this batch would request
-                            # the same missing Tool forever.
-                            run, followups = (
-                                await self._persist_followup_user_messages(
-                                    run,
-                                    completed_tool_results,
-                                    context,
-                                    state.turn_id,
-                                    step_id,
-                                )
-                            )
-                            state = state.model_copy(
-                                update={
-                                    "messages": (*state.messages, *followups),
-                                    "pending_response_step_id": None,
-                                    "pending_questionnaire_completed": False,
-                                }
-                            )
-                            return await self._suspend_for_continuation_interaction(
-                                run, state, decision, context, step_id
-                            )
+                            result = ToolExecutionResult(tool_call_id=call.tool_call_id, operation_id=call.operation_id,
+                                error=error, content=(TextBlock(text=error.message),))
+                            run, result = await self._commit_tool_result(run, call, result, context, state.turn_id, step_id=step_id)
+                            state = state.model_copy(update={"messages": (*state.messages, self._tool_result_message(result))})
+                            completed_tool_results.append(result)
+                            continue
                         return await self._fail(run, state, step_id, exc.info, context)
+                    if definition.side_effect_level.value in {"read", "none"}:
+                        read_tools.add(definition.name)
                     tool_call = ToolCall(
                         tool_call_id=model_call.tool_call_id,
                         tool_name=model_call.name,
@@ -1555,7 +1538,8 @@ class AgentLoopEngine:
             state = state.model_copy(
                 update={"messages": order_tool_context(state.messages)}
             )
-            repeated = self._trailing_repeat_count(state.response_fingerprints)
+            state = inspection_progress(state, response, completed_tool_results, read_tools)
+            repeated = repeated_cycles(state.response_fingerprints)
             signals = await self._continuation_signals(run.run_id, state)
             # Phase 5: completion is policy, not an implicit consequence of EOF
             # or a provider finish_reason.
@@ -1570,6 +1554,7 @@ class AgentLoopEngine:
                 available_tools=available_tools,
                 pending_tool_calls=0,
                 repeated_fingerprint_count=repeated,
+                no_progress_steps=state.no_progress_steps,
                 explicit_status=signals.explicit_status,
                 explicit_status_note=signals.explicit_status_note,
                 requested_interaction=signals.interaction,
@@ -2474,22 +2459,8 @@ class AgentLoopEngine:
 
     @staticmethod
     def _log_tool_exception(exc, run, call, turn_id, step_id):
-        # Keep private stacks out of the model-facing result and durable ledger.
-        # Explicit scope also works when dispatch runs outside a request context.
-        get_logger("sagents.agent.tools").exception(
-            "tool.execution.exception",
-            "Tool execution raised an exception.",
-            exc,
-            session_id=run.session_id,
-            run_id=run.run_id,
-            turn_id=turn_id,
-            step_id=step_id,
-            tool_call_id=call.tool_call_id,
-            attributes={
-                "tool_name": call.tool_name,
-                "operation_id": call.operation_id,
-            },
-        )
+        """Optional observer hook; execution never depends on logging."""
+
 
     async def dispatch_tool_call(
         self, run, call, context, turn_id, step_id=None, state=None
