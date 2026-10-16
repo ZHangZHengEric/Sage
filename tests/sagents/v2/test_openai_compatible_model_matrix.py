@@ -963,3 +963,41 @@ async def test_length_limited_tool_arguments_are_not_exposed_for_execution(argum
     assert error.metadata["tool_execution_started"] is False
     assert error.metadata["finish_reason"] == "length"
     assert stream.closed
+
+
+@pytest.mark.asyncio
+async def test_explicit_reasoning_history_rejection_negotiates_empty_host_history():
+    error = RuntimeError('The `reasoning_content` in the thinking mode must be passed back to the API.')
+    error.status_code = 400
+    completions = SequencedCompletions([
+        error, FakeStream((chunk(content='ok', finish='stop'),)),
+        FakeStream((chunk(content='again', finish='stop'),)),
+    ])
+    provider = OpenAICompatibleModelProvider(config(), client=FakeClient(completions))
+    messages = (
+        ModelMessage(role='user', content=(TextBlock(text='go'),)),
+        ModelMessage(role='assistant', tool_calls=(ModelToolCall(tool_call_id='memory', name='search_memory', arguments={}),)),
+        ModelMessage(role='tool', tool_call_id='memory', content=(TextBlock(text='none'),)),
+        ModelMessage(role='assistant', content=(TextBlock(text='continue'),),
+                     provider_state=make_provider_state('openai_compatible', {'reasoning_content': 'real reasoning'})),
+    )
+    events = [event async for event in provider.stream(request(messages=messages))]
+    assert 'reasoning_content' not in completions.calls[0]['messages'][1]
+    assert completions.calls[1]['messages'][1]['reasoning_content'] == ''
+    assert completions.calls[1]['messages'][3]['reasoning_content'] == 'real reasoning'
+    assert events[-1].response.provider_metadata['compatibility_fallback']['kind'] == 'empty_reasoning_content_supplied'
+    _ = [event async for event in provider.stream(request(messages=messages))]
+    assert len(completions.calls) == 3
+    assert completions.calls[2]['messages'][1]['reasoning_content'] == ''
+
+
+@pytest.mark.asyncio
+async def test_reasoning_history_negotiation_is_bounded_and_does_not_apply_to_other_errors():
+    for message in ('invalid tool arguments', 'The reasoning_content must be passed back to the API.'):
+        error = RuntimeError(message)
+        error.status_code = 400
+        completions = SequencedCompletions([error, error])
+        provider = OpenAICompatibleModelProvider(config(), client=FakeClient(completions))
+        with pytest.raises(SageV2Error):
+            _ = [event async for event in provider.stream(request(messages=(ModelMessage(role='assistant', content=(TextBlock(text='prior'),)),)))]
+        assert len(completions.calls) == (2 if 'reasoning_content' in message else 1)

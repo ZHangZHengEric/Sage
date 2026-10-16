@@ -252,6 +252,7 @@ class AgentConfiguration {
     this.maxLoopCount = 100,
     this.deepThinking = false,
     this.thinkingLevel = 'medium',
+    this.memory = const {'recall': true, 'auto_write': true, 'scope': 'agent'},
     this.availableTools = const [],
     this.availableSkills = const [],
     this.shellPolicy = const ShellPolicySummary(),
@@ -272,6 +273,7 @@ class AgentConfiguration {
   final int maxLoopCount;
   final bool deepThinking;
   final String thinkingLevel;
+  final Map<String, Object?> memory;
   final List<String> availableTools;
   final List<String> availableSkills;
   final ShellPolicySummary shellPolicy;
@@ -297,6 +299,9 @@ class AgentConfiguration {
       maxLoopCount: (json['max_loop_count'] as num?)?.toInt() ?? 100,
       deepThinking: json['deep_thinking'] == true,
       thinkingLevel: json['thinking_level']?.toString() ?? 'medium',
+      memory: json['memory'] is Map
+          ? (json['memory'] as Map).cast<String, Object?>()
+          : const {'recall': true, 'auto_write': true, 'scope': 'agent'},
       availableTools: _stringList(json['available_tools']),
       availableSkills: _stringList(json['available_skills']),
       shellPolicy: shellPolicy is Map
@@ -354,6 +359,9 @@ class AgentConfiguration {
       thinkingLevel: patch.containsKey('thinking_level')
           ? patch['thinking_level']?.toString() ?? 'medium'
           : thinkingLevel,
+      memory: patch['memory'] is Map
+          ? (patch['memory'] as Map).cast<String, Object?>()
+          : memory,
       availableTools: patch.containsKey('available_tools')
           ? _stringList(patch['available_tools'])
           : availableTools,

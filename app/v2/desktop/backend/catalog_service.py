@@ -16,6 +16,7 @@ from app.v2.desktop.backend.catalog import (
     DesktopModelProviderRecord,
     default_agent_config,
 )
+from app.v2.desktop.backend.runtime_config import _agent_memory_behavior
 from app.v2.desktop.backend.shell_policy import (
     normalize_shell_command,
     shell_policy_summary,
@@ -718,6 +719,7 @@ class DesktopCatalogServiceMixin:
             ),
             "deep_thinking": deep_thinking,
             "thinking_level": thinking_level,
+            "memory": _agent_memory_behavior(agent).model_dump(mode="json"),
             "available_tools": list(config.get("availableTools") or []),
             "available_skills": list(config.get("availableSkills") or []),
             "approved_shell_commands": list(config.get("approvedShellCommands") or []),
@@ -770,6 +772,10 @@ class DesktopCatalogServiceMixin:
             "available_skills": "availableSkills",
             "approved_shell_commands": "approvedShellCommands",
         }
+        if "memory" in fields:
+            if patch.memory is None or patch.memory.scope not in {"agent", "session", "principal"}:
+                raise ValueError("memory requires scope agent, session or principal")
+            config["memory"] = patch.memory.model_dump(mode="json")
         for field, target in mapping.items():
             if field in fields:
                 config[target] = getattr(patch, field)

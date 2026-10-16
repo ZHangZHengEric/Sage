@@ -1568,6 +1568,66 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       },
                     ),
                     const SizedBox(height: 22),
+                    _SettingsRowGroup(
+                      children: [
+                        for (final field in ['recall', 'auto_write'])
+                          _SettingsRow(
+                            label: context.l10n.text('agent.memory.$field'),
+                            control: Semantics(
+                              label: context.l10n.text('agent.memory.$field'),
+                              enabled: _editingAgent,
+                              child: AbsorbPointer(
+                                absorbing: !_editingAgent,
+                                child: GlassSwitch(
+                                  key: ValueKey('agent-memory-$field'),
+                                  value: agent.memory[field] == true,
+                                  activeColor: Theme.of(
+                                    context,
+                                  ).colorScheme.primary,
+                                  settings: _glass(context),
+                                  useOwnLayer: true,
+                                  onChanged: (value) => _saveAgent({
+                                    'memory': {...agent.memory, field: value},
+                                  }),
+                                ),
+                              ),
+                            ),
+                          ),
+                        _SettingsRow(
+                          label: context.l10n.text('agent.memory.scope'),
+                          control: _editingAgent
+                              ? _SettingsPicker<String>(
+                                  key: const ValueKey('agent-memory-scope'),
+                                  value:
+                                      agent.memory['scope']?.toString() ??
+                                      'agent',
+                                  width: 220,
+                                  options: [
+                                    for (final scope in [
+                                      'agent',
+                                      'session',
+                                      'principal',
+                                    ])
+                                      _PickerOption(
+                                        value: scope,
+                                        label: context.l10n.text(
+                                          'agent.memory.$scope',
+                                        ),
+                                      ),
+                                  ],
+                                  onChanged: (value) => _saveAgent({
+                                    'memory': {...agent.memory, 'scope': value},
+                                  }),
+                                )
+                              : Text(
+                                  context.l10n.text(
+                                    'agent.memory.${agent.memory['scope'] ?? 'agent'}',
+                                  ),
+                                ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 22),
                     _AssignmentSection(
                       title: context.l10n.text('settings.tools'),
                       groups: _toolAssignmentGroups(

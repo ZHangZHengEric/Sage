@@ -6,6 +6,7 @@ from pydantic import BaseModel, Field, model_validator
 
 from app.v2.desktop.backend.catalog import DesktopModelCompatibilityProfile
 from sagents.v2.contracts.run_state import SessionConcurrencyMode
+from sagents.v2.package.manifest.agents import AgentMemoryBehavior
 
 
 class DesktopProject(BaseModel):
@@ -50,6 +51,7 @@ class AgentSettingsPatch(BaseModel):
     thinking_level: (
         Literal["minimal", "low", "medium", "high", "xhigh", "max"] | None
     ) = None
+    memory: AgentMemoryBehavior | None = None
     available_tools: list[str] | None = None
     available_skills: list[str] | None = None
     approved_shell_commands: list[str] | None = None

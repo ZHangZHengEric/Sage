@@ -79,6 +79,7 @@ from app.v2.desktop.backend.run_context import (
 from app.v2.desktop.backend.run_service import DesktopRunServiceMixin
 from app.v2.desktop.backend.runtime_config import (
     _agent_memory_enabled,
+    _agent_memory_behavior,
 )
 from app.v2.desktop.backend.usage_analytics import (
     _start_run_user_text,
@@ -160,8 +161,8 @@ class _DesktopRecoveryAgent:
         facade = SAgent(
             runtime=self.runtime,
             driver_factory=lambda _: driver,
-            memory_service=(self.service.memory_service if memory_enabled else None),
-            memory_scope={"recall": False, "auto_write": memory_enabled},
+            memory_service=(self.service._memory_service_for_agent(agent) if memory_enabled and _agent_memory_behavior(agent).auto_write else None),
+            memory_scope={"recall": False, "auto_write": memory_enabled and _agent_memory_behavior(agent).auto_write},
         )
         try:
             execution = facade.ensure_execution(run_id, context, resume=resume)
