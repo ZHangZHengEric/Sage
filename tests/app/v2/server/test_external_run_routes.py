@@ -184,3 +184,72 @@ def test_external_run_uses_effective_package_step_budget(
         assert replay.status_code == 200, replay.text
         assert client.portal.call(stored_command) == command
         assert set(observed_limits) == {expected or 24}
+
+
+def test_external_cleanup_routes_are_independent_and_idempotent(tmp_path):
+    host = make_host(tmp_path)
+    with TestClient(create_app(host)) as client:
+        setup_agent(client)
+        agent_id = client.headers["SAGE-AGENT-ID"]
+        base = f"/api/agents/{agent_id}"
+        client.put(base + "/workspace/files", headers=_headers(),
+                   json={"directory": "assets/site", "files": {"index.html": "YQ=="}})
+        assert _run(client, agent_id).status_code == 200
+        # Session cleanup must preserve files, and reject a different tenant.
+        assert client.delete(base + "/sessions/thread-a", headers=_headers("tenant-b")).status_code == 404
+        for _ in range(2):
+            response = client.delete(base + "/sessions/thread-a", headers=_headers())
+            assert response.status_code == 200, response.text
+        root = host.paths.workspace_path("tenant-a", agent_id)
+        assert (root / "assets/site/index.html").exists()
+        for expected in [True, False]:
+            response = client.delete(base + "/workspace/files", headers=_headers(),
+                                     params={"path": "assets", "recursive": True})
+            assert response.status_code == 200, response.text
+            assert response.json()["data"] == {"path": "assets", "deleted": expected}
+
+
+@pytest.mark.parametrize("error,status,detail", [
+    (PermissionError(13, "denied"), 403, "workspace_permission_denied"),
+    (OSError(16, "busy"), 409, "workspace_busy"),
+    (OSError(5, "io"), 500, "workspace_storage_failure"),
+])
+def test_workspace_delete_reports_storage_errors(tmp_path, monkeypatch, error, status, detail):
+    host = make_host(tmp_path)
+    with TestClient(create_app(host)) as client:
+        setup_agent(client)
+        base = f'/api/agents/{client.headers["SAGE-AGENT-ID"]}'
+        def fail(*args, **kwargs):
+            raise error
+        monkeypatch.setattr("app.v2.server.routers.conversations.delete_workspace_path", fail)
+        response = client.delete(base + "/workspace/files", headers=_headers(), params={"path": "assets"})
+        assert response.status_code == status, response.text
+        assert response.json()["error_detail"] == detail
+
+
+def test_workspace_cleanup_refuses_durable_unfinished_runs(tmp_path):
+    host = make_host(tmp_path)
+    with TestClient(create_app(host)) as client:
+        setup_agent(client)
+        agent_id = client.headers["SAGE-AGENT-ID"]
+        base = f"/api/agents/{agent_id}"
+        assert _run(client, agent_id).status_code == 200
+
+        async def enqueue():
+            from app.v2.server.conversations.external_runs import selected_run
+            selected = await selected_run(host.conversations, tenant_id="tenant-a",
+                agent_id=agent_id, thread_id="thread-a", run_id="run-a")
+            command = selected[-1].model_copy(update={
+                "run_id": "unfinished", "idempotency_key": "unfinished"})
+            await host.application.entrypoint().runtime.session_store.create_run(command, selected[4])
+        client.portal.call(enqueue)
+        # Even an unrelated child path is reachable by a task in this workspace.
+        response = client.delete(base + "/workspace/files", headers=_headers(),
+                                 params={"path": "other", "recursive": True})
+        assert response.status_code == 409, response.text
+        assert response.json()["error_detail"] == "workspace_busy"
+        response = client.delete(base + "/sessions/thread-a", headers=_headers())
+        assert response.status_code == 409, response.text
+        # Another tenant's workspace remains independent.
+        assert client.delete(base + "/workspace/files", headers=_headers("tenant-b"),
+                             params={"path": "other"}).status_code == 200

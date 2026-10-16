@@ -219,3 +219,16 @@ MCP 与 A2A 这类租户自己的目录，工具授权按目录整体授予而�
 工作空间统一按用户与 Agent 隔离：同一用户的同一 Agent 跨 Session 共享，不同 Agent 不共享。外部 API 的用户身份取 `SAGE-TENANT-ID`，配置所有者只用于授权和配置读取，不作为外部用户的工作空间身份。用户/Agent ID 中的路径分隔符使用可逆 URL 编码，普通 ID 保持原样，不使用 SHA 目录。
 
 工作空间查询须提供 `thread_id` 或 `agent_id`；有 Session 时由后端从持久化身份解析目录。旧用户共享目录和旧 SHA 目录不自动合并或复制；历史外部 Session 缺少原始用户标识时需要明确迁移映射，不能从 SHA 反推用户。
+
+
+### 外部 workspace 与会话清理
+
+内网业务接口使用 `SAGE-TENANT-ID`，Agent 取 URL 中的 `agent_id`，沿用外部 Run 的受控内网信任边界。业务后端必须传入已验证的租户身份，不应直接向公网暴露这些接口。
+
+- `DELETE /api/agents/{agent_id}/workspace/files?path=assets/site&recursive=true`：删除该租户、该 Agent workspace 内的相对文件或目录。`recursive` 默认 false，仅能删除文件、链接或空目录；true 可递归删除目录。不绑定业务实体或目录前缀。
+- 成功返回 `data: {"path":"assets/site","deleted":true}`；目标不存在返回 200，`deleted:false`，不创建工作空间。禁止空路径、绝对路径、路径穿越和隐藏管理目录。路径祖先不能是符号链接；目标链接及子目录中的链接只删除链接本身，保留链接指向的数据。
+- 错误通过 `error_detail` 区分：422 `invalid_workspace_path`；403 `workspace_permission_denied`；409 `workspace_busy` 或 `workspace_not_empty`；500 `workspace_storage_failure`。递归失败可能已删除部分内容，修复原因后可用相同请求重试；接口不会回滚已删除的文件。
+- 同租户、同 Agent 有未结束 Run（包括排队、等待输入和恢复中的 Run），或本地执行尚未退出时返回 409。Run 的 working directory 不是文件访问隔离边界，因此保护整个 Agent workspace，即使待删除路径与 Run 的工作目录不同。先取消任务并等待执行退出，再重试清理。
+- `DELETE /api/agents/{agent_id}/sessions/{session_id}`：独立清理该身份下的会话树和 thread 索引，重复调用成功，保留会话身份绑定及 workspace 文件；错误身份返回 404。有未结束任务时拒绝清理。是否与目录删除组合、调用顺序由业务后端决定。
+
+删除与 Run 创建、文件导入在当前 server 进程内互斥；请求取消时会等待文件线程退出后释放互斥。运行冲突保护适用于现有单进程 server v2，不提供多 worker、多实例或外部进程直接写 workspace 时的分布式文件租约。

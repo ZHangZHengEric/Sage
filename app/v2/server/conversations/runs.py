@@ -19,6 +19,8 @@ LOGGER = get_logger(__name__)
 
 class RunService:
     def __init__(self, *, application, session_access, execution, users=None, keys=None, catalog=None, settings=None) -> None:
+        # Serializes Run creation with destructive workspace/session operations.
+        self.workspace_mutation_lock = asyncio.Lock()
         self.application = application
         self.session_access = session_access
         self.execution = execution
@@ -260,41 +262,42 @@ class RunService:
         ``bound`` is cleared once the task owns it.
         """
 
-        token = bind_model_user(user_id)
-        bound = False
-        try:
-            bound = self.execution.bind_model(session_id, user_id)
-            application = self.application
-            stream = await application.run_interface(
-                interface,
-                command,
-                context,
-                agent_id=application.resolved_plan.entrypoint_agent_id,
-            )
-            run_id = stream.handle.run_id
-            if (
-                self.execution.driving(run_id)
-                or stream.handle.state in TERMINAL_RUN_STATES
-                or stream.handle.state == RunState.SUSPENDED
-            ):
-                await stream.detach()
-                return run_id
-            task = asyncio.create_task(
-                self._drive(
-                    stream,
-                    session_id=session_id,
-                    label=label,
-                    on_finished=on_finished,
-                ),
-                name=f"server-v2-{label}-{run_id}",
-            )
-            self.execution.adopt(run_id, task)
+        async with self.workspace_mutation_lock:
+            token = bind_model_user(user_id)
             bound = False
-            return run_id
-        finally:
-            if bound:
-                self.execution.unbind_model(session_id)
-            reset_model_user(token)
+            try:
+                bound = self.execution.bind_model(session_id, user_id)
+                application = self.application
+                stream = await application.run_interface(
+                    interface,
+                    command,
+                    context,
+                    agent_id=application.resolved_plan.entrypoint_agent_id,
+                )
+                run_id = stream.handle.run_id
+                if (
+                    self.execution.driving(run_id)
+                    or stream.handle.state in TERMINAL_RUN_STATES
+                    or stream.handle.state == RunState.SUSPENDED
+                ):
+                    await stream.detach()
+                    return run_id
+                task = asyncio.create_task(
+                    self._drive(
+                        stream,
+                        session_id=session_id,
+                        label=label,
+                        on_finished=on_finished,
+                    ),
+                    name=f"server-v2-{label}-{run_id}",
+                )
+                self.execution.adopt(run_id, task)
+                bound = False
+                return run_id
+            finally:
+                if bound:
+                    self.execution.unbind_model(session_id)
+                reset_model_user(token)
 
     async def _drive(self, stream, *, session_id: str, label: str, on_finished) -> None:
         run_id = stream.handle.run_id

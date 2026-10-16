@@ -5,10 +5,11 @@ from __future__ import annotations
 import base64
 import binascii
 import os
+import shutil
 from pathlib import PurePosixPath
 import stat
 
-from app.v2.server.storage.paths import ServerPaths
+from app.v2.server.storage.paths import ServerPaths, identity_segment
 
 MAX_FILES = 256
 MAX_FILE_BYTES = 4 << 20
@@ -114,3 +115,41 @@ def import_workspace_files(paths: ServerPaths, tenant_id: str, agent_id: str,
     finally:
         os.close(fd)
     return len(decoded)
+
+
+def delete_workspace_path(paths: ServerPaths, tenant_id: str, agent_id: str,
+                          path: str, *, recursive: bool = False) -> bool:
+    """Delete relative to pinned directory descriptors; never follow symlinks.
+
+    Missing targets succeed without creating a workspace. Symlink leaves are
+    unlinked, including dangling links; symlink ancestors are rejected.
+    """
+    parts = workspace_parts(path)
+    flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+    fd = os.open(paths.tenants_root, flags)
+    try:
+        for part in (identity_segment(tenant_id), identity_segment(agent_id),
+                     "workspace", *parts[:-1]):
+            try:
+                child = os.open(part, flags, dir_fd=fd)
+            except FileNotFoundError:
+                return False
+            os.close(fd)
+            fd = child
+        name = parts[-1]
+        try:
+            info = os.stat(name, dir_fd=fd, follow_symlinks=False)
+        except FileNotFoundError:
+            return False
+        if stat.S_ISDIR(info.st_mode):
+            if recursive:
+                if not shutil.rmtree.avoids_symlink_attacks:
+                    raise RuntimeError("symlink-safe directory deletion is unavailable")
+                shutil.rmtree(name, dir_fd=fd)
+            else:
+                os.rmdir(name, dir_fd=fd)
+        else:
+            os.unlink(name, dir_fd=fd)
+        return True
+    finally:
+        os.close(fd)
