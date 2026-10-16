@@ -656,3 +656,9 @@ the controller retains the best candidate without saving or activating it.
 See [optimization API](optimization/README.md) and run
 `python -m examples.sagents_v2_package_optimizer` for an offline multi-round
 example with the native v2 runtime.
+
+## 配置与插件开发参考
+
+- [接入、调试与自定义插件协议](../../docs/zh/architecture/sagents-host-development.md)
+- [Runtime 全部字段、默认组件与内置插件参数](../../docs/zh/architecture/sagents-runtime-reference.md)
+- [sage.yaml 全部字段、子 Agent 与更新恢复](../../docs/zh/architecture/sagents-manifest-reference.md)
