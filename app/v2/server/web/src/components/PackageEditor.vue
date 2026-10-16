@@ -1,6 +1,7 @@
 <script setup>
 import { computed, ref } from 'vue'
 import SchemaField from './SchemaField.vue'
+import PluginConfig from './PluginConfig.vue'
 import { labels, resolveSchema } from '../config-schema.js'
 const props = defineProps({ modelValue: String, schema: Object, resources: Object, disabled: Boolean })
 const emit = defineEmits(['update:modelValue'])
@@ -40,6 +41,12 @@ const root = computed(() => {
 const manifestSchema = computed(() => resolveSchema(root.value.properties?.manifest, root.value))
 const value = computed(() => active.value === 'files' ? bundle.value?.files : bundle.value?.manifest?.[active.value])
 const fieldSchema = computed(() => active.value === 'files' ? root.value.properties?.files : manifestSchema.value.properties?.[active.value])
+function updatePlugins(value) {
+  if (!bundle.value || props.disabled) return
+  const next = structuredClone(bundle.value)
+  next.manifest.runtime = { ...(next.manifest.runtime || {}), capabilities: value }
+  emit('update:modelValue', JSON.stringify(next, null, 2))
+}
 function update(value) {
   if (!bundle.value || props.disabled) return
   const next = structuredClone(bundle.value)
@@ -53,7 +60,7 @@ function update(value) {
     <div class="row" role="group" aria-label="编辑模式"><button class="btn" :class="{ ghost: mode !== 'form' }" type="button" @click="mode = 'form'">可视化配置</button><button class="btn" :class="{ ghost: mode !== 'source' }" type="button" @click="mode = 'source'">完整定义</button></div>
     <template v-if="mode === 'form' && bundle && root.properties">
       <nav class="config-tabs" aria-label="Package 配置分区"><button v-for="section in sections" :key="section" class="btn" :class="{ ghost: active !== section }" type="button" @click="active = section">{{ labels[section] }}</button></nav>
-      <div class="glass-config"><SchemaField :key="active" :label="labels[active]" :model-value="value" :schema="fieldSchema || {}" :root="root" :disabled="disabled" @update:model-value="update" /></div>
+      <div class="glass-config"><PluginConfig v-if="active === 'runtime'" :model-value="bundle.manifest.runtime?.capabilities || {}" :disabled="disabled" @update:model-value="updatePlugins" /><SchemaField :key="active" :label="labels[active]" :model-value="value" :schema="fieldSchema || {}" :root="root" :disabled="disabled" @update:model-value="update" /></div>
     </template>
     <p v-else-if="mode === 'form' && !bundle" class="error" role="alert">完整定义不是有效 JSON，请在完整定义中修正。</p>
     <label v-else class="field"><span>完整包定义</span><textarea class="mono" aria-label="完整包定义" :value="modelValue" :disabled="disabled" rows="22" spellcheck="false" @input="emit('update:modelValue', $event.target.value)" /></label>

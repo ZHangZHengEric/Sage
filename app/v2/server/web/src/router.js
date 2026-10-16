@@ -21,6 +21,7 @@ export const router = createRouter({
     { path: '/', component: Chat },
     { path: '/history', component: History },
     { path: '/tools', component: Tools },
+    { path: '/plugins', component: () => import('./views/Plugins.vue') },
     { path: '/users', component: Users, meta: { admin: true } },
     { path: '/agents', component: Agents },
     { path: '/studio', component: Studio },

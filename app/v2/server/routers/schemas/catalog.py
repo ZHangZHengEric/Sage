@@ -6,6 +6,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from app.v2.server.runtime.policy import ExecutionPolicy
 from sagents.v2.package.manifest.agents import AgentSandboxConfig, AgentBudgets
 from sagents.v2.agent.management import AgentPackageBundle
+from sagents.v2.package.manifest.runtime import CapabilitySelection
 
 from app.v2.server.catalog.records import ModelConfiguration
 
@@ -28,6 +29,7 @@ class AgentBody(BaseModel):
     execution_policy: ExecutionPolicy | None = None
     sandbox: AgentSandboxConfig | None = None
     budgets: AgentBudgets | None = None
+    plugins: dict[str, CapabilitySelection] | None = None
 
 class AgentPublic(BaseModel):
     id: str
