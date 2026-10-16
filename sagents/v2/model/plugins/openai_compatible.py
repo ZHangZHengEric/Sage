@@ -984,6 +984,7 @@ class OpenAIChatCompletionsModelProvider(OpenAICompatibleModelProvider):
         """Probe Chat Completions only and return its reusable wire strategy."""
 
         from sagents.v2.model.capability_probe import (
+            capability_probe_config,
             ModelCapabilityProbeStatus,
             model_capability_profile,
             negotiate_model_output_limit,
@@ -992,6 +993,7 @@ class OpenAIChatCompletionsModelProvider(OpenAICompatibleModelProvider):
             probe_model_reasoning_controls,
         )
 
+        probe_config = capability_probe_config(self.config)
         effective, _ = await negotiate_model_output_limit(self, request)
         maximum_field = (
             self.resolved_max_output_tokens_field
@@ -1004,7 +1006,7 @@ class OpenAIChatCompletionsModelProvider(OpenAICompatibleModelProvider):
             extra_body: dict[str, Any] | None = None,
             image_detail_mode: Literal["include", "omit"] = "include",
         ):
-            config = self.config.model_copy(
+            config = probe_config.model_copy(
                 update={
                     "default_max_output_tokens": effective,
                     "max_output_tokens_field": maximum_field,

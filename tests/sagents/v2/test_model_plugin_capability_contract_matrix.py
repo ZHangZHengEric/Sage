@@ -336,3 +336,36 @@ def test_profile_from_another_protocol_is_rejected_instead_of_falling_back():
             ),
             client=object(),
         )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(('provider_type', 'config_type'), [
+    (_ChatProbeProvider, OpenAIChatCompletionsConfig),
+    (_ResponsesProbeProvider, OpenAIResponsesConfig),
+    (_AnthropicProbeProvider, AnthropicMessagesConfig),
+    (_GeminiProbeProvider, GeminiGenerateContentConfig),
+])
+async def test_probes_bypass_unverified_declarations_without_widening_runtime(provider_type, config_type):
+    denied = CAPABILITIES.model_copy(update={
+        'supports_tools': False, 'supports_parallel_tool_calls': False,
+        'supports_reasoning': False, 'supports_multimodal_input': False,
+        'supports_structured_output': False,
+    })
+    class GuardedProvider(provider_type):
+        async def _stream(self, request):
+            if 'connection' not in request.request_id:
+                assert self.config.capabilities.supports_tools
+                assert self.config.capabilities.supports_multimodal_input
+                assert self.config.capabilities.supports_structured_output
+            async for event in super()._stream(request):
+                yield event
+    provider = GuardedProvider(config_type(model='test', base_url='https://example.invalid/v1', capabilities=denied, default_max_output_tokens=128), client=object())
+    profile = await provider.probe_capabilities(ModelCapabilityProbeRequest(
+        model_binding='primary', route_fingerprint='test', max_output_tokens=128,
+        reasoning_efforts=('low',),
+    ))
+    assert profile.supports('multimodal')
+    assert profile.supports('tool_calling')
+    assert profile.supports('structured_output')
+    assert provider.config.capabilities == denied
+    assert (await provider.capabilities('primary')).supports_tools is False

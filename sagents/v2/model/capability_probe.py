@@ -40,6 +40,30 @@ _PROBE_IMAGE = (
     "YKJA76jmUc2jmkc1U0EzACKcASc1hNCeAAAAAElFTkSuQmCC"
 )
 _RED_MARKERS = ("red", "红色", "红", "赤", "绯", "朱", "丹", "绛")
+
+
+def capability_probe_config(config):
+    """Discover provider capabilities independently of unverified host declarations.
+
+    Only temporary probe clients use this copy. Normal clients retain their
+    configured capability gates and any previously negotiated wire strategy.
+    """
+    return config.model_copy(
+        update={
+            "capabilities": config.capabilities.model_copy(
+                update={
+                    "supports_tools": True,
+                    "supports_parallel_tool_calls": True,
+                    "supports_reasoning": True,
+                    "supports_multimodal_input": True,
+                    "supports_structured_output": True,
+                }
+            ),
+            "invocation_strategy": {},
+        }
+    )
+
+
 async def negotiate_model_output_limit(
     provider: ModelProvider,
     request: ModelCapabilityProbeRequest,
@@ -713,10 +737,12 @@ async def _probe_tool_calling(
                         "required": ["value"],
                         "additionalProperties": False,
                     },
-                    strict=True,
                 ),
             ),
-            tool_choice="required",
+            # Basic tool support must not require forced selection or strict
+            # schemas. Some providers reject those in their default thinking
+            # mode while supporting ordinary tool calls.
+            tool_choice="auto",
             max_output_tokens=max_output_tokens,
         ),
         name="tool_calling",
