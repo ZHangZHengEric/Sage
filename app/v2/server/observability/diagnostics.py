@@ -94,7 +94,10 @@ class SessionDiagnostics:
     """
 
     format_version = "sage.session-diagnostics/v1"
-    max_record_bytes = 8 * 1024 * 1024
+    # A model record combines request/response with two independently bounded
+    # 8 MiB streams (provider wire and normalized events). The old 8 MiB row
+    # limit discarded otherwise complete captures from ordinary long outputs.
+    max_record_bytes = 32 * 1024 * 1024
     max_logs_per_run = 10000
 
     def __init__(self, root: Path):

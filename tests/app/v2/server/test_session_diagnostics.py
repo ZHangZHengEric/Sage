@@ -11,6 +11,44 @@ from sagents.v2.runtime.observability.contracts import LogRecord
 from tests.app.v2.server.test_file_downloads import identity, _run_input
 
 
+async def test_large_model_stream_preserves_request_and_export_after_restart(tmp_path):
+    sink = SessionDiagnostics(tmp_path / "private")
+    request = SimpleNamespace(run_id="run-large", request_id="req-large", metadata={})
+    await sink.begin_model_request(
+        session_id="large", request=request, provider={},
+        wire_request={"messages": ["Create the project"], "api_key": "never-export-this"},
+    )
+    # Reproduce the real long tool-output capture: each stream is within its
+    # own budget, but their combined record exceeds the former 8 MiB limit.
+    delta = "x" * (4 * 1024 * 1024 + 512 * 1024)
+    stream = {"wire_events": [{"delta": delta}], "normalized_events": [{"text": delta}],
+              "wire_capture_available": True, "dropped_wire_events": 0,
+              "dropped_normalized_events": 0}
+    await sink.record_model_stream(session_id="large", request=request, evidence=stream)
+    await sink.complete_model_request(
+        session_id="large", request=request,
+        response=SimpleNamespace(model_dump=lambda **_: {"output": "saved"}),
+    )
+    evidence = SessionDiagnostics(tmp_path / "private").snapshot("large", {"run-large"})
+    record = evidence["models"][0]
+    assert record["request"]["messages"] == ["Create the project"]
+    assert record["stream"] == stream
+    assert record["status"] == "completed"
+    assert record["purpose"] == "agent"
+    assert not record.get("truncated")
+    state = {"sessions": [{"session_id": "large"}],
+             "runs": [{"session_id": "large", "run_id": "run-large"}]}
+    output, _ = prepare_session_export("large", state, evidence)
+    with output, ZipFile(output) as archive:
+        index = json.loads(archive.read("large/requests/index.json"))
+        exported = json.loads(archive.read("large/" + index[0]["path"]))
+        assert exported["stream"] == stream
+        assert "never-export-this" not in json.dumps(exported)
+        manifest = json.loads(archive.read("large/manifest.json"))
+        assert manifest["truncated_model_records"] == 0
+        assert manifest["stream_evidence_missing_for_requests"] == []
+
+
 def test_redaction_covers_nested_json_free_text_urls_and_sibling_secret():
     value = {
         "api_key": "arbitrary-value",
