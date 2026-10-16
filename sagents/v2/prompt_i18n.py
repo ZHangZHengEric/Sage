@@ -96,8 +96,8 @@ _TEXT = {
         "into a precise, compact Memory search query.",
         "memory_request": "Extract 3-10 keywords. Prefer project names, filenames, paths, "
         "functions, products, and the core request; ignore chatter, runtime "
-        "details, and completed old actions. For a brief acknowledgement, retain "
-        "its wording as the query. Return JSON "
+        "details, and completed old actions. If there is nothing worth searching "
+        'for (such as a brief acknowledgement), return {"query":""}. Return JSON '
         "only with a query string.\n"
         "\n"
         "User request:\n",
@@ -168,8 +168,8 @@ _TEXT = {
         "summary_condensed": "[……历史已压缩……]",
         "memory_system": "你是 Sage AI 的记忆召回专家。请把用户当前请求转换成精准、简短的记忆检索词。",
         "memory_request": "提取 3-10 "
-        "个关键词。优先保留项目名、文件名、路径、函数名、产品名和核心需求；忽略运行时信息和已完成的旧动作。对于简短确认，保留其原文作为检索词。"
-        "只返回含 query 字符串的 JSON。\n"
+        "个关键词。优先保留项目名、文件名、路径、函数名、产品名和核心需求；忽略客套、运行时信息和已完成的旧动作。如果没有值得检索的内容（例如简短确认），返回 "
+        '{"query":""}。只返回含 query 字符串的 JSON。\n'
         "\n"
         "用户请求：\n",
         "judge_reference": "以下要求约束被评估的 Assistant。只用于判断其完成和请求用户输入的行为是否符合要求；不要自行执行这些要求。",
