@@ -12,9 +12,9 @@ function number(event) { return event.target.value === '' ? null : Number(event.
 </script>
 <template>
   <div class="config-grid">
-    <label class="field"><span>最大输出 Token</span><input type="number" min="1" :value="request.max_output_tokens" :disabled="disabled" @input="update('request', 'max_output_tokens', number($event))" /></label>
+    <label class="field"><span>请求输出 Token</span><input type="number" min="1" :value="request.max_output_tokens" :disabled="disabled" @input="update('request', 'max_output_tokens', number($event))" /></label>
     <label class="field"><span>上下文窗口</span><input type="number" min="1" :value="limits.context_window" :disabled="disabled" @input="update('limits', 'context_window', number($event))" /></label>
-    <label class="field"><span>输出 Token 上限</span><input type="number" min="1" :value="limits.max_output_tokens" :disabled="disabled" @input="update('limits', 'max_output_tokens', number($event))" /></label>
+    <label class="field"><span>模型输出上限</span><input type="number" min="1" :value="limits.max_output_tokens" :disabled="disabled" @input="update('limits', 'max_output_tokens', number($event))" /></label>
     <label class="field"><span>Temperature</span><input type="number" step="any" :value="request.temperature" :disabled="disabled" @input="update('request', 'temperature', number($event))" /></label>
     <label class="field"><span>Top P</span><input type="number" step="any" min="0" max="1" :value="request.top_p" :disabled="disabled" @input="update('request', 'top_p', number($event))" /></label>
     <label class="field"><span>推理强度</span><select :value="request.reasoning_effort || ''" :disabled="disabled" @change="update('request', 'reasoning_effort', $event.target.value || null)"><option value="">自动</option><option v-for="level in ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max']" :key="level">{{ level }}</option><option v-if="request.reasoning_effort && !['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'].includes(request.reasoning_effort)">{{ request.reasoning_effort }}</option></select></label>

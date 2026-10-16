@@ -152,12 +152,14 @@ class AnthropicMessagesModelProvider:
         """Probe only Anthropic Messages request and response semantics."""
 
         from sagents.v2.model.capability_probe import (
+            capability_probe_config,
             model_capability_profile,
             negotiate_model_output_limit,
             probe_model_capabilities,
             probe_model_reasoning_controls,
         )
 
+        probe_config = capability_probe_config(self.config)
         effective, _ = await negotiate_model_output_limit(self, request)
 
         def clone(
@@ -165,7 +167,7 @@ class AnthropicMessagesModelProvider:
             reasoning_effort: str | None = None,
             extra_body: dict[str, Any] | None = None,
         ):
-            config = self.config.model_copy(
+            config = probe_config.model_copy(
                 update={
                     "default_max_output_tokens": effective,
                     "reasoning_effort": reasoning_effort,

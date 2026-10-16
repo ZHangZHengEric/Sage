@@ -19,8 +19,13 @@ async function probe() {
   error.value = ''; probing.value = true
   try {
     const profile = await api.probeModel({ ...form.value, ...(editing.value ? { id: editing.value } : {}) })
-    const supported = name => profile.outcomes.some(item => item.name === name && item.status === 'supported')
-    form.value = { ...form.value, capability_profile: profile, capabilities: { ...form.value.capabilities, multimodal: supported('multimodal'), structured_output: supported('structured_output') || supported('json_object'), tool_calling: supported('tool_calling'), reasoning: supported('reasoning_control') } }
+    const capabilities = { ...(form.value.capabilities || {}) }
+    for (const [key, names] of [['multimodal', ['multimodal']], ['structured_output', ['structured_output', 'json_object']], ['tool_calling', ['tool_calling']], ['reasoning', ['reasoning_control']]]) {
+      const outcomes = profile.outcomes.filter(item => names.includes(item.name))
+      if (outcomes.some(item => item.status === 'supported')) capabilities[key] = true
+      else if (outcomes.length === names.length && outcomes.every(item => item.status === 'unsupported')) capabilities[key] = false
+    }
+    form.value = { ...form.value, capability_profile: profile, capabilities }
   } catch (exc) { error.value = exc.message } finally { probing.value = false }
 }
 const form = ref({

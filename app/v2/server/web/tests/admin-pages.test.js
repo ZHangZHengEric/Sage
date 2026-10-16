@@ -230,3 +230,20 @@ test('package form edits retain unrelated agents, files and runtime selections',
   assert.deepEqual(changed.files, bundle.files)
   assert.deepEqual(changed.manifest.runtime, bundle.manifest.runtime)
 })
+
+test('inconclusive probe failures retain declared abilities instead of disabling them', async t => {
+  const { api, mount } = await setup(t, 'Models')
+  t.mock.method(api, 'listModels', async () => [])
+  t.mock.method(api, 'probeModel', async () => ({ outcomes: [
+    { name: 'tool_calling', status: 'error', error: 'timeout' },
+    { name: 'multimodal', status: 'error', error: 'HTTP 429' },
+    { name: 'structured_output', status: 'unsupported' },
+    { name: 'json_object', status: 'error' },
+  ] }))
+  const state = await mount()
+  state.startNew()
+  state.form.capabilities = { tool_calling: true, multimodal: true, structured_output: true }
+  await state.probe()
+  assert.deepEqual(state.form.capabilities, { tool_calling: true, multimodal: true, structured_output: true })
+  assert.equal(state.probing, false)
+})

@@ -214,3 +214,16 @@ async def test_reasoning_only_connection_does_not_claim_text_support():
     assert report.outcome("connection").supported is True
     assert report.outcome("connection").metadata["has_text"] is False
     assert report.supports_text is False
+
+
+@pytest.mark.asyncio
+async def test_tool_probe_does_not_require_force_or_strict_mode():
+    class ThinkingToolsProvider(ProbeProvider):
+        async def _stream(self, request):
+            if request.tools:
+                assert request.tool_choice == 'auto'
+                assert all(tool.strict is None for tool in request.tools)
+            async for event in super()._stream(request):
+                yield event
+    report = await probe_model_capabilities(ThinkingToolsProvider(), model_binding='primary')
+    assert report.supports_tools

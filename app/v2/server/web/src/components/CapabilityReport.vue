@@ -2,7 +2,7 @@
 defineProps({ profile: Object })
 const names = { connection: '连接', multimodal: '多模态', structured_output: '结构化输出', json_object: 'JSON 输出', tool_calling: '工具调用', reasoning_control: '推理控制' }
 const behaviors = { none: '无推理', always: '始终推理', controllable: '可控制' }
-const statuses = { supported: '支持', unsupported: '不支持', error: '失败', skipped: '未探测' }
+const statuses = { supported: '支持', unsupported: '未通过', error: '探测失败', skipped: '未探测' }
 </script>
 <template>
   <section v-if="profile" class="glass-config capability-report" aria-label="能力探测结果">

@@ -154,17 +154,19 @@ class GeminiGenerateContentModelProvider:
 
     async def probe_capabilities(self, request):
         from sagents.v2.model.capability_probe import (
+            capability_probe_config,
             model_capability_profile,
             negotiate_model_output_limit,
             probe_model_capabilities,
             probe_model_reasoning_controls,
         )
 
+        probe_config = capability_probe_config(self.config)
         effective, _ = await negotiate_model_output_limit(self, request)
 
         def clone(*, effort=None, budget=None):
             return self.__class__(
-                self.config.model_copy(
+                probe_config.model_copy(
                     update={
                         "default_max_output_tokens": effective,
                         "reasoning_effort": effort,
