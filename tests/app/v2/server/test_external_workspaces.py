@@ -89,3 +89,48 @@ def test_download_rejects_file_modified_during_snapshot(tmp_path, monkeypatch):
     monkeypatch.setattr(downloads.ZipFile, "open", open_and_mutate)
     with pytest.raises(SnapshotChangedError):
         prepare_download(tmp_path, "projects/site")
+
+
+def test_workspace_delete_is_recursive_idempotent_and_isolated(tmp_path):
+    from app.v2.server.storage.external_workspaces import delete_workspace_path
+    paths = prepare_server_v2_storage(tmp_path)
+    for tenant, agent in [("a", "one"), ("b", "one"), ("a", "two")]:
+        import_workspace_files(paths, tenant, agent, "assets/nested", {"a.txt": "YQ=="})
+    with pytest.raises(OSError):
+        delete_workspace_path(paths, "a", "one", "assets")
+    assert delete_workspace_path(paths, "a", "one", "assets", recursive=True)
+    assert not delete_workspace_path(paths, "a", "one", "assets", recursive=True)
+    assert (paths.workspace_path("b", "one") / "assets/nested/a.txt").exists()
+    assert (paths.workspace_path("a", "two") / "assets/nested/a.txt").exists()
+    assert not delete_workspace_path(paths, "missing", "agent", "file")
+    assert not paths.workspace_path("missing", "agent").exists()
+
+
+def test_workspace_delete_unlinks_symlinks_without_following_them(tmp_path):
+    from app.v2.server.storage.external_workspaces import delete_workspace_path
+    paths = prepare_server_v2_storage(tmp_path)
+    root = paths.workspace_dir("a", "one")
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "keep").write_text("keep")
+    (root / "link").symlink_to(outside, target_is_directory=True)
+    with pytest.raises(OSError):
+        delete_workspace_path(paths, "a", "one", "link/keep", recursive=True)
+    assert delete_workspace_path(paths, "a", "one", "link", recursive=True)
+    (root / "dir").mkdir()
+    (root / "dir" / "link").symlink_to(outside, target_is_directory=True)
+    assert delete_workspace_path(paths, "a", "one", "dir", recursive=True)
+    assert (outside / "keep").read_text() == "keep"
+    root.rmdir()
+    root.symlink_to(outside, target_is_directory=True)
+    with pytest.raises(OSError):
+        delete_workspace_path(paths, "a", "one", "keep")
+    assert (outside / "keep").exists()
+
+
+@pytest.mark.parametrize("value", ["", ".", "..", "../a", "/tmp/a", "a/../b", "a//b", ".sage", "a\\b"])
+def test_workspace_delete_rejects_invalid_paths(tmp_path, value):
+    from app.v2.server.storage.external_workspaces import delete_workspace_path
+    paths = prepare_server_v2_storage(tmp_path)
+    with pytest.raises(ValueError):
+        delete_workspace_path(paths, "a", "one", value, recursive=True)

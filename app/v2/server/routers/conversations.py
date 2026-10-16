@@ -1,6 +1,6 @@
 """HTTP endpoints for conversation runs, threads, and pending approvals."""
 
-import asyncio
+import errno
 from typing import Annotated, Literal
 
 from ag_ui.core import RunAgentInput
@@ -9,6 +9,9 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.v2.server.conversations import external_runs as access
+from app.v2.server.conversations.cleanup import (
+    delete_external_session, finish_file_operation, require_idle,
+)
 from app.v2.server.routers.deps import (
     AdminUser,
     ChatCallerDep,
@@ -18,7 +21,7 @@ from app.v2.server.routers.deps import (
     ReadUser,
 )
 from app.v2.server.routers.files import download_response, file_operation
-from app.v2.server.routers.render import success
+from app.v2.server.routers.render import error_response, success
 from app.v2.server.routers.schemas.common import AUTH_ERRORS, VALIDATION_ERRORS, ApiResponse, ErrorBody
 from app.v2.server.routers.schemas.conversations import (
     AgentRunBody,
@@ -28,6 +31,7 @@ from app.v2.server.routers.schemas.conversations import (
 )
 from app.v2.server.storage.downloads import prepare_download, prepare_session_export
 from app.v2.server.storage.external_workspaces import (
+    delete_workspace_path,
     import_workspace_files,
     workspace_parts,
 )
@@ -312,9 +316,10 @@ class InteractionReply(BaseModel):
 @external_router.put("/workspace/files")
 async def put_workspace_files(body: WorkspaceImport, caller: CallerDep, host: HostDep):
     try:
-        count = await asyncio.to_thread(import_workspace_files, host.paths,
-                                        caller.tenant_id, caller.agent_id,
-                                        body.directory, body.files)
+        async with host.conversations.runs.workspace_mutation_lock:
+            count = await finish_file_operation(import_workspace_files, host.paths,
+                                                caller.tenant_id, caller.agent_id,
+                                                body.directory, body.files)
     except FileExistsError as exc:
         raise _error("workspace_conflict", ErrorCategory.CONFLICT,
                      "workspace file conflicts with existing data") from exc
@@ -322,6 +327,45 @@ async def put_workspace_files(body: WorkspaceImport, caller: CallerDep, host: Ho
         raise _error("invalid_workspace", ErrorCategory.VALIDATION,
                      "invalid workspace files") from exc
     return success({"directory": body.directory, "file_count": count})
+
+
+@external_router.delete("/workspace/files")
+async def delete_workspace_files(caller: CallerDep, host: HostDep,
+                                 service: ConversationDep,
+                                 path: str = Query(min_length=1, max_length=4096),
+                                 recursive: bool = False):
+    try:
+        workspace_parts(path)
+    except ValueError:
+        return error_response(status_code=422, message="invalid workspace path",
+                              detail="invalid_workspace_path")
+    async with service.runs.workspace_mutation_lock:
+        await require_idle(service, caller.tenant_id, caller.agent_id)
+        try:
+            deleted = await finish_file_operation(
+                delete_workspace_path, host.paths, caller.tenant_id,
+                caller.agent_id, path, recursive=recursive)
+        except OSError as exc:
+            if exc.errno in {errno.EACCES, errno.EPERM, errno.EROFS}:
+                status, code = 403, "workspace_permission_denied"
+            elif exc.errno in {errno.EBUSY, errno.ETXTBSY}:
+                status, code = 409, "workspace_busy"
+            elif exc.errno in {errno.ELOOP, errno.ENOTDIR}:
+                status, code = 422, "invalid_workspace_path"
+            elif exc.errno in {errno.ENOTEMPTY, errno.EEXIST}:
+                status, code = 409, "workspace_not_empty"
+            else:
+                status, code = 500, "workspace_storage_failure"
+            return error_response(status_code=status, message=code, detail=code)
+        return success({"path": path, "deleted": deleted})
+
+
+@external_router.delete("/sessions/{session_id}")
+async def delete_agent_session(session_id: str, caller: CallerDep,
+                                service: ConversationDep):
+    internal_id = await delete_external_session(
+        service, caller.tenant_id, caller.agent_id, session_id)
+    return success({"session_id": internal_id})
 
 
 @external_router.post("/runs", response_class=StreamingResponse)
