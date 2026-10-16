@@ -411,10 +411,8 @@ def upsert_agent(
                 category=ErrorCategory.VALIDATION, message=f"unknown fast model {fast_id}"))
         data = record.package.model_dump(mode="json")
         definition = data["manifest"]["agents"][record.id]
-        route_id = definition["models"].get("fast", "fast")
         if fast_id:
-            definition["models"]["fast"] = route_id
-            data["manifest"]["models"][route_id] = {"provider": "server", "model": fast_id}
+            definition["models"]["fast"] = fast_id
         else:
             definition["models"].pop("fast", None)
         record = record.model_copy(update={"package": AgentPackageBundle.model_validate(data)}).with_configuration()
