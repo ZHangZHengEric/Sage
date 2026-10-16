@@ -27,6 +27,7 @@ class RuntimeHost {
     RuntimeProcessStarter startProcess = Process.start,
     RuntimePidKiller killPid = Process.killPid,
     Duration terminationGracePeriod = const Duration(seconds: 10),
+    this.incompatibleLeaseGracePeriod = const Duration(seconds: 35),
     int sidecarReadyAttempts = 20,
     this.startupTimeout = const Duration(seconds: 45),
     Duration sidecarPollInterval = const Duration(milliseconds: 100),
@@ -52,6 +53,7 @@ class RuntimeHost {
   final RuntimePidKiller _pidKiller;
   final RuntimePythonVersionReader readPythonVersion;
   final Duration _shutdownGracePeriod;
+  final Duration incompatibleLeaseGracePeriod;
   final Duration startupTimeout;
   final int _registryReadyAttempts;
   final Duration _registryPollInterval;
@@ -327,7 +329,17 @@ class RuntimeHost {
       api.baseUri = Uri.parse('http://$host:$port');
       api.authToken = _authTokenFrom(value);
       try {
-        final result = await api.shutdownRuntimeIfIdle();
+        var result = await api.shutdownRuntimeIfIdle();
+        final waiting = Stopwatch()..start();
+        while (result['shutdown_requested'] != true &&
+            waiting.elapsed < incompatibleLeaseGracePeriod &&
+            !_closed) {
+          // A recently closed window may leave a lease until its next expiry.
+          // Only the old host may decide it is idle; never terminate clients.
+          await Future<void>.delayed(const Duration(milliseconds: 250));
+          if (!await registry.exists()) return;
+          result = await api.shutdownRuntimeIfIdle();
+        }
         if (result['shutdown_requested'] != true) {
           throw SageApiException(
             'A different Sage Desktop build is still serving '

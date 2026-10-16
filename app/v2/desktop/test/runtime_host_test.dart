@@ -19,6 +19,7 @@ class _RegistryApi extends V2ApiClient {
   final Set<int> healthyPorts;
   final bool shutdownOnDetach;
   final Map<String, Object?> idleShutdownResult;
+  Future<Map<String, Object?>> Function()? onIdleShutdown;
   int attachCalls = 0;
   int detachCalls = 0;
   int idleShutdownCalls = 0;
@@ -44,6 +45,7 @@ class _RegistryApi extends V2ApiClient {
   @override
   Future<Map<String, Object?>> shutdownRuntimeIfIdle() async {
     idleShutdownCalls += 1;
+    if (onIdleShutdown != null) return onIdleShutdown!();
     return idleShutdownResult;
   }
 }
@@ -449,6 +451,7 @@ void main() {
       api: api,
       sidecarRegistryFile: registry,
       buildId: 'new-build',
+      incompatibleLeaseGracePeriod: Duration.zero,
       startProcess:
           (executable, arguments, {workingDirectory, environment}) async {
             spawned = true;
@@ -472,6 +475,57 @@ void main() {
     expect(spawned, isFalse);
     expect(registry.existsSync(), isTrue);
   });
+
+  test(
+    'RuntimeHost waits for a closed window lease before upgrading',
+    () async {
+      final directory = await Directory.systemTemp.createTemp(
+        'sage-lease-upgrade-',
+      );
+      addTearDown(() => directory.delete(recursive: true));
+      final registry = File('${directory.path}/desktop-v2-sidecar.json');
+      await registry.writeAsString(
+        jsonEncode({
+          'protocol': 'sage.runtime/v2',
+          'host': '127.0.0.1',
+          'port': 54321,
+          'pid': 123,
+          'revision': 12,
+          'build_id': 'old-build',
+          'auth_token': 'registry-token',
+        }),
+      );
+      final api = _RegistryApi(healthyPorts: const {54322});
+      api.onIdleShutdown = () async {
+        if (api.idleShutdownCalls == 1) {
+          return {'active_clients': 1, 'shutdown_requested': false};
+        }
+        await registry.delete();
+        return {'active_clients': 0, 'shutdown_requested': true};
+      };
+      final killed = <int>[];
+      final host = RuntimeHost(
+        api: api,
+        sidecarRegistryFile: registry,
+        buildId: 'new-build',
+        incompatibleLeaseGracePeriod: const Duration(seconds: 1),
+        readPythonVersion: (_) async => (3, 12),
+        killPid: (pid, signal) {
+          killed.add(pid);
+          return true;
+        },
+        startProcess:
+            (executable, arguments, {workingDirectory, environment}) async =>
+                _FakeProcess(pid: 456, readyPort: 54322),
+      );
+      await host.ensureReady();
+      expect(api.idleShutdownCalls, 2);
+      expect(api.attachCalls, 1);
+      expect(api.baseUri.port, 54322);
+      expect(killed, isEmpty);
+      host.detach();
+    },
+  );
 
   test(
     'RuntimeHost escalates sidecar shutdown when SIGTERM does not exit',
