@@ -41,8 +41,8 @@ def test_trace_env_settings_and_explicit_noop_override(tmp_path, monkeypatch):
     )
     assert disabled.effective_trace_backend == "noop"
     assert (
-        "observability.trace-sink"
-        not in server_v2_manifest(disabled).runtime.capabilities
+        server_v2_manifest(disabled).runtime.capabilities["observability.trace-sink"].plugin
+        == "sage.trace.noop"
     )
     assert not disabled.trace_console_url
 

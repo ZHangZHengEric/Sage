@@ -152,6 +152,13 @@ def _runtime_capabilities(
         **{key: CapabilitySelection(plugin=plugin, config=DEFAULT_CONFIG.get(key, {}))
            for key, plugin in AGENT_DEFAULTS.items()},
         "artifact.store": CapabilitySelection(plugin="sage.artifact.session"),
+        # Pin the deployed product choices rather than inheriting SDK defaults
+        # that may change when the SDK is upgraded.
+        "context.summary-store": CapabilitySelection(
+            plugin="sage.context.summary-store.session-derived",
+        ),
+        "observability.trace-sink": CapabilitySelection(plugin="sage.trace.noop"),
+        "package.registry": CapabilitySelection(plugin="sage.package-registry.ephemeral"),
         "context.summarizer": CapabilitySelection(
             plugin="sage.context.summarizer.model",
             config={"model_binding": "primary"},
