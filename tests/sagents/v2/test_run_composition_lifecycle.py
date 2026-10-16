@@ -182,14 +182,14 @@ entrypoint: {agent: main}
         await SAgentBuilder()
         .with_defaults(session_root=tmp_path)
         .with_model_provider(model)
-        .build(manifest)
+        ._build_package(manifest)
     )
     try:
         child = (
             await SAgentBuilder()
             .with_shared_runtime(host)
             .with_model_provider(model)
-            .build(manifest)
+            ._build_package(manifest)
         )
         assert (
             child.entrypoint().runtime.session_store

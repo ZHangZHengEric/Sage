@@ -95,3 +95,15 @@ From the repository root, using its Python 3.12+ virtual environment:
 
 Live model and external database/sandbox tests require their own configured
 services. A local test pass does not establish distributed deployment readiness.
+
+
+Current public lifecycle: `builder.build()` → `app.load_agent()` → `app.entrypoint().run_stream(..., agent=agent)` → `app.close()`.
+
+Loading, revision publication and recovery snapshots live in `sagents/v2/composition/loaded_agents.py`、`inputs.py`、`revision_store.py`；`defaults.py` owns the SDK/Desktop component defaults.
+
+
+For the unified entrypoint, read `sagents/v2/builder.py` (App creation),
+`composition/loaded_agents.py` (revisions and lifetime),
+`composition/agent_graph.py` (independent child Package bindings), and
+`agent/management/loading.py` (persisted dependency trees).
+CLI composition lives in `app/v2/cli/host.py`; TUI reuses it through CLI v2.

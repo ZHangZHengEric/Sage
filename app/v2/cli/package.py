@@ -156,3 +156,13 @@ def plan_visible_tools(package: SageManifest, agent_id: str) -> tuple[str, ...]:
             visible.append(name)
     return tuple(visible)
 
+
+
+def builtin_dependencies(package: SageManifest) -> dict[str, SageManifest]:
+    """Resolve the CLI's built-in catalog into independent child Packages."""
+    preset_id = package.entrypoint.agent
+    if (not package.metadata.id.startswith("sage.cli.")
+            or package.metadata.id.rsplit(".", 1)[-1] != preset_id
+            or preset_id not in BUILTIN_AGENT_PRESETS):
+        return {}
+    return BuiltinPackageFactory.dependencies(preset_id, package)

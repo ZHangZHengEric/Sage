@@ -154,7 +154,7 @@ async def test_builder_wires_durable_images_from_tool_to_request_and_session(
         .with_defaults(session_root=root)
         .with_model_provider(model)
         .with_execution_binding_provider(Bindings())
-        .build(package)
+        ._build_package(package)
     )
     try:
         assert isinstance(application.service("artifact.store"), SessionArtifactStore)

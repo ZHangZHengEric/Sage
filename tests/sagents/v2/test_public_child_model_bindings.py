@@ -182,15 +182,27 @@ async def build(root, manifest, *, approval=False, dynamic=False):
     try:
         app = await (
             SAgentBuilder()
+            .with_defaults(session_root=root)
             .with_session_store(store)
             .with_derived_state_store(store)
             .with_model_provider(model)
             .with_tool_provider(plugin.catalog, plugin.executor)
-            .build(manifest)
+            .build(runtime=manifest.runtime)
         )
     except BaseException:
         await store.close()
         raise
+    from sagents.v2.package.manifest.agents import ApplicationEntrypoint
+    children = {}
+    if manifest.agents["main"].subagents:
+        worker = manifest.model_copy(update={
+            "metadata": manifest.metadata.model_copy(update={"id": "test.worker"}),
+            "agents": {"worker": manifest.agents["worker"]},
+            "entrypoint": ApplicationEntrypoint(agent="worker"),
+        })
+        children["worker"] = await app.load_agent(worker)
+    parent = manifest.model_copy(update={"agents": {"main": manifest.agents["main"]}})
+    await app.load_agent(parent, subagents=children)
     return app, store, model, calls
 
 
@@ -200,16 +212,18 @@ async def start(app, manifest, route, key):
         "main",
         model_bindings={"primary": route},
     )
+    loaded = next(a for a in app.loaded_agents if a.id == manifest.metadata.id)
     return await app.entrypoint().run_stream(
         StartRun(
-            agent_id="main",
+            agent_id=loaded.id,
             session_id=key,
             input=(InputItem(role="user", content=(TextBlock(text="Delegate"),)),),
             config=config,
-            resolved_spec_hash=app.composition_hash,
+            resolved_spec_hash=loaded.composition_hash,
             idempotency_key=key,
         ),
         CONTEXT,
+        agent=loaded,
     )
 
 
@@ -340,7 +354,7 @@ async def test_public_child_approval_resume_keeps_persisted_route(
             CONTEXT,
         )
         assert receipt.decision.value == "accepted"
-        execution = await app.entrypoint().continue_run(run.run_id, CONTEXT)
+        execution = await app.entrypoint().continue_run(run.run_id, CONTEXT, agent=await app.agent_for_run(run.run_id, CONTEXT))
         assert (await asyncio.wait_for(execution, 10)).state.value == "completed"
         assert len(calls) == 1
         assert calls[0].owner_run_id == child_id
@@ -371,15 +385,14 @@ def test_public_resolver_priority_and_rejection():
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("mode", ["team", "fibre"])
-async def test_public_resolved_package_is_snapshotted_before_delegation(tmp_path, mode):
+async def test_public_package_is_snapshotted_before_delegation(tmp_path, mode):
     manifest = package(mode)
-    resolved = CompositionResolver().resolve(manifest)
-    app, store, model, calls = await build(tmp_path, resolved)
+    app, store, model, calls = await build(tmp_path, manifest)
     model.parent_gate = asyncio.Event()
     try:
         stream = await start(app, manifest, "b", "snapshot-parent")
         await asyncio.wait_for(model.parent_entered.wait(), 10)
-        resolved.agents["worker"].delegation_model_bindings["primary"] = "c"
+        manifest.agents["worker"].delegation_model_bindings["primary"] = "c"
         model.parent_gate.set()
         assert (await asyncio.wait_for(stream.wait(), 10)).state.value == "completed"
         assert len(calls) == 1

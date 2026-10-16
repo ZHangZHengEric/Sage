@@ -8,6 +8,11 @@ from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from typing import Any, TypeVar
+from pathlib import Path
+
+from sagents.v2.composition.inputs import PackageInput
+from sagents.v2.composition.loaded_agents import LoadedAgent
+from sagents.v2.composition.host_execution import HostAgentExecution
 
 from sagents.v2.composition.contracts import (
     ApplicationResource as ApplicationResource,
@@ -63,7 +68,7 @@ class SAgentApplication:
         self,
         *,
         agents: Mapping[str, SAgent],
-        entrypoint_agent_id: str,
+        entrypoint_agent_id: str | None,
         scope_handles: tuple[ExtensionScopeHandle, ...],
         services: Mapping[str, Any],
         adapters: Mapping[str, ProtocolAdapter],
@@ -72,8 +77,9 @@ class SAgentApplication:
         owned_resources: tuple[ApplicationResource, ...] = (),
         resource_readiness: dict | None = None,
     ) -> None:
-        if entrypoint_agent_id not in agents:
+        if entrypoint_agent_id is not None and entrypoint_agent_id not in agents:
             raise ValueError(f"unknown application entrypoint {entrypoint_agent_id!r}")
+        self._loaded_agents = None
         self._agents = dict(agents)
         self._entrypoint_agent_id = entrypoint_agent_id
         self._scope_handles = list(scope_handles)
@@ -84,7 +90,7 @@ class SAgentApplication:
         self.resolved_plan = resolved_plan or ResolvedApplicationPlan(
             package_id="unknown",
             manifest_hash="unknown",
-            entrypoint_agent_id=entrypoint_agent_id,
+            entrypoint_agent_id=entrypoint_agent_id or "",
             providers=(),
             dependencies=(),
             composition_hash=composition_hash,
@@ -228,16 +234,103 @@ class SAgentApplication:
                 cache_identities=cache_identities,
             )
 
-    def entrypoint(self) -> SAgent:
+    @staticmethod
+    def _execution_scope(resolved, execution):
+        """Own an externally supplied driver using the same shutdown boundary."""
+        agent_id = resolved.entrypoint_agent
+        return SAgentApplication(
+            agents={agent_id: execution.create_agent()}, entrypoint_agent_id=agent_id,
+            scope_handles=(), services={}, adapters={}, composition_hash=execution.spec_hash,
+            resolved_plan=ResolvedApplicationPlan(
+                package_id=resolved.package_id, manifest_hash=resolved.manifest_hash,
+                entrypoint_agent_id=agent_id, providers=(), dependencies=(),
+                composition_hash=execution.spec_hash,
+            ),
+        )
+
+    async def load_agent(
+        self,
+        package: PackageInput | None = None,
+        *,
+        config_text: str | None = None,
+        base_path: str | Path | None = None,
+        execution: HostAgentExecution | None = None,
+        subagents: dict[str, LoadedAgent] | None = None,
+    ) -> LoadedAgent:
+        """Load one Package once; subsequent identical loads reuse its handle."""
+        if self._loaded_agents is None:
+            raise RuntimeError("load_agent requires build() without a Package")
+        agent = await self._loaded_agents.load(
+            package, config_text=config_text, base_path=base_path, execution=execution, subagents=subagents
+        )
+        if execution is None:
+            await self._loaded_agents.restore_pending()
+        return agent
+
+    async def update_agent(
+        self,
+        *,
+        agent: LoadedAgent,
+        package: PackageInput | None = None,
+        config_text: str | None = None,
+        base_path: str | Path | None = None,
+        execution: HostAgentExecution | None = None,
+        subagents: dict[str, LoadedAgent] | None = None,
+    ) -> LoadedAgent:
+        """Atomically publish a new revision without changing existing handles."""
+        if self._loaded_agents is None:
+            raise RuntimeError("update_agent requires build() without a Package")
+        return await self._loaded_agents.load(
+            package,
+            config_text=config_text,
+            base_path=base_path,
+            previous=agent,
+            execution=execution,
+            subagents=subagents,
+        )
+
+    async def agent_for_run(self, run_id, context):
+        """Authorize a durable Run and retrieve its exact loaded revision."""
+        if self._loaded_agents is None:
+            raise RuntimeError("agent_for_run requires build() without a Package")
+        async with self._assembly_operation():
+            return await self._loaded_agents.for_run(run_id, context)
+
+    @property
+    def loaded_agents(self):
         self._ensure_open()
+        return (
+            tuple(self._loaded_agents.current.values()) if self._loaded_agents else ()
+        )
+
+    def entrypoint(self):
+        self._ensure_open()
+        if self._loaded_agents is not None:
+            return self._loaded_agents.entrypoint
         return self._agents[self._entrypoint_agent_id]
 
     def agent(self, agent_id: str) -> SAgent:
         self._ensure_open()
+        if self._loaded_agents is not None:
+            for handle in self.loaded_agents:
+                if handle.id == agent_id:
+                    return self._loaded_agents.implementation(handle)
+            if self._loaded_agents.root is not None:
+                return self._loaded_agents.root.agent(agent_id)
         try:
             return self._agents[agent_id]
         except KeyError as exc:
             raise KeyError(f"unknown application Agent {agent_id!r}") from exc
+
+    @property
+    def runtime(self):
+        """Shared control runtime; Agent selection belongs to the run entrypoint."""
+        self._ensure_open()
+        if self._loaded_agents is not None:
+            if self._loaded_agents.root is None:
+                raise RuntimeError("load an Agent before accessing runtime services")
+            return self._loaded_agents.root.runtime
+        return self._agents[self._entrypoint_agent_id].runtime
 
     def service(self, capability: str) -> Any:
         self._ensure_open()
@@ -258,15 +351,13 @@ class SAgentApplication:
         command: StartRun,
         context: RequestContext,
         *,
-        agent_id: str | None = None,
+        agent: LoadedAgent,
     ) -> InterfaceRunStream:
         """Start a Native run and project every event with explicit loss data."""
 
         self._ensure_open()
         adapter = self._adapter(interface)
-        native = await self.agent(agent_id or self._entrypoint_agent_id).run_stream(
-            command, context
-        )
+        native = await self.entrypoint().run_stream(command, context, agent=agent)
         return InterfaceRunStream(
             native=native,
             results=self._project(native.events, adapter),
@@ -283,7 +374,7 @@ class SAgentApplication:
         """Replay canonical RuntimeEvents through one declared protocol adapter."""
 
         self._ensure_open()
-        native = self.agent(agent_id or self._entrypoint_agent_id).subscribe_events(
+        native = self.agent(agent_id or self.resolved_plan.entrypoint_agent_id).subscribe_events(
             cursor, context
         )
         return self._project(native, self._adapter(interface))
@@ -336,6 +427,8 @@ class SAgentApplication:
                 ) from errors[0]
 
     def _adapter(self, name: str) -> ProtocolAdapter:
+        if self._loaded_agents is not None and self._loaded_agents.root is not None:
+            return self._loaded_agents.root._adapter(name)
         try:
             return self._adapters[name]
         except KeyError as exc:

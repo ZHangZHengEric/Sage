@@ -34,7 +34,7 @@ async def test_idle_check_includes_suspended_and_unwinding_runs(state, driving):
     store = SimpleNamespace(list_dispatchable_runs=dispatchable, get_run=get_run, get_start_command=command)
     service = SimpleNamespace(
         threads=SimpleNamespace(list_for=threads), context_for=lambda _: None,
-        application=SimpleNamespace(entrypoint=lambda: SimpleNamespace(runtime=SimpleNamespace(session_store=store))),
+        application=SimpleNamespace(runtime=SimpleNamespace(session_store=store)),
         session_access=SimpleNamespace(list_descendant_sessions=descendants, list_session_runs=runs),
         runs=SimpleNamespace(catalog=SimpleNamespace(agent_owner=owner),
                              execution=SimpleNamespace(driving=lambda _: driving)),
@@ -59,6 +59,10 @@ async def test_cancelled_delete_keeps_admission_locked_until_worker_finishes():
     service = RunService(application=SimpleNamespace(run_interface=run_interface,
         resolved_plan=SimpleNamespace(entrypoint_agent_id="agent")),
         session_access=None, execution=SimpleNamespace(bind_model=lambda *_: False, driving=lambda _: False))
+
+    async def load_agent(*args):
+        return object()
+    service._load_run_agent = load_agent
 
     def delete():
         entered.set()

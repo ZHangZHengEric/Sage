@@ -140,23 +140,35 @@ async def compose_catalog_loop(
     )
     builder.with_admitted_run_contract(owner_run_id, command.resolved_spec_hash)
     async def compose(resources):
-        application = await builder.build(manifest, tenant_id=user_id)
+        application = await builder.build(runtime=manifest.runtime, tenant_id=user_id)
+        try:
+            from sagents.v2.agent.management.loading import load_bundle_agents
+            loaded = await load_bundle_agents(application, bundle.model_copy(update={"manifest": manifest}))
+        except BaseException:
+            await application.close()
+            raise
         resources.own(application)
-        return PackageRunDriver(application)
+        return PackageRunDriver(application, loaded)
 
     assembly = await service.application.compose_run(compose)
     return assembly.value, assembly.resources
 
 
 class PackageRunDriver:
-    def __init__(self, application):
+    def __init__(self, application, agent):
         self.application = application
+        self.agent = agent
 
     async def execute(self, run_id, context):
-        return await self.application.entrypoint().drive_admitted_run(run_id, context)
+        return await self._drive(run_id, context)
 
     async def resume(self, run_id, context):
-        return await self.application.entrypoint().drive_admitted_run(run_id, context, resume=True)
+        return await self._drive(run_id, context, resume=True)
+
+    async def _drive(self, run_id, context, *, resume=False):
+        return await self.application.entrypoint().drive_admitted_run(
+            run_id, context, agent=self.agent, resume=resume,
+        )
 
 
 async def _composition(service, command: StartRun, catalog, *, user_id: str):

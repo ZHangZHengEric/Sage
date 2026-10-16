@@ -146,7 +146,7 @@ async def test_public_builder_is_the_composition_entrypoint(tmp_path: Path):
         SAgentBuilder()
         .with_defaults(session_root=tmp_path / "session-store")
         .with_model_provider(ScriptedModelProvider(()))
-        .build(package)
+        ._build_package(package)
     )
 
     assert isinstance(application, SAgentApplication)
@@ -179,7 +179,7 @@ async def test_builder_transfers_host_resources_in_close_order(tmp_path: Path):
         .with_defaults(session_root=tmp_path / "session-store")
         .with_model_provider(ScriptedModelProvider(()))
         .with_owned_resources(scheduler, models)
-        .build(package)
+        ._build_package(package)
     )
 
     await application.close()
@@ -206,7 +206,7 @@ async def test_builder_uses_host_run_driver_factory(tmp_path: Path):
         .with_defaults(session_root=tmp_path / "session-store")
         .with_model_provider(ScriptedModelProvider(()))
         .with_run_driver_factory(make_driver)
-        .build(package)
+        ._build_package(package)
     )
 
     assert application.entrypoint().driver_factory("run-1") is driver
@@ -233,7 +233,7 @@ async def test_builder_injects_derived_state_independently_from_session_store(
         .with_session_store(session_store)
         .with_derived_state_store(derived_state)
         .with_model_provider(ScriptedModelProvider(()))
-        .build(package)
+        ._build_package(package)
     )
 
     summary_store = application.service("context.summary-store")
@@ -258,7 +258,7 @@ async def test_builder_does_not_require_injected_session_store_to_hold_derived_s
         .with_defaults(session_root=tmp_path / "unused-session-store")
         .with_session_store(_AuthoritativeOnlySessionStore())
         .with_model_provider(ScriptedModelProvider(()))
-        .build(package)
+        ._build_package(package)
     )
 
     derived_state = application.service("derived-state.store")
@@ -281,7 +281,7 @@ async def test_builder_wires_session_deletion_to_session_memory_cleanup(tmp_path
         .with_defaults(session_root=tmp_path / "unused-session-store")
         .with_session_memory_provider(session_memory)
         .with_model_provider(ScriptedModelProvider(()))
-        .build(package)
+        ._build_package(package)
     )
     store = application.entrypoint().runtime.session_store
     context = RequestContext(
@@ -348,7 +348,7 @@ async def test_builder_fails_when_selected_provider_cannot_meet_required_guarant
             SAgentBuilder()
             .with_defaults(session_root=tmp_path / "session-store")
             .with_model_provider(ScriptedModelProvider(()))
-            .build(package)
+            ._build_package(package)
         )
 
     assert (
@@ -381,7 +381,7 @@ async def test_distributed_profile_automatically_rejects_single_host_plugins(
             SAgentBuilder()
             .with_defaults(session_root=tmp_path / "session-store")
             .with_model_provider(ScriptedModelProvider(()))
-            .build(package)
+            ._build_package(package)
         )
 
     assert unsatisfied.value.info.code == "runtime.capability_guarantee_unsatisfied"
@@ -435,7 +435,7 @@ async def test_builtin_only_policy_rejects_external_declaration_before_import():
     )
 
     with pytest.raises(SageV2Error) as rejected:
-        await SAgentBuilder().build(package)
+        await SAgentBuilder()._build_package(package)
 
     assert rejected.value.info.code == "extension.plugin_trust_policy_violation"
     assert rejected.value.info.metadata == {
@@ -464,7 +464,7 @@ async def test_materialization_cannot_weaken_application_trust_or_change_profile
         SAgentBuilder()
         .with_defaults(session_root=tmp_path / "sessions")
         .with_model_provider(ScriptedModelProvider(()))
-        .build(root)
+        ._build_package(root)
     )
     external = BuiltinPackageFactory.create(
         "assistant",
@@ -524,7 +524,7 @@ async def test_builder_reads_mapping_capabilities_from_an_injected_provider(
         .with_defaults(session_root=tmp_path / "unused-store")
         .with_session_store(EphemeralSessionStore())
         .with_model_provider(ScriptedModelProvider(()))
-        .build(package)
+        ._build_package(package)
     )
 
     await application.close()
@@ -582,7 +582,7 @@ async def test_live_capability_conflict_cannot_be_masked_by_descriptor(tmp_path:
             .with_defaults(session_root=tmp_path / "sessions")
             .register(registration)
             .with_model_provider(ScriptedModelProvider(()))
-            .build(package)
+            ._build_package(package)
         )
 
     assert conflict.value.info.code == "runtime.capability_descriptor_conflict"
@@ -605,7 +605,7 @@ async def test_application_composition_hash_includes_builder_storage_config(
         SAgentBuilder()
         .with_defaults(session_root=tmp_path / "first")
         .with_model_provider(provider)
-        .build(package)
+        ._build_package(package)
     )
     first_hash = first.composition_hash
     await first.close()
@@ -613,7 +613,7 @@ async def test_application_composition_hash_includes_builder_storage_config(
         SAgentBuilder()
         .with_defaults(session_root=tmp_path / "second")
         .with_model_provider(provider)
-        .build(package)
+        ._build_package(package)
     )
 
     assert second.composition_hash != first_hash
@@ -634,7 +634,7 @@ async def test_builder_loop_fences_on_the_full_application_composition_hash(
         SAgentBuilder()
         .with_defaults(session_root=tmp_path / "session-store")
         .with_model_provider(ScriptedModelProvider(()))
-        .build(package)
+        ._build_package(package)
     )
 
     loop = application.entrypoint().driver_factory("run_1")
@@ -695,7 +695,7 @@ async def test_builder_composes_selected_context_and_continuation_plugins(
         SAgentBuilder()
         .with_defaults(session_root=tmp_path / "session-store")
         .with_model_provider(ScriptedModelProvider(()))
-        .build(package)
+        ._build_package(package)
     )
 
     loop = application.entrypoint().driver_factory("run_1")
@@ -735,6 +735,7 @@ async def test_search_memory_assignment_controls_recall_and_auto_write(
     assert agent_id is not None
     definition = package.agents[agent_id].model_copy(
         update={
+            "subagents": (),
             "memory": AgentMemoryBehavior(
                 recall=True,
                 auto_write=True,
@@ -750,7 +751,7 @@ async def test_search_memory_assignment_controls_recall_and_auto_write(
         .with_defaults(session_root=tmp_path / preset / "session-store")
         .with_memory_provider(NoopMemoryProvider())
         .with_model_provider(ScriptedModelProvider(()))
-        .build(package)
+        ._build_package(package)
     )
     agent = application.entrypoint()
     loop = agent.driver_factory("run_1")
@@ -818,7 +819,7 @@ async def test_registered_third_party_model_plugin_is_selected_by_model_route(
         SAgentBuilder()
         .with_defaults(session_root=tmp_path / "session-store")
         .register(registration)
-        .build(package)
+        ._build_package(package)
     )
 
     model = application.entrypoint().driver_factory("run_1").model
@@ -854,7 +855,7 @@ async def test_official_tools_are_explicit_and_never_auto_discovered(tmp_path: P
         .with_model_provider(ScriptedModelProvider(()))
     )
     with pytest.raises(ValueError, match="with_tool_runtime"):
-        await builder.build(package)
+        await builder._build_package(package)
 
     issuer = SandboxGrantIssuer()
     provider = LocalWorkspaceSandboxProvider(issuer.verification_key)
@@ -877,7 +878,7 @@ async def test_official_tools_are_explicit_and_never_auto_discovered(tmp_path: P
     )
     application = await builder.with_tool_runtime(
         OfficialToolRuntime(handle, issuer)
-    ).build(package)
+    )._build_package(package)
     assert isinstance(application, SAgentApplication)
     await application.close()
 
@@ -969,7 +970,7 @@ async def test_execution_binding_provider_receives_actual_run_and_closes_once(
         .with_defaults(session_root=tmp_path / "session-store")
         .with_model_provider(model)
         .with_execution_binding_provider(bindings)
-        .build(package)
+        ._build_package(package)
     )
     deferred = {
         (value.capability, value.plugin_id, value.scope, value.source)
@@ -1118,7 +1119,7 @@ async def test_builder_injects_host_log_and_diagnostic_sinks(tmp_path: Path):
         .with_model_provider(ScriptedModelProvider(()))
         .with_log_sink(log_sink)
         .with_diagnostic_sink(diagnostic_sink)
-        .build(package)
+        ._build_package(package)
     )
 
     assert application.service("observability.log-sink") is log_sink
@@ -1158,7 +1159,7 @@ async def test_builder_logs_resolved_application_registration(tmp_path: Path):
         .with_defaults(session_root=tmp_path / "session-store")
         .with_model_provider(ScriptedModelProvider(()))
         .with_log_sink(sink)
-        .build(package)
+        ._build_package(package)
     )
     try:
         registration = next(
@@ -1186,7 +1187,7 @@ async def test_builder_keeps_plugin_sinks_when_host_does_not_inject(
         SAgentBuilder()
         .with_defaults(session_root=tmp_path / "session-store")
         .with_model_provider(ScriptedModelProvider(()))
-        .build(package)
+        ._build_package(package)
     )
 
     assert isinstance(application.service("observability.log-sink"), NoopLogSink)
@@ -1229,7 +1230,7 @@ async def test_materialize_agent_uses_next_manifest_without_a_second_dispatcher(
         SAgentBuilder()
         .with_defaults(session_root=tmp_path / "session-store")
         .with_model_provider(ScriptedModelProvider(()))
-        .build(package)
+        ._build_package(package)
     )
     dispatcher = application.service("execution.dispatcher")
     next_manifest = _with_runtime_capabilities(
@@ -1283,7 +1284,7 @@ async def test_materialize_agent_reuses_agent_scoped_ports(tmp_path: Path):
         SAgentBuilder()
         .with_defaults(session_root=tmp_path / "session-store")
         .with_model_provider(ScriptedModelProvider(()))
-        .build(package)
+        ._build_package(package)
     )
     first = await application.materialize_agent(
         package, agent_id="assistant", run_id="run_1"
@@ -1313,7 +1314,7 @@ async def test_materialize_agent_isolates_cached_ports_by_tenant_and_agent(tmp_p
         SAgentBuilder()
         .with_defaults(session_root=tmp_path / "session-store")
         .with_model_provider(ScriptedModelProvider(()))
-        .build(package, tenant_id="tenant_a")
+        ._build_package(package, tenant_id="tenant_a")
     )
 
     tenant_a_first = await application.materialize_agent(
@@ -1383,7 +1384,7 @@ async def test_materialized_plan_reports_only_ports_selected_for_this_call(
         SAgentBuilder()
         .with_defaults(session_root=tmp_path / "session-store")
         .with_model_provider(ScriptedModelProvider(()))
-        .build(package)
+        ._build_package(package)
     )
     first = await application.materialize_agent(
         window, agent_id="assistant", run_id="run_1"
@@ -1439,7 +1440,7 @@ async def test_materialize_agent_rolls_back_run_scopes_on_later_failure(
         SAgentBuilder()
         .with_defaults(session_root=tmp_path / "session-store")
         .with_model_provider(ScriptedModelProvider(()))
-        .build(package)
+        ._build_package(package)
     )
     composer = application._composer
     original_port = composer._port
@@ -1582,7 +1583,7 @@ async def _build_with_tool_policy(session_root: Path, package, policy, model):
     )
     if policy is not None:
         builder = builder.with_tool_policy(policy)
-    return await builder.build(package)
+    return await builder._build_package(package)
 
 
 async def _run_to_boundary(application: SAgentApplication, package, *, key: str):
@@ -1750,7 +1751,7 @@ async def test_builder_wires_session_approval_memory_and_accepts_a_host_memory(
         .with_defaults(session_root=tmp_path / "host")
         .with_model_provider(ScriptedModelProvider(()))
         .with_approval_memory(host_memory)
-        .build(package)
+        ._build_package(package)
     )
     try:
         assert application.services["agent.approval-memory"] is host_memory
@@ -1788,7 +1789,7 @@ async def test_builder_layers_a_host_approval_memory_over_the_session_memory(
         .with_defaults(session_root=tmp_path / "layer")
         .with_model_provider(ScriptedModelProvider(()))
         .with_approval_memory_layer(Layer)
-        .build(package)
+        ._build_package(package)
     )
     try:
         memory = application.services["agent.approval-memory"]
@@ -1876,7 +1877,7 @@ async def test_closed_run_scopes_do_not_retain_materialization_locks(tmp_path):
         SAgentBuilder()
         .with_defaults(session_root=tmp_path / "session-store")
         .with_model_provider(ScriptedModelProvider(()))
-        .build(package)
+        ._build_package(package)
     )
     try:
         for index in range(20):
@@ -1906,7 +1907,7 @@ async def test_materialization_lock_remains_shared_by_concurrent_waiters(
         SAgentBuilder()
         .with_defaults(session_root=tmp_path / "session-store")
         .with_model_provider(ScriptedModelProvider(()))
-        .build(package)
+        ._build_package(package)
     )
     entered = asyncio.Event()
     release = asyncio.Event()
@@ -1962,7 +1963,7 @@ async def test_skill_loading_config_reaches_factory_and_rematerialized_ports(tmp
         PluginDeclaration(id="sage.skill.loading.lazy", config={"max_active_tokens": 9000}),
     )})
     application = await (SAgentBuilder().with_defaults(session_root=tmp_path)
-                         .with_model_provider(ScriptedModelProvider(())).build(package))
+                         .with_model_provider(ScriptedModelProvider(()))._build_package(package))
     try:
         assert application.service("skill.loading").config.max_active_tokens == 9000
         configured = package.model_copy(update={"runtime": package.runtime.model_copy(
@@ -2018,7 +2019,7 @@ async def test_materialized_user_config_is_not_overwritten_by_host_defaults(tmp_
         },
     })})
     application = await (SAgentBuilder().with_defaults(session_root=tmp_path)
-                         .with_model_provider(ScriptedModelProvider(())).build(package))
+                         .with_model_provider(ScriptedModelProvider(()))._build_package(package))
     try:
         ports = await application.materialize_agent(package, run_id="configured-run")
         assert ports.continuation_policy.judge.timeout_seconds == 12

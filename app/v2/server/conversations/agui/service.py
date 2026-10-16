@@ -197,7 +197,7 @@ class ConversationService:
                 interaction = await self.session_access.get_interaction(suspension.interaction_id, context)
                 if interaction.interaction_type.value != "approval":
                     continue
-                command = await self.application.entrypoint().runtime.session_store.get_start_command(run.run_id)
+                command = await self.application.runtime.session_store.get_start_command(run.run_id)
                 _, policy = frozen_execution(command)
                 timeout = min(policy.approval_timeout_seconds, self.runs.settings.approval_timeout_seconds)
                 items.append({"run_id": run.run_id, "thread_id": thread.thread_id,

@@ -119,12 +119,13 @@ async def demo(root: Path):
         .with_tool_policy(
             DefaultToolPolicy(approval_strategy=ApprovalStrategy.AUTO_APPROVE)
         )
-        .build(SageManifest.model_validate(parent_data))
+        .build(runtime=SageManifest.model_validate(parent_data).runtime)
     )
     try:
+        agent = await app.load_agent(SageManifest.model_validate(parent_data))
         stream = await app.entrypoint().run_stream(
             StartRun(
-                agent_id="assistant",
+                agent_id=agent.id,
                 input=(
                     InputItem(
                         role="user",
@@ -133,10 +134,11 @@ async def demo(root: Path):
                         ),
                     ),
                 ),
-                resolved_spec_hash=app.composition_hash,
+                resolved_spec_hash=agent.composition_hash,
                 idempotency_key="demo-parent",
             ),
             context,
+            agent=agent,
         )
         await stream.wait()
         await stream.detach()

@@ -29,7 +29,7 @@ async def require_idle(service, tenant_id: str, agent_id: str):
             code="server.agent.not_found", category=ErrorCategory.VALIDATION,
             message="Agent not found"))
     context = service.context_for(owner)
-    store = service.application.entrypoint().runtime.session_store
+    store = service.application.runtime.session_store
     candidates = {entry.run.run_id for entry in await store.list_dispatchable_runs()}
     for thread in await service.threads.list_for(owner):
         try:

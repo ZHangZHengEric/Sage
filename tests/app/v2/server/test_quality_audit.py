@@ -304,13 +304,13 @@ async def test_catalog_loop_uses_the_agent_config_accepted_with_the_run(
     catalog.agents[0] = catalog.agents[0].with_configuration(instructions="Edited after the Run was admitted")
     await service.catalog.store.save("user", catalog)
     captured = {}
-    original = PackageBuilder.build
+    original = PackageBuilder._build_package
 
     async def capture(self, manifest, **kwargs):
-        captured["instructions"] = manifest.agents[agent_id].instructions.inline
+        captured["instructions"] = manifest.agents[agent_id].instructions
         return await original(self, manifest, **kwargs)
 
-    monkeypatch.setattr(PackageBuilder, "build", capture)
+    monkeypatch.setattr(PackageBuilder, "_build_package", capture)
     try:
         _, ports = await compose_catalog_loop(service, command, user_id="user")
         assert captured["instructions"] == "Admitted instructions"

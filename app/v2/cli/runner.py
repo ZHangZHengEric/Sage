@@ -7,7 +7,6 @@ import json
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 
-from sagents.v2 import SAgent
 from sagents.v2.contracts.commands import (
     CancelRun,
     InputItem,
@@ -49,6 +48,30 @@ PENDING_RUN_SETTLE_SECONDS = 12.0
 _PENDING_STATES = frozenset(
     {RunState.QUEUED, RunState.RUNNING, RunState.RESUMING, RunState.SUSPEND_REQUESTED}
 )
+
+
+class CliExecution:
+    """CLI execution binds each new request and resumes its original revision."""
+
+    def __init__(self, application, agent):
+        self.application, self.agent = application, agent
+
+    @property
+    def runtime(self):
+        return self.application.runtime
+
+    async def run_stream(self, command, context):
+        return await self.application.entrypoint().run_stream(command, context, agent=self.agent)
+
+    async def continue_run(self, run_id, context):
+        agent = await self.application.agent_for_run(run_id, context)
+        return await self.application.entrypoint().continue_run(run_id, context, agent=agent)
+
+    async def subscribe_events(self, cursor, context):
+        async for event in self.application.service("session.access").subscribe_events(cursor, context):
+            yield event
+            if event.type in {"run.suspended", "run.completed", "run.failed", "run.cancelled"}:
+                return
 
 
 @dataclass
@@ -137,7 +160,7 @@ class _EventTracker:
 
 
 async def run_task(
-    agent: SAgent,
+    agent: CliExecution,
     command: StartRun,
     context: RequestContext,
     *,
@@ -192,7 +215,7 @@ async def run_task(
 
 
 async def resume_run(
-    agent: SAgent,
+    agent: CliExecution,
     run_id: str,
     context: RequestContext,
     *,
@@ -239,7 +262,7 @@ async def resume_run(
 
 
 async def wait_for_pending_run_settlement(
-    agent: SAgent,
+    agent: CliExecution,
     snapshot: RunSnapshot,
     context: RequestContext,
     *,
@@ -271,7 +294,7 @@ async def wait_for_pending_run_settlement(
 
 
 async def _drive_suspensions(
-    agent: SAgent,
+    agent: CliExecution,
     snapshot: RunSnapshot,
     context: RequestContext,
     *,
@@ -471,7 +494,7 @@ class _Steerer:
 
 
 async def _finish(
-    agent: SAgent,
+    agent: CliExecution,
     snapshot: RunSnapshot,
     renderer: EventRenderer,
     tracker: _EventTracker,
@@ -585,7 +608,7 @@ class _InterruptCanceller:
 
 
 async def _answer_suspension(
-    agent: SAgent,
+    agent: CliExecution,
     snapshot: RunSnapshot,
     context: RequestContext,
     *,

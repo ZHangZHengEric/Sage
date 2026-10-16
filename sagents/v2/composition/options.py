@@ -73,3 +73,6 @@ class BuildOptions:
         self.admitted_run_contract = None
         self.owned_resources: list[ApplicationResource] = []
         self.check_readiness = False
+        self.dispatcher = None
+        self.defer_dispatcher_start = False
+        self.revision_identity = False

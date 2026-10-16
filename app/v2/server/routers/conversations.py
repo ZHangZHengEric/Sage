@@ -221,7 +221,7 @@ async def session_download(thread_id: str, user: AdminUser, host: HostDep):
         binding.owner_id != record.user_id or binding.agent_id != record.agent_id
     ):
         raise HTTPException(404, "thread not found")
-    store = service.application.entrypoint().runtime.session_store
+    store = service.application.runtime.session_store
     if not isinstance(store, (MysqlSessionStore, FilesystemSessionStore)):
         raise HTTPException(
             409, "this Session store does not support diagnostic export"

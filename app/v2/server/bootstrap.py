@@ -56,7 +56,6 @@ class ServerHost:
         skills: SkillStore | None = None,
         api_keys: ApiKeyStore | None = None,
         package_authorizer=None,
-        package_extensions=(),
         extensions=(),
     ) -> None:
         if database is None:
@@ -66,10 +65,10 @@ class ServerHost:
         self.diagnostics = None
         self.contexts = RequestContexts(settings.language)
         self.package_authorizer = package_authorizer
-        self.package_extensions = (*extensions, *package_extensions)
+        self._registrations = tuple(extensions)
         from sagents.v2.runtime.extensions.official import builtin_extension_registry
         self.extensions = builtin_extension_registry()
-        for registration in self.package_extensions:
+        for registration in self._registrations:
             self.extensions.register(registration)
         self.agent_management = None
         self.package_queries = None
@@ -217,11 +216,13 @@ class ServerHost:
                 )
                 .with_owned_resources(scheduler, host_models)
             )
-            for registration in self.package_extensions:
+            for registration in self._registrations:
                 builder.register(registration)
-            self._application = await builder.build(server_v2_manifest(self.settings))
+            manifest = server_v2_manifest(self.settings)
+            self._application = await builder.build(runtime=manifest.runtime)
+            await self._application.load_agent(manifest)
             await install_sandbox(self.execution, self._application, self.settings)
-            host_models.session_store = self._application.entrypoint().runtime.session_store
+            host_models.session_store = self._application.runtime.session_store
             session_access = self._application.service("session.access")
             admission = RunAdmission(
                 threads=self.threads,
@@ -283,7 +284,7 @@ class ServerHost:
                 mcp_plugins=self.mcp_plugins,
                 a2a_plugins=self.a2a_plugins,
                 package_authorizer=self.package_authorizer,
-                extensions=self.package_extensions,
+                extensions=self._registrations,
                 run_quota=run_quota,
                 model_budget=model_budget,
                 log_sink=self.log_sink,

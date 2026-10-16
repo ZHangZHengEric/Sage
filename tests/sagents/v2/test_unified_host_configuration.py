@@ -39,10 +39,10 @@ def builder(tmp_path, registration=None):
 @pytest.mark.asyncio
 async def test_runtime_parameter_and_embedded_runtime_have_same_identity(tmp_path):
     manifest = package()
-    direct = await builder(tmp_path).build(manifest)
+    direct = await builder(tmp_path)._build_package(manifest)
     identity = direct.composition_hash
     await direct.close()
-    separate = await builder(tmp_path).build(
+    separate = await builder(tmp_path)._build_package(
         manifest.model_copy(update={"runtime": RuntimeConfig()}),
         runtime=manifest.runtime.model_dump(mode="json"),
     )
@@ -67,7 +67,7 @@ async def test_invalid_registered_plugin_parameters_fail_before_factory(
         return original_factory(context, dependencies)
 
     with pytest.raises(SageV2Error) as caught:
-        await builder(tmp_path, replace(registration, factory=factory)).build(
+        await builder(tmp_path, replace(registration, factory=factory))._build_package(
             package(),
             runtime={
                 "capabilities": {
@@ -86,7 +86,7 @@ async def test_invalid_registered_plugin_parameters_fail_before_factory(
 async def test_resolved_package_cannot_silently_change_runtime(tmp_path):
     resolved = CompositionResolver().resolve(package())
     with pytest.raises(ValueError, match="already resolved"):
-        await builder(tmp_path).build(resolved, runtime=RuntimeConfig())
+        await builder(tmp_path)._build_package(resolved, runtime=RuntimeConfig())
 
 
 @pytest.mark.asyncio
@@ -140,7 +140,7 @@ async def test_process_provider_config_names_concurrency_and_shutdown(tmp_path):
         },
         stop=lambda value, reason: stopped.append(value),
     )
-    app = await builder(tmp_path).register(registration).build(package())
+    app = await builder(tmp_path).register(registration)._build_package(package())
     try:
         selection = {"plugin": "example.host.service", "name": "left"}
         values = await asyncio.gather(
@@ -192,14 +192,19 @@ async def test_server_registration_and_package_runtime_parameter(tmp_path):
     await host.start()
     try:
         assert host.application.service("context.token-estimator").bytes_per_token == 8
+        class UnusedBindings:
+            async def acquire(self, request):
+                raise AssertionError("configuration inspection must not acquire a workspace")
         managed = await (
             PackageBuilder(settings, None, tmp_path / "package", application=host.application)
             .with_defaults(session_root=tmp_path / "package")
             .with_model_provider(offline_model())
             .register(registration)
-            .build(package(), runtime=package().runtime)
+            .with_execution_binding_provider(UnusedBindings())
+            .build(runtime=package().runtime)
         )
         try:
+            await managed.load_agent(package())
             assert managed.service("context.token-estimator").bytes_per_token == 4
         finally:
             await managed.close()

@@ -27,7 +27,6 @@ from sagents.v2.contracts.interactions import InteractionType
 from sagents.v2.contracts.items import TextBlock
 from sagents.v2.contracts.principals import RequestContext
 from sagents.v2.contracts.run_state import TERMINAL_RUN_STATES, RunState
-from sagents.v2.package.manifest import CompositionResolver
 
 # Factories are host-owned. Bundles never contain Python import callbacks.
 BuilderFactory = Callable[[AgentPackageBundle, Path, RequestContext], Any]
@@ -162,10 +161,12 @@ class AgentManagementService:
     async def _validate(self, bundle, context, *, readiness=False):
         readiness = readiness or self.require_readiness
         await self.authorize("validate", bundle, context)
-        resolved = CompositionResolver().resolve(bundle.resolved_manifest())
+        from sagents.v2.agent.management.loading import resolve_bundle
+        resolve_bundle(bundle, bundle.manifest.runtime)
+        agent_ids = tuple(bundle.manifest.agents)
         reports = {}
-        # Build all agents: validating one entrypoint must not hide a broken member.
-        for agent_id in resolved.agents:
+        # Loading the root also validates every pinned dependency.
+        for agent_id in agent_ids:
             async with self._build_slots:
                 task = asyncio.create_task(
                     self._validate_agent(bundle, agent_id, context, readiness=readiness)
@@ -192,7 +193,7 @@ class AgentManagementService:
             ),
             "valid": True,
             "ref": bundle.content_hash,
-            "agents": list(resolved.agents),
+            "agents": list(agent_ids),
             "flows": list(bundle.manifest.flows),
             "validation": "schema, composition and provider initialization; no quality evaluation",
         }
@@ -331,26 +332,38 @@ class AgentManagementService:
             builder.with_job_runtime(self.job_runtime)
         if readiness:
             builder.with_readiness_check()
-        sources = [(declaration, bundle.files[f"extensions/{declaration.id}.py"])
-                   for declaration in bundle.manifest.plugins
-                   if f"extensions/{declaration.id}.py" in bundle.files]
+        sources = {}
+        async def collect_sources(member, *, dependency=False):
+            if dependency:
+                await self.authorize("restore", member, context)
+            local = [(declaration, member.files[f"extensions/{declaration.id}.py"])
+                     for declaration in member.manifest.plugins
+                     if f"extensions/{declaration.id}.py" in member.files]
+            if local:
+                if not self.allow_source_plugins:
+                    raise ValueError("source plugins require explicit host opt-in")
+                if member.manifest.runtime.plugin_trust_policy == "built_in_only":
+                    raise ValueError("built_in_only policy does not allow source plugins")
+                await self.authorize("load_source_plugin", member, context)
+                for declaration, source in local:
+                    value = (declaration, source)
+                    if declaration.id in sources and sources[declaration.id] != value:
+                        raise ValueError("dependency source plugins must have unique registrations")
+                    if builder.extensions.contains(declaration.id):
+                        raise ValueError("source plugins cannot replace an already registered extension")
+                    sources[declaration.id] = value
+            for child in member.dependencies.values():
+                await collect_sources(child, dependency=True)
+        await collect_sources(bundle)
         scope = None
         if sources:
-            if not self.allow_source_plugins:
-                raise ValueError("source plugins require explicit host opt-in")
-            if bundle.manifest.runtime.plugin_trust_policy == "built_in_only":
-                raise ValueError("built_in_only policy does not allow source plugins")
-            for declaration, _ in sources:
-                if builder.extensions.contains(declaration.id):
-                    raise ValueError("source plugins cannot replace an already registered extension")
-            await self.authorize("load_source_plugin", bundle, context)
             from sagents.v2.agent.management.source_plugins import SourcePluginScope
             scope = SourcePluginScope()
         try:
             if scope is not None:
                 # Keep imports off the event loop, and settle an owned load even
                 # if the caller leaves before it completes.
-                for declaration, source in sources:
+                for declaration, source in sources.values():
                     task = asyncio.create_task(asyncio.to_thread(scope.load, declaration, source))
                     try:
                         registration = await asyncio.shield(task)
@@ -358,11 +371,14 @@ class AgentManagementService:
                         await task
                         raise
                     builder.register(registration)
-            app = await builder.build(
-                bundle.resolved_manifest(),
-                tenant_id=context.actor.tenant_id,
-                agent_id=agent_id,
-            )
+            manifest = bundle.resolved_manifest()
+            app = await builder.build(runtime=manifest.runtime, tenant_id=context.actor.tenant_id)
+            try:
+                from sagents.v2.agent.management.loading import load_bundle_agents
+                await load_bundle_agents(app, bundle)
+            except BaseException:
+                await app.close()
+                raise
             if scope is not None:
                 await app.adopt_resource(scope, close_after_existing=True)
             return app
@@ -481,17 +497,19 @@ class AgentManagementService:
             await self._validate(bundle, context, readiness=True)
         app = await self._application(bundle, agent_id, context)
         native = app.entrypoint()
+        loaded = next(a for a in app.loaded_agents if a.package_id == bundle.manifest.metadata.id)
         # Native idempotency survives a crash between admission and handle indexing.
         key = hashlib.sha256(f"{owner}:{operation}".encode()).hexdigest()
         handle = await native.start_run(
             StartRun(
-                agent_id=agent_id,
+                agent_id=loaded.id,
                 session_id=session_id,
                 input=(InputItem(role="user", content=(TextBlock(text=content),)),),
-                resolved_spec_hash=app.composition_hash,
+                resolved_spec_hash=loaded.composition_hash,
                 idempotency_key=f"managed:{key}",
             ),
             context,
+            agent=loaded,
         )
         record = await self.store.invocation(
             owner, operation, handle=handle.model_dump(mode="json")
@@ -732,7 +750,7 @@ class AgentManagementService:
                 current = await native.runtime.get_run(run.run_id)
                 if current.state == RunState.RESUMING:
                     try:
-                        await native.continue_run(run.run_id, context)
+                        await native.continue_run(run.run_id, context, agent=await app.agent_for_run(run.run_id, context))
                     except ValueError:
                         # Another concurrent retry may already have started it.
                         if (

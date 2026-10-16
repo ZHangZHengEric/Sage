@@ -20,7 +20,18 @@ from sagents.v2.package.manifest.root import (
 
 
 class BuiltinPackageFactory:
-    """Creates complete one-manifest packages without embedding credentials."""
+    """Creates single-Agent packages without embedding credentials."""
+
+    @staticmethod
+    def dependencies(preset_id: str, package: SageManifest) -> dict[str, SageManifest]:
+        """Direct child Packages; load them before binding this preset."""
+        return {name: package.model_copy(update={
+            "metadata": package.metadata.model_copy(update={
+                "id": f"{package.metadata.id}.{name}", "name": BUILTIN_AGENT_PRESETS[name].name}),
+            "agents": {name: BUILTIN_AGENT_PRESETS[name].agent_definition()},
+            "entrypoint": ApplicationEntrypoint(agent=name),
+            "flows": {},
+        }) for name in BUILTIN_AGENT_PRESETS[preset_id].subagents}
 
     @staticmethod
     def create(
@@ -35,14 +46,6 @@ class BuiltinPackageFactory:
     ) -> SageManifest:
         preset = BUILTIN_AGENT_PRESETS[preset_id]
         included = {preset_id: preset.agent_definition()}
-        pending = list(preset.subagents)
-        while pending:
-            child_id = pending.pop(0)
-            if child_id in included:
-                continue
-            child = BUILTIN_AGENT_PRESETS[child_id]
-            included[child_id] = child.agent_definition()
-            pending.extend(child.subagents)
         flows = {}
         if preset.entrypoint.type == "flow":
             flows["main"] = FlowDefinition(

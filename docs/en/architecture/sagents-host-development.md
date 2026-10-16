@@ -9,9 +9,10 @@ loading, context budgets, Session history and recovery belong to the runtime.
 ## Entry points
 
 ```text
-sage.yaml → bootstrap.build_application() → SAgentBuilder.build()
-          → SAgentApplication.entrypoint() → SAgent.run_stream(command, context)
-          → events / wait() → application.close() at host shutdown
+SAgentBuilder.build(runtime=...) → App
+  → app.load_agent(package) → reusable LoadedAgent
+  → app.entrypoint().run_stream(command, context, agent=agent)
+  → stream.events / stream.wait() → app.close()
 ```
 
 The starter separates manifest configuration (`sage.yaml`), process composition
@@ -34,6 +35,54 @@ scripted provider to resume a Run admitted against a real model.
 is not an I/O-free YAML validator. Offline replaces the model port only; the
 provided manifest contains no network tools.
 
+## Loading and updating
+
+One new Package defines exactly one Agent. Load it once and reuse the returned
+handle. `app.update_agent(agent=old, package=source)` publishes a new immutable
+revision; existing handles and admitted Runs retain their original revision.
+Identical loads reuse handles, invalid updates preserve the current version,
+and stale concurrent updates are rejected.
+
+`load_agent` accepts a file/directory path, manifest or dictionary. Use
+`config_text=` explicitly for YAML/JSON text; file references require `base_path`
+and cannot escape it. `build(runtime=...)` accepts RuntimeConfig, dictionaries
+or paths; text uses `runtime_config_text=`. Object/path and text inputs are
+mutually exclusive. A directory Package uses `sage.yaml`.
+
+Without runtime configuration, the SDK uses the same shared component defaults
+as Desktop, excluding personal settings and credentials. Explicit runtime
+replaces defaults; use `sagents.v2.default_runtime()` to
+start with the shared profile and customize selected capabilities. Resources
+open lazily when the first Agent loads. Commands use the loaded handle's `id`
+and `composition_hash`; the run entrypoint validates them.
+
+All revisions share a dispatcher and durable stores. Revisions remain alive
+until App shutdown, so frequent updates consume additional memory. Local SDK
+recovery snapshots are saved under `agent-revisions/` in the runtime data root.
+Use `await app.agent_for_run(run_id, context)` to authorize and retrieve the
+original revision before manually continuing a suspended Run.
+Keep snapshots with Session data; missing/incompatible revisions cannot be replaced
+with the latest version during recovery. This is local persistence, not a
+distributed package registry.
+
+Desktop and Server inject `HostAgentExecution` for their existing admission and
+frozen recovery contracts. Per-Run resources are still acquired and closed per
+Run. `build(package)` is removed and public loading rejects multi-Agent Packages.
+All hosts use build → load_agent → explicit Agent execution.
+
+Load child Packages independently and bind immutable handles:
+
+```python
+reviewer = await app.load_agent("./agents/reviewer")
+coder = await app.load_agent("./agents/coder", subagents={"reviewer": reviewer})
+```
+
+Updating reviewer does not change coder. Explicitly update coder with the new
+child handle to adopt it. Private recovery snapshots preserve the full compiled
+graph. Managed `AgentPackageBundle.dependencies` persists the individual child
+Packages; each is loaded through the same App API. CLI presets follow this
+pattern, and TUI uses the same CLI through `sage v2 chat --json`.
+
 ## Configuration boundaries
 
 | Input | Owner |
@@ -50,7 +99,9 @@ Loader environment overlays may override only `runtime`, `policies`, and
 `interfaces`. There is no universal environment-variable-over-YAML rule.
 Explicit host injections select their corresponding ports; trusted locked
 runtime dependencies cannot be replaced by plugin config. Inspect
-`app.resolved_plan` for the effective binding and its source.
+`agent.resolved_plan` for a standard SDK revision; `app.resolved_plan` is the
+initial process view. Host-injected execution reports its full component plan
+when the admitted Run is composed, not in the loaded definition.
 `with_shared_runtime()` borrows its documented services, not every host setting.
 
 ## Common debugging contract
@@ -113,8 +164,7 @@ the example rejects them. Trusted dependencies are separate from user config.
 Plugin implementations never need to import sibling implementations.
 
 Both hosts accept `extensions=(registration,)` at construction:
-`DesktopV2Service(...)` and `ServerHost(...)`. Server also retains the legacy
-`package_extensions` argument. Registration supplies implementations; runtime
+`DesktopV2Service(...)` and `ServerHost(...)`. The old `package_extensions` argument is removed. Registration supplies implementations; runtime
 configuration selects them and supplies parameters.
 
 Hosts that admit Runs themselves use the same existing integration interfaces:
@@ -162,3 +212,21 @@ Tests have a default 30-second hang guard; use explicit assertions for performan
 contracts and test-specific timeout markers when needed.
 
 Desktop and Server both acquire sandbox providers through application-owned plugin lifecycles. Server configuration and Agent validation use the host registration registry.
+
+
+## Verification
+
+Run the Python suites under `tests/sagents/v2`, `tests/app/v2/server`,
+`tests/app/v2/desktop`, and `tests/app/clients/cli` (excluding optional live suites).
+Run `flutter test` in `app/v2/desktop`, and `cargo test --offline` in
+`app/clients/terminal`.
+
+For an opt-in real-model Desktop test, run
+`SAGE_DESKTOP_LIVE_CATALOG="$HOME/sage/runtime/desktop-catalog.json" flutter test test/unified_sidecar_test.dart`.
+It uses the first Agent's configured model, or the explicit provider ID in
+`SAGE_DESKTOP_LIVE_MODEL`. It starts the real Python sidecar with isolated data,
+checks two turns and history recall, and incurs real model request costs.
+
+Internal assembly regression tests use private `_build_package` to inspect
+compiled execution graphs. Applications and public API tests use `build()` and
+`load_agent()`; private assembly methods are not integration entrypoints.
