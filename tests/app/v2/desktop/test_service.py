@@ -2574,8 +2574,9 @@ async def test_hybrid_is_not_selectable_and_explicit_status_builds_real_policy(
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("auxiliary_json_compatible", [True, False])
+@pytest.mark.parametrize("explicit_selection", [True, False])
 async def test_llm_judge_selection_uses_v1_contract_and_hides_turn_status(
-    tmp_path: Path, auxiliary_json_compatible: bool,
+    tmp_path: Path, auxiliary_json_compatible: bool, explicit_selection: bool,
 ):
     service = DesktopV2Service(tmp_path)
     fast_provider = await service.create_model_provider(
@@ -2590,11 +2591,12 @@ async def test_llm_judge_selection_uses_v1_contract_and_hides_turn_status(
     )
     # A probe result must never silently replace the user's chosen plugins.
     service._auxiliary_json_compatible = lambda provider: auxiliary_json_compatible
-    await service.select_component(
-        "agent.continuation-policy",
-        ComponentSelectionRequest(plugin_id="sage.agent.continuation.llm-judge"),
-        "user_1",
-    )
+    if explicit_selection:
+        await service.select_component(
+            "agent.continuation-policy",
+            ComponentSelectionRequest(plugin_id="sage.agent.continuation.llm-judge"),
+            "user_1",
+        )
     await service.list_agents("user_1")
     await service.patch_model_provider(
         "model_main", ModelProviderPatch(api_keys=["test-key"]), "user_1"

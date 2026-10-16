@@ -34,6 +34,15 @@ async def change_context(service, marker):
 
 
 async def configure(service, root):
+    # ConcurrentModel scripts agent steps, not auxiliary judge requests.
+    # Keep the isolation scenarios independent of model completion scoring.
+    settings = await service.get_settings()
+    await service.save_settings(settings.model_copy(update={
+        "component_selections": {
+            **settings.component_selections,
+            "agent.continuation-policy": "sage.agent.continuation.deterministic",
+        },
+    }))
     await service.list_agents("user")
     await service.patch_model_provider(
         "model_main",
