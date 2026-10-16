@@ -275,3 +275,28 @@ test('plugin settings group implementations under Desktop component names and ke
   state.query = 'unmatched'
   assert.equal(state.groups.length, 0)
 })
+
+test('plugin settings handle Server injected components without descriptors or selections', async t => {
+  const { api, mount } = await setup(t, 'Plugins')
+  t.mock.method(api, 'listPlugins', async () => ({ defaults: {}, plugins: [
+    { id: 'sage.context.summarizer.model', capabilities: ['context.summarizer'], schema: { properties: { timeout_seconds: { default: 30 } } } },
+  ] }))
+  t.mock.method(api, 'serverPlugins', async () => ({ providers: [
+    { capability: 'derived-state.store', plugin_id: null, scope: 'process' },
+    { capability: 'session.access', plugin_id: null, scope: 'process' },
+    { capability: 'agent.approval-memory', plugin_id: null, scope: 'process' },
+  ], selections: {} }))
+  const state = await mount()
+  assert.equal(state.error, '')
+  assert.equal(state.groups.length, 4)
+  for (const group of state.groups) {
+    const rows = state.parameterRows(group)
+    if (group.id === 'context.summarizer') assert.equal(rows[0].value, '30')
+    else {
+      assert.deepEqual(rows, [])
+      assert.equal(state.currentNames(group), 'Server 提供')
+    }
+  }
+  state.server = null
+  assert.doesNotThrow(() => state.parameterRows(state.groups[0]))
+})
