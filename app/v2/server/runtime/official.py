@@ -103,12 +103,25 @@ def workspace_sandbox_spec(
     resources = resources or ResourceLimits(require_hard_limits=False)
     network = network or NetworkPolicy()
     root = str(Path(host_workspace).resolve())
+    process = ProcessPolicy(
+        enabled=True,
+        allow_shell=True,
+        allowed_executables=("bash", "sh", "python", "python3", "rg", "git", "node", "sage-frontend-test"),
+        allowed_env_names=(
+            "PATH", "PYTHONPATH", "NODE_PATH", "PLAYWRIGHT_BROWSERS_PATH",
+            "PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD", "FONTCONFIG_FILE",
+            "npm_config_offline", "npm_config_update_notifier",
+        ),
+        max_wall_time_seconds=300,
+        max_output_bytes=4 * 1024 * 1024,
+    )
     fingerprint = hashlib.sha256(
         json.dumps(
             {
                 "plugin": LocalWorkspaceSandboxProvider.plugin_id,
                 "host_workspace": root,
                 "resources": resources.model_dump(mode="json"),
+                "process": process.model_dump(mode="json"),
                 "network": network.model_dump(mode="json"),
             },
             sort_keys=True,
@@ -127,14 +140,7 @@ def workspace_sandbox_spec(
             max_file_bytes=64 * 1024 * 1024,
             max_total_bytes=4 * 1024 * 1024 * 1024,
         ),
-        process=ProcessPolicy(
-            enabled=True,
-            allow_shell=True,
-            allowed_executables=("bash", "sh", "python", "python3", "rg", "git"),
-            allowed_env_names=("PATH", "PYTHONPATH"),
-            max_wall_time_seconds=300,
-            max_output_bytes=4 * 1024 * 1024,
-        ),
+        process=process,
         network=network,
         lifecycle=LifecyclePolicy(
             durability=SandboxDurability.DURABLE_EXTERNAL,

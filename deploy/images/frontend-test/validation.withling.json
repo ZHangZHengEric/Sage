@@ -1,0 +1,34 @@
+{
+  "workspace": "/tmp/sage-frontend-acceptance-mu3slwwn/workspace",
+  "network": "none",
+  "checks": {
+    "file_api_boundary": {
+      "passed": true,
+      "error": "path is outside the workspace"
+    },
+    "runtime": {
+      "passed": true,
+      "exit_code": 0,
+      "stdout": "{\"uid\":10001,\"node\":\"v24.13.0\",\"npm\":\"11.6.2\",\"jsdom\":\"26.1.0\",\"playwright\":\"1.58.2\",\"browser\":\"/usr/local/lib/sage-frontend-test/browsers/chromium-1208/chrome-linux64/chrome\",\"fonts\":\"Noto Sans CJK SC\",\"NODE_PATH\":\"/usr/local/lib/sage-frontend-test/node_modules\",\"PLAYWRIGHT_BROWSERS_PATH\":\"/usr/local/lib/sage-frontend-test/browsers\",\"FONTCONFIG_FILE\":\"/usr/share/sage-frontend-test/fonts.conf\",\"isolation\":[\"Uid:\\t10001\\t10001\\t10001\\t10001\",\"Gid:\\t10001\\t10001\\t10001\\t10001\",\"CapEff:\\t0000000000000000\",\"NoNewPrivs:\\t1\",\"Seccomp:\\t2\"],\"namespaces\":{\"net\":\"net:[4026532775]\",\"pid\":\"pid:[4026532773]\"}}\n",
+      "stderr": ""
+    },
+    "offline": {
+      "passed": true,
+      "exit_code": 0,
+      "stdout": "2: denied: [Errno 1] Operation not permitted\n10: denied: [Errno 1] Operation not permitted\nCLONE_NEWUSER: denied: EPERM\n",
+      "stderr": ""
+    },
+    "jsdom": {
+      "passed": true,
+      "exit_code": 0,
+      "stdout": "{\"mode\":\"jsdom\",\"script\":\"/workspace/.sage-tests/dom.cjs\",\"status\":\"passed\",\"durationMs\":7202,\"artifacts\":\"/workspace/.sage-tests/artifacts/jsdom-rF7UyX\"}\n",
+      "stderr": ""
+    },
+    "playwright": {
+      "passed": false,
+      "exit_code": 1,
+      "stdout": "{\"mode\":\"playwright\",\"script\":\"/workspace/.sage-tests/browser.cjs\",\"status\":\"failed\",\"durationMs\":5720,\"artifacts\":\"/workspace/.sage-tests/artifacts/playwright-sTf9Px\",\"error\":\"browserType.launch: Target page, context or browser has been closed\\nBrowser logs:\\nChromium sandboxing failed!\\n================================\\nTo avoid the sandboxing issue, do either of the following:\\n  - (preferred): Configure your environment to support sandboxing\\n  - (alternative): Launch Chromium without sandbox using 'chromiumSandbox: false' option\\n================================\\n\\nCall log:\\n  - <launching> /usr/local/lib/sage-frontend-test/browsers/chromium_headless_shell-1208/chrome-headless-shell-linux64/chrome-headless-shell --disable-field-trial-config --disable-background-networking --disable-background-timer-throttling --disable-backgrounding-occluded-windows --disable-back-forward-cache --disable-breakpad --disable-client-side-phishing-detection --disable-component-extensions-with-background-pages --disable-component-update --no-default-browser-check --disable-default-apps --disable-dev-shm-usage --disable-extensions --disable-features=AvoidUnnecessaryBeforeUnloadCheckSync,BoundaryEventDispatchTracksNodeRemoval,DestroyProfileOnBrowserClose,DialMediaRouteProvider,GlobalMediaControls,HttpsUpgrades,LensOverlay,MediaRouter,PaintHolding,ThirdPartyStoragePartitioning,Translate,AutoDeElevate,RenderDocument,OptimizationHints --enable-features=CDPScreenshotNewSurface --allow-pre-commit-input --disable-hang-monitor --disable-ipc-flooding-protection --disable-popup-blocking --disable-prompt-on-repost --disable-renderer-backgrounding --force-color-profile=srgb --metrics-recording-only --no-first-run --password-store=basic --use-mock-keychain --no-service-autorun --export-tagged-pdf --disable-search-engine-choice-screen --unsafely-disable-devtools-self-xss-warnings --edge-skip-compat-layer-relaunch --enable-automation --disable-infobars --disable-search-engine-choice-screen --disable-sync --enable-unsafe-swiftshader --headless --hide-scrollbars --mute-audio --blink-settings=primaryHoverType=2,availableHoverTypes=2,primaryPointerType=4,availablePointerTypes=4 --disable-dev-shm-usage --user-data-dir=/tmp/sage-frontend-GXw53R/playwright_chromiumdev_profile-GQb7mt --remote-debugging-pipe --no-startup-window\\n  - <launched> pid=13\\n  - [pid=13][err] [1016/061835.989499:FATAL:content/browser/zygote_host/zygote_host_impl_linux.cc:128] No usable sandbox! If you are running on Ubuntu 23.10+ or another Linux distro that has disabled unprivileged user namespaces with AppArmor, see https://chromium.googlesource.com/chromium/src/+/main/docs/security/apparmor-userns-restrictions.md. Otherwise see https://chromium.googlesource.com/chromium/src/+/main/docs/linux/suid_sandbox_development.md for more information on developing with the (older) SUID sandbox. If you want to live dangerously and need an immediate workaround, you can try using --no-sandbox.\\n  - [pid=13] <gracefully close start>\\n  - [pid=13] <kill>\\n  - [pid=13] <will force kill>\\n  - [pid=13] <process did exit: exitCode=null, signal=SIGTRAP>\\n  - [pid=13] starting temporary directories cleanup\\n  - [pid=13] finished temporary directories cleanup\\n  - [pid=13] <gracefully close end>\\n\\n    at context.launch (/usr/local/lib/sage-frontend-test/runner.cjs:44:60)\\n    at module.exports (/workspace/.sage-tests/browser.cjs:2:24)\\n    at main (/usr/local/lib/sage-frontend-test/runner.cjs:53:11)\\n    at Object.<anonymous> (/usr/local/lib/sage-frontend-test/runner.cjs:67:1)\"}\n",
+      "stderr": ""
+    }
+  }
+}

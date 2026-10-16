@@ -1,0 +1,9 @@
+#!/bin/sh
+# Fixed locations are visible in the sandbox; never resolve through /root caches.
+export NODE_PATH=/usr/local/lib/sage-frontend-test/node_modules
+export PLAYWRIGHT_BROWSERS_PATH=/usr/local/lib/sage-frontend-test/browsers
+export PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
+export npm_config_offline=true
+export npm_config_update_notifier=false
+export FONTCONFIG_FILE=/usr/share/sage-frontend-test/fonts.conf
+exec /usr/local/bin/node /usr/local/lib/sage-frontend-test/runner.cjs "$@"

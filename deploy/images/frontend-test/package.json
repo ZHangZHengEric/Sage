@@ -1,0 +1,9 @@
+{
+  "name": "sage-sandbox-frontend-test",
+  "version": "1.0.0",
+  "private": true,
+  "dependencies": {
+    "jsdom": "26.1.0",
+    "playwright": "1.58.2"
+  }
+}

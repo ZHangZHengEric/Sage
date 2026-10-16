@@ -149,3 +149,6 @@ DEPLOY_ENV=dev deploy/k8s/scripts/delete.sh
 ```
 
 更多 Kubernetes 参数见 `deploy/k8s/README.md`。
+
+Server v2 本地沙箱的预装前端测试环境、离线调用及隔离限制见
+[前端测试环境说明](images/frontend-test/README.md)。
