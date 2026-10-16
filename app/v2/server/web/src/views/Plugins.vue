@@ -1,38 +1,70 @@
 <script setup>
-import { computed, onMounted, ref } from 'vue'
+import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { api } from '../api.js'
 import { isAdmin } from '../auth.js'
-import SchemaField from '../components/SchemaField.vue'
-const catalog = ref(null), server = ref(null), error = ref(''), query = ref('')
-const plugins = computed(() => (catalog.value?.plugins || []).filter(item => `${item.id} ${item.name} ${item.capabilities.join(' ')}`.toLowerCase().includes(query.value.toLowerCase())))
-function defaultsFor(plugin) { return plugin.capabilities.filter(cap => catalog.value.defaults[cap] === plugin.id) }
-function bindingsFor(plugin) { return server.value?.providers.filter(item => item.plugin_id === plugin.id) || [] }
-function configFor(plugin) { return Object.fromEntries(Object.entries(plugin.schema?.properties || {}).filter(([, field]) => field.default !== undefined).map(([key, field]) => [key, field.default])) }
-onMounted(async () => { try { [catalog.value, server.value] = await Promise.all([api.listPlugins(), isAdmin() ? api.serverPlugins() : null]) } catch (e) { error.value = e.message } })
+import { labels } from '../config-schema.js'
+import { componentGroups, pluginName, scopeNames, parameterDefaults, displayValue } from '../plugin-presentation.js'
+const catalog = ref(null), server = ref(null), error = ref(''), query = ref(''), active = ref(''), content = ref(null), navigation = ref(null)
+const preview = ref({})
+const groups = computed(() => componentGroups(catalog.value, server.value?.providers).filter(group => !query.value || `${group.name} ${group.id} ${group.plugins.map(p => `${pluginName(p)} ${p.name} ${p.id}`).join(' ')}`.toLowerCase().includes(query.value.toLowerCase())))
+function bindings(group) { return server.value?.providers.filter(item => item.capability === group.id) || [] }
+function currentIds(group) { const live = bindings(group).map(item => item.plugin_id).filter(Boolean); return live.length ? [...new Set(live)] : [catalog.value?.defaults[group.id]].filter(Boolean) }
+function currentNames(group) { return currentIds(group).map(id => pluginName(group.plugins.find(p => p.id === id) || id)).join('、') || bindings(group).map(b => b.implementation || 'Server 提供').join('、') || '未指定' }
+function inspecting(group) { return group.plugins.find(p => p.id === (preview.value[group.id] || currentIds(group)[0])) || group.plugins[0] }
+function parameterRows(group) {
+  const plugin = inspecting(group)
+  const selection = server.value?.selections[group.id]
+  const live = selection?.plugin === plugin?.id ? selection.config : {}
+  return Object.entries(plugin?.schema?.properties || {}).map(([key]) => ({ key, label: labels[key] || key, value: displayValue(({ ...parameterDefaults(plugin), ...live })[key]) }))
+}
+function jump(id) { const body = content.value, target = body?.querySelector(`[data-component="${id}"]`); if (!body || !target) return; body.scrollTop += target.getBoundingClientRect().top - body.getBoundingClientRect().top; active.value = id }
+function trackSection() { if (!content.value) return; const top = content.value.getBoundingClientRect().top; for (const group of groups.value) if (content.value.querySelector(`[data-component="${group.id}"]`)?.getBoundingClientRect().top <= top + 110) active.value = group.id }
+watch(active, async id => {
+  await nextTick()
+  const nav = navigation.value, button = nav?.querySelector(`[data-nav="${id}"]`)
+  if (!nav || !button) return
+  const area = nav.getBoundingClientRect(), item = button.getBoundingClientRect()
+  if (item.left < area.left) nav.scrollLeft += item.left - area.left
+  else if (item.right > area.right) nav.scrollLeft += item.right - area.right
+  if (item.top < area.top) nav.scrollTop += item.top - area.top
+  else if (item.bottom > area.bottom) nav.scrollTop += item.bottom - area.bottom
+})
+watch(query, async () => { await nextTick(); active.value = groups.value[0]?.id || ''; if (content.value) content.value.scrollTop = 0 })
+onMounted(async () => { try { [catalog.value, server.value] = await Promise.all([api.listPlugins(), isAdmin() ? api.serverPlugins() : null]); active.value = groups.value[0]?.id || '' } catch (e) { error.value = e.message } })
 </script>
 <template>
-  <section>
-    <header class="page-head"><h1>插件</h1><input v-model="query" type="search" aria-label="搜索插件" placeholder="搜索插件" /></header>
+  <section class="plugins-page">
+    <header class="page-head"><h1>插件</h1><input v-model="query" type="search" aria-label="搜索组件或插件" placeholder="搜索组件或插件" /></header>
     <p v-if="error" class="error" role="alert">{{ error }}</p><p v-else-if="!catalog" role="status">加载中…</p>
-    <div v-else>
-      <details v-if="server" class="panel" open><summary>Server 生效配置</summary><div class="plugin-bindings"><div v-for="binding in server.providers" :key="`${binding.capability}:${binding.name}:${binding.scope}`" class="plugin-binding"><strong>{{ binding.capability }}</strong><code>{{ binding.plugin_id || binding.source }}</code><span>{{ binding.scope }}</span></div></div></details>
-    <div class="plugin-grid">
-      <article v-for="plugin in plugins" :key="plugin.id" class="panel plugin-card">
-        <h2>{{ plugin.name }}</h2><code>{{ plugin.id }}</code>
-        <div class="selected-tags"><span v-for="cap in plugin.capabilities" :key="cap" class="tag">{{ cap }}</span><span v-if="defaultsFor(plugin).length" class="tag">默认选择</span><span v-if="bindingsFor(plugin).length" class="tag">线上生效</span><span class="tag">{{ plugin.configurable_capabilities.length ? 'Agent 可配置' : 'Server 管理' }}</span></div>
-        <SchemaField v-if="Object.keys(plugin.schema.properties || {}).length" :schema="plugin.schema" :root="plugin.schema" :model-value="configFor(plugin)" label="默认参数" disabled />
-        <template v-for="binding in bindingsFor(plugin)" :key="`${binding.capability}:${binding.scope}`"><div class="plugin-binding">{{ binding.capability }} · {{ binding.scope }}</div><SchemaField v-if="server.selections[binding.capability]" :schema="plugin.schema" :root="plugin.schema" :model-value="server.selections[binding.capability].config" label="生效配置" disabled /></template>
-      </article>
+    <div v-else-if="groups.length" class="component-layout">
+      <nav ref="navigation" class="component-nav panel" aria-label="插件组件"><button v-for="group in groups" :key="group.id" :data-nav="group.id" :class="{ active: active === group.id }" :aria-current="active === group.id ? 'true' : undefined" @click="jump(group.id)">{{ group.name }}</button></nav>
+      <div ref="content" class="component-content" @scroll="trackSection">
+        <article v-for="group in groups" :key="group.id" :data-component="group.id" class="panel component-card">
+          <div class="component-head"><h2>{{ group.name }}</h2><router-link v-if="catalog.configurable?.includes(group.id)" class="btn ghost" to="/agents">配置智能体</router-link><router-link v-else-if="group.id === 'model.provider'" class="btn ghost" to="/models">模型配置</router-link></div>
+          <div class="current-choice"><span class="status-dot"></span><span>当前：<strong>{{ currentNames(group) }}</strong></span></div>
+          <div class="selected-tags"><span class="tag">{{ catalog.configurable?.includes(group.id) ? '智能体可配置' : 'Server 管理' }}</span><span v-if="currentIds(group).length" class="tag">{{ bindings(group).length ? '正在使用' : '默认选择' }}</span><span v-for="scope in [...new Set(bindings(group).map(b => b.scope))]" :key="scope" class="tag">作用域：{{ scopeNames[scope] || scope }}</span></div>
+          <details v-if="group.plugins.length" class="plugin-options"><summary>可选实现（{{ group.plugins.length }}）</summary><div class="implementation-list"><button v-for="plugin in group.plugins" :key="plugin.id" class="implementation" :class="{ inspecting: inspecting(group)?.id === plugin.id }" :aria-pressed="inspecting(group)?.id === plugin.id" @click="preview[group.id] = plugin.id"><span class="option-dot" :class="{ selected: currentIds(group).includes(plugin.id) }"></span><span>{{ pluginName(plugin) }}</span><span v-if="currentIds(group).includes(plugin.id)" class="implementation-status">当前</span></button></div></details>
+          <details v-if="parameterRows(group).length" class="plugin-options"><summary>插件参数 · {{ pluginName(inspecting(group)) }}</summary><dl class="parameter-list"><div v-for="row in parameterRows(group)" :key="row.key"><dt>{{ row.label }}</dt><dd>{{ row.value }}</dd></div></dl></details>
+          <details class="plugin-options technical"><summary>技术信息</summary><dl class="parameter-list"><div><dt>组件标识</dt><dd>{{ group.id }}</dd></div><div v-for="plugin in group.plugins" :key="plugin.id"><dt>{{ pluginName(plugin) }}</dt><dd>{{ plugin.id }}</dd></div></dl></details>
+        </article>
+      </div>
     </div>
-    </div>
-    <p v-if="catalog && !plugins.length" class="empty">没有匹配的插件</p>
+    <p v-else-if="catalog" class="empty">没有匹配的组件或插件</p>
   </section>
 </template>
 <style scoped>
-.plugin-bindings { display: grid; gap: 12px; margin-top: 16px; }.plugin-bindings .plugin-binding { display: flex; flex-wrap: wrap; gap: 12px; }.plugin-bindings strong { min-width: 230px; }
-.plugin-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 360px), 1fr)); gap: 16px; margin-top: 16px; }
-.plugin-card { min-width: 0; background: color-mix(in srgb, var(--card) 90%, transparent); backdrop-filter: blur(14px); }
-.plugin-card h2 { font-size: 17px; margin: 0 0 8px; }
-.plugin-card code { overflow-wrap: anywhere; font-size: 12px; }
-.selected-tags { margin: 12px 0; }.plugin-binding { margin-top: 12px; color: var(--muted-foreground); overflow-wrap: anywhere; }
+.plugins-page { height: 100%; display: flex; flex-direction: column; min-height: 0; }
+.component-layout { display: grid; grid-template-columns: 210px minmax(0, 1fr); gap: 20px; min-height: 0; flex: 1; }
+.component-nav { align-self: start; max-height: 100%; overflow: auto; padding: 8px; display: grid; gap: 3px; }
+.component-nav button { padding: 11px 12px; border: 0; background: transparent; color: var(--foreground); border-radius: 8px; text-align: left; cursor: pointer; }
+.component-nav button.active { background: color-mix(in srgb, var(--primary) 12%, transparent); color: var(--primary); }
+.component-nav button:hover { background: var(--muted); }
+.component-content { overflow: auto; min-width: 0; padding: 0 8px 24px 0; scroll-padding-top: 4px; }
+.component-card { margin-bottom: 14px; background: color-mix(in srgb, var(--card) 90%, transparent); backdrop-filter: blur(14px); }
+.component-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }.component-head h2 { font-size: 18px; margin: 0; }
+.current-choice { display: flex; align-items: center; gap: 9px; margin: 16px 0 12px; flex-wrap: wrap; }.status-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--primary); }
+.selected-tags { margin-bottom: 16px; }.plugin-options { border-top: 1px solid var(--border); padding: 12px 0; }.plugin-options:last-child { padding-bottom: 0; }.plugin-options summary { cursor: pointer; font-size: 13px; }
+.implementation-list { display: grid; gap: 4px; margin-top: 10px; }.implementation { display: flex; align-items: center; gap: 10px; padding: 10px; background: transparent; border: 1px solid transparent; color: var(--foreground); text-align: left; border-radius: 8px; cursor: pointer; }.implementation:hover,.implementation.inspecting { background: var(--muted); }.option-dot { width: 14px; height: 14px; border: 1px solid var(--border); border-radius: 50%; flex-shrink: 0; }.option-dot.selected { border: 4px solid var(--primary); }.implementation-status { margin-left: auto; color: var(--primary); font-size: 12px; }
+.parameter-list { margin: 14px 0 0; }.parameter-list > div { display: grid; grid-template-columns: minmax(120px, .9fr) minmax(0, 1.1fr); gap: 16px; padding: 8px 0; font-size: 13px; }.parameter-list dt { color: var(--muted-foreground); }.parameter-list dd { margin: 0; overflow-wrap: anywhere; }.technical dd { font-family: monospace; font-size: 12px; }
+@media (max-width: 760px) { .component-layout { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); gap: 12px; }.component-nav { display: flex; overflow-x: auto; }.component-nav button { flex-shrink: 0; }.component-content { padding-right: 0; }.parameter-list > div { grid-template-columns: 1fr; gap: 5px; } }
 </style>

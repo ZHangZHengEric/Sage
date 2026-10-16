@@ -2,10 +2,11 @@
 import { computed, onMounted, ref } from 'vue'
 import { api } from '../api.js'
 import SchemaField from './SchemaField.vue'
+import { componentName, pluginName } from '../plugin-presentation.js'
 const props = defineProps({ modelValue: { type: Object, default: () => ({}) }, disabled: Boolean })
 const emit = defineEmits(['update:modelValue'])
 const catalog = ref(null), error = ref('')
-const labels = { 'context.summarizer': '会话摘要', 'context.reducer': '上下文压缩', 'context.token-estimator': 'Token 估算', 'context.unit-compactor': '工具结果压缩', 'agent.continuation-policy': '任务继续判定', 'tool.selection-policy': '工具选择', 'skill.loading': '技能加载', 'memory.recall-query': '记忆查询' }
+
 const capabilities = computed(() => catalog.value?.configurable || [])
 function options(capability) { return catalog.value.plugins.filter(item => item.capabilities.includes(capability)) }
 function selected(capability) { return props.modelValue[capability]?.plugin || catalog.value.defaults[capability] }
@@ -32,18 +33,20 @@ onMounted(async () => { try { catalog.value = await api.listPlugins() } catch (e
     <p v-if="error" class="error" role="alert">{{ error }}</p>
     <p v-else-if="!catalog" role="status">加载中…</p>
     <section v-for="capability in capabilities" :key="capability" class="panel plugin-panel">
-      <label class="field"><span>{{ labels[capability] || capability }} <span class="tag">{{ modelValue[capability] ? '显式配置' : '默认' }}</span></span>
+      <label class="field"><span>{{ componentName(capability) }} <span class="tag">{{ modelValue[capability] ? '自定义' : '跟随默认' }}</span></span>
         <select :value="modelValue[capability]?.plugin || ''" :disabled="disabled" @change="update(capability, $event.target.value)">
-          <option value="">默认 · {{ catalog.defaults[capability] }}</option>
+          <option value="">默认 · {{ pluginName(catalog.plugins.find(item => item.id === catalog.defaults[capability]) || catalog.defaults[capability]) }}</option>
           <option v-if="modelValue[capability] && !options(capability).some(item => item.id === modelValue[capability].plugin)" :value="modelValue[capability].plugin">{{ modelValue[capability].plugin }}</option>
-          <option v-for="plugin in options(capability)" :key="plugin.id" :value="plugin.id">{{ plugin.name }} · {{ plugin.id }}</option>
+          <option v-for="plugin in options(capability)" :key="plugin.id" :value="plugin.id">{{ pluginName(plugin) }}</option>
         </select>
       </label>
       <SchemaField v-if="Object.keys(definition(capability)?.schema?.properties || {}).length" :schema="definition(capability).schema" :root="definition(capability).schema" :model-value="parameters(capability)" label="参数" :disabled="disabled" @update:model-value="configure(capability, $event)" />
+      <details class="plugin-technical"><summary>技术信息</summary><code>{{ selected(capability) }}</code></details>
     </section>
   </div>
 </template>
 <style scoped>
 .plugin-panel { background: color-mix(in srgb, var(--card) 90%, transparent); backdrop-filter: blur(14px); min-width: 0; }
 .plugin-panel select { width: 100%; }
+.plugin-technical { margin-top: 12px; font-size: 12px; }.plugin-technical summary { cursor: pointer; }.plugin-technical code { display: block; margin-top: 8px; overflow-wrap: anywhere; }
 </style>
