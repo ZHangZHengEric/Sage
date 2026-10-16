@@ -10,6 +10,28 @@ from tests.app.v2.server.test_file_downloads import identity
 from tests.app.v2.server.test_session_diagnostics import admin_headers
 
 
+def test_fresh_deployment_pins_current_server_plugin_defaults(tmp_path):
+    from app.v2.server.config.plugins import SERVER_DEFAULTS
+    from tests.app.v2.server.conftest import make_settings
+
+    settings = make_settings(tmp_path, mysql_url="mysql+aiomysql://test:test@localhost/sage")
+    assert not ServerPluginConfig(tmp_path).path.exists()
+    capabilities = server_v2_manifest(settings).runtime.capabilities
+    for capability, plugin in SERVER_DEFAULTS.items():
+        assert capabilities[capability].plugin == plugin
+    assert capabilities["context.summarizer"].config == {"model_binding": "primary"}
+    assert capabilities["agent.continuation-policy"].config == {"model_binding": "fast"}
+    assert capabilities["memory.provider"].config == {"root": str(tmp_path / "runtime/memory")}
+    assert capabilities["session-memory.provider"].config == {"root": str(tmp_path / "runtime/session-memory")}
+    assert capabilities["workspace.initializer"].config == {"language": "zh"}
+    assert capabilities["session.store"].plugin == "sage.session.mysql"
+    assert capabilities["execution.scheduler"].config == {
+        "max_concurrent_runs": 8,
+        "max_concurrent_runs_per_tenant": 2,
+        "max_pending_items": 1024,
+    }
+
+
 def test_admin_save_pending_reset_and_conflict(client):
     admin = admin_headers(client)
     user, _ = identity(client, "plugin-not-admin")
