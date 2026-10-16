@@ -279,6 +279,7 @@ class ServerHost:
                 run_quota=run_quota,
                 model_budget=model_budget,
                 log_sink=self.log_sink,
+                diagnostic_sink=self.diagnostics,
                 job_runtime=self.application.service("execution.job-runtime"),
             )
             self.package_queries = self.agent_management.queries

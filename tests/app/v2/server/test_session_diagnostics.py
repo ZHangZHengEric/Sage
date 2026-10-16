@@ -220,6 +220,40 @@ def admin_headers(client):
     return {"Authorization": f"Bearer {token}"}
 
 
+def test_direct_package_uses_server_model_diagnostics(client, service):
+    from tests.app.v2.server.test_packages import settled
+
+    headers = admin_headers(client)
+    bundle = client.get("/api/agent-packages/template", headers=headers).json()["data"]
+    saved = client.post("/api/agent-packages", headers=headers, json=bundle)
+    assert saved.status_code == 200, saved.text
+    response = client.post("/api/agent-packages/runs", headers=headers, json={
+        "ref": saved.json()["data"]["ref"], "agent_id": "assistant",
+        "content": "hello", "operation": "package-diagnostics",
+    })
+    assert response.status_code == 200, response.text
+    state = settled(client, headers, "package-diagnostics")
+    assert state["run"]["state"] == "completed", state
+    run = state["run"]
+    evidence = service.diagnostics.snapshot(run["session_id"], {run["run_id"]})
+    records = evidence["models"]
+    assert records, "Direct Package model calls must reach Server diagnostics"
+    assert any(record["response"].get("text") == "hello" for record in records)
+    assert all(record["request"] and record["status"] == "completed" for record in records)
+    assert {record["purpose"] for record in records} >= {"agent", "continuation_judge"}
+    session_id = run["session_id"]
+    output, _ = prepare_session_export(session_id, {
+        "sessions": [{"session_id": session_id}], "runs": [run],
+    }, evidence)
+    with output, ZipFile(output) as archive:
+        manifest = json.loads(archive.read(f"{session_id}/manifest.json"))
+        assert manifest["model_records"] == len(records)
+        assert not manifest["models_missing_for_runs"]
+        index = json.loads(archive.read(f"{session_id}/requests/index.json"))
+        assert len(index) == len(records)
+        assert all(archive.read(f"{session_id}/" + entry["path"]) for entry in index)
+
+
 def test_web_export_captures_real_model_response_and_correlated_logs(client, service):
     alice, _ = identity(client, "alice")
     assert (

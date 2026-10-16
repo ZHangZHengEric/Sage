@@ -32,6 +32,7 @@ class ServerAgentManagement(AgentManagementService):
         run_quota,
         model_budget,
         log_sink,
+        diagnostic_sink,
         job_runtime,
     ):
         if database is None:
@@ -56,6 +57,7 @@ class ServerAgentManagement(AgentManagementService):
             run_quota=run_quota,
             policy=self.policy,
             log_sink=log_sink,
+            diagnostic_sink=diagnostic_sink,
         )
         self.queries = ServerPackageQueries(
             users=users,
