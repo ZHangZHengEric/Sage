@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { createRenderer, nextTick, ssrContextKey } from 'vue'
+import { createRenderer, createSSRApp, nextTick, ssrContextKey } from 'vue'
+import { renderToString } from 'vue/server-renderer'
 import { createServer } from 'vite'
 
 async function setup(t, name, directory = 'views') {
@@ -16,7 +17,7 @@ async function setup(t, name, directory = 'views') {
   })
   const { api } = await server.ssrLoadModule('/src/api.js')
   const { default: Component } = await server.ssrLoadModule(`/src/${directory}/${name}.vue`)
-  return { api, mount: async (props = {}) => {
+  return { api, Component, mount: async (props = {}) => {
     const renderer = createRenderer({ createComment: () => ({}), insert() {}, remove() {}, parentNode: () => null, nextSibling: () => null })
     const app = renderer.createApp({ ...Component, render: () => null }, props)
     app.provide(ssrContextKey, {})
@@ -299,4 +300,44 @@ test('plugin settings handle Server injected components without descriptors or s
   }
   state.server = null
   assert.doesNotThrow(() => state.parameterRows(state.groups[0]))
+})
+
+test('Server plugin editor saves a real selection, preserves failed drafts, and resets defaults', async t => {
+  const { api, Component, mount } = await setup(t, 'Plugins')
+  const id = 'sage.memory.filesystem-bm25'
+  t.mock.method(api, 'listPlugins', async () => ({ defaults: { 'memory.provider': 'sage.memory.noop' }, plugins: [
+    { id, capabilities: ['memory.provider'], schema: { properties: { root: { type: 'string' } } } },
+  ] }))
+  const initial = { providers: [], selections: {}, saved: { 'memory.provider': { plugin: id, config: { root: '/data/original' } } }, defaults: {}, configurable: ['memory.provider'], pending: ['memory.provider'], revision: 'first', storage_root: '/data/plugins' }
+  t.mock.method(api, 'serverPlugins', async () => initial)
+  t.mock.method(api, 'saveServerPlugins', async body => {
+    if (body.revision === 'stale') throw new Error('配置已被其他管理员修改')
+    return { ...initial, revision: 'next', saved: body.changes['memory.provider'] ? body.changes : {}, pending: body.changes['memory.provider'] ? ['memory.provider'] : [] }
+  })
+  const state = await mount()
+  const group = state.groups[0]
+  state.startEdit(group)
+  state.draft.config.root = '/data/changed'
+  assert.equal(state.server.saved['memory.provider'].config.root, '/data/original')
+  state.server.revision = 'stale'
+  await state.saveServer()
+  assert.match(state.saveError, /其他管理员/)
+  assert.equal(state.editing, 'memory.provider')
+  assert.equal(state.draft.config.root, '/data/changed')
+  state.server.revision = 'first'
+  state.choosePlugin(id)
+  assert.equal(state.draft.config.root, '/data/plugins/memory.provider')
+  await state.saveServer()
+  assert.equal(state.editing, '')
+  assert.match(state.message, /重启/)
+  assert.equal(state.currentNames(group), '关闭长期记忆')
+  const html = await renderToString(createSSRApp({ ...Component, setup: () => state }))
+  assert.match(html, /<article/)
+  assert.match(html, /已保存：本地 BM25 记忆/)
+  assert.match(html, /配置 Server/)
+  state.startEdit(group)
+  state.choosePlugin('')
+  await state.saveServer()
+  assert.equal(api.saveServerPlugins.mock.calls.at(-1).arguments[0].changes['memory.provider'], null)
+  assert.equal(state.server.pending.length, 0)
 })

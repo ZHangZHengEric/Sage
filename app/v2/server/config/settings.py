@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from app.v2.server.observability.logging import get_logger
@@ -87,6 +87,8 @@ class ServerSettings:
     linux_execution_uid: int | None = None
     linux_execution_gid: int | None = None
     approval_timeout_seconds: int = 86400
+    # Startup snapshot; never read mutable configuration files during a Run.
+    plugin_overrides: dict = field(default_factory=dict, repr=False)
 
     def __post_init__(self) -> None:
         if self.sandbox_network_mode not in {"none", "unrestricted"}:

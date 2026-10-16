@@ -14,7 +14,7 @@ function definition(capability) { return catalog.value.plugins.find(item => item
 function parameters(capability) {
   const fields = definition(capability)?.schema?.properties || {}
   const defaults = Object.fromEntries(Object.entries(fields).filter(([, field]) => field.default !== undefined).map(([key, field]) => [key, field.default]))
-  const host = !props.modelValue[capability] ? catalog.value.default_config?.[capability] || {} : {}
+  const host = selected(capability) === catalog.value.defaults[capability] ? catalog.value.default_config?.[capability] || {} : {}
   return { ...defaults, ...host, ...(props.modelValue[capability]?.config || {}) }
 }
 function update(capability, plugin) {
