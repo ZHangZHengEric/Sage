@@ -73,6 +73,18 @@ python -m scripts.v2.migrate_agent_table --env app/v2/server/.env --backup /secu
 
 模型客户端池使用 `SAGE_SERVER_MAX_MODEL_CLIENTS`（默认 64）限制容量。同一用户的相同配置跨 Run 复用连接，凭据变化使用新客户端；池满且所有客户端占用时返回可重试的限流错误。详见[模型池与增量持久化](../../../docs/zh/architecture/sagents-v2-model-pool-and-persistence.md)。
 
+## Server 插件配置
+
+管理员可在 `/plugins` 点击“配置 Server”，选择实现并编辑 Schema 参数；普通用户只能查看插件目录。`PUT /api/plugins/server` 接收版本号 `revision` 和局部变更 `changes`，将某项设为 `null` 恢复部署默认。保存会校验插件能力、可用依赖、参数和宿主保留项；过期版本返回 409，不覆盖其他管理员的修改。
+
+配置以原子替换写入 `{data_root}/config/plugins.json`，启动时加载快照。页面分别显示当前实现和待重启配置；保存不会改变运行中的对话，也不会使后续 Run 与进程共享服务使用不同版本。重启 Server 后才统一生效。Docker 的 `/app/data` 持久化挂载会保留这些配置。
+
+页面可编辑上下文摘要、Token 估算、上下文压缩、完成判定、工具选择、工具结果压缩、Skill 加载、记忆检索词生成，以及长期记忆、会话记忆、摘要存储、链路追踪、工作区初始化和包注册表。模型接口、工具与 Skill 目录、日志和诊断、Session 数据库、沙箱、共享调度及其他注入服务由部署或相应专用页面管理，不能保存一份会被宿主忽略的插件选择。
+
+普通智能体可以覆盖前八项。优先级为：智能体显式配置 → Server 已生效配置 → 插件默认值。同一实现合并参数；不同实现替换整项选择。智能体选择“跟随默认”不会写入覆盖。Server 保存后尚未重启的配置不会成为智能体默认值。Studio 独立 Package 使用 `ServerPackagePolicy` 的额外授权，不扩大普通智能体的权限。
+
+本地 BM25 记忆使用 `sage.memory.filesystem-bm25`，必填 `root`，页面默认放在 `{data_root}/runtime/plugins/memory.provider`。这只启用存储提供者；自动召回、写入和 `search_memory` 授权仍属于 Agent 行为，需要单独配置。
+
 ## 完整 Agent 包平台与 Studio
 
 `/studio` 提供完整包定义编辑、普通 Agent 导入、不可变版本、复制/切换版本、运行、事件、任务历史、反馈、人工审批和同 Session 续接。对应 HTTP 入口为 `/api/agent-packages`。普通 Agent 可选择 `agent_package_*` 工具，通过同一管理服务创建并调用其他 Agent。

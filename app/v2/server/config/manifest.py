@@ -64,6 +64,12 @@ def server_v2_run_manifest(
         for key, value in base.runtime.capabilities.items()
         if key in AGENT_DEFAULTS
     }
+    for key, selection in selections.items():
+        default = host.runtime.capabilities.get(key)
+        if default is not None and default.plugin == selection.plugin:
+            selections[key] = selection.model_copy(update={
+                "config": {**default.config, **selection.config},
+            })
     return base.model_copy(
         update={
             "runtime": host.runtime.model_copy(
@@ -208,4 +214,9 @@ def _runtime_capabilities(
         capabilities["observability.trace-sink"] = CapabilitySelection(
             plugin=f"sage.trace.{settings.effective_trace_backend}", config=config,
         )
+    if settings is not None:
+        capabilities.update({
+            key: CapabilitySelection.model_validate(value)
+            for key, value in settings.plugin_overrides.items()
+        })
     return capabilities

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from dataclasses import replace
 
 from sagents.v2.application import SAgentApplication
 from sagents.v2.builder import SAgentBuilder
@@ -139,6 +140,12 @@ class ServerHost:
     async def start(self) -> None:
         if self._application is not None:
             return
+        from app.v2.server.config.plugins import ServerPluginConfig
+
+        self.settings = replace(
+            self.settings,
+            plugin_overrides=ServerPluginConfig(self.paths.data_root).read(),
+        )
         if self.diagnostics is None:
             from app.v2.server.observability.diagnostics import SessionDiagnostics
 

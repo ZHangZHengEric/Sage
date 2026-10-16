@@ -1,6 +1,8 @@
 from typing import Annotated
 
-from fastapi import APIRouter, File, Form, UploadFile
+from fastapi import APIRouter, File, Form, UploadFile, HTTPException
+from pydantic import BaseModel, ConfigDict
+from sagents.v2.package.manifest.runtime import CapabilitySelection
 
 from app.v2.server.routers.deps import ReadUser, CatalogDep, CurrentUser, AdminUser, HostDep, PackageDep, SkillDep
 from app.v2.server.runtime.official import official_tool_catalog
@@ -38,20 +40,27 @@ async def list_plugins(user: CurrentUser, host: HostDep):
             plugin_id = getattr(implementation, "plugin_id", None)
             if plugin_id:
                 defaults[capability] = plugin_id
-    defaults.update(AGENT_DEFAULTS)
+    for capability, plugin in AGENT_DEFAULTS.items():
+        defaults.setdefault(capability, plugin)
+    from app.v2.server.config.manifest import server_v2_manifest
+    default_config = dict(DEFAULT_CONFIG)
+    for key, selection in server_v2_manifest(host.settings).runtime.capabilities.items():
+        defaults[key] = selection.plugin
+        if key in AGENT_DEFAULTS:
+            default_config[key] = selection.config
     return success(
         {
             "plugins": plugin_options(),
             "defaults": defaults,
             "configurable": list(AGENT_DEFAULTS),
-            "default_config": DEFAULT_CONFIG,
+            "default_config": default_config,
         }
     )
 
 
 @agent_router.get("/api/plugins/server")
 async def server_plugins(user: AdminUser, host: HostDep):
-    from dataclasses import asdict
+    from dataclasses import asdict, replace
     from app.v2.server.config.manifest import server_v2_manifest
     from app.v2.server.observability.diagnostics import redact
 
@@ -72,18 +81,58 @@ async def server_plugins(user: AdminUser, host: HostDep):
             if row["plugin_id"] is None:
                 row["plugin_id"] = getattr(implementation, "plugin_id", None)
         providers.append(row)
-    return success(
-        redact(
-            {
+    from app.v2.server.config.plugins import ServerPluginConfig, SERVER_CONFIGURABLE, SERVER_DEFAULTS, revision
+    saved = ServerPluginConfig(host.paths.data_root).read()
+    active = host.settings.plugin_overrides
+    pending = sorted(key for key in set(saved) | set(active) if saved.get(key) != active.get(key))
+    deployment_defaults = {key: {"plugin": plugin, "config": {}} for key, plugin in SERVER_DEFAULTS.items()}
+    deployment_defaults.update({
+        key: value.model_dump(mode="json", exclude_none=True)
+        for key, value in server_v2_manifest(replace(host.settings, plugin_overrides={})).runtime.capabilities.items()
+        if key in SERVER_CONFIGURABLE
+    })
+    result = redact({
                 "providers": providers,
                 "selections": selections,
                 "interfaces": {
                     key: value.model_dump(mode="json")
                     for key, value in manifest.interfaces.items()
                 },
-            }
-        )
+            })
+    # Editable selections contain only schema-approved configuration, not
+    # host-injected credentials/DSNs. Environment variable names must roundtrip.
+    result.update(
+        configurable=sorted(SERVER_CONFIGURABLE),
+        saved=saved, revision=revision(saved), pending=pending,
+        defaults=deployment_defaults,
+        storage_root=str(host.paths.data_root / "runtime" / "plugins"),
     )
+    return success(result)
+
+
+class ServerPluginBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    revision: str
+    changes: dict[str, CapabilitySelection | None]
+
+
+@agent_router.put("/api/plugins/server")
+async def save_server_plugins(body: ServerPluginBody, user: AdminUser, host: HostDep):
+    import asyncio
+    from app.v2.server.config.plugins import ServerPluginConfig
+
+    try:
+        await asyncio.to_thread(
+            ServerPluginConfig(host.paths.data_root).save,
+            {key: value.model_dump(mode="json", exclude_none=True) if value else None
+             for key, value in body.changes.items()},
+            body.revision,
+        )
+    except FileExistsError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except (ValueError, KeyError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return await server_plugins(user, host)
 
 
 @agent_router.get("/api/tools", response_model=ApiResponse[list[ToolPublic]])

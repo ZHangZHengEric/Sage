@@ -51,6 +51,7 @@ def plugin_options():
             configurable_capabilities=[
                 o.capability for o in d.provides if o.capability in AGENT_DEFAULTS
             ],
+            available=d.availability.available,
         )
         for registration in registry.registrations()
         for d in [registration.descriptor]

@@ -60,6 +60,7 @@ async function list(path, all = true) {
 export const api = {
   listPlugins: () => request('/api/plugins'),
   serverPlugins: () => request('/api/plugins/server'),
+  saveServerPlugins: body => request('/api/plugins/server', { method: 'PUT', body: JSON.stringify(body) }),
   workspaceFiles: (path = '', owner, threadId = '', agentId = '') => read(`/api/workspace/files?path=${encodeURIComponent(path)}${threadId ? `&thread_id=${encodeURIComponent(threadId)}` : `&agent_id=${encodeURIComponent(agentId)}`}`, threadId ? undefined : owner),
   workspaceDownload: (path = '', owner, threadId = '', agentId = '') => request(`/api/workspace/download?path=${encodeURIComponent(path)}${threadId ? `&thread_id=${encodeURIComponent(threadId)}` : `&agent_id=${encodeURIComponent(agentId)}`}`, !threadId && owner ? { headers: { 'X-Sage-View-User': owner.user_id } } : {}, true),
   downloadSession: id => request(`/api/threads/${encodeURIComponent(id)}/download`, {}, true),
