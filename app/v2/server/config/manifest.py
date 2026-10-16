@@ -47,7 +47,9 @@ def server_v2_run_manifest(
             else source.description,
             "skills": tuple(skills),
             "tools": tuple(selected_tools),
-            "tool_approval": agent.tool_approval if agent is not None else source.tool_approval,
+            "tool_approval": agent.tool_approval
+            if agent is not None
+            else source.tool_approval,
             "instructions": Instructions(
                 inline=instructions
                 or source.instructions.inline
@@ -55,9 +57,18 @@ def server_v2_run_manifest(
             ),
         }
     )
+    from app.v2.server.catalog.plugins import AGENT_DEFAULTS
+
+    selections = {
+        key: value
+        for key, value in base.runtime.capabilities.items()
+        if key in AGENT_DEFAULTS
+    }
     return base.model_copy(
         update={
-            "runtime": host.runtime,
+            "runtime": host.runtime.model_copy(
+                update={"capabilities": {**host.runtime.capabilities, **selections}}
+            ),
             "interfaces": host.interfaces,
             "agents": {agent_id: composed},
             "entrypoint": ApplicationEntrypoint(agent=agent_id),
@@ -136,6 +147,10 @@ def _runtime_capabilities(
     log_level = settings.log_level if settings is not None else "info"
     log_format = settings.log_format if settings is not None else "json"
     capabilities: dict[str, CapabilitySelection] = {
+        "context.summarizer": CapabilitySelection(
+            plugin="sage.context.summarizer.model",
+            config={"model_binding": "primary"},
+        ),
         "agent.continuation-policy": CapabilitySelection(
             plugin="sage.agent.continuation.llm-judge",
             config={"model_binding": "fast"},

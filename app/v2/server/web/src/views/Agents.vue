@@ -23,6 +23,7 @@ const error = ref('')
 const pending = ref(false)
 const editing = ref('')
 const form = ref(emptyForm())
+const configurablePlugins = ref([])
 
 const hasAgents = computed(() => agents.value.length > 0)
 // External Tools are granted per catalog rather than per Agent: they only
@@ -41,6 +42,7 @@ function emptyForm() {
     instructions: 'Be helpful, concise, and explicit about uncertainty.',
     model_id: '',
     budgets: {},
+    plugins: {},
     tools: [],
     sandbox: { network: 'none' },
     tool_approval: { default: 'auto_approve', tools: {} },
@@ -58,6 +60,8 @@ async function refresh() {
       api.listSkills(false),
       api.listTools(),
     ])
+  const plugins = await api.listPlugins()
+  configurablePlugins.value = plugins.configurable
   agents.value = nextAgents
   models.value = nextModels
   mcp.value = nextMcp
@@ -100,6 +104,7 @@ async function openAgent(item, readonly = true) {
     editing.value = item.id
     form.value = {
       name: detail.name, description: detail.description || '', instructions: detail.instructions || '',
+      plugins: Object.fromEntries(Object.entries(detail.package?.manifest?.runtime?.capabilities || {}).filter(([key]) => configurablePlugins.value.includes(key))),
       budgets: structuredClone(detail.package?.manifest?.agents?.[item.id]?.budgets || {}),
       model_id: detail.model_id || '', tools: [...(detail.tools || [])],
       tool_approval: detail.tool_approval ? structuredClone(detail.tool_approval) : null,

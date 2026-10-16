@@ -417,14 +417,29 @@ def upsert_agent(
                                              sandbox=payload.get("sandbox"))
     elif payload.get("sandbox") is not None:
         record = record.with_configuration(sandbox=payload["sandbox"])
-    advanced = {key: payload[key] for key in ("budgets",)
-                if payload.get(key) is not None}
+    advanced = {
+        key: payload[key] for key in ("budgets",) if payload.get(key) is not None
+    }
     if advanced:
         data = record.package.model_dump(mode="json")
         data["manifest"]["agents"][record.id].update(advanced)
-        record = record.model_copy(update={"package": AgentPackageBundle.model_validate(data)})
+        record = record.model_copy(
+            update={"package": AgentPackageBundle.model_validate(data)}
+        )
         # Recompute the content version after updating canonical fields.
         record = record.with_configuration()
+    if payload.get("plugins") is not None:
+        from app.v2.server.catalog.plugins import validate_agent_plugins, AGENT_DEFAULTS
+
+        validate_agent_plugins(payload["plugins"])
+        data = record.package.model_dump(mode="json")
+        current = data["manifest"]["runtime"].get("capabilities", {})
+        data["manifest"]["runtime"]["capabilities"] = {
+            k: v for k, v in current.items() if k not in AGENT_DEFAULTS
+        } | payload["plugins"]
+        record = record.model_copy(
+            update={"package": AgentPackageBundle.model_validate(data)}
+        ).with_configuration()
     if record.model_id and not any(
         item.id == record.model_id for item in catalog.models
     ):

@@ -2,7 +2,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, File, Form, UploadFile
 
-from app.v2.server.routers.deps import ReadUser, CatalogDep, CurrentUser, HostDep, PackageDep, SkillDep
+from app.v2.server.routers.deps import ReadUser, CatalogDep, CurrentUser, AdminUser, HostDep, PackageDep, SkillDep
 from app.v2.server.runtime.official import official_tool_catalog
 from app.v2.server.routers.render import success
 from app.v2.server.routers.schemas.common import AUTH_ERRORS, VALIDATION_ERRORS, ApiResponse
@@ -16,18 +16,108 @@ guidance_router = APIRouter(tags=["agents"], responses=VALIDATION_ERRORS)
 skill_binding_router = APIRouter(tags=["skills"], responses={**AUTH_ERRORS, **VALIDATION_ERRORS})
 
 
+@agent_router.get("/api/plugins")
+async def list_plugins(user: CurrentUser, host: HostDep):
+    from app.v2.server.catalog.plugins import (
+        plugin_options,
+        AGENT_DEFAULTS,
+        DEFAULT_CONFIG,
+    )
+
+    defaults = {
+        provider.capability: provider.plugin_id
+        for provider in host.application.resolved_plan.providers
+        if provider.plugin_id
+    }
+    for option in plugin_options():
+        for capability in option["capabilities"]:
+            try:
+                implementation = host.application.service(capability)
+            except KeyError:
+                continue
+            plugin_id = getattr(implementation, "plugin_id", None)
+            if plugin_id:
+                defaults[capability] = plugin_id
+    defaults.update(AGENT_DEFAULTS)
+    return success(
+        {
+            "plugins": plugin_options(),
+            "defaults": defaults,
+            "configurable": list(AGENT_DEFAULTS),
+            "default_config": DEFAULT_CONFIG,
+        }
+    )
+
+
+@agent_router.get("/api/plugins/server")
+async def server_plugins(user: AdminUser, host: HostDep):
+    from dataclasses import asdict
+    from app.v2.server.config.manifest import server_v2_manifest
+    from app.v2.server.observability.diagnostics import redact
+
+    manifest = server_v2_manifest(host.settings)
+    providers = []
+    selections = {
+        key: value.model_dump(mode="json")
+        for key, value in manifest.runtime.capabilities.items()
+    }
+    for provider in host.application.resolved_plan.providers:
+        row = asdict(provider)
+        try:
+            implementation = host.application.service(provider.capability)
+        except KeyError:
+            implementation = None
+        if implementation is not None:
+            row["implementation"] = type(implementation).__name__
+            if row["plugin_id"] is None:
+                row["plugin_id"] = getattr(implementation, "plugin_id", None)
+        providers.append(row)
+    return success(
+        redact(
+            {
+                "providers": providers,
+                "selections": selections,
+                "interfaces": {
+                    key: value.model_dump(mode="json")
+                    for key, value in manifest.interfaces.items()
+                },
+            }
+        )
+    )
+
+
 @agent_router.get("/api/tools", response_model=ApiResponse[list[ToolPublic]])
 async def list_tools(user: CurrentUser, packages: PackageDep, service: CatalogDep):
     from sagents.v2.tool.plugins.agent_management import AgentManagementToolPlugin
+
     definitions = AgentManagementToolPlugin(packages).definitions
     catalog = await service.get(user.user_id)
     plugin = service.mcp_plugins.get(user.user_id, catalog.mcp_servers)
     external = await plugin.list_tools(run_id="catalog") if plugin is not None else ()
-    return success([*official_tool_catalog(), *[
-        dict(name=item.name, approval_key=item.approval_key, category="MCP", source="mcp", default=False)
-        for item in external], *[
-        dict(name=item.name, category="agent-management", source="host", default=False)
-        for item in definitions]])
+    return success(
+        [
+            *official_tool_catalog(),
+            *[
+                dict(
+                    name=item.name,
+                    approval_key=item.approval_key,
+                    category="MCP",
+                    source="mcp",
+                    default=False,
+                )
+                for item in external
+            ],
+            *[
+                dict(
+                    name=item.name,
+                    category="agent-management",
+                    source="host",
+                    default=False,
+                )
+                for item in definitions
+            ],
+        ]
+    )
 
 
 @agent_router.get("/api/agents", response_model=ApiResponse[list[AgentPublic]])

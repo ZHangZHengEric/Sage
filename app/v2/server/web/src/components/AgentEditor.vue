@@ -2,6 +2,7 @@
 import { computed, ref } from 'vue'
 import AppIcon from './AppIcon.vue'
 import SchemaField from './SchemaField.vue'
+import PluginConfig from './PluginConfig.vue'
 const props = defineProps({
   form: { type: Object, required: true },
   agentId: String, readonly: Boolean, canEdit: Boolean, busy: Boolean, error: String, message: String,
@@ -17,6 +18,7 @@ const toolSearch = ref(''), skillSearch = ref('')
 const sections = [
   { id: 'basic', label: '基本信息', icon: 'user' },
   { id: 'model', label: '模型配置', icon: 'model' },
+  { id: 'plugins', label: '插件配置', icon: 'settings' },
   { id: 'budgets', label: '运行预算', icon: 'settings' },
   { id: 'tools', label: '可用工具', icon: 'tools' },
   { id: 'skills', label: '可用技能', icon: 'skill' },
@@ -86,6 +88,7 @@ function toggleSkill(name) {
             <label class="field"><span>系统提示词</span><textarea class="mono" :value="form.instructions" :readonly="readonly" :disabled="busy" rows="10" @input="update('instructions', $event.target.value)" /></label>
           </div></section>
           <section id="agent-model"><h2><span class="section-icon"><AppIcon name="model" /></span>模型配置</h2><div class="section-fields"><label class="field"><span>模型</span><select :value="form.model_id" :disabled="readonly || busy" @change="update('model_id', $event.target.value)"><option value="">使用默认模型</option><option v-if="form.model_id && !models.some(model => model.id === form.model_id)" :value="form.model_id">{{ form.model_id }}</option><option v-for="model in models" :key="model.id" :value="model.id">{{ model.model }}</option></select></label></div></section>
+          <section id="agent-plugins"><h2>插件配置</h2><div class="section-fields"><PluginConfig :model-value="form.plugins || {}" :disabled="readonly || busy" @update:model-value="update('plugins', $event)" /></div></section>
           <section id="agent-budgets"><h2>运行预算</h2><div class="section-fields"><SchemaField :model-value="form.budgets || {}" :schema="budgetSchema" label="预算" :disabled="readonly || busy" @update:model-value="update('budgets', $event)" /></div></section>
           <section id="agent-tools"><h2><span class="section-icon"><AppIcon name="tools" /></span>可用工具<span class="selection-count">{{ form.tools.length }}</span></h2><div class="section-fields">
             <div v-if="form.tools.length" class="selected-tags"><span v-for="name in form.tools" :key="name" class="tag">{{ name }}</span></div>

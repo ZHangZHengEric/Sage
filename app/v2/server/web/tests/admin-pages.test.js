@@ -77,6 +77,7 @@ test('Studio reads identical operation names using the selected owner and resets
 
 test('agent detail reads the selected owner and keeps foreign configurations read-only', async t => {
   const { api, mount } = await setup(t, 'Agents')
+  t.mock.method(api, 'listPlugins', async () => ({ configurable: ['context.summarizer'] }))
   const owner = { user_id: 'alice', username: 'alice' }
   const agent = { id: 'agent-1', name: 'Alice agent', description: '', instructions: 'Instructions', tools: ['file_read'], model_id: 'alice-model', _owner: owner }
   for (const method of ['listModels', 'listMcp', 'listA2aAgents', 'listSkills', 'listTools']) t.mock.method(api, method, async () => [])
@@ -98,6 +99,7 @@ test('agent detail reads the selected owner and keeps foreign configurations rea
 
 test('agent editor saves V2 fields and selected skills before staying open or exiting', async t => {
   const { api, mount } = await setup(t, 'Agents')
+  t.mock.method(api, 'listPlugins', async () => ({ configurable: ['context.summarizer'] }))
   for (const method of ['listAgents', 'listModels', 'listMcp', 'listA2aAgents', 'listSkills', 'listTools', 'listAgentSkills']) t.mock.method(api, method, async () => [])
   t.mock.method(api, 'createAgent', async body => ({ ...body, id: 'new-agent' }))
   t.mock.method(api, 'updateAgent', async (id, body) => ({ ...body, id }))
@@ -112,7 +114,7 @@ test('agent editor saves V2 fields and selected skills before staying open or ex
   assert.equal(state.drawerOpen, true)
   assert.equal(state.editing, 'new-agent')
   assert.deepEqual(api.bindAgentSkills.mock.calls[0].arguments, ['new-agent', ['research']])
-  assert.deepEqual(Object.keys(api.createAgent.mock.calls[0].arguments[0]).sort(), ['budgets', 'description', 'execution_policy', 'instructions', 'model_id', 'name', 'sandbox', 'tool_approval', 'tools'])
+  assert.deepEqual(Object.keys(api.createAgent.mock.calls[0].arguments[0]).sort(), ['budgets', 'description', 'execution_policy', 'instructions', 'model_id', 'name', 'plugins', 'sandbox', 'tool_approval', 'tools'])
   assert.deepEqual(api.createAgent.mock.calls[0].arguments[0].tool_approval, { default: 'auto_approve', tools: { file_read: 'ask', 'mcp:drive:write': 'auto_approve' } })
   await state.save(true)
   assert.equal(state.drawerOpen, false)
@@ -246,4 +248,21 @@ test('inconclusive probe failures retain declared abilities instead of disabling
   await state.probe()
   assert.deepEqual(state.form.capabilities, { tool_calling: true, multimodal: true, structured_output: true })
   assert.equal(state.probing, false)
+})
+
+
+test('plugin inventory includes defaults, alternatives, and actual server bindings', async t => {
+  const { api, mount } = await setup(t, 'Plugins')
+  t.mock.method(api, 'listPlugins', async () => ({ defaults: { 'context.summarizer': 'model' }, plugins: [
+    { id: 'model', name: 'Model summary', capabilities: ['context.summarizer'], schema: { properties: { timeout: { default: 300 } } } },
+    { id: 'extractive', name: 'Extractive', capabilities: ['context.summarizer'], schema: {} },
+  ] }))
+  t.mock.method(api, 'serverPlugins', async () => ({ providers: [{ capability: 'context.summarizer', plugin_id: 'model' }] }))
+  const state = await mount()
+  assert.equal(state.plugins.length, 2)
+  assert.deepEqual(state.defaultsFor(state.plugins[0]), ['context.summarizer'])
+  assert.equal(state.bindingsFor(state.plugins[0]).length, 1)
+  assert.deepEqual(state.configFor(state.plugins[0]), { timeout: 300 })
+  state.query = 'extractive'
+  assert.equal(state.plugins.length, 1)
 })

@@ -24,6 +24,7 @@ from sagents.v2.agent.policy import (
     DefaultToolPolicy,
     SessionApprovalMemory,
 )
+from sagents.v2.context.plugins.summarizer_model import ModelConversationSummarizer
 from sagents.v2.context import (
     ExtractiveConversationSummarizer,
     JsonHeuristicTokenEstimator,
@@ -911,7 +912,7 @@ class SAgentBuilder:
             runtime_config,
             plugin_declarations,
             capability="context.summarizer",
-            default_plugin=ExtractiveConversationSummarizer.plugin_id,
+            default_plugin=ModelConversationSummarizer.plugin_id,
             default_scope=ExtensionScope.AGENT,
             locked_config={"model": models_by_agent[selected_agent]},
             tenant_id=tenant_id,
@@ -2497,7 +2498,11 @@ class _ApplicationComposer:
                 runtime,
                 declarations,
                 capability="context.summarizer",
-                default_plugin=ExtractiveConversationSummarizer.plugin_id,
+                default_plugin=(
+                    ModelConversationSummarizer.plugin_id
+                    if effective_model is not None
+                    else ExtractiveConversationSummarizer.plugin_id
+                ),
                 default_scope=ExtensionScope.AGENT,
                 scope_id=f"materialize-summarizer:{selected_agent}",
                 locked_config=summarizer_lock,

@@ -16,6 +16,7 @@ const accountMenu = ref(null)
 const groups = [
   { label: '工作空间', icon: 'grid', links: [
     { to: '/models', label: '模型供应商', icon: 'model' },
+    { to: '/plugins', label: '插件', icon: 'settings' },
     { to: '/tools', label: '工具', icon: 'tools', paths: ['/tools', '/mcp', '/a2a'] },
     { to: '/skills', label: '技能', icon: 'skill' },
   ] },

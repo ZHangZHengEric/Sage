@@ -32,7 +32,11 @@ def test_package_has_no_yaml_credentials_or_model_routes():
     judge = manifest.runtime.capabilities["agent.continuation-policy"]
     assert judge.plugin == "sage.agent.continuation.llm-judge"
     assert judge.config == {"model_binding": "fast"}
+    summarizer = manifest.runtime.capabilities["context.summarizer"]
+    assert summarizer.plugin == "sage.context.summarizer.model"
+    assert summarizer.config == {"model_binding": "primary"}
     assert list(manifest.runtime.capabilities) == [
+        "context.summarizer",
         "agent.continuation-policy",
         "observability.log-sink",
     ]
