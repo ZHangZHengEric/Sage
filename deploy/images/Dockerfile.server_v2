@@ -1,3 +1,5 @@
+FROM docker.m.daocloud.io/library/node:24.13.0-bookworm-slim@sha256:4660b1ca8b28d6d1906fd644abe34b2ed81d15434d26d845ef0aced307cf4b6f AS frontend-node
+
 FROM docker.m.daocloud.io/library/python:3.12-slim-trixie
 
 ENV TZ=Asia/Shanghai \
@@ -12,9 +14,25 @@ RUN sed -i 's@deb.debian.org@mirrors.tuna.tsinghua.edu.cn@g' \
 
 # Runtime tools for local sandbox execution and MCP subprocesses.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    ca-certificates curl git bubblewrap util-linux nodejs npm build-essential \
+    ca-certificates curl git bubblewrap util-linux build-essential fonts-dejavu-core fonts-liberation fonts-noto-cjk fontconfig \
     && rm -rf /var/lib/apt/lists/*
 
+# Pin Node (including its bundled npm), JS dependencies and the matching browser.
+# All runtime assets live in directories already mounted read-only by bubblewrap.
+COPY --from=frontend-node /usr/local/bin/node /usr/local/bin/node
+COPY --from=frontend-node /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/npm
+RUN ln -s ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
+    && ln -s ../lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx
+ENV NODE_PATH=/usr/local/lib/sage-frontend-test/node_modules \
+    PLAYWRIGHT_BROWSERS_PATH=/usr/local/lib/sage-frontend-test/browsers \
+    FONTCONFIG_FILE=/usr/share/sage-frontend-test/fonts.conf
+COPY deploy/images/frontend-test/package*.json /usr/local/lib/sage-frontend-test/
+RUN cd /usr/local/lib/sage-frontend-test \
+    && npm ci --ignore-scripts --no-audit --no-fund \
+    && node node_modules/playwright/cli.js install --with-deps chromium \
+    && chmod -R a+rX /usr/local/lib/sage-frontend-test \
+    && npm cache clean --force \
+    && rm -rf /var/lib/apt/lists/*
 ENV PIP_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple/
 
 # The supervisor stays root; sandbox subprocesses drop to this dedicated user.
@@ -28,6 +46,13 @@ ENV SAGE_SERVER_LINUX_EXECUTION_UID=10001 \
 COPY deploy/images/requirements.server_v2.txt /tmp/sage-server-requirements.txt
 RUN python -m pip install --no-cache-dir -r /tmp/sage-server-requirements.txt \
     && rm /tmp/sage-server-requirements.txt
+
+COPY deploy/images/frontend-test/runner.cjs /usr/local/lib/sage-frontend-test/runner.cjs
+COPY deploy/images/frontend-test/fonts.conf /usr/share/sage-frontend-test/fonts.conf
+COPY --chmod=755 deploy/images/frontend-test/sage-frontend-test /usr/local/bin/sage-frontend-test
+ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 \
+    npm_config_offline=true \
+    npm_config_update_notifier=false
 
 COPY . .
 # Use the image-specific dependencies above; do not install the shared dependency set.

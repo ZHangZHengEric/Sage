@@ -538,8 +538,8 @@ def test_linux_launch_pins_mounts_cgroups_and_loader_environment(
         assert command.count("--bind-fd") == 3
         assert len(fds) == 4 and len(set(fds)) == 4
         assert command.count("--remount-ro") == 3
-        assert command[command.index("--bind") + 1] == "/dev/null"
-        assert command.index("--bind") < command.index("--remount-ro")
+        assert command[command.index("--dev-bind") + 1] == "/dev/null"
+        assert command.index("--dev-bind") < command.index("--remount-ro")
         assert "LD_PRELOAD" not in environment
         assert command.index("LD_PRELOAD") > command.index("--setenv")
     finally:
