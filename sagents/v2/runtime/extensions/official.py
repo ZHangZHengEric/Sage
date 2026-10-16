@@ -446,7 +446,7 @@ def _register_infrastructure(registry: ExtensionRegistry) -> None:
         "context.summarizer",
         lambda context, dependencies: ModelConversationSummarizer(
             context.config["model"],
-            model_binding=str(context.config.get("model_binding", "summary")),
+            model_binding=str(context.config.get("model_binding", "primary")),
             max_source_tokens=int(context.config.get("max_source_tokens", 24000)),
             timeout_seconds=float(
                 context.config.get(
@@ -462,7 +462,7 @@ def _register_infrastructure(registry: ExtensionRegistry) -> None:
             "type": "object",
             "properties": {
                 "model": {},
-                "model_binding": {"type": "string", "minLength": 1, "default": "summary"},
+                "model_binding": {"type": "string", "const": "primary", "default": "primary", "readOnly": True},
                 "max_source_tokens": {"type": "integer", "minimum": 1, "default": 24_000},
                 "timeout_seconds": {"type": "number", "exclusiveMinimum": 0, "default": DEFAULT_SUMMARY_MODEL_TIMEOUT_SECONDS},
                 "idle_timeout_seconds": {"type": "number", "exclusiveMinimum": 0, "default": DEFAULT_AUXILIARY_MODEL_TIMEOUT_SECONDS},

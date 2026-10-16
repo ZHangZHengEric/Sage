@@ -3206,6 +3206,7 @@ async def test_loop_composition_uses_native_model_skill_tool_and_sandbox_plugins
     assert isinstance(
         loop.context_assembler.reducer.summarizer, ModelConversationSummarizer
     )
+    assert loop.context_assembler.reducer.summarizer.model_binding == "primary"
     assert loop.automatic_memory_recall is True
     assert isinstance(
         loop.memory_recall_query_generator, LLMMemoryRecallQueryGenerator

@@ -245,7 +245,7 @@ def _runtime_capabilities(
 
 # Product-owned bindings are displayed when a real value exists, but not editable.
 DESKTOP_COMPONENT_CONFIG_LOCKS = {
-    "context.summarizer": {"model_binding": "summary"},
+    "context.summarizer": {"model_binding": "primary"},
     "agent.continuation-policy": {"model_binding": "fast"},
 }
 

@@ -444,7 +444,7 @@ class DesktopRunCompositionMixin(DesktopRunEnvironmentMixin):
                 "model": provider.model,
                 "base_url": provider.base_url,
                 "credential": SecretStr(provider.api_key or ""),
-                "model_binding": "summary",
+                "model_binding": "primary",
             },
             "memory.recall-query": {
                 "plugin": memory_query_plugin_id,
