@@ -3003,9 +3003,9 @@ async def test_approval_restores_whole_tool_batch_before_next_model_request(
         run = await loop.resume(run.run_id, CONTEXT)
     assert run.state == RunState.COMPLETED
     assert [call.tool_call_id for call in executor.calls] == (
-        ["call_1", "call_2", "call_3"]
+        ["call_3", "call_1", "call_2"]
         if first_decision == "approve_once"
-        else ["call_2", "call_3"]
+        else ["call_3", "call_2"]
     )
     request = model.requests[-1]
     assert [
@@ -3013,7 +3013,7 @@ async def test_approval_restores_whole_tool_batch_before_next_model_request(
     ] == ["call_1", "call_2", "call_3"]
     assert [
         message.tool_call_id for message in request.messages if message.role == "tool"
-    ] == ["call_1", "call_2", "call_3"]
+    ] == ["call_3", "call_1", "call_2"]
     events = await runtime.session_store.read_events(run.run_id)
     assert len([event for event in events if event.type == "step.started"]) == 2
     assert len([event for event in events if event.type == "step.completed"]) == 2
@@ -3074,7 +3074,7 @@ async def test_pause_during_tool_preserves_remaining_batch():
         message.tool_call_id
         for message in model.requests[-1].messages
         if message.role == "tool"
-    ] == ["call_1", "call_2"]
+    ] == ["call_2", "call_1"]
 
 
 @pytest.mark.asyncio
@@ -3150,7 +3150,7 @@ async def test_worker_restart_restores_token_budget_before_continuing_model():
 
 
 @pytest.mark.asyncio
-async def test_worker_recovery_keeps_unstarted_calls_in_same_response():
+async def test_worker_recovery_reconciles_each_started_parallel_call_without_replay():
     started = asyncio.Event()
 
     async def interrupted(call, context):
@@ -3184,26 +3184,24 @@ async def test_worker_recovery_keeps_unstarted_calls_in_same_response():
         tool_executor=executor,
     )
     run = await loop.recover_interrupted(handle.run_id, CONTEXT)
-    suspension, interaction = await _pending_interaction(runtime, run)
-    await runtime.reply_interaction(
-        _approval_reply(
-            run.run_id,
-            run,
-            suspension,
-            interaction,
-            "confirm_succeeded",
-            "recover-batch",
-        ),
-        CONTEXT,
-    )
-    run = await loop.resume(run.run_id, CONTEXT)
+    for index in range(2):
+        assert run.state == RunState.SUSPENDED
+        assert model.requests == []
+        suspension, interaction = await _pending_interaction(runtime, run)
+        await runtime.reply_interaction(
+            _approval_reply(
+                run.run_id, run, suspension, interaction,
+                "confirm_succeeded", f"recover-batch:{index}",
+            ), CONTEXT,
+        )
+        run = await loop.resume(run.run_id, CONTEXT)
     assert run.state == RunState.COMPLETED
-    assert [call.tool_call_id for call in executor.calls] == ["call_2"]
+    assert executor.calls == []
     assert [
         message.tool_call_id
         for message in model.requests[-1].messages
         if message.role == "tool"
-    ] == ["call_1", "call_2"]
+    ] == ["call_2", "call_1"]
 
 
 @pytest.mark.asyncio
@@ -4182,3 +4180,336 @@ async def test_repaired_step_discards_partial_stream_items_from_model_history():
         command, run_id=handle.run_id, through_run_sequence=checkpoint.run_sequence
     )
     assert loop._ledger_digest(ledger) == checkpoint.state["ledger_digest"]
+
+
+async def _wait_for_tool_event(runtime, run_id, event_type, call_id):
+    async def wait():
+        while True:
+            events = await runtime.session_store.read_events(run_id)
+            if any(
+                event.type == event_type and event.data.tool_call_id == call_id
+                for event in events
+            ):
+                return events
+            await asyncio.sleep(0)
+
+    return await asyncio.wait_for(wait(), 2)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("tool_name", ["read_value", "write_value"])
+async def test_parallel_tools_overlap_and_publish_fast_result_before_slow_siblings(
+    tool_name,
+):
+    entered = set()
+    all_entered = asyncio.Event()
+    release = {f"call_{index}": asyncio.Event() for index in range(3)}
+
+    async def handler(call, context):
+        entered.add(call.tool_call_id)
+        if len(entered) == 3:
+            all_entered.set()
+        await release[call.tool_call_id].wait()
+        return await tool_handler(call, context)
+
+    calls = tuple(
+        tool_call(tool_name).model_copy(update={"tool_call_id": call_id})
+        for call_id in release
+    )
+    model = ScriptedModelProvider(
+        (
+            ScriptedModelStep(events=(completed("", calls=calls),)),
+            ScriptedModelStep(events=(completed("done"),)),
+        )
+    )
+    runtime, handle, loop, executor = await setup_loop(
+        model,
+        handlers={"read_value": handler, "write_value": handler},
+        tool_policy=DefaultToolPolicy(approval_strategy=ApprovalStrategy.AUTO_APPROVE),
+    )
+    task = asyncio.create_task(loop.execute(handle.run_id, CONTEXT))
+    try:
+        # A sequential executor cannot reach this barrier: no handler may finish yet.
+        await asyncio.wait_for(all_entered.wait(), 2)
+        assert len(model.requests) == 1
+        release["call_1"].set()
+        events = await _wait_for_tool_event(
+            runtime, handle.run_id, "tool.call.succeeded", "call_1"
+        )
+        assert sum(event.type == "tool.call.started" for event in events) == 3
+        assert sum(event.type == "tool.call.succeeded" for event in events) == 1
+        assert not task.done()
+        assert len(model.requests) == 1
+        for gate in release.values():
+            gate.set()
+        run = await asyncio.wait_for(task, 2)
+        assert run.state == RunState.COMPLETED
+        assert len(executor.calls) == 3
+        assert len({call.operation_id for call in executor.calls}) == 3
+        assert {
+            message.tool_call_id
+            for message in model.requests[-1].messages
+            if message.role == "tool"
+        } == set(release)
+    finally:
+        for gate in release.values():
+            gate.set()
+        if not task.done():
+            task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+
+
+@pytest.mark.asyncio
+async def test_parallel_uncertain_results_resume_without_replaying_successful_sibling():
+    entered = set()
+    all_entered = asyncio.Event()
+
+    async def handler(call, context):
+        entered.add(call.tool_call_id)
+        if len(entered) == 3:
+            all_entered.set()
+        await all_entered.wait()
+        if call.tool_call_id != "call_ok":
+            raise SageV2Error(
+                RuntimeErrorInfo(
+                    code="tool.response_lost",
+                    category=ErrorCategory.UNCERTAIN_SIDE_EFFECT,
+                    message="response lost",
+                    safe_to_resume=True,
+                )
+            )
+        return await tool_handler(call, context)
+
+    calls = tuple(
+        tool_call("write_value").model_copy(update={"tool_call_id": call_id})
+        for call_id in ("call_unknown_1", "call_ok", "call_unknown_2")
+    )
+    model = ScriptedModelProvider(
+        (
+            ScriptedModelStep(events=(completed("", calls=calls),)),
+            ScriptedModelStep(events=(completed("done"),)),
+        )
+    )
+    policy = DefaultToolPolicy(approval_strategy=ApprovalStrategy.AUTO_APPROVE)
+    runtime, handle, loop, executor = await setup_loop(
+        model,
+        handlers={"write_value": handler},
+        tool_policy=policy,
+    )
+    run = await asyncio.wait_for(loop.execute(handle.run_id, CONTEXT), 2)
+    for index in range(2):
+        assert run.state == RunState.SUSPENDED
+        assert len(model.requests) == 1
+        assert len(executor.calls) == 3
+        suspension, interaction = await _pending_interaction(runtime, run)
+        await runtime.reply_interaction(
+            _approval_reply(
+                run.run_id,
+                run,
+                suspension,
+                interaction,
+                "confirm_succeeded",
+                f"unknown:{index}",
+            ),
+            CONTEXT,
+        )
+        loop = AgentLoopEngine(
+            runtime=runtime,
+            model=model,
+            tool_catalog=InMemoryToolCatalog((WRITE_TOOL,)),
+            tool_executor=executor,
+            tool_policy=policy,
+        )
+        run = await loop.resume(run.run_id, CONTEXT)
+    assert run.state == RunState.COMPLETED
+    assert len(executor.calls) == 3
+    events = await runtime.session_store.read_events(run.run_id)
+    assert sum(event.type == "tool.call.succeeded" for event in events) == 1
+    assert sum(event.type == "tool.call.reconciled" for event in events) == 2
+
+
+@pytest.mark.asyncio
+async def test_parallel_restart_consumes_saved_error_receipt_without_execution():
+    blocked = asyncio.Event()
+
+    async def handler(call, context):
+        if call.tool_call_id == "call_1":
+            blocked.set()
+            await asyncio.Event().wait()
+        await blocked.wait()
+        raise ValueError("read failed")
+
+    calls = (tool_call(), tool_call().model_copy(update={"tool_call_id": "call_2"}))
+    runtime, handle, loop, executor = await setup_loop(
+        ScriptedModelProvider(
+            (ScriptedModelStep(events=(completed("", calls=calls),)),)
+        ),
+        tools=(READ_TOOL,),
+        handlers={"read_value": handler},
+    )
+    task = asyncio.create_task(loop.execute(handle.run_id, CONTEXT))
+    try:
+        await _wait_for_tool_event(
+            runtime, handle.run_id, "tool.call.received", "call_2"
+        )
+    finally:
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+    model = ScriptedModelProvider((ScriptedModelStep(events=(completed("done"),)),))
+    loop = AgentLoopEngine(
+        runtime=runtime,
+        model=model,
+        tool_catalog=InMemoryToolCatalog((READ_TOOL,)),
+        tool_executor=executor,
+    )
+    run = await loop.recover_interrupted(handle.run_id, CONTEXT)
+    assert run.state == RunState.SUSPENDED
+    suspension, interaction = await _pending_interaction(runtime, run)
+    checkpoint = await runtime.session_store.get_checkpoint(run.checkpoint_id)
+    assert (
+        AgentLoopCheckpointCodec.decode(checkpoint.state).pending_tool_call.tool_call_id
+        == "call_1"
+    )
+    await runtime.reply_interaction(
+        _approval_reply(
+            run.run_id,
+            run,
+            suspension,
+            interaction,
+            "confirm_succeeded",
+            "receipt-restart",
+        ),
+        CONTEXT,
+    )
+    run = await loop.resume(run.run_id, CONTEXT)
+    assert run.state == RunState.COMPLETED
+    assert len(executor.calls) == 2
+    events = await runtime.session_store.read_events(run.run_id)
+    failures = [event for event in events if event.type == "tool.call.failed"]
+    assert len(failures) == 1
+    assert failures[0].data.tool_call_id == "call_2"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("pause_first", [False, True])
+async def test_parallel_parent_cancellation_drains_every_tool(pause_first):
+    active = set()
+    both_started = asyncio.Event()
+
+    async def handler(call, context):
+        active.add(call.tool_call_id)
+        if len(active) == 2:
+            both_started.set()
+        try:
+            await asyncio.Event().wait()
+        finally:
+            active.remove(call.tool_call_id)
+
+    calls = (tool_call(), tool_call().model_copy(update={"tool_call_id": "call_2"}))
+    runtime, handle, loop, _ = await setup_loop(
+        ScriptedModelProvider(
+            (ScriptedModelStep(events=(completed("", calls=calls),)),)
+        ),
+        tools=(READ_TOOL,),
+        handlers={"read_value": handler},
+    )
+    task = asyncio.create_task(loop.execute(handle.run_id, CONTEXT))
+    try:
+        await asyncio.wait_for(both_started.wait(), 1)
+        if pause_first:
+            run = await runtime.get_run(handle.run_id)
+            await runtime.pause_run(
+                PauseRun(
+                    run_id=run.run_id,
+                    expected_revision=run.revision,
+                    idempotency_key="pause-parallel-cancel",
+                ),
+                CONTEXT,
+            )
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        assert not active
+        events = await runtime.session_store.read_events(handle.run_id)
+        assert {
+            event.data.tool_call_id
+            for event in events
+            if event.type == "tool.call.unknown"
+        } == {"call_1", "call_2"}
+    finally:
+        if not task.done():
+            task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+
+
+@pytest.mark.asyncio
+async def test_parallel_tool_context_survives_later_uncertain_sibling():
+    async def handler(call, context):
+        if call.tool_call_id == "call_2":
+            raise SageV2Error(
+                RuntimeErrorInfo(
+                    code="tool.response_lost",
+                    category=ErrorCategory.UNCERTAIN_SIDE_EFFECT,
+                    message="response lost",
+                    safe_to_resume=True,
+                )
+            )
+        result = await tool_handler(call, context)
+        return result.model_copy(
+            update={
+                "metadata": {
+                    "followup_user_message": {
+                        "content": [
+                            {"kind": "text", "text": "Supplemental tool context"}
+                        ],
+                        "metadata": {
+                            "tool_context": True,
+                            "source_tool_call_id": call.tool_call_id,
+                        },
+                    }
+                }
+            }
+        )
+
+    calls = (tool_call(), tool_call().model_copy(update={"tool_call_id": "call_2"}))
+    model = ScriptedModelProvider(
+        (
+            ScriptedModelStep(events=(completed("", calls=calls),)),
+            ScriptedModelStep(events=(completed("done"),)),
+        )
+    )
+    runtime, handle, loop, executor = await setup_loop(
+        model,
+        tools=(READ_TOOL,),
+        handlers={"read_value": handler},
+    )
+    run = await loop.execute(handle.run_id, CONTEXT)
+    assert run.state == RunState.SUSPENDED
+    suspension, interaction = await _pending_interaction(runtime, run)
+    await runtime.reply_interaction(
+        _approval_reply(
+            run.run_id,
+            run,
+            suspension,
+            interaction,
+            "confirm_succeeded",
+            "context-unknown",
+        ),
+        CONTEXT,
+    )
+    loop = AgentLoopEngine(
+        runtime=runtime,
+        model=model,
+        tool_catalog=InMemoryToolCatalog((READ_TOOL,)),
+        tool_executor=executor,
+    )
+    run = await loop.resume(run.run_id, CONTEXT)
+    assert run.state == RunState.COMPLETED
+    assert len(executor.calls) == 2
+    followups = [
+        message
+        for message in model.requests[-1].messages
+        if message.metadata.get("tool_context")
+    ]
+    assert len(followups) == 1
+    assert followups[0].content[0].text == "Supplemental tool context"

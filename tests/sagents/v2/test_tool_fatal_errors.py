@@ -1,4 +1,4 @@
-"""Unsafe Tool failures terminate execution before another Tool or model turn."""
+"""Unsafe Tool failures stop the Run after draining its parallel tool batch."""
 
 import pytest
 
@@ -53,7 +53,7 @@ async def test_unsafe_tool_error_stops_the_run(raised, retryable, side_effect):
                         calls=(
                             tool_call().model_copy(update={"tool_call_id": "fatal"}),
                             tool_call().model_copy(
-                                update={"tool_call_id": "must-not-execute"}
+                                update={"tool_call_id": "parallel-sibling"}
                             ),
                         )
                     ),
@@ -72,7 +72,8 @@ async def test_unsafe_tool_error_stops_the_run(raised, retryable, side_effect):
     )
     result = await loop.execute(handle.run_id, CONTEXT)
     assert result.state == RunState.FAILED
-    assert executed == ["fatal"]
+    # Both siblings were authorized and dispatched before either result arrived.
+    assert executed == ["fatal", "parallel-sibling"]
     assert len(model.requests) == 1
     events = await runtime.session_store.read_events(handle.run_id)
     assert any(e.type == "tool.call.failed" for e in events)

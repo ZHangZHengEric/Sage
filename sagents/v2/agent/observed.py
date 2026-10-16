@@ -251,7 +251,7 @@ class ObservedRunDriver(AgentLoopEngine):
         )
 
 
-    async def dispatch_tool_call(
+    async def _capture_tool_execution(
         self, run, call, context, turn_id, step_id=None, state=None
     ):
         return await self._observe_tool_call(
@@ -261,7 +261,7 @@ class ObservedRunDriver(AgentLoopEngine):
             turn_id,
             step_id=step_id,
             state=state,
-            body=super().dispatch_tool_call,
+            body=super()._capture_tool_execution,
         )
 
     async def _observe_tool_call(
