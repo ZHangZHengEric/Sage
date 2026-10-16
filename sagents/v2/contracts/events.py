@@ -97,6 +97,8 @@ class ToolEventData(StrictModel):
     idempotency_key: Identifier | None = None
     arguments: dict[str, Any] | None = None
     result_item_id: Identifier | None = None
+    # Durable provider receipt, before run-wide suspension/settlement decisions.
+    execution_result: dict[str, Any] | None = None
     error: RuntimeErrorInfo | None = None
 
 
@@ -346,6 +348,7 @@ EVENT_CATALOG.update(
             "tool.call.awaiting_approval",
             "tool.call.dispatching",
             "tool.call.started",
+            "tool.call.received",
             "tool.call.succeeded",
             "tool.call.failed",
             "tool.call.unknown",

@@ -629,6 +629,8 @@ class AgentLoopEngine:
                 if isinstance(event.data, UsageEventData)
             ),
         )
+        if await self._tool_execution_receipt(run, call) is not None:
+            return await self._drive(run, state, context)
         try:
             definition = await self.tool_catalog.get_tool(call.tool_name, run_id=run_id)
         except Exception:
@@ -1383,8 +1385,14 @@ class AgentLoopEngine:
                     message.tool_call_id
                     for message in self._pending_response_results(state)
                 }
+                prepared_calls = []
+                approval_calls = []
+                crossed = await self._crossed_tool_calls(run, step_id)
                 for model_call in response.tool_calls:
                     if model_call.tool_call_id in settled:
+                        continue
+                    if model_call.tool_call_id in crossed:
+                        prepared_calls.append(crossed[model_call.tool_call_id])
                         continue
                     try:
                         definition = await self.tool_catalog.get_tool(
@@ -1482,25 +1490,20 @@ class AgentLoopEngine:
                         completed_tool_results.append(result)
                         continue
                     if policy.action == ToolPolicyAction.REQUIRE_INTERACTION:
-                        run, followups = await self._persist_followup_user_messages(
-                            run,
-                            completed_tool_results,
-                            context,
-                            state.turn_id,
-                            step_id,
-                        )
-                        state = state.model_copy(
-                            update={
-                                "messages": (*state.messages, *followups),
-                                "pending_tool_call": tool_call,
-                                "pending_tool_policy": policy,
-                                "pending_tool_phase": "approval",
-                                "pending_tool_step_id": step_id,
-                            }
-                        )
-                        return await self._suspend_for_tool_approval(
-                            run, state, policy, context, step_id
-                        )
+                        approval_calls.append((tool_call, policy))
+                    else:
+                        prepared_calls.append(tool_call)
+
+                run, state, batch_results = await self._execute_tool_batch(
+                    run, prepared_calls, crossed, context, state, step_id
+                )
+                completed_tool_results.extend(batch_results.values())
+                questionnaire_completed = state.pending_questionnaire_completed
+                if run.state in TERMINAL_RUN_STATES:
+                    return run
+                for tool_call in prepared_calls:
+                    if tool_call.tool_call_id in batch_results:
+                        continue
                     run, result = await self._dispatch_tool(
                         run, tool_call, context, state.turn_id, step_id, state
                     )
@@ -1510,19 +1513,51 @@ class AgentLoopEngine:
                         questionnaire_completed
                         or self._validated_questionnaire_result(tool_call, result)
                     )
+                    # Persist supplemental context before a later sibling can
+                    # suspend, so resume cannot lose an already-settled result's context.
+                    run, followups = await self._persist_followup_user_messages(
+                        run, (result,), context, state.turn_id, step_id
+                    )
                     state = state.model_copy(
                         update={
                             "pending_questionnaire_completed": questionnaire_completed,
-                            "messages": (
+                            "messages": order_tool_context((
                                 *state.messages,
                                 self._tool_result_message(result),
-                            ),
+                                *followups,
+                            )),
                             "expanded_tool_names": (
                                 self.tool_selection_policy.expanded_tools(run.run_id)
                             ),
                         }
                     )
-                    completed_tool_results.append(result)
+                    completed_tool_results.append(result.model_copy(update={
+                        "metadata": {key: value for key, value in result.metadata.items()
+                                     if key != "followup_user_message"},
+                    }))
+                if run.state == RunState.SUSPEND_REQUESTED:
+                    run, followups = await self._persist_followup_user_messages(
+                        run, completed_tool_results, context, state.turn_id, step_id
+                    )
+                    state = state.model_copy(update={
+                        "messages": (*state.messages, *followups),
+                    })
+                    return await self._suspend_at_safe_point(run, state, context)
+                if approval_calls:
+                    tool_call, policy = approval_calls[0]
+                    run, followups = await self._persist_followup_user_messages(
+                        run, completed_tool_results, context, state.turn_id, step_id
+                    )
+                    state = state.model_copy(update={
+                        "messages": (*state.messages, *followups),
+                        "pending_tool_call": tool_call,
+                        "pending_tool_policy": policy,
+                        "pending_tool_phase": "approval",
+                        "pending_tool_step_id": step_id,
+                    })
+                    return await self._suspend_for_tool_approval(
+                        run, state, policy, context, step_id
+                    )
                 run, followups = await self._persist_followup_user_messages(
                     run,
                     completed_tool_results,
@@ -2462,17 +2497,160 @@ class AgentLoopEngine:
         """Optional observer hook; execution never depends on logging."""
 
 
-    async def dispatch_tool_call(
-        self, run, call, context, turn_id, step_id=None, state=None
-    ):
-        """Cross the tool side-effect barrier and settle or reconcile its result.
+    def _apply_tool_expansion(self, call, result):
+        if result.error is None and call.tool_name == "tool_expand_tools":
+            requested_names = call.arguments.get("tool_names")
+            if requested_names is None:
+                requested_names = call.arguments.get("names")
+            if isinstance(requested_names, (list, tuple)):
+                self.tool_selection_policy.expand_tools(
+                    run_id=call.owner_run_id,
+                    names=tuple(
+                        name for name in requested_names if isinstance(name, str)
+                    ),
+                )
 
-        `dispatching` is committed before calling the provider. Once control
-        crosses into ToolExecutor, a transport failure may mean the operation
-        succeeded remotely; such failures become UNKNOWN, never an automatic
-        retry.
+    async def _crossed_tool_calls(self, run, step_id):
+        """Original calls that crossed the durable barrier, never safe to replay."""
+        events = await self.runtime.session_store.read_events(run.run_id)
+        command = await self.runtime.session_store.get_start_command(run.run_id)
+        proposals = {
+            event.data.operation_id: event.data
+            for event in events
+            if event.type == "tool.call.proposed"
+            and event.step_id == step_id
+            and isinstance(event.data, ToolEventData)
+        }
+        calls = {}
+        for event in events:
+            if event.type != "tool.call.started" or event.step_id != step_id:
+                continue
+            data = event.data
+            proposal = proposals.get(data.operation_id)
+            calls[data.tool_call_id] = ToolCall(
+                tool_call_id=data.tool_call_id,
+                tool_name=data.tool_name,
+                arguments=proposal.arguments
+                if proposal and proposal.arguments is not None
+                else {},
+                operation_id=data.operation_id,
+                idempotency_key=data.idempotency_key,
+                owner_run_id=run.run_id,
+                owner_agent_id=command.agent_id,
+                owner_session_id=run.session_id,
+            )
+        return calls
+
+    async def _tool_execution_receipt(self, run, call):
+        events = await self.runtime.session_store.read_events(run.run_id)
+        for event in reversed(events):
+            if (
+                event.type == "tool.call.received"
+                and event.data.operation_id == call.operation_id
+            ):
+                return ToolExecutionResult.model_validate(event.data.execution_result)
+        return None
+
+    async def _execute_tool_batch(self, run, calls, crossed, context, state, step_id):
+        """Execute siblings concurrently; one owner serializes durable receipts.
+
+        All receipts are durable before any result can suspend the whole Run.
+        Recovery consumes receipts or reconciles started operations, never
+        repeats a side effect merely because a sibling needed user input.
         """
+        turn_id = state.turn_id
+        results = {}
+        fresh = [call for call in calls if call.tool_call_id not in crossed]
+        if len(calls) <= 1:
+            return run, state, results
+        for call in fresh:
+            run = await self._start_tool_execution(run, call, context, turn_id, step_id)
 
+        async def execute(call):
+            _, result = await self._capture_tool_execution(
+                run, call, context, turn_id, step_id
+            )
+            return call, result
+
+        tasks = [asyncio.create_task(execute(call)) for call in fresh]
+        try:
+            for future in asyncio.as_completed(tasks):
+                call, result = await future
+                run = await self.runtime.get_run(run.run_id)
+                if result is None or run.state in TERMINAL_RUN_STATES:
+                    continue
+                # Publish ordinary successes immediately, without waiting for a
+                # slow sibling. Decisions that can suspend the Run wait until
+                # every execution has drained and its receipt is durable.
+                if (
+                    result.error is None
+                    and not result.metadata.get("delegation_interactions")
+                    and not result.metadata.get("followup_user_message")
+                ):
+                    self._apply_tool_expansion(call, result)
+                    run, result = await self._commit_tool_result(
+                        run,
+                        call,
+                        result,
+                        context,
+                        turn_id,
+                        step_id=step_id,
+                        expected_states={RunState.RUNNING, RunState.SUSPEND_REQUESTED},
+                    )
+                    results[call.tool_call_id] = result
+                    state = state.model_copy(
+                        update={
+                            "messages": (
+                                *state.messages,
+                                self._tool_result_message(result),
+                            ),
+                            "pending_questionnaire_completed": (
+                                state.pending_questionnaire_completed
+                                or self._validated_questionnaire_result(call, result)
+                            ),
+                            "expanded_tool_names": self.tool_selection_policy.expanded_tools(
+                                run.run_id
+                            ),
+                        }
+                    )
+                else:
+                    run = await self._commit_running(
+                        run,
+                        context,
+                        (
+                            EventDraft(
+                                type="tool.call.received",
+                                turn_id=turn_id,
+                                step_id=step_id,
+                                data=ToolEventData(
+                                    tool_call_id=call.tool_call_id,
+                                    tool_name=call.tool_name,
+                                    operation_id=call.operation_id,
+                                    idempotency_key=call.idempotency_key,
+                                    state="received",
+                                    execution_result=result.model_dump(mode="json"),
+                                ),
+                            ),
+                        ),
+                        expected_states={RunState.RUNNING, RunState.SUSPEND_REQUESTED},
+                    )
+        finally:
+            for task in tasks:
+                if not task.done():
+                    task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
+            run = await self.runtime.get_run(run.run_id)
+            if run.state in TERMINAL_RUN_STATES:
+                await self._release_run_resources(run.run_id)
+            elif run.state in {RunState.RUNNING, RunState.SUSPEND_REQUESTED}:
+                for call, task in zip(fresh, tasks, strict=True):
+                    if task.cancelled():
+                        run = await self._record_cancelled_execution(
+                            run, call, context, turn_id, step_id
+                        )
+        return await self.runtime.get_run(run.run_id), state, results
+
+    async def _start_tool_execution(self, run, call, context, turn_id, step_id):
         run = await self._commit_running(
             run,
             context,
@@ -2503,43 +2681,39 @@ class AgentLoopEngine:
                 ),
             ),
         )
+        return run
+
+    async def _record_cancelled_execution(self, run, call, context, turn_id, step_id):
+        return await self._record_tool_unknown(
+            run,
+            call,
+            RuntimeErrorInfo(
+                code="tool.cancelled_before_result",
+                category=ErrorCategory.UNCERTAIN_SIDE_EFFECT,
+                message="tool execution was cancelled before a result was received",
+                safe_to_resume=True,
+                metadata={
+                    "tool_name": call.tool_name,
+                    "operation_id": call.operation_id,
+                    "tool_result_received": False,
+                },
+            ),
+            context,
+            turn_id,
+            step_id,
+        )
+
+    async def _capture_tool_execution(
+        self, run, call, context, turn_id, step_id=None, state=None
+    ):
         try:
             run, result = await self._execute_tool_with_control(run, call, context)
             if result is None:
-                # The Run reached a terminal state while the Tool was being
-                # cancelled; the loop will not come back to its safe point, so
-                # release Run-scoped Tool resources (e.g. shell jobs) here.
-                await self._release_run_resources(run.run_id)
+                # The owner releases run resources after all siblings drain.
                 return run, None
         except asyncio.CancelledError:
-            current = await self.runtime.get_run(run.run_id)
-            if current.state in TERMINAL_RUN_STATES:
-                await self._release_run_resources(run.run_id)
-                raise
-            if current.state in {RunState.RUNNING, RunState.SUSPEND_REQUESTED}:
-                uncertainty = RuntimeErrorInfo(
-                    code="tool.cancelled_before_result",
-                    category=ErrorCategory.UNCERTAIN_SIDE_EFFECT,
-                    message=(
-                        "tool execution was cancelled before a result was received"
-                    ),
-                    safe_to_resume=True,
-                    metadata={
-                        "tool_name": call.tool_name,
-                        "operation_id": call.operation_id,
-                        "tool_result_received": False,
-                    },
-                )
-                try:
-                    await asyncio.shield(
-                        self._record_tool_unknown(
-                            current, call, uncertainty, context, turn_id, step_id
-                        )
-                    )
-                except asyncio.CancelledError:
-                    raise
-                except Exception:
-                    pass
+            # The durable started barrier is sufficient for crash recovery.
+            # The batch owner drains every sibling before releasing resources.
             raise
         except SageV2Error as exc:
             self._log_tool_exception(exc, run, call, turn_id, step_id)
@@ -2567,6 +2741,56 @@ class AgentLoopEngine:
                 content=(TextBlock(text=error_diagnostic_message(localized)),),
                 error=localized,
             )
+        return run, result
+
+    async def dispatch_tool_call(
+        self, run, call, context, turn_id, step_id=None, state=None
+    ):
+        """Cross the tool side-effect barrier and settle or reconcile its result.
+
+        `dispatching` is committed before calling the provider. Once control
+        crosses into ToolExecutor, a transport failure may mean the operation
+        succeeded remotely; such failures become UNKNOWN, never an automatic
+        retry.
+        """
+
+        previous = await self._crossed_tool_calls(run, step_id)
+        if call.tool_call_id in previous:
+            # Reuse the original operation identity, including after process loss.
+            call = previous[call.tool_call_id]
+            receipt = await self._tool_execution_receipt(run, call)
+            if receipt is None:
+                uncertainty = RuntimeErrorInfo(
+                    code="tool.outcome_unknown_after_worker_restart",
+                    category=ErrorCategory.UNCERTAIN_SIDE_EFFECT,
+                    message="Tool dispatch was recorded without a result; reconcile before continuing",
+                    safe_to_resume=True,
+                )
+                run = await self._record_tool_unknown(
+                    run, call, uncertainty, context, turn_id, step_id
+                )
+                return await self._reconcile_or_suspend_tool(
+                    run, call, context, turn_id, step_id, state, uncertainty
+                )
+            result = receipt
+        else:
+            run = await self._start_tool_execution(run, call, context, turn_id, step_id)
+            try:
+                run, result = await self._capture_tool_execution(
+                    run, call, context, turn_id, step_id
+                )
+            except asyncio.CancelledError:
+                current = await self.runtime.get_run(run.run_id)
+                if current.state in TERMINAL_RUN_STATES:
+                    await self._release_run_resources(run.run_id)
+                elif current.state in {RunState.RUNNING, RunState.SUSPEND_REQUESTED}:
+                    await asyncio.shield(self._record_cancelled_execution(
+                        current, call, context, turn_id, step_id
+                    ))
+                raise
+            if result is None:
+                await self._release_run_resources(run.run_id)
+                return run, None
         if result.error is not None:
             localized = localize_error(result.error, context.language)
             if not localized.safe_to_resume:
@@ -2594,17 +2818,7 @@ class AgentLoopEngine:
             # Localization only owns the host/UI summary. The receipt marker
             # controls side-effect certainty, not whether content is retained.
             result = result.model_copy(update={"error": localized})
-        elif call.tool_name == "tool_expand_tools":
-            requested_names = call.arguments.get("tool_names")
-            if requested_names is None:
-                requested_names = call.arguments.get("names")
-            if isinstance(requested_names, (list, tuple)):
-                self.tool_selection_policy.expand_tools(
-                    run_id=call.owner_run_id,
-                    names=tuple(
-                        name for name in requested_names if isinstance(name, str)
-                    ),
-                )
+        self._apply_tool_expansion(call, result)
         pending_delegations = result.metadata.get("delegation_interactions")
         if (
             state is not None
@@ -2879,6 +3093,7 @@ class AgentLoopEngine:
                     ),
                 ),
             ),
+            expected_states={RunState.RUNNING, RunState.SUSPEND_REQUESTED},
         )
 
     async def _reconcile_or_suspend_tool(
