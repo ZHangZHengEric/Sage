@@ -112,6 +112,51 @@ def test_package_entrypoint_rejects_server_override_before_execution(client):
     assert "session.store" in response.text and "不允许" in response.text
 
 
+@pytest.mark.timeout(15)
+@pytest.mark.parametrize("route", ["agent", "agent-package"])
+@pytest.mark.parametrize("tool,arguments,error_code", [
+    ("nonexistent_tool", {}, "tool.not_found"),
+    ("file_write", {"file_path": "result.txt"}, "tool.arguments_invalid"),
+])
+def test_both_entrypoints_recover_tool_errors_and_deliver_file(
+    tmp_path, route, tool, arguments, error_code,
+):
+    from fastapi.testclient import TestClient
+    from app.v2.server.main import create_app
+    from sagents.v2.testing.plugins import ScriptedModelProvider
+    from tests.app.v2.server.conftest import make_test_service
+    from tests.app.v2.server.test_a2a_resume import _step
+    from tests.app.v2.server.test_agui_chat import _run_input
+
+    provider = ScriptedModelProvider((
+        _step(1, "try", tool, arguments),
+        _step(2, "correct", "file_write", {"file_path": "result.txt", "content": "delivered"}),
+        _step(3, "finished"),
+    ))
+    host = make_test_service(tmp_path, model_provider=provider)
+    with TestClient(create_app(service=host)) as client:
+        headers, _ = identity(client, "tool-recovery")
+        agent = client.get("/api/agents", headers=headers).json()["data"][0]
+        body = _run_input()
+        body["forwardedProps"] = {"agentId": agent["id"]}
+        if route == "agent-package":
+            body["agent_package"] = agent["package"]
+        response = client.post(f"/api/{route}", headers=headers, json=body)
+        assert response.status_code == 200, response.text
+        assert "RUN_FINISHED" in response.text and "RUN_ERROR" not in response.text
+        download = client.get("/api/workspace/download", headers=headers,
+                              params={"thread_id": "thread-1", "path": "result.txt"})
+        assert download.status_code == 200 and download.content == b"delivered"
+        store = host.application.entrypoint().runtime.session_store
+        runs = client.portal.call(store.list_session_runs, "thread-1")
+        assert len(runs) == 1 and runs[0].state.value == "completed"
+        events = client.portal.call(store.read_events, runs[0].run_id)
+        assert any(event.type == "tool.call.failed" and event.data.error
+                   and event.data.error.code == error_code for event in events)
+        assert len(provider.requests) == 3
+        assert error_code in provider.requests[1].model_dump_json()
+
+
 @pytest.mark.asyncio
 async def test_model_factory_resolves_each_agent_binding(tmp_path, monkeypatch):
     from sagents.v2.package.manifest.models import ModelRoute
