@@ -1,5 +1,6 @@
 // Names follow Desktop v2 settings_screen.dart and its Chinese localization.
 export const componentNames = {
+  'derived-state.store': '运行状态存储', 'session.access': '会话访问控制', 'agent.approval-memory': '审批记忆',
   'agent.continuation-policy': 'Run 完成判定', 'tool.selection-policy': '工具选择策略',
   'memory.provider': '长期记忆', 'memory.recall-query': '记忆检索词生成', 'session-memory.provider': '会话记忆',
   'context.summarizer': '上下文摘要器', 'context.reducer': '上下文压缩', 'context.summary-store': '摘要存储',

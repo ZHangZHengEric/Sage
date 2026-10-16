@@ -9,7 +9,7 @@ const preview = ref({})
 const groups = computed(() => componentGroups(catalog.value, server.value?.providers).filter(group => !query.value || `${group.name} ${group.id} ${group.plugins.map(p => `${pluginName(p)} ${p.name} ${p.id}`).join(' ')}`.toLowerCase().includes(query.value.toLowerCase())))
 function bindings(group) { return server.value?.providers.filter(item => item.capability === group.id) || [] }
 function currentIds(group) { const live = bindings(group).map(item => item.plugin_id).filter(Boolean); return live.length ? [...new Set(live)] : [catalog.value?.defaults[group.id]].filter(Boolean) }
-function currentNames(group) { return currentIds(group).map(id => pluginName(group.plugins.find(p => p.id === id) || id)).join('、') || bindings(group).map(b => b.implementation || 'Server 提供').join('、') || '未指定' }
+function currentNames(group) { return currentIds(group).map(id => pluginName(group.plugins.find(p => p.id === id) || id)).join('、') || (bindings(group).length ? 'Server 提供' : '') || '未指定' }
 function inspecting(group) { return group.plugins.find(p => p.id === (preview.value[group.id] || currentIds(group)[0])) || group.plugins[0] }
 function parameterRows(group) {
   const plugin = inspecting(group)
