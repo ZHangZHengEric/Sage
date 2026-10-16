@@ -369,3 +369,20 @@ test('Studio starts new Package runs through the ordinary chat page', async t =>
   assert.equal(target.query.package, 'package@1.0.0')
   assert.deepEqual(JSON.parse(drafts.get(target.query.draft)), { content: 'Run this package' })
 })
+
+test('package model slots select App model IDs without embedding model routes', async t => {
+  const { mount } = await setup(t, 'PackageEditor', 'components')
+  const bundle = { manifest: { agents: { main: { models: { primary: 'existing-id' } } } }, files: {} }
+  const schema = { bundle_schema: { $defs: { AgentDefinition: { properties: {
+    mode: {}, models: { patternProperties: { '^.*$': { type: 'string' } } }, delegation_model_bindings: {},
+    tools: {}, skills: {}, subagents: {},
+  } } }, properties: { manifest: { type: 'object' } } } }
+  const state = await mount({ modelValue: JSON.stringify(bundle), schema, resources: { models: [{ id: 'app-model', model: 'Model label' }] } })
+  const bindings = state.root.$defs.AgentDefinition.properties
+  assert.deepEqual(bindings.models.additionalProperties.enum, ['default', 'app-model', 'existing-id'])
+  assert.equal(bindings.models.additionalProperties['x-option-labels']['app-model'], 'Model label')
+  assert.deepEqual(bindings.delegation_model_bindings.additionalProperties.enum, ['default', 'app-model'])
+  assert.equal(state.sections.includes('models'), false)
+  assert.equal(state.sections.includes('credentials'), false)
+  assert.equal(state.bundle.manifest.models, undefined)
+})

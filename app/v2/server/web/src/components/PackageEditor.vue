@@ -6,7 +6,7 @@ import { labels, resolveSchema } from '../config-schema.js'
 const props = defineProps({ modelValue: String, schema: Object, resources: Object, disabled: Boolean })
 const emit = defineEmits(['update:modelValue'])
 const active = ref('metadata'), mode = ref('form')
-const sections = ['metadata', 'entrypoint', 'agents', 'models', 'runtime', 'policies', 'flows', 'credentials', 'plugins', 'interfaces', 'tests', 'environments', 'files']
+const sections = ['metadata', 'entrypoint', 'agents', 'runtime', 'policies', 'flows', 'plugins', 'interfaces', 'tests', 'environments', 'files']
 const bundle = computed(() => { try { return JSON.parse(props.modelValue) } catch { return null } })
 const root = computed(() => {
   const schema = JSON.parse(JSON.stringify(props.schema?.bundle_schema || {}))
@@ -15,19 +15,13 @@ const root = computed(() => {
     const steps = defs[name]?.properties?.max_steps
     if (steps?.anyOf) steps.anyOf[0].maximum = 10000
   }
-  const route = defs.ModelRoute?.properties
-  if (route) {
-    route.provider = { type: 'string', const: 'server' }
-    for (const key of ['base_url', 'credential', 'plugin', 'capability_profile']) delete route[key]
-    route.model = { type: 'string', 'x-option-labels': Object.fromEntries([['default', '默认模型'], ...(props.resources?.models || []).map(item => [item.id, item.model])]), enum: [...new Set(['default', ...(props.resources?.models || []).map(item => item.id), ...Object.values(bundle.value?.manifest?.models || {}).map(item => item.model)])] }
-  }
   const agent = defs.AgentDefinition?.properties
   if (agent) {
     agent.mode['x-option-labels'] = { simple: '简单', fibre: 'Fibre', team: '团队' }
     for (const field of ['models', 'delegation_model_bindings']) {
       const current = Object.values(bundle.value?.manifest?.agents || {}).flatMap(item => Object.values(item[field] || {}))
-      const routes = [...new Set([...Object.keys(bundle.value?.manifest?.models || {}), ...current])]
-      if (routes.length) agent[field].additionalProperties = { type: 'string', enum: routes }
+      const routes = [...new Set(['default', ...(props.resources?.models || []).map(item => item.id), ...current])]
+      if (routes.length) agent[field].additionalProperties = { type: 'string', enum: routes, 'x-option-labels': Object.fromEntries([['default', '默认模型'], ...(props.resources?.models || []).map(item => [item.id, item.model])]) }
       delete agent[field].patternProperties
     }
     for (const [field, choices] of [['tools', props.resources?.tools?.map(item => item.name)], ['skills', props.resources?.skills?.map(item => item.name)], ['subagents', Object.keys(bundle.value?.manifest?.agents || {})]]) {
