@@ -9039,6 +9039,49 @@ void main() {
     expect(api.lastAgentPatch, {'deep_thinking': false});
   });
 
+  for (final brightness in [Brightness.light, Brightness.dark]) {
+    testWidgets('agent memory settings persist in ${brightness.name}', (
+      tester,
+    ) async {
+      tester.view.physicalSize = const Size(1200, 800);
+      tester.view.devicePixelRatio = 1;
+      tester.platformDispatcher.platformBrightnessTestValue = brightness;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      addTearDown(tester.platformDispatcher.clearPlatformBrightnessTestValue);
+      final api = _FakeApi();
+      final controller = await _controller(api: api);
+      addTearDown(() => _disposeController(controller));
+      await tester.pumpWidget(SageDesktopV2App(controller: controller));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('settings-button')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('智能体').first);
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('settings-agent-edit')));
+      await tester.pumpAndSettle();
+      for (final field in ['recall', 'auto_write']) {
+        final toggle = find.byKey(ValueKey('agent-memory-$field'));
+        await tester.ensureVisible(toggle);
+        await tester.pumpAndSettle();
+        await tester.tap(toggle);
+        await tester.pumpAndSettle();
+        expect((api.lastAgentPatch!['memory'] as Map)[field], false);
+      }
+      final scope = find.byKey(const ValueKey('agent-memory-scope'));
+      await tester.ensureVisible(scope);
+      await tester.pumpAndSettle();
+      await tester.tap(scope);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('当前会话').last);
+      await tester.pumpAndSettle();
+      expect(api.lastAgentPatch, {
+        'memory': {'recall': false, 'auto_write': false, 'scope': 'session'},
+      });
+      expect(tester.takeException(), isNull);
+    });
+  }
+
   testWidgets('agent reasoning controls follow verified model capabilities', (
     tester,
   ) async {
@@ -10155,40 +10198,83 @@ void main() {
     },
   );
 
-  testWidgets('intermediate UI is one process row opening original preview in sidebar', (tester) async {
-    tester.view.physicalSize = const Size(1440, 1000);
-    tester.view.devicePixelRatio = 1;
-    addTearDown(tester.view.resetPhysicalSize);
-    addTearDown(tester.view.resetDevicePixelRatio);
-    final controller = await _controller(api: _FakeApi());
-    addTearDown(() => _disposeController(controller));
-    await tester.pumpWidget(SageDesktopV2App(controller: controller));
-    await tester.pumpAndSettle();
-    final c = controller.selectedConversation!;
-    c.messages.add(ChatMessage(id: 'ui-user', role: 'user', text: 'Create slides'));
-    c.processPanels.add(RuntimeProcessPanel(id: 'ui-process', anchorMessageId: 'ui-user', runId: 'ui-run', running: false, startedAt: DateTime.now()));
-    for (final id in ['old-ui', 'new-ui']) {
-      final surface = <String, Object?>{'message_id': id, 'block_index': 0, 'run_id': 'ui-run', 'complete': false, 'error': 'invalid',
-        'tree': {'component': 'Deck', 'props': {'title': id, 'children': [
-          {'component': 'Slide', 'props': {'title': id, 'layout': 'cover', 'accent': 'blue', 'children': []}}
-        ]}}};
-      c.messages.add(ChatMessage(id: id, role: 'assistant', text: '```openui\nroot = Deck("Title", [])\n```', openUiSurfaces: [surface]));
-      controller.updateOpenUiDraft(surface, {});
-    }
-    await tester.pumpAndSettle();
-    expect(find.byKey(const ValueKey('old-ui')), findsNothing);
-    expect(find.byKey(const ValueKey('new-ui')), findsOneWidget);
-    await tester.tap(find.byKey(const ValueKey('process-panel-toggle')).last);
-    await tester.pumpAndSettle();
-    final row = find.byKey(const ValueKey('process-openui:old-ui:0'));
-    expect(row, findsOneWidget);
-    expect(tester.getSize(row).height, lessThan(60));
-    await tester.tap(row);
-    await tester.pumpAndSettle();
-    expect(controller.expandedOpenUiKey, 'old-ui:0');
-    expect(find.byKey(const ValueKey('openui-deck-workspace')), findsOneWidget);
-    expect(tester.takeException(), isNull);
-  });
+  testWidgets(
+    'intermediate UI is one process row opening original preview in sidebar',
+    (tester) async {
+      tester.view.physicalSize = const Size(1440, 1000);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final controller = await _controller(api: _FakeApi());
+      addTearDown(() => _disposeController(controller));
+      await tester.pumpWidget(SageDesktopV2App(controller: controller));
+      await tester.pumpAndSettle();
+      final c = controller.selectedConversation!;
+      c.messages.add(
+        ChatMessage(id: 'ui-user', role: 'user', text: 'Create slides'),
+      );
+      c.processPanels.add(
+        RuntimeProcessPanel(
+          id: 'ui-process',
+          anchorMessageId: 'ui-user',
+          runId: 'ui-run',
+          running: false,
+          startedAt: DateTime.now(),
+        ),
+      );
+      for (final id in ['old-ui', 'new-ui']) {
+        final surface = <String, Object?>{
+          'message_id': id,
+          'block_index': 0,
+          'run_id': 'ui-run',
+          'complete': false,
+          'error': 'invalid',
+          'tree': {
+            'component': 'Deck',
+            'props': {
+              'title': id,
+              'children': [
+                {
+                  'component': 'Slide',
+                  'props': {
+                    'title': id,
+                    'layout': 'cover',
+                    'accent': 'blue',
+                    'children': [],
+                  },
+                },
+              ],
+            },
+          },
+        };
+        c.messages.add(
+          ChatMessage(
+            id: id,
+            role: 'assistant',
+            text: '```openui\nroot = Deck("Title", [])\n```',
+            openUiSurfaces: [surface],
+          ),
+        );
+        controller.updateOpenUiDraft(surface, {});
+      }
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('old-ui')), findsNothing);
+      expect(find.byKey(const ValueKey('new-ui')), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey('process-panel-toggle')).last);
+      await tester.pumpAndSettle();
+      final row = find.byKey(const ValueKey('process-openui:old-ui:0'));
+      expect(row, findsOneWidget);
+      expect(tester.getSize(row).height, lessThan(60));
+      await tester.tap(row);
+      await tester.pumpAndSettle();
+      expect(controller.expandedOpenUiKey, 'old-ui:0');
+      expect(
+        find.byKey(const ValueKey('openui-deck-workspace')),
+        findsOneWidget,
+      );
+      expect(tester.takeException(), isNull);
+    },
+  );
 
   testWidgets(
     'general interactive UI default auto-saves and affects only new chats',

@@ -132,6 +132,7 @@ class OpenAICompatibleModelProvider:
         # flag for selecting between them. In auto mode, start with the model-
         # family preference, retry the alternate field only after an explicit
         # pre-stream 400/422 rejection, and remember the accepted route dialect.
+        self._requires_empty_reasoning_content = False
         self._resolved_max_output_tokens_field: (
             Literal["max_tokens", "max_completion_tokens"] | None
         ) = None
@@ -513,11 +514,14 @@ class OpenAICompatibleModelProvider:
         fallbacks: list[dict[str, Any]] = []
         reasoning_fallback_used = False
         token_fallback_used = False
+        history_fallback_used = False
         while True:
             try:
                 record_wire_event({"diagnostic_event": "request_attempt", "payload": current})
                 upstream = await self._client.chat.completions.create(**current)
                 self._learn_output_token_field(current)
+                if history_fallback_used:
+                    self._requires_empty_reasoning_content = True
                 if not fallbacks:
                     return upstream, None
                 if len(fallbacks) == 1:
@@ -528,6 +532,14 @@ class OpenAICompatibleModelProvider:
                 }
             except Exception as exc:
                 record_wire_event({"diagnostic_event": "request_error", "error": {"type": type(exc).__name__, "message": str(exc)}})
+                if not history_fallback_used:
+                    fallback = self._reasoning_history_fallback_request(current, exc)
+                    if fallback is not None:
+                        current = fallback
+                        history_fallback_used = True
+                        fallbacks.append({"kind": "empty_reasoning_content_supplied",
+                                          "provider_status": self._provider_status(exc)})
+                        continue
                 if not token_fallback_used:
                     fallback, change = self._token_field_fallback_request(current, exc)
                     if fallback is not None:
@@ -550,6 +562,26 @@ class OpenAICompatibleModelProvider:
                         )
                         continue
                 raise
+
+    def _reasoning_history_fallback_request(self, kwargs, exc):
+        # Host-generated tool history (e.g. memory recall) has no model reasoning.
+        # Negotiate only after an explicit pre-stream rejection, preserving every
+        # real reasoning value. Never send this extension to unrelated providers.
+        if self._provider_status(exc) not in {400, 422}:
+            return None
+        message = str(exc).lower()
+        if "reasoning_content" not in message or "must be passed back" not in message:
+            return None
+        messages = kwargs.get("messages", ())
+        missing = [item for item in messages if item.get("role") == "assistant"
+                   and item.get("reasoning_content") is None]
+        if not missing:
+            return None
+        return {**kwargs, "messages": [
+            {**item, "reasoning_content": ""}
+            if item.get("role") == "assistant" and item.get("reasoning_content") is None
+            else item for item in messages
+        ]}
 
     def _effective_max_output_tokens_field(
         self,
@@ -845,6 +877,9 @@ class OpenAICompatibleModelProvider:
                 for key in ("reasoning_content", "reasoning_details"):
                     if key in state:
                         value[key] = state[key]
+        if message.role == "assistant" and self._requires_empty_reasoning_content:
+            if value.get("reasoning_content") is None:
+                value["reasoning_content"] = ""
         if message.role == "tool":
             value["tool_call_id"] = message.tool_call_id
         if message.tool_calls:

@@ -26,6 +26,7 @@ def default_agent_config(*, model_provider_id: str = "model_main") -> dict[str, 
     return {
         "systemPrefix": "You are a helpful Sage agent.",
         "systemContext": {},
+        "memory": {"recall": True, "auto_write": True, "scope": "agent"},
         "agentMode": "simple",
         "subAgentSelectionMode": "auto_all",
         "availableSubAgentIds": [],

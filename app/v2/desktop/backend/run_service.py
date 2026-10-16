@@ -63,6 +63,7 @@ from app.v2.desktop.backend.runtime_config import (
     _SKILL_NAME,
     _TOOL_NAME,
     _agent_memory_enabled,
+    _agent_memory_behavior,
 )
 from app.v2.desktop.backend.usage_analytics import (
     _usage_percentile as _usage_percentile,
@@ -209,11 +210,11 @@ class DesktopRunServiceMixin(DesktopRunCompositionMixin):
             facade = SAgent(
                 runtime=self.runtime,
                 driver_factory=lambda _run_id: driver,
-                memory_service=(self.memory_service if memory_enabled else None),
+                memory_service=(self._memory_service_for_agent(agent) if memory_enabled and _agent_memory_behavior(agent).auto_write else None),
                 memory_scope={
-                    "recall": memory_enabled,
-                    "auto_write": memory_enabled,
-                    "scope": "agent",
+                    "recall": memory_enabled and _agent_memory_behavior(agent).recall,
+                    "auto_write": memory_enabled and _agent_memory_behavior(agent).auto_write,
+                    "scope": _agent_memory_behavior(agent).scope,
                     "recall_limit": 8,
                 },
             )
@@ -773,11 +774,11 @@ class DesktopRunServiceMixin(DesktopRunCompositionMixin):
         facade = SAgent(
             runtime=self.runtime,
             driver_factory=lambda _: driver,
-            memory_service=(self.memory_service if memory_enabled else None),
+            memory_service=(self._memory_service_for_agent(agent) if memory_enabled and _agent_memory_behavior(agent).auto_write else None),
             memory_scope={
-                "recall": memory_enabled,
-                "auto_write": memory_enabled,
-                "scope": "agent",
+                "recall": memory_enabled and _agent_memory_behavior(agent).recall,
+                "auto_write": memory_enabled and _agent_memory_behavior(agent).auto_write,
+                "scope": _agent_memory_behavior(agent).scope,
                 "recall_limit": 8,
             },
         )

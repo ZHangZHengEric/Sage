@@ -46,10 +46,20 @@ _REASONING_DISABLE_EXTRAS: dict[str, dict[str, Any]] = {
 }
 
 
+def _agent_memory_behavior(agent: Any):
+    from sagents.v2.package.manifest.agents import AgentMemoryBehavior
+
+    # Older Desktop records used both automatic behaviors by default. Expose
+    # that default in settings, while honoring every explicit Package choice.
+    return AgentMemoryBehavior.model_validate(agent.config.get("memory") or {
+        "recall": True, "auto_write": True, "scope": "agent",
+    })
+
+
 def _agent_memory_enabled(
     agent: Any, memory_plugin_id: str, session_memory_plugin_id: str
 ) -> bool:
-    """Use Tool assignment as the per-Agent Memory feature switch."""
+    """Whether the Agent has access to a configured memory backend."""
 
     has_provider = (
         memory_plugin_id != "sage.memory.noop"

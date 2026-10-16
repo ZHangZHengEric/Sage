@@ -138,6 +138,7 @@ from app.v2.desktop.backend.run_environment import DesktopRunEnvironmentMixin
 from app.v2.desktop.backend.openui import OpenUiContextProvider
 from app.v2.desktop.backend.runtime_config import (
     _PLAN_BLOCKED_TOOLS,
+    _agent_memory_behavior,
     _REASONING_DISABLE_EXTRAS,
     _SKILL_NAME,
     _TOOL_NAME,
@@ -153,6 +154,10 @@ from app.v2.desktop.backend.usage_analytics import (
 
 class DesktopRunCompositionMixin(DesktopRunEnvironmentMixin):
     """Compose immutable Run manifests, providers, tools, and sandboxes."""
+
+    def _memory_service_for_agent(self, agent):
+        from sagents.v2.memory import MemoryService
+        return MemoryService(self.memory_provider, scope_mode=_agent_memory_behavior(agent).scope)
 
     async def _build_loop(
         self,
@@ -394,11 +399,6 @@ class DesktopRunCompositionMixin(DesktopRunEnvironmentMixin):
                 _DESKTOP_COMPONENT_DEFAULTS["agent.continuation-policy"],
             ),
         )
-        if continuation_plugin_id in {
-            "sage.agent.continuation.llm-judge",
-            "sage.agent.continuation.hybrid",
-        } and not self._auxiliary_json_compatible(judge_provider):
-            continuation_plugin_id = "sage.agent.continuation.deterministic"
         raw_tool_selection = agent.config.get("toolSelection")
         legacy_tool_selection_config = (
             dict(raw_tool_selection) if isinstance(raw_tool_selection, dict) else {}
@@ -414,11 +414,6 @@ class DesktopRunCompositionMixin(DesktopRunEnvironmentMixin):
                 "tool.selection-policy", legacy_plugin_id
             ),
         )
-        if (
-            tool_selection_plugin_id == "sage.tool-selection.llm"
-            and not self._auxiliary_json_compatible(judge_provider)
-        ):
-            tool_selection_plugin_id = "sage.tool-selection.lexical"
         configured_tool_selection = settings.component_configs.get(
             "tool.selection-policy"
         )
@@ -659,7 +654,7 @@ class DesktopRunCompositionMixin(DesktopRunEnvironmentMixin):
             issuer,
             artifact_store=artifact_store,
             supports_multimodal_input=multimodal_by_agent.get,
-            memory_service=self.memory_service,
+            memory_service=self._memory_service_for_agent(agent),
             session_memory_service=self.session_memory_service,
             goal_state_service=goal_state_service,
             tool_selection_policy=tool_selection_policy,
@@ -1010,6 +1005,10 @@ class DesktopRunCompositionMixin(DesktopRunEnvironmentMixin):
                         or self.session_memory_plugin_id != "sage.session-memory.noop"
                     )
                     and "search_memory" in descriptor.tools
+                    and _agent_memory_behavior(
+                        agent if descriptor.agent_id == agent.agent_id
+                        else members_by_id[descriptor.agent_id]
+                    ).recall
                 ),
                 memory_recall_limit=8,
                 memory_recall_query_generator=memory_query_generator,
@@ -1178,6 +1177,7 @@ class DesktopRunCompositionMixin(DesktopRunEnvironmentMixin):
         memory_enabled = (
             self.memory_plugin_id != "sage.memory.noop" and "search_memory" in tools
         )
+        memory_behavior = _agent_memory_behavior(agent)
         route = ModelRoute(
             provider=provider.protocol,
             base_url=provider.base_url,
@@ -1230,9 +1230,9 @@ class DesktopRunCompositionMixin(DesktopRunEnvironmentMixin):
                     skills=skills,
                     budgets=AgentBudgets(max_steps=max_steps),
                     memory=AgentMemoryBehavior(
-                        recall=memory_enabled,
-                        auto_write=memory_enabled,
-                        scope="agent",
+                        recall=memory_enabled and memory_behavior.recall,
+                        auto_write=memory_enabled and memory_behavior.auto_write,
+                        scope=memory_behavior.scope,
                     ),
                 )
             },
