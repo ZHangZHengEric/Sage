@@ -157,7 +157,7 @@ class DesktopRunCompositionMixin(DesktopRunEnvironmentMixin):
 
     def _memory_service_for_agent(self, agent):
         from sagents.v2.memory import MemoryService
-        return MemoryService(self.memory_provider, scope_mode=_agent_memory_behavior(agent).scope)
+        return MemoryService(self.memory_provider, scope_mode=_agent_memory_behavior(agent).scope, session_store=self.session_store)
 
     async def _build_loop(
         self,

@@ -210,7 +210,7 @@ MCP 与 A2A 这类租户自己的目录，工具授权按目录整体授予而�
 
 ### 内网业务调用 V2 chat
 
-原 `POST /api/agent` 同时支持 Sage 登录态和内网业务头部身份。内网调用同时提供 `SAGE-AGENT-ID`、`SAGE-TENANT-ID`，无需 `Authorization`；`SAGE-TENANT-ID` 是外部业务用户唯一标识，无需在 Sage 注册。`SAGE-AGENT-ID` 全局唯一，由该 Agent 所属 Sage 账号提供模型、提示词、工具和技能配置。接口按受控内网部署，头部身份由业务后端负责传入。
+原 `POST /api/agent` 同时支持 Sage 登录态和内网业务头部身份。内网调用同时提供 `SAGE-AGENT-ID`、`SAGE-TENANT-ID`，必须提供 `Authorization: Bearer <该 Agent 的 API Key>`；`SAGE-TENANT-ID` 是外部业务用户唯一标识，无需在 Sage 注册。`SAGE-AGENT-ID` 全局唯一，由该 Agent 所属 Sage 账号提供模型、提示词、工具和技能配置。Server 校验 API Key、绑定的 Agent、所有者和权限，外部用户身份由通过鉴权的业务后端负责从登录态提取，不接受客户端任意冒用。
 
 请求继续使用 AG-UI：`session_id` 是唯一会话身份，传入时原样使用；省略时由 Sage 生成。`threadId` 是兼容别名，两者同时传入必须完全一致，否则在启动 Run 前返回 422。空字符串、首尾空格及无效 ID 会被拒绝，不会静默规范化。`runId` 是本次请求唯一 ID，`messages` 中传用户文字和文件 URL。编辑复用响应中的 `session_id`，使用新的 `runId`；相同 `runId` 重试不会重复生成。SSE 的 `RUN_STARTED` / `RUN_FINISHED` 和结果接口同时返回 `session_id`、兼容字段 `threadId`，二者都指向实际持久化会话。
 
@@ -230,12 +230,15 @@ MCP 与 A2A 这类租户自己的目录，工具授权按目录整体授予而�
 
 工作空间统一按用户与 Agent 隔离：同一用户的同一 Agent 跨 Session 共享，不同 Agent 不共享。外部 API 的用户身份取 `SAGE-TENANT-ID`，配置所有者只用于授权和配置读取，不作为外部用户的工作空间身份。用户/Agent ID 中的路径分隔符使用可逆 URL 编码，普通 ID 保持原样，不使用 SHA 目录。
 
+长期记忆由 sagents 按可信用户身份与 Agent workspace 隔离，并保留宿主租户边界。外部调用的用户取 `SAGE-TENANT-ID`，不取共享 Agent 的配置所有者；同一用户与 Agent 的不同 Session、作品子目录共享该工作空间的长期记忆。身份在 Run 接受时由宿主传入并持久化，恢复执行、自动写入和 `search_memory` 使用同一隔离键，调用方的 metadata 不能覆盖它。BM25 插件持久化到 Server 数据目录；Agent Package 需启用记忆行为及 `search_memory` 工具。历史无 workspace 身份的记忆保留原文件，不自动迁入新范围，以免误分其他用户的数据。
+
+
 工作空间查询须提供 `thread_id` 或 `agent_id`；有 Session 时由后端从持久化身份解析目录。旧用户共享目录和旧 SHA 目录不自动合并或复制；历史外部 Session 缺少原始用户标识时需要明确迁移映射，不能从 SHA 反推用户。
 
 
 ### 外部 workspace 与会话清理
 
-内网业务接口使用 `SAGE-TENANT-ID`，Agent 取 URL 中的 `agent_id`，沿用外部 Run 的受控内网信任边界。业务后端必须传入已验证的租户身份，不应直接向公网暴露这些接口。
+内网业务接口使用 `SAGE-TENANT-ID`，Agent 取 URL 中的 `agent_id`，必须同时提供 `Authorization: Bearer <Agent API Key>`。所有运行、结果、回复、取消、文件和删除接口统一鉴权；GET 使用 `a2a:read`，调用和文件修改使用 `a2a:invoke`，回复交互使用 `a2a:approve`（沿用现有 API Key 权限名称）。Key 只能访问其绑定的 Agent，撤销后请求立即拒绝。业务后端必须从已验证的登录态提取用户 ID；Key 不应交给最终用户或前端。
 
 - `DELETE /api/agents/{agent_id}/workspace/files?path=assets/site&recursive=true`：删除该租户、该 Agent workspace 内的相对文件或目录。`recursive` 默认 false，仅能删除文件、链接或空目录；true 可递归删除目录。不绑定业务实体或目录前缀。
 - 成功返回 `data: {"path":"assets/site","deleted":true}`；目标不存在返回 200，`deleted:false`，不创建工作空间。禁止空路径、绝对路径、路径穿越和隐藏管理目录。路径祖先不能是符号链接；目标链接及子目录中的链接只删除链接本身，保留链接指向的数据。

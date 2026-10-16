@@ -53,6 +53,7 @@ class RunAdmission:
         package=None,
         absent: str = "thread not found",
         tenant_id: str | None = None,
+        key_id: str | None = None,
     ) -> AdmittedRun:
         existing = await self.threads.find(session_id)
         if existing is not None and existing.user_id != user_id:
@@ -150,7 +151,7 @@ class RunAdmission:
                 mcp_servers=tuple(item.name for item in enabled_mcp_servers(catalog)),
                 a2a_agents=tuple(item.name for item in enabled_a2a_agents(catalog)),
                 call_depth=call_depth, package=package,
-            ), **execution_metadata(policy, user_id=user_id, agent_id=agent.id)},
+            ), **execution_metadata(policy, user_id=user_id, agent_id=agent.id, key_id=key_id)},
             model_ready=self.execution.has_model(catalog),
             max_steps=resolved.policy_ceilings[agent.id].max_steps,
         )

@@ -269,7 +269,7 @@ class ConversationService:
 
     async def start(self, request, *, user_id: str, last_event_id: str | None = None,
                     agent_id: str | None = None, workspace_directory: str | None = None,
-                    runtime_context: dict | None = None, package=None):
+                    runtime_context: dict | None = None, package=None, api_key=None):
         if workspace_directory is not None:
             from app.v2.server.storage.external_workspaces import workspace_parts
             if agent_id is None:
@@ -301,6 +301,7 @@ class ConversationService:
             pin_existing=True,
             package=package,
             tenant_id=workspace_user_id if agent_id is not None else None,
+            key_id=api_key.key_id if api_key is not None else None,
         )
         enabled = tuple(item.name for item in admitted.skills)
         metadata = {**admitted.metadata, "server_v2.workspace_user_id": workspace_user_id}

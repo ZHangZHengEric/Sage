@@ -337,7 +337,11 @@ async def test_missing_session_context_uses_real_run_session_in_prompt_and_tool(
                        for block in message.content if isinstance(block, TextBlock))
     assert f"<session_id>{expected}</session_id>" in prompt
     stored = await runtime.session_store.get_start_command(handle.run_id)
-    assert stored.config.metadata == metadata
+    assert stored.config.metadata == {**metadata, "sagents.memory_identity": {
+        "tenant_id": CONTEXT.actor.tenant_id,
+        "user_id": CONTEXT.actor.principal_id,
+        "workspace_id": "test",
+    }}
 
 
 @pytest.mark.parametrize("target", [None, "target-session"])

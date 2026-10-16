@@ -17,6 +17,7 @@ class MemoryScope(StrictModel):
     principal_id: str
     agent_id: str | None = None
     session_id: str | None = None
+    workspace_id: str | None = None
 
 
 class MemoryRecord(StrictModel):

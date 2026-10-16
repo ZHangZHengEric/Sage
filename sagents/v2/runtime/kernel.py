@@ -71,6 +71,13 @@ class HarnessRuntime:
     async def start_run(self, command: StartRun, context: RequestContext) -> RunHandle:
         """Accept a Run request; execution is started separately by a driver."""
 
+        from sagents.v2.memory.identity import bind_memory_identity
+
+        parent_command = (
+            await self.session_store.get_start_command(command.parent_run_id)
+            if command.parent_run_id else None
+        )
+        command = bind_memory_identity(command, context, parent_command=parent_command)
         result = await self.session_store.create_run(command, context)
         return result.handle
 

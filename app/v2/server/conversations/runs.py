@@ -262,6 +262,11 @@ class RunService:
         ``bound`` is cleared once the task owns it.
         """
 
+        from app.v2.server.storage.workspaces import workspace_user
+        from sagents.v2.contracts.principals import MemoryIdentity
+        context = context.model_copy(update={"memory_identity": MemoryIdentity(
+            user_id=workspace_user(command, user_id), workspace_id=command.agent_id,
+        )})
         async with self.workspace_mutation_lock:
             token = bind_model_user(user_id)
             bound = False

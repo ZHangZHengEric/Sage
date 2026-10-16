@@ -160,6 +160,11 @@ async def test_desktop_runs_overlap_and_keep_model_context_and_mcp_directory(
         async def stream(value):
             command = await service.session_store.get_start_command(value.run_id)
             assert command.config.metadata["model_route"]["model"] == provider.model
+            from sagents.v2.memory.identity import command_memory_scope
+            scope = command_memory_scope(command)
+            assert scope.principal_id == "user"
+            expected_project = projects["a" if command.session_id == "session-a" or same_project else "b"]
+            assert scope.workspace_id == f"desktop:{expected_project.id}:sage"
             model.entered.add(value.run_id)
             if len(model.entered) == 2:
                 model.all_started.set()

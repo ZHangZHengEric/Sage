@@ -1,3 +1,5 @@
+import pytest
+
 from fastapi.testclient import TestClient
 
 from app.v2.server.bootstrap import ServerHost
@@ -30,6 +32,11 @@ def setup_agent(client):
     assert response.status_code == 200, response.text
     client.cookies.clear()
     client.headers["SAGE-AGENT-ID"] = response.json()["data"]["id"]
+    key = client.post("/api/keys", headers={"Authorization": f"Bearer {token}"},
+        json={"agent_id": client.headers["SAGE-AGENT-ID"], "name": "external-test",
+              "scopes": ["a2a:invoke", "a2a:read", "a2a:approve"]})
+    assert key.status_code == 200, key.text
+    client.headers["Authorization"] = "Bearer " + key.json()["data"]["api_key"]
     return token
 
 
@@ -57,10 +64,12 @@ def result(client, session="work-1", request=None, user="business-user-123"):
     )
 
 
+@pytest.mark.timeout(20)
 def test_external_chat_unregistered_user_edits_and_restart(tmp_path):
     with TestClient(create_app(make_host(tmp_path))) as client:
         setup_agent(client)
         agent_id = client.headers["SAGE-AGENT-ID"]
+        authorization = client.headers["Authorization"]
         first = send(client)
         assert first.status_code == 200, first.text
         events = _parse_sse(first.text)
@@ -100,6 +109,7 @@ def test_external_chat_unregistered_user_edits_and_restart(tmp_path):
     # Reopen both runtime and SQL repositories; no Python objects carry the results.
     with TestClient(create_app(make_host(tmp_path))) as restarted:
         restarted.headers["SAGE-AGENT-ID"] = agent_id
+        restarted.headers["Authorization"] = authorization
         restored = result(restarted, request="edit-2")
         assert restored.status_code == 200, restored.text
         assert restored.json()["data"] == latest
@@ -122,7 +132,7 @@ def test_external_headers_required_and_existing_chat_still_authenticated(tmp_pat
                 json=body,
                 headers={"SAGE-AGENT-ID": "unknown", "SAGE-TENANT-ID": "business-user"},
             ).status_code
-            == 404
+            == 403
         )
         assert (
             client.post(

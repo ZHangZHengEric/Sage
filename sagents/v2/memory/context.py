@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from sagents.v2.memory.identity import command_memory_scope
+
 from sagents.v2.prompt_i18n import prompt_text, run_prompt_language
 from sagents.v2.context.contracts import ContextSegment, ContextStability
 from sagents.v2.contracts.commands import StartRun
@@ -36,12 +38,7 @@ class MemoryContextSource:
             return ()
         hits = await self.service.recall(
             MemoryQuery(
-                scope=self.service.scope(
-                    tenant_id=scope_data.get("tenant_id"),
-                    principal_id=principal_id,
-                    agent_id=command.agent_id,
-                    session_id=command.session_id,
-                ),
+                scope=command_memory_scope(command),
                 text=query_text,
                 limit=int(scope_data.get("limit") or self.default_limit),
             )

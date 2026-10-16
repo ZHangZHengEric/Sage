@@ -111,7 +111,9 @@ class MemoryService:
         extractor: MemoryExtractor | None = None,
         on_error: Callable[[Exception], Awaitable[None]] | None = None,
         scope_mode: str = "principal",
+        session_store=None,
     ) -> None:
+        self.session_store = session_store
         self.provider = provider
         self.ingestion_policy = ingestion_policy or CompletedRunMemoryPolicy()
         self.extractor = extractor or CanonicalMessageMemoryExtractor()
@@ -119,6 +121,13 @@ class MemoryService:
         if scope_mode not in {"principal", "agent", "session"}:
             raise ValueError(f"unsupported Memory scope {scope_mode!r}")
         self.scope_mode = scope_mode
+
+    async def scope_for_run(self, run_id: str, context) -> MemoryScope:
+        from sagents.v2.memory.identity import command_memory_scope
+        if self.session_store is None:
+            raise ValueError("Memory lookup requires the canonical Session store")
+        command = await self.session_store.get_start_command(run_id)
+        return command_memory_scope(command, context)
 
     async def recall(self, query: MemoryQuery) -> tuple[MemoryHit, ...]:
         return await self.provider.recall(query)
@@ -160,12 +169,9 @@ class MemoryService:
             events = await session_store.read_events(run.run_id)
             if not await self.ingestion_policy.should_ingest(run, events):
                 return
-            scope = self.scope(
-                tenant_id=context.actor.tenant_id,
-                principal_id=context.actor.principal_id,
-                agent_id=(await session_store.get_start_command(run.run_id)).agent_id,
-                session_id=run.session_id,
-            )
+            from sagents.v2.memory.identity import command_memory_scope
+            command = await session_store.get_start_command(run.run_id)
+            scope = command_memory_scope(command, context)
             for record in await self.extractor.extract(run, events, scope):
                 await self.provider.remember(record)
         except Exception as exc:
