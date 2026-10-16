@@ -8,18 +8,15 @@ from __future__ import annotations
 
 import hashlib
 import json
-from contextlib import AsyncExitStack
 from pathlib import Path, PurePosixPath
 
 from sagents.v2._concurrency import bounded_to_thread
 from sagents.v2.contracts.errors import ErrorCategory, RuntimeErrorInfo, SageV2Error
-from sagents.v2.contracts.principals import RequestContext
 from sagents.v2.skill import (
     SkillBundle,
     SkillDescriptor,
 )
 
-from app.v2.server.runtime.loop import CatalogRunDependencies, compose_catalog_loop
 from app.v2.server.skills.records import (
     SkillPackage,
     SkillRecord,
@@ -175,52 +172,6 @@ class ReadThroughSkillWorkspace:
                 )
             )
         return wire_cache
-
-
-class CatalogRunDriver:
-    """Load the catalog Agent, then materialize a sagents/v2 loop for this run."""
-
-    def __init__(self, service: CatalogRunDependencies, run_id: str) -> None:
-        self.service = service
-        self.run_id = run_id
-        self._driver = None
-        self._ports = None
-
-    async def _resolve(self, context: RequestContext):
-        if self._driver is not None:
-            return self._driver
-        runtime = self.service.application.entrypoint().runtime
-        command = await runtime.session_store.get_start_command(self.run_id)
-        self._driver, self._ports = await compose_catalog_loop(
-            self.service,
-            command,
-            user_id=context.actor.principal_id,
-            run_id=self.run_id,
-        )
-        return self._driver
-
-    async def execute(self, run_id: str, context: RequestContext):
-        try:
-            return await (await self._resolve(context)).execute(run_id, context)
-        finally:
-            await self._close_ports()
-
-    async def resume(self, run_id: str, context: RequestContext):
-        try:
-            return await (await self._resolve(context)).resume(run_id, context)
-        finally:
-            await self._close_ports()
-
-    async def _close_ports(self) -> None:
-        ports = self._ports
-        self._ports = None
-        if ports is None:
-            return
-        async with AsyncExitStack() as stack:
-            for handle in ports.scope_handles:
-                closer = getattr(handle, "close", None)
-                if closer is not None:
-                    stack.push_async_callback(closer)
 
 
 def _descriptor(record: SkillRecord) -> SkillDescriptor:

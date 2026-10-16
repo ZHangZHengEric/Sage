@@ -1,0 +1,22 @@
+schema_version: sage/v2
+kind: application
+metadata: {id: example.host, version: 1.0.0, name: Host starter}
+credentials:
+  model-key: {source: env, key: MODEL_API_KEY}
+models:
+  primary:
+    provider: openai-responses
+    base_url: https://api.openai.com/v1
+    credential: model-key
+    model: your-model
+agents:
+  main:
+    name: Assistant
+    instructions: {inline: "Be helpful and concise."}
+    models: {primary: primary}
+entrypoint: {agent: main}
+runtime:
+  capabilities:
+    context.token-estimator:
+      plugin: example.context.byte-estimator
+      config: {bytes_per_token: 4.0}

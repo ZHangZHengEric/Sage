@@ -215,6 +215,68 @@ class AgentCompositionFactory:
             ),
         )
 
+    def create_context(
+        self,
+        resolved: ResolvedSageManifest,
+        agent_id: str,
+        *,
+        providers: tuple[ContextSegmentProvider, ...] = (),
+        developer_instructions: str | None = None,
+        session_memory_service: SessionMemoryService | None = None,
+        artifact_store: ArtifactStore | None = None,
+    ) -> DefaultContextAssembler:
+        """Compose history and context under the selected Agent's budget.
+
+        Providers are used in exactly the supplied order. Custom hosts own
+        their prompt and completion policies; the factory owns budget defaults,
+        reduction and the authoritative history reader. Pass the root Agent ID
+        when delegated loops must share the root's context budget.
+        """
+        agent = resolved.agents[agent_id]
+        ceiling = resolved.policy_ceilings[agent_id]
+        route_id = agent.model_bindings.get("primary")
+        route = resolved.model_routes.get(route_id, {})
+        limits = route.get("limits", {})
+        request_defaults = route.get("request", {})
+        candidates = [
+            value
+            for value in (
+                limits.get("context_window"),
+                ceiling.max_input_tokens,
+            )
+            if value is not None
+        ]
+        candidates = candidates or [32_768]
+        context_budget = ContextBudget(
+            max_system_tokens=ceiling.max_system_tokens or 16_384,
+            protected_recent_tokens=(
+                ceiling.protected_recent_tokens
+                if ceiling.protected_recent_tokens is not None
+                else 8_192
+            ),
+            max_input_tokens=min(int(value) for value in candidates),
+            reserve_output_tokens=int(
+                request_defaults.get("max_output_tokens")
+                or limits.get("max_output_tokens")
+                or ceiling.max_output_tokens
+                or 0
+            ),
+        )
+        return DefaultContextAssembler(
+            max_system_tokens=ceiling.max_system_tokens or 16_384,
+            developer_instructions=(
+                agent.instructions
+                if developer_instructions is None else developer_instructions
+            ),
+            providers=providers,
+            budget=context_budget,
+            reducer=self.context_components.create_reducer(),
+            estimator=self.context_components.token_estimator,
+            history_reader=self.runtime.session_store,
+            projection_observer=session_memory_service,
+            artifact_store=artifact_store,
+        )
+
     def create_loop(
         self,
         resolved: ResolvedSageManifest,
@@ -240,13 +302,29 @@ class AgentCompositionFactory:
         goal_state_service: GoalStateService | None = None,
         additional_runtime_tools: tuple[str, ...] = (),
         granted_catalogs: tuple[ToolCatalog, ...] = (),
+        fallback_invocation_mode: str | None = None,
         additional_context_providers: tuple[ContextSegmentProvider, ...] = (),
+        context_providers: tuple[ContextSegmentProvider, ...] | None = None,
+        developer_instructions: str | None = None,
+        context_agent_id: str | None = None,
+        completion_gates: tuple[str, ...] = ("goal", "plan"),
+        automatic_memory_recall: bool | None = None,
         artifact_store: ArtifactStore | None = None,
         expected_resolved_spec_hash: str | None = None,
         trace_sink=None,
         log_sink=None,
     ) -> AgentLoopEngine:
-        """Create the standard single-Agent Loop from resolved capabilities."""
+        """Compose a loop through the same policy/context boundary for every host.
+
+        Explicit context providers replace the default provider order. Completion
+        gates are applied in the supplied order; an empty tuple disables wrapping.
+        These host parameters do not alter an already admitted package identity.
+        """
+        unknown_gates = set(completion_gates) - {"goal", "plan"}
+        if unknown_gates:
+            raise ValueError(f"unknown completion gates: {sorted(unknown_gates)}")
+        if context_providers is not None and additional_context_providers:
+            raise ValueError("choose explicit or additional context providers, not both")
 
         agent = resolved.agents[agent_id]
         ceiling = resolved.policy_ceilings[agent_id]
@@ -262,68 +340,37 @@ class AgentCompositionFactory:
                     message=f"tools exceed agent policy ceiling: {outside_ceiling}",
                 )
             )
-        route_id = agent.model_bindings.get("primary")
-        route = resolved.model_routes.get(route_id, {})
-        limits = route.get("limits", {})
-        request_defaults = route.get("request", {})
-        candidates = [
-            value
-            for value in (
-                limits.get("context_window"),
-                ceiling.max_input_tokens,
-            )
-            if value is not None
-        ]
-        candidates = candidates or [32_768]
-        context_budget = None
-        if candidates:
-            context_budget = ContextBudget(
-                max_system_tokens=ceiling.max_system_tokens or 16_384,
-                protected_recent_tokens=(
-                    ceiling.protected_recent_tokens
-                    if ceiling.protected_recent_tokens is not None
-                    else 8_192
-                ),
-                max_input_tokens=min(int(value) for value in candidates),
-                reserve_output_tokens=int(
-                    request_defaults.get("max_output_tokens")
-                    or limits.get("max_output_tokens")
-                    or ceiling.max_output_tokens
-                    or 0
-                ),
-            )
-        context_providers: tuple[ContextSegmentProvider, ...] = (
-            RunMetadataContextProvider(),
-            *additional_context_providers,
-        )
-        if goal_state_service is not None:
+        if context_providers is None:
             context_providers = (
-                *context_providers,
-                GoalContextProvider(goal_state_service),
-                PlanContextProvider(goal_state_service),
+                RunMetadataContextProvider(),
+                *additional_context_providers,
             )
-        if skill_loader is not None:
-            context_providers = (
-                *context_providers,
-                AvailableSkillsContextProvider(skill_loader.catalog),
-                ActiveSkillsContextProvider(skill_loader),
+            if goal_state_service is not None:
+                context_providers = (
+                    *context_providers,
+                    GoalContextProvider(goal_state_service),
+                    PlanContextProvider(goal_state_service),
+                )
+            if skill_loader is not None:
+                context_providers = (
+                    *context_providers,
+                    AvailableSkillsContextProvider(skill_loader.catalog),
+                    ActiveSkillsContextProvider(skill_loader),
+                )
+        if automatic_memory_recall is None:
+            automatic_memory_recall = (
+                (memory_service is not None or session_memory_service is not None)
+                and "search_memory" in selected_tools and agent.memory.recall
             )
-        automatic_memory_recall = (
-            (memory_service is not None or session_memory_service is not None)
-            and "search_memory" in selected_tools and agent.memory.recall
-        )
         selected_continuation_policy = (
             continuation_policy or CompositeContinuationPolicy()
         )
         if goal_state_service is not None:
-            selected_continuation_policy = GoalCompletionGatePolicy(
-                selected_continuation_policy,
-                goal_state_service,
-            )
-            selected_continuation_policy = PlanCompletionGatePolicy(
-                selected_continuation_policy,
-                goal_state_service,
-            )
+            gate_types = {"goal": GoalCompletionGatePolicy, "plan": PlanCompletionGatePolicy}
+            for gate in completion_gates:
+                selected_continuation_policy = gate_types[gate](
+                    selected_continuation_policy, goal_state_service,
+                )
         return self.create_engine(
             model=model,
             tool_catalog=InvocationGrantToolCatalog(
@@ -331,6 +378,7 @@ class AgentCompositionFactory:
                 (*selected_tools, *additional_runtime_tools),
                 self.runtime.session_store.get_start_command,
                 granted_catalogs=granted_catalogs,
+                fallback_invocation_mode=fallback_invocation_mode,
             ),
             tool_executor=tool_executor,
             self_configuration=self_configuration,
@@ -347,19 +395,12 @@ class AgentCompositionFactory:
             automatic_memory_recall=automatic_memory_recall,
             memory_recall_limit=memory_recall_limit,
             memory_recall_query_generator=memory_recall_query_generator,
-            context_assembler=DefaultContextAssembler(
-                max_system_tokens=ceiling.max_system_tokens or 16_384,
-                developer_instructions=agent.instructions,
+            context_assembler=self.create_context(
+                resolved,
+                context_agent_id or agent_id,
                 providers=context_providers,
-                budget=context_budget,
-                reducer=(
-                    self.context_components.create_reducer()
-                    if context_budget is not None
-                    else None
-                ),
-                estimator=self.context_components.token_estimator,
-                history_reader=self.runtime.session_store,
-                projection_observer=session_memory_service,
+                developer_instructions=developer_instructions,
+                session_memory_service=session_memory_service,
                 artifact_store=artifact_store,
             ),
             expected_resolved_spec_hash=expected_resolved_spec_hash or resolved.manifest_hash,

@@ -22,7 +22,7 @@ async def test_desktop_primary_and_auxiliary_providers_share_budget(
             yield request
 
     monkeypatch.setattr(
-        "app.v2.desktop.backend.run_composition.create_registered_model_provider",
+        "app.v2.desktop.backend.model_providers.create_registered_model_provider",
         lambda *args, **kwargs: Provider(),
     )
     service = DesktopV2Service(tmp_path, max_concurrent_model_calls=1)

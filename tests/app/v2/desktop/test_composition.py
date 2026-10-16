@@ -341,3 +341,22 @@ def test_desktop_resolves_proxy_network_configuration(network):
     assert config["network"]["mode"] == network["mode"]
     assert config["network"]["deny_private_networks"] is True
     assert config["network"]["allowed_schemes"] == ["http", "https"]
+
+
+@pytest.mark.parametrize("saved,frozen,expected", [
+    ({}, None, "host"),
+    ({"workspace_root": "/project"}, None, "virtual"),
+    ({}, "virtual", "virtual"),
+    ({}, "host", "host"),
+    ({"workspace_path_mode": "virtual"}, "host", "virtual"),
+    ({"workspace_path_mode": "host"}, "virtual", "host"),
+])
+def test_workspace_path_default_preserves_explicit_and_frozen_configuration(saved, frozen, expected):
+    from app.v2.desktop.backend.runtime_config import _resolved_sandbox_config
+    from app.v2.desktop.backend.schemas import DesktopV2Settings
+
+    _, config = _resolved_sandbox_config(
+        DesktopV2Settings(component_configs={"execution.sandbox": saved}),
+        frozen_path_mode=frozen,
+    )
+    assert config["workspace_path_mode"] == expected

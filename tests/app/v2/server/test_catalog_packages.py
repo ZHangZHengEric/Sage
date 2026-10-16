@@ -167,15 +167,15 @@ def test_existing_external_runs_use_persisted_package_sandbox(
     host = make_host(tmp_path)
     host.settings = replace(host.settings, sandbox_network_mode=ceiling)
     specs = []
-    provider = host.execution.sandbox_provider
-    original = provider.provision
-
-    async def capture(spec, context, *, run_id):
-        specs.append(spec)
-        return await original(spec, context, run_id=run_id)
-
-    monkeypatch.setattr(provider, "provision", capture)
     with TestClient(create_app(host)) as client:
+        provider = host.execution.sandbox_provider
+        original = provider.provision
+
+        async def capture(spec, context, *, run_id):
+            specs.append(spec)
+            return await original(spec, context, run_id=run_id)
+
+        monkeypatch.setattr(provider, "provision", capture)
         token = register_and_login(client)
         auth = {"Authorization": f"Bearer {token}"}
         created = client.post(

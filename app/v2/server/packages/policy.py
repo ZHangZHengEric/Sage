@@ -43,7 +43,7 @@ class ServerPackagePolicy:
             )
         if manifest.interfaces:
             raise PermissionError("protocol interfaces are provided by Server")
-        validate_agent_plugins({key: value for key, value in manifest.runtime.capabilities.items() if key in AGENT_DEFAULTS})
+        validate_agent_plugins({key: value for key, value in manifest.runtime.capabilities.items() if key in AGENT_DEFAULTS}, registry=getattr(self.catalog, "extensions", None))
         declared = {item.id for item in manifest.plugins}
         if any(
             selection.plugin not in declared

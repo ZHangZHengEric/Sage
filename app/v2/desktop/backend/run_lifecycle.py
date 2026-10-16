@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from sagents.v2.contracts.principals import RequestContext
+from sagents.v2.composition.resources import RunResources
 from sagents.v2.runtime.execution import ExecutionResourceState
 
 
@@ -19,13 +20,14 @@ ACTIVE_EXTENSION_SCOPE_HANDLES: ContextVar[list[Any] | None] = ContextVar(
 class DesktopRunResources:
     """Close Run scopes before their sandbox, retaining only failed resources."""
 
-    def __init__(self, sandbox_handle, scope_handles, lifecycle=None) -> None:
+    def __init__(self, sandbox_handle, scope_handles, lifecycle=None, *, resources=None) -> None:
         self.sandbox_handle = sandbox_handle
-        self.scope_handles = scope_handles
+        self.resources = resources if resources is not None else RunResources()
+        if resources is None:
+            self.resources.services = scope_handles
+            self.resources.own(sandbox_handle, dependency=True)
+        self.scope_handles = self.resources.services
         self.lifecycle = lifecycle
-        self._closed = False
-        self._sandbox_closed = False
-        self._close_lock = asyncio.Lock()
         self.defer_close = False
 
     def __getattr__(self, name):
@@ -37,28 +39,7 @@ class DesktopRunResources:
         await self.close_now()
 
     async def close_now(self) -> None:
-        async with self._close_lock:
-            if self._closed:
-                return
-            errors: list[BaseException] = []
-            failed_handles: list[Any] = []
-            for handle in reversed(self.scope_handles):
-                try:
-                    await handle.close()
-                except BaseException as exc:
-                    errors.append(exc)
-                    failed_handles.append(handle)
-            self.scope_handles[:] = reversed(failed_handles)
-            if not self.scope_handles and not self._sandbox_closed:
-                try:
-                    await self.sandbox_handle.close()
-                except BaseException as exc:
-                    errors.append(exc)
-                else:
-                    self._sandbox_closed = True
-            self._closed = not self.scope_handles and self._sandbox_closed
-            if errors:
-                raise errors[0]
+        await self.resources.close()
 
 
 class DesktopDriver:

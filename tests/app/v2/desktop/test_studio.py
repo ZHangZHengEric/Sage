@@ -360,6 +360,7 @@ async def test_studio_tools_are_per_run_and_recovered_without_global_configurati
                 ),
                 resolved,
                 agent=agent,
+                workspace=workspace,
             )
         with pytest.raises(SageV2Error):
             service.studio_request_binding(

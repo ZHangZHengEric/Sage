@@ -11,7 +11,6 @@ from sagents.v2.runtime.execution.sandbox import (
     FileSystemMode,
     FileSystemPolicy,
     LifecyclePolicy,
-    LocalWorkspaceSandboxProvider,
     NetworkPolicy,
     NetworkMode,
     ProcessPolicy,
@@ -42,17 +41,26 @@ DEFAULT_OFFICIAL_TOOLS = (
 )
 
 
-def install_sandbox(execution, settings=None) -> None:
-    """One issuer and one local-workspace provider for the process."""
+async def install_sandbox(execution, application, settings=None) -> None:
+    """Create the process provider through the application's plugin lifecycle."""
 
     if execution.sandbox_grant_issuer is not None:
         return
     issuer = SandboxGrantIssuer()
-    execution.sandbox_provider = LocalWorkspaceSandboxProvider(
-        issuer.verification_key,
-        linux_execution_uid=settings.linux_execution_uid if settings else None,
-        linux_execution_gid=settings.linux_execution_gid if settings else None,
+    selection = (settings.plugin_overrides if settings else {}).get(
+        "execution.sandbox", {"plugin": "sage.sandbox.local-workspace"}
     )
+    provider = await application.process_provider(
+        "execution.sandbox", selection,
+        dependencies={
+            key: value for key, value in {
+                "verification_key": issuer.verification_key,
+                "linux_execution_uid": settings.linux_execution_uid if settings else None,
+                "linux_execution_gid": settings.linux_execution_gid if settings else None,
+            }.items() if value is not None
+        },
+    )
+    execution.sandbox_provider = provider
     execution.sandbox_grant_issuer = issuer
 
 
@@ -118,7 +126,7 @@ def workspace_sandbox_spec(
     fingerprint = hashlib.sha256(
         json.dumps(
             {
-                "plugin": LocalWorkspaceSandboxProvider.plugin_id,
+                "plugin": "sage.sandbox.local-workspace",
                 "host_workspace": root,
                 "resources": resources.model_dump(mode="json"),
                 "process": process.model_dump(mode="json"),

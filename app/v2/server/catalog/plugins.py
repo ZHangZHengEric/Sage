@@ -40,8 +40,8 @@ def configuration_schema(descriptor):
     return schema
 
 
-def plugin_options():
-    registry = builtin_extension_registry()
+def plugin_options(registry=None):
+    registry = registry if registry is not None else builtin_extension_registry()
     return [
         dict(
             id=d.plugin_id,
@@ -59,10 +59,10 @@ def plugin_options():
     ]
 
 
-def validate_agent_plugins(selections):
+def validate_agent_plugins(selections, *, registry=None):
     if selections is None:
         return
-    registry = builtin_extension_registry()
+    registry = registry if registry is not None else builtin_extension_registry()
     for capability, selection in selections.items():
         value = (
             selection.model_dump(mode="json")

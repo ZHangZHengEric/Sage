@@ -25,6 +25,7 @@ from sagents.v2.contracts.errors import ErrorCategory, RuntimeErrorInfo, SageV2E
 class CatalogService:
     def __init__(self, store, *, mcp_plugins, a2a_plugins, skills) -> None:
         self.store = store
+        self.extensions = None
         self.locks = tuple(asyncio.Lock() for _ in range(64))
         self.mcp_plugins = mcp_plugins
         self.a2a_plugins = a2a_plugins
@@ -90,7 +91,7 @@ class CatalogService:
         self._validate_agent_options(payload)
         async with self._lock(user_id, "agents"):
             catalog = await self.store.get(user_id)
-            record, catalog = upsert_agent(catalog, {**payload, "id": new_id("agent")})
+            record, catalog = upsert_agent(catalog, {**payload, "id": new_id("agent")}, registry=self.extensions)
             await self.store.create_agent(user_id, record)
             return record
 
@@ -109,7 +110,7 @@ class CatalogService:
             catalog = await self.store.get(user_id)
             require_agent(catalog, agent_id)
             payload = {**payload, "id": agent_id}
-            record, catalog = upsert_agent(catalog, payload)
+            record, catalog = upsert_agent(catalog, payload, registry=self.extensions)
             await self.store.update_agent(user_id, record)
             return record
 

@@ -144,7 +144,7 @@ def stable_component_id(capability: str, plugin_id: str) -> str:
         "sage.tool-selection.hybrid",
     }:
         return "sage.tool-selection.llm"
-    if plugin_id.startswith("sage."):
+    if "." in plugin_id:
         return plugin_id
     prefixes = {
         "skill.loading": "sage.skill.loading.",

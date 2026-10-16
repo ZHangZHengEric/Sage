@@ -20,6 +20,7 @@ from app.v2.server.runtime.official import default_agent_tools
 def server_v2_run_manifest(
     settings: ServerSettings | None = None,
     *,
+    registry=None,
     agent: AgentRecord | None = None,
     agent_id: str = "main",
     skills: tuple[str, ...] = (),
@@ -60,7 +61,7 @@ def server_v2_run_manifest(
     from app.v2.server.catalog.plugins import validate_agent_plugins
 
     selections = dict(base.runtime.capabilities) if agent is not None else {}
-    validate_agent_plugins(selections)
+    validate_agent_plugins(selections, registry=registry)
     from sagents.v2.package.manifest.runtime import merge_capability_selections
 
     selections = merge_capability_selections(host.runtime.capabilities, selections)

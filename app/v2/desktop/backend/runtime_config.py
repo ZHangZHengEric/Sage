@@ -167,7 +167,7 @@ def _continuation_agent_instructions(plugin_id: str) -> str:
 _SANDBOX_DEFAULTS = {
     "sage.sandbox.local-workspace": {
         "workspace_root": "/workspace",
-        "workspace_path_mode": "virtual",
+        "workspace_path_mode": "host",
         "workspace_mapping": "active_workspace",
         "filesystem_mode": "workspace",
     },
@@ -199,7 +199,7 @@ def _sandbox_network_policy(
 
 
 def _resolved_sandbox_config(
-    settings: DesktopV2Settings,
+    settings: DesktopV2Settings, *, frozen_path_mode: str | None = None,
 ) -> tuple[str, dict[str, Any]]:
     plugin_id = _stable_component_id(
         "execution.sandbox",
@@ -209,7 +209,13 @@ def _resolved_sandbox_config(
         ),
     )
     config = dict(_SANDBOX_DEFAULTS.get(plugin_id, {}))
-    config.update(settings.component_configs.get("execution.sandbox", {}))
+    if frozen_path_mode is not None:
+        config["workspace_path_mode"] = frozen_path_mode
+    saved = settings.component_configs.get("execution.sandbox", {})
+    if "workspace_root" in saved and "workspace_path_mode" not in saved:
+        # Older explicit mount-root settings implied a virtual path.
+        config["workspace_path_mode"] = "virtual"
+    config.update(saved)
     # 内核硬限制来自管理员委派的 cgroup 子树与 XFS project 挂载；没配就不声称
     # 拥有它们，否则 admission 会放行一个 provisioning 必然拒绝的 spec。显式写
     # 在 resources 里的取值仍然优先。

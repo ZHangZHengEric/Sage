@@ -26,7 +26,7 @@ from app.v2.server.identity.service import IdentityService
 from app.v2.server.config.manifest import server_v2_manifest
 from app.v2.server.runtime.official import install_sandbox
 from app.v2.server.conversations.runs import RunService
-from app.v2.server.skills.runtime import CatalogRunDriver
+from app.v2.server.runtime.driver import CatalogRunDriver
 from app.v2.server.skills.service import SkillCatalogService
 from app.v2.server.config.settings import ServerSettings
 from app.v2.server.observability.logging import get_logger
@@ -57,6 +57,7 @@ class ServerHost:
         api_keys: ApiKeyStore | None = None,
         package_authorizer=None,
         package_extensions=(),
+        extensions=(),
     ) -> None:
         if database is None:
             raise RuntimeError("database is required")
@@ -65,7 +66,11 @@ class ServerHost:
         self.diagnostics = None
         self.contexts = RequestContexts(settings.language)
         self.package_authorizer = package_authorizer
-        self.package_extensions = tuple(package_extensions)
+        self.package_extensions = (*extensions, *package_extensions)
+        from sagents.v2.runtime.extensions.official import builtin_extension_registry
+        self.extensions = builtin_extension_registry()
+        for registration in self.package_extensions:
+            self.extensions.register(registration)
         self.agent_management = None
         self.package_queries = None
         self.database = database
@@ -96,6 +101,7 @@ class ServerHost:
             a2a_plugins=self.a2a_plugins,
             skills=self.skill_catalog,
         )
+        self.catalog.extensions = self.extensions
         self.credentials = CredentialService(
             api_keys if api_keys is not None else DatabaseApiKeyStore(database),
             self.catalog,
@@ -103,7 +109,6 @@ class ServerHost:
         self.execution = ProcessExecution(fallback_model=model_provider)
         self._application: SAgentApplication | None = None
         self._tasks: set[asyncio.Task[None]] = set()
-        install_sandbox(self.execution, settings)
         self.conversations: ConversationService | None = None
         self.admin: AdminService | None = None
         self.a2a: A2AService | None = None
@@ -144,7 +149,7 @@ class ServerHost:
 
         self.settings = replace(
             self.settings,
-            plugin_overrides=ServerPluginConfig(self.paths.data_root).read(),
+            plugin_overrides=ServerPluginConfig(self.paths.data_root, registry=self.extensions).read(),
         )
         if self.diagnostics is None:
             from app.v2.server.observability.diagnostics import SessionDiagnostics
@@ -197,7 +202,7 @@ class ServerHost:
                 max_clients=self.settings.max_model_clients,
             )
             self.execution.model_pool = host_models
-            self._application = await (
+            builder = (
                 SAgentBuilder()
                 .with_defaults(session_root=self.paths.sessions_root)
                 .with_model_provider(host_models)
@@ -211,8 +216,11 @@ class ServerHost:
                     )
                 )
                 .with_owned_resources(scheduler, host_models)
-                .build(server_v2_manifest(self.settings))
             )
+            for registration in self.package_extensions:
+                builder.register(registration)
+            self._application = await builder.build(server_v2_manifest(self.settings))
+            await install_sandbox(self.execution, self._application, self.settings)
             host_models.session_store = self._application.entrypoint().runtime.session_store
             session_access = self._application.service("session.access")
             admission = RunAdmission(
@@ -325,6 +333,8 @@ class ServerHost:
         if self._application is not None:
             await self._application.close()
         self._application = None
+        self.execution.sandbox_provider = None
+        self.execution.sandbox_grant_issuer = None
         self.mcp_plugins.clear()
         self.a2a_plugins.clear()
         self.execution.model_pool = None

@@ -413,7 +413,7 @@ def test_host_read_paths_skip_workspace_and_root(tmp_path):
 
 @pytest.mark.asyncio
 @pytest.mark.skipif(sys.platform != "darwin", reason="native Seatbelt")
-@pytest.mark.timeout(10)
+@pytest.mark.timeout(30)
 async def test_system_python_starts_inside_macos_sandbox(tmp_path):
     import subprocess
 
@@ -422,7 +422,15 @@ async def test_system_python_starts_inside_macos_sandbox(tmp_path):
     )
     if available.returncode:
         pytest.skip("system Python requires installed developer tools")
-    _, issuer, handle = await local(tmp_path)
+    issuer = SandboxGrantIssuer()
+    provider = LocalWorkspaceSandboxProvider(issuer.verification_key)
+    selected = spec(tmp_path)
+    # This checks interpreter access, not startup latency. Apple's launcher can
+    # invoke xcodebuild on a cold machine, exceeding the resource tests' 3s cap.
+    selected = selected.model_copy(update={
+        "process": selected.process.model_copy(update={"max_wall_time_seconds": 20}),
+    })
+    handle = await provider.provision(selected, CONTEXT, run_id="resource-run")
     request = ProcessRequest(
         argv=("bash", "-c", "/usr/bin/python3 -c 'import json; print(json.dumps(123))'")
     )

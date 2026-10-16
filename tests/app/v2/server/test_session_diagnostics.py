@@ -499,3 +499,22 @@ def test_legacy_binding_without_run_tenant_metadata_remains_downloadable(
             json.loads(archive.read(f"{legacy_id}/manifest.json"))["session_id"]
             == legacy_id
         )
+
+
+def test_repeated_stream_redaction_is_scoped_to_each_snapshot():
+    # Repeated wire/normalized payloads may be reused inside one call, but the
+    # same text in another Session must use that Session's discovered secrets.
+    payload = "ordinary-value " + "x" * (128 * 1024)
+    original = {"wire": payload, "normalized": payload}
+    first = redact({"password": "ordinary-value", **original})
+    assert first["wire"] == first["normalized"] == payload.replace("ordinary-value", REDACTED)
+    assert redact(original) == original
+    assert original["wire"] == payload
+
+
+def test_repeated_embedded_json_still_redacts_secrets_in_sibling_text():
+    embedded = '{"password":"embedded-value","message":"embedded-value"}'
+    result = redact({"wire": embedded, "normalized": embedded, "message": "embedded-value"})
+    assert result["wire"] == result["normalized"]
+    assert "embedded-value" not in json.dumps(result)
+    assert result["message"] == REDACTED

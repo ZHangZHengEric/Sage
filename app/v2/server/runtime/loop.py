@@ -121,7 +121,6 @@ async def compose_catalog_loop(
     service: CatalogRunDependencies, command: StartRun, *, user_id: str, run_id: str | None = None
 ):
     """Resolve the catalog ID to a Package, then use the shared Package builder."""
-    from types import SimpleNamespace
     from app.v2.server.storage.workspaces import with_workspace_binding
 
     command = await with_workspace_binding(command, user_id, service.threads)
@@ -129,7 +128,7 @@ async def compose_catalog_loop(
     frozen = await _composition(service, command, catalog, user_id=user_id)
     bundle = frozen.package or frozen.agent.package
     manifest = bundle.resolved_manifest() if frozen.package is not None else server_v2_run_manifest(
-        service.settings, agent=frozen.agent,
+        service.settings, agent=frozen.agent, registry=getattr(service.catalog, "extensions", None),
         skills=tuple(record.name for record in frozen.skills),
     )
     owner_run_id = run_id or command.idempotency_key
@@ -140,8 +139,13 @@ async def compose_catalog_loop(
         service.agent_management, catalog_run=(service, command, frozen),
     )
     builder.with_admitted_run_contract(owner_run_id, command.resolved_spec_hash)
-    application = await builder.build(manifest, tenant_id=user_id)
-    return PackageRunDriver(application), SimpleNamespace(scope_handles=(application,))
+    async def compose(resources):
+        application = await builder.build(manifest, tenant_id=user_id)
+        resources.own(application)
+        return PackageRunDriver(application)
+
+    assembly = await service.application.compose_run(compose)
+    return assembly.value, assembly.resources
 
 
 class PackageRunDriver:

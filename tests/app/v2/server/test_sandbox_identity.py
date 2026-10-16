@@ -8,7 +8,7 @@ from app.v2.server.storage.paths import prepare_server_v2_storage
 from tests.app.v2.server.conftest import make_settings, make_test_service
 
 
-def test_execution_identity_reaches_host_provider_and_paths(tmp_path, monkeypatch):
+async def test_execution_identity_reaches_host_provider_and_paths(tmp_path, monkeypatch):
     monkeypatch.setenv("SAGE_SERVER_MYSQL_URL", "mysql://unused/unused")
     monkeypatch.setenv("SAGE_SERVER_LINUX_EXECUTION_UID", "10001")
     monkeypatch.setenv("SAGE_SERVER_LINUX_EXECUTION_GID", "10002")
@@ -18,8 +18,12 @@ def test_execution_identity_reaches_host_provider_and_paths(tmp_path, monkeypatc
         linux_execution_uid=settings.linux_execution_uid,
         linux_execution_gid=settings.linux_execution_gid,
     )
-    assert host.execution.sandbox_provider._boundary_options["execution_uid"] == 10001
-    assert host.execution.sandbox_provider._boundary_options["execution_gid"] == 10002
+    await host.start()
+    try:
+        assert host.execution.sandbox_provider._boundary_options["execution_uid"] == 10001
+        assert host.execution.sandbox_provider._boundary_options["execution_gid"] == 10002
+    finally:
+        await host.close()
     assert host.paths.linux_execution_uid == 10001
     assert host.paths.linux_execution_gid == 10002
 

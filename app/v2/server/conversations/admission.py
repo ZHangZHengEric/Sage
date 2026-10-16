@@ -122,7 +122,7 @@ class RunAdmission:
         # Freeze the effective package budget with the admitted Agent. The
         # resolver intersects Agent budgets with the package policy ceiling.
         from app.v2.server.config.manifest import server_v2_run_manifest
-        effective = package.resolved_manifest() if package else server_v2_run_manifest(self.settings, agent=agent)
+        effective = package.resolved_manifest() if package else server_v2_run_manifest(self.settings, agent=agent, registry=getattr(self.catalog, "extensions", None))
         resolved = CompositionResolver().resolve(effective)
         if package is None:
             skills = tuple(await self.skills.bound_skills(owner_user_id=user_id, agent_id=agent.id))
