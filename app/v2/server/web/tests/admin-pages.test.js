@@ -251,18 +251,27 @@ test('inconclusive probe failures retain declared abilities instead of disabling
 })
 
 
-test('plugin inventory includes defaults, alternatives, and actual server bindings', async t => {
+test('plugin settings group implementations under Desktop component names and keep actual values', async t => {
   const { api, mount } = await setup(t, 'Plugins')
-  t.mock.method(api, 'listPlugins', async () => ({ defaults: { 'context.summarizer': 'model' }, plugins: [
-    { id: 'model', name: 'Model summary', capabilities: ['context.summarizer'], schema: { properties: { timeout: { default: 300 } } } },
-    { id: 'extractive', name: 'Extractive', capabilities: ['context.summarizer'], schema: {} },
+  const model = 'sage.context.summarizer.model', extractive = 'sage.context.summarizer.extractive'
+  t.mock.method(api, 'listPlugins', async () => ({ defaults: { 'context.summarizer': model }, plugins: [
+    { id: model, name: 'Model summary', capabilities: ['context.summarizer'], schema: { properties: { timeout_seconds: { default: 300 } } } },
+    { id: extractive, name: 'Extractive', capabilities: ['context.summarizer'], schema: {} },
   ] }))
-  t.mock.method(api, 'serverPlugins', async () => ({ providers: [{ capability: 'context.summarizer', plugin_id: 'model' }] }))
+  t.mock.method(api, 'serverPlugins', async () => ({ providers: [{ capability: 'context.summarizer', plugin_id: model }], selections: { 'context.summarizer': { plugin: model, config: { timeout_seconds: 45 } } } }))
   const state = await mount()
-  assert.equal(state.plugins.length, 2)
-  assert.deepEqual(state.defaultsFor(state.plugins[0]), ['context.summarizer'])
-  assert.equal(state.bindingsFor(state.plugins[0]).length, 1)
-  assert.deepEqual(state.configFor(state.plugins[0]), { timeout: 300 })
-  state.query = 'extractive'
-  assert.equal(state.plugins.length, 1)
+  assert.equal(state.groups.length, 1)
+  const group = state.groups[0]
+  assert.equal(group.name, '上下文摘要器')
+  assert.equal(group.plugins.length, 2)
+  assert.equal(state.currentNames(group), '模型摘要')
+  assert.equal(state.parameterRows(group)[0].value, '45')
+  state.preview[group.id] = extractive
+  assert.equal(state.inspecting(group).id, extractive)
+  assert.equal(state.currentNames(group), '模型摘要')
+  assert.equal(api.serverPlugins.mock.calls.length, 1)
+  state.query = '抽取式摘要'
+  assert.equal(state.groups.length, 1)
+  state.query = 'unmatched'
+  assert.equal(state.groups.length, 0)
 })
