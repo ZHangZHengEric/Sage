@@ -13,8 +13,9 @@ function currentNames(group) { return currentIds(group).map(id => pluginName(gro
 function inspecting(group) { return group.plugins.find(p => p.id === (preview.value[group.id] || currentIds(group)[0])) || group.plugins[0] }
 function parameterRows(group) {
   const plugin = inspecting(group)
-  const selection = server.value?.selections[group.id]
-  const live = selection?.plugin === plugin?.id ? selection.config : {}
+  if (!plugin) return []
+  const selection = server.value?.selections?.[group.id]
+  const live = selection?.plugin === plugin.id ? selection.config : {}
   return Object.entries(plugin?.schema?.properties || {}).map(([key]) => ({ key, label: labels[key] || key, value: displayValue(({ ...parameterDefaults(plugin), ...live })[key]) }))
 }
 function jump(id) { const body = content.value, target = body?.querySelector(`[data-component="${id}"]`); if (!body || !target) return; body.scrollTop += target.getBoundingClientRect().top - body.getBoundingClientRect().top; active.value = id }
