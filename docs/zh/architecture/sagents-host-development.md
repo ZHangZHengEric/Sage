@@ -3,6 +3,10 @@
 [English](../../en/architecture/sagents-host-development.md) · [代码阅读指南](code-reading-guide.md) · [可运行参考项目](../../../examples/sagents_v2_host/)
 
 **新项目先采用一个装配入口、一份 Agent manifest 和统一的 Run 调试标识。**
+
+三份文档分工：[本指南](sagents-host-development.md)讲接入、调试和自定义插件协议；[Runtime 配置参考](sagents-runtime-reference.md)查组件参数与默认值；[sage.yaml 配置参考](sagents-manifest-reference.md)查 Agent Package 全部字段。
+
+自定义插件从[协议总表](#哪些模块支持插件各自是什么协议)和[完整示例](#一个完整独立的插件)开始阅读。
 CLI、HTTP 服务和桌面应用可以有不同产品行为，但不要分别实现模型预算、插件加载、Session 历史和恢复状态机。
 本文的命令行参数是参考项目的约定，不是 SDK 自动读取的全局环境变量。
 
@@ -121,7 +125,7 @@ SDK 不会因为模型名或网关有误自动切换其他实现。离线模型�
 | 配置种类 | 放置位置 | 常见内容 |
 | --- | --- | --- |
 | Agent 定义 | `sage.yaml` | instructions、模型绑定、工具/Skill 白名单、预算 |
-| 选用的能力实现 | manifest 的 `runtime.capabilities` 与 `plugins` | 插件 ID、scope、插件参数 |
+| 选用的能力实现 | App 的 runtime.capabilities 与 Package plugins | 插件 ID、scope、插件参数；采用 manifest.runtime 时须由宿主传给 build |
 | 宿主部署设置 | `HostSettings` / 宿主配置模块 | runtime 根目录、日志级别、配置文件路径 |
 | 宿主资源对象 | 唯一 bootstrap 中的 `Builder.with_*()` | SessionStore、模型并发预算、ExecutionBindingProvider、诊断 sink |
 | 单次运行 | `StartRun` 与其配置 | 输入、Session、幂等键、已受理的配置身份 |
@@ -265,3 +269,208 @@ Desktop 和 Server 的沙箱提供者均通过应用的插件生命周期创建�
 
 底层装配回归使用私有 `_build_package` 检验执行图；第三方接入测试使用公开的
 `build()` / `load_agent()`，不要在应用代码里调用私有装配器。
+
+## 自己实现插件：从契约开始
+
+本指南与两份逐字段参考配套阅读：[Runtime 配置参考](sagents-runtime-reference.md)、[sage.yaml 配置参考](sagents-manifest-reference.md)。
+
+插件由两层协议组成：
+
+1. **统一装配协议**：ExtensionDescriptor 描述插件身份、能力、API 版本、参数和 scope；ExtensionRegistration 提供 factory/start/stop。
+2. **领域协议**：factory/start 返回的对象要实现该能力真正需要的方法，例如 TokenEstimator.estimate 或 ToolExecutor.execute/reconcile。注册成功只证明声明可解析，不会证明方法和恢复行为正确。
+
+实现类可以使用结构化 Protocol，不要求继承内置插件或共同基类。插件之间保持独立；共享 SDK 契约，不导入其他插件的内部代码。一个插件可以提供多个能力，但必须为每一个 offer 返回正确对象。
+
+### 哪些模块支持插件、各自是什么协议
+
+下表覆盖当前内置注册表提供的全部 capability。方法列用于定位，**参数、返回值和异步要求以链接中的公共协议为准**。新增实现必须完整实现协议，不能只实现表中某个常用方法。对于暂时没有独立 Protocol 的扩展点，表中明确说明其实际适配契约，不把它包装成更稳定的承诺。
+
+| capability | 协议 / 源码 | 方法 | 关键要求 |
+| --- | --- | --- | --- |
+| `agent.continuation-policy` | [ContinuationPolicy](../../../sagents/v2/agent/policy/continuation.py) | `decide` | 返回继续、完成或请求交互的决策；不能绕开预算和授权 |
+| `artifact.store` | [ArtifactStore](../../../sagents/v2/runtime/artifact/contracts.py) | `put`、`get`、`delete` | 不可变产物内容流与引用；不是 Session 主存储 |
+| `context.reducer` | [ContextReducer](../../../sagents/v2/context/contracts.py) | `reduce` | 返回上下文投影；不能改写权威历史 |
+| `context.summarizer` | [ConversationSummarizer](../../../sagents/v2/context/summary.py) | `summarize` | 根据请求生成摘要文本 |
+| `context.summary-store` | [ConversationSummaryStore](../../../sagents/v2/context/summary.py) | `get`、`save`、`delete` | 遵守 expected_revision 的并发更新语义 |
+| `context.token-estimator` | [TokenEstimator](../../../sagents/v2/context/token_estimator.py) | `estimate` | 同步、无副作用；返回非负 token 估算 |
+| `context.unit-compactor` | [ContextUnitCompactor](../../../sagents/v2/context/contracts.py) | `compact` | 对不可拆分单元生成替代投影，不能破坏工具调用配对 |
+| `credentials.provider` | [CredentialProvider](../../../sagents/v2/runtime/credentials/provider.py) | `resolve` | 将声明解析为 CredentialMaterial，不把密钥写日志 |
+| `execution.job-runtime` | [JobRuntime](../../../sagents/v2/runtime/execution/jobs/provider.py) | `capabilities`、`submit`、`inspect`、`wait`、`cancel`、`read_output`、`handle_run_pause`、`list_run_jobs`、`mark_orphaned`、`adopt`、`purge_terminal`、`close` | 后台工作状态、输出游标、取消、孤儿认领和清理 |
+| `execution.sandbox` | [SandboxProvider](../../../sagents/v2/runtime/execution/sandbox/provider.py) | `capabilities`、`provision`、`attach`、`inspect`、`snapshot`、`restore`、`release`、`terminate`、`purge_terminated` | API v3；返回 SandboxHandle，提供 filesystem/process/network 子端口；宿主必须授权执行绑定 |
+| `execution.scheduler` | [Scheduler](../../../sagents/v2/runtime/execution/scheduler/provider.py) | `capabilities`、`submit`、`claim`、`renew`、`release`、`assert_fence`、`execute_fenced`、`cancel`、`close` | 租约、fencing 与原子执行是语义要求，不只是方法名 |
+| `flow.node` | [RunnableNode](../../../sagents/v2/flow/contracts.py) | `run` | 节点结果必须表达完成/挂起/失败，遵守检查点和重复执行边界 |
+| `interface.protocol-adapter` | [ProtocolAdapter](../../../sagents/v2/interfaces/protocols/contracts.py) | `capabilities`、`translate` | RuntimeEvent 的单向投影，保留 source identity 和丢失信息说明 |
+| `memory.provider` | [MemoryProvider](../../../sagents/v2/memory/contracts.py) | `capabilities`、`recall`、`remember`、`forget`、`get`、`health` | 长期记忆，保持访问范围和幂等写入语义 |
+| `memory.recall-query` | [MemoryRecallQueryGenerator](../../../sagents/v2/memory/query.py) | `generate` | 将用户输入转换为召回查询 |
+| `model.provider` | [ModelProvider](../../../sagents/v2/model/provider.py) | `capabilities`、`probe_capabilities`、`stream` | capabilities/probe_capabilities/stream；输出 ModelStreamEvent，不直接伪造 RuntimeEvent |
+| `observability.diagnostic-sink` | [DiagnosticSink](../../../sagents/v2/runtime/observability/contracts.py) | `begin_model_request`、`complete_model_request`、`record_model_first_token`、`fail_model_request` | 模型请求/响应诊断，不能作为恢复权威输入 |
+| `observability.log-sink` | [LogSink](../../../sagents/v2/runtime/observability/contracts.py) | `write`、`close` | 同步日志投影，声明 format_version，避免阻塞执行 |
+| `observability.trace-sink` | [TraceSink](../../../sagents/v2/runtime/observability/contracts.py) | `start_span`、`add_event`、`end_span`、`close` | 同步 span/event 投影，声明 format_version，异步导出应有有界队列 |
+| `package.registry` | [InMemoryAgentPackageRegistry](../../../sagents/v2/package/registry/registry.py) | `capabilities`、`save_draft`、`validate`、`test`、`publish`、`retire`、`get`、`list` | 当前以注册表对象接口适配，没有独立 Registry Protocol；单个进程服务不是分布式仓库保证 |
+| `session-memory.provider` | [SessionMemoryProvider](../../../sagents/v2/session_memory/contracts.py) | `capabilities`、`sync`、`recall`、`forget_session`、`health` | 同步会话记忆索引、检索及清理 |
+| `session.store` | [SessionStore](../../../sagents/v2/runtime/session/contracts.py) | `capabilities`、`create_run`、`get_run`、`list_dispatchable_runs`、`get_run_result`、`get_session`、`get_start_command`、`get_run_context`、`put_attachment`、`get_attachment`、`copy_attachment`、`export_session_backup`、`restore_session_backup`、`get_checkpoint`、`get_suspension`、`get_interaction`、`get_execution_resource`、`list_pending_execution_releases`、`list_execution_resources`、`get_interaction_resolution`、`authorize_session_actor`、`delete_session`、`list_descendant_sessions`、`list_session_runs`、`propose_session_commit`、`publish_session_commit`、`reject_session_commit`、`get_session_commit_proposal`、`list_session_commit_proposals`、`read_session_events`、`read_events`、`read_stream_previews`、`read_fork_base_events`、`subscribe_events`、`publish_stream_preview`、`commit_model_stream_batch`、`commit_run`、`commit_execution_resource`、`enqueue_steer`、`claim_steers`、`resolve_interaction`、`request_resume` | 权威 Run/Session/事件/检查点事务；不是任意 key-value 存储 |
+| `skill.catalog` | [SkillCatalog](../../../sagents/v2/skill/contracts.py) | `list_skills`、`get_skill` | 发现允许使用的 Skill 描述 |
+| `skill.loading` | [SkillLoadingPlugin](../../../sagents/v2/skill/plugins/loading.py) | `create_loader` | 当前是 create_loader(**ports) 的工厂适配契约，没有独立 SkillLoading Protocol；返回兼容 SkillLoader 的加载器 |
+| `skill.source` | [SkillSource](../../../sagents/v2/skill/contracts.py) | `fetch` | 取得 SkillBundle；materialize 由另一个工作区端口负责 |
+| `tool.catalog` | [ToolCatalog](../../../sagents/v2/tool/provider.py) | `list_tools`、`get_tool` | 工具 schema 与副作用元数据；白名单仍由 Agent/宿主控制 |
+| `tool.executor` | [ToolExecutor](../../../sagents/v2/tool/provider.py) | `execute`、`reconcile` | execute 与 reconcile 必须一起实现；取消另看 CancellableToolExecutor |
+| `tool.selection-policy` | [ToolSelectionPolicy](../../../sagents/v2/tool/selection.py) | `prepare`、`select`、`expand_tools`、`expanded_tools`、`restore_expanded_tools`、`release_run` | 选择模型可见工具，不得扩大授权范围 |
+| `workspace.initializer` | [WorkspaceInitializer](../../../sagents/v2/workspace/contracts.py) | `initialize` | 同步 initialize(root)，返回创建的文件；不能越过工作区导入宿主私有状态 |
+
+一些端口通过 Builder 注入，**不是额外的 capabilities 插件名**：
+
+| 端口 | 注入方式 / 契约 | 边界 |
+| --- | --- | --- |
+| DerivedStateStore | `with_derived_state_store`；[协议](../../../sagents/v2/runtime/session/contracts.py) | 摘要等可重建状态，支持版本竞争控制 |
+| SkillWorkspace | `with_skill_provider(catalog, source, workspace)`；[协议](../../../sagents/v2/skill/contracts.py) | 受控 materialize，不能由 Skill 自行取得宿主路径权限 |
+| ExecutionBindingProvider | `with_execution_binding_provider`；[协议](../../../sagents/v2/runtime/execution/binding.py) | 宿主授予的工作区/沙箱绑定，涉及恢复与释放 |
+| 模型并发预算 | `with_model_budget` | 宿主共享的模型并发资源 |
+| Run driver | `with_run_driver_factory` / HostAgentExecution | 高级宿主受理快照与恢复契约，普通项目无需实现 |
+
+### 一个完整、独立的插件
+
+以下插件只实现 token 估算，不依赖内置 estimator 的实现。它用于展示协议与参数规范，生产应根据模型 tokenizer/实测误差选择算法。
+
+```python
+import math
+from pydantic import BaseModel, ConfigDict, Field
+from sagents.v2.runtime.extensions import (
+    CapabilityOffer, ExtensionDescriptor, ExtensionRegistration, ExtensionScope,
+)
+
+class EstimatorConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    bytes_per_token: float = Field(default=4.0, gt=0)
+
+class ByteEstimator:
+    estimator_id = "myproject-byte-estimator"
+
+    def __init__(self, *, bytes_per_token: float = 4.0):
+        self.bytes_per_token = bytes_per_token
+
+    def estimate(self, messages):
+        return sum(
+            math.ceil(len(message.model_dump_json().encode("utf-8")) / self.bytes_per_token)
+            for message in messages
+        )
+
+def estimator_registration():
+    return ExtensionRegistration(
+        descriptor=ExtensionDescriptor(
+            plugin_id="myproject.context.byte-estimator",
+            version="1.0.0",
+            name="Byte estimator",
+            provides=(CapabilityOffer(
+                capability="context.token-estimator", api_version="2",
+            ),),
+            supported_scopes=frozenset({ExtensionScope.AGENT}),
+            config_schema=EstimatorConfig.model_json_schema(),
+        ),
+        config_model=EstimatorConfig,
+        factory=lambda context, dependencies: ByteEstimator(**context.config),
+    )
+```
+
+在 App 创建前注册，参数仍走 runtime 标准：
+
+```python
+from sagents.v2 import SAgentBuilder
+from sagents.v2.composition.defaults import default_runtime
+
+builder = SAgentBuilder()
+builder.register(estimator_registration())
+config = default_runtime("./runtime").model_dump(mode="json")
+config["capabilities"]["context.token-estimator"] = {
+    "plugin": "myproject.context.byte-estimator",
+    "config": {"bytes_per_token": 3.5},
+}
+app = await builder.build(runtime=config)
+try:
+    agent = await app.load_agent("./agents/assistant")
+finally:
+    await app.close()
+```
+
+可直接运行的同类实现见 [plugins.py](../../../examples/sagents_v2_host/plugins.py)，接线见 [bootstrap.py](../../../examples/sagents_v2_host/bootstrap.py)。不要只在 YAML 填一个 Python 包名；注册表必须有真实工厂。
+
+### 注册协议逐项说明
+
+| 对象 / 字段 | 必填 / 默认 | 责任 |
+| --- | --- | --- |
+| `ExtensionDescriptor.plugin_id` | 必填 Identifier | 稳定且不冲突的插件 ID |
+| `version` | 必填 string | 插件实现版本；与 capability API 版本分开 |
+| `api_version` | `2` | descriptor API 标识 |
+| `name` / `description` | name 必填，description="" | 可读名称和用途 |
+| `provides` | 非空 CapabilityOffer 数组 | 这个插件实际提供的能力集合 |
+| `dependencies` | `[]` | 所依赖能力的声明，按图解析，不能有不可满足的依赖 |
+| `supported_scopes` | 非空集合 | 真正能正确工作的生命周期范围 |
+| `default_scope` | null | 必须属于支持集合；缺省可按 process→tenant→agent→run 选择最宽范围，但具体装配点还会明确请求 scope |
+| `config_schema` | `{}` | JSON Schema；建议显式限制 additionalProperties=false |
+| `capabilities` | `{}` | provider 保障声明；应与实际能力一致 |
+| `built_in` | false | 元数据；第三方不能靠自填 true 取得内置信任 |
+| `availability` | available=true，reason=null | 可用性探测结果，不能隐瞒未安装的可选依赖 |
+| `ExtensionRegistration.factory` | 必填 | `(context, dependencies) → instance`，可同步或异步 |
+| `start` | null | 可选 `(instance, context, dependencies) → provider 映射`，可异步 |
+| `stop` | null | 可选 `(instance, reason) → None`，可异步 |
+| `config_model` | null | 推荐提供 Pydantic 类型模型，补默认值并验证参数，与 schema 保持一致 |
+
+CapabilityOffer：capability 与 api_version 必填，name 默认 default，multi_provider 默认 false。同一 descriptor 不能重复 `(capability, name)`。多数能力 API 为 2，沙箱能力为 3，必须看对应 offer/宿主要求，不能全部机械填 2。
+
+ExtensionDependency：capability 必填，api_version 默认 `>=2,<3`，name 默认 null，optional 默认 false。通过 ProviderSet 获取声明的依赖，不要在插件中重新创建一个 App 或隐式查找另一个插件单例。长生命周期实例不能持有已销毁的短生命周期依赖。
+
+ExtensionScopeContext：scope、scope_id 必填，tenant_id/agent_id/run_id 默认 null，config 默认 `{}`。这里只获得对应作用域身份；不要在 process 插件里把第一次看到的 run_id 保存成所有请求的身份。
+
+### 多端口插件和资源清理
+
+例如一个插件同时提供 ToolCatalog、ToolExecutor，它可以返回一个容器实例，并显式分配两个端口：
+
+```python
+from sagents.v2.runtime.extensions import CapabilityKey
+
+def start_tools(instance, context, dependencies):
+    return {
+        CapabilityKey(capability="tool.catalog", name="custom"): instance.catalog,
+        CapabilityKey(capability="tool.executor", name="custom"): instance.executor,
+    }
+
+async def stop_tools(instance, reason):
+    await instance.close()
+```
+
+将 start_tools、stop_tools 交给 ExtensionRegistration；descriptor.provides 必须声明同样两个 key。工具 catalog 的 name 要与对应 executor 匹配。单端口插件若不提供 start，也没有 instance.start，默认把 instance 本身作为提供对象。
+
+启动与关闭顺序：
+
+1. 按 schema/config_model 校验参数、解析依赖和 scope 后创建实例；factory 内部失败时，它自己要清理尚未返回给宿主的资源。
+2. 有注册 start 时调用它，否则调用实例 start；两者都没有时使用实例作为 provider。实际返回 key 必须符合 provides。
+3. 成功实例归作用域管理；后续启动失败会回滚已启动实例。
+4. 关闭优先调用 registration.stop，再尝试 instance.stop(reason)，最后 instance.close()。支持 awaitable，按依赖生命周期释放。
+5. StopReason 包括 scope_closed、start_failed、host_shutdown、reload。close/stop 应可安全重复或在失败后继续清理；不要依赖析构函数释放连接。
+
+process/tenant/agent 范围可能同时服务多个 Run。将每个 Run 的暂存数据按 run_id 隔离并有界清理；外部 I/O 不要放在长期持有的共享锁内。资源被宿主借用时不要重复关闭宿主对象。
+
+### 不同领域必须守住的语义
+
+- **模型插件**：capabilities/probe 输出真实能力，stream 保持文本增量、工具调用 ID 与结束语义；供应商异常转换为可判断的错误，不伪造成功响应。调用过程有取消/断流，不能把任意中断当作已完成。
+- **工具插件**：ToolDefinition 的副作用、幂等和取消能力必须真实；execute 使用 operation_id 对接外部幂等/对账。无法判定副作用是否已经发生时 reconcile 返回不确定，交给框架挂起处理，不能简单重放。
+- **SessionStore**：实现完整事务/CAS、事件序列、幂等、actor 授权、检查点和恢复契约。仅能保存 messages 的后端不是合格 SessionStore。派生索引不能代替权威事件。
+- **Scheduler**：execute_fenced 必须保证校验到 mutation 完成之间旧租约不会被新租约取代；仅 assert_fence 后无锁调用 callback 不满足协议。并发租户限额也必须符合能力声明。
+- **Sandbox/Job**：提供真实可查询状态、重连/取消/释放结果；不能用“接口返回成功”冒充外部进程已终止。宿主决定网络和路径授权，插件负责落实。
+- **摘要/Context**：只改变模型看到的投影；保留工具调用/结果配对及必要引用，不删除或重写原始 Session 历史。持久摘要遵守修订号竞争检查。
+- **协议适配器**：只转换 RuntimeEvent，不把 AG-UI/MCP/A2A 的展示帧当作权威执行状态。丢失信息要明确报告。
+- **日志/Trace**：不是恢复输入；限流和缓冲有界，不能泄漏凭据。观察系统异常不应被伪装成业务状态。
+
+### 插件应如何测试
+
+先验证领域协议，再验证装配，不必所有测试都访问真实模型：
+
+| 测试层 | 应覆盖内容 | 仓库参考 |
+| --- | --- | --- |
+| 参数 | 默认值、边界、未知参数、缺少依赖、不支持 scope | [扩展测试](../../../tests/sagents/v2/test_extension_discovery_matrix.py) |
+| 装配 | 预注册→build→load_agent，确认选中自定义插件；错误配置不能替换旧版本 | [加载测试](../../../tests/sagents/v2/test_loaded_agents.py) |
+| 生命周期 | factory/start 失败回滚，stop/close，借用对象不重复关闭 | [资源生命周期测试](../../../tests/sagents/v2/test_run_composition_lifecycle.py) |
+| 领域语义 | 输入输出契约、并发、幂等、取消、异常和不确定结果 | 各领域 contracts/provider 以及对应 tests/sagents/v2 测试 |
+| 恢复 | 挂起、进程重启、原版本继续；不能切换到新插件参数重放旧副作用 | [加载测试](../../../tests/sagents/v2/test_loaded_agents.py)、Session/执行恢复测试 |
+| 独立性 | 不依赖其他插件私有实现，不跨层导入宿主 UI | [边界测试](../../../tests/sagents/v2/test_source_boundary_matrix.py) |
+
+纯 estimator 至少验证空消息、Unicode、长输入和参数非法；工具/存储/调度器则需要真正的失败注入与恢复测试。最后用目标宿主的真实入口验收，不能只验证 factory 能返回对象。

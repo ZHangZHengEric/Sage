@@ -1,6 +1,6 @@
 # Sage v2 代码阅读指南
 
-基于 sagents 开发新项目，请先看[统一开发入口、配置与调试规范](sagents-host-development.md)。
+基于 sagents 开发新项目，请先看[统一开发入口、配置与调试规范](sagents-host-development.md)。字段查询见 [Runtime 配置参考](sagents-runtime-reference.md)和 [sage.yaml 配置参考](sagents-manifest-reference.md)。
 
 [English](../../en/architecture/code-reading-guide.md)
 
@@ -10,7 +10,7 @@ Sage 分为可嵌入的 sagents 运行时，以及 desktop、server 两个产品
 ## 第一次阅读
 
 1. 从 [Python 示例](../../../examples/sagents_v2_quickstart.py) 开始，沿着
-   `build → entrypoint → run_stream → wait → close` 阅读。
+   `build → load_agent → entrypoint → run_stream → wait → close` 阅读。
 2. 阅读 [命令](../../../sagents/v2/contracts/commands.py)、
    [Run 状态](../../../sagents/v2/contracts/run_state.py)和
    [事件](../../../sagents/v2/contracts/events.py)，先明确输入、状态和输出。
