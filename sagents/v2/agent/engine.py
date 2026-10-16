@@ -364,8 +364,9 @@ class AgentLoopEngine:
         if "language" in inspect.signature(generate).parameters:
             query_options["language"] = run_prompt_language(command.config.metadata)
         query = await generate(user_input, **query_options)
-        if not query.strip():
-            return run, state
+        # An enabled recall runs on every user turn, including acknowledgements.
+        # Keyword extraction may be empty; it must not disable the search.
+        query = query.strip() or user_input
         try:
             definition = await self.tool_catalog.get_tool(
                 "search_memory", run_id=run.run_id

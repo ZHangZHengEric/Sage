@@ -29,6 +29,7 @@ from sagents.v2.memory import (
     MemoryWriteResult,
     NoopMemoryProvider,
 )
+from sagents.v2.memory.identity import bind_memory_identity
 from sagents.v2.memory.plugins.filesystem_bm25 import FilesystemBm25MemoryProvider
 from sagents.v2.model.contracts import ModelEventKind, ModelResponse, ModelStreamEvent
 from sagents.v2.testing.runtime import ephemeral_runtime
@@ -114,7 +115,7 @@ def command(*, memory: bool = False):
 @pytest.mark.asyncio
 async def test_noop_memory_does_not_change_prompt_context():
     source = MemoryContextSource(MemoryService(NoopMemoryProvider()))
-    assert await source.segments(command(memory=True)) == ()
+    assert await source.segments(bind_memory_identity(command(memory=True), CONTEXT)) == ()
 
 
 @pytest.mark.asyncio
@@ -131,7 +132,7 @@ async def test_recall_enters_context_with_stable_provenance():
         hits=(MemoryHit(record=record, score=0.9, reason="semantic"),)
     )
     segments = await MemoryContextSource(MemoryService(provider)).segments(
-        command(memory=True)
+        bind_memory_identity(command(memory=True), CONTEXT)
     )
 
     assert len(segments) == 1
@@ -312,7 +313,7 @@ async def test_llm_memory_query_plugin_generates_keywords():
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("query", ["", " \n\t "])
-async def test_empty_llm_recall_query_skips_search_and_completes_run(query):
+async def test_empty_llm_recall_query_still_searches_current_user_turn(query):
     model = ScriptedModelProvider(
         tuple(
             ScriptedModelStep(
@@ -337,7 +338,10 @@ async def test_empty_llm_recall_query_skips_search_and_completes_run(query):
         input_schema={"type": "object"},
         side_effect_level=SideEffectLevel.READ,
     )
-    executor = InMemoryToolExecutor({"search_memory": definition}, {})
+    async def search(call, context):
+        return ToolExecutionResult(tool_call_id=call.tool_call_id, operation_id=call.operation_id,
+                                   content=(TextBlock(text="No matching memories"),))
+    executor = InMemoryToolExecutor({"search_memory": definition}, {"search_memory": search})
     loop = AgentLoopEngine(
         runtime=runtime,
         model=model,
@@ -345,6 +349,9 @@ async def test_empty_llm_recall_query_skips_search_and_completes_run(query):
         tool_executor=executor,
         automatic_memory_recall=True,
         memory_recall_query_generator=LLMMemoryRecallQueryGenerator(model),
+        context_assembler=DefaultContextAssembler(
+            history_reader=runtime.session_store,
+        ),
     )
     agent = SAgent(runtime=runtime, driver_factory=lambda _run_id: loop)
     request = command(memory=True).model_copy(
@@ -357,10 +364,14 @@ async def test_empty_llm_recall_query_skips_search_and_completes_run(query):
 
     assert result.state.value == "completed"
     assert not any(event.type == "run.failed" for event in events)
-    assert executor.calls == []
+    assert len(executor.calls) == 1
+    assert executor.calls[0].arguments["query"] == "没有"
     assert len(model.requests) == 2
     assert model.requests[0].metadata["purpose"] == "memory_recall_query"
-    assert model.requests[1].messages[-1].content[0].text == "没有"
+    assert any(
+        message.role == "tool" and message.content[0].text == "No matching memories"
+        for message in model.requests[1].messages
+    )
 
 
 @pytest.mark.asyncio
@@ -579,13 +590,10 @@ async def test_filesystem_bm25_imports_legacy_json_once_without_resurrection(tmp
 @pytest.mark.asyncio
 async def test_search_memory_uses_the_memory_service_agent_scope(tmp_path):
     provider = FilesystemBm25MemoryProvider(tmp_path / "memory")
-    service = MemoryService(provider, scope_mode="agent")
-    scope = service.scope(
-        tenant_id="tenant_1",
-        principal_id="user_1",
-        agent_id="agent_1",
-        session_id="session_1",
-    )
+    runtime = ephemeral_runtime()
+    handle = await runtime.start_run(command(), CONTEXT)
+    service = MemoryService(provider, scope_mode="agent", session_store=runtime.session_store)
+    scope = await service.scope_for_run(handle.run_id, CONTEXT)
     now = utc_now()
     await provider.remember(
         MemoryRecord(
@@ -603,9 +611,9 @@ async def test_search_memory_uses_the_memory_service_agent_scope(tmp_path):
             arguments={"query": "blue green release"},
             operation_id="operation_1",
             idempotency_key="key_1",
-            owner_run_id="run_1",
+            owner_run_id=handle.run_id,
             owner_agent_id="agent_1",
-            owner_session_id="session_1",
+            owner_session_id=handle.session_id,
         ),
         request_context=CONTEXT,
     )
@@ -639,3 +647,81 @@ def test_memory_service_owns_provider_neutral_scope_resolution(
 
     assert scope.agent_id == expected_agent
     assert scope.session_id == expected_session
+
+
+@pytest.mark.asyncio
+async def test_workspace_memory_identity_survives_recovery_and_ignores_caller_metadata(tmp_path):
+    from sagents.v2.contracts.principals import MemoryIdentity
+    from sagents.v2.memory.identity import MEMORY_IDENTITY_KEY, command_memory_scope
+
+    runtime = ephemeral_runtime()
+    provider = FilesystemBm25MemoryProvider(tmp_path / "memory")
+    service = MemoryService(provider, session_store=runtime.session_store)
+    handles, scopes = [], []
+    for index, (user, workspace) in enumerate((
+        ("alice", "workspace-one"), ("bob", "workspace-one"),
+        ("alice", "workspace-two"), ("alice", "workspace-one"),
+    )):
+        request = command().model_copy(update={"idempotency_key": f"request-{index}"})
+        request.config.metadata[MEMORY_IDENTITY_KEY] = {
+            "user_id": "victim", "workspace_id": "other", "tenant_id": "victim",
+        }
+        context = CONTEXT.model_copy(update={"memory_identity": MemoryIdentity(
+            user_id=user, workspace_id=workspace,
+        )})
+        handle = await runtime.start_run(request, context)
+        stored = await runtime.session_store.get_start_command(handle.run_id)
+        handles.append(handle)
+        scopes.append(command_memory_scope(stored))
+    assert scopes[0] == scopes[3]
+    assert scopes[0] != scopes[1] and scopes[0] != scopes[2]
+    assert scopes[0].principal_id == "alice"
+    assert scopes[0].tenant_id == CONTEXT.actor.tenant_id
+    foreign = CONTEXT.model_copy(update={"actor": CONTEXT.actor.model_copy(update={"tenant_id": "foreign"})})
+    with pytest.raises(PermissionError):
+        await service.scope_for_run(handles[0].run_id, foreign)
+    now = utc_now()
+    await service.remember(MemoryRecord(memory_id="preference", scope=scopes[0],
+        content="cobaltcoffee preference", created_at=now, updated_at=now))
+    # The recovery caller has only the execution owner; the stored Run wins.
+    for index, handle in enumerate(handles):
+        invocation = ToolInvocation(call=ToolCall(
+            tool_call_id=f"call-{index}", tool_name="search_memory", arguments={},
+            operation_id=f"operation-{index}", idempotency_key=f"tool-{index}",
+            owner_run_id=handle.run_id, owner_agent_id="agent_1",
+            owner_session_id=handle.session_id,
+        ), request_context=CONTEXT)
+        results = await MemoryTools(SimpleNamespace(memory_service=service)).search_memory(
+            "cobaltcoffee", invocation=invocation,
+        )
+        assert bool(results["results"]) == (index in (0, 3))
+    assert not (await service.forget("preference", scope=scopes[1])).deleted
+    assert not (await service.forget("preference", scope=scopes[2])).deleted
+    assert await provider.get("preference", scope=scopes[0]) is not None
+    assert (await service.forget("preference", scope=scopes[3])).deleted
+
+
+def test_child_memory_keeps_external_user_after_recovery_and_respects_new_workspace():
+    from sagents.v2.contracts.principals import MemoryIdentity
+    from sagents.v2.memory.identity import command_memory_scope
+
+    external = CONTEXT.model_copy(update={"memory_identity": MemoryIdentity(
+        user_id="wishseen-user", workspace_id="shared-agent-workspace",
+    )})
+    parent = bind_memory_identity(command(), external)
+    child = command().model_copy(update={"parent_run_id": "parent-run", "idempotency_key": "child"})
+    restored = bind_memory_identity(child, CONTEXT, parent_command=parent)
+    assert command_memory_scope(restored).principal_id == "wishseen-user"
+    assert command_memory_scope(restored).workspace_id == "shared-agent-workspace"
+    switched = external.model_copy(update={"memory_identity": MemoryIdentity(
+        user_id="wishseen-user", workspace_id="another-workspace",
+    )})
+    assert command_memory_scope(bind_memory_identity(
+        child, switched, parent_command=parent,
+    )).workspace_id == "another-workspace"
+    child.config.metadata["workspace_policy"] = "private_child"
+    private = command_memory_scope(bind_memory_identity(child, CONTEXT, parent_command=parent))
+    assert private.principal_id == "wishseen-user"
+    assert private.workspace_id != "shared-agent-workspace"
+    legacy = command_memory_scope(bind_memory_identity(child, CONTEXT, parent_command=command()))
+    assert legacy.workspace_id != "agent_1"

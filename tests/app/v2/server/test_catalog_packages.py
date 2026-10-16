@@ -202,6 +202,10 @@ def test_existing_external_runs_use_persisted_package_sandbox(
         assert updated.json()["data"]["sandbox"]["network"] == requested
         client.cookies.clear()
         client.headers["SAGE-AGENT-ID"] = agent_id
+        key = client.post("/api/keys", headers=auth,
+            json={"agent_id": agent_id, "name": "external-test"})
+        assert key.status_code == 200, key.text
+        client.headers["Authorization"] = "Bearer " + key.json()["data"]["api_key"]
         response = client.post(
             f"/api/agents/{agent_id}/runs",
             headers={"SAGE-TENANT-ID": "business-user"},

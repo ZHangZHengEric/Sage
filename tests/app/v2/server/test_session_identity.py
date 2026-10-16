@@ -199,6 +199,7 @@ def test_legacy_suspended_todo_restores_after_restart(tmp_path):
     with TestClient(create_app(host)) as client:
         setup_agent(client)
         agent = client.headers["SAGE-AGENT-ID"]
+        authorization = client.headers["Authorization"]
         identity = json.dumps(["business-user-123", agent, "old-id"], separators=(",", ":"))
         legacy = "external_" + hashlib.sha256(identity.encode()).hexdigest()
         first = client.post("/api/agent", headers=headers(), json=body(session_id=legacy))
@@ -215,6 +216,7 @@ def test_legacy_suspended_todo_restores_after_restart(tmp_path):
     restarted = make_host(tmp_path, steps=8)
     with TestClient(create_app(restarted)) as client:
         client.headers["SAGE-AGENT-ID"] = agent
+        client.headers["Authorization"] = authorization
         base = f"/api/agents/{agent}/runs/old-id/request-1"
         detail = client.get(base, headers=headers())
         assert detail.status_code == 200, detail.text

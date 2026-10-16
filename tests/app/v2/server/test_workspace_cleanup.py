@@ -46,6 +46,7 @@ async def test_idle_check_includes_suspended_and_unwinding_runs(state, driving):
 @pytest.mark.asyncio
 async def test_cancelled_delete_keeps_admission_locked_until_worker_finishes():
     from threading import Event
+    from app.v2.server.identity.context import RequestContexts
     entered, release = Event(), Event()
     ran = asyncio.Event()
 
@@ -73,7 +74,9 @@ async def test_cancelled_delete_keeps_admission_locked_until_worker_finishes():
         assert await asyncio.to_thread(entered.wait, 5)
         deletion.cancel()
         start = asyncio.create_task(service.start_detached_run(
-            "ag_ui", None, None, user_id="u", session_id="s", label="test"))
+            "ag_ui", SimpleNamespace(agent_id="agent", session_id="s", config=SimpleNamespace(metadata={})),
+            RequestContexts("en").for_user("u"),
+            user_id="u", session_id="s", label="test"))
         await asyncio.sleep(0.02)
         assert not ran.is_set()
         assert service.workspace_mutation_lock.locked()

@@ -179,6 +179,14 @@ class DesktopRunServiceMixin(DesktopRunCompositionMixin):
                 user_id,
                 language=str(command.config.metadata.get("response_language") or "en"),
             )
+            from sagents.v2.contracts.principals import MemoryIdentity
+            memory_workspace = request.workspace_id
+            if not memory_workspace or memory_workspace.startswith("agent:"):
+                memory_workspace = "default"
+            context = context.model_copy(update={"memory_identity": MemoryIdentity(
+                user_id=user_id,
+                workspace_id=f"desktop:{memory_workspace}:{agent.agent_id}",
+            )})
             accepted_handle = await self.runtime.start_run(command, context)
             if action_surface is not None:
                 self.openui_store.accepted(action_surface, accepted_handle.run_id)

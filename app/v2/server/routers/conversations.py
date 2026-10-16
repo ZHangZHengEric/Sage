@@ -77,7 +77,7 @@ async def run_agent(
     last_event_id = (request.headers.get("last-event-id") or "").strip() or None
     stream = await service.start(
         body.to_agui(), user_id=caller.user_id,
-        agent_id=caller.agent_id, last_event_id=last_event_id,
+        agent_id=caller.agent_id, last_event_id=last_event_id, api_key=caller.api_key,
     )
     return StreamingResponse(
         stream,
@@ -309,19 +309,24 @@ def _error(code: str, category: ErrorCategory, message: str) -> SageV2Error:
 
 
 class Caller:
-    def __init__(self, tenant_id: str, agent_id: str):
+    def __init__(self, tenant_id: str, agent_id: str, api_key):
         self.tenant_id = tenant_id
         self.agent_id = agent_id
+        self.api_key = api_key
 
 
 async def internal_caller(
+    request: Request,
+    host: HostDep,
     agent_id: str,
     tenant_id: Annotated[str, Header(alias="SAGE-TENANT-ID", min_length=1, max_length=128)],
 ) -> Caller:
     if not tenant_id.strip():
         raise _error("invalid_tenant", ErrorCategory.VALIDATION,
                      "tenant ID is required")
-    return Caller(tenant_id, agent_id)
+    from app.v2.server.identity.external import authorize_external_agent
+    key = await authorize_external_agent(request, host, agent_id)
+    return Caller(tenant_id, agent_id, key)
 
 
 CallerDep = Annotated[Caller, Depends(internal_caller)]
@@ -413,7 +418,7 @@ async def start_run(body: ExternalRunBody, request: Request, caller: CallerDep,
                          "invalid workspace directory") from exc
     last_event_id = (request.headers.get("last-event-id") or "").strip() or None
     stream = await service.start(body.to_agui(), user_id=caller.tenant_id,
-                                 agent_id=caller.agent_id,
+                                 agent_id=caller.agent_id, api_key=caller.api_key,
                                  workspace_directory=workspace_path,
                                  runtime_context=body.runtimeContext,
                                  last_event_id=last_event_id)

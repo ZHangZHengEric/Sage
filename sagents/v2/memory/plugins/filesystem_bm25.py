@@ -318,7 +318,7 @@ class FilesystemBm25MemoryProvider:
     @staticmethod
     def _scope_key(scope: MemoryScope) -> str:
         encoded = json.dumps(
-            scope.model_dump(mode="json"),
+            scope.model_dump(mode="json", exclude={"workspace_id"} if scope.workspace_id is None else set()),
             ensure_ascii=False,
             sort_keys=True,
             separators=(",", ":"),

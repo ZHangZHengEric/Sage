@@ -31,8 +31,16 @@ class TraceContext(StrictModel):
     correlation_id: Identifier | None = None
 
 
+class MemoryIdentity(StrictModel):
+    """Host-verified user and logical Agent workspace, independent of execution owner."""
+
+    user_id: Identifier
+    workspace_id: Identifier
+
+
 class RequestContext(StrictModel):
     actor: ActorRef
+    memory_identity: MemoryIdentity | None = None
     trace: TraceContext = Field(default_factory=TraceContext)
     deadline: datetime | None = None
     language: str = "en"

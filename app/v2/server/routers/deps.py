@@ -211,12 +211,15 @@ AdminUser = Annotated[UserRecord, Depends(require_admin)]
 
 
 class ChatCaller:
-    def __init__(self, user_id: str, agent_id: str | None = None):
+    def __init__(self, user_id: str, agent_id: str | None = None, api_key=None):
         self.user_id = user_id
         self.agent_id = agent_id
+        self.api_key = api_key
 
 
 async def get_chat_caller(
+    request: Request,
+    host: HostDep,
     user: OptionalUser,
     agent_id: Annotated[str | None, Header(alias="SAGE-AGENT-ID", min_length=1, max_length=128)] = None,
     user_id: Annotated[str | None, Header(alias="SAGE-TENANT-ID", min_length=1, max_length=128)] = None,
@@ -225,7 +228,9 @@ async def get_chat_caller(
         if not agent_id or not user_id or not agent_id.strip() or not user_id.strip():
             raise SageV2Error(RuntimeErrorInfo(code="server.chat.invalid_identity",
                 category=ErrorCategory.VALIDATION, message="SAGE-AGENT-ID and SAGE-TENANT-ID headers are required together"))
-        return ChatCaller(user_id, agent_id)
+        from app.v2.server.identity.external import authorize_external_agent
+        key = await authorize_external_agent(request, host, agent_id)
+        return ChatCaller(user_id, agent_id, key)
     if user is None:
         raise SageV2Error(RuntimeErrorInfo(code="server.chat.unauthenticated",
             category=ErrorCategory.AUTHENTICATION, message="authentication required"))

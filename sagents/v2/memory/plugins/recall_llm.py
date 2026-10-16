@@ -115,5 +115,5 @@ class LLMMemoryRecallQueryGenerator:
                     metadata={"plugin_id": self.plugin_id},
                 )
             )
-        # An empty query means no recall is needed; the engine skips the search.
+        # The engine falls back to the user input when keyword extraction is empty.
         return query.strip()

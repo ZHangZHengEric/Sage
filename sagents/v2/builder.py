@@ -740,6 +740,7 @@ class SAgentBuilder:
         memory_service = MemoryService(
             memory_provider,
             scope_mode=memory_behavior.scope,
+            session_store=session_store,
         )
         session_memory_provider = self._session_memory_provider
         if session_memory_provider is None:
@@ -794,7 +795,7 @@ class SAgentBuilder:
             models_by_agent[member_id] = member_model
 
         memory_services_by_agent = {
-            member_id: MemoryService(memory_provider, scope_mode=resolved.agents[member_id].memory.scope)
+            member_id: MemoryService(memory_provider, scope_mode=resolved.agents[member_id].memory.scope, session_store=session_store)
             for member_id in models_by_agent
         }
         memory_service = memory_services_by_agent[selected_agent]
