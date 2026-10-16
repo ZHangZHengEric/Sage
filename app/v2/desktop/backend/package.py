@@ -23,7 +23,7 @@ DESKTOP_COMPONENTS = {
         "scope": "agent",
     },
     "agent.continuation-policy": {
-        "default": "sage.agent.continuation.deterministic",
+        "default": "sage.agent.continuation.llm-judge",
         "selection_mode": "user",
         "apply_mode": "next_run",
         "scope": "run",
@@ -59,7 +59,7 @@ DESKTOP_COMPONENTS = {
         "scope": "process",
     },
     "memory.recall-query": {
-        "default": "sage.memory.recall-query.direct",
+        "default": "sage.memory.recall-query.llm",
         "selection_mode": "user",
         "apply_mode": "next_run",
         "scope": "agent",

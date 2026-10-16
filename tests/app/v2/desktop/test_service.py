@@ -80,7 +80,6 @@ from sagents.v2.tool import InMemoryToolCatalog, InMemoryToolExecutor
 from sagents.v2.package.manifest.resolver import CompositionResolver
 from sagents.v2.context import ModelConversationSummarizer
 from sagents.v2.memory import (
-    DirectMemoryRecallQueryGenerator,
     LLMMemoryRecallQueryGenerator,
 )
 from sagents.v2.tool import McpServerConfig, McpToolPlugin
@@ -274,7 +273,7 @@ async def test_desktop_run_application_exposes_resolved_component_plan(tmp_path)
         ) in bindings
         assert (
             "agent.continuation-policy",
-            "sage.agent.continuation.deterministic",
+            "sage.agent.continuation.llm-judge",
             "plugin",
         ) in bindings
         assert "desktop-host" not in {
@@ -2069,6 +2068,13 @@ async def test_component_inventory_explains_plugins_and_locks_model_protocol(
     tmp_path: Path,
 ):
     service = DesktopV2Service(tmp_path)
+    # Exercise the explicitly selected rule-based policy without external model calls.
+    settings = await service.get_settings()
+    await service.save_settings(settings.model_copy(update={
+        "component_selections": {**settings.component_selections,
+            "agent.continuation-policy": "sage.agent.continuation.deterministic",
+            "memory.recall-query": "sage.memory.recall-query.direct"},
+    }))
     inventory = await service.component_inventory("user_1")
     by_id = {value["component"]["component_id"]: value for value in inventory}
 
@@ -3200,7 +3206,7 @@ async def test_loop_composition_uses_native_model_skill_tool_and_sandbox_plugins
     )
     assert loop.automatic_memory_recall is True
     assert isinstance(
-        loop.memory_recall_query_generator, DirectMemoryRecallQueryGenerator
+        loop.memory_recall_query_generator, LLMMemoryRecallQueryGenerator
     )
     assert {"file_read", "execute_shell_command", "todo_write", "load_skill"} <= names
     await sandbox.close()
@@ -3432,6 +3438,13 @@ async def test_plan_mode_is_a_read_only_run_contract(tmp_path: Path):
 @pytest.mark.timeout(10)
 async def test_goal_mode_requires_goal_complete_after_rechecking(tmp_path: Path):
     service = DesktopV2Service(tmp_path)
+    # Exercise the explicitly selected rule-based policy without external model calls.
+    settings = await service.get_settings()
+    await service.save_settings(settings.model_copy(update={
+        "component_selections": {**settings.component_selections,
+            "agent.continuation-policy": "sage.agent.continuation.deterministic",
+            "memory.recall-query": "sage.memory.recall-query.direct"},
+    }))
     await service.list_agents("user_1")
     await service.patch_model_provider(
         "model_main", ModelProviderPatch(api_keys=["test-key"]), "user_1"
@@ -3634,6 +3647,13 @@ async def test_goal_survives_repeated_questionnaires_and_service_restart(
     for round_number in range(3):
         # Each answer is handled by a fresh service, with no in-memory goal state.
         service = DesktopV2Service(tmp_path)
+        # Exercise the explicitly selected rule-based policy without external model calls.
+        settings = await service.get_settings()
+        await service.save_settings(settings.model_copy(update={
+            "component_selections": {**settings.component_selections,
+                "agent.continuation-policy": "sage.agent.continuation.deterministic",
+                "memory.recall-query": "sage.memory.recall-query.direct"},
+        }))
         await service.list_agents("user_1")
         await service.patch_model_provider(
             "model_main", ModelProviderPatch(api_keys=["test-key"]), "user_1"
@@ -4117,6 +4137,13 @@ async def test_desktop_turn_status_drives_the_real_continuation_policy(
     tmp_path: Path,
 ):
     service = DesktopV2Service(tmp_path)
+    # Exercise the explicitly selected rule-based policy without external model calls.
+    settings = await service.get_settings()
+    await service.save_settings(settings.model_copy(update={
+        "component_selections": {**settings.component_selections,
+            "agent.continuation-policy": "sage.agent.continuation.deterministic",
+            "memory.recall-query": "sage.memory.recall-query.direct"},
+    }))
     await service.list_agents("user_1")
     await service.patch_model_provider(
         "model_main", ModelProviderPatch(api_keys=["test-key"]), "user_1"
