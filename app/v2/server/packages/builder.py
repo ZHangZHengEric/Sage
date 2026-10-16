@@ -234,6 +234,7 @@ class ServerPackageBuilderFactory:
         run_quota,
         policy,
         log_sink,
+        diagnostic_sink,
     ):
         self.settings = settings
         self.paths = paths
@@ -246,6 +247,7 @@ class ServerPackageBuilderFactory:
         self.run_quota = run_quota
         self.policy = policy
         self.log_sink = log_sink
+        self.diagnostic_sink = diagnostic_sink
 
     async def build(self, bundle, root, context, management, *, catalog_run=None):
         await self.policy.authorize("restore", bundle, context, management)
@@ -265,6 +267,7 @@ class ServerPackageBuilderFactory:
                            application=service.application if service else None)
             .with_defaults(session_root=root)
             .with_log_sink(self.log_sink)
+            .with_diagnostic_sink(self.diagnostic_sink)
             .with_model_budget(self.execution.model_budget)
             .with_model_provider_factory(
                 lambda resolved, agent_id: CatalogPackageModel(
