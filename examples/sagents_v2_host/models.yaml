@@ -1,0 +1,8 @@
+credentials:
+  model-key: {source: env, key: MODEL_API_KEY}
+models:
+  primary:
+    provider: openai-responses
+    base_url: https://api.openai.com/v1
+    credential: model-key
+    model: your-model

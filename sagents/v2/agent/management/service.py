@@ -161,8 +161,6 @@ class AgentManagementService:
     async def _validate(self, bundle, context, *, readiness=False):
         readiness = readiness or self.require_readiness
         await self.authorize("validate", bundle, context)
-        from sagents.v2.agent.management.loading import resolve_bundle
-        resolve_bundle(bundle, bundle.manifest.runtime)
         agent_ids = tuple(bundle.manifest.agents)
         reports = {}
         # Loading the root also validates every pinned dependency.

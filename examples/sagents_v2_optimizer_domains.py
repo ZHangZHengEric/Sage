@@ -413,12 +413,11 @@ async def run(args):
         data = BuiltinPackageFactory.create(
             "assistant",
             package_id=f"domain.benchmark.{role}",
-            model=model,
-            base_url=selected["endpoint"],
-            max_output_tokens=4096,
-            context_window=int(selected.get("maxInputLength") or 64000),
+
+
+
+
         ).model_dump(mode="json")
-        data["models"]["primary"]["provider"] = "openai-responses"
         data["agents"]["assistant"]["instructions"] = {"inline": instructions}
         data["agents"]["assistant"]["tools"] = []
         return AgentPackageBundle.model_validate({"manifest": data})
@@ -503,7 +502,12 @@ async def run(args):
             ),
         )
         builder = (
-            SAgentBuilder()
+            SAgentBuilder().with_models({"models": {"primary": {
+                "provider": "openai-responses", "model": model,
+                "base_url": selected["endpoint"],
+                "request": {"max_output_tokens": 4096},
+                "limits": {"context_window": int(selected.get("maxInputLength") or 64000)},
+            }}})
             .with_defaults(session_root=root / "sessions")
             .with_model_provider(provider)
             .with_owned_resources(provider)

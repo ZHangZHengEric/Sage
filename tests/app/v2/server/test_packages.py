@@ -198,7 +198,7 @@ def test_package_grants_fail_before_saving(client, change):
     headers = {"Authorization": f"Bearer {register_and_login(client)}"}
     bundle = client.get("/api/agent-packages/template", headers=headers).json()["data"]
     if change == "model":
-        next(iter(bundle["manifest"]["models"].values()))["model"] = "foreign-model"
+        next(iter(bundle["manifest"]["agents"].values()))["models"]["primary"] = "foreign-model"
     elif change == "tools":
         bundle["manifest"]["agents"]["assistant"]["tools"] = ["not_granted"]
     elif change == "budget":
@@ -213,7 +213,7 @@ def test_package_grants_fail_before_saving(client, change):
             'raise AssertionError("must never load")'
         )
     response = client.post("/api/agent-packages", headers=headers, json=bundle)
-    assert response.status_code == 403, response.text
+    assert response.status_code == (422 if change == "credentials" else 403), response.text
     assert client.get("/api/agent-packages", headers=headers).json()["data"] == []
 
 

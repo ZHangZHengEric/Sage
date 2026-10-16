@@ -34,8 +34,8 @@ def test_desktop_manifest_encodes_product_defaults(tmp_path: Path):
     capabilities = manifest.runtime.capabilities
 
     assert manifest.metadata.id == "com.sage.desktop-v2"
-    assert manifest.credentials == {}
-    assert manifest.models == {}
+    assert "credentials" not in manifest.model_dump()
+    assert "models" not in manifest.model_dump()
     assert (
         capabilities["session.store"].plugin
         == DESKTOP_COMPONENT_DEFAULTS["session.store"]

@@ -1,4 +1,5 @@
 from __future__ import annotations
+from tests.sagents.v2.model_fixture import TEST_MODELS
 
 import os
 import uuid
@@ -211,8 +212,8 @@ async def test_builder_rejects_postgres_plugin_without_dsn():
     package = BuiltinPackageFactory.create(
         "assistant",
         package_id="test.postgres-missing-dsn",
-        model="test-model",
-        base_url="https://model.invalid/v1",
+
+
     )
     package = package.model_copy(
         update={
@@ -229,7 +230,7 @@ async def test_builder_rejects_postgres_plugin_without_dsn():
         }
     )
     with pytest.raises(SageV2Error) as exc_info:
-        await SAgentBuilder().with_model_provider(ScriptedModelProvider(()))._build_package(
+        await SAgentBuilder().with_models(TEST_MODELS).with_model_provider(ScriptedModelProvider(()))._build_package(
             package
         )
     assert exc_info.value.info.code == "extension.config_invalid"
@@ -445,8 +446,8 @@ async def test_builder_can_select_postgres_session_store(postgres_dsn):
     package = BuiltinPackageFactory.create(
         "assistant",
         package_id="test.postgres-builder",
-        model="test-model",
-        base_url="https://model.invalid/v1",
+
+
     )
     package = package.model_copy(
         update={
@@ -463,7 +464,7 @@ async def test_builder_can_select_postgres_session_store(postgres_dsn):
         }
     )
     application = await (
-        SAgentBuilder()
+        SAgentBuilder().with_models(TEST_MODELS)
         .with_model_provider(ScriptedModelProvider(()))
         ._build_package(package)
     )

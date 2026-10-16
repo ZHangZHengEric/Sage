@@ -254,7 +254,7 @@ class DesktopRunCompositionMixin(DesktopRunEnvironmentMixin):
         if valid_skills and "load_skill" not in valid_tools:
             valid_tools = (*valid_tools, "load_skill")
         manifest = self._manifest(agent, provider, valid_tools, valid_skills)
-        resolved = CompositionResolver().resolve(manifest)
+        resolved = CompositionResolver().resolve(manifest, models=self._model_catalog(agent, provider))
         settings = (
             DesktopV2Settings.model_validate(environment.snapshot["settings"])
             if environment is not None
@@ -269,8 +269,11 @@ class DesktopRunCompositionMixin(DesktopRunEnvironmentMixin):
                     "component_configs": dict(component_snapshot.get("configs") or {}),
                 }
             )
-        current_resolved_spec_hash = self._desktop_spec_hash(
-            resolved.manifest_hash, settings
+        # The durable environment owns this Run's admitted identity. Re-encoding
+        # a Package into the current App-model format must not change that ID.
+        current_resolved_spec_hash = (
+            resolved_spec_hash if environment is not None and resolved_spec_hash is not None
+            else self._desktop_spec_hash(resolved.manifest_hash, settings)
         )
         # Desktop compression uses the configured route itself. The summary is
         # derived state in SummaryStore; canonical Session events remain intact.
@@ -974,10 +977,6 @@ class DesktopRunCompositionMixin(DesktopRunEnvironmentMixin):
             self.memory_plugin_id != "sage.memory.noop" and "search_memory" in tools
         )
         memory_behavior = _agent_memory_behavior(agent)
-        route = DesktopModelProviders.route(
-            provider, agent,
-            compatibility_profile=self._verified_model_compatibility_profile(provider),
-        )
         return SageManifest(
             kind="agent-package",
             metadata=ManifestMetadata(
@@ -986,12 +985,6 @@ class DesktopRunCompositionMixin(DesktopRunEnvironmentMixin):
                 name=agent.name,
                 description=agent.config.get("description"),
             ),
-            credentials={
-                "desktop_model": CredentialDeclaration(
-                    source="host", ref=f"llm-provider:{provider.id}"
-                )
-            },
-            models={"primary": route},
             policies=PolicyConfig(budgets={"max_steps": max_steps}),
             agents={
                 agent.agent_id: AgentDefinition(
@@ -1000,7 +993,7 @@ class DesktopRunCompositionMixin(DesktopRunEnvironmentMixin):
                         inline=agent.config.get("systemPrefix")
                         or "You are a helpful Sage agent."
                     ),
-                    models={"primary": "primary"},
+                    models={"primary": provider.id},
                     tools=tools if provider.supports_tool_calling else (),
                     skills=skills,
                     budgets=AgentBudgets(max_steps=max_steps),
@@ -1012,6 +1005,18 @@ class DesktopRunCompositionMixin(DesktopRunEnvironmentMixin):
                 )
             },
             entrypoint=ApplicationEntrypoint(agent=agent.agent_id),
+        )
+
+    def _model_catalog(self, agent, provider):
+        from sagents.v2.model.catalog import ModelCatalogConfig
+        route = DesktopModelProviders.route(
+            provider, agent,
+            compatibility_profile=self._verified_model_compatibility_profile(provider),
+        )
+        return ModelCatalogConfig(
+            models={provider.id: route},
+            credentials={"desktop_model": CredentialDeclaration(
+                source="host", ref=f"llm-provider:{provider.id}")},
         )
 
     async def _model_provider(

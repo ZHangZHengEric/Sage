@@ -7,7 +7,7 @@ import pytest
 
 from app.v2.cli import config
 from app.v2.cli.app_model import APP_CREDENTIAL_ENV
-from app.v2.cli.commands import resolve_package
+from app.v2.cli.commands import resolve_package, resolve_models
 from app.v2.cli.errors import CLIError
 
 
@@ -41,7 +41,7 @@ def catalog(tmp_path, monkeypatch):
 
 def package():
     cfg = config.configure_cli_logging(verbose=False)
-    return resolve_package(argparse.Namespace(package=None, preset="coder", user_id="default_user"), cfg)
+    return resolve_models(argparse.Namespace(models=None, package=None, preset="coder", user_id="default_user"), cfg)
 
 
 def test_defaults_share_app_route_and_keep_credentials_out_of_manifest(catalog):

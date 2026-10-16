@@ -46,7 +46,7 @@ class ServerPackageQueries:
         return {
             **base_schema,
             "host_policy": {
-                "model_routes": "provider=server; model=caller catalog ID or default; no URL or credentials",
+                "model_routes": "Agent models map slots directly to App catalog IDs; connections and credentials are App-owned",
                 "runtime_capabilities": [
                     "flow.node",
                     "tool.catalog",
@@ -91,19 +91,10 @@ class ServerPackageQueries:
 
     async def template(self, context, agent_id=None):
         data = BuiltinPackageFactory.create(
-            "assistant", package_id="user.assistant", model="default"
+            "assistant", package_id="user.assistant", model_id="default"
         ).model_dump(mode="json")
         data["runtime"]["capabilities"] = {}
         data["interfaces"] = {}
-        data["credentials"] = {}
-        for route in data["models"].values():
-            route.update(
-                provider="server",
-                model="default",
-                base_url=None,
-                credential=None,
-                plugin=None,
-            )
         if agent_id:
             agent = require_agent(
                 await self.catalog.get(context.actor.principal_id), agent_id

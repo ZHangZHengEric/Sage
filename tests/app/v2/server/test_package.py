@@ -18,8 +18,8 @@ def _stdout_log_sink(manifest):
 
 def test_package_has_no_yaml_credentials_or_model_routes():
     manifest = server_v2_manifest()
-    assert manifest.credentials == {}
-    assert manifest.models == {}
+    assert "credentials" not in manifest.model_dump()
+    assert "models" not in manifest.model_dump()
     assert manifest.entrypoint.agent == "main"
     assert manifest.interfaces["ag_ui"].plugin == "sage.protocol.ag-ui"
     log_sink = _stdout_log_sink(manifest)

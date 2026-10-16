@@ -1,3 +1,4 @@
+from tests.sagents.v2.model_fixture import TEST_MODELS
 from pathlib import Path
 
 import pytest
@@ -15,10 +16,10 @@ async def test_builder_returns_application_with_one_close_boundary(tmp_path: Pat
     package = BuiltinPackageFactory.create(
         "assistant",
         package_id="test.application",
-        model="test-model",
+
     )
     application = await (
-        SAgentBuilder()
+        SAgentBuilder().with_models(TEST_MODELS)
         .with_defaults(session_root=tmp_path / "sessions")
         .with_model_provider(ScriptedModelProvider(()))
         ._build_package(package)
@@ -68,7 +69,7 @@ async def test_build_failure_rolls_back_started_extensions(tmp_path: Path):
     package = BuiltinPackageFactory.create(
         "assistant",
         package_id="test.application-rollback",
-        model="test-model",
+
     )
     package = package.model_copy(
         update={
@@ -87,7 +88,7 @@ async def test_build_failure_rolls_back_started_extensions(tmp_path: Path):
 
     with pytest.raises(Exception):
         await (
-            SAgentBuilder()
+            SAgentBuilder().with_models(TEST_MODELS)
             .with_model_provider(ScriptedModelProvider(()))
             ._build_package(package)
         )

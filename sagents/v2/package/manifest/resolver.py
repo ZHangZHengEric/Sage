@@ -68,11 +68,19 @@ class ResolvedSageManifest(StrictModel):
 
 
 class CompositionResolver:
-    def resolve(self, manifest: SageManifest) -> ResolvedSageManifest:
-        for route_id, route in manifest.models.items():
+    def __init__(self, *, models=None):
+        self.models = models
+
+    def resolve(self, manifest: SageManifest, *, models=None) -> ResolvedSageManifest:
+        from sagents.v2.model.catalog import model_catalog_input
+        catalog = model_catalog_input(models if models is not None else self.models).selected(
+            route for agent in manifest.agents.values()
+            for route in (*agent.models.values(), *agent.delegation_model_bindings.values())
+        )
+        for route_id, route in catalog.models.items():
             if (
                 route.credential is not None
-                and route.credential not in manifest.credentials
+                and route.credential not in catalog.credentials
             ):
                 raise _error(
                     "manifest.credential_not_found",
@@ -80,7 +88,7 @@ class CompositionResolver:
                 )
         for agent_id, agent in manifest.agents.items():
             for binding, route_id in agent.models.items():
-                if route_id not in manifest.models:
+                if route_id not in catalog.models:
                     raise _error(
                         "manifest.model_not_found",
                         f"agent {agent_id!r} binding {binding!r} references unknown model {route_id!r}",
@@ -181,6 +189,7 @@ class CompositionResolver:
             )
 
         payload = manifest.model_dump(mode="json", exclude={"environments"})
+        payload["models"] = catalog.model_dump(mode="json")
         digest = hashlib.sha256(
             json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
         ).hexdigest()
@@ -193,13 +202,13 @@ class CompositionResolver:
             agents=resolved_agents,
             model_routes={
                 route_id: route.model_dump(mode="json")
-                for route_id, route in manifest.models.items()
+                for route_id, route in catalog.models.items()
             },
             flows=dict(manifest.flows),
             policy_ceilings=ceilings,
             plugins=manifest.plugins,
             runtime=manifest.runtime,
-            credentials=dict(manifest.credentials),
+            credentials=dict(catalog.credentials),
             interfaces=dict(manifest.interfaces),
         )
 

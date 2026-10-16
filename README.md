@@ -148,14 +148,6 @@ AGENT_YAML = """
 schema_version: sage/v2
 kind: application
 metadata: {id: example.assistant, version: 1.0.0, name: Assistant}
-credentials:
-  api-key: {source: env, key: MODEL_API_KEY}
-models:
-  primary:
-    provider: openai-responses
-    base_url: https://api.openai.com/v1
-    credential: api-key
-    model: your-model
 agents:
   main:
     name: Assistant
@@ -164,20 +156,35 @@ agents:
 entrypoint: {agent: main}
 """
 
+MODELS_YAML = """
+credentials:
+  api-key: {source: env, key: MODEL_API_KEY}
+models:
+  primary:
+    provider: openai-responses
+    base_url: https://api.openai.com/v1
+    credential: api-key
+    model: your-model
+"""
+
 
 async def main():
     manifest = SageManifestLoader().loads(AGENT_YAML)
-    app = await SAgentBuilder().with_defaults(session_root="runtime").build(manifest)
+    app = await (
+        SAgentBuilder().with_defaults(session_root="runtime")
+        .build(models_config_text=MODELS_YAML)
+    )
     try:
+        agent = await app.load_agent(manifest)
         context = RequestContext(actor=ActorRef(
             principal_id="user-1", principal_type=PrincipalType.USER,
         ))
         stream = await app.entrypoint().run_stream(StartRun(
-            agent_id="main",
+            agent_id=agent.id,
             input=(InputItem(role="user", content=(TextBlock(text="Say hello!"),)),),
-            resolved_spec_hash=app.composition_hash,
+            resolved_spec_hash=agent.composition_hash,
             idempotency_key=str(uuid4()),
-        ), context)
+        ), context, agent=agent)
         async for event in stream.events:
             print(event.model_dump_json())
         print((await stream.wait()).state)

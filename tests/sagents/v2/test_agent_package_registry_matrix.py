@@ -1,4 +1,6 @@
 from __future__ import annotations
+from tests.sagents.v2.model_fixture import TEST_MODELS
+from sagents.v2.package.manifest.resolver import CompositionResolver
 
 import asyncio
 
@@ -14,7 +16,7 @@ def package(*, version="0.1.0", required_rate=1.0):
     value = BuiltinPackageFactory.create(
         "assistant",
         package_id="com.example.assistant",
-        model="gpt-test",
+
     )
     return value.model_copy(
         update={
@@ -36,7 +38,7 @@ def report(*, passed, failed):
 
 
 def test_in_memory_registry_reports_non_durable_trust_capabilities():
-    assert InMemoryAgentPackageRegistry().capabilities == {
+    assert InMemoryAgentPackageRegistry(resolver=CompositionResolver(models=TEST_MODELS)).capabilities == {
         "durable_across_process_restart": False,
         "supports_package_signatures": False,
         "shared_across_processes": False,
@@ -45,7 +47,7 @@ def test_in_memory_registry_reports_non_durable_trust_capabilities():
 
 @pytest.mark.asyncio
 async def test_package_lifecycle_requires_validation_tests_and_gate_before_publish():
-    registry = InMemoryAgentPackageRegistry()
+    registry = InMemoryAgentPackageRegistry(resolver=CompositionResolver(models=TEST_MODELS))
     draft = await registry.save_draft(package())
     assert draft.stage == PackageStage.DRAFT
 
@@ -74,7 +76,7 @@ async def test_package_lifecycle_requires_validation_tests_and_gate_before_publi
 
 @pytest.mark.asyncio
 async def test_failed_eval_gate_blocks_publish_and_published_version_is_immutable():
-    registry = InMemoryAgentPackageRegistry()
+    registry = InMemoryAgentPackageRegistry(resolver=CompositionResolver(models=TEST_MODELS))
     draft = await registry.save_draft(package(required_rate=0.75))
     await registry.validate(draft.package_id, draft.version, expected_revision=0)
     tested = await registry.test(
@@ -89,7 +91,7 @@ async def test_failed_eval_gate_blocks_publish_and_published_version_is_immutabl
         )
     assert failed.value.info.code == "package.test_gate_failed"
 
-    registry = InMemoryAgentPackageRegistry()
+    registry = InMemoryAgentPackageRegistry(resolver=CompositionResolver(models=TEST_MODELS))
     draft = await registry.save_draft(package())
     await registry.validate(draft.package_id, draft.version, expected_revision=0)
     tested = await registry.test(
@@ -109,7 +111,7 @@ async def test_failed_eval_gate_blocks_publish_and_published_version_is_immutabl
 @pytest.mark.asyncio
 @pytest.mark.parametrize("required_rate", [-0.1, 1.1, "invalid", float("nan"), True])
 async def test_invalid_package_test_gate_is_rejected(required_rate):
-    registry = InMemoryAgentPackageRegistry()
+    registry = InMemoryAgentPackageRegistry(resolver=CompositionResolver(models=TEST_MODELS))
     draft = await registry.save_draft(package(required_rate=required_rate))
     await registry.validate(draft.package_id, draft.version, expected_revision=0)
     tested = await registry.test(
@@ -129,7 +131,7 @@ async def test_invalid_package_test_gate_is_rejected(required_rate):
 
 @pytest.mark.asyncio
 async def test_stale_revision_and_concurrent_update_are_rejected():
-    registry = InMemoryAgentPackageRegistry()
+    registry = InMemoryAgentPackageRegistry(resolver=CompositionResolver(models=TEST_MODELS))
     draft = await registry.save_draft(package())
     updated = package().model_copy(
         update={"metadata": package().metadata.model_copy(update={"name": "Updated"})}
@@ -146,7 +148,7 @@ async def test_stale_revision_and_concurrent_update_are_rejected():
 
 @pytest.mark.asyncio
 async def test_content_change_invalidates_previous_validation_and_test_report():
-    registry = InMemoryAgentPackageRegistry()
+    registry = InMemoryAgentPackageRegistry(resolver=CompositionResolver(models=TEST_MODELS))
     draft = await registry.save_draft(package())
     await registry.validate(draft.package_id, draft.version, expected_revision=0)
     tested = await registry.test(
@@ -168,7 +170,7 @@ async def test_content_change_invalidates_previous_validation_and_test_report():
 
 @pytest.mark.asyncio
 async def test_published_package_can_only_transition_to_auditable_retired_state():
-    registry = InMemoryAgentPackageRegistry()
+    registry = InMemoryAgentPackageRegistry(resolver=CompositionResolver(models=TEST_MODELS))
     draft = await registry.save_draft(package())
     await registry.validate(draft.package_id, draft.version, expected_revision=0)
     tested = await registry.test(

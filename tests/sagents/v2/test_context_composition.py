@@ -1,5 +1,7 @@
 """Public host composition keeps budget and prompt behavior consistent."""
 
+from tests.sagents.v2.model_fixture import TEST_MODELS
+
 from types import SimpleNamespace
 
 import pytest
@@ -14,11 +16,11 @@ from sagents.v2.runtime.session import EphemeralSessionStore
 
 
 def resolved():
-    return CompositionResolver().resolve(
+    return CompositionResolver(models=TEST_MODELS).resolve(
         BuiltinPackageFactory.create(
             "assistant",
             package_id="context.test",
-            model="test",
+
         )
     )
 

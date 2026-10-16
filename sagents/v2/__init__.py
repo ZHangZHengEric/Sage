@@ -98,6 +98,7 @@ _EXPORTS = {
     "RuntimeEvent": ("sagents.v2.contracts", "RuntimeEvent"),
     "SAgent": ("sagents.v2.sagent", "SAgent"),
     "SAgentApplication": ("sagents.v2.application", "SAgentApplication"),
+    "ModelCatalogConfig": ("sagents.v2.model.catalog", "ModelCatalogConfig"),
     "SAgentBuilder": ("sagents.v2.builder", "SAgentBuilder"),
     "SAgentRunStream": ("sagents.v2.sagent", "SAgentRunStream"),
     "SessionCommitProposal": ("sagents.v2.contracts", "SessionCommitProposal"),

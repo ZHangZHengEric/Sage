@@ -623,6 +623,7 @@ class DesktopRsiMixin:
 
                 return (
                     SAgentBuilder()
+                    .with_models(self._model_catalog(agent, selected))
                     .with_defaults(session_root=workspace / "sessions")
                     .with_model_provider(model)
                     .with_execution_binding_provider(bindings)

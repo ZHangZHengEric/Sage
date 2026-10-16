@@ -60,6 +60,12 @@ class SAgentBuilder:
         self.extensions = builtin_extension_registry()
         self._options = BuildOptions()
 
+    def with_models(self, models=None, *, models_config_text=None):
+        """Configure the App model catalog before build; App owns updates."""
+        from sagents.v2.model.catalog import model_catalog_input
+        self._models = model_catalog_input(models, config_text=models_config_text)
+        return self
+
     def with_shared_runtime(self, application: SAgentApplication) -> "SAgentBuilder":
         """Borrow a process application's durable/runtime services for a Run.
 
@@ -296,10 +302,6 @@ class SAgentBuilder:
     def inventory(self) -> tuple[dict, ...]:
         return self.extensions.inventory()
 
-    def _prepare_package(self, package):
-        """Host-specific catalog normalization, before revision hashing/freezing."""
-        return package
-
     async def _build_package(
         self,
         package: SageManifest | ResolvedSageManifest | str | Path,
@@ -311,9 +313,14 @@ class SAgentBuilder:
         """Resolve one composition and open all provider scopes asynchronously."""
 
         runtime = RuntimeConfig.model_validate(runtime) if runtime is not None else None
+        from sagents.v2.composition.resolution import _resolve_package
+        _, package = _resolve_package(package, runtime=runtime, models=getattr(self, "_models", None))
         scope_handles = []
         try:
-            return await ApplicationAssembler(self._options, self.extensions).assemble(
+            return await ApplicationAssembler(
+                self._options, self.extensions,
+                model_resolver=getattr(self, "_model_resolver", None),
+            ).assemble(
                 package,
                 tenant_id=tenant_id,
                 agent_id=agent_id,
@@ -334,6 +341,8 @@ class SAgentBuilder:
         tenant_id: str | None = None,
         runtime: RuntimeInput | None = None,
         runtime_config_text: str | None = None,
+        models=None,
+        models_config_text: str | None = None,
     ) -> SAgentApplication:
         """Create an App, then load Agent Packages with app.load_agent().
 
@@ -343,6 +352,11 @@ class SAgentBuilder:
         from sagents.v2.composition.defaults import default_runtime
         from sagents.v2.composition.loaded_agents import LoadedAgents
 
+        from sagents.v2.model.catalog import model_catalog_input
+        models = model_catalog_input(
+            models if models is not None or models_config_text is not None else getattr(self, "_models", None),
+            config_text=models_config_text,
+        )
         runtime = runtime_input(runtime, config_text=runtime_config_text)
         if runtime is None:
             runtime = default_runtime(self._options.session_root or ".runtime/sagents")
@@ -362,6 +376,6 @@ class SAgentBuilder:
             owned_resources=tuple(reversed(self._options.owned_resources)),
         )
         application._loaded_agents = LoadedAgents(
-            application, snapshot, runtime, tenant_id
+            application, snapshot, runtime, tenant_id, models
         )
         return application

@@ -213,6 +213,7 @@ class LocalWorkspaceBindingProvider:
 async def build_cli_application(
     *,
     package: SageManifest,
+    models=None,
     session_root: str | Path,
     bindings: LocalWorkspaceBindingProvider,
     model_provider: ModelProvider | None = None,
@@ -221,7 +222,7 @@ async def build_cli_application(
 ) -> SAgentApplication:
     """用唯一组合根 ``SAgentBuilder`` 构建 CLI 使用的 ``SAgentApplication``。
 
-    ``model_provider`` 仅供测试/脚本化场景注入；生产路径由 manifest 的模型路由决定。
+    ``model_provider`` 仅供测试/脚本化场景注入；生产路径由 App models 配置与 Agent 的模型 ID 决定。
     ``tool_policy`` 是 ``--approval-mode`` 决定的审批策略（见 ``app.v2.cli.approvals``），
     None 时沿用引擎默认。审批记忆在 Kernel 的 session 作用域之上叠加 ``workspace``
     作用域，文件放在 ``approval_store``（默认 ``session_root/approvals``，宿主目录、
@@ -250,7 +251,7 @@ async def build_cli_application(
             session_memory, store_root=store_root, workspace=workspace
         )
     )
-    application = await builder.build(runtime=package.runtime)
+    application = await builder.build(runtime=package.runtime, models=models)
     try:
         from app.v2.cli.package import builtin_dependencies
         loaded = {}

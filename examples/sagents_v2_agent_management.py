@@ -61,7 +61,7 @@ async def demo(root: Path):
         actor=ActorRef(principal_id="demo", principal_type=PrincipalType.USER)
     )
     child = BuiltinPackageFactory.create(
-        "assistant", package_id="demo.expert", model="scripted"
+        "assistant", package_id="demo.expert",
     ).model_dump(mode="json")
     child["agents"]["assistant"].update(
         instructions={"inline": "Convert distances accurately. Verify units."},
@@ -78,7 +78,7 @@ async def demo(root: Path):
 
     def builder_factory(package, session_root, ctx):
         return (
-            SAgentBuilder()
+            SAgentBuilder().with_models({"models": {"primary": {"provider": "openai-responses", "model": "scripted"}}})
             .with_defaults(session_root=session_root)
             .with_model_provider(ScriptedModelProvider((step("2 km = 2000 m"),)))
         )
@@ -87,7 +87,7 @@ async def demo(root: Path):
         root / "managed", builder_factory=builder_factory, authorize=authorize
     )
     parent_data = BuiltinPackageFactory.create(
-        "assistant", package_id="demo.parent", model="scripted"
+        "assistant", package_id="demo.parent",
     ).model_dump(mode="json")
     parent_data["agents"]["assistant"]["tools"] = [
         "agent_package_save",
@@ -112,7 +112,7 @@ async def demo(root: Path):
         )
     )
     app = await (
-        SAgentBuilder()
+        SAgentBuilder().with_models({"models": {"primary": {"provider": "openai-responses", "model": "scripted"}}})
         .with_defaults(session_root=root / "parent")
         .with_model_provider(parent_model)
         .with_agent_management(service)

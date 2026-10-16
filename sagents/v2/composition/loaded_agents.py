@@ -102,10 +102,14 @@ class LoadedAgents:
     execution scopes, while subsequent revisions borrow durable process stores.
     """
 
-    def __init__(self, application, builder, runtime, tenant_id):
+    def __init__(self, application, builder, runtime, tenant_id, models):
         self.application = application
         self.builder = builder
         self.runtime = runtime
+        from sagents.v2.package.manifest.resolver import CompositionResolver
+        self.models = models
+        self.model_resolver = CompositionResolver(models=models)
+        self.sources = {}
         self.tenant_id = tenant_id
         self.root = None
         self.current = {}
@@ -131,7 +135,11 @@ class LoadedAgents:
             agent._application.resolved_plan.entrypoint_agent_id
         )
 
-    async def load(
+    async def load(self, *args, **kwargs):
+        async with self.lock:
+            return await self._load(*args, **kwargs)
+
+    async def _load(
         self,
         package=None,
         *,
@@ -143,15 +151,15 @@ class LoadedAgents:
         historical=False,
         expected_hash=None,
     ):
+        source = None
         if historical:
             # Private archive restoration: this is a compiled graph, not a Package input.
             resolved = package.model_copy(deep=True)
             if resolved.runtime != self.runtime:
                 raise ValueError("saved Agent runtime differs from this App")
         else:
-            package = self.builder._prepare_package(
-                package_input(package, config_text=config_text, base_path=base_path)
-            )
+            package = package_input(package, config_text=config_text, base_path=base_path)
+            source = package.model_dump(mode="json")
             for child in (subagents or {}).values():
                 self.implementation(child)
             if execution is not None:
@@ -159,7 +167,7 @@ class LoadedAgents:
                     raise ValueError(
                         "host execution resolves dependencies from its admitted snapshot"
                     )
-                resolved = execution.resolve_descriptor(package, self.runtime)
+                resolved = execution.resolve_descriptor(package, self.runtime, models=self.models)
             else:
                 resolved = resolve_agent_graph(
                     package,
@@ -168,6 +176,7 @@ class LoadedAgents:
                         name: child._resolved
                         for name, child in (subagents or {}).items()
                     },
+                    models=self.models,
                 )
         agent_id = resolved.entrypoint_agent
         if agent_id not in resolved.agents:
@@ -178,7 +187,7 @@ class LoadedAgents:
             else f"{resolved.manifest_hash}:{execution.spec_hash}"
         )
         key = (resolved.package_id, revision)
-        async with self.application._assembly_operation(), self.lock:
+        async with self.application._assembly_operation():
             current = self.current.get(resolved.package_id)
             if previous is not None:
                 self.implementation(previous)
@@ -191,12 +200,16 @@ class LoadedAgents:
                 if current is not previous:
                     raise ValueError("Agent was updated; use its current revision")
             elif key in self.revisions:
+                if not historical and self.sources.get(resolved.package_id) == source:
+                    self.current[resolved.package_id] = self.revisions[key]
                 return self.revisions[key]
-            elif not historical and current is not None and current.version != revision:
+            elif (not historical and current is not None and current.version != revision
+                  and self.sources.get(resolved.package_id) != source):
                 raise ValueError("Package changed; use update_agent explicitly")
             existing = self.revisions.get(key)
             if existing is not None:
                 self.current[resolved.package_id] = existing
+                self.sources[resolved.package_id] = source
                 return existing
             if execution is not None:
                 if self.root is None:
@@ -215,9 +228,11 @@ class LoadedAgents:
                 )
                 self.application._owned_resources.insert(-1, assembled)
                 self.current[resolved.package_id] = handle
+                self.sources[resolved.package_id] = source
                 self.revisions[key] = handle
                 return handle
             builder = copy(self.builder)
+            builder._model_resolver = self.model_resolver
             builder._options = copy(self.builder._options)
             if self.root is not None:
                 builder._options.owned_resources = []
@@ -275,6 +290,7 @@ class LoadedAgents:
                 self.application.resource_readiness = assembled.resource_readiness
             if not historical:
                 self.current[resolved.package_id] = handle
+                self.sources[resolved.package_id] = source
             self.revisions[key] = handle
             dispatcher = assembled.service("execution.dispatcher")
             # Stop dispatch before any revision resources during App shutdown.

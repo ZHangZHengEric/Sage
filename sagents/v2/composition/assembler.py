@@ -150,7 +150,8 @@ _DISTRIBUTED_PROFILE_GUARANTEES: dict[str, dict[str, Any]] = {
 
 
 class ApplicationAssembler:
-    def __init__(self, options: BuildOptions, extensions: ExtensionRegistry) -> None:
+    def __init__(self, options: BuildOptions, extensions: ExtensionRegistry, *, model_resolver=None) -> None:
+        self.model_resolver = model_resolver
         self.options = options
         self.extensions = extensions
 
@@ -1075,6 +1076,7 @@ class ApplicationAssembler:
                 summary_store=root_components.context.summary_store,
                 derived_state=derived_state,
                 process_model=models_by_agent[selected_agent],
+                models={"models": resolved.model_routes, "credentials": resolved.credentials},
                 default_tenant_id=tenant_id,
                 deployment_profile=runtime_config.deployment_profile,
             )
@@ -1518,6 +1520,10 @@ class ApplicationAssembler:
                 declarations,
                 capability="package.registry",
                 default_plugin=InMemoryAgentPackageRegistry.plugin_id,
+                locked_config={"resolver": self.model_resolver or CompositionResolver(models={
+                    "models": resolved.model_routes,
+                    "credentials": resolved.credentials,
+                })},
             ),
             "observability.diagnostic-sink": (
                 self.options.diagnostic_sink

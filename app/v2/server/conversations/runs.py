@@ -51,6 +51,10 @@ class RunService:
             agent_id=command.agent_id,
         )
         async with self._agent_load_lock:
+            if frozen is not None:
+                from app.v2.server.catalog.model_config import app_models
+                models = command.config.metadata.get("server_v2.models")
+                await self.application.update_models(models or app_models(await self.catalog.get(user_id)))
             current = next((value for value in self.application.loaded_agents
                             if value.package_id == (manifest.package_id if hasattr(manifest, "package_id") else manifest.metadata.id)), None)
             if current is None:

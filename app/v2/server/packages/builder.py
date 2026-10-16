@@ -32,7 +32,7 @@ class CatalogPackageModel:
     async def provider(self, binding):
         catalog = self.snapshot if self.snapshot is not None else await self.catalog.get(self.user_id)
         route = self.routes.get(binding) or self.routes.get("primary")
-        selected = route.model if route else "default"
+        selected = route.credential.removeprefix("server-model:") if route and route.credential else "default"
         record = package_model_record(catalog, selected)
         if record is None:
             if selected != "default" or self.execution.fallback_model is None:
@@ -46,7 +46,11 @@ class CatalogPackageModel:
             yield self.execution.fallback_model
             return
         if route is not None:
-            record = record.for_route(route)
+            record = record.model_copy(update={
+                "protocol": route.provider, "base_url": route.base_url or record.base_url,
+                "model": route.model, "request": route.request, "limits": route.limits,
+                "capabilities": route.capabilities, "capability_profile": route.capability_profile,
+            })
         _provider, scope = await open_model_lease(self.execution, self.user_id, record)
         try:
             yield scope.provider
@@ -147,9 +151,8 @@ class PackageBuilder(SAgentBuilder):
         super().__init__()
         self.settings, self.run_quota, self.root = settings, run_quota, root
         self.host_application = application
-        self.catalog_snapshot = None
 
-    async def build(self, *, runtime=None, runtime_config_text=None, tenant_id=None):
+    async def build(self, *, runtime=None, runtime_config_text=None, tenant_id=None, models=None, models_config_text=None):
         from sagents.v2.composition.inputs import runtime_input
         from sagents.v2.package.manifest.runtime import merge_capability_selections
         from sagents.v2.runtime.execution.scheduler.plugins.ephemeral import InMemoryScheduler
@@ -174,25 +177,8 @@ class PackageBuilder(SAgentBuilder):
                 max_pending_items=self.settings.max_pending_runs)
             self.with_scheduler(scheduler)
             self.with_owned_resources(scheduler)
-        return await super().build(runtime=effective, tenant_id=tenant_id)
+        return await super().build(runtime=effective, tenant_id=tenant_id, models=models, models_config_text=models_config_text)
 
-    def _prepare_package(self, package):
-        # Catalog profiles are host-owned model metadata, frozen for this builder.
-        from sagents.v2.package.manifest.resolver import ResolvedSageManifest
-        if isinstance(package, ResolvedSageManifest):
-            return package
-        routes = dict(package.models)
-        if self.catalog_snapshot is not None:
-            for key, route in routes.items():
-                record = package_model_record(self.catalog_snapshot, route.model)
-                if record is not None:
-                    selected = record.for_route(route)
-                    routes[key] = route.model_copy(update={
-                        "request": selected.request, "limits": selected.limits,
-                        "capabilities": selected.capabilities,
-                        "capability_profile": selected.current_profile(),
-                    })
-        return package.model_copy(update={"models": routes})
 
 
 class ServerPackageBuilderFactory:
@@ -264,7 +250,9 @@ class ServerPackageBuilderFactory:
         )
         for registration in self.extensions:
             builder.register(registration)
-        builder.catalog_snapshot = catalog
+        from app.v2.server.catalog.model_config import app_models
+        frozen_models = command.config.metadata.get("server_v2.models") if command is not None else None
+        builder.with_models(frozen_models or app_models(catalog))
         frozen = catalog_run[2] if catalog_run is not None else None
         records = frozen.skills if frozen is not None else tuple(await self.skills.list_visible(user_id=user_id, role="user"))
         binding = prepare_tenant_binding(

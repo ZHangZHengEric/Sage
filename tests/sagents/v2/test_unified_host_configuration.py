@@ -1,5 +1,7 @@
 """One registration/configuration/lifecycle contract for package and host assembly."""
 
+from tests.sagents.v2.model_fixture import TEST_MODELS
+
 import asyncio
 from dataclasses import replace
 from pathlib import Path
@@ -29,7 +31,7 @@ def package():
 
 def builder(tmp_path, registration=None):
     return (
-        SAgentBuilder()
+        SAgentBuilder().with_models(TEST_MODELS)
         .with_defaults(session_root=tmp_path)
         .with_model_provider(offline_model())
         .register(registration or estimator_registration())
@@ -84,7 +86,7 @@ async def test_invalid_registered_plugin_parameters_fail_before_factory(
 
 @pytest.mark.asyncio
 async def test_resolved_package_cannot_silently_change_runtime(tmp_path):
-    resolved = CompositionResolver().resolve(package())
+    resolved = CompositionResolver(models=TEST_MODELS).resolve(package())
     with pytest.raises(ValueError, match="already resolved"):
         await builder(tmp_path)._build_package(resolved, runtime=RuntimeConfig())
 
@@ -201,7 +203,7 @@ async def test_server_registration_and_package_runtime_parameter(tmp_path):
             .with_model_provider(offline_model())
             .register(registration)
             .with_execution_binding_provider(UnusedBindings())
-            .build(runtime=package().runtime)
+            .build(runtime=package().runtime, models=TEST_MODELS)
         )
         try:
             await managed.load_agent(package())

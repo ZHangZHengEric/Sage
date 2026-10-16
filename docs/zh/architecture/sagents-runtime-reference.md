@@ -2,7 +2,131 @@
 
 [接入开发指南](sagents-host-development.md) · [sage.yaml 配置参考](sagents-manifest-reference.md) · [代码阅读指南](code-reading-guide.md)
 
-本文面向使用 `SAgentBuilder.build()`、`app.load_agent()` 的项目，解释当前代码实际支持的配置。Runtime 决定 App 使用哪些组件；Agent Package 决定 Agent 的指令、模型路由、工具范围和预算。Desktop、Server 的数据库地址、登录配置、监听端口、工作区选择属于宿主设置，不是这里的 RuntimeConfig 字段。
+本文面向使用 `SAgentBuilder.build()`、`app.load_agent()` 的项目，解释当前代码实际支持的配置。Runtime 决定 App 使用哪些组件；App 的模型目录管理模型路由与凭据；Agent Package 决定指令、模型 ID 引用、工具范围和预算。Desktop、Server 的数据库地址、登录配置、监听端口、工作区选择属于宿主设置，不是这里的 RuntimeConfig 字段。
+
+## App 模型配置
+
+App 分别接收两份配置：`runtime.yaml` 选择组件及参数，`models.yaml` 管理模型及凭据引用。`models` 不是 RuntimeConfig 字段，不要把它塞进 `runtime.yaml`。Agent Package 只引用 App 模型 ID。
+
+```python
+from sagents.v2 import SAgentBuilder
+
+app = await SAgentBuilder().build(
+    runtime="./runtime.yaml",
+    models="./models.yaml",
+)
+try:
+    agent = await app.load_agent("./agents/assistant")
+finally:
+    await app.close()
+```
+
+`models` 支持文件路径字符串、Path、配置字典、ModelCatalogConfig。YAML/JSON 正文使用 `models_config_text=`；两种参数互斥。省略时目录为空，不会自动提供模型或读取当前电脑的密钥。默认运行组件仍采用标准组件方案；Desktop/Server 的宿主层负责把自身模型配置传入 App。
+
+```yaml
+# models.yaml
+credentials:
+  model-key: {source: env, key: MODEL_API_KEY}
+models:
+  primary:
+    provider: openai-responses
+    model: your-model
+    base_url: https://api.openai.com/v1
+    credential: model-key
+    request:
+      max_output_tokens: 4096
+      reasoning_effort: medium
+    limits:
+      context_window: 128000
+      max_output_tokens: 4096
+    capabilities:
+      tool_calling: true
+      reasoning: true
+```
+
+`your-model`、窗口数值和推理力度只是配置示例，需按实际供应商模型填写。能力声明不会让模型获得原本不支持的功能。不要复制其他模型的探测结果。顶层只有 `models` 和 `credentials`，默认都是空映射；未知字段、重复 YAML 键、无效凭据引用会被拒绝。
+
+### 更新与版本
+
+Builder 的 `.with_models(...)` 用于创建前配置；已经 build 的 App 通过以下接口更新：
+
+```python
+await app.update_models("./models.yaml")  # 原子替换整个目录
+route = app.models.models["primary"].model_copy(deep=True)
+route.request.reasoning_effort = "high"
+await app.update_model("primary", route)  # 替换单个模型的完整配置
+agent_v2 = await app.load_agent("./agents/assistant")
+```
+
+`update_model` 接收完整 ModelRoute 或同结构字典，不是局部补丁；新凭据声明应通过 `update_models` 一并提交。`app.models` 返回副本，修改副本不会更新 App。更新先校验再发布，失败不会损坏当前目录。
+
+模型更新后重新 load 同一 Package 才会得到引用新模型配置的 handle；旧 handle 和已受理 Run 继续使用原快照。Package 自身改变时仍须 `update_agent`。未被 Agent 引用的模型更新不改变它的装配身份。恢复使用已受理版本，不能把“读取最新模型配置”当作恢复步骤。密钥材料仍由凭据服务提供，不写入 Package 或模型快照。
+
+### credentials
+
+```yaml
+credentials:
+  public-api:
+    source: env
+    key: MODEL_API_KEY
+  managed-api:
+    source: host
+    ref: tenant-primary-model
+```
+
+| 字段 | 类型 | 默认 | 含义 |
+| --- | --- | --- | --- |
+| `source` | `env` / `host` | 必填 | 从环境或宿主凭据服务取得密钥 |
+| `key` | string / null | null | env 使用的环境变量名 |
+| `ref` | string / null | null | host 使用的凭据引用 |
+
+不要把真实密钥写成 key/ref 的内容。env 声明应提供 key；host 声明应提供宿主能够解析的 ref。模型 schema 本身允许 key/ref 为 null，并不证明凭据能解析；最终由对应凭据 provider 校验。默认环境 provider 不会自动读取 Server 数据库中的 host 凭据。
+
+### models
+
+App 的 `models.<id>` 定义路由，Package 的 `agents.main.models.<slot>` 引用该 ID。常用槽位为 primary、fast；路由名可以自定义。
+
+| ModelRoute 字段 | 类型 | 默认 | 含义 |
+| --- | --- | --- | --- |
+| `provider` | Identifier | 必填 | 供应商协议 ID，不是模型名 |
+| `plugin` | Identifier / null | null | 指定已注册 model.provider 插件；省略按 provider 协议解析 |
+| `base_url` | string / null | null | 绝对 HTTP(S) URL；不能含用户名密码、query 或 fragment |
+| `credential` | Identifier / null | null | 顶层 credentials 的键 |
+| `model` | string | 必填 | 供应商的模型 ID |
+| `request` | ModelRequestDefaults | 见下表 | 请求默认值 |
+| `limits` | ModelLimits | 见下表 | 模型上下文和输出限制 |
+| `capabilities` | ModelCapabilityDeclaration | 见下表 | 能力声明，不能替代探测事实 |
+| `capability_profile` | ModelCapabilityProfile / null | null | 宿主保存的版本化探测结果与插件调用策略，通常由模型配置流程生成 |
+
+内置协议：`openai-responses`、`openai-chat-completions`、`anthropic-messages`、`gemini-generate-content`，对应 `sage.model.<协议>` 插件。模型名称不存在或协议不匹配时，不会自动换供应商模型。
+
+| request 字段 | 类型 / 范围 | 默认 | 含义 |
+| --- | --- | --- | --- |
+| `max_output_tokens` | 正整数 / null | null | 请求输出 token 上限 |
+| `temperature` | number / null | null | 采样温度；供应商另有合法范围和模型限制 |
+| `top_p` | number / null | null | nucleus sampling 参数；供应商另有约束 |
+| `reasoning_effort` | string / null | null | 推理力度，由对应模型协议解释 |
+| `extra` | 对象 | `{}` | 协议扩展字段，不保证任意供应商都支持 |
+
+| limits 字段 | 类型 | 默认 | 含义 |
+| --- | --- | --- | --- |
+| `context_window` | 正整数 / null | null | 上下文窗口上限 |
+| `max_output_tokens` | 正整数 / null | null | 模型允许的最大输出 token 数 |
+
+null 表示没有在此处声明，不表示无限大；还受模型、宿主和 Run 预算限制。
+
+| capabilities 字段 | 默认 | 含义 |
+| --- | --- | --- |
+| `multimodal` | false | 多模态输入 |
+| `structured_output` | false | 结构化输出 |
+| `tool_calling` | true | 工具调用 |
+| `reasoning` | false | 推理能力 |
+| `parallel_tool_calls` | false | 并行工具调用 |
+
+以上类型都是 boolean。`capability_profile` 的完整结构：schema_version=1；plugin_id、plugin_version、protocol、route_fingerprint、effective_max_output_tokens（正整数）、outcomes 必填；verified_at 默认当前 UTC 时间；invocation_strategy、metadata 默认 `{}`。outcomes 必须恰好包含 connection、multimodal、structured_output、json_object、tool_calling、reasoning_control 六项且不重复。
+
+每项 outcome：name 与 status 必填；status 为 supported/unsupported/error/skipped；response、error、error_code、error_category、provider_code 默认为 null；metadata 默认 `{}`。这些是某个路由版本的探测事实，勿复制别的模型的 profile 假装已经验证。插件拥有 invocation_strategy 的解释权。
+
 
 ## 目录
 
@@ -146,7 +270,7 @@ scope 的含义：process 与 App 进程服务同寿命；tenant 按租户隔离
 | `observability.log-sink` | `sage.logging.filesystem` | `root=R/logs`；结构化运行日志 |
 | `workspace.initializer` | `sage.workspace.initializer.claw` | `language=en`；工作区引导资料 |
 
-默认运行方案未显式列出的服务仍有装配回退：调度器 `sage.scheduler.ephemeral`、后台 Job `sage.job.ephemeral`、Artifact `sage.artifact.session`、Package Registry `sage.package-registry.ephemeral`、Trace `sage.trace.noop`、凭据 `sage.credentials.environment`、上下文单元压缩 `sage.context.unit-compactor.reference`。模型实现由 Agent 的 models 路由选择。
+默认运行方案未显式列出的服务仍有装配回退：调度器 `sage.scheduler.ephemeral`、后台 Job `sage.job.ephemeral`、Artifact `sage.artifact.session`、Package Registry `sage.package-registry.ephemeral`、Trace `sage.trace.noop`、凭据 `sage.credentials.environment`、上下文单元压缩 `sage.context.unit-compactor.reference`。模型实现由 App 模型目录解析 Agent 的模型 ID 引用。
 
 显式空 runtime 与上表的重要差异：memory/session-memory 为 noop，记忆查询为 direct，continuation 为 deterministic，diagnostic/log 为 noop，workspace initializer 为 bare；会话存储仍回退 filesystem。**提供记忆组件也不会自动打开 Agent 的 `memory.recall/auto_write`，它们默认 false。**
 
@@ -491,7 +615,7 @@ Resolves credentials from process environment variables.
 
 | 参数 | 类型 / 范围 | 默认值 | schema 必填 | 用途 |
 | --- | --- | --- | --- | --- |
-| `declarations` | object | `{}` | 否 | 凭据声明映射，通常来自 manifest.credentials |
+| `declarations` | object | `{}` | 否 | 凭据声明映射，通常来自 App models 配置的 credentials |
 | `environment` | object / null | 省略时读取宿主 os.environ | 否 | Trace 为环境标签；credentials.environment 为宿主环境变量映射 |
 
 ### sage.credentials.mapping
@@ -618,7 +742,7 @@ Uses Claude system, content-block, tool-use, and SSE semantics.
 
 | 参数 | 类型 / 范围 | 默认值 | schema 必填 | 用途 |
 | --- | --- | --- | --- | --- |
-| `route` | object | 无固定值；仍需提供/注入 | 是 | 模型路由对象，来自 manifest.models |
+| `route` | object | 无固定值；仍需提供/注入 | 是 | 模型路由对象，来自 App models 配置的 models |
 | `credential` | 宿主对象 | 省略时 None；通常由宿主解析注入 | 否 | 宿主对象：解析后的凭据 |
 | `client` | 宿主对象 | 省略时 None，使用协议默认客户端 | 否 | 宿主对象：模型协议客户端 |
 | `provider_instance_id` | string | 省略时 None，由实现生成/选择 | 否 | 宿主指定 provider 实例标识 |
@@ -631,7 +755,7 @@ Uses native Gemini Parts, function calls, thought signatures, and SSE.
 
 | 参数 | 类型 / 范围 | 默认值 | schema 必填 | 用途 |
 | --- | --- | --- | --- | --- |
-| `route` | object | 无固定值；仍需提供/注入 | 是 | 模型路由对象，来自 manifest.models |
+| `route` | object | 无固定值；仍需提供/注入 | 是 | 模型路由对象，来自 App models 配置的 models |
 | `credential` | 宿主对象 | 省略时 None；通常由宿主解析注入 | 否 | 宿主对象：解析后的凭据 |
 | `client` | 宿主对象 | 省略时 None，使用协议默认客户端 | 否 | 宿主对象：模型协议客户端 |
 | `provider_instance_id` | string | 省略时 None，由实现生成/选择 | 否 | 宿主指定 provider 实例标识 |
@@ -644,7 +768,7 @@ Streams chat messages and function calls through /chat/completions.
 
 | 参数 | 类型 / 范围 | 默认值 | schema 必填 | 用途 |
 | --- | --- | --- | --- | --- |
-| `route` | object | 无固定值；仍需提供/注入 | 是 | 模型路由对象，来自 manifest.models |
+| `route` | object | 无固定值；仍需提供/注入 | 是 | 模型路由对象，来自 App models 配置的 models |
 | `credential` | 宿主对象 | 省略时 None；通常由宿主解析注入 | 否 | 宿主对象：解析后的凭据 |
 | `client` | 宿主对象 | 省略时 None，使用协议默认客户端 | 否 | 宿主对象：模型协议客户端 |
 | `provider_instance_id` | string | 省略时 None，由实现生成/选择 | 否 | 宿主指定 provider 实例标识 |
@@ -657,7 +781,7 @@ Uses typed input/output items and Responses streaming events.
 
 | 参数 | 类型 / 范围 | 默认值 | schema 必填 | 用途 |
 | --- | --- | --- | --- | --- |
-| `route` | object | 无固定值；仍需提供/注入 | 是 | 模型路由对象，来自 manifest.models |
+| `route` | object | 无固定值；仍需提供/注入 | 是 | 模型路由对象，来自 App models 配置的 models |
 | `credential` | 宿主对象 | 省略时 None；通常由宿主解析注入 | 否 | 宿主对象：解析后的凭据 |
 | `client` | 宿主对象 | 省略时 None，使用协议默认客户端 | 否 | 宿主对象：模型协议客户端 |
 | `provider_instance_id` | string | 省略时 None，由实现生成/选择 | 否 | 宿主指定 provider 实例标识 |
@@ -687,7 +811,7 @@ Process-local AgentPackage inventory without restart durability.
 
 提供能力：`package.registry:default`。支持 scope：process。
 
-没有可配置参数，使用 `config: {}`。
+使用 `config: {}`。`resolver` 是宿主注入的对象依赖，不应写进 YAML；统一入口将它绑定到 App 当前模型目录，让新 Package 的模型 ID 校验使用相同配置。
 
 ### sage.protocol.a2a
 

@@ -40,6 +40,7 @@ from app.v2.cli.host import (
 )
 from app.v2.cli.package import (
     CliModelSettings,
+    cli_model_catalog,
     available_presets,
     build_preset_package,
     plan_visible_tools,
@@ -149,12 +150,13 @@ class ClosableAgent:
 async def make_agent(tmp_path, model, *, tool_policy=None, workspace_name="workspace"):
     workspace = tmp_path / workspace_name
     workspace.mkdir(exist_ok=True)
-    package = build_preset_package("coder", MODEL)
+    package = build_preset_package("coder")
     bindings = LocalWorkspaceBindingProvider(
         workspace, settings=WorkspaceSandboxSettings(process_enabled=False)
     )
     application = await build_cli_application(
         package=package,
+        models=cli_model_catalog(MODEL),
         session_root=tmp_path / "runtime",
         bindings=bindings,
         model_provider=model,
@@ -555,7 +557,7 @@ async def test_v2_run_command_requires_model_configuration(tmp_path, monkeypatch
     steps = " ".join(raised.value.next_steps)
     assert "SAGE_DEFAULT_LLM_MODEL_NAME" in steps
     assert "SAGE_DEFAULT_LLM_API_KEY" in steps
-    assert "--package" in steps
+    assert "--models" in steps
 
 
 async def test_v2_run_command_end_to_end_with_injected_model(
@@ -1208,10 +1210,10 @@ def test_preset_package_selects_filesystem_scheduler_only_when_root_given(tmp_pa
         without_filesystem_scheduler,
     )
 
-    plain = build_preset_package("coder", MODEL)
+    plain = build_preset_package("coder")
     assert SCHEDULER_CAPABILITY not in plain.runtime.capabilities
 
-    durable = build_preset_package("coder", MODEL, scheduler_root=tmp_path / "sched")
+    durable = build_preset_package("coder", scheduler_root=tmp_path / "sched")
     selection = durable.runtime.capabilities[SCHEDULER_CAPABILITY]
     assert selection.plugin == FILESYSTEM_SCHEDULER_PLUGIN
     assert selection.config["root"] == str(tmp_path / "sched")
@@ -1352,13 +1354,14 @@ async def test_suspended_run_from_a_previous_process_is_resumed_first(
     monkeypatch.setenv("SAGE_DEFAULT_LLM_API_KEY", "test-key")
     workspace = tmp_path / "workspace"
     session_root = tmp_path / "runtime"
-    package = build_preset_package("coder", MODEL, scheduler_root=session_root / "scheduler")
+    package = build_preset_package("coder", scheduler_root=session_root / "scheduler")
 
     first_bindings = LocalWorkspaceBindingProvider(
         workspace, settings=WorkspaceSandboxSettings(process_enabled=False)
     )
     first = await build_cli_application(
         package=package,
+        models=cli_model_catalog(MODEL),
         session_root=session_root,
         bindings=first_bindings,
         model_provider=write_hello_model(),
@@ -1656,12 +1659,13 @@ def shell_tool_result(request):
 async def make_shell_agent(tmp_path, model, *, read_only=False):
     workspace = tmp_path / "workspace"
     workspace.mkdir(exist_ok=True)
-    package = build_preset_package("coder", MODEL)
+    package = build_preset_package("coder")
     bindings = LocalWorkspaceBindingProvider(
         workspace, settings=WorkspaceSandboxSettings(read_only=read_only, protected_paths=())
     )
     application = await build_cli_application(
         package=package,
+        models=cli_model_catalog(MODEL),
         session_root=tmp_path / "runtime",
         bindings=bindings,
         model_provider=model,

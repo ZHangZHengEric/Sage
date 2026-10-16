@@ -100,7 +100,7 @@ Desktop 的 `component_plan.py` 只负责将已确定的设置快照转换为组
 分布式部署能力。
 
 
-当前统一入口：`builder.build()` → `app.load_agent()` → `app.entrypoint().run_stream(..., agent=agent)` → `app.close()`.
+当前统一入口：`builder.build(runtime=..., models=...)` → `app.load_agent()` → `app.entrypoint().run_stream(..., agent=agent)` → `app.close()`.
 
 加载、版本发布和恢复快照分别在 `sagents/v2/composition/loaded_agents.py`、`inputs.py`、`revision_store.py`；`defaults.py` 由 SDK 与 Desktop 共用组件默认值。
 
@@ -109,3 +109,5 @@ Desktop 的 `component_plan.py` 只负责将已确定的设置快照转换为组
 `composition/loaded_agents.py` 管理版本和生命周期，`composition/agent_graph.py`
 绑定独立子 Package，`agent/management/loading.py` 加载持久化的依赖树。
 CLI 的实际装配在 `app/v2/cli/host.py`，TUI 通过 CLI v2 协议复用它。
+
+模型配置入口见 [App 模型配置](sagents-runtime-reference.md#app-模型配置)：App 管理连接、请求参数与能力，Package 只引用模型 ID。运行期更新通过 App 发布新目录，再加载 Agent；已受理 Run 保持原模型快照。

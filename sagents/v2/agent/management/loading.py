@@ -9,16 +9,17 @@ async def load_bundle_agents(application, bundle):
     return await application.load_agent(bundle.resolved_manifest(), subagents=children)
 
 
-def resolve_bundle(bundle, runtime):
+def resolve_bundle(bundle, runtime, *, models):
     from sagents.v2.composition.agent_graph import resolve_agent_graph
 
     return resolve_agent_graph(
         bundle.resolved_manifest(),
         runtime,
         {
-            name: resolve_bundle(child, runtime)
+            name: resolve_bundle(child, runtime, models=models)
             for name, child in bundle.dependencies.items()
         },
+        models=models,
     )
 
 

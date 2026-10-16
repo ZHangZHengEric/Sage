@@ -152,7 +152,8 @@ class DesktopRunServiceMixin(DesktopRunCompositionMixin):
             if valid_skills and "load_skill" not in valid_tools:
                 valid_tools = (*valid_tools, "load_skill")
             resolved = CompositionResolver().resolve(
-                self._manifest(agent, provider, valid_tools, valid_skills)
+                self._manifest(agent, provider, valid_tools, valid_skills),
+                models=self._model_catalog(agent, provider),
             )
             command = self._command(
                 request,
@@ -215,6 +216,7 @@ class DesktopRunServiceMixin(DesktopRunCompositionMixin):
             self._drivers[accepted_handle.run_id] = driver
             loaded = await self._load_run_agent(
                 agent, self._manifest(agent, provider, valid_tools, valid_skills), command,
+                models=self._model_catalog(agent, provider),
             )
             stream = await self.application.entrypoint().schedule_accepted_run(
                 accepted_handle, context, agent=loaded,
@@ -772,7 +774,7 @@ class DesktopRunServiceMixin(DesktopRunCompositionMixin):
         loaded = await self._load_run_agent(
             agent,
             self._manifest(agent, provider, tuple(command.config.enabled_tools or ()), tuple(command.config.enabled_skills or ())),
-            command,
+            command, models=self._model_catalog(agent, provider),
         )
         task = await self.application.entrypoint().continue_run(
             run_id,
@@ -791,7 +793,7 @@ class DesktopRunServiceMixin(DesktopRunCompositionMixin):
             lambda _completed, key=run_id: asyncio.create_task(self._index_run(key))
         )
 
-    async def _load_run_agent(self, agent, manifest, command):
+    async def _load_run_agent(self, agent, manifest, command, *, models):
         """Reuse a frozen definition; Run-specific resources stay in its driver."""
         from sagents.v2 import HostAgentExecution
         if not hasattr(self, "_loaded_agent_lock"):
@@ -811,6 +813,7 @@ class DesktopRunServiceMixin(DesktopRunCompositionMixin):
                           "scope": behavior.scope, "recall_limit": 8},
         )
         async with self._loaded_agent_lock:
+            await self.application.update_models(models)
             current = next((value for value in self.application.loaded_agents
                             if value.package_id == manifest.metadata.id), None)
             if current is None:

@@ -28,14 +28,11 @@ def build_package(record, *, sandbox=None, previous=None) -> AgentPackageBundle:
         data = {
             "metadata": {"id": record.id, "name": record.name, "version": "initial"},
             "entrypoint": {"agent": record.id},
-            "models": {
-                "primary": {"provider": "server", "model": record.model_id or "default"}
-            },
             "agents": {
                 record.id: {
                     "name": record.name,
                     "instructions": {"inline": record.instructions},
-                    "models": {"primary": "primary"},
+                    "models": {"primary": record.model_id or "default"},
                     "memory": {"recall": True, "auto_write": True, "scope": "agent"},
                 }
             },
@@ -59,12 +56,7 @@ def build_package(record, *, sandbox=None, previous=None) -> AgentPackageBundle:
     )
     if sandbox is not None:
         definition["sandbox"] = sandbox
-    route_id = definition["models"].get("primary", "primary")
-    manifest["models"][route_id] = {
-        **manifest["models"].get(route_id, {}),
-        "provider": "server",
-        "model": record.model_id or "default",
-    }
+    definition["models"]["primary"] = record.model_id or "default"
     manifest["metadata"].update(name=record.name, version="content")
     digest = hashlib.sha256(json.dumps(data, sort_keys=True).encode()).hexdigest()[:24]
     manifest["metadata"]["version"] = digest
@@ -77,13 +69,13 @@ def project_package(record):
     if manifest.entrypoint.agent != record.id or set(manifest.agents) != {record.id}:
         raise ValueError("catalog package must contain exactly its stable Agent ID")
     definition = manifest.agents[record.id]
-    route = manifest.models[definition.models.get("primary", "primary")]
+    model_id = definition.models.get("primary", "default")
     record.name = definition.name
     record.description = definition.description or ""
     record.instructions = (
         package.resolved_manifest().agents[record.id].instructions.inline or ""
     )
-    record.model_id = "" if route.model == "default" else route.model
+    record.model_id = "" if model_id == "default" else model_id
     record.tools = list(definition.tools)
     record.skills = list(definition.skills)
     record.tool_approval = definition.tool_approval

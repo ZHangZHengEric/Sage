@@ -2,7 +2,7 @@
 
 [接入开发指南](sagents-host-development.md) · [Runtime 配置参考](sagents-runtime-reference.md) · [代码阅读指南](code-reading-guide.md)
 
-`sage.yaml` 定义一个 Agent Package。**一个 Package 恰好一个 Agent；一个 App 可以加载多个 Package。** App 负责运行环境与生命周期，Package 负责 Agent 的指令、模型路由、能力范围和预算。加载返回 Agent handle，不需要再用名称选择一次 Agent。
+`sage.yaml` 定义一个 Agent Package。**一个 Package 恰好一个 Agent；一个 App 可以加载多个 Package。** App 负责运行环境与生命周期，Package 负责 Agent 的指令、模型 ID 引用、能力范围和预算。加载返回 Agent handle，不需要再用名称选择一次 Agent。
 
 ## 目录
 
@@ -10,8 +10,7 @@
 - [文件、字符串与路径](#文件字符串与路径)
 - [顶层字段总表](#顶层字段总表)
 - [metadata](#metadata)
-- [credentials](#credentials)
-- [models](#models)
+- [模型 ID 引用](#模型-id-引用)
 - [agents](#agents)
 - [预算与策略](#预算与策略)
 - [entrypoint 与 flows](#entrypoint-与-flows)
@@ -24,7 +23,7 @@
 
 ## 最小配置与加载
 
-下面是结构完整的文本对话 Package。`your-model` 是占位符，必须替换为你供应商支持的真实模型，并由环境提供 `MODEL_API_KEY`。这不是离线模型配置。
+下面是结构完整的文本对话 Package。App 必须先配置模型 ID `primary`，连接参数与凭据写在独立的 `models.yaml` 中。
 
 ```yaml
 schema_version: sage/v2
@@ -33,16 +32,6 @@ metadata:
   id: example.assistant
   version: "1.0.0"
   name: Assistant
-credentials:
-  model-key:
-    source: env
-    key: MODEL_API_KEY
-models:
-  primary:
-    provider: openai-responses
-    base_url: https://api.openai.com/v1
-    credential: model-key
-    model: your-model
 agents:
   main:
     name: Assistant
@@ -57,7 +46,7 @@ entrypoint:
 ```python
 from sagents.v2 import SAgentBuilder
 
-app = await SAgentBuilder().build()
+app = await SAgentBuilder().build(models="./models.yaml")
 try:
     agent = await app.load_agent("./agents/assistant")
     # StartRun.agent_id = agent.id
@@ -89,7 +78,7 @@ finally:
 
 `package` 与 `config_text` 必须且只能提供一个。传文件路径时不能另传 base_path，基准目录由文件位置决定。直接使用低层 `SageManifestLoader.load` 则要求文件名为 `sage.yaml`；这是它与公开 `load_agent` 路径输入的区别。
 
-不支持在任意字符串中自动展开 `${VAR}`；环境变量通过 credentials.env 的 `key` 读取。YAML 重复键会被拒绝，未知模型字段会被拒绝。JSON null 与“未填写”须符合各字段类型；例如 budgets 接受 null，tools 则应写数组或省略。
+不支持在任意字符串中自动展开 `${VAR}`；模型密钥通过 App 的 credentials 声明读取环境变量。YAML 重复键会被拒绝，未知模型字段会被拒绝。JSON null 与“未填写”须符合各字段类型；例如 budgets 接受 null，tools 则应写数组或省略。
 
 ## 顶层字段总表
 
@@ -98,8 +87,6 @@ finally:
 | `schema_version` | 固定字符串 | `sage/v2` | schema 版本 |
 | `kind` | `agent-package` / `application` | `agent-package` | 文档种类标签；新 Package 推荐 agent-package，application 标签也不能绕过一个 Package 一个 Agent |
 | `metadata` | 对象 | 必填 | Package 身份、版本和显示名称 |
-| `credentials` | 名称 → CredentialDeclaration | `{}` | 密钥引用，不是密钥值 |
-| `models` | 路由名 → ModelRoute | `{}` | 供应商协议、模型、请求参数和能力信息 |
 | `runtime` | RuntimeConfig | 字段默认配置 | 可供宿主选用的 runtime 声明；load_agent 不会覆盖已创建 App 的 runtime |
 | `plugins` | PluginDeclaration 数组 | `[]` | 插件声明与默认参数，ID 不可重复 |
 | `policies` | PolicyConfig | budgets 全部 null | Package 预算上限 |
@@ -123,70 +110,21 @@ finally:
 
 metadata.version 不是加载缓存的唯一依据。实际版本身份包括解析内容与固定的子 Agent 图；`agent.composition_hash` 才是本次装配身份。不要通过只修改 version 让旧运行自动采用新定义。
 
-## credentials
+## 模型 ID 引用
+
+模型路由和凭据由 App 统一管理，在 `models.yaml` 中配置。`sage.yaml` 只保存槽位与 App 模型 ID 的绑定：
 
 ```yaml
-credentials:
-  public-api:
-    source: env
-    key: MODEL_API_KEY
-  managed-api:
-    source: host
-    ref: tenant-primary-model
+agents:
+  main:
+    name: Assistant
+    instructions: {inline: "准确回答问题。"}
+    models: {primary: primary, fast: primary}
 ```
 
-| 字段 | 类型 | 默认 | 含义 |
-| --- | --- | --- | --- |
-| `source` | `env` / `host` | 必填 | 从环境或宿主凭据服务取得密钥 |
-| `key` | string / null | null | env 使用的环境变量名 |
-| `ref` | string / null | null | host 使用的凭据引用 |
+同一 ID 可以供多个 Package 使用；这里的 `primary`、`fast` 是用途槽位，右侧值才是 App 模型 ID。模型不存在时加载失败，不会自动选择其他模型。子 Agent 的 `delegation_model_bindings` 同样引用 App 模型 ID。
 
-不要把真实密钥写成 key/ref 的内容。env 声明应提供 key；host 声明应提供宿主能够解析的 ref。模型 schema 本身允许 key/ref 为 null，并不证明凭据能解析；最终由对应凭据 provider 校验。默认环境 provider 不会自动读取 Server 数据库中的 host 凭据。
-
-## models
-
-`models.<route>` 定义路由，`agents.main.models.<slot>` 将 Agent 槽位映射到该路由。常用槽位为 primary、fast；路由名可以自定义。
-
-| ModelRoute 字段 | 类型 | 默认 | 含义 |
-| --- | --- | --- | --- |
-| `provider` | Identifier | 必填 | 供应商协议 ID，不是模型名 |
-| `plugin` | Identifier / null | null | 指定已注册 model.provider 插件；省略按 provider 协议解析 |
-| `base_url` | string / null | null | 绝对 HTTP(S) URL；不能含用户名密码、query 或 fragment |
-| `credential` | Identifier / null | null | 顶层 credentials 的键 |
-| `model` | string | 必填 | 供应商的模型 ID |
-| `request` | ModelRequestDefaults | 见下表 | 请求默认值 |
-| `limits` | ModelLimits | 见下表 | 模型上下文和输出限制 |
-| `capabilities` | ModelCapabilityDeclaration | 见下表 | 能力声明，不能替代探测事实 |
-| `capability_profile` | ModelCapabilityProfile / null | null | 宿主保存的版本化探测结果与插件调用策略，通常由模型配置流程生成 |
-
-内置协议：`openai-responses`、`openai-chat-completions`、`anthropic-messages`、`gemini-generate-content`，对应 `sage.model.<协议>` 插件。模型名称不存在或协议不匹配时，不会自动换供应商模型。
-
-| request 字段 | 类型 / 范围 | 默认 | 含义 |
-| --- | --- | --- | --- |
-| `max_output_tokens` | 正整数 / null | null | 请求输出 token 上限 |
-| `temperature` | number / null | null | 采样温度；供应商另有合法范围和模型限制 |
-| `top_p` | number / null | null | nucleus sampling 参数；供应商另有约束 |
-| `reasoning_effort` | string / null | null | 推理力度，由对应模型协议解释 |
-| `extra` | 对象 | `{}` | 协议扩展字段，不保证任意供应商都支持 |
-
-| limits 字段 | 类型 | 默认 | 含义 |
-| --- | --- | --- | --- |
-| `context_window` | 正整数 / null | null | 上下文窗口上限 |
-| `max_output_tokens` | 正整数 / null | null | 模型允许的最大输出 token 数 |
-
-null 表示没有在此处声明，不表示无限大；还受模型、宿主和 Run 预算限制。
-
-| capabilities 字段 | 默认 | 含义 |
-| --- | --- | --- |
-| `multimodal` | false | 多模态输入 |
-| `structured_output` | false | 结构化输出 |
-| `tool_calling` | true | 工具调用 |
-| `reasoning` | false | 推理能力 |
-| `parallel_tool_calls` | false | 并行工具调用 |
-
-以上类型都是 boolean。`capability_profile` 的完整结构：schema_version=1；plugin_id、plugin_version、protocol、route_fingerprint、effective_max_output_tokens（正整数）、outcomes 必填；verified_at 默认当前 UTC 时间；invocation_strategy、metadata 默认 `{}`。outcomes 必须恰好包含 connection、multimodal、structured_output、json_object、tool_calling、reasoning_control 六项且不重复。
-
-每项 outcome：name 与 status 必填；status 为 supported/unsupported/error/skipped；response、error、error_code、error_category、provider_code 默认为 null；metadata 默认 `{}`。这些是某个路由版本的探测事实，勿复制别的模型的 profile 假装已经验证。插件拥有 invocation_strategy 的解释权。
+顶层 `models` 和 `credentials` 已移除，即使为空也会报错。不要在 Package 中复制模型连接配置。完整字段、默认值、推理参数、能力探测和更新方式见 [App 模型配置](sagents-runtime-reference.md#app-模型配置)。
 
 ## agents
 
@@ -198,8 +136,8 @@ null 表示没有在此处声明，不表示无限大；还受模型、宿主和
 | `description` | string / null | null | 可选说明 |
 | `instructions` | Instructions | 必填 | inline 或 path 二选一 |
 | `mode` | simple / fibre / team | simple | Agent 运行模式；声明 subagents 不会自动授权委派 |
-| `models` | 槽位 → 顶层模型路由名 | `{}` | 本 Agent 模型绑定 |
-| `delegation_model_bindings` | 槽位 → 路由名 | `{}` | 作为子 Agent 时显式指定覆盖父 Run 选择的模型绑定 |
+| `models` | 槽位 → App 模型 ID | `{}` | 本 Agent 模型绑定 |
+| `delegation_model_bindings` | 槽位 → App 模型 ID | `{}` | 作为子 Agent 时显式指定覆盖父 Run 选择的模型绑定 |
 | `entrypoint` | AgentEntrypoint | loop/react | Agent 内部执行方式 |
 | `tools` | ToolName 数组 | `[]` | 工具允许范围；不是安装工具的声明 |
 | `tool_approval` | ToolApprovalConfig / null | null | Agent 的工具审批偏好；不能替代宿主授权 |
@@ -374,7 +312,7 @@ manifest = SageManifestLoader().load(
 # 然后 build(runtime=manifest.runtime)，再 load_agent(manifest)。
 ```
 
-只允许覆盖 runtime、policies、interfaces。不能用 environments 改 agents、models、credentials、metadata。对象递归合并，非对象值替换；不存在的环境名会报错。`app.load_agent` 没有 environment 参数，环境变量也不会自动选中某个 overlay。
+只允许覆盖 runtime、policies、interfaces。不能用 environments 改 agents、metadata 或 App 模型配置。对象递归合并，非对象值替换；不存在的环境名会报错。`app.load_agent` 没有 environment 参数，环境变量也不会自动选中某个 overlay。
 
 ## 子 Agent、复用、更新与恢复
 
@@ -410,7 +348,7 @@ coder_v2 = await app.update_agent(
 
 ## 完整配置示例
 
-这是单 Agent、有显式模型预算与日志适配器的完整声明。运行前替换真实模型和凭据；如果采用其中 runtime，宿主须显式传给 build。没有配置工具和 Skill，避免误以为声明名称会自动安装它们。
+这是单 Agent、有显式模型预算与日志适配器的完整声明。运行前在 App 中配置模型 ID `primary`；如果采用其中 runtime，宿主须显式传给 build。没有配置工具和 Skill，避免误以为声明名称会自动安装它们。
 
 ```yaml
 schema_version: sage/v2
@@ -419,19 +357,6 @@ metadata:
   id: example.support
   version: "1.0.0"
   name: Support Assistant
-credentials:
-  api: {source: env, key: MODEL_API_KEY}
-models:
-  primary:
-    provider: openai-responses
-    base_url: https://api.openai.com/v1
-    credential: api
-    model: your-model
-    request: {max_output_tokens: 4096}
-    limits: {context_window: 128000, max_output_tokens: 4096}
-    capabilities:
-      tool_calling: true
-      multimodal: false
 runtime:
   deployment_profile: controlled_host
   capabilities:
@@ -467,7 +392,7 @@ interfaces:
 
 分三层验证，不能只验证 YAML 能解析：
 
-1. **结构与引用**：SageManifestLoader 校验字段；CompositionResolver 校验模型、凭据、入口和策略引用。公开 load_agent 额外保证一个 Package 一个 Agent。
+1. **结构与引用**：SageManifestLoader 校验字段；CompositionResolver 结合 App 模型目录校验模型、入口和策略引用。公开 load_agent 额外保证一个 Package 一个 Agent。
 2. **装配**：预注册插件，build App，load_agent，检查 resolved plan/readiness；这一步可以打开存储、连接外部服务，不是纯静态解析。
 3. **执行**：通过真实入口完成对话、工具调用、挂起/恢复；供应商配置可能只有在真实请求时才暴露问题。
 
@@ -486,7 +411,7 @@ assert manifest.entrypoint.agent in manifest.agents
 | 改 sage.yaml.runtime 没生效 | App runtime 已固定；修改宿主 build 参数并考虑旧 Run 恢复 |
 | Changed Package 要求 update | 正常版本保护；使用当前 handle 调 update_agent |
 | 找不到 instructions 文件 | 检查 Package 基准目录，内存输入提供 base_path |
-| credentials 声明存在但请求失败 | 检查环境变量/host provider，声明不是实际密钥 |
+| App credentials 声明存在但请求失败 | 检查环境变量/host provider，声明不是实际密钥 |
 | 工具在 YAML 里但无法调用 | tools 只是允许范围；还需 catalog/executor、宿主授权和有效执行绑定 |
 | subagents 声明存在却不委派 | 检查 mode、显式绑定和宿主授权 |
 | Profile 显示支持却供应商报错 | 检查 route_fingerprint、实际模型协议和探测是否过期 |

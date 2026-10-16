@@ -1,6 +1,9 @@
 """Built-in packages expose only established decorator-backed Tool names."""
 
 from __future__ import annotations
+from tests.sagents.v2.model_fixture import TEST_MODELS
+
+
 
 from pathlib import Path
 
@@ -8,7 +11,6 @@ import pytest
 from pydantic import ValidationError
 
 from sagents.v2.agent.presets.catalog import BUILTIN_AGENT_PRESETS
-from sagents.v2.package.manifest import CompositionResolver
 from sagents.v2.package.presets import BuiltinPackageFactory
 from sagents.v2.tool import DecoratedToolProvider, ToolCall, ToolDefinition, tool
 from sagents.v2.contracts.errors import SageV2Error
@@ -43,20 +45,21 @@ def test_every_builtin_preset_creates_a_complete_resolvable_manifest(preset_id):
     manifest = BuiltinPackageFactory.create(
         preset_id,
         package_id=f"sage.official.{preset_id}",
-        model="gpt-test",
-        base_url="https://gateway.invalid/openai/v1",
-        context_window=128_000,
-        max_output_tokens=8_192,
+
+
+
+
     )
     from sagents.v2.composition.agent_graph import resolve_agent_graph
     def resolve(preset, value):
         assert len(value.agents) == 1
         children = BuiltinPackageFactory.dependencies(preset, value)
-        return resolve_agent_graph(value, value.runtime, {key: resolve(key, child) for key, child in children.items()})
+        return resolve_agent_graph(value, value.runtime, {key: resolve(key, child) for key, child in children.items()}, models=TEST_MODELS)
     resolved = resolve(preset_id, manifest)
     assert resolved.entrypoint_agent == preset_id
     assert resolved.agents[preset_id].instructions
-    assert manifest.credentials["model_api_key"].key == "SAGE_MODEL_API_KEY"
+    assert "credentials" not in manifest.model_dump()
+    assert "models" not in manifest.model_dump()
 
 
 def test_builtin_presets_do_not_invent_tool_names():
