@@ -1,11 +1,11 @@
-FROM docker.m.daocloud.io/node:22-alpine AS builder
+FROM docker.m.daocloud.io/library/node:22-alpine AS builder
 WORKDIR /app
 COPY app/v2/server/web/package.json app/v2/server/web/package-lock.json ./
 RUN npm ci
 COPY app/v2/server/web/ .
 RUN npm run build
 
-FROM docker.m.daocloud.io/nginx:1.27-alpine
+FROM docker.m.daocloud.io/library/nginx:1.27-alpine
 COPY deploy/standalone/nginx.conf /etc/nginx/conf.d/default.conf
 COPY --from=builder /app/dist /usr/share/nginx/html
 EXPOSE 80
