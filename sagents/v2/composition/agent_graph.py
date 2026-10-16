@@ -13,7 +13,7 @@ from sagents.v2.package.manifest.resolver import (
 )
 
 
-def resolve_agent_graph(package, runtime, children):
+def resolve_agent_graph(package, runtime, children, *, models=None):
     if isinstance(package, ResolvedSageManifest):
         if children:
             raise ValueError("resolved Packages cannot bind additional subagents")
@@ -38,7 +38,7 @@ def resolve_agent_graph(package, runtime, children):
             "agents": {name: definition.model_copy(update={"subagents": ()})},
         }
     )
-    resolved = CompositionResolver().resolve(standalone)
+    resolved = CompositionResolver().resolve(standalone, models=models)
     agents = dict(resolved.agents)
     agents[name] = agents[name].model_copy(update={"subagents": definition.subagents})
     routes, credentials = dict(resolved.model_routes), dict(resolved.credentials)

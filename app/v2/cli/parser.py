@@ -34,10 +34,11 @@ def _add_v2_common_args(parser: argparse.ArgumentParser, *, default_user_id: str
         default=DEFAULT_PRESET,
         help=f"Built-in agent preset used when no --package is given (default: {DEFAULT_PRESET})",
     )
+    parser.add_argument("--models", help="App model catalog YAML/JSON file")
     parser.add_argument(
         "--package",
         dest="package",
-        help="Path to a sage.yaml agent package (overrides --preset and model env config)",
+        help="Path to a sage.yaml agent package (overrides --preset; model connections come from --models or App settings)",
     )
     parser.add_argument(
         "--workspace",

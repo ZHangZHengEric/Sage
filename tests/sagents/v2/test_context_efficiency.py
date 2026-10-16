@@ -1,4 +1,5 @@
 from __future__ import annotations
+from tests.sagents.v2.model_fixture import TEST_MODELS
 
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
@@ -481,8 +482,8 @@ def test_manifest_system_and_protected_limits_respect_global_ceiling():
     package = BuiltinPackageFactory.create(
         "assistant",
         package_id="test.context-zones",
-        model="test",
-        base_url="https://model.invalid/v1",
+
+
     )
     data = package.model_dump(mode="json")
     agent_id = data["entrypoint"]["agent"]
@@ -490,7 +491,7 @@ def test_manifest_system_and_protected_limits_respect_global_ceiling():
         system_tokens=12000, protected_recent_tokens=4096
     )
     data["policies"]["budgets"].update(system_tokens=8000, protected_recent_tokens=0)
-    resolved = CompositionResolver().resolve(type(package).model_validate(data))
+    resolved = CompositionResolver(models=TEST_MODELS).resolve(type(package).model_validate(data))
     assert resolved.policy_ceilings[agent_id].max_system_tokens == 8000
     assert resolved.policy_ceilings[agent_id].protected_recent_tokens == 0
 
@@ -506,12 +507,12 @@ async def test_public_builder_suspends_unbounded_input_before_model_request(tmp_
     package = BuiltinPackageFactory.create(
         "assistant",
         package_id="test.default-budget",
-        model="test",
-        base_url="https://model.invalid/v1",
+
+
     )
     model = ScriptedModelProvider(())
     application = await (
-        SAgentBuilder()
+        SAgentBuilder().with_models({"models": {"primary": {"provider": "openai-chat-completions", "model": "test"}}})
         .with_defaults(session_root=tmp_path)
         .with_model_provider(model)
         ._build_package(package)

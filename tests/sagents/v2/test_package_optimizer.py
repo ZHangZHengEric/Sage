@@ -1,4 +1,5 @@
 from __future__ import annotations
+from tests.sagents.v2.model_fixture import TEST_MODELS
 
 import asyncio
 import json
@@ -20,7 +21,7 @@ from sagents.v2.package.presets import BuiltinPackageFactory
 
 def bundle(name="target"):
     data = BuiltinPackageFactory.create(
-        "assistant", package_id=f"test.{name}", model="test"
+        "assistant", package_id=f"test.{name}",
     ).model_dump(mode="json")
     data["agents"]["assistant"]["instructions"] = {"path": "prompts/base.md"}
     return AgentPackageBundle.model_validate(
@@ -354,7 +355,7 @@ async def test_native_runner_runs_real_v2_application_and_materializes_files(tmp
             "skills/units/SKILL.md"
         ]
         return (
-            SAgentBuilder()
+            SAgentBuilder().with_models(TEST_MODELS)
             .with_defaults(session_root=root / "sessions")
             .with_model_provider(
                 ScriptedModelProvider(
@@ -413,7 +414,7 @@ async def test_native_runner_cancellation_closes_driver_and_removes_workspace(tm
     def factory(package, root, ctx):
         paths.append(root)
         return (
-            SAgentBuilder()
+            SAgentBuilder().with_models(TEST_MODELS)
             .with_defaults(session_root=root / "sessions")
             .with_model_provider(WaitingModel(()))
         )
@@ -902,7 +903,7 @@ async def test_native_runner_preserves_tool_execution_evidence(tmp_path):
             )
         )
         return (
-            SAgentBuilder()
+            SAgentBuilder().with_models(TEST_MODELS)
             .with_defaults(session_root=root / "sessions")
             .with_model_provider(model)
             .with_tool_provider(provider.catalog, provider.executor)
@@ -1099,7 +1100,7 @@ async def test_native_conversation_keeps_target_session_and_prior_messages(tmp_p
             for index, text in enumerate(("Remembered", "42"))
         )
         return (
-            SAgentBuilder()
+            SAgentBuilder().with_models(TEST_MODELS)
             .with_defaults(session_root=root / "sessions")
             .with_model_provider(ScriptedModelProvider(steps))
         )

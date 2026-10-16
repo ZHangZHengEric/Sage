@@ -1,3 +1,4 @@
+from tests.sagents.v2.model_fixture import TEST_MODELS
 from contextlib import asynccontextmanager
 
 import pytest
@@ -421,10 +422,10 @@ async def test_public_builder_exposes_self_configuration_without_initial_skills(
         )
     )
     package = BuiltinPackageFactory.create(
-        "assistant", package_id="test.self-configuration", model="test-model"
+        "assistant", package_id="test.self-configuration",
     )
     application = await (
-        SAgentBuilder()
+        SAgentBuilder().with_models(TEST_MODELS)
         .with_defaults(session_root=tmp_path / "sessions")
         .with_model_provider(model)
         .with_tool_provider(InMemoryToolCatalog(()), InMemoryToolExecutor({}, {}))

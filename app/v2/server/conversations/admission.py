@@ -94,6 +94,8 @@ class RunAdmission:
                         metadata={"side_effect_state": "not_applied"},
                     ))
         catalog = await self.catalog.get(user_id)
+        from app.v2.server.catalog.model_config import app_models
+        model_config = app_models(catalog)
         requested = (
             resolve_thread_agent_id(existing, agent_id) if pin_existing else agent_id
         )
@@ -102,7 +104,7 @@ class RunAdmission:
         else:
             from app.v2.server.catalog.records import AgentRecord
             package_manifest = package.resolved_manifest()
-            CompositionResolver().resolve(package_manifest)
+            CompositionResolver().resolve(package_manifest, models=model_config)
             root_id = package_manifest.entrypoint.agent
             if root_id is None:
                 raise SageV2Error(RuntimeErrorInfo(
@@ -112,10 +114,10 @@ class RunAdmission:
             if requested and requested != root_id:
                 raise ValueError("Package entrypoint does not match the session Agent")
             definition = package_manifest.agents[root_id]
-            route = package_manifest.models.get(definition.models.get("primary", "primary"))
+            model_id = definition.models.get("primary", "default")
             agent = AgentRecord(id=root_id, name=definition.name,
                 instructions=definition.instructions.inline or "",
-                model_id=route.model if route and route.model != "default" else "",
+                model_id=model_id if model_id != "default" else "",
                 tools=list(definition.tools), skills=list(definition.skills),
                 tool_approval=definition.tool_approval)
 
@@ -123,7 +125,7 @@ class RunAdmission:
         # resolver intersects Agent budgets with the package policy ceiling.
         from app.v2.server.config.manifest import server_v2_run_manifest
         effective = package.resolved_manifest() if package else server_v2_run_manifest(self.settings, agent=agent, registry=getattr(self.catalog, "extensions", None))
-        resolved = CompositionResolver().resolve(effective)
+        resolved = CompositionResolver().resolve(effective, models=model_config)
         if package is None:
             skills = tuple(await self.skills.bound_skills(owner_user_id=user_id, agent_id=agent.id))
         else:
@@ -145,7 +147,7 @@ class RunAdmission:
             agent=agent,
             skills=skills,
             catalog=catalog,
-            metadata={**composition_metadata(
+            metadata={"server_v2.models": model_config.model_dump(mode="json"), **composition_metadata(
                 agent=agent,
                 skills=skills,
                 mcp_servers=tuple(item.name for item in enabled_mcp_servers(catalog)),

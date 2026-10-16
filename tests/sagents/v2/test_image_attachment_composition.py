@@ -1,5 +1,8 @@
 """Exercise image attachment wiring through the public builder and host loops."""
 
+from tests.sagents.v2.model_fixture import TEST_MODELS
+
+
 from pathlib import Path
 import os
 import uuid
@@ -119,7 +122,7 @@ async def test_builder_wires_durable_images_from_tool_to_request_and_session(
     package = BuiltinPackageFactory.create(
         "assistant",
         package_id="test.durable-images",
-        model="test-model",
+
     )
     agent_id = package.entrypoint.agent
     package = package.model_copy(
@@ -150,7 +153,7 @@ async def test_builder_wires_durable_images_from_tool_to_request_and_session(
             plugin="sage.session.mysql", config={"dsn": mysql_dsn, "table_prefix": prefix}
         )
     application = await (
-        SAgentBuilder()
+        SAgentBuilder().with_models(TEST_MODELS)
         .with_defaults(session_root=root)
         .with_model_provider(model)
         .with_execution_binding_provider(Bindings())

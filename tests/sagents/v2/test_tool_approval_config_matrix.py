@@ -1,5 +1,7 @@
 from contextlib import asynccontextmanager
 
+from tests.sagents.v2.model_fixture import TEST_MODELS
+
 import pytest
 
 from sagents.v2 import SAgentBuilder
@@ -88,7 +90,7 @@ async def test_restored_package_rules_control_actual_loop_dispatch(tmp_path, kin
         )
     )
     app = (
-        await SAgentBuilder()
+        await SAgentBuilder().with_models(TEST_MODELS)
         .with_defaults(session_root=tmp_path)
         .with_model_provider(provider)
         .with_tool_provider(catalog, executor)

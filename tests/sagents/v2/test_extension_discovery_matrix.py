@@ -1,4 +1,7 @@
 from __future__ import annotations
+from tests.sagents.v2.model_fixture import TEST_MODELS
+from copy import deepcopy
+
 
 from dataclasses import dataclass
 from pathlib import Path
@@ -22,6 +25,10 @@ from sagents.v2.runtime.extensions import (
 )
 from sagents.v2.runtime.extensions import discovery
 from sagents.v2.testing.plugins import ScriptedModelProvider
+
+
+PLUGIN_MODELS = deepcopy(TEST_MODELS)
+PLUGIN_MODELS["models"]["primary"]["plugin"] = "acme.model.private-gateway"
 
 
 @dataclass(frozen=True)
@@ -70,15 +77,11 @@ def _package_with_declared_model_plugin():
     package = BuiltinPackageFactory.create(
         "assistant",
         package_id="test.discovered-model",
-        model="test-model",
-        base_url="https://model.invalid/v1",
-    )
-    route = package.models["primary"].model_copy(
-        update={"plugin": "acme.model.private-gateway"}
+
+
     )
     return package.model_copy(
         update={
-            "models": {"primary": route},
             "plugins": (
                 PluginDeclaration(
                     id="acme.model.private-gateway",
@@ -109,11 +112,11 @@ async def test_declared_entry_point_is_loaded_and_configured(
     )
     package = _package_with_declared_model_plugin()
     build_input = (
-        CompositionResolver().resolve(package) if use_resolved_manifest else package
+        CompositionResolver(models=PLUGIN_MODELS).resolve(package) if use_resolved_manifest else package
     )
 
     application = await (
-        SAgentBuilder()
+        SAgentBuilder().with_models(PLUGIN_MODELS)
         .with_defaults(session_root=tmp_path / "session-store")
         ._build_package(build_input)
     )
@@ -137,7 +140,7 @@ async def test_manually_registered_declared_plugin_does_not_require_entry_point(
 
     monkeypatch.setattr(discovery.metadata, "entry_points", unexpected_discovery)
     application = await (
-        SAgentBuilder()
+        SAgentBuilder().with_models(PLUGIN_MODELS)
         .with_defaults(session_root=tmp_path / "session-store")
         .register(registration)
         ._build_package(_package_with_declared_model_plugin())
@@ -175,8 +178,8 @@ async def test_resolved_manifest_preserves_runtime_plugin_selection(
     package = BuiltinPackageFactory.create(
         "assistant",
         package_id="test.resolved-runtime-plugin",
-        model="test-model",
-        base_url="https://model.invalid/v1",
+
+
     )
     package = package.model_copy(
         update={
@@ -198,10 +201,10 @@ async def test_resolved_manifest_preserves_runtime_plugin_selection(
             ),
         }
     )
-    resolved = CompositionResolver().resolve(package)
+    resolved = CompositionResolver(models=PLUGIN_MODELS).resolve(package)
 
     application = await (
-        SAgentBuilder()
+        SAgentBuilder().with_models(PLUGIN_MODELS)
         .with_defaults(session_root=tmp_path / "session-store")
         .with_model_provider(ScriptedModelProvider(()))
         ._build_package(resolved)
@@ -329,7 +332,7 @@ async def test_manually_registered_plugin_still_obeys_manifest_version(tmp_path)
 
     with pytest.raises(SageV2Error) as mismatch:
         await (
-            SAgentBuilder()
+            SAgentBuilder().with_models(PLUGIN_MODELS)
             .with_defaults(session_root=tmp_path / "session-store")
             .register(_model_registration(provider))
             ._build_package(package)

@@ -940,8 +940,9 @@ def _register_infrastructure(registry: ExtensionRegistry) -> None:
         registry,
         InMemoryAgentPackageRegistry,
         "package.registry",
-        lambda context, dependencies: InMemoryAgentPackageRegistry(),
+        lambda context, dependencies: InMemoryAgentPackageRegistry(resolver=context.config.get("resolver")),
         scopes={ExtensionScope.PROCESS},
+        config_schema=_optional_object_config_schema("resolver"),
         capabilities={
             "durable_across_process_restart": False,
             "supports_package_signatures": False,

@@ -22,7 +22,7 @@ class HostAgentExecution:
     memory_service: Any = None
     memory_scope: dict = field(default_factory=dict)
 
-    def resolve_descriptor(self, package, runtime):
+    def resolve_descriptor(self, package, runtime, *, models=None):
         """Identify the facade; the host driver validates/loads the frozen graph.
 
         Dependencies belong to that per-Run graph, not to a second set of live
@@ -39,7 +39,7 @@ class HostAgentExecution:
         descriptor = package.model_copy(
             update={"agents": {name: definition.model_copy(update={"subagents": ()})}}
         )
-        _, resolved = _resolve_package(descriptor, runtime=runtime)
+        _, resolved = _resolve_package(descriptor, runtime=runtime, models=models)
         # Include the complete declaration even though the facade owns no graph.
         digest = hashlib.sha256(
             json.dumps(

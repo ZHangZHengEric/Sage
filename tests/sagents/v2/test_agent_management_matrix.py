@@ -1,4 +1,5 @@
 from __future__ import annotations
+from tests.sagents.v2.model_fixture import TEST_MODELS
 
 import asyncio
 from builtins import BaseExceptionGroup
@@ -32,7 +33,7 @@ def context(user="alice", tenant="one"):
 
 def bundle(version="1.0.0"):
     data = BuiltinPackageFactory.create(
-        "assistant", package_id="com.test.expert", model="test"
+        "assistant", package_id="com.test.expert",
     ).model_dump(mode="json")
     data["metadata"]["version"] = version
     key = data["entrypoint"]["agent"]
@@ -134,7 +135,7 @@ def service(root, *, authorize=None):
         provider = model()
         models.append(provider)
         return (
-            SAgentBuilder()
+            SAgentBuilder().with_models(TEST_MODELS)
             .with_defaults(session_root=run_root)
             .with_model_provider(provider)
         )
@@ -260,7 +261,7 @@ def test_management_tools_publish_complete_schema(tmp_path):
         "agent_package_status",
     } <= names
     schema = svc.schema()["bundle_schema"]
-    assert {"agents", "flows", "plugins", "models", "runtime"} <= schema["$defs"][
+    assert {"agents", "flows", "plugins", "runtime"} <= schema["$defs"][
         "SageManifest"
     ]["properties"].keys()
 
@@ -295,7 +296,7 @@ async def test_parent_model_creates_and_invokes_full_agent(tmp_path):
     svc, _ = service(tmp_path / "management")
     plugin = AgentManagementToolPlugin(svc)
     parent = BuiltinPackageFactory.create(
-        "assistant", package_id="parent", model="test"
+        "assistant", package_id="parent",
     ).model_dump(mode="json")
     parent["agents"]["assistant"]["tools"] = [d.name for d in plugin.definitions]
     parent["agents"]["assistant"]["budgets"] = {"max_steps": 8}
@@ -333,7 +334,7 @@ async def test_parent_model_creates_and_invokes_full_agent(tmp_path):
         )
     )
     app = await (
-        SAgentBuilder()
+        SAgentBuilder().with_models(TEST_MODELS)
         .with_defaults(session_root=tmp_path / "parent")
         .with_model_provider(provider)
         .with_tool_policy(
@@ -415,7 +416,7 @@ async def test_builder_executes_declared_flow_and_custom_node(tmp_path, binding)
 
     def build(package, root, ctx):
         return (
-            SAgentBuilder()
+            SAgentBuilder().with_models(TEST_MODELS)
             .with_defaults(session_root=root)
             .with_model_provider(model())
             .with_flow_tool_nodes({"calculate": Node()})
@@ -457,7 +458,7 @@ async def test_builder_executes_declared_flow_and_custom_node(tmp_path, binding)
 
         def build(package, root, ctx):
             return (
-                SAgentBuilder()
+                SAgentBuilder().with_models(TEST_MODELS)
                 .with_defaults(session_root=root)
                 .with_model_provider(model())
                 .register(registration)
@@ -577,7 +578,7 @@ async def test_managed_agent_selects_standard_plugin_and_configuration(tmp_path)
             )
         )
         return (
-            SAgentBuilder()
+            SAgentBuilder().with_models(TEST_MODELS)
             .with_defaults(session_root=root)
             .register(registration)
             .with_model_provider(provider)
@@ -639,7 +640,7 @@ async def test_managed_agent_loads_its_selected_skill(tmp_path):
         )
         requests.append(provider.requests)
         return (
-            SAgentBuilder()
+            SAgentBuilder().with_models(TEST_MODELS)
             .with_defaults(session_root=root)
             .with_model_provider(provider)
             .with_skill_provider(source, source, InMemorySkillWorkspace())
@@ -798,7 +799,7 @@ async def test_created_agent_can_create_another_agent_when_granted(tmp_path):
                 )
             )
         return (
-            SAgentBuilder()
+            SAgentBuilder().with_models(TEST_MODELS)
             .with_defaults(session_root=root)
             .with_model_provider(provider)
             .with_agent_management(svc)
@@ -837,7 +838,7 @@ async def test_bundle_preserves_resources_and_instruction_whitespace(tmp_path):
     ref = await store.save("owner", package)
     restored = await store.get("owner", ref)
     assert restored.files == data["files"]
-    resolved = CompositionResolver().resolve(restored.resolved_manifest())
+    resolved = CompositionResolver(models=TEST_MODELS).resolve(restored.resolved_manifest())
     assert resolved.agents["assistant"].instructions == text
     assert (
         AgentDescriptor(
@@ -1012,7 +1013,7 @@ async def test_concurrent_managed_runs_are_isolated_and_duplicate_admission_is_o
         provider = SlowModel(model(count=64)._steps)
         providers.append(provider)
         return (
-            SAgentBuilder()
+            SAgentBuilder().with_models(TEST_MODELS)
             .with_defaults(session_root=root)
             .with_model_provider(provider)
         )
@@ -1393,7 +1394,7 @@ async def test_readiness_reports_missing_resources_and_strict_save_rejects(tmp_p
         pass
 
     def factory(package, root, ctx):
-        return SAgentBuilder().with_defaults(session_root=root).with_model_provider(model())
+        return SAgentBuilder().with_models(TEST_MODELS).with_defaults(session_root=root).with_model_provider(model())
 
     svc = AgentManagementService(tmp_path, builder_factory=factory, authorize=allow)
     try:
@@ -1438,7 +1439,7 @@ async def test_idle_release_reads_archived_result_without_rebuilding_application
         pass
 
     def factory(package, root, ctx):
-        return SAgentBuilder().with_defaults(session_root=root).with_model_provider(model())
+        return SAgentBuilder().with_models(TEST_MODELS).with_defaults(session_root=root).with_model_provider(model())
 
     svc = AgentManagementService(tmp_path, builder_factory=factory, authorize=allow, max_applications=1)
     try:
@@ -1516,7 +1517,7 @@ async def test_flow_build_only_initializes_reachable_agents(tmp_path, monkeypatc
     from sagents.v2.package.manifest import SageManifest
     for definition in data["manifest"]["agents"].values():
         definition["instructions"] = {"inline": "Run the declared flow."}
-    app = await SAgentBuilder().with_defaults(session_root=tmp_path)._build_package(
+    app = await SAgentBuilder().with_models(TEST_MODELS).with_defaults(session_root=tmp_path)._build_package(
         SageManifest.model_validate(data["manifest"]))
     try:
         assert calls == ["assistant", "worker"]
@@ -1548,7 +1549,7 @@ async def test_managed_applications_share_host_model_budget(tmp_path):
         pass
 
     def factory(package, root, ctx):
-        return SAgentBuilder().with_defaults(session_root=root).with_model_provider(Model())
+        return SAgentBuilder().with_models(TEST_MODELS).with_defaults(session_root=root).with_model_provider(Model())
 
     svc = AgentManagementService(tmp_path, builder_factory=factory, authorize=allow, model_budget=budget)
     try:
@@ -1632,7 +1633,7 @@ async def test_strict_readiness_rechecks_saved_versions_when_resource_disappears
         pass
 
     def factory(package, root, ctx):
-        return (SAgentBuilder().with_defaults(session_root=root).with_model_provider(model())
+        return (SAgentBuilder().with_models(TEST_MODELS).with_defaults(session_root=root).with_model_provider(model())
             .with_tool_provider(InMemoryToolCatalog(tuple(available)), InMemoryToolExecutor({}, {})))
 
     svc = AgentManagementService(tmp_path, builder_factory=factory, authorize=allow, require_readiness=True)
@@ -1793,7 +1794,7 @@ async def test_reclamation_preserves_ephemeral_session_continuation(tmp_path):
         pass
 
     def factory(package, root, ctx):
-        return (SAgentBuilder().with_defaults(session_root=root)
+        return (SAgentBuilder().with_models(TEST_MODELS).with_defaults(session_root=root)
                 .with_session_store(EphemeralSessionStore()).with_model_provider(model()))
 
     svc = AgentManagementService(tmp_path, builder_factory=factory, authorize=allow,
@@ -1969,7 +1970,7 @@ async def test_shared_jobs_survive_one_application_close_and_bound_admission(tmp
     apps = []
     try:
         for index in range(2):
-            apps.append(await SAgentBuilder().with_defaults(session_root=tmp_path / str(index))
+            apps.append(await SAgentBuilder().with_models(TEST_MODELS).with_defaults(session_root=tmp_path / str(index))
                         .with_model_provider(model()).with_job_runtime(jobs)._build_package(bundle().resolved_manifest()))
         assert apps[0].service("execution.job-runtime") is apps[1].service("execution.job-runtime") is jobs
         first = await jobs.submit(JobSpec(kind="test", owner_run_id="run-a", idempotency_key="a"))

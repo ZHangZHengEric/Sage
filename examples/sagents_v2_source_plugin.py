@@ -38,7 +38,7 @@ registration = ExtensionRegistration(
 
 async def demo(root):
     manifest = BuiltinPackageFactory.create(
-        'assistant', package_id='demo.source', model='scripted',
+        'assistant', package_id='demo.source',
     ).model_dump(mode='json')
     manifest['agents']['assistant']['entrypoint'] = {'type': 'flow', 'flow': 'main'}
     manifest['plugins'] = [{'id': 'demo.calculate', 'version': '1.0.0'}]
@@ -63,7 +63,7 @@ async def demo(root):
             raise PermissionError('outside the fixed demo grant')
 
     def build(package, session_root, ctx):
-        return (SAgentBuilder().with_defaults(session_root=session_root)
+        return (SAgentBuilder().with_models({"models": {"primary": {"provider": "openai-responses", "model": "scripted"}}}).with_defaults(session_root=session_root)
                 .with_model_provider(ScriptedModelProvider((step('unused'),))))
 
     service = AgentManagementService(

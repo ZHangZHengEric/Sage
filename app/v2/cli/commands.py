@@ -112,6 +112,14 @@ def resolve_package(
     if package_path:
         # 用户自带的 package 原样尊重（含 scheduler 选择）。
         return load_package(package_path)
+    return build_preset_package(args.preset, scheduler_root=scheduler_root)
+
+
+def resolve_models(args, cfg):
+    from app.v2.cli.package import cli_model_catalog
+    from sagents.v2.model.catalog import model_catalog_input
+    if getattr(args, "models", None):
+        return model_catalog_input(args.models)
     if getattr(cfg, "use_app_model", False):
         from app.v2.cli.config import app_default_model
         from app.v2.cli.app_model import app_model_settings
@@ -120,9 +128,7 @@ def resolve_package(
         if provider is not None:
             if os.environ.get("SAGE_DEFAULT_LLM_MODEL_NAME"):
                 provider = {**provider, "model": cfg.default_llm_model_name}
-            return build_preset_package(
-                args.preset, app_model_settings(provider), scheduler_root=scheduler_root,
-            )
+            return cli_model_catalog(app_model_settings(provider))
     model = (cfg.default_llm_model_name or "").strip()
     base_url = (cfg.default_llm_api_base_url or "").strip()
     api_key = (os.environ.get(DEFAULT_CREDENTIAL_ENV) or "").strip()
@@ -142,13 +148,9 @@ def resolve_package(
     if next_steps:
         raise CLIError(
             "Model configuration is incomplete for `sage v2`.",
-            next_steps=next_steps + ["Or pass --package path/to/sage.yaml."],
+            next_steps=next_steps + ["Or pass --models path/to/models.yaml."],
         )
-    return build_preset_package(
-        args.preset,
-        CliModelSettings(model=model, base_url=base_url),
-        scheduler_root=scheduler_root,
-    )
+    return cli_model_catalog(CliModelSettings(model=model, base_url=base_url))
 
 
 def select_decider(
@@ -403,6 +405,7 @@ async def open_cli_session(
     session_root = resolve_session_root(getattr(args, "session_root", None))
     scheduler_root = session_root / "scheduler"
     package = resolve_package(args, cfg, scheduler_root=scheduler_root)
+    models = resolve_models(args, cfg)
     agent_id = package.entrypoint.agent
     if agent_id is None:
         raise CLIError("the selected package has no agent entrypoint")
@@ -430,6 +433,7 @@ async def open_cli_session(
     try:
         application = await build_agent_fn(
             package=package,
+            models=models,
             session_root=session_root,
             bindings=bindings,
             tool_policy=tool_policy,
@@ -455,6 +459,7 @@ async def open_cli_session(
         package = fallback
         application = await build_agent_fn(
             package=package,
+            models=models,
             session_root=session_root,
             bindings=bindings,
             tool_policy=tool_policy,

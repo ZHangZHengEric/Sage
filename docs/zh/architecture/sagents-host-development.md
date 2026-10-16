@@ -13,7 +13,7 @@ CLI、HTTP 服务和桌面应用可以有不同产品行为，但不要分别实
 ## 现在的开发入口
 
 ```text
-SAgentBuilder.build(runtime=...) → App
+SAgentBuilder.build(runtime=..., models=...) → App
     ↓ app.load_agent(Package)       一个 Package 一个 Agent，加载结果可复用
     ↓ app.entrypoint().run_stream(command, context, agent=agent)
     ↓ stream.events / stream.wait()
@@ -25,7 +25,8 @@ await app.close()                   统一关闭所有版本及资源
 
 | 文件 | 职责 |
 | --- | --- |
-| [sage.yaml](../../../examples/sagents_v2_host/sage.yaml) | 可版本管理的 Agent 配置；只引用凭据，不保存密钥 |
+| [sage.yaml](../../../examples/sagents_v2_host/sage.yaml) | 可版本管理的 Agent 配置；只引用 App 模型 ID |
+| [models.yaml](../../../examples/sagents_v2_host/models.yaml) | App 模型路由、请求参数、能力和凭据引用 |
 | [plugins.py](../../../examples/sagents_v2_host/plugins.py) | 独立的自定义插件、参数模型和注册声明 |
 | [bootstrap.py](../../../examples/sagents_v2_host/bootstrap.py) | `HostSettings`、配置加载、Builder 和宿主端口注入 |
 | [__main__.py](../../../examples/sagents_v2_host/__main__.py) | CLI 参数、用户身份、StartRun、事件消费与关闭 |
@@ -48,13 +49,25 @@ finally:
 长期运行的服务在启动时创建 Application，在关闭时释放；请求处理函数复用它，不能每个 HTTP 请求都创建一套进程服务。
 身份由宿主认证后生成 `RequestContext`，不要直接信任客户端传来的 principal/tenant。
 
+## App、模型和 Agent 的边界
+
+| 配置 | 所有者 | 内容 |
+| --- | --- | --- |
+| runtime.yaml | App | 存储、执行、观测等组件选择与参数 |
+| models.yaml | App | 模型 ID、协议、连接、凭据引用、请求参数、能力与限制 |
+| sage.yaml | 单个 Agent Package | 指令、模型 ID 引用、工具、Skill、预算和子 Agent 声明 |
+
+Desktop 将模型设置转换成 App 模型目录；Server 将当前用户授权的模型目录注入 App；CLI 支持 `--models ./models.yaml`，TUI 复用 CLI 入口。各宿主保留自己的认证、密钥和持久化管理，不要求第三方实现这些产品层逻辑。
+
+模型完整字段与更新 API 见 [App 模型配置](sagents-runtime-reference.md#app-模型配置)。运行中的配置更新使用 App 的 `update_models` / `update_model`，Builder 不承担运行期状态管理。自定义模型插件依旧实现 `model.provider` 协议，提前注册，再由模型配置的 `plugin` 指定；插件独立实现，不需要继承 Desktop 或 Server 的代码。
+
 ## 加载输入、复用和更新
 
 ```python
 from pathlib import Path
 from sagents.v2 import SAgentBuilder
 
-app = await SAgentBuilder().with_defaults(session_root="./runtime").build()
+app = await SAgentBuilder().with_defaults(session_root="./runtime").build(models="./models.yaml")
 try:
     agent = await app.load_agent("./agents/assistant")  # 目录中的 sage.yaml
     # 也支持 Path("./assistant.yaml")、SageManifest 或配置字典。
@@ -65,13 +78,13 @@ finally:
     await app.close()
 ```
 
-路径字符串不作为 YAML 猜测。`package` 与 `config_text`、`runtime` 与 `runtime_config_text` 分别互斥。
+路径字符串不作为 YAML 猜测。`package` 与 `config_text`、`runtime` 与 `runtime_config_text`、`models` 与 `models_config_text` 分别互斥。
 内存配置含 instruction 文件引用时必须给 `base_path`，且文件不能越出该目录。
 一个新 Package 必须恰有一个 Agent，不再通过名称二次选择。
 普通 SDK 的 `agent.id` 来自 Package ID，两个 Package 的内部 Agent 都叫 main 也不会冲突。
 `StartRun.agent_id` 与 `resolved_spec_hash` 使用加载结果的 `agent.id` 与 `agent.composition_hash`；入口校验两者。
 
-重复加载同一份有效配置返回同一个 handle。不同配置必须显式 update；更新保留逻辑 ID，返回新 handle。
+重复加载同一份 Package 和模型配置返回同一个 handle。App 模型目录更新后可重新 load 原 Package 获取新版本；Package 自身改变必须显式 update；更新保留逻辑 ID，返回新 handle。
 旧 handle 不会被修改，已运行任务也不会切换版本。校验失败不替换当前版本；并发更新使用当前 handle，过期 handle 会被拒绝。
 App 统一持有调度器与所有已加载版本，关闭时先停止调度，再释放各版本及共享存储。
 目前版本保留到 App 关闭；高频更新的长期服务需关注内存占用，不会自动驱逐仍可能被恢复使用的版本。
@@ -474,3 +487,25 @@ process/tenant/agent 范围可能同时服务多个 Run。将每个 Run 的暂�
 | 独立性 | 不依赖其他插件私有实现，不跨层导入宿主 UI | [边界测试](../../../tests/sagents/v2/test_source_boundary_matrix.py) |
 
 纯 estimator 至少验证空消息、Unicode、长输入和参数非法；工具/存储/调度器则需要真正的失败注入与恢复测试。最后用目标宿主的真实入口验收，不能只验证 factory 能返回对象。
+
+## 旧数据升级与部署
+
+旧 `sage.yaml` 顶层 `models` / `credentials` 不再被接受。新项目直接使用独立 App 模型配置；已有项目必须先迁移存储中的 Package，不能只修改磁盘示例。不要删除 Session 或修改 `resolved_spec_hash` 来规避错误。
+
+仓库提供显式离线迁移脚本：
+
+```bash
+# Server：先审计，再停止所有写入进程并执行迁移。
+python -m scripts.v2.migrate_app_models
+python -m scripts.v2.migrate_app_models --writers-stopped --backup /secure/app-models-before.json
+
+# Desktop：root 是实际 runtime 目录，不是工作区。
+python -m scripts.v2.migrate_desktop_app_models --root /path/to/sage/runtime
+python -m scripts.v2.migrate_desktop_app_models --root /path/to/sage/runtime --apply --writers-stopped
+```
+
+Server 脚本读取部署环境的数据库配置，在事务内写入；先用独占新文件保存原始记录，再更新 Package 内容、Bundle 引用及相关索引。当前迁移只接受旧 Server 标准模型引用；遇到额外连接或请求参数会中止，需先制定其 App 模型映射，不能静默丢弃。旧 Run 的身份保持不变；没有模型快照的历史 Run 保持原来按授权模型目录解析的恢复规则，不能凭迁移重建过去不存在的模型快照。
+
+Desktop 脚本将原 `llm-provider:` 引用改成 App 模型 ID，迁移 RSI、目录和 Session 中的 Package。实际模型设置与运行环境中的 provider 快照保留。所有受影响的 JSON 文件和完整 RSI 数据库先备份到 runtime/backups；它不是跨文件事务，执行中断时应停止客户端、从该备份恢复后再重试。两个脚本都支持重复审计，迁移完成后待改动数量应为零。
+
+先在备份副本验收，部署时确保所有旧写入进程停止。回滚需要同时恢复旧程序和迁移前数据；新旧 schema 不可混用。最后验证真实模型两轮对话、历史读取和挂起恢复，不能只依赖服务健康检查。

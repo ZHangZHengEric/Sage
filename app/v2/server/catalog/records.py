@@ -95,31 +95,6 @@ class ModelRecord(ModelConfiguration):
             capability_profile=self.current_profile(),
         )
 
-    def for_route(self, route):
-        request = self.request.model_dump()
-        request.update(
-            {
-                key: value
-                for key, value in route.request.model_dump(exclude={"extra"}).items()
-                if value is not None
-            }
-        )
-        request["extra"] = {**self.request.extra, **route.request.extra}
-        limits = self.limits.model_dump()
-        limits.update(
-            {
-                key: value
-                for key, value in route.limits.model_dump().items()
-                if value is not None
-            }
-        )
-        return self.model_copy(
-            update={
-                "request": ModelRequestDefaults.model_validate(request),
-                "limits": ModelLimits.model_validate(limits),
-            }
-        )
-
     def public_dict(self) -> dict[str, object]:
         data = self.model_dump(mode="json", exclude={"api_key"})
         if self.current_profile() is None:
@@ -156,8 +131,8 @@ class AgentRecord(BaseModel):
     @property
     def fast_model_id(self):
         definition = self.package.manifest.agents[self.id]
-        route = self.package.manifest.models.get(definition.models.get("fast", ""))
-        return route.model if route and route.model != "default" else ""
+        model_id = definition.models.get("fast", "")
+        return model_id if model_id != "default" else ""
 
     @property
     def sandbox(self):

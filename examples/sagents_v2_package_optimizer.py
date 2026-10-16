@@ -33,7 +33,7 @@ from sagents.v2.testing.plugins.scripted_model import (
 
 def package(name, instructions):
     data = BuiltinPackageFactory.create(
-        "assistant", package_id=f"demo.{name}", model="scripted"
+        "assistant", package_id=f"demo.{name}",
     ).model_dump(mode="json")
     data["agents"]["assistant"]["instructions"] = {"inline": instructions}
     data["agents"]["assistant"]["tools"] = []
@@ -109,7 +109,7 @@ async def demo(root: Path):
             )
         )
         return (
-            SAgentBuilder()
+            SAgentBuilder().with_models({"models": {"primary": {"provider": "openai-responses", "model": "scripted"}}})
             .with_defaults(session_root=workspace / "sessions")
             .with_model_provider(provider)
         )
@@ -169,7 +169,7 @@ async def demo(root: Path):
                         )
                     )
                     return (
-                        SAgentBuilder()
+                        SAgentBuilder().with_models({"models": {"primary": {"provider": "openai-responses", "model": "scripted"}}})
                         .with_defaults(session_root=workspace / "sessions")
                         .with_model_provider(provider)
                     )

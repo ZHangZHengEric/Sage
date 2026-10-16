@@ -12,7 +12,6 @@ from sagents.v2.model.capability_contracts import (
     ModelCapabilityProfile,
     ModelCapabilityProbeOutcome,
 )
-from sagents.v2.package.manifest.models import ModelRoute
 from tests.app.v2.server.conftest import register_and_login
 
 
@@ -76,7 +75,7 @@ def test_catalog_model_options_preserved_on_default_change_and_invalidate_profil
     assert "secret" not in str(record.public_dict())
 
 
-def test_options_and_profile_reach_provider_and_package_overrides(monkeypatch):
+def test_options_and_profile_reach_provider_and_app_catalog(monkeypatch):
     monkeypatch.setattr(
         "sagents.v2.model.plugins.openai_compatible.AsyncOpenAI",
         lambda **kwargs: SimpleNamespace(**kwargs),
@@ -98,20 +97,14 @@ def test_options_and_profile_reach_provider_and_package_overrides(monkeypatch):
     assert provider.config.default_temperature == 0.4
     assert provider.config.default_max_output_tokens == 2048
     assert provider.config.max_output_tokens_field == "max_completion_tokens"
-    override = record.for_route(
-        ModelRoute(
-            provider="server",
-            model=record.id,
-            request={"temperature": 0, "top_p": 0.8, "extra": {"seed": 9}},
-        )
-    )
-    assert override.request.temperature == 0
-    assert override.request.extra == {"seed": 9}
-    assert record.request.extra == {"seed": 7}
-    assert override.api_key == record.api_key
-    assert ModelClientPool._key("alice", override) != ModelClientPool._key(
-        "alice", record
-    )
+    from app.v2.server.catalog.model_config import app_models
+    from app.v2.server.catalog.records import UserCatalog
+    catalog = app_models(UserCatalog(models=[record], agents=[], default_agent_id=""))
+    route = catalog.models[record.id]
+    assert route.request.temperature == 0.4
+    assert route.request.extra == {"seed": 7}
+    assert route.capability_profile == record.capability_profile
+    assert "secret" not in catalog.model_dump_json()
 
 
 def test_web_model_round_trip_and_agent_budgets(client):

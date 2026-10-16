@@ -166,8 +166,6 @@ async def test_model_factory_resolves_each_agent_binding(tmp_path, monkeypatch):
     from tests.app.v2.server.conftest import scripted_hello
 
     manifest = SageManifest(kind="agent-package", metadata=ManifestMetadata(id="models", name="Models", version="1.0.0"),
-        models={"custom-main": ModelRoute(provider="server", model="main"),
-                "custom-child": ModelRoute(provider="server", model="child")},
         agents={"main": AgentDefinition(name="Main", instructions={"inline": "Main"}, mode="team", models={"primary": "custom-main"}, subagents=("child",)),
                 "child": AgentDefinition(name="Child", instructions={"inline": "Child"}, models={"primary": "custom-child"})},
         entrypoint=ApplicationEntrypoint(agent="main"))
@@ -183,7 +181,7 @@ async def test_model_factory_resolves_each_agent_binding(tmp_path, monkeypatch):
     def factory(resolved, agent_id):
         seen[agent_id] = resolved.agents[agent_id].model_bindings
         return scripted_hello()
-    app = await SAgentBuilder().with_defaults(session_root=tmp_path).with_model_provider_factory(factory)._build_package(manifest)
+    app = await SAgentBuilder().with_models({"models": {"custom-main": ModelRoute(provider="server", model="main"), "custom-child": ModelRoute(provider="server", model="child")}}).with_defaults(session_root=tmp_path).with_model_provider_factory(factory)._build_package(manifest)
     try:
         assert seen == {"main": {"primary": "custom-main"}, "child": {"primary": "custom-child"}}
         for capability in ("context.summarizer", "agent.continuation-policy", "memory.recall-query"):

@@ -39,7 +39,7 @@ class ServerPackagePolicy:
             raise PermissionError(f"{', '.join(forbidden)} 由 Server 管理，不允许在 Agent Package 中修改")
         if manifest.runtime.required_guarantees:
             raise PermissionError("runtime.required_guarantees 由 Server 管理，不允许修改")
-        if manifest.credentials or manifest.environments:
+        if manifest.environments:
             raise PermissionError(
                 "credentials and environment overrides are host owned"
             )
@@ -60,17 +60,9 @@ class ServerPackagePolicy:
             raise PermissionError("max_steps exceeds host ceiling 10000")
         catalog = await self.catalog.get(user_id)
         models = {item.id for item in catalog.models} | {"default"}
-        for route in manifest.models.values():
-            if (
-                route.provider != "server"
-                or route.model not in models
-                or route.base_url
-                or route.credential
-                or route.plugin
-            ):
-                raise PermissionError(
-                    "model routes must reference caller catalog IDs using provider=server"
-                )
+        for definition in manifest.agents.values():
+            if not set(definition.models.values()) <= models:
+                raise PermissionError("Agent model IDs must belong to the caller App catalog")
         known = {item["name"] for item in official_tool_catalog()}
         known.update(
             item.name for item in AgentManagementToolPlugin(management).definitions

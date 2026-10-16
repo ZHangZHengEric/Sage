@@ -217,16 +217,11 @@ async def main(args):
         data = BuiltinPackageFactory.create(
             "assistant",
             package_id=f"live.optimizer.{role}",
-            model=model,
-            base_url=config["base_url"],
-            max_output_tokens=4096,
-            context_window=config.get("max_model_len") or 64000,
+
+
+
+
         ).model_dump(mode="json")
-        data["models"]["primary"]["provider"] = (
-            "openai-responses"
-            if config["protocol"] == "openai-responses"
-            else "openai-compatible"
-        )
         if instructions:
             data["agents"]["assistant"]["instructions"] = {"inline": instructions}
             data["agents"]["assistant"]["tools"] = []
@@ -299,7 +294,12 @@ async def main(args):
                 credential=material,
             )
         builder = (
-            SAgentBuilder()
+            SAgentBuilder().with_models({"models": {"primary": {
+                "provider": config["protocol"], "model": model,
+                "base_url": config["base_url"],
+                "request": {"max_output_tokens": 4096},
+                "limits": {"context_window": config.get("max_model_len") or 64000},
+            }}})
             .with_defaults(session_root=root / "sessions")
             .with_model_provider(provider)
             .with_owned_resources(provider)

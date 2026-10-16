@@ -17,7 +17,7 @@ async def test_database_package_cas_handles_archives_and_reopen(tmp_path):
     store = DatabasePackageStore(db)
     bundle = AgentPackageBundle(
         manifest=BuiltinPackageFactory.create(
-            "assistant", package_id="test.package", model="default"
+            "assistant", package_id="test.package",
         )
     )
     try:

@@ -1007,7 +1007,7 @@ async def test_model_manifest_omits_tools_when_probe_marked_them_unsupported(
 
     manifest = service._manifest(agent, provider, ("todo_write",), ())
 
-    route = manifest.models["primary"]
+    route = service._model_catalog(agent, provider).models[provider.id]
     assert route.capabilities.tool_calling is False
     assert route.capabilities.parallel_tool_calls is False
     assert manifest.agents[agent.agent_id].tools == ()
@@ -1054,11 +1054,10 @@ async def test_verified_model_compatibility_persists_and_drives_runtime_routes(
     assert service._auxiliary_json_compatible(stored) is True
     agent = await service._agent("sage", "user_1")
 
-    manifest = service._manifest(agent, stored, (), ())
-    assert manifest.models["primary"].request.extra == {
+    assert service._model_catalog(agent, stored).models[stored.id].request.extra == {
         "max_output_tokens_field": "max_tokens"
     }
-    assert manifest.models["primary"].request.reasoning_effort is None
+    assert service._model_catalog(agent, stored).models[stored.id].request.reasoning_effort is None
     judge_provider = await service._model_provider(stored, agent, enable_thinking=False)
     assert judge_provider.config.max_output_tokens_field == "max_tokens"
     assert judge_provider.config.reasoning_parameter_fallback is False
@@ -1528,7 +1527,7 @@ async def test_model_capability_probe_calibrates_luna_and_runtime_omits_rejected
             }
         }
     )
-    route = service._manifest(agent, verified, (), ()).models["primary"]
+    route = service._model_catalog(agent, verified).models[verified.id]
     assert route.request.max_output_tokens == 8192
     assert route.request.reasoning_effort is None
     assert route.request.extra == {"max_output_tokens_field": "max_completion_tokens"}
@@ -1643,7 +1642,7 @@ async def test_model_capability_probe_requires_reasoning_to_work_with_tools(
             }
         }
     )
-    route = service._manifest(agent, verified, ("turn_status",), ()).models["primary"]
+    route = service._model_catalog(agent, verified).models[verified.id]
     assert route.request.reasoning_effort is None
     await service.close()
 
@@ -1737,7 +1736,7 @@ async def test_model_capability_probe_persists_nested_reasoning_effort_dialect(
             }
         }
     )
-    route = service._manifest(agent, verified, ("turn_status",), ()).models["primary"]
+    route = service._model_catalog(agent, verified).models[verified.id]
     assert route.request.reasoning_effort is None
     assert route.request.extra["chat_template_kwargs"] == {
         "thinking": True,
@@ -1812,7 +1811,7 @@ async def test_model_capability_probe_persists_effective_reasoning_disable_contr
 
     verified = candidate.model_copy(update={"compatibility_profile": profile})
     agent = await service._agent("sage", "user_1")
-    route = service._manifest(agent, verified, (), ()).models["primary"]
+    route = service._model_catalog(agent, verified).models[verified.id]
     assert route.request.reasoning_effort is None
     assert route.request.extra["enable_thinking"] is False
     await service.close()
@@ -3200,7 +3199,7 @@ async def test_loop_composition_uses_native_model_skill_tool_and_sandbox_plugins
     )
 
     names = {value.name for value in await loop.tool_catalog.list_tools(run_id="run_1")}
-    assert resolved.model_routes["primary"]["provider"] == "openai-responses"
+    assert resolved.model_routes[provider.id]["provider"] == "openai-responses"
     assert sandbox.ref.provider_id == "sage.sandbox.local-workspace"
     assert sandbox.provider._row(sandbox.ref).spec.network.mode.value == network_mode
     assert isinstance(
@@ -4513,7 +4512,7 @@ async def test_desktop_command_freezes_language_identity_time_and_workspace_cont
     )
     provider = (await service.catalog.list_model_providers("user_1"))[0]
     resolved = service._manifest(agent, provider, ("todo_write",), ())
-    resolved = CompositionResolver().resolve(resolved)
+    resolved = CompositionResolver(models=service._model_catalog(agent, provider)).resolve(resolved)
     workspace = await service.workspace_root(None, "sage")
 
     command = service._command(
@@ -4580,7 +4579,7 @@ async def test_desktop_command_inlines_workspace_images_for_multimodal_models(
     image_path.parent.mkdir(parents=True, exist_ok=True)
     image_bytes = b"\x89PNG\r\n\x1a\n"
     image_path.write_bytes(image_bytes)
-    resolved = CompositionResolver().resolve(
+    resolved = CompositionResolver(models=service._model_catalog(agent, provider)).resolve(
         service._manifest(agent, provider, ("file_read",), ())
     )
 
@@ -4629,7 +4628,7 @@ async def test_desktop_command_preserves_interleaved_structured_references(
     agent = await service._agent("sage", "user_1")
     provider = (await service.catalog.list_model_providers("user_1"))[0]
     workspace = await service.workspace_root(None, "sage")
-    resolved = CompositionResolver().resolve(
+    resolved = CompositionResolver(models=service._model_catalog(agent, provider)).resolve(
         service._manifest(agent, provider, ("file_read",), ())
     )
 
@@ -4680,7 +4679,7 @@ async def test_desktop_command_compresses_large_images_without_mutating_upload(
     source = Image.effect_noise((2_048, 1_536), 100).convert("RGB")
     source.save(image_path, format="PNG")
     original = image_path.read_bytes()
-    resolved = CompositionResolver().resolve(
+    resolved = CompositionResolver(models=service._model_catalog(agent, provider)).resolve(
         service._manifest(agent, provider, ("file_read",), ())
     )
 
@@ -4724,7 +4723,7 @@ async def test_desktop_command_keeps_images_as_references_for_text_only_models(
     image_path = workspace / "uploads" / "image.png"
     image_path.parent.mkdir(parents=True, exist_ok=True)
     image_path.write_bytes(b"\x89PNG\r\n\x1a\n")
-    resolved = CompositionResolver().resolve(
+    resolved = CompositionResolver(models=service._model_catalog(agent, provider)).resolve(
         service._manifest(agent, provider, ("file_read",), ())
     )
 
@@ -4757,7 +4756,7 @@ async def test_desktop_command_keeps_non_image_files_as_markdown_references(
     agent = await service._agent("sage", "user_1")
     provider = (await service.catalog.list_model_providers("user_1"))[0]
     workspace = await service.workspace_root(None, "sage")
-    resolved = CompositionResolver().resolve(
+    resolved = CompositionResolver(models=service._model_catalog(agent, provider)).resolve(
         service._manifest(agent, provider, ("file_read",), ())
     )
 

@@ -4,14 +4,7 @@ from __future__ import annotations
 
 from sagents.v2.agent.presets.catalog import BUILTIN_AGENT_PRESETS
 from sagents.v2.package.manifest.agents import ApplicationEntrypoint
-from sagents.v2.package.manifest.credentials import CredentialDeclaration
 from sagents.v2.package.manifest.flows import FlowDefinition, FlowEdge, FlowNode
-from sagents.v2.package.manifest.models import (
-    ModelCapabilityDeclaration,
-    ModelLimits,
-    ModelRequestDefaults,
-    ModelRoute,
-)
 from sagents.v2.package.manifest.root import (
     ManifestMetadata,
     SageManifest,
@@ -28,7 +21,8 @@ class BuiltinPackageFactory:
         return {name: package.model_copy(update={
             "metadata": package.metadata.model_copy(update={
                 "id": f"{package.metadata.id}.{name}", "name": BUILTIN_AGENT_PRESETS[name].name}),
-            "agents": {name: BUILTIN_AGENT_PRESETS[name].agent_definition()},
+            "agents": {name: BUILTIN_AGENT_PRESETS[name].agent_definition().model_copy(update={
+                "models": dict(next(iter(package.agents.values())).models)})},
             "entrypoint": ApplicationEntrypoint(agent=name),
             "flows": {},
         }) for name in BUILTIN_AGENT_PRESETS[preset_id].subagents}
@@ -38,14 +32,12 @@ class BuiltinPackageFactory:
         preset_id: str,
         *,
         package_id: str,
-        model: str,
-        base_url: str | None = None,
-        credential_env: str = "SAGE_MODEL_API_KEY",
-        context_window: int | None = None,
-        max_output_tokens: int | None = None,
+        model_id: str = "primary",
     ) -> SageManifest:
         preset = BUILTIN_AGENT_PRESETS[preset_id]
-        included = {preset_id: preset.agent_definition()}
+        included = {preset_id: preset.agent_definition().model_copy(update={
+            "models": {"primary": model_id}
+        })}
         flows = {}
         if preset.entrypoint.type == "flow":
             flows["main"] = FlowDefinition(
@@ -65,27 +57,6 @@ class BuiltinPackageFactory:
                 name=preset.name,
                 description=preset.purpose,
             ),
-            credentials={
-                "model_api_key": CredentialDeclaration(source="env", key=credential_env)
-            },
-            models={
-                "primary": ModelRoute(
-                    provider="openai-compatible",
-                    base_url=base_url,
-                    credential="model_api_key",
-                    model=model,
-                    request=ModelRequestDefaults(max_output_tokens=max_output_tokens),
-                    limits=ModelLimits(
-                        context_window=context_window,
-                        max_output_tokens=max_output_tokens,
-                    ),
-                    capabilities=ModelCapabilityDeclaration(
-                        tool_calling=True,
-                        reasoning=True,
-                        parallel_tool_calls=True,
-                    ),
-                )
-            },
             agents=included,
             flows=flows,
             entrypoint=ApplicationEntrypoint(agent=preset_id),

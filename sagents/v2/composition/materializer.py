@@ -66,6 +66,7 @@ class AgentMaterializer:
         summary_store,
         derived_state,
         process_model=None,
+        models=None,
         default_tenant_id: str | None = None,
         deployment_profile: str = "controlled_host",
     ) -> None:
@@ -75,6 +76,7 @@ class AgentMaterializer:
         self.process_plan = process_plan
         self.summary_store = summary_store
         self.derived_state = derived_state
+        self.models = models
         self.process_model = process_model
         self.default_tenant_id = default_tenant_id
         self.deployment_profile = deployment_profile
@@ -123,7 +125,7 @@ class AgentMaterializer:
         if self._cache_guard is None:
             self._cache_guard = asyncio.Lock()
         tenant_id = tenant_id or self.default_tenant_id
-        manifest, resolved = resolve_package(package, runtime=runtime)
+        manifest, resolved = resolve_package(package, runtime=runtime, models=self.models)
         declarations = manifest.plugins if manifest is not None else resolved.plugins
         runtime = manifest.runtime if manifest is not None else resolved.runtime
         if runtime.deployment_profile != self.deployment_profile:

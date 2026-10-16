@@ -55,9 +55,9 @@ def available_presets() -> tuple[str, ...]:
 
 def build_preset_package(
     preset: str,
-    model: CliModelSettings,
     *,
     package_id: str | None = None,
+    model_id: str = "primary",
     scheduler_root: str | Path | None = None,
 ) -> SageManifest:
     """基于内置 preset 生成一个可直接 build 的 package。
@@ -73,14 +73,8 @@ def build_preset_package(
     manifest = BuiltinPackageFactory.create(
         preset,
         package_id=package_id or f"sage.cli.{preset}",
-        model=model.model,
-        base_url=model.base_url,
-        credential_env=model.credential_env,
-        context_window=model.context_window,
-        max_output_tokens=model.max_output_tokens,
+        model_id=model_id,
     )
-    if model.route is not None:
-        manifest = manifest.model_copy(update={"models": {"primary": model.route}})
     capabilities = {
         **manifest.runtime.capabilities,
         "tool.catalog": CapabilitySelection(
@@ -166,3 +160,19 @@ def builtin_dependencies(package: SageManifest) -> dict[str, SageManifest]:
             or preset_id not in BUILTIN_AGENT_PRESETS):
         return {}
     return BuiltinPackageFactory.dependencies(preset_id, package)
+
+
+def cli_model_catalog(settings: CliModelSettings):
+    from sagents.v2.model.catalog import ModelCatalogConfig
+    from sagents.v2.package.manifest.credentials import CredentialDeclaration
+    from sagents.v2.package.manifest.models import ModelLimits, ModelRequestDefaults
+    route = settings.route or ModelRoute(
+        provider="openai-chat-completions", model=settings.model,
+        base_url=settings.base_url, credential="model_api_key",
+        request=ModelRequestDefaults(max_output_tokens=settings.max_output_tokens),
+        limits=ModelLimits(context_window=settings.context_window,
+                           max_output_tokens=settings.max_output_tokens),
+    )
+    return ModelCatalogConfig(models={"primary": route}, credentials={
+        "model_api_key": CredentialDeclaration(source="env", key=settings.credential_env)
+    })

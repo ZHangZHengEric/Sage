@@ -33,9 +33,6 @@ MANIFEST = """
 schema_version: sage/v2
 kind: application
 metadata: {id: example.multi-project, version: 1.0.0, name: Multi-project}
-models:
-  route_a: {provider: openai-compatible, model: model-a}
-  route_b: {provider: openai-compatible, model: model-b}
 agents:
   main:
     name: Shared agent
@@ -49,6 +46,13 @@ runtime:
       config: {max_concurrent_runs: 4, max_concurrent_runs_per_tenant: 4}
 entrypoint: {agent: main}
 """
+
+MODELS_YAML = """
+models:
+  route_a: {provider: openai-compatible, model: model-a}
+  route_b: {provider: openai-compatible, model: model-b}
+"""
+
 
 
 class ProjectTools:
@@ -206,9 +210,9 @@ async def run_example(root: Path, *, cancel_first: bool = False):
     model = ConcurrentModel(store)
     tools = ProjectTools(store)
     manifest = SageManifestLoader().loads(MANIFEST)
-    resolved = CompositionResolver().resolve(manifest)
+    resolved = CompositionResolver().resolve(manifest, models=__import__("yaml").safe_load(MODELS_YAML))
     app = await (
-        SAgentBuilder()
+        SAgentBuilder().with_models(models_config_text=MODELS_YAML)
         .with_defaults(session_root=root / "runtime")
         .with_session_store(store)
         .with_model_provider(model)

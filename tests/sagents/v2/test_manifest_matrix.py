@@ -18,13 +18,9 @@ from sagents.v2.package.manifest.loader import SageManifestLoader
 from sagents.v2.package.manifest.resolver import CompositionResolver
 
 
-VALID = """
-schema_version: sage/v2
-kind: application
-metadata:
-  id: com.example.coder
-  version: 1.0.0
-  name: Coder
+from sagents.v2.model.catalog import model_catalog_input
+
+MODELS = """
 credentials:
   primary-key:
     source: env
@@ -39,6 +35,15 @@ models:
       max_output_tokens: 2048
     limits:
       context_window: 128000
+"""
+
+VALID = """
+schema_version: sage/v2
+kind: application
+metadata:
+  id: com.example.coder
+  version: 1.0.0
+  name: Coder
 runtime:
   preset: standard
   capabilities:
@@ -95,7 +100,7 @@ CONTEXT = RequestContext(
 
 def test_valid_single_file_resolves_to_secret_free_immutable_specs():
     manifest = SageManifestLoader().loads(VALID)
-    resolved = CompositionResolver().resolve(manifest)
+    resolved = CompositionResolver(models=model_catalog_input(config_text=MODELS)).resolve(manifest)
     assert resolved.package_id == "com.example.coder"
     assert resolved.entrypoint_agent == "main"
     assert resolved.agents["main"].instructions == "Be concise."
@@ -112,14 +117,13 @@ def test_valid_single_file_resolves_to_secret_free_immutable_specs():
 
 @pytest.mark.parametrize("secret_field", ["api_key", "api_keys", "token", "password"])
 def test_plaintext_secret_fields_are_rejected_by_strict_schema(secret_field):
-    content = VALID.replace(
+    content = MODELS.replace(
         "    model: test-model",
         f"    model: test-model\n    {secret_field}: do-not-allow",
     )
-    with pytest.raises(SageV2Error) as invalid:
-        SageManifestLoader().loads(content)
-    assert invalid.value.info.code == "manifest.schema_invalid"
-    assert secret_field in invalid.value.info.message
+    with pytest.raises(ValueError) as invalid:
+        model_catalog_input(config_text=content)
+    assert secret_field in str(invalid.value)
 
 
 @pytest.mark.parametrize(
@@ -132,16 +136,14 @@ def test_plaintext_secret_fields_are_rejected_by_strict_schema(secret_field):
     ],
 )
 def test_model_base_url_cannot_smuggle_credentials(base_url):
-    content = VALID.replace("https://models.example.com/v1", base_url)
-    with pytest.raises(SageV2Error) as invalid:
-        SageManifestLoader().loads(content)
-    assert invalid.value.info.code == "manifest.schema_invalid"
+    content = MODELS.replace("https://models.example.com/v1", base_url)
+    with pytest.raises(ValueError):
+        model_catalog_input(config_text=content)
 
 
 @pytest.mark.parametrize(
     ("replacement", "error_code"),
     [
-        ("credential: missing-key", "manifest.credential_not_found"),
         ("primary: missing-model", "manifest.model_not_found"),
         ("subagents: [missing-agent]", "manifest.subagent_not_found"),
         ("agent: missing-agent", "manifest.agent_not_found"),
@@ -160,9 +162,13 @@ def test_reference_validation_matrix(replacement, error_code):
     else:
         content = VALID.replace("agent: main", replacement)
     manifest = SageManifestLoader().loads(content)
-    with pytest.raises(SageV2Error) as invalid:
-        CompositionResolver().resolve(manifest)
-    assert invalid.value.info.code == error_code
+    if replacement.startswith("primary"):
+        with pytest.raises(ValueError, match="unknown App model IDs"):
+            CompositionResolver(models=model_catalog_input(config_text=MODELS)).resolve(manifest)
+    else:
+        with pytest.raises(SageV2Error) as invalid:
+            CompositionResolver(models=model_catalog_input(config_text=MODELS)).resolve(manifest)
+        assert invalid.value.info.code == error_code
 
 
 def test_environment_overlay_only_changes_allowed_domains():
@@ -226,8 +232,8 @@ def test_instruction_path_escape_and_wrong_entry_filename_are_rejected(tmp_path)
 
 
 def test_run_override_can_narrow_but_not_expand_policy_ceiling():
-    resolved = CompositionResolver().resolve(SageManifestLoader().loads(VALID))
-    resolver = CompositionResolver()
+    resolved = CompositionResolver(models=model_catalog_input(config_text=MODELS)).resolve(SageManifestLoader().loads(VALID))
+    resolver = CompositionResolver(models=model_catalog_input(config_text=MODELS))
     narrowed = resolver.resolve_run_config(
         resolved,
         "main",
@@ -274,9 +280,8 @@ def test_run_override_can_narrow_but_not_expand_policy_ceiling():
 
 @pytest.mark.asyncio
 async def test_credential_providers_resolve_only_at_boundary_and_mask_repr():
-    manifest = SageManifestLoader().loads(VALID)
     provider = EnvironmentCredentialProvider(
-        manifest.credentials, {"TEST_MODEL_KEY": "super-secret-value"}
+        model_catalog_input(config_text=MODELS).credentials, {"TEST_MODEL_KEY": "super-secret-value"}
     )
     material = await provider.resolve(
         CredentialRef(credential_id="primary-key", purpose="model_inference"),
@@ -296,7 +301,7 @@ async def test_credential_providers_resolve_only_at_boundary_and_mask_repr():
 @pytest.mark.asyncio
 async def test_missing_credential_is_typed_and_never_returns_empty_secret():
     provider = EnvironmentCredentialProvider(
-        SageManifestLoader().loads(VALID).credentials, {}
+        model_catalog_input(config_text=MODELS).credentials, {}
     )
     with pytest.raises(SageV2Error) as unavailable:
         await provider.resolve(

@@ -25,11 +25,9 @@ from sagents.v2.tool.plugins.ephemeral import EphemeralToolPlugin
 CONTEXT = RequestContext(actor=ActorRef(principal_id="owner", principal_type="user"))
 
 
+MODELS = {"models": {name: {"provider": "openai-compatible", "model": name} for name in ("a", "b", "c")}}
+
 def package(mode, *, override=None, allowed=("a", "b", "c"), dynamic=False):
-    models = {
-        name: {"provider": "openai-compatible", "model": name}
-        for name in ("a", "b", "c")
-    }
     delegation_tool = (
         "sys_team_delegate_task" if mode == "team" else "sys_delegate_task"
     )
@@ -42,7 +40,6 @@ def package(mode, *, override=None, allowed=("a", "b", "c"), dynamic=False):
                 "version": "1.0.0",
                 "name": "Child bindings",
             },
-            "models": models,
             "agents": {
                 "main": {
                     "name": "Main",
@@ -181,7 +178,7 @@ async def build(root, manifest, *, approval=False, dynamic=False):
     )
     try:
         app = await (
-            SAgentBuilder()
+            SAgentBuilder().with_models(MODELS)
             .with_defaults(session_root=root)
             .with_session_store(store)
             .with_derived_state_store(store)
@@ -207,8 +204,8 @@ async def build(root, manifest, *, approval=False, dynamic=False):
 
 
 async def start(app, manifest, route, key):
-    config = CompositionResolver().resolve_run_config(
-        CompositionResolver().resolve(manifest),
+    config = CompositionResolver(models=MODELS).resolve_run_config(
+        CompositionResolver(models=MODELS).resolve(manifest),
         "main",
         model_bindings={"primary": route},
     )
@@ -371,16 +368,16 @@ async def test_public_child_approval_resume_keeps_persisted_route(
 
 def test_public_resolver_priority_and_rejection():
     manifest = package("team", allowed=("a",), override="a")
-    resolved = CompositionResolver().resolve(manifest)
+    resolved = CompositionResolver(models=MODELS).resolve(manifest)
     parent = RunConfig(model_bindings={"primary": "b", "parent_only": "c"})
-    child = CompositionResolver().resolve_child_run_config(
+    child = CompositionResolver(models=MODELS).resolve_child_run_config(
         resolved, "worker", parent_config=parent
     )
     assert child.model_bindings["primary"] == "a"
     assert "parent_only" not in child.model_bindings
     manifest.agents["worker"].delegation_model_bindings["primary"] = "b"
     with pytest.raises(SageV2Error, match="policy ceiling"):
-        CompositionResolver().resolve(manifest)
+        CompositionResolver(models=MODELS).resolve(manifest)
 
 
 @pytest.mark.asyncio

@@ -49,7 +49,7 @@ def _validate_declared_plugin_trust(
         )
 
 
-def _resolve_package(package, *, runtime: RuntimeConfig | None = None):
+def _resolve_package(package, *, runtime: RuntimeConfig | None = None, models=None):
     if isinstance(package, ResolvedSageManifest):
         if runtime is not None and runtime != package.runtime:
             raise ValueError("cannot override runtime on an already resolved package; configure before resolution")
@@ -64,7 +64,7 @@ def _resolve_package(package, *, runtime: RuntimeConfig | None = None):
         )
     if runtime is not None:
         package = package.model_copy(update={"runtime": runtime.model_copy(deep=True)})
-    return package, CompositionResolver().resolve(package)
+    return package, CompositionResolver().resolve(package, models=models)
 
 
 def _merge_plugin_config(

@@ -9,7 +9,7 @@ loading, context budgets, Session history and recovery belong to the runtime.
 ## Entry points
 
 ```text
-SAgentBuilder.build(runtime=...) → App
+SAgentBuilder.build(runtime=..., models=...) → App
   → app.load_agent(package) → reusable LoadedAgent
   → app.entrypoint().run_stream(command, context, agent=agent)
   → stream.events / stream.wait() → app.close()
@@ -128,14 +128,16 @@ same `AgentCompositionFactory.create_loop()` loop assembly. Hosts supply their
 authentication, approval and workspace policies through parameters and existing
 ports. Internal assemblers/materializers remain implementation details.
 
-Agent definitions live in an Agent Package. Its `sage.yaml` describes Agents,
-models, tools, Skills and policies, and can include runtime selections. Optional
-`build(package, runtime=...)` accepts the same `RuntimeConfig` (or a dictionary),
-not a separate configuration language. This replaces the entire package runtime;
-omitting it preserves the package configuration. It is applied before resolution,
-so equivalent effective configurations have identical composition identities.
-An already resolved package cannot receive a different runtime. Server retains
-its existing deployment/package merge in its adapter before calling this entry.
+App owns model routes, credentials, request defaults, limits and capabilities.
+Pass these as `models="./models.yaml"` (or a dictionary / ModelCatalogConfig).
+Use `models_config_text=` for YAML/JSON text. Runtime components remain a separate
+`runtime` input. Packages only map model slots to App model IDs.
+
+Use `app.update_models(...)` to atomically replace the catalog, or
+`app.update_model(id, complete_route)` to replace one route. Reload an unchanged
+Package to adopt updated models; edit the Package with `update_agent`.
+Existing handles and admitted Runs keep their frozen configuration.
+Builder configuration only affects applications built afterwards.
 
 ```python
 from sagents.v2 import SAgentBuilder
@@ -143,7 +145,7 @@ from examples.sagents_v2_host.plugins import estimator_registration
 
 builder = SAgentBuilder().with_defaults(session_root="./runtime")
 builder.register(estimator_registration())
-app = await builder.build("examples/sagents_v2_host/sage.yaml", runtime={
+app = await builder.build(models="examples/sagents_v2_host/models.yaml", runtime={
     "capabilities": {
         "context.token-estimator": {
             "plugin": "example.context.byte-estimator",
@@ -152,6 +154,7 @@ app = await builder.build("examples/sagents_v2_host/sage.yaml", runtime={
         },
     },
 })
+agent = await app.load_agent("examples/sagents_v2_host/sage.yaml")
 # Supply model credentials and close the application after use.
 ```
 

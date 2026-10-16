@@ -133,6 +133,41 @@ class SAgentApplication:
                 self._materialize_inflight -= 1
                 self._materialize_idle.notify_all()
 
+    @property
+    def models(self):
+        """A detached snapshot of the App catalog, never a mutable registry."""
+        self._ensure_open()
+        if self._loaded_agents is None:
+            raise RuntimeError("model management requires an App built by SAgentBuilder")
+        return self._loaded_agents.models.model_copy(deep=True)
+
+    async def update_models(self, models=None, *, models_config_text=None):
+        """Publish a validated catalog for subsequent loads; keep old revisions."""
+        from sagents.v2.model.catalog import model_catalog_input
+        if self._loaded_agents is None:
+            raise RuntimeError("model management requires an App built by SAgentBuilder")
+        selected = model_catalog_input(models, config_text=models_config_text)
+        async with self._assembly_operation(), self._loaded_agents.lock:
+            self._loaded_agents.models = selected
+            self._loaded_agents.model_resolver.models = selected
+        return self.models
+
+    async def update_model(self, model_id, config):
+        """Add or replace one model atomically; credentials live in App config."""
+        from sagents.v2.model.catalog import ModelCatalogConfig
+        from sagents.v2.package.manifest.models import ModelRoute
+        if self._loaded_agents is None:
+            raise RuntimeError("model management requires an App built by SAgentBuilder")
+        async with self._assembly_operation(), self._loaded_agents.lock:
+            catalog = self._loaded_agents.models
+            selected = ModelCatalogConfig(
+                models={**catalog.models, model_id: ModelRoute.model_validate(config)},
+                credentials=catalog.credentials,
+            ).model_copy(deep=True)
+            self._loaded_agents.models = selected
+            self._loaded_agents.model_resolver.models = selected
+        return self.models
+
     async def compose_run(
         self, compose: Callable[[RunResources], Awaitable[T]]
     ) -> ComposedRun[T]:

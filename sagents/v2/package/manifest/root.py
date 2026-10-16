@@ -8,9 +8,7 @@ from pydantic import Field, model_validator
 
 from sagents.v2.contracts.common import Identifier, StrictModel
 from sagents.v2.package.manifest.agents import AgentDefinition, ApplicationEntrypoint
-from sagents.v2.package.manifest.credentials import CredentialDeclaration
 from sagents.v2.package.manifest.flows import FlowDefinition
-from sagents.v2.package.manifest.models import ModelRoute
 from sagents.v2.package.manifest.runtime import PolicyConfig, RuntimeConfig
 from sagents.v2.runtime.extensions.contracts import ExtensionScope
 
@@ -45,8 +43,6 @@ class SageManifest(StrictModel):
     schema_version: Literal["sage/v2"] = "sage/v2"
     kind: Literal["application", "agent-package"] = "agent-package"
     metadata: ManifestMetadata
-    credentials: dict[Identifier, CredentialDeclaration] = Field(default_factory=dict)
-    models: dict[Identifier, ModelRoute] = Field(default_factory=dict)
     runtime: RuntimeConfig = Field(default_factory=RuntimeConfig)
     plugins: tuple[PluginDeclaration, ...] = ()
     policies: PolicyConfig = Field(default_factory=PolicyConfig)

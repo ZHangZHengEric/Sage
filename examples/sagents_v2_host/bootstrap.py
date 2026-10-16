@@ -18,6 +18,7 @@ class HostSettings:
     log_level: str = "info"
     environment: str | None = None
     runtime: RuntimeConfig | None = None
+    models: object | None = None
 
 
 async def build_application(
@@ -43,7 +44,10 @@ async def build_application(
         builder.register(registration)
     if model is not None:
         builder.with_model_provider(model)
-    app = await builder.build(runtime=settings.runtime if settings.runtime is not None else manifest.runtime)
+    app = await builder.build(
+        runtime=settings.runtime if settings.runtime is not None else manifest.runtime,
+        models=settings.models if settings.models is not None else settings.manifest_path.with_name("models.yaml"),
+    )
     try:
         await app.load_agent(manifest)
     except BaseException:
