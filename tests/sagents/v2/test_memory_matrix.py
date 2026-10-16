@@ -313,7 +313,7 @@ async def test_llm_memory_query_plugin_generates_keywords():
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("query", ["", " \n\t "])
-async def test_empty_llm_recall_query_still_searches_current_user_turn(query):
+async def test_empty_llm_recall_query_skips_search_and_continues_turn(query):
     model = ScriptedModelProvider(
         tuple(
             ScriptedModelStep(
@@ -364,14 +364,10 @@ async def test_empty_llm_recall_query_still_searches_current_user_turn(query):
 
     assert result.state.value == "completed"
     assert not any(event.type == "run.failed" for event in events)
-    assert len(executor.calls) == 1
-    assert executor.calls[0].arguments["query"] == "没有"
+    assert executor.calls == []
     assert len(model.requests) == 2
     assert model.requests[0].metadata["purpose"] == "memory_recall_query"
-    assert any(
-        message.role == "tool" and message.content[0].text == "No matching memories"
-        for message in model.requests[1].messages
-    )
+    assert not any(message.role == "tool" for message in model.requests[1].messages)
 
 
 @pytest.mark.asyncio
