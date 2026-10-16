@@ -9,15 +9,12 @@ CLI、HTTP 服务和桌面应用可以有不同产品行为，但不要分别实
 ## 现在的开发入口
 
 ```text
-sage.yaml                     声明 Agent、模型路由、凭据引用、工具及能力配置
-    ↓
-bootstrap.build_application() 唯一装配点：注入宿主资源和诊断端口
-    ↓ SAgentBuilder.build()
-SAgentApplication             持有组件、装配身份与应用生命周期
-    ↓ entrypoint()
-SAgent.run_stream(StartRun, RequestContext)
-    ↓ events / wait()
-应用关闭时 await app.close()
+SAgentBuilder.build(runtime=...) → App
+    ↓ app.load_agent(Package)       一个 Package 一个 Agent，加载结果可复用
+    ↓ app.entrypoint().run_stream(command, context, agent=agent)
+    ↓ stream.events / stream.wait()
+    ↓ app.update_agent(agent=agent, package=...)  发布新版本
+await app.close()                   统一关闭所有版本及资源
 ```
 
 参考项目的文件按职责划分：
@@ -34,7 +31,8 @@ SAgent.run_stream(StartRun, RequestContext)
 ```python
 app = await build_application(settings)
 try:
-    stream = await app.entrypoint().run_stream(command, context)
+    agent = app.loaded_agents[0]  # bootstrap 中 load_agent 的结果
+    stream = await app.entrypoint().run_stream(command, context, agent=agent)
     async for event in stream.events:
         render(event)
     result = await stream.wait()
@@ -45,6 +43,57 @@ finally:
 这段是宿主接线示意；可直接执行的完整实现见上述参考项目。
 长期运行的服务在启动时创建 Application，在关闭时释放；请求处理函数复用它，不能每个 HTTP 请求都创建一套进程服务。
 身份由宿主认证后生成 `RequestContext`，不要直接信任客户端传来的 principal/tenant。
+
+## 加载输入、复用和更新
+
+```python
+from pathlib import Path
+from sagents.v2 import SAgentBuilder
+
+app = await SAgentBuilder().with_defaults(session_root="./runtime").build()
+try:
+    agent = await app.load_agent("./agents/assistant")  # 目录中的 sage.yaml
+    # 也支持 Path("./assistant.yaml")、SageManifest 或配置字典。
+    # 文本显式写为 app.load_agent(config_text=yaml_or_json, base_path=package_root)。
+    # runtime 同样支持 RuntimeConfig、字典、路径，文本使用 runtime_config_text=。
+    newer = await app.update_agent(agent=agent, package="./agents/assistant")
+finally:
+    await app.close()
+```
+
+路径字符串不作为 YAML 猜测。`package` 与 `config_text`、`runtime` 与 `runtime_config_text` 分别互斥。
+内存配置含 instruction 文件引用时必须给 `base_path`，且文件不能越出该目录。
+一个新 Package 必须恰有一个 Agent，不再通过名称二次选择。
+普通 SDK 的 `agent.id` 来自 Package ID，两个 Package 的内部 Agent 都叫 main 也不会冲突。
+`StartRun.agent_id` 与 `resolved_spec_hash` 使用加载结果的 `agent.id` 与 `agent.composition_hash`；入口校验两者。
+
+重复加载同一份有效配置返回同一个 handle。不同配置必须显式 update；更新保留逻辑 ID，返回新 handle。
+旧 handle 不会被修改，已运行任务也不会切换版本。校验失败不替换当前版本；并发更新使用当前 handle，过期 handle 会被拒绝。
+App 统一持有调度器与所有已加载版本，关闭时先停止调度，再释放各版本及共享存储。
+目前版本保留到 App 关闭；高频更新的长期服务需关注内存占用，不会自动驱逐仍可能被恢复使用的版本。
+
+本机 SDK 在运行数据目录的 `agent-revisions/` 保存原始解析快照，重启后从快照恢复待调度旧运行，
+而不是用最新 Package 代替。手动继续挂起运行时，先用 `await app.agent_for_run(run_id, context)`
+取回经授权校验的原版本，再传给 `entrypoint().continue_run(..., agent=agent)`。
+缺失或身份不兼容的快照不能自动换版本执行。归档与 Session 数据一起保留；
+其中可能包含配置内容，应按私有运行数据管理。该本机快照存储不是分布式 Package Registry。
+Desktop / Server 使用 `HostAgentExecution` 注入已有受理和驱动契约，依然从各自持久化的受理快照恢复，
+一次运行的模型、沙箱和授权仍由该运行的 driver 管理；加载复用不等于复用这些 Run 资源。
+`build(package)` 已移除，公开入口拒绝多 Agent Package。所有宿主使用 build → load_agent → 显式运行。
+
+子 Agent 同样独立加载，再按父 Package 声明的名称绑定：
+
+```python
+reviewer = await app.load_agent("./agents/reviewer")
+coder = await app.load_agent("./agents/coder", subagents={"reviewer": reviewer})
+```
+
+绑定固定到具体版本。更新 reviewer 不会改变已加载的 coder；要采用新版本，显式
+`app.update_agent(agent=coder, package="./agents/coder", subagents={"reviewer": updated_reviewer})`。
+内部恢复快照包含完整执行图，公开 Package 仍只有一个 Agent。托管 `AgentPackageBundle`
+使用 `dependencies` 保存各个独立子 Package，服务通过同一个 `load_agent` 加载。
+
+CLI 内置预设也按此方式加载；TUI 默认调用 `sage v2 chat --json`，共用 CLI 的实现。
 
 ## 先离线跑通，再接真实模型
 
@@ -83,7 +132,8 @@ SDK 不会因为模型名或网关有误自动切换其他实现。离线模型�
 不能假定它可以覆盖任意字段，也没有一个通用的“所有环境变量自动覆盖 YAML”规则。
 
 显式 `with_*()` 注入用于替换对应宿主端口；插件选择、声明配置与宿主锁定依赖则由装配层合并。
-模型、存储、estimator 等宿主锁定依赖不能被插件配置冒充替换。**以 `app.resolved_plan` 确认最终绑定，不凭配置文件推测。**
+模型、存储、estimator 等宿主锁定依赖不能被插件配置冒充替换。**普通 SDK 使用 `agent.resolved_plan` 查看该版本的最终绑定；`app.resolved_plan` 是首次装配的进程视图。**
+宿主自定义执行的完整运行组件计划在其 Run 装配与诊断中查看，加载句柄不会提前伪造该计划。
 `with_shared_runtime()` 只借用其声明的进程服务，不代表复制全部 Builder 配置或产品策略。
 
 ## 各项目保持一致的调试方式
@@ -126,7 +176,7 @@ from examples.sagents_v2_host.plugins import estimator_registration
 
 builder = SAgentBuilder().with_defaults(session_root="./runtime")
 builder.register(estimator_registration())  # 先注册，再装配
-app = await builder.build("examples/sagents_v2_host/sage.yaml", runtime={
+app = await builder.build(runtime={
     "capabilities": {
         "context.token-estimator": {
             "plugin": "example.context.byte-estimator",
@@ -135,13 +185,16 @@ app = await builder.build("examples/sagents_v2_host/sage.yaml", runtime={
         },
     },
 })
+agent = await app.load_agent("examples/sagents_v2_host/sage.yaml")
 # 使用完成后 await app.close()；真实模型仍需要对应的凭据。
 ```
 
-`runtime=` 是完整替换 Package 的 `runtime`，不是隐式深合并；省略时使用 Package 的配置。
-配置在解析前应用，因此同样的有效配置得到同样的装配身份。已经解析的 Package 不允许
-换成不同的 runtime；恢复必须使用受理时的快照。Server 自身的部署默认值与 Package
-配置合并仍在其适配层完成，然后传给这个入口。
+`build()` 不传 runtime 时使用与 Desktop 共用的组件默认配置；不会读取个人模型密钥或电脑设置。
+显式 runtime 是完整配置，不做隐式深合并；需要继承默认项时先调用
+`from sagents.v2 import default_runtime` 的 `default_runtime(session_root)`，再修改其 capabilities。App 的 runtime 优先于 Package 内的旧 runtime 字段。
+实际资源按需在首次加载 Agent 时创建；因此 `build()` 后直接关闭也合法。
+已解析的 Package 不允许覆盖为不同 runtime，恢复仍使用受理时的配置。
+Server 的部署设置与 Package 能力选择在宿主适配层合并后传入。
 
 插件使用同一份 `CapabilitySelection`：`plugin / name / scope / config`。
 `ExtensionRegistration` 声明能力、支持的 scope、参数 JSON Schema、可选的参数模型和工厂。
@@ -150,7 +203,7 @@ Schema 校验在工厂调用前进行；是否允许额外字段由插件 schema
 插件实现互不导入，可以有重复代码。参考项目的字节估算器用于展示接入契约，不是厂商 tokenizer。
 
 两端都接受提前注册：`DesktopV2Service(..., extensions=(registration,))` 和
-`ServerHost(..., extensions=(registration,))`；Server 旧的 `package_extensions` 参数继续兼容。
+`ServerHost(..., extensions=(registration,))`，不再接受旧的 `package_extensions` 参数。
 注册提供实现，`runtime.capabilities` 选择实现和参数；不要把插件工厂调用散落在业务代码里。
 
 宿主需要自己受理 Run 时使用已有的以下接口，不实例化内部 assembler/materializer：
@@ -201,3 +254,14 @@ Desktop 的 `backend/composition.py → run_composition.py`，配置翻译在 `c
 仓库测试默认有 30 秒防挂死时限；性能要求用独立断言，单项时限用 `pytest.mark.timeout(...)`。
 
 Desktop 和 Server 的沙箱提供者均通过应用的插件生命周期创建。Server 的配置与 Agent 校验使用宿主预注册的同一个 registry。
+
+
+## 验证入口
+
+- Python：`.venv/bin/python -m pytest tests/sagents/v2 tests/app/v2/server tests/app/v2/desktop tests/app/clients/cli --ignore=tests/sagents/v2/live`。
+- Desktop：在 `app/v2/desktop` 运行 `flutter test`。`unified_sidecar_test.dart` 使用真实 Python sidecar，默认仅替换模型响应。
+- 真实模型：在同一目录运行 `SAGE_DESKTOP_LIVE_CATALOG="$HOME/sage/runtime/desktop-catalog.json" flutter test test/unified_sidecar_test.dart`。使用目录首个 Agent 绑定的模型；可通过 `SAGE_DESKTOP_LIVE_MODEL` 显式选择模型 ID。测试使用隔离数据目录，验证两轮回答和历史回忆，会产生真实模型请求费用。
+- TUI：在 `app/clients/terminal` 运行 `cargo test --offline`，覆盖 CLI v2 启动参数、事件协议和交互。
+
+底层装配回归使用私有 `_build_package` 检验执行图；第三方接入测试使用公开的
+`build()` / `load_agent()`，不要在应用代码里调用私有装配器。

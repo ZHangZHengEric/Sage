@@ -514,7 +514,7 @@ async def test_public_builder_suspends_unbounded_input_before_model_request(tmp_
         SAgentBuilder()
         .with_defaults(session_root=tmp_path)
         .with_model_provider(model)
-        .build(package)
+        ._build_package(package)
     )
     try:
         stream = await application.entrypoint().run_stream(

@@ -21,7 +21,7 @@ async def test_builder_returns_application_with_one_close_boundary(tmp_path: Pat
         SAgentBuilder()
         .with_defaults(session_root=tmp_path / "sessions")
         .with_model_provider(ScriptedModelProvider(()))
-        .build(package)
+        ._build_package(package)
     )
 
     assert isinstance(application, SAgentApplication)
@@ -89,7 +89,7 @@ async def test_build_failure_rolls_back_started_extensions(tmp_path: Path):
         await (
             SAgentBuilder()
             .with_model_provider(ScriptedModelProvider(()))
-            .build(package)
+            ._build_package(package)
         )
 
 

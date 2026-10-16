@@ -435,7 +435,7 @@ async def test_public_builder_exposes_self_configuration_without_initial_skills(
         .with_self_configuration(
             lambda agent_id: service(tmp_path, owner=f"user:{agent_id}")
         )
-        .build(package)
+        ._build_package(package)
     )
     try:
         stream = await application.entrypoint().run_stream(

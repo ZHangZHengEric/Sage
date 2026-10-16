@@ -18,6 +18,7 @@ from app.v2.server.runtime.official import provision_workspace, agent_network_po
 from sagents.v2 import SAgentBuilder
 from sagents.v2.contracts.errors import ErrorCategory, RuntimeErrorInfo, SageV2Error
 from sagents.v2.package.manifest.runtime import CapabilitySelection, RuntimeConfig
+from sagents.v2.package.manifest.models import ModelRoute
 from sagents.v2.runtime.execution import RunExecutionBinding
 
 
@@ -148,65 +149,50 @@ class PackageBuilder(SAgentBuilder):
         self.host_application = application
         self.catalog_snapshot = None
 
-    async def build(self, manifest, *, runtime=None, **kwargs):
-        runtime_override = RuntimeConfig.model_validate(runtime) if runtime is not None else None
-        # Temporary validation never creates permanent MySQL table families.
-        settings = self.settings
-        if self.root.name.startswith("validate-"):
-            settings = replace(settings, mysql_url=None)
-        runtime = server_v2_manifest(settings).runtime
+    async def build(self, *, runtime=None, runtime_config_text=None, tenant_id=None):
+        from sagents.v2.composition.inputs import runtime_input
         from sagents.v2.package.manifest.runtime import merge_capability_selections
+        from sagents.v2.runtime.execution.scheduler.plugins.ephemeral import InMemoryScheduler
 
-        capabilities = merge_capability_selections(runtime.capabilities, manifest.runtime.capabilities)
+        selected = runtime_input(runtime, config_text=runtime_config_text) or RuntimeConfig()
+        settings = replace(self.settings, mysql_url=None) if self.root.name.startswith("validate-") else self.settings
+        base = server_v2_manifest(settings).runtime
+        capabilities = merge_capability_selections(base.capabilities, selected.capabilities)
         if self.host_application is None and "session.store" in capabilities:
             selection = capabilities["session.store"]
             suffix = hashlib.sha256(str(self.root).encode()).hexdigest()[:24]
-            capabilities["session.store"] = selection.model_copy(
-                update={
-                    "config": {**selection.config, "table_prefix": f"managed_{suffix}"}
-                }
-            )
-        capabilities.setdefault(
-            "tool.catalog", CapabilitySelection(plugin="sage.tool.official")
-        )
-        models = dict(manifest.models)
+            capabilities["session.store"] = selection.model_copy(update={
+                "config": {**selection.config, "table_prefix": f"managed_{suffix}"}
+            })
+        capabilities.setdefault("tool.catalog", CapabilitySelection(plugin="sage.tool.official"))
+        effective = base.model_copy(update={"capabilities": capabilities,
+            "plugin_trust_policy": selected.plugin_trust_policy})
+        if self.host_application is not None:
+            self.with_shared_runtime(self.host_application)
+        else:
+            scheduler = InMemoryScheduler(quota_group=self.run_quota,
+                max_pending_items=self.settings.max_pending_runs)
+            self.with_scheduler(scheduler)
+            self.with_owned_resources(scheduler)
+        return await super().build(runtime=effective, tenant_id=tenant_id)
+
+    def _prepare_package(self, package):
+        # Catalog profiles are host-owned model metadata, frozen for this builder.
+        from sagents.v2.package.manifest.resolver import ResolvedSageManifest
+        if isinstance(package, ResolvedSageManifest):
+            return package
+        routes = dict(package.models)
         if self.catalog_snapshot is not None:
-            for key, route in models.items():
+            for key, route in routes.items():
                 record = package_model_record(self.catalog_snapshot, route.model)
                 if record is not None:
                     selected = record.for_route(route)
-                    models[key] = route.model_copy(update={
+                    routes[key] = route.model_copy(update={
                         "request": selected.request, "limits": selected.limits,
                         "capabilities": selected.capabilities,
                         "capability_profile": selected.current_profile(),
                     })
-        effective_runtime = runtime.model_copy(
-            update={
-                "capabilities": capabilities,
-                "plugin_trust_policy": manifest.runtime.plugin_trust_policy,
-            }
-        )
-        effective = manifest.model_copy(update={"models": models})
-        from sagents.v2.runtime.execution.scheduler.plugins.ephemeral import (
-            InMemoryScheduler,
-        )
-
-        if self.host_application is not None:
-            self.with_shared_runtime(self.host_application)
-            return await super().build(effective, runtime=runtime_override if runtime_override is not None else effective_runtime, **kwargs)
-
-        scheduler = InMemoryScheduler(
-            quota_group=self.run_quota,
-            max_pending_items=self.settings.max_pending_runs,
-        )
-        self.with_scheduler(scheduler)
-        try:
-            app = await super().build(effective, runtime=runtime_override if runtime_override is not None else effective_runtime, **kwargs)
-            await app.adopt_resource(scheduler, close_after_existing=True)
-            return app
-        except BaseException:
-            await scheduler.close()
-            raise
+        return package.model_copy(update={"models": routes})
 
 
 class ServerPackageBuilderFactory:
@@ -247,9 +233,10 @@ class ServerPackageBuilderFactory:
         catalog = (await self.catalog.get(user_id)).model_copy(deep=True)
         command = catalog_run[1] if catalog_run is not None else None
         service = catalog_run[0] if catalog_run is not None else None
+        from sagents.v2.agent.management.loading import bundle_agent_definitions
         bindings = PackageBindings(
             self.paths, self.execution, user_id,
-            agents=bundle.manifest.agents, settings=self.settings,
+            agents=bundle_agent_definitions(bundle), settings=self.settings,
             command=command, catalog=self.catalog,
         )
         builder = (
@@ -264,7 +251,7 @@ class ServerPackageBuilderFactory:
                     self.catalog,
                     self.execution,
                     user_id,
-                    {binding: bundle.manifest.models[route]
+                    {binding: ModelRoute.model_validate(resolved.model_routes[route])
                      for binding, route in resolved.agents[agent_id].model_bindings.items()},
                     snapshot=catalog,
                 )

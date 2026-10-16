@@ -54,6 +54,9 @@ async def test_managed_builds_are_shared_but_do_not_block_other_agents(tmp_path)
     closed = []
 
     class App:
+        async def load_agent(self, *args, **kwargs):
+            pass
+
         async def close(self):
             closed.append(self)
 
@@ -337,7 +340,7 @@ async def test_parent_model_creates_and_invokes_full_agent(tmp_path):
             DefaultToolPolicy(approval_strategy=ApprovalStrategy.AUTO_APPROVE)
         )
         .with_agent_management(svc)
-        .build(SageManifest.model_validate(parent))
+        ._build_package(SageManifest.model_validate(parent))
     )
     try:
         stream = await app.entrypoint().run_stream(
@@ -460,6 +463,14 @@ async def test_builder_executes_declared_flow_and_custom_node(tmp_path, binding)
                 .register(registration)
             )
 
+    from copy import deepcopy
+    child = deepcopy(data)
+    child["manifest"]["metadata"]["id"] += ".worker"
+    child["manifest"]["agents"] = {"worker": child["manifest"]["agents"]["worker"]}
+    child["manifest"]["entrypoint"] = {"agent": "worker"}
+    child["manifest"]["flows"] = {}
+    data["manifest"]["agents"].pop("worker")
+    data["dependencies"] = {"worker": child}
     package = AgentPackageBundle.model_validate(data)
     svc = AgentManagementService(tmp_path, builder_factory=build, authorize=allow)
     try:
@@ -1110,6 +1121,9 @@ async def test_build_limit_covers_validation_and_runtime_and_releases_cancelled_
     active = peak = built = closed = 0
 
     class App:
+        async def load_agent(self, *args, **kwargs):
+            pass
+
         async def close(self):
             nonlocal closed
             closed += 1
@@ -1184,6 +1198,9 @@ async def test_cancelled_save_settles_validation_and_releases_version_lock(tmp_p
     closed = []
 
     class App:
+        async def load_agent(self, *args, **kwargs):
+            pass
+
         async def close(self):
             closed.append(True)
 
@@ -1307,6 +1324,9 @@ async def test_validation_close_failure_is_retained_and_retried(tmp_path):
     closes = []
 
     class App:
+        async def load_agent(self, *args, **kwargs):
+            pass
+
         async def close(self):
             closes.append(True)
             if len(closes) == 1:
@@ -1493,8 +1513,11 @@ async def test_flow_build_only_initializes_reachable_agents(tmp_path, monkeypatc
 
     from sagents.v2.composition.assembler import ApplicationAssembler
     monkeypatch.setattr(ApplicationAssembler, "_create_model", create_model)
-    app = await SAgentBuilder().with_defaults(session_root=tmp_path).build(
-        AgentPackageBundle.model_validate(data).resolved_manifest())
+    from sagents.v2.package.manifest import SageManifest
+    for definition in data["manifest"]["agents"].values():
+        definition["instructions"] = {"inline": "Run the declared flow."}
+    app = await SAgentBuilder().with_defaults(session_root=tmp_path)._build_package(
+        SageManifest.model_validate(data["manifest"]))
     try:
         assert calls == ["assistant", "worker"]
     finally:
@@ -1843,6 +1866,9 @@ async def test_cancelled_shutdown_preserves_owned_build_for_cleanup_retry(tmp_pa
     closed = []
 
     class App:
+        async def load_agent(self, *args, **kwargs):
+            pass
+
         async def close(self):
             closed.append(self)
 
@@ -1944,7 +1970,7 @@ async def test_shared_jobs_survive_one_application_close_and_bound_admission(tmp
     try:
         for index in range(2):
             apps.append(await SAgentBuilder().with_defaults(session_root=tmp_path / str(index))
-                        .with_model_provider(model()).with_job_runtime(jobs).build(bundle().resolved_manifest()))
+                        .with_model_provider(model()).with_job_runtime(jobs)._build_package(bundle().resolved_manifest()))
         assert apps[0].service("execution.job-runtime") is apps[1].service("execution.job-runtime") is jobs
         first = await jobs.submit(JobSpec(kind="test", owner_run_id="run-a", idempotency_key="a"))
         await started.wait()

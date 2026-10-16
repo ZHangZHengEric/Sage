@@ -135,7 +135,9 @@ class ClosableAgent:
 
     def __init__(self, application):
         self.application = application
-        self.agent = application.entrypoint()
+        from app.v2.cli.runner import CliExecution
+        loaded = next(a for a in application.loaded_agents if a.id == "sage.cli.coder")
+        self.agent = CliExecution(application, loaded)
 
     def __getattr__(self, name):
         return getattr(self.agent, name)
@@ -159,9 +161,9 @@ async def make_agent(tmp_path, model, *, tool_policy=None, workspace_name="works
         tool_policy=tool_policy,
     )
     command = build_start_run(
-        agent_id=package.entrypoint.agent,
+        agent_id=package.metadata.id,
         task="create hello.txt",
-        resolved_spec_hash=application.composition_hash,
+        resolved_spec_hash=next(a.composition_hash for a in application.loaded_agents if a.id == "sage.cli.coder"),
     )
     return workspace, bindings, ClosableAgent(application), command
 
@@ -647,13 +649,13 @@ async def test_interrupt_cancels_run_durably_and_exits_130(tmp_path):
 async def test_second_run_in_same_session_sees_previous_history(tmp_path):
     model = talk_model("first answer", "second answer")
     _, _, agent, _ = await make_agent(tmp_path, model)
-    spec_hash = agent.application.composition_hash
+    spec_hash = agent.agent.agent.composition_hash
     renderer = PlainRenderer(io.StringIO(), io.StringIO())
     decider = StaticInteractionDecider("deny")
 
     first = await run_task(
         agent,
-        build_start_run(agent_id="coder", task="first task", resolved_spec_hash=spec_hash),
+        build_start_run(agent_id="sage.cli.coder", task="first task", resolved_spec_hash=spec_hash),
         CONTEXT,
         renderer=renderer,
         decider=decider,
@@ -661,7 +663,7 @@ async def test_second_run_in_same_session_sees_previous_history(tmp_path):
     second = await run_task(
         agent,
         build_start_run(
-            agent_id="coder",
+            agent_id="sage.cli.coder",
             task="second task",
             resolved_spec_hash=spec_hash,
             session_id=first.session_id,
@@ -783,13 +785,13 @@ async def test_sessions_listing_reads_authoritative_state(tmp_path):
 
     model = talk_model("one", "two")
     _, _, agent, _ = await make_agent(tmp_path, model)
-    spec_hash = agent.application.composition_hash
+    spec_hash = agent.agent.agent.composition_hash
     renderer = PlainRenderer(io.StringIO(), io.StringIO())
     decider = StaticInteractionDecider("deny")
     first = await run_task(
         agent,
         build_start_run(
-            agent_id="coder",
+            agent_id="sage.cli.coder",
             task="first task",
             resolved_spec_hash=spec_hash,
             metadata={"workspace": "/w", "package_id": "sage.cli.coder"},
@@ -801,7 +803,7 @@ async def test_sessions_listing_reads_authoritative_state(tmp_path):
     second = await run_task(
         agent,
         build_start_run(
-            agent_id="coder",
+            agent_id="sage.cli.coder",
             task="second task\nwith detail",
             resolved_spec_hash=spec_hash,
             metadata={"workspace": "/w", "package_id": "sage.cli.coder"},
@@ -825,7 +827,7 @@ async def test_sessions_listing_reads_authoritative_state(tmp_path):
     assert newest.run_count == 1
     assert newest.last_run_id == second.run_id
     assert newest.last_state == "completed"
-    assert newest.agent_id == "coder"
+    assert newest.agent_id == "sage.cli.coder"
     assert newest.workspace == "/w"
     assert newest.package_id == "sage.cli.coder"
     assert [value.session_id for value in limited] == [second.session_id]
@@ -1020,7 +1022,7 @@ async def test_close_tolerates_only_pending_driver_errors(tmp_path):
             bindings=FakeBindings(),
             package=None,
             spec_hash="sha256:test",
-            agent_id="coder",
+            agent_id="sage.cli.coder",
             context=CONTEXT,
             renderer=SimpleNamespace(notice=notices.append),
             decider=None,
@@ -1162,13 +1164,13 @@ async def test_resume_cursor_is_per_run_when_one_renderer_spans_two_runs(tmp_pat
         )
     )
     workspace, _, agent, _ = await make_agent(tmp_path, model)
-    spec_hash = agent.application.composition_hash
+    spec_hash = agent.agent.agent.composition_hash
     renderer = PlainRenderer(io.StringIO(), io.StringIO())
     decider = StaticInteractionDecider("approve_once")
 
     first = await run_task(
         agent,
-        build_start_run(agent_id="coder", task="first", resolved_spec_hash=spec_hash),
+        build_start_run(agent_id="sage.cli.coder", task="first", resolved_spec_hash=spec_hash),
         CONTEXT,
         renderer=renderer,
         decider=decider,
@@ -1177,7 +1179,7 @@ async def test_resume_cursor_is_per_run_when_one_renderer_spans_two_runs(tmp_pat
         run_task(
             agent,
             build_start_run(
-                agent_id="coder",
+                agent_id="sage.cli.coder",
                 task="second",
                 resolved_spec_hash=spec_hash,
                 session_id=first.session_id,
@@ -1280,7 +1282,7 @@ async def test_run_orphaned_by_a_crash_is_settled_then_the_session_resumes(
     store = open_session_store(session_root)
     runtime = HarnessRuntime(store)
     handle = await runtime.start_run(
-        build_start_run(agent_id="coder", task="orphan", resolved_spec_hash="sha256:x"),
+        build_start_run(agent_id="sage.cli.coder", task="orphan", resolved_spec_hash="sha256:x"),
         CONTEXT,
     )
     running = await runtime.start_execution(
@@ -1361,12 +1363,12 @@ async def test_suspended_run_from_a_previous_process_is_resumed_first(
         bindings=first_bindings,
         model_provider=write_hello_model(),
     )
-    agent = first.entrypoint()
+    agent = ClosableAgent(first)
     stream = await agent.run_stream(
         build_start_run(
-            agent_id="coder",
+            agent_id="sage.cli.coder",
             task="create hello.txt",
-            resolved_spec_hash=first.composition_hash,
+            resolved_spec_hash=next(a.composition_hash for a in first.loaded_agents if a.id == "sage.cli.coder"),
         ),
         CONTEXT,
     )
@@ -1516,11 +1518,11 @@ async def test_sessions_inspect_replays_the_transcript_read_only(tmp_path):
     first = await run_task(
         agent, command, CONTEXT, renderer=renderer, decider=StaticInteractionDecider("approve_once")
     )
-    spec_hash = agent.application.composition_hash
+    spec_hash = agent.agent.agent.composition_hash
     second = await run_task(
         agent,
         build_start_run(
-            agent_id="coder",
+            agent_id="sage.cli.coder",
             task="say bye",
             resolved_spec_hash=spec_hash,
             session_id=first.session_id,
@@ -1665,7 +1667,7 @@ async def make_shell_agent(tmp_path, model, *, read_only=False):
         model_provider=model,
     )
     command = build_start_run(
-        agent_id="coder", task="run it", resolved_spec_hash=application.composition_hash
+        agent_id="sage.cli.coder", task="run it", resolved_spec_hash=next(a.composition_hash for a in application.loaded_agents if a.id == "sage.cli.coder")
     )
     return workspace, bindings, ClosableAgent(application), command
 
@@ -1682,12 +1684,12 @@ async def test_binding_forwards_the_request_lifecycle(tmp_path):
 
     provider = LocalWorkspaceBindingProvider(tmp_path)
     plain = await provider.acquire(
-        ExecutionBindingRequest(run_id="run_1", agent_id="coder", context=CONTEXT)
+        ExecutionBindingRequest(run_id="run_1", agent_id="sage.cli.coder", context=CONTEXT)
     )
     lifecycle = RecordingLifecycle()
     coordinated = await provider.acquire(
         ExecutionBindingRequest(
-            run_id="run_2", agent_id="coder", context=CONTEXT, lifecycle=lifecycle
+            run_id="run_2", agent_id="sage.cli.coder", context=CONTEXT, lifecycle=lifecycle
         )
     )
     try:
@@ -2267,7 +2269,7 @@ def test_build_start_run_carries_enabled_tools():
     from sagents.v2.contracts.commands import RunConfig
 
     command = build_start_run(
-        agent_id="coder",
+        agent_id="sage.cli.coder",
         task="t",
         resolved_spec_hash="sha256:x",
         enabled_tools=("file_read",),
@@ -2276,7 +2278,7 @@ def test_build_start_run_carries_enabled_tools():
     assert command.config.enabled_tools == ("file_read",)
     assert command.config.metadata == {"workspace": "w"}
     merged = build_start_run(
-        agent_id="coder",
+        agent_id="sage.cli.coder",
         task="t",
         resolved_spec_hash="sha256:x",
         config=RunConfig(max_steps=3, metadata={"a": 1}),
@@ -2286,7 +2288,7 @@ def test_build_start_run_carries_enabled_tools():
     assert merged.config.max_steps == 3
     assert merged.config.enabled_tools == ("grep",)
     assert merged.config.metadata == {"a": 1, "b": 2}
-    assert build_start_run(agent_id="coder", task="t", resolved_spec_hash="sha256:x").config.enabled_tools is None
+    assert build_start_run(agent_id="sage.cli.coder", task="t", resolved_spec_hash="sha256:x").config.enabled_tools is None
 
 
 @pytest.mark.parametrize(

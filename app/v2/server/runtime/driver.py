@@ -19,7 +19,7 @@ class CatalogRunDriver:
     async def _resolve(self, context: RequestContext):
         if self._driver is not None:
             return self._driver
-        runtime = self.service.application.entrypoint().runtime
+        runtime = self.service.application.runtime
         command = await runtime.session_store.get_start_command(self.run_id)
         self._driver, self._resources = await compose_catalog_loop(
             self.service,

@@ -315,7 +315,7 @@ class A2AService:
         context = self._context_for(key, correlation_id=get_request_id())
         task_id = message.task_id
         run = await self._run(task_id, context)
-        command = await self._application.entrypoint().runtime.session_store.get_start_command(task_id)
+        command = await self._application.runtime.session_store.get_start_command(task_id)
         if key.agent_id and key.agent_id != command.agent_id:
             raise SageV2Error(RuntimeErrorInfo(code="server.conversations.a2a.service.not_found",
                 category=ErrorCategory.VALIDATION, message="task not found"))

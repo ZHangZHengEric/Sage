@@ -29,6 +29,8 @@ class ServerPackagePolicy:
         # Read/control survive a revoked model or extension; execution must not.
         if action in {"read", "read_run", "cancel", "reply"}:
             return
+        for child in bundle.dependencies.values():
+            await self.authorize(action, child, context, management)
         manifest = bundle.manifest
         if manifest.runtime.deployment_profile != "controlled_host":
             raise PermissionError("Server supports a single controlled host")

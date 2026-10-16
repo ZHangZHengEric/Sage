@@ -92,7 +92,7 @@ async def test_restored_package_rules_control_actual_loop_dispatch(tmp_path, kin
         .with_defaults(session_root=tmp_path)
         .with_model_provider(provider)
         .with_tool_provider(catalog, executor)
-        .build(package)
+        ._build_package(package)
     )
     actor = _POLICY_USER.actor.model_copy(update={"scopes": definition.required_scopes})
     try:

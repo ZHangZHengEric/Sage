@@ -212,24 +212,12 @@ class DesktopRunServiceMixin(DesktopRunCompositionMixin):
             driver = _DesktopDriver(
                 self, None, workspace, None, lazy_builder=build_driver
             )
-            memory_enabled = _agent_memory_enabled(
-                agent, self.memory_plugin_id, self.session_memory_plugin_id
+            self._drivers[accepted_handle.run_id] = driver
+            loaded = await self._load_run_agent(
+                agent, self._manifest(agent, provider, valid_tools, valid_skills), command,
             )
-            facade = SAgent(
-                runtime=self.runtime,
-                driver_factory=lambda _run_id: driver,
-                memory_service=(self._memory_service_for_agent(agent) if memory_enabled and _agent_memory_behavior(agent).auto_write else None),
-                memory_scope={
-                    "recall": memory_enabled and _agent_memory_behavior(agent).recall,
-                    "auto_write": memory_enabled and _agent_memory_behavior(agent).auto_write,
-                    "scope": _agent_memory_behavior(agent).scope,
-                    "recall_limit": 8,
-                },
-            )
-            facade.attach_dispatcher(self.dispatcher)
-            stream = await facade.schedule_accepted_run(accepted_handle, context)
-            stream.add_done_callback(
-                lambda _completed, agent=facade: self._schedule_agent_close(agent)
+            stream = await self.application.entrypoint().schedule_accepted_run(
+                accepted_handle, context, agent=loaded,
             )
         except asyncio.CancelledError:
             if driver is not None:
@@ -737,9 +725,6 @@ class DesktopRunServiceMixin(DesktopRunCompositionMixin):
         command = await self.session_store.get_start_command(run_id)
         environment = await self._environment_for_command(command, user_id, run_id)
         agent = await self._agent_in_environment(command, environment, user_id)
-        memory_enabled = _agent_memory_enabled(
-            agent, self.memory_plugin_id, self.session_memory_plugin_id
-        )
         driver = self._drivers.get(run_id)
         if driver is None:
             provider = (
@@ -779,27 +764,23 @@ class DesktopRunServiceMixin(DesktopRunCompositionMixin):
                 self, None, workspace, None, lazy_builder=build_driver
             )
             self._drivers[run_id] = driver
-        facade = SAgent(
-            runtime=self.runtime,
-            driver_factory=lambda _: driver,
-            memory_service=(self._memory_service_for_agent(agent) if memory_enabled and _agent_memory_behavior(agent).auto_write else None),
-            memory_scope={
-                "recall": memory_enabled and _agent_memory_behavior(agent).recall,
-                "auto_write": memory_enabled and _agent_memory_behavior(agent).auto_write,
-                "scope": _agent_memory_behavior(agent).scope,
-                "recall_limit": 8,
-            },
+        provider = (
+            environment.provider(agent)
+            if environment is not None
+            else await self._provider_for_command(command, agent, user_id)
         )
-        facade.attach_dispatcher(self.dispatcher)
-        task = await facade.continue_run(
+        loaded = await self._load_run_agent(
+            agent,
+            self._manifest(agent, provider, tuple(command.config.enabled_tools or ()), tuple(command.config.enabled_skills or ())),
+            command,
+        )
+        task = await self.application.entrypoint().continue_run(
             run_id,
             self._context(
                 user_id,
                 language=str(command.config.metadata.get("response_language") or "en"),
             ),
-        )
-        task.add_done_callback(
-            lambda _completed, agent=facade: self._schedule_agent_close(agent)
+            agent=loaded,
         )
         task.add_done_callback(
             lambda _completed, key=run_id, value=driver: asyncio.create_task(
@@ -809,6 +790,35 @@ class DesktopRunServiceMixin(DesktopRunCompositionMixin):
         task.add_done_callback(
             lambda _completed, key=run_id: asyncio.create_task(self._index_run(key))
         )
+
+    async def _load_run_agent(self, agent, manifest, command):
+        """Reuse a frozen definition; Run-specific resources stay in its driver."""
+        from sagents.v2 import HostAgentExecution
+        if not hasattr(self, "_loaded_agent_lock"):
+            self._loaded_agent_lock = asyncio.Lock()
+        memory_enabled = _agent_memory_enabled(
+            agent, self.memory_plugin_id, self.session_memory_plugin_id,
+        )
+        behavior = _agent_memory_behavior(agent)
+        execution = HostAgentExecution(
+            driver_factory=self._driver_for_loaded_agent,
+            spec_hash=command.resolved_spec_hash,
+            runtime=self.runtime,
+            dispatcher=self.dispatcher,
+            memory_service=self._memory_service_for_agent(agent) if memory_enabled and behavior.auto_write else None,
+            memory_scope={"recall": memory_enabled and behavior.recall,
+                          "auto_write": memory_enabled and behavior.auto_write,
+                          "scope": behavior.scope, "recall_limit": 8},
+        )
+        async with self._loaded_agent_lock:
+            current = next((value for value in self.application.loaded_agents
+                            if value.package_id == manifest.metadata.id), None)
+            if current is None:
+                return await self.application.load_agent(manifest, execution=execution)
+            return await self.application.update_agent(agent=current, package=manifest, execution=execution)
+
+    def _driver_for_loaded_agent(self, run_id):
+        return self._drivers[run_id]
 
     def _discard_driver(self, run_id: str, driver: _DesktopDriver) -> None:
         if self._drivers.get(run_id) is driver:

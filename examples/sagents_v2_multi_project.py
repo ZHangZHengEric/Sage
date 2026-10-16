@@ -216,8 +216,9 @@ async def run_example(root: Path, *, cancel_first: bool = False):
         .with_tool_policy(
             DefaultToolPolicy(approval_strategy=ApprovalStrategy.AUTO_APPROVE)
         )
-        .build(manifest)
+        .build(runtime=manifest.runtime)
     )
+    agent = await app.load_agent(manifest)
     streams = []
     try:
         context = RequestContext(
@@ -246,7 +247,7 @@ async def run_example(root: Path, *, cancel_first: bool = False):
             streams.append(
                 await app.entrypoint().run_stream(
                     StartRun(
-                        agent_id="main",
+                        agent_id=agent.id,
                         session_id=session,
                         config=config,
                         input=(
@@ -256,9 +257,10 @@ async def run_example(root: Path, *, cancel_first: bool = False):
                             ),
                         ),
                         idempotency_key=session,
-                        resolved_spec_hash=app.composition_hash,
+                        resolved_spec_hash=agent.composition_hash,
                     ),
                     context,
+                    agent=agent,
                 )
             )
         # All three must enter the model before any is allowed to finish.

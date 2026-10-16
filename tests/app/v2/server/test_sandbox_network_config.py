@@ -169,6 +169,14 @@ def test_flow_member_uses_own_network_policy(client, service, monkeypatch):
         "nodes": [{"id": "work", "type": "agent", "agent": "worker"}, {"id": "end", "type": "end"}],
         "edges": [{"from": "work", "to": "end"}],
     }}
+    from copy import deepcopy
+    child = deepcopy(bundle)
+    child["manifest"]["metadata"]["id"] += ".worker"
+    child["manifest"]["agents"] = {"worker": child["manifest"]["agents"]["worker"]}
+    child["manifest"]["entrypoint"] = {"agent": "worker"}
+    child["manifest"]["flows"] = {}
+    bundle["manifest"]["agents"].pop("worker")
+    bundle["dependencies"] = {"worker": child}
     response = client.post("/api/agent-packages", headers=headers, json=bundle)
     assert response.status_code == 200, response.text
     networks.clear()

@@ -229,7 +229,7 @@ async def test_builder_rejects_postgres_plugin_without_dsn():
         }
     )
     with pytest.raises(SageV2Error) as exc_info:
-        await SAgentBuilder().with_model_provider(ScriptedModelProvider(())).build(
+        await SAgentBuilder().with_model_provider(ScriptedModelProvider(()))._build_package(
             package
         )
     assert exc_info.value.info.code == "extension.config_invalid"
@@ -465,7 +465,7 @@ async def test_builder_can_select_postgres_session_store(postgres_dsn):
     application = await (
         SAgentBuilder()
         .with_model_provider(ScriptedModelProvider(()))
-        .build(package)
+        ._build_package(package)
     )
     store = application.entrypoint().runtime.session_store
     assert store.schema_name == schema

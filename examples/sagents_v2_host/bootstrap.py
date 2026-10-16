@@ -43,4 +43,10 @@ async def build_application(
         builder.register(registration)
     if model is not None:
         builder.with_model_provider(model)
-    return await builder.build(manifest, runtime=settings.runtime)
+    app = await builder.build(runtime=settings.runtime if settings.runtime is not None else manifest.runtime)
+    try:
+        await app.load_agent(manifest)
+    except BaseException:
+        await app.close()
+        raise
+    return app

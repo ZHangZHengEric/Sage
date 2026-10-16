@@ -10,8 +10,9 @@ void main() {
   final python = File(
     '${root.path}/.venv/${Platform.isWindows ? 'Scripts/python.exe' : 'bin/python'}',
   );
+  final live = Platform.environment.containsKey('SAGE_DESKTOP_LIVE_CATALOG');
   test(
-    'real sidecar completes two streamed turns with persisted history',
+    live ? 'live model completes two streamed turns with persisted history' : 'real sidecar completes two streamed turns with persisted history',
     () async {
       expect(
         python.existsSync(),
@@ -71,13 +72,13 @@ void main() {
             .startRun({
               'agent_id': agents.first.id,
               'messages': [
-                {'role': 'user', 'text': 'Conversation test turn $turn'},
+                {'role': 'user', 'text': live ? (turn == 1 ? '记住验收代号 SAGE_ENTRY_716。不要调用工具，只回复代号。' : '上一轮的验收代号是什么？不要调用工具，只回复代号。') : 'Conversation test turn $turn'},
               ],
               'idempotency_key': 'flutter-unified-$turn',
               'session_id': sessionId,
             })
             .toList()
-            .timeout(const Duration(seconds: 30));
+            .timeout(Duration(seconds: live ? 180 : 30));
         expect(
           frames.any((frame) => frame['type'] == 'run.failed'),
           isFalse,
@@ -88,7 +89,7 @@ void main() {
           isTrue,
           reason: jsonEncode(frames),
         );
-        expect(jsonEncode(frames), contains('Unified reply $turn'));
+        expect(jsonEncode(frames), contains(live ? 'SAGE_ENTRY_716' : 'Unified reply $turn'));
         final opened = frames.firstWhere(
           (frame) => frame['kind'] == 'stream.opened',
         );
@@ -98,7 +99,7 @@ void main() {
         expect((run['run'] as Map)['state'], 'completed');
       }
     },
-    timeout: const Timeout(Duration(minutes: 2)),
+    timeout: Timeout(Duration(minutes: live ? 7 : 2)),
     skip: python.existsSync()
         ? false
         : 'Requires repository .venv with Python backend dependencies',

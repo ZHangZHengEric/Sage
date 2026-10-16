@@ -6,7 +6,7 @@ import hashlib
 import json
 from pathlib import PurePosixPath
 
-from pydantic import Field, model_validator
+from pydantic import Field, model_validator, model_serializer
 
 from sagents.v2.contracts.common import StrictModel, VerbatimText
 from sagents.v2.package.manifest import SageManifest
@@ -15,9 +15,19 @@ from sagents.v2.package.manifest import SageManifest
 class AgentPackageBundle(StrictModel):
     manifest: SageManifest
     files: dict[VerbatimText, VerbatimText] = Field(default_factory=dict)
+    dependencies: dict[str, AgentPackageBundle] = Field(default_factory=dict)
+
+    @model_serializer(mode="wrap")
+    def serialize_bundle(self, handler):
+        data = handler(self)
+        if not self.dependencies:
+            data.pop("dependencies", None)
+        return data
 
     @model_validator(mode="after")
     def validate_files(self):
+        if len(self.manifest.agents) != 1:
+            raise ValueError("an Agent Package must define exactly one Agent")
         for name in self.files:
             path = PurePosixPath(name)
             if (

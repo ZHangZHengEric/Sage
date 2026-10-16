@@ -990,7 +990,7 @@ class ApplicationAssembler:
                     },
                 )
             )
-        dispatcher = LocalWorkerDispatcher(
+        dispatcher = self.options.dispatcher or LocalWorkerDispatcher(
             scheduler,
             max_concurrent_runs=int(dispatcher_values.get("max_concurrent_runs", 8)),
             max_concurrent_runs_per_tenant=tenant_limit,
@@ -999,12 +999,15 @@ class ApplicationAssembler:
         )
         services["execution.dispatcher"] = dispatcher
         composition_hash = self._composition_hash(
-            resolved.manifest_hash, scope_handles, services
+            resolved.manifest_hash, scope_handles, services,
+            registry=self.extensions if self.options.revision_identity else None,
         )
         runtime_composition_hash = composition_hash
         agent.attach_dispatcher(dispatcher)
-        dispatcher.attach_recovery_agent(agent)
-        await dispatcher.start()
+        if self.options.dispatcher is None:
+            dispatcher.attach_recovery_agent(agent)
+        if not self.options.defer_dispatcher_start:
+            await dispatcher.start()
         resolved_plan = self._resolved_application_plan(
             package_id=resolved.package_id,
             manifest_hash=resolved.manifest_hash,
@@ -1060,7 +1063,7 @@ class ApplicationAssembler:
             adapters=adapters,
             composition_hash=composition_hash,
             resolved_plan=resolved_plan,
-            owned_resources=(*reversed(self.options.owned_resources), dispatcher),
+            owned_resources=(*reversed(self.options.owned_resources), *((dispatcher,) if self.options.dispatcher is None else ())),
             resource_readiness=readiness,
         )
         application._attach_composer(
@@ -1758,12 +1761,13 @@ class ApplicationAssembler:
         return effective
 
     @staticmethod
-    def _composition_hash(manifest_hash, handles, services) -> str:
+    def _composition_hash(manifest_hash, handles, services, *, registry=None) -> str:
         payload = {
             "manifest": manifest_hash,
-            "plans": sorted(
-                handle.composition_hash for handle in handles if handle.graph.plugin_ids
-            ),
+            "plans": (sorted(registry.inventory(), key=lambda item: item["plugin_id"])
+                      if registry is not None else sorted(
+                          handle.composition_hash for handle in handles if handle.graph.plugin_ids
+                      )),
             "services": {
                 capability: _service_composition_identity(provider)
                 for capability, provider in sorted(services.items())

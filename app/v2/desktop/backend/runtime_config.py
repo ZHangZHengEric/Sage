@@ -4,6 +4,8 @@ import re
 from pathlib import Path
 from typing import Any
 
+from sagents.v2.composition.defaults import DEFAULT_SANDBOX_CONFIGS as _SANDBOX_DEFAULTS
+
 from app.v2.desktop.backend.package import (
     DESKTOP_COMPONENT_DEFAULTS as _DESKTOP_COMPONENT_DEFAULTS,
     stable_component_id as _stable_component_id,
@@ -164,20 +166,7 @@ def _continuation_agent_instructions(plugin_id: str) -> str:
     return ""
 
 
-_SANDBOX_DEFAULTS = {
-    "sage.sandbox.local-workspace": {
-        "workspace_root": "/workspace",
-        "workspace_path_mode": "host",
-        "workspace_mapping": "active_workspace",
-        "filesystem_mode": "workspace",
-    },
-    "sage.sandbox.ephemeral": {
-        "workspace_root": "/workspace",
-        "workspace_path_mode": "virtual",
-        "workspace_mapping": "isolated",
-        "filesystem_mode": "workspace",
-    },
-}
+
 
 
 def _sandbox_network_policy(

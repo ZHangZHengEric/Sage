@@ -183,7 +183,7 @@ async def test_model_factory_resolves_each_agent_binding(tmp_path, monkeypatch):
     def factory(resolved, agent_id):
         seen[agent_id] = resolved.agents[agent_id].model_bindings
         return scripted_hello()
-    app = await SAgentBuilder().with_defaults(session_root=tmp_path).with_model_provider_factory(factory).build(manifest)
+    app = await SAgentBuilder().with_defaults(session_root=tmp_path).with_model_provider_factory(factory)._build_package(manifest)
     try:
         assert seen == {"main": {"primary": "custom-main"}, "child": {"primary": "custom-child"}}
         for capability in ("context.summarizer", "agent.continuation-policy", "memory.recall-query"):

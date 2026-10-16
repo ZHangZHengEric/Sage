@@ -98,3 +98,14 @@ Desktop 的 `component_plan.py` 只负责将已确定的设置快照转换为组
 
 真实模型、数据库和外部沙箱测试需要各自的环境。单机测试通过不等于已经验证
 分布式部署能力。
+
+
+当前统一入口：`builder.build()` → `app.load_agent()` → `app.entrypoint().run_stream(..., agent=agent)` → `app.close()`.
+
+加载、版本发布和恢复快照分别在 `sagents/v2/composition/loaded_agents.py`、`inputs.py`、`revision_store.py`；`defaults.py` 由 SDK 与 Desktop 共用组件默认值。
+
+
+统一入口的阅读顺序：`sagents/v2/builder.py` 创建 App，
+`composition/loaded_agents.py` 管理版本和生命周期，`composition/agent_graph.py`
+绑定独立子 Package，`agent/management/loading.py` 加载持久化的依赖树。
+CLI 的实际装配在 `app/v2/cli/host.py`，TUI 通过 CLI v2 协议复用它。

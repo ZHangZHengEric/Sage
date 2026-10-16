@@ -87,9 +87,13 @@ class IsolatedOptimizationRunner:
             builder = self.builder_factory(package.model_copy(deep=True), root, context)
             if inspect.isawaitable(builder):
                 builder = await builder
-            app = await builder.build(
-                manifest, tenant_id=context.actor.tenant_id, agent_id=agent_id
-            )
+            app = await builder.build(runtime=manifest.runtime, tenant_id=context.actor.tenant_id)
+            try:
+                from sagents.v2.agent.management.loading import load_bundle_agents
+                await load_bundle_agents(app, package)
+            except BaseException:
+                await app.close()
+                raise
             try:
                 yield _NativeConversation(
                     self, app, package, agent_id, context, started
@@ -103,18 +107,20 @@ class IsolatedOptimizationRunner:
         stream = None
         try:
             agent = app.entrypoint()
+            loaded = next(a for a in app.loaded_agents if a.package_id == package.manifest.metadata.id)
             stream = await agent.run_stream(
                 StartRun(
-                    agent_id=agent_id,
+                    agent_id=loaded.id,
                     config=RunConfig(
                         metadata=self.run_metadata(package) if self.run_metadata else {}
                     ),
                     session_id=session_id,
                     input=(InputItem(role="user", content=(TextBlock(text=content),)),),
-                    resolved_spec_hash=app.composition_hash,
+                    resolved_spec_hash=loaded.composition_hash,
                     idempotency_key=f"optimization_{uuid4().hex}",
                 ),
                 context,
+                agent=loaded,
             )
             snapshot = await stream.wait()
             result = (

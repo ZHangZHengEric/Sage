@@ -28,6 +28,34 @@ class RunService:
         self.keys = keys
         self.catalog = catalog
         self.settings = settings
+        self._agent_load_lock = asyncio.Lock()
+
+    async def _load_run_agent(self, command, user_id):
+        from app.v2.server.conversations.composition import load_composition
+        from app.v2.server.config.manifest import server_v2_run_manifest
+        from sagents.v2 import HostAgentExecution
+        frozen = load_composition(command, user_id=user_id)
+        if frozen is None:
+            manifest = self.application.loaded_agents[0]._resolved
+        else:
+            manifest = frozen.package.resolved_manifest() if frozen.package is not None else server_v2_run_manifest(
+                self.settings, agent=frozen.agent,
+                registry=getattr(self.catalog, "extensions", None),
+                skills=tuple(record.name for record in frozen.skills),
+            )
+        root = self.application.agent(self.application.resolved_plan.entrypoint_agent_id)
+        execution = HostAgentExecution(
+            driver_factory=root.driver_factory, spec_hash=command.resolved_spec_hash,
+            runtime=self.application.runtime,
+            dispatcher=self.application.service("execution.dispatcher"),
+            agent_id=command.agent_id,
+        )
+        async with self._agent_load_lock:
+            current = next((value for value in self.application.loaded_agents
+                            if value.package_id == (manifest.package_id if hasattr(manifest, "package_id") else manifest.metadata.id)), None)
+            if current is None:
+                return await self.application.load_agent(manifest, execution=execution)
+            return await self.application.update_agent(agent=current, package=manifest, execution=execution)
 
     async def cancel_run(
         self,
@@ -46,7 +74,7 @@ class RunService:
         fact.
         """
 
-        runtime = self.application.entrypoint().runtime
+        runtime = self.application.runtime
         receipt = await runtime.cancel_run(
             CancelRun(
                 run_id=run_id,
@@ -93,7 +121,7 @@ class RunService:
                 )
             )
         suspension = await access.get_suspension(run.suspension_id, context)
-        runtime = self.application.entrypoint().runtime
+        runtime = self.application.runtime
         if suspension.interaction_id is None:
             receipt = await runtime.resume_run(
                 ResumeRun(
@@ -153,7 +181,7 @@ class RunService:
         )
 
     async def approval_expired(self, run, interaction) -> bool:
-        command = await self.application.entrypoint().runtime.session_store.get_start_command(run.run_id)
+        command = await self.application.runtime.session_store.get_start_command(run.run_id)
         _, policy = frozen_execution(command)
         timeout = policy.approval_timeout_seconds
         if self.settings is not None:
@@ -168,7 +196,7 @@ class RunService:
             raise SageV2Error(RuntimeErrorInfo(code="server.approval.expired",
                 category=ErrorCategory.CONFLICT, message="Approval expired; start a new task"))
         if self.keys is not None and decision not in {"deny", "cancel"}:
-            command = await self.application.entrypoint().runtime.session_store.get_start_command(run.run_id)
+            command = await self.application.runtime.session_store.get_start_command(run.run_id)
             live = await live_execution_policy(command, users=self.users, keys=self.keys, catalog=self.catalog,
                 settings=self.settings, user_id=context.actor.principal_id)
             if live is None:
@@ -216,7 +244,7 @@ class RunService:
         already running under a drive that is someone else's.
         """
 
-        agent = self.application.entrypoint()
+        agent = self.application.agent(self.application.resolved_plan.entrypoint_agent_id)
         run = await agent.runtime.get_run(run_id)
         if run.state != RunState.RESUMING or self.execution.driving(run_id):
             return
@@ -224,7 +252,9 @@ class RunService:
         bound = False
         try:
             bound = self.execution.bind_model(session_id, user_id)
-            execution = await agent.continue_run(run_id, context)
+            command = await self.application.runtime.session_store.get_start_command(run_id)
+            loaded = await self._load_run_agent(command, user_id)
+            execution = await self.application.entrypoint().continue_run(run_id, context, agent=loaded)
             task = asyncio.create_task(
                 self._continue_drive(
                     execution, run_id=run_id, session_id=session_id, label=label
@@ -273,11 +303,12 @@ class RunService:
             try:
                 bound = self.execution.bind_model(session_id, user_id)
                 application = self.application
+                loaded = await self._load_run_agent(command, user_id)
                 stream = await application.run_interface(
                     interface,
                     command,
                     context,
-                    agent_id=application.resolved_plan.entrypoint_agent_id,
+                    agent=loaded,
                 )
                 run_id = stream.handle.run_id
                 if (

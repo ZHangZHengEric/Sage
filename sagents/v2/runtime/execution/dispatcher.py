@@ -81,6 +81,7 @@ class LocalWorkerDispatcher:
         self._claim_policy = SchedulerClaimPolicy(
             max_active_per_tenant=max_concurrent_runs_per_tenant
         )
+        self.recovery_filter = None
         self._recovery_agent = None
         self._lifecycle = asyncio.Condition()
         self._submissions_inflight = 0
@@ -117,6 +118,11 @@ class LocalWorkerDispatcher:
             for index in range(self.max_concurrent_runs)
         ]
 
+    async def refresh_recovery(self) -> None:
+        """Restore newly available Agent revisions under the dispatcher lock."""
+        async with self._lifecycle:
+            await self._restore_dispatchable_work()
+
     async def _restore_dispatchable_work(self) -> None:
         """Rebuild missing Scheduler entries from authoritative Run intents."""
 
@@ -127,6 +133,8 @@ class LocalWorkerDispatcher:
         if reader is None:
             return
         for intent in await reader():
+            if self.recovery_filter is not None and not self.recovery_filter(intent.run):
+                continue
             try:
                 await self.scheduler.submit(
                     self._work_item(

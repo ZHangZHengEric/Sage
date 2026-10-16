@@ -398,6 +398,14 @@ def test_flow_executes_member_agent_with_host_limits(client):
             "edges": [{"from": "work", "to": "end"}],
         }
     }
+    from copy import deepcopy
+    child = deepcopy(bundle)
+    child["manifest"]["metadata"]["id"] += ".worker"
+    child["manifest"]["agents"] = {"worker": child["manifest"]["agents"]["worker"]}
+    child["manifest"]["entrypoint"] = {"agent": "worker"}
+    child["manifest"]["flows"] = {}
+    bundle["manifest"]["agents"].pop("worker")
+    bundle["dependencies"] = {"worker": child}
     response = client.post("/api/agent-packages", headers=headers, json=bundle)
     assert response.status_code == 200, response.text
     ref = response.json()["data"]["ref"]
@@ -600,3 +608,26 @@ def test_a_package_run_can_reach_the_tenant_s_own_a2a_peers(tmp_path):
     assert len(transport.sent) == 1
     message = transport.sent[0][1]["params"]["message"]
     assert message["parts"][0]["text"] == "what is new"
+
+
+def test_streamed_package_loads_independent_child_package(client):
+    from copy import deepcopy
+    headers = {"Authorization": f"Bearer {register_and_login(client)}"}
+    parent = client.get("/api/agent-packages/template", headers=headers).json()["data"]
+    child = deepcopy(parent)
+    child["manifest"]["metadata"]["id"] += ".child"
+    parent["manifest"]["agents"]["assistant"]["entrypoint"] = {"type": "flow", "flow": "main"}
+    parent["manifest"]["flows"] = {"main": {
+        "version": "1", "start": "child",
+        "nodes": [{"id": "child", "type": "agent", "agent": "worker"}, {"id": "end", "type": "end"}],
+        "edges": [{"from": "child", "to": "end"}],
+    }}
+    parent["dependencies"] = {"worker": child}
+    response = client.post("/api/agent-package", headers=headers, json={
+        "threadId": "independent-child", "runId": "independent-child-run",
+        "messages": [{"id": "m1", "role": "user", "content": "Say hello"}],
+        "tools": [], "context": [], "state": {}, "agent_package": parent,
+    })
+    assert response.status_code == 200, response.text
+    assert '"RUN_ERROR"' not in response.text, response.text
+    assert '"RUN_FINISHED"' in response.text, response.text

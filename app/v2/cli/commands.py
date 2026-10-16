@@ -11,7 +11,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
 
-from sagents.v2 import SAgent, SAgentApplication
+from sagents.v2 import SAgentApplication
+from app.v2.cli.runner import CliExecution
 from sagents.v2.contracts.errors import SageV2Error
 from sagents.v2.contracts.principals import ActorRef, PrincipalType, RequestContext
 from sagents.v2.contracts.run_state import TERMINAL_RUN_STATES, RunState
@@ -204,7 +205,7 @@ class CliSession:
     """一次 CLI 调用共享的运行时资源：同一个 ``SAgent`` 跑多轮 Run。"""
 
     application: SAgentApplication
-    agent: SAgent
+    agent: CliExecution
     stdin: StdinLineReader
     bindings: LocalWorkspaceBindingProvider
     package: SageManifest
@@ -461,14 +462,15 @@ async def open_cli_session(
     context = RequestContext(
         actor=ActorRef(principal_id=args.user_id, principal_type=PrincipalType.USER)
     )
+    loaded_agent = next(agent for agent in application.loaded_agents if agent.package_id == package.metadata.id)
     return CliSession(
         application=application,
-        agent=application.entrypoint(),
+        agent=CliExecution(application, loaded_agent),
         stdin=stdin,
         bindings=bindings,
         package=package,
-        spec_hash=application.composition_hash,
-        agent_id=agent_id,
+        spec_hash=loaded_agent.composition_hash,
+        agent_id=loaded_agent.id,
         context=context,
         renderer=renderer,
         decider=decider,

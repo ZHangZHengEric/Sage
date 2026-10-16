@@ -115,7 +115,7 @@ async def test_declared_entry_point_is_loaded_and_configured(
     application = await (
         SAgentBuilder()
         .with_defaults(session_root=tmp_path / "session-store")
-        .build(build_input)
+        ._build_package(build_input)
     )
 
     assert application.entrypoint().driver_factory("run_1").model.provider is provider
@@ -140,7 +140,7 @@ async def test_manually_registered_declared_plugin_does_not_require_entry_point(
         SAgentBuilder()
         .with_defaults(session_root=tmp_path / "session-store")
         .register(registration)
-        .build(_package_with_declared_model_plugin())
+        ._build_package(_package_with_declared_model_plugin())
     )
 
     assert application.entrypoint().driver_factory("run_1").model.provider is provider
@@ -204,7 +204,7 @@ async def test_resolved_manifest_preserves_runtime_plugin_selection(
         SAgentBuilder()
         .with_defaults(session_root=tmp_path / "session-store")
         .with_model_provider(ScriptedModelProvider(()))
-        .build(resolved)
+        ._build_package(resolved)
     )
 
     assert observed_configs == [{"namespace": "agent"}]
@@ -332,7 +332,7 @@ async def test_manually_registered_plugin_still_obeys_manifest_version(tmp_path)
             SAgentBuilder()
             .with_defaults(session_root=tmp_path / "session-store")
             .register(_model_registration(provider))
-            .build(package)
+            ._build_package(package)
         )
 
     assert mismatch.value.info.code == "extension.version_mismatch"

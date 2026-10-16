@@ -18,6 +18,7 @@ from sagents.v2.application import (
 )
 from sagents.v2.composition.assembler import ApplicationAssembler
 from sagents.v2.composition.options import BuildOptions
+from sagents.v2.composition.inputs import RuntimeInput
 from sagents.v2.memory import (
     MemoryProvider,
 )
@@ -66,7 +67,7 @@ class SAgentBuilder:
         and observability logging remain explicit host choices for this package.
         """
         return (
-            self.with_session_store(application.entrypoint().runtime.session_store)
+            self.with_session_store(application.runtime.session_store)
             .with_derived_state_store(application.service("derived-state.store"))
             .with_scheduler(application.service("execution.scheduler"))
             .with_job_runtime(application.service("execution.job-runtime"))
@@ -96,6 +97,7 @@ class SAgentBuilder:
         admission hash; child Runs inherit this execution contract.
         """
         self._options.admitted_run_contract = (run_id, spec_hash)
+        self._options.defer_dispatcher_start = True
         return self
 
     def with_run_driver_factory(self, factory: DriverFactory) -> "SAgentBuilder":
@@ -294,7 +296,11 @@ class SAgentBuilder:
     def inventory(self) -> tuple[dict, ...]:
         return self.extensions.inventory()
 
-    async def build(
+    def _prepare_package(self, package):
+        """Host-specific catalog normalization, before revision hashing/freezing."""
+        return package
+
+    async def _build_package(
         self,
         package: SageManifest | ResolvedSageManifest | str | Path,
         *,
@@ -321,3 +327,41 @@ class SAgentBuilder:
                 except BaseException as close_exc:
                     exc.add_note(f"scope rollback also failed: {close_exc}")
             raise
+
+    async def build(
+        self,
+        *,
+        tenant_id: str | None = None,
+        runtime: RuntimeInput | None = None,
+        runtime_config_text: str | None = None,
+    ) -> SAgentApplication:
+        """Create an App, then load Agent Packages with app.load_agent().
+
+        """
+        from copy import copy, deepcopy
+        from sagents.v2.composition.inputs import runtime_input
+        from sagents.v2.composition.defaults import default_runtime
+        from sagents.v2.composition.loaded_agents import LoadedAgents
+
+        runtime = runtime_input(runtime, config_text=runtime_config_text)
+        if runtime is None:
+            runtime = default_runtime(self._options.session_root or ".runtime/sagents")
+        snapshot = copy(self)
+        snapshot._options = copy(self._options)
+        snapshot.extensions = deepcopy(self.extensions)
+        snapshot._options.owned_resources = []
+        snapshot._options.extra_tools = list(self._options.extra_tools)
+        snapshot._options.flow_tool_nodes = dict(self._options.flow_tool_nodes)
+        application = SAgentApplication(
+            agents={},
+            entrypoint_agent_id=None,
+            scope_handles=(),
+            services={},
+            adapters={},
+            composition_hash="",
+            owned_resources=tuple(reversed(self._options.owned_resources)),
+        )
+        application._loaded_agents = LoadedAgents(
+            application, snapshot, runtime, tenant_id
+        )
+        return application

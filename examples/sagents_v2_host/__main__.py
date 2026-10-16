@@ -83,13 +83,14 @@ async def main(args) -> None:
                 principal_type=PrincipalType.USER,
             )
         )
+        agent = app.loaded_agents[0]
         command = StartRun(
-            agent_id=app.resolved_plan.entrypoint_agent_id,
+            agent_id=agent.id,
             input=(InputItem(role="user", content=(TextBlock(text=args.prompt),)),),
-            resolved_spec_hash=app.composition_hash,
+            resolved_spec_hash=agent.composition_hash,
             idempotency_key=args.idempotency_key or str(uuid4()),
         )
-        stream = await app.entrypoint().run_stream(command, context)
+        stream = await app.entrypoint().run_stream(command, context, agent=agent)
         async for event in stream.events:
             print(event.model_dump_json())
         result = await stream.wait()

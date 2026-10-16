@@ -11,6 +11,10 @@ Requires Python 3.12 or newer. The legacy Sage runtime remains 3.10+.
 from sagents.v2._lazy import exported_names, resolve_export
 
 _EXPORTS = {
+    "RuntimeConfig": ("sagents.v2.package.manifest.runtime", "RuntimeConfig"),
+    "default_runtime": ("sagents.v2.composition.defaults", "default_runtime"),
+    "HostAgentExecution": ("sagents.v2.composition.host_execution", "HostAgentExecution"),
+    "LoadedAgent": ("sagents.v2.composition.loaded_agents", "LoadedAgent"),
     "ComposedRun": ("sagents.v2.composition.resources", "ComposedRun"),
     "RunResources": ("sagents.v2.composition.resources", "RunResources"),
     "AgentPackageTestGenerator": (

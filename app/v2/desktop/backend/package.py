@@ -6,6 +6,8 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
+from sagents.v2.composition.defaults import DEFAULT_COMPONENTS, default_runtime
+
 from sagents.v2.package.manifest.agents import (
     AgentDefinition,
     ApplicationEntrypoint,
@@ -17,91 +19,91 @@ from sagents.v2.package.manifest.runtime import CapabilitySelection, RuntimeConf
 
 DESKTOP_COMPONENTS = {
     "skill.loading": {
-        "default": "sage.skill.loading.lazy",
+        "default": DEFAULT_COMPONENTS["skill.loading"],
         "selection_mode": "user",
         "apply_mode": "next_run",
         "scope": "agent",
     },
     "agent.continuation-policy": {
-        "default": "sage.agent.continuation.llm-judge",
+        "default": DEFAULT_COMPONENTS["agent.continuation-policy"],
         "selection_mode": "user",
         "apply_mode": "next_run",
         "scope": "run",
     },
     "context.token-estimator": {
-        "default": "sage.context.token-estimator.json-heuristic",
+        "default": DEFAULT_COMPONENTS["context.token-estimator"],
         "selection_mode": "user",
         "apply_mode": "next_run",
         "scope": "tenant",
     },
     "context.reducer": {
-        "default": "sage.context.reducer.persistent-summary",
+        "default": DEFAULT_COMPONENTS["context.reducer"],
         "selection_mode": "user",
         "apply_mode": "next_run",
         "scope": "tenant",
     },
     "context.summarizer": {
-        "default": "sage.context.summarizer.model",
+        "default": DEFAULT_COMPONENTS["context.summarizer"],
         "selection_mode": "user",
         "apply_mode": "next_run",
         "scope": "agent",
     },
     "context.summary-store": {
-        "default": "sage.context.summary-store.session-derived",
+        "default": DEFAULT_COMPONENTS["context.summary-store"],
         "selection_mode": "host",
         "apply_mode": "restart",
         "scope": "process",
     },
     "memory.provider": {
-        "default": "sage.memory.filesystem-bm25",
+        "default": DEFAULT_COMPONENTS["memory.provider"],
         "selection_mode": "user",
         "apply_mode": "restart",
         "scope": "process",
     },
     "memory.recall-query": {
-        "default": "sage.memory.recall-query.llm",
+        "default": DEFAULT_COMPONENTS["memory.recall-query"],
         "selection_mode": "user",
         "apply_mode": "next_run",
         "scope": "agent",
     },
     "tool.selection-policy": {
-        "default": "sage.tool-selection.llm",
+        "default": DEFAULT_COMPONENTS["tool.selection-policy"],
         "selection_mode": "user",
         "apply_mode": "next_run",
         "scope": "agent",
     },
     "session-memory.provider": {
-        "default": "sage.session-memory.sqlite-bm25",
+        "default": DEFAULT_COMPONENTS["session-memory.provider"],
         "selection_mode": "user",
         "apply_mode": "restart",
         "scope": "process",
     },
     "observability.diagnostic-sink": {
-        "default": "sage.observability.filesystem",
+        "default": DEFAULT_COMPONENTS["observability.diagnostic-sink"],
         "selection_mode": "host",
         "apply_mode": "restart",
         "scope": "process",
     },
     "observability.log-sink": {
-        "default": "sage.logging.filesystem",
+        "default": DEFAULT_COMPONENTS["observability.log-sink"],
         "selection_mode": "user",
         "apply_mode": "restart",
         "scope": "process",
     },
     "execution.sandbox": {
-        "default": "sage.sandbox.local-workspace",
+        "default": DEFAULT_COMPONENTS["execution.sandbox"],
         "selection_mode": "host",
         "apply_mode": "next_run",
         "scope": "run",
     },
     "session.store": {
-        "default": "sage.session.filesystem",
+        "default": DEFAULT_COMPONENTS["session.store"],
         "selection_mode": "host",
         "apply_mode": "restart",
         "scope": "process",
     },
     "workspace.initializer": {
-        "default": "sage.workspace.initializer.claw",
+        "default": DEFAULT_COMPONENTS["workspace.initializer"],
         "selection_mode": "user",
         "apply_mode": "next_run",
         "scope": "agent",
@@ -213,16 +215,7 @@ def _runtime_capabilities(
     configs: Mapping[str, Mapping[str, Any]],
     language: str,
 ) -> dict[str, CapabilitySelection]:
-    paths = {
-        "session.store": {"root": str(session_root)},
-        "memory.provider": {"root": str(session_root / "memory")},
-        "session-memory.provider": {"root": str(session_root / "session-memory")},
-        "observability.diagnostic-sink": {
-            "root": str(session_root / "sessions"),
-            "legacy_root": str(session_root / "diagnostics"),
-        },
-        "observability.log-sink": {"root": str(session_root / "logs")},
-    }
+    paths = {key: selection.config for key, selection in default_runtime(session_root).capabilities.items()}
     capabilities: dict[str, CapabilitySelection] = {}
     for capability in _MANIFEST_CAPABILITIES:
         plugin_id = stable_component_id(
@@ -230,6 +223,8 @@ def _runtime_capabilities(
             selections.get(capability, DESKTOP_COMPONENT_DEFAULTS[capability]),
         )
         host_config = dict(paths.get(capability, {}))
+        if capability == "workspace.initializer":
+            host_config.pop("language", None)
         if (
             capability == "workspace.initializer"
             and plugin_id == "sage.workspace.initializer.claw"

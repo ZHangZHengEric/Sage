@@ -89,15 +89,18 @@ async def build_desktop_application(
         builder = builder.with_log_sink(log_sink)
     if diagnostic_sink is not None:
         builder = builder.with_diagnostic_sink(diagnostic_sink)
-    application = await builder.build(
-        desktop_v2_manifest(
-            session_root=root,
-            component_selections=component_selections,
-            component_configs=component_configs,
-            language=language,
-        ),
-        runtime=runtime,
+    manifest = desktop_v2_manifest(
+        session_root=root,
+        component_selections=component_selections,
+        component_configs=component_configs,
+        language=language,
     )
+    application = await builder.build(runtime=runtime if runtime is not None else manifest.runtime)
+    try:
+        await application.load_agent(manifest)
+    except BaseException:
+        await application.close()
+        raise
     if owns_bindings:
         # Application closes owned resources in reverse order. The dispatcher
         # must settle Run drivers before their Host binding provider closes.
