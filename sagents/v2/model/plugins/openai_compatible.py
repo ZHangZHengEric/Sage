@@ -41,6 +41,7 @@ from sagents.v2.contracts.provider_state import make_provider_state, read_provid
 from sagents.v2.model.wire import (
     parse_tool_arguments,
     provider_error,
+    ProviderStreamFailure,
     stream_incomplete_error,
     minimum_reasoning_control,
     validate_extra_body,
@@ -311,6 +312,13 @@ class OpenAICompatibleModelProvider:
             ) = await self._create_with_compatibility_negotiation(kwargs)
             async for chunk in upstream:
                 record_wire_event(chunk)
+                failure = wire_value(chunk, "error")
+                if failure:
+                    raise ProviderStreamFailure(
+                        str(wire_value(failure, "message") or failure),
+                        code=wire_value(failure, "code") or wire_value(failure, "type"),
+                        body=wire_json_value(failure),
+                    )
                 response_id = str(wire_value(chunk, "id") or response_id)
                 raw_usage = wire_value(chunk, "usage")
                 if raw_usage is not None:
@@ -517,7 +525,9 @@ class OpenAICompatibleModelProvider:
         history_fallback_used = False
         while True:
             try:
-                record_wire_event({"diagnostic_event": "request_attempt", "payload": current})
+                record_wire_event(
+                    {"diagnostic_event": "request_attempt", "payload": current}
+                )
                 upstream = await self._client.chat.completions.create(**current)
                 self._learn_output_token_field(current)
                 if history_fallback_used:
@@ -531,14 +541,23 @@ class OpenAICompatibleModelProvider:
                     "attempts": fallbacks,
                 }
             except Exception as exc:
-                record_wire_event({"diagnostic_event": "request_error", "error": {"type": type(exc).__name__, "message": str(exc)}})
+                record_wire_event(
+                    {
+                        "diagnostic_event": "request_error",
+                        "error": {"type": type(exc).__name__, "message": str(exc)},
+                    }
+                )
                 if not history_fallback_used:
                     fallback = self._reasoning_history_fallback_request(current, exc)
                     if fallback is not None:
                         current = fallback
                         history_fallback_used = True
-                        fallbacks.append({"kind": "empty_reasoning_content_supplied",
-                                          "provider_status": self._provider_status(exc)})
+                        fallbacks.append(
+                            {
+                                "kind": "empty_reasoning_content_supplied",
+                                "provider_status": self._provider_status(exc),
+                            }
+                        )
                         continue
                 if not token_fallback_used:
                     fallback, change = self._token_field_fallback_request(current, exc)
@@ -573,15 +592,23 @@ class OpenAICompatibleModelProvider:
         if "reasoning_content" not in message or "must be passed back" not in message:
             return None
         messages = kwargs.get("messages", ())
-        missing = [item for item in messages if item.get("role") == "assistant"
-                   and item.get("reasoning_content") is None]
+        missing = [
+            item
+            for item in messages
+            if item.get("role") == "assistant" and item.get("reasoning_content") is None
+        ]
         if not missing:
             return None
-        return {**kwargs, "messages": [
-            {**item, "reasoning_content": ""}
-            if item.get("role") == "assistant" and item.get("reasoning_content") is None
-            else item for item in messages
-        ]}
+        return {
+            **kwargs,
+            "messages": [
+                {**item, "reasoning_content": ""}
+                if item.get("role") == "assistant"
+                and item.get("reasoning_content") is None
+                else item
+                for item in messages
+            ],
+        }
 
     def _effective_max_output_tokens_field(
         self,
@@ -1137,7 +1164,9 @@ class OpenAIChatCompletionsModelProvider(OpenAICompatibleModelProvider):
                 "structured_output_format": (
                     "json_schema"
                     if report.supports_structured_output
-                    else "json_object" if report.supports_json_object else None
+                    else "json_object"
+                    if report.supports_json_object
+                    else None
                 ),
                 "auxiliary_json_compatible": bool(
                     reasoning_metadata["auxiliary_json"].get("status") == "supported"

@@ -12,17 +12,15 @@ from sagents.v2.skill.provider import SkillLoader
 
 
 class SkillLoadingConfig(StrictModel):
-    max_active_tokens: int = Field(default=6_000, ge=1, strict=True)
+    max_active_characters: int = Field(default=24_000, ge=1, strict=True)
 
 
 class SkillLoadingPlugin:
-    """Load Skill material on demand, bounded by an active-token budget."""
+    """Load Skill material on demand, bounded by an active-character storage limit."""
 
     plugin_id = "sage.skill.loading.lazy"
     name = "Lazy Skill loading"
-    description = (
-        "Loads Skill material only when it is asked for, within a token budget."
-    )
+    description = "Loads Skill material only when it is asked for, within a character storage limit."
     descriptor = ExtensionDescriptor(
         plugin_id=plugin_id,
         version="2.0.0",
@@ -34,8 +32,10 @@ class SkillLoadingPlugin:
         built_in=True,
     )
 
-    def __init__(self, *, max_active_tokens: int = 6_000) -> None:
-        self.config = SkillLoadingConfig(max_active_tokens=max_active_tokens)
+    def __init__(self, *, max_active_characters: int = 24_000) -> None:
+        self.config = SkillLoadingConfig(max_active_characters=max_active_characters)
 
     def create_loader(self, **ports) -> SkillLoader:
-        return SkillLoader(**ports, max_active_tokens=self.config.max_active_tokens)
+        return SkillLoader(
+            **ports, max_active_characters=self.config.max_active_characters
+        )

@@ -83,6 +83,10 @@ graph. Managed `AgentPackageBundle.dependencies` persists the individual child
 Packages; each is loaded through the same App API. CLI presets follow this
 pattern, and TUI uses the same CLI through `sage v2 chat --json`.
 
+## Delegated task Sessions
+
+Default delegation passes only the task message. Without `child_session_id`, it creates an independent serial Session whose first `user` message is the parent's task. With an existing child Session, it appends a new `user` task and retains that child's own history. `parent_run_id`, `parent_tool_call_id` and Session ancestry support tracing, result routing and storage layout; they do not implicitly copy parent messages or attachments. Put necessary background and resource references in content; original_task is tracing metadata and is not automatically sent as a child message. Explicit low-level `FORK` requests retain their snapshot semantics and are separate from default delegation.
+
 ## Configuration boundaries
 
 | Input | Owner |
@@ -141,16 +145,16 @@ Builder configuration only affects applications built afterwards.
 
 ```python
 from sagents.v2 import SAgentBuilder
-from examples.sagents_v2_host.plugins import estimator_registration
+from examples.sagents_v2_host.plugins import compactor_registration
 
 builder = SAgentBuilder().with_defaults(session_root="./runtime")
-builder.register(estimator_registration())
+builder.register(compactor_registration())
 app = await builder.build(models="examples/sagents_v2_host/models.yaml", runtime={
     "capabilities": {
-        "context.token-estimator": {
-            "plugin": "example.context.byte-estimator",
+        "context.unit-compactor": {
+            "plugin": "example.context.reference-compactor",
             "scope": "agent",
-            "config": {"bytes_per_token": 4.0},
+            "config": {"minimum_characters": 4},
         },
     },
 })

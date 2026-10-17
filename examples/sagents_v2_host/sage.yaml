@@ -9,6 +9,6 @@ agents:
 entrypoint: {agent: main}
 runtime:
   capabilities:
-    context.token-estimator:
-      plugin: example.context.byte-estimator
-      config: {bytes_per_token: 4.0}
+    context.unit-compactor:
+      plugin: example.context.reference-compactor
+      config: {minimum_characters: 4.0}

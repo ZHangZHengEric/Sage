@@ -137,14 +137,14 @@ _TOOL_DESCRIPTIONS: dict[str, ToolText] = {
         "Criar um subagente especialista reutilizável na sessão atual; system_prompt define seu papel e capacidades, não uma tarefa única.",
     ),
     "sys_delegate_task": _text(
-        "把一个或多个具体任务并发委派给已有子智能体。",
-        "Delegate one or more concrete tasks concurrently to existing sub-agents.",
-        "Delegar uma ou mais tarefas concretas simultaneamente a subagentes existentes.",
+        "把一个或多个具体任务并发委派给已有子智能体。新会话只收到 content，不继承父历史；正文须写全目标、背景、约束和资源引用。已有子会话保留自己的历史并追加 user 任务。",
+        "Delegate concrete tasks concurrently to existing sub-agents. A new Session receives only content, without parent history; include the goal, background, constraints and resource references. An existing child Session retains its own history and receives a new user task.",
+        "Delegar tarefas concretas simultaneamente a subagentes existentes. Uma nova sessão recebe apenas content, sem histórico do pai; incluir objetivo, contexto, restrições e referências. Uma sessão filha existente mantém seu histórico e recebe uma nova tarefa user.",
     ),
     "sys_team_delegate_task": _text(
-        "把一个或多个具体任务并发委派给已有团队成员。",
-        "Delegate one or more concrete tasks concurrently to existing Team members.",
-        "Delegar uma ou mais tarefas concretas simultaneamente a membros existentes da equipe.",
+        "把一个或多个具体任务并发委派给已有团队成员。新会话只收到 content，不继承父历史；正文须写全目标、背景、约束和资源引用。已有子会话保留自己的历史并追加 user 任务。",
+        "Delegate concrete tasks concurrently to existing Team members. A new Session receives only content, without parent history; include the goal, background, constraints and resource references. An existing child Session retains its own history and receives a new user task.",
+        "Delegar tarefas concretas simultaneamente a membros existentes da equipe. Uma nova sessão recebe apenas content, sem histórico do pai; incluir objetivo, contexto, restrições e referências. Uma sessão filha existente mantém seu histórico e recebe uma nova tarefa user.",
     ),
 }
 
@@ -530,7 +530,33 @@ def _generic_field_description(field_name: str, language: str) -> str:
     return templates.get(language, "Tool parameter {name}.").format(name=field_name)
 
 
-def _localize_schema(node: Any, tool_name: str, language: str) -> Any:
+_DELEGATION_TASK_FIELDS = {
+    "content": _text(
+        "子智能体实际收到的 user 任务正文。写全目标、必要背景、约束、资源引用与验收标准；新会话不继承父会话历史。",
+        "The user task message sent to the child. Include the goal, necessary background, constraints, resource references and acceptance criteria; new Sessions do not inherit parent history.",
+        "Mensagem de tarefa user enviada ao filho. Incluir objetivo, contexto necessário, restrições, referências e critérios de aceitação; novas sessões não herdam o histórico do pai.",
+    ),
+    "original_task": _text(
+        "可选的原始请求追踪元数据，不会自动作为子会话消息发送。子智能体需要的信息请写入 content；省略时使用 content。",
+        "Optional original request retained as tracing metadata, not automatically sent as a child message. Put required context in content; defaults to content when omitted.",
+        "Solicitação original opcional mantida como metadado de rastreamento, não enviada automaticamente como mensagem ao filho. Colocar o contexto necessário em content; usa content quando omitida.",
+    ),
+    "session_id": _text(
+        "可选的已有子会话 ID；复用时追加 content 并保留该子会话自身历史。新任务省略；不要填写父会话 ID。",
+        "Optional existing child Session ID: append content and retain that child's own history. Omit for a new Session; never use the parent Session ID.",
+        "ID opcional de uma sessão filha existente: acrescentar content e manter o histórico da filha. Omitir para uma nova sessão; nunca usar o ID da sessão pai.",
+    ),
+}
+_TOOL_PATH_OVERRIDES = {
+    (tool_name, ("tasks", "[]", field)): text
+    for tool_name in ("sys_delegate_task", "sys_team_delegate_task")
+    for field, text in _DELEGATION_TASK_FIELDS.items()
+}
+
+
+def _localize_schema(
+    node: Any, tool_name: str, language: str, path: tuple[str, ...] = ()
+) -> Any:
     if not isinstance(node, dict):
         return node
     properties = node.get("properties")
@@ -538,7 +564,9 @@ def _localize_schema(node: Any, tool_name: str, language: str) -> Any:
         for field_name, child in properties.items():
             if not isinstance(child, dict):
                 continue
-            text = _TOOL_FIELD_OVERRIDES.get((tool_name, field_name))
+            field_path = (*path, field_name)
+            text = _TOOL_PATH_OVERRIDES.get((tool_name, field_path))
+            text = text or _TOOL_FIELD_OVERRIDES.get((tool_name, field_name))
             text = text or _FIELD_DESCRIPTIONS.get(field_name)
             if text is not None:
                 child["description"] = (
@@ -546,19 +574,19 @@ def _localize_schema(node: Any, tool_name: str, language: str) -> Any:
                     if language in {"zh", "en", "pt"}
                     else _generic_field_description(field_name, language)
                 )
-            _localize_schema(child, tool_name, language)
+            _localize_schema(child, tool_name, language, field_path)
     items = node.get("items")
     if isinstance(items, dict):
-        _localize_schema(items, tool_name, language)
+        _localize_schema(items, tool_name, language, (*path, "[]"))
     for keyword in ("anyOf", "oneOf", "allOf", "prefixItems"):
         values = node.get(keyword)
         if isinstance(values, list):
             for value in values:
-                _localize_schema(value, tool_name, language)
+                _localize_schema(value, tool_name, language, path)
     for keyword in ("additionalProperties", "contains", "not", "if", "then", "else"):
         value = node.get(keyword)
         if isinstance(value, dict):
-            _localize_schema(value, tool_name, language)
+            _localize_schema(value, tool_name, language, path)
     return node
 
 

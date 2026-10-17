@@ -8,6 +8,8 @@ that the whole model route is invalid.
 
 from __future__ import annotations
 
+from sagents.v2.model.recovery import collect_response, model_call_budget
+
 import asyncio
 import json
 from collections.abc import Awaitable, Callable, Mapping
@@ -17,7 +19,6 @@ from sagents.v2.contracts.common import new_id
 from sagents.v2.contracts.errors import ErrorCategory, RuntimeErrorInfo, SageV2Error
 from sagents.v2.contracts.items import ImageBlock, TextBlock
 from sagents.v2.model.contracts import (
-    ModelEventKind,
     ModelMessage,
     ModelRequest,
     ModelResponse,
@@ -111,7 +112,9 @@ async def probe_model_reasoning_controls(
 ) -> tuple[ModelCapabilityProbeOutcome, dict[str, Any]]:
     """Probe plugin-declared reasoning variants and select one exact strategy."""
 
-    prompt = "Think carefully about 17 multiplied by 19, then reply with the number only."
+    prompt = (
+        "Think carefully about 17 multiplied by 19, then reply with the number only."
+    )
     omit = await probe_model_connection(
         base_provider,
         model_binding=request.model_binding,
@@ -147,8 +150,8 @@ async def probe_model_reasoning_controls(
                     max_output_tokens=max_output_tokens,
                     timeout_seconds=request.timeout_seconds,
                 )
-                disable_outcomes[strategy]["auxiliary_json"] = (
-                    json_outcome.model_dump(mode="json")
+                disable_outcomes[strategy]["auxiliary_json"] = json_outcome.model_dump(
+                    mode="json"
                 )
                 if json_outcome.supported:
                     disable_strategy = strategy
@@ -170,9 +173,7 @@ async def probe_model_reasoning_controls(
                 timeout_seconds=request.timeout_seconds,
                 prompt=prompt,
             )
-            values: dict[str, Any] = {
-                "text": text_outcome.model_dump(mode="json")
-            }
+            values: dict[str, Any] = {"text": text_outcome.model_dump(mode="json")}
             observed = bool(
                 text_outcome.metadata.get("has_reasoning")
                 or text_outcome.metadata.get("reasoning_tokens")
@@ -210,10 +211,7 @@ async def probe_model_reasoning_controls(
         nested = strategy_results["chat_template_reasoning_effort"]["supported"]
         if nested and (
             not top
-            or (
-                len(top) == len(request.reasoning_efforts)
-                and len(nested) < len(top)
-            )
+            or (len(top) == len(request.reasoning_efforts) and len(nested) < len(top))
         ):
             effort_strategy = "chat_template_reasoning_effort"
     selected = strategy_results.get(
@@ -767,9 +765,10 @@ async def _request(
 ) -> tuple[ModelResponse | None, ModelCapabilityProbeOutcome | None]:
     completed = None
     try:
-        async for event in provider.stream(request):
-            if event.kind == ModelEventKind.COMPLETED:
-                completed = event.response
+        # Probes have fixed tiny protocol prompts: compression would invalidate
+        # the measurement. Transient transport errors still retry finitely.
+        with model_call_budget():
+            completed = await collect_response(provider, request)
     except SageV2Error as exc:
         diagnostic = _compact_probe_error(exc.info.message, name=name)
         return None, ModelCapabilityProbeOutcome(
@@ -790,9 +789,7 @@ async def _request(
             error=message,
             error_code=type(exc).__name__,
             provider_code=str(status) if status is not None else None,
-            metadata={
-                "diagnostic_error": _compact_probe_error(message, name=name)
-            },
+            metadata={"diagnostic_error": _compact_probe_error(message, name=name)},
         )
     if completed is None:
         return None, ModelCapabilityProbeOutcome(

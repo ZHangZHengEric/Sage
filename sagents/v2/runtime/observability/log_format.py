@@ -32,11 +32,24 @@ def record_reaches_min_level(level: LogLevel, min_level: LogLevel) -> bool:
 
 _SENSITIVE_KEY = re.compile(
     r"authorization|api[_-]?key|access[_-]?token|refresh[_-]?token|"
-    r"password|secret|credential|cookie",
+    r"(?:ownership[_-]?)?session[_-]?token|password|secret|credential|cookie",
     re.IGNORECASE,
 )
 _BEARER = re.compile(r"(?i)bearer\s+[a-z0-9._~+/=-]+")
 _SECRET_TOKEN = re.compile(r"\bsk-[a-zA-Z0-9_-]{6,}\b")
+_SECRET_LABEL = (
+    r"authorization|api[_-]?key|access[_-]?token|refresh[_-]?token|"
+    r"(?:ownership[_-]?)?session[_-]?token|password|secret|credential|cookie"
+)
+_XML_SECRET = re.compile(
+    rf"(<(?P<tag>{_SECRET_LABEL})\b[^>]*>).*?(</(?P=tag)\s*>)",
+    re.IGNORECASE | re.DOTALL,
+)
+_ASSIGNED_SECRET = re.compile(
+    rf"((?:[\"']?)(?:{_SECRET_LABEL})(?:[\"']?)\s*[:=]\s*)"
+    r"(\"(?:\\.|[^\"\\])*\"|'(?:\\.|[^'\\])*'|[^\s,;}<]+)",
+    re.IGNORECASE,
+)
 
 
 def redact_log_value(value: Any) -> Any:
@@ -52,6 +65,30 @@ def redact_log_value(value: Any) -> Any:
     if isinstance(value, (list, tuple, set, frozenset)):
         return [redact_log_value(item) for item in value]
     if isinstance(value, str):
+        # Tool arguments and results are often JSON encoded inside wire strings.
+        if value.lstrip().startswith(("{", "[")):
+            try:
+                decoded = json.loads(value)
+            except (ValueError, RecursionError):
+                pass
+            else:
+                redacted = redact_log_value(decoded)
+                if redacted != decoded:
+                    return json.dumps(redacted, ensure_ascii=False)
+        value = _XML_SECRET.sub(r"\1[REDACTED]\3", value)
+        value = _ASSIGNED_SECRET.sub(
+            lambda m: (
+                m[1]
+                + (
+                    '"[REDACTED]"'
+                    if m[2][0] == '"'
+                    else "'[REDACTED]'"
+                    if m[2][0] == "'"
+                    else "[REDACTED]"
+                )
+            ),
+            value,
+        )
         return _SECRET_TOKEN.sub("[REDACTED]", _BEARER.sub("Bearer [REDACTED]", value))
     if value is None or isinstance(value, (bool, int, float)):
         return value

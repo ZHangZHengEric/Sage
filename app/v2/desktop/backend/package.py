@@ -30,11 +30,11 @@ DESKTOP_COMPONENTS = {
         "apply_mode": "next_run",
         "scope": "run",
     },
-    "context.token-estimator": {
-        "default": DEFAULT_COMPONENTS["context.token-estimator"],
+    "context.unit-compactor": {
+        "default": DEFAULT_COMPONENTS["context.unit-compactor"],
         "selection_mode": "user",
         "apply_mode": "next_run",
-        "scope": "tenant",
+        "scope": "agent",
     },
     "context.reducer": {
         "default": DEFAULT_COMPONENTS["context.reducer"],
@@ -122,7 +122,7 @@ _MANIFEST_CAPABILITIES = (
     "session-memory.provider",
     "observability.diagnostic-sink",
     "observability.log-sink",
-    "context.token-estimator",
+    "context.unit-compactor",
     "context.reducer",
     "context.summarizer",
     "context.summary-store",
@@ -151,7 +151,6 @@ def stable_component_id(capability: str, plugin_id: str) -> str:
     prefixes = {
         "skill.loading": "sage.skill.loading.",
         "agent.continuation-policy": "sage.agent.continuation.",
-        "context.token-estimator": "sage.context.token-estimator.",
         "context.reducer": "sage.context.reducer.",
         "context.summarizer": "sage.context.summarizer.",
         "context.summary-store": "sage.context.summary-store.",
@@ -215,7 +214,10 @@ def _runtime_capabilities(
     configs: Mapping[str, Mapping[str, Any]],
     language: str,
 ) -> dict[str, CapabilitySelection]:
-    paths = {key: selection.config for key, selection in default_runtime(session_root).capabilities.items()}
+    paths = {
+        key: selection.config
+        for key, selection in default_runtime(session_root).capabilities.items()
+    }
     capabilities: dict[str, CapabilitySelection] = {}
     for capability in _MANIFEST_CAPABILITIES:
         plugin_id = stable_component_id(
@@ -261,11 +263,16 @@ _DESKTOP_INJECTED_FIELDS = {
 
 
 def desktop_component_config_schema(
-    capability: str, schema: Mapping[str, Any] | None, *, language: str | None = None,
+    capability: str,
+    schema: Mapping[str, Any] | None,
+    *,
+    language: str | None = None,
     plugin_id: str | None = None,
 ) -> dict:
     result = dict(schema or {})
-    properties = {key: dict(value) for key, value in result.get("properties", {}).items()}
+    properties = {
+        key: dict(value) for key, value in result.get("properties", {}).items()
+    }
     for key in _DESKTOP_INJECTED_FIELDS.get(capability, set()):
         if key in properties:
             properties[key]["readOnly"] = True
@@ -273,7 +280,12 @@ def desktop_component_config_schema(
                 properties[key].update(default=language, const=language)
     for key, value in DESKTOP_COMPONENT_CONFIG_LOCKS.get(capability, {}).items():
         if key in properties:
-            properties[key] = {**properties[key], "default": value, "const": value, "readOnly": True}
+            properties[key] = {
+                **properties[key],
+                "default": value,
+                "const": value,
+                "readOnly": True,
+            }
     # Local selection policies never call a model; this shared legacy field is inert.
     if plugin_id in {"sage.tool-selection.lexical", "sage.tool-selection.recent"}:
         properties.pop("model_timeout_seconds", None)

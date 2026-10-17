@@ -29,6 +29,10 @@ from sagents.v2.contracts.errors import (
 )
 from sagents.v2.contracts.run_state import TERMINAL_RUN_STATES
 from sagents.v2.runtime.session.state import SessionStoreCoordinator
+from sagents.v2.runtime.session.filesystem_layout import (
+    SESSION_LAYOUT_FORMAT,
+    resolve_session_directory,
+)
 from sagents.v2.runtime.observability.logs import get_logger
 from sagents.v2.runtime.session.aggregate import SessionAggregate
 from sagents.v2.runtime.session.journal import (
@@ -56,7 +60,6 @@ except ImportError:  # pragma: no cover - POSIX uses fcntl above.
 
 
 LOGGER = get_logger(__name__)
-SESSION_LAYOUT_FORMAT = "sage.filesystem-session-layout/v1"
 SESSION_INDEX_FORMAT = "sage.filesystem-session-index/v1"
 _TERMINAL_RUN_STATE_VALUES = frozenset(state.value for state in TERMINAL_RUN_STATES)
 _DISPATCHABLE_RUN_STATE_VALUES = frozenset(
@@ -2109,31 +2112,13 @@ class _FilesystemSessionState(SessionStoreCoordinator):
 
     def _session_dir(self, session_id: str) -> Path:
         location = self._location_path(session_id)
-        if location.is_file():
-            try:
-                payload = json.loads(location.read_text(encoding="utf-8"))
-                if (
-                    payload.get("format") != SESSION_LAYOUT_FORMAT
-                    or payload.get("session_id") != session_id
-                ):
-                    raise ValueError("location identity does not match")
-                candidate = (
-                    self.sessions_root / str(payload["relative_path"])
-                ).resolve()
-                candidate.relative_to(self.sessions_root)
-                return candidate
-            except (
-                OSError,
-                KeyError,
-                TypeError,
-                ValueError,
-                json.JSONDecodeError,
-            ) as exc:
-                raise self._corrupt(
-                    "session_store.location_corrupt",
-                    f"Session location {location} is invalid: {exc}",
-                ) from exc
-        return self.sessions_root / self._safe_segment(session_id)
+        try:
+            return resolve_session_directory(self.sessions_root, session_id)
+        except (OSError, KeyError, TypeError, ValueError) as exc:
+            raise self._corrupt(
+                "session_store.location_corrupt",
+                f"Session location {location} is invalid: {exc}",
+            ) from exc
 
     def _session_dir_for_state(self, session_id: str, state: dict[str, Any]) -> Path:
         current = self._session_dir(session_id)

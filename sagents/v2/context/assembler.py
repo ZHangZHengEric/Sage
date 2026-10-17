@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import hashlib
 import json
-from collections import defaultdict, deque
+from collections import OrderedDict, defaultdict, deque
 import re
 from typing import Protocol
 
+from sagents.v2.contracts.errors import SageV2Error
+from sagents.v2.model.recovery import recovery_error
 from sagents.v2.contracts.conversation import is_user_request, order_tool_context
 from sagents.v2.context.contracts import (
     ContextBudget,
@@ -21,10 +23,12 @@ from sagents.v2.context.contracts import (
     ContextSegmentProvider,
     ContextStability,
 )
-from sagents.v2.context.plugins.estimator_json import JsonHeuristicTokenEstimator
-from sagents.v2.context.plugins.window import WindowContextReducer
-from sagents.v2.context.token_estimator import TokenEstimator, estimate_tokens_async
-from sagents.v2.context.calibration import input_usage_projection, input_usage_scope
+from sagents.v2.context.plugins.persistent_reducer import (
+    PersistentSummaryContextReducer,
+)
+from sagents.v2.context.plugins.summary_ephemeral import (
+    InMemoryConversationSummaryStore,
+)
 from sagents.v2.model import ModelMessage
 from sagents.v2.runtime.artifact.contracts import ArtifactStore
 from sagents.v2.runtime.artifact.images import hydrate_image_blocks
@@ -88,7 +92,6 @@ class DefaultContextAssembler:
         runtime_context_in_user: bool = True,
         budget: ContextBudget | None = None,
         reducer: ContextReducer | None = None,
-        estimator: TokenEstimator | None = None,
         history_reader: SessionHistoryReader | None = None,
         projection_observer: ContextProjectionObserver | None = None,
         artifact_store: ArtifactStore | None = None,
@@ -125,8 +128,11 @@ class DefaultContextAssembler:
             raise ValueError("max_system_tokens must be positive")
         self.max_system_tokens = max_system_tokens
         self.budget = budget
-        self.estimator = estimator or JsonHeuristicTokenEstimator()
-        self.reducer = reducer or WindowContextReducer(self.estimator)
+        self._compression_requested = {}
+        self._projection_signatures = OrderedDict()
+        self.reducer = reducer or PersistentSummaryContextReducer(
+            InMemoryConversationSummaryStore()
+        )
         self.history = (
             SessionHistoryLedgerBuilder(history_reader)
             if history_reader is not None
@@ -237,29 +243,6 @@ class DefaultContextAssembler:
                 )
             )
         system = tuple(system_messages)
-        system_tokens = await estimate_tokens_async(self.estimator, system)
-        system_limit = (
-            self.budget.max_system_tokens if self.budget else self.max_system_tokens
-        )
-        if system_tokens > system_limit:
-            from sagents.v2.contracts.errors import (
-                ErrorCategory,
-                RuntimeErrorInfo,
-                SageV2Error,
-            )
-
-            raise SageV2Error(
-                RuntimeErrorInfo(
-                    code="context.system_budget_exhausted",
-                    category=ErrorCategory.VALIDATION,
-                    message="system instructions exceed their token budget",
-                    safe_to_resume=True,
-                    metadata={
-                        "system_tokens": system_tokens,
-                        "max_system_tokens": system_limit,
-                    },
-                )
-            )
         system = (
             *system,
             *(message for message in ledger if message.role == "developer"),
@@ -296,57 +279,46 @@ class DefaultContextAssembler:
         # observer both need the owning Run, and neither should pay for a
         # second store read.
         run = None
-        if (
-            run_id is not None
-            and self.history is not None
-            and (self.budget is not None or self.projection_observer is not None)
-        ):
+        if run_id is not None and self.history is not None and self.reducer is not None:
             run = await self.history.reader.get_run(run_id)
-        if self.budget is not None:
-            # Reduction affects only this request projection. The checkpointed
-            # ledger and canonical runtime events retain their original facts.
-            scope = None
-            if run is not None:
-                context_key = self._summary_context_key(run.session_id)
-                if run.concurrency_mode == SessionConcurrencyMode.SNAPSHOT_ISOLATED:
-                    context_key = self._summary_context_key(
-                        run.session_id, run_id=run.run_id
-                    )
-                scope = ContextReductionScope(
-                    context_key=context_key,
-                    session_id=run.session_id,
-                    run_id=run.run_id,
-                    source_sequence=run.base_session_sequence,
-                    canonical_messages=canonical,
-                    canonical_indices=canonical_indices,
-                    response_language=str(
-                        command.config.metadata.get("response_language") or "en"
-                    ),
-                )
-            reservation = reservation or ContextRequestReservation()
-            runtime_tokens = await self._runtime_injection_tokens(canonical, volatile)
-            if runtime_tokens:
-                reservation = reservation.model_copy(
-                    update={
-                        "runtime_context_tokens": (
-                            reservation.runtime_context_tokens + runtime_tokens
-                        )
-                    }
-                )
-            effective_budget = self._with_reservation(self.budget, reservation)
-            with input_usage_projection(
-                lambda values: self._apply_inference_view(tuple(values), volatile),
-                reserved_tokens=runtime_tokens,
-            ):
-                projection = await self.reducer.reduce(
-                    messages, effective_budget, scope=scope
-                )
-        else:
-            projection = ContextProjection(
-                messages=messages,
-                estimated_tokens=await estimate_tokens_async(self.estimator, messages),
-                source_message_count=len(messages),
+        scope = ContextReductionScope(
+            context_key=self._summary_context_key(
+                run.session_id if run is not None else run_id or command.agent_id,
+                run_id=run_id
+                if run is not None
+                and run.concurrency_mode == SessionConcurrencyMode.SNAPSHOT_ISOLATED
+                else None,
+            ),
+            session_id=run.session_id
+            if run is not None
+            else run_id or command.agent_id,
+            run_id=run_id or command.agent_id,
+            source_sequence=run.base_session_sequence if run is not None else 0,
+            canonical_messages=canonical,
+            canonical_indices=canonical_indices,
+            response_language=str(
+                command.config.metadata.get("response_language") or "en"
+            ),
+            force=run_id in self._compression_requested,
+            allow_reference_compaction=not (
+                self._compression_requested.get(run_id, False)
+                and self._projection_signatures.get(run_id, (None, None))[1]
+                == "reference_compaction"
+            ),
+        )
+        required = self._compression_requested.get(run_id, False)
+        try:
+            projection = await self.reducer.reduce(messages, self.budget, scope=scope)
+        except SageV2Error as exc:
+            if required or exc.info.code not in {
+                "context.no_reducible_history",
+                "context.summary_no_progress",
+            }:
+                raise
+            projection = await self.reducer.reduce(
+                messages, self.budget, scope=scope.model_copy(update={"force": False})
             )
+        self._compression_requested.pop(run_id, None)
         view = self._apply_inference_view(projection.messages, volatile)
         artifact_store = self.artifact_store
         if artifact_store is None and run_id is not None and self.history is not None:
@@ -358,11 +330,25 @@ class DefaultContextAssembler:
             projection = projection.model_copy(
                 update={
                     "messages": view,
-                    "estimated_tokens": await estimate_tokens_async(
-                        self.estimator, view
-                    ),
                 }
             )
+        if run_id is not None:
+            signature = hashlib.sha256()
+            for message in projection.messages:
+                signature.update(message.model_dump_json().encode())
+            digest = signature.hexdigest()
+            if (
+                required
+                and digest == self._projection_signatures.get(run_id, (None, None))[0]
+            ):
+                raise recovery_error(
+                    "context.summary_no_progress",
+                    "Context recovery produced the same rejected request view",
+                )
+            self._projection_signatures[run_id] = (digest, projection.strategy)
+            self._projection_signatures.move_to_end(run_id)
+            while len(self._projection_signatures) > 128:
+                self._projection_signatures.popitem(last=False)
         if self.projection_observer is not None and run_id is not None:
             await self.projection_observer.observe_projection(
                 run_id,
@@ -387,62 +373,21 @@ class DefaultContextAssembler:
         ).hexdigest()
         return f"context_{digest}"
 
-    @staticmethod
-    def _with_reservation(
-        budget: ContextBudget,
-        reservation: ContextRequestReservation,
-    ) -> ContextBudget:
-        max_messages = budget.max_messages
-        if max_messages is not None:
-            max_messages -= reservation.message_count
-            if max_messages <= 0:
-                from sagents.v2.contracts.errors import (
-                    ErrorCategory,
-                    RuntimeErrorInfo,
-                    SageV2Error,
-                )
-
-                raise SageV2Error(
-                    RuntimeErrorInfo(
-                        code="context.invalid_budget",
-                        category=ErrorCategory.VALIDATION,
-                        message=(
-                            "reserved request suffix consumes the model message budget"
-                        ),
-                        safe_to_resume=True,
-                    )
-                )
-        return budget.model_copy(
-            update={
-                "reserve_input_tokens": (
-                    budget.reserve_input_tokens + reservation.input_tokens
-                ),
-                "max_messages": max_messages,
-            }
+    def request_compression(self, run_id, *, required=True):
+        self._compression_requested[run_id] = (
+            required or self._compression_requested.get(run_id, False)
         )
 
-    async def _runtime_injection_tokens(
-        self,
-        canonical: tuple[ModelMessage, ...],
-        volatile: tuple[ContextSegment, ...],
-    ) -> int:
-        """Tokens added when the latest user message receives runtime context."""
-
-        if not volatile:
-            return 0
-        latest = next(
-            (message for message in reversed(canonical) if is_user_request(message)),
-            None,
-        )
-        if latest is None:
-            return 0
-        injected = self._inject_latest_user((latest,), volatile)[-1]
-        # Both sides must use the same local estimate. A reported total for
-        # the injected message cannot be subtracted from an uncalibrated one.
-        with input_usage_scope(None):
-            before = await estimate_tokens_async(self.estimator, (latest,))
-            after = await estimate_tokens_async(self.estimator, (injected,))
-        return max(0, after - before)
+    def observe_usage(self, run_id, input_tokens):
+        if self.budget is not None:
+            maximum = max(
+                1,
+                self.budget.max_input_tokens
+                - self.budget.reserve_output_tokens
+                - self.budget.reserve_input_tokens,
+            )
+            if input_tokens >= maximum:
+                self.request_compression(run_id, required=False)
 
     @classmethod
     def _apply_inference_view(

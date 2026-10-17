@@ -44,9 +44,6 @@ def test_builtin_inventory_contains_only_real_factories():
         "sage.context.summarizer.model",
         "sage.context.summary-store.ephemeral",
         "sage.context.summary-store.session-derived",
-        "sage.context.token-estimator.json-heuristic",
-        "sage.context.token-estimator.tiktoken",
-        "sage.context.token-estimator.unicode-heuristic",
         "sage.context.unit-compactor.reference",
         "sage.credentials.environment",
         "sage.credentials.mapping",
@@ -135,7 +132,11 @@ def test_builtin_inventory_contains_only_real_factories():
     )
     assert inventory["sage.tool.ephemeral"]["capabilities"]["durable"] is False
     assert inventory["sage.tool.ephemeral"]["capabilities"]["testing"] is True
-    for plugin_id in ("sage.sandbox.ephemeral", "sage.sandbox.local-workspace", "sage.sandbox.cube-volume"):
+    for plugin_id in (
+        "sage.sandbox.ephemeral",
+        "sage.sandbox.local-workspace",
+        "sage.sandbox.cube-volume",
+    ):
         assert inventory[plugin_id]["version"] == "3.0.0"
         assert inventory[plugin_id]["provides"][0]["capability"] == "execution.sandbox"
         assert inventory[plugin_id]["provides"][0]["api_version"] == "3"

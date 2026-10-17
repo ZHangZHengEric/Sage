@@ -31,6 +31,7 @@ from sagents.v2.model.wire import (
     minimum_reasoning_control,
     parse_tool_arguments,
     provider_error,
+    ProviderStreamFailure,
     stream_incomplete_error,
     validate_extra_body,
     wire_json_value,
@@ -309,7 +310,9 @@ class AnthropicMessagesModelProvider:
         response_started = False
         terminal_event_received = False
         try:
-            record_wire_event({"diagnostic_event": "request_attempt", "payload": payload})
+            record_wire_event(
+                {"diagnostic_event": "request_attempt", "payload": payload}
+            )
             async with self._open_stream(payload) as response:
                 raise_for_status = getattr(response, "raise_for_status", None)
                 if raise_for_status is not None:
@@ -410,7 +413,10 @@ class AnthropicMessagesModelProvider:
                             if isinstance(error, dict)
                             else str(error)
                         )
-                        raise RuntimeError(message or "Anthropic Messages API failed")
+                        raise ProviderStreamFailure(
+                            message or "Anthropic Messages API failed",
+                            code=error.get("type") if isinstance(error, dict) else None,
+                        )
         except SageV2Error:
             raise
         except Exception as exc:

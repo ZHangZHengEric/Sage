@@ -48,14 +48,9 @@ class DesktopComponentPlan:
         runtime_root: Path,
         summary_store_plugin_id: str,
     ) -> DesktopComponentPlan:
-        estimator_id = settings.component_selections.get(
-            "context.token-estimator",
-            _DESKTOP_COMPONENT_DEFAULTS["context.token-estimator"],
-        )
         reducer_id = settings.component_selections.get(
             "context.reducer", _DESKTOP_COMPONENT_DEFAULTS["context.reducer"]
         )
-        estimator_id = _stable_component_id("context.token-estimator", estimator_id)
         reducer_id = _stable_component_id("context.reducer", reducer_id)
         memory_query_plugin_id = _stable_component_id(
             "memory.recall-query",
@@ -106,7 +101,6 @@ class DesktopComponentPlan:
             session_root=runtime_root,
             component_selections={
                 **settings.component_selections,
-                "context.token-estimator": estimator_id,
                 "context.reducer": reducer_id,
                 "context.summarizer": summarizer_plugin_id,
                 "agent.continuation-policy": continuation_plugin_id,
@@ -135,7 +129,6 @@ class DesktopComponentPlan:
             },
             "context.reducer": {
                 "plugin": reducer_id,
-                "estimator": estimator_id,
                 "summarizer": summarizer_plugin_id,
                 "summary_store": summary_store_plugin_id,
                 "provider": provider.id,

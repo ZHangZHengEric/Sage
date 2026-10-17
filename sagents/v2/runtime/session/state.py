@@ -1213,6 +1213,9 @@ class SessionStoreCoordinator(SessionAttachmentMixin):
                 else command.session_id
             )
             lock_session_ids = [planned_session_id]
+            if command.session_id is None and command.parent_run_id is not None:
+                parent_run = await self.get_run(command.parent_run_id)
+                lock_session_ids.append(parent_run.session_id)
             if (
                 command.session_concurrency_mode == SessionConcurrencyMode.FORK
                 and command.session_id is not None
@@ -1256,6 +1259,14 @@ class SessionStoreCoordinator(SessionAttachmentMixin):
             fork_base_revision: int | None = None
             fork_base_sequence: int | None = None
             fork_base_events: tuple[RuntimeEvent, ...] = ()
+            # A parent link establishes ownership/trace topology, not context.
+            # New ordinary children start with only their explicit input Items.
+            if command.session_id is None and command.parent_run_id is not None:
+                parent_run = self._runs.get(command.parent_run_id)
+                if parent_run is None:
+                    raise self._not_found("run.not_found", command.parent_run_id)
+                parent_session_id = parent_run.session_id
+                self._authorize_session_actor_locked(parent_session_id, context)
             if command.session_concurrency_mode == SessionConcurrencyMode.FORK:
                 # Fork creates a new child Session at a stable parent revision;
                 # the child Run never writes into the parent canonical log.
@@ -1301,7 +1312,7 @@ class SessionStoreCoordinator(SessionAttachmentMixin):
                     ),
                 )
                 self._sessions[session_id] = session
-                if parent_session_id is not None:
+                if command.session_concurrency_mode == SessionConcurrencyMode.FORK:
                     await self._inherit_attachments_locked(
                         parent_session_id, session_id
                     )

@@ -1,173 +1,68 @@
-"""Persistent hierarchical-summary context reduction without ledger mutation."""
+"""Durable, API-triggered history compression. Canonical history is immutable."""
 
 from __future__ import annotations
 
-import json
-
+from sagents.v2.context.contracts import ContextProjection
+from sagents.v2.context.partition import conversation_units, current_turn_boundary
+from sagents.v2.context.references import compact_unit_to_references
 from sagents.v2.context.progress_summary import bounded_snapshot
-
-from sagents.v2.contracts.errors import (
-    ErrorCategory,
-    RuntimeErrorInfo,
-    SageV2Error,
-)
-from sagents.v2.contracts.items import ImageBlock, TextBlock
-from sagents.v2.contracts.conversation import is_user_request
-from sagents.v2.context.contracts import (
-    ContextBudget,
-    ContextProjection,
-    ContextReductionScope,
-    ContextUnitCompactor,
-)
 from sagents.v2.context.summary import (
-    ConversationSummarizer,
-    ConversationSummary,
-    ConversationSummaryStore,
-    SummarizationRequest,
     create_summary,
     message_digests_async,
-    summary_safe_block_text,
+    ConversationSummary,
+    SummarizationRequest,
 )
-from sagents.v2.context.token_estimator import (
-    TokenEstimator,
-    MessageTokenCounter,
-    estimate_tokens_async,
-)
-from sagents.v2.context.estimation import WireSizeTokenEstimator
-from sagents.v2.context.partition import (
-    conversation_units,
-    current_turn_boundary,
-    protected_boundary,
-)
+from sagents.v2.contracts.conversation import is_user_request
+from sagents.v2.contracts.errors import ErrorCategory, RuntimeErrorInfo, SageV2Error
+from sagents.v2.contracts.items import TextBlock
 from sagents.v2.model.contracts import ModelMessage
-from sagents.v2.runtime.observability.logs import get_logger
-
-LOGGER = get_logger(__name__)
-
-
+from sagents.v2.model.recovery import model_call_budget
 
 
 class _ExtractiveConversationSummarizer:
-    async def summarize(self, request: SummarizationRequest) -> str:
+    async def summarize(self, request):
         return bounded_snapshot(request)
 
 
-class _ReferenceContextUnitCompactor:
-    def __init__(self, estimator: TokenEstimator) -> None:
-        self.estimator = estimator
-
-    async def compact(
-        self, unit: tuple[ModelMessage, ...]
-    ) -> tuple[ModelMessage, ...] | None:
-        result = []
-        changed = False
-        for message in unit:
-            reference = message.metadata.get("context_reference")
-            if message.role != "tool" or not isinstance(reference, (dict, str)):
-                result.append(message)
-                continue
-            encoded = json.dumps(
-                reference,
-                ensure_ascii=False,
-                sort_keys=True,
-                separators=(",", ":"),
-            )
-            replacement = message.model_copy(
-                update={
-                    "content": (
-                        TextBlock(
-                            text=f"<tool_result_reference>{encoded}</tool_result_reference>"
-                        ),
-                    ),
-                    "metadata": {
-                        **message.metadata,
-                        "context_compacted_to_reference": True,
-                    },
-                }
-            )
-            if self.estimator.estimate((replacement,)) < self.estimator.estimate(
-                (message,)
-            ):
-                result.append(replacement)
-                changed = True
-            else:
-                result.append(message)
-        return tuple(result) if changed else None
-
-
 class PersistentSummaryContextReducer:
-    """Replace old history with a durable derived summary plus recent units.
-
-    Raw messages remain in Runtime events and checkpoints.  The summary store is
-    an independent replaceable port, so an embedding host may persist it in a
-    database, object store, remote service, or memory rather than a filesystem.
-    """
-
     plugin_id = "sage.context.reducer.persistent-summary"
     name = "Persistent summary context reducer"
-    description = "Summarizes older units into a durable rolling conversation summary."
+    description = "Summarizes complete history only after API rejection or reported usage reaches a configured limit."
 
     def __init__(
         self,
-        store: ConversationSummaryStore,
+        store,
         *,
-        summarizer: ConversationSummarizer | None = None,
-        estimator: TokenEstimator | None = None,
-        summary_target_tokens: int = 1_024,
-        protected_recent_units: int = 4,
-        max_summary_source_tokens: int = 24_000,
-        unit_compactor: ContextUnitCompactor | None = None,
-        max_summary_calls: int = 4,
-    ) -> None:
-        if summary_target_tokens <= 0:
-            raise ValueError("summary_target_tokens must be positive")
-        if protected_recent_units < 1:
-            raise ValueError("protected_recent_units must be at least one")
-        if max_summary_source_tokens <= 0:
-            raise ValueError("max_summary_source_tokens must be positive")
-        if max_summary_calls < 1:
-            raise ValueError("max_summary_calls must be positive")
-        self.max_summary_calls = max_summary_calls
+        summarizer=None,
+        summary_target_tokens=1024,
+        protected_recent_units=4,
+        max_summary_calls=64,
+        unit_compactor=None,
+        max_summary_source_tokens=None,
+    ):
+        # max_summary_source_tokens is accepted for existing manifests only.
+        # It is deliberately never used to estimate or reject input.
+        if (
+            summary_target_tokens < 1
+            or max_summary_calls < 1
+            or protected_recent_units < 1
+        ):
+            raise ValueError("summary output and recovery limits must be positive")
         self.store = store
         self.summarizer = summarizer or _ExtractiveConversationSummarizer()
-        self.estimator = estimator or WireSizeTokenEstimator()
         self.summary_target_tokens = summary_target_tokens
+        self.max_summary_calls = max_summary_calls
         self.protected_recent_units = protected_recent_units
-        self.max_summary_source_tokens = max_summary_source_tokens
-        self.unit_compactor = unit_compactor or _ReferenceContextUnitCompactor(
-            self.estimator
-        )
+        self.unit_compactor = unit_compactor
 
-    async def reduce(
-        self,
-        messages: tuple[ModelMessage, ...],
-        budget: ContextBudget,
-        *,
-        scope: ContextReductionScope | None = None,
-    ) -> ContextProjection:
+    async def reduce(self, messages, budget=None, *, scope=None):
         if scope is None:
             raise self._error(
                 "context.summary_scope_required",
-                "persistent summary reduction requires a Session/Run scope",
+                "Persistent summaries require a session/run scope",
             )
-        maximum = (
-            budget.max_input_tokens
-            - budget.reserve_output_tokens
-            - budget.reserve_input_tokens
-        )
-        if maximum <= 0:
-            raise self._error(
-                "context.invalid_budget",
-                "output and final-request reserves consume the input budget",
-            )
-        systems = tuple(
-            message for message in messages if message.role in {"system", "developer"}
-        )
-        payload = tuple(
-            message
-            for message in messages
-            if message.role not in {"system", "developer"}
-        )
+        systems = tuple(m for m in messages if m.role in {"system", "developer"})
+        payload = tuple(m for m in messages if m.role not in {"system", "developer"})
         canonical = (
             scope.canonical_messages
             if scope.canonical_messages is not None
@@ -180,377 +75,215 @@ class PersistentSummaryContextReducer:
         )
         if (
             len(indices) != len(payload)
-            or any(index < 0 or index >= len(canonical) for index in indices)
             or len(set(indices)) != len(indices)
+            or any(i < 0 or i >= len(canonical) for i in indices)
         ):
             raise self._error(
                 "context.invalid_source_mapping", "invalid canonical history mapping"
             )
-        original_messages = (*systems, *canonical)
-        counter = await MessageTokenCounter.create(self.estimator, messages)
-        system_tokens = counter.estimate(systems)
-        if system_tokens > budget.max_system_tokens:
-            raise self._error(
-                "context.system_budget_exhausted",
-                "system instructions exceed their token budget",
-            )
         stored = await self.store.get(scope.context_key, session_id=scope.session_id)
         previous, _ = await self._validated_previous(stored, canonical)
         canonical_covered = len(previous.covered_message_digests) if previous else 0
-        covered_count = sum(index < canonical_covered for index in indices)
-        remaining = payload[covered_count:]
-        # A mismatched prefix must not apply the old summary, but the
-        # checkpoint stays until a new summary replaces it. Deleting here
-        # forces the next turn to start from zero and can pin the Session.
-        summary_prefix = (self._summary_message(previous),) if previous else ()
+        covered = sum(i < canonical_covered for i in indices)
+        if any(i >= canonical_covered for i in indices[:covered]) or any(
+            i < canonical_covered for i in indices[covered:]
+        ):
+            raise self._error(
+                "context.invalid_source_mapping",
+                "Canonical coverage is not a contiguous projection prefix",
+            )
+        remaining = payload[covered:]
         request_index = next(
             (i for i in range(len(payload) - 1, -1, -1) if is_user_request(payload[i])),
             None,
         )
         anchor = (
             (payload[request_index],)
-            if request_index is not None and request_index < covered_count
+            if request_index is not None and request_index < covered
             else ()
         )
-        current = (*systems, *summary_prefix, *anchor, *remaining)
-
-        def over(values):
-            return counter.estimate(values) > maximum or (
-                budget.max_messages is not None and len(values) > budget.max_messages
-            )
-
-        if not over(current):
+        prefix = (self._summary_message(previous),) if previous else ()
+        current = (*systems, *prefix, *anchor, *remaining)
+        force = scope.force or (
+            budget is not None
+            and budget.max_messages is not None
+            and len(current) > budget.max_messages
+        )
+        if not force:
             return ContextProjection(
                 messages=current,
                 historical_messages=canonical[:canonical_covered],
-                estimated_tokens=counter.estimate(current),
-                source_message_count=len(original_messages),
+                source_message_count=len(messages),
                 dropped_message_count=canonical_covered,
-                dropped_digest=previous.source_digest if previous else None,
                 strategy="persistent_summary" if previous else "none",
             )
-
-        units = self._units(remaining)
-        costs = [counter.estimate(unit) for unit in units]
-        mandatory = current_turn_boundary(units)
-        changed = []
-        # Before any model call, compact oversized mandatory tool results using
-        # their durable references. Never lose an existing summary on this path.
-        mandatory_messages = tuple(
-            message for unit in units[mandatory:] for message in unit
+        units = conversation_units(remaining)
+        boundary = current_turn_boundary(units)
+        # A single long turn can compress completed batches while retaining the
+        # exact real user request and the latest complete tool/image batch.
+        same_turn = boundary == 0
+        if same_turn:
+            boundary = max(0, len(units) - 1) if len(units) > 2 else 0
+        selected_count = (
+            max(2 if same_turn else 1, (boundary + 1) // 2) if boundary else 0
         )
-        if over((*systems, *summary_prefix, *anchor, *mandatory_messages)):
-            for index in range(mandatory, len(units)):
-                replacement = await self.unit_compactor.compact(units[index])
-                if replacement is not None:
-                    changed.extend(
-                        original
-                        for original, new in zip(units[index], replacement, strict=True)
-                        if original != new
-                    )
-                    units[index] = replacement
-                    costs[index] = counter.estimate(replacement)
-            mandatory_messages = tuple(
-                message for unit in units[mandatory:] for message in unit
+        if (
+            budget is not None
+            and budget.max_messages is not None
+            and len(current) > budget.max_messages
+        ):
+            removed = 0
+            for index, unit in enumerate(units[:boundary]):
+                removed += len(unit)
+                selected_count = index + 1
+                if (
+                    len(current)
+                    - removed
+                    + (0 if previous else 1)
+                    + (1 if same_turn else 0)
+                    <= budget.max_messages
+                ):
+                    break
+        if scope.force:
+            # API pressure must also retire completed work in the active turn.
+            # Stopping at the latest user boundary leaves long agent/tool loops
+            # mostly intact. Keep a recent window of whole batches instead;
+            # the exact latest user request is reinserted as an anchor below.
+            selected_count = max(
+                selected_count, len(units) - self.protected_recent_units
             )
-            if over((*systems, *summary_prefix, *anchor, *mandatory_messages)):
-                # A long Run may summarize completed steps, including image
-                # followups. Keep the latest complete batch and exact request.
-                mandatory = max(0, len(units) - 1)
-                anchor = (
-                    (payload[request_index],)
-                    if request_index is not None
-                    and request_index < covered_count + sum(map(len, units[:mandatory]))
-                    else ()
+        compacted = []
+        changed = []
+        for unit in units if scope.allow_reference_compaction else ():
+            replacement = await (
+                self.unit_compactor.compact(unit)
+                if self.unit_compactor is not None
+                else compact_unit_to_references(unit)
+            )
+            compacted.extend(replacement if replacement is not None else unit)
+            if replacement is not None:
+                changed.extend(
+                    original
+                    for original, projected in zip(unit, replacement, strict=True)
+                    if original != projected
                 )
-                mandatory_messages = tuple(
-                    m for unit in units[mandatory:] for m in unit
-                )
-                if over((*systems, *anchor, *mandatory_messages)):
-                    raise self._error(
-                        "context.budget_exhausted",
-                        "system, user request and latest tool batch exceed the model budget",
-                    )
-        if mandatory == 0:
-            result = (*systems, *summary_prefix, *anchor, *mandatory_messages)
-            if over(result):
-                raise self._error(
-                    "context.budget_exhausted",
-                    "no completed history remains to reduce within the model budget",
-                )
-            historical = (*canonical[:canonical_covered], *changed)
+        if changed:
             return ContextProjection(
-                messages=result,
-                historical_messages=historical,
-                estimated_tokens=counter.estimate(result),
-                source_message_count=len(original_messages),
-                dropped_message_count=len(historical),
-                dropped_digest=previous.source_digest if previous else None,
+                messages=(*systems, *prefix, *anchor, *compacted),
+                historical_messages=(*canonical[:canonical_covered], *changed),
+                source_message_count=len(messages),
+                dropped_message_count=canonical_covered + len(changed),
                 strategy="reference_compaction",
             )
-
-        soft_tokens = min(
-            budget.protected_recent_tokens, max(0, maximum - system_tokens) // 3
-        )
-        boundary = protected_boundary(
-            units,
-            costs,
-            recent_units=self.protected_recent_units,
-            recent_tokens=soft_tokens,
-        )
-        if anchor:
-            boundary = mandatory
-        placeholder = self._placeholder_message(previous)
-        placeholder_tokens = counter.estimate((placeholder, *anchor))
-        # Linear accounting for additive built-ins; arbitrary custom estimators
-        # retain complete-request semantics instead of unsafe token subtraction.
-        suffix_tokens = [0] * (len(units) + 1)
-        suffix_counts = [0] * (len(units) + 1)
-        for index in range(len(units) - 1, -1, -1):
-            suffix_tokens[index] = suffix_tokens[index + 1] + costs[index]
-            suffix_counts[index] = suffix_counts[index + 1] + len(units[index])
-
-        def candidate_over(index):
-            if counter.costs is None:
-                return over(
-                    (
-                        *systems,
-                        placeholder,
-                        *anchor,
-                        *(m for unit in units[index:] for m in unit),
-                    )
-                )
-            return system_tokens + placeholder_tokens + suffix_tokens[
-                index
-            ] > maximum or (
-                budget.max_messages is not None
-                and len(systems) + 1 + len(anchor) + suffix_counts[index]
-                > budget.max_messages
-            )
-
-        # Summarize the eligible prefix once, leaving a bounded recent suffix.
-        # This creates headroom instead of re-triggering on every new message.
-        selected_count = boundary
-        # Recent historical protection is soft. Relax it before failing a Run.
-        while selected_count < mandatory and candidate_over(selected_count):
-            selected_count += 1
-        selected_count = max(1, selected_count)
-        selected = tuple(message for unit in units[:selected_count] for message in unit)
-        suffix = tuple(message for unit in units[selected_count:] for message in unit)
-        # If selection did not reach the request, it remains in the suffix.
-        selected_end = covered_count + len(selected)
-        planned_anchor = (
-            (payload[request_index],)
-            if request_index is not None and request_index < selected_end
-            else ()
-        )
-        planned_retained = (*planned_anchor, *suffix)
-        available = maximum - counter.estimate((*systems, *planned_retained))
-        if available <= 0 or (
-            budget.max_messages is not None
-            and len(systems) + 1 + len(planned_retained) > budget.max_messages
-        ):
-            raise self._error(
-                "context.budget_exhausted", "no space remains for a history summary"
-            )
-        target = max(1, min(self.summary_target_tokens, available - 128))
-        prior_count = covered_count
-        checkpoint = previous
-        checkpoint_covered = 0
-
-        async def save_batch(text, covered_selected):
-            nonlocal checkpoint, checkpoint_covered
-            batch_message_count = covered_selected - checkpoint_covered
-            # Commit only complete source units, with canonical provenance and
-            # CAS. A later model failure must not lose this validated prefix.
-            canonical_end = max(indices[: prior_count + covered_selected]) + 1
-            all_covered = canonical[:canonical_end]
-            summary = create_summary(
-                scope=scope,
-                previous=checkpoint,
-                covered_messages=all_covered,
-                covered_digests=await message_digests_async(all_covered),
-                text=text,
-                estimator=self.estimator,
-            )
-            self._require_compression_gain(
-                checkpoint, selected[checkpoint_covered:covered_selected], summary
-            )
-            if over((*systems, self._summary_message(summary), *planned_retained)):
+        if not selected_count and units:
+            latest = units[-1]
+            expected = {c.tool_call_id for c in latest[0].tool_calls}
+            actual = {m.tool_call_id for m in latest if m.role == "tool"}
+            if expected and expected == actual:
+                # A single oversized completed batch is reducible as a whole.
+                # Keep the exact user anchor and retain all facts in the ledger.
+                selected_count = len(units)
+        if selected_count or previous is not None:
+            selected = tuple(m for unit in units[:selected_count] for m in unit)
+            end = covered + len(selected)
+            canonical_end = max(indices[:end]) + 1 if selected else canonical_covered
+            if any(i < canonical_end for i in indices[end:]):
                 raise self._error(
-                    "context.budget_exhausted",
-                    "summary exceeds its reserved request budget",
+                    "context.invalid_source_mapping",
+                    "Compression would cover unprocessed canonical messages",
                 )
-            checkpoint = await self.store.save(
-                summary,
-                expected_revision=(
-                    checkpoint.revision
-                    if checkpoint is not None
-                    else stored.revision
-                    if stored
-                    else None
-                ),
-            )
-            checkpoint_covered = covered_selected
-            LOGGER.info(
-                "context.summary.checkpoint_saved",
-                "Saved validated conversation summary batch",
-                session_id=scope.session_id,
-                run_id=scope.run_id,
-                attributes={
-                    "summary_id": checkpoint.summary_id,
-                    "summary_revision": checkpoint.revision,
-                    "covered_message_count": checkpoint.source_message_count,
-                    "newly_covered_message_count": batch_message_count,
-                    "projection_covered_message_count": covered_selected,
-                    "remaining_selected_message_count": len(selected)
-                    - covered_selected,
-                    "estimated_summary_tokens": checkpoint.estimated_tokens,
-                },
-            )
-
-        _, covered_selected = await self._hierarchical_summary(
-            scope,
-            previous,
-            selected,
-            target_tokens=target,
-            on_batch_completed=save_batch,
-        )
-        leftover = selected[covered_selected:]
-        canonical_end = max(indices[: prior_count + covered_selected]) + 1
-        all_covered = canonical[:canonical_end]
-        covered_end = prior_count + covered_selected
-        anchor = (
-            (payload[request_index],)
-            if request_index is not None and request_index < covered_end
-            else ()
-        )
-        retained = (*anchor, *leftover, *suffix)
-        assert checkpoint is not None
-        saved = checkpoint
-        result = (*systems, self._summary_message(saved), *retained)
-        if over(result):
-            raise self._error(
-                "context.budget_exhausted",
-                "summary exceeds its reserved request budget",
-            )
-        return self._projection(
-            original_messages,
-            result,
-            saved,
-            historical_messages=(*all_covered, *changed),
-        )
-
-    async def _hierarchical_summary(
-        self, scope, previous, messages, *, target_tokens=None, on_batch_completed=None
-    ):
-        target = target_tokens or self.summary_target_tokens
-        # Summary prompts describe media rather than sending pixels. Budget the
-        # same representation so old images do not exhaust the summary batches.
-        messages = tuple(
-            message.model_copy(
-                update={
-                    "content": tuple(
-                        TextBlock(text=summary_safe_block_text(block))
-                        if isinstance(block, ImageBlock)
-                        else block
-                        for block in message.content
-                    )
-                }
-            )
-            if any(isinstance(b, ImageBlock) for b in message.content)
-            else message
-            for message in messages
-        )
-        counter = await MessageTokenCounter.create(self.estimator, messages)
-        batches = []
-        batch = []
-        batch_tokens = 0
-        batch_coverage = 0
-        # Reserve room for the rolling summary as well as framing on every call.
-        previous_tokens = (
-            counter.estimate((self._summary_message(previous),)) if previous else 0
-        )
-        reserve = max(target + 256, previous_tokens)
-        limit = self.max_summary_source_tokens - reserve
-        if limit <= 0:
-            raise self._error(
-                "context.summary_source_too_large",
-                "rolling summary consumes the source budget",
-            )
-        for unit in self._units(messages):
-            source_count = len(unit)
-            cost = counter.estimate(unit)
-            if cost > limit:
-                replacement = await self.unit_compactor.compact(unit)
-                if replacement is not None:
-                    unit = replacement
-                    cost = counter.estimate(unit)
-                if cost > limit:
-                    if batch:
-                        batches.append((tuple(batch), batch_coverage))
-                        batch, batch_tokens, batch_coverage = [], 0, 0
-                    fragments = await self._summary_fragments(unit, limit)
-                    # Canonical coverage advances only after the complete unit.
-                    batches.extend(
-                        (fragment, source_count if index == len(fragments) - 1 else 0)
-                        for index, fragment in enumerate(fragments)
-                    )
-                    continue
-            candidate_tokens = (
-                batch_tokens + cost
-                if counter.costs is not None
-                else counter.estimate((*batch, *unit))
-            )
-            if batch and candidate_tokens > limit:
-                batches.append((tuple(batch), batch_coverage))
-                batch, batch_tokens, batch_coverage = [], 0, 0
-            batch.extend(unit)
-            batch_tokens += cost
-            batch_coverage += source_count
-        if batch:
-            batches.append((tuple(batch), batch_coverage))
-        # One projection may only spend max_summary_calls. Cover that prefix,
-        # persist it, and let the next turn continue. Do not fail the Run.
-        work = batches[: self.max_summary_calls]
-        while work and not work[-1][1]:
-            work.pop()
-        if not work:
-            raise self._error(
-                "context.summary_source_too_large",
-                "history unit requires more fragments than the summary call budget",
-            )
-        rolling = previous.text if previous else None
-        covered = 0
-        for batch, source_count in work:
-            # Intermediate output can be larger than the requested target. Check
-            # its actual size before sending it to the next summary request.
-            prefix = (
-                (ModelMessage(role="system", content=(TextBlock(text=rolling),)),)
-                if rolling
+            retained = tuple(m for unit in units[selected_count:] for m in unit)
+            anchor = (
+                (payload[request_index],)
+                if request_index is not None and request_index < end
                 else ()
             )
-            if counter.estimate((*prefix, *batch)) > self.max_summary_source_tokens:
-                raise self._error(
-                    "context.summary_source_too_large",
-                    "rolling summary exceeds the source budget",
+            with model_call_budget() as quota:
+                quota.remaining = min(quota.remaining, self.max_summary_calls)
+                text = await self.summarizer.summarize(
+                    SummarizationRequest(
+                        scope=scope,
+                        messages=selected,
+                        previous_summary=previous.text if previous else None,
+                        target_tokens=self.summary_target_tokens,
+                    )
                 )
-            rolling = await self.summarizer.summarize(
-                SummarizationRequest(
-                    scope=scope,
-                    messages=batch,
-                    previous_summary=rolling,
-                    target_tokens=target,
-                )
-            )
-            if not rolling or not rolling.strip():
+            if not text or not text.strip():
                 raise self._error(
                     "context.summary_empty", "summarizer returned an empty summary"
                 )
-            covered += source_count
-            if on_batch_completed is not None and source_count:
-                await on_batch_completed(rolling.strip(), covered)
-        return rolling.strip(), covered
+            source_characters = sum(len(m.model_dump_json()) for m in selected) + (
+                len(previous.text) if previous else 0
+            )
+            if len(text.strip()) >= source_characters:
+                raise self._error(
+                    "context.summary_no_progress",
+                    "Summary did not reduce the selected source",
+                )
+            # A failed or cancelled summary never advances canonical coverage.
+            summary = create_summary(
+                scope=scope,
+                previous=previous,
+                covered_messages=canonical[:canonical_end],
+                covered_digests=await message_digests_async(canonical[:canonical_end]),
+                text=text.strip(),
+            )
+            if stored is not None and previous is None:
+                summary = summary.model_copy(update={"revision": stored.revision + 1})
+            candidate = (*systems, self._summary_message(summary), *anchor, *retained)
+            fewer_messages = (
+                budget is not None
+                and budget.max_messages is not None
+                and len(candidate) < len(current)
+            )
+            if not fewer_messages and sum(
+                len(m.model_dump_json()) for m in candidate
+            ) >= sum(len(m.model_dump_json()) for m in current):
+                raise self._error(
+                    "context.summary_no_progress",
+                    "Summarizer did not reduce the complete request view",
+                )
+            try:
+                saved = await self.store.save(
+                    summary, expected_revision=stored.revision if stored else None
+                )
+            except ValueError:
+                # A competing identical projection may have won the CAS. Reuse
+                # its validated complete prefix; never overwrite divergent work.
+                winner = await self.store.get(
+                    scope.context_key, session_id=scope.session_id
+                )
+                if winner is None or winner.revision == (
+                    stored.revision if stored else None
+                ):
+                    raise
+                valid, _ = await self._validated_previous(winner, canonical)
+                if valid is None or len(valid.covered_message_digests) < canonical_end:
+                    raise self._error(
+                        "context.summary_revision_conflict",
+                        "Another summary changed incompatible canonical coverage",
+                    )
+                canonical_end = len(valid.covered_message_digests)
+                end = sum(i < canonical_end for i in indices)
+                retained = payload[end:]
+                anchor = (
+                    (payload[request_index],)
+                    if request_index is not None and request_index < end
+                    else ()
+                )
+                saved = valid
+            return ContextProjection(
+                messages=(*systems, self._summary_message(saved), *anchor, *retained),
+                historical_messages=canonical[:canonical_end],
+                source_message_count=len(messages),
+                dropped_message_count=canonical_end,
+                dropped_digest=saved.source_digest,
+                strategy="persistent_summary",
+            )
+        raise self._error(
+            "context.no_reducible_history",
+            "The API rejected mandatory instructions, the current request or latest Tool batch; no completed history remains to compress",
+        )
 
     @staticmethod
     async def _validated_previous(
@@ -582,16 +315,6 @@ class PersistentSummaryContextReducer:
             return None, payload
         return summary, payload[count:]
 
-    def _placeholder_message(self, summary: ConversationSummary | None) -> ModelMessage:
-        if summary is not None:
-            return self._summary_message(summary)
-        approximate_chars = max(256, self.summary_target_tokens * 4)
-        return ModelMessage(
-            role="system",
-            content=(TextBlock(text="S" * approximate_chars),),
-            metadata={"context_summary": True},
-        )
-
     @staticmethod
     def _summary_message(summary: ConversationSummary) -> ModelMessage:
         return ModelMessage(
@@ -613,119 +336,6 @@ class PersistentSummaryContextReducer:
                 "cache_segment": "semi_stable",
             },
         )
-
-    def _projection(
-        self,
-        source: tuple[ModelMessage, ...],
-        result: tuple[ModelMessage, ...],
-        summary: ConversationSummary,
-        *,
-        historical_messages: tuple[ModelMessage, ...],
-    ) -> ContextProjection:
-        return ContextProjection(
-            messages=result,
-            historical_messages=historical_messages,
-            estimated_tokens=self.estimator.estimate(result),
-            source_message_count=len(source),
-            dropped_message_count=len(summary.covered_message_digests),
-            dropped_digest=summary.source_digest,
-            strategy="persistent_summary",
-        )
-
-    def _require_compression_gain(
-        self,
-        previous: ConversationSummary | None,
-        selected: tuple[ModelMessage, ...],
-        summary: ConversationSummary,
-    ) -> None:
-        """Judge only the reducible source; request reservations never enter here."""
-
-        source = (
-            *((self._summary_message(previous),) if previous else ()),
-            *selected,
-        )
-        source_tokens = self.estimator.estimate(source)
-        summary_tokens = self.estimator.estimate((self._summary_message(summary),))
-        if summary_tokens >= source_tokens:
-            raise self._error(
-                "context.summary_not_reducing",
-                "summary did not reduce the compressible conversation content",
-            )
-
-    async def _summary_fragments(self, unit, limit):
-        """Split only summary text; never rewrite canonical messages or tool pairs."""
-        from sagents.v2.context.summary import _redact_data_urls
-
-        fragments = []
-        for index, message in enumerate(unit):
-            text = "\n".join(
-                summary_safe_block_text(block) for block in message.content
-            )
-            if message.tool_calls:
-                calls = [
-                    {
-                        "tool_call_id": call.tool_call_id,
-                        "name": call.name,
-                        "arguments": call.arguments,
-                    }
-                    for call in message.tool_calls
-                ]
-                text += "\nTool calls: " + _redact_data_urls(
-                    json.dumps(calls, ensure_ascii=False, sort_keys=True)
-                )
-            header = f"[history message {index + 1}/{len(unit)}; role={message.role}; tool_call_id={message.tool_call_id or '-'}]"
-            part = 1
-            remaining = text or "[empty message]"
-            while remaining:
-
-                def projected(length):
-                    return ModelMessage(
-                        role=message.role,
-                        tool_call_id=message.tool_call_id,
-                        content=(
-                            TextBlock(
-                                text=f"{header} fragment={part}\n{remaining[:length]}"
-                            ),
-                        ),
-                    )
-
-                low, high = 0, len(remaining)
-                while low < high:
-                    middle = (low + high + 1) // 2
-                    if (
-                        await estimate_tokens_async(
-                            self.estimator, (projected(middle),)
-                        )
-                        <= limit
-                    ):
-                        low = middle
-                    else:
-                        high = middle - 1
-                if not low:
-                    raise self._error(
-                        "context.summary_source_too_large",
-                        "summary fragment framing exceeds its budget",
-                    )
-                fragments.append((projected(low),))
-                remaining = remaining[low:]
-                part += 1
-        # Several small tool records can share one summary request. Splitting
-        # a parallel batch must not consume one model call per tool by default.
-        batches, current = [], []
-        for fragment in fragments:
-            if (
-                current
-                and await estimate_tokens_async(self.estimator, (*current, *fragment))
-                > limit
-            ):
-                batches.append(tuple(current))
-                current = []
-            current.extend(fragment)
-        if current:
-            batches.append(tuple(current))
-        return batches
-
-    _units = staticmethod(conversation_units)
 
     @staticmethod
     def _error(code: str, message: str) -> SageV2Error:

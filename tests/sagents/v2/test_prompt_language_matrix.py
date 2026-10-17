@@ -100,7 +100,8 @@ async def test_runtime_and_auxiliary_requests_share_locale_and_fallback(
     await LLMContinuationJudge(judge_model).decide(_context(language=language or "en"))
     judge_request = judge_model.requests[0]
     assert judge_request.metadata["response_language"] == expected
-    judge_text = judge_request.messages[0].content[0].text
+    assert tuple(m.role for m in judge_request.messages) == ("system", "user")
+    judge_text = "\n".join(m.content[0].text for m in judge_request.messages)
     assert (
         "先应用 Todo 硬约束" if expected == "zh" else "Apply the Todo invariant first"
     ) in judge_text
@@ -171,7 +172,6 @@ async def test_summary_initial_retry_and_extractive_fallback_share_locale(
     assert snapshot["summary"] == "old evidence"
     assert "/project/file.py" in " ".join(snapshot["user_requirements"])
     assert "Previous summary" not in value
-
 
 
 @pytest.mark.parametrize(

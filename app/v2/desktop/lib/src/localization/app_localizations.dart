@@ -263,17 +263,9 @@ const _translations = <String, Map<String, String>>{
     'component.toolSelection.max_expanded_tools_per_run': '单次 Run 累计展开上限',
     'component.toolSelection.invalid': '请输入有效阈值；候选 Top K 不能超过最多可见工具数。',
     'component.toolSelection.restoreDefaults': '恢复默认阈值',
-    'component.tokenEstimator.name': 'Token 估算',
-    'component.tokenEstimator.value': '估算模型请求占用的 Token 数量',
     'component.skillLoading.name': 'Skill 加载',
     'component.reducer.name': '上下文压缩',
     'component.reducer.value': '在请求超过模型窗口前精简历史消息',
-    'component.plugin.jsonHeuristic.name': 'JSON 启发式估算',
-    'component.plugin.jsonHeuristic.value': '无额外依赖的保守估算',
-    'component.plugin.unicodeHeuristic.name': 'Unicode 启发式估算',
-    'component.plugin.unicodeHeuristic.value': '按 Unicode 文字构成估算 Token',
-    'component.plugin.tiktoken.name': 'Tiktoken 估算',
-    'component.plugin.tiktoken.value': '使用 Tiktoken 分词器进行估算',
     'component.plugin.persistentSummary.name': '持久摘要',
     'component.plugin.persistentSummary.value': '摘要较早的完整消息并保留近期内容',
     'component.plugin.window.name': '窗口裁剪',
@@ -661,22 +653,10 @@ const _translations = <String, Map<String, String>>{
     'component.toolSelection.invalid':
         'Enter valid limits; candidate Top K cannot exceed maximum visible Tools.',
     'component.toolSelection.restoreDefaults': 'Restore default thresholds',
-    'component.tokenEstimator.name': 'Token estimation',
-    'component.tokenEstimator.value':
-        'Estimates token usage for model requests',
     'component.skillLoading.name': 'Skill loading',
     'component.reducer.name': 'Context compression',
     'component.reducer.value':
         'Reduces history before it exceeds the model window',
-    'component.plugin.jsonHeuristic.name': 'JSON heuristic',
-    'component.plugin.jsonHeuristic.value':
-        'Conservative estimation with no extra dependency',
-    'component.plugin.unicodeHeuristic.name': 'Unicode heuristic',
-    'component.plugin.unicodeHeuristic.value':
-        'Estimates tokens from Unicode text composition',
-    'component.plugin.tiktoken.name': 'Tiktoken estimation',
-    'component.plugin.tiktoken.value':
-        'Estimates tokens with the Tiktoken tokenizer',
     'component.plugin.persistentSummary.name': 'Persistent summary',
     'component.plugin.persistentSummary.value':
         'Summarizes older complete messages and keeps recent context',
@@ -1082,22 +1062,10 @@ const _translations = <String, Map<String, String>>{
     'component.toolSelection.invalid':
         'Informe limites válidos; Top K não pode superar o máximo visível.',
     'component.toolSelection.restoreDefaults': 'Restaurar limites padrão',
-    'component.tokenEstimator.name': 'Estimativa de tokens',
-    'component.tokenEstimator.value':
-        'Estima o uso de tokens nas solicitações ao modelo',
     'component.skillLoading.name': 'Carregamento de Skills',
     'component.reducer.name': 'Compressão de contexto',
     'component.reducer.value':
         'Reduz o histórico antes de exceder a janela do modelo',
-    'component.plugin.jsonHeuristic.name': 'Estimativa JSON',
-    'component.plugin.jsonHeuristic.value':
-        'Estimativa conservadora sem dependências extras',
-    'component.plugin.unicodeHeuristic.name': 'Estimativa Unicode',
-    'component.plugin.unicodeHeuristic.value':
-        'Estima tokens pela composição do texto Unicode',
-    'component.plugin.tiktoken.name': 'Estimativa Tiktoken',
-    'component.plugin.tiktoken.value':
-        'Estima tokens com o tokenizador Tiktoken',
     'component.plugin.persistentSummary.name': 'Resumo persistente',
     'component.plugin.persistentSummary.value':
         'Resume mensagens antigas e preserva o contexto recente',
@@ -1510,22 +1478,10 @@ const _translations = <String, Map<String, String>>{
         'Introduce límites válidos; Top K no puede superar el máximo visible.',
     'component.toolSelection.restoreDefaults':
         'Restaurar umbrales predeterminados',
-    'component.tokenEstimator.name': 'Estimación de tokens',
-    'component.tokenEstimator.value':
-        'Estima el uso de tokens en las solicitudes al modelo',
     'component.skillLoading.name': 'Carga de Skills',
     'component.reducer.name': 'Compresión de contexto',
     'component.reducer.value':
         'Reduce el historial antes de superar la ventana del modelo',
-    'component.plugin.jsonHeuristic.name': 'Estimación JSON',
-    'component.plugin.jsonHeuristic.value':
-        'Estimación conservadora sin dependencias adicionales',
-    'component.plugin.unicodeHeuristic.name': 'Estimación Unicode',
-    'component.plugin.unicodeHeuristic.value':
-        'Estima tokens según la composición del texto Unicode',
-    'component.plugin.tiktoken.name': 'Estimación Tiktoken',
-    'component.plugin.tiktoken.value':
-        'Estima tokens con el tokenizador Tiktoken',
     'component.plugin.persistentSummary.name': 'Resumen persistente',
     'component.plugin.persistentSummary.value':
         'Resume mensajes antiguos y conserva el contexto reciente',
@@ -1938,22 +1894,10 @@ const _translations = <String, Map<String, String>>{
     'component.toolSelection.invalid':
         'Saisissez des limites valides ; Top K ne peut pas dépasser le maximum visible.',
     'component.toolSelection.restoreDefaults': 'Rétablir les seuils par défaut',
-    'component.tokenEstimator.name': 'Estimation des jetons',
-    'component.tokenEstimator.value':
-        'Estime les jetons utilisés par les requêtes au modèle',
     'component.skillLoading.name': 'Chargement des Skills',
     'component.reducer.name': 'Compression du contexte',
     'component.reducer.value':
         'Réduit l’historique avant de dépasser la fenêtre du modèle',
-    'component.plugin.jsonHeuristic.name': 'Estimation JSON',
-    'component.plugin.jsonHeuristic.value':
-        'Estimation prudente sans dépendance supplémentaire',
-    'component.plugin.unicodeHeuristic.name': 'Estimation Unicode',
-    'component.plugin.unicodeHeuristic.value':
-        'Estime les jetons selon la composition du texte Unicode',
-    'component.plugin.tiktoken.name': 'Estimation Tiktoken',
-    'component.plugin.tiktoken.value':
-        'Estime les jetons avec le tokenizer Tiktoken',
     'component.plugin.persistentSummary.name': 'Résumé persistant',
     'component.plugin.persistentSummary.value':
         'Résume les anciens messages et conserve le contexte récent',
@@ -2364,22 +2308,10 @@ const _translations = <String, Map<String, String>>{
     'component.toolSelection.invalid':
         'Gültige Grenzen eingeben; Top K darf das sichtbare Maximum nicht überschreiten.',
     'component.toolSelection.restoreDefaults': 'Standardwerte wiederherstellen',
-    'component.tokenEstimator.name': 'Token-Schätzung',
-    'component.tokenEstimator.value':
-        'Schätzt den Tokenverbrauch von Modellanfragen',
     'component.skillLoading.name': 'Skill-Laden',
     'component.reducer.name': 'Kontextkomprimierung',
     'component.reducer.value':
         'Reduziert den Verlauf vor dem Überschreiten des Modellfensters',
-    'component.plugin.jsonHeuristic.name': 'JSON-Schätzung',
-    'component.plugin.jsonHeuristic.value':
-        'Konservative Schätzung ohne zusätzliche Abhängigkeit',
-    'component.plugin.unicodeHeuristic.name': 'Unicode-Schätzung',
-    'component.plugin.unicodeHeuristic.value':
-        'Schätzt Tokens aus der Unicode-Textzusammensetzung',
-    'component.plugin.tiktoken.name': 'Tiktoken-Schätzung',
-    'component.plugin.tiktoken.value':
-        'Schätzt Tokens mit dem Tiktoken-Tokenizer',
     'component.plugin.persistentSummary.name': 'Dauerhafte Zusammenfassung',
     'component.plugin.persistentSummary.value':
         'Fasst ältere Nachrichten zusammen und behält neuen Kontext',
@@ -2772,17 +2704,9 @@ const _translations = <String, Map<String, String>>{
     'component.toolSelection.invalid':
         '有効な値を入力してください。Top K は最大表示数以下である必要があります。',
     'component.toolSelection.restoreDefaults': '既定のしきい値に戻す',
-    'component.tokenEstimator.name': 'Token 見積もり',
-    'component.tokenEstimator.value': 'モデルリクエストの Token 使用量を見積もります',
     'component.skillLoading.name': 'Skill の読み込み',
     'component.reducer.name': 'コンテキスト圧縮',
     'component.reducer.value': 'モデルのウィンドウを超える前に履歴を縮小します',
-    'component.plugin.jsonHeuristic.name': 'JSON ヒューリスティック',
-    'component.plugin.jsonHeuristic.value': '追加依存のない安全側の見積もり',
-    'component.plugin.unicodeHeuristic.name': 'Unicode ヒューリスティック',
-    'component.plugin.unicodeHeuristic.value': 'Unicode テキストの構成から Token を見積ります',
-    'component.plugin.tiktoken.name': 'Tiktoken 見積もり',
-    'component.plugin.tiktoken.value': 'Tiktoken トークナイザーで Token を見積ります',
     'component.plugin.persistentSummary.name': '永続サマリー',
     'component.plugin.persistentSummary.value': '古いメッセージを要約して最近の文脈を保ちます',
     'component.plugin.window.name': 'ウィンドウ切り詰め',
@@ -3157,17 +3081,9 @@ const _translations = <String, Map<String, String>>{
     'component.toolSelection.invalid':
         '유효한 값을 입력하세요. Top K는 최대 표시 수를 넘을 수 없습니다.',
     'component.toolSelection.restoreDefaults': '기본 임계값 복원',
-    'component.tokenEstimator.name': 'Token 추정',
-    'component.tokenEstimator.value': '모델 요청의 Token 사용량을 추정합니다',
     'component.skillLoading.name': 'Skill 로딩',
     'component.reducer.name': '컨텍스트 압축',
     'component.reducer.value': '모델 창을 넘기 전에 기록을 줄입니다',
-    'component.plugin.jsonHeuristic.name': 'JSON 휴리스틱',
-    'component.plugin.jsonHeuristic.value': '추가 의존성 없이 보수적으로 추정합니다',
-    'component.plugin.unicodeHeuristic.name': 'Unicode 휴리스틱',
-    'component.plugin.unicodeHeuristic.value': 'Unicode 텍스트 구성으로 Token을 추정합니다',
-    'component.plugin.tiktoken.name': 'Tiktoken 추정',
-    'component.plugin.tiktoken.value': 'Tiktoken 토크나이저로 Token을 추정합니다',
     'component.plugin.persistentSummary.name': '영구 요약',
     'component.plugin.persistentSummary.value': '이전 메시지를 요약하고 최근 컨텍스트를 유지합니다',
     'component.plugin.window.name': '창 잘라내기',
@@ -3558,21 +3474,9 @@ const _translations = <String, Map<String, String>>{
         'Введите допустимые значения; Top K не должен превышать видимый максимум.',
     'component.toolSelection.restoreDefaults':
         'Восстановить пороги по умолчанию',
-    'component.tokenEstimator.name': 'Оценка Token',
-    'component.tokenEstimator.value':
-        'Оценивает число Token в запросах к модели',
     'component.skillLoading.name': 'Загрузка Skills',
     'component.reducer.name': 'Сжатие контекста',
     'component.reducer.value': 'Сокращает историю до превышения окна модели',
-    'component.plugin.jsonHeuristic.name': 'Оценка JSON',
-    'component.plugin.jsonHeuristic.value':
-        'Консервативная оценка без дополнительных зависимостей',
-    'component.plugin.unicodeHeuristic.name': 'Оценка Unicode',
-    'component.plugin.unicodeHeuristic.value':
-        'Оценивает Token по составу Unicode-текста',
-    'component.plugin.tiktoken.name': 'Оценка Tiktoken',
-    'component.plugin.tiktoken.value':
-        'Оценивает Token с помощью токенизатора Tiktoken',
     'component.plugin.persistentSummary.name': 'Постоянная сводка',
     'component.plugin.persistentSummary.value':
         'Сжимает старые сообщения и сохраняет свежий контекст',

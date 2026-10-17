@@ -33,7 +33,8 @@ def context(user="alice", tenant="one"):
 
 def bundle(version="1.0.0"):
     data = BuiltinPackageFactory.create(
-        "assistant", package_id="com.test.expert",
+        "assistant",
+        package_id="com.test.expert",
     ).model_dump(mode="json")
     data["metadata"]["version"] = version
     key = data["entrypoint"]["agent"]
@@ -135,7 +136,8 @@ def service(root, *, authorize=None):
         provider = model()
         models.append(provider)
         return (
-            SAgentBuilder().with_models(TEST_MODELS)
+            SAgentBuilder()
+            .with_models(TEST_MODELS)
             .with_defaults(session_root=run_root)
             .with_model_provider(provider)
         )
@@ -261,9 +263,9 @@ def test_management_tools_publish_complete_schema(tmp_path):
         "agent_package_status",
     } <= names
     schema = svc.schema()["bundle_schema"]
-    assert {"agents", "flows", "plugins", "runtime"} <= schema["$defs"][
-        "SageManifest"
-    ]["properties"].keys()
+    assert {"agents", "flows", "plugins", "runtime"} <= schema["$defs"]["SageManifest"][
+        "properties"
+    ].keys()
 
 
 def tool_step(name, arguments, call_id):
@@ -296,7 +298,8 @@ async def test_parent_model_creates_and_invokes_full_agent(tmp_path):
     svc, _ = service(tmp_path / "management")
     plugin = AgentManagementToolPlugin(svc)
     parent = BuiltinPackageFactory.create(
-        "assistant", package_id="parent",
+        "assistant",
+        package_id="parent",
     ).model_dump(mode="json")
     parent["agents"]["assistant"]["tools"] = [d.name for d in plugin.definitions]
     parent["agents"]["assistant"]["budgets"] = {"max_steps": 8}
@@ -334,7 +337,8 @@ async def test_parent_model_creates_and_invokes_full_agent(tmp_path):
         )
     )
     app = await (
-        SAgentBuilder().with_models(TEST_MODELS)
+        SAgentBuilder()
+        .with_models(TEST_MODELS)
         .with_defaults(session_root=tmp_path / "parent")
         .with_model_provider(provider)
         .with_tool_policy(
@@ -416,7 +420,8 @@ async def test_builder_executes_declared_flow_and_custom_node(tmp_path, binding)
 
     def build(package, root, ctx):
         return (
-            SAgentBuilder().with_models(TEST_MODELS)
+            SAgentBuilder()
+            .with_models(TEST_MODELS)
             .with_defaults(session_root=root)
             .with_model_provider(model())
             .with_flow_tool_nodes({"calculate": Node()})
@@ -458,13 +463,15 @@ async def test_builder_executes_declared_flow_and_custom_node(tmp_path, binding)
 
         def build(package, root, ctx):
             return (
-                SAgentBuilder().with_models(TEST_MODELS)
+                SAgentBuilder()
+                .with_models(TEST_MODELS)
                 .with_defaults(session_root=root)
                 .with_model_provider(model())
                 .register(registration)
             )
 
     from copy import deepcopy
+
     child = deepcopy(data)
     child["manifest"]["metadata"]["id"] += ".worker"
     child["manifest"]["agents"] = {"worker": child["manifest"]["agents"]["worker"]}
@@ -578,7 +585,8 @@ async def test_managed_agent_selects_standard_plugin_and_configuration(tmp_path)
             )
         )
         return (
-            SAgentBuilder().with_models(TEST_MODELS)
+            SAgentBuilder()
+            .with_models(TEST_MODELS)
             .with_defaults(session_root=root)
             .register(registration)
             .with_model_provider(provider)
@@ -640,7 +648,8 @@ async def test_managed_agent_loads_its_selected_skill(tmp_path):
         )
         requests.append(provider.requests)
         return (
-            SAgentBuilder().with_models(TEST_MODELS)
+            SAgentBuilder()
+            .with_models(TEST_MODELS)
             .with_defaults(session_root=root)
             .with_model_provider(provider)
             .with_skill_provider(source, source, InMemorySkillWorkspace())
@@ -661,7 +670,11 @@ async def test_managed_agent_loads_its_selected_skill(tmp_path):
         await svc.close()
         svc = AgentManagementService(tmp_path, builder_factory=build, authorize=allow)
         await svc.run(
-            saved["ref"], "assistant", "Continue", "skill_next", ctx,
+            saved["ref"],
+            "assistant",
+            "Continue",
+            "skill_next",
+            ctx,
             session_id=first["session_id"],
         )
         continued = await settled(svc, "skill_next", ctx)
@@ -799,7 +812,8 @@ async def test_created_agent_can_create_another_agent_when_granted(tmp_path):
                 )
             )
         return (
-            SAgentBuilder().with_models(TEST_MODELS)
+            SAgentBuilder()
+            .with_models(TEST_MODELS)
             .with_defaults(session_root=root)
             .with_model_provider(provider)
             .with_agent_management(svc)
@@ -838,7 +852,9 @@ async def test_bundle_preserves_resources_and_instruction_whitespace(tmp_path):
     ref = await store.save("owner", package)
     restored = await store.get("owner", ref)
     assert restored.files == data["files"]
-    resolved = CompositionResolver(models=TEST_MODELS).resolve(restored.resolved_manifest())
+    resolved = CompositionResolver(models=TEST_MODELS).resolve(
+        restored.resolved_manifest()
+    )
     assert resolved.agents["assistant"].instructions == text
     assert (
         AgentDescriptor(
@@ -1013,7 +1029,8 @@ async def test_concurrent_managed_runs_are_isolated_and_duplicate_admission_is_o
         provider = SlowModel(model(count=64)._steps)
         providers.append(provider)
         return (
-            SAgentBuilder().with_models(TEST_MODELS)
+            SAgentBuilder()
+            .with_models(TEST_MODELS)
             .with_defaults(session_root=root)
             .with_model_provider(provider)
         )
@@ -1394,7 +1411,12 @@ async def test_readiness_reports_missing_resources_and_strict_save_rejects(tmp_p
         pass
 
     def factory(package, root, ctx):
-        return SAgentBuilder().with_models(TEST_MODELS).with_defaults(session_root=root).with_model_provider(model())
+        return (
+            SAgentBuilder()
+            .with_models(TEST_MODELS)
+            .with_defaults(session_root=root)
+            .with_model_provider(model())
+        )
 
     svc = AgentManagementService(tmp_path, builder_factory=factory, authorize=allow)
     try:
@@ -1416,32 +1438,60 @@ async def test_readiness_reports_missing_resources_and_strict_save_rejects(tmp_p
 async def test_readiness_available_skill_and_deferred_catalog(tmp_path):
     from sagents.v2.agent.management.readiness import resource_readiness
     from sagents.v2.skill.contracts import SkillBundle, SkillDescriptor
-    from sagents.v2.skill.plugins.ephemeral import InMemorySkillProvider, InMemorySkillWorkspace
+    from sagents.v2.skill.plugins.ephemeral import (
+        InMemorySkillProvider,
+        InMemorySkillWorkspace,
+    )
     from sagents.v2.tool.plugins.ephemeral import InMemoryToolCatalog
 
-    source = InMemorySkillProvider((SkillBundle(
-        descriptor=SkillDescriptor(name="known", description="Known", source_id="test"),
-        files={"SKILL.md": b"Instructions"}, content_hash="v1",
-    ),))
-    definition = bundle().manifest.agents["assistant"].model_copy(update={"tools": ("load_skill",), "skills": ("known",)})
-    report = await resource_readiness(definition, InMemoryToolCatalog(()),
-        skill_provider=(source, source, InMemorySkillWorkspace()))
+    source = InMemorySkillProvider(
+        (
+            SkillBundle(
+                descriptor=SkillDescriptor(
+                    name="known", description="Known", source_id="test"
+                ),
+                files={"SKILL.md": b"Instructions"},
+                content_hash="v1",
+            ),
+        )
+    )
+    definition = (
+        bundle()
+        .manifest.agents["assistant"]
+        .model_copy(update={"tools": ("load_skill",), "skills": ("known",)})
+    )
+    report = await resource_readiness(
+        definition,
+        InMemoryToolCatalog(()),
+        skill_provider=(source, source, InMemorySkillWorkspace()),
+    )
     assert report["ready"] is True
     assert not source.fetches
-    report = await resource_readiness(definition, InMemoryToolCatalog(()), deferred_tools=True)
+    report = await resource_readiness(
+        definition, InMemoryToolCatalog(()), deferred_tools=True
+    )
     assert report["ready"] is False
     assert report["unverified"]
 
 
 @pytest.mark.asyncio
-async def test_idle_release_reads_archived_result_without_rebuilding_application(tmp_path):
+async def test_idle_release_reads_archived_result_without_rebuilding_application(
+    tmp_path,
+):
     async def allow(*args):
         pass
 
     def factory(package, root, ctx):
-        return SAgentBuilder().with_models(TEST_MODELS).with_defaults(session_root=root).with_model_provider(model())
+        return (
+            SAgentBuilder()
+            .with_models(TEST_MODELS)
+            .with_defaults(session_root=root)
+            .with_model_provider(model())
+        )
 
-    svc = AgentManagementService(tmp_path, builder_factory=factory, authorize=allow, max_applications=1)
+    svc = AgentManagementService(
+        tmp_path, builder_factory=factory, authorize=allow, max_applications=1
+    )
     try:
         saved = await svc.save(bundle(), context())
         await svc.run(saved["ref"], "assistant", "hello", "idle", context())
@@ -1464,20 +1514,42 @@ async def test_idle_probe_preserves_queued_runs_after_reopen(tmp_path):
 
     store = FilesystemSessionStore(tmp_path)
     try:
-        created = await store.create_run(StartRun(agent_id="assistant", input=(), resolved_spec_hash="test", idempotency_key="first"), context())
+        created = await store.create_run(
+            StartRun(
+                agent_id="assistant",
+                input=(),
+                resolved_spec_hash="test",
+                idempotency_key="first",
+            ),
+            context(),
+        )
         assert await store.has_nonterminal_runs()
         run = await store.get_run(created.handle.run_id)
         # A terminal row can be reclaimed; a new queued row cannot.
-        await store.commit_run(run_id=run.run_id, expected_revision=run.revision,
-            expected_states={RunState.QUEUED}, new_state=RunState.CANCELLED,
-            drafts=(), context=context(), idempotency_key="cancel-first")
+        await store.commit_run(
+            run_id=run.run_id,
+            expected_revision=run.revision,
+            expected_states={RunState.QUEUED},
+            new_state=RunState.CANCELLED,
+            drafts=(),
+            context=context(),
+            idempotency_key="cancel-first",
+        )
         assert not await store.has_nonterminal_runs()
     finally:
         await store.close()
     reopened = FilesystemSessionStore(tmp_path)
     try:
         assert not await reopened.has_nonterminal_runs()
-        await reopened.create_run(StartRun(agent_id="assistant", input=(), resolved_spec_hash="test", idempotency_key="second"), context())
+        await reopened.create_run(
+            StartRun(
+                agent_id="assistant",
+                input=(),
+                resolved_spec_hash="test",
+                idempotency_key="second",
+            ),
+            context(),
+        )
     finally:
         await reopened.close()
     again = FilesystemSessionStore(tmp_path)
@@ -1493,32 +1565,57 @@ async def test_flow_build_only_initializes_reachable_agents(tmp_path, monkeypatc
     template = data["manifest"]["agents"]["assistant"].copy()
     for name in ("worker", "unused"):
         data["manifest"]["agents"][name] = template.copy()
-    data["manifest"]["agents"]["assistant"]["entrypoint"] = {"type": "flow", "flow": "main"}
+    data["manifest"]["agents"]["assistant"]["entrypoint"] = {
+        "type": "flow",
+        "flow": "main",
+    }
     data["manifest"]["flows"] = {
-        "main": {"version": "1", "start": "nested", "nodes": [
-            {"id": "nested", "type": "subflow", "flow": "child"},
-            {"id": "end", "type": "end"},
-            {"id": "unused", "type": "agent", "agent": "unused"},
-        ], "edges": [{"from": "nested", "to": "end"}]},
-        "child": {"version": "1", "start": "parallel", "nodes": [
-            {"id": "parallel", "type": "parallel", "config": {"branches": ["worker"]}},
-            {"id": "worker", "type": "agent", "agent": "worker"},
-            {"id": "end", "type": "end"},
-        ], "edges": [{"from": "parallel", "to": "end"}]},
+        "main": {
+            "version": "1",
+            "start": "nested",
+            "nodes": [
+                {"id": "nested", "type": "subflow", "flow": "child"},
+                {"id": "end", "type": "end"},
+                {"id": "unused", "type": "agent", "agent": "unused"},
+            ],
+            "edges": [{"from": "nested", "to": "end"}],
+        },
+        "child": {
+            "version": "1",
+            "start": "parallel",
+            "nodes": [
+                {
+                    "id": "parallel",
+                    "type": "parallel",
+                    "config": {"branches": ["worker"]},
+                },
+                {"id": "worker", "type": "agent", "agent": "worker"},
+                {"id": "end", "type": "end"},
+            ],
+            "edges": [{"from": "parallel", "to": "end"}],
+        },
     }
     calls = []
 
-    async def create_model(self, host, process, handles, resolved, agent_id, *args, **kwargs):
+    async def create_model(
+        self, host, process, handles, resolved, agent_id, *args, **kwargs
+    ):
         calls.append(agent_id)
         return model()
 
     from sagents.v2.composition.assembler import ApplicationAssembler
+
     monkeypatch.setattr(ApplicationAssembler, "_create_model", create_model)
     from sagents.v2.package.manifest import SageManifest
+
     for definition in data["manifest"]["agents"].values():
         definition["instructions"] = {"inline": "Run the declared flow."}
-    app = await SAgentBuilder().with_models(TEST_MODELS).with_defaults(session_root=tmp_path)._build_package(
-        SageManifest.model_validate(data["manifest"]))
+    app = (
+        await SAgentBuilder()
+        .with_models(TEST_MODELS)
+        .with_defaults(session_root=tmp_path)
+        ._build_package(SageManifest.model_validate(data["manifest"]))
+    )
     try:
         assert calls == ["assistant", "worker"]
     finally:
@@ -1549,23 +1646,34 @@ async def test_managed_applications_share_host_model_budget(tmp_path):
         pass
 
     def factory(package, root, ctx):
-        return SAgentBuilder().with_models(TEST_MODELS).with_defaults(session_root=root).with_model_provider(Model())
+        return (
+            SAgentBuilder()
+            .with_models(TEST_MODELS)
+            .with_defaults(session_root=root)
+            .with_model_provider(Model())
+        )
 
-    svc = AgentManagementService(tmp_path, builder_factory=factory, authorize=allow, model_budget=budget)
+    svc = AgentManagementService(
+        tmp_path, builder_factory=factory, authorize=allow, model_budget=budget
+    )
     try:
         for index in range(2):
             saved = await svc.save(bundle(f"{index + 1}.0.0"), context())
-            await svc.run(saved["ref"], "assistant", "hello", f"bounded-{index}", context())
+            await svc.run(
+                saved["ref"], "assistant", "hello", f"bounded-{index}", context()
+            )
         await asyncio.wait_for(started.wait(), 2)
         for _ in range(200):
             if budget.waiting:
                 break
-            await asyncio.sleep(.01)
+            await asyncio.sleep(0.01)
         assert budget.active == 1 and budget.waiting == 1
         assert len(calls) == 1
         release.set()
         for index in range(2):
-            assert (await settled(svc, f"bounded-{index}", context()))["run"]["state"] == "completed"
+            assert (await settled(svc, f"bounded-{index}", context()))["run"][
+                "state"
+            ] == "completed"
         assert len(calls) == 2
         assert svc.capacity()["model_calls"]["active"] == 0
     finally:
@@ -1607,7 +1715,15 @@ async def test_idle_probe_fails_closed_on_corrupt_persisted_state(tmp_path):
     from sagents.v2.runtime.session.plugins.filesystem import FilesystemSessionStore
 
     store = FilesystemSessionStore(tmp_path)
-    await store.create_run(StartRun(agent_id="assistant", input=(), resolved_spec_hash="test", idempotency_key="one"), context())
+    await store.create_run(
+        StartRun(
+            agent_id="assistant",
+            input=(),
+            resolved_spec_hash="test",
+            idempotency_key="one",
+        ),
+        context(),
+    )
     await store.close()
     snapshot = next(tmp_path.rglob("state.json"))
     snapshot.write_text("broken", encoding="utf-8")
@@ -1620,11 +1736,17 @@ async def test_idle_probe_fails_closed_on_corrupt_persisted_state(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_strict_readiness_rechecks_saved_versions_when_resource_disappears(tmp_path):
+async def test_strict_readiness_rechecks_saved_versions_when_resource_disappears(
+    tmp_path,
+):
     from sagents.v2.tool import InMemoryToolCatalog, InMemoryToolExecutor
     from sagents.v2.tool.contracts import ToolDefinition
 
-    available = [ToolDefinition(name="known", description="Known", input_schema={"type": "object"})]
+    available = [
+        ToolDefinition(
+            name="known", description="Known", input_schema={"type": "object"}
+        )
+    ]
     data = bundle().model_dump(mode="json")
     data["manifest"]["agents"]["assistant"]["tools"] = ["known"]
     package = AgentPackageBundle.model_validate(data)
@@ -1633,10 +1755,19 @@ async def test_strict_readiness_rechecks_saved_versions_when_resource_disappears
         pass
 
     def factory(package, root, ctx):
-        return (SAgentBuilder().with_models(TEST_MODELS).with_defaults(session_root=root).with_model_provider(model())
-            .with_tool_provider(InMemoryToolCatalog(tuple(available)), InMemoryToolExecutor({}, {})))
+        return (
+            SAgentBuilder()
+            .with_models(TEST_MODELS)
+            .with_defaults(session_root=root)
+            .with_model_provider(model())
+            .with_tool_provider(
+                InMemoryToolCatalog(tuple(available)), InMemoryToolExecutor({}, {})
+            )
+        )
 
-    svc = AgentManagementService(tmp_path, builder_factory=factory, authorize=allow, require_readiness=True)
+    svc = AgentManagementService(
+        tmp_path, builder_factory=factory, authorize=allow, require_readiness=True
+    )
     try:
         saved = await svc.save(package, context())
         assert saved["readiness"]["ready"]
@@ -1652,11 +1783,16 @@ async def test_strict_readiness_rechecks_saved_versions_when_resource_disappears
 
 
 async def finish_without_status(svc, handle):
-    app = next(app for app in svc._applications.values()
-               if handle["run_id"] in app.entrypoint().runtime.session_store._runs)
+    app = next(
+        app
+        for app in svc._applications.values()
+        if handle["run_id"] in app.entrypoint().runtime.session_store._runs
+    )
     async with asyncio.timeout(5):
-        while (await app.entrypoint().runtime.get_run(handle["run_id"])).state.value != "completed":
-            await asyncio.sleep(.01)
+        while (
+            await app.entrypoint().runtime.get_run(handle["run_id"])
+        ).state.value != "completed":
+            await asyncio.sleep(0.01)
     return app
 
 
@@ -1685,7 +1821,9 @@ async def test_capacity_pressure_archives_and_reclaims_then_reads_offline(tmp_pa
     async def allow(*args):
         pass
 
-    offline = AgentManagementService(tmp_path, builder_factory=unavailable, authorize=allow)
+    offline = AgentManagementService(
+        tmp_path, builder_factory=unavailable, authorize=allow
+    )
     try:
         assert (await offline.status("first", context())) == result
         assert offline.capacity()["applications"] == 0
@@ -1703,7 +1841,9 @@ async def test_capacity_pressure_archives_and_reclaims_then_reads_offline(tmp_pa
 
 
 @pytest.mark.asyncio
-async def test_eviction_cannot_close_application_while_status_holds_lease(tmp_path, monkeypatch):
+async def test_eviction_cannot_close_application_while_status_holds_lease(
+    tmp_path, monkeypatch
+):
     svc, _ = service(tmp_path)
     svc.max_applications = 1
     svc.auto_release_idle_seconds = 0
@@ -1726,7 +1866,10 @@ async def test_eviction_cannot_close_application_while_status_holds_lease(tmp_pa
         reading = asyncio.create_task(svc.status("first", context()))
         await entered.wait()
         assert svc.capacity()["leased_applications"] == 1
-        assert await svc.release_idle(min_idle_seconds=0) == {"released": 0, "busy": True}
+        assert await svc.release_idle(min_idle_seconds=0) == {
+            "released": 0,
+            "busy": True,
+        }
         with pytest.raises(ValueError, match="capacity"):
             await svc.run(second["ref"], "assistant", "second", "second", context())
         release.set()
@@ -1794,17 +1937,34 @@ async def test_reclamation_preserves_ephemeral_session_continuation(tmp_path):
         pass
 
     def factory(package, root, ctx):
-        return (SAgentBuilder().with_models(TEST_MODELS).with_defaults(session_root=root)
-                .with_session_store(EphemeralSessionStore()).with_model_provider(model()))
+        return (
+            SAgentBuilder()
+            .with_models(TEST_MODELS)
+            .with_defaults(session_root=root)
+            .with_session_store(EphemeralSessionStore())
+            .with_model_provider(model())
+        )
 
-    svc = AgentManagementService(tmp_path, builder_factory=factory, authorize=allow,
-                                 max_applications=1, auto_release_idle_seconds=0)
+    svc = AgentManagementService(
+        tmp_path,
+        builder_factory=factory,
+        authorize=allow,
+        max_applications=1,
+        auto_release_idle_seconds=0,
+    )
     try:
         saved = await svc.save(bundle(), context())
         first = await svc.run(saved["ref"], "assistant", "hello", "first", context())
         await settled(svc, "first", context())
         assert (await svc.release_idle(min_idle_seconds=0))["released"] == 0
-        second = await svc.run(saved["ref"], "assistant", "continue", "second", context(), session_id=first["session_id"])
+        second = await svc.run(
+            saved["ref"],
+            "assistant",
+            "continue",
+            "second",
+            context(),
+            session_id=first["session_id"],
+        )
         assert second["session_id"] == first["session_id"]
         assert (await settled(svc, "second", context()))["terminal"]
     finally:
@@ -1812,7 +1972,9 @@ async def test_reclamation_preserves_ephemeral_session_continuation(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_shutdown_archives_unobserved_completed_run_and_releases_on_archive_failure(tmp_path, monkeypatch):
+async def test_shutdown_archives_unobserved_completed_run_and_releases_on_archive_failure(
+    tmp_path, monkeypatch
+):
     svc, _ = service(tmp_path)
     saved = await svc.save(bundle(), context())
     handle = await svc.run(saved["ref"], "assistant", "hello", "first", context())
@@ -1822,7 +1984,9 @@ async def test_shutdown_archives_unobserved_completed_run_and_releases_on_archiv
     try:
         assert (await reopened.status("first", context()))["terminal"]
         assert models == []
-        other = await reopened.run(saved["ref"], "assistant", "again", "second", context())
+        other = await reopened.run(
+            saved["ref"], "assistant", "again", "second", context()
+        )
         app = await finish_without_status(reopened, other)
         original = reopened.store.terminal_status
 
@@ -1848,14 +2012,25 @@ async def test_archive_pagination_does_not_skip_unobserved_operations(tmp_path):
         handle = await svc.run(saved["ref"], "assistant", "hello", "first", context())
         await finish_without_status(svc, handle)
         from sagents.v2.agent.management.service import owner_key
+
         owner = owner_key(context())
         # Multiple inventory rows make the paging boundary observable without
         # spending the test on 101 separate model executions.
         for index in range(101):
-            await svc.store.invocation(owner, f"copy-{index:03}", saved["ref"], "assistant", "same-run", handle=handle)
+            await svc.store.invocation(
+                owner,
+                f"copy-{index:03}",
+                saved["ref"],
+                "assistant",
+                "same-run",
+                handle=handle,
+            )
         assert (await svc.release_idle(min_idle_seconds=0))["released"] == 1
         assert (await svc.store.terminal_status(owner, "copy-100"))["terminal"]
-        assert await svc.store.unarchived_invocations(owner, saved["ref"], "assistant") == []
+        assert (
+            await svc.store.unarchived_invocations(owner, saved["ref"], "assistant")
+            == []
+        )
     finally:
         await svc.close()
 
@@ -1882,7 +2057,9 @@ async def test_cancelled_shutdown_preserves_owned_build_for_cleanup_retry(tmp_pa
     async def allow(*args):
         pass
 
-    svc = AgentManagementService(tmp_path, builder_factory=lambda *args: Builder(), authorize=allow)
+    svc = AgentManagementService(
+        tmp_path, builder_factory=lambda *args: Builder(), authorize=allow
+    )
     building = asyncio.create_task(svc._application(bundle(), "assistant", context()))
     try:
         await entered.wait()
@@ -1904,12 +2081,17 @@ async def test_cancelled_shutdown_preserves_owned_build_for_cleanup_retry(tmp_pa
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("timeout", [False, True])
-async def test_managed_run_preserves_queue_failure_reason(tmp_path, timeout):
+async def test_managed_run_preserves_queue_failure_reason(
+    tmp_path, timeout, monkeypatch
+):
+    from sagents.v2.agent import AgentLoopEngine
     from sagents.v2.model import ModelConcurrencyBudget
 
+    monkeypatch.setattr(AgentLoopEngine, "_PROVIDER_RETRY_BASE_SECONDS", 0)
     svc, models = service(tmp_path)
-    svc.model_budget = ModelConcurrencyBudget(1, max_waiting=1 if timeout else 0,
-                                             wait_timeout_seconds=.01)
+    svc.model_budget = ModelConcurrencyBudget(
+        1, max_waiting=1 if timeout else 0, wait_timeout_seconds=0.01
+    )
     try:
         saved = await svc.save(bundle(), context())
         async with svc.model_budget.lease():
@@ -1917,39 +2099,61 @@ async def test_managed_run_preserves_queue_failure_reason(tmp_path, timeout):
             result = await settled(svc, "overloaded", context())
         assert result["run"]["state"] == "suspended"
         error = result["interaction"]["payload"]["error"]
-        assert error["code"] == ("model.queue_timeout" if timeout else "model.queue_full")
+        assert error["code"] == (
+            "model.queue_timeout" if timeout else "model.queue_full"
+        )
         assert error["retryable"] and error["safe_to_resume"]
         assert all(not provider.requests for provider in models)
-        await svc.control("overloaded", "reply", context(), decision="retry",
-            interaction_id=result["interaction"]["interaction_id"])
-        assert (await settled(svc, "overloaded", context()))["run"]["state"] == "completed"
+        await svc.control(
+            "overloaded",
+            "reply",
+            context(),
+            decision="retry",
+            interaction_id=result["interaction"]["interaction_id"],
+        )
+        assert (await settled(svc, "overloaded", context()))["run"][
+            "state"
+        ] == "completed"
     finally:
         await svc.close()
 
 
 @pytest.mark.asyncio
-async def test_unarchived_filesystem_history_reads_without_model_or_source_writes(tmp_path, monkeypatch):
+async def test_unarchived_filesystem_history_reads_without_model_or_source_writes(
+    tmp_path, monkeypatch
+):
     svc, _ = service(tmp_path)
     saved = await svc.save(bundle(), context())
     handle = await svc.run(saved["ref"], "assistant", "hello", "unobserved", context())
     await finish_without_status(svc, handle)
+
     async def skip_archive(*args):
         pass
+
     monkeypatch.setattr(svc, "_archive_application", skip_archive)
     await svc.close()
     root = tmp_path / "runs"
-    before = {str(path): path.read_bytes() for path in root.rglob('*') if path.is_file()}
+    before = {
+        str(path): path.read_bytes() for path in root.rglob("*") if path.is_file()
+    }
+
     async def allow(*args):
         pass
+
     def unavailable(*args):
         raise AssertionError("history must not initialize a model")
-    restored = AgentManagementService(tmp_path, builder_factory=unavailable, authorize=allow)
+
+    restored = AgentManagementService(
+        tmp_path, builder_factory=unavailable, authorize=allow
+    )
     try:
         value = await restored.status("unobserved", context())
         assert value["terminal"]
         assert value["run"]["run_id"] == handle["run_id"]
         assert restored.capacity()["applications"] == 0
-        after = {str(path): path.read_bytes() for path in root.rglob('*') if path.is_file()}
+        after = {
+            str(path): path.read_bytes() for path in root.rglob("*") if path.is_file()
+        }
         assert after == before
     finally:
         await restored.close()
@@ -1960,23 +2164,44 @@ async def test_shared_jobs_survive_one_application_close_and_bound_admission(tmp
     from sagents.v2.runtime.execution.jobs import InMemoryJobRuntime
     from sagents.v2.contracts.jobs import JobSpec, JobCompletion
     from sagents.v2.contracts.errors import SageV2Error
+
     release = asyncio.Event()
     started = asyncio.Event()
+
     async def runner(spec, emit, cancelled):
         started.set()
         await release.wait()
         return JobCompletion(exit_code=0)
-    jobs = InMemoryJobRuntime({"test": runner}, max_concurrent_jobs=1, max_admitted_jobs=1)
+
+    jobs = InMemoryJobRuntime(
+        {"test": runner}, max_concurrent_jobs=1, max_admitted_jobs=1
+    )
     apps = []
     try:
         for index in range(2):
-            apps.append(await SAgentBuilder().with_models(TEST_MODELS).with_defaults(session_root=tmp_path / str(index))
-                        .with_model_provider(model()).with_job_runtime(jobs)._build_package(bundle().resolved_manifest()))
-        assert apps[0].service("execution.job-runtime") is apps[1].service("execution.job-runtime") is jobs
-        first = await jobs.submit(JobSpec(kind="test", owner_run_id="run-a", idempotency_key="a"))
+            apps.append(
+                await SAgentBuilder()
+                .with_models(TEST_MODELS)
+                .with_defaults(session_root=tmp_path / str(index))
+                .with_model_provider(model())
+                .with_job_runtime(jobs)
+                ._build_package(bundle().resolved_manifest())
+            )
+        assert (
+            apps[0].service("execution.job-runtime")
+            is apps[1].service("execution.job-runtime")
+            is jobs
+        )
+        first = await jobs.submit(
+            JobSpec(kind="test", owner_run_id="run-a", idempotency_key="a")
+        )
         await started.wait()
         with pytest.raises(SageV2Error):
-            await apps[1].service("execution.job-runtime").submit(JobSpec(kind="test", owner_run_id="run-b", idempotency_key="b"))
+            await (
+                apps[1]
+                .service("execution.job-runtime")
+                .submit(JobSpec(kind="test", owner_run_id="run-b", idempotency_key="b"))
+            )
         await apps[0].close()
         assert not jobs._closed
         release.set()
@@ -1990,13 +2215,26 @@ async def test_shared_jobs_survive_one_application_close_and_bound_admission(tmp
 
 def source_plugin_bundle():
     data = bundle().model_dump(mode="json")
-    data["manifest"]["agents"]["assistant"]["entrypoint"] = {"type": "flow", "flow": "main"}
+    data["manifest"]["agents"]["assistant"]["entrypoint"] = {
+        "type": "flow",
+        "flow": "main",
+    }
     data["manifest"]["plugins"] = [{"id": "test.generated", "version": "1.0.0"}]
-    data["manifest"]["runtime"]["capabilities"] = {"flow.node": {"plugin": "test.generated", "name": "calculate"}}
-    data["manifest"]["flows"] = {"main": {"version": "1", "start": "calculate", "nodes": [
-        {"id": "calculate", "type": "tool", "tool": "calculate"}, {"id": "end", "type": "end"}],
-        "edges": [{"from": "calculate", "to": "end"}]}}
-    data["files"]["extensions/test.generated.py"] = '''
+    data["manifest"]["runtime"]["capabilities"] = {
+        "flow.node": {"plugin": "test.generated", "name": "calculate"}
+    }
+    data["manifest"]["flows"] = {
+        "main": {
+            "version": "1",
+            "start": "calculate",
+            "nodes": [
+                {"id": "calculate", "type": "tool", "tool": "calculate"},
+                {"id": "end", "type": "end"},
+            ],
+            "edges": [{"from": "calculate", "to": "end"}],
+        }
+    }
+    data["files"]["extensions/test.generated.py"] = """
 from sagents.v2.flow import FlowNodeResult
 from sagents.v2.runtime.extensions import ExtensionRegistration, ExtensionDescriptor, CapabilityOffer, ExtensionScope
 class Node:
@@ -2008,17 +2246,20 @@ registration = ExtensionRegistration(
         supported_scopes=frozenset({ExtensionScope.AGENT})),
     factory=lambda context, dependencies: Node(),
     start=lambda node, context, dependencies: {"flow.node:calculate": node})
-'''
+"""
     return AgentPackageBundle.model_validate(data)
 
 
 @pytest.mark.asyncio
 async def test_source_extension_build_register_run_and_module_cleanup(tmp_path):
     import sys
+
     baseline = {name for name in sys.modules if name.startswith("_sage_extension_")}
     calls = []
+
     async def allow(action, package, ctx):
         calls.append(action)
+
     svc, _ = service(tmp_path, authorize=allow)
     svc.allow_source_plugins = True
     try:
@@ -2027,10 +2268,14 @@ async def test_source_extension_build_register_run_and_module_cleanup(tmp_path):
         await svc.run(saved["ref"], "assistant", "calculate", "source", context())
         result = await settled(svc, "source", context())
         assert result["flow_results"]["calculate"]["answer"] == 42
-        assert {name for name in sys.modules if name.startswith("_sage_extension_")} != baseline
+        assert {
+            name for name in sys.modules if name.startswith("_sage_extension_")
+        } != baseline
     finally:
         await svc.close()
-    assert {name for name in sys.modules if name.startswith("_sage_extension_")} == baseline
+    assert {
+        name for name in sys.modules if name.startswith("_sage_extension_")
+    } == baseline
 
 
 @pytest.mark.asyncio
@@ -2040,9 +2285,11 @@ async def test_source_extensions_require_optin_and_explicit_authorization(tmp_pa
         with pytest.raises(ValueError, match="opt-in"):
             await svc.save(source_plugin_bundle(), context())
         svc.allow_source_plugins = True
+
         async def deny_load(action, package, ctx):
             if action == "load_source_plugin":
                 raise PermissionError("source import denied")
+
         svc.authorize = deny_load
         with pytest.raises(PermissionError, match="denied"):
             await svc.save(source_plugin_bundle(), context())
@@ -2052,31 +2299,40 @@ async def test_source_extensions_require_optin_and_explicit_authorization(tmp_pa
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize('invalid', ['syntax', 'export', 'identity', 'version', 'built_in'])
-async def test_invalid_source_extensions_leave_no_modules_or_packages(tmp_path, invalid):
+@pytest.mark.parametrize(
+    "invalid", ["syntax", "export", "identity", "version", "built_in"]
+)
+async def test_invalid_source_extensions_leave_no_modules_or_packages(
+    tmp_path, invalid
+):
     import sys
     from sagents.v2.contracts.errors import SageV2Error
-    data = source_plugin_bundle().model_dump(mode='json')
-    path = 'extensions/test.generated.py'
-    source = data['files'][path]
-    if invalid == 'syntax':
-        source = 'def broken('
-    elif invalid == 'export':
-        source = 'registration = None'
-    elif invalid == 'identity':
-        source = source.replace('plugin_id="test.generated"', 'plugin_id="other.plugin"')
-    elif invalid == 'version':
+
+    data = source_plugin_bundle().model_dump(mode="json")
+    path = "extensions/test.generated.py"
+    source = data["files"][path]
+    if invalid == "syntax":
+        source = "def broken("
+    elif invalid == "export":
+        source = "registration = None"
+    elif invalid == "identity":
+        source = source.replace(
+            'plugin_id="test.generated"', 'plugin_id="other.plugin"'
+        )
+    elif invalid == "version":
         source = source.replace('version="1.0.0"', 'version="2.0.0"')
     else:
         source = source.replace('name="Generated",', 'name="Generated", built_in=True,')
-    data['files'][path] = source
-    baseline = {name for name in sys.modules if name.startswith('_sage_extension_')}
+    data["files"][path] = source
+    baseline = {name for name in sys.modules if name.startswith("_sage_extension_")}
     svc, _ = service(tmp_path)
     svc.allow_source_plugins = True
     try:
         with pytest.raises((ValueError, SyntaxError, SageV2Error)):
             await svc.save(AgentPackageBundle.model_validate(data), context())
         assert not await svc.list(context())
-        assert {name for name in sys.modules if name.startswith('_sage_extension_')} == baseline
+        assert {
+            name for name in sys.modules if name.startswith("_sage_extension_")
+        } == baseline
     finally:
         await svc.close()

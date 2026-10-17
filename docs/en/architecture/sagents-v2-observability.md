@@ -17,6 +17,12 @@ ref: v2-detail-sagents-v2-observability
 
 `ObservedRunDriver` owns Agent and tool observations; `RecordingModelProvider` owns model observations. They emit the same vendor-independent `TraceSpan`. `sage.trace.otlp` exports generic/GenAI attributes, while `sage.trace.langfuse` adds Langfuse mappings over the shared OTLP transport. No database tables or durable observability queues are added.
 
+## Filesystem diagnostics
+
+The filesystem diagnostic plugin's `root` is the SessionStore's `sessions` root. Both use the same location map. Requests live in their owning Session's `runs/<run_id>/llm_requests`, including nested children under `sub_sessions/<session_id>`. Old flat records remain readable and move into the owning Session on its next diagnostic write; Session state and history are not migrated by the sink.
+
+Inline media is deduplicated by the SHA256 of its original UTF-8 text into the owning Session's `diagnostics/media/<sha256>.txt`. On-disk JSON contains `$sage_diagnostic_media` references. `get_model_request` and `list_model_requests` verify length and hash and restore the original strings, while retaining compatibility with inline records. Export the whole Session directory; media never references another Session and follows its owner during archive or deletion. This changes diagnostic storage only, not actual model requests, context tokens, or authoritative history.
+
 ## Trace identity
 
 Each top-level execute/resume starts a new trace. Multiple executions in one Session are linked by session_id, and suspension/resumption by run_id. This changes the previous behavior of using one Jaeger trace for the entire Session; historical data can still be queried by session_id.

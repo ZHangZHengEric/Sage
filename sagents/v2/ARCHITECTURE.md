@@ -141,10 +141,10 @@ already-resolved ports and wires an Agent loop without discovering plugins.
 registry at execution time.
 
 The Builder consumes manifest selections for `agent.continuation-policy`,
-`context.token-estimator`, `context.summary-store`, `context.summarizer`, and
+`context.unit-compactor`, `context.summary-store`, `context.summarizer`, and
 `context.reducer`. Host-owned dependencies are locked inputs applied after
 manifest configuration, so configuration cannot replace the active Model,
-SessionStore, estimator, store, or summarizer. Generic composition uses
+SessionStore, store, or summarizer. Generic composition uses
 `AgentCompositionFactory.create_engine`. Desktop product state (catalog,
 session index, MCP records, settings) stays outside `resolved_plan`;
 host-owned sinks, models, tools, and sandbox bindings enter through `with_*`.
@@ -193,39 +193,48 @@ and crash/recovery tests remain required in addition to payload golden tests.
 
 ## Context boundary
 
-Context reduction operates on canonical conversation units, but the enforced
-budget is the final provider request:
+Context reduction operates on canonical conversation units. Local input-token
+estimators, calibration and preflight token gates have been removed. A configured
+input ceiling remains a trigger: after reported provider input usage reaches the
+ceiling minus explicit output/input reserves, the next projection compresses
+history. Cached input is a subset of input usage, never added twice. An API
+`model.context_window_exceeded` rejection also triggers compression immediately,
+including structured errors inside an HTTP 200 stream. Without a counting API,
+a new input's exact token size is only known after provider feedback.
 
-```text
-system/developer segments
-+ reduced Session history
-+ current user/task boundary
-+ hidden tool index and continuation guidance
-+ selected tool schemas
-+ provider protocol overhead
-```
+The main loop permits at most six compression retries per uncommitted step.
+Compression preserves the exact latest real user request and processes complete
+Tool batches, including parallel results and attached media. Large completed
+current-turn batches can be summarized atomically. Durable references are used
+only when supplied by the Tool. No canonical messages or successful Tool receipts
+are removed or replayed. An unchanged rejected projection stops recovery.
 
-A reducer must preserve the latest real user request, active goal/plan state,
-complete tool-call/result pairs, and any provider replay state needed by the
-current tool turn. Summaries are reference-only, untrusted historical data and
-must never outrank the latest user request. A single oversized unit requires an
-explicit truncation/artifact/reference strategy; batching only between messages
-is insufficient.
+Summary requests first send their complete source, including the previous
+checkpoint. Only API overflow splits the source into two halves. Both halves
+must succeed before their structured summaries are merged without discarding fields or identifiers.
+Completed API output is never locally clipped to a guessed token envelope. Model
+calls, output-format retries and transient retries share a 64-call operation
+quota; splitting has a depth ceiling of 12. Empty or expanding summaries fail
+without advancing coverage. Checkpoints commit only after the full selected
+canonical prefix has been summarized, with digest validation and revision CAS.
+Completion-Judge rules and its JSON output contract remain in a protected
+system message, separate from compressible execution evidence.
+Auxiliary selection, memory query and completion-judge requests use the same
+bounded API-feedback recovery and buffer intermediate responses.
 
-`context.unit-compactor` is the replaceable boundary for such indivisible
-units. The built-in implementation only substitutes a Tool result when the Tool
-returned a durable `context_reference` that was persisted with its canonical
-Item; otherwise reduction fails closed. It never invents a reference or
-silently truncates content.
+Mandatory instructions and a single irreducible current user input cannot be
+compressed safely. Recovery stops with an explicit resumable error and preserves
+the full ledger. Proactive reported-usage pressure alone never fails an otherwise
+usable request when no reducible content remains.
 
-Tool schemas, hidden-tool index, continuation guidance, and protocol overhead
-are explicit non-compressible reservations. They never enter reducer input or
-`historical_messages`; reducers compare compression gain only for canonical
-compressible conversation content. The runtime appends the reserved suffix,
-checks the final request, and maps provider rejection to
-`model.context_window_exceeded`. A pre-stream rejection gets at most one retry
-with a larger adaptive reservation; a response that already emitted semantic
-content is never transparently replayed.
+Transient model failures get up to three transparent retries with exponential
+backoff (1, 2, 4 seconds), without consuming another successful Agent step.
+Interrupted streams cancel their partial Items before retrying; cancelled output
+never enters canonical model history. Only the uncommitted model request is
+replayed: completed Tool calls and their results remain authoritative. Summary
+model calls also retry temporary provider failures, preserving saved summary
+checkpoints. Authentication/configuration errors and uncertain Tool side effects
+continue through typed recovery rather than blindly repeating execution.
 
 ## Runtime and persistence boundaries
 

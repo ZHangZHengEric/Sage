@@ -8,7 +8,6 @@ from typing import Any, Protocol
 from sagents.v2.agent.policy.continuation import ContinuationPolicy
 from sagents.v2.context.contracts import ContextReducer
 from sagents.v2.context.summary import ConversationSummarizer
-from sagents.v2.context.token_estimator import TokenEstimator
 from sagents.v2.memory.query import MemoryRecallQueryGenerator
 from sagents.v2.runtime.extensions import ExtensionScopeHandle
 from sagents.v2.tool import ToolCatalog, ToolExecutor
@@ -50,7 +49,6 @@ class ResolvedApplicationPlan:
 class MaterializedAgentPorts:
     """Agent/Run ports rematerialized on a live process Application."""
 
-    token_estimator: TokenEstimator
     summarizer: ConversationSummarizer
     context_reducer: ContextReducer
     continuation_policy: ContinuationPolicy

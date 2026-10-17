@@ -6,16 +6,22 @@ import asyncio
 from sagents.v2.prompt_i18n import prompt_text
 from sagents.v2._concurrency import auxiliary_capacity
 import json
-from typing import Any
 
 import httpx
 
-from sagents.v2.context.progress_summary import bounded_snapshot
+from sagents.v2.context.progress_summary import task_snapshot
 from sagents.v2.context.summary import SummarizationRequest, summary_safe_block_text
 from sagents.v2.contracts.common import new_id
 from sagents.v2.contracts.errors import ErrorCategory, RuntimeErrorInfo, SageV2Error
-from sagents.v2.contracts.items import TextBlock
+from sagents.v2.contracts.items import JsonBlock, TextBlock
 from sagents.v2.model.contracts import ModelEventKind, ModelMessage, ModelRequest
+from sagents.v2.model.wire import stream_incomplete_error
+from sagents.v2.model.recovery import (
+    adaptive_summary,
+    consume_model_call,
+    model_call_budget,
+    reported_context_limit_error,
+)
 from sagents.v2.model.provider import (
     DEFAULT_AUXILIARY_MODEL_TIMEOUT_SECONDS,
     ModelProvider,
@@ -62,6 +68,7 @@ class ModelConversationSummarizer:
         "required": list(_FIELDS),
         "additionalProperties": False,
     }
+
     def __init__(
         self,
         model: ModelProvider,
@@ -86,6 +93,45 @@ class ModelConversationSummarizer:
         self.idle_timeout_seconds = float(idle_timeout_seconds)
 
     async def summarize(self, request: SummarizationRequest) -> str:
+        # The complete source, including the previous checkpoint, participates
+        # in splitting. Never drop a prefix or commit a partial successful half.
+        source = self._source(request)
+        first = True
+
+        async def summarize_fragment(fragment):
+            nonlocal first
+            if first:
+                first = False
+                return await self._summarize_with_retries(request)
+            fragment_request = request.model_copy(
+                update={
+                    "previous_summary": None,
+                    "messages": (
+                        ModelMessage(role="user", content=(TextBlock(text=fragment),)),
+                    ),
+                }
+            )
+            return await self._summarize_with_retries(fragment_request)
+
+        with model_call_budget():
+            result = await adaptive_summary(
+                source, summarize_fragment, merge=self._merge_payloads
+            )
+        # Fragment requests carry serialized text; attach authoritative Tool/Todo
+        # evidence from the original complete request only after all parts finish.
+        try:
+            payload = json.loads(result)
+        except (TypeError, ValueError):
+            return result  # compatibility for custom summarizer subclasses
+        snapshot = task_snapshot(request)
+        for field in ("tool_outcomes", "todo_state_at_compaction_boundary"):
+            if field in snapshot:
+                payload[field] = snapshot[field]
+        if "todo_state_at_compaction_boundary" in snapshot:
+            payload["open_tasks"] = snapshot.get("open_tasks", [])
+        return json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+
+    async def _summarize_with_retries(self, request: SummarizationRequest) -> str:
         async with auxiliary_capacity("context-summary"):
             logger = LOGGER.bind(
                 session_id=request.scope.session_id,
@@ -124,6 +170,33 @@ class ModelConversationSummarizer:
                         raise self._timeout_error("total", progress) from exc
                 except Exception as exc:
                     timeout_error = self._as_timeout_error(exc, progress)
+                    if (
+                        timeout_error is None
+                        and isinstance(exc, SageV2Error)
+                        and exc.info.retryable
+                        and exc.info.category
+                        in {
+                            ErrorCategory.PROVIDER_TRANSIENT,
+                            ErrorCategory.RATE_LIMITED,
+                        }
+                    ):
+                        # Summary output is derived, with no Tool side effects
+                        # or user-visible deltas. Retrying it cannot replay work.
+                        if timeout_attempt == self._MAX_TIMEOUT_RETRIES:
+                            raise
+                        delay = 2 ** (timeout_attempt + 1)
+                        logger.warning(
+                            "context.summary.provider_retry",
+                            "Conversation summary provider failed; retrying",
+                            error=exc,
+                            attributes={
+                                **attributes,
+                                "retry_delay_seconds": delay,
+                                "provider_retry_attempt": timeout_attempt + 1,
+                            },
+                        )
+                        await asyncio.sleep(delay)
+                        continue
                     if timeout_error is None:
                         logger.exception(
                             "context.summary.failed",
@@ -234,7 +307,7 @@ class ModelConversationSummarizer:
             )
         )
 
-    async def _summarize(self, request: SummarizationRequest, progress) -> str:
+    def _source(self, request: SummarizationRequest) -> str:
         parts = []
         if request.previous_summary:
             parts.append(
@@ -244,35 +317,30 @@ class ModelConversationSummarizer:
         for message in request.messages:
             value = self._message_text(message)
             if message.tool_calls:
-                value += "\n" + prompt_text("summary_tools", request.response_language) + " " + ", ".join(
-                    f"{call.name}({json.dumps(call.arguments, ensure_ascii=False, sort_keys=True)})"
-                    for call in message.tool_calls
+                value += (
+                    "\n"
+                    + prompt_text("summary_tools", request.response_language)
+                    + " "
+                    + ", ".join(
+                        f"{call.name}({summary_safe_block_text(JsonBlock(value=call.arguments))})"
+                        for call in message.tool_calls
+                    )
                 )
             parts.append(f"<{message.role}>\n{value}\n</{message.role}>")
         parts.append("</history>")
+        return "\n".join(parts)
+
+    async def _summarize(self, request: SummarizationRequest, progress) -> str:
         capabilities = await self.model.capabilities(self.model_binding)
-        source = "\n".join(parts)
-        estimated_source_tokens = self._estimate_source_tokens(source)
-        if estimated_source_tokens > self.max_source_tokens:
-            raise SageV2Error(
-                RuntimeErrorInfo(
-                    code="context.summarizer.source_too_large",
-                    category=ErrorCategory.VALIDATION,
-                    message=(
-                        "conversation summary source exceeds the plugin's "
-                        "configured input limit"
-                    ),
-                    safe_to_resume=True,
-                    metadata={
-                        "estimated_source_tokens": estimated_source_tokens,
-                        "max_source_tokens": self.max_source_tokens,
-                    },
-                )
-            )
+        source = self._source(request)
         last_error = ""
         for attempt in range(2):
             progress["attempt"] = attempt + 1
-            retry = ("\n\n" + prompt_text("summary_retry", request.response_language)) if attempt else ""
+            retry = (
+                ("\n\n" + prompt_text("summary_retry", request.response_language))
+                if attempt
+                else ""
+            )
             model_request = ModelRequest(
                 request_id=new_id("summary_request"),
                 run_id=request.scope.run_id,
@@ -283,11 +351,19 @@ class ModelConversationSummarizer:
                         content=(
                             TextBlock(
                                 text=(
-                                    prompt_text("summary_system", request.response_language)
+                                    prompt_text(
+                                        "summary_system", request.response_language
+                                    )
                                     + "\n"
-                                    + prompt_text("summary_language", request.response_language)
+                                    + prompt_text(
+                                        "summary_language", request.response_language
+                                    )
                                     + " "
-                                    + prompt_text("summary_budget", request.response_language, target_tokens=request.target_tokens)
+                                    + prompt_text(
+                                        "summary_budget",
+                                        request.response_language,
+                                        target_tokens=request.target_tokens,
+                                    )
                                     + retry
                                 )
                             ),
@@ -312,6 +388,7 @@ class ModelConversationSummarizer:
             )
             progress["model_request_id"] = model_request.request_id
             completed = None
+            consume_model_call()
             stream = self.model.stream(model_request)
             try:
                 iterator = aiter(stream)
@@ -334,13 +411,26 @@ class ModelConversationSummarizer:
                 closer = getattr(stream, "aclose", None)
                 if closer is not None:
                     await closer()
-            if completed is not None and completed.finish_reason in {
+            if completed is not None:
+                ceiling_error = reported_context_limit_error(completed, capabilities)
+                if ceiling_error is not None:
+                    raise ceiling_error
+            if completed is not None and completed.finish_reason.lower() in {
                 "max_output_tokens",
+                "max_tokens",
                 "length",
             }:
                 last_error = "summary output was truncated at the model output limit"
                 continue
-            if completed is None or not completed.text.strip():
+            if completed is None:
+                raise stream_incomplete_error(
+                    provider=self.plugin_id,
+                    response_started=bool(
+                        progress["text_delta_count"]
+                        or progress["reasoning_delta_count"]
+                    ),
+                )
+            if not completed.text.strip():
                 last_error = "summary model completed without usable text"
                 continue
             try:
@@ -348,22 +438,49 @@ class ModelConversationSummarizer:
             except (json.JSONDecodeError, ValueError) as exc:
                 last_error = str(exc)
                 continue
-            bounded = self._bound_payload(payload, request.target_tokens)
-            return bounded_snapshot(request, bounded)
+            # The API output limit is the bound. Do not truncate verified
+            # identifiers or drop requirements after a complete valid response.
+            return json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
         raise RuntimeError(
             f"summary model returned invalid structured output: {last_error}"
         )
 
     @staticmethod
-    def _message_text(message: ModelMessage) -> str:
-        return "\n".join(summary_safe_block_text(block) for block in message.content)
+    def _merge_payloads(first: str, second: str) -> str:
+        """Keep every successful child's structured facts, in source order.
+
+        A further generative summary can silently forget identifiers from the
+        first child. Storage merges never trim these facts; the next request
+        still goes through API feedback if this aggregate is too large.
+        """
+        left, right = json.loads(first), json.loads(second)
+        merged = dict(left)
+        for key, value in right.items():
+            previous = merged.get(key)
+            if key == "summary":
+                merged[key] = "\n".join(
+                    dict.fromkeys(str(v) for v in (previous, value) if v)
+                )
+            elif key == "todo_state_at_compaction_boundary":
+                merged[key] = value
+            elif isinstance(previous, list) and isinstance(value, list):
+                seen = set()
+                combined = []
+                for item in (*previous, *value):
+                    identity = json.dumps(item, ensure_ascii=False, sort_keys=True)
+                    if identity not in seen:
+                        seen.add(identity)
+                        combined.append(item)
+                merged[key] = combined
+            elif isinstance(previous, dict) and isinstance(value, dict):
+                merged[key] = {**previous, **value}
+            else:
+                merged[key] = value
+        return json.dumps(merged, ensure_ascii=False, separators=(",", ":"))
 
     @staticmethod
-    def _estimate_source_tokens(value: str) -> int:
-        """Conservative dependency-free bound for this plugin's text payload."""
-
-        ascii_count = sum(character.isascii() for character in value)
-        return (ascii_count + 3) // 4 + (len(value) - ascii_count)
+    def _message_text(message: ModelMessage) -> str:
+        return "\n".join(summary_safe_block_text(block) for block in message.content)
 
     @classmethod
     def _parse_payload(cls, value: str) -> dict[str, object]:
@@ -388,41 +505,3 @@ class ModelConversationSummarizer:
                 raise ValueError(f"summary JSON field {field_name!r} must be strings")
             normalized[field_name] = [item.strip() for item in raw if item.strip()]
         return normalized
-
-    @classmethod
-    def _bound_payload(
-        cls, payload: dict[str, object], target_tokens: int
-    ) -> dict[str, object]:
-        """Deterministically keep the structured summary inside a safe envelope."""
-
-        bounded: dict[str, Any] = {
-            "summary": str(payload["summary"])[: max(256, target_tokens * 3)]
-        }
-        for field_name in cls._FIELDS[1:]:
-            raw = payload[field_name]
-            # `_parse_payload` normalizes every structured field to a list. The
-            # assertion keeps that invariant visible to both readers and the
-            # type checker at this serialization boundary.
-            assert isinstance(raw, list)
-            bounded[field_name] = [str(item)[:1_000] for item in raw][:20]
-        maximum = max(512, target_tokens * 4)
-        serialized = lambda: json.dumps(  # noqa: E731 - local size probe
-            bounded, ensure_ascii=False, sort_keys=True, separators=(",", ":")
-        )
-        # Lower-priority tail items are removed before truncating the narrative.
-        while len(serialized()) > maximum:
-            candidate = next(
-                (
-                    field_name
-                    for field_name in reversed(cls._FIELDS[1:])
-                    if bounded[field_name]
-                ),
-                None,
-            )
-            if candidate is None:
-                break
-            bounded[candidate].pop()
-        if len(serialized()) > maximum:
-            overhead = len(serialized()) - len(str(bounded["summary"]))
-            bounded["summary"] = str(bounded["summary"])[: max(1, maximum - overhead)]
-        return bounded

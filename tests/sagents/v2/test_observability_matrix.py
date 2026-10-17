@@ -1122,3 +1122,22 @@ async def test_forked_child_run_joins_parent_execution_trace():
     assert tool_span.parent_span_id == parent_run.span_id
     assert model_span.parent_span_id == child_run.span_id
     assert model_span.trace_id == expected_trace
+
+
+@pytest.mark.parametrize('name', ['ownership_session_token', 'sessionToken', 'access_token', 'apiKey'])
+def test_diagnostics_redact_ownership_and_embedded_credentials_without_hiding_usage(name):
+    from sagents.v2.runtime.observability.log_format import redact_log_value
+    value = {
+        name: 'dummy-private-value',
+        'arguments': json.dumps({name:'dummy-private-value','item_id':'candidate','run_id':'v3'}),
+        'runtime_context': f'<{name}>dummy-private-value</{name}>',
+        'error': f'provider rejected {name}="dummy-private-value"',
+        'input_tokens':111631,
+        'source_digest':'sha256:'+'a'*64,
+    }
+    result=FilesystemDiagnosticSink._redact(value)
+    assert result == redact_log_value(value)
+    assert 'dummy-private-value' not in json.dumps(result)
+    assert result['input_tokens']==111631 and result['source_digest']==value['source_digest']
+    assert json.loads(result['arguments'])['item_id']=='candidate'
+    assert value[name]=='dummy-private-value'

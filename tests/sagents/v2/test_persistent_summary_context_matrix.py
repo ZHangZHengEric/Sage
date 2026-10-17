@@ -123,7 +123,9 @@ def test_summary_units_never_drop_an_unmatched_tool_message():
         ModelMessage(role="user", content=(TextBlock(text="continue"),)),
     )
 
-    units = PersistentSummaryContextReducer._units(messages)
+    units = __import__(
+        "sagents.v2.context.partition", fromlist=["conversation_units"]
+    ).conversation_units(messages)
 
     assert units == [(messages[0],), (messages[1],), (messages[2],)]
 
@@ -311,7 +313,7 @@ async def test_rewritten_prefix_never_applies_stale_summary():
 
     stored = await store.get("session_1")
     assert stored is not None
-    assert stored.revision == 1
+    assert stored.revision == 2
     assert summarizer.requests[-1].previous_summary is None
 
 
@@ -330,17 +332,14 @@ async def test_incompatible_prefix_keeps_checkpoint_when_reduction_fails():
         role="user", content=(TextBlock(text="rewritten history"),)
     )
 
+    reducer.summarizer = ExpandingSummarizer()
     with pytest.raises(SageV2Error) as caught:
         await reducer.reduce(
             tuple(rewritten),
             ContextBudget(max_input_tokens=80, max_messages=1),
             scope=scope(),
         )
-
-    assert caught.value.info.code in {
-        "context.budget_exhausted",
-        "context.summary_source_too_large",
-    }
+    assert caught.value.info.code == "context.summary_no_progress"
     kept = await store.get("session_1")
     assert kept is not None
     assert kept.summary_id == original.summary_id
@@ -394,7 +393,7 @@ async def test_summary_must_reduce_only_the_selected_compressible_content():
             scope=scope(),
         )
 
-    assert caught.value.info.code == "context.summary_not_reducing"
+    assert caught.value.info.code == "context.summary_no_progress"
     assert await store.get("session_1") is None
 
 
@@ -450,7 +449,7 @@ async def test_oversized_protected_tool_unit_uses_explicit_durable_reference():
     projection = await reducer.reduce(
         source,
         ContextBudget(max_input_tokens=300),
-        scope=scope(),
+        scope=scope().model_copy(update={"force": True}),
     )
 
     assert projection.strategy == "reference_compaction"
@@ -501,7 +500,9 @@ async def test_model_summarizer_retries_and_returns_the_structured_contract():
         )
     )
 
-    assert json.loads(value) == payload
+    decoded = json.loads(value)
+    assert {key: decoded[key] for key in payload} == payload
+    assert decoded["tool_outcomes"]["lookup "]["status"] == "completed"
     assert len(model.requests) == 2
     assert model.requests[0].response_schema is not None
     assert model.requests[1].metadata == {
@@ -825,24 +826,6 @@ async def test_summary_does_not_retry_non_timeout_or_cancellation(monkeypatch, c
 
 
 @pytest.mark.asyncio
-async def test_model_summarizer_enforces_its_own_source_limit():
-    model = ScriptedModelProvider(())
-    summarizer = ModelConversationSummarizer(model, max_source_tokens=1)
-
-    with pytest.raises(SageV2Error) as caught:
-        await summarizer.summarize(
-            SummarizationRequest(
-                scope=scope(),
-                messages=ledger()[1:4],
-                target_tokens=512,
-            )
-        )
-
-    assert caught.value.info.code == "context.summarizer.source_too_large"
-    assert model.requests == []
-
-
-@pytest.mark.asyncio
 async def test_summary_timeout_includes_capability_discovery():
     class SlowCapabilities:
         async def capabilities(self, binding):
@@ -862,97 +845,6 @@ async def test_summary_timeout_includes_capability_discovery():
     assert caught.value.info.code == "context.summarizer.model_timeout"
     assert caught.value.info.metadata["timeout_kind"] == "total"
     assert caught.value.info.metadata["attempt"] == 0
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize(
-    "budget",
-    [
-        ContextBudget(max_input_tokens=100_000, max_messages=6),
-        ContextBudget(max_input_tokens=25_000),
-    ],
-)
-async def test_long_run_summarizes_old_image_batches_and_reuses_exact_request(budget):
-    request = ModelMessage(
-        role="user", content=(TextBlock(text="Animate this character"),)
-    )
-    messages = [request]
-    for i in range(24):
-        call_id = f"image_{i}"
-        messages.extend(
-            (
-                ModelMessage(
-                    role="assistant",
-                    tool_calls=(
-                        ModelToolCall(
-                            tool_call_id=call_id, name="analyze_image", arguments={}
-                        ),
-                    ),
-                ),
-                ModelMessage(
-                    role="tool",
-                    tool_call_id=call_id,
-                    content=(TextBlock(text="attached"),),
-                ),
-                ModelMessage(
-                    role="user",
-                    content=(
-                        TextBlock(text=f"Frame {i}"),
-                        ImageBlock(
-                            uri="data:image/png;base64,AAAA", mime_type="image/png"
-                        ),
-                    ),
-                    metadata={"tool_context": True, "source_tool_call_id": call_id},
-                ),
-            )
-        )
-    source = tuple(messages)
-    summarizer = RecordingSummarizer()
-    reducer = PersistentSummaryContextReducer(
-        InMemoryConversationSummaryStore(),
-        summarizer=summarizer,
-        summary_target_tokens=128,
-    )
-    projection = await reducer.reduce(source, budget, scope=scope())
-    assert projection.strategy == "persistent_summary"
-    assert projection.messages[1] == request
-    assert projection.messages[-3:] == source[-3:]
-    assert projection.historical_messages == source[:-3]
-    summarized = tuple(m for r in summarizer.requests for m in r.messages)
-    assert len(summarized) == len(source[:-3])
-    assert not any(isinstance(b, ImageBlock) for m in summarized for b in m.content)
-    assert (
-        sum("[image attached:" in b.text for m in summarized for b in m.content) == 23
-    )
-    replay = await reducer.reduce(source, budget, scope=scope())
-    assert replay.messages == projection.messages
-    # A second reduction inside the same Run must keep the original request.
-    continued = (
-        *source,
-        *(
-            m.model_copy(update={"tool_call_id": "next"})
-            if m.role == "tool"
-            else m.model_copy(
-                update={
-                    "tool_calls": (
-                        ModelToolCall(
-                            tool_call_id="next", name="analyze_image", arguments={}
-                        ),
-                    )
-                }
-            )
-            if m.role == "assistant"
-            else m.model_copy(
-                update={
-                    "metadata": {"tool_context": True, "source_tool_call_id": "next"}
-                }
-            )
-            for m in source[-3:]
-        ),
-    )
-    rolled = await reducer.reduce(continued, budget, scope=scope())
-    assert rolled.messages[1] == request
-    assert rolled.messages[-3:] == continued[-3:]
 
 
 class BoundedSummaryRecorder:
@@ -996,183 +888,68 @@ def oversized_parallel_unit():
 
 
 @pytest.mark.asyncio
-async def test_oversized_parallel_results_fragment_only_summary_and_cover_whole_unit():
-    from sagents.v2.context.plugins.estimator_json import JsonHeuristicTokenEstimator
-
-    original = oversized_parallel_unit()
-    snapshot = tuple(message.model_dump() for message in original)
-    summarizer = BoundedSummaryRecorder()
-    estimator = JsonHeuristicTokenEstimator()
-    reducer = PersistentSummaryContextReducer(
-        InMemoryConversationSummaryStore(),
-        summarizer=summarizer,
-        estimator=estimator,
-        summary_target_tokens=4096,
-        max_summary_source_tokens=24000,
-    )
-    assert estimator.estimate(original) > 24000 - 4096 - 256
-    checkpoints = []
-
-    async def checkpoint(text, count):
-        checkpoints.append(count)
-
-    result, covered = await reducer._hierarchical_summary(
-        scope(), None, original, on_batch_completed=checkpoint
-    )
-    assert result == "bounded rolling summary"
-    assert covered == 3
-    assert checkpoints == [3]
-    assert len(summarizer.requests) >= 2
-    for request in summarizer.requests:
-        prefix = (
-            (
-                ModelMessage(
-                    role="system", content=(TextBlock(text=request.previous_summary),)
-                ),
-            )
-            if request.previous_summary
-            else ()
-        )
-        assert estimator.estimate((*prefix, *request.messages)) <= 24000
-    text = "\n".join(
-        block.text
-        for request in summarizer.requests
-        for message in request.messages
-        for block in message.content
-    )
-    for marker in (
-        "PROJECT_BEGIN",
-        "PROJECT_END",
-        "SHELL_BEGIN",
-        "SHELL_END",
-        '"tool_call_id": "project"',
-        '"tool_call_id": "shell"',
-    ):
-        assert marker in text
-    # All result text remains present, even across fragment boundaries.
-    assert text.count("p") >= 13_745
-    assert text.count("s") >= 78_520
-    assert tuple(message.model_dump() for message in original) == snapshot
-
-
-@pytest.mark.asyncio
-async def test_fragment_failure_does_not_checkpoint_partial_parallel_unit():
-    summarizer = BoundedSummaryRecorder(fail_on=2)
-    reducer = PersistentSummaryContextReducer(
-        InMemoryConversationSummaryStore(),
-        summarizer=summarizer,
-        summary_target_tokens=4096,
-        max_summary_source_tokens=24000,
-    )
-    checkpoints = []
-
-    async def checkpoint(text, count):
-        checkpoints.append(count)
-
-    with pytest.raises(RuntimeError, match="summary provider failed"):
-        await reducer._hierarchical_summary(
-            scope(), None, oversized_parallel_unit(), on_batch_completed=checkpoint
-        )
-    assert checkpoints == []
-
-
-@pytest.mark.asyncio
-async def test_call_budget_never_claims_unprocessed_tool_fragments():
-    summarizer = BoundedSummaryRecorder()
-    reducer = PersistentSummaryContextReducer(
-        InMemoryConversationSummaryStore(),
-        summarizer=summarizer,
-        summary_target_tokens=4096,
-        max_summary_source_tokens=24000,
-        max_summary_calls=1,
-    )
-    with pytest.raises(SageV2Error) as caught:
-        await reducer._hierarchical_summary(scope(), None, oversized_parallel_unit())
-    assert caught.value.info.code == "context.summary_source_too_large"
-    assert summarizer.requests == []
-    preceding = ModelMessage(
-        role="user", content=(TextBlock(text="Earlier completed history"),)
-    )
-    _, count = await reducer._hierarchical_summary(
-        scope(), None, (preceding, *oversized_parallel_unit())
-    )
-    assert count == 1
-    assert len(summarizer.requests) == 1
-
-
-@pytest.mark.asyncio
-async def test_fragmented_summary_redacts_inline_media_in_tool_arguments_and_results():
-    summarizer = BoundedSummaryRecorder()
-    secret_uri = "data:image/png;base64," + "A" * 100_000
-    messages = (
-        ModelMessage(
-            role="assistant",
-            tool_calls=(
-                ModelToolCall(
-                    tool_call_id="image",
-                    name="inspect",
-                    arguments={"image": secret_uri},
-                ),
+@pytest.mark.parametrize("text", ["中文摘要😀" * 1000, '路径\\和"引号\n' * 1000])
+async def test_model_summary_preserves_complete_api_output_without_local_clipping(text):
+    payload = {field: [] for field in ModelConversationSummarizer._FIELDS}
+    payload["summary"] = text
+    payload["user_requirements"] = [text]
+    model = ScriptedModelProvider(
+        (
+            ScriptedModelStep(
+                events=(_summary_completion(json.dumps(payload, ensure_ascii=False)),)
             ),
-        ),
-        ModelMessage(
-            role="tool",
-            tool_call_id="image",
-            content=(JsonBlock(value={"image": secret_uri, "output": "x" * 100_000}),),
-        ),
+        )
     )
-    reducer = PersistentSummaryContextReducer(
-        InMemoryConversationSummaryStore(),
-        summarizer=summarizer,
-        summary_target_tokens=4096,
-        max_summary_source_tokens=24000,
+    result = json.loads(
+        await ModelConversationSummarizer(model).summarize(
+            SummarizationRequest(
+                scope=scope(), messages=ledger()[1:4], target_tokens=512
+            )
+        )
     )
-    _, covered = await reducer._hierarchical_summary(scope(), None, messages)
-    assert covered == 2
-    serialized = json.dumps(
-        [
-            request.model_dump()
-            if hasattr(request, "model_dump")
-            else [m.model_dump() for m in request.messages]
-            for request in summarizer.requests
-        ]
-    )
-    assert "A" * 100 not in serialized
-    assert messages[0].tool_calls[0].arguments["image"] == secret_uri
+    assert result["summary"] == text.strip()
+    assert result["user_requirements"] == [text.strip()]
 
 
 @pytest.mark.asyncio
-async def test_many_parallel_results_pack_into_bounded_summary_calls():
-    summarizer = BoundedSummaryRecorder()
-    calls = tuple(
-        ModelToolCall(tool_call_id=f"call_{index}", name="inspect", arguments={})
-        for index in range(10)
-    )
-    messages = (
-        ModelMessage(role="assistant", tool_calls=calls),
-        *(
-            ModelMessage(
-                role="tool",
-                tool_call_id=call.tool_call_id,
-                content=(TextBlock(text="r" * 20_000),),
+@pytest.mark.parametrize("recover", [False, True])
+async def test_summary_transient_provider_errors_retry_without_losing_progress(
+    monkeypatch, recover
+):
+    import sagents.v2.context.plugins.summarizer_model as module
+    from sagents.v2.contracts.errors import ErrorCategory, RuntimeErrorInfo
+
+    delays = []
+
+    async def sleep(delay):
+        delays.append(delay)
+
+    monkeypatch.setattr(module.asyncio, "sleep", sleep)
+    summarizer = ModelConversationSummarizer(ScriptedModelProvider(()))
+    attempts = []
+
+    async def summarize(request, progress):
+        attempts.append(request)
+        if recover and len(attempts) == 4:
+            return "recovered summary"
+        raise SageV2Error(
+            RuntimeErrorInfo(
+                code="model.provider_transient",
+                category=ErrorCategory.PROVIDER_TRANSIENT,
+                message="upstream unavailable",
+                retryable=True,
             )
-            for call in calls
-        ),
+        )
+
+    monkeypatch.setattr(summarizer, "_summarize", summarize)
+    request = SummarizationRequest(
+        scope=scope(), messages=ledger()[1:4], target_tokens=512
     )
-    reducer = PersistentSummaryContextReducer(
-        InMemoryConversationSummaryStore(),
-        summarizer=summarizer,
-        summary_target_tokens=4096,
-        max_summary_source_tokens=24000,
-        max_summary_calls=4,
-    )
-    _, count = await reducer._hierarchical_summary(scope(), None, messages)
-    assert count == len(messages)
-    assert len(summarizer.requests) <= 4
-    result_ids = {
-        message.tool_call_id
-        for request in summarizer.requests
-        for message in request.messages
-        if message.role == "tool"
-    }
-    assert result_ids == {call.tool_call_id for call in calls}
+    if recover:
+        assert await summarizer.summarize(request) == "recovered summary"
+    else:
+        with pytest.raises(SageV2Error) as caught:
+            await summarizer.summarize(request)
+        assert caught.value.info.code == "model.provider_transient"
+    assert attempts == [request] * 4
+    assert delays == [2, 4, 8]

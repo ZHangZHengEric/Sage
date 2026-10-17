@@ -115,14 +115,18 @@ async def test_chat_probe_selects_and_reuses_the_verified_json_dialect(
                 raise error
             text = object_text if format_type == "json_object" else '{"ok":true}'
             return FakeStream(
-                [{
-                    "id": "response_probe",
-                    "choices": [{
-                        "index": 0,
-                        "delta": {"content": text},
-                        "finish_reason": "stop",
-                    }],
-                }]
+                [
+                    {
+                        "id": "response_probe",
+                        "choices": [
+                            {
+                                "index": 0,
+                                "delta": {"content": text},
+                                "finish_reason": "stop",
+                            }
+                        ],
+                    }
+                ]
             )
 
     completions = DialectCompletions()
@@ -831,7 +835,7 @@ async def test_chat_compatible_rejects_stream_without_finish_reason():
         _ = [event async for event in provider.stream(request())]
 
     assert caught.value.info.code == "model.stream_incomplete"
-    assert caught.value.info.retryable is False
+    assert caught.value.info.retryable is True
     assert stream.closed is True
 
 
@@ -967,37 +971,123 @@ async def test_length_limited_tool_arguments_are_not_exposed_for_execution(argum
 
 @pytest.mark.asyncio
 async def test_explicit_reasoning_history_rejection_negotiates_empty_host_history():
-    error = RuntimeError('The `reasoning_content` in the thinking mode must be passed back to the API.')
+    error = RuntimeError(
+        "The `reasoning_content` in the thinking mode must be passed back to the API."
+    )
     error.status_code = 400
-    completions = SequencedCompletions([
-        error, FakeStream((chunk(content='ok', finish='stop'),)),
-        FakeStream((chunk(content='again', finish='stop'),)),
-    ])
+    completions = SequencedCompletions(
+        [
+            error,
+            FakeStream((chunk(content="ok", finish="stop"),)),
+            FakeStream((chunk(content="again", finish="stop"),)),
+        ]
+    )
     provider = OpenAICompatibleModelProvider(config(), client=FakeClient(completions))
     messages = (
-        ModelMessage(role='user', content=(TextBlock(text='go'),)),
-        ModelMessage(role='assistant', tool_calls=(ModelToolCall(tool_call_id='memory', name='search_memory', arguments={}),)),
-        ModelMessage(role='tool', tool_call_id='memory', content=(TextBlock(text='none'),)),
-        ModelMessage(role='assistant', content=(TextBlock(text='continue'),),
-                     provider_state=make_provider_state('openai_compatible', {'reasoning_content': 'real reasoning'})),
+        ModelMessage(role="user", content=(TextBlock(text="go"),)),
+        ModelMessage(
+            role="assistant",
+            tool_calls=(
+                ModelToolCall(
+                    tool_call_id="memory", name="search_memory", arguments={}
+                ),
+            ),
+        ),
+        ModelMessage(
+            role="tool", tool_call_id="memory", content=(TextBlock(text="none"),)
+        ),
+        ModelMessage(
+            role="assistant",
+            content=(TextBlock(text="continue"),),
+            provider_state=make_provider_state(
+                "openai_compatible", {"reasoning_content": "real reasoning"}
+            ),
+        ),
     )
     events = [event async for event in provider.stream(request(messages=messages))]
-    assert 'reasoning_content' not in completions.calls[0]['messages'][1]
-    assert completions.calls[1]['messages'][1]['reasoning_content'] == ''
-    assert completions.calls[1]['messages'][3]['reasoning_content'] == 'real reasoning'
-    assert events[-1].response.provider_metadata['compatibility_fallback']['kind'] == 'empty_reasoning_content_supplied'
+    assert "reasoning_content" not in completions.calls[0]["messages"][1]
+    assert completions.calls[1]["messages"][1]["reasoning_content"] == ""
+    assert completions.calls[1]["messages"][3]["reasoning_content"] == "real reasoning"
+    assert (
+        events[-1].response.provider_metadata["compatibility_fallback"]["kind"]
+        == "empty_reasoning_content_supplied"
+    )
     _ = [event async for event in provider.stream(request(messages=messages))]
     assert len(completions.calls) == 3
-    assert completions.calls[2]['messages'][1]['reasoning_content'] == ''
+    assert completions.calls[2]["messages"][1]["reasoning_content"] == ""
 
 
 @pytest.mark.asyncio
 async def test_reasoning_history_negotiation_is_bounded_and_does_not_apply_to_other_errors():
-    for message in ('invalid tool arguments', 'The reasoning_content must be passed back to the API.'):
+    for message in (
+        "invalid tool arguments",
+        "The reasoning_content must be passed back to the API.",
+    ):
         error = RuntimeError(message)
         error.status_code = 400
         completions = SequencedCompletions([error, error])
-        provider = OpenAICompatibleModelProvider(config(), client=FakeClient(completions))
+        provider = OpenAICompatibleModelProvider(
+            config(), client=FakeClient(completions)
+        )
         with pytest.raises(SageV2Error):
-            _ = [event async for event in provider.stream(request(messages=(ModelMessage(role='assistant', content=(TextBlock(text='prior'),)),)))]
-        assert len(completions.calls) == (2 if 'reasoning_content' in message else 1)
+            _ = [
+                event
+                async for event in provider.stream(
+                    request(
+                        messages=(
+                            ModelMessage(
+                                role="assistant", content=(TextBlock(text="prior"),)
+                            ),
+                        )
+                    )
+                )
+            ]
+        assert len(completions.calls) == (2 if "reasoning_content" in message else 1)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "code,expected,retryable",
+    [
+        ("context_length_exceeded", "model.context_window_exceeded", True),
+        ("prompt_too_long", "model.context_window_exceeded", True),
+        ("server_error", "model.provider_transient", True),
+        ("invalid_api_key", "model.provider_permanent", False),
+    ],
+)
+@pytest.mark.parametrize("partial", [False, True])
+async def test_chat_structured_sse_failure_keeps_its_error_code(
+    code, expected, retryable, partial
+):
+    chunks = []
+    if partial:
+        chunks.append({"choices": [{"delta": {"content": "partial"}}]})
+    chunks.append({"error": {"code": code, "message": "provider rejected request"}})
+    stream = FakeStream(chunks)
+    completions = FakeCompletions(stream=stream)
+    provider = OpenAICompatibleModelProvider(
+        OpenAICompatibleConfig(
+            base_url="https://example.invalid/v1",
+            model="test",
+            capabilities=CAPABILITIES,
+        ),
+        client=FakeClient(completions),
+    )
+    with pytest.raises(SageV2Error) as exc:
+        _ = [
+            event
+            async for event in provider.stream(
+                ModelRequest(
+                    request_id="r",
+                    run_id="run",
+                    model_binding="primary",
+                    messages=(
+                        ModelMessage(role="user", content=(TextBlock(text="hello"),)),
+                    ),
+                )
+            )
+        ]
+    assert exc.value.info.code == expected
+    assert exc.value.info.retryable == retryable
+    assert exc.value.info.metadata["response_started"] == partial
+    assert stream.closed

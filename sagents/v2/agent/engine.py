@@ -11,13 +11,17 @@ import asyncio
 import hashlib
 import inspect
 import json
+from datetime import timedelta
 from collections.abc import Callable
 
 from sagents.v2.contracts.conversation import order_tool_context
 from sagents.v2.agent.progress import inspection_progress, repeated_cycles
 from sagents.v2.agent.state import AgentLoopCheckpointCodec, AgentLoopCheckpointState
 from sagents.v2.agent.stream_batcher import StreamEventBatcher
-from sagents.v2.agent.model_recovery import can_repair_model_arguments, argument_recovery_guidance
+from sagents.v2.agent.model_recovery import (
+    can_repair_model_arguments,
+    argument_recovery_guidance,
+)
 from sagents.v2.model.contracts import (
     ModelEventKind,
     ModelMessage,
@@ -138,10 +142,10 @@ from sagents.v2.i18n import (
 
 
 class AgentLoopEngine:
-    # V1 Fibre retries transient provider failures inside the logical model
-    # request. V2 keeps that behavior narrowly scoped to a response that
-    # contained no usable semantic fields, where replay cannot duplicate a
-    # Tool call or other external side effect.
+    # Retry only the uncommitted model request, before Tool dispatch. Partial
+    # Items are cancelled and never enter canonical model history.
+    _MAX_TRANSPARENT_PROVIDER_RETRIES = 3
+    _PROVIDER_RETRY_BASE_SECONDS = 1.0
     _MAX_TRANSPARENT_EMPTY_RESPONSE_RETRIES = 2
     _MAX_MODEL_ARGUMENT_RECOVERIES = 2
 
@@ -175,24 +179,45 @@ class AgentLoopEngine:
         self.self_configuration = self_configuration
         if self_configuration is not None:
             if step_request_builder is not None:
-                raise ValueError("self configuration requires the standard step request builder")
+                raise ValueError(
+                    "self configuration requires the standard step request builder"
+                )
             from copy import copy
+
             # Hosts may reuse their base loader for child loops. Keep capability
             # additions private to this Agent rather than mutating that shared loader.
             skill_loader = copy(skill_loader) if skill_loader is not None else None
-            tool_catalog, tool_executor = self_configuration.bind(tool_catalog, tool_executor, skill_loader)
+            tool_catalog, tool_executor = self_configuration.bind(
+                tool_catalog, tool_executor, skill_loader
+            )
             if context_assembler is None:
-                context_assembler = DefaultContextAssembler(history_reader=runtime.session_store)
+                context_assembler = DefaultContextAssembler(
+                    history_reader=runtime.session_store
+                )
             if not isinstance(context_assembler, DefaultContextAssembler):
                 raise ValueError("self configuration requires DefaultContextAssembler")
             context_assembler = copy(context_assembler)
-            from sagents.v2.skill.context import AvailableSkillsContextProvider, ActiveSkillsContextProvider
+            from sagents.v2.skill.context import (
+                AvailableSkillsContextProvider,
+                ActiveSkillsContextProvider,
+            )
+
             # Existing providers captured the pre-bind catalog. Replace those
             # references so a freshly registered Skill is discoverable immediately.
-            providers = tuple(provider for provider in context_assembler.providers
-                              if not isinstance(provider, (AvailableSkillsContextProvider, ActiveSkillsContextProvider)))
-            context_assembler.providers = (*providers, AvailableSkillsContextProvider(skill_loader.catalog),
-                                           ActiveSkillsContextProvider(skill_loader), self_configuration)
+            providers = tuple(
+                provider
+                for provider in context_assembler.providers
+                if not isinstance(
+                    provider,
+                    (AvailableSkillsContextProvider, ActiveSkillsContextProvider),
+                )
+            )
+            context_assembler.providers = (
+                *providers,
+                AvailableSkillsContextProvider(skill_loader.catalog),
+                ActiveSkillsContextProvider(skill_loader),
+                self_configuration,
+            )
         self.runtime = runtime
         self.model = model
         self.tool_catalog = tool_catalog
@@ -216,7 +241,6 @@ class AgentLoopEngine:
                 context_assembler=self.context_assembler,
                 tool_catalog=self.tool_catalog,
                 tool_selection_policy=self.tool_selection_policy,
-                token_estimator=getattr(self.context_assembler, "estimator", None),
                 context_budget=getattr(self.context_assembler, "budget", None),
             )
         )
@@ -533,11 +557,17 @@ class AgentLoopEngine:
         command = with_session_context(command, run.session_id)
         context = self._context_for_command(context, command)
         events = await self.runtime.session_store.read_events(run_id)
-        if any(event.type in {"tool.call.succeeded", "tool.call.reconciled"}
-               and isinstance(event.data, ToolEventData)
-               and event.data.tool_name == "agent_self_configure" for event in events):
+        if any(
+            event.type in {"tool.call.succeeded", "tool.call.reconciled"}
+            and isinstance(event.data, ToolEventData)
+            and event.data.tool_name == "agent_self_configure"
+            for event in events
+        ):
             if self.self_configuration is None:
-                raise self._conflict("self_configuration.unavailable", "The Run requires its saved self configuration")
+                raise self._conflict(
+                    "self_configuration.unavailable",
+                    "The Run requires its saved self configuration",
+                )
             await self.self_configuration.verify_checkpoint(run_id, 0)
         await self._prepare_self_configuration(run_id, context)
         settled_types = {
@@ -767,8 +797,13 @@ class AgentLoopEngine:
         state = AgentLoopCheckpointCodec.decode(checkpoint.state)
         if state.self_configuration_revision is not None:
             if self.self_configuration is None:
-                raise self._conflict("self_configuration.unavailable", "The Run requires its saved self configuration")
-            await self.self_configuration.verify_checkpoint(run_id, state.self_configuration_revision)
+                raise self._conflict(
+                    "self_configuration.unavailable",
+                    "The Run requires its saved self configuration",
+                )
+            await self.self_configuration.verify_checkpoint(
+                run_id, state.self_configuration_revision
+            )
         self.tool_selection_policy.restore_expanded_tools(
             run_id, state.expanded_tool_names
         )
@@ -1089,12 +1124,16 @@ class AgentLoopEngine:
         context = self._context_for_command(context, command)
         max_steps = command.config.max_steps or 24
         empty_response_retries = 0
+        provider_retries = 0
         context_overflow_retries = 0
-        additional_input_reserve_tokens = 0
         while run.state == RunState.RUNNING:
             await self._prepare_self_configuration(run.run_id, context)
             if self.self_configuration is not None:
-                state = state.model_copy(update={"self_configuration_revision": self.self_configuration.revision})
+                state = state.model_copy(
+                    update={
+                        "self_configuration_revision": self.self_configuration.revision
+                    }
+                )
             state = state.model_copy(
                 update={"messages": order_tool_context(state.messages)}
             )
@@ -1174,7 +1213,6 @@ class AgentLoopEngine:
                         messages=state.messages,
                         pending_continuation_reason=state.pending_continuation_reason,
                         language=context.language,
-                        additional_input_reserve_tokens=additional_input_reserve_tokens,
                     )
                 except SageV2Error as exc:
                     return await self._fail(run, state, step_id, exc.info, context)
@@ -1202,6 +1240,61 @@ class AgentLoopEngine:
                         run, request, context, state, step_id
                     )
                 except SageV2Error as exc:
+                    # The stream may have flushed deltas and cancelled partial
+                    # Items before raising; use its latest durable revision.
+                    run = await self.runtime.get_run(run.run_id)
+                    if run.state == RunState.SUSPEND_REQUESTED:
+                        return await self._suspend_at_safe_point(
+                            run,
+                            state.model_copy(update={"retry_model_step": True}),
+                            context,
+                        )
+                    if run.state in TERMINAL_RUN_STATES:
+                        return run
+                    if (
+                        exc.info.category
+                        in {
+                            ErrorCategory.PROVIDER_TRANSIENT,
+                            ErrorCategory.RATE_LIMITED,
+                        }
+                        and exc.info.retryable
+                        and exc.info.code != "model.empty_semantic_response"
+                        and provider_retries < self._MAX_TRANSPARENT_PROVIDER_RETRIES
+                    ):
+                        provider_retries += 1
+                        delay = self._PROVIDER_RETRY_BASE_SECONDS * 2 ** (
+                            provider_retries - 1
+                        )
+                        retry_error = exc.info.model_copy(
+                            update={
+                                "metadata": {
+                                    **exc.info.metadata,
+                                    "transparent_retry_attempt": provider_retries,
+                                    "transparent_retry_limit": self._MAX_TRANSPARENT_PROVIDER_RETRIES,
+                                    "retry_delay_seconds": delay,
+                                },
+                            }
+                        )
+                        run = await self._commit_running(
+                            run,
+                            context,
+                            (
+                                EventDraft(
+                                    type="step.retry_scheduled",
+                                    turn_id=state.turn_id,
+                                    step_id=step_id,
+                                    data=StepEventData(
+                                        state="retry_scheduled",
+                                        attempt=provider_retries,
+                                        retry_at=self.clock()
+                                        + timedelta(seconds=delay),
+                                        error=retry_error,
+                                    ),
+                                ),
+                            ),
+                        )
+                        await self._wait_for_model_retry(run.run_id, delay)
+                        continue
                     if (
                         can_repair_model_arguments(exc.info)
                         and state.pending_tool_call is None
@@ -1220,26 +1313,19 @@ class AgentLoopEngine:
                         continue
                     if (
                         exc.info.code == "model.context_window_exceeded"
-                        and exc.info.retryable
-                        and context_overflow_retries == 0
-                        and getattr(self.context_assembler, "budget", None) is not None
-                    ):
-                        context_overflow_retries = 1
-                        estimated = int(
-                            request.metadata.get("request_budget", {}).get(
-                                "estimated_input_tokens", 0
-                            )
+                        and context_overflow_retries < 6
+                        and callable(
+                            getattr(self.context_assembler, "request_compression", None)
                         )
-                        additional_input_reserve_tokens = max(512, estimated // 10)
+                    ):
+                        context_overflow_retries += 1
+                        self.context_assembler.request_compression(run.run_id)
                         retry_error = exc.info.model_copy(
                             update={
                                 "metadata": {
                                     **exc.info.metadata,
-                                    "adaptive_input_reserve_tokens": (
-                                        additional_input_reserve_tokens
-                                    ),
-                                    "transparent_retry_attempt": 1,
-                                    "transparent_retry_limit": 1,
+                                    "transparent_retry_attempt": context_overflow_retries,
+                                    "transparent_retry_limit": 6,
                                 }
                             }
                         )
@@ -1253,7 +1339,7 @@ class AgentLoopEngine:
                                     step_id=step_id,
                                     data=StepEventData(
                                         state="retry_scheduled",
-                                        attempt=1,
+                                        attempt=context_overflow_retries,
                                         retry_at=self.clock(),
                                         error=retry_error,
                                     ),
@@ -1333,8 +1419,8 @@ class AgentLoopEngine:
                 if observe_response is not None:
                     observe_response(request, response)
                 empty_response_retries = 0
+                provider_retries = 0
                 context_overflow_retries = 0
-                additional_input_reserve_tokens = 0
                 messages = state.messages
                 # Human-readable reasoning remains a separate canonical Item, while
                 # opaque provider continuation state is attached to the assistant
@@ -1404,23 +1490,49 @@ class AgentLoopEngine:
                             # Settle it as Tool feedback, then execute valid siblings.
                             call = ToolCall(
                                 tool_call_id=model_call.tool_call_id,
-                                tool_name=model_call.name, arguments=model_call.arguments,
+                                tool_name=model_call.name,
+                                arguments=model_call.arguments,
                                 operation_id=new_id("operation"),
                                 idempotency_key=f"{run.run_id}:{model_call.tool_call_id}",
-                                owner_run_id=run.run_id, owner_agent_id=command.agent_id,
+                                owner_run_id=run.run_id,
+                                owner_agent_id=command.agent_id,
                                 owner_session_id=run.session_id,
                             )
-                            run = await self._record_tool_proposal(run, call, context, state.turn_id, step_id)
+                            run = await self._record_tool_proposal(
+                                run, call, context, state.turn_id, step_id
+                            )
                             error = RuntimeErrorInfo(
-                                code="tool.not_found", category=ErrorCategory.VALIDATION,
+                                code="tool.not_found",
+                                category=ErrorCategory.VALIDATION,
                                 message=f"Tool {model_call.name!r} is unavailable. Use an exact available Tool name: {', '.join(available_tools)}. No execution occurred.",
                                 safe_to_resume=True,
-                                metadata={"side_effect_state": "not_applied", "tool_execution_started": False},
+                                metadata={
+                                    "side_effect_state": "not_applied",
+                                    "tool_execution_started": False,
+                                },
                             )
-                            result = ToolExecutionResult(tool_call_id=call.tool_call_id, operation_id=call.operation_id,
-                                error=error, content=(TextBlock(text=error.message),))
-                            run, result = await self._commit_tool_result(run, call, result, context, state.turn_id, step_id=step_id)
-                            state = state.model_copy(update={"messages": (*state.messages, self._tool_result_message(result))})
+                            result = ToolExecutionResult(
+                                tool_call_id=call.tool_call_id,
+                                operation_id=call.operation_id,
+                                error=error,
+                                content=(TextBlock(text=error.message),),
+                            )
+                            run, result = await self._commit_tool_result(
+                                run,
+                                call,
+                                result,
+                                context,
+                                state.turn_id,
+                                step_id=step_id,
+                            )
+                            state = state.model_copy(
+                                update={
+                                    "messages": (
+                                        *state.messages,
+                                        self._tool_result_message(result),
+                                    )
+                                }
+                            )
                             completed_tool_results.append(result)
                             continue
                         return await self._fail(run, state, step_id, exc.info, context)
@@ -1521,40 +1633,53 @@ class AgentLoopEngine:
                     state = state.model_copy(
                         update={
                             "pending_questionnaire_completed": questionnaire_completed,
-                            "messages": order_tool_context((
-                                *state.messages,
-                                self._tool_result_message(result),
-                                *followups,
-                            )),
+                            "messages": order_tool_context(
+                                (
+                                    *state.messages,
+                                    self._tool_result_message(result),
+                                    *followups,
+                                )
+                            ),
                             "expanded_tool_names": (
                                 self.tool_selection_policy.expanded_tools(run.run_id)
                             ),
                         }
                     )
-                    completed_tool_results.append(result.model_copy(update={
-                        "metadata": {key: value for key, value in result.metadata.items()
-                                     if key != "followup_user_message"},
-                    }))
+                    completed_tool_results.append(
+                        result.model_copy(
+                            update={
+                                "metadata": {
+                                    key: value
+                                    for key, value in result.metadata.items()
+                                    if key != "followup_user_message"
+                                },
+                            }
+                        )
+                    )
                 if run.state == RunState.SUSPEND_REQUESTED:
                     run, followups = await self._persist_followup_user_messages(
                         run, completed_tool_results, context, state.turn_id, step_id
                     )
-                    state = state.model_copy(update={
-                        "messages": (*state.messages, *followups),
-                    })
+                    state = state.model_copy(
+                        update={
+                            "messages": (*state.messages, *followups),
+                        }
+                    )
                     return await self._suspend_at_safe_point(run, state, context)
                 if approval_calls:
                     tool_call, policy = approval_calls[0]
                     run, followups = await self._persist_followup_user_messages(
                         run, completed_tool_results, context, state.turn_id, step_id
                     )
-                    state = state.model_copy(update={
-                        "messages": (*state.messages, *followups),
-                        "pending_tool_call": tool_call,
-                        "pending_tool_policy": policy,
-                        "pending_tool_phase": "approval",
-                        "pending_tool_step_id": step_id,
-                    })
+                    state = state.model_copy(
+                        update={
+                            "messages": (*state.messages, *followups),
+                            "pending_tool_call": tool_call,
+                            "pending_tool_policy": policy,
+                            "pending_tool_phase": "approval",
+                            "pending_tool_step_id": step_id,
+                        }
+                    )
                     return await self._suspend_for_tool_approval(
                         run, state, policy, context, step_id
                     )
@@ -1573,7 +1698,9 @@ class AgentLoopEngine:
             state = state.model_copy(
                 update={"messages": order_tool_context(state.messages)}
             )
-            state = inspection_progress(state, response, completed_tool_results, read_tools)
+            state = inspection_progress(
+                state, response, completed_tool_results, read_tools
+            )
             repeated = repeated_cycles(state.response_fingerprints)
             signals = await self._continuation_signals(run.run_id, state)
             # Phase 5: completion is policy, not an implicit consequence of EOF
@@ -1701,9 +1828,10 @@ class AgentLoopEngine:
             ):
                 continuation_reason = self._normalized_continuation_reason(
                     decision.reason,
-                    limit=6000 if decision.reason_code in {
-                        "openui.validation_retry", "output.self_check_retry"
-                    } else 240,
+                    limit=6000
+                    if decision.reason_code
+                    in {"openui.validation_retry", "output.self_check_retry"}
+                    else 240,
                 )
             state = state.model_copy(
                 update={
@@ -1956,6 +2084,13 @@ class AgentLoopEngine:
     async def _stream_model(self, run, request, context, state, step_id):
         return await self.stream_model_step(run, request, context, state, step_id)
 
+    async def _wait_for_model_retry(self, run_id, delay):
+        until = asyncio.get_running_loop().time() + delay
+        while (remaining := until - asyncio.get_running_loop().time()) > 0:
+            await asyncio.sleep(min(0.1, remaining))
+            if (await self.runtime.get_run(run_id)).state != RunState.RUNNING:
+                return
+
     async def _control_aware_model_events(self, stream, run, command):
         """Poll durable control/deadline state without cancelling socket reads."""
 
@@ -2138,8 +2273,32 @@ class AgentLoopEngine:
                         run = await batcher.add(draft)
                 else:
                     response = model_event.response
+            if response is None:
+                raise SageV2Error(
+                    RuntimeErrorInfo(
+                        code="model.stream_incomplete",
+                        category=ErrorCategory.PROVIDER_TRANSIENT,
+                        message="model stream ended without a completed response",
+                        retryable=True,
+                        safe_to_resume=True,
+                        metadata={
+                            "response_started": text_started or reasoning_started
+                        },
+                    )
+                )
         except SageV2Error as exc:
-            if can_repair_model_arguments(exc.info):
+            if (
+                can_repair_model_arguments(exc.info)
+                or (
+                    exc.info.category
+                    in {ErrorCategory.PROVIDER_TRANSIENT, ErrorCategory.RATE_LIMITED}
+                    and exc.info.retryable
+                )
+                or (
+                    exc.info.code == "model.context_window_exceeded"
+                    and exc.info.retryable
+                )
+            ):
                 run = await batcher.flush()
                 current = await self.runtime.get_run(run.run_id)
                 if current.state == RunState.RUNNING:
@@ -2162,6 +2321,14 @@ class AgentLoopEngine:
                     if drafts:
                         run = await self._commit_running(current, context, drafts)
                         await batcher.observe_run(run)
+            if text_started or reasoning_started:
+                raise SageV2Error(
+                    exc.info.model_copy(
+                        update={
+                            "metadata": {**exc.info.metadata, "response_started": True},
+                        }
+                    )
+                ) from exc
             raise
         finally:
             try:
@@ -2178,16 +2345,7 @@ class AgentLoopEngine:
                     closer = getattr(stream, "aclose", None)
                     if closer is not None:
                         await closer()
-        if response is None:
-            raise SageV2Error(
-                RuntimeErrorInfo(
-                    code="model.stream_incomplete",
-                    category=ErrorCategory.PROVIDER_TRANSIENT,
-                    message="model stream ended without a completed response",
-                    retryable=True,
-                    safe_to_resume=True,
-                )
-            )
+        assert response is not None
         drafts: list[EventDraft] = []
         if response.reasoning or reasoning_started:
             reasoning_text = response.reasoning or reasoning
@@ -2496,7 +2654,6 @@ class AgentLoopEngine:
     def _log_tool_exception(exc, run, call, turn_id, step_id):
         """Optional observer hook; execution never depends on logging."""
 
-
     def _apply_tool_expansion(self, call, result):
         if result.error is None and call.tool_name == "tool_expand_tools":
             requested_names = call.arguments.get("tool_names")
@@ -2784,9 +2941,11 @@ class AgentLoopEngine:
                 if current.state in TERMINAL_RUN_STATES:
                     await self._release_run_resources(run.run_id)
                 elif current.state in {RunState.RUNNING, RunState.SUSPEND_REQUESTED}:
-                    await asyncio.shield(self._record_cancelled_execution(
-                        current, call, context, turn_id, step_id
-                    ))
+                    await asyncio.shield(
+                        self._record_cancelled_execution(
+                            current, call, context, turn_id, step_id
+                        )
+                    )
                 raise
             if result is None:
                 await self._release_run_resources(run.run_id)
@@ -2900,7 +3059,12 @@ class AgentLoopEngine:
             await self._release_run_resources(run.run_id)
             return current, None
         run, _ = await self._commit_tool_result(
-            current, call, result, context, turn_id, step_id=step_id,
+            current,
+            call,
+            result,
+            context,
+            turn_id,
+            step_id=step_id,
             expected_states={RunState.RUNNING, RunState.SUSPEND_REQUESTED},
         )
         if state is None:
@@ -3131,10 +3295,17 @@ class AgentLoopEngine:
             except Exception as exc:
                 if isinstance(exc, SageV2Error) and not exc.info.safe_to_resume:
                     return await self._stop_for_unsafe_tool_error(
-                        run, call, ToolExecutionResult(
+                        run,
+                        call,
+                        ToolExecutionResult(
                             tool_call_id=call.tool_call_id,
-                            operation_id=call.operation_id, error=exc.info,
-                        ), context, turn_id, step_id, state,
+                            operation_id=call.operation_id,
+                            error=exc.info,
+                        ),
+                        context,
+                        turn_id,
+                        step_id,
+                        state,
                     )
                 reconciled = ReconcileResult(
                     operation_id=call.operation_id,
@@ -3148,15 +3319,23 @@ class AgentLoopEngine:
                     ),
                 )
             fatal_error = (
-                reconciled.result.error if reconciled.result and reconciled.result.error
+                reconciled.result.error
+                if reconciled.result and reconciled.result.error
                 else reconciled.error
             )
             if fatal_error is not None and not fatal_error.safe_to_resume:
                 return await self._stop_for_unsafe_tool_error(
-                    run, call, ToolExecutionResult(
+                    run,
+                    call,
+                    ToolExecutionResult(
                         tool_call_id=call.tool_call_id,
-                        operation_id=call.operation_id, error=fatal_error,
-                    ), context, turn_id, step_id, state,
+                        operation_id=call.operation_id,
+                        error=fatal_error,
+                    ),
+                    context,
+                    turn_id,
+                    step_id,
+                    state,
                 )
             if reconciled.state == ReconcileState.SUCCEEDED and reconciled.result:
                 run, result = await self._commit_tool_result(

@@ -27,16 +27,15 @@ from sagents.v2.agent.policy import (
 from sagents.v2.context import (
     ExtractiveConversationSummarizer,
     InMemoryConversationSummaryStore,
-    JsonHeuristicTokenEstimator,
     ModelConversationSummarizer,
     PersistentSummaryContextReducer,
     ReferenceContextUnitCompactor,
     SessionDerivedConversationSummaryStore,
-    TiktokenTokenEstimator,
-    UnicodeHeuristicTokenEstimator,
     WindowContextReducer,
 )
-from sagents.v2.context.plugins.summarizer_model import DEFAULT_SUMMARY_MODEL_TIMEOUT_SECONDS
+from sagents.v2.context.plugins.summarizer_model import (
+    DEFAULT_SUMMARY_MODEL_TIMEOUT_SECONDS,
+)
 from sagents.v2.interfaces.protocols.a2a import A2AProtocolAdapter
 from sagents.v2.interfaces.protocols.acp import AcpProtocolAdapter
 from sagents.v2.interfaces.protocols.ag_ui import AgUiProtocolAdapter
@@ -293,85 +292,19 @@ def _register_infrastructure(registry: ExtensionRegistry) -> None:
 
     _one(
         registry,
-        JsonHeuristicTokenEstimator,
-        "context.token-estimator",
-        lambda context, dependencies: JsonHeuristicTokenEstimator(**context.config),
-        scopes={ExtensionScope.PROCESS, ExtensionScope.AGENT},
-        config_schema={
-            "type": "object",
-            "properties": {
-                "bytes_per_token": {"type": "number", "exclusiveMinimum": 0},
-                "message_overhead": {"type": "integer", "minimum": 0},
-            },
-            "additionalProperties": False,
-        },
-    )
-    _one(
-        registry,
-        UnicodeHeuristicTokenEstimator,
-        "context.token-estimator",
-        lambda context, dependencies: UnicodeHeuristicTokenEstimator(**context.config),
-        scopes={ExtensionScope.PROCESS, ExtensionScope.AGENT},
-        config_schema={
-            "type": "object",
-            "properties": {
-                "ascii_chars_per_token": {
-                    "type": "number",
-                    "exclusiveMinimum": 0,
-                },
-                "non_ascii_chars_per_token": {
-                    "type": "number",
-                    "exclusiveMinimum": 0,
-                },
-                "message_overhead": {"type": "integer", "minimum": 0},
-            },
-            "additionalProperties": False,
-        },
-    )
-    _one(
-        registry,
-        TiktokenTokenEstimator,
-        "context.token-estimator",
-        lambda context, dependencies: TiktokenTokenEstimator(**context.config),
-        scopes={ExtensionScope.PROCESS, ExtensionScope.AGENT},
-        config_schema={
-            "type": "object",
-            "properties": {
-                "model": {"type": ["string", "null"]},
-                "encoding_name": {"type": "string", "minLength": 1},
-                "encoder": {},
-                "tokens_per_message": {"type": "integer", "minimum": 0},
-            },
-            "additionalProperties": False,
-        },
-        availability=ExtensionAvailability(
-            available=importlib.util.find_spec("tiktoken") is not None,
-            reason=(
-                None
-                if importlib.util.find_spec("tiktoken") is not None
-                else "optional tiktoken package is not installed"
-            ),
-        ),
-    )
-    _one(
-        registry,
         ReferenceContextUnitCompactor,
         "context.unit-compactor",
-        lambda context, dependencies: ReferenceContextUnitCompactor(
-            context.config.get("estimator")
-        ),
+        lambda context, dependencies: ReferenceContextUnitCompactor(),
         scopes={ExtensionScope.PROCESS, ExtensionScope.AGENT},
-        config_schema=_optional_object_config_schema("estimator"),
+        config_schema={"type": "object", "additionalProperties": False},
     )
     _one(
         registry,
         WindowContextReducer,
         "context.reducer",
-        lambda context, dependencies: WindowContextReducer(
-            context.config.get("estimator")
-        ),
+        lambda context, dependencies: WindowContextReducer(),
         scopes={ExtensionScope.AGENT, ExtensionScope.RUN},
-        config_schema=_optional_object_config_schema("estimator"),
+        config_schema={"type": "object", "additionalProperties": False},
     )
     _one(
         registry,
@@ -380,7 +313,6 @@ def _register_infrastructure(registry: ExtensionRegistry) -> None:
         lambda context, dependencies: PersistentSummaryContextReducer(
             context.config["store"],
             summarizer=context.config.get("summarizer"),
-            estimator=context.config.get("estimator"),
             summary_target_tokens=int(
                 context.config.get("summary_target_tokens", 1024)
             ),
@@ -389,7 +321,7 @@ def _register_infrastructure(registry: ExtensionRegistry) -> None:
                 context.config.get("max_summary_source_tokens", 24000)
             ),
             unit_compactor=context.config.get("unit_compactor"),
-            max_summary_calls=int(context.config.get("max_summary_calls", 4)),
+            max_summary_calls=int(context.config.get("max_summary_calls", 64)),
         ),
         scopes={ExtensionScope.AGENT, ExtensionScope.RUN},
         config_schema={
@@ -397,7 +329,6 @@ def _register_infrastructure(registry: ExtensionRegistry) -> None:
             "properties": {
                 "store": {},
                 "summarizer": {},
-                "estimator": {},
                 "summary_target_tokens": {"type": "integer", "minimum": 1},
                 "protected_recent_units": {"type": "integer", "minimum": 1},
                 "max_summary_calls": {"type": "integer", "minimum": 1},
@@ -453,19 +384,38 @@ def _register_infrastructure(registry: ExtensionRegistry) -> None:
                     "timeout_seconds", DEFAULT_SUMMARY_MODEL_TIMEOUT_SECONDS
                 )
             ),
-            idle_timeout_seconds=float(context.config.get(
-                "idle_timeout_seconds", DEFAULT_AUXILIARY_MODEL_TIMEOUT_SECONDS
-            )),
+            idle_timeout_seconds=float(
+                context.config.get(
+                    "idle_timeout_seconds", DEFAULT_AUXILIARY_MODEL_TIMEOUT_SECONDS
+                )
+            ),
         ),
         scopes={ExtensionScope.AGENT},
         config_schema={
             "type": "object",
             "properties": {
                 "model": {},
-                "model_binding": {"type": "string", "const": "primary", "default": "primary", "readOnly": True},
-                "max_source_tokens": {"type": "integer", "minimum": 1, "default": 24_000},
-                "timeout_seconds": {"type": "number", "exclusiveMinimum": 0, "default": DEFAULT_SUMMARY_MODEL_TIMEOUT_SECONDS},
-                "idle_timeout_seconds": {"type": "number", "exclusiveMinimum": 0, "default": DEFAULT_AUXILIARY_MODEL_TIMEOUT_SECONDS},
+                "model_binding": {
+                    "type": "string",
+                    "const": "primary",
+                    "default": "primary",
+                    "readOnly": True,
+                },
+                "max_source_tokens": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "default": 24_000,
+                },
+                "timeout_seconds": {
+                    "type": "number",
+                    "exclusiveMinimum": 0,
+                    "default": DEFAULT_SUMMARY_MODEL_TIMEOUT_SECONDS,
+                },
+                "idle_timeout_seconds": {
+                    "type": "number",
+                    "exclusiveMinimum": 0,
+                    "default": DEFAULT_AUXILIARY_MODEL_TIMEOUT_SECONDS,
+                },
             },
             "required": ["model"],
             "additionalProperties": False,
@@ -652,8 +602,11 @@ def _register_infrastructure(registry: ExtensionRegistry) -> None:
         version="3.0.0",
         availability=ExtensionAvailability(
             available=importlib.util.find_spec("cubesandbox") is not None,
-            reason=(None if importlib.util.find_spec("cubesandbox") is not None
-                    else "optional cubesandbox>=0.6.0 package is not installed"),
+            reason=(
+                None
+                if importlib.util.find_spec("cubesandbox") is not None
+                else "optional cubesandbox>=0.6.0 package is not installed"
+            ),
         ),
         config_schema={
             "type": "object",
@@ -858,23 +811,36 @@ def _register_infrastructure(registry: ExtensionRegistry) -> None:
         "observability.trace-sink",
         lambda context, dependencies: LangfuseTraceSink(
             base_url=context.config["base_url"],
-            public_key=os.environ.get(context.config.get("public_key_env", "LANGFUSE_PUBLIC_KEY"), ""),
-            secret_key=os.environ.get(context.config.get("secret_key_env", "LANGFUSE_SECRET_KEY"), ""),
+            public_key=os.environ.get(
+                context.config.get("public_key_env", "LANGFUSE_PUBLIC_KEY"), ""
+            ),
+            secret_key=os.environ.get(
+                context.config.get("secret_key_env", "LANGFUSE_SECRET_KEY"), ""
+            ),
             service_name=context.config.get("service_name", "sage"),
             ingestion_version=context.config.get("ingestion_version", 4),
             **_trace_options(context.config),
         ),
         scopes={ExtensionScope.PROCESS},
-        availability=ExtensionAvailability(available=langfuse_available(),
-            reason=None if langfuse_available() else "optional OTLP HTTP exporter is not installed"),
-        config_schema={"type": "object", "required": ["base_url"], "properties": {
-            "base_url": {"type": "string", "minLength": 1},
-            "public_key_env": {"type": "string", "default": "LANGFUSE_PUBLIC_KEY"},
-            "secret_key_env": {"type": "string", "default": "LANGFUSE_SECRET_KEY"},
-            "service_name": {"type": "string", "default": "sage"},
-            "ingestion_version": {"type": "integer", "enum": [3, 4], "default": 4},
-            **_TRACE_PROPERTIES,
-        }, "additionalProperties": False},
+        availability=ExtensionAvailability(
+            available=langfuse_available(),
+            reason=None
+            if langfuse_available()
+            else "optional OTLP HTTP exporter is not installed",
+        ),
+        config_schema={
+            "type": "object",
+            "required": ["base_url"],
+            "properties": {
+                "base_url": {"type": "string", "minLength": 1},
+                "public_key_env": {"type": "string", "default": "LANGFUSE_PUBLIC_KEY"},
+                "secret_key_env": {"type": "string", "default": "LANGFUSE_SECRET_KEY"},
+                "service_name": {"type": "string", "default": "sage"},
+                "ingestion_version": {"type": "integer", "enum": [3, 4], "default": 4},
+                **_TRACE_PROPERTIES,
+            },
+            "additionalProperties": False,
+        },
         capabilities={"exports_otlp": True},
     )
     _one(
@@ -902,11 +868,15 @@ def _register_infrastructure(registry: ExtensionRegistry) -> None:
         registry,
         SessionArtifactStore,
         "artifact.store",
-        lambda context, dependencies: SessionArtifactStore(context.config["session_store"]),
+        lambda context, dependencies: SessionArtifactStore(
+            context.config["session_store"]
+        ),
         scopes={ExtensionScope.PROCESS},
         config_schema={
-            "type": "object", "required": ["session_store"],
-            "properties": {"session_store": {}}, "additionalProperties": False,
+            "type": "object",
+            "required": ["session_store"],
+            "properties": {"session_store": {}},
+            "additionalProperties": False,
         },
     )
     _one(
@@ -927,7 +897,8 @@ def _register_infrastructure(registry: ExtensionRegistry) -> None:
         lambda context, dependencies: FilesystemArtifactStore(context.config["root"]),
         scopes={ExtensionScope.PROCESS},
         config_schema={
-            "type": "object", "required": ["root"],
+            "type": "object",
+            "required": ["root"],
             "properties": {"root": {"type": "string", "minLength": 1}},
             "additionalProperties": False,
         },
@@ -940,7 +911,9 @@ def _register_infrastructure(registry: ExtensionRegistry) -> None:
         registry,
         InMemoryAgentPackageRegistry,
         "package.registry",
-        lambda context, dependencies: InMemoryAgentPackageRegistry(resolver=context.config.get("resolver")),
+        lambda context, dependencies: InMemoryAgentPackageRegistry(
+            resolver=context.config.get("resolver")
+        ),
         scopes={ExtensionScope.PROCESS},
         config_schema=_optional_object_config_schema("resolver"),
         capabilities={
@@ -1081,7 +1054,9 @@ def _one(
 def _with_constructor_defaults(implementation: type, schema: dict) -> dict:
     """Publish scalar constructor defaults; explicit factory defaults win."""
     parameters = inspect.signature(implementation).parameters
-    properties = {key: dict(value) for key, value in schema.get("properties", {}).items()}
+    properties = {
+        key: dict(value) for key, value in schema.get("properties", {}).items()
+    }
     for key, field in properties.items():
         parameter = parameters.get(key)
         if parameter is None or "default" in field:
@@ -1127,7 +1102,11 @@ def _continuation_config_schema(*, uses_model: bool = False) -> dict:
             {
                 "model": {},
                 "model_binding": {"type": "string", "minLength": 1, "default": "fast"},
-                "timeout_seconds": {"type": "number", "exclusiveMinimum": 0, "default": DEFAULT_AUXILIARY_MODEL_TIMEOUT_SECONDS},
+                "timeout_seconds": {
+                    "type": "number",
+                    "exclusiveMinimum": 0,
+                    "default": DEFAULT_AUXILIARY_MODEL_TIMEOUT_SECONDS,
+                },
             }
         )
         required.append("model")
@@ -1171,11 +1150,24 @@ def _sandbox_config_schema(*, in_memory: bool) -> dict:
                 "network": {
                     "type": "object",
                     "properties": {
-                        "mode": {"type": "string", "enum": ["none", "unrestricted", "allowlist", "proxy"]},
+                        "mode": {
+                            "type": "string",
+                            "enum": ["none", "unrestricted", "allowlist", "proxy"],
+                        },
                         "deny_private_networks": {"type": "boolean"},
                         "allowed_hosts": {"type": "array", "items": {"type": "string"}},
-                        "allowed_ports": {"type": "array", "items": {"type": "integer", "minimum": 1, "maximum": 65535}},
-                        "allowed_schemes": {"type": "array", "items": {"type": "string", "enum": ["http", "https"]}},
+                        "allowed_ports": {
+                            "type": "array",
+                            "items": {
+                                "type": "integer",
+                                "minimum": 1,
+                                "maximum": 65535,
+                            },
+                        },
+                        "allowed_schemes": {
+                            "type": "array",
+                            "items": {"type": "string", "enum": ["http", "https"]},
+                        },
                         "proxy_url": {"type": "string"},
                     },
                     "additionalProperties": True,
@@ -1371,7 +1363,11 @@ def _register_session_and_memory(registry: ExtensionRegistry) -> None:
                     "properties": {
                         "model": {},
                         "language": {"type": "string"},
-                        "timeout_seconds": {"type": "number", "exclusiveMinimum": 0, "default": DEFAULT_AUXILIARY_MODEL_TIMEOUT_SECONDS},
+                        "timeout_seconds": {
+                            "type": "number",
+                            "exclusiveMinimum": 0,
+                            "default": DEFAULT_AUXILIARY_MODEL_TIMEOUT_SECONDS,
+                        },
                     },
                     "required": ["model"],
                     "additionalProperties": False,
@@ -1659,12 +1655,26 @@ def _model_factory(context, dependencies):
 
 _TRACE_PROPERTIES = {
     "environment": {"type": "string", "default": "production"},
-    "content_mode": {"type": "string", "enum": ["metadata", "redacted"], "default": "redacted"},
-    "max_content_chars": {"type": "integer", "minimum": 256, "maximum": 65536, "default": 16384},
+    "content_mode": {
+        "type": "string",
+        "enum": ["metadata", "redacted"],
+        "default": "redacted",
+    },
+    "max_content_chars": {
+        "type": "integer",
+        "minimum": 256,
+        "maximum": 65536,
+        "default": 16384,
+    },
     "sample_rate": {"type": "number", "minimum": 0, "maximum": 1, "default": 1.0},
     "max_queue_size": {"type": "integer", "minimum": 1, "default": 2048},
     "max_active_spans": {"type": "integer", "minimum": 1, "default": 4096},
-    "timeout_seconds": {"type": "number", "exclusiveMinimum": 0, "maximum": 30, "default": 3.0},
+    "timeout_seconds": {
+        "type": "number",
+        "exclusiveMinimum": 0,
+        "maximum": 30,
+        "default": 3.0,
+    },
 }
 
 

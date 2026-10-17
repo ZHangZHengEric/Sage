@@ -112,7 +112,10 @@ async def test_llm_judge_uses_v1_prompt_contract_and_reports_usage():
             "implementation": "v1",
             "response_language": "en",
         }
-        prompt = request.messages[0].content[0].text
+        assert tuple(m.role for m in request.messages) == ("system", "user")
+        assert "Create the report." not in request.messages[0].content[0].text
+        assert "Create the report." in request.messages[1].content[0].text
+        prompt = "\n".join(m.content[0].text for m in request.messages)
         assert "Apply the Todo invariant first" in prompt
         assert "Create the report." in prompt
         assert "Create files only after verification." in prompt
@@ -425,7 +428,7 @@ async def test_llm_judge_applies_v1_authoritative_todo_invariant():
     )
 
     def assert_request(request):
-        assert "<current_todo_plan>" in request.messages[0].content[0].text
+        assert "<current_todo_plan>" in request.messages[-1].content[0].text
 
     model = ScriptedModelProvider((_judge_step("completed", assertion=assert_request),))
     policy = LLMJudgeContinuationPolicy(LLMContinuationJudge(model))

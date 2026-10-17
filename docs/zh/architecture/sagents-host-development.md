@@ -105,6 +105,8 @@ reviewer = await app.load_agent("./agents/reviewer")
 coder = await app.load_agent("./agents/coder", subagents={"reviewer": reviewer})
 ```
 
+默认委派只传任务消息：未指定 `child_session_id` 时创建独立的串行 Session，第一条 `user` 消息就是父 Agent 发来的任务；指定时在该子 Session 追加新的 `user` 任务消息，保留子会话自己的历史。`parent_run_id`、`parent_tool_call_id` 和 Session 父子关系用于追踪、结果回传及目录归属，不会隐式复制父会话消息或附件。父 Agent 应在 `content` 中明确提供必要背景和资源引用；`original_task` 仅作为追踪元数据，不会自动成为子会话消息。显式请求的底层 `FORK` 模式仍保留其原有快照语义，不是默认委派行为。
+
 绑定固定到具体版本。更新 reviewer 不会改变已加载的 coder；要采用新版本，显式
 `app.update_agent(agent=coder, package="./agents/coder", subagents={"reviewer": updated_reviewer})`。
 内部恢复快照包含完整执行图，公开 Package 仍只有一个 Agent。托管 `AgentPackageBundle`
@@ -189,16 +191,16 @@ Desktop、Server 和第三方项目都使用 `SAgentBuilder.build()`；循环装
 
 ```python
 from sagents.v2 import SAgentBuilder
-from examples.sagents_v2_host.plugins import estimator_registration
+from examples.sagents_v2_host.plugins import compactor_registration
 
 builder = SAgentBuilder().with_defaults(session_root="./runtime")
-builder.register(estimator_registration())  # 先注册，再装配
+builder.register(compactor_registration())  # 先注册，再装配
 app = await builder.build(runtime={
     "capabilities": {
-        "context.token-estimator": {
-            "plugin": "example.context.byte-estimator",
+        "context.unit-compactor": {
+            "plugin": "example.context.reference-compactor",
             "scope": "agent",
-            "config": {"bytes_per_token": 4.0},
+            "config": {"minimum_characters": 4},
         },
     },
 })
@@ -290,7 +292,7 @@ Desktop 和 Server 的沙箱提供者均通过应用的插件生命周期创建�
 插件由两层协议组成：
 
 1. **统一装配协议**：ExtensionDescriptor 描述插件身份、能力、API 版本、参数和 scope；ExtensionRegistration 提供 factory/start/stop。
-2. **领域协议**：factory/start 返回的对象要实现该能力真正需要的方法，例如 TokenEstimator.estimate 或 ToolExecutor.execute/reconcile。注册成功只证明声明可解析，不会证明方法和恢复行为正确。
+2. **领域协议**：factory/start 返回的对象要实现该能力真正需要的方法，例如 ContextUnitCompactor.compact 或 ToolExecutor.execute/reconcile。注册成功只证明声明可解析，不会证明方法和恢复行为正确。
 
 实现类可以使用结构化 Protocol，不要求继承内置插件或共同基类。插件之间保持独立；共享 SDK 契约，不导入其他插件的内部代码。一个插件可以提供多个能力，但必须为每一个 offer 返回正确对象。
 
@@ -305,7 +307,7 @@ Desktop 和 Server 的沙箱提供者均通过应用的插件生命周期创建�
 | `context.reducer` | [ContextReducer](../../../sagents/v2/context/contracts.py) | `reduce` | 返回上下文投影；不能改写权威历史 |
 | `context.summarizer` | [ConversationSummarizer](../../../sagents/v2/context/summary.py) | `summarize` | 根据请求生成摘要文本 |
 | `context.summary-store` | [ConversationSummaryStore](../../../sagents/v2/context/summary.py) | `get`、`save`、`delete` | 遵守 expected_revision 的并发更新语义 |
-| `context.token-estimator` | [TokenEstimator](../../../sagents/v2/context/token_estimator.py) | `estimate` | 同步、无副作用；返回非负 token 估算 |
+| `context.unit-compactor` | [ContextUnitCompactor](../../../sagents/v2/context/contracts.py) | `compact` | 异步、无副作用；仅使用真实持久引用 |
 | `context.unit-compactor` | [ContextUnitCompactor](../../../sagents/v2/context/contracts.py) | `compact` | 对不可拆分单元生成替代投影，不能破坏工具调用配对 |
 | `credentials.provider` | [CredentialProvider](../../../sagents/v2/runtime/credentials/provider.py) | `resolve` | 将声明解析为 CredentialMaterial，不把密钥写日志 |
 | `execution.job-runtime` | [JobRuntime](../../../sagents/v2/runtime/execution/jobs/provider.py) | `capabilities`、`submit`、`inspect`、`wait`、`cancel`、`read_output`、`handle_run_pause`、`list_run_jobs`、`mark_orphaned`、`adopt`、`purge_terminal`、`close` | 后台工作状态、输出游标、取消、孤儿认领和清理 |
@@ -342,45 +344,44 @@ Desktop 和 Server 的沙箱提供者均通过应用的插件生命周期创建�
 
 ### 一个完整、独立的插件
 
-以下插件只实现 token 估算，不依赖内置 estimator 的实现。它用于展示协议与参数规范，生产应根据模型 tokenizer/实测误差选择算法。
+以下插件使用工具提供的真实持久引用压缩工具结果，不进行 token 估算。
 
 ```python
-import math
+"""Standalone compactor example using exact characters and durable references."""
 from pydantic import BaseModel, ConfigDict, Field
-from sagents.v2.runtime.extensions import (
-    CapabilityOffer, ExtensionDescriptor, ExtensionRegistration, ExtensionScope,
-)
+from sagents.v2.contracts.items import TextBlock
+from sagents.v2.runtime.extensions import CapabilityOffer, ExtensionDescriptor, ExtensionRegistration, ExtensionScope
 
-class EstimatorConfig(BaseModel):
+
+class ReferenceConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    bytes_per_token: float = Field(default=4.0, gt=0)
+    minimum_characters: int = Field(default=4, gt=0)
 
-class ByteEstimator:
-    estimator_id = "myproject-byte-estimator"
 
-    def __init__(self, *, bytes_per_token: float = 4.0):
-        self.bytes_per_token = bytes_per_token
+class ReferenceCompactor:
+    def __init__(self, *, minimum_characters=4):
+        self.minimum_characters = minimum_characters
 
-    def estimate(self, messages):
-        return sum(
-            math.ceil(len(message.model_dump_json().encode("utf-8")) / self.bytes_per_token)
-            for message in messages
-        )
+    async def compact(self, messages):
+        projected = []
+        for message in messages:
+            reference = message.metadata.get("context_reference", {})
+            uri = reference.get("uri") if isinstance(reference, dict) else None
+            if message.role == "tool" and uri and len(message.model_dump_json()) >= self.minimum_characters:
+                projected.append(message.model_copy(update={"content": (TextBlock(text=f"[Stored tool result: {uri}]"),)}))
+            else:
+                projected.append(message)
+        return tuple(projected) if tuple(projected) != messages else None
 
-def estimator_registration():
+
+def compactor_registration() -> ExtensionRegistration:
     return ExtensionRegistration(
         descriptor=ExtensionDescriptor(
-            plugin_id="myproject.context.byte-estimator",
-            version="1.0.0",
-            name="Byte estimator",
-            provides=(CapabilityOffer(
-                capability="context.token-estimator", api_version="2",
-            ),),
-            supported_scopes=frozenset({ExtensionScope.AGENT}),
-            config_schema=EstimatorConfig.model_json_schema(),
-        ),
-        config_model=EstimatorConfig,
-        factory=lambda context, dependencies: ByteEstimator(**context.config),
+            plugin_id="example.context.reference-compactor", version="2.0.0", name="Example reference compactor",
+            provides=(CapabilityOffer(capability="context.unit-compactor", api_version="2"),),
+            supported_scopes=frozenset({ExtensionScope.AGENT}), config_schema=ReferenceConfig.model_json_schema(),
+        ), config_model=ReferenceConfig,
+        factory=lambda context, dependencies: ReferenceCompactor(**context.config),
     )
 ```
 
@@ -391,11 +392,11 @@ from sagents.v2 import SAgentBuilder
 from sagents.v2.composition.defaults import default_runtime
 
 builder = SAgentBuilder()
-builder.register(estimator_registration())
+builder.register(compactor_registration())
 config = default_runtime("./runtime").model_dump(mode="json")
-config["capabilities"]["context.token-estimator"] = {
-    "plugin": "myproject.context.byte-estimator",
-    "config": {"bytes_per_token": 3.5},
+config["capabilities"]["context.unit-compactor"] = {
+    "plugin": "myproject.context.reference-compactor",
+    "config": {"minimum_characters": 3},
 }
 app = await builder.build(runtime=config)
 try:

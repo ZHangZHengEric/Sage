@@ -22,8 +22,13 @@ from sagents.v2.runtime.extensions.official import builtin_extension_registry
 # Other process services are injected by ServerHost, or bound to host storage,
 # execution grants and tenant catalogs. A saved choice there would be ignored.
 SERVER_CONFIGURABLE = frozenset(AGENT_DEFAULTS) | {
-    "memory.provider", "session-memory.provider", "context.summary-store",
-    "observability.trace-sink", "workspace.initializer", "package.registry", "artifact.store",
+    "memory.provider",
+    "session-memory.provider",
+    "context.summary-store",
+    "observability.trace-sink",
+    "workspace.initializer",
+    "package.registry",
+    "artifact.store",
 }
 SERVER_DEFAULTS = {
     **AGENT_DEFAULTS,
@@ -83,6 +88,7 @@ class ServerPluginConfig:
         value = json.loads(self.path.read_text())
         if not isinstance(value, dict):
             raise ValueError("Server 插件配置格式错误")
+        value.pop("context.token-estimator", None)
         return validate_selections(value, registry=self.registry)
 
     def save(self, changes: dict, expected_revision: str) -> dict:
@@ -105,7 +111,9 @@ class ServerPluginConfig:
                 else:
                     candidate[capability] = selection
             candidate = validate_selections(candidate, registry=self.registry)
-            descriptor, name = tempfile.mkstemp(dir=self.path.parent, prefix=".plugins-")
+            descriptor, name = tempfile.mkstemp(
+                dir=self.path.parent, prefix=".plugins-"
+            )
             try:
                 with os.fdopen(descriptor, "w") as output:
                     json.dump(candidate, output, ensure_ascii=False, indent=2)

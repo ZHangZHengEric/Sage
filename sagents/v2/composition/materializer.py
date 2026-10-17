@@ -32,7 +32,6 @@ from sagents.v2.composition.resolution import (
 from sagents.v2.composition.resolution import _resolve_package as resolve_package
 from sagents.v2.context import (
     ExtractiveConversationSummarizer,
-    JsonHeuristicTokenEstimator,
     PersistentSummaryContextReducer,
     ReferenceContextUnitCompactor,
 )
@@ -90,7 +89,11 @@ class AgentMaterializer:
         )
 
     async def process_provider(
-        self, capability: str, selection: CapabilitySelection, *, dependencies=None,
+        self,
+        capability: str,
+        selection: CapabilitySelection,
+        *,
+        dependencies=None,
     ):
         if selection.scope not in {None, ExtensionScope.PROCESS}:
             raise ValueError("process_provider requires process scope")
@@ -99,11 +102,16 @@ class AgentMaterializer:
             capabilities={capability: selection},
         )
         return await self._port(
-            runtime, (), capability=capability, default_plugin=selection.plugin,
+            runtime,
+            (),
+            capability=capability,
+            default_plugin=selection.plugin,
             default_scope=ExtensionScope.PROCESS,
             scope_id=f"host-provider:{capability}",
             locked_config=dependencies,
-            identities={}, run_handles=[], selected_handles=[],
+            identities={},
+            run_handles=[],
+            selected_handles=[],
         )
 
     async def materialize_agent(
@@ -125,7 +133,9 @@ class AgentMaterializer:
         if self._cache_guard is None:
             self._cache_guard = asyncio.Lock()
         tenant_id = tenant_id or self.default_tenant_id
-        manifest, resolved = resolve_package(package, runtime=runtime, models=self.models)
+        manifest, resolved = resolve_package(
+            package, runtime=runtime, models=self.models
+        )
         declarations = manifest.plugins if manifest is not None else resolved.plugins
         runtime = manifest.runtime if manifest is not None else resolved.runtime
         if runtime.deployment_profile != self.deployment_profile:
@@ -177,19 +187,6 @@ class AgentMaterializer:
         run_handles: list[Any] = []
         selected_handles: list[Any] = []
         async with self._close_run_handles_on_error(run_handles):
-            estimator = await self._port(
-                runtime,
-                declarations,
-                capability="context.token-estimator",
-                default_plugin=JsonHeuristicTokenEstimator.plugin_id,
-                default_scope=ExtensionScope.AGENT,
-                scope_id=f"materialize-estimator:{selected_agent}",
-                identities=identities,
-                run_handles=run_handles,
-                selected_handles=selected_handles,
-                tenant_id=tenant_id,
-                agent_id=selected_agent,
-            )
             summarizer_lock = dict(locks.get("context.summarizer") or {})
             if effective_model is not None and "model" not in summarizer_lock:
                 summarizer_lock["model"] = effective_model
@@ -218,7 +215,6 @@ class AgentMaterializer:
                 default_plugin=ReferenceContextUnitCompactor.plugin_id,
                 default_scope=ExtensionScope.AGENT,
                 scope_id=f"materialize-unit-compactor:{selected_agent}",
-                locked_config={"estimator": estimator},
                 identities=identities,
                 run_handles=run_handles,
                 selected_handles=selected_handles,
@@ -226,7 +222,6 @@ class AgentMaterializer:
                 agent_id=selected_agent,
             )
             reducer_lock = {
-                "estimator": estimator,
                 "store": self.summary_store,
                 "summarizer": summarizer,
                 "unit_compactor": unit_compactor,
@@ -253,6 +248,7 @@ class AgentMaterializer:
                 default_plugin=SkillLoadingPlugin.plugin_id,
                 default_scope=ExtensionScope.AGENT,
                 scope_id=f"materialize-skill-loading:{selected_agent}",
+                locked_config=locks.get("skill.loading"),
                 identities=identities,
                 run_handles=run_handles,
                 selected_handles=selected_handles,
@@ -338,7 +334,6 @@ class AgentMaterializer:
             tool_executor=tool_executor,
         )
         return MaterializedAgentPorts(
-            token_estimator=estimator,
             summarizer=summarizer,
             context_reducer=context_reducer,
             skill_loading=skill_loading,
@@ -551,7 +546,6 @@ class AgentMaterializer:
             "agent.continuation-policy",
             "context.reducer",
             "context.summarizer",
-            "context.token-estimator",
             "context.unit-compactor",
             "memory.recall-query",
             "tool.selection-policy",

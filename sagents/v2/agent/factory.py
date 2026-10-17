@@ -98,6 +98,7 @@ class AgentCompositionFactory:
                     message=f"skills exceed agent policy ceiling: {outside_ceiling}",
                 )
             )
+
         async def inherited_skills(run_id: str) -> tuple[str, ...]:
             from sagents.v2.context.session_history import SessionHistoryLedgerBuilder
 
@@ -108,8 +109,10 @@ class AgentCompositionFactory:
             # SkillLoadTool emits these metadata fields only after a successful
             # load. A call alone (failed, denied, or unfinished) is not activation.
             successful_loads = {
-                (message.metadata.get("source_run_id"), message.tool_call_id):
-                    message.metadata["skill_name"]
+                (
+                    message.metadata.get("source_run_id"),
+                    message.tool_call_id,
+                ): message.metadata["skill_name"]
                 for message in messages
                 if message.role == "tool"
                 and message.metadata.get("skill_name")
@@ -121,9 +124,12 @@ class AgentCompositionFactory:
                     if call.name != "load_skill":
                         continue
                     name = call.arguments.get("skill_name")
-                    if successful_loads.get(
-                        (message.metadata.get("source_run_id"), call.tool_call_id)
-                    ) != name:
+                    if (
+                        successful_loads.get(
+                            (message.metadata.get("source_run_id"), call.tool_call_id)
+                        )
+                        != name
+                    ):
                         continue
                     if isinstance(name, str) and name and name not in names:
                         names.append(name)
@@ -136,11 +142,17 @@ class AgentCompositionFactory:
             if len(selections) > 1:
                 raise ValueError("skill.loading requires a single provider")
             selection = selections[0] if selections else None
-            if selection is not None and selection.plugin != SkillLoadingPlugin.plugin_id:
+            if (
+                selection is not None
+                and selection.plugin != SkillLoadingPlugin.plugin_id
+            ):
                 raise ValueError("custom skill.loading provider must be injected")
             config = next(
-                (dict(p.config) for p in resolved.plugins
-                 if p.id == SkillLoadingPlugin.plugin_id),
+                (
+                    dict(p.config)
+                    for p in resolved.plugins
+                    if p.id == SkillLoadingPlugin.plugin_id
+                ),
                 {},
             )
             if selection is not None:
@@ -266,12 +278,12 @@ class AgentCompositionFactory:
             max_system_tokens=ceiling.max_system_tokens or 16_384,
             developer_instructions=(
                 agent.instructions
-                if developer_instructions is None else developer_instructions
+                if developer_instructions is None
+                else developer_instructions
             ),
             providers=providers,
             budget=context_budget,
             reducer=self.context_components.create_reducer(),
-            estimator=self.context_components.token_estimator,
             history_reader=self.runtime.session_store,
             projection_observer=session_memory_service,
             artifact_store=artifact_store,
@@ -324,7 +336,9 @@ class AgentCompositionFactory:
         if unknown_gates:
             raise ValueError(f"unknown completion gates: {sorted(unknown_gates)}")
         if context_providers is not None and additional_context_providers:
-            raise ValueError("choose explicit or additional context providers, not both")
+            raise ValueError(
+                "choose explicit or additional context providers, not both"
+            )
 
         agent = resolved.agents[agent_id]
         ceiling = resolved.policy_ceilings[agent_id]
@@ -360,16 +374,21 @@ class AgentCompositionFactory:
         if automatic_memory_recall is None:
             automatic_memory_recall = (
                 (memory_service is not None or session_memory_service is not None)
-                and "search_memory" in selected_tools and agent.memory.recall
+                and "search_memory" in selected_tools
+                and agent.memory.recall
             )
         selected_continuation_policy = (
             continuation_policy or CompositeContinuationPolicy()
         )
         if goal_state_service is not None:
-            gate_types = {"goal": GoalCompletionGatePolicy, "plan": PlanCompletionGatePolicy}
+            gate_types = {
+                "goal": GoalCompletionGatePolicy,
+                "plan": PlanCompletionGatePolicy,
+            }
             for gate in completion_gates:
                 selected_continuation_policy = gate_types[gate](
-                    selected_continuation_policy, goal_state_service,
+                    selected_continuation_policy,
+                    goal_state_service,
                 )
         return self.create_engine(
             model=model,
@@ -403,7 +422,8 @@ class AgentCompositionFactory:
                 session_memory_service=session_memory_service,
                 artifact_store=artifact_store,
             ),
-            expected_resolved_spec_hash=expected_resolved_spec_hash or resolved.manifest_hash,
+            expected_resolved_spec_hash=expected_resolved_spec_hash
+            or resolved.manifest_hash,
             trace_sink=trace_sink,
             log_sink=log_sink,
         )

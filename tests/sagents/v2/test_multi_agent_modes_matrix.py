@@ -319,7 +319,64 @@ async def test_multi_agent_tool_definitions_are_localized_for_the_model():
     assert delegate.description.startswith("把一个或多个具体任务")
     task_fields = delegate.input_schema["properties"]["tasks"]["items"]["properties"]
     assert task_fields["agent_id"]["description"] == "目标智能体的准确 ID"
-    assert task_fields["original_task"]["description"].startswith("用于补充上下文")
+    assert "追踪元数据" in task_fields["original_task"]["description"]
+    assert "不会自动" in task_fields["original_task"]["description"]
+    assert "不继承父会话历史" in task_fields["content"]["description"]
+    assert "已有子会话" in task_fields["session_id"]["description"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mode", [AgentMode.FIBRE, AgentMode.TEAM])
+@pytest.mark.parametrize(
+    "language,content_hint,metadata_hint,child_hint,current_hint",
+    [
+        ("zh-CN", "不继承父会话历史", "追踪元数据", "已有子会话", "当前会话"),
+        (
+            "en",
+            "do not inherit parent history",
+            "tracing metadata",
+            "existing child",
+            "Current session",
+        ),
+        (
+            "pt-BR",
+            "não herdam o histórico do pai",
+            "metadado de rastreamento",
+            "sessão filha existente",
+            "sessão atual",
+        ),
+    ],
+)
+async def test_delegation_localization_distinguishes_child_context_and_parent_routing(
+    mode, language, content_hint, metadata_hint, child_hint, current_hint
+):
+    suite = MultiAgentToolPlugin(
+        coordinator=MultiAgentCoordinator(
+            mode=mode, registry=AgentRegistry((MEMBER,)), executor=FakeChildExecutor()
+        ),
+        runtime=ephemeral_runtime(),
+    )
+    name = "sys_delegate_task" if mode == AgentMode.FIBRE else "sys_team_delegate_task"
+    original = await suite.catalog.get_tool(name, run_id="run_1")
+    localized = localize_tool_definition(original, language)
+    fields = localized.input_schema["properties"]["tasks"]["items"]["properties"]
+    assert content_hint in fields["content"]["description"]
+    assert metadata_hint in fields["original_task"]["description"]
+    assert child_hint in fields["session_id"]["description"]
+    assert (
+        current_hint
+        in localized.input_schema["properties"]["session_id"]["description"]
+    )
+    # Localization must not mutate the reusable catalog or its routing schema.
+    original_fields = original.input_schema["properties"]["tasks"]["items"][
+        "properties"
+    ]
+    assert "tracing metadata" in original_fields["original_task"]["description"]
+    assert fields["session_id"]["type"] == "string"
+    assert localized.input_schema["properties"]["tasks"]["items"]["required"] == [
+        "agent_id",
+        "content",
+    ]
 
 
 @pytest.mark.asyncio
@@ -646,9 +703,9 @@ async def test_fibre_dynamic_agent_roster_survives_a_fresh_projection():
     result = await factory.create_loop(leader, parent.run_id).execute(
         parent.run_id, CONTEXT
     )
-    restored = await SessionDynamicAgentRoster(runtime.session_store, runtime.session_store).load(
-        parent.session_id
-    )
+    restored = await SessionDynamicAgentRoster(
+        runtime.session_store, runtime.session_store
+    ).load(parent.session_id)
 
     assert result.state == RunState.COMPLETED
     assert len(restored) == 1
@@ -721,7 +778,7 @@ def loop_executor(runtime):
 
 
 @pytest.mark.asyncio
-async def test_loop_child_executor_creates_real_fork_run_with_parent_causality():
+async def test_loop_child_executor_creates_independent_serial_run_with_only_task_message():
     runtime = ephemeral_runtime()
     parent = await runtime.start_run(
         StartRun(
@@ -762,7 +819,21 @@ async def test_loop_child_executor_creates_real_fork_run_with_parent_causality()
     command = await runtime.session_store.get_start_command(result.child_run_id)
     assert command.parent_run_id == parent.run_id
     assert command.invocation_mode == "delegation"
-    assert command.session_id == parent.session_id
+    assert command.session_id is None
+    run = await runtime.get_run(result.child_run_id)
+    assert run.concurrency_mode == SessionConcurrencyMode.SERIAL
+    child = await runtime.session_store.get_session(result.child_session_id)
+    assert child.parent_session_id == parent.session_id
+    assert await runtime.session_store.read_fork_base_events(result.child_run_id) == ()
+    from sagents.v2.context.session_history import SessionHistoryLedgerBuilder
+
+    history = await SessionHistoryLedgerBuilder(runtime.session_store).rebuild(
+        command, run_id=run.run_id
+    )
+    assert len(history) == 2  # The task followed by this child's own answer.
+    assert history[0].role == "user"
+    assert history[0].content[0].text == task(1).content
+    assert history[1].content[0].text == "child done"
     assert command.config.enabled_tools == ("file_write",)
     assert command.config.enabled_skills == ("python",)
     assert command.config.metadata["workspace_policy"] == "private_child"

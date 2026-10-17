@@ -325,7 +325,9 @@ class GeminiGenerateContentModelProvider:
         terminal = started = False
         finish_reason = "completed"
         try:
-            record_wire_event({"diagnostic_event": "request_attempt", "payload": payload})
+            record_wire_event(
+                {"diagnostic_event": "request_attempt", "payload": payload}
+            )
             async with self._client.stream("POST", path, json=payload) as response:
                 if response.status_code >= 400:
                     await response.aread()
@@ -341,6 +343,7 @@ class GeminiGenerateContentModelProvider:
                         failed = httpx.Response(
                             int(error.get("code") or 500),
                             request=response.request,
+                            json={"error": error},
                         )
                         raise httpx.HTTPStatusError(
                             str(error.get("message") or error),

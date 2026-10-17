@@ -70,7 +70,7 @@ def test_admin_save_pending_reset_and_conflict(client):
 def test_invalid_server_plugin_changes_are_atomic(client, changes):
     admin = admin_headers(client)
     before = client.get("/api/plugins/server", headers=admin).json()["data"]
-    changes = {"context.token-estimator": {"plugin": "sage.context.token-estimator.unicode-heuristic"}, **changes}
+    changes = {"context.reducer": {"plugin": "sage.context.reducer.window"}, **changes}
     response = client.put("/api/plugins/server", headers=admin, json={"revision": before["revision"], "changes": changes})
     assert response.status_code == 422, response.text
     after = client.get("/api/plugins/server", headers=admin).json()["data"]

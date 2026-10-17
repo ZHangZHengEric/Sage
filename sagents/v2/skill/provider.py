@@ -101,12 +101,11 @@ class SkillLoader:
         workspace: SkillWorkspace,
         activations: SkillActivationRepository,
         workspace_root: str = "/workspace",
-        max_active_tokens: int = 6_000,
-        token_estimator: Callable[[str], int] | None = None,
+        max_active_characters: int = 24_000,
         inherited_skills: Callable[[str], Awaitable[tuple[str, ...]]] | None = None,
     ) -> None:
-        if max_active_tokens < 1:
-            raise ValueError("max_active_tokens must be positive")
+        if max_active_characters < 1:
+            raise ValueError("max_active_characters must be positive")
         self.inherited_skills = inherited_skills
         self._initialized_runs: set[str] = set()
         self._requested_names: dict[str, set[str]] = {}
@@ -115,8 +114,7 @@ class SkillLoader:
         self.workspace = workspace
         self.activations = activations
         self.workspace_root = workspace_root.rstrip("/") or "/"
-        self.max_active_tokens = max_active_tokens
-        self.token_estimator = token_estimator or self._default_token_estimate
+        self.max_active_characters = max_active_characters
         self._locks_guard = asyncio.Lock()
         self._load_locks: WeakValueDictionary = WeakValueDictionary()
 
@@ -148,9 +146,13 @@ class SkillLoader:
                 processed.add(name)
 
     async def _load_once(
-        self, name: str, *, run_id: str, budget_tokens: int | None = None
+        self, name: str, *, run_id: str, budget_characters: int | None = None
     ) -> LoadedSkill:
-        limit = self.max_active_tokens if budget_tokens is None else budget_tokens
+        limit = (
+            self.max_active_characters
+            if budget_characters is None
+            else budget_characters
+        )
         with errors_before_side_effect("skill.lookup_failed"):
             descriptor = await self.catalog.get_skill(name, run_id=run_id)
         existing = {
@@ -178,7 +180,9 @@ class SkillLoader:
             try:
                 instructions = bundle.files["SKILL.md"].decode("utf-8")
             except UnicodeDecodeError as exc:
-                raise self._error("skill.invalid_utf8", "SKILL.md must be UTF-8") from exc
+                raise self._error(
+                    "skill.invalid_utf8", "SKILL.md must be UTF-8"
+                ) from exc
             loaded = LoadedSkill(
                 run_id=run_id,
                 descriptor=descriptor,
@@ -188,19 +192,19 @@ class SkillLoader:
                 file_list=tuple(sorted(bundle.files)),
                 loaded_at=utc_now(),
             )
-            estimated_tokens = self.token_estimator(self._context_content(loaded))
-            if estimated_tokens > limit:
+            characters = len(self._context_content(loaded))
+            if characters > limit:
                 raise self._error(
                     "skill.active_budget_exceeded",
                     f"skill {name!r} instructions exceed the active context budget "
-                    f"({estimated_tokens} estimated tokens; "
+                    f"({characters} characters; "
                     f"limit {limit})",
                 )
         workspace_path = await self.workspace.materialize(
             bundle, run_id=run_id, destination=destination
         )
         loaded = loaded.model_copy(update={"workspace_path": workspace_path})
-        if self.token_estimator(self._context_content(loaded)) > limit:
+        if len(self._context_content(loaded)) > limit:
             raise self._error(
                 "skill.active_budget_exceeded",
                 "materialized skill context exceeds the active budget",
@@ -217,9 +221,8 @@ class SkillLoader:
                 run_id not in self._initialized_runs
                 and self.inherited_skills is not None
             ):
-                remaining = self.max_active_tokens - sum(
-                    self.token_estimator(self._context_content(value))
-                    for value in values
+                remaining = self.max_active_characters - sum(
+                    len(self._context_content(value)) for value in values
                 )
                 if remaining > 0:
                     allowed = {
@@ -234,7 +237,7 @@ class SkillLoader:
                             continue
                         try:
                             value = await self._load_once(
-                                name, run_id=run_id, budget_tokens=remaining
+                                name, run_id=run_id, budget_characters=remaining
                             )
                         except SageV2Error as exc:
                             if exc.info.code in {
@@ -245,7 +248,7 @@ class SkillLoader:
                                 continue
                             raise
                         inherited.append(value)
-                        remaining -= self.token_estimator(self._context_content(value))
+                        remaining -= len(self._context_content(value))
                     # History is older than this Run's explicit/default loads.
                     # Keep current activations newest for later budget eviction.
                     await self.activations.replace_loaded(
@@ -259,17 +262,17 @@ class SkillLoader:
 
     async def _load_lock(self, run_id: str, name: str) -> asyncio.Lock:
         # Loading is concurrent across Runs but serialized inside one Agent
-        # Workspace so activation order and token-budget eviction are stable.
+        # Workspace so activation order and activation eviction are stable.
         key = (run_id, "__skill_activation__")
         async with self._locks_guard:
             return self._load_locks.setdefault(key, asyncio.Lock())
 
     async def _enforce_active_budget(self, run_id: str) -> None:
         values = list(await self.activations.list_loaded(run_id=run_id))
-        costs = [self.token_estimator(self._context_content(value)) for value in values]
+        costs = [len(self._context_content(value)) for value in values]
         total = sum(costs)
         start = 0
-        while total > self.max_active_tokens and start < len(values):
+        while total > self.max_active_characters and start < len(values):
             total -= costs[start]
             start += 1
         await self.activations.replace_loaded(
@@ -286,10 +289,6 @@ class SkillLoader:
             f"<skill_content>{escape(value.instructions)}</skill_content>\n"
             "</active_skill>"
         )
-
-    @staticmethod
-    def _default_token_estimate(value: str) -> int:
-        return max(1, (len(value.encode("utf-8")) + 3) // 4)
 
     @staticmethod
     def _error(code: str, message: str) -> SageV2Error:

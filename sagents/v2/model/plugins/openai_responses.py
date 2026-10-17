@@ -27,6 +27,7 @@ from sagents.v2.model.wire import (
     minimum_reasoning_control,
     parse_tool_arguments,
     provider_error,
+    ProviderStreamFailure,
     stream_incomplete_error,
     validate_extra_body,
     wire_json_value,
@@ -309,14 +310,23 @@ class OpenAIResponsesModelProvider:
         compatibility_fallback: dict[str, Any] | None = None
         try:
             try:
-                record_wire_event({"diagnostic_event": "request_attempt", "payload": payload})
+                record_wire_event(
+                    {"diagnostic_event": "request_attempt", "payload": payload}
+                )
                 upstream = await self._client.responses.create(**payload)
             except Exception as exc:
-                record_wire_event({"diagnostic_event": "request_error", "error": {"type": type(exc).__name__, "message": str(exc)}})
+                record_wire_event(
+                    {
+                        "diagnostic_event": "request_error",
+                        "error": {"type": type(exc).__name__, "message": str(exc)},
+                    }
+                )
                 fallback_payload = self._reasoning_fallback_request(payload, exc)
                 if fallback_payload is None:
                     raise
-                record_wire_event({"diagnostic_event": "request_attempt", "payload": fallback_payload})
+                record_wire_event(
+                    {"diagnostic_event": "request_attempt", "payload": fallback_payload}
+                )
                 upstream = await self._client.responses.create(**fallback_payload)
                 self._reasoning_control_rejected = True
                 compatibility_fallback = {
@@ -396,8 +406,19 @@ class OpenAIResponsesModelProvider:
                     error = wire_value(event, "error") or wire_value(
                         wire_value(event, "response"), "error"
                     )
-                    raise RuntimeError(
-                        str(wire_value(error, "message", "Responses API failed"))
+                    # SSE failures arrive after HTTP 200. Preserve the typed
+                    # payload so context rejection can trigger compression.
+                    raise ProviderStreamFailure(
+                        str(
+                            wire_value(error, "message")
+                            or wire_value(event, "message")
+                            or "Responses API failed"
+                        ),
+                        code=wire_value(error, "code")
+                        or wire_value(event, "code")
+                        or "response_failed",
+                        body=error,
+                        status_code=wire_value(error, "status_code"),
                     )
         except Exception as exc:
             from sagents.v2.contracts.errors import SageV2Error

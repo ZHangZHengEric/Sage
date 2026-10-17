@@ -186,7 +186,7 @@ async def test_tag_activation_does_not_reload_evicted_skills_each_step():
     provider, _, _, loader = loader_for(
         bundle("alpha", "A" * 100), bundle("beta", "B" * 100)
     )
-    loader.max_active_tokens = 300
+    loader.max_active_characters = 300
     loader.token_estimator = len
     request = command().model_copy(
         update={
@@ -329,8 +329,7 @@ async def test_active_skill_budget_evicts_oldest_within_hard_budget():
         source=provider,
         workspace=workspace,
         activations=activations,
-        max_active_tokens=300,
-        token_estimator=len,
+        max_active_characters=300,
     )
 
     await loader.load("alpha", run_id="run_1")
@@ -524,7 +523,7 @@ async def test_single_oversized_skill_is_rejected_before_copy_or_activation():
         source=provider,
         workspace=workspace,
         activations=activations,
-        max_active_tokens=100,
+        max_active_characters=100,
     )
     with pytest.raises(SageV2Error) as caught:
         await loader.load("huge", run_id="run_1")
@@ -594,8 +593,7 @@ async def test_session_skill_history_loads_recent_unique_skills_within_window():
         return ("new", "recent", "new", "old")
 
     loader.inherited_skills = history
-    loader.token_estimator = lambda text: 10
-    loader.max_active_tokens = 20
+    loader.max_active_characters = 320
     loaded = await loader.loaded(run_id="next_run")
     assert [v.descriptor.name for v in loaded] == ["recent", "new"]
     assert [entry[1] for entry in workspace.materializations] == ["new", "recent"]
@@ -634,14 +632,11 @@ async def test_inherited_skills_obey_current_grant_and_materialize_for_new_run()
 async def test_history_restores_around_defaults_and_skips_oversized_candidates(budget):
     provider, workspace, activations, loader = loader_for(
         *(
-            bundle(name, name)
+            bundle(name, name * 500 if name == "large" else name)
             for name in ("a", "b", "large", "recent", "old", "revoked")
         )
     )
-    loader.token_estimator = lambda text: (
-        25 if "<skill_name>large</skill_name>" in text else 10
-    )
-    loader.max_active_tokens = budget
+    loader.max_active_characters = {20: 280, 30: 440, 40: 600}[budget]
     defaults = tuple([await loader.load(name, run_id="next") for name in ("a", "b")])
     history_reads = []
 
@@ -659,11 +654,11 @@ async def test_history_restores_around_defaults_and_skips_oversized_candidates(b
     assert [value.descriptor.name for value in loaded] == expected
     assert loaded[-2:] == defaults
     assert (
-        sum(loader.token_estimator(loader._context_content(value)) for value in loaded)
-        <= budget
+        sum(len(loader._context_content(value)) for value in loaded)
+        <= loader.max_active_characters
     )
     assert all(result == loaded for result in results)
-    assert history_reads == ([] if budget == 20 else ["next"])
+    assert history_reads == ["next"]
     assert len(provider.fetches) == len(set(provider.fetches))
     assert {name for _, name, _ in workspace.materializations} == set(expected)
     assert await activations.list_loaded(run_id="next") == loaded

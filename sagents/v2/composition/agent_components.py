@@ -14,7 +14,6 @@ from sagents.v2.agent.factory import AgentCompositionFactory
 from sagents.v2.agent.policy import CompositeContinuationPolicy
 from sagents.v2.agent.policy.continuation import ContinuationPolicy
 from sagents.v2.context import (
-    JsonHeuristicTokenEstimator,
     PersistentSummaryContextReducer,
     ReferenceContextUnitCompactor,
     SessionDerivedConversationSummaryStore,
@@ -44,7 +43,6 @@ class AgentComponents:
     def services(self) -> dict[str, Any]:
         """Expose the root Agent's providers for readiness and plan inspection."""
         return {
-            "context.token-estimator": self.context.token_estimator,
             "context.summary-store": self.context.summary_store,
             "context.summarizer": self.context.summarizer,
             "context.unit-compactor": self.unit_compactor,
@@ -63,11 +61,6 @@ class AgentComponents:
         runtime: RuntimePort,
         derived_state: DerivedStateStore,
     ) -> AgentComponents:
-        token_estimator = await open_capability(
-            capability="context.token-estimator",
-            default_plugin=JsonHeuristicTokenEstimator.plugin_id,
-            agent_id=agent_id,
-        )
         summary_store = await open_capability(
             capability="context.summary-store",
             default_plugin=SessionDerivedConversationSummaryStore.plugin_id,
@@ -83,7 +76,6 @@ class AgentComponents:
         unit_compactor = await open_capability(
             capability="context.unit-compactor",
             default_plugin=ReferenceContextUnitCompactor.plugin_id,
-            locked_config={"estimator": token_estimator},
             agent_id=agent_id,
         )
         context_reducer = await open_capability(
@@ -92,7 +84,6 @@ class AgentComponents:
             locked_config={
                 "store": summary_store,
                 "summarizer": summarizer,
-                "estimator": token_estimator,
                 "unit_compactor": unit_compactor,
             },
             agent_id=agent_id,
@@ -109,7 +100,6 @@ class AgentComponents:
             agent_id=agent_id,
         )
         components = ContextComponentBundle(
-            token_estimator=token_estimator,
             summary_store=summary_store,
             summarizer=summarizer,
             reducer=context_reducer,

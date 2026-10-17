@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import Field, model_validator
+from pydantic import Field, field_validator, model_validator
 
 from sagents.v2.contracts.common import Identifier, StrictModel
 from sagents.v2.package.manifest.agents import AgentDefinition, ApplicationEntrypoint
@@ -24,6 +24,20 @@ class PluginDeclaration(StrictModel):
     id: Identifier
     version: str | None = None
     config: dict[str, Any] = Field(default_factory=dict)
+
+    @model_validator(mode="before")
+    @classmethod
+    def retire_skill_estimate_limit(cls, value):
+        if isinstance(value, dict) and value.get("id") == "sage.skill.loading.lazy":
+            config = value.get("config")
+            if isinstance(config, dict) and "max_active_tokens" in config:
+                return {
+                    **value,
+                    "config": {
+                        k: v for k, v in config.items() if k != "max_active_tokens"
+                    },
+                }
+        return value
 
 
 class InterfaceDeclaration(StrictModel):
@@ -52,6 +66,24 @@ class SageManifest(StrictModel):
     interfaces: dict[Identifier, InterfaceDeclaration] = Field(default_factory=dict)
     tests: TestDeclaration = Field(default_factory=TestDeclaration)
     environments: dict[Identifier, dict[str, Any]] = Field(default_factory=dict)
+
+    @field_validator("plugins", mode="before")
+    @classmethod
+    def retire_estimator_plugins(cls, value):
+        if not isinstance(value, (tuple, list)):
+            return value
+
+        def retired(plugin):
+            identifier = (
+                plugin.get("id")
+                if isinstance(plugin, dict)
+                else getattr(plugin, "id", None)
+            )
+            return isinstance(identifier, str) and identifier.startswith(
+                "sage.context.token-estimator."
+            )
+
+        return tuple(plugin for plugin in value if not retired(plugin))
 
     @model_validator(mode="after")
     def validate_unique_plugin_declarations(self) -> "SageManifest":
