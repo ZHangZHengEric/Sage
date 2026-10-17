@@ -476,9 +476,22 @@ host source, scopes, API versions, dependency edges, and composition hash
 without exposing raw configuration or credentials.
 
 The optional filesystem Scheduler persists pending work, leases, and fencing
-counters for single-host restart recovery. Queued work can be redispatched;
-uncheckpointed running work fails explicitly instead of being replayed. This
-does not claim a distributed scheduler or a durable JobRuntime.
+counters for single-host restart recovery. Queued work can be redispatched.
+Agent Loops atomically save running checkpoints before inference, with completed
+model responses, and at Step completion. Recovery verifies the canonical ledger,
+restores budgets and tool selection, consumes saved responses/results, and retries
+only unfinished inference. A completed Tool result and its supplemental model
+context are committed together. Delegation reconciliation uses the original task
+and child-Run creation keys to recover the same Team tree, reading completed
+siblings without running them again and propagating child interactions normally.
+
+A dispatched external Tool without a saved result is never blindly replayed:
+its provider must reconcile the operation or the Run waits for explicit
+resolution. Generic MCP has no cross-process exactly-once guarantee. Legacy or
+custom drivers without a usable checkpoint/tool barrier still fail explicitly
+instead of replaying unknown work. This does not claim a distributed scheduler
+or a durable JobRuntime. In-flight model previews that were not durably committed
+can be lost on a hard kill; completed history and tool results remain authoritative.
 
 Worker fencing is a semantic plugin contract rather than a built-in database
 transaction. A Scheduler used by `SAgentBuilder` must support

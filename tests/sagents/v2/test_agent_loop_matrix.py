@@ -821,7 +821,10 @@ async def test_need_user_input_signal_suspends_and_resumes_with_canonical_input(
 
 
 @pytest.mark.asyncio
-async def test_validated_questionnaire_result_completes_without_calling_judge():
+@pytest.mark.parametrize("worker_restart", [False, True])
+async def test_validated_questionnaire_result_completes_without_calling_judge(
+    worker_restart,
+):
     questionnaire_tool = ToolDefinition(
         name="questionnaire_async",
         description="Ask the user a structured question.",
@@ -875,7 +878,30 @@ async def test_validated_questionnaire_result_completes_without_calling_judge():
         continuation_policy=policy,
     )
 
-    result = await loop.execute(handle.run_id, CONTEXT)
+    if worker_restart:
+
+        class ProcessLost(BaseException):
+            pass
+
+        commit_result = loop._commit_tool_result
+
+        async def crash_after_saved_result(*args, **kwargs):
+            await commit_result(*args, **kwargs)
+            raise ProcessLost()
+
+        loop._commit_tool_result = crash_after_saved_result
+        with pytest.raises(ProcessLost):
+            await loop.execute(handle.run_id, CONTEXT)
+        recovered_loop = AgentLoopEngine(
+            runtime=runtime,
+            model=model,
+            tool_catalog=loop.tool_catalog,
+            tool_executor=loop.tool_executor,
+            continuation_policy=policy,
+        )
+        result = await recovered_loop.recover_interrupted(handle.run_id, CONTEXT)
+    else:
+        result = await loop.execute(handle.run_id, CONTEXT)
     events = await runtime.session_store.read_events(handle.run_id)
     decision = next(event for event in events if event.type == "continuation.decided")
 
@@ -3244,7 +3270,7 @@ async def test_worker_recovery_reconciles_each_started_parallel_call_without_rep
         message.tool_call_id
         for message in model.requests[-1].messages
         if message.role == "tool"
-    ] == ["call_2", "call_1"]
+    ] == ["call_1", "call_2"]
 
 
 @pytest.mark.asyncio

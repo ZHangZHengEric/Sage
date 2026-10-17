@@ -120,7 +120,9 @@ class LoopChildRunExecutor:
                 "parent_tool_call_id": task.parent_tool_call_id or "",
                 "workspace_policy": workspace_policy.value,
                 "agent_mode": descriptor.mode.value,
-                "response_language": str(parent_metadata.get("response_language") or "en"),
+                "response_language": str(
+                    parent_metadata.get("response_language") or "en"
+                ),
             }
         )
         input_metadata = {}
@@ -170,10 +172,23 @@ class LoopChildRunExecutor:
         self._tasks_by_run[handle.run_id] = task
         current = await self.runtime.get_run(handle.run_id)
         try:
-            loop = await self._loop_for(descriptor, handle.run_id, context)
-            if current.state == RunState.RESUMING:
+            if (
+                current.state in TERMINAL_RUN_STATES
+                or current.state == RunState.SUSPENDED
+            ):
+                run = current
+            elif current.state == RunState.RESUMING:
+                loop = await self._loop_for(descriptor, handle.run_id, context)
                 run = await loop.resume(handle.run_id, context)
-            elif current.state in {RunState.QUEUED, RunState.RUNNING}:
+            elif current.state in {RunState.RUNNING, RunState.SUSPEND_REQUESTED}:
+                loop = await self._loop_for(descriptor, handle.run_id, context)
+                run = await loop.recover_interrupted(handle.run_id, context)
+                if run is None:
+                    raise RuntimeError(
+                        "active child has no recoverable execution state"
+                    )
+            elif current.state == RunState.QUEUED:
+                loop = await self._loop_for(descriptor, handle.run_id, context)
                 run = await loop.execute(handle.run_id, context)
             else:
                 run = current
@@ -194,11 +209,14 @@ class LoopChildRunExecutor:
         if loop is not None:
             return loop
         parameters = tuple(inspect.signature(self.loop_factory).parameters.values())
-        accepts_context = any(
-            value.kind
-            in {inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD}
-            for value in parameters
-        ) or len(parameters) >= 3
+        accepts_context = (
+            any(
+                value.kind
+                in {inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD}
+                for value in parameters
+            )
+            or len(parameters) >= 3
+        )
         built = (
             self.loop_factory(descriptor, run_id, context)
             if accepts_context
@@ -310,44 +328,17 @@ class LoopChildRunExecutor:
             descriptor = descriptor.model_copy(update={"allow_delegation": False})
         if descriptor is not None:
             self._descriptors_by_run[run_id] = descriptor
-        if descriptor is None or run.suspension_id is None:
+        if descriptor is None:
             raise RuntimeError("delegated run cannot be resumed by this executor")
-        suspension = await self.runtime.session_store.get_suspension(run.suspension_id)
-        if suspension.interaction_id is None:
-            raise RuntimeError("delegated run suspension has no interaction")
-        interaction = await self.runtime.session_store.get_interaction(
-            suspension.interaction_id
-        )
-        receipt = await self.runtime.reply_interaction(
-            ReplyInteraction(
-                run_id=run_id,
-                suspension_id=suspension.suspension_id,
-                interaction_id=interaction.interaction_id,
-                expected_revision=run.revision,
-                expected_suspension_revision=suspension.expected_revision,
-                expected_interaction_revision=interaction.expected_revision,
-                decision=decision,
-                payload=payload,
-                idempotency_key=(
-                    f"delegated-interaction:{run_id}:"
-                    f"{interaction.interaction_id}:{interaction.expected_revision}"
-                ),
-            ),
-            context,
-        )
-        if receipt.decision.value == "rejected":
-            raise RuntimeError(
-                receipt.error.message
-                if receipt.error
-                else "delegated reply was rejected"
-            )
-        resumed = await (await self._loop_for(descriptor, run_id, context)).resume(
-            run_id, context
-        )
         task = self._tasks_by_run.get(run_id)
         if task is None:
+            prefix = f"delegate:{command.parent_run_id}:"
             task = DelegationTask(
-                task_id=run_id,
+                task_id=(
+                    command.idempotency_key[len(prefix) :]
+                    if command.idempotency_key.startswith(prefix)
+                    else run_id
+                ),
                 agent_id=descriptor.agent_id,
                 task_name=str(
                     command.config.metadata.get("task_name") or descriptor.name
@@ -365,6 +356,57 @@ class LoopChildRunExecutor:
                 ),
             )
             self._tasks_by_run[run_id] = task
+        if run.state in TERMINAL_RUN_STATES:
+            resumed = run
+        elif run.state in {RunState.RUNNING, RunState.SUSPEND_REQUESTED}:
+            resumed = await (
+                await self._loop_for(descriptor, run_id, context)
+            ).recover_interrupted(run_id, context)
+            if resumed is None:
+                raise RuntimeError("active child has no recoverable execution state")
+        elif run.state == RunState.RESUMING:
+            resumed = await (await self._loop_for(descriptor, run_id, context)).resume(
+                run_id, context
+            )
+        elif run.state == RunState.SUSPENDED and run.suspension_id is not None:
+            suspension = await self.runtime.session_store.get_suspension(
+                run.suspension_id
+            )
+            if suspension.interaction_id is None:
+                raise RuntimeError("delegated run suspension has no interaction")
+            interaction = await self.runtime.session_store.get_interaction(
+                suspension.interaction_id
+            )
+            receipt = await self.runtime.reply_interaction(
+                ReplyInteraction(
+                    run_id=run_id,
+                    suspension_id=suspension.suspension_id,
+                    interaction_id=interaction.interaction_id,
+                    expected_revision=run.revision,
+                    expected_suspension_revision=suspension.expected_revision,
+                    expected_interaction_revision=interaction.expected_revision,
+                    decision=decision,
+                    payload=payload,
+                    idempotency_key=(
+                        f"delegated-interaction:{run_id}:"
+                        f"{interaction.interaction_id}:{interaction.expected_revision}"
+                    ),
+                ),
+                context,
+            )
+            if receipt.decision.value == "rejected":
+                raise RuntimeError(
+                    receipt.error.message
+                    if receipt.error
+                    else "delegated reply was rejected"
+                )
+            resumed = await (await self._loop_for(descriptor, run_id, context)).resume(
+                run_id, context
+            )
+        else:
+            raise RuntimeError(
+                "delegated run is not awaiting or recovering an interaction"
+            )
         result = await self._result(task, run.session_id, resumed)
         if resumed.state in TERMINAL_RUN_STATES:
             await self._release_run(run_id)
