@@ -13,6 +13,7 @@ from sagents.v2.skill.contracts import (
     SkillCatalog,
     SkillDescriptor,
     SkillSource,
+    SkillRunState,
     SkillWorkspace,
 )
 from sagents.v2.contracts.common import utc_now
@@ -109,6 +110,7 @@ class SkillLoader:
         self.inherited_skills = inherited_skills
         self._initialized_runs: set[str] = set()
         self._requested_names: dict[str, set[str]] = {}
+        self._preload_states: dict[str, SkillRunState] = {}
         self.catalog = catalog
         self.source = source
         self.workspace = workspace
@@ -117,6 +119,65 @@ class SkillLoader:
         self.max_active_characters = max_active_characters
         self._locks_guard = asyncio.Lock()
         self._load_locks: WeakValueDictionary = WeakValueDictionary()
+
+    async def snapshot_run(self, run_id: str) -> dict:
+        lock = await self._load_lock(run_id, "")
+        async with lock:
+            state = self._preload_states.get(run_id, SkillRunState())
+            return state.model_copy(update={
+                "active": await self.activations.list_loaded(run_id=run_id),
+                "history_initialized": run_id in self._initialized_runs,
+                "requested_names": tuple(sorted(self._requested_names.get(run_id, ()))),
+            }).model_dump(mode="json")
+
+    async def restore_run(self, run_id: str, snapshot: dict) -> None:
+        lock = await self._load_lock(run_id, "")
+        async with lock:
+            # Restore the exact activation list, including an intentionally empty one.
+            # Never infer initialization from which skill bodies happen to remain.
+            state = SkillRunState.model_validate(snapshot)
+            if any(value.run_id != run_id for value in state.active):
+                raise self._error("skill.state_invalid", "skill state belongs to another Run")
+            await self.activations.replace_loaded(run_id=run_id, values=state.active)
+            self._preload_states[run_id] = state
+            if state.history_initialized:
+                self._initialized_runs.add(run_id)
+            else:
+                self._initialized_runs.discard(run_id)
+            self._requested_names[run_id] = set(state.requested_names)
+
+    async def initialize_preloads(
+        self, names: tuple[str, ...], *, run_id: str, on_progress=None
+    ) -> None:
+        async with self._locks_guard:
+            key = (run_id, "__preload_initialization__")
+            lock = self._load_locks.setdefault(key, asyncio.Lock())
+        async with lock:
+            await self._initialize_preloads_once(names, run_id=run_id, on_progress=on_progress)
+
+    async def _initialize_preloads_once(self, names, *, run_id, on_progress):
+        state = self._preload_states.get(run_id, SkillRunState(preloads=names))
+        if state.preloads_complete:
+            return
+        if not state.preloads:
+            state = state.model_copy(update={"preloads": names})
+        self._preload_states[run_id] = state
+        # History is older than defaults and must not restore them after eviction.
+        await self.loaded(run_id=run_id)
+        self._initialized_runs.add(run_id)
+        for name in dict.fromkeys(state.preloads):
+            if name in state.processed_preloads:
+                continue
+            await self.load(name, run_id=run_id)
+            state = state.model_copy(update={
+                "processed_preloads": (*state.processed_preloads, name),
+            })
+            self._preload_states[run_id] = state
+            if on_progress is not None:
+                await on_progress()
+        self._preload_states[run_id] = state.model_copy(update={"preloads_complete": True})
+        if on_progress is not None:
+            await on_progress()
 
     async def load(self, name: str, *, run_id: str) -> LoadedSkill:
         lock = await self._load_lock(run_id, name)

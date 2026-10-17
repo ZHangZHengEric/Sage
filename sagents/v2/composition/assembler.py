@@ -546,6 +546,7 @@ class ApplicationAssembler:
             mode=AgentMode(selected_definition.mode),
             tools=selected_definition.tools,
             skills=selected_definition.skills,
+            preload_skills=selected_definition.preload_skills,
         )
         member_descriptors = tuple(
             AgentDescriptor(
@@ -556,6 +557,7 @@ class ApplicationAssembler:
                 mode=AgentMode(resolved.agents[member_id].mode),
                 tools=resolved.agents[member_id].tools,
                 skills=resolved.agents[member_id].skills,
+                preload_skills=resolved.agents[member_id].preload_skills,
                 allow_delegation=False,
             )
             for member_id in composition_members
@@ -644,6 +646,7 @@ class ApplicationAssembler:
                             "mode": "simple",
                             "tools": descriptor.tools,
                             "skills": descriptor.skills,
+                            "preload_skills": descriptor.preload_skills,
                             "subagents": (),
                         }
                     )

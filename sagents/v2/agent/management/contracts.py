@@ -58,8 +58,18 @@ class AgentPackageBundle(StrictModel):
 
     @property
     def content_hash(self) -> str:
+        payload = self.model_dump(mode="json")
+
+        def omit_empty_preloads(bundle):
+            # Empty defaults must not change immutable refs saved before this
+            # field existed. Dependencies are independent, recursively pinned bundles.
+            for agent in bundle["manifest"]["agents"].values():
+                if not agent.get("preload_skills"):
+                    agent.pop("preload_skills", None)
+            for dependency in bundle.get("dependencies", {}).values():
+                omit_empty_preloads(dependency)
+
+        omit_empty_preloads(payload)
         return hashlib.sha256(
-            json.dumps(
-                self.model_dump(mode="json"), sort_keys=True, separators=(",", ":")
-            ).encode()
+            json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
         ).hexdigest()

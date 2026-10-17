@@ -31,6 +31,7 @@ from sagents.v2.contracts.events import (
     RuntimeEvent,
     SandboxEventData,
     SessionCommitEventData,
+    SkillStateEventData,
     SteeringEventData,
     StepEventData,
     ToolEventData,
@@ -123,6 +124,8 @@ def _error() -> RuntimeErrorInfo:
 
 
 def _data_for(kind: str):
+    if kind == "skill_state":
+        return SkillStateEventData(state={})
     if kind == "run":
         return RunEventData(state="running")
     if kind == "turn":

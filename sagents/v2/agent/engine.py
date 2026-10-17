@@ -141,6 +141,10 @@ from sagents.v2.i18n import (
 )
 
 
+class _SkillInitializationPaused(Exception):
+    """A completed preload is a safe boundary for a requested pause."""
+
+
 class AgentLoopEngine:
     # Retry only the uncommitted model request, before Tool dispatch. Partial
     # Items are cancelled and never enter canonical model history.
@@ -174,6 +178,7 @@ class AgentLoopEngine:
         expected_resolved_spec_hash: str | None = None,
         self_configuration=None,
         skill_loader=None,
+        preload_skills: tuple[str, ...] = (),
         clock: Callable = utc_now,
     ) -> None:
         self.self_configuration = self_configuration
@@ -218,6 +223,9 @@ class AgentLoopEngine:
                 ActiveSkillsContextProvider(skill_loader),
                 self_configuration,
             )
+        self.skill_loader = skill_loader
+        self.preload_skills = preload_skills
+        self._last_skill_states: dict[str, dict] = {}
         self.runtime = runtime
         self.model = model
         self.tool_catalog = tool_catalog
@@ -284,6 +292,7 @@ class AgentLoopEngine:
         command = with_session_context(command, run.session_id)
         context = self._context_for_command(context, command)
         await self._prepare_self_configuration(run_id, context)
+        await self._restore_skill_state(run_id)
         turn_id = new_id("turn")
         messages = await self.context_assembler.initial_ledger(
             command, run_id=run.run_id
@@ -305,6 +314,14 @@ class AgentLoopEngine:
                 ),
             ),
         )
+        try:
+            run = await self._initialize_skills(run, command, context)
+        except _SkillInitializationPaused:
+            return await self._suspend_at_safe_point(
+                await self.runtime.get_run(run.run_id), state, context
+            )
+        except Exception as exc:
+            return await self._fail_skill_initialization(run, state, command, exc, context)
         tool_selection_task = asyncio.create_task(
             self._prepare_tool_selection(
                 command=command,
@@ -339,6 +356,89 @@ class AgentLoopEngine:
                 )
             raise
         return await self._drive(run, state, context)
+
+    async def _restore_skill_state(self, run_id, *, checkpoint_state=None, legacy=False):
+        if not self.preload_skills or self.skill_loader is None:
+            return
+        snapshot = checkpoint_state
+        if snapshot is None:
+            events = await self.runtime.session_store.read_events(run_id)
+            snapshot = next((event.data.state for event in reversed(events)
+                             if event.type == "skill.state"), None)
+        if snapshot is None and legacy:
+            # Old suspended Runs never acquire newly configured defaults.
+            snapshot = await self.skill_loader.snapshot_run(run_id)
+            snapshot.update(preloads_complete=True, history_initialized=True)
+        if snapshot is not None:
+            await self.skill_loader.restore_run(run_id, snapshot)
+            self._last_skill_states[run_id] = snapshot
+
+    async def _initialize_skills(self, run, command, context):
+        if not self.preload_skills:
+            return run
+        if self.skill_loader is None:
+            raise ValueError("preload_skills requires a skill loading provider")
+
+        async def persist():
+            nonlocal run
+            current = await self.runtime.get_run(run.run_id)
+            try:
+                run = await self._commit_running(
+                    current, context, (),
+                    expected_states={RunState.RUNNING, RunState.SUSPEND_REQUESTED},
+                )
+            except SageV2Error as exc:
+                # A pause can win CAS while the activation snapshot is read.
+                # Retry only the state commit, never the completed skill load.
+                if exc.info.code != "run.revision_conflict":
+                    raise
+                current = await self.runtime.get_run(run.run_id)
+                if current.state != RunState.SUSPEND_REQUESTED:
+                    raise
+                run = await self._commit_running(
+                    current, context, (), expected_states={RunState.SUSPEND_REQUESTED}
+                )
+            if run.state == RunState.SUSPEND_REQUESTED:
+                raise _SkillInitializationPaused()
+
+        await self.skill_loader.initialize_preloads(
+            self.preload_skills, run_id=run.run_id, on_progress=persist
+        )
+        return run
+
+    async def _fail_skill_initialization(self, run, state, command, exc, context):
+        cause = exc.info if isinstance(exc, SageV2Error) else None
+        snapshot = (await self.skill_loader.snapshot_run(run.run_id)
+                    if self.skill_loader is not None else {})
+        pending = [name for name in self.preload_skills
+                   if name not in snapshot.get("processed_preloads", ())]
+        error = RuntimeErrorInfo(
+            code="skill.preload_failed",
+            category=cause.category if cause else ErrorCategory.PROVIDER_PERMANENT,
+            message=(f"Skill initialization failed for Agent {command.agent_id!r}, "
+                     f"Run {run.run_id!r}, skill {pending[0] if pending else None!r}: "
+                     f"{cause.message if cause else exception_diagnostic_message(exc)}"),
+            safe_to_resume=cause.safe_to_resume if cause else False,
+            retryable=cause.retryable if cause else False,
+            metadata={"agent_id": command.agent_id, "run_id": run.run_id,
+                      "skill_name": pending[0] if pending else None,
+                      "stage": "preload", "cause_code": cause.code if cause else None,
+                      "cause": cause.model_dump(mode="json") if cause else None},
+        )
+        current = await self.runtime.get_run(run.run_id)
+        step_id = new_id("step_preload")
+        if current.state in TERMINAL_RUN_STATES or (
+            current.state == RunState.RUNNING
+            and not (error.safe_to_resume or error.retryable)
+        ):
+            return await self._fail(current, state, step_id, error, context)
+        current = await self._commit_running(current, context, (EventDraft(
+            type="step.failed", turn_id=state.turn_id, step_id=step_id,
+            data=StepEventData(state="failed", error=error),
+        ),), expected_states={RunState.RUNNING, RunState.SUSPEND_REQUESTED})
+        if current.state == RunState.SUSPEND_REQUESTED:
+            return await self._suspend_at_safe_point(current, state, context)
+        return await self._fail(current, state, step_id, error, context)
 
     async def _prepare_self_configuration(self, run_id, context):
         if self.self_configuration is not None:
@@ -557,6 +657,7 @@ class AgentLoopEngine:
         command = with_session_context(command, run.session_id)
         context = self._context_for_command(context, command)
         events = await self.runtime.session_store.read_events(run_id)
+        await self._restore_skill_state(run_id, legacy=True)
         if any(
             event.type in {"tool.call.succeeded", "tool.call.reconciled"}
             and isinstance(event.data, ToolEventData)
@@ -795,6 +896,9 @@ class AgentLoopEngine:
                 )
             )
         state = AgentLoopCheckpointCodec.decode(checkpoint.state)
+        await self._restore_skill_state(
+            run_id, checkpoint_state=state.skill_state, legacy=True
+        )
         if state.self_configuration_revision is not None:
             if self.self_configuration is None:
                 raise self._conflict(
@@ -1127,6 +1231,14 @@ class AgentLoopEngine:
         provider_retries = 0
         context_overflow_retries = 0
         while run.state == RunState.RUNNING:
+            try:
+                run = await self._initialize_skills(run, command, context)
+            except _SkillInitializationPaused:
+                return await self._suspend_at_safe_point(
+                    await self.runtime.get_run(run.run_id), state, context
+                )
+            except Exception as exc:
+                return await self._fail_skill_initialization(run, state, command, exc, context)
             await self._prepare_self_configuration(run.run_id, context)
             if self.self_configuration is not None:
                 state = state.model_copy(
@@ -2053,7 +2165,7 @@ class AgentLoopEngine:
                 }
             }
         )
-        checkpoint, _ = self._checkpoint_records(
+        checkpoint, _ = await self._checkpoint_records(
             run, state, reason=SuspensionReason.MANUAL_PAUSE
         )
         committed = await self.runtime.session_store.commit_run(
@@ -3204,7 +3316,7 @@ class AgentLoopEngine:
         raw = pending.get("interaction") if isinstance(pending, dict) else None
         child = InteractionRequest.model_validate(raw)
         interaction_id = new_id("interaction")
-        checkpoint, suspension = self._checkpoint_records(
+        checkpoint, suspension = await self._checkpoint_records(
             run,
             state,
             reason=SuspensionReason.INPUT_REQUIRED,
@@ -3588,7 +3700,7 @@ class AgentLoopEngine:
                 "pending_tool_error": error.model_dump(mode="json"),
             }
         )
-        checkpoint, suspension = self._checkpoint_records(
+        checkpoint, suspension = await self._checkpoint_records(
             run,
             pending_state,
             reason=SuspensionReason.POLICY_HOLD,
@@ -3641,7 +3753,7 @@ class AgentLoopEngine:
         """Checkpoint before dispatch so approval cannot race the side effect."""
 
         interaction_id = new_id("interaction")
-        checkpoint, suspension = self._checkpoint_records(
+        checkpoint, suspension = await self._checkpoint_records(
             run,
             state,
             reason=SuspensionReason.APPROVAL_REQUIRED,
@@ -3723,7 +3835,7 @@ class AgentLoopEngine:
             if preserve_budget
             else state.step_number + 1
         )
-        checkpoint, suspension = self._checkpoint_records(
+        checkpoint, suspension = await self._checkpoint_records(
             run,
             state.model_copy(update={"step_number": next_step}),
             reason=SuspensionReason.INPUT_REQUIRED,
@@ -3758,7 +3870,7 @@ class AgentLoopEngine:
     async def commit_safe_point_suspension(self, run, state, context):
         """Commit a manual-pause checkpoint between externally visible actions."""
 
-        checkpoint, suspension = self._checkpoint_records(
+        checkpoint, suspension = await self._checkpoint_records(
             run, state, reason=SuspensionReason.MANUAL_PAUSE
         )
         return await self.runtime.commit_suspension(
@@ -3770,9 +3882,13 @@ class AgentLoopEngine:
             idempotency_key=f"manual-suspend:{suspension.suspension_id}",
         )
 
-    def _checkpoint_records(self, run, state, *, reason, interaction_id=None):
+    async def _checkpoint_records(self, run, state, *, reason, interaction_id=None):
         """Build matching Checkpoint/Suspension records for one atomic commit."""
 
+        if self.preload_skills and self.skill_loader is not None:
+            state = state.model_copy(update={
+                "skill_state": await self.skill_loader.snapshot_run(run.run_id),
+            })
         checkpoint_id = new_id("checkpoint")
         checkpoint_state = AgentLoopCheckpointCodec.encode(
             state, ledger_digest=self._ledger_digest(state.messages)
@@ -4103,7 +4219,16 @@ class AgentLoopEngine:
     async def _commit_running(
         self, run, context, drafts, *, expected_states=None
     ) -> RunSnapshot:
-        return await self.lifecycle.commit(
+        snapshot = None
+        if self.preload_skills and self.skill_loader is not None:
+            from sagents.v2.contracts.events import SkillStateEventData
+
+            snapshot = await self.skill_loader.snapshot_run(run.run_id)
+            if snapshot != self._last_skill_states.get(run.run_id):
+                drafts = (*drafts, EventDraft(
+                    type="skill.state", data=SkillStateEventData(state=snapshot)
+                ))
+        committed = await self.lifecycle.commit(
             run,
             expected_states=expected_states or {RunState.RUNNING},
             new_state=run.state,
@@ -4111,6 +4236,9 @@ class AgentLoopEngine:
             context=context,
             idempotency_key=new_id("loop_commit"),
         )
+        if snapshot is not None:
+            self._last_skill_states[run.run_id] = snapshot
+        return committed
 
     def _item(
         self, item_id, run_id, turn_id, step_id, data, status=ItemStatus.COMPLETED

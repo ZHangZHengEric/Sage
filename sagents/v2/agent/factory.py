@@ -191,6 +191,7 @@ class AgentCompositionFactory:
         expected_resolved_spec_hash: str | None = None,
         self_configuration=None,
         skill_loader=None,
+        preload_skills: tuple[str, ...] = (),
         trace_sink=None,
         log_sink=None,
     ) -> AgentLoopEngine:
@@ -220,6 +221,7 @@ class AgentCompositionFactory:
             expected_resolved_spec_hash=expected_resolved_spec_hash,
             self_configuration=self_configuration,
             skill_loader=skill_loader,
+            preload_skills=preload_skills,
             **(
                 {"trace_sink": trace_sink, "log_sink": log_sink}
                 if engine_type is ObservedRunDriver
@@ -402,6 +404,7 @@ class AgentCompositionFactory:
             tool_executor=tool_executor,
             self_configuration=self_configuration,
             skill_loader=skill_loader,
+            preload_skills=agent.preload_skills,
             tool_policy=(tool_policy or DefaultToolPolicy()).with_approval_config(
                 agent.tool_approval
             ),

@@ -144,6 +144,9 @@ def resolve_agent_graph(package, runtime, children, *, models=None):
         }
     )
     payload = graph.model_dump(mode="json", exclude={"manifest_hash"})
+    for definition in payload["agents"].values():
+        if not definition.get("preload_skills"):
+            definition.pop("preload_skills", None)
     digest = hashlib.sha256(
         json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
     ).hexdigest()

@@ -209,6 +209,13 @@ class ProtocolEventData(StrictModel):
     capabilities: dict[str, Any] | None = None
 
 
+class SkillStateEventData(StrictModel):
+    """Authoritative Run activation and one-shot initialization snapshot."""
+
+    kind: Literal["skill_state"] = "skill_state"
+    state: dict[str, Any]
+
+
 class SessionCommitEventData(StrictModel):
     """Audit fact for snapshot proposal, publication, or rejection."""
 
@@ -242,6 +249,7 @@ EventData = Annotated[
         UsageEventData,
         ProtocolEventData,
         SessionCommitEventData,
+        SkillStateEventData,
     ],
     Field(discriminator="kind"),
 ]
@@ -278,6 +286,7 @@ def _definitions(
 
 
 EVENT_CATALOG: dict[str, EventDefinition] = {}
+EVENT_CATALOG.update(_definitions(("skill.state",), "skill_state", sensitive=True))
 # Lifecycle and completed Item events are durable facts. High-frequency deltas
 # and progress events are replay-buffered because the completed Item or Job is
 # the authoritative projection.

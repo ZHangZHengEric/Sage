@@ -151,6 +151,7 @@ class ModeAwareAgentLoopFactory:
         return engine_type(
             runtime=self.runtime,
             model=self.model_factory(descriptor, run_id),
+            preload_skills=descriptor.preload_skills,
             tool_catalog=catalog,
             tool_executor=executor,
             context_assembler=DefaultContextAssembler(

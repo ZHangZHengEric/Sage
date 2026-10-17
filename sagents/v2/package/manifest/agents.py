@@ -73,10 +73,18 @@ class AgentDefinition(StrictModel):
     tools: tuple[ToolName, ...] = ()
     tool_approval: ToolApprovalConfig | None = None
     skills: tuple[SkillName, ...] = ()
+    preload_skills: tuple[SkillName, ...] = ()
     subagents: tuple[Identifier, ...] = ()
     budgets: AgentBudgets = Field(default_factory=AgentBudgets)
     memory: AgentMemoryBehavior = Field(default_factory=AgentMemoryBehavior)
     sandbox: AgentSandboxConfig = Field(default_factory=AgentSandboxConfig)
+
+    @model_validator(mode="after")
+    def validate_preload_skills(self) -> "AgentDefinition":
+        outside = set(self.preload_skills) - set(self.skills)
+        if outside:
+            raise ValueError(f"preload_skills must be a subset of skills: {sorted(outside)}")
+        return self
 
 
 class ApplicationEntrypoint(StrictModel):

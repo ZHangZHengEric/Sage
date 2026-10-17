@@ -536,8 +536,11 @@ def test_single_agent_bundle_preserves_historical_content_hash():
     from sagents.v2.agent.management import AgentPackageBundle
 
     raw = {"manifest": package().model_dump(mode="json"), "files": {}}
+    historical = json.loads(json.dumps(raw))
+    for agent in historical["manifest"]["agents"].values():
+        agent.pop("preload_skills", None)
     expected = hashlib.sha256(
-        json.dumps(raw, sort_keys=True, separators=(",", ":")).encode()
+        json.dumps(historical, sort_keys=True, separators=(",", ":")).encode()
     ).hexdigest()
     bundle = AgentPackageBundle.model_validate(raw)
     assert bundle.content_hash == expected
