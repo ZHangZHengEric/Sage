@@ -21,7 +21,11 @@ from sagents.v2.runtime.extensions import (
     ExtensionScope,
 )
 from sagents.v2.contracts.items import JsonBlock
-from sagents.v2.tool.contracts import ToolExecutionResult
+from sagents.v2.tool.contracts import (
+    ReconcileResult,
+    ReconcileState,
+    ToolExecutionResult,
+)
 from sagents.v2.tool.decorated import DecoratedToolProvider, ToolInvocation
 from sagents.v2.tool.decorators import tool
 
@@ -151,6 +155,27 @@ class _DelegationMethods:
         self.coordinator = coordinator
         self.runtime = runtime
 
+    async def _reconcile_delegation(self, call, context):
+        # Deterministic task IDs and StartRun idempotency keys recover the same
+        # children, including siblings that completed before the parent crashed.
+        value = await self._delegate(
+            call.arguments["tasks"], ToolInvocation(call, context)
+        )
+        result = (
+            value
+            if isinstance(value, ToolExecutionResult)
+            else ToolExecutionResult(
+                tool_call_id=call.tool_call_id,
+                operation_id=call.operation_id,
+                content=(JsonBlock(value=value),),
+            )
+        )
+        return ReconcileResult(
+            operation_id=call.operation_id,
+            state=ReconcileState.SUCCEEDED,
+            result=result,
+        )
+
     async def _assert_delegation_allowed(self, invocation: ToolInvocation):
         command = await self.runtime.session_store.get_start_command(
             invocation.call.owner_run_id
@@ -233,6 +258,8 @@ class _DelegationMethods:
 
 
 class _FibreToolMethods(_DelegationMethods):
+    reconcile_sys_delegate_task = _DelegationMethods._reconcile_delegation
+
     @tool(
         description=(
             "Create a new general-purpose expert sub-agent. The system_prompt "
@@ -276,6 +303,7 @@ class _FibreToolMethods(_DelegationMethods):
             "child Session retains its own history and receives a new user task."
         ),
         input_schema=_DELEGATION_INPUT_SCHEMA,
+        supports_reconciliation=True,
     )
     async def sys_delegate_task(
         self,
@@ -290,6 +318,8 @@ class _FibreToolMethods(_DelegationMethods):
 
 
 class _TeamToolMethods(_DelegationMethods):
+    reconcile_sys_team_delegate_task = _DelegationMethods._reconcile_delegation
+
     @tool(
         description=(
             "Delegate self-contained tasks to existing Team members concurrently. "
@@ -297,6 +327,7 @@ class _TeamToolMethods(_DelegationMethods):
             "child Session retains its own history and receives a new user task."
         ),
         input_schema=_DELEGATION_INPUT_SCHEMA,
+        supports_reconciliation=True,
     )
     async def sys_team_delegate_task(
         self,

@@ -17,6 +17,7 @@ class DurableRunLifecycle:
         context,
         idempotency_key,
         expected_states,
+        checkpoint=None,
     ):
         result = await self.runtime.session_store.commit_run(
             run_id=run.run_id,
@@ -26,6 +27,7 @@ class DurableRunLifecycle:
             drafts=tuple(drafts),
             context=context,
             idempotency_key=idempotency_key,
+            checkpoint=checkpoint,
         )
         return result.run
 

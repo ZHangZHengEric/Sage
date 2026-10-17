@@ -24,6 +24,9 @@ class AgentLoopCheckpointState(StrictModel):
 
     skill_state: dict | None = None
     state_version: str = "2"
+    # Running checkpoints are safe restart boundaries, not unresolved human
+    # interactions. Legacy/suspension checkpoints retain their existing codec.
+    execution_checkpoint: bool = False
     turn_id: Identifier
     step_number: int = Field(ge=1)
     messages: tuple[ModelMessage, ...] = ()
@@ -42,6 +45,7 @@ class AgentLoopCheckpointState(StrictModel):
     # Calls/results remain authoritative in the canonical Item ledger.
     pending_response_step_id: Identifier | None = None
     pending_response_finish_reason: str = "tool_calls"
+    pending_response_has_message: bool = True
     pending_response_system_requirements: str = ""
     pending_response_tool_names: tuple[str, ...] = ()
     pending_questionnaire_completed: bool = False

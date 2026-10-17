@@ -94,6 +94,7 @@ from sagents.v2.contracts.errors import (
     exception_diagnostic_message,
 )
 from sagents.v2.contracts.events import (
+    CheckpointEventData,
     ContinuationEventData,
     ItemEventData,
     PolicyEventData,
@@ -313,6 +314,7 @@ class AgentLoopEngine:
                     data=TurnEventData(state="started"),
                 ),
             ),
+            recovery_state=state,
         )
         try:
             run = await self._initialize_skills(run, command, context)
@@ -641,12 +643,10 @@ class AgentLoopEngine:
     async def recover_interrupted(
         self, run_id: str, context: RequestContext
     ) -> RunSnapshot | None:
-        """Recover a process-lost Tool barrier without replaying the Tool.
+        """Recover durable loop state without replaying completed side effects.
 
-        Returns ``None`` when the durable ledger contains no crossed side-effect
-        barrier.  In that case the dispatcher may settle the uncheckpointed
-        model/control work as resource loss.  Once ``tool.call.started`` exists,
-        however, only reconciliation or explicit human resolution is safe.
+        Running checkpoints cover model/control work as well as tool batches.
+        Legacy Runs without one retain the conservative tool-barrier recovery.
         """
 
         run = await self.runtime.get_run(run_id)
@@ -657,6 +657,140 @@ class AgentLoopEngine:
         command = with_session_context(command, run.session_id)
         context = self._context_for_command(context, command)
         events = await self.runtime.session_store.read_events(run_id)
+        if run.checkpoint_id is not None:
+            checkpoint = await self.runtime.session_store.get_checkpoint(
+                run.checkpoint_id
+            )
+            resumed_after_checkpoint = any(
+                event.type == "run.resumed"
+                and event.run_sequence > checkpoint.run_sequence
+                for event in events
+            )
+            if (
+                checkpoint.state.get("execution_checkpoint") is True
+                or resumed_after_checkpoint
+            ):
+                if (
+                    checkpoint.checkpoint_codec_version
+                    != AgentLoopCheckpointCodec.version
+                ):
+                    raise SageV2Error(
+                        RuntimeErrorInfo(
+                            code="loop.checkpoint_incompatible",
+                            category=ErrorCategory.UNSUPPORTED_SCHEMA,
+                            message="running checkpoint codec is unsupported",
+                            safe_to_resume=False,
+                        )
+                    )
+                self._assert_resolved_spec_compatible(
+                    run.resolved_spec_hash,
+                    checkpoint_hash=checkpoint.resolved_spec_hash,
+                )
+                state = AgentLoopCheckpointCodec.decode(checkpoint.state)
+                prefix = await self.ledger_rebuilder.rebuild(
+                    command,
+                    run_id=run_id,
+                    through_run_sequence=checkpoint.run_sequence,
+                )
+                if state.ledger_digest != self._ledger_digest(prefix):
+                    raise SageV2Error(
+                        RuntimeErrorInfo(
+                            code="loop.checkpoint_ledger_mismatch",
+                            category=ErrorCategory.CORRUPT_STATE,
+                            message="canonical Items do not match the running checkpoint ledger",
+                            safe_to_resume=False,
+                        )
+                    )
+                messages = await self.ledger_rebuilder.rebuild(command, run_id=run_id)
+                await self._restore_skill_state(
+                    run_id, checkpoint_state=state.skill_state, legacy=True
+                )
+                self.tool_selection_policy.restore_expanded_tools(
+                    run_id, state.expanded_tool_names
+                )
+                # Results can land after the model-response checkpoint. Restore
+                # expansion from authoritative successful calls, not fresh defaults.
+                proposals = {
+                    e.data.operation_id: e.data
+                    for e in events
+                    if e.type == "tool.call.proposed"
+                    and isinstance(e.data, ToolEventData)
+                }
+                for event in events:
+                    if (
+                        event.type in {"tool.call.succeeded", "tool.call.reconciled"}
+                        and isinstance(event.data, ToolEventData)
+                        and event.data.error is None
+                    ):
+                        proposal = proposals.get(event.data.operation_id)
+                        if (
+                            proposal is not None
+                            and proposal.tool_name == "tool_expand_tools"
+                        ):
+                            self.tool_selection_policy.expand_tools(
+                                run_id=run_id,
+                                names=tuple(
+                                    (proposal.arguments or {}).get("tool_names")
+                                    or (proposal.arguments or {}).get("names")
+                                    or ()
+                                ),
+                            )
+                if state.self_configuration_revision is not None:
+                    if self.self_configuration is None:
+                        raise self._conflict(
+                            "self_configuration.unavailable",
+                            "saved self configuration is unavailable",
+                        )
+                    await self.self_configuration.verify_checkpoint(
+                        run_id, state.self_configuration_revision
+                    )
+                state = state.model_copy(
+                    update={
+                        "messages": messages,
+                        "pending_questionnaire_completed": (
+                            state.pending_questionnaire_completed
+                            or self._recovered_questionnaire_completed(
+                                run, state, events
+                            )
+                        ),
+                        "expanded_tool_names": self.tool_selection_policy.expanded_tools(
+                            run_id
+                        ),
+                        "total_input_tokens": sum(
+                            e.data.usage.input_tokens
+                            for e in events
+                            if isinstance(e.data, UsageEventData)
+                        ),
+                        "total_output_tokens": sum(
+                            e.data.usage.output_tokens
+                            for e in events
+                            if isinstance(e.data, UsageEventData)
+                        ),
+                    }
+                )
+                if resumed_after_checkpoint and not checkpoint.state.get(
+                    "execution_checkpoint"
+                ):
+                    resolved = next(
+                        (
+                            event
+                            for event in reversed(events)
+                            if event.type == "interaction.resolved"
+                            and event.run_sequence > checkpoint.run_sequence
+                        ),
+                        None,
+                    )
+                    if resolved is not None:
+                        interaction_id = resolved.data.interaction_id
+                        resolution = (
+                            await self.runtime.session_store.get_interaction_resolution(
+                                interaction_id
+                            )
+                        )
+                        return await self._continue_resolved_checkpoint(
+                            run, state, resolution, interaction_id, command, context
+                        )
+                return await self._drive(run, state, context)
         await self._restore_skill_state(run_id, legacy=True)
         if any(
             event.type in {"tool.call.succeeded", "tool.call.reconciled"}
@@ -860,6 +994,44 @@ class AgentLoopEngine:
             ),
         )
 
+    def _recovered_questionnaire_completed(self, run, state, events):
+        items = {
+            event.item_id: event.data.item
+            for event in events
+            if isinstance(event.data, ItemEventData) and event.data.item is not None
+        }
+        for event in events:
+            data = event.data
+            if (
+                event.step_id != state.pending_response_step_id
+                or event.type not in {"tool.call.succeeded", "tool.call.reconciled"}
+                or not isinstance(data, ToolEventData)
+                or data.tool_name != "questionnaire_async"
+                or data.error is not None
+            ):
+                continue
+            item = items.get(data.result_item_id)
+            if item is None or not isinstance(item.data, ToolResultItemData):
+                continue
+            call = ToolCall(
+                tool_call_id=data.tool_call_id,
+                tool_name=data.tool_name,
+                arguments={},
+                operation_id=data.operation_id,
+                idempotency_key=data.idempotency_key,
+                owner_run_id=run.run_id,
+            )
+            result = ToolExecutionResult(
+                tool_call_id=data.tool_call_id,
+                operation_id=data.operation_id,
+                content=item.data.content,
+                metadata=item.data.metadata,
+                error=item.data.error,
+            )
+            if self._validated_questionnaire_result(call, result):
+                return True
+        return False
+
     async def resume_coordinated(
         self, run_id: str, context: RequestContext
     ) -> RunSnapshot:
@@ -971,8 +1143,34 @@ class AgentLoopEngine:
             context=context,
             idempotency_key=f"loop-resumed:{suspension.suspension_id}:{suspension.expected_revision}",
         )
+        return await self._continue_resolved_checkpoint(
+            run, state, resolution, suspension.interaction_id, command, context
+        )
+
+    async def _continue_resolved_checkpoint(
+        self, run, state, resolution, interaction_id, command, context
+    ):
+        settled = bool(
+            state.pending_tool_call is not None
+            and any(
+                message.tool_call_id == state.pending_tool_call.tool_call_id
+                for message in self._pending_response_results(state)
+            )
+        )
+        if settled:
+            state = state.model_copy(
+                update={
+                    "pending_tool_call": None,
+                    "pending_tool_policy": None,
+                    "pending_tool_phase": None,
+                    "pending_tool_step_id": None,
+                    "pending_tool_error": None,
+                    "pending_tool_result": None,
+                    "pending_child_interactions": (),
+                }
+            )
         if state.pending_tool_call is not None:
-            if suspension.interaction_id is None:
+            if interaction_id is None:
                 raise self._conflict(
                     "loop.interaction_missing",
                     "pending approval tool call has no interaction",
@@ -1131,9 +1329,9 @@ class AgentLoopEngine:
                     ),
                 }
             )
-        elif suspension.interaction_id is not None and resolution is not None:
+        elif interaction_id is not None and resolution is not None and not settled:
             interaction = await self.runtime.session_store.get_interaction(
-                suspension.interaction_id
+                interaction_id
             )
             if interaction.interaction_type == InteractionType.USER_INPUT:
                 if resolution.decision == "cancel":
@@ -1184,7 +1382,10 @@ class AgentLoopEngine:
                         context,
                         None,
                     )
-                if input_items:
+                if input_items and not any(
+                    message.metadata.get("interaction_id") == interaction_id
+                    for message in state.messages
+                ):
                     run = await self._commit_interaction_input(
                         run,
                         state,
@@ -1304,6 +1505,7 @@ class AgentLoopEngine:
                             ),
                         ),
                     ),
+                    recovery_state=state,
                 )
                 # Phase 2: ContextAssembler creates the provider-facing projection.
                 # The raw ledger and canonical RuntimeEvents are left unchanged.
@@ -1533,44 +1735,8 @@ class AgentLoopEngine:
                 empty_response_retries = 0
                 provider_retries = 0
                 context_overflow_retries = 0
-                messages = state.messages
-                # Human-readable reasoning remains a separate canonical Item, while
-                # opaque provider continuation state is attached to the assistant
-                # ledger entry. Providers such as MiniMax, OpenAI Responses, and
-                # Anthropic require that state after a tool call.
-                if response.text or response.tool_calls or response.provider_state:
-                    messages = (
-                        *messages,
-                        ModelMessage(
-                            role="assistant",
-                            content=(
-                                (TextBlock(text=response.text),)
-                                if response.text
-                                else ()
-                            ),
-                            tool_calls=response.tool_calls,
-                            provider_state=response.provider_state,
-                        ),
-                    )
-                state = state.model_copy(
-                    update={
-                        "messages": messages,
-                        "total_input_tokens": state.total_input_tokens
-                        + response.usage.input_tokens,
-                        "total_output_tokens": state.total_output_tokens
-                        + response.usage.output_tokens,
-                        "response_fingerprints": (
-                            *state.response_fingerprints,
-                            self._response_fingerprint(response),
-                        )[-48:],
-                        "retry_model_step": False,
-                        "force_tool_choice_required_next": False,
-                        "pending_continuation_reason": None,
-                        "pending_response_step_id": step_id,
-                        "pending_response_finish_reason": response.finish_reason,
-                        "pending_response_system_requirements": system_requirements,
-                        "pending_response_tool_names": available_tools,
-                    }
+                state = self._state_after_model_response(
+                    state, response, step_id, system_requirements, available_tools
                 )
 
             questionnaire_completed = state.pending_questionnaire_completed
@@ -1906,20 +2072,6 @@ class AgentLoopEngine:
                 ContinuationAction.HANDOFF,
             }:
                 return await self._complete(run, state, step_id, context)
-            run = await self._commit_running(
-                run,
-                context,
-                (
-                    EventDraft(
-                        type="step.completed",
-                        turn_id=state.turn_id,
-                        step_id=step_id,
-                        data=StepEventData(
-                            state="completed", attempt=state.step_number
-                        ),
-                    ),
-                ),
-            )
             continuation_reason = None
             if (
                 decision.action == ContinuationAction.CONTINUE_STEP
@@ -1954,7 +2106,60 @@ class AgentLoopEngine:
                     "pending_continuation_reason": continuation_reason,
                 }
             )
+            run = await self._commit_running(
+                run,
+                context,
+                (
+                    EventDraft(
+                        type="step.completed",
+                        turn_id=state.turn_id,
+                        step_id=step_id,
+                        data=StepEventData(
+                            state="completed", attempt=state.step_number - 1
+                        ),
+                    ),
+                ),
+                recovery_state=state,
+            )
         return run
+
+    def _state_after_model_response(
+        self, state, response, step_id, requirements, tools
+    ):
+        messages = state.messages
+        if response.text or response.tool_calls or response.provider_state:
+            messages = (
+                *messages,
+                ModelMessage(
+                    role="assistant",
+                    content=(TextBlock(text=response.text),) if response.text else (),
+                    tool_calls=response.tool_calls,
+                    provider_state=response.provider_state,
+                ),
+            )
+        return state.model_copy(
+            update={
+                "messages": messages,
+                "total_input_tokens": state.total_input_tokens
+                + response.usage.input_tokens,
+                "total_output_tokens": state.total_output_tokens
+                + response.usage.output_tokens,
+                "response_fingerprints": (
+                    *state.response_fingerprints,
+                    self._response_fingerprint(response),
+                )[-48:],
+                "retry_model_step": False,
+                "force_tool_choice_required_next": False,
+                "pending_continuation_reason": None,
+                "pending_response_step_id": step_id,
+                "pending_response_finish_reason": response.finish_reason,
+                "pending_response_has_message": bool(
+                    response.text or response.tool_calls or response.provider_state
+                ),
+                "pending_response_system_requirements": requirements,
+                "pending_response_tool_names": tuple(tools),
+            }
+        )
 
     @staticmethod
     def _pending_response_results(
@@ -1973,13 +2178,17 @@ class AgentLoopEngine:
     @staticmethod
     def _pending_response(state: AgentLoopCheckpointState) -> ModelResponse:
         """Rebuild the unfinished batch without copying ledger text into checkpoints."""
-        message = next(
-            (
-                message
-                for message in reversed(state.messages)
-                if message.role == "assistant"
-            ),
-            None,
+        message = (
+            next(
+                (
+                    message
+                    for message in reversed(state.messages)
+                    if message.role == "assistant"
+                ),
+                None,
+            )
+            if state.pending_response_has_message
+            else None
         )
         return ModelResponse(
             response_id=state.pending_response_step_id or "recovered-response",
@@ -2167,6 +2376,11 @@ class AgentLoopEngine:
         )
         checkpoint, _ = await self._checkpoint_records(
             run, state, reason=SuspensionReason.MANUAL_PAUSE
+        )
+        checkpoint = checkpoint.model_copy(
+            update={
+                "state": {**checkpoint.state, "execution_checkpoint": True},
+            }
         )
         committed = await self.runtime.session_store.commit_run(
             run_id=run.run_id,
@@ -2458,6 +2672,10 @@ class AgentLoopEngine:
                     if closer is not None:
                         await closer()
         assert response is not None
+        # Some providers leave the final text empty and deliver it only as
+        # deltas. The response checkpoint must describe the exact committed Item.
+        if text and not response.text:
+            response = response.model_copy(update={"text": text})
         drafts: list[EventDraft] = []
         if response.reasoning or reasoning_started:
             reasoning_text = response.reasoning or reasoning
@@ -2529,7 +2747,13 @@ class AgentLoopEngine:
                 data=UsageEventData(usage=response.usage),
             )
         )
-        run = await self._commit_running(run, context, tuple(drafts))
+        recovery_state = self._state_after_model_response(
+            state, response, step_id, self._system_requirements(request.messages),
+            tuple(tool.name for tool in request.tools),
+        )
+        run = await self._commit_running(
+            run, context, tuple(drafts), recovery_state=recovery_state
+        )
         return run, response, None
 
     async def _record_tool_proposal(self, run, call, context, turn_id, step_id):
@@ -3450,8 +3674,32 @@ class AgentLoopEngine:
                     state,
                 )
             if reconciled.state == ReconcileState.SUCCEEDED and reconciled.result:
+                pending = reconciled.result.metadata.get("delegation_interactions")
+                if state is not None and isinstance(pending, list) and pending:
+                    pending_state = state.model_copy(
+                        update={
+                            "pending_tool_call": call,
+                            "pending_tool_phase": "delegation_interaction",
+                            "pending_tool_step_id": step_id,
+                            "pending_tool_result": reconciled.result.model_dump(
+                                mode="json"
+                            ),
+                            "pending_child_interactions": tuple(pending),
+                        }
+                    )
+                    return (
+                        await self._suspend_for_delegated_interaction(
+                            await self.runtime.get_run(run.run_id),
+                            pending_state,
+                            call,
+                            pending[0],
+                            context,
+                            step_id,
+                        ),
+                        None,
+                    )
                 run, result = await self._commit_tool_result(
-                    run,
+                    await self.runtime.get_run(run.run_id),
                     call,
                     reconciled.result,
                     context,
@@ -3667,6 +3915,7 @@ class AgentLoopEngine:
                     item_id=item_id,
                     data=ItemEventData(operation="completed", item=item),
                 ),
+                *self._followup_user_message_drafts(run, (result,), turn_id, step_id),
             ),
             expected_states=expected_states,
         )
@@ -3886,12 +4135,15 @@ class AgentLoopEngine:
         """Build matching Checkpoint/Suspension records for one atomic commit."""
 
         if self.preload_skills and self.skill_loader is not None:
-            state = state.model_copy(update={
-                "skill_state": await self.skill_loader.snapshot_run(run.run_id),
-            })
+            state = state.model_copy(
+                update={
+                    "skill_state": await self.skill_loader.snapshot_run(run.run_id),
+                }
+            )
         checkpoint_id = new_id("checkpoint")
         checkpoint_state = AgentLoopCheckpointCodec.encode(
-            state, ledger_digest=self._ledger_digest(state.messages)
+            state.model_copy(update={"execution_checkpoint": False}),
+            ledger_digest=self._ledger_digest(state.messages),
         )
         checkpoint = Checkpoint(
             checkpoint_id=checkpoint_id,
@@ -4217,7 +4469,7 @@ class AgentLoopEngine:
                 continue
 
     async def _commit_running(
-        self, run, context, drafts, *, expected_states=None
+        self, run, context, drafts, *, expected_states=None, recovery_state=None
     ) -> RunSnapshot:
         snapshot = None
         if self.preload_skills and self.skill_loader is not None:
@@ -4225,9 +4477,45 @@ class AgentLoopEngine:
 
             snapshot = await self.skill_loader.snapshot_run(run.run_id)
             if snapshot != self._last_skill_states.get(run.run_id):
-                drafts = (*drafts, EventDraft(
-                    type="skill.state", data=SkillStateEventData(state=snapshot)
-                ))
+                drafts = (
+                    *drafts,
+                    EventDraft(
+                        type="skill.state", data=SkillStateEventData(state=snapshot)
+                    ),
+                )
+        checkpoint = None
+        if recovery_state is not None:
+            if snapshot is not None:
+                recovery_state = recovery_state.model_copy(
+                    update={"skill_state": snapshot}
+                )
+            checkpoint = Checkpoint(
+                checkpoint_id=new_id("checkpoint"),
+                checkpoint_codec_version=AgentLoopCheckpointCodec.version,
+                session_id=run.session_id,
+                run_id=run.run_id,
+                run_sequence=run.last_run_sequence + len(drafts) + 1,
+                session_revision=run.accepted_session_revision,
+                state=AgentLoopCheckpointCodec.encode(
+                    recovery_state.model_copy(update={"execution_checkpoint": True}),
+                    ledger_digest=self._ledger_digest(recovery_state.messages),
+                ),
+                resolved_spec_hash=run.resolved_spec_hash,
+                created_at=self.clock(),
+            )
+            drafts = (
+                *drafts,
+                EventDraft(
+                    type="checkpoint.committed",
+                    turn_id=recovery_state.turn_id,
+                    data=CheckpointEventData(
+                        checkpoint_id=checkpoint.checkpoint_id,
+                        checkpoint_codec_version=checkpoint.checkpoint_codec_version,
+                        run_sequence=checkpoint.run_sequence,
+                        session_revision=checkpoint.session_revision,
+                    ),
+                ),
+            )
         committed = await self.lifecycle.commit(
             run,
             expected_states=expected_states or {RunState.RUNNING},
@@ -4235,6 +4523,7 @@ class AgentLoopEngine:
             drafts=drafts,
             context=context,
             idempotency_key=new_id("loop_commit"),
+            checkpoint=checkpoint,
         )
         if snapshot is not None:
             self._last_skill_states[run.run_id] = snapshot
@@ -4297,12 +4586,41 @@ class AgentLoopEngine:
     async def _persist_followup_user_messages(
         self, run, results, context, turn_id, step_id
     ):
-        messages = []
+        messages = tuple(
+            message
+            for result in results
+            for message in self._followup_user_messages(result)
+        )
+        if not messages:
+            return run, ()
+        existing = {
+            event.item_id
+            for event in await self.runtime.session_store.read_events(run.run_id)
+        }
+        drafts = tuple(
+            draft
+            for draft in self._followup_user_message_drafts(
+                run, results, turn_id, step_id
+            )
+            if draft.item_id not in existing
+        )
+        if drafts:
+            run = await self._commit_running(
+                run, context, drafts, expected_states={run.state}
+            )
+        return run, messages
+
+    def _followup_user_message_drafts(self, run, results, turn_id, step_id):
+        """Bind supplemental model context atomically to its tool result.
+
+        Deterministic Item identities also make legacy deferred publication
+        idempotent when recovery encounters an already-persisted follow-up.
+        """
         drafts = []
         for result in results:
-            for message in self._followup_user_messages(result):
-                messages.append(message)
-                item_id = new_id("item")
+            for index, message in enumerate(self._followup_user_messages(result)):
+                key = f"{run.run_id}:{result.operation_id}:{index}"
+                item_id = "item_followup_" + hashlib.sha256(key.encode()).hexdigest()
                 item = self._item(
                     item_id,
                     run.run_id,
@@ -4323,12 +4641,7 @@ class AgentLoopEngine:
                         data=ItemEventData(operation="completed", item=item),
                     )
                 )
-        if not drafts:
-            return run, ()
-        run = await self._commit_running(
-            run, context, tuple(drafts), expected_states={run.state}
-        )
-        return run, tuple(messages)
+        return tuple(drafts)
 
     @classmethod
     def _ledger_messages_for_tool_result(cls, result):
