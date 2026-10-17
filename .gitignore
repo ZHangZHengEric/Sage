@@ -259,3 +259,12 @@ app/v1/desktop/scripts/certs
 
 # Local QA screenshots, recordings and runtime traces
 /artifacts/
+
+# Local artifacts left in legacy desktop paths; keep source files visible.
+/app/desktop/scripts/certs/
+/app/desktop/tauri/gen/
+/app/desktop_v2/.dart_tool/
+/app/desktop_v2/.flutter-plugins-dependencies
+/app/desktop_v2/linux/flutter/ephemeral/
+/app/desktop_v2/macos/Flutter/ephemeral/
+/app/desktop_v2/windows/flutter/ephemeral/
