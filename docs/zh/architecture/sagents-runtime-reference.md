@@ -231,13 +231,12 @@ Identifier 长度 1–192，首字符为字母或数字，后续可用字母、�
 
 ```yaml
 capabilities:
-  context.token-estimator:
-    plugin: sage.context.token-estimator.json-heuristic
+  context.unit-compactor:
+    plugin: sage.context.unit-compactor.reference
     name: default
     scope: agent
-    config:
-      bytes_per_token: 4.0
-      message_overhead: 6
+    config: {}
+
 ```
 
 | 字段 | 类型 | 默认值 | 含义 |
@@ -260,7 +259,6 @@ scope 的含义：process 与 App 进程服务同寿命；tenant 按租户隔离
 | `session-memory.provider` | `sage.session-memory.sqlite-bm25` | `root=R/session-memory`；会话记忆索引 |
 | `skill.loading` | `sage.skill.loading.lazy` | 按需激活 Skill，默认活动内容上限 6000 tokens |
 | `agent.continuation-policy` | `sage.agent.continuation.llm-judge` | 模型判断后续执行/结束 |
-| `context.token-estimator` | `sage.context.token-estimator.json-heuristic` | JSON 启发式 token 估算 |
 | `context.reducer` | `sage.context.reducer.persistent-summary` | 持久化摘要压缩上下文 |
 | `context.summarizer` | `sage.context.summarizer.model` | 主模型生成摘要 |
 | `context.summary-store` | `sage.context.summary-store.session-derived` | 使用会话派生状态存摘要 |
@@ -346,15 +344,15 @@ capabilities:
 
 ```python
 from sagents.v2 import SAgentBuilder
-from examples.sagents_v2_host.plugins import estimator_registration
+from examples.sagents_v2_host.plugins import compactor_registration
 
 builder = SAgentBuilder()
-builder.register(estimator_registration())
+builder.register(compactor_registration())
 app = await builder.build(runtime={
     "capabilities": {
-        "context.token-estimator": {
-            "plugin": "example.context.byte-estimator",
-            "config": {"bytes_per_token": 4.0},
+        "context.unit-compactor": {
+            "plugin": "example.context.reference-compactor",
+            "config": {"minimum_characters": 4},
         },
     },
 })
@@ -383,7 +381,7 @@ finally:
 
 下表按当前注册表逐一列出插件，包含没有参数的插件。`schema 必填` 是插件实例化阶段的要求，**不表示这些项都应由用户写 YAML**：标为“宿主对象”的项由装配层注入。参数默认值优先取注册 schema，再补充已核实的工厂/调度器默认值；“无固定值”表示由宿主/实现按上下文决定，不等于 null 或关闭。
 
-表中的范围是校验范围，bytes 为字节、seconds 为秒、tokens 为估算 token 数。对象参数不能用名称字符串替代 Python 对象。插件注册不代表任何能力名放进 capabilities 都会自动创建它：工具、模型、Flow、接口分别由对应装配路径消费。请同时查看“提供能力”和使用位置。
+表中的范围是校验范围，bytes 为字节、seconds 为秒、tokens 为 API 输出预算或供应商实际 usage 阈值，不做本地输入估算。对象参数不能用名称字符串替代 Python 对象。插件注册不代表任何能力名放进 capabilities 都会自动创建它：工具、模型、Flow、接口分别由对应装配路径消费。请同时查看“提供能力”和使用位置。
 
 
 ### 插件索引
@@ -395,7 +393,6 @@ finally:
 | `context.reducer` | [sage.context.reducer.persistent-summary](#sagecontextreducerpersistent-summary)、[sage.context.reducer.window](#sagecontextreducerwindow) |
 | `context.summarizer` | [sage.context.summarizer.extractive](#sagecontextsummarizerextractive)、[sage.context.summarizer.model](#sagecontextsummarizermodel) |
 | `context.summary-store` | [sage.context.summary-store.ephemeral](#sagecontextsummary-storeephemeral)、[sage.context.summary-store.session-derived](#sagecontextsummary-storesession-derived) |
-| `context.token-estimator` | [sage.context.token-estimator.json-heuristic](#sagecontexttoken-estimatorjson-heuristic)、[sage.context.token-estimator.tiktoken](#sagecontexttoken-estimatortiktoken)、[sage.context.token-estimator.unicode-heuristic](#sagecontexttoken-estimatorunicode-heuristic) |
 | `context.unit-compactor` | [sage.context.unit-compactor.reference](#sagecontextunit-compactorreference) |
 | `credentials.provider` | [sage.credentials.environment](#sagecredentialsenvironment)、[sage.credentials.mapping](#sagecredentialsmapping) |
 | `execution.job-runtime` | [sage.job.ephemeral](#sagejobephemeral) |
@@ -504,22 +501,20 @@ Summarizes older units into a durable rolling conversation summary.
 | --- | --- | --- | --- | --- |
 | `store` | 宿主对象 | 无固定值；仍需提供/注入 | 是 | 宿主对象：摘要存储 |
 | `summarizer` | 宿主对象 | 无固定值 | 否 | 宿主对象：摘要生成器 |
-| `estimator` | 宿主对象 | 无固定值 | 否 | 宿主对象：token 估算器 |
 | `summary_target_tokens` | integer；minimum=1 | `1024` | 否 | 生成摘要的目标 token 数 |
-| `protected_recent_units` | integer；minimum=1 | `4` | 否 | 保留的最近上下文单元数量 |
-| `max_summary_calls` | integer；minimum=1 | `4` | 否 | 一次压缩允许的摘要调用上限 |
-| `max_summary_source_tokens` | integer；minimum=1 | `24000` | 否 | 压缩处理的摘要来源 token 上限 |
+| `protected_recent_units` | integer；minimum=1 | `4` | 否 | 兼容旧配置；API 恢复按完整批次保留最新用户原文 |
+| `max_summary_calls` | integer；minimum=1 | `64` | 否 | 一次压缩允许的摘要调用上限 |
+| `max_summary_source_tokens` | integer；minimum=1 | `24000` | 否 | 兼容旧配置，已弃用；输入仅由 API 超长反馈分批 |
 | `unit_compactor` | 宿主对象 | 无固定值 | 否 | 宿主对象：上下文单元压缩器 |
 
 ### sage.context.reducer.window
 
-Drops oldest units to keep the prompt inside a token window.
+Drops complete old units only on API feedback or an exact message-count trigger.
 
 提供能力：`context.reducer:default`。支持 scope：agent, run。
 
 | 参数 | 类型 / 范围 | 默认值 | schema 必填 | 用途 |
 | --- | --- | --- | --- | --- |
-| `estimator` | 宿主对象 | 无固定值 | 否 | 宿主对象：token 估算器 |
 
 ### sage.context.summarizer.extractive
 
@@ -561,41 +556,6 @@ Persists conversation summaries through the selected SessionStore.
 | --- | --- | --- | --- | --- |
 | `derived_state` | 宿主对象 | 无固定值；仍需提供/注入 | 是 | 宿主对象：派生状态存储 |
 
-### sage.context.token-estimator.json-heuristic
-
-Estimates tokens from JSON-serialized message size.
-
-提供能力：`context.token-estimator:default`。支持 scope：agent, process。
-
-| 参数 | 类型 / 范围 | 默认值 | schema 必填 | 用途 |
-| --- | --- | --- | --- | --- |
-| `bytes_per_token` | number；exclusiveMinimum=0 | `4.0` | 否 | 每 token 估算字节数 |
-| `message_overhead` | integer；minimum=0 | `6` | 否 | 每条消息的额外 token 开销 |
-
-### sage.context.token-estimator.tiktoken
-
-Uses tiktoken encodings when the optional package is installed.
-
-提供能力：`context.token-estimator:default`。支持 scope：agent, process。
-
-| 参数 | 类型 / 范围 | 默认值 | schema 必填 | 用途 |
-| --- | --- | --- | --- | --- |
-| `model` | string / null | 省略时 None，按 encoding_name 选择 | 否 | 模型依赖；通常是宿主注入的 ModelProvider；tiktoken 中则是 tokenizer 模型名 |
-| `encoding_name` | string；minLength=1 | `"cl100k_base"` | 否 | tiktoken 编码名称 |
-| `encoder` | 宿主对象 | 省略时 None，创建 tiktoken encoder | 否 | 宿主对象：自定义 tokenizer |
-| `tokens_per_message` | integer；minimum=0 | `6` | 否 | 每条消息额外 token 开销 |
-
-### sage.context.token-estimator.unicode-heuristic
-
-Estimates tokens from Unicode code-point length.
-
-提供能力：`context.token-estimator:default`。支持 scope：agent, process。
-
-| 参数 | 类型 / 范围 | 默认值 | schema 必填 | 用途 |
-| --- | --- | --- | --- | --- |
-| `ascii_chars_per_token` | number；exclusiveMinimum=0 | `4.0` | 否 | ASCII 字符与 token 换算比 |
-| `non_ascii_chars_per_token` | number；exclusiveMinimum=0 | `1.5` | 否 | 非 ASCII 字符与 token 换算比 |
-| `message_overhead` | integer；minimum=0 | `6` | 否 | 每条消息的额外 token 开销 |
 
 ### sage.context.unit-compactor.reference
 
@@ -605,7 +565,6 @@ Compacts oversized units into durable references instead of dropping them.
 
 | 参数 | 类型 / 范围 | 默认值 | schema 必填 | 用途 |
 | --- | --- | --- | --- | --- |
-| `estimator` | 宿主对象 | 无固定值 | 否 | 宿主对象：token 估算器 |
 
 ### sage.credentials.environment
 
@@ -1024,7 +983,7 @@ Loads Skill material only when it is asked for, within a token budget.
 
 | 参数 | 类型 / 范围 | 默认值 | schema 必填 | 用途 |
 | --- | --- | --- | --- | --- |
-| `max_active_tokens` | integer；minimum=1 | `6000` | 否 | 活动 Skill 内容 token 上限 |
+| `max_active_characters` | integer；minimum=1 | `24000` | 否 | 活动 Skill 内容的精确字符存储上限 |
 
 ### sage.tool-selection.direct
 

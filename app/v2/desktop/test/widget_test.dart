@@ -49,7 +49,7 @@ class _SkillComponentApi extends _FakeApi {
           configSchema: {
             'type': 'object',
             'properties': {
-              'max_active_tokens': {
+              'max_active_characters': {
                 'type': 'integer',
                 'minimum': 1,
                 'default': 6000,
@@ -8025,7 +8025,7 @@ void main() {
         await tester.tap(find.text('运行组件'));
         await tester.pumpAndSettle();
         final field = find.byKey(
-          const ValueKey('settings-plugin-skill.loading-max_active_tokens'),
+          const ValueKey('settings-plugin-skill.loading-max_active_characters'),
         );
         final save = find.byKey(
           const ValueKey('settings-plugin-save-skill.loading'),
@@ -8041,7 +8041,7 @@ void main() {
         await tester.tap(save);
         await tester.pumpAndSettle();
         expect(api.lastSelectedComponent, 'skill.loading');
-        expect(api.lastSelectedComponentConfig, {'max_active_tokens': 12000});
+        expect(api.lastSelectedComponentConfig, {'max_active_characters': 12000});
         expect(find.text('12000'), findsOneWidget);
         final owner = find.byKey(
           const ValueKey(

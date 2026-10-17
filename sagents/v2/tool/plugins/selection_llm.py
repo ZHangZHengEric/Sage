@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from sagents.v2.context.auxiliary import stream_auxiliary_model
+
 import asyncio
 import json
 
@@ -24,8 +26,8 @@ from sagents.v2.tool.selection import (
     _EXPANSION_BATCH_LIMIT,
     _INDEX_DESCRIPTION_CHARS,
     _INDEX_ENTRY_LIMIT,
-    _INDEX_TOKEN_LIMIT,
-    _schema_tokens,
+    _INDEX_CHAR_LIMIT,
+    _schema_characters,
 )
 
 
@@ -139,27 +141,27 @@ class _LLMSelectionState:
     ) -> ToolSelectionResult:
         selected_names = {tool.name for tool in selected}
         hidden_index: list[tuple[str, str]] = []
-        index_tokens = 0
+        index_characters = 0
         for tool in request.tools:
             if tool.name in selected_names:
                 continue
             description = " ".join(tool.description.split())[:_INDEX_DESCRIPTION_CHARS]
-            cost = max(1, (len(tool.name) + len(description) + 5) // 3)
+            cost = len(tool.name) + len(description) + 5
             if len(hidden_index) >= _INDEX_ENTRY_LIMIT:
                 break
-            if hidden_index and index_tokens + cost > _INDEX_TOKEN_LIMIT:
+            if hidden_index and index_characters + cost > _INDEX_CHAR_LIMIT:
                 break
             hidden_index.append((tool.name, description))
-            index_tokens += cost
+            index_characters += cost
         return ToolSelectionResult(
             tools=selected,
             strategy=strategy,
             catalog_count=len(request.tools),
             selected_count=len(selected),
-            estimated_schema_tokens=sum(_schema_tokens(tool) for tool in selected),
+            schema_characters=sum(_schema_characters(tool) for tool in selected),
             expanded_tools=self.expanded_tools(request.run_id),
             hidden_tool_index=tuple(hidden_index),
-            estimated_index_tokens=index_tokens,
+            index_characters=index_characters,
         )
 
 
@@ -251,7 +253,7 @@ class LLMToolSelectionPolicy(_LLMSelectionState):
             metadata={"purpose": "tool_selection"},
         )
         response = None
-        stream = context.model.stream(request)
+        stream = stream_auxiliary_model(context.model, request)
         try:
             async with asyncio.timeout(self.config.model_timeout_seconds):
                 iterator = stream.__aiter__()

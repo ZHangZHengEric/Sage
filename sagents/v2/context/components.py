@@ -9,10 +9,8 @@ from sagents.v2.context import (
     ConversationSummaryStore,
     ExtractiveConversationSummarizer,
     InMemoryConversationSummaryStore,
-    JsonHeuristicTokenEstimator,
     PersistentSummaryContextReducer,
     ContextReducer,
-    TokenEstimator,
     WindowContextReducer,
 )
 
@@ -26,7 +24,6 @@ class ContextComponentBundle:
     durable `ConversationSummaryStore` and a model-backed summarizer.
     """
 
-    token_estimator: TokenEstimator = field(default_factory=JsonHeuristicTokenEstimator)
     summary_store: ConversationSummaryStore = field(
         default_factory=InMemoryConversationSummaryStore
     )
@@ -36,7 +33,7 @@ class ContextComponentBundle:
     summary_target_tokens: int = 1_024
     protected_recent_units: int = 4
     max_summary_source_tokens: int = 24_000
-    max_summary_calls: int = 4
+    max_summary_calls: int = 64
     reducer_id: str = "persistent-summary"
     reducer: ContextReducer | None = None
 
@@ -47,14 +44,13 @@ class ContextComponentBundle:
             return self.reducer
 
         if self.reducer_id == "window":
-            return WindowContextReducer(self.token_estimator)
+            return WindowContextReducer()
         if self.reducer_id != "persistent-summary":
             raise ValueError(f"unknown context reducer {self.reducer_id!r}")
 
         return PersistentSummaryContextReducer(
             self.summary_store,
             summarizer=self.summarizer,
-            estimator=self.token_estimator,
             summary_target_tokens=self.summary_target_tokens,
             protected_recent_units=self.protected_recent_units,
             max_summary_source_tokens=self.max_summary_source_tokens,

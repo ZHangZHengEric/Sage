@@ -4,10 +4,6 @@ from sagents.v2._lazy import exported_names, resolve_export
 
 
 _EXPORTS = {
-    "CallableTokenEstimator": (
-        "sagents.v2.context.token_estimator",
-        "CallableTokenEstimator",
-    ),
     "ContextAssembler": ("sagents.v2.context.assembler", "ContextAssembler"),
     "ContextBudget": ("sagents.v2.context.contracts", "ContextBudget"),
     "ContextPlacement": ("sagents.v2.context.contracts", "ContextPlacement"),
@@ -43,14 +39,9 @@ _EXPORTS = {
         "sagents.v2.context.plugins.summarizer_extractive",
         "ExtractiveConversationSummarizer",
     ),
-    "HeuristicTokenEstimator": ("sagents.v2.context.budget", "HeuristicTokenEstimator"),
     "InMemoryConversationSummaryStore": (
         "sagents.v2.context.plugins.summary_ephemeral",
         "InMemoryConversationSummaryStore",
-    ),
-    "JsonHeuristicTokenEstimator": (
-        "sagents.v2.context.plugins.estimator_json",
-        "JsonHeuristicTokenEstimator",
     ),
     "ModelConversationSummarizer": (
         "sagents.v2.context.plugins.summarizer_model",
@@ -86,15 +77,6 @@ _EXPORTS = {
     ),
     "StaticContextProvider": ("sagents.v2.context.assembler", "StaticContextProvider"),
     "SummarizationRequest": ("sagents.v2.context.summary", "SummarizationRequest"),
-    "TiktokenTokenEstimator": (
-        "sagents.v2.context.plugins.estimator_tiktoken",
-        "TiktokenTokenEstimator",
-    ),
-    "TokenEstimator": ("sagents.v2.context.token_estimator", "TokenEstimator"),
-    "UnicodeHeuristicTokenEstimator": (
-        "sagents.v2.context.plugins.estimator_unicode",
-        "UnicodeHeuristicTokenEstimator",
-    ),
     "WindowContextReducer": (
         "sagents.v2.context.plugins.window",
         "WindowContextReducer",

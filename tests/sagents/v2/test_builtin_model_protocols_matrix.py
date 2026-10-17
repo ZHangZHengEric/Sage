@@ -522,7 +522,7 @@ async def test_openai_responses_rejects_stream_without_terminal_event():
         _ = [event async for event in provider.stream(request())]
 
     assert caught.value.info.code == "model.stream_incomplete"
-    assert caught.value.info.retryable is False
+    assert caught.value.info.retryable is True
     assert caught.value.info.metadata["response_started"] is True
     assert stream.closed is True
 
@@ -769,7 +769,7 @@ async def test_anthropic_messages_rejects_stream_without_message_stop():
         _ = [event async for event in provider.stream(request())]
 
     assert caught.value.info.code == "model.stream_incomplete"
-    assert caught.value.info.retryable is False
+    assert caught.value.info.retryable is True
 
 
 @pytest.mark.asyncio
@@ -936,20 +936,32 @@ def test_model_factory_preserves_protocol_output_defaults(protocol, default, max
 
 @pytest.mark.parametrize("protocol", ["chat", "responses", "anthropic"])
 def test_text_only_binding_rejects_image_before_network(protocol):
-    from sagents.v2.model.plugins.openai_compatible import OpenAICompatibleConfig, OpenAICompatibleModelProvider
+    from sagents.v2.model.plugins.openai_compatible import (
+        OpenAICompatibleConfig,
+        OpenAICompatibleModelProvider,
+    )
 
     caps = CAPABILITIES.model_copy(update={"supports_multimodal_input": False})
     if protocol == "chat":
         provider = OpenAICompatibleModelProvider(
-            OpenAICompatibleConfig(base_url="https://example.invalid", model="text-only", capabilities=caps), client=object()
+            OpenAICompatibleConfig(
+                base_url="https://example.invalid", model="text-only", capabilities=caps
+            ),
+            client=object(),
         )
     elif protocol == "responses":
         provider = OpenAIResponsesModelProvider(
-            OpenAIResponsesConfig(base_url="https://example.invalid", model="text-only", capabilities=caps), client=object()
+            OpenAIResponsesConfig(
+                base_url="https://example.invalid", model="text-only", capabilities=caps
+            ),
+            client=object(),
         )
     else:
         provider = AnthropicMessagesModelProvider(
-            AnthropicMessagesConfig(base_url="https://example.invalid", model="text-only", capabilities=caps), client=object()
+            AnthropicMessagesConfig(
+                base_url="https://example.invalid", model="text-only", capabilities=caps
+            ),
+            client=object(),
         )
     with pytest.raises(SageV2Error) as caught:
         provider._validate_request(request())
@@ -964,7 +976,9 @@ def test_orcarouter_resolves_to_openai_compatible_protocol(provider_id):
         resolve_model_protocol(provider_id)
         == BuiltinModelProtocol.OPENAI_CHAT_COMPLETIONS
     )
-    assert model_protocol_default_base_url(provider_id) == "https://api.orcarouter.ai/v1"
+    assert (
+        model_protocol_default_base_url(provider_id) == "https://api.orcarouter.ai/v1"
+    )
 
 
 @pytest.mark.parametrize("base_url", [None, "https://gateway.example/v1"])
@@ -995,3 +1009,46 @@ def test_existing_protocol_default_base_urls_are_preserved(provider_id, expected
     from sagents.v2.model.protocols import model_protocol_default_base_url
 
     assert model_protocol_default_base_url(provider_id) == expected_url
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("event_type", ["response.failed", "error"])
+@pytest.mark.parametrize(
+    "code,expected",
+    [
+        ("context_length_exceeded", "model.context_window_exceeded"),
+        ("server_error", "model.provider_transient"),
+        ("rate_limit_exceeded", "model.provider_transient"),
+        ("invalid_api_key", "model.provider_permanent"),
+    ],
+)
+async def test_responses_stream_errors_keep_codes_for_recovery(
+    event_type, code, expected
+):
+    payload = {"code": code, "message": "upstream rejected request"}
+    event = {"type": event_type}
+    if event_type == "response.failed":
+        event["response"] = {"error": payload}
+    else:
+        event.update(payload)
+    upstream = FakeAsyncStream((event,))
+    provider = OpenAIResponsesModelProvider(
+        OpenAIResponsesConfig(model="gpt-test", capabilities=CAPABILITIES),
+        client=SimpleNamespace(responses=FakeResponses(upstream)),
+    )
+    with pytest.raises(SageV2Error) as caught:
+        _ = [e async for e in provider.stream(request())]
+    assert caught.value.info.code == expected
+    assert caught.value.info.provider_code == code
+    assert caught.value.info.retryable == (code != "invalid_api_key")
+    assert caught.value.info.metadata["response_started"] is False
+    assert upstream.closed
+
+
+@pytest.mark.parametrize("kind", [TimeoutError, ConnectionError])
+def test_transport_errors_are_transient_without_http_status(kind):
+    from sagents.v2.model.wire import provider_error
+
+    error = provider_error(kind("connection interrupted"))
+    assert error.info.code == "model.provider_transient"
+    assert error.info.retryable

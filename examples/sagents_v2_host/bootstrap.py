@@ -6,7 +6,7 @@ from pathlib import Path
 from sagents.v2 import SAgentApplication, SAgentBuilder
 from sagents.v2.model import ModelProvider
 from sagents.v2.package.manifest.runtime import RuntimeConfig
-from .plugins import estimator_registration
+from .plugins import compactor_registration
 from sagents.v2.package.manifest import SageManifestLoader
 from sagents.v2.runtime.observability import FilesystemDiagnosticSink, StdoutLogSink
 
@@ -40,13 +40,15 @@ async def build_application(
         .with_diagnostic_sink(FilesystemDiagnosticSink(runtime_root / "sessions"))
         .with_readiness_check()
     )
-    for registration in (estimator_registration(), *extensions):
+    for registration in (compactor_registration(), *extensions):
         builder.register(registration)
     if model is not None:
         builder.with_model_provider(model)
     app = await builder.build(
         runtime=settings.runtime if settings.runtime is not None else manifest.runtime,
-        models=settings.models if settings.models is not None else settings.manifest_path.with_name("models.yaml"),
+        models=settings.models
+        if settings.models is not None
+        else settings.manifest_path.with_name("models.yaml"),
     )
     try:
         await app.load_agent(manifest)

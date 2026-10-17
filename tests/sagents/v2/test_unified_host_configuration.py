@@ -10,7 +10,7 @@ import pytest
 
 from app.v2.desktop.backend.composition import build_desktop_application
 from examples.sagents_v2_host.__main__ import offline_model
-from examples.sagents_v2_host.plugins import estimator_registration
+from examples.sagents_v2_host.plugins import compactor_registration
 from sagents.v2 import SAgentBuilder
 from sagents.v2.contracts.errors import SageV2Error
 from sagents.v2.package.manifest import SageManifestLoader
@@ -31,10 +31,11 @@ def package():
 
 def builder(tmp_path, registration=None):
     return (
-        SAgentBuilder().with_models(TEST_MODELS)
+        SAgentBuilder()
+        .with_models(TEST_MODELS)
         .with_defaults(session_root=tmp_path)
         .with_model_provider(offline_model())
-        .register(registration or estimator_registration())
+        .register(registration or compactor_registration())
     )
 
 
@@ -50,18 +51,18 @@ async def test_runtime_parameter_and_embedded_runtime_have_same_identity(tmp_pat
     )
     try:
         assert separate.composition_hash == identity
-        assert separate.service("context.token-estimator").bytes_per_token == 4
+        assert separate.service("context.unit-compactor").minimum_characters == 4
     finally:
         await separate.close()
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("config", [{"bytes_per_token": 0}, {"typo": 4}])
+@pytest.mark.parametrize("config", [{"minimum_characters": 0}, {"typo": 4}])
 async def test_invalid_registered_plugin_parameters_fail_before_factory(
     tmp_path, config
 ):
     calls = []
-    registration = estimator_registration()
+    registration = compactor_registration()
     original_factory = registration.factory
 
     def factory(context, dependencies):
@@ -73,7 +74,7 @@ async def test_invalid_registered_plugin_parameters_fail_before_factory(
             package(),
             runtime={
                 "capabilities": {
-                    "context.token-estimator": {
+                    "context.unit-compactor": {
                         "plugin": registration.descriptor.plugin_id,
                         "config": config,
                     }
@@ -96,14 +97,14 @@ async def test_desktop_uses_same_custom_plugin_registration_and_config(tmp_path)
     app = await build_desktop_application(
         session_root=tmp_path / "runtime",
         workspace=tmp_path / "workspace",
-        extensions=(estimator_registration(),),
+        extensions=(compactor_registration(),),
         component_selections={
-            "context.token-estimator": "example.context.byte-estimator"
+            "context.unit-compactor": "example.context.reference-compactor"
         },
-        component_configs={"context.token-estimator": {"bytes_per_token": 8}},
+        component_configs={"context.unit-compactor": {"minimum_characters": 8}},
     )
     try:
-        assert app.service("context.token-estimator").bytes_per_token == 8
+        assert app.service("context.unit-compactor").minimum_characters == 8
     finally:
         await app.close()
 
@@ -175,30 +176,48 @@ async def test_server_registration_and_package_runtime_parameter(tmp_path):
     from app.v2.server.packages.builder import PackageBuilder
     from tests.app.v2.server.conftest import FixtureServerHost, make_settings
 
-    registration = estimator_registration()
-    settings = make_settings(tmp_path, plugin_overrides={
-        "context.token-estimator": {
-            "plugin": registration.descriptor.plugin_id,
-            "config": {"bytes_per_token": 8},
+    registration = compactor_registration()
+    settings = make_settings(
+        tmp_path,
+        plugin_overrides={
+            "context.unit-compactor": {
+                "plugin": registration.descriptor.plugin_id,
+                "config": {"minimum_characters": 8},
+            },
         },
-    })
+    )
     host = FixtureServerHost(
-        settings, database=Database(DatabaseSettings(
-            url=f"sqlite+aiosqlite:///{tmp_path}/host.db",
-        )), model_provider=offline_model(), extensions=(registration,),
+        settings,
+        database=Database(
+            DatabaseSettings(
+                url=f"sqlite+aiosqlite:///{tmp_path}/host.db",
+            )
+        ),
+        model_provider=offline_model(),
+        extensions=(registration,),
     )
     from app.v2.server.config.plugins import ServerPluginConfig, revision
+
     ServerPluginConfig(tmp_path, registry=host.extensions).save(
-        settings.plugin_overrides, revision({}),
+        settings.plugin_overrides,
+        revision({}),
     )
     await host.start()
     try:
-        assert host.application.service("context.token-estimator").bytes_per_token == 8
+        assert (
+            host.application.service("context.unit-compactor").minimum_characters == 8
+        )
+
         class UnusedBindings:
             async def acquire(self, request):
-                raise AssertionError("configuration inspection must not acquire a workspace")
+                raise AssertionError(
+                    "configuration inspection must not acquire a workspace"
+                )
+
         managed = await (
-            PackageBuilder(settings, None, tmp_path / "package", application=host.application)
+            PackageBuilder(
+                settings, None, tmp_path / "package", application=host.application
+            )
             .with_defaults(session_root=tmp_path / "package")
             .with_model_provider(offline_model())
             .register(registration)
@@ -207,10 +226,12 @@ async def test_server_registration_and_package_runtime_parameter(tmp_path):
         )
         try:
             await managed.load_agent(package())
-            assert managed.service("context.token-estimator").bytes_per_token == 4
+            assert managed.service("context.unit-compactor").minimum_characters == 4
         finally:
             await managed.close()
-        assert host.application.service("context.token-estimator").bytes_per_token == 8
+        assert (
+            host.application.service("context.unit-compactor").minimum_characters == 8
+        )
         assert host.execution.sandbox_provider is not None
     finally:
         await host.close()

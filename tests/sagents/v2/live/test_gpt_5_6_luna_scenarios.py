@@ -219,3 +219,149 @@ async def test_live_agent_loop_calls_tool_and_completes_canonical_run():
     ]
     assert completed_messages
     assert completed_messages[-1].data.content[0].text.strip() == "42"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("trigger", ["reported_limit", "injected_overflow"])
+async def test_live_compresses_then_completes_tool_flow_without_replay(trigger):
+    """Real primary and summary calls; injected errors exercise rare API paths."""
+    from sagents.v2.context import (
+        ContextBudget,
+        DefaultContextAssembler,
+        InMemoryConversationSummaryStore,
+        PersistentSummaryContextReducer,
+    )
+    from sagents.v2.context.plugins.summarizer_model import ModelConversationSummarizer
+    from sagents.v2.contracts.errors import ErrorCategory, RuntimeErrorInfo, SageV2Error
+
+    real = _live_provider()
+    requests, usages = [], []
+    rejected = set()
+
+    class ObservedProvider:
+        async def capabilities(self, binding):
+            return await real.capabilities(binding)
+
+        async def stream(self, request):
+            purpose = request.metadata.get("purpose", "main")
+            requests.append(request)
+            if trigger == "injected_overflow" and purpose not in rejected:
+                rejected.add(purpose)
+                raise SageV2Error(
+                    RuntimeErrorInfo(
+                        code="model.context_window_exceeded",
+                        category=ErrorCategory.VALIDATION,
+                        message="Injected API context rejection",
+                        safe_to_resume=True,
+                    )
+                )
+            stream = real.stream(request)
+            try:
+                async for event in stream:
+                    if event.kind == ModelEventKind.COMPLETED:
+                        usages.append((purpose, event.response.usage))
+                    yield event
+            finally:
+                await stream.aclose()
+
+    provider = ObservedProvider()
+    history = (
+        ModelMessage(
+            role="user",
+            content=(
+                TextBlock(text="历史记录：项目验收已经通过，保留结论即可。" * 1500),
+            ),
+        ),
+        ModelMessage(
+            role="assistant", content=(TextBlock(text="已经保存项目验收结论。"),)
+        ),
+    )
+    frozen = tuple(m.model_dump_json() for m in history)
+
+    class History(DefaultContextAssembler):
+        async def initial_ledger(self, command, *, run_id=None):
+            return (*history, *(await super().initial_ledger(command, run_id=run_id)))
+
+    store = InMemoryConversationSummaryStore()
+    assembler = History(
+        budget=ContextBudget(max_input_tokens=2000, reserve_output_tokens=512),
+        reducer=PersistentSummaryContextReducer(
+            store,
+            summarizer=ModelConversationSummarizer(provider),
+            summary_target_tokens=256,
+        ),
+    )
+    runtime = ephemeral_runtime()
+    handle = await runtime.start_run(
+        StartRun(
+            agent_id="live_compression",
+            input=(
+                InputItem(
+                    role="user",
+                    content=(
+                        TextBlock(
+                            text="必须只调用一次 add_numbers 工具计算19+23，然后只输出工具结果。"
+                        ),
+                    ),
+                ),
+            ),
+            config=RunConfig(max_steps=8, max_output_tokens=512),
+            resolved_spec_hash="sha256:live-compression",
+            idempotency_key="live-compression",
+        ),
+        CONTEXT,
+    )
+    definition = ToolDefinition(
+        name="add_numbers",
+        description="Add two integers.",
+        input_schema={
+            "type": "object",
+            "properties": {"a": {"type": "integer"}, "b": {"type": "integer"}},
+            "required": ["a", "b"],
+            "additionalProperties": False,
+        },
+        side_effect_level=SideEffectLevel.NONE,
+    )
+    executions = []
+
+    async def add(call, context):
+        executions.append(call.tool_call_id)
+        return ToolExecutionResult(
+            tool_call_id=call.tool_call_id,
+            operation_id=call.operation_id,
+            content=(TextBlock(text=str(call.arguments["a"] + call.arguments["b"])),),
+        )
+
+    loop = AgentLoopEngine(
+        runtime=runtime,
+        model=provider,
+        context_assembler=assembler,
+        tool_catalog=InMemoryToolCatalog((definition,)),
+        tool_executor=InMemoryToolExecutor(
+            {definition.name: definition}, {definition.name: add}
+        ),
+    )
+    run = await loop.execute(handle.run_id, CONTEXT)
+    assert run.state == RunState.COMPLETED
+    assert len(executions) == 1
+    assert any(r.metadata.get("purpose") == "conversation_summary" for r in requests)
+    assert any(
+        m.metadata.get("context_summary")
+        for r in requests
+        if not r.metadata.get("purpose")
+        for m in r.messages
+    )
+    assert tuple(m.model_dump_json() for m in history) == frozen
+    assert any(u.reported for _, u in usages)
+    if trigger == "reported_limit":
+        assert next(u for p, u in usages if p == "main").input_tokens >= 1488
+    else:
+        assert rejected == {"main", "conversation_summary"}
+    result = await runtime.get_run_result(handle.run_id)
+    messages = [
+        i
+        for i in result.final_items
+        if i.data.kind == "message" and i.status.value == "completed"
+    ]
+    assert messages[-1].data.content[0].text.strip() == "42"
+    assert len(requests) <= 16

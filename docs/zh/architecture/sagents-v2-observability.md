@@ -17,6 +17,12 @@ ref: v2-detail-sagents-v2-observability
 
 `ObservedRunDriver` 负责 Agent 与工具，`RecordingModelProvider` 负责模型。它们产生同一份厂商无关 `TraceSpan`，`sage.trace.otlp` 导出通用/GenAI 字段，`sage.trace.langfuse` 在公共 OTLP 传输上添加 Langfuse 映射。没有新增数据库表或持久化观测队列。
 
+## 文件诊断
+
+文件诊断插件的 `root` 指向 SessionStore 的 `sessions` 根目录，使用与 SessionStore 相同的位置映射。请求写入所属 Session 的 `runs/<run_id>/llm_requests`；子会话位于父会话的 `sub_sessions/<session_id>` 中，不另建平铺诊断目录。旧平铺记录仍可读取，在该 Session 下一次诊断写入时迁入正确目录；会话状态和历史不参与此迁移。
+
+内联媒体以 UTF-8 原文的 SHA256 去重，存入该 Session 的 `diagnostics/media/<sha256>.txt`。磁盘请求 JSON 使用 `$sage_diagnostic_media` 引用，`get_model_request` 和 `list_model_requests` 自动校验哈希、长度并还原原文，兼容旧内联记录。导出必须包含整个 Session 目录；媒体不跨 Session 引用，随所属 Session 一起归档或删除。去重只改变诊断存储，不改变实际模型请求、上下文 token 或权威历史。
+
 ## Trace 身份
 
 每次顶层 execute/resume 建立新 trace，同一 Session 的多次执行通过 session_id 关联，暂停恢复通过 run_id 关联。这改变了原来的“整个 Session 一个 Jaeger trace”行为；查询历史数据时仍可使用 session_id。

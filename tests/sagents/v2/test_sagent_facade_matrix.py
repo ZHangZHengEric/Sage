@@ -502,9 +502,12 @@ async def test_schedule_accepted_run_submission_failure_is_durable():
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("phase", ["primary", "tool_selection"])
-async def test_model_connection_failure_streams_recovery_before_suspension(phase):
+async def test_model_connection_failure_streams_recovery_before_suspension(
+    phase, monkeypatch
+):
     from sagents.v2.tool.plugins.selection_recent import RecentToolSelectionPolicy
 
+    monkeypatch.setattr(AgentLoopEngine, "_PROVIDER_RETRY_BASE_SECONDS", 0)
     failure = RuntimeErrorInfo(
         code="model.provider_transient",
         category=ErrorCategory.PROVIDER_TRANSIENT,
@@ -520,7 +523,7 @@ async def test_model_connection_failure_streams_recovery_before_suspension(phase
             await super().prepare(context)
 
     runtime = ephemeral_runtime()
-    model = ScriptedModelProvider((ScriptedModelStep(events=(), error=failure),))
+    model = ScriptedModelProvider((ScriptedModelStep(events=(), error=failure),) * 4)
     agent = SAgent(
         runtime=runtime,
         driver_factory=lambda run_id: AgentLoopEngine(
@@ -547,7 +550,10 @@ async def test_model_connection_failure_streams_recovery_before_suspension(phase
     assert interaction.data.payload["questions"]
     assert interaction.data.allowed_decisions == ("retry", "change_direction", "cancel")
     assert not any(event.type == "run.completed" for event in events)
-    assert len(model.requests) == (1 if phase == "primary" else 0)
+    assert len(model.requests) == (4 if phase == "primary" else 0)
+    assert len([e for e in events if e.type == "step.retry_scheduled"]) == (
+        3 if phase == "primary" else 0
+    )
     replay = await runtime.session_store.read_events(final.run_id)
     assert any(event.event_id == interaction.event_id for event in replay)
     await agent.close()

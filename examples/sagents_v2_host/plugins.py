@@ -1,9 +1,7 @@
-"""A standalone third-party plugin: no imports from built-in implementations."""
-
-import math
+"""Standalone compactor example using exact characters and durable references."""
 
 from pydantic import BaseModel, ConfigDict, Field
-
+from sagents.v2.contracts.items import TextBlock
 from sagents.v2.runtime.extensions import (
     CapabilityOffer,
     ExtensionDescriptor,
@@ -12,38 +10,49 @@ from sagents.v2.runtime.extensions import (
 )
 
 
-class EstimatorConfig(BaseModel):
+class ReferenceConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    bytes_per_token: float = Field(default=4.0, gt=0)
+    minimum_characters: int = Field(default=4, gt=0)
 
 
-class ByteEstimator:
-    """Example heuristic, not a vendor tokenizer or a production recommendation."""
+class ReferenceCompactor:
+    def __init__(self, *, minimum_characters=4):
+        self.minimum_characters = minimum_characters
 
-    estimator_id = "example-byte-estimator"
+    async def compact(self, messages):
+        projected = []
+        for message in messages:
+            reference = message.metadata.get("context_reference", {})
+            uri = reference.get("uri") if isinstance(reference, dict) else None
+            if (
+                message.role == "tool"
+                and uri
+                and len(message.model_dump_json()) >= self.minimum_characters
+            ):
+                projected.append(
+                    message.model_copy(
+                        update={
+                            "content": (TextBlock(text=f"[Stored tool result: {uri}]"),)
+                        }
+                    )
+                )
+            else:
+                projected.append(message)
+        return tuple(projected) if tuple(projected) != messages else None
 
-    def __init__(self, *, bytes_per_token=4.0):
-        self.bytes_per_token = bytes_per_token
 
-    def estimate(self, messages):
-        return sum(
-            math.ceil(len(message.model_dump_json().encode()) / self.bytes_per_token)
-            for message in messages
-        )
-
-
-def estimator_registration() -> ExtensionRegistration:
+def compactor_registration() -> ExtensionRegistration:
     return ExtensionRegistration(
         descriptor=ExtensionDescriptor(
-            plugin_id="example.context.byte-estimator",
+            plugin_id="example.context.reference-compactor",
             version="2.0.0",
-            name="Example byte estimator",
+            name="Example reference compactor",
             provides=(
-                CapabilityOffer(capability="context.token-estimator", api_version="2"),
+                CapabilityOffer(capability="context.unit-compactor", api_version="2"),
             ),
             supported_scopes=frozenset({ExtensionScope.AGENT}),
-            config_schema=EstimatorConfig.model_json_schema(),
+            config_schema=ReferenceConfig.model_json_schema(),
         ),
-        config_model=EstimatorConfig,
-        factory=lambda context, dependencies: ByteEstimator(**context.config),
+        config_model=ReferenceConfig,
+        factory=lambda context, dependencies: ReferenceCompactor(**context.config),
     )

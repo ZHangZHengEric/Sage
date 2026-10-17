@@ -49,20 +49,14 @@ class ContextBudget(StrictModel):
     reserve_output_tokens: int = Field(default=0, ge=0)
     reserve_input_tokens: int = Field(default=0, ge=0)
     max_messages: int | None = Field(default=None, gt=0)
-    # Hard ceiling for instructions, separate from tools/output reservations.
+    # Legacy manifest fields, retained for deserialization only. No estimation.
     max_system_tokens: int = Field(default=16_384, gt=0)
-    # Recent historical units are soft protection, bounded by this token cap.
+    # Legacy manifest field; history protection uses complete conversation units.
     protected_recent_tokens: int = Field(default=8_192, ge=0)
 
 
 class ContextRequestReservation(StrictModel):
-    """Final-request space that is not part of the reducible conversation.
-
-    Tool schemas and runtime-only suffix messages are selected by the Agent step
-    builder, after canonical history has been assembled. Reserving their space
-    lets reducers fit the conversation against the request that will actually be
-    sent instead of only the message prefix they happen to receive.
-    """
+    """Legacy request reservation, accepted for source compatibility only."""
 
     tool_schema_tokens: int = Field(default=0, ge=0)
     hidden_tool_index_tokens: int = Field(default=0, ge=0)
@@ -96,7 +90,7 @@ class ContextProjection(StrictModel):
 
     messages: tuple[ModelMessage, ...]
     historical_messages: tuple[ModelMessage, ...] = ()
-    estimated_tokens: int = Field(ge=0)
+    estimated_tokens: int = Field(default=0, ge=0)  # legacy persisted snapshots only
     source_message_count: int = Field(ge=0)
     dropped_message_count: int = Field(default=0, ge=0)
     dropped_digest: str | None = None
@@ -125,6 +119,8 @@ class ContextProjectionObserver(Protocol):
 class ContextReductionScope(StrictModel):
     """Stable identity supplied to stateful context-reduction plugins."""
 
+    force: bool = False
+    allow_reference_compaction: bool = True
     context_key: Identifier
     session_id: Identifier
     run_id: Identifier

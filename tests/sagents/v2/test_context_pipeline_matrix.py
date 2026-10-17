@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import pytest
+from sagents.v2.context.plugins.window import WindowContextReducer
 
 from sagents.v2.context import (
     ContextBudget,
@@ -122,7 +123,9 @@ async def test_prepare_messages_inlines_image_attachment_without_changing_ledger
     from sagents.v2.tool.official.media import compress_image_to_jpeg_bytes_for_llm
 
     store = FilesystemArtifactStore(tmp_path / "artifacts")
-    uri = await snapshot_image(store, compress_image_to_jpeg_bytes_for_llm(Image.new("RGB", (32, 32), "red")))
+    uri = await snapshot_image(
+        store, compress_image_to_jpeg_bytes_for_llm(Image.new("RGB", (32, 32), "red"))
+    )
     ledger = (
         ModelMessage(
             role="user",
@@ -133,22 +136,32 @@ async def test_prepare_messages_inlines_image_attachment_without_changing_ledger
             metadata={"tool_source": "analyze_image", "tool_context": True},
         ),
     )
-    prepared = await DefaultContextAssembler(artifact_store=store).prepare_messages(command(), ledger)
+    prepared = await DefaultContextAssembler(artifact_store=store).prepare_messages(
+        command(), ledger
+    )
     assert ledger[0].content[1].uri == uri
     assert prepared[0].content[1].uri.startswith("data:image/jpeg;base64,")
     assert "data:image" not in ledger[0].content[1].uri
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("uri", ["/workspace/frame.png", "file:///tmp/frame.png", "frame.png"])
-async def test_context_rejects_local_image_paths_without_opening_host_files(uri, monkeypatch):
+@pytest.mark.parametrize(
+    "uri", ["/workspace/frame.png", "file:///tmp/frame.png", "frame.png"]
+)
+async def test_context_rejects_local_image_paths_without_opening_host_files(
+    uri, monkeypatch
+):
     from PIL import Image
 
     def forbidden(*args, **kwargs):
         pytest.fail("context assembler must not open host paths")
 
     monkeypatch.setattr(Image, "open", forbidden)
-    ledger = (ModelMessage(role="user", content=(ImageBlock(uri=uri, mime_type="image/png"),)),)
+    ledger = (
+        ModelMessage(
+            role="user", content=(ImageBlock(uri=uri, mime_type="image/png"),)
+        ),
+    )
     with pytest.raises(SageV2Error) as error:
         await DefaultContextAssembler().prepare_messages(command(), ledger)
     assert error.value.info.code == "image.local_path_unsupported"
@@ -163,23 +176,38 @@ async def test_image_attachment_is_tenant_scoped_and_missing_is_explicit(tmp_pat
     owner = ScopedArtifactStore(store, "user-a")
     other = ScopedArtifactStore(store, "user-b")
     uri = await snapshot_image(owner, b"image")
-    ledger = (ModelMessage(role="user", content=(ImageBlock(uri=uri, mime_type="image/jpeg"),)),)
+    ledger = (
+        ModelMessage(
+            role="user", content=(ImageBlock(uri=uri, mime_type="image/jpeg"),)
+        ),
+    )
     with pytest.raises(SageV2Error) as denied:
-        await DefaultContextAssembler(artifact_store=other).prepare_messages(command(), ledger)
+        await DefaultContextAssembler(artifact_store=other).prepare_messages(
+            command(), ledger
+        )
     assert denied.value.info.code == "artifact.not_found"
     await owner.delete(uri.removeprefix("sage-image:"))
     with pytest.raises(SageV2Error) as missing:
-        await DefaultContextAssembler(artifact_store=owner).prepare_messages(command(), ledger)
+        await DefaultContextAssembler(artifact_store=owner).prepare_messages(
+            command(), ledger
+        )
     assert missing.value.info.code == "artifact.not_found"
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("uri,code", [
-    ("sage-image:" + "a" * 64, "image.store_unavailable"),
-    ("sage-image:../../secret", "image.invalid_reference"),
-])
+@pytest.mark.parametrize(
+    "uri,code",
+    [
+        ("sage-image:" + "a" * 64, "image.store_unavailable"),
+        ("sage-image:../../secret", "image.invalid_reference"),
+    ],
+)
 async def test_invalid_image_attachment_never_reaches_provider(uri, code):
-    ledger = (ModelMessage(role="user", content=(ImageBlock(uri=uri, mime_type="image/jpeg"),)),)
+    ledger = (
+        ModelMessage(
+            role="user", content=(ImageBlock(uri=uri, mime_type="image/jpeg"),)
+        ),
+    )
     with pytest.raises(SageV2Error) as error:
         await DefaultContextAssembler().prepare_messages(command(), ledger)
     assert error.value.info.code == code
@@ -188,16 +216,27 @@ async def test_invalid_image_attachment_never_reaches_provider(uri, code):
 @pytest.mark.asyncio
 async def test_legacy_inline_images_still_project_without_attachment_storage():
     uri = "data:image/png;base64,AAAA"
-    ledger = (ModelMessage(role="user", content=(ImageBlock(uri=uri, mime_type="image/png"),)),)
-    assert (await DefaultContextAssembler().prepare_messages(command(), ledger))[0].content[0].uri == uri
+    ledger = (
+        ModelMessage(
+            role="user", content=(ImageBlock(uri=uri, mime_type="image/png"),)
+        ),
+    )
+    assert (await DefaultContextAssembler().prepare_messages(command(), ledger))[
+        0
+    ].content[0].uri == uri
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("media_type,code", [
-    ("image/jpeg", "image.integrity_failed"),
-    ("text/plain", "image.invalid_attachment"),
-])
-async def test_image_loader_checks_bytes_against_reference_for_custom_stores(media_type, code):
+@pytest.mark.parametrize(
+    "media_type,code",
+    [
+        ("image/jpeg", "image.integrity_failed"),
+        ("text/plain", "image.invalid_attachment"),
+    ],
+)
+async def test_image_loader_checks_bytes_against_reference_for_custom_stores(
+    media_type, code
+):
     from sagents.v2.runtime.artifact import InMemoryArtifactStore
 
     store = InMemoryArtifactStore()
@@ -207,9 +246,18 @@ async def test_image_loader_checks_bytes_against_reference_for_custom_stores(med
         yield b"wrong image content"
 
     await store.put(artifact_id=identifier, media_type=media_type, content=content())
-    ledger = (ModelMessage(role="user", content=(ImageBlock(uri="sage-image:" + identifier, mime_type="image/jpeg"),)),)
+    ledger = (
+        ModelMessage(
+            role="user",
+            content=(
+                ImageBlock(uri="sage-image:" + identifier, mime_type="image/jpeg"),
+            ),
+        ),
+    )
     with pytest.raises(SageV2Error) as error:
-        await DefaultContextAssembler(artifact_store=store).prepare_messages(command(), ledger)
+        await DefaultContextAssembler(artifact_store=store).prepare_messages(
+            command(), ledger
+        )
     assert error.value.info.code == code
 
 
@@ -443,6 +491,7 @@ async def test_budget_reduction_drops_oldest_complete_units_not_half_tool_pairs(
     assembler = DefaultContextAssembler(
         system_instructions="system",
         budget=ContextBudget(max_input_tokens=10_000, max_messages=4),
+        reducer=WindowContextReducer(),
     )
     projection = await assembler.prepare_projection(command(), ledger)
 
@@ -464,12 +513,8 @@ async def test_budget_never_truncates_protected_latest_user_silently():
         system_instructions="system",
         budget=ContextBudget(max_input_tokens=1),
     )
-    with pytest.raises(SageV2Error) as caught:
-        await assembler.prepare_messages(
-            command(),
-            (ModelMessage(role="user", content=(TextBlock(text="must survive"),)),),
-        )
-    assert caught.value.info.code == "context.budget_exhausted"
+    source = (ModelMessage(role="user", content=(TextBlock(text="must survive"),)),)
+    assert (await assembler.prepare_messages(command(), source))[-1] == source[0]
 
 
 @pytest.mark.asyncio
@@ -534,7 +579,7 @@ async def test_reducer_sees_filtered_history_without_runtime_injection():
 
 
 @pytest.mark.asyncio
-async def test_runtime_injection_is_reserved_before_reduction():
+async def test_runtime_injection_does_not_estimate_or_reserve_tokens():
     captured = {}
 
     class CaptureReducer:
@@ -569,14 +614,14 @@ async def test_runtime_injection_is_reserved_before_reduction():
     await assembler.prepare_projection(command(), ledger)
 
     reserved = captured["budget"].reserve_input_tokens
-    assert reserved > 0
+    assert reserved == 0
     bare = DefaultContextAssembler(
         budget=ContextBudget(max_input_tokens=10_000),
         reducer=CaptureReducer(),
     )
     await bare.prepare_projection(command(), ledger)
     assert captured["budget"].reserve_input_tokens == 0
-    assert reserved > captured["budget"].reserve_input_tokens
+    assert reserved == captured["budget"].reserve_input_tokens
 
 
 @pytest.mark.asyncio

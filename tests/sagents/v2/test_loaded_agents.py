@@ -10,7 +10,8 @@ from sagents.v2.testing.plugins import ScriptedModelProvider
 
 def package():
     return BuiltinPackageFactory.create(
-        "assistant", package_id="test.loaded",
+        "assistant",
+        package_id="test.loaded",
     )
 
 
@@ -18,7 +19,8 @@ def package():
 async def test_load_reuse_update_and_close(tmp_path):
     manifest = package()
     app = (
-        await SAgentBuilder().with_models(TEST_MODELS)
+        await SAgentBuilder()
+        .with_models(TEST_MODELS)
         .with_defaults(session_root=tmp_path)
         .with_model_provider(ScriptedModelProvider(()))
         .build(runtime=manifest.runtime)
@@ -49,7 +51,8 @@ async def test_default_runtime_matches_desktop(tmp_path):
     from app.v2.desktop.backend.package import desktop_v2_manifest
 
     app = (
-        await SAgentBuilder().with_models(TEST_MODELS)
+        await SAgentBuilder()
+        .with_models(TEST_MODELS)
         .with_defaults(session_root=tmp_path)
         .with_model_provider(ScriptedModelProvider(()))
         .build()
@@ -72,7 +75,8 @@ async def test_revision_identity_survives_loading_order(tmp_path):
 
     def builder():
         return (
-            SAgentBuilder().with_models(TEST_MODELS)
+            SAgentBuilder()
+            .with_models(TEST_MODELS)
             .with_defaults(session_root=tmp_path)
             .with_model_provider(ScriptedModelProvider(()))
         )
@@ -102,7 +106,8 @@ async def test_multiple_packages_with_same_internal_agent_name(tmp_path):
         update={"metadata": first.metadata.model_copy(update={"id": "test.other"})}
     )
     app = (
-        await SAgentBuilder().with_models(TEST_MODELS)
+        await SAgentBuilder()
+        .with_models(TEST_MODELS)
         .with_defaults(session_root=tmp_path)
         .with_model_provider(ScriptedModelProvider(()))
         .build(runtime=first.runtime)
@@ -167,7 +172,8 @@ async def test_reusable_agent_runs_and_old_revision_survives_update(tmp_path):
     original = package()
     provider = model()
     app = (
-        await SAgentBuilder().with_models(TEST_MODELS)
+        await SAgentBuilder()
+        .with_models(TEST_MODELS)
         .with_defaults(session_root=tmp_path)
         .with_model_provider(provider)
         .build(runtime=original.runtime)
@@ -204,7 +210,8 @@ async def test_restart_restores_pending_original_revision_after_update(tmp_path)
         update={"metadata": original.metadata.model_copy(update={"version": "2"})}
     )
     app = (
-        await SAgentBuilder().with_models(TEST_MODELS)
+        await SAgentBuilder()
+        .with_models(TEST_MODELS)
         .with_defaults(session_root=tmp_path)
         .with_model_provider(model())
         .build(runtime=original.runtime)
@@ -214,7 +221,8 @@ async def test_restart_restores_pending_original_revision_after_update(tmp_path)
     pending = await app.runtime.start_run(command(first, "recover-original"), context())
     await app.close()
     reopened = (
-        await SAgentBuilder().with_models(TEST_MODELS)
+        await SAgentBuilder()
+        .with_models(TEST_MODELS)
         .with_defaults(session_root=tmp_path)
         .with_model_provider(model())
         .build(runtime=original.runtime)
@@ -246,7 +254,8 @@ async def test_package_inputs_and_atomic_invalid_update(tmp_path):
     data = manifest.model_dump(mode="json")
     (folder / "sage.yaml").write_text(yaml.safe_dump(data))
     app = (
-        await SAgentBuilder().with_models(TEST_MODELS)
+        await SAgentBuilder()
+        .with_models(TEST_MODELS)
         .with_defaults(session_root=tmp_path / "state")
         .with_model_provider(model())
         .build(runtime=manifest.runtime)
@@ -312,7 +321,8 @@ async def test_app_owns_resources_without_loading_and_snapshots_registration(tmp
             closed.append(True)
 
     builder = (
-        SAgentBuilder().with_models(TEST_MODELS)
+        SAgentBuilder()
+        .with_models(TEST_MODELS)
         .with_defaults(session_root=tmp_path)
         .with_owned_resources(Resource())
     )
@@ -337,7 +347,8 @@ async def test_update_while_old_run_is_in_flight(tmp_path):
     provider = GatedModel(model()._steps)
     original = package()
     app = (
-        await SAgentBuilder().with_models(TEST_MODELS)
+        await SAgentBuilder()
+        .with_models(TEST_MODELS)
         .with_defaults(session_root=tmp_path)
         .with_model_provider(provider)
         .build(runtime=original.runtime)
@@ -372,13 +383,15 @@ async def test_update_while_old_run_is_in_flight(tmp_path):
 async def test_entrypoint_requires_owned_agent_and_matching_command(tmp_path):
     manifest = package()
     app = (
-        await SAgentBuilder().with_models(TEST_MODELS)
+        await SAgentBuilder()
+        .with_models(TEST_MODELS)
         .with_defaults(session_root=tmp_path / "one")
         .with_model_provider(model())
         .build(runtime=manifest.runtime)
     )
     other = (
-        await SAgentBuilder().with_models(TEST_MODELS)
+        await SAgentBuilder()
+        .with_models(TEST_MODELS)
         .with_defaults(session_root=tmp_path / "two")
         .with_model_provider(model())
         .build(runtime=manifest.runtime)
@@ -402,7 +415,7 @@ async def test_entrypoint_requires_owned_agent_and_matching_command(tmp_path):
 
 @pytest.mark.asyncio
 async def test_plugin_validation_failure_keeps_loaded_revision(tmp_path):
-    from examples.sagents_v2_host.plugins import estimator_registration
+    from examples.sagents_v2_host.plugins import compactor_registration
     from sagents.v2.package.manifest.root import PluginDeclaration
     from sagents.v2.package.manifest.runtime import CapabilitySelection
 
@@ -411,15 +424,16 @@ async def test_plugin_validation_failure_keeps_loaded_revision(tmp_path):
         update={
             "capabilities": {
                 **manifest.runtime.capabilities,
-                "context.token-estimator": CapabilitySelection(
-                    plugin="example.context.byte-estimator", scope="agent"
+                "context.unit-compactor": CapabilitySelection(
+                    plugin="example.context.reference-compactor", scope="agent"
                 ),
             }
         }
     )
     app = (
-        await SAgentBuilder().with_models(TEST_MODELS)
-        .register(estimator_registration())
+        await SAgentBuilder()
+        .with_models(TEST_MODELS)
+        .register(compactor_registration())
         .with_defaults(session_root=tmp_path)
         .with_model_provider(model())
         .build(runtime=runtime)
@@ -430,8 +444,8 @@ async def test_plugin_validation_failure_keeps_loaded_revision(tmp_path):
             update={
                 "plugins": (
                     PluginDeclaration(
-                        id="example.context.byte-estimator",
-                        config={"bytes_per_token": -1},
+                        id="example.context.reference-compactor",
+                        config={"minimum_characters": -1},
                     ),
                 )
             }
@@ -464,7 +478,8 @@ async def test_child_revision_is_pinned_across_update_and_restart(tmp_path):
 
     async def open_app():
         return (
-            await SAgentBuilder().with_models(TEST_MODELS)
+            await SAgentBuilder()
+            .with_models(TEST_MODELS)
             .with_defaults(session_root=tmp_path)
             .with_model_provider(model())
             .build(runtime=parent_package.runtime)

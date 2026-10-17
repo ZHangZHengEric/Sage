@@ -264,7 +264,7 @@ async def test_stream_failures_are_not_successful_completions(events, code):
         if code == "model.provider_transient":
             assert error.value.info.retryable is True
         if code == "model.stream_incomplete":
-            assert error.value.info.retryable is False
+            assert error.value.info.retryable is True
     finally:
         await client.aclose()
 

@@ -7,29 +7,13 @@ the replaceable projection from canonical loop state to one model request.
 from __future__ import annotations
 
 from sagents.v2.prompt_i18n import prompt_text, run_prompt_language
-from sagents.v2.context.token_estimator import estimate_tokens_async
-
 import json
-from collections import OrderedDict
-from sagents.v2.context.calibration import (
-    InputUsageBaseline,
-    fingerprint,
-    input_usage_scope,
-    message_fingerprints,
-)
 from dataclasses import dataclass
 from typing import Protocol
 
 from sagents.v2.context import ContextAssembler
-from sagents.v2.context.contracts import ContextBudget, ContextRequestReservation
-from sagents.v2.context.plugins.estimator_json import JsonHeuristicTokenEstimator
-from sagents.v2.context.token_estimator import TokenEstimator
+from sagents.v2.context.contracts import ContextBudget
 from sagents.v2.contracts.commands import StartRun
-from sagents.v2.contracts.errors import (
-    ErrorCategory,
-    RuntimeErrorInfo,
-    SageV2Error,
-)
 from sagents.v2.contracts.items import TextBlock
 from sagents.v2.i18n import tr
 from sagents.v2.model.contracts import (
@@ -66,14 +50,11 @@ class AgentStepRequestBuilder(Protocol):
         messages: tuple[ModelMessage, ...],
         pending_continuation_reason: str | None,
         language: str | None,
-        additional_input_reserve_tokens: int = 0,
     ) -> PreparedAgentStep: ...
 
 
 class DefaultAgentStepRequestBuilder:
     """Default context assembly, Tool projection, and request construction."""
-
-    _PROVIDER_REQUEST_OVERHEAD_TOKENS = 32
 
     def __init__(
         self,
@@ -81,15 +62,12 @@ class DefaultAgentStepRequestBuilder:
         context_assembler: ContextAssembler,
         tool_catalog: ToolCatalog,
         tool_selection_policy: ToolSelectionPolicy,
-        token_estimator: TokenEstimator | None = None,
         context_budget: ContextBudget | None = None,
     ) -> None:
         self.context_assembler = context_assembler
         self.tool_catalog = tool_catalog
         self.tool_selection_policy = tool_selection_policy
-        self.token_estimator = token_estimator or JsonHeuristicTokenEstimator()
         self.context_budget = context_budget
-        self._input_baselines: OrderedDict[str, InputUsageBaseline] = OrderedDict()
 
     async def prepare(
         self,
@@ -101,10 +79,7 @@ class DefaultAgentStepRequestBuilder:
         messages: tuple[ModelMessage, ...],
         pending_continuation_reason: str | None,
         language: str | None,
-        additional_input_reserve_tokens: int = 0,
     ) -> PreparedAgentStep:
-        if additional_input_reserve_tokens < 0:
-            raise ValueError("additional_input_reserve_tokens cannot be negative")
         catalog_tools = await self.tool_catalog.list_tools(run_id=run_id)
         catalog_tools = tools_for_invocation_mode(
             catalog_tools, command.invocation_mode
@@ -136,62 +111,22 @@ class DefaultAgentStepRequestBuilder:
             else ()
         )
         continuation_messages = (
-            (self._continuation_message(pending_continuation_reason, run_prompt_language(command.config.metadata)),)
+            (
+                self._continuation_message(
+                    pending_continuation_reason,
+                    run_prompt_language(command.config.metadata),
+                ),
+            )
             if pending_continuation_reason
             else ()
         )
         suffix_messages = (*hidden_index_messages, *continuation_messages)
-        tool_tokens = await self._estimate_tool_tokens(request_tools)
-        reservation = ContextRequestReservation(
-            tool_schema_tokens=tool_tokens,
-            hidden_tool_index_tokens=await estimate_tokens_async(
-                self.token_estimator, hidden_index_messages
-            ),
-            continuation_guidance_tokens=await estimate_tokens_async(
-                self.token_estimator, continuation_messages
-            ),
-            protocol_overhead_tokens=(
-                self._PROVIDER_REQUEST_OVERHEAD_TOKENS + additional_input_reserve_tokens
-            ),
-            message_count=len(suffix_messages),
+        prepared_messages = await self.context_assembler.prepare_messages(
+            command,
+            messages,
+            run_id=run_id,
         )
-        calibration_scope = fingerprint(
-            {
-                "spec": command.resolved_spec_hash,
-                "config": command.config.model_dump(mode="json"),
-                "tools": [
-                    t.model_dump(mode="json")
-                    for t in sorted(request_tools, key=lambda t: t.name)
-                ],
-                "invocation_mode": command.invocation_mode,
-                "language": language,
-            }
-        )
-        baseline = self._input_baselines.get(run_id)
-        if baseline is not None and (
-            baseline.scope != calibration_scope
-            or additional_input_reserve_tokens
-            or not getattr(self.token_estimator, "additive", False)
-        ):
-            baseline = None
-        with input_usage_scope(baseline):
-            prepared_messages = await self.context_assembler.prepare_messages(
-                command,
-                messages,
-                run_id=run_id,
-                reservation=reservation,
-            )
-            prepared_messages = (*prepared_messages, *suffix_messages)
-            estimated_input_tokens = (
-                await estimate_tokens_async(self.token_estimator, prepared_messages)
-                + tool_tokens
-                + self._PROVIDER_REQUEST_OVERHEAD_TOKENS
-            )
-        calibrated = baseline is not None and baseline.matches(prepared_messages)
-        self._validate_final_budget(
-            estimated_input_tokens=estimated_input_tokens,
-            message_count=len(prepared_messages),
-        )
+        prepared_messages = (*prepared_messages, *suffix_messages)
         request = ModelRequest(
             request_id=new_id("model_request"),
             run_id=run_id,
@@ -204,47 +139,24 @@ class DefaultAgentStepRequestBuilder:
             ),
             tool_choice="auto" if selection.tools else None,
             metadata={
-                "input_calibration_scope": calibration_scope,
                 "turn_id": turn_id,
                 "step_id": step_id,
                 "request_budget": {
-                    "context_budget": self.context_budget.model_dump(mode="json") if self.context_budget else None,
+                    "context_budget": self.context_budget.model_dump(mode="json")
+                    if self.context_budget
+                    else None,
                     "canonical_message_count": len(messages),
                     "projected_message_count": len(prepared_messages),
-                    "estimated_input_tokens": estimated_input_tokens,
-                    "accounting_method": "reported_prefix_plus_estimated_delta"
-                    if calibrated
-                    else "estimated",
-                    "baseline_request_id": baseline.request_id if calibrated else None,
-                    "baseline_input_tokens": baseline.input_tokens
-                    if calibrated
-                    else None,
-                    "estimated_new_message_count": len(prepared_messages)
-                    - len(baseline.messages)
-                    if calibrated
-                    else len(prepared_messages),
-                    "estimated_delta_tokens": estimated_input_tokens
-                    - baseline.input_tokens
-                    - baseline.margin
-                    if calibrated
-                    else None,
-                    "calibration_margin_tokens": baseline.margin if calibrated else 0,
-                    "reserved_non_history_tokens": reservation.input_tokens,
-                    "tool_schema_tokens": reservation.tool_schema_tokens,
-                    "hidden_tool_index_tokens": (reservation.hidden_tool_index_tokens),
-                    "continuation_guidance_tokens": (
-                        reservation.continuation_guidance_tokens
-                    ),
-                    "protocol_overhead_tokens": (reservation.protocol_overhead_tokens),
+                    "accounting_method": "provider_reported",
                 },
                 "tool_selection": {
                     "plugin": self.tool_selection_policy.plugin_id,
                     "strategy": selection.strategy,
                     "catalog_count": selection.catalog_count,
                     "selected_count": selection.selected_count,
-                    "estimated_schema_tokens": selection.estimated_schema_tokens,
+                    "schema_characters": selection.schema_characters,
                     "hidden_index_count": len(selection.hidden_tool_index),
-                    "estimated_index_tokens": selection.estimated_index_tokens,
+                    "index_characters": selection.index_characters,
                     "expanded_tools": selection.expanded_tools,
                 },
             },
@@ -252,96 +164,11 @@ class DefaultAgentStepRequestBuilder:
         return PreparedAgentStep(request=request, tools=selection.tools)
 
     def observe_response(self, request: ModelRequest, response: ModelResponse) -> None:
-        """Accept only complete, reported usage from this builder's requests."""
-        usage = response.usage
-        scope = request.metadata.get("input_calibration_scope")
-        budget = request.metadata.get("request_budget", {})
-        overhead = (
-            budget.get("tool_schema_tokens", 0) + self._PROVIDER_REQUEST_OVERHEAD_TOKENS
-        )
-        if (
-            not usage.reported
-            or usage.input_tokens <= overhead
-            or not scope
-            or usage.cached_input_tokens > usage.input_tokens
-            or response.provider_metadata.get("compatibility_fallback")
-            or request.tool_choice not in (None, "auto")
-        ):
-            self._input_baselines.pop(request.run_id, None)
-            return
-        self._input_baselines[request.run_id] = InputUsageBaseline(
-            scope=scope,
-            request_id=request.request_id,
-            messages=message_fingerprints(request.messages),
-            input_tokens=usage.input_tokens,
-            non_message_tokens=overhead,
-        )
-        self._input_baselines.move_to_end(request.run_id)
-        while len(self._input_baselines) > 128:
-            self._input_baselines.popitem(last=False)
-
-    async def _estimate_tool_tokens(
-        self, tools: tuple[ModelToolDefinition, ...]
-    ) -> int:
-        if not tools:
-            return 0
-        # Reuse the selected Context estimator while representing non-message
-        # Tool schemas as one deterministic budget-only message. The wrapper
-        # overhead is intentionally conservative across provider protocols.
-        payload = json.dumps(
-            [tool.model_dump(mode="json", exclude_none=True) for tool in tools],
-            ensure_ascii=False,
-            sort_keys=True,
-            separators=(",", ":"),
-        )
-        return await estimate_tokens_async(
-            self.token_estimator,
-            (
-                ModelMessage(
-                    role="developer",
-                    content=(TextBlock(text=payload),),
-                    metadata={"request_budget_tools": True},
-                ),
-            ),
-        )
-
-    def _validate_final_budget(
-        self, *, estimated_input_tokens: int, message_count: int
-    ) -> None:
-        budget = self.context_budget
-        if budget is None:
-            return
-        maximum = (
-            budget.max_input_tokens
-            - budget.reserve_output_tokens
-            - budget.reserve_input_tokens
-        )
-        if maximum <= 0:
-            raise self._budget_error(
-                "context.invalid_budget",
-                "output and configured input reserves consume the model budget",
-            )
-        if estimated_input_tokens > maximum:
-            raise self._budget_error(
-                "context.budget_exhausted",
-                "final messages, Tool schemas, and provider overhead exceed the model budget",
-            )
-        if budget.max_messages is not None and message_count > budget.max_messages:
-            raise self._budget_error(
-                "context.budget_exhausted",
-                "final runtime suffix exceeds the model message budget",
-            )
-
-    @staticmethod
-    def _budget_error(code: str, message: str) -> SageV2Error:
-        return SageV2Error(
-            RuntimeErrorInfo(
-                code=code,
-                category=ErrorCategory.VALIDATION,
-                message=message,
-                safe_to_resume=True,
-            )
-        )
+        """Schedule compression from actual provider usage, never an estimate."""
+        if response.usage.reported:
+            observer = getattr(self.context_assembler, "observe_usage", None)
+            if observer is not None:
+                observer(request.run_id, response.usage.input_tokens)
 
     @staticmethod
     def _tool_index_message(

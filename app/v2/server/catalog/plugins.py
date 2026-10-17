@@ -7,7 +7,6 @@ from sagents.v2.runtime.extensions.official import builtin_extension_registry
 
 AGENT_DEFAULTS = {
     "context.summarizer": "sage.context.summarizer.model",
-    "context.token-estimator": "sage.context.token-estimator.json-heuristic",
     "context.reducer": "sage.context.reducer.persistent-summary",
     "agent.continuation-policy": "sage.agent.continuation.llm-judge",
     "tool.selection-policy": "sage.tool-selection.llm",
@@ -75,7 +74,9 @@ def validate_agent_plugins(selections, *, registry=None):
             if not isinstance(value, dict):
                 raise ValueError("插件配置必须是对象")
             if capability not in AGENT_DEFAULTS:
-                raise ValueError(f"{capability} 由 Server 管理，不允许在 Agent Package 中修改")
+                raise ValueError(
+                    f"{capability} 由 Server 管理，不允许在 Agent Package 中修改"
+                )
             if value.get("name", "default") != "default":
                 raise ValueError("Agent 插件只支持 default 绑定")
             if value.get("scope") not in (None, "agent", "run"):

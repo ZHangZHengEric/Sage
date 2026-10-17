@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import re
 import tempfile
 import threading
 from collections.abc import Mapping
@@ -16,6 +17,9 @@ from urllib.parse import quote
 from sagents.v2.contracts.common import utc_now
 from sagents.v2.model.contracts import ModelRequest, ModelResponse
 from sagents.v2.runtime.observability.timing import elapsed_ms
+from sagents.v2.runtime.observability.log_format import redact_log_value
+from sagents.v2.runtime.observability.diagnostic_media import DiagnosticMediaStore
+from sagents.v2.runtime.session.filesystem_layout import resolve_session_directory
 
 
 class FilesystemDiagnosticSink:
@@ -29,17 +33,6 @@ class FilesystemDiagnosticSink:
         "continuation_judge": "completion_judge",
         "task_complete_judge": "completion_judge",
     }
-    _sensitive_fragments = (
-        "authorization",
-        "api_key",
-        "apikey",
-        "access_token",
-        "refresh_token",
-        "password",
-        "secret",
-        "credential",
-        "cookie",
-    )
 
     def __init__(
         self,
@@ -168,6 +161,7 @@ class FilesystemDiagnosticSink:
 
     def _write_model_record(self, record: dict[str, Any]) -> None:
         with self._write_lock:
+            self._migrate_flat_records(record["session_id"])
             path, index = self._new_model_record_path(
                 record["session_id"],
                 record["run_id"],
@@ -175,7 +169,7 @@ class FilesystemDiagnosticSink:
                 record["started_at"],
             )
             record["index"] = index
-            self._atomic_json(path, record)
+            self._write_record(path, record)
 
     def _finish_model_record(
         self,
@@ -185,6 +179,7 @@ class FilesystemDiagnosticSink:
         update: dict[str, Any],
     ) -> None:
         with self._write_lock:
+            self._migrate_flat_records(session_id)
             path = self._find_model_record_path(
                 session_id, request.run_id, request.request_id
             )
@@ -208,9 +203,7 @@ class FilesystemDiagnosticSink:
                     "request_id": request.request_id,
                     "started_at": started_at,
                     "request": {},
-                    "metadata": self._redact(
-                        self._request_metadata(request, {}, {})
-                    ),
+                    "metadata": self._redact(self._request_metadata(request, {}, {})),
                 }
             safe_update = self._redact(update)
             record.update(safe_update)
@@ -222,7 +215,7 @@ class FilesystemDiagnosticSink:
                 record["duration_ms"] = duration_ms
             if ttfb_ms is not None:
                 record["ttfb_ms"] = ttfb_ms
-            self._atomic_json(path, record)
+            self._write_record(path, record)
 
     def _record_model_first_token(
         self,
@@ -231,6 +224,7 @@ class FilesystemDiagnosticSink:
         observed_at: datetime,
     ) -> None:
         with self._write_lock:
+            self._migrate_flat_records(session_id)
             path = self._find_model_record_path(
                 session_id, request.run_id, request.request_id
             )
@@ -240,7 +234,7 @@ class FilesystemDiagnosticSink:
             if record.get("first_token_at"):
                 return
             record["first_token_at"] = observed_at.isoformat()
-            self._atomic_json(path, record)
+            self._write_record(path, record)
 
     def _list_model_requests_sync(
         self, session_id: str, run_id: str | None
@@ -261,7 +255,7 @@ class FilesystemDiagnosticSink:
             if not request_dir.is_dir():
                 continue
             for path in request_dir.glob("*.json"):
-                value = json.loads(path.read_text(encoding="utf-8"))
+                value = self._read_record(path)
                 key = (str(value.get("run_id") or ""), str(value["request_id"]))
                 records.setdefault(key, value)
         values = list(records.values())
@@ -290,12 +284,11 @@ class FilesystemDiagnosticSink:
             )
         if path is None:
             raise FileNotFoundError(f"model request not found: {request_id}")
-        return json.loads(path.read_text(encoding="utf-8"))
+        return self._read_record(path)
 
     def _request_directory(self, session_id: str, run_id: str) -> Path:
         return (
-            self.root
-            / self._safe_segment(session_id)
+            resolve_session_directory(self.root, session_id)
             / "runs"
             / self._safe_segment(run_id)
             / "llm_requests"
@@ -308,15 +301,19 @@ class FilesystemDiagnosticSink:
         run_id: str | None,
         directory_name: str,
     ) -> tuple[Path, ...]:
-        session_root = sessions_root / self._safe_segment(session_id)
+        session_root = resolve_session_directory(sessions_root, session_id)
+        roots = [session_root]
+        flat = sessions_root / self._safe_segment(session_id)
+        if flat != session_root:
+            roots.append(flat)  # Read compatibility; writes move these records.
         if run_id is not None:
-            return (
-                session_root
-                / "runs"
-                / self._safe_segment(run_id)
-                / directory_name,
+            return tuple(
+                root / "runs" / self._safe_segment(run_id) / directory_name
+                for root in roots
             )
-        return tuple(session_root.glob(f"runs/*/{directory_name}"))
+        return tuple(
+            path for root in roots for path in root.glob(f"runs/*/{directory_name}")
+        )
 
     def _new_model_record_path(
         self,
@@ -342,7 +339,67 @@ class FilesystemDiagnosticSink:
         self, session_id: str, run_id: str, request_id: str
     ) -> Path | None:
         directory = self._request_directory(session_id, run_id)
-        return self._find_record_in_directory(directory, request_id)
+        found = self._find_record_in_directory(directory, request_id)
+        if found is not None:
+            return found
+        flat = (
+            self.root
+            / self._safe_segment(session_id)
+            / "runs"
+            / self._safe_segment(run_id)
+            / "llm_requests"
+        )
+        if flat != directory:
+            return self._find_record_in_directory(flat, request_id)
+        return None
+
+    @staticmethod
+    def _read_record(path: Path) -> dict[str, Any]:
+        return DiagnosticMediaStore(path.parents[3]).restore(
+            json.loads(path.read_text(encoding="utf-8"))
+        )
+
+    @classmethod
+    def _write_record(cls, path: Path, record: dict[str, Any]) -> None:
+        # Blob files stay inside this Session, so archive/export/delete can move
+        # the whole Session without references to another Session's files.
+        stored = DiagnosticMediaStore(path.parents[3]).externalize(record)
+        cls._atomic_json(path, stored)
+
+    def _migrate_flat_records(self, session_id: str) -> None:
+        """On writes, adopt old misplaced child diagnostics without touching state."""
+        owner = resolve_session_directory(self.root, session_id)
+        flat = self.root / self._safe_segment(session_id)
+        if flat == owner:
+            return
+        for source in sorted(flat.glob("runs/*/llm_requests/*.json")):
+            try:
+                record = self._read_record(source)
+                if record.get("session_id") != session_id:
+                    continue
+                destination, index = self._new_model_record_path(
+                    session_id,
+                    str(record["run_id"]),
+                    self._stored_request_kind(record, source.name),
+                    str(record["started_at"]),
+                )
+                record["index"] = index
+                self._write_record(destination, self._redact(record))
+                source.unlink()
+            except (OSError, KeyError, TypeError, ValueError):
+                # Keep malformed/incomplete legacy data for investigation; it
+                # must not prevent recording new requests at the correct path.
+                continue
+        # Only remove diagnostic blobs once every old record has been adopted.
+        # Session state, attachments and unrelated files are never touched.
+        if not any(flat.glob("runs/*/llm_requests/*.json")):
+            for blob in (flat / "diagnostics/media").glob("*.txt"):
+                if re.fullmatch(r"[0-9a-f]{64}\.txt", blob.name):
+                    try:
+                        blob.unlink()
+                    except OSError:
+                        pass
+        self._remove_empty_directories(flat)
 
     def _find_record_in_directory(
         self, directory: Path, request_id: str
@@ -395,7 +452,10 @@ class FilesystemDiagnosticSink:
                         self._stored_request_kind(record, source.name),
                         started_at,
                     )
-                    os.replace(source, destination)
+                    self._write_record(
+                        destination, self._redact(self._read_record(source))
+                    )
+                    source.unlink()
                 except (KeyError, OSError, TypeError, ValueError, json.JSONDecodeError):
                     # Diagnostics are optional. A malformed legacy record remains
                     # in place instead of blocking SessionStore startup.
@@ -458,9 +518,7 @@ class FilesystemDiagnosticSink:
             return
 
     @classmethod
-    def _request_kind(
-        cls, request: ModelRequest, provider: Mapping[str, Any]
-    ) -> str:
+    def _request_kind(cls, request: ModelRequest, provider: Mapping[str, Any]) -> str:
         purpose = request.metadata.get("purpose") or provider.get("purpose") or "agent"
         normalized = "_".join(
             part
@@ -519,26 +577,7 @@ class FilesystemDiagnosticSink:
 
     @classmethod
     def _redact(cls, value: Any) -> Any:
-        if isinstance(value, dict):
-            return {
-                key: (
-                    "[REDACTED]"
-                    if any(
-                        fragment in str(key).lower().replace("-", "_")
-                        for fragment in cls._sensitive_fragments
-                    )
-                    else cls._redact(item)
-                )
-                for key, item in value.items()
-            }
-        if isinstance(value, (list, tuple)):
-            return [cls._redact(item) for item in value]
-        if isinstance(value, str) and (
-            value.lower().startswith("bearer ")
-            or (value.startswith("sk-") and len(value) > 6)
-        ):
-            return "[REDACTED]"
-        return value
+        return redact_log_value(value)
 
     @staticmethod
     def _atomic_json(path: Path, value: Any) -> None:

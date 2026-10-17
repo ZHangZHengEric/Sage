@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from sagents.v2.context.auxiliary import stream_auxiliary_model
+
 import asyncio
 import json
 import re
@@ -82,12 +84,19 @@ class LLMContinuationJudge:
         self.timeout_seconds = float(timeout_seconds)
 
     async def decide(self, context: ContinuationContext) -> ContinuationDecision:
-        prompt, has_open_todo = self._prompt(context)
+        judge_input, has_open_todo = self._judge_input(context)
+        language = prompt_language(context.language)
+        instructions = LEGACY_V1_TASK_COMPLETE_TEMPLATE[language].format(
+            messages="<judge_input>The following user message contains the conversation and execution evidence to assess.</judge_input>"
+        )
         request = ModelRequest(
             request_id=new_id("continuation_judge"),
             run_id=context.run_id,
             model_binding=self.model_binding,
-            messages=(ModelMessage(role="user", content=(TextBlock(text=prompt),)),),
+            messages=(
+                ModelMessage(role="system", content=(TextBlock(text=instructions),)),
+                ModelMessage(role="user", content=(TextBlock(text=judge_input),)),
+            ),
             response_format="json_object",
             metadata={
                 "purpose": "continuation_judge",
@@ -98,7 +107,7 @@ class LLMContinuationJudge:
         completed = None
         try:
             async with asyncio.timeout(self.timeout_seconds):
-                async for event in self.model.stream(request):
+                async for event in stream_auxiliary_model(self.model, request):
                     if event.kind == ModelEventKind.COMPLETED:
                         completed = event.response
         except TimeoutError as exc:
@@ -134,6 +143,13 @@ class LLMContinuationJudge:
         return self._decision(context, result, has_open_todo, completed.usage)
 
     def _prompt(self, context: ContinuationContext) -> tuple[str, bool]:
+        judge_input, has_open_todo = self._judge_input(context)
+        language = prompt_language(context.language)
+        return LEGACY_V1_TASK_COMPLETE_TEMPLATE[language].format(
+            messages=judge_input
+        ), has_open_todo
+
+    def _judge_input(self, context: ContinuationContext) -> tuple[str, bool]:
         language = prompt_language(context.language)
         messages = self._recent_request_trace(context.ledger)
         trace = self._format_messages(messages, language=language)
@@ -150,10 +166,7 @@ class LLMContinuationJudge:
             "</available_tools>\n\n"
             f"{trace}"
         )
-        return (
-            LEGACY_V1_TASK_COMPLETE_TEMPLATE[language].format(messages=judge_messages),
-            has_open_todo,
-        )
+        return judge_messages, has_open_todo
 
     @staticmethod
     def _recent_request_trace(
@@ -166,14 +179,14 @@ class LLMContinuationJudge:
         selected = (
             messages[last_user_index:] if last_user_index is not None else messages
         )
-        # V1 gives the recent trace a 3000-token budget and protects the latest
-        # Assistant text. These per-row bounds are the V1 formatter's final
-        # safety net and keep the V2 adapter deterministic without changing the
-        # canonical ledger.
+        # Trace formatting retains the latest user turn and bounds display rows
+        # by explicit characters; API feedback governs context recovery.
         return tuple(selected)
 
     @classmethod
-    def _format_messages(cls, messages: tuple[ModelMessage, ...], *, language: str = "en") -> str:
+    def _format_messages(
+        cls, messages: tuple[ModelMessage, ...], *, language: str = "en"
+    ) -> str:
         lines: list[str] = []
         tool_call_names: dict[str, str] = {}
         last_assistant_text_index = None
@@ -191,7 +204,13 @@ class LLMContinuationJudge:
                 for call in message.tool_calls:
                     names.append(call.name)
                     tool_call_names[call.tool_call_id] = call.name
-                lines.append("assistant: [" + prompt_text("judge_tools", language) + " " + ", ".join(names) + "]")
+                lines.append(
+                    "assistant: ["
+                    + prompt_text("judge_tools", language)
+                    + " "
+                    + ", ".join(names)
+                    + "]"
+                )
                 continue
             if message.role == "tool":
                 tool_name = tool_call_names.get(message.tool_call_id or "") or (
@@ -201,7 +220,9 @@ class LLMContinuationJudge:
                 if len(preview) > _TOOL_RESULT_PREVIEW_CHARS:
                     preview = (
                         preview[:_TOOL_RESULT_PREVIEW_CHARS]
-                        + "\n...[" + prompt_text("judge_tool_truncated", language) + " "
+                        + "\n...["
+                        + prompt_text("judge_tool_truncated", language)
+                        + " "
                         + str(len(preview))
                         + "]"
                     )
@@ -213,7 +234,9 @@ class LLMContinuationJudge:
             if not text:
                 continue
             if index != last_assistant_text_index and len(text) > 2_000:
-                text = text[:2_000] + (f"\n...[{prompt_text('judge_truncated', language)} {len(text)}]")
+                text = text[:2_000] + (
+                    f"\n...[{prompt_text('judge_truncated', language)} {len(text)}]"
+                )
             lines.append(f"{message.role}: {text}")
         return "\n\n".join(lines)
 
@@ -522,7 +545,11 @@ class LLMJudgeContinuationPolicy:
         self._output_limit = ResponseLimitRule()
         self._flow = FlowBoundaryRule()
         self._pending_tools = ToolOrTextRuleForPendingCalls()
-        self._tool_guards = (InspectionProgressRule(), LoopCorrectionRule(), LoopRecoveryRule(6))
+        self._tool_guards = (
+            InspectionProgressRule(),
+            LoopCorrectionRule(),
+            LoopRecoveryRule(6),
+        )
 
     async def decide(self, context: ContinuationContext) -> ContinuationDecision:
         if context.requested_interaction is not None:
@@ -539,7 +566,7 @@ class LLMJudgeContinuationPolicy:
                 metadata={
                     "policy": "llm_judge",
                     "implementation": "v1",
-                "response_language": prompt_language(context.language),
+                    "response_language": prompt_language(context.language),
                     "source": "explicit_interaction",
                 },
             )

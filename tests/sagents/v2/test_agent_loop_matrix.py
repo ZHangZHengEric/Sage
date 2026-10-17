@@ -12,6 +12,7 @@ from sagents.v2.agent.state import AgentLoopCheckpointCodec, AgentLoopCheckpoint
 from sagents.v2.model.contracts import (
     ModelCapabilities,
     ModelEventKind,
+    ModelMessage,
     ModelResponse,
     ModelStreamEvent,
     ModelToolCall,
@@ -1091,7 +1092,7 @@ async def test_openui_parser_feedback_reaches_the_next_model_request():
     from sagents.v2.agent.policy.output_self_check import OutputSelfCheckPolicy
 
     bad = '```openui\nroot = Deck("Deck", [Slide("Cover", [Text("A"), Text("B")], "cover")])\n```'
-    good = bad.replace(', Text("B")', '')
+    good = bad.replace(', Text("B")', "")
 
     def assert_repair_request(request):
         guidance = request.messages[-1]
@@ -1100,18 +1101,27 @@ async def test_openui_parser_feedback_reaches_the_next_model_request():
         assert "cover allows at most 1, got 2" in guidance.content[0].text
         assert request.tool_choice == "auto"
 
-    model = ScriptedModelProvider((
-        ScriptedModelStep(events=(completed(bad),)),
-        ScriptedModelStep(assertion=assert_repair_request, events=(completed(good),)),
-    ))
+    model = ScriptedModelProvider(
+        (
+            ScriptedModelStep(events=(completed(bad),)),
+            ScriptedModelStep(
+                assertion=assert_repair_request, events=(completed(good),)
+            ),
+        )
+    )
     delegate = AsyncMock()
     delegate.decide.return_value = ContinuationDecision(
-        action=ContinuationAction.COMPLETE_RUN, reason_code="judge.completed", reason="done"
+        action=ContinuationAction.COMPLETE_RUN,
+        reason_code="judge.completed",
+        reason="done",
     )
     parser = OpenUiParser()
     try:
         runtime, handle, loop, executor = await setup_loop(
-            model, continuation_policy=OutputSelfCheckPolicy(delegate, OpenUiOutputChecker(parser))
+            model,
+            continuation_policy=OutputSelfCheckPolicy(
+                delegate, OpenUiOutputChecker(parser)
+            ),
         )
         result = await loop.execute(handle.run_id, CONTEXT)
         assert result.state == RunState.COMPLETED
@@ -1357,10 +1367,23 @@ async def test_run_config_output_and_deadline_budgets_are_enforced_by_loop():
 
 @pytest.mark.asyncio
 async def test_model_call_to_unavailable_tool_returns_feedback_without_execution():
-    model = ScriptedModelProvider((
-        ScriptedModelStep(events=(completed("", calls=(ModelToolCall(tool_call_id="missing", name="not_enabled", arguments={}),)),)),
-        ScriptedModelStep(events=(completed("corrected"),)),
-    ))
+    model = ScriptedModelProvider(
+        (
+            ScriptedModelStep(
+                events=(
+                    completed(
+                        "",
+                        calls=(
+                            ModelToolCall(
+                                tool_call_id="missing", name="not_enabled", arguments={}
+                            ),
+                        ),
+                    ),
+                )
+            ),
+            ScriptedModelStep(events=(completed("corrected"),)),
+        )
+    )
     runtime, handle, loop, executor = await setup_loop(model, tools=(READ_TOOL,))
     run = await loop.execute(handle.run_id, CONTEXT)
     events = await runtime.session_store.read_events(handle.run_id)
@@ -1592,9 +1615,10 @@ async def test_missing_actor_scope_denies_without_interaction_or_dispatch():
     ],
 )
 async def test_model_failure_matrix_requests_typed_recovery_questionnaire(
-    step, error_code
+    step, error_code, monkeypatch
 ):
-    runtime, handle, loop, _ = await setup_loop(ScriptedModelProvider((step,)))
+    monkeypatch.setattr(AgentLoopEngine, "_PROVIDER_RETRY_BASE_SECONDS", 0)
+    runtime, handle, loop, _ = await setup_loop(ScriptedModelProvider((step,) * 4))
     result = await loop.execute(handle.run_id, CONTEXT)
     events = await runtime.session_store.read_events(handle.run_id)
     assert result.state == RunState.SUSPENDED
@@ -1639,7 +1663,7 @@ async def test_empty_semantic_response_retries_transparently_before_suspending()
 
 
 @pytest.mark.asyncio
-async def test_pre_stream_context_overflow_reduces_once_with_adaptive_reserve():
+async def test_pre_stream_context_overflow_compresses_from_api_feedback():
     overflow = RuntimeErrorInfo(
         code="model.context_window_exceeded",
         category=ErrorCategory.VALIDATION,
@@ -1654,18 +1678,28 @@ async def test_pre_stream_context_overflow_reduces_once_with_adaptive_reserve():
             ScriptedModelStep(events=(completed("done"),)),
         )
     )
-    assembler = DefaultContextAssembler(budget=ContextBudget(max_input_tokens=2_000))
+
+    class HistoricalAssembler(DefaultContextAssembler):
+        async def initial_ledger(self, command, *, run_id=None):
+            return (
+                ModelMessage(role="user", content=(TextBlock(text="old " * 2000),)),
+                ModelMessage(role="assistant", content=(TextBlock(text="old answer"),)),
+                *(await super().initial_ledger(command, run_id=run_id)),
+            )
+
+    assembler = HistoricalAssembler(budget=ContextBudget(max_input_tokens=8_000))
     runtime, handle, loop, _ = await setup_loop(model, context_assembler=assembler)
 
     result = await loop.execute(handle.run_id, CONTEXT)
 
     assert result.state == RunState.COMPLETED
     assert len(model.requests) == 2
-    first_budget = model.requests[0].metadata["request_budget"]
-    second_budget = model.requests[1].metadata["request_budget"]
     assert (
-        second_budget["protocol_overhead_tokens"]
-        >= first_budget["protocol_overhead_tokens"] + 512
+        model.requests[1].metadata["request_budget"]["accounting_method"]
+        == "provider_reported"
+    )
+    assert sum(len(m.model_dump_json()) for m in model.requests[1].messages) < sum(
+        len(m.model_dump_json()) for m in model.requests[0].messages
     )
     events = await runtime.session_store.read_events(handle.run_id)
     retries = [event for event in events if event.type == "step.retry_scheduled"]
@@ -1970,7 +2004,11 @@ async def test_reasoning_only_response_does_not_pollute_next_model_request():
 
 
 @pytest.mark.asyncio
-async def test_automatic_memory_recall_checkpoint_resumes_without_digest_mismatch():
+async def test_automatic_memory_recall_checkpoint_resumes_without_digest_mismatch(
+    monkeypatch,
+):
+    monkeypatch.setattr(AgentLoopEngine, "_PROVIDER_RETRY_BASE_SECONDS", 0)
+
     class RecallQuery:
         async def generate(self, user_input, *, run_id):
             assert user_input == "do task"
@@ -1990,7 +2028,7 @@ async def test_automatic_memory_recall_checkpoint_resumes_without_digest_mismatc
         retryable=True,
         safe_to_resume=True,
     )
-    model = ScriptedModelProvider((ScriptedModelStep(events=(), error=failure),))
+    model = ScriptedModelProvider((ScriptedModelStep(events=(), error=failure),) * 4)
     runtime, handle, loop, _ = await setup_loop(
         model,
         tools=(memory_tool,),
@@ -3190,9 +3228,14 @@ async def test_worker_recovery_reconciles_each_started_parallel_call_without_rep
         suspension, interaction = await _pending_interaction(runtime, run)
         await runtime.reply_interaction(
             _approval_reply(
-                run.run_id, run, suspension, interaction,
-                "confirm_succeeded", f"recover-batch:{index}",
-            ), CONTEXT,
+                run.run_id,
+                run,
+                suspension,
+                interaction,
+                "confirm_succeeded",
+                f"recover-batch:{index}",
+            ),
+            CONTEXT,
         )
         run = await loop.resume(run.run_id, CONTEXT)
     assert run.state == RunState.COMPLETED
@@ -3271,15 +3314,19 @@ async def test_questionnaire_completion_survives_batch_approval(questionnaire_fi
 @pytest.mark.asyncio
 async def test_unavailable_tool_feedback_preserves_valid_siblings():
     missing = ModelToolCall(tool_call_id="missing", name="not_enabled", arguments={})
-    model = ScriptedModelProvider((
-        ScriptedModelStep(events=(completed("", calls=(missing, tool_call())),)),
-        ScriptedModelStep(events=(completed("done"),)),
-    ))
+    model = ScriptedModelProvider(
+        (
+            ScriptedModelStep(events=(completed("", calls=(missing, tool_call())),)),
+            ScriptedModelStep(events=(completed("done"),)),
+        )
+    )
     runtime, handle, loop, executor = await setup_loop(model, tools=(READ_TOOL,))
     run = await loop.execute(handle.run_id, CONTEXT)
     assert run.state == RunState.COMPLETED
     assert len(executor.calls) == 1
-    assert [m.tool_call_id for m in model.requests[-1].messages if m.role == "tool"] == ["missing", "call_1"]
+    assert [
+        m.tool_call_id for m in model.requests[-1].messages if m.role == "tool"
+    ] == ["missing", "call_1"]
 
 
 async def reply_pending_interaction(runtime, handle, snapshot, decision, key):
@@ -3615,61 +3662,94 @@ async def test_output_limit_preserves_partial_answer_and_bounded_continuation(
 async def test_image_followup_survives_approval_and_engine_restart(decision, tmp_path):
     from sagents.v2.runtime.artifact import FilesystemArtifactStore
     from sagents.v2.runtime.artifact.images import snapshot_image
+
     store = FilesystemArtifactStore(tmp_path / "artifacts")
     uri = await snapshot_image(store, b"snapshot-image")
 
     async def image_handler(call, context):
         result = await tool_handler(call, context)
-        return result.model_copy(update={"metadata": {"followup_user_message": {
-            "content": [
-                {"kind": "text", "text": "Inspect frame"},
-                {"kind": "image", "uri": uri, "mime_type": "image/jpeg"},
-            ],
-            "metadata": {
-                "tool_source": "analyze_image",
-                "tool_context": True,
-                "image_path": "/workspace/frame.png",
-            },
-        }}})
+        return result.model_copy(
+            update={
+                "metadata": {
+                    "followup_user_message": {
+                        "content": [
+                            {"kind": "text", "text": "Inspect frame"},
+                            {"kind": "image", "uri": uri, "mime_type": "image/jpeg"},
+                        ],
+                        "metadata": {
+                            "tool_source": "analyze_image",
+                            "tool_context": True,
+                            "image_path": "/workspace/frame.png",
+                        },
+                    }
+                }
+            }
+        )
 
-    calls = (tool_call("read_value"), ModelToolCall(
-        tool_call_id="call_2", name="write_value", arguments={"key": "b", "value": "2"},
-    ))
-    model = ScriptedModelProvider((
-        ScriptedModelStep(events=(completed("", calls=calls),)),
-        ScriptedModelStep(events=(completed("done"),)),
-    ))
-    runtime, handle, loop, executor = await setup_loop(model, handlers={
-        "read_value": image_handler, "write_value": tool_handler,
-    })
+    calls = (
+        tool_call("read_value"),
+        ModelToolCall(
+            tool_call_id="call_2",
+            name="write_value",
+            arguments={"key": "b", "value": "2"},
+        ),
+    )
+    model = ScriptedModelProvider(
+        (
+            ScriptedModelStep(events=(completed("", calls=calls),)),
+            ScriptedModelStep(events=(completed("done"),)),
+        )
+    )
+    runtime, handle, loop, executor = await setup_loop(
+        model,
+        handlers={
+            "read_value": image_handler,
+            "write_value": tool_handler,
+        },
+    )
     loop.context_assembler.artifact_store = store
     run = await loop.execute(handle.run_id, CONTEXT)
     assert run.state == RunState.SUSPENDED
     suspension, interaction = await _pending_interaction(runtime, run)
     await runtime.reply_interaction(
-        _approval_reply(run.run_id, run, suspension, interaction, decision, "image:approval"), CONTEXT,
+        _approval_reply(
+            run.run_id, run, suspension, interaction, decision, "image:approval"
+        ),
+        CONTEXT,
     )
-    loop = AgentLoopEngine(runtime=runtime, model=model,
-        tool_catalog=InMemoryToolCatalog((READ_TOOL, WRITE_TOOL)), tool_executor=executor,
+    loop = AgentLoopEngine(
+        runtime=runtime,
+        model=model,
+        tool_catalog=InMemoryToolCatalog((READ_TOOL, WRITE_TOOL)),
+        tool_executor=executor,
         context_assembler=DefaultContextAssembler(
             history_reader=runtime.session_store,
             artifact_store=FilesystemArtifactStore(tmp_path / "artifacts"),
-        ))
+        ),
+    )
     run = await loop.resume(run.run_id, CONTEXT)
     assert run.state == RunState.COMPLETED
     messages = tuple(m for m in model.requests[-1].messages if m.role != "system")
     assert [m.role for m in messages] == ["user", "assistant", "tool", "tool", "user"]
-    assert [m.tool_call_id for m in messages if m.role == "tool"] == ["call_1", "call_2"]
+    assert [m.tool_call_id for m in messages if m.role == "tool"] == [
+        "call_1",
+        "call_2",
+    ]
     assert messages[-1].content[-1].uri.startswith("data:image/jpeg;base64,")
     assert len([call for call in executor.calls if call.tool_call_id == "call_1"]) == 1
 
     command = await runtime.session_store.get_start_command(run.run_id)
     replay = await loop.ledger_rebuilder.rebuild(
-        command, run_id=run.run_id, through_run_sequence=run.last_run_sequence,
+        command,
+        run_id=run.run_id,
+        through_run_sequence=run.last_run_sequence,
     )
     batch = next(index for index, message in enumerate(replay) if message.tool_calls)
-    assert [message.role for message in replay[batch:batch + 4]] == [
-        "assistant", "tool", "tool", "user",
+    assert [message.role for message in replay[batch : batch + 4]] == [
+        "assistant",
+        "tool",
+        "tool",
+        "user",
     ]
     assert replay[batch + 3].content[-1].uri == uri
     assert all(
@@ -3679,29 +3759,37 @@ async def test_image_followup_survives_approval_and_engine_restart(decision, tmp
 
 
 @pytest.mark.asyncio
-async def test_reported_usage_calibrates_next_tool_step_in_live_loop():
+async def test_reported_usage_does_not_estimate_next_tool_step():
     first = completed("", calls=(tool_call(),))
-    first = first.model_copy(update={"response": first.response.model_copy(update={
-        "usage": UsageSummary(reported=True, input_tokens=2000,
-                              cached_input_tokens=1500, output_tokens=100),
-    })})
-    model = ScriptedModelProvider((
-        ScriptedModelStep(events=(first,)),
-        ScriptedModelStep(events=(completed("done"),)),
-    ))
+    first = first.model_copy(
+        update={
+            "response": first.response.model_copy(
+                update={
+                    "usage": UsageSummary(
+                        reported=True,
+                        input_tokens=2000,
+                        cached_input_tokens=1500,
+                        output_tokens=100,
+                    ),
+                }
+            )
+        }
+    )
+    model = ScriptedModelProvider(
+        (
+            ScriptedModelStep(events=(first,)),
+            ScriptedModelStep(events=(completed("done"),)),
+        )
+    )
     runtime, handle, loop, _ = await setup_loop(model)
     result = await loop.execute(handle.run_id, CONTEXT)
     assert result.state == RunState.COMPLETED
     before, after = model.requests
     budget = after.metadata["request_budget"]
-    assert budget["accounting_method"] == "reported_prefix_plus_estimated_delta"
-    assert budget["baseline_request_id"] == before.request_id
-    assert budget["baseline_input_tokens"] == 2000
-    assert budget["estimated_new_message_count"] == 2
-    added = after.messages[len(before.messages):]
-    assert budget["estimated_input_tokens"] == (
-        2000 + 128 + loop.step_request_builder.token_estimator.estimate(added)
-    )
+    assert budget["accounting_method"] == "provider_reported"
+    assert "estimated_input_tokens" not in budget
+    assert after.messages[: len(before.messages)] == before.messages
+
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("language", ["zh", "en", "pt"])
@@ -3813,24 +3901,33 @@ async def test_output_self_check_numeric_repair_reaches_author_and_completes():
     from sagents.v2.agent.policy.output_self_check import OutputSelfCheckPolicy
 
     bad = '```openui\nroot = Stack([NumberInput("cups", "Cups", 100, 0, 1000, 1), Computed("Unit cost", "divide", [1000, "cups"])])\n```'
-    good = bad.replace('100, 0, 1000, 1', '100, 1, 1000, 1')
+    good = bad.replace("100, 0, 1000, 1", "100, 1, 1000, 1")
+
     def assert_feedback(request):
         text = request.messages[-1].content[0].text
         assert "[output.self_check]" in text
         assert "When cups=0" in text
         assert "complete replacement OpenUI block" in text
 
-    model = ScriptedModelProvider((
-        ScriptedModelStep(events=(completed(bad),)),
-        ScriptedModelStep(assertion=assert_feedback, events=(completed(good),)),
-    ))
+    model = ScriptedModelProvider(
+        (
+            ScriptedModelStep(events=(completed(bad),)),
+            ScriptedModelStep(assertion=assert_feedback, events=(completed(good),)),
+        )
+    )
     delegate = AsyncMock()
-    delegate.decide.return_value = ContinuationDecision(action=ContinuationAction.COMPLETE_RUN, reason_code="done", reason="done")
+    delegate.decide.return_value = ContinuationDecision(
+        action=ContinuationAction.COMPLETE_RUN, reason_code="done", reason="done"
+    )
     parser = OpenUiParser()
     try:
-        runtime, handle, loop, executor = await setup_loop(model, continuation_policy=OutputSelfCheckPolicy(
-            delegate, OpenUiOutputChecker(parser),
-        ))
+        runtime, handle, loop, executor = await setup_loop(
+            model,
+            continuation_policy=OutputSelfCheckPolicy(
+                delegate,
+                OpenUiOutputChecker(parser),
+            ),
+        )
         result = await loop.execute(handle.run_id, CONTEXT)
         assert result.state == RunState.COMPLETED
         assert not executor.calls
@@ -4513,3 +4610,310 @@ async def test_parallel_tool_context_survives_later_uncertain_sibling():
     ]
     assert len(followups) == 1
     assert followups[0].content[0].text == "Supplemental tool context"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("recover", [False, True])
+@pytest.mark.parametrize("tool_name", ["read_value", "write_value"])
+async def test_transient_model_retries_preserve_completed_tool_work(
+    monkeypatch, recover, tool_name
+):
+    monkeypatch.setattr(AgentLoopEngine, "_PROVIDER_RETRY_BASE_SECONDS", 0)
+    error = RuntimeErrorInfo(
+        code="model.provider_transient",
+        category=ErrorCategory.PROVIDER_TRANSIENT,
+        message="upstream unavailable",
+        retryable=True,
+        safe_to_resume=True,
+    )
+    steps = [ScriptedModelStep(events=(completed(calls=(tool_call(tool_name),)),))]
+    steps.extend([ScriptedModelStep(events=(), error=error)] * (3 if recover else 4))
+    if recover:
+        steps.append(ScriptedModelStep(events=(completed("done"),)))
+    model = ScriptedModelProvider(tuple(steps))
+    runtime, handle, loop, _ = await setup_loop(
+        model,
+        tool_policy=DefaultToolPolicy(approval_strategy=ApprovalStrategy.AUTO_APPROVE),
+    )
+    result = await loop.execute(handle.run_id, CONTEXT)
+    events = await runtime.session_store.read_events(handle.run_id)
+    assert result.state == (RunState.COMPLETED if recover else RunState.SUSPENDED)
+    assert len([e for e in events if e.type == "step.retry_scheduled"]) == 3
+    assert len([e for e in events if e.type == "tool.call.started"]) == 1
+    assert all(req.messages == model.requests[1].messages for req in model.requests[2:])
+
+
+@pytest.mark.asyncio
+async def test_transient_model_failure_cancels_partial_output_before_retry(monkeypatch):
+    monkeypatch.setattr(AgentLoopEngine, "_PROVIDER_RETRY_BASE_SECONDS", 0)
+
+    class PartialFailureModel(ScriptedModelProvider):
+        async def _stream(self, request):
+            self.requests.append(request)
+            if len(self.requests) == 2:
+                yield completed("done")
+                return
+            yield ModelStreamEvent(kind=ModelEventKind.TEXT_DELTA, delta="partial")
+            raise SageV2Error(
+                RuntimeErrorInfo(
+                    code="model.provider_transient",
+                    category=ErrorCategory.PROVIDER_TRANSIENT,
+                    message="upstream unavailable",
+                    retryable=True,
+                    safe_to_resume=True,
+                )
+            )
+
+    model = PartialFailureModel(())
+    runtime, handle, loop, _ = await setup_loop(model)
+    result = await loop.execute(handle.run_id, CONTEXT)
+    assert result.state == RunState.COMPLETED
+    assert len(model.requests) == 2
+    events = await runtime.session_store.read_events(handle.run_id)
+    assert len([e for e in events if e.type == "step.retry_scheduled"]) == 1
+    partial = [
+        e.data.item
+        for e in events
+        if e.type == "item.completed" and e.data.item.status.value == "cancelled"
+    ]
+    assert len(partial) == 1
+    assert all("partial" not in str(m.content) for m in model.requests[1].messages)
+
+
+@pytest.mark.asyncio
+async def test_cancel_during_provider_backoff_stops_without_another_request(
+    monkeypatch,
+):
+    model = ScriptedModelProvider(
+        (
+            ScriptedModelStep(
+                events=(),
+                error=RuntimeErrorInfo(
+                    code="model.provider_transient",
+                    category=ErrorCategory.PROVIDER_TRANSIENT,
+                    message="upstream unavailable",
+                    retryable=True,
+                    safe_to_resume=True,
+                ),
+            ),
+        )
+    )
+    runtime, handle, loop, _ = await setup_loop(model)
+    monkeypatch.setattr(loop, "_PROVIDER_RETRY_BASE_SECONDS", 30)
+    waiting = asyncio.Event()
+    original = loop._wait_for_model_retry
+
+    async def wait(run_id, delay):
+        waiting.set()
+        await original(run_id, delay)
+
+    monkeypatch.setattr(loop, "_wait_for_model_retry", wait)
+    execution = asyncio.create_task(loop.execute(handle.run_id, CONTEXT))
+    await asyncio.wait_for(waiting.wait(), 1)
+    current = await runtime.get_run(handle.run_id)
+    await runtime.cancel_run(
+        CancelRun(
+            run_id=handle.run_id,
+            expected_revision=current.revision,
+            idempotency_key="cancel-provider-backoff",
+        ),
+        CONTEXT,
+    )
+    result = await asyncio.wait_for(execution, 1)
+    assert result.state == RunState.CANCELLED
+    assert len(model.requests) == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("upstream_code", ["context_length_exceeded", "server_error"])
+@pytest.mark.parametrize("recover", [False, True])
+async def test_responses_stream_failure_recovers_through_real_adapter_and_loop(
+    monkeypatch, upstream_code, recover
+):
+    from types import SimpleNamespace
+    from sagents.v2.context import (
+        InMemoryConversationSummaryStore,
+        PersistentSummaryContextReducer,
+    )
+    from sagents.v2.model import OpenAIResponsesConfig, OpenAIResponsesModelProvider
+
+    monkeypatch.setattr(AgentLoopEngine, "_PROVIDER_RETRY_BASE_SECONDS", 0)
+    summary_requests = []
+
+    class Summary:
+        async def summarize(self, request):
+            summary_requests.append(request)
+            return "Earlier work verified; continue the current request."
+
+    class HistoryAssembler(DefaultContextAssembler):
+        async def initial_ledger(self, command, *, run_id=None):
+            return (
+                ModelMessage(
+                    role="user", content=(TextBlock(text="old history " * 1_500),)
+                ),
+                ModelMessage(role="assistant", content=(TextBlock(text="old answer"),)),
+                ModelMessage(
+                    role="user", content=(TextBlock(text="current exact request"),)
+                ),
+            )
+
+    class Stream:
+        def __init__(self, events):
+            self.events = events
+            self.closed = False
+
+        def __aiter__(self):
+            return self.iterate()
+
+        async def iterate(self):
+            for event in self.events:
+                yield event
+
+        async def close(self):
+            self.closed = True
+
+    class Responses:
+        def __init__(self):
+            self.calls = []
+            self.streams = []
+
+        async def create(self, **payload):
+            self.calls.append(payload)
+            events = (
+                (
+                    {
+                        "type": "error",
+                        "code": upstream_code,
+                        "message": "upstream rejected request",
+                    },
+                )
+                if len(self.calls) == 1 or not recover
+                else (
+                    {"type": "response.output_text.delta", "delta": "done"},
+                    {
+                        "type": "response.completed",
+                        "response": {
+                            "id": "response_done",
+                            "status": "completed",
+                            "output": [
+                                {
+                                    "type": "message",
+                                    "role": "assistant",
+                                    "content": [
+                                        {"type": "output_text", "text": "done"}
+                                    ],
+                                }
+                            ],
+                        },
+                    },
+                )
+            )
+            stream = Stream(events)
+            self.streams.append(stream)
+            return stream
+
+    responses = Responses()
+    model = OpenAIResponsesModelProvider(
+        OpenAIResponsesConfig(
+            model="fake-primary",
+            capabilities=ModelCapabilities(
+                supports_streaming=True,
+                supports_tools=True,
+                supports_parallel_tool_calls=True,
+                supports_reasoning=True,
+                supports_multimodal_input=True,
+                supports_structured_output=True,
+            ),
+        ),
+        client=SimpleNamespace(responses=responses),
+    )
+    reducer = PersistentSummaryContextReducer(
+        InMemoryConversationSummaryStore(),
+        summarizer=Summary(),
+        summary_target_tokens=192,
+    )
+    assembler = HistoryAssembler(
+        budget=ContextBudget(max_input_tokens=16_000, reserve_output_tokens=2_048),
+        reducer=reducer,
+    )
+    runtime, handle, loop, _ = await setup_loop(
+        model, tools=(), context_assembler=assembler
+    )
+    assembler.history = SimpleNamespace(reader=runtime.session_store)
+    result = await loop.execute(handle.run_id, CONTEXT)
+    assert result.state == (RunState.COMPLETED if recover else RunState.SUSPENDED)
+    context_error = upstream_code == "context_length_exceeded"
+    assert len(responses.calls) == (
+        (2 if recover else 3) if context_error else (2 if recover else 4)
+    )
+    assert all(stream.closed for stream in responses.streams)
+    events = await runtime.session_store.read_events(handle.run_id)
+    retries = [e for e in events if e.type == "step.retry_scheduled"]
+    assert len(retries) == (
+        (1 if recover else 3) if context_error else (1 if recover else 3)
+    )
+    assert any(e.type == "interaction.requested" for e in events) != recover
+    if context_error:
+        assert summary_requests
+        assert "<conversation_summary>" in str(responses.calls[1]["input"])
+        assert "current exact request" in str(responses.calls[1]["input"])
+        assert "old history " * 100 not in str(responses.calls[1]["input"])
+        assert retries[0].data.error.code == "model.context_window_exceeded"
+    else:
+        assert not summary_requests
+        assert responses.calls[0]["input"] == responses.calls[1]["input"]
+        assert retries[0].data.error.code == "model.provider_transient"
+
+
+@pytest.mark.asyncio
+async def test_context_recovery_stops_after_six_retries_without_executing_tools():
+    from sagents.v2.context import (
+        InMemoryConversationSummaryStore,
+        PersistentSummaryContextReducer,
+    )
+
+    overflow = RuntimeErrorInfo(
+        code="model.context_window_exceeded",
+        category=ErrorCategory.VALIDATION,
+        message="API context rejected",
+        safe_to_resume=True,
+    )
+    model = ScriptedModelProvider(
+        tuple(ScriptedModelStep(events=(), error=overflow) for _ in range(20))
+    )
+
+    class Summary:
+        async def summarize(self, request):
+            return "earlier facts"
+
+    class History(DefaultContextAssembler):
+        async def initial_ledger(self, command, *, run_id=None):
+            return (
+                *(
+                    ModelMessage(
+                        role="assistant", content=(TextBlock(text=f"fact {i} " * 1000),)
+                    )
+                    for i in range(100)
+                ),
+                *(await super().initial_ledger(command, run_id=run_id)),
+            )
+
+    assembler = History(
+        reducer=PersistentSummaryContextReducer(
+            InMemoryConversationSummaryStore(),
+            summarizer=Summary(),
+            # Leave enough history to exercise the six-retry limit rather than
+            # exhausting compression progress with the default recent window.
+            protected_recent_units=100,
+        )
+    )
+    runtime, handle, loop, executor = await setup_loop(
+        model, context_assembler=assembler
+    )
+    result = await loop.execute(handle.run_id, CONTEXT)
+    assert result.state == RunState.SUSPENDED
+    assert len(model.requests) == 7
+    events = await runtime.session_store.read_events(handle.run_id)
+    assert len([e for e in events if e.type == "step.retry_scheduled"]) == 6
+    assert [e.data.attempt for e in events if e.type == "step.retry_scheduled"] == list(range(1, 7))
+    assert not any(e.type == "tool.call.started" for e in events)

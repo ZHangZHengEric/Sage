@@ -255,13 +255,13 @@ PluginDeclaration：id 必填；version 可选字符串，默认 null；config �
 
 ```yaml
 plugins:
-  - id: example.context.byte-estimator
-    config: {bytes_per_token: 4.0}
+  - id: example.context.reference-compactor
+    config: {minimum_characters: 4}
 runtime:
   capabilities:
-    context.token-estimator:
-      plugin: example.context.byte-estimator
-      config: {bytes_per_token: 3.5}
+    context.unit-compactor:
+      plugin: example.context.reference-compactor
+      config: {minimum_characters: 3}
 ```
 
 在宿主选择这份 runtime 且已注册示例插件时，selection.config 的 3.5 优先于插件声明中的 4.0。普通 load_agent 不会因为看到这段 runtime 就自动改变 App。自定义插件参数同样经过 schema/config_model 校验，资源同样由作用域管理；插件实现保持独立。

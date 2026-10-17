@@ -14,7 +14,6 @@ from pydantic import Field
 from sagents.v2.prompt_i18n import prompt_language
 from sagents.v2.contracts.common import StrictModel, new_id, utc_now
 from sagents.v2.context.contracts import ContextReductionScope
-from sagents.v2.context.token_estimator import TokenEstimator
 from sagents.v2.model.contracts import ModelMessage
 from sagents.v2.contracts.items import (
     AudioBlock,
@@ -91,7 +90,7 @@ class ConversationSummary(StrictModel):
     covered_message_digests: tuple[str, ...]
     source_message_count: int = Field(ge=1)
     text: str
-    estimated_tokens: int = Field(ge=0)
+    estimated_tokens: int = Field(default=0, ge=0)  # legacy snapshot field
     source_sequence: int = Field(default=0, ge=0)
     created_at: datetime
     updated_at: datetime
@@ -181,11 +180,9 @@ def create_summary(
     covered_messages: tuple[ModelMessage, ...],
     covered_digests: tuple[str, ...],
     text: str,
-    estimator: TokenEstimator,
 ) -> ConversationSummary:
     now = utc_now()
     source_payload = "\n".join(covered_digests).encode()
-    summary_message = ModelMessage(role="system", content=(TextBlock(text=text),))
     return ConversationSummary(
         summary_id=previous.summary_id if previous else new_id("context_summary"),
         context_key=scope.context_key,
@@ -195,7 +192,6 @@ def create_summary(
         covered_message_digests=covered_digests,
         source_message_count=len(covered_messages),
         text=text,
-        estimated_tokens=estimator.estimate((summary_message,)),
         source_sequence=scope.source_sequence,
         created_at=previous.created_at if previous else now,
         updated_at=now,

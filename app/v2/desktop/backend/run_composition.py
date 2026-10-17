@@ -366,13 +366,11 @@ class DesktopRunCompositionMixin(DesktopRunEnvironmentMixin):
             owner_handles.extend(ports.scope_handles)
         memory_query_generator = ports.memory_query_generator
         summarizer = ports.summarizer
-        token_estimator = ports.token_estimator
         context_reducer = ports.context_reducer
         tool_selection_policy = ports.tool_selection_policy
         factory = AgentCompositionFactory(
             self.driver_runtime,
             context_components=ContextComponentBundle(
-                token_estimator=token_estimator,
                 summary_store=self.summary_store,
                 summarizer=summarizer,
                 reducer=context_reducer,

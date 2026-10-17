@@ -3100,7 +3100,6 @@ String _runtimeComponentName(
   'agent.continuation-policy' =>
     l10n.languageCode == 'zh' ? 'Run 完成判定' : 'Run completion policy',
   'skill.loading' => l10n.text('component.skillLoading.name'),
-  'context.token-estimator' => l10n.text('component.tokenEstimator.name'),
   'context.reducer' => l10n.text('component.reducer.name'),
   'context.summarizer' =>
     l10n.languageCode == 'zh' ? '上下文摘要器' : 'Context summarizer',
@@ -3132,7 +3131,6 @@ String _runtimeComponentValue(
     l10n.languageCode == 'zh'
         ? '决定 Agent 继续调用工具、请求用户输入、完成或失败'
         : 'Decides whether an Agent continues, asks the user, completes, or fails',
-  'context.token-estimator' => l10n.text('component.tokenEstimator.value'),
   'context.reducer' => l10n.text('component.reducer.value'),
   'context.summarizer' =>
     l10n.languageCode == 'zh'
@@ -3191,12 +3189,6 @@ String _runtimePluginName(
     l10n.languageCode == 'zh'
         ? '结束工具（turn_status）'
         : 'Completion Tool (turn_status)',
-  'sage.context.token-estimator.json-heuristic' ||
-  'json-heuristic' => l10n.text('component.plugin.jsonHeuristic.name'),
-  'sage.context.token-estimator.unicode-heuristic' ||
-  'unicode-heuristic' => l10n.text('component.plugin.unicodeHeuristic.name'),
-  'sage.context.token-estimator.tiktoken' ||
-  'tiktoken' => l10n.text('component.plugin.tiktoken.name'),
   'sage.context.reducer.persistent-summary' ||
   'persistent-summary' => l10n.text('component.plugin.persistentSummary.name'),
   'sage.context.reducer.window' ||
@@ -3280,12 +3272,6 @@ String _runtimePluginValue(
     l10n.languageCode == 'zh'
         ? '由 turn_status 明确返回完成、继续、请求输入、阻塞或失败'
         : 'Uses turn_status to explicitly complete, continue, request input, block, or fail',
-  'sage.context.token-estimator.json-heuristic' ||
-  'json-heuristic' => l10n.text('component.plugin.jsonHeuristic.value'),
-  'sage.context.token-estimator.unicode-heuristic' ||
-  'unicode-heuristic' => l10n.text('component.plugin.unicodeHeuristic.value'),
-  'sage.context.token-estimator.tiktoken' ||
-  'tiktoken' => l10n.text('component.plugin.tiktoken.value'),
   'sage.context.reducer.persistent-summary' ||
   'persistent-summary' => l10n.text('component.plugin.persistentSummary.value'),
   'sage.context.reducer.window' ||

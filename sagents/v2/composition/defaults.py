@@ -6,7 +6,7 @@ from sagents.v2.package.manifest.runtime import CapabilitySelection, RuntimeConf
 DEFAULT_COMPONENTS = {
     "skill.loading": "sage.skill.loading.lazy",
     "agent.continuation-policy": "sage.agent.continuation.llm-judge",
-    "context.token-estimator": "sage.context.token-estimator.json-heuristic",
+    "context.unit-compactor": "sage.context.unit-compactor.reference",
     "context.reducer": "sage.context.reducer.persistent-summary",
     "context.summarizer": "sage.context.summarizer.model",
     "context.summary-store": "sage.context.summary-store.session-derived",

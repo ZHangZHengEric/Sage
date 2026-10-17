@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from sagents.v2.context.auxiliary import stream_auxiliary_model
+
 import asyncio
 import json
 
@@ -40,7 +42,9 @@ class LLMMemoryRecallQueryGenerator:
         self.language = language
         self.timeout_seconds = float(timeout_seconds)
 
-    async def generate(self, user_input: str, *, run_id: str, language: str | None = None) -> str:
+    async def generate(
+        self, user_input: str, *, run_id: str, language: str | None = None
+    ) -> str:
         source = user_input.strip()
         if not source:
             return ""
@@ -62,7 +66,7 @@ class LLMMemoryRecallQueryGenerator:
         response = None
         try:
             async with asyncio.timeout(self.timeout_seconds):
-                stream = self.model.stream(request)
+                stream = stream_auxiliary_model(self.model, request)
                 try:
                     async for event in stream:
                         if event.response is not None:

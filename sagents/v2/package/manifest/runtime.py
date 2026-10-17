@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import Field
+from pydantic import Field, field_validator, model_validator
 
 from sagents.v2.contracts.common import Identifier, StrictModel
 from sagents.v2.runtime.extensions.contracts import ExtensionScope
@@ -17,6 +17,20 @@ class CapabilitySelection(StrictModel):
     name: Identifier = "default"
     scope: ExtensionScope | None = None
     config: dict[str, Any] = Field(default_factory=dict)
+
+    @model_validator(mode="before")
+    @classmethod
+    def retire_skill_estimate_limit(cls, value):
+        if isinstance(value, dict) and value.get("plugin") == "sage.skill.loading.lazy":
+            config = value.get("config")
+            if isinstance(config, dict) and "max_active_tokens" in config:
+                return {
+                    **value,
+                    "config": {
+                        k: v for k, v in config.items() if k != "max_active_tokens"
+                    },
+                }
+        return value
 
 
 CapabilityBinding = CapabilitySelection | tuple[CapabilitySelection, ...]
@@ -34,6 +48,17 @@ class RuntimeConfig(StrictModel):
     required_guarantees: dict[Identifier, dict[Identifier, Any]] = Field(
         default_factory=dict
     )
+
+    @field_validator("capabilities", mode="before")
+    @classmethod
+    def retire_input_estimator(cls, value):
+        if isinstance(value, dict):
+            return {
+                key: item
+                for key, item in value.items()
+                if key != "context.token-estimator"
+            }
+        return value
 
     def selections(self, capability: str) -> tuple[CapabilitySelection, ...]:
         value = self.capabilities.get(capability)
@@ -61,12 +86,16 @@ def merge_capability_selections(defaults, overrides):
     merged = dict(defaults)
     for capability, selection in overrides.items():
         previous = merged.get(capability)
-        if (isinstance(previous, CapabilitySelection)
-                and isinstance(selection, CapabilitySelection)
-                and previous.plugin == selection.plugin
-                and previous.name == selection.name):
-            selection = selection.model_copy(update={
-                "config": {**previous.config, **selection.config},
-            })
+        if (
+            isinstance(previous, CapabilitySelection)
+            and isinstance(selection, CapabilitySelection)
+            and previous.plugin == selection.plugin
+            and previous.name == selection.name
+        ):
+            selection = selection.model_copy(
+                update={
+                    "config": {**previous.config, **selection.config},
+                }
+            )
         merged[capability] = selection
     return merged

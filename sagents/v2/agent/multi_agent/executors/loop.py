@@ -88,9 +88,9 @@ class LoopChildRunExecutor:
         workspace_policy: WorkspaceSharingPolicy,
         context: RequestContext,
     ) -> DelegationResult:
-        """Create a fork for new work or continue the Agent's existing child Session.
+        """Create an independent conversation or continue an existing child.
 
-        A new task forks the parent Session to isolate canonical history. A
+        A new task starts with only its user task message in a serial Session. A
         follow-up task with `child_session_id` starts a serial Run in that child
         Session, preserving the child Agent's own conversation.
         """
@@ -100,7 +100,7 @@ class LoopChildRunExecutor:
             # capabilities but execute this delegated invocation as a leaf.
             descriptor = descriptor.model_copy(update={"allow_delegation": False})
 
-        parent = await self.runtime.get_run(parent_run_id)
+        await self.runtime.get_run(parent_run_id)
         parent_command = await self.runtime.session_store.get_start_command(
             parent_run_id
         )
@@ -149,7 +149,7 @@ class LoopChildRunExecutor:
             deep=True,
         )
         command = StartRun(
-            session_id=task.child_session_id if continuing else parent.session_id,
+            session_id=task.child_session_id if continuing else None,
             agent_id=descriptor.agent_id,
             input=(
                 InputItem(
@@ -159,11 +159,7 @@ class LoopChildRunExecutor:
                 ),
             ),
             config=config,
-            session_concurrency_mode=(
-                SessionConcurrencyMode.SERIAL
-                if continuing
-                else SessionConcurrencyMode.FORK
-            ),
+            session_concurrency_mode=SessionConcurrencyMode.SERIAL,
             resolved_spec_hash=self.resolved_spec_hash,
             idempotency_key=f"delegate:{parent_run_id}:{task.task_id}",
             parent_run_id=parent_run_id,

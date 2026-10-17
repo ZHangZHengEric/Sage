@@ -49,7 +49,11 @@ _DELEGATION_INPUT_SCHEMA: dict[str, Any] = {
                     "content": {
                         "type": "string",
                         "minLength": 1,
-                        "description": "Detailed concrete task for the child agent.",
+                        "description": (
+                            "The user task message sent to the child. Include the goal, "
+                            "necessary background, constraints, resource references and "
+                            "acceptance criteria; new Sessions do not inherit parent history."
+                        ),
                     },
                     "task_name": {
                         "type": "string",
@@ -60,14 +64,16 @@ _DELEGATION_INPUT_SCHEMA: dict[str, Any] = {
                     "original_task": {
                         "type": "string",
                         "description": (
-                            "Optional original user request for additional context. "
-                            "Defaults to content when omitted."
+                            "Optional original request retained as tracing metadata, not "
+                            "automatically sent as a child message. Put required context "
+                            "in content. Defaults to content when omitted."
                         ),
                     },
                     "session_id": {
                         "type": "string",
                         "description": (
-                            "Optional existing child session ID to continue. Omit for a new task; "
+                            "Optional existing child session ID: append content and retain "
+                            "that child's own history. Omit to create a new Session; "
                             "never pass the current parent session ID."
                         ),
                     },
@@ -264,7 +270,11 @@ class _FibreToolMethods(_DelegationMethods):
         return descriptor.model_dump(mode="json")
 
     @tool(
-        description="Delegate concrete tasks to existing sub-agents concurrently.",
+        description=(
+            "Delegate self-contained tasks to existing sub-agents concurrently. "
+            "A new Session receives only content, not parent history; an existing "
+            "child Session retains its own history and receives a new user task."
+        ),
         input_schema=_DELEGATION_INPUT_SCHEMA,
     )
     async def sys_delegate_task(
@@ -281,7 +291,11 @@ class _FibreToolMethods(_DelegationMethods):
 
 class _TeamToolMethods(_DelegationMethods):
     @tool(
-        description="Delegate concrete tasks to existing Team members concurrently.",
+        description=(
+            "Delegate self-contained tasks to existing Team members concurrently. "
+            "A new Session receives only content, not parent history; an existing "
+            "child Session retains its own history and receives a new user task."
+        ),
         input_schema=_DELEGATION_INPUT_SCHEMA,
     )
     async def sys_team_delegate_task(

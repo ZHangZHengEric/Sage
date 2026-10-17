@@ -81,7 +81,7 @@ def stream_incomplete_error(*, provider: str, response_started: bool) -> SageV2E
             message=(
                 f"{provider} stream ended before a terminal response event was received"
             ),
-            retryable=not response_started,
+            retryable=True,
             safe_to_resume=True,
             metadata={
                 "provider": provider,
@@ -196,6 +196,16 @@ _CONTEXT_WINDOW_MARKERS = (
 )
 
 
+class ProviderStreamFailure(RuntimeError):
+    """Structured provider rejection delivered inside a successful HTTP stream."""
+
+    def __init__(self, message, *, code=None, body=None, status_code=None):
+        super().__init__(message)
+        self.code = code
+        self.body = body
+        self.status_code = status_code
+
+
 def provider_error(exc: Exception, *, response_started: bool = False) -> SageV2Error:
     """Classify common HTTP/SDK failures without exposing credential material."""
 
@@ -212,12 +222,44 @@ def provider_error(exc: Exception, *, response_started: bool = False) -> SageV2E
         )
         if value is not None
     ).lower()
-    context_overflow = status in {400, 413, 422} and (
-        any(marker in details for marker in _CONTEXT_WINDOW_MARKERS)
-        or ("input token count" in details and "exceeds" in details)
+    provider_code = getattr(exc, "code", None)
+    context_overflow = (
+        status in {400, 413, 422}
+        and (
+            any(marker in details for marker in _CONTEXT_WINDOW_MARKERS)
+            or ("input token count" in details and "exceeds" in details)
+        )
+    ) or (
+        status in {None, 200}
+        and (
+            provider_code
+            in {"context_length_exceeded", "context_window_exceeded", "prompt_too_long"}
+            or any(marker in details for marker in _CONTEXT_WINDOW_MARKERS[:-1])
+        )
     )
-    retryable = status in {408, 409, 425, 429} or (
-        isinstance(status, int) and status >= 500
+    retryable = (
+        status in {408, 409, 425, 429}
+        or (isinstance(status, int) and status >= 500)
+        or isinstance(exc, (TimeoutError, ConnectionError))
+        or (
+            any(
+                cls.__name__
+                in {"APIConnectionError", "APITimeoutError", "TransportError"}
+                for cls in type(exc).__mro__
+            )
+        )
+        or (
+            status in {None, 200}
+            and provider_code
+            in {
+                "server_error",
+                "internal_server_error",
+                "rate_limit_exceeded",
+                "overloaded_error",
+                "api_error",
+                "response_failed",
+            }
+        )
     )
     if context_overflow:
         return SageV2Error(
@@ -225,9 +267,9 @@ def provider_error(exc: Exception, *, response_started: bool = False) -> SageV2E
                 code="model.context_window_exceeded",
                 category=ErrorCategory.VALIDATION,
                 message="provider rejected the final request as exceeding its context window",
-                retryable=not response_started,
+                retryable=True,
                 safe_to_resume=True,
-                provider_code=str(status),
+                provider_code=str(status) if status is not None else provider_code,
                 metadata={"response_started": response_started},
             )
         )
@@ -244,6 +286,7 @@ def provider_error(exc: Exception, *, response_started: bool = False) -> SageV2E
             message=str(exc),
             retryable=retryable,
             safe_to_resume=True,
-            provider_code=str(status) if status is not None else None,
+            provider_code=str(status) if status is not None else provider_code,
+            metadata={"response_started": response_started},
         )
     )

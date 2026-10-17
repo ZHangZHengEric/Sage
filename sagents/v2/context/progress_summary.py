@@ -1,11 +1,72 @@
 """Bounded, rolling task facts; source bodies never become the progress ledger."""
+
 from __future__ import annotations
 
 import json
 import re
-from sagents.v2.context.summary import SummarizationRequest, summary_safe_block_text
+import hashlib
+from sagents.v2.contracts.conversation import is_user_request
+from sagents.v2.context.summary import (
+    SummarizationRequest,
+    summary_safe_block_text,
+    _redact_data_urls,
+)
 
-FIELDS = ('summary', 'decisions', 'open_tasks', 'files_touched', 'commands_run', 'important_errors', 'user_requirements')
+FIELDS = (
+    "summary",
+    "decisions",
+    "open_tasks",
+    "files_touched",
+    "commands_run",
+    "important_errors",
+    "user_requirements",
+)
+
+
+def _tool_target(args: dict, payload: object) -> str:
+    """Identify a resource/version before falling back to a bounded selector."""
+    result = payload if isinstance(payload, dict) else {}
+    item = result.get("item") if isinstance(result.get("item"), dict) else {}
+    item_id = args.get("item_id") or result.get("item_id") or item.get("item_id")
+    if item_id:
+        selected = item.get("selected_run") or item.get("latest_run") or {}
+        if not isinstance(selected, dict):
+            selected = {}
+        identity = {"item_id": item_id}
+        project = args.get("project_id") or result.get("project_id")
+        run = args.get("run_id") or result.get("run_id") or selected.get("run_id")
+        if project:
+            identity["project_id"] = project
+        if run:
+            identity["run_id"] = run
+        return json.dumps(
+            identity, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+        )
+    target = next(
+        (
+            _redact_data_urls(str(args[k]))
+            for k in (
+                "file_path",
+                "path",
+                "command",
+                "query",
+                "skill_name",
+                "project_id",
+            )
+            if args.get(k)
+        ),
+        "",
+    )
+    if len(target) > 300:
+        return target[:280] + "…#" + hashlib.sha256(target.encode()).hexdigest()[:16]
+    if not target and args:
+        return (
+            "args#"
+            + hashlib.sha256(
+                json.dumps(args, sort_keys=True, ensure_ascii=False).encode()
+            ).hexdigest()[:16]
+        )
+    return target
 
 
 def task_snapshot(request: SummarizationRequest, narrative: dict | None = None) -> dict:
@@ -15,27 +76,47 @@ def task_snapshot(request: SummarizationRequest, narrative: dict | None = None) 
             previous = json.loads(request.previous_summary)
         except (ValueError, TypeError):
             # Migrate old wrappers once, without copying their nested history.
-            text = re.sub(r'(?m)^Previous summary:\s*|^New history:\s*', '', request.previous_summary)
-            previous = {'summary': text[:600]}
+            text = re.sub(
+                r"(?m)^Previous summary:\s*|^New history:\s*",
+                "",
+                request.previous_summary,
+            )
+            previous = {"summary": text[:600]}
     if not isinstance(previous, dict):
         previous = {}
-    result = {key: list(previous.get(key, [])) if isinstance(previous.get(key), list) else [] for key in FIELDS[1:]}
-    result['summary'] = str(previous.get('summary', 'Historical task facts; continue the latest user request.'))[:800]
+    result = {
+        key: list(previous.get(key, [])) if isinstance(previous.get(key), list) else []
+        for key in FIELDS[1:]
+    }
+    result["summary"] = str(
+        previous.get(
+            "summary", "Historical task facts; continue the latest user request."
+        )
+    )[:800]
     if narrative:
         result.update(narrative)
     calls = {}
-    outcomes = dict(previous.get('tool_outcomes', {})) if isinstance(previous.get('tool_outcomes'), dict) else {}
-    todo = previous.get('todo_state_at_compaction_boundary')
+    outcomes = (
+        dict(previous.get("tool_outcomes", {}))
+        if isinstance(previous.get("tool_outcomes"), dict)
+        else {}
+    )
+    todo = previous.get("todo_state_at_compaction_boundary")
     for message in request.messages:
-        text = '\n'.join(summary_safe_block_text(b) for b in message.content)
-        if message.role == 'user' and narrative is None:
-            result['user_requirements'].append(text[:1000])
+        text = "\n".join(summary_safe_block_text(b) for b in message.content)
+        if is_user_request(message) and narrative is None:
+            result["user_requirements"].append(text[:1000])
         for block in message.content:
-            if getattr(block, 'kind', 'text') in ('image', 'audio', 'file', 'resource_ref'):
-                result['decisions'].append(summary_safe_block_text(block))
+            if getattr(block, "kind", "text") in (
+                "image",
+                "audio",
+                "file",
+                "resource_ref",
+            ):
+                result["decisions"].append(summary_safe_block_text(block))
         for call in message.tool_calls:
             calls[call.tool_call_id] = call
-        if message.role != 'tool':
+        if message.role != "tool":
             continue
         call = calls.get(message.tool_call_id)
         if call is None:
@@ -45,60 +126,140 @@ def task_snapshot(request: SummarizationRequest, narrative: dict | None = None) 
             payload = json.loads(text)
         except (ValueError, TypeError):
             payload = {}
-        failed = text.startswith('tool.') or bool(message.metadata.get('error')) or (isinstance(payload, dict) and (payload.get('error') or payload.get('success') is False or payload.get('status') in ('error', 'failed')))
-        target = next((str(args[k]) for k in ('file_path', 'path', 'command', 'query', 'skill_name') if args.get(k)), '')[:300]
-        key = f'{name} {target}'
-        fact = {'status': 'failed' if failed else 'completed'}
+        failed = (
+            text.startswith("tool.")
+            or bool(message.metadata.get("error"))
+            or (
+                isinstance(payload, dict)
+                and (
+                    payload.get("error")
+                    or payload.get("success") is False
+                    or (
+                        isinstance(payload.get("exit_code"), int)
+                        and payload["exit_code"] != 0
+                    )
+                    or payload.get("status") in ("error", "failed")
+                )
+            )
+        )
+        target = _tool_target(args, payload)
+        key = f"{name} {target}"
+        fact = {"status": "failed" if failed else "completed"}
+        if (
+            not failed
+            and isinstance(payload, dict)
+            and payload.get("status") in {"running", "pending", "queued"}
+        ):
+            fact["status"] = payload["status"]
         if failed:
-            fact['error'] = text[:400]
-            result['important_errors'].append(f'{key}: {text[:300]}')
-        if name in ('file_write', 'file_update') and not failed:
-            result['files_touched'].append(target)
-        if name in ('execute_shell_command', 'shell'):
-            result['commands_run'].append(f'{target}: {fact["status"]}')
-        if name == 'todo_write' and not failed:
-            todo = args.get('tasks', args.get('todos', args))
+            fact["error"] = text[:400]
+            result["important_errors"].append(f"{key}: {text[:300]}")
+        if name in ("file_write", "file_update") and not failed:
+            result["files_touched"].append(target)
+        if name in ("execute_shell_command", "shell"):
+            result["commands_run"].append(f"{target}: {fact['status']}")
+        if name == "todo_write" and not failed:
+            todo = args.get("tasks", args.get("todos", args))
         # Replace a resource's state rather than appending another read transcript.
-        if narrative is None or name in ('file_write', 'file_update', 'todo_write', 'file_read', 'list_dir'):
+        if narrative is None or name in (
+            "file_write",
+            "file_update",
+            "todo_write",
+            "file_read",
+            "list_dir",
+        ):
             outcomes.pop(key, None)
             outcomes[key] = fact
     for key in FIELDS[1:]:
         values = result.get(key, [])
         result[key] = list(dict.fromkeys(str(v)[:1000] for v in values))[-16:]
     # Mutations survive subsequent inspection traffic.
-    important = {k: v for k, v in outcomes.items() if k.startswith(('file_write ', 'file_update ', 'todo_write '))}
+    important = {
+        k: v
+        for k, v in outcomes.items()
+        if k.startswith(("file_write ", "file_update ", "todo_write "))
+    }
     reads = {k: v for k, v in outcomes.items() if k not in important}
     if outcomes:
-        result['tool_outcomes'] = dict([*list(important.items())[-20:], *list(reads.items())[-8:]])
+        result["tool_outcomes"] = dict(
+            [*list(important.items())[-20:], *list(reads.items())[-8:]]
+        )
     if todo is not None:
-        result['todo_state_at_compaction_boundary'] = todo
+        result["todo_state_at_compaction_boundary"] = todo
         if isinstance(todo, list) and narrative is None:
-            result['open_tasks'] = [str(t.get('content', t.get('title', t.get('description', t))))[:500] for t in todo if isinstance(t, dict) and t.get('status') not in ('completed', 'done', 'cancelled')][-20:]
+            result["open_tasks"] = [
+                str(t.get("content", t.get("title", t.get("description", t))))[:500]
+                for t in todo
+                if isinstance(t, dict)
+                and t.get("status") not in ("completed", "done", "cancelled")
+            ][-20:]
     return result
 
 
-def bounded_snapshot(request: SummarizationRequest, narrative: dict | None = None) -> str:
+def bounded_snapshot(
+    request: SummarizationRequest, narrative: dict | None = None
+) -> str:
     result = task_snapshot(request, narrative)
+
     def encode():
-        return json.dumps(result, ensure_ascii=False, separators=(',', ':'))
+        return json.dumps(result, ensure_ascii=False, separators=(",", ":"))
+
     if narrative is None:
-        result = {k: v for k, v in result.items() if v and k != 'summary'} | ({'summary': result['summary']} if request.previous_summary else {})
-        source_chars = sum(len(summary_safe_block_text(b)) for m in request.messages for b in m.content)
-        if not request.previous_summary and source_chars < 128 and not result.get('files_touched') and not result.get('todo_state_at_compaction_boundary'):
-            return '\n'.join([*result.get('user_requirements', []), *result.get('decisions', []), *result.get('tool_outcomes', {}).keys()]) or 'No pending work recorded.'
+        result = {k: v for k, v in result.items() if v and k != "summary"} | (
+            {"summary": result["summary"]} if request.previous_summary else {}
+        )
+        source_chars = sum(
+            len(summary_safe_block_text(b)) for m in request.messages for b in m.content
+        )
+        if (
+            not request.previous_summary
+            and source_chars < 128
+            and not result.get("files_touched")
+            and not result.get("todo_state_at_compaction_boundary")
+        ):
+            return (
+                "\n".join(
+                    [
+                        *result.get("user_requirements", []),
+                        *result.get("decisions", []),
+                        *result.get("tool_outcomes", {}).keys(),
+                    ]
+                )
+                or "No pending work recorded."
+            )
     maximum = max(1024, request.target_tokens * 3)
     # Preserve task state and writes ahead of disposable prose/read evidence.
     while len(encode()) > maximum:
-        if result.get('tool_outcomes'):
-            keys = list(result['tool_outcomes'])
-            key = next((k for k in keys if not k.startswith(('file_write ', 'file_update ', 'todo_write '))), keys[0])
-            del result['tool_outcomes'][key]
-        elif any(result.get(k) for k in ('commands_run', 'important_errors', 'decisions')):
-            next(result[k] for k in ('commands_run', 'important_errors', 'decisions') if result.get(k)).pop(0)
-        elif len(result.get('summary', '')) > 80:
-            result['summary'] = result['summary'][:80]
-        elif any(len(result.get(k, [])) > 1 for k in ('user_requirements', 'files_touched', 'open_tasks')):
-            next(result[k] for k in ('user_requirements', 'files_touched', 'open_tasks') if len(result.get(k, [])) > 1).pop(0)
+        if result.get("tool_outcomes"):
+            keys = list(result["tool_outcomes"])
+            key = next(
+                (
+                    k
+                    for k in keys
+                    if not k.startswith(("file_write ", "file_update ", "todo_write "))
+                ),
+                keys[0],
+            )
+            del result["tool_outcomes"][key]
+        elif any(
+            result.get(k) for k in ("commands_run", "important_errors", "decisions")
+        ):
+            next(
+                result[k]
+                for k in ("commands_run", "important_errors", "decisions")
+                if result.get(k)
+            ).pop(0)
+        elif len(result.get("summary", "")) > 80:
+            result["summary"] = result["summary"][:80]
+        elif any(
+            len(result.get(k, [])) > 1
+            for k in ("user_requirements", "files_touched", "open_tasks")
+        ):
+            next(
+                result[k]
+                for k in ("user_requirements", "files_touched", "open_tasks")
+                if len(result.get(k, [])) > 1
+            ).pop(0)
         else:
             # Do not silently truncate task snapshots; let the reducer enforce its budget.
             break

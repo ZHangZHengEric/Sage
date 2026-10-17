@@ -38,16 +38,3 @@ def current_turn_boundary(units):
         ),
         max(0, len(units) - 1),
     )
-
-
-def protected_boundary(units, costs, *, recent_units, recent_tokens):
-    """Current turn is mandatory; older recent units consume a soft token budget."""
-    mandatory = current_turn_boundary(units)
-    boundary = mandatory
-    used = 0
-    for index in range(mandatory - 1, max(-1, len(units) - recent_units - 1), -1):
-        if used + costs[index] > recent_tokens:
-            break
-        used += costs[index]
-        boundary = index
-    return boundary

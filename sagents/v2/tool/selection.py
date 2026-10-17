@@ -40,7 +40,7 @@ DEFAULT_ALWAYS_VISIBLE_TOOLS = (
 # Internal safety constants, intentionally not user-facing configuration.
 _CONTEXT_TURNS = 5
 _INDEX_ENTRY_LIMIT = 128
-_INDEX_TOKEN_LIMIT = 2_000
+_INDEX_CHAR_LIMIT = 6_000
 _INDEX_DESCRIPTION_CHARS = 96
 _EXPANSION_BATCH_LIMIT = 8
 
@@ -99,10 +99,10 @@ class ToolSelectionResult:
     strategy: str
     catalog_count: int
     selected_count: int
-    estimated_schema_tokens: int
+    schema_characters: int
     expanded_tools: tuple[str, ...] = ()
     hidden_tool_index: tuple[tuple[str, str], ...] = ()
-    estimated_index_tokens: int = 0
+    index_characters: int = 0
 
 
 class ToolSelectionPolicy(Protocol):
@@ -245,11 +245,11 @@ def _parse_llm_tool_names(
     return names if names or not raw_names else None
 
 
-def _schema_tokens(tool: ToolDefinition) -> int:
+def _schema_characters(tool: ToolDefinition) -> int:
     payload = {
         "name": tool.name,
         "description": tool.description,
         "input_schema": tool.input_schema,
         "output_schema": tool.output_schema,
     }
-    return max(1, (len(json.dumps(payload, ensure_ascii=False)) + 2) // 3)
+    return len(json.dumps(payload, ensure_ascii=False))
