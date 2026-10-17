@@ -78,3 +78,23 @@ def test_client_cannot_choose_or_overwrite_an_agent_id(client):
                           json={'id': 'renamed', 'name': 'Overwrite'})
     assert response.status_code == 422
     assert client.get('/api/agents', headers=headers).json()['data'][0] == original
+
+
+def test_agent_external_tool_scope_roundtrips_and_preserves_omitted_updates(client):
+    token = register_and_login(client)
+    headers = {"Authorization": f"Bearer {token}"}
+    response = client.post('/api/agents', headers=headers, json={
+        'name': 'Scoped', 'external_tools': ['mcp_drive_read', 'a2a_peer_search'],
+    })
+    assert response.status_code == 200, response.text
+    agent = response.json()['data']
+    assert agent['external_tools'] == ['mcp_drive_read', 'a2a_peer_search']
+    assert set(agent['external_tools']) <= set(agent['package']['manifest']['agents'][agent['id']]['tools'])
+    assert 'external_tools' not in agent['package']['manifest']['agents'][agent['id']]
+    url = f"/api/agents/{agent['id']}"
+    updated = client.put(url, headers=headers, json={'name': 'Renamed'}).json()['data']
+    assert updated['external_tools'] == agent['external_tools']
+    for scope in ([], ["mcp_drive_read"]):
+        updated = client.put(url, headers=headers, json={'name': 'Scoped', 'external_tools': scope})
+        assert updated.status_code == 200, updated.text
+        assert client.get(url, headers=headers).json()['data']['external_tools'] == scope

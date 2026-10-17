@@ -35,7 +35,7 @@ def server_v2_run_manifest(
         name = name or agent.name
         instructions = instructions if instructions is not None else agent.instructions
         if not tools:
-            tools = tuple(agent.tools)
+            tools = (*agent.tools, *agent.external_tools)
     selected_tools = list(tools) if agent is not None or tools else default_agent_tools()
     host = server_v2_manifest(settings)
     base = agent.package.resolved_manifest() if agent is not None else host

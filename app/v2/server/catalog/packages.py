@@ -11,6 +11,11 @@ from sagents.v2.contracts.principals import ActorRef, PrincipalType, RequestCont
 from sagents.v2.package.manifest import SageManifest
 
 
+def is_external_tool(name: str) -> bool:
+    """MCP/A2A bridges reserve these public tool-name prefixes."""
+    return name.startswith(("mcp_", "a2a_"))
+
+
 def package_owner(user_id: str) -> str:
     return owner_key(
         RequestContext(
@@ -48,7 +53,10 @@ def build_package(record, *, sandbox=None, previous=None) -> AgentPackageBundle:
         name=record.name,
         description=record.description,
         instructions={"inline": record.instructions},
-        tools=record.tools,
+        tools=list(dict.fromkeys([
+            *[name for name in record.tools if not is_external_tool(name)],
+            *record.external_tools,
+        ])),
         skills=record.skills,
         tool_approval=record.tool_approval.model_dump()
         if record.tool_approval
@@ -76,7 +84,8 @@ def project_package(record):
         package.resolved_manifest().agents[record.id].instructions.inline or ""
     )
     record.model_id = "" if model_id == "default" else model_id
-    record.tools = list(definition.tools)
+    record.tools = [name for name in definition.tools if not is_external_tool(name)]
+    record.external_tools = [name for name in definition.tools if is_external_tool(name)]
     record.skills = list(definition.skills)
     record.tool_approval = definition.tool_approval
     return record

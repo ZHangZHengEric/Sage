@@ -233,7 +233,7 @@ class DatabaseCatalogStore:
 
 
 def _agent_values(record: AgentRecord) -> dict:
-    return record.model_dump(mode="json", exclude={"id", "skills", "package"})
+    return record.model_dump(mode="json", exclude={"id", "skills", "package", "external_tools"})
 
 
 def _agent_row(user_id: str, record: AgentRecord) -> AgentRow:

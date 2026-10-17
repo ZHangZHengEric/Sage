@@ -7,6 +7,7 @@ from sagents.v2.tool.plugins.agent_management import AgentManagementToolPlugin
 from app.v2.server.runtime.official import official_tool_catalog
 from app.v2.server.catalog.records import enabled_a2a_agents, enabled_mcp_servers
 from app.v2.server.catalog.plugins import AGENT_DEFAULTS, validate_agent_plugins
+from app.v2.server.catalog.packages import is_external_tool
 
 PACKAGE_COMPOSITION_CAPABILITIES = {"flow.node", "tool.catalog"}
 
@@ -81,7 +82,11 @@ class ServerPackagePolicy:
                 manifest.runtime.selections("tool.catalog")
                 and self.package_authorizer is not None
             )
-            if (set(agent.tools) - known and not custom_tools) or set(
+            # External definitions are discovered at runtime. Missing/disabled
+            # providers remove their tools; the Server adapter grants only names
+            # actually supplied by this owner's enabled MCP/A2A connections.
+            unknown_tools = {name for name in agent.tools if name not in known and not is_external_tool(name)}
+            if (unknown_tools and not custom_tools) or set(
                 agent.skills
             ) - skills:
                 raise PermissionError("package requests unavailable tools or skills")

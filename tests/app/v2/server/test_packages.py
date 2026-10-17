@@ -533,13 +533,7 @@ def test_events_are_cursor_based_and_owner_scoped(client):
 
 
 def test_a_package_run_can_reach_the_tenant_s_own_a2a_peers(tmp_path):
-    """A peer is configured on the tenant, not declared in the package.
-
-    The package's manifest names official tools, which is all a package author
-    can name: an A2A peer's Tools only exist once its card has been read. Being
-    composed into the Run is therefore not enough — without a grant the model
-    sees the Tool and is refused the moment it uses it.
-    """
+    """A configured peer is callable only after the package explicitly selects it."""
 
     from fastapi.testclient import TestClient
     from sagents.v2.testing.plugins import ScriptedModelProvider
@@ -576,6 +570,7 @@ def test_a_package_run_can_reach_the_tenant_s_own_a2a_peers(tmp_path):
         bundle = client.get("/api/agent-packages/template", headers=headers).json()[
             "data"
         ]
+        bundle["manifest"]["agents"]["assistant"]["tools"].append("a2a_researcher_research")
         saved = client.post("/api/agent-packages", headers=headers, json=bundle).json()[
             "data"
         ]

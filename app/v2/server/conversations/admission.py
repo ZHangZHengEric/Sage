@@ -103,6 +103,7 @@ class RunAdmission:
             agent = require_agent(catalog, requested or None)
         else:
             from app.v2.server.catalog.records import AgentRecord
+            from app.v2.server.catalog.packages import is_external_tool
             package_manifest = package.resolved_manifest()
             CompositionResolver().resolve(package_manifest, models=model_config)
             root_id = package_manifest.entrypoint.agent
@@ -119,6 +120,7 @@ class RunAdmission:
                 instructions=definition.instructions.inline or "",
                 model_id=model_id if model_id != "default" else "",
                 tools=list(definition.tools), skills=list(definition.skills),
+                external_tools=[name for name in definition.tools if is_external_tool(name)],
                 tool_approval=definition.tool_approval)
 
         # Freeze the effective package budget with the admitted Agent. The

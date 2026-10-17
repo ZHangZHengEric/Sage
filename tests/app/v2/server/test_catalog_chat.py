@@ -84,3 +84,42 @@ def test_agui_run_uses_catalog_agent_instructions(tmp_path):
         if getattr(block, "text", None)
     )
     assert "catalog writer agent" in rendered
+
+
+@pytest.mark.parametrize('scope', [None, [], ['mcp_read'], ['a2a_peer_search']])
+def test_agent_external_scope_reaches_the_actual_model_request(tmp_path, monkeypatch, scope):
+    from sagents.v2.tool.contracts import ToolDefinition
+    from sagents.v2.tool.plugins.ephemeral import InMemoryToolCatalog
+
+    provider = scripted_hello()
+    service = make_test_service(tmp_path, model_provider=provider)
+    from app.v2.server.catalog.records import McpServerRecord, A2AAgentRecord
+    original_catalog = service.catalog.get
+    async def catalog_with_tools(user_id):
+        catalog = await original_catalog(user_id)
+        catalog.mcp_servers = [McpServerRecord(name='test', url='https://mcp.invalid', tools=['mcp_read'])]
+        catalog.a2a_agents = [A2AAgentRecord(name='peer', url='https://peer.invalid', skills=['a2a_peer_search'])]
+        return catalog
+    monkeypatch.setattr(service.catalog, 'get', catalog_with_tools)
+    for cache, name in [(service.mcp_plugins, 'mcp_read'), (service.a2a_plugins, 'a2a_peer_search')]:
+        plugin = InMemoryToolCatalog((ToolDefinition(name=name, description=name, input_schema={'type': 'object'}),))
+        monkeypatch.setattr(cache, 'get', lambda *args, plugin=plugin, **kwargs: plugin)
+    with TestClient(create_app(service=service)) as client:
+        token = register_and_login(client)
+        headers = {'Authorization': f'Bearer {token}'}
+        config = {'name': 'Scoped', 'tools': ['file_read']}
+        if scope is not None:
+            config['external_tools'] = scope
+        created = client.post('/api/agents', json=config, headers=headers)
+        assert created.status_code == 200, created.text
+        agent = created.json()['data']
+        assert agent['external_tools'] == (scope or [])
+        payload = _run_input()
+        payload['forwardedProps'] = {'agentId': agent['id']}
+        response = client.post('/api/agent', json=payload, headers=headers)
+        assert response.status_code == 200, response.text
+        assert _parse_sse(response.text)[-1]['type'] == 'RUN_FINISHED', response.text
+    assert provider.requests
+    names = {tool.name for tool in provider.requests[0].tools}
+    assert names & {'mcp_read', 'a2a_peer_search'} == set(scope or [])
+    assert 'file_read' in names

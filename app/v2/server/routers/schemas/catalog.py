@@ -27,6 +27,7 @@ class AgentBody(BaseModel):
     model_id: str = ""
     fast_model_id: str | None = None
     tools: list[str] = Field(default_factory=default_agent_tools)
+    external_tools: list[str] = Field(default_factory=list)
     tool_approval: ToolApprovalConfig | None = None
     execution_policy: ExecutionPolicy | None = None
     sandbox: AgentSandboxConfig | None = None
@@ -42,6 +43,7 @@ class AgentPublic(BaseModel):
     model_id: str | None = None
     fast_model_id: str | None = None
     tools: list[str] = Field(default_factory=list)
+    external_tools: list[str] = Field(default_factory=list)
     skills: list[str] = Field(default_factory=list)
     tool_approval: ToolApprovalConfig | None = None
     execution_policy: ExecutionPolicy = Field(default_factory=lambda: ExecutionPolicy(shell="sandboxed"))

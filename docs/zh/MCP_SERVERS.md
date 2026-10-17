@@ -72,7 +72,7 @@ mcp = McpToolPlugin((McpServerConfig(
 ### 发现、授权、调用与清理
 
 1. **发现：** 启用连接，检查 catalog 实际返回的工具、Sage 名称与输入 schema。Server 的刷新操作会重新发现工具。保存连接或成功列出工具，不代表工具调用已成功。
-2. **授权：** 嵌入式 Agent 的 `tools` 授权名单应包含实际发现的名称；宿主还需给 actor 所需的 `tool.external_side_effect` scope。MCP bridge 将所有外部工具标为 `WRITE` 与 `requires_approval=True`，即使名称或注释看起来只是只读搜索。默认 `CONFIGURED` 策略在 scope 检查后要求审批；宿主选择的策略与审批记忆可能改变交互。服务 Key 不能代替 Sage 授权。
+2. **授权：** Server 页面在「智能体 → 编辑 → 可用工具 → 外部工具」逐项勾选，通过 Server API 的 `external_tools` 名单控制 MCP/A2A 可用范围；标准包沿用 `tools` 名单，由 Server 过滤后注入。未选择时禁用，新增工具需重新授权。嵌入式 Agent 的 `tools` 授权名单应包含实际发现的名称；宿主还需给 actor 所需的 `tool.external_side_effect` scope。MCP bridge 将所有外部工具标为 `WRITE` 与 `requires_approval=True`，即使名称或注释看起来只是只读搜索。默认 `CONFIGURED` 策略在 scope 检查后要求审批；宿主选择的策略与审批记忆可能改变交互。服务 Key 不能代替 Sage 授权。
 3. **调用：** 在宿主审批流程中核对工具和参数，再检查返回结果。区分发现/鉴权失败与工具响应的 `isError`。超时、取消或丢失响应可能使远端副作用未知；考虑重试前先核实远端结果。
 4. **清理：** 默认 bridge 为发现或一次调用打开短生命周期 SDK 会话，并在退出 context 后关闭。嵌入式宿主退出时保留 `await application.close()`。停用或删除连接用于停止后续使用，活动 Run 需另外取消；关闭本地会话不等于撤销服务 Key，也不能证明远端任务已停止。
 

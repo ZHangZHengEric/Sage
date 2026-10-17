@@ -65,6 +65,12 @@ function setToolApproval(key, value) {
   const config = props.form.tool_approval || { default: 'auto_approve', tools: {} }
   update('tool_approval', { ...config, tools: { ...config.tools, [key]: value } })
 }
+const availableExternalTools = computed(() => [...new Set([...props.externalTools, ...(props.form.external_tools || [])])])
+function toggleExternalTool(name) {
+  const selected = new Set(props.form.external_tools || [])
+  if (selected.has(name)) selected.delete(name); else selected.add(name)
+  update('external_tools', [...selected])
+}
 function toggleSkill(name) {
   if (props.readonly) return
   const selected = new Set(props.selectedSkills)
@@ -102,7 +108,14 @@ function toggleSkill(name) {
               <div class="selection-list"><label v-for="tool in displayedTools" :key="tool.name" class="selection-row"><input type="checkbox" :checked="form.tools.includes(tool.name)" :disabled="readonly || busy" @change="toggleTool(tool.name)" /><span>{{ tool.name }}<small>{{ tool.category }}</small></span></label><p v-if="!displayedTools.length" class="empty">没有匹配的工具</p></div>
             </div>
             <p v-if="!form.tools.length" class="muted field-note">未选择时使用服务端默认工具。</p>
-            <div v-if="externalTools.length" class="external-tools"><h3>外部工具</h3><div class="selected-tags"><span v-for="name in externalTools" :key="name" class="tag">{{ name }}</span></div></div>
+            <div class="external-tools">
+              <h3>外部工具</h3>
+              <p class="muted field-note">仅允许所选工具。未选择时禁用外部工具，后续新增工具需单独勾选授权。</p>
+              <div v-if="availableExternalTools.length" class="selection-box"><div class="selection-list">
+                <label v-for="name in availableExternalTools" :key="name" class="selection-row"><input type="checkbox" :checked="(form.external_tools || []).includes(name)" :disabled="readonly || busy" @change="toggleExternalTool(name)" /><span>{{ name }}<small v-if="!externalTools.includes(name)">当前不可用，可取消授权</small></span></label>
+              </div></div>
+              <p v-else class="empty">暂无外部工具，请先在工具页面添加连接并刷新工具。</p>
+            </div>
           </div></section>
           <section id="agent-skills"><h2><span class="section-icon"><AppIcon name="skill" /></span>可用技能<span class="selection-count">{{ selectedSkills.length }}</span></h2><div class="section-fields">
             <div v-if="selectedSkills.length" class="selected-tags"><span v-for="name in selectedSkills" :key="name" class="tag">{{ name }}</span></div>

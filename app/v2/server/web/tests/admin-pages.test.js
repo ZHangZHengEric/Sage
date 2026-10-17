@@ -118,7 +118,7 @@ test('agent editor saves V2 fields and selected skills before staying open or ex
   assert.equal(state.drawerOpen, true)
   assert.equal(state.editing, 'new-agent')
   assert.deepEqual(api.bindAgentSkills.mock.calls[0].arguments, ['new-agent', ['research']])
-  assert.deepEqual(Object.keys(api.createAgent.mock.calls[0].arguments[0]).sort(), ['budgets', 'description', 'execution_policy', 'fast_model_id', 'instructions', 'memory', 'model_id', 'name', 'plugins', 'sandbox', 'tool_approval', 'tools'])
+  assert.deepEqual(Object.keys(api.createAgent.mock.calls[0].arguments[0]).sort(), ['budgets', 'description', 'execution_policy', 'external_tools', 'fast_model_id', 'instructions', 'memory', 'model_id', 'name', 'plugins', 'sandbox', 'tool_approval', 'tools'])
   assert.deepEqual(api.createAgent.mock.calls[0].arguments[0].tool_approval, { default: 'auto_approve', tools: { file_read: 'ask', 'mcp:drive:write': 'auto_approve' } })
   await state.save(true)
   assert.equal(state.drawerOpen, false)
@@ -385,4 +385,41 @@ test('package model slots select App model IDs without embedding model routes', 
   assert.equal(state.sections.includes('models'), false)
   assert.equal(state.sections.includes('credentials'), false)
   assert.equal(state.bundle.manifest.models, undefined)
+})
+
+
+test('agent editor selects external tools independently and keeps unavailable selections removable', async t => {
+  const { Component, mount } = await setup(t, 'AgentEditor', 'components')
+  let form = { name: 'Scoped', tools: ['file_read'], external_tools: ['mcp_old'], execution_policy: { shell: 'ask' } }
+  const state = await mount({ form, externalTools: ['mcp_read', 'a2a_peer_search'],
+    'onUpdate:form': value => { form = value } })
+  assert.deepEqual(state.availableExternalTools, ['mcp_read', 'a2a_peer_search', 'mcp_old'])
+  state.toggleExternalTool('mcp_read')
+  assert.deepEqual(form.external_tools, ['mcp_old', 'mcp_read'])
+  assert.deepEqual(form.tools, ['file_read'])
+  const html = await renderToString(createSSRApp(Component, { form, externalTools: ['mcp_read', 'a2a_peer_search'] }))
+  assert.match(html, /仅允许所选工具/)
+  assert.match(html, /mcp_read/)
+})
+
+test('agents retain external scope through opening and saving, excluding disabled connections', async t => {
+  const { api, mount } = await setup(t, 'Agents')
+  t.mock.method(api, 'listPlugins', async () => ({ configurable: [] }))
+  const agent = { id: 'scoped', name: 'Scoped', tools: ['file_read'], external_tools: ['mcp_read'] }
+  for (const method of ['listModels', 'listSkills', 'listTools', 'listAgentSkills']) t.mock.method(api, method, async () => [])
+  t.mock.method(api, 'listAgents', async () => [agent])
+  t.mock.method(api, 'getAgent', async () => agent)
+  t.mock.method(api, 'listMcp', async () => [{ tools: ['mcp_read'] }, { disabled: true, tools: ['mcp_disabled'] }])
+  t.mock.method(api, 'listA2aAgents', async () => [{ skills: ['a2a_search'] }])
+  t.mock.method(api, 'updateAgent', async (id, body) => ({ ...body, id }))
+  t.mock.method(api, 'bindAgentSkills', async () => [])
+  const state = await mount()
+  assert.deepEqual(state.externalTools, ['mcp_read', 'a2a_search'])
+  await state.openAgent(agent, false)
+  assert.deepEqual(state.form.external_tools, ['mcp_read'])
+  state.form.external_tools = []
+  await state.save(false)
+  assert.deepEqual(api.updateAgent.mock.calls[0].arguments[1].external_tools, [])
+  state.startNew()
+  assert.deepEqual(state.form.external_tools, [])
 })
