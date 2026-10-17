@@ -107,7 +107,7 @@ function startNew() {
     <div class="panel table-panel">
 
       <p v-if="error && !drawerOpen" class="error" role="alert">{{ error }}</p>
-      <p v-if="!hasServers" class="empty">还没有 MCP。添加后它的工具对本租户的智能体全部可用。</p>
+      <p v-if="!hasServers" class="empty">还没有 MCP。添加后请在智能体的「可用工具 → 外部工具」中勾选授权。</p>
       <table v-else>
         <thead>
           <tr><th v-if="servers[0]?._owner">用户</th><th>名称</th><th>协议</th><th>工具</th><th></th></tr>

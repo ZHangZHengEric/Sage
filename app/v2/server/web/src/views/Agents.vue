@@ -26,12 +26,9 @@ const form = ref(emptyForm())
 const configurablePlugins = ref([])
 
 const hasAgents = computed(() => agents.value.length > 0)
-// External Tools are granted per catalog rather than per Agent: they only
-// exist once the server or peer has been asked, so nothing here could name
-// them ahead of time. Shown, not offered.
 const externalTools = computed(() => [
   ...new Set([
-    ...mcp.value.flatMap((item) => item.tools || []),
+    ...mcp.value.flatMap((item) => (item.disabled ? [] : item.tools || [])),
     ...peers.value.flatMap((item) => (item.disabled ? [] : item.skills || [])),
   ]),
 ])
@@ -45,6 +42,7 @@ function emptyForm() {
     memory: { recall: true, auto_write: true, scope: 'agent' },
     plugins: {},
     tools: officialTools.value.filter(tool => tool.default).map(tool => tool.name),
+    external_tools: [],
     sandbox: { network: 'none' },
     tool_approval: { default: 'auto_approve', tools: {} },
     execution_policy: { shell: 'sandboxed', on_approval_required: 'suspend', approval_timeout_seconds: 86400 },
@@ -109,6 +107,7 @@ async function openAgent(item, readonly = true) {
       budgets: structuredClone(detail.package?.manifest?.agents?.[item.id]?.budgets || {}),
       memory: structuredClone(detail.package?.manifest?.agents?.[item.id]?.memory || { recall: false, auto_write: false, scope: 'agent' }),
       model_id: detail.model_id || '', fast_model_id: detail.fast_model_id || '', tools: [...(detail.tools || [])],
+      external_tools: [...(detail.external_tools || [])],
       tool_approval: detail.tool_approval ? structuredClone(detail.tool_approval) : null,
       execution_policy: { ...(detail.execution_policy || emptyForm().execution_policy) },
       sandbox: { ...(detail.sandbox || emptyForm().sandbox) },

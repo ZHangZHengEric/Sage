@@ -302,3 +302,24 @@ async def test_model_request_options_survive_database_reload(store):
     assert model.limits == saved.limits
     assert model.capabilities == saved.capabilities
     assert model.api_key.get_secret_value() == "database-test-key"
+
+
+async def test_external_scope_survives_database_reload_and_old_refs_remain_valid(store):
+    import hashlib
+    import json
+
+    agent = AgentRecord(id='agent_scope', name='Scoped', external_tools=['mcp_read'])
+    await store.create_agent('alice', agent)
+    loaded = await DatabaseCatalogStore(store.database).get('alice')
+    assert next(a for a in loaded.agents if a.id == agent.id).external_tools == ['mcp_read']
+    disabled = agent.with_configuration(external_tools=[])
+    await store.update_agent('alice', disabled)
+    loaded = await DatabaseCatalogStore(store.database).get('alice')
+    assert next(a for a in loaded.agents if a.id == agent.id).external_tools == []
+    # Simulate the serialized bundle before external_tools existed.
+    old = disabled.package.model_dump(mode='json')
+    for definition in old['manifest']['agents'].values():
+        if not definition.get('preload_skills'):
+            definition.pop('preload_skills', None)
+    old_ref = hashlib.sha256(json.dumps(old, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
+    assert disabled.package.content_hash == old_ref

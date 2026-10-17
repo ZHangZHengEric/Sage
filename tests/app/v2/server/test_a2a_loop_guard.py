@@ -82,6 +82,11 @@ def configure_peer(client: TestClient, token: str) -> None:
         headers={"Authorization": f"Bearer {token}"},
     )
     assert created.status_code == 200, created.text
+    headers = {"Authorization": f"Bearer {token}"}
+    agent = client.get("/api/agents", headers=headers).json()["data"][0]
+    authorized = client.put(f"/api/agents/{agent['id']}", headers=headers,
+                            json={"name": agent["name"], "external_tools": [TOOL]})
+    assert authorized.status_code == 200, authorized.text
 
 
 @pytest.mark.timeout(30)

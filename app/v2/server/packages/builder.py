@@ -151,6 +151,7 @@ class PackageBuilder(SAgentBuilder):
         super().__init__()
         self.settings, self.run_quota, self.root = settings, run_quota, root
         self.host_application = application
+        self.external_tool_providers = []
 
     async def build(self, *, runtime=None, runtime_config_text=None, tenant_id=None, models=None, models_config_text=None):
         from sagents.v2.composition.inputs import runtime_input
@@ -177,7 +178,12 @@ class PackageBuilder(SAgentBuilder):
                 max_pending_items=self.settings.max_pending_runs)
             self.with_scheduler(scheduler)
             self.with_owned_resources(scheduler)
-        return await super().build(runtime=effective, tenant_id=tenant_id, models=models, models_config_text=models_config_text)
+        application = await super().build(runtime=effective, tenant_id=tenant_id, models=models, models_config_text=models_config_text)
+        async def command_reader(run_id):
+            return await application.runtime.session_store.get_start_command(run_id)
+        for provider in self.external_tool_providers:
+            provider.bind(command_reader)
+        return application
 
 
 
@@ -270,8 +276,11 @@ class ServerPackageBuilderFactory:
         builder.with_skill_provider(
             binding.provider, binding.provider, binding.workspace
         )
+        from app.v2.server.runtime.integrations.external_tools import ScopedExternalTools
         for tool in binding.external:
-            builder.with_additional_tools(tool, tool)
+            scoped = ScopedExternalTools(tool, bindings.agents)
+            builder.external_tool_providers.append(scoped)
+            builder.with_additional_tools(scoped, scoped)
         if catalog_run is not None:
             from app.v2.server.runtime.policy import frozen_execution, live_execution_policy
 
