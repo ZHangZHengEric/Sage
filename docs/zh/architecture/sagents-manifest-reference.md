@@ -142,10 +142,28 @@ agents:
 | `tools` | ToolName 数组 | `[]` | 工具允许范围；不是安装工具的声明 |
 | `tool_approval` | ToolApprovalConfig / null | null | Agent 的工具审批偏好；不能替代宿主授权 |
 | `skills` | SkillName 数组 | `[]` | Skill 允许范围；需宿主有对应 catalog/source |
+| `preload_skills` | SkillName 数组 | `[]` | 每个新 Run 首次模型调用前预加载一次；必须是本 Agent `skills` 的子集 |
 | `subagents` | Identifier 数组 | `[]` | 可委派子 Agent 的别名；加载时必须绑定独立 handle |
 | `budgets` | AgentBudgets | 每项 null | 本 Agent 预算，与 Package 上限合并 |
 | `memory` | AgentMemoryBehavior | 见下表 | 记忆行为开关 |
 | `sandbox` | AgentSandboxConfig | network=none | 向宿主请求的网络范围，不是执行授权 |
+
+`preload_skills` 属于每个 Agent 的独立配置，例如：
+
+```yaml
+skills: [python, testing]
+preload_skills: [testing]
+```
+
+父 Agent、各层级子 Agent，以及同一 Session 续接产生的新 Run，均在首次模型调用
+（包括辅助模型调用）前按各自配置初始化。预加载仍受当前 Run 的技能授权约束，
+不能扩大权限；加载失败报告 `skill.preload_failed`，包含 Agent、Run、技能及底层错误。
+默认技能和手动加载的技能使用相同预算，可被淘汰；不要求常驻、不自动补回，
+需要时可调用 `load_skill`。初始化顺序按声明顺序，预算不足可淘汰较早加载的技能；
+单个技能本身超过加载预算则初始化失败。
+
+暂停或进程重启后恢复同一 Run 时，恢复持久化的初始化进度和激活列表，
+不补回已淘汰技能；初始化中途恢复只继续尚未完成的部分。未配置字段时保持现有懒加载行为。
 
 Instructions 示例（二选一，不能同时写，也不能都省略）：
 

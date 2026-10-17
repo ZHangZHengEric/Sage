@@ -23,6 +23,7 @@ from sagents.v2.contracts.events import (
     RuntimeEvent,
     SandboxEventData,
     SessionCommitEventData,
+    SkillStateEventData,
     SteeringEventData,
     StepEventData,
     ToolEventData,
@@ -57,6 +58,8 @@ SOURCE = EventSource(source_type=EventSourceType.AGENT)
 
 
 def data_for(kind):
+    if kind == "skill_state":
+        return SkillStateEventData(state={})
     if kind == "run":
         return RunEventData(state="running")
     if kind == "turn":

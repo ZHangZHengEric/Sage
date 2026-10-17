@@ -41,9 +41,13 @@ class HostAgentExecution:
         )
         _, resolved = _resolve_package(descriptor, runtime=runtime, models=models)
         # Include the complete declaration even though the facade owns no graph.
+        payload = package.model_dump(mode="json")
+        for definition in payload["agents"].values():
+            if not definition.get("preload_skills"):
+                definition.pop("preload_skills", None)
         digest = hashlib.sha256(
             json.dumps(
-                package.model_dump(mode="json"), sort_keys=True, separators=(",", ":")
+                payload, sort_keys=True, separators=(",", ":")
             ).encode()
         ).hexdigest()
         return resolved.model_copy(update={"manifest_hash": f"sha256:{digest}"})

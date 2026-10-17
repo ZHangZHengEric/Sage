@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Protocol
+from typing import Literal, Protocol
 
 from pydantic import Field, field_validator
 
@@ -52,6 +52,18 @@ class LoadedSkill(StrictModel):
     instructions: str
     file_list: tuple[str, ...]
     loaded_at: datetime
+
+
+class SkillRunState(StrictModel):
+    """Run control state, independent from the rebuildable activation cache."""
+
+    version: Literal[1] = 1
+    preloads: tuple[str, ...] = ()
+    processed_preloads: tuple[str, ...] = ()
+    preloads_complete: bool = False
+    history_initialized: bool = False
+    requested_names: tuple[str, ...] = ()
+    active: tuple[LoadedSkill, ...] = ()
 
 
 class SkillCatalog(Protocol):

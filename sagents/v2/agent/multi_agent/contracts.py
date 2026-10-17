@@ -45,11 +45,19 @@ class AgentDescriptor(StrictModel):
     mode: AgentMode = AgentMode.SIMPLE
     tools: tuple[ToolName, ...] = ()
     skills: tuple[SkillName, ...] = ()
+    preload_skills: tuple[SkillName, ...] = ()
     dynamic: bool = False
     # A persistent Fibre/Team Agent may be selected as a member while executing
     # as a leaf for this invocation.  Keep its declared mode visible instead of
     # silently rewriting it to SIMPLE.
     allow_delegation: bool = True
+
+    @model_validator(mode="after")
+    def validate_preload_skills(self) -> "AgentDescriptor":
+        outside = set(self.preload_skills) - set(self.skills)
+        if outside:
+            raise ValueError(f"preload_skills must be a subset of skills: {sorted(outside)}")
+        return self
 
 
 class DelegationTask(StrictModel):

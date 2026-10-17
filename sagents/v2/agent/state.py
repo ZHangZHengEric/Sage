@@ -22,6 +22,7 @@ class AgentLoopCheckpointState(StrictModel):
     remains readable solely so pre-v2 checkpoint payloads can be recovered.
     """
 
+    skill_state: dict | None = None
     state_version: str = "2"
     turn_id: Identifier
     step_number: int = Field(ge=1)

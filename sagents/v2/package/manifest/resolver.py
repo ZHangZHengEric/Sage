@@ -7,7 +7,7 @@ import json
 from typing import Any, Literal
 
 from sagents.v2.agent.policy.approval_config import ToolApprovalConfig
-from pydantic import Field
+from pydantic import Field, model_validator
 
 from sagents.v2.contracts.commands import RunConfig
 from sagents.v2.contracts.common import Identifier, StrictModel, VerbatimText
@@ -34,8 +34,16 @@ class ResolvedAgent(StrictModel):
     tools: tuple[str, ...] = ()
     tool_approval: ToolApprovalConfig | None = None
     skills: tuple[str, ...] = ()
+    preload_skills: tuple[str, ...] = ()
     subagents: tuple[str, ...] = ()
     memory: AgentMemoryBehavior = Field(default_factory=AgentMemoryBehavior)
+
+    @model_validator(mode="after")
+    def validate_preload_skills(self) -> "ResolvedAgent":
+        outside = set(self.preload_skills) - set(self.skills)
+        if outside:
+            raise ValueError(f"preload_skills must be a subset of skills: {sorted(outside)}")
+        return self
 
 
 class PolicyCeiling(StrictModel):
@@ -158,6 +166,7 @@ class CompositionResolver:
                 tools=agent.tools,
                 tool_approval=agent.tool_approval,
                 skills=agent.skills,
+                preload_skills=agent.preload_skills,
                 subagents=agent.subagents,
                 memory=agent.memory,
             )
@@ -189,6 +198,10 @@ class CompositionResolver:
             )
 
         payload = manifest.model_dump(mode="json", exclude={"environments"})
+        # Preserve pre-field hashes for packages that do not opt in.
+        for definition in payload["agents"].values():
+            if not definition.get("preload_skills"):
+                definition.pop("preload_skills", None)
         payload["models"] = catalog.model_dump(mode="json")
         digest = hashlib.sha256(
             json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()

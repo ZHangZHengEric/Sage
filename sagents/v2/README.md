@@ -30,6 +30,17 @@ not initialize global managers or application services.
 SAgents manages one known Session at a time. Listing, searching, naming,
 archiving, and paging all Sessions belongs to the embedding application.
 
+Agents may declare `preload_skills: [testing]` alongside `skills`. The preload
+list must be a subset of that Agent's allowed skills and cannot widen a Run's
+resolved grant. Each new Run, including child Runs and follow-up Runs in the same
+Session, loads its own Agent's defaults once before any model call. Preloads use
+the normal activation budget: they may be evicted and are never automatically
+reinserted. Use `load_skill` to reactivate an evicted skill. Initialization progress
+and active skills are saved in durable Run events/checkpoints, so resuming the
+same Run after pause or process restart restores its exact state. Initialization
+failures report `skill.preload_failed` with Agent, Run, skill and underlying error
+details. Omitting the field preserves lazy loading and existing package hashes.
+
 ## What happens during a Run
 
 ```text
