@@ -3288,13 +3288,6 @@ class AgentLoopEngine:
                 return run, None
         if result.error is not None:
             localized = localize_error(result.error, context.language)
-            if not localized.safe_to_resume:
-                # An unsafe runtime/storage failure must never become ordinary
-                # model feedback or be reclassified as a retryable Tool effect.
-                result = result.model_copy(update={"error": localized})
-                return await self._stop_for_unsafe_tool_error(
-                    run, call, result, context, turn_id, step_id, state
-                )
             if await self._tool_failure_is_uncertain(run, call, localized):
                 uncertainty = self._as_uncertain_tool_error(localized)
                 run = await self._record_tool_unknown(
@@ -3308,6 +3301,13 @@ class AgentLoopEngine:
                     step_id,
                     state,
                     uncertainty,
+                )
+            if self._unsafe_tool_runtime_error(localized):
+                # An unsafe runtime/storage failure must never become ordinary
+                # model feedback or be reclassified as a retryable Tool effect.
+                result = result.model_copy(update={"error": localized})
+                return await self._stop_for_unsafe_tool_error(
+                    run, call, result, context, turn_id, step_id, state
                 )
             # Content belongs to the Tool, including structured failure output.
             # Localization only owns the host/UI summary. The receipt marker
@@ -3409,6 +3409,17 @@ class AgentLoopEngine:
             run, state, step_id, result.error, context, allow_recovery=False
         ), None
 
+    @staticmethod
+    def _unsafe_tool_runtime_error(error: RuntimeErrorInfo) -> bool:
+        """Only unrecoverable framework failures terminate a tool-owning Run."""
+        return not error.safe_to_resume and error.category in {
+            ErrorCategory.INTERNAL,
+            ErrorCategory.CORRUPT_STATE,
+            ErrorCategory.UNSUPPORTED_SCHEMA,
+            ErrorCategory.CONFLICT,
+            ErrorCategory.RESOURCE_LOST,
+        }
+
     async def _tool_failure_is_uncertain(self, run, call, error) -> bool:
         """Classify post-dispatch failures without assuming a write was rolled back."""
 
@@ -3419,6 +3430,8 @@ class AgentLoopEngine:
             return False
         if error.category == ErrorCategory.UNCERTAIN_SIDE_EFFECT:
             return True
+        if self._unsafe_tool_runtime_error(error):
+            return False
         if error.metadata.get("side_effect_state") == "not_applied":
             return False
         definition = await self.tool_catalog.get_tool(call.tool_name, run_id=run.run_id)
@@ -3629,7 +3642,9 @@ class AgentLoopEngine:
                     else await self.tool_executor.reconcile(call.operation_id, context)
                 )
             except Exception as exc:
-                if isinstance(exc, SageV2Error) and not exc.info.safe_to_resume:
+                if isinstance(exc, SageV2Error) and self._unsafe_tool_runtime_error(
+                    exc.info
+                ):
                     return await self._stop_for_unsafe_tool_error(
                         run,
                         call,
@@ -3659,7 +3674,7 @@ class AgentLoopEngine:
                 if reconciled.result and reconciled.result.error
                 else reconciled.error
             )
-            if fatal_error is not None and not fatal_error.safe_to_resume:
+            if fatal_error is not None and self._unsafe_tool_runtime_error(fatal_error):
                 return await self._stop_for_unsafe_tool_error(
                     run,
                     call,

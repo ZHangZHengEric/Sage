@@ -983,3 +983,78 @@ async def test_mcp_discovery_rejects_normalized_tool_name_collision():
     assert collision.value.info.category == ErrorCategory.CONFLICT
     assert bridge._definitions == {}
     assert bridge._routes == {}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("phase", ["connect", "call", "cleanup"])
+@pytest.mark.parametrize("remote_error", [False, True])
+async def test_mcp_failure_stage_preserves_response_and_leaf_diagnostics(
+    phase, remote_error
+):
+    class Session(FakeSession):
+        async def call_tool(self, name, arguments):
+            self.calls.append((name, arguments))
+            if phase == "call":
+                raise ExceptionGroup("call group", [TimeoutError("request deadline")])
+            return {
+                "content": [{"type": "text", "text": "authoritative receipt"}],
+                "isError": remote_error,
+            }
+
+    session = Session()
+    opens = 0
+
+    @asynccontextmanager
+    async def factory(config):
+        nonlocal opens
+        opens += 1
+        if opens > 1 and phase == "connect":
+            raise ExceptionGroup("open group", [ConnectionError("initialize offline")])
+        yield session
+        if opens > 1 and phase == "cleanup":
+            raise ExceptionGroup("close group", [ConnectionError("close offline")])
+
+    bridge = McpToolPlugin(
+        (McpServerConfig(name="drive", protocol="stdio", command="mcp"),),
+        session_factory=factory,
+    )
+    definition = (await bridge.list_tools(run_id="run_1"))[0]
+    call = ToolCall(
+        tool_call_id="call_1",
+        tool_name=definition.name,
+        arguments={"query": "report"},
+        operation_id="operation_1",
+        idempotency_key="stage-test",
+        owner_run_id="run_1",
+    )
+    if phase == "cleanup":
+        first = await bridge.execute(call, CONTEXT)
+        assert first.content[0].text == "authoritative receipt"
+        assert bool(first.error) == remote_error
+        assert first.metadata["mcp_result_received"] is True
+        assert "ConnectionError: close offline" in first.metadata["mcp_cleanup_error"]
+        assert await bridge.execute(call, CONTEXT) == first
+        assert (await bridge.reconcile(call.operation_id, CONTEXT)).result == first
+        assert len(session.calls) == 1
+    else:
+        with pytest.raises(SageV2Error) as caught:
+            await bridge.execute(call, CONTEXT)
+        info = caught.value.info
+        assert info.metadata["mcp_phase"] == phase
+        assert info.metadata["mcp_result_received"] is False
+        if phase == "connect":
+            assert info.code == "mcp.connection_failed"
+            assert info.safe_to_resume is True
+            assert info.retryable is True
+            assert info.metadata["side_effect_state"] == "not_applied"
+            assert "ConnectionError: initialize offline" in info.message
+            assert session.calls == []
+        else:
+            assert info.code == "mcp.result_timeout"
+            assert info.category == ErrorCategory.UNCERTAIN_SIDE_EFFECT
+            assert info.retryable is False
+            assert "TimeoutError: request deadline" in info.message
+            assert len(session.calls) == 1
+        with pytest.raises(SageV2Error) as repeated:
+            await bridge.execute(call, CONTEXT)
+        assert repeated.value.info == info

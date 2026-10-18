@@ -487,7 +487,20 @@ siblings without running them again and propagating child interactions normally.
 
 A dispatched external Tool without a saved result is never blindly replayed:
 its provider must reconcile the operation or the Run waits for explicit
-resolution. Generic MCP has no cross-process exactly-once guarantee. Legacy or
+resolution. Known Tool failures are saved as Tool results for the Agent to
+handle, rather than terminating the Run. Unknown Tool outcomes suspend the same Run for provider
+reconciliation or explicit `confirm_succeeded` / `mark_failed` resolution; no
+retry is offered for an operation whose remote outcome is unknown. The durable
+ledger retains completed sibling results across suspension and process restart.
+Unrecoverable framework/storage errors can still fail a Run.
+
+The MCP bridge distinguishes connection initialization, call execution and
+connection cleanup. Initialization failure is marked `not_applied`; failure
+while awaiting the call is uncertain. Once a response arrives, cleanup failure
+cannot replace it: the response is retained along with cleanup diagnostics.
+Nested exception details are recorded for transport diagnosis.
+
+Generic MCP has no cross-process exactly-once guarantee. Legacy or
 custom drivers without a usable checkpoint/tool barrier still fail explicitly
 instead of replaying unknown work. This does not claim a distributed scheduler
 or a durable JobRuntime. In-flight model previews that were not durably committed

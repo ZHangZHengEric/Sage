@@ -201,7 +201,7 @@ def simple_loop(root, runtime, model, *, boundary=None, unknown=False, followup=
     return AgentLoopEngine(**options)
 
 
-def team_factory(root, runtime, model, *, crash=False):
+def team_factory(root, runtime, model, *, crash=False, unknown=False):
     descriptors = {
         name: AgentDescriptor(
             agent_id=name,
@@ -232,6 +232,15 @@ def team_factory(root, runtime, model, *, crash=False):
             await runtime.session_store.get_start_command(call.owner_run_id)
         ).agent_id
         effect(root, name)
+        if unknown and name == "slow":
+            raise SageV2Error(
+                RuntimeErrorInfo(
+                    code="mcp.result_not_received",
+                    category=ErrorCategory.UNCERTAIN_SIDE_EFFECT,
+                    message="response lost after remote effect",
+                    safe_to_resume=False,
+                )
+            )
         return ToolExecutionResult(
             tool_call_id=call.tool_call_id,
             operation_id=call.operation_id,
@@ -272,7 +281,7 @@ def team_factory(root, runtime, model, *, crash=False):
     return factory, descriptors["root"]
 
 
-async def retry_interaction(runtime, store, run_id):
+async def retry_interaction(runtime, store, run_id, *, decision="retry"):
     run = await store.get_run(run_id)
     suspension = await store.get_suspension(run.suspension_id)
     interaction = await store.get_interaction(suspension.interaction_id)
@@ -284,7 +293,8 @@ async def retry_interaction(runtime, store, run_id):
             expected_revision=run.revision,
             expected_suspension_revision=suspension.expected_revision,
             expected_interaction_revision=interaction.expected_revision,
-            decision="retry",
+            decision=decision,
+            payload={"result_text": "verified saved remote result"},
             idempotency_key="retry-after-restart",
         ),
         CONTEXT,
@@ -318,7 +328,9 @@ async def worker(root, scenario):
         initial=scenario == "first-model",
     )
     if scenario.startswith("team"):
-        factory, descriptor = team_factory(root, runtime, model, crash=True)
+        factory, descriptor = team_factory(
+            root, runtime, model, crash=True, unknown=scenario == "team-unknown"
+        )
         loop = factory.create_loop(descriptor, handle.run_id)
     else:
         boundary = (
@@ -337,6 +349,10 @@ async def worker(root, scenario):
             followup=scenario == "followup",
         )
     result = await loop.execute(handle.run_id, CONTEXT)
+    if scenario == "team-unknown":
+        assert result.state == RunState.SUSPENDED
+        (root / "ready").write_text("nested unknown tool awaiting reconciliation")
+        await asyncio.Event().wait()
     if scenario in {"team-suspended", "team-resuming", "team-child-resuming"}:
         assert result.state == RunState.SUSPENDED
         if scenario == "team-suspended":
@@ -428,7 +444,8 @@ async def test_hard_kill_preserves_ledger_and_does_not_repeat_tools(tmp_path, sc
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    "scenario", ["team", "team-suspended", "team-resuming", "team-child-resuming"]
+    "scenario",
+    ["team", "team-suspended", "team-resuming", "team-child-resuming", "team-unknown"],
 )
 async def test_dispatcher_recovers_entire_team_tree_after_hard_kill(tmp_path, scenario):
     identity = await kill_worker(tmp_path, scenario)
@@ -459,6 +476,10 @@ async def test_dispatcher_recovers_entire_team_tree_after_hard_kill(tmp_path, sc
     try:
         if scenario == "team-suspended":
             await retry_interaction(runtime, store, identity["run"])
+        if scenario == "team-unknown":
+            await retry_interaction(
+                runtime, store, identity["run"], decision="confirm_succeeded"
+            )
         await dispatcher.start()
         async with asyncio.timeout(10):
             while (await store.get_run(identity["run"])).state not in {
