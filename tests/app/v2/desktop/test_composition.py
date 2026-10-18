@@ -371,6 +371,9 @@ async def test_disk_quota_is_consistent_for_all_desktop_workspace_bindings(tmp_p
         tmp_path / "workspace", resources=ResourceLimits(disk_mb=disk_mb, require_hard_limits=False),
     )
     try:
+        await bindings.acquire(ExecutionBindingRequest(
+            run_id="parent", agent_id="parent", context=_context(),
+        ))
         for index, policy in enumerate(WorkspaceSharingPolicy):
             binding = await bindings.acquire(ExecutionBindingRequest(
                 run_id=f"quota-{index}", parent_run_id="parent", agent_id="member",

@@ -22,6 +22,7 @@ from sagents.v2.contracts.errors import ErrorCategory, RuntimeErrorInfo, SageV2E
 
 from ..contracts import FileOperation, NetworkMode
 from .network import LINUX_PROXY_LAUNCH, ShellNetworkBroker, validate_shell_network
+from .paths import LocalSandboxPaths
 
 _MACOS_DEVELOPER_READ_ROOTS = (
     "/Library/Developer/CommandLineTools",
@@ -345,7 +346,9 @@ class LocalResourceBoundary:
         self._monitors: dict[int, asyncio.Task] = {}
         self._tracked = {}
         self._root_processes = {}
-        self.scratch = row.root / ".sage-sandbox-tmp"
+        self._descendants_by_root = {}
+        self.paths = LocalSandboxPaths(row.root, getattr(getattr(row, "spec", None), "workspace_root", "/workspace"), sys.platform)
+        self.scratch = self.paths.temporary
 
     def _host_read_paths(self) -> tuple[str, ...]:
         workspace = self.row.root.resolve()
@@ -445,6 +448,9 @@ class LocalResourceBoundary:
                 raise ValueError(
                     "workspace_root overlaps the Linux runtime or is not canonical"
                 )
+            for alias in (Path("/home/agent"), Path("/var/tmp")):
+                if virtual_root == alias or virtual_root in alias.parents or alias in virtual_root.parents:
+                    raise ValueError(f"workspace_root overlaps sandbox runtime directory {alias}")
             if not shutil.which("bwrap"):
                 raise RuntimeError("Linux local sandbox requires bwrap")
             # Quotas are the hard-limit half of this boundary, and they are the
@@ -529,15 +535,16 @@ class LocalResourceBoundary:
             await asyncio.to_thread(self._check_hardlinks)
         else:
             raise RuntimeError("native local sandbox supports Linux and macOS only")
-        if self.scratch.is_symlink():
-            raise PermissionError("sandbox scratch directory cannot be a symlink")
-        self.scratch.mkdir(mode=0o700, exist_ok=True)
-        if os.geteuid() == 0:
-            fd = os.open(self.scratch, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
-            try:
-                os.fchown(fd, self.execution_uid, self.execution_gid)
-            finally:
-                os.close(fd)
+        for directory in self.paths.directories:
+            if directory.is_symlink():
+                raise PermissionError(f"sandbox runtime directory cannot be a symlink: {directory}")
+            directory.mkdir(mode=0o700, exist_ok=True)
+            if os.geteuid() == 0:
+                fd = os.open(directory, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+                try:
+                    os.fchown(fd, self.execution_uid, self.execution_gid)
+                finally:
+                    os.close(fd)
         used_bytes = self._disk_bytes()
         limit_mb = self.row.spec.resources.disk_mb
         if used_bytes > limit_mb * 1024**2:
@@ -602,6 +609,7 @@ class LocalResourceBoundary:
                 # Each --bind-fd consumes and closes its descriptor. Use a
                 # distinct duplicate for the second scratch mount.
                 launch_fds.append(os.dup(launch_fds[1]))
+                launch_fds.append(os.open(self.paths.home, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW))
             except BaseException:
                 for fd in launch_fds:
                     os.close(fd)
@@ -693,12 +701,16 @@ class LocalResourceBoundary:
                 "--bind-fd",
                 str(launch_fds[3]),
                 "/dev/shm",
+                "--bind-fd" if writable else "--ro-bind-fd",
+                str(launch_fds[4]),
+                "/home/agent",
+                "--symlink",
+                "/tmp",
+                "/var/tmp",
                 "--chdir",
-                spec.workspace_root.rstrip("/")
-                + "/"
-                + cwd.relative_to(self.row.root).as_posix(),
+                self.paths.wire_path(cwd),
             ]
-            payload_env = {**env, "TMPDIR": "/tmp", "HOME": "/tmp"}
+            payload_env = {**env, **self.paths.environment}
             if self.network_broker is None:
                 for key, value in payload_env.items():
                     command += ["--setenv", key, value]
@@ -801,8 +813,7 @@ class LocalResourceBoundary:
                 FileOperation.DELETE,
             }:
                 profile += [f"(allow file-write* (subpath {quote(self.row.root)}))"]
-            env["TMPDIR"] = str(self.scratch)
-            env["HOME"] = str(self.scratch)
+            env.update(self.paths.environment)
             command = [
                 "/usr/bin/sandbox-exec",
                 "-p",
@@ -855,9 +866,9 @@ class LocalResourceBoundary:
                 for root in list(self._root_processes.values()):
                     try:
                         for process in [root, *root.children(recursive=True)]:
-                            self._tracked[(process.pid, process.create_time())] = (
-                                process
-                            )
+                            key = (process.pid, process.create_time())
+                            self._tracked[key] = process
+                            self._descendants_by_root.setdefault(root.pid, set()).add(key)
                     except psutil.NoSuchProcess:
                         pass
                 rss, cpu_delta = 0, 0.0
@@ -877,7 +888,13 @@ class LocalResourceBoundary:
                     or used > limits.disk_mb * 1024**2
                     or len(self._tracked) > limits.max_processes
                 ):
-                    self.row.state = type(self.row.state).LOST
+                    self._mark_lost(
+                        "sandbox resource limit exceeded",
+                        reason="resource_limit_exceeded",
+                        memory_bytes=rss, memory_limit_bytes=limits.memory_mb * 1024**2,
+                        disk_bytes=used, disk_limit_bytes=limits.disk_mb * 1024**2,
+                        process_count=len(self._tracked), process_limit=limits.max_processes,
+                    )
                     for process in list(self._tracked.values()):
                         try:
                             process.kill()
@@ -906,15 +923,52 @@ class LocalResourceBoundary:
                 await asyncio.sleep(0.1)
         except asyncio.CancelledError:
             raise
-        except Exception:
+        except Exception as exc:
             # Losing the monitor cannot silently turn into unmonitored execution.
-            self.row.state = type(self.row.state).LOST
+            self._mark_lost(
+                f"sandbox resource monitor failed: {type(exc).__name__}: {exc}",
+                reason="resource_monitor_failed",
+            )
             for process in list(self._tracked.values()):
                 try:
                     process.kill()
                 except psutil.NoSuchProcess:
                     pass
             raise
+
+    def _mark_lost(self, message, **metadata):
+        self.row.state = type(self.row.state).LOST
+        # Preserve the first cause; cleanup must not hide the original failure.
+        if getattr(self.row, "failure", None) is None:
+            self.row.failure = RuntimeErrorInfo(
+                code="sandbox.lost",
+                category=ErrorCategory.RESOURCE_LOST,
+                message=(f"{message}; diagnostics={metadata}"),
+                safe_to_resume=True,
+                metadata={"sandbox_id": self.row.ref.sandbox_id,
+                          "state": self.row.state.value, **metadata},
+            )
+
+    def check_recovery(self):
+        """Probe existing enforcement without weakening limits or replaying work."""
+        if not self.row.root.is_dir():
+            raise FileNotFoundError(f"workspace directory missing: {self.row.root}")
+        if self._root_processes or self.jobs or self._tracked:
+            raise RuntimeError("previous sandbox processes have not been fully reaped")
+        self._check_hardlinks()
+        if self.cgroup:
+            if not (self.cgroup / "cgroup.kill").exists():
+                raise RuntimeError(f"cgroup enforcement is missing: {self.cgroup}")
+        else:
+            import psutil
+            probe = psutil.Process()
+            probe.children(recursive=True)
+            probe.memory_info()
+            probe.cpu_times()
+        used = self._disk_bytes()
+        limit = self.row.spec.resources.disk_mb * 1024**2
+        if used > limit:
+            raise RuntimeError(f"workspace disk usage {used} exceeds limit {limit} bytes")
 
     def _disk_bytes(self):
         return sum(
@@ -935,6 +989,17 @@ class LocalResourceBoundary:
         if job:
             await self.finish_job(job)
         self._root_processes.pop(process.pid, None)
+        # A completed member must not leave descendants running while siblings
+        # keep the shared supervisor alive. Only reap this command's tree.
+        if self.cgroup is None:
+            import psutil
+            for key in self._descendants_by_root.pop(process.pid, set()):
+                tracked = self._tracked.pop(key, None)
+                if tracked is not None:
+                    try:
+                        tracked.kill()
+                    except psutil.NoSuchProcess:
+                        pass
         if not self._root_processes and self._monitors:
             for task in self._monitors.values():
                 task.cancel()
@@ -948,9 +1013,27 @@ class LocalResourceBoundary:
                 except psutil.NoSuchProcess:
                     pass
             self._tracked.clear()
-        if self._disk_bytes() > self.row.spec.resources.disk_mb * 1024**2:
-            self.row.state = type(self.row.state).LOST
-            raise RuntimeError("sandbox exceeded resources.disk_mb")
+            self._descendants_by_root.clear()
+        used = self._disk_bytes()
+        if used > self.row.spec.resources.disk_mb * 1024**2:
+            self._mark_lost(
+                "sandbox exceeded resources.disk_mb", reason="disk_limit_exceeded",
+                disk_bytes=used,
+                disk_limit_bytes=self.row.spec.resources.disk_mb * 1024**2,
+            )
+        if getattr(self.row, "failure", None) is not None:
+            # Processes may already have written files: do not claim not_applied.
+            available = self.row.root.is_dir()
+            failure = self.row.failure
+            raise SageV2Error(failure.model_copy(update={
+                "safe_to_resume": available,
+                "message": (f"{failure.message}; command has been stopped and reaped; "
+                            "files may have changed: inspect them before trying a revised command; "
+                            f"workspace_available={available}"),
+                "metadata": {**failure.metadata, "process_settled": True,
+                             "side_effect_state": "may_have_applied", "do_not_replay": True,
+                             "available_capabilities": ["filesystem"] if available else []},
+            }))
 
     async def finish_job(self, job):
         (job / "cgroup.kill").write_text("1")
