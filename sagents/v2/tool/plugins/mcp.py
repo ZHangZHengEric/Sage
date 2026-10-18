@@ -366,11 +366,7 @@ class McpToolPlugin:
             return await asyncio.shield(future)
         server, remote_name = route
         try:
-            async with self.session_factory(server) as session:
-                response = await asyncio.wait_for(
-                    session.call_tool(remote_name, call.arguments),
-                    timeout=server.timeout_seconds,
-                )
+            response, cleanup_error = await self._request(server, remote_name, call)
         except asyncio.CancelledError as exc:
             error = self._provider_error(
                 "mcp.result_cancelled",
@@ -388,47 +384,25 @@ class McpToolPlugin:
                     future.set_exception(exc)
                     future.exception()
             raise
-        except TimeoutError as exc:
-            error = self._provider_error(
-                "mcp.result_timeout",
-                server,
-                RuntimeError(
-                    f"Tool did not return within {server.timeout_seconds:g} seconds"
-                ),
-                category=ErrorCategory.UNCERTAIN_SIDE_EFFECT,
-                metadata={
-                    "mcp_result_received": False,
-                    "transport_failure": "timeout",
-                },
-            )
+        except SageV2Error as error:
             async with self._lock:
                 self._failures[call.idempotency_key] = error.info
                 if not future.done():
                     future.set_exception(error)
                     future.exception()
-            raise error from exc
-        except Exception as exc:
-            # The request may have reached the remote server and completed even
-            # though its response was lost. Never replay a write from this state.
-            error = self._provider_error(
-                "mcp.result_not_received",
-                server,
-                exc,
-                category=ErrorCategory.UNCERTAIN_SIDE_EFFECT,
-                metadata={
-                    "mcp_result_received": False,
-                    "transport_failure": "connection",
-                },
-            )
-            async with self._lock:
-                self._failures[call.idempotency_key] = error.info
-                if not future.done():
-                    future.set_exception(error)
-                    future.exception()
-            raise error from exc
+            raise
         else:
             try:
                 result = self._project_result(call, server, remote_name, response)
+                if cleanup_error is not None:
+                    result = result.model_copy(
+                        update={
+                            "metadata": {
+                                **result.metadata,
+                                "mcp_cleanup_error": cleanup_error,
+                            }
+                        }
+                    )
             except Exception as exc:
                 error = self._provider_error(
                     "mcp.result_invalid",
@@ -455,6 +429,80 @@ class McpToolPlugin:
             async with self._lock:
                 self._inflight.pop(call.idempotency_key, None)
                 self._operation_keys.pop(call.operation_id, None)
+
+    async def _request(
+        self, server: McpServerConfig, remote_name: str, call: ToolCall
+    ) -> tuple[Any, str | None]:
+        # Only failure while awaiting call_tool has an unknown remote outcome.
+        # Opening the session cannot dispatch this call; closing it cannot undo
+        # an authoritative response that has already arrived.
+        phase = "connect"
+        response = None
+        try:
+            async with self.session_factory(server) as session:
+                phase = "call"
+                response = await asyncio.wait_for(
+                    session.call_tool(remote_name, call.arguments),
+                    timeout=server.timeout_seconds,
+                )
+                phase = "cleanup"
+        except Exception as exc:
+            if phase == "cleanup":
+                return response, self._exception_details(exc)
+            timeout = self._is_timeout(exc)
+            before_dispatch = phase == "connect"
+            diagnostic = (
+                RuntimeError(
+                    f"Tool did not return within {server.timeout_seconds:g} seconds; "
+                    f"{self._exception_details(exc)}"
+                )
+                if timeout
+                else exc
+            )
+            raise self._provider_error(
+                "mcp.connection_failed"
+                if before_dispatch
+                else ("mcp.result_timeout" if timeout else "mcp.result_not_received"),
+                server,
+                diagnostic,
+                category=(
+                    ErrorCategory.PROVIDER_TRANSIENT
+                    if before_dispatch
+                    else ErrorCategory.UNCERTAIN_SIDE_EFFECT
+                ),
+                metadata={
+                    "mcp_result_received": False,
+                    "mcp_phase": phase,
+                    "timeout_seconds": server.timeout_seconds,
+                    "transport_failure": "timeout" if timeout else "connection",
+                    **({"side_effect_state": "not_applied"} if before_dispatch else {}),
+                },
+            ) from exc
+        return response, None
+
+    @staticmethod
+    def _is_timeout(exc: BaseException) -> bool:
+        if isinstance(exc, BaseExceptionGroup):
+            return all(McpToolPlugin._is_timeout(child) for child in exc.exceptions)
+        return isinstance(exc, TimeoutError)
+
+    @staticmethod
+    def _exception_details(exc: BaseException) -> str:
+        # ExceptionGroup.__str__ hides the leaf errors. Retain bounded details
+        # for diagnosis without copying an entire traceback into the ledger.
+        details = []
+        pending = [(exc, 0)]
+        while pending and len(details) < 16:
+            error, depth = pending.pop()
+            details.append(f"{type(error).__name__}: {error}"[:1024])
+            if depth >= 8:
+                continue
+            children = error.exceptions if isinstance(error, BaseExceptionGroup) else ()
+            if children:
+                pending.extend((child, depth + 1) for child in reversed(children))
+            elif error.__cause__ is not None:
+                pending.append((error.__cause__, depth + 1))
+        return " | ".join(details)[:8192]
 
     def _project_result(
         self,
@@ -693,7 +741,7 @@ class McpToolPlugin:
     ) -> SageV2Error:
         return McpToolPlugin._error(
             code,
-            f"MCP server {server.name!r} failed: {exc}",
+            f"MCP server {server.name!r} failed: {McpToolPlugin._exception_details(exc)}",
             category,
             metadata={
                 "server": server.name,

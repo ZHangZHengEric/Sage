@@ -154,7 +154,8 @@ async def tool_handler(call, context):
 
 
 class UncertainToolExecutor:
-    def __init__(self, states):
+    def __init__(self, states, *, safe_to_resume=True):
+        self.safe_to_resume = safe_to_resume
         self.states = list(states)
         self.calls = []
         self.reconciliations = []
@@ -166,7 +167,7 @@ class UncertainToolExecutor:
                 code="tool.response_lost",
                 category=ErrorCategory.UNCERTAIN_SIDE_EFFECT,
                 message="the request may have committed before the response was lost",
-                safe_to_resume=True,
+                safe_to_resume=self.safe_to_resume,
             )
         )
 
@@ -2408,9 +2409,12 @@ async def test_resume_rejects_checkpoint_ledger_digest_that_disagrees_with_event
 @pytest.mark.parametrize(
     "confirmed_state", [ReconcileState.SUCCEEDED, ReconcileState.FAILED]
 )
-async def test_uncertain_tool_is_reconciled_without_duplicate_dispatch(confirmed_state):
+@pytest.mark.parametrize("safe_to_resume", [True, False])
+async def test_uncertain_tool_is_reconciled_without_duplicate_dispatch(
+    confirmed_state, safe_to_resume
+):
     definition = READ_TOOL.model_copy(update={"supports_reconciliation": True})
-    executor = UncertainToolExecutor((confirmed_state,))
+    executor = UncertainToolExecutor((confirmed_state,), safe_to_resume=safe_to_resume)
     model = ScriptedModelProvider(
         (
             ScriptedModelStep(events=(completed("", calls=(tool_call(),)),)),
@@ -3500,7 +3504,10 @@ async def test_manual_reconciliation_failure_keeps_the_checkpoint_ledger_resumab
 
 
 @pytest.mark.asyncio
-async def test_authoritative_tool_error_content_is_persisted_and_resumable():
+@pytest.mark.parametrize("safe_to_resume", [True, False])
+async def test_authoritative_tool_error_content_is_persisted_and_resumable(
+    safe_to_resume,
+):
     """带 tool_result_received 的失败：模型看到的内容与落盘 Item 一致，之后仍可 resume。"""
 
     class RejectedWriteExecutor:
@@ -3514,7 +3521,7 @@ async def test_authoritative_tool_error_content_is_persisted_and_resumable():
                     code="remote.write_rejected",
                     category=ErrorCategory.PROVIDER_PERMANENT,
                     message="write rejected",
-                    safe_to_resume=True,
+                    safe_to_resume=safe_to_resume,
                     metadata={"tool_result_received": True},
                 ),
                 metadata={"tool_result_received": True},
@@ -4943,3 +4950,125 @@ async def test_context_recovery_stops_after_six_retries_without_executing_tools(
     assert len([e for e in events if e.type == "step.retry_scheduled"]) == 6
     assert [e.data.attempt for e in events if e.type == "step.retry_scheduled"] == list(range(1, 7))
     assert not any(e.type == "tool.call.started" for e in events)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("decision", ["confirm_succeeded", "mark_failed"])
+async def test_mcp_unknown_pauses_and_cold_resume_keeps_parallel_results(decision):
+    from contextlib import asynccontextmanager
+    from sagents.v2.tool import McpServerConfig, McpToolPlugin
+
+    context = CONTEXT.model_copy(
+        update={
+            "actor": CONTEXT.actor.model_copy(
+                update={"scopes": ("tool.external_side_effect",)}
+            )
+        }
+    )
+    dispatches = []
+
+    class Session:
+        async def list_tools(self):
+            return {
+                "tools": [
+                    {
+                        "name": "read_value",
+                        "description": "Remote operation",
+                        "inputSchema": {"type": "object"},
+                    }
+                ]
+            }
+
+        async def call_tool(self, name, arguments):
+            dispatches.append(arguments["value"])
+            if arguments["value"] == "unknown":
+                raise ExceptionGroup(
+                    "transport group", [ConnectionError("response lost")]
+                )
+            return {"content": [{"type": "text", "text": "saved sibling receipt"}]}
+
+    @asynccontextmanager
+    async def factory(config):
+        yield Session()
+
+    bridge = McpToolPlugin(
+        (McpServerConfig(name="yiii", protocol="stdio", command="fake"),),
+        session_factory=factory,
+    )
+    definitions = await bridge.list_tools(run_id="discovery")
+    calls = tuple(
+        ModelToolCall(
+            tool_call_id=f"call_{n}",
+            name=definitions[0].name,
+            arguments={"value": value},
+        )
+        for n, value in enumerate(("unknown", "saved"), 1)
+    )
+    model = ScriptedModelProvider(
+        (ScriptedModelStep(events=(completed("", calls=calls),)),)
+    )
+    runtime, handle, loop, _ = await setup_loop(
+        model, tools=definitions, actor_context=context
+    )
+    loop.tool_executor = bridge
+    suspended = await loop.execute(handle.run_id, context)
+    assert suspended.state == RunState.SUSPENDED
+    events = await runtime.session_store.read_events(handle.run_id)
+    assert not any(e.type == "run.failed" for e in events)
+    assert (
+        persisted_tool_result(events, "call_2").data.content[0].text
+        == "saved sibling receipt"
+    )
+
+    # Cold host/plugin: only the durable ledger is available, with no in-memory
+    # provider receipts. Both the completed sibling and resolved call must reuse it.
+    cold = ephemeral_runtime()
+    await cold.session_store.load_state(await runtime.session_store.export_state())
+    resolution_model = ScriptedModelProvider(
+        (ScriptedModelStep(events=(completed("done"),)),)
+    )
+
+    class NeverExecute:
+        async def execute(self, call, context):
+            raise AssertionError("saved operation must never be dispatched again")
+
+    recovered_loop = AgentLoopEngine(
+        runtime=cold,
+        model=resolution_model,
+        tool_catalog=InMemoryToolCatalog(definitions),
+        tool_executor=NeverExecute(),
+    )
+    suspension = await cold.session_store.get_suspension(suspended.suspension_id)
+    interaction = await cold.session_store.get_interaction(suspension.interaction_id)
+    assert interaction.allowed_decisions == (
+        "confirm_succeeded",
+        "mark_failed",
+        "cancel",
+    )
+    await cold.reply_interaction(
+        ReplyInteraction(
+            run_id=handle.run_id,
+            suspension_id=suspension.suspension_id,
+            interaction_id=interaction.interaction_id,
+            expected_revision=suspended.revision,
+            expected_suspension_revision=suspension.expected_revision,
+            expected_interaction_revision=interaction.expected_revision,
+            decision=decision,
+            payload={"result_text": "checked remote receipt"},
+            idempotency_key="checked",
+        ),
+        context,
+    )
+    result = await recovered_loop.resume(handle.run_id, context)
+    assert result.state == RunState.COMPLETED
+    assert sorted(dispatches) == ["saved", "unknown"]
+    messages = [m for m in resolution_model.requests[0].messages if m.role == "tool"]
+    assert sorted(m.tool_call_id for m in messages) == ["call_1", "call_2"]
+    by_id = {m.tool_call_id: m for m in messages}
+    assert by_id["call_2"].content[0].text == "saved sibling receipt"
+    if decision == "confirm_succeeded":
+        assert by_id["call_1"].content[0].text == "checked remote receipt"
+    events = await cold.session_store.read_events(handle.run_id)
+    assert sum(e.type == "tool.call.started" for e in events) == 2
+    assert sum(e.type == "tool.call.reconciled" for e in events) == 1
+    assert not any(e.type == "run.failed" for e in events)
