@@ -6,6 +6,7 @@ import asyncio
 import os
 import shutil
 import subprocess
+import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -157,7 +158,7 @@ async def test_local_workspace_reads_and_writes_only_with_matching_signed_grants
         issuer, handle, "read", path="/workspace/note.txt"
     )
 
-    assert stat.path == "/workspace/note.txt"
+    assert stat.path == ("/workspace/note.txt" if sys.platform == "linux" else str(tmp_path / "note.txt"))
     assert (
         await handle.filesystem.read_bytes(
             "/workspace/note.txt", intent=read_intent, grant=read_grant
@@ -257,7 +258,7 @@ async def test_local_workspace_maps_host_paths_at_the_sandbox_boundary(
     _, handle = await provision(tmp_path)
     inside = tmp_path / "nested" / "note.txt"
     assert handle.filesystem.normalize_path(str(inside)) == (
-        "/workspace/nested/note.txt"
+        "/workspace/nested/note.txt" if sys.platform == "linux" else str(inside)
     )
     with pytest.raises(PermissionError, match="outside"):
         handle.filesystem.normalize_path(str(tmp_path.parent / "outside.txt"))
@@ -756,7 +757,9 @@ async def test_local_workspace_protected_paths_stay_readable_and_siblings_writab
     listed = await handle.filesystem.list_paths(
         ".git/hooks", intent=list_intent, grant=list_grant
     )
-    assert [value.path for value in listed] == ["/workspace/.git/hooks/pre-commit"]
+    assert [value.path for value in listed] == [
+        "/workspace/.git/hooks/pre-commit" if sys.platform == "linux" else str(hook)
+    ]
 
     # ".git" 受保护不能误伤 ".gitignore" 这类同前缀兄弟路径。
     for path in (".gitignore", "src/main.py", ".github/workflows/ci.yml"):

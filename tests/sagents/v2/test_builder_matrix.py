@@ -965,7 +965,7 @@ async def test_execution_binding_provider_receives_actual_run_and_closes_once(
         StartRun(
             agent_id=agent_id,
             input=(InputItem(role="user", content=(TextBlock(text="hello"),)),),
-            resolved_spec_hash="sha256:test",
+            resolved_spec_hash=application.composition_hash,
             idempotency_key="binding-run",
         ),
         RequestContext(
@@ -977,6 +977,10 @@ async def test_execution_binding_provider_receives_actual_run_and_closes_once(
     assert bindings.requests[0].run_id == result.run_id
     assert bindings.bindings[0].sandbox.ref.owner_run_id == result.run_id
     assert bindings.bindings[0].closed is True
+    prompt = str(model.requests[0].messages)
+    assert "<sandbox_environment>" in prompt
+    assert "XDG_CACHE_HOME" in prompt
+    assert bindings.bindings[0].sandbox.describe_environment()["environment"]["HOME"] in prompt
     await application.close()
 
 

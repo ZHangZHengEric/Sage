@@ -91,6 +91,10 @@ def sandbox_denial_as_not_applied(exc: BaseException) -> SageV2Error | None:
 
     if isinstance(exc, SageV2Error):
         info = exc.info
+        # Resource loss can be detected after execution too. Only the provider
+        # can establish whether this operation crossed its side-effect boundary.
+        if info.category == ErrorCategory.RESOURCE_LOST:
+            return None
         if info.code not in SANDBOX_DENIAL_CODES:
             return None
         if info.metadata.get("side_effect_state") == "not_applied":
@@ -413,6 +417,10 @@ class OfficialToolRuntime:
             )
         except TimeoutError:
             snapshot = await self.job_runtime.inspect(task_id)
+        if snapshot.error and snapshot.error.category == ErrorCategory.RESOURCE_LOST:
+            # A lost execution environment is a framework failure even when
+            # delivered through the asynchronous shell job channel.
+            raise SageV2Error(snapshot.error)
         output = await self._job_output(task_id)
         terminal = snapshot.state in {
             JobState.COMPLETED,

@@ -46,6 +46,7 @@ from sagents.v2.composition.resolution import (
 from sagents.v2.composition.resolution import _resolve_package as resolve_package
 from sagents.v2.contracts.errors import ErrorCategory, RuntimeErrorInfo, SageV2Error
 from sagents.v2.contracts.principals import ActorRef, PrincipalType, RequestContext
+from sagents.v2.context.sandbox_environment import SandboxEnvironmentContextProvider
 from sagents.v2.goal import GoalStateService
 from sagents.v2.interfaces.protocols.native import NativeProtocolAdapter
 from sagents.v2.memory import (
@@ -762,6 +763,8 @@ class ApplicationAssembler:
                     skill_loader=skill_loader,
                     self_configuration=self_configuration,
                     additional_context_providers=(
+                        *((SandboxEnvironmentContextProvider(active_runtime.sandbox),)
+                          if active_runtime is not None else ()),
                         AgentRosterContextProvider(
                             registry,
                             descriptor.mode,
@@ -796,7 +799,25 @@ class ApplicationAssembler:
                     ),
                     context=child_context,
                 )
-                binding = await self.options.execution_binding_provider.acquire(request)
+                if (root_descriptor.mode == AgentMode.TEAM
+                        and request.workspace_policy == "shared_parent"
+                        and continuation_runtime is not None):
+                    share = getattr(continuation_runtime.sandbox, "share", None)
+                    if not callable(share):
+                        raise SageV2Error(RuntimeErrorInfo(
+                            code="execution.shared_sandbox_unsupported",
+                            category=ErrorCategory.UNSUPPORTED_SCHEMA,
+                            message="Team shared_parent requires a sandbox provider with Run leases",
+                        ))
+                    sandbox = await share(run_id=child_run_id, context=child_context)
+                    binding = RunExecutionBinding(
+                        run_id=child_run_id, parent_run_id=command.parent_run_id,
+                        agent_id=descriptor.agent_id, workspace_policy=request.workspace_policy,
+                        workspace_root=sandbox.filesystem.normalize_path("."),
+                        sandbox=sandbox, grant_issuer=continuation_runtime.grant_issuer,
+                    )
+                else:
+                    binding = await self.options.execution_binding_provider.acquire(request)
                 try:
                     binding.validate_for(request)
                     child_tools = await bound_tools.compose(

@@ -3555,6 +3555,12 @@ class AgentLoopEngine:
         # write must not be escalated to an unknown-side-effect suspension.
         if error.metadata.get("tool_result_received") is True:
             return False
+        # A local supervisor confirms the process was reaped. Its partial files
+        # remain inspectable; report the interruption instead of replaying it or
+        # suspending the entire Agent for an unknown execution outcome.
+        if (error.category == ErrorCategory.RESOURCE_LOST
+                and error.metadata.get("process_settled") is True):
+            return False
         if error.category == ErrorCategory.UNCERTAIN_SIDE_EFFECT:
             return True
         if self._unsafe_tool_runtime_error(error):

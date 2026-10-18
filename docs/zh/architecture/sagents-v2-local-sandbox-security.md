@@ -155,3 +155,32 @@ SAGE_TEST_EXECUTION_GID
 ```
 
 缺失平台或专用资源时的跳过不算通过。命令构造单元测试不代表 Linux cgroup/XFS 实机验收。
+
+## 本地沙箱的标准目录与环境说明
+
+本地插件在已有宿主工作区内创建以下目录；不搬迁现有项目文件，也不把宿主工作区视为操作系统的 `/`：
+
+| 用途 | 宿主存储（相对工作区） | Linux 进程路径 | 原生 macOS 进程路径 |
+| --- | --- | --- | --- |
+| 工作区 | `.` | `workspace_root` | 宿主工作区绝对路径 |
+| 临时文件 | `.sage-sandbox-tmp/` | `/tmp`、`/var/tmp`（另与 `/dev/shm` 共用存储） | 工作区内真实路径 |
+| Home | `.sage-sandbox-home/` | `/home/agent` | 工作区内真实路径 |
+| 缓存 | `.sage-sandbox-home/.cache/` | `$HOME/.cache` | `$HOME/.cache` |
+| 配置 | `.sage-sandbox-home/.config/` | `$HOME/.config` | `$HOME/.config` |
+| 数据、状态 | `.sage-sandbox-home/.local/share/`、`.local/state/` | Home 下相应目录 | Home 下相应目录 |
+
+插件提供 `HOME`、`TMPDIR`、`TMP`、`TEMP`、`XDG_CACHE_HOME`、`XDG_CONFIG_HOME`、`XDG_DATA_HOME`、`XDG_STATE_HOME`。临时目录沿用原位置；Home 与临时目录分开。所有这些目录计入工作区磁盘额度，生命周期跟随宿主工作区；主动共享工作区的 Run 也共享这些目录。只读策略继续适用，不因目录存在而获得写权限。
+
+文件工具接受相对工作区路径、工作区内的宿主绝对路径，以及 `~/`、`$HOME/`、`${TMPDIR}/` 和上述环境变量的前缀形式。只使用插件的目录变量，不读取宿主用户的 HOME，不执行任意 shell 展开。Linux 同时接受进程可见的挂载路径。路径遍历、符号链接、保护路径和签名授权检查继续执行。
+
+文件工具返回的规范路径与当前平台 Shell 可见的路径一致：Linux 返回挂载后的虚拟路径；原生 macOS 返回真实工作区绝对路径。macOS 文件工具仍接受原 `workspace_root` 别名作为兼容输入，但 Shell 不提供绝对路径重映射；应使用规范输出或环境变量，而非把 `/tmp`、`/private/tmp` 当成工作区别名。Linux 的 `workspace_root` 不能与 `/home/agent`、`/var/tmp` 的挂载路径重叠。
+
+本地 handle 的 `describe_environment()` 返回操作系统、隔离方式、工作区、目录环境变量、网络模式、资源额度和路径规则。通用组合层只把可选描述投影为 `<sandbox_environment>` 上下文，不解释本地目录布局。其他插件不提供此方法时保持原行为。自行组合 Agent loop 的宿主可使用 `SandboxEnvironmentContextProvider`，见 [yiii 接入说明](sagents-v2-yiii-sandbox-directories-integration.md)。
+
+## Team 共享实例与 Run 租约
+
+标准 Builder 的 Team 成员默认通过本地插件的 `share` 能力获得父沙箱租约，使用同一 sandbox_id、目录、进程并发槽和资源监督。每个租约仍有独立的 owner_run_id 和签名校验。关闭成员仅取消该成员的运行中及排队任务；同租约有多个 attach handle 时，最后一个 handle 关闭才释放该租约；最后一个有效租约释放才关闭物理环境。正常成员退出不会关闭其他成员环境。
+
+`LocalWorkspaceExecutionBindingProvider` 可通过原有 `with_execution_binding_provider` 接入标准 Builder，Desktop 使用同一 SDK 实现的兼容类。Builder 的公开调用方式不变。Team 使用共享策略而插件没有 Run 租约能力时明确报不支持；显式独立工作区策略仍按宿主配置单独获取。
+
+临时目录/Home/XDG 环境变量不改变本机访问授权，只决定默认存储位置；具体文件、系统和电脑控制能力仍由所选执行插件及宿主工具授权决定。

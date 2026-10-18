@@ -31,7 +31,11 @@ class ExecutionBindingRequest:
 
 @dataclass
 class RunExecutionBinding:
-    """A sandbox and grant authority owned by exactly one durable Run."""
+    """A Run-owned sandbox lease and grant authority.
+
+    The signed lease belongs to exactly one durable Run; multiple leases may
+    refer to the same physical sandbox without sharing cancellation ownership.
+    """
 
     run_id: str
     agent_id: str

@@ -160,7 +160,7 @@ pathlib.Path('inside.txt').write_text('allowed')
 @pytest.mark.skipif(
     sys.platform != "darwin", reason="native macOS resource supervision"
 )
-async def test_memory_overage_kills_execution_and_fences_sandbox(tmp_path):
+async def test_memory_overage_reports_details_and_next_process_recovers(tmp_path):
     _, issuer, handle = await local(tmp_path, memory_mb=64)
     request = ProcessRequest(
         argv=(
@@ -169,9 +169,20 @@ async def test_memory_overage_kills_execution_and_fences_sandbox(tmp_path):
             "import time; data=bytearray(128*1024*1024); time.sleep(2)",
         )
     )
-    result = await handle.process.run(request, **authorize(issuer, handle, request))
-    assert result.exit_code != 0
+    with pytest.raises(SageV2Error) as caught:
+        await handle.process.run(request, **authorize(issuer, handle, request))
+    assert caught.value.info.code == "sandbox.lost"
+    assert caught.value.info.metadata["reason"] == "resource_limit_exceeded"
+    assert caught.value.info.metadata["side_effect_state"] == "may_have_applied"
+    assert caught.value.info.safe_to_resume
     assert (await handle.status()).state == SandboxState.LOST
+    assert "memory_bytes" in caught.value.info.message
+    request = ProcessRequest(argv=("python", "-c", "print('recovered')"))
+    result = await handle.process.run(request, **authorize(issuer, handle, request))
+    assert result.exit_code == 0
+    assert b"recovered" in result.stdout
+    assert (await handle.status()).state == SandboxState.READY
+    await handle.destroy()
 
 
 @pytest.mark.asyncio
@@ -204,7 +215,7 @@ async def test_multiple_files_cannot_silently_exceed_standard_disk_limit(tmp_pat
             "from pathlib import Path; [Path(str(i)).write_bytes(b'x'*700000) for i in range(2)]",
         )
     )
-    with pytest.raises(RuntimeError, match="disk_mb"):
+    with pytest.raises(SageV2Error, match="disk_mb|resource limit"):
         await handle.process.run(request, **authorize(issuer, handle, request))
     assert (await handle.status()).state == SandboxState.LOST
 
@@ -232,7 +243,8 @@ async def test_timeout_covers_blocked_stdin_and_terminate_rejects_queued_jobs(tm
     await handle.destroy()
     results = await asyncio.gather(first, second, return_exceptions=True)
     assert isinstance(results[0], asyncio.CancelledError)
-    assert isinstance(results[1], PermissionError)
+    assert isinstance(results[1], asyncio.CancelledError)
+    assert not handle.process.row.queued_tasks
     assert not provider._rows[handle.ref.sandbox_id].active_tasks
 
 
@@ -520,6 +532,7 @@ def test_linux_launch_pins_mounts_cgroups_and_loader_environment(
     boundary.cgroup = tmp_path / "cgroup"
     boundary.cgroup.mkdir()
     boundary.scratch.mkdir()
+    boundary.paths.home.mkdir()
     if network_enabled:
         row.spec = row.spec.model_copy(
             update={
@@ -543,8 +556,8 @@ def test_linux_launch_pins_mounts_cgroups_and_loader_environment(
         if network_enabled:
             assert command.index("--share-net") > command.index("--unshare-all")
             assert "/etc/resolv.conf" in command
-        assert command.count("--bind-fd") == 3
-        assert len(fds) == 4 and len(set(fds)) == 4
+        assert command.count("--bind-fd") == 4
+        assert len(fds) == 5 and len(set(fds)) == 5
         assert command.count("--remount-ro") == 3
         assert command[command.index("--dev-bind") + 1] == "/dev/null"
         assert command.index("--dev-bind") < command.index("--remount-ro")
@@ -591,6 +604,7 @@ def test_linux_proxy_launch_retains_network_namespace_and_delays_loader_environm
     )
     boundary = LocalResourceBoundary(row)
     boundary.scratch.mkdir()
+    boundary.paths.home.mkdir()
     boundary.network_broker = SimpleNamespace(
         socket_path=tmp_path / "broker.sock", token="run-token"
     )
@@ -785,3 +799,75 @@ async def test_existing_workspace_quota_failure_is_typed_and_preserves_artifacts
     assert error.message_params["limit_mb"] == 1
     assert "沙箱磁盘配额" in localize_error(error, "zh").message
     assert artifact.stat().st_size == 2 * 1024**2
+
+
+@pytest.mark.asyncio
+async def test_monitor_failure_retains_cause_and_finish_reports_resource_loss(tmp_path):
+    provider, _, handle = await local(tmp_path)
+    row = handle.filesystem.row
+    boundary = row.boundary
+
+    def broken_children(**kwargs):
+        raise RuntimeError("resource query unavailable")
+
+    boundary._root_processes[123] = SimpleNamespace(children=broken_children)
+    try:
+        with pytest.raises(RuntimeError, match="resource query unavailable"):
+            await boundary._monitor()
+        assert row.state == SandboxState.LOST
+        assert row.failure.metadata["reason"] == "resource_monitor_failed"
+        assert "resource query unavailable" in row.failure.message
+        with pytest.raises(SageV2Error) as caught:
+            await boundary.finish(SimpleNamespace(pid=123))
+        assert caught.value.info.metadata["reason"] == row.failure.metadata["reason"]
+        assert caught.value.info.safe_to_resume
+        assert caught.value.info.metadata["process_settled"] is True
+        assert caught.value.info.metadata["side_effect_state"] == "may_have_applied"
+        with pytest.raises(SageV2Error) as admission:
+            provider._require_ready(row)
+        assert admission.value.info.metadata["side_effect_state"] == "not_applied"
+        assert admission.value.info.safe_to_resume
+    finally:
+        boundary._root_processes.clear()
+        await handle.destroy()
+
+
+@pytest.mark.asyncio
+async def test_process_recovery_is_bounded_and_preserves_diagnostics(tmp_path, monkeypatch):
+    provider, _, handle = await local(tmp_path)
+    row = handle.filesystem.row
+    boundary = row.boundary
+    boundary._mark_lost("resource query unavailable", reason="resource_monitor_failed")
+    calls = []
+
+    def broken_probe():
+        calls.append(1)
+        raise PermissionError("sysctl denied during recovery")
+
+    monkeypatch.setattr(boundary, "check_recovery", broken_probe)
+    await provider._recover_process(row)
+    await provider._recover_process(row)
+    assert calls == [1]
+    with pytest.raises(SageV2Error) as caught:
+        provider._require_ready(row)
+    assert caught.value.info.safe_to_resume
+    assert "sysctl denied during recovery" in caught.value.info.message
+    assert caught.value.info.metadata["recovery_attempts"] == 1
+    assert caught.value.info.metadata["available_capabilities"] == ["filesystem"]
+    await handle.destroy()
+
+
+@pytest.mark.asyncio
+async def test_process_recovery_only_admits_future_work(tmp_path, monkeypatch):
+    provider, _, handle = await local(tmp_path)
+    row = handle.filesystem.row
+    row.boundary._mark_lost("memory limit exceeded", reason="resource_limit_exceeded")
+    probes = []
+    monkeypatch.setattr(row.boundary, "check_recovery", lambda: probes.append(1))
+    await provider._recover_process(row)
+    assert probes == [1]
+    assert row.state == SandboxState.READY
+    assert row.failure is None
+    assert row.recovery_attempts == 1
+    assert not row.active_tasks
+    await handle.destroy()

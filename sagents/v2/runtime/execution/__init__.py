@@ -4,6 +4,10 @@ from sagents.v2._lazy import exported_names, resolve_export
 
 
 _EXPORTS = {
+    "LocalWorkspaceExecutionBindingProvider": (
+        "sagents.v2.runtime.execution.local_binding",
+        "LocalWorkspaceExecutionBindingProvider",
+    ),
     "ExecutionBindingLifecycleCoordinator": (
         "sagents.v2.runtime.execution.lifecycle",
         "ExecutionBindingLifecycleCoordinator",

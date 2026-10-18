@@ -201,7 +201,10 @@ def _known_not_applied(exc: Exception) -> SageV2Error:
     if isinstance(exc, SageV2Error):
         info = exc.info.model_copy(
             update={
-                "safe_to_resume": True,
+                "safe_to_resume": (
+                    exc.info.safe_to_resume
+                    if exc.info.category == ErrorCategory.RESOURCE_LOST else True
+                ),
                 "metadata": {
                     **exc.info.metadata,
                     "side_effect_state": "not_applied",

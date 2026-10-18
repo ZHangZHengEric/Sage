@@ -94,7 +94,15 @@ class SandboxNetworkRuntime(Protocol):
 
 
 class SandboxHandle(Protocol):
-    """Run-scoped access to one provisioned or reattached sandbox."""
+    """Run-scoped access to one provisioned or reattached sandbox.
+
+    Providers may expose ``describe_environment() -> dict`` (sync or async) to
+    publish their actual OS, directories, environment variables and path rules.
+    Composition projects it into Agent context without interpreting mappings.
+    Providers supporting Team sharing expose ``share(*, run_id, context)`` on
+    the handle: it returns a Run-owned lease with the same sandbox_id and policy,
+    independent revocation, and resource accounting shared by all live members.
+    """
 
     ref: SandboxRef
     filesystem: SandboxFileSystem

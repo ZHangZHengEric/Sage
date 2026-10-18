@@ -5199,3 +5199,61 @@ async def test_network_retry_wait_honors_user_cancel():
     ), CONTEXT)
     assert (await asyncio.wait_for(task, 2)).state == RunState.CANCELLED
     assert len(model.requests) == 1
+
+
+@pytest.mark.asyncio
+async def test_lost_sandbox_stops_run_before_next_model_request():
+    async def lost_before_write(call, context):
+        from sagents.v2.tool.official.runtime import sandbox_denials_not_applied
+        with sandbox_denials_not_applied():
+            raise SageV2Error(RuntimeErrorInfo(
+                code="sandbox.lost", category=ErrorCategory.RESOURCE_LOST,
+                message="sandbox resource monitor failed; host recovery required",
+                metadata={"side_effect_state": "not_applied"},
+            ))
+
+    model = ScriptedModelProvider((
+        ScriptedModelStep(events=(completed("", calls=(tool_call("write_value"),)),)),
+        ScriptedModelStep(events=(completed("must not be requested"),)),
+    ))
+    runtime, handle, loop, _ = await setup_loop(
+        model, handlers={"read_value": tool_handler, "write_value": lost_before_write}
+    )
+    loop.tool_policy = DefaultToolPolicy(approval_strategy=ApprovalStrategy.AUTO_APPROVE)
+    result = await loop.execute(handle.run_id, CONTEXT)
+    events = await runtime.session_store.read_events(handle.run_id)
+    assert result.state == RunState.FAILED
+    assert len(model.requests) == 1
+    assert not any(e.type == "tool.call.unknown" for e in events)
+    failure = next(e for e in events if e.type == "tool.call.failed").data.error
+    assert failure.category == ErrorCategory.RESOURCE_LOST
+    assert not failure.safe_to_resume
+    assert failure.metadata["side_effect_state"] == "not_applied"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("settled", [False, True])
+async def test_partial_sandbox_failure_reports_details_and_agent_continues(settled):
+    async def interrupted(call, context):
+        raise SageV2Error(RuntimeErrorInfo(
+            code="sandbox.lost", category=ErrorCategory.RESOURCE_LOST,
+            message="memory_bytes=134217728 exceeds memory_limit_bytes=67108864; inspect partial files",
+            safe_to_resume=True,
+            metadata=({"process_settled": True, "side_effect_state": "may_have_applied",
+                       "do_not_replay": True} if settled else {"side_effect_state": "not_applied"}),
+        ))
+    model = ScriptedModelProvider((
+        ScriptedModelStep(events=(completed("", calls=(tool_call("write_value"),)),)),
+        ScriptedModelStep(events=(completed("continuing with available tools"),)),
+    ))
+    runtime, handle, loop, _ = await setup_loop(
+        model, handlers={"read_value": tool_handler, "write_value": interrupted}
+    )
+    loop.tool_policy = DefaultToolPolicy(approval_strategy=ApprovalStrategy.AUTO_APPROVE)
+    result = await loop.execute(handle.run_id, CONTEXT)
+    events = await runtime.session_store.read_events(handle.run_id)
+    assert result.state == RunState.COMPLETED
+    assert len(model.requests) == 2
+    assert not any(e.type in {"tool.call.unknown", "interaction.requested"} for e in events)
+    tool_message = next(m for m in model.requests[1].messages if m.role == "tool")
+    assert "134217728" in str(tool_message.content)

@@ -136,6 +136,10 @@ class _LocalRow:
     state: SandboxState
     created_at: object
     updated_at: object
+    failure: RuntimeErrorInfo | None = None
+    recovery_attempts: int = 0
+    terminating: bool = False
+    recovery_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
     revision: int = 0
     attached_clients: int = 1
     mutation_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
@@ -144,6 +148,13 @@ class _LocalRow:
     )
     boundary: object = None
     active_tasks: set = field(default_factory=set)
+    queued_tasks: set = field(default_factory=set)
+    # One physical boundary, with a separately revocable signed lease per Run.
+    resource: object = None
+    members: dict = field(default_factory=dict)
+    issued_runs: set = field(default_factory=set)
+    lease_terminated: bool = False
+    lease_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
 
 
 class _LocalFileSystem:
@@ -182,8 +193,7 @@ class _LocalFileSystem:
         if policy.max_file_bytes is not None and len(content) > policy.max_file_bytes:
             raise ValueError("file exceeds max_file_bytes")
         async with self.row.mutation_lock:
-            if self.row.state != SandboxState.READY:
-                raise PermissionError("sandbox is not ready")
+            self.provider._require_ready(self.row, operation=operation.value)
             previous_size = candidate.stat().st_size if candidate.is_file() else 0
             total_limit = min(
                 policy.max_total_bytes or self.row.spec.resources.disk_mb * 1024**2,
@@ -217,8 +227,7 @@ class _LocalFileSystem:
         if candidate.is_dir():
             raise IsADirectoryError(path)
         async with self.row.mutation_lock:
-            if self.row.state != SandboxState.READY:
-                raise PermissionError("sandbox is not ready")
+            self.provider._require_ready(self.row, operation=FileOperation.DELETE.value)
             from ..local_support import files as local_files
 
             await asyncio.to_thread(
@@ -293,7 +302,7 @@ class _LocalProcessRuntime:
         self.row = row
 
     def _prepare(self, request, intent, grant):
-        self.provider._verify(self.row, "process.run", intent, grant)
+        self.provider._verify(self.row, "process.run", intent, grant, check_ready=False)
         if (
             intent.executable != request.argv[0]
             or intent.argv != request.argv
@@ -373,8 +382,20 @@ class _LocalProcessRuntime:
         return resolved_executable, arguments, cwd, environment, timeout
 
     @asynccontextmanager
+    async def _process_slot(self):
+        task = asyncio.current_task()
+        self.row.queued_tasks.add(task)
+        try:
+            async with self.row.process_slots:
+                self.row.queued_tasks.discard(task)
+                yield
+        finally:
+            self.row.queued_tasks.discard(task)
+
+    @asynccontextmanager
     async def open_process(self, request: ProcessRequest, *, intent, grant):
         executable, arguments, cwd, environment, timeout = self._prepare(request, intent, grant)
+        await self.provider._recover_process(self.row)
         # Interactive servers have no implicit batch-command deadline. Explicit
         # request and sandbox policy limits are still enforced by _prepare.
         if request.timeout_seconds is None and self.row.spec.process.max_wall_time_seconds is None:
@@ -383,9 +404,8 @@ class _LocalProcessRuntime:
             raise PermissionError("interactive processes require a writable process policy")
         if request.stdin is not None:
             raise ValueError("interactive stdin must be written through the stream")
-        async with self.row.process_slots:
-            if self.row.state != SandboxState.READY:
-                raise PermissionError("sandbox is not ready")
+        async with self._process_slot():
+            self.provider._require_ready(self.row)
             task = asyncio.current_task()
             self.row.active_tasks.add(task)
             process = None
@@ -420,12 +440,12 @@ class _LocalProcessRuntime:
 
     async def run(self, request: ProcessRequest, *, intent, grant) -> ProcessResult:
         resolved_executable, arguments, cwd, environment, timeout = self._prepare(request, intent, grant)
+        await self.provider._recover_process(self.row)
         policy = self.row.spec.process
         started = time.monotonic()
-        async with self.row.process_slots:
+        async with self._process_slot():
             # Recheck after queueing: terminate may have run while we waited.
-            if self.row.state != SandboxState.READY:
-                raise PermissionError("sandbox is not ready")
+            self.provider._require_ready(self.row)
             task = asyncio.current_task()
             self.row.active_tasks.add(task)
             if policy.read_only:
@@ -633,6 +653,20 @@ class _LocalHandle:
         self.process = _LocalProcessRuntime(provider, row)
         self.network = _NoNetwork()
         self._closed = False
+        self._close_task = None
+
+    def describe_environment(self):
+        from ..local_support.paths import LocalSandboxPaths
+
+        row = self.filesystem.row
+        result = LocalSandboxPaths(row.root, row.spec.workspace_root, sys.platform).describe()
+        result["network_mode"] = row.spec.network.mode.value
+        result["process_read_only"] = row.spec.process.read_only
+        result["resource_limits"] = row.spec.resources.model_dump(mode="json")
+        result["sandbox_id"] = row.ref.sandbox_id
+        result["lease_owner_run_id"] = row.ref.owner_run_id
+        result["shared_instance"] = len(row.resource.members) > 1
+        return result
 
     async def status(self):
         return await self.provider.inspect(self.ref)
@@ -640,15 +674,31 @@ class _LocalHandle:
     async def suspend(self):
         return await self.provider.snapshot(self.ref)
 
+    async def share(self, *, run_id, context):
+        if self._closed:
+            raise RuntimeError("cannot share a closed sandbox lease")
+        return await self.provider.share(self.ref, context, run_id=run_id)
+
     async def close(self):
-        if not self._closed:
-            row = self.provider._rows.get(self.ref.sandbox_id)
-            if row is not None:
-                row.attached_clients = max(0, row.attached_clients - 1)
-            self._closed = True
-            self.provider._sweep_terminated()
+        if self._close_task is not None and self._close_task.done() and not self._closed:
+            self._close_task = None  # Retry a failed cleanup, not a released lease.
+        if self._close_task is None:
+            self._close_task = asyncio.create_task(self._release_lease())
+        await asyncio.shield(self._close_task)
+
+    async def _release_lease(self):
+        row = self.provider._row(self.ref)
+        # Only the last handle for this Run releases its lease. Other Runs
+        # keep the same physical boundary and their own active processes.
+        row.attached_clients = max(0, row.attached_clients - 1)
+        if row.attached_clients == 0:
+            await self.provider.terminate(self.ref, TerminateMode.FORCE)
+        self._closed = True
+        self.provider._sweep_terminated()
 
     async def destroy(self):
+        if self._closed:
+            return
         await self.provider.terminate(self.ref, TerminateMode.FORCE)
         await self.close()
 
@@ -702,7 +752,7 @@ class LocalWorkspaceSandboxProvider:
         self._max_retained_terminal = max_retained_terminal_items
         self._rows: dict[str, _LocalRow] = {}
         self._used_nonces: dict[str, str] = {}
-        self._release_receipts: dict[tuple[str, str], SandboxReleaseReceipt] = {}
+        self._release_receipts: dict[tuple[str, str, str], SandboxReleaseReceipt] = {}
         self._boundary_options = dict(
             cgroup_root=linux_cgroup_root,
             quota_mount=linux_quota_mount,
@@ -815,6 +865,9 @@ class LocalWorkspaceSandboxProvider:
                 await row.boundary.network_broker.close()
             row.boundary.remove()
             raise
+        row.resource = row
+        row.members[run_id] = row
+        row.issued_runs.add(run_id)
         self._rows[ref.sandbox_id] = row
         return _LocalHandle(self, row)
 
@@ -823,12 +876,46 @@ class LocalWorkspaceSandboxProvider:
         from ..admission import validate_resource_support
 
         validate_resource_support(row.spec, await self.capabilities())
-        if row.state != SandboxState.READY:
-            raise RuntimeError("sandbox is terminated")
+        self._require_ready(row)
         if row.ref.tenant_id != context.actor.tenant_id:
             raise PermissionError("tenant does not own sandbox")
         row.attached_clients += 1
         return _LocalHandle(self, row)
+
+    async def share(self, ref, context, *, run_id):
+        """Lease this same sandbox to a child Run without broadening its policy.
+
+        Callers are trusted host composition code, never model-supplied IDs.
+        Grants remain signed against the child owner and the same sandbox ID.
+        """
+        parent = self._row(ref)
+        if parent.ref.tenant_id != context.actor.tenant_id:
+            raise PermissionError("tenant does not own sandbox")
+        resource = parent.resource
+        async with resource.lease_lock:
+            self._require_ready(parent)
+            if run_id in resource.issued_runs:
+                raise ValueError("sandbox already has a lease for this Run; attach its ref instead")
+            child = _LocalRow(
+                ref=parent.ref.model_copy(update={"owner_run_id": run_id}),
+                spec=parent.spec, root=parent.root, state=SandboxState.READY,
+                created_at=self._clock(), updated_at=self._clock(),
+                mutation_lock=resource.mutation_lock, process_slots=resource.process_slots,
+                boundary=resource.boundary, resource=resource,
+            )
+            resource.members[run_id] = child
+            resource.issued_runs.add(run_id)
+            return _LocalHandle(self, child)
+
+    async def share_run(self, parent_run_id, context, *, run_id):
+        """Host adapter for custom composers that persist parent Run IDs."""
+        candidates = [member for resource in self._rows.values()
+                      for member in resource.members.values()
+                      if member.ref.owner_run_id == parent_run_id and not member.lease_terminated
+                      and member.ref.tenant_id == context.actor.tenant_id]
+        if len(candidates) != 1:
+            raise ValueError("parent Run must have exactly one live sandbox lease")
+        return await self.share(candidates[0].ref, context, run_id=run_id)
 
     async def reacquire_workspace(self, ref, spec, context, *, run_id):
         """Rebuild lost local compute around the same durable host workspace.
@@ -857,7 +944,7 @@ class LocalWorkspaceSandboxProvider:
         ]
         return SandboxSnapshot(
             ref=row.ref,
-            state=row.state,
+            state=SandboxState.TERMINATED if row.lease_terminated else row.resource.state,
             revision=row.revision,
             created_at=row.created_at,
             updated_at=row.updated_at,
@@ -876,7 +963,7 @@ class LocalWorkspaceSandboxProvider:
         row = self._row(request.ref)
         if row.ref.tenant_id != context.actor.tenant_id:
             raise PermissionError("tenant does not own sandbox")
-        key = (request.ref.sandbox_id, request.idempotency_key)
+        key = (request.ref.sandbox_id, request.ref.owner_run_id, request.idempotency_key)
         previous = self._release_receipts.get(key)
         if previous is not None:
             return previous.model_copy(update={"duplicate": True})
@@ -889,8 +976,8 @@ class LocalWorkspaceSandboxProvider:
         receipt = SandboxReleaseReceipt(
             ref=request.ref,
             disposition=request.disposition,
-            state=row.state,
-            compute_released=row.state == SandboxState.TERMINATED,
+            state=SandboxState.TERMINATED if row.lease_terminated else row.resource.state,
+            compute_released=row.resource.state == SandboxState.TERMINATED,
             released_at=self._clock(),
         )
         self._release_receipts[key] = receipt
@@ -899,34 +986,51 @@ class LocalWorkspaceSandboxProvider:
     async def terminate(self, ref, mode):
         del mode
         row = self._row(ref)
-        if row.state == SandboxState.TERMINATED:
-            return
-        row.state = SandboxState.LOST  # Fence admission while compute is being reaped.
-        await row.boundary.terminate()
-        tasks = tuple(row.active_tasks)
-        for task in tasks:
-            task.cancel()
-        results = await asyncio.gather(*tasks, return_exceptions=True)
-        for result in results:
-            if isinstance(result, Exception):
-                raise RuntimeError("sandbox process cleanup failed") from result
-        row.state = SandboxState.TERMINATED
-        row.revision += 1
-        row.updated_at = self._clock()
-        self._sweep_terminated()
+        resource = row.resource
+        async with resource.lease_lock:
+            if row.lease_terminated and (
+                resource.state == SandboxState.TERMINATED
+                or (any(not member.lease_terminated for member in resource.members.values())
+                    and not row.active_tasks and not row.queued_tasks)
+            ):
+                return
+            row.lease_terminated = True  # Fence this Run, including queued work.
+            tasks = tuple(row.active_tasks | row.queued_tasks)
+            for task in tasks:
+                task.cancel()
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+            failures = [result for result in results if isinstance(result, Exception)]
+            if not any(not member.lease_terminated for member in resource.members.values()):
+                resource.terminating = True
+                resource.state = SandboxState.LOST
+                await resource.boundary.terminate()
+                resource.state = SandboxState.TERMINATED
+                resource.updated_at = self._clock()
+            row.revision += 1
+            row.updated_at = self._clock()
+            self._sweep_terminated()
+            if failures:
+                raise RuntimeError("sandbox lease process cleanup failed") from failures[0]
 
     async def purge_terminated(self, ref) -> None:
         row = self._row(ref)
-        if row.state != SandboxState.TERMINATED or row.attached_clients != 0:
-            raise RuntimeError("only detached terminated sandboxes can be purged")
-        self._purge_row(ref.sandbox_id)
+        if not row.lease_terminated or row.attached_clients != 0:
+            raise RuntimeError("only detached terminated sandbox leases can be purged")
+        resource = row.resource
+        if row is not resource:
+            resource.members.pop(ref.owner_run_id, None)
+        if resource.state == SandboxState.TERMINATED and all(
+            member.attached_clients == 0 for member in resource.members.values()
+        ):
+            self._purge_row(ref.sandbox_id)
 
     def _sweep_terminated(self) -> int:
         terminal = sorted(
             (
                 row
                 for row in self._rows.values()
-                if row.state == SandboxState.TERMINATED and row.attached_clients == 0
+                if row.state == SandboxState.TERMINATED
+                and all(member.attached_clients == 0 for member in row.members.values())
             ),
             key=lambda row: (row.updated_at, row.ref.sandbox_id),
         )
@@ -963,34 +1067,21 @@ class LocalWorkspaceSandboxProvider:
 
     def _row(self, ref):
         row = self._rows.get(ref.sandbox_id)
-        if row is None or row.ref != ref:
+        member = row.members.get(ref.owner_run_id) if row is not None else None
+        if member is None or member.ref != ref:
             raise ValueError("sandbox reference is unknown")
-        return row
+        return member
 
     @staticmethod
     def _requested_path(row: _LocalRow, path: str) -> Path:
         """把 wire path / 宿主绝对路径 / 相对路径统一成未解析的宿主路径。"""
 
-        root_prefix = row.spec.workspace_root.rstrip("/") + "/"
-        if path == row.spec.workspace_root:
-            return row.root
-        if path.startswith(root_prefix):
-            return row.root / path[len(root_prefix) :]
-        if Path(path).is_absolute():
-            return Path(path).expanduser()
-        return row.root / path
+        from ..local_support.paths import LocalSandboxPaths
+
+        return LocalSandboxPaths(row.root, row.spec.workspace_root, sys.platform).host_path(path)
 
     def _path(self, row: _LocalRow, path: str) -> Path:
-        relative = path
-        if relative == row.spec.workspace_root:
-            candidate = row.root
-        elif relative.startswith(row.spec.workspace_root.rstrip("/") + "/"):
-            relative = relative[len(row.spec.workspace_root.rstrip("/")) + 1 :]
-            candidate = Path(os.path.abspath(row.root / relative))
-        elif Path(relative).is_absolute():
-            candidate = Path(os.path.abspath(Path(relative).expanduser()))
-        else:
-            candidate = Path(os.path.abspath(row.root / relative))
+        candidate = Path(os.path.abspath(self._requested_path(row, path)))
         if candidate != row.root and row.root not in candidate.parents:
             raise PermissionError("path is outside the workspace")
         allowed = False
@@ -1022,10 +1113,9 @@ class LocalWorkspaceSandboxProvider:
 
     def _wire_path(self, row: _LocalRow, path: str) -> str:
         candidate = self._path(row, path)
-        relative = candidate.relative_to(row.root).as_posix()
-        return row.spec.workspace_root.rstrip("/") + (
-            f"/{relative}" if relative != "." else ""
-        )
+        from ..local_support.paths import LocalSandboxPaths
+
+        return LocalSandboxPaths(row.root, row.spec.workspace_root, sys.platform).wire_path(candidate)
 
     def _authorize(self, row, operation, path, intent, grant):
         self._verify(row, operation.value, intent, grant)
@@ -1081,7 +1171,84 @@ class LocalWorkspaceSandboxProvider:
                     )
                 )
 
-    def _verify(self, row, operation, intent, grant):
+    async def _recover_process(self, row: _LocalRow) -> None:
+        if row.lease_terminated:
+            return
+        row = row.resource
+        if row.state != SandboxState.LOST or row.failure is None or row.terminating:
+            return
+        async with row.recovery_lock:
+            if (row.state != SandboxState.LOST or row.terminating
+                    or any(member.active_tasks for member in row.members.values())):
+                return
+            if row.recovery_attempts >= 1:
+                return
+            # Cleanup can reduce workspace usage before the next process starts.
+            # Do not consume the one recovery attempt while still over quota.
+            failure = row.failure
+            try:
+                used = await asyncio.to_thread(row.boundary._disk_bytes)
+                if used > row.spec.resources.disk_mb * 1024**2:
+                    return
+                row.recovery_attempts += 1
+                await asyncio.to_thread(row.boundary.check_recovery)
+            except Exception as exc:
+                row.failure = row.failure.model_copy(update={
+                    "message": f"{row.failure.message}; recovery probe failed: {type(exc).__name__}: {exc}",
+                    "metadata": {**row.failure.metadata,
+                                 "recovery_error": f"{type(exc).__name__}: {exc}"},
+                })
+                return
+            # Only future operations are admitted. Never replay the interrupted
+            # command, which may already have changed the durable workspace.
+            if row.terminating or row.state != SandboxState.LOST or row.failure is not failure:
+                return
+            row.failure = None
+            row.state = SandboxState.READY
+            row.updated_at = self._clock()
+
+    @staticmethod
+    def _require_ready(row: _LocalRow, *, operation: str | None = None) -> None:
+        if row.lease_terminated:
+            raise SageV2Error(RuntimeErrorInfo(
+                code="sandbox.lease_released", category=ErrorCategory.RESOURCE_LOST,
+                message=f"sandbox lease for Run {row.ref.owner_run_id} has been released; other members are unaffected",
+                metadata={"side_effect_state": "not_applied", "sandbox_id": row.ref.sandbox_id},
+            ))
+        row = row.resource
+        if row.state == SandboxState.READY and not row.terminating:
+            return
+        workspace_available = row.root.is_dir()
+        # File I/O has its own signed policy and descriptor containment. Losing
+        # supervised processes does not invalidate that independent capability.
+        if (row.state == SandboxState.LOST and not row.terminating and row.failure is not None
+                and workspace_available and operation in {op.value for op in FileOperation}):
+            return
+        resumable = row.state == SandboxState.LOST and not row.terminating and workspace_available
+        failure = row.failure or RuntimeErrorInfo(
+            code="sandbox.lost",
+            category=ErrorCategory.RESOURCE_LOST,
+            message=f"sandbox state={row.state.value}; no original failure was recorded",
+        )
+        raise SageV2Error(failure.model_copy(update={
+            "safe_to_resume": resumable,
+            "retryable": False,
+            "message": (
+                f"{failure.message}; state={row.state.value}; "
+                f"workspace={row.root}; workspace_available={workspace_available}; "
+                f"recovery_attempts={row.recovery_attempts}/1; "
+                + ("process execution is blocked; file tools remain available for inspection and cleanup"
+                   if resumable and row.failure is not None
+                   else "host must restore the execution environment")
+            ),
+            "metadata": {**failure.metadata, "sandbox_id": row.ref.sandbox_id,
+                         "state": row.state.value, "workspace_available": workspace_available,
+                         "available_capabilities": ["filesystem"] if resumable and row.failure is not None else [],
+                         "recovery_attempts": row.recovery_attempts,
+                         "side_effect_state": "not_applied"},
+        }))
+
+    def _verify(self, row, operation, intent, grant, *, check_ready=True):
         signature = hmac.new(
             self.verification_key, _grant_payload(grant), hashlib.sha256
         ).hexdigest()
@@ -1089,8 +1256,6 @@ class LocalWorkspaceSandboxProvider:
             raise PermissionError("sandbox grant signature is invalid")
         if grant.expires_at <= self._clock() or grant.nonce in self._used_nonces:
             raise PermissionError("sandbox grant is expired or already used")
-        if row.state != SandboxState.READY:
-            raise PermissionError("sandbox is not ready")
         if (
             intent.operation != operation
             or intent.sandbox_id != row.ref.sandbox_id
@@ -1106,6 +1271,8 @@ class LocalWorkspaceSandboxProvider:
             raise PermissionError("sandbox grant does not match the operation")
         if operation not in grant.allowed_operations:
             raise PermissionError("sandbox grant does not allow this operation")
+        if check_ready:
+            self._require_ready(row, operation=operation)
         if grant.single_use:
             self._used_nonces[grant.nonce] = row.ref.sandbox_id
 
@@ -1121,10 +1288,9 @@ class LocalWorkspaceSandboxProvider:
     def _stat(row: _LocalRow, candidate: Path) -> FileStat:
         from ..local_support import files as local_files
 
-        relative = candidate.relative_to(row.root).as_posix()
-        wire_path = row.spec.workspace_root.rstrip("/") + (
-            f"/{relative}" if relative != "." else ""
-        )
+        from ..local_support.paths import LocalSandboxPaths
+
+        wire_path = LocalSandboxPaths(row.root, row.spec.workspace_root, sys.platform).wire_path(candidate)
         content_hash = None
         if candidate.is_file():
             content_hash = f"sha256:{hashlib.sha256(local_files.read(row.root, candidate.relative_to(row.root), row.spec.filesystem.max_file_bytes or row.spec.resources.memory_mb * 1024**2)).hexdigest()}"

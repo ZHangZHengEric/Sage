@@ -1345,3 +1345,82 @@ async def test_todo_preflight_validation_is_not_applied(tmp_path: Path, tasks):
         await plugin.executor.execute(call("todo_write", {"session_id": "session_1", "tasks": tasks}), CONTEXT)
     assert caught.value.info.metadata["side_effect_state"] == "not_applied"
     assert not (tmp_path / ".sage" / "todos" / "session_1.json").exists()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("tool_name,arguments", [
+    ("file_read", {"file_path": "value.txt"}),
+    ("file_write", {"file_path": "value.txt", "content": "changed"}),
+    ("file_update", {"file_path": "value.txt", "operations": [
+        {"update_mode": "search_replace", "search_pattern": "original", "replacement": "changed"}
+    ]}),
+])
+async def test_lost_compute_preserves_file_tools(
+    tmp_path, tool_name, arguments
+):
+    from sagents.v2.runtime.execution.sandbox import SandboxState
+
+    plugin = await plugin_for(tmp_path)
+    (tmp_path / "value.txt").write_text("original")
+    runtime = plugin.runtime
+    row = runtime.sandbox.filesystem.row
+    row.boundary._mark_lost("sandbox disk quota exceeded", reason="disk_limit_exceeded")
+    assert row.state == SandboxState.LOST
+    await plugin.executor.execute(call(tool_name, arguments), CONTEXT)
+    expected = "original" if tool_name == "file_read" else "changed"
+    assert (tmp_path / "value.txt").read_text() == expected
+    assert row.state == SandboxState.LOST
+
+
+@pytest.mark.asyncio
+async def test_missing_workspace_and_lost_compute_is_fatal(tmp_path):
+    import shutil
+
+    plugin = await plugin_for(tmp_path)
+    row = plugin.runtime.sandbox.filesystem.row
+    row.boundary._mark_lost("resource monitor failed", reason="resource_monitor_failed")
+    shutil.rmtree(tmp_path)
+    with pytest.raises(SageV2Error) as caught:
+        await plugin.executor.execute(call("file_read", {"file_path": "value.txt"}), CONTEXT)
+    info = caught.value.info
+    assert info.category == ErrorCategory.RESOURCE_LOST
+    assert not info.safe_to_resume
+    assert info.metadata["workspace_available"] is False
+    assert "workspace_available=False" in info.message
+    assert "resource monitor failed" in info.message
+
+
+def test_sandbox_denial_mapping_does_not_make_resource_loss_resumable():
+    from sagents.v2.tool.official.runtime import sandbox_denial_as_not_applied
+
+    failure = SageV2Error(RuntimeErrorInfo(
+        code="sandbox.lost", category=ErrorCategory.RESOURCE_LOST,
+        message="sandbox execution environment lost",
+    ))
+    mapped = sandbox_denial_as_not_applied(failure)
+    assert mapped is None
+    assert not failure.info.safe_to_resume
+    assert "side_effect_state" not in failure.info.metadata
+
+
+@pytest.mark.asyncio
+async def test_shell_job_resource_loss_reaches_tool_executor(tmp_path, monkeypatch):
+    plugin = await plugin_for(tmp_path)
+
+    async def lost_after_launch(*args, **kwargs):
+        raise SageV2Error(RuntimeErrorInfo(
+            code="sandbox.lost", category=ErrorCategory.RESOURCE_LOST,
+            message="sandbox monitor failed after launch",
+        ))
+
+    monkeypatch.setattr(plugin.runtime.sandbox.process, "run", lost_after_launch)
+    try:
+        with pytest.raises(SageV2Error) as caught:
+            await plugin.executor.execute(call("execute_shell_command", {
+                "command": "echo test", "block_until_ms": 1000,
+            }), CONTEXT)
+        assert caught.value.info.category == ErrorCategory.RESOURCE_LOST
+        assert not caught.value.info.safe_to_resume
+        assert "side_effect_state" not in caught.value.info.metadata
+    finally:
+        await plugin.executor.release_run("run_1")

@@ -454,7 +454,7 @@ class InMemoryJobRuntime:
                 row.updated_at = self._clock()
         except Exception as exc:
             async with self._lock:
-                row.error = RuntimeErrorInfo(
+                row.error = exc.info if isinstance(exc, SageV2Error) else RuntimeErrorInfo(
                     code="job.runner_failed",
                     category=ErrorCategory.PROVIDER_PERMANENT,
                     message=str(exc),
