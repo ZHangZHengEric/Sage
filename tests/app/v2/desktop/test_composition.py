@@ -360,3 +360,58 @@ def test_workspace_path_default_preserves_explicit_and_frozen_configuration(save
         frozen_path_mode=frozen,
     )
     assert config["workspace_path_mode"] == expected
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("disk_mb", [1, 32768])
+async def test_disk_quota_is_consistent_for_all_desktop_workspace_bindings(tmp_path, disk_mb):
+    from sagents.v2.runtime.execution.sandbox import ResourceLimits
+
+    bindings = DesktopExecutionBindingProvider(
+        tmp_path / "workspace", resources=ResourceLimits(disk_mb=disk_mb, require_hard_limits=False),
+    )
+    try:
+        for index, policy in enumerate(WorkspaceSharingPolicy):
+            binding = await bindings.acquire(ExecutionBindingRequest(
+                run_id=f"quota-{index}", parent_run_id="parent", agent_id="member",
+                context=_context(), workspace_policy=policy,
+            ))
+            try:
+                spec = binding.sandbox.provider._row(binding.sandbox.ref).spec
+                assert spec.resources.disk_mb == disk_mb
+                assert spec.filesystem.max_total_bytes == disk_mb * 1024**2
+            finally:
+                await binding.close()
+    finally:
+        await bindings.close()
+
+
+@pytest.mark.asyncio
+async def test_workspace_larger_than_four_gib_can_write_under_configured_quota(tmp_path):
+    from sagents.v2.runtime.execution.sandbox import OperationIntent, ResourceLimits
+
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    # Sparse fixture exercises logical quota accounting without writing 5 GiB.
+    with (workspace / "existing-video.mp4").open("wb") as artifact:
+        artifact.truncate(5 * 1024**3)
+    bindings = DesktopExecutionBindingProvider(
+        workspace, resources=ResourceLimits(disk_mb=32768, require_hard_limits=False),
+    )
+    try:
+        binding = await bindings.acquire(ExecutionBindingRequest(
+            run_id="large-workspace", agent_id="main", context=_context(),
+            workspace_policy=WorkspaceSharingPolicy.SHARED_PARENT,
+        ))
+        path = str(workspace / "result.txt")
+        intent = OperationIntent(
+            operation="create", run_id=binding.run_id, tool_call_id="write-result",
+            sandbox_id=binding.sandbox.ref.sandbox_id, path=path,
+        )
+        grant = bindings.issuer.issue(
+            ref=binding.sandbox.ref, intent=intent, allowed_operations=frozenset({"create"}),
+        )
+        await binding.sandbox.filesystem.write_bytes(path, b"done", intent=intent, grant=grant)
+        assert (workspace / "result.txt").read_bytes() == b"done"
+    finally:
+        await bindings.close()

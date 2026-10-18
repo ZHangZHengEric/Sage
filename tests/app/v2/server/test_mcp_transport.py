@@ -60,6 +60,21 @@ def test_mcp_timeout_is_configurable_and_bounded():
     assert exc.value.info.category == ErrorCategory.VALIDATION
 
 
+def test_mcp_execution_deadline_is_optional_and_independent_of_connection_timeout():
+    record, catalog = upsert_mcp(empty_catalog(), _payload(call_timeout_seconds=7200))
+    config = mcp_server_configs([record])[0]
+    assert config.timeout_seconds == 30
+    assert config.call_timeout_seconds == 7200
+    unchanged, catalog = upsert_mcp(catalog, _payload())
+    assert unchanged.call_timeout_seconds == 7200
+    unlimited, _ = upsert_mcp(catalog, _payload(call_timeout_seconds=None))
+    assert unlimited.public_dict()["call_timeout_seconds"] is None
+    assert mcp_server_configs([unlimited])[0].call_timeout_seconds is None
+    for invalid in (0, -1):
+        with pytest.raises(SageV2Error):
+            upsert_mcp(empty_catalog(), _payload(call_timeout_seconds=invalid))
+
+
 def test_a_legacy_stdio_row_is_skipped_instead_of_breaking_the_catalog():
     catalog = UserCatalog.model_validate(
         {

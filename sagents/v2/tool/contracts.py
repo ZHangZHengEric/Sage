@@ -40,6 +40,8 @@ class ResumeStrategy(str, Enum):
     RETRY = "retry"
     RESTART_STEP = "restart_step"
     MANUAL_RESOLUTION = "manual_resolution"
+    # Return unresolved outcomes to the model, with status-check guidance.
+    AGENT_RECOVERY = "agent_recovery"
 
 
 class ReconcileState(str, Enum):

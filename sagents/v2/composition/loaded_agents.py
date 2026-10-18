@@ -303,7 +303,7 @@ class LoadedAgents:
                     value.composition_hash == run.resolved_spec_hash
                     for value in self.revisions.values()
                 )
-            if self.builder._options.admitted_run_contract is None:
+            if self.builder._options.admitted_run_contract is None and not self.builder._options.manual_dispatcher_start:
                 await dispatcher.start()
                 await dispatcher.refresh_recovery()
             return handle

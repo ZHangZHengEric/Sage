@@ -22,7 +22,7 @@ async def create_mcp(body: McpBody, user: CurrentUser, service: CatalogDep):
 
 @router.put("/api/mcp/{name}", response_model=ApiResponse[McpPublic])
 async def update_mcp(name: str, body: McpBody, user: CurrentUser, service: CatalogDep):
-    record = await service.update_mcp(user.user_id, name, body.model_dump())
+    record = await service.update_mcp(user.user_id, name, body.model_dump(exclude_unset=True))
     return success(record.public_dict())
 
 

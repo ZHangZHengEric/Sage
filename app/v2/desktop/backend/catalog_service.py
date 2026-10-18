@@ -362,6 +362,8 @@ class DesktopCatalogServiceMixin:
             command=value.command,
             args=value.args,
             env=value.env,
+            timeout_seconds=value.timeout_seconds,
+            call_timeout_seconds=value.call_timeout_seconds,
             required=required,
         )
 
@@ -911,6 +913,8 @@ class DesktopCatalogServiceMixin:
                 command=request.command,
                 args=tuple(request.args),
                 env=request.env,
+                timeout_seconds=request.timeout_seconds,
+                call_timeout_seconds=request.call_timeout_seconds,
             )
         )
         values = await self.list_mcp_connections(user_id)

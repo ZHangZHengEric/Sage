@@ -81,6 +81,14 @@ class DesktopDriver:
         finally:
             ACTIVE_EXTENSION_SCOPE_HANDLES.reset(token)
 
+    async def recover_interrupted(self, run_id: str, context: RequestContext):
+        await self._ensure_composed()
+        token = ACTIVE_EXTENSION_SCOPE_HANDLES.set(self.sandbox_handle.scope_handles)
+        try:
+            return await self.loop.recover_interrupted(run_id, context)
+        finally:
+            ACTIVE_EXTENSION_SCOPE_HANDLES.reset(token)
+
     async def _ensure_composed(self) -> None:
         if self.loop is not None:
             return

@@ -144,7 +144,8 @@ class _DecoratedToolExecutor:
                     )
                 )
             async with self._lock:
-                self._results[call.idempotency_key] = result
+                if not result.metadata.get("delegation_deferred_until"):
+                    self._results[call.idempotency_key] = result
                 if not future.done():
                     future.set_result(result)
             return result

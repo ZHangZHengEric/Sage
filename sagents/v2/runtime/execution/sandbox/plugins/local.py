@@ -375,6 +375,10 @@ class _LocalProcessRuntime:
     @asynccontextmanager
     async def open_process(self, request: ProcessRequest, *, intent, grant):
         executable, arguments, cwd, environment, timeout = self._prepare(request, intent, grant)
+        # Interactive servers have no implicit batch-command deadline. Explicit
+        # request and sandbox policy limits are still enforced by _prepare.
+        if request.timeout_seconds is None and self.row.spec.process.max_wall_time_seconds is None:
+            timeout = None
         if self.row.spec.process.read_only:
             raise PermissionError("interactive processes require a writable process policy")
         if request.stdin is not None:
@@ -825,6 +829,24 @@ class LocalWorkspaceSandboxProvider:
             raise PermissionError("tenant does not own sandbox")
         row.attached_clients += 1
         return _LocalHandle(self, row)
+
+    async def reacquire_workspace(self, ref, spec, context, *, run_id):
+        """Rebuild lost local compute around the same durable host workspace.
+
+        This does not replay a process or Tool. The execution checkpoint and
+        individual Tool barriers still decide how unfinished work is recovered.
+        """
+        if (
+            ref.provider_id != self.provider_id
+            or ref.tenant_id != context.actor.tenant_id
+            or ref.owner_run_id != run_id
+            or ref.spec_hash != spec.spec_hash
+            or ref.policy_hash != spec.policy_hash
+        ):
+            raise PermissionError("workspace reacquisition must preserve sandbox ownership and policy")
+        if ref.sandbox_id in self._rows:
+            return await self.attach(ref, context)
+        return await self.provision(spec, context, run_id=run_id)
 
     async def inspect(self, ref):
         row = self._row(ref)

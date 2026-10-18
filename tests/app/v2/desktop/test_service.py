@@ -166,6 +166,8 @@ async def test_builtin_anytool_uses_ephemeral_sidecar_capability(tmp_path: Path)
     config = service._mcp_config(record)
 
     assert config.url == "http://127.0.0.1:54321/api/mcp/anytool/AnyTool"
+    assert config.timeout_seconds == 30
+    assert config.call_timeout_seconds is None
     assert config.api_key is not None
     assert config.api_key.get_secret_value() == "launch-capability"
     assert record.api_key is None
@@ -5183,3 +5185,204 @@ async def test_local_sandbox_read_paths_config_is_forwarded_and_separates_cache(
         )
         is first
     )
+
+
+@pytest.mark.asyncio
+async def test_preflight_preserves_typed_resource_failure_details(tmp_path, monkeypatch):
+    service = DesktopV2Service(tmp_path)
+    await service.list_agents("user_1")
+
+    async def quota_failure(*args, **kwargs):
+        raise SageV2Error(RuntimeErrorInfo(
+            code="sandbox.workspace_quota_exceeded",
+            category=ErrorCategory.RESOURCE_LOST,
+            message="existing workspace exceeds resources.disk_mb",
+            message_key="error.sandbox.workspace_quota_exceeded",
+            message_params={"used_mb": 5000, "limit_mb": 4096},
+            metadata={"used_bytes": 5000 * 1024**2, "side_effect_state": "not_applied"},
+        ))
+
+    monkeypatch.setattr(service, "_agent", quota_failure)
+    request = DesktopRunRequest(
+        agent_id="sage", messages=[RunMessage(role="user", text="继续")],
+        response_language="zh-CN", idempotency_key="typed-quota-failure",
+    )
+    frames = [json.loads(value) async for value in service.run_events(request, "user_1")]
+    error = next(value for value in frames if value.get("type") == "run.failed")["data"]["error"]
+    assert error["code"] == "sandbox.workspace_quota_exceeded"
+    assert error["category"] == "resource_lost"
+    assert "5000" in error["message"] and "4096" in error["message"]
+    assert error["metadata"]["used_bytes"] == 5000 * 1024**2
+    assert "部分信息无效" not in error["message"]
+    await service.close()
+
+
+@pytest.mark.asyncio
+async def test_configured_disk_quota_reaches_main_and_child_sandboxes(tmp_path):
+    from sagents.v2.contracts.commands import InputItem, RunConfig, StartRun
+    from sagents.v2.contracts.items import TextBlock
+
+    service = DesktopV2Service(tmp_path)
+    root_sandbox = child_sandbox = None
+    try:
+        settings = await service.get_settings()
+        configs = {**settings.component_configs, "execution.sandbox": {"resources": {"disk_mb": 32768}}}
+        settings = await service.save_settings(settings.model_copy(update={"component_configs": configs}))
+        snapshot = {
+            "sandbox_path_mode": "host",
+            "selections": dict(settings.component_selections), "configs": configs,
+        }
+        await service.list_agents("user_1")
+        member = await service.create_agent(AgentCreate(name="Quota Reviewer"), "user_1")
+        await service.patch_model_provider("model_main", ModelProviderPatch(api_keys=["test-key"]), "user_1")
+        await service.patch_agent_settings("sage", AgentSettingsPatch(
+            agent_mode="team", sub_agent_selection_mode="manual", available_sub_agent_ids=[member["id"]],
+        ), "user_1")
+        agent = await service._agent("sage", "user_1")
+        provider = await service._provider(agent, "user_1")
+        workspace = await service.workspace_root(None, "sage")
+        _, loop, root_sandbox = await service._build_loop(
+            agent=agent, provider=provider, workspace=workspace,
+            preferred_skills=(), approval_mode="high_risk", component_snapshot=snapshot,
+        )
+        parent_spec = root_sandbox.provider._row(root_sandbox.ref).spec
+        assert parent_spec.resources.disk_mb == 32768
+        assert parent_spec.filesystem.max_total_bytes == 32768 * 1024**2
+
+        # A later settings edit must not replace the child Run's accepted snapshot.
+        await service.save_settings(settings.model_copy(update={
+            "component_configs": {**configs, "execution.sandbox": {"resources": {"disk_mb": 1}}},
+        }))
+        controller = loop.delegated_run_controller
+        descriptor = await controller.descriptor_resolver(member["id"])
+        context = service._context("user_1")
+        child = await service.runtime.start_run(StartRun(
+            agent_id=member["id"], input=(InputItem(role="user", content=(TextBlock(text="review"),)),),
+            config=RunConfig(metadata={"runtime_components": snapshot}),
+            resolved_spec_hash=controller.resolved_spec_hash, idempotency_key="quota-child",
+        ), context)
+        async with desktop_execution_lease(service, child.run_id):
+            _, child_sandbox = await controller.loop_factory(descriptor, child.run_id, context)
+        child_spec = child_sandbox.provider._row(child_sandbox.ref).spec
+        assert child_spec.resources.disk_mb == 32768
+        assert child_spec.filesystem.max_total_bytes == parent_spec.filesystem.max_total_bytes
+    finally:
+        if child_sandbox is not None:
+            await child_sandbox.close()
+        if root_sandbox is not None:
+            await root_sandbox.close()
+        await service.close()
+
+
+@pytest.mark.asyncio
+async def test_desktop_start_automatically_recovers_delayed_run_after_restart(tmp_path, monkeypatch):
+    import asyncio
+    from sagents.v2.agent.engine import AgentLoopEngine
+    from sagents.v2.contracts.run_state import RunState
+
+    monkeypatch.setattr(AgentLoopEngine, "_PROVIDER_RETRY_BASE_SECONDS", 0.5)
+    first_model = ScriptedModelProvider((ScriptedModelStep(events=(), error=RuntimeErrorInfo(
+        code="model.provider_transient", category=ErrorCategory.PROVIDER_TRANSIENT,
+        message="offline", retryable=True,
+    )),))
+    service = DesktopV2Service(tmp_path)
+
+    async def offline_model(*args, **kwargs):
+        return first_model
+
+    monkeypatch.setattr(service, "_model_provider", offline_model)
+    await service.list_agents("user_1")
+    settings = await service.get_settings()
+    await service.save_settings(settings.model_copy(update={"component_selections": {
+        **settings.component_selections,
+        "agent.continuation-policy": "sage.agent.continuation.deterministic",
+    }}))
+    await service.patch_model_provider("model_main", ModelProviderPatch(api_keys=["test-key"]), "user_1")
+    await service.patch_agent_settings("sage", AgentSettingsPatch(
+        agent_mode="simple", available_tools=[], available_skills=[],
+    ), "user_1")
+    stream = service.run_events(DesktopRunRequest(
+        agent_id="sage", messages=[RunMessage(role="user", text="finish work")],
+        idempotency_key="desktop-autonomous-restart",
+    ), "user_1")
+    run_id = None
+    try:
+        async def until_waiting():
+            nonlocal run_id
+            async for line in stream:
+                event = json.loads(line)
+                if event.get("kind") == "stream.opened":
+                    run_id = event["handle"]["run_id"]
+                if event.get("type") == "step.retry_scheduled":
+                    return
+        await asyncio.wait_for(until_waiting(), 5)
+        await stream.aclose()
+        await service.close()
+
+        restored_model = ScriptedModelProvider((ScriptedModelStep(events=(ModelStreamEvent(
+            kind=ModelEventKind.COMPLETED,
+            response=ModelResponse(response_id="recovered", text="done", finish_reason="stop"),
+        ),)),))
+        restored = DesktopV2Service(tmp_path)
+
+        async def online_model(*args, **kwargs):
+            return restored_model
+
+        monkeypatch.setattr(restored, "_model_provider", online_model)
+        try:
+            await restored.start()
+            async def completed():
+                while (run := await restored.runtime.get_run(run_id)).state != RunState.COMPLETED:
+                    assert run.state != RunState.FAILED
+                    await asyncio.sleep(0.01)
+                return run
+            await asyncio.wait_for(completed(), 5)
+            assert len(restored_model.requests) == 1
+            assert not [e for e in await restored.session_store.read_events(run_id) if e.type == "run.failed"]
+        finally:
+            await restored.close()
+    finally:
+        await stream.aclose()
+        await service.close()
+
+
+@pytest.mark.asyncio
+async def test_desktop_recovers_repeated_outages_without_reusing_closed_bindings(tmp_path, monkeypatch):
+    import asyncio
+    from sagents.v2.agent.engine import AgentLoopEngine
+
+    monkeypatch.setattr(AgentLoopEngine, "_PROVIDER_RETRY_BASE_SECONDS", 0.02)
+    failure = ScriptedModelStep(events=(), error=RuntimeErrorInfo(
+        code="model.provider_transient", category=ErrorCategory.PROVIDER_TRANSIENT,
+        message="offline", retryable=True,
+    ))
+    model = ScriptedModelProvider((failure, failure, ScriptedModelStep(events=(ModelStreamEvent(
+        kind=ModelEventKind.COMPLETED,
+        response=ModelResponse(response_id="recovered", text="done", finish_reason="stop"),
+    ),))))
+    service = DesktopV2Service(tmp_path)
+    async def provider(*args, **kwargs):
+        return model
+    monkeypatch.setattr(service, "_model_provider", provider)
+    try:
+        settings = await service.get_settings()
+        await service.save_settings(settings.model_copy(update={"component_selections": {
+            **settings.component_selections,
+            "agent.continuation-policy": "sage.agent.continuation.deterministic",
+        }}))
+        await service.list_agents("user_1")
+        await service.patch_model_provider("model_main", ModelProviderPatch(api_keys=["test-key"]), "user_1")
+        await service.patch_agent_settings("sage", AgentSettingsPatch(
+            agent_mode="simple", available_tools=[], available_skills=[],
+        ), "user_1")
+        async def collect():
+            return [json.loads(line) async for line in service.run_events(DesktopRunRequest(
+                agent_id="sage", messages=[RunMessage(role="user", text="finish")],
+                idempotency_key="repeated-outage",
+            ), "user_1")]
+        events = await asyncio.wait_for(collect(), 5)
+        assert any(e.get("type") == "run.completed" for e in events)
+        assert not any(e.get("type") in {"interaction.requested", "run.failed"} for e in events)
+        assert len(model.requests) == 3
+    finally:
+        await service.close()

@@ -32,33 +32,44 @@ async def sdk_session(config: Any) -> AsyncIterator[McpClientSession]:
         else None
     )
     async with AsyncExitStack() as stack:
-        if config.protocol == "stdio":
-            if not config.command:
-                raise ValueError("stdio MCP requires command")
-            streams = await stack.enter_async_context(
-                stdio_client(
-                    StdioServerParameters(
-                        command=config.command,
-                        args=list(config.args),
-                        env=dict(config.env),
+        # Bound startup, including waiting for the SSE endpoint, independently
+        # of reads while a tool is executing. Keep AnyIO contexts in this task.
+        async with asyncio.timeout(config.timeout_seconds):
+            if config.protocol == "stdio":
+                if not config.command:
+                    raise ValueError("stdio MCP requires command")
+                streams = await stack.enter_async_context(
+                    stdio_client(
+                        StdioServerParameters(
+                            command=config.command,
+                            args=list(config.args),
+                            env=dict(config.env),
+                        )
                     )
                 )
-            )
-            read, write = streams
-        elif config.protocol == "sse":
-            if not config.url:
-                raise ValueError("SSE MCP requires URL")
-            read, write = await stack.enter_async_context(
-                sse_client(config.url, headers=headers, timeout=config.timeout_seconds)
-            )
-        else:
-            if not config.url:
-                raise ValueError("streamable HTTP MCP requires URL")
-            read, write, _ = await stack.enter_async_context(
-                streamablehttp_client(
-                    config.url, headers=headers, timeout=config.timeout_seconds
+                read, write = streams
+            elif config.protocol == "sse":
+                if not config.url:
+                    raise ValueError("SSE MCP requires URL")
+                read, write = await stack.enter_async_context(
+                    sse_client(
+                        config.url,
+                        headers=headers,
+                        timeout=config.timeout_seconds,
+                        sse_read_timeout=config.call_timeout_seconds,
+                    )
                 )
-            )
-        session = await stack.enter_async_context(ClientSession(read, write))
-        await asyncio.wait_for(session.initialize(), timeout=config.timeout_seconds)
+            else:
+                if not config.url:
+                    raise ValueError("streamable HTTP MCP requires URL")
+                read, write, _ = await stack.enter_async_context(
+                    streamablehttp_client(
+                        config.url,
+                        headers=headers,
+                        timeout=config.timeout_seconds,
+                        sse_read_timeout=config.call_timeout_seconds,
+                    )
+                )
+            session = await stack.enter_async_context(ClientSession(read, write))
+            await asyncio.wait_for(session.initialize(), timeout=config.timeout_seconds)
         yield session

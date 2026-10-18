@@ -4,11 +4,13 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 from dataclasses import dataclass
-from datetime import timedelta
+from datetime import datetime, timedelta
 from collections.abc import Awaitable, Callable
 from typing import Any
 
+from sagents.v2.contracts.commands import CancelRun
 from sagents.v2.contracts.principals import RequestContext
 from sagents.v2.contracts.run_state import (
     RunSnapshot,
@@ -25,6 +27,16 @@ from sagents.v2.runtime.execution.scheduler import (
     WorkerLease,
 )
 from sagents.v2.runtime.observability.logs import get_logger
+
+from sagents.v2.runtime.execution.ownership import (
+    ACTIVE_OWNERSHIP,
+    ExecutionOwnership,
+    is_lease_loss,
+    revoke_ownership,
+    require_execution_ownership,
+)
+
+DEFAULT_LEASE_SECONDS = 48 * 60 * 60
 
 
 _LOGGER = get_logger(__name__)
@@ -63,8 +75,9 @@ class LocalWorkerDispatcher:
         *,
         max_concurrent_runs: int = 8,
         max_concurrent_runs_per_tenant: int = 2,
-        lease_seconds: float = 30.0,
+        lease_seconds: float = DEFAULT_LEASE_SECONDS,
         lease_scope_factory=None,
+        preserve_runs_on_shutdown: bool = True,
     ) -> None:
         if max_concurrent_runs < 1 or max_concurrent_runs_per_tenant < 1:
             raise ValueError("dispatcher concurrency limits must be positive")
@@ -75,7 +88,10 @@ class LocalWorkerDispatcher:
         self.max_concurrent_runs_per_tenant = max_concurrent_runs_per_tenant
         self.lease_duration = timedelta(seconds=lease_seconds)
         self.lease_scope_factory = lease_scope_factory
+        self.preserve_runs_on_shutdown = preserve_runs_on_shutdown
+        self._supports_deferred_work = "available_at" in inspect.signature(scheduler.release).parameters
         self._requests: dict[str, _DispatchRequest] = {}
+        self._run_gates: dict[str, tuple[asyncio.Lock, int]] = {}
         self._cleanup_requests: dict[str, _CleanupRequest] = {}
         self._workers: list[asyncio.Task[None]] = []
         self._claim_policy = SchedulerClaimPolicy(
@@ -133,15 +149,20 @@ class LocalWorkerDispatcher:
         if reader is None:
             return
         for intent in await reader():
-            if self.recovery_filter is not None and not self.recovery_filter(intent.run):
+            if self.recovery_filter is not None and not self.recovery_filter(
+                intent.run
+            ):
                 continue
             try:
+                work = self._work_item(
+                    intent.run, intent.context,
+                    resume=intent.run.state == RunState.RESUMING,
+                )
+                wake_at = await self._automatic_resume_at(store, intent.run.run_id)
+                if wake_at is not None and intent.run.state == RunState.RUNNING:
+                    work = work.model_copy(update={"available_at": wake_at})
                 await self.scheduler.submit(
-                    self._work_item(
-                        intent.run,
-                        intent.context,
-                        resume=intent.run.state == RunState.RESUMING,
-                    )
+                    work
                 )
             except SageV2Error as exc:
                 if exc.info.code != "scheduler.work_id_conflict":
@@ -321,6 +342,7 @@ class LocalWorkerDispatcher:
                 continue
             retry_delay = 0.1
             if lease is None:
+                await self._settle_deferred_controls()
                 continue
             cleanup = self._cleanup_requests.get(lease.work.work_id)
             if cleanup is not None:
@@ -332,7 +354,7 @@ class LocalWorkerDispatcher:
                 request = self._restore_request(lease)
                 if request is None:
                     try:
-                        await self.scheduler.release(
+                        await self._release_lease(
                             lease, LeaseReleaseReason.CANCELLED, requeue=False
                         )
                     except Exception as exc:
@@ -347,17 +369,37 @@ class LocalWorkerDispatcher:
                     continue
                 self._requests[lease.work.run_id] = request
             request.claimed = True
+            if lease.work.attempt > 1:
+                request.recovered = True
+            ownership = ExecutionOwnership(
+                run_id=lease.work.run_id, supports_deferred_work=self._supports_deferred_work,
+            )
+            ownership_token = ACTIVE_OWNERSHIP.set(ownership)
             renewer = asyncio.create_task(self._renew(lease))
+            gate, users = self._run_gates.get(lease.work.run_id, (asyncio.Lock(), 0))
+            self._run_gates[lease.work.run_id] = (gate, users + 1)
+            gate_held = False
+            requeued = False
             execution = None
             snapshot = None
             try:
+                await gate.acquire()
+                gate_held = True
                 scope = (
                     self.lease_scope_factory(lease)
                     if self.lease_scope_factory is not None
                     else _NullAsyncScope()
                 )
                 async with scope:
-                    if request.recovered:
+                    # A crash can happen after the checkpoint but before the
+                    # lease is delayed. Honor the durable timestamp on takeover.
+                    runtime = getattr(request.agent, "runtime", None)
+                    if request.recovered and runtime is not None and self._supports_deferred_work:
+                        wake_at = await self._automatic_resume_at(runtime.session_store, lease.work.run_id)
+                        current = await runtime.get_run(lease.work.run_id)
+                        if wake_at is not None and wake_at > utc_now() and current.state == RunState.RUNNING:
+                            snapshot = current
+                    if request.recovered and snapshot is None:
                         recovered = await request.agent.runtime.get_run(
                             lease.work.run_id
                         )
@@ -378,10 +420,29 @@ class LocalWorkerDispatcher:
                             )
                             if recover_barrier is not None:
                                 try:
-                                    snapshot = await recover_barrier(
-                                        recovered.run_id, request.context
+                                    execution = asyncio.create_task(
+                                        recover_barrier(
+                                            recovered.run_id, request.context
+                                        )
                                     )
+                                    done, _ = await asyncio.wait(
+                                        {execution, renewer},
+                                        return_when=asyncio.FIRST_COMPLETED,
+                                    )
+                                    if renewer in done:
+                                        revoke_ownership()
+                                        execution.cancel()
+                                        await asyncio.gather(
+                                            execution, return_exceptions=True
+                                        )
+                                        raise self._renewal_error(renewer)
+                                    snapshot = execution.result()
                                 except Exception as exc:
+                                    if ownership.revoked or is_lease_loss(exc):
+                                        raise
+                                    if await self._defer_recovery_error(lease, request, exc):
+                                        requeued = True
+                                        continue
                                     error = RuntimeErrorInfo(
                                         code="execution.barrier_recovery_failed",
                                         category=ErrorCategory.UNCERTAIN_SIDE_EFFECT,
@@ -431,31 +492,29 @@ class LocalWorkerDispatcher:
                             {execution, renewer}, return_when=asyncio.FIRST_COMPLETED
                         )
                         if renewer in done:
-                            renewal_error = renewer.exception()
+                            revoke_ownership()
                             execution.cancel()
                             await asyncio.gather(execution, return_exceptions=True)
-                            if renewal_error is None:
-                                renewal_error = RuntimeError(
-                                    "scheduler lease renewer stopped"
-                                )
-                            await _agent_method(
-                                request.agent,
-                                "fail_driver_crash",
-                                "_fail_driver_crash",
-                            )(
-                                lease.work.run_id,
-                                renewal_error,
-                                request.context,
-                            )
-                            raise renewal_error
+                            raise self._renewal_error(renewer)
                         snapshot = execution.result()
+                if snapshot.state == RunState.RUNNING and self._supports_deferred_work:
+                    wake_at = await self._automatic_resume_at(request.agent.runtime.session_store, snapshot.run_id)
+                    if wake_at is not None:
+                        request.recovered = True
+                        request.claimed = False
+                        requeued = True
+                        await self._release_lease(
+                            lease, LeaseReleaseReason.DEFERRED,
+                            requeue=True, available_at=wake_at,
+                        )
+                        continue
                 reason = {
                     RunState.COMPLETED: LeaseReleaseReason.COMPLETED,
                     RunState.FAILED: LeaseReleaseReason.FAILED,
                     RunState.CANCELLED: LeaseReleaseReason.CANCELLED,
                     RunState.SUSPENDED: LeaseReleaseReason.SUSPENDED,
                 }.get(snapshot.state, LeaseReleaseReason.FAILED)
-                await self.scheduler.release(
+                await self._release_lease(
                     lease,
                     reason,
                     requeue=snapshot.state == RunState.RESUMING,
@@ -493,18 +552,12 @@ class LocalWorkerDispatcher:
                                     return_when=asyncio.FIRST_COMPLETED,
                                 )
                                 if renewer in done:
+                                    revoke_ownership()
                                     recovery.cancel()
                                     await asyncio.gather(
                                         recovery, return_exceptions=True
                                     )
-                                    renewal_error = renewer.exception() or RuntimeError(
-                                        "scheduler lease renewer stopped"
-                                    )
-                                    await _agent_method(
-                                        request.agent,
-                                        "fail_driver_crash",
-                                        "_fail_driver_crash",
-                                    )(lease.work.run_id, renewal_error, request.context)
+                                    renewal_error = self._renewal_error(renewer)
                                     raise renewal_error
                                 recovery.result()
                             finally:
@@ -524,32 +577,157 @@ class LocalWorkerDispatcher:
                         )
                     raise
                 except BaseException as exc:
+                    if ownership.revoked or is_lease_loss(exc):
+                        requeued = await self._requeue_lost_lease(lease, request, exc)
+                    else:
+                        try:
+                            await self._release_lease(
+                                lease, LeaseReleaseReason.FAILED, requeue=False
+                            )
+                        except Exception:
+                            pass
+                        if not request.result.done():
+                            request.result.set_exception(exc)
+                if self._closed:
+                    raise
+            except Exception as exc:
+                if ownership.revoked or is_lease_loss(exc):
+                    revoke_ownership()
+                    if execution is not None and not execution.done():
+                        execution.cancel()
+                        await asyncio.gather(execution, return_exceptions=True)
+                    requeued = await self._requeue_lost_lease(lease, request, exc)
+                else:
                     try:
-                        await self.scheduler.release(
+                        await self._release_lease(
                             lease, LeaseReleaseReason.FAILED, requeue=False
                         )
                     except Exception:
                         pass
+                    self._discard_request(lease.work.run_id, request)
                     if not request.result.done():
                         request.result.set_exception(exc)
-                if self._closed:
-                    raise
-            except Exception as exc:
-                try:
-                    await self.scheduler.release(
-                        lease, LeaseReleaseReason.FAILED, requeue=False
-                    )
-                except Exception:
-                    # A release failure must not permanently shrink the pool.
-                    # The Scheduler will reap an active lease if one remains.
-                    pass
-                self._discard_request(lease.work.run_id, request)
-                if not request.result.done():
-                    request.result.set_exception(exc)
             finally:
                 renewer.cancel()
                 await asyncio.gather(renewer, return_exceptions=True)
-                self._discard_request(lease.work.run_id, request)
+                if not requeued:
+                    self._discard_request(lease.work.run_id, request)
+                if gate_held:
+                    gate.release()
+                _, users = self._run_gates[lease.work.run_id]
+                if users == 1:
+                    self._run_gates.pop(lease.work.run_id)
+                else:
+                    self._run_gates[lease.work.run_id] = (gate, users - 1)
+                ACTIVE_OWNERSHIP.reset(ownership_token)
+
+    @staticmethod
+    async def _automatic_resume_at(store, run_id):
+        try:
+            checkpoint = await store.get_latest_checkpoint(run_id)
+        except SageV2Error as exc:
+            if exc.info.code == "checkpoint.not_found_for_run":
+                return None
+            raise
+        if checkpoint.state.get("execution_checkpoint") is not True:
+            return None
+        value = checkpoint.state.get("automatic_resume_at")
+        return datetime.fromisoformat(value) if isinstance(value, str) else value
+
+    async def _settle_deferred_controls(self):
+        for run_id, request in tuple(self._requests.items()):
+            if request.claimed or not request.recovered or request.result.done():
+                continue
+            snapshot = await request.agent.runtime.get_run(run_id)
+            if snapshot.state == RunState.SUSPEND_REQUESTED:
+                wake = getattr(self.scheduler, "reschedule_pending", None)
+                if wake is not None:
+                    await wake(f"work-{run_id}", utc_now())
+                continue
+            if snapshot.state not in TERMINAL_RUN_STATES and snapshot.state != RunState.SUSPENDED:
+                continue
+            await self.scheduler.cancel(f"work-{run_id}")
+            self._discard_request(run_id, request)
+            if not request.result.done():
+                request.result.set_result(snapshot)
+
+    async def _defer_recovery_error(self, lease, request, error):
+        if not (
+            self._supports_deferred_work and isinstance(error, SageV2Error)
+            and error.info.retryable and error.info.safe_to_resume
+            and error.info.category in {
+                ErrorCategory.PROVIDER_TRANSIENT, ErrorCategory.RATE_LIMITED,
+                ErrorCategory.RESOURCE_LOST,
+            }
+        ):
+            return False
+        runtime = request.agent.runtime
+        run = await runtime.get_run(lease.work.run_id)
+        if run.state not in {RunState.RUNNING, RunState.SUSPEND_REQUESTED}:
+            return False
+        command = await runtime.session_store.get_start_command(run.run_id)
+        due = utc_now() + timedelta(seconds=min(60, 2 ** min(lease.work.attempt - 1, 6)))
+        if command.config.deadline_seconds is not None:
+            deadline = run.created_at + timedelta(seconds=command.config.deadline_seconds)
+            if deadline <= utc_now():
+                return False
+            due = min(due, deadline)
+        await self._release_lease(
+            lease, LeaseReleaseReason.DEFERRED, requeue=True, available_at=due,
+        )
+        request.recovered = True
+        request.claimed = False
+        _LOGGER.warning(
+            "scheduler.recovery.retry", "recoverable resource failure; scheduled another attempt",
+            run_id=run.run_id, error_code=error.info.code, retry_at=due.isoformat(),
+        )
+        return True
+
+    async def _release_lease(self, lease, reason, **kwargs):
+        # A durable release may be in fsync when shutdown cancels its Worker.
+        # Drain that atomic transition before handling cancellation; otherwise
+        # the scheduler may be poisoned or the same lease released twice.
+        release = asyncio.create_task(self.scheduler.release(lease, reason, **kwargs))
+        cancelled = False
+        while not release.done():
+            try:
+                await asyncio.shield(release)
+            except asyncio.CancelledError:
+                cancelled = True
+        release.result()
+        if cancelled:
+            raise asyncio.CancelledError
+
+    async def _requeue_lost_lease(self, lease, request, error) -> bool:
+        """Keep the caller and Run tree alive until a fresh fenced claim recovers it."""
+        if getattr(request.agent, "runtime", None) is None:
+            # Compatibility drivers without durable Run state cannot be resumed.
+            if not request.result.done():
+                request.result.set_exception(error)
+            return False
+        request.recovered = True
+        request.claimed = False
+        try:
+            await self._release_lease(
+                lease, LeaseReleaseReason.WORKER_SHUTDOWN, requeue=True
+            )
+        except Exception as exc:
+            if not is_lease_loss(exc):
+                # Keep durable Run state recoverable even if the Scheduler needs
+                # operator repair; never strand its in-process caller or worker.
+                if not request.result.done():
+                    request.result.set_exception(exc)
+                return False
+            # An expired/stolen lease has already been requeued by the Scheduler.
+        _LOGGER.warning(
+            "scheduler.worker.ownership_lost",
+            "worker lease lost; preserving Run tree for a fresh claim",
+            run_id=lease.work.run_id,
+            lease_id=lease.lease_id,
+            fencing_token=lease.fencing_token,
+            diagnostic=str(error),
+        )
+        return True
 
     async def _execute_cleanup(
         self, lease: WorkerLease, request: _CleanupRequest
@@ -574,7 +752,7 @@ class LocalWorkerDispatcher:
                         "scheduler lease renewer stopped"
                     )
                 value = operation.result()
-            await self.scheduler.release(
+            await self._release_lease(
                 lease, LeaseReleaseReason.COMPLETED, requeue=False
             )
             if not request.result.done():
@@ -590,7 +768,7 @@ class LocalWorkerDispatcher:
             if not request.result.done():
                 request.result.set_exception(exc)
             try:
-                await self.scheduler.release(
+                await self._release_lease(
                     lease, LeaseReleaseReason.FAILED, requeue=False
                 )
             except Exception:
@@ -610,6 +788,7 @@ class LocalWorkerDispatcher:
         RUNNING would advertise resumability without a surviving driver.
         """
 
+        require_execution_ownership()
         sessions = await runtime.session_store.list_descendant_sessions(root.session_id)
         candidates = []
         for session in sessions:
@@ -699,6 +878,22 @@ class LocalWorkerDispatcher:
     ) -> None:
         """Resolve a submitted Future even when failure recording is unavailable."""
 
+        runtime = getattr(request.agent, "runtime", None)
+        if self.preserve_runs_on_shutdown and runtime is not None:
+            snapshot = await runtime.get_run(run_id)
+            if lease is not None:
+                try:
+                    await self._release_lease(
+                        lease, LeaseReleaseReason.WORKER_SHUTDOWN,
+                        requeue=snapshot.state not in TERMINAL_RUN_STATES and snapshot.state != RunState.SUSPENDED,
+                    )
+                except SageV2Error as exc:
+                    if not is_lease_loss(exc):
+                        raise
+            if not request.result.done():
+                request.result.set_result(snapshot)
+            return
+
         try:
             snapshot = await _agent_method(
                 request.agent, "fail_driver_crash", "_fail_driver_crash"
@@ -711,18 +906,50 @@ class LocalWorkerDispatcher:
             if not request.result.done():
                 request.result.set_exception(exc)
         else:
+            # Explicit dispatcher shutdown remains terminal. Local task
+            # cancellation alone no longer fails children, so settle any active
+            # descendants once the root's shutdown fact is authoritative.
+            runtime = getattr(request.agent, "runtime", None)
+            if runtime is not None and snapshot.state in TERMINAL_RUN_STATES:
+                await self._cancel_shutdown_descendants(
+                    runtime, snapshot, request.context
+                )
             if not request.result.done():
                 request.result.set_result(snapshot)
         finally:
             if lease is not None:
                 try:
-                    await self.scheduler.release(
+                    await self._release_lease(
                         lease, LeaseReleaseReason.FAILED, requeue=False
                     )
                 except BaseException:
                     # Expiry/reaping remains the final fallback, but shutdown
                     # must never strand the caller's Future on release failure.
                     pass
+
+    async def _cancel_shutdown_descendants(self, runtime, root, context):
+        for session in await runtime.session_store.list_descendant_sessions(
+            root.session_id
+        ):
+            for child in await runtime.session_store.list_session_runs(
+                session.session_id
+            ):
+                if (
+                    child.state in TERMINAL_RUN_STATES
+                    or not await self._has_run_ancestor(
+                        runtime.session_store, child.run_id, root.run_id
+                    )
+                ):
+                    continue
+                await runtime.cancel_run(
+                    CancelRun(
+                        run_id=child.run_id,
+                        expected_revision=child.revision,
+                        idempotency_key=f"parent-shutdown:{root.run_id}:{child.run_id}",
+                        reason="parent_worker_shutdown",
+                    ),
+                    context,
+                )
 
     async def _finish_cancelled_execution(
         self,
@@ -753,6 +980,9 @@ class LocalWorkerDispatcher:
             try:
                 snapshot = await recover(run_id, request.context)
             except Exception as exc:
+                require_execution_ownership()
+                if is_lease_loss(exc):
+                    raise
                 _LOGGER.exception(
                     "scheduler.worker.recovery_failed",
                     "live execution cancel could not recover the Run barrier",
@@ -803,7 +1033,7 @@ class LocalWorkerDispatcher:
         }.get(snapshot.state, LeaseReleaseReason.FAILED)
         try:
             if lease is not None:
-                await self.scheduler.release(
+                await self._release_lease(
                     lease,
                     reason,
                     requeue=snapshot.state == RunState.RESUMING,
@@ -814,21 +1044,48 @@ class LocalWorkerDispatcher:
         if not request.result.done():
             request.result.set_result(snapshot)
 
+    @staticmethod
+    def _renewal_error(renewer):
+        # Task.exception() raises CancelledError for a cancelled heartbeat. It
+        # must be treated as lost ownership, not as a user/shutdown cancellation.
+        if renewer.cancelled():
+            return RuntimeError("scheduler lease renewer was cancelled")
+        return renewer.exception() or RuntimeError("scheduler lease renewer stopped")
+
     async def _renew(self, lease) -> None:
-        delay = max(self.lease_duration.total_seconds() / 3, 0.05)
+        delay = max(min(self.lease_duration.total_seconds() / 3, 10.0), 0.05)
         current = lease
         while True:
             await asyncio.sleep(delay)
-            current = await self.scheduler.renew(
-                current, lease_duration=self.lease_duration
-            )
+            try:
+                current = await self.scheduler.renew(
+                    current, lease_duration=self.lease_duration
+                )
+            except Exception as exc:
+                transient = isinstance(exc, (OSError, TimeoutError)) or (
+                    isinstance(exc, SageV2Error)
+                    and exc.info.retryable
+                    and not is_lease_loss(exc)
+                )
+                if transient and utc_now() < current.expires_at:
+                    _LOGGER.warning(
+                        "scheduler.renew.retry",
+                        "lease renewal temporarily failed",
+                        run_id=lease.work.run_id,
+                        diagnostic=str(exc),
+                    )
+                    continue
+                revoke_ownership()
+                raise
 
     @staticmethod
     def _consume_detached_result(result: asyncio.Future[RunSnapshot]) -> None:
         """Retrieve orphan completion errors so asyncio does not log them later."""
 
         if not result.cancelled():
-            result.exception()
+            error = result.exception()
+            if error is not None:
+                _LOGGER.exception("scheduler.recovery.failed", "automatic recovery failed", error)
 
     @staticmethod
     def _shutdown_error() -> SageV2Error:

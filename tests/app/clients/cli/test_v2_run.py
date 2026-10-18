@@ -2871,3 +2871,17 @@ def test_cli_proxy_mode_configuration_reaches_sandbox_spec(tmp_path, mode, extra
     assert spec.network.allowed_ports == (443,)
     assert spec.network.deny_private_networks is True
     assert spec.network.allowed_schemes == ("http", "https")
+
+
+@pytest.mark.parametrize("disk_mb", [1, 32768])
+@pytest.mark.parametrize("explicit_limit", [None, 1024])
+def test_cli_filesystem_quota_defaults_to_resource_configuration(tmp_path, disk_mb, explicit_limit):
+    from sagents.v2.runtime.execution.sandbox import ResourceLimits
+
+    spec = LocalWorkspaceBindingProvider(tmp_path, settings=WorkspaceSandboxSettings(
+        resources=ResourceLimits(disk_mb=disk_mb, require_hard_limits=False),
+        max_total_bytes=explicit_limit,
+    )).sandbox_spec()
+    assert spec.filesystem.max_total_bytes == (
+        explicit_limit if explicit_limit is not None else disk_mb * 1024**2
+    )

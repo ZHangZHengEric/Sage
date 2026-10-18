@@ -455,7 +455,7 @@ async def test_shutdown_records_a_typed_terminal_failure_instead_of_requeueing()
     dispatcher = LocalWorkerDispatcher(
         scheduler,
         max_concurrent_runs=1,
-        lease_scope_factory=fenced.lease_scope,
+        lease_scope_factory=fenced.lease_scope, preserve_runs_on_shutdown=False,
     )
     agent.attach_dispatcher(dispatcher)
     stream = await agent.run_stream(
@@ -784,7 +784,7 @@ async def test_close_during_recovery_records_shutdown():
 
     agent = SAgent(runtime=runtime, driver_factory=lambda run_id: Driver())
     dispatcher = LocalWorkerDispatcher(
-        scheduler, max_concurrent_runs=1, lease_scope_factory=fenced.lease_scope
+        scheduler, max_concurrent_runs=1, lease_scope_factory=fenced.lease_scope, preserve_runs_on_shutdown=False
     )
     agent.attach_dispatcher(dispatcher)
     stream = await agent.run_stream(start_command("close-during-recovery"), CONTEXT)

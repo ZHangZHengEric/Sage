@@ -436,7 +436,7 @@ class DesktopRunCompositionMixin(DesktopRunEnvironmentMixin):
                 ),
                 allowed_roots=(workspace_root,),
                 max_file_bytes=64 * 1024 * 1024,
-                max_total_bytes=4 * 1024 * 1024 * 1024,
+                max_total_bytes=sandbox_config["resources"]["disk_mb"] * 1024**2,
             ),
             process=ProcessPolicy(
                 enabled=process_enabled,

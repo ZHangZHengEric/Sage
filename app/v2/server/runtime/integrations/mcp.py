@@ -22,6 +22,7 @@ def to_mcp_config(
             api_key=record.api_key,
             required=required,
             timeout_seconds=record.timeout_seconds,
+            call_timeout_seconds=record.call_timeout_seconds,
         )
     except Exception as exc:
         raise SageV2Error(

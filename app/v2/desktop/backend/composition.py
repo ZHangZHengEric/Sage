@@ -56,6 +56,7 @@ async def build_desktop_application(
     bindings: DesktopExecutionBindingProvider | None = None,
     extensions: tuple[ExtensionRegistration, ...] = (),
     runtime: RuntimeConfig | dict | None = None,
+    defer_recovery: bool = False,
 ) -> SAgentApplication:
     """Assemble Desktop runtime as Manifest + host bindings.
 
@@ -79,6 +80,8 @@ async def build_desktop_application(
         .with_model_provider(model_provider or UnusableProcessModelProvider())
         .with_execution_binding_provider(provider)
     )
+    if defer_recovery:
+        builder.with_deferred_execution_start()
     for registration in extensions:
         builder.register(registration)
     if session_store is not None:

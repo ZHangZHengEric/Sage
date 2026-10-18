@@ -534,7 +534,9 @@ async def test_model_connection_failure_streams_recovery_before_suspension(
             tool_selection_policy=Selection(),
         ),
     )
-    stream = await agent.run_stream(command(), CONTEXT)
+    from sagents.v2.contracts.commands import RunConfig
+    request = command().model_copy(update={"config": RunConfig(transient_retry_limit=3)})
+    stream = await agent.run_stream(request, CONTEXT)
 
     async def collect():
         return [event async for event in stream.events]
@@ -551,9 +553,7 @@ async def test_model_connection_failure_streams_recovery_before_suspension(
     assert interaction.data.allowed_decisions == ("retry", "change_direction", "cancel")
     assert not any(event.type == "run.completed" for event in events)
     assert len(model.requests) == (4 if phase == "primary" else 0)
-    assert len([e for e in events if e.type == "step.retry_scheduled"]) == (
-        3 if phase == "primary" else 0
-    )
+    assert len([e for e in events if e.type == "step.retry_scheduled"]) == 3
     replay = await runtime.session_store.read_events(final.run_id)
     assert any(event.event_id == interaction.event_id for event in replay)
     await agent.close()

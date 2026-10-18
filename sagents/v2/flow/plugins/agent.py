@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from sagents.v2.runtime.execution.ownership import deferred_work_scope
+
 import json
 
 from sagents.v2.contracts.errors import ErrorCategory, RuntimeErrorInfo
@@ -45,23 +47,26 @@ class NativeAgentFlowNode:
             task_content += "\n\nPrior flow results (task data):\n" + json.dumps(
                 context.prior_results, ensure_ascii=False
             )
-        result = await self.child_executor.run_child(
-            self.descriptor,
-            DelegationTask(
-                task_id=f"{context.flow_execution_id}:{context.node_execution_id}",
-                agent_id=self.descriptor.agent_id,
-                task_name=str(context.config.get("task_name") or context.node_id),
-                original_task=self._input_text(command.input),
-                content=task_content,
-                flow_boundary=str(
-                    context.config.get("flow_boundary") or "complete_node"
+        # Flow has its own node checkpoint protocol. Until it supports deferred
+        # node outcomes, keep child inference waits inside this node invocation.
+        with deferred_work_scope(False):
+            result = await self.child_executor.run_child(
+                self.descriptor,
+                DelegationTask(
+                    task_id=f"{context.flow_execution_id}:{context.node_execution_id}",
+                    agent_id=self.descriptor.agent_id,
+                    task_name=str(context.config.get("task_name") or context.node_id),
+                    original_task=self._input_text(command.input),
+                    content=task_content,
+                    flow_boundary=str(
+                        context.config.get("flow_boundary") or "complete_node"
+                    ),
+                    invocation_mode=AgentInvocationMode.AGENT_AS_TOOL,
                 ),
-                invocation_mode=AgentInvocationMode.AGENT_AS_TOOL,
-            ),
-            parent_run_id=context.run_id,
-            workspace_policy=self.workspace_policy,
-            context=context.request_context,
-        )
+                parent_run_id=context.run_id,
+                workspace_policy=self.workspace_policy,
+                context=context.request_context,
+            )
         output = {
             "agent_id": result.agent_id,
             "child_run_id": result.child_run_id,

@@ -111,6 +111,11 @@ class SAgentBuilder:
         self._options.run_driver_factory = factory
         return self
 
+    def with_deferred_execution_start(self) -> "SAgentBuilder":
+        """Let a host install its recovery driver before starting workers."""
+        self._options.manual_dispatcher_start = True
+        return self
+
     def with_owned_resources(self, *resources: ApplicationResource) -> "SAgentBuilder":
         """Close a host-created resource after the Application's own resources.
 

@@ -29,7 +29,11 @@ class InputItem(StrictModel):
 
 
 class RunConfig(StrictModel):
-    """Per-Run overrides already narrowed against the Agent policy ceiling."""
+    """Per-Run overrides narrowed against the Agent policy ceiling.
+
+    With automatic_stage_continuation enabled, max_steps bounds each stage;
+    deadlines and total token budgets continue to bound the complete Run.
+    """
 
     model_bindings: dict[str, str] = Field(default_factory=dict)
     # ``None`` means that a compatibility host did not provide a per-Run grant
@@ -41,6 +45,12 @@ class RunConfig(StrictModel):
     max_output_tokens: int | None = Field(default=None, gt=0)
     max_total_tokens: int | None = Field(default=None, gt=0)
     deadline_seconds: float | None = Field(default=None, gt=0)
+    # Infrastructure outages do not require a human decision after a handful
+    # of attempts. Hosts can opt into a finite limit; explicit Run budgets and
+    # cancellation remain authoritative when this is None.
+    transient_retry_limit: int | None = Field(default=None, ge=0)
+    automatic_stage_continuation: bool = True
+    max_stages: int | None = Field(default=None, gt=0)
     flow_boundary: Literal["complete_node", "continue_node"] | None = None
     priority: int = Field(default=0, ge=-100, le=100)
     metadata: dict[str, Any] = Field(default_factory=dict)

@@ -189,3 +189,14 @@ def test_flow_member_uses_own_network_policy(client, service, monkeypatch):
     assert state["run"]["state"] == "completed", state
     assert networks[state["run"]["run_id"]] == NetworkMode.UNRESTRICTED
     assert NetworkMode.NONE in networks.values()
+
+
+@pytest.mark.parametrize("disk_mb", [1, 32768])
+def test_workspace_filesystem_quota_follows_resource_configuration(tmp_path, disk_mb):
+    from sagents.v2.runtime.execution.sandbox import ResourceLimits
+
+    spec = workspace_sandbox_spec(tmp_path, resources=ResourceLimits(
+        disk_mb=disk_mb, require_hard_limits=False,
+    ))
+    assert spec.resources.disk_mb == disk_mb
+    assert spec.filesystem.max_total_bytes == disk_mb * 1024**2
