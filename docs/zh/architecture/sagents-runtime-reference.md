@@ -300,7 +300,7 @@ capabilities:
       root: /srv/my-app/runtime/scheduler
       max_concurrent_runs: 8
       max_concurrent_runs_per_tenant: 2
-      lease_seconds: 30
+      lease_seconds: 172800
 ```
 
 调度并发限制是整个 App 的运行调度限制，不是模型供应商 QPS。租约由运行器维护，不要把 lease_seconds 当作对话总超时。`wall_time_seconds` 属于 Agent/Run 预算，模型摘要超时属于 summarizer，MCP 超时属于单个 MCP server，它们不能互相替代。
@@ -887,7 +887,7 @@ Process-local scheduler without restart durability.
 | `max_retained_terminal_items` | integer；minimum=0 | `4096` | 否 | 保留终态调度/沙箱条目数上限 |
 | `max_concurrent_runs` | integer；minimum=1 | `8` | 否 | App 调度并发 Run 上限 |
 | `max_concurrent_runs_per_tenant` | integer；minimum=1 | `2` | 否 | 单租户调度并发 Run 上限 |
-| `lease_seconds` | number；exclusiveMinimum=0 | `30` | 否 | 执行租约时长（秒），由 dispatcher 消费 |
+| `lease_seconds` | number；exclusiveMinimum=0 | `172800`（48 小时） | 否 | 执行租约时长（秒），由 dispatcher 定期续租 |
 
 ### sage.scheduler.filesystem
 
@@ -901,7 +901,7 @@ Persists scheduler items on the local filesystem.
 | `max_retained_terminal_items` | integer；minimum=0 | `4096` | 否 | 保留终态调度/沙箱条目数上限 |
 | `max_concurrent_runs` | integer；minimum=1 | `8` | 否 | App 调度并发 Run 上限 |
 | `max_concurrent_runs_per_tenant` | integer；minimum=1 | `2` | 否 | 单租户调度并发 Run 上限 |
-| `lease_seconds` | number；exclusiveMinimum=0 | `30` | 否 | 执行租约时长（秒），由 dispatcher 消费 |
+| `lease_seconds` | number；exclusiveMinimum=0 | `172800`（48 小时） | 否 | 执行租约时长（秒），由 dispatcher 定期续租 |
 | `root` | string；minLength=1 | 无固定值；仍需提供/注入 | 是 | 存储根目录；不同组件应使用对应独立目录 |
 
 ### sage.session-memory.noop
@@ -1059,7 +1059,8 @@ Bridges configured MCP servers into the Sage Tool catalog and executor.
 | `command` | string / null | `null` | 否 | stdio MCP 启动命令 |
 | `args` | array | `[]` | 否 | stdio 命令参数数组 |
 | `env` | object | `{}` | 否 | stdio 子进程环境变量映射 |
-| `timeout_seconds` | number；exclusiveMinimum=0 | `30` | 否 | 该组件操作的总等待上限（秒），不是整个 Run 预算 |
+| `timeout_seconds` | number；exclusiveMinimum=0 | `30` | 否 | MCP 连接、初始化和工具发现等待上限（秒），不限制工具执行时长 |
+| `call_timeout_seconds` | number / null；exclusiveMinimum=0 | `null` | 否 | 单次工具执行截止时间（秒）；默认持续等待结果，仍可取消。HTTP/SSE 读取等待同步使用此配置，避免 SDK 默认读取超时中断长任务 |
 | `required` | boolean | `true` | 否 | 此 MCP 服务是否为必需依赖 |
 | `max_tools` | integer；exclusiveMinimum=0, maximum=10000 | `256` | 否 | 发现工具数上限 |
 | `max_pages` | integer；exclusiveMinimum=0, maximum=1024 | `64` | 否 | 发现分页数上限 |
@@ -1166,6 +1167,34 @@ Seeds a Claw-style workspace layout and starter files.
 | 参数 | 类型 / 范围 | 默认值 | schema 必填 | 用途 |
 | --- | --- | --- | --- | --- |
 | `language` | string；minLength=1 | `"en"` | 否 | 工作区模板/查询/Skill 提示语言 |
+
+## Run 的网络故障自动恢复
+
+`RunConfig.transient_retry_limit` 默认 `null`：主模型推理及该步骤请求准备阶段遇到可重试的 `provider_transient` / `rate_limited` 错误时，不会因重试三次失败就要求人工处理。可显式设为非负整数限制连续重试次数，`0` 表示禁用透明重试。空语义响应、参数错误、鉴权错误、未知工具副作用不属于此无限重试路径。
+
+退避间隔为 1、2、4、8……秒，上限 60 秒。每次等待前原子写入 `step.retry_scheduled` 和运行检查点，保存连续失败次数及下次尝试时间。故障恢复或宿主接管运行后继续处理同一推理步骤，不重复执行已完成工具，不消耗正常步骤额度；成功推理后清零连续失败次数。暂停、取消和显式 `deadline_seconds` 仍有效。
+
+在内置调度器下，等待前持久化 `automatic_resume_at` 后归还 Worker 租约，调度项以该时间延迟重新入队，同时释放租户并发名额。原 Run 保持非终态，观察者的完成 Future 保持等待。Team/Fibre 成员的等待通过可核对的委派任务 ID 汇总给父任务，整棵调用树可在无活动调用时归还根 Worker；已完成兄弟任务的结果直接复用。暂停可提前唤醒等待任务，取消会结算原调用者。直接驱动 Loop 的宿主仍可使用进程内等待；自定义 Scheduler 应实现 `release(..., requeue=True, available_at=...)` 以启用让出 Worker。
+
+恢复驱动或沙箱恢复报出明确可重试且可安全恢复的临时服务、限流或资源错误时，调度器会再次延迟入队，不把它改写为不确定副作用的终态失败。显式运行截止时间仍生效。入队/归还租约的持久化事务会在 Worker 取消前完成，避免关闭服务时中断 fsync 而损坏调度状态。
+
+`RunConfig.automatic_stage_continuation` 默认 `true`，达到 `max_steps` 的阶段边界时自动保存检查点、重置阶段步骤计数，并在同一 Run、同一会话中接续原目标。历史消息、工具结果、总 token 用量、重复行为检测状态不重置。`max_stages` 默认 `null`，可配置正整数限制阶段数；将 `automatic_stage_continuation` 设为 `false` 可恢复步骤上限后的人工恢复行为。截止时间、总 token 上限和显式人工交互不被阶段接续绕过。
+
+Flow 节点拥有独立的节点检查点协议；其 Agent 节点保留进程内等待和显式节点边界，不把未完成节点当作已完成的委派结果。上述自动让出 Worker 与阶段接续适用于原生 Agent Loop 及其 Team/Fibre 委派树。
+
+Scheduler 配置 `preserve_runs_on_shutdown` 默认 `true`：正常关闭服务会保留未完成 Run 和检查点、归还租约，重启后通过持久化执行意图自动接管。设置为 `false` 可使用原有的关闭即失败行为。Filesystem Scheduler 持有独占写锁，新进程获得锁后立即回收旧租约；即使进程在保存检查点之后、延迟入队之前被强杀，也会依据检查点的唤醒时间恢复，不必等待 48 小时租约自然过期。
+
+Desktop 启动时先绑定宿主恢复驱动，再启动 Worker，不依赖新对话或手动继续。本地工作区仍在时，可以在相同所有者和策略下重建失去进程内引用的沙箱；这不重放进程或工具副作用。自定义宿主可用 `SAgentBuilder.with_deferred_execution_start()` 推迟 Worker 启动，安装恢复驱动后调用 `dispatcher.start()`。生产恢复应使用持久化 SessionStore；内存存储无法跨服务进程保存检查点。
+
+不能把未知结果的写操作作为网络请求直接重发。鉴权、不可用的资源配置、磁盘配额不足、不可核对的外部副作用仍需各自的修复或确认策略；自动恢复不会删除已有产物、提高显式资源额度或宣告未验收目标完成。
+
+MCP 工具使用 `resume_strategy=agent_recovery`。调用期间连接重置、超时或未收到响应时，先核对本地执行回执；仍无法确认则将原始诊断、操作 ID、幂等键和原始参数作为工具错误持久化并反馈给模型，不创建阻塞式人工核对。错误明确标记 `execution_outcome=unknown` 和 `recovery_action=check_status_before_retry`，指导 Agent 先调用可用的状态查询工具或检查已有产物：已完成则复用，仍在执行则等待，确认未执行或可安全重复后才重试。框架不直接重放未知写操作，也不假设所有 MCP 服务都有统一的状态接口。此规则适用于主 Agent、Team/Fibre 子 Agent 和丢失内存回执后的中断恢复。明确返回的 `isError` 仍作为普通工具失败；合法的空内容响应仍有效，`None` 响应不能当作成功。其他工具的显式人工恢复策略保持有效。
+
+本地沙箱启动前检测到工作区超过 `resources.disk_mb` 时，返回 `sandbox.workspace_quota_exceeded`，包含已用字节数、配额及“尚未执行”标记，界面展示具体容量；不会删除已有产物或自动突破显式资源限制。该错误与请求参数错误、实际物理磁盘已满不同。
+
+Desktop、Server 的工作区 `FileSystemPolicy.max_total_bytes` 从有效的 `resources.disk_mb * 1024 * 1024` 派生，不再单独固定为 4 GB；CLI 省略独立 `max_total_bytes` 时也使用此值。CLI 显式设置的独立文件系统上限仍保留。默认 `resources.disk_mb` 仍为 4096，需要更大工作区时应调整资源配置，例如 `32768`。Desktop 配置入口是 `component_configs["execution.sandbox"]["resources"]["disk_mb"]`。
+
+子 Agent 继承父任务已接受的 `runtime_components` 配置快照，创建和恢复时使用同一资源配置；修改全局设置不追溯修改已有任务或沙箱。配置更新应通过新任务及新沙箱生效。
 
 ## 源码与维护
 

@@ -393,11 +393,13 @@ class DesktopV2Service(
                 language=language,
                 bindings=execution_binding_provider,
                 extensions=self._host_extensions,
+                defer_recovery=True,
             )
             try:
                 self.execution_binding_provider = execution_binding_provider
                 self.application = application
                 self._bind_process_runtime()
+                await self.dispatcher.start()
                 self._start_studio_delivery_worker()
             except BaseException:
                 self.execution_binding_provider = None
@@ -410,11 +412,12 @@ class DesktopV2Service(
         application = self.application
         self.scheduler = application.service("execution.scheduler")
         self.dispatcher = application.service("execution.dispatcher")
-        self.dispatcher.attach_recovery_agent(_DesktopRecoveryAgent(self), replace=True)
         self.driver_session_store = LeaseFencedSessionStore(
             self.session_store, self.scheduler
         )
         self.driver_runtime = HarnessRuntime(self.driver_session_store)
+        self.dispatcher.attach_recovery_agent(_DesktopRecoveryAgent(self), replace=True)
+        self.dispatcher.recovery_filter = None
         self.session_access = application.service("session.access")
         self.delegation_limiter = DelegationConcurrencyLimiter(
             max_concurrency=8,

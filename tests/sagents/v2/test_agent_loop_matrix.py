@@ -208,6 +208,9 @@ async def setup_loop(
     max_output_tokens=None,
     max_total_tokens=None,
     deadline_seconds=None,
+    transient_retry_limit=3,
+    automatic_stage_continuation=False,
+    max_stages=None,
     clock=None,
     actor_context=CONTEXT,
     flow_boundary=None,
@@ -235,6 +238,9 @@ async def setup_loop(
                 max_output_tokens=max_output_tokens,
                 max_total_tokens=max_total_tokens,
                 deadline_seconds=deadline_seconds,
+                transient_retry_limit=transient_retry_limit,
+                automatic_stage_continuation=automatic_stage_continuation,
+                max_stages=max_stages,
                 flow_boundary=flow_boundary,
                 metadata=(
                     {"response_language": response_language}
@@ -1645,7 +1651,9 @@ async def test_model_failure_matrix_requests_typed_recovery_questionnaire(
     step, error_code, monkeypatch
 ):
     monkeypatch.setattr(AgentLoopEngine, "_PROVIDER_RETRY_BASE_SECONDS", 0)
-    runtime, handle, loop, _ = await setup_loop(ScriptedModelProvider((step,) * 4))
+    runtime, handle, loop, _ = await setup_loop(
+        ScriptedModelProvider((step,) * 4), transient_retry_limit=3
+    )
     result = await loop.execute(handle.run_id, CONTEXT)
     events = await runtime.session_store.read_events(handle.run_id)
     assert result.state == RunState.SUSPENDED
@@ -4666,6 +4674,7 @@ async def test_transient_model_retries_preserve_completed_tool_work(
     model = ScriptedModelProvider(tuple(steps))
     runtime, handle, loop, _ = await setup_loop(
         model,
+        transient_retry_limit=3,
         tool_policy=DefaultToolPolicy(approval_strategy=ApprovalStrategy.AUTO_APPROVE),
     )
     result = await loop.execute(handle.run_id, CONTEXT)
@@ -4953,8 +4962,8 @@ async def test_context_recovery_stops_after_six_retries_without_executing_tools(
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("decision", ["confirm_succeeded", "mark_failed"])
-async def test_mcp_unknown_pauses_and_cold_resume_keeps_parallel_results(decision):
+@pytest.mark.parametrize("cold_restart", [False, True])
+async def test_mcp_unknown_returns_error_and_keeps_parallel_results(cold_restart):
     from contextlib import asynccontextmanager
     from sagents.v2.tool import McpServerConfig, McpToolPlugin
 
@@ -5004,15 +5013,36 @@ async def test_mcp_unknown_pauses_and_cold_resume_keeps_parallel_results(decisio
         )
         for n, value in enumerate(("unknown", "saved"), 1)
     )
+    def interrupt_before_inference(request):
+        if cold_restart:
+            raise asyncio.CancelledError
+
     model = ScriptedModelProvider(
-        (ScriptedModelStep(events=(completed("", calls=calls),)),)
+        (ScriptedModelStep(events=(completed("", calls=calls),)),
+         ScriptedModelStep(events=(completed("done"),), assertion=interrupt_before_inference))
     )
     runtime, handle, loop, _ = await setup_loop(
         model, tools=definitions, actor_context=context
     )
     loop.tool_executor = bridge
-    suspended = await loop.execute(handle.run_id, context)
-    assert suspended.state == RunState.SUSPENDED
+    if cold_restart:
+        with pytest.raises(asyncio.CancelledError):
+            await loop.execute(handle.run_id, context)
+        cold = ephemeral_runtime()
+        await cold.session_store.load_state(await runtime.session_store.export_state())
+        runtime = cold
+        model = ScriptedModelProvider((ScriptedModelStep(events=(completed("done"),)),))
+
+        class NeverExecute:
+            async def execute(self, call, context):
+                raise AssertionError("committed sibling/error must not be replayed")
+
+        loop = AgentLoopEngine(runtime=runtime, model=model,
+                               tool_catalog=InMemoryToolCatalog(definitions), tool_executor=NeverExecute())
+        result = await loop.recover_interrupted(handle.run_id, context)
+    else:
+        result = await loop.execute(handle.run_id, context)
+    assert result.state == RunState.COMPLETED
     events = await runtime.session_store.read_events(handle.run_id)
     assert not any(e.type == "run.failed" for e in events)
     assert (
@@ -5020,55 +5050,152 @@ async def test_mcp_unknown_pauses_and_cold_resume_keeps_parallel_results(decisio
         == "saved sibling receipt"
     )
 
-    # Cold host/plugin: only the durable ledger is available, with no in-memory
-    # provider receipts. Both the completed sibling and resolved call must reuse it.
-    cold = ephemeral_runtime()
-    await cold.session_store.load_state(await runtime.session_store.export_state())
-    resolution_model = ScriptedModelProvider(
-        (ScriptedModelStep(events=(completed("done"),)),)
-    )
-
-    class NeverExecute:
-        async def execute(self, call, context):
-            raise AssertionError("saved operation must never be dispatched again")
-
-    recovered_loop = AgentLoopEngine(
-        runtime=cold,
-        model=resolution_model,
-        tool_catalog=InMemoryToolCatalog(definitions),
-        tool_executor=NeverExecute(),
-    )
-    suspension = await cold.session_store.get_suspension(suspended.suspension_id)
-    interaction = await cold.session_store.get_interaction(suspension.interaction_id)
-    assert interaction.allowed_decisions == (
-        "confirm_succeeded",
-        "mark_failed",
-        "cancel",
-    )
-    await cold.reply_interaction(
-        ReplyInteraction(
-            run_id=handle.run_id,
-            suspension_id=suspension.suspension_id,
-            interaction_id=interaction.interaction_id,
-            expected_revision=suspended.revision,
-            expected_suspension_revision=suspension.expected_revision,
-            expected_interaction_revision=interaction.expected_revision,
-            decision=decision,
-            payload={"result_text": "checked remote receipt"},
-            idempotency_key="checked",
-        ),
-        context,
-    )
-    result = await recovered_loop.resume(handle.run_id, context)
-    assert result.state == RunState.COMPLETED
     assert sorted(dispatches) == ["saved", "unknown"]
-    messages = [m for m in resolution_model.requests[0].messages if m.role == "tool"]
+    messages = [m for m in model.requests[-1].messages if m.role == "tool"]
     assert sorted(m.tool_call_id for m in messages) == ["call_1", "call_2"]
     by_id = {m.tool_call_id: m for m in messages}
     assert by_id["call_2"].content[0].text == "saved sibling receipt"
-    if decision == "confirm_succeeded":
-        assert by_id["call_1"].content[0].text == "checked remote receipt"
-    events = await cold.session_store.read_events(handle.run_id)
+    assert "check_status_before_retry" in by_id["call_1"].content[0].text
+    assert "ConnectionError: response lost" in by_id["call_1"].content[0].text
+    events = await runtime.session_store.read_events(handle.run_id)
     assert sum(e.type == "tool.call.started" for e in events) == 2
-    assert sum(e.type == "tool.call.reconciled" for e in events) == 1
+    assert sum(e.type == "tool.call.failed" for e in events) == 1
+    assert not any(e.type == "interaction.requested" for e in events)
     assert not any(e.type == "run.failed" for e in events)
+
+
+@pytest.mark.asyncio
+async def test_default_outage_recovery_outlives_step_budget_without_replaying_write(monkeypatch):
+    monkeypatch.setattr(AgentLoopEngine, "_PROVIDER_RETRY_BASE_SECONDS", 0)
+    error = RuntimeErrorInfo(
+        code="model.provider_transient", category=ErrorCategory.PROVIDER_TRANSIENT,
+        message="network unavailable", retryable=True,
+    )
+    model = ScriptedModelProvider((
+        ScriptedModelStep(events=(completed(calls=(tool_call("write_value"),)),)),
+        *([ScriptedModelStep(events=(), error=error)] * 30),
+        ScriptedModelStep(events=(completed("done"),)),
+    ))
+    runtime, handle, loop, executor = await setup_loop(
+        model, max_steps=3, transient_retry_limit=None,
+        tool_policy=DefaultToolPolicy(approval_strategy=ApprovalStrategy.AUTO_APPROVE),
+    )
+    result = await loop.execute(handle.run_id, CONTEXT)
+    assert result.state == RunState.COMPLETED
+    assert len(executor.calls) == 1
+    events = await runtime.session_store.read_events(handle.run_id)
+    retries = [e for e in events if e.type == "step.retry_scheduled"]
+    assert len(retries) == 30
+    assert all(e.data.error.metadata["automatic_recovery"] for e in retries)
+    assert not [e for e in events if e.type == "interaction.requested"]
+    assert all(req.messages == model.requests[1].messages for req in model.requests[2:])
+
+
+@pytest.mark.asyncio
+async def test_network_failure_in_request_preparation_recovers_automatically(monkeypatch):
+    monkeypatch.setattr(AgentLoopEngine, "_PROVIDER_RETRY_BASE_SECONDS", 0)
+    model = ScriptedModelProvider((ScriptedModelStep(events=(completed("done"),)),))
+    runtime, handle, loop, _ = await setup_loop(model, transient_retry_limit=None)
+    original = loop.step_request_builder.prepare
+    attempts = 0
+
+    async def prepare(**kwargs):
+        nonlocal attempts
+        attempts += 1
+        if attempts <= 5:
+            raise SageV2Error(RuntimeErrorInfo(
+                code="context.provider_unavailable", category=ErrorCategory.PROVIDER_TRANSIENT,
+                message="auxiliary model offline", retryable=True,
+            ))
+        return await original(**kwargs)
+
+    monkeypatch.setattr(loop.step_request_builder, "prepare", prepare)
+    assert (await loop.execute(handle.run_id, CONTEXT)).state == RunState.COMPLETED
+    assert attempts == 6
+    assert len(model.requests) == 1
+
+
+@pytest.mark.asyncio
+async def test_network_retry_checkpoint_recovers_after_worker_restart(monkeypatch):
+    error = RuntimeErrorInfo(
+        code="model.provider_transient", category=ErrorCategory.PROVIDER_TRANSIENT,
+        message="network unavailable", retryable=True,
+    )
+    model = ScriptedModelProvider((ScriptedModelStep(events=(), error=error),))
+    runtime, handle, loop, _ = await setup_loop(model)
+    waiting = asyncio.Event()
+
+    async def wait(run_id, delay):
+        waiting.set()
+        await asyncio.Event().wait()
+
+    monkeypatch.setattr(loop, "_wait_for_model_retry", wait)
+    task = asyncio.create_task(loop.execute(handle.run_id, CONTEXT))
+    await asyncio.wait_for(waiting.wait(), 2)
+    checkpoint = await runtime.session_store.get_latest_checkpoint(handle.run_id)
+    state = AgentLoopCheckpointCodec.decode(checkpoint.state)
+    assert state.provider_retry_attempts == 1
+    assert state.provider_retry_at is not None
+    assert state.retry_model_step
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    recovered_model = ScriptedModelProvider((ScriptedModelStep(events=(completed("recovered"),)),))
+    recovered = AgentLoopEngine(
+        runtime=runtime, model=recovered_model,
+        tool_catalog=InMemoryToolCatalog((READ_TOOL, WRITE_TOOL)),
+        tool_executor=InMemoryToolExecutor(
+            {"read_value": READ_TOOL, "write_value": WRITE_TOOL},
+            {"read_value": tool_handler, "write_value": tool_handler},
+        ),
+    )
+    delays = []
+
+    async def record_wait(run_id, delay):
+        delays.append(delay)
+
+    monkeypatch.setattr(recovered, "_wait_for_model_retry", record_wait)
+    result = await recovered.recover_interrupted(handle.run_id, CONTEXT)
+    assert result.state == RunState.COMPLETED
+    assert len(delays) == 1 and delays[0] > 0
+    assert len(recovered_model.requests) == 1
+
+
+@pytest.mark.asyncio
+async def test_network_retry_respects_deadline_without_another_provider_request():
+    model = ScriptedModelProvider((ScriptedModelStep(events=(), error=RuntimeErrorInfo(
+        code="model.provider_transient", category=ErrorCategory.PROVIDER_TRANSIENT,
+        message="offline", retryable=True,
+    )),))
+    runtime, handle, loop, _ = await setup_loop(
+        model, deadline_seconds=0.05, transient_retry_limit=None,
+    )
+    result = await loop.execute(handle.run_id, CONTEXT)
+    assert result.state == RunState.SUSPENDED
+    assert len(model.requests) == 1
+    suspension = await runtime.session_store.get_suspension(result.suspension_id)
+    interaction = await runtime.session_store.get_interaction(suspension.interaction_id)
+    assert interaction.payload["reason_code"] == "budget.deadline"
+
+
+@pytest.mark.asyncio
+async def test_network_retry_wait_honors_user_cancel():
+    model = ScriptedModelProvider((ScriptedModelStep(events=(), error=RuntimeErrorInfo(
+        code="model.provider_transient", category=ErrorCategory.PROVIDER_TRANSIENT,
+        message="offline", retryable=True,
+    )),))
+    runtime, handle, loop, _ = await setup_loop(model, transient_retry_limit=None)
+    task = asyncio.create_task(loop.execute(handle.run_id, CONTEXT))
+    for _ in range(100):
+        events = await runtime.session_store.read_events(handle.run_id)
+        if any(e.type == "step.retry_scheduled" for e in events):
+            break
+        await asyncio.sleep(0.005)
+    current = await runtime.get_run(handle.run_id)
+    await runtime.cancel_run(CancelRun(
+        run_id=handle.run_id, expected_revision=current.revision,
+        idempotency_key="cancel-outage-recovery",
+    ), CONTEXT)
+    assert (await asyncio.wait_for(task, 2)).state == RunState.CANCELLED
+    assert len(model.requests) == 1

@@ -7,8 +7,13 @@ import inspect
 from collections.abc import Awaitable, Callable
 from copy import deepcopy
 
+from sagents.v2.runtime.execution.ownership import (
+    is_lease_loss,
+    require_execution_ownership,
+)
 from sagents.v2.agent import AgentLoopEngine
 from sagents.v2.contracts.commands import (
+    CancelRun,
     InputItem,
     ReplyInteraction,
     RunConfig,
@@ -45,6 +50,7 @@ ChildRunConfigResolver = Callable[
 
 
 _INHERITED_RUNTIME_METADATA = (
+    "runtime_components",
     "current_time",
     "system_context",
     "identity_documents",
@@ -193,16 +199,43 @@ class LoopChildRunExecutor:
             else:
                 run = current
         except asyncio.CancelledError:
-            await self._settle_crashed_child(
-                handle.run_id, context, "cancelled locally"
-            )
+            # A cancelled local driver is not a user cancellation or a durable
+            # child failure. Its original checkpoint/barriers remain recoverable.
+            # A durable user cancellation in its ancestry is a separate fact.
+            await self._inherit_user_cancellation(handle.run_id, parent_run_id, context)
             raise
         except Exception as exc:
+            require_execution_ownership()
+            if is_lease_loss(exc):
+                raise
             run = await self._settle_crashed_child(handle.run_id, context, str(exc))
         result = await self._result(task, handle.session_id, run)
         if run.state in TERMINAL_RUN_STATES:
             await self._release_run(handle.run_id)
         return result
+
+    async def _inherit_user_cancellation(self, run_id, parent_run_id, context):
+        require_execution_ownership()
+        ancestor = parent_run_id
+        seen = set()
+        while ancestor and ancestor not in seen:
+            seen.add(ancestor)
+            parent = await self.runtime.get_run(ancestor)
+            if parent.state == RunState.CANCELLED:
+                child = await self.runtime.get_run(run_id)
+                if child.state not in TERMINAL_RUN_STATES:
+                    await self.runtime.cancel_run(
+                        CancelRun(
+                            run_id=run_id,
+                            expected_revision=child.revision,
+                            idempotency_key=f"parent-cancelled:{ancestor}:{run_id}",
+                            reason="parent_cancelled",
+                        ),
+                        context,
+                    )
+                return
+            command = await self.runtime.session_store.get_start_command(ancestor)
+            ancestor = command.parent_run_id
 
     async def _loop_for(self, descriptor, run_id, context):
         loop = self._loops_by_run.get(run_id)
@@ -260,6 +293,7 @@ class LoopChildRunExecutor:
     async def _settle_crashed_child(self, run_id, context, message):
         """Ensure a created child Run never remains active after its driver exits."""
 
+        require_execution_ownership()
         error = RuntimeErrorInfo(
             code="agent.child_driver_crashed",
             category=ErrorCategory.INTERNAL,

@@ -38,7 +38,10 @@ class SandboxMcpSessionFactory:
             argv=(config.command, *config.args),
             cwd=self.workspace_root,
             env=dict(config.env),
-            timeout_seconds=config.timeout_seconds,
+            # The subprocess lives for the session, including tool execution.
+            # Connection timeout must not terminate a running MCP server.
+            # Sandbox process policy and session cleanup still own its lifetime.
+            timeout_seconds=None,
         )
         intent = OperationIntent(
             operation="process.run",

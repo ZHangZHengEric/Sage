@@ -17,6 +17,7 @@ class LeaseReleaseReason(str, Enum):
     SUSPENDED = "suspended"
     CANCELLED = "cancelled"
     WORKER_SHUTDOWN = "worker_shutdown"
+    DEFERRED = "deferred"
 
 
 class SchedulerCapabilities(StrictModel):

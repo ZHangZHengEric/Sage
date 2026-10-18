@@ -76,7 +76,8 @@ async def test_mcp_bridge_namespaces_discovers_executes_and_deduplicates():
     assert tools[0].requires_approval is False
     assert tools[0].approval_key == "mcp:drive:search%20files"
     assert tools[0].idempotency_strategy.value == "reconcile_only"
-    assert tools[0].resume_strategy.value == "manual_resolution"
+    assert tools[0].resume_strategy.value == "agent_recovery"
+    assert tools[0].supports_reconciliation is True
     call = ToolCall(
         tool_call_id="call_1",
         tool_name=tools[0].name,
@@ -474,6 +475,69 @@ async def test_mcp_dispatch_transport_failure_is_an_uncertain_side_effect():
 
 
 @pytest.mark.asyncio
+async def test_mcp_tool_can_outlive_connection_timeout_without_redispatch():
+    class SlowSession(FakeSession):
+        async def call_tool(self, name, arguments):
+            await asyncio.sleep(0.04)
+            return await super().call_tool(name, arguments)
+
+    session = SlowSession()
+
+    @asynccontextmanager
+    async def factory(config):
+        yield session
+
+    bridge = McpToolPlugin(
+        (McpServerConfig(name="drive", protocol="stdio", command="mcp", timeout_seconds=0.01),),
+        session_factory=factory,
+    )
+    tool = (await bridge.list_tools(run_id="run_1"))[0]
+    call = ToolCall(
+        tool_call_id="call_1", tool_name=tool.name, arguments={"query": "report"},
+        operation_id="operation_1", idempotency_key="long-call", owner_run_id="run_1",
+    )
+    result = await bridge.execute(call, CONTEXT)
+    assert result.error is None
+    assert await bridge.execute(call, CONTEXT) == result
+    assert session.calls == [("search files", {"query": "report"})]
+
+
+@pytest.mark.asyncio
+async def test_mcp_tool_without_deadline_can_still_be_cancelled():
+    started = asyncio.Event()
+    cancelled = asyncio.Event()
+
+    class WaitingSession(FakeSession):
+        async def call_tool(self, name, arguments):
+            started.set()
+            try:
+                await asyncio.Event().wait()
+            finally:
+                cancelled.set()
+
+    @asynccontextmanager
+    async def factory(config):
+        yield WaitingSession()
+
+    bridge = McpToolPlugin(
+        (McpServerConfig(name="drive", protocol="stdio", command="mcp"),),
+        session_factory=factory,
+    )
+    tool = (await bridge.list_tools(run_id="run_1"))[0]
+    call = ToolCall(
+        tool_call_id="call_1", tool_name=tool.name, arguments={"query": "report"},
+        operation_id="operation_1", idempotency_key="cancel-long-call", owner_run_id="run_1",
+    )
+    task = asyncio.create_task(bridge.execute(call, CONTEXT))
+    await asyncio.wait_for(started.wait(), 1)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert cancelled.is_set()
+    assert not bridge._inflight
+
+
+@pytest.mark.asyncio
 async def test_mcp_timeout_is_an_uncertain_side_effect_without_a_tool_result():
     class SlowSession(FakeSession):
         async def call_tool(self, name, arguments):
@@ -491,7 +555,7 @@ async def test_mcp_timeout_is_an_uncertain_side_effect_without_a_tool_result():
                 name="drive",
                 protocol="stdio",
                 command="mcp",
-                timeout_seconds=0.01,
+                call_timeout_seconds=0.01,
             ),
         ),
         session_factory=factory,

@@ -44,6 +44,8 @@ def _run_outcome_observation(
         )
     if state == RunState.SUSPENDED:
         return TraceStatus.UNSET, "agent.run.suspended", "agent run suspended", "info"
+    if state == RunState.RUNNING:
+        return TraceStatus.UNSET, "agent.run.deferred", "agent run scheduled to continue", "info"
     return TraceStatus.UNSET, "agent.run.stopped", "agent run stopped", "warning"
 
 

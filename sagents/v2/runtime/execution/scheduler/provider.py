@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
-from datetime import timedelta
+from datetime import datetime, timedelta
 from typing import Protocol, TypeVar
 
 from sagents.v2.runtime.execution.scheduler.contracts import (
@@ -41,9 +41,12 @@ class Scheduler(Protocol):
         reason: LeaseReleaseReason,
         *,
         requeue: bool = False,
+        available_at: datetime | None = None,
     ) -> None: ...
 
     async def assert_fence(self, lease: WorkerLease) -> None: ...
+
+    async def reschedule_pending(self, work_id: str, available_at: datetime) -> bool: ...
 
     async def execute_fenced(
         self, lease: WorkerLease, operation: Callable[[], Awaitable[_T]]

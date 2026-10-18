@@ -18,6 +18,8 @@ import sys
 import time
 from pathlib import Path
 
+from sagents.v2.contracts.errors import ErrorCategory, RuntimeErrorInfo, SageV2Error
+
 from ..contracts import FileOperation, NetworkMode
 from .network import LINUX_PROXY_LAUNCH, ShellNetworkBroker, validate_shell_network
 
@@ -536,8 +538,22 @@ class LocalResourceBoundary:
                 os.fchown(fd, self.execution_uid, self.execution_gid)
             finally:
                 os.close(fd)
-        if self._disk_bytes() > self.row.spec.resources.disk_mb * 1024**2:
-            raise ValueError("existing workspace exceeds resources.disk_mb")
+        used_bytes = self._disk_bytes()
+        limit_mb = self.row.spec.resources.disk_mb
+        if used_bytes > limit_mb * 1024**2:
+            raise SageV2Error(RuntimeErrorInfo(
+                code="sandbox.workspace_quota_exceeded",
+                category=ErrorCategory.RESOURCE_LOST,
+                message="existing workspace exceeds resources.disk_mb",
+                message_key="error.sandbox.workspace_quota_exceeded",
+                message_params={"used_mb": (used_bytes + 1024**2 - 1) // 1024**2, "limit_mb": limit_mb},
+                safe_to_resume=True,
+                metadata={
+                    "side_effect_state": "not_applied", "used_bytes": used_bytes,
+                    "limit_bytes": limit_mb * 1024**2,
+                    "recovery_action": "increase_quota_or_archive_working_files",
+                },
+            ))
         if self.row.spec.network.mode in {NetworkMode.ALLOWLIST, NetworkMode.PROXY}:
             broker = ShellNetworkBroker(self.row.spec.network)
             try:

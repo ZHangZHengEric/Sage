@@ -71,6 +71,7 @@ from sagents.v2.runtime.execution import (
     LocalWorkerDispatcher,
     RunExecutionBinding,
 )
+from sagents.v2.runtime.execution.dispatcher import DEFAULT_LEASE_SECONDS
 from sagents.v2.runtime.execution.jobs import InMemoryJobRuntime
 from sagents.v2.runtime.execution.scheduler import InMemoryScheduler
 from sagents.v2.runtime.extensions import (
@@ -998,8 +999,9 @@ class ApplicationAssembler:
             scheduler,
             max_concurrent_runs=int(dispatcher_values.get("max_concurrent_runs", 8)),
             max_concurrent_runs_per_tenant=tenant_limit,
-            lease_seconds=float(dispatcher_values.get("lease_seconds", 30.0)),
+            lease_seconds=float(dispatcher_values.get("lease_seconds", DEFAULT_LEASE_SECONDS)),
             lease_scope_factory=driver_session_store.lease_scope,
+            preserve_runs_on_shutdown=bool(dispatcher_values.get("preserve_runs_on_shutdown", True)),
         )
         services["execution.dispatcher"] = dispatcher
         composition_hash = self._composition_hash(
@@ -1010,7 +1012,7 @@ class ApplicationAssembler:
         agent.attach_dispatcher(dispatcher)
         if self.options.dispatcher is None:
             dispatcher.attach_recovery_agent(agent)
-        if not self.options.defer_dispatcher_start:
+        if not self.options.defer_dispatcher_start and not self.options.manual_dispatcher_start:
             await dispatcher.start()
         resolved_plan = self._resolved_application_plan(
             package_id=resolved.package_id,

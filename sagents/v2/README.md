@@ -477,6 +477,18 @@ without exposing raw configuration or credentials.
 
 The optional filesystem Scheduler persists pending work, leases, and fencing
 counters for single-host restart recovery. Queued work can be redispatched.
+Execution leases default to 48 hours (`lease_seconds: 172800`), with renewal at
+least every 10 seconds; this is renewable ownership, not a task duration limit.
+A lost lease revokes the old worker and its inline Team tasks, then requeues the
+same work for a fresh fenced claim. Local generations drain before a replacement
+starts. Local cancellation does not mark child Runs failed. The replacement
+recovers the original Run/session tree and reuses committed Tool results; unknown
+operations follow the Tool's reconciliation/recovery policy.
+After a process restart, the filesystem Scheduler's exclusive writer lock allows
+immediate reclamation of abandoned leases without waiting 48 hours. Transient
+renewal errors are retried while the lease remains valid. Explicit user cancel
+and unrecoverable driver/state failures retain their separate terminal semantics.
+
 Agent Loops atomically save running checkpoints before inference, with completed
 model responses, and at Step completion. Recovery verifies the canonical ledger,
 restores budgets and tool selection, consumes saved responses/results, and retries
@@ -486,11 +498,12 @@ and child-Run creation keys to recover the same Team tree, reading completed
 siblings without running them again and propagating child interactions normally.
 
 A dispatched external Tool without a saved result is never blindly replayed:
-its provider must reconcile the operation or the Run waits for explicit
-resolution. Known Tool failures are saved as Tool results for the Agent to
-handle, rather than terminating the Run. Unknown Tool outcomes suspend the same Run for provider
-reconciliation or explicit `confirm_succeeded` / `mark_failed` resolution; no
-retry is offered for an operation whose remote outcome is unknown. The durable
+its provider first reconciles the operation when supported. Known Tool failures
+are saved as Tool results for the Agent to handle, rather than terminating the
+Run. Tools with `resume_strategy=agent_recovery` return unresolved outcomes as
+durable Tool errors with operation identity, original arguments, and instructions
+to check status/outputs before deciding whether retry is safe. Other Tool policies
+retain explicit `confirm_succeeded` / `mark_failed` resolution. The durable
 ledger retains completed sibling results across suspension and process restart.
 Unrecoverable framework/storage errors can still fail a Run.
 
@@ -499,6 +512,13 @@ connection cleanup. Initialization failure is marked `not_applied`; failure
 while awaiting the call is uncertain. Once a response arrives, cleanup failure
 cannot replace it: the response is retained along with cleanup diagnostics.
 Nested exception details are recorded for transport diagnosis.
+MCP Tools use `agent_recovery`: reset connections, timeouts and missing responses
+do not create a blocking human interaction. Local receipts are checked first;
+otherwise the Agent receives an `execution_outcome=unknown` error and continues
+with available status/query tools or output inspection. Empty successful content
+is valid; a missing response is not success. The framework does not replay the
+uncertain operation or invent a generic remote status API. This applies to both
+root and delegated Agent Loops, including recovery after worker loss.
 
 Generic MCP has no cross-process exactly-once guarantee. Legacy or
 custom drivers without a usable checkpoint/tool barrier still fail explicitly

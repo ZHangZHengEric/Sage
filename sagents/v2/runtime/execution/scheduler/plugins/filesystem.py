@@ -244,6 +244,7 @@ class _FilesystemSchedulerStateMachine:
         reason: LeaseReleaseReason,
         *,
         requeue: bool = False,
+        available_at: datetime | None = None,
     ) -> None:
         async with self._condition:
             await self._condition.wait_for(
@@ -255,7 +256,10 @@ class _FilesystemSchedulerStateMachine:
             self._run_lease.pop(lease.work.run_id, None)
             if requeue and lease.work.work_id not in self._cancelled:
                 retry = lease.work.model_copy(
-                    update={"attempt": lease.work.attempt + 1}
+                    update={
+                        "attempt": lease.work.attempt + 1,
+                        "available_at": available_at or lease.work.available_at,
+                    }
                 )
                 self._items[retry.work_id] = retry
                 self._push_locked(retry)
@@ -264,6 +268,22 @@ class _FilesystemSchedulerStateMachine:
                 self._remember_terminal_locked(lease.work)
             await self._persist_locked()
             self._condition.notify_all()
+
+    async def reschedule_pending(self, work_id: str, available_at: datetime) -> bool:
+        """Wake an unclaimed deferred Run for control input without stealing a lease."""
+        async with self._condition:
+            self._ensure_open()
+            work = self._items.get(work_id)
+            if work is None or work_id in self._work_lease or work_id in self._cancelled:
+                return False
+            work = work.model_copy(update={"available_at": available_at})
+            self._items[work_id] = work
+            self._pending = [entry for entry in self._pending if entry[3] != work_id]
+            heapq.heapify(self._pending)
+            self._push_locked(work)
+            await self._persist_locked()
+            self._condition.notify_all()
+            return True
 
     async def assert_fence(self, lease: WorkerLease) -> None:
         async with self._condition:
@@ -694,6 +714,11 @@ class FilesystemScheduler(_FilesystemSchedulerStateMachine):
         self._acquire_writer_lock(state_store.root)
         try:
             super().__init__(state_store=state_store, **kwargs)
+            # The exclusive writer lock proves the previous local owner has
+            # exited. Recover its work immediately, even with a 48-hour lease.
+            # Fence counters survive; the next claim always uses a newer token.
+            for abandoned in tuple(self._leases.values()):
+                self._expire_lease_locked(abandoned)
         except BaseException:
             self._release_writer_lock()
             raise

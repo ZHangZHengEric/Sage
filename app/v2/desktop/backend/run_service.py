@@ -281,7 +281,9 @@ class DesktopRunServiceMixin(DesktopRunCompositionMixin):
             failed = await self.runtime.fail_run(
                 run_id=handle.run_id,
                 expected_revision=(await self.runtime.get_run(handle.run_id)).revision,
-                error=RuntimeErrorInfo(
+                error=exc.info.model_copy(update={"safe_to_resume": False})
+                if isinstance(exc, SageV2Error)
+                else RuntimeErrorInfo(
                     code="desktop.run_start_failed",
                     category=(
                         exc.info.category

@@ -766,3 +766,22 @@ async def test_configured_command_path_resolves_short_names_inside_shell(tmp_pat
             assert result.stdout == b"configured-path"
     finally:
         await handle.close()
+
+
+@pytest.mark.asyncio
+async def test_existing_workspace_quota_failure_is_typed_and_preserves_artifacts(tmp_path):
+    from sagents.v2.contracts.errors import ErrorCategory
+    from sagents.v2.i18n import localize_error
+
+    artifact = tmp_path / "video.mp4"
+    artifact.write_bytes(b"x" * (2 * 1024**2))
+    with pytest.raises(SageV2Error) as caught:
+        await local(tmp_path, disk_mb=1)
+    error = caught.value.info
+    assert error.code == "sandbox.workspace_quota_exceeded"
+    assert error.category == ErrorCategory.RESOURCE_LOST
+    assert error.metadata["side_effect_state"] == "not_applied"
+    assert error.metadata["used_bytes"] >= 2 * 1024**2
+    assert error.message_params["limit_mb"] == 1
+    assert "沙箱磁盘配额" in localize_error(error, "zh").message
+    assert artifact.stat().st_size == 2 * 1024**2

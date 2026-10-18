@@ -6,6 +6,10 @@ import asyncio
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 
+from sagents.v2.runtime.execution.ownership import (
+    is_lease_loss,
+    require_execution_ownership,
+)
 from sagents.v2.contracts.errors import (
     ErrorCategory,
     RuntimeErrorInfo,
@@ -163,6 +167,9 @@ class MultiAgentCoordinator:
             if not isinstance(value, BaseException):
                 results.append(value)
                 continue
+            require_execution_ownership()
+            if isinstance(value, asyncio.CancelledError) or is_lease_loss(value):
+                raise value
             error = (
                 value.info
                 if isinstance(value, SageV2Error)

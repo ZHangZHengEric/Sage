@@ -66,6 +66,7 @@ class McpBody(BaseModel):
     disabled: bool = False
     description: str = ""
     timeout_seconds: float | None = Field(default=None, gt=0, le=900)
+    call_timeout_seconds: float | None = Field(default=None, gt=0)
 
 class McpPublic(BaseModel):
     name: str
@@ -74,6 +75,7 @@ class McpPublic(BaseModel):
     disabled: bool = False
     description: str = ""
     timeout_seconds: float = 30
+    call_timeout_seconds: float | None = None
     tools: list[str] = Field(default_factory=list)
     has_api_key: bool = False
 

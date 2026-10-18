@@ -147,7 +147,12 @@ class ExecutionBindingLifecycleCoordinator:
                 "retained sandbox is no longer reconnectable",
             )
         if record.state == ExecutionResourceState.ACTIVE:
-            handle = await self.sandbox_provider.attach(record.sandbox_ref, context)
+            reacquire = getattr(self.sandbox_provider, "reacquire_workspace", None)
+            handle = (
+                await reacquire(record.sandbox_ref, spec, context, run_id=run_id)
+                if callable(reacquire)
+                else await self.sandbox_provider.attach(record.sandbox_ref, context)
+            )
             await self._commit_active(record, handle, context, event_type="sandbox.resumed")
             return handle
         if record.state not in {

@@ -77,6 +77,31 @@ async def test_real_stdio_sdk_session_is_sandboxed_and_released(tmp_path):
         await handle.destroy()
 
 
+async def test_stdio_tool_outlives_connection_timeout(tmp_path):
+    import asyncio
+
+    issuer, handle = await provision(
+        tmp_path, allowed_executables=(sys.executable,),
+        max_output_bytes=65536, max_wall_time_seconds=10,
+    )
+    factory = SandboxMcpSessionFactory(handle, issuer)
+    slow_server = SERVER.replace(
+        'elif method == "tools/call":',
+        'elif method == "tools/call":\n        import time; time.sleep(0.3)',
+    )
+    try:
+        async with factory(McpServerConfig(
+            name="slow", protocol="stdio", command=sys.executable,
+            args=("-S", "-u", "-c", slow_server, str(tmp_path / "output.txt")),
+            timeout_seconds=0.15,
+        )) as session:
+            result = await asyncio.wait_for(session.call_tool("echo", {}), 3)
+            assert not result.isError
+        assert not handle.process.row.active_tasks
+    finally:
+        await handle.destroy()
+
+
 async def test_stdio_respects_executable_policy(tmp_path):
     issuer, handle = await provision(tmp_path, allowed_executables=("python",))
     try:

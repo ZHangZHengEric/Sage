@@ -77,6 +77,8 @@ class MCPConnectionRequest(BaseModel):
     command: str | None = None
     args: list[str] = Field(default_factory=list)
     env: dict[str, str] = Field(default_factory=dict)
+    timeout_seconds: float = Field(default=30, gt=0)
+    call_timeout_seconds: float | None = Field(default=None, gt=0)
 
 
 class ModelProviderPatch(BaseModel):

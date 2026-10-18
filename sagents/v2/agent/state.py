@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from enum import Enum
+from datetime import datetime
 from typing import Annotated, Literal
 
 from pydantic import Field, TypeAdapter
@@ -50,6 +51,11 @@ class AgentLoopCheckpointState(StrictModel):
     pending_response_tool_names: tuple[str, ...] = ()
     pending_questionnaire_completed: bool = False
     retry_model_step: bool = False
+    provider_retry_attempts: int = Field(default=0, ge=0)
+    provider_retry_at: datetime | None = None
+    automatic_resume_at: datetime | None = None
+    automatic_resume_reason: str | None = None
+    stage_number: int = Field(default=1, ge=1)
     # Run-wide recovery budget, persisted before another inference is sent.
     model_argument_recovery_attempts: int = Field(default=0, ge=0)
     # V1 LLM-Judge continuation requires the next direct model response to use

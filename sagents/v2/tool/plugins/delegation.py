@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from sagents.v2.runtime.execution.ownership import deferred_work_scope
+
 from typing import Any
 
 from sagents.v2.agent.multi_agent.contracts import (
@@ -217,12 +219,13 @@ class _DelegationMethods:
             )
             for index, value in enumerate(tasks, start=1)
         )
-        results = await self.coordinator.delegate(
-            DelegationBatch(tasks=values),
-            parent_run_id=invocation.call.owner_run_id,
-            parent_session_id=parent.session_id,
-            context=invocation.request_context,
-        )
+        with deferred_work_scope(True):
+            results = await self.coordinator.delegate(
+                DelegationBatch(tasks=values),
+                parent_run_id=invocation.call.owner_run_id,
+                parent_session_id=parent.session_id,
+                context=invocation.request_context,
+            )
         payload = {
             "results": [value.model_dump(mode="json") for value in results],
             "child_run_ids": [value.child_run_id for value in results],
@@ -248,6 +251,20 @@ class _DelegationMethods:
                     }
                 )
         if not pending:
+            due = []
+            for value in results:
+                if value.outcome.value == "running" and value.child_run_id is not None:
+                    checkpoint = await self.runtime.session_store.get_latest_checkpoint(value.child_run_id)
+                    wake_at = checkpoint.state.get("automatic_resume_at")
+                    if wake_at:
+                        due.append(wake_at)
+            if due:
+                return ToolExecutionResult(
+                    tool_call_id=invocation.call.tool_call_id,
+                    operation_id=invocation.call.operation_id,
+                    content=(JsonBlock(value=payload),),
+                    metadata={"delegation_deferred_until": min(due)},
+                )
             return payload
         return ToolExecutionResult(
             tool_call_id=invocation.call.tool_call_id,

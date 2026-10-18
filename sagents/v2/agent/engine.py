@@ -14,6 +14,11 @@ import json
 from datetime import timedelta
 from collections.abc import Callable
 
+from sagents.v2.runtime.execution.ownership import (
+    can_defer_run,
+    is_lease_loss,
+    require_execution_ownership,
+)
 from sagents.v2.contracts.conversation import order_tool_context
 from sagents.v2.agent.progress import inspection_progress, repeated_cycles
 from sagents.v2.agent.state import AgentLoopCheckpointCodec, AgentLoopCheckpointState
@@ -68,6 +73,7 @@ from sagents.v2.tool.contracts import (
     CancelSemantics,
     ReconcileResult,
     ReconcileState,
+    ResumeStrategy,
     SideEffectLevel,
     ToolCall,
     ToolCancellationState,
@@ -149,8 +155,8 @@ class _SkillInitializationPaused(Exception):
 class AgentLoopEngine:
     # Retry only the uncommitted model request, before Tool dispatch. Partial
     # Items are cancelled and never enter canonical model history.
-    _MAX_TRANSPARENT_PROVIDER_RETRIES = 3
     _PROVIDER_RETRY_BASE_SECONDS = 1.0
+    _PROVIDER_RETRY_MAX_SECONDS = 60.0
     _MAX_TRANSPARENT_EMPTY_RESPONSE_RETRIES = 2
     _MAX_MODEL_ARGUMENT_RECOVERIES = 2
 
@@ -353,6 +359,17 @@ class AgentLoopEngine:
                         safe_to_resume=True,
                     )
                 )
+                if self._provider_retry_allowed(error, command, state) and (
+                    not self.automatic_memory_recall
+                    or (not tool_selection_task.cancelled() and tool_selection_task.exception() is exc)
+                ):
+                    run, state = await self._schedule_provider_retry(
+                        await self.runtime.get_run(run.run_id), state,
+                        new_id("step_preparation"), error, command, context,
+                    )
+                    if can_defer_run(run.run_id):
+                        return run
+                    return await self._drive(run, state, context)
                 return await self._fail(
                     run, state, new_id("step_preparation"), error, context
                 )
@@ -950,7 +967,10 @@ class AgentLoopEngine:
                 state.turn_id,
                 started.step_id,
             )
-        if definition is not None and definition.supports_reconciliation:
+        if definition is not None and (
+            definition.supports_reconciliation
+            or definition.resume_strategy == ResumeStrategy.AGENT_RECOVERY
+        ):
             run, result = await self._reconcile_or_suspend_tool(
                 run,
                 call,
@@ -1429,9 +1449,48 @@ class AgentLoopEngine:
         context = self._context_for_command(context, command)
         max_steps = command.config.max_steps or 24
         empty_response_retries = 0
-        provider_retries = 0
         context_overflow_retries = 0
-        while run.state == RunState.RUNNING:
+        while run.state in {RunState.RUNNING, RunState.SUSPEND_REQUESTED}:
+            if run.state == RunState.SUSPEND_REQUESTED:
+                return await self._suspend_at_safe_point(run, state, context)
+            if state.provider_retry_at is not None:
+                delay = max(0, (state.provider_retry_at - self.clock()).total_seconds())
+                if delay > 0 and can_defer_run(run.run_id):
+                    return run
+                if command.config.deadline_seconds is not None:
+                    remaining = command.config.deadline_seconds - max(
+                        0, (self.clock() - run.created_at).total_seconds()
+                    )
+                    delay = min(delay, max(0, remaining))
+                await self._wait_for_model_retry(run.run_id, delay)
+                current = await self.runtime.get_run(run.run_id)
+                if current.state == RunState.SUSPEND_REQUESTED:
+                    return await self._suspend_at_safe_point(current, state, context)
+                if current.state in TERMINAL_RUN_STATES:
+                    await self._release_run_resources(run.run_id)
+                    return current
+                run = current
+                if (
+                    command.config.deadline_seconds is not None
+                    and (self.clock() - run.created_at).total_seconds()
+                    >= command.config.deadline_seconds
+                ):
+                    return await self._fail(
+                        run, state, None,
+                        RuntimeErrorInfo(
+                            code="budget.deadline", category=ErrorCategory.VALIDATION,
+                            message="Run deadline reached while waiting for provider recovery",
+                            safe_to_resume=True,
+                        ), context,
+                    )
+                state = state.model_copy(update={
+                    "provider_retry_at": None, "automatic_resume_at": None,
+                    "automatic_resume_reason": None,
+                })
+            elif state.automatic_resume_at is not None:
+                state = state.model_copy(update={
+                    "automatic_resume_at": None, "automatic_resume_reason": None,
+                })
             try:
                 run = await self._initialize_skills(run, command, context)
             except _SkillInitializationPaused:
@@ -1529,6 +1588,13 @@ class AgentLoopEngine:
                         language=context.language,
                     )
                 except SageV2Error as exc:
+                    if self._provider_retry_allowed(exc.info, command, state):
+                        run, state = await self._schedule_provider_retry(
+                            run, state, step_id, exc.info, command, context
+                        )
+                        if can_defer_run(run.run_id):
+                            return run
+                        continue
                     return await self._fail(run, state, step_id, exc.info, context)
                 except Exception as exc:
                     return await self._fail(
@@ -1565,49 +1631,12 @@ class AgentLoopEngine:
                         )
                     if run.state in TERMINAL_RUN_STATES:
                         return run
-                    if (
-                        exc.info.category
-                        in {
-                            ErrorCategory.PROVIDER_TRANSIENT,
-                            ErrorCategory.RATE_LIMITED,
-                        }
-                        and exc.info.retryable
-                        and exc.info.code != "model.empty_semantic_response"
-                        and provider_retries < self._MAX_TRANSPARENT_PROVIDER_RETRIES
-                    ):
-                        provider_retries += 1
-                        delay = self._PROVIDER_RETRY_BASE_SECONDS * 2 ** (
-                            provider_retries - 1
+                    if self._provider_retry_allowed(exc.info, command, state):
+                        run, state = await self._schedule_provider_retry(
+                            run, state, step_id, exc.info, command, context
                         )
-                        retry_error = exc.info.model_copy(
-                            update={
-                                "metadata": {
-                                    **exc.info.metadata,
-                                    "transparent_retry_attempt": provider_retries,
-                                    "transparent_retry_limit": self._MAX_TRANSPARENT_PROVIDER_RETRIES,
-                                    "retry_delay_seconds": delay,
-                                },
-                            }
-                        )
-                        run = await self._commit_running(
-                            run,
-                            context,
-                            (
-                                EventDraft(
-                                    type="step.retry_scheduled",
-                                    turn_id=state.turn_id,
-                                    step_id=step_id,
-                                    data=StepEventData(
-                                        state="retry_scheduled",
-                                        attempt=provider_retries,
-                                        retry_at=self.clock()
-                                        + timedelta(seconds=delay),
-                                        error=retry_error,
-                                    ),
-                                ),
-                            ),
-                        )
-                        await self._wait_for_model_retry(run.run_id, delay)
+                        if can_defer_run(run.run_id):
+                            return run
                         continue
                     if (
                         can_repair_model_arguments(exc.info)
@@ -1733,7 +1762,6 @@ class AgentLoopEngine:
                 if observe_response is not None:
                     observe_response(request, response)
                 empty_response_retries = 0
-                provider_retries = 0
                 context_overflow_retries = 0
                 state = self._state_after_model_response(
                     state, response, step_id, system_requirements, available_tools
@@ -2034,6 +2062,22 @@ class AgentLoopEngine:
                         + decision.usage.output_tokens,
                     }
                 )
+            advance_stage = (
+                decision.action == ContinuationAction.REQUEST_INTERACTION
+                and decision.reason_code in {"budget.max_steps", "status.missing_at_limit"}
+                and command.config.automatic_stage_continuation
+                and command.config.flow_boundary is None
+                and (command.config.max_stages is None or state.stage_number < command.config.max_stages)
+                and (command.config.deadline_seconds is None or continuation_context.elapsed_seconds < command.config.deadline_seconds)
+                and (continuation_context.max_total_tokens is None or state.total_input_tokens + state.total_output_tokens < continuation_context.max_total_tokens)
+            )
+            if advance_stage:
+                decision = decision.model_copy(update={
+                    "action": ContinuationAction.CONTINUE_STEP,
+                    "reason_code": "stage.continue",
+                    "reason": "continue the task in the next checkpointed execution stage",
+                    "interaction": None,
+                })
             run = await self._record_continuation(
                 run, decision, context, state.turn_id, step_id
             )
@@ -2063,6 +2107,30 @@ class AgentLoopEngine:
                     ),
                     context,
                 )
+            if advance_stage:
+                completed_step = state.step_number
+                state = state.model_copy(update={
+                    "stage_number": state.stage_number + 1, "step_number": 1,
+                    "automatic_resume_at": self.clock(),
+                    "automatic_resume_reason": "stage.continue",
+                    "pending_continuation_reason": (
+                        "Continue the original task from the saved results. "
+                        "This is a new execution stage, not a new user request. "
+                        "Preserve completed work and verify remaining requirements."
+                    ),
+                })
+                run = await self._commit_running(
+                    run, context, (EventDraft(
+                        type="step.completed", turn_id=state.turn_id, step_id=step_id,
+                        data=StepEventData(state="completed", attempt=completed_step),
+                    ), EventDraft(
+                        type="step.retry_scheduled", turn_id=state.turn_id, step_id=step_id,
+                        data=StepEventData(state="stage_scheduled", attempt=state.stage_number, retry_at=state.automatic_resume_at),
+                    ),), recovery_state=state,
+                )
+                if can_defer_run(run.run_id):
+                    return run
+                continue
             if decision.action == ContinuationAction.REQUEST_INTERACTION:
                 return await self._suspend_for_continuation_interaction(
                     run, state, decision, context, step_id
@@ -2149,6 +2217,8 @@ class AgentLoopEngine:
                     self._response_fingerprint(response),
                 )[-48:],
                 "retry_model_step": False,
+                "provider_retry_attempts": 0,
+                "provider_retry_at": None,
                 "force_tool_choice_required_next": False,
                 "pending_continuation_reason": None,
                 "pending_response_step_id": step_id,
@@ -2409,6 +2479,58 @@ class AgentLoopEngine:
 
     async def _stream_model(self, run, request, context, state, step_id):
         return await self.stream_model_step(run, request, context, state, step_id)
+
+    @staticmethod
+    def _provider_retry_allowed(error, command, state):
+        limit = command.config.transient_retry_limit
+        return (
+            error.retryable
+            and error.category in {ErrorCategory.PROVIDER_TRANSIENT, ErrorCategory.RATE_LIMITED}
+            and error.code != "model.empty_semantic_response"
+            and state.pending_tool_call is None
+            and state.pending_response_step_id is None
+            and (limit is None or state.provider_retry_attempts < limit)
+        )
+
+    async def _schedule_provider_retry(self, run, state, step_id, error, command, context):
+        # Only uncommitted inference/preparation is retried. Never redispatch
+        # completed tools or replay a tool whose remote outcome is unknown.
+        attempt = state.provider_retry_attempts + 1
+        delay = min(
+            self._PROVIDER_RETRY_MAX_SECONDS,
+            self._PROVIDER_RETRY_BASE_SECONDS * 2 ** min(attempt - 1, 16),
+        )
+        retry_at = self.clock() + timedelta(seconds=delay)
+        if command.config.deadline_seconds is not None:
+            retry_at = min(retry_at, run.created_at + timedelta(seconds=command.config.deadline_seconds))
+        state = state.model_copy(update={
+            "provider_retry_attempts": attempt,
+            "provider_retry_at": retry_at,
+            "retry_model_step": True,
+            "automatic_resume_at": retry_at,
+            "automatic_resume_reason": "provider.retry",
+        })
+        error = localize_error(error, context.language)
+        error = error.model_copy(update={
+            "metadata": {
+                **error.metadata,
+                "transparent_retry_attempt": attempt,
+                "transparent_retry_limit": command.config.transient_retry_limit,
+                "retry_delay_seconds": delay,
+                "automatic_recovery": True,
+            },
+        })
+        run = await self._commit_running(
+            run, context,
+            (EventDraft(
+                type="step.retry_scheduled", turn_id=state.turn_id, step_id=step_id,
+                data=StepEventData(
+                    state="retry_scheduled", attempt=attempt, retry_at=retry_at, error=error,
+                ),
+            ),),
+            recovery_state=state,
+        )
+        return run, state
 
     async def _wait_for_model_retry(self, run_id, delay):
         until = asyncio.get_running_loop().time() + delay
@@ -3041,7 +3163,9 @@ class AgentLoopEngine:
                 event.type == "tool.call.received"
                 and event.data.operation_id == call.operation_id
             ):
-                return ToolExecutionResult.model_validate(event.data.execution_result)
+                result = ToolExecutionResult.model_validate(event.data.execution_result)
+                if not result.metadata.get("delegation_deferred_until"):
+                    return result
         return None
 
     async def _execute_tool_batch(self, run, calls, crossed, context, state, step_id):
@@ -3078,6 +3202,7 @@ class AgentLoopEngine:
                 if (
                     result.error is None
                     and not result.metadata.get("delegation_interactions")
+                    and not result.metadata.get("delegation_deferred_until")
                     and not result.metadata.get("followup_user_message")
                 ):
                     self._apply_tool_expansion(call, result)
@@ -3314,6 +3439,8 @@ class AgentLoopEngine:
             # controls side-effect certainty, not whether content is retained.
             result = result.model_copy(update={"error": localized})
         self._apply_tool_expansion(call, result)
+        if state is not None and result.metadata.get("delegation_deferred_until"):
+            return await self._defer_delegation(run, state, result, context, step_id), None
         pending_delegations = result.metadata.get("delegation_interactions")
         if (
             state is not None
@@ -3689,6 +3816,10 @@ class AgentLoopEngine:
                     state,
                 )
             if reconciled.state == ReconcileState.SUCCEEDED and reconciled.result:
+                if state is not None and reconciled.result.metadata.get("delegation_deferred_until"):
+                    return await self._defer_delegation(
+                        await self.runtime.get_run(run.run_id), state, reconciled.result, context, step_id
+                    ), None
                 pending = reconciled.result.metadata.get("delegation_interactions")
                 if state is not None and isinstance(pending, list) and pending:
                     pending_state = state.model_copy(
@@ -3745,6 +3876,48 @@ class AgentLoopEngine:
                     event_type_override="tool.call.reconciled",
                 )
                 return run, result
+        if definition.resume_strategy == ResumeStrategy.AGENT_RECOVERY:
+            # A missing response is a failed invocation, not evidence that the
+            # remote operation failed. Preserve that distinction in the durable
+            # result and model-visible text; never replay the write here.
+            guidance = (
+                "Tool invocation failed; the remote execution outcome is unknown. "
+                "Continue recovery autonomously. Before retrying this operation, "
+                "use available status/query tools or inspect existing outputs to "
+                "determine whether it already completed. Reuse completed outputs; "
+                "wait for pending work. Retry only after confirming it did not "
+                "apply, or that repetition is safe/idempotent. If status cannot be "
+                "determined, use another safe recovery approach; do not blindly "
+                "repeat a write or claim success. A transport error alone does "
+                "not require user confirmation."
+            )
+            error = uncertainty.model_copy(update={
+                "safe_to_resume": True,
+                "retryable": False,
+                "metadata": {
+                    **uncertainty.metadata,
+                    "execution_outcome": "unknown",
+                    "recovery_action": "check_status_before_retry",
+                    "tool_name": call.tool_name,
+                    "operation_id": call.operation_id,
+                    "idempotency_key": call.idempotency_key,
+                    "arguments": call.arguments,
+                },
+            })
+            result = ToolExecutionResult(
+                tool_call_id=call.tool_call_id,
+                operation_id=call.operation_id,
+                error=error,
+                content=(TextBlock(text=(
+                    f"{error_diagnostic_message(error)}\n\n{guidance}\n"
+                    "Recovery context: " + json.dumps(error.metadata, ensure_ascii=False, default=str)
+                )),),
+                metadata={"execution_outcome": "unknown", "recovery_action": "check_status_before_retry"},
+            )
+            return await self._commit_tool_result(
+                await self.runtime.get_run(run.run_id), call, result, context,
+                turn_id, step_id=step_id,
+            )
         if state is None:
             raise SageV2Error(uncertainty)
         return (
@@ -3752,6 +3925,20 @@ class AgentLoopEngine:
                 run, state, call, uncertainty, context, step_id, definition
             ),
             None,
+        )
+
+    async def _defer_delegation(self, run, state, result, context, step_id):
+        from datetime import datetime
+
+        due = datetime.fromisoformat(result.metadata["delegation_deferred_until"])
+        state = state.model_copy(update={
+            "automatic_resume_at": due, "automatic_resume_reason": "delegation.wait",
+        })
+        return await self._commit_running(
+            run, context, (EventDraft(
+                type="step.retry_scheduled", turn_id=state.turn_id, step_id=step_id,
+                data=StepEventData(state="delegation_wait", retry_at=due),
+            ),), recovery_state=state,
         )
 
     async def _resume_uncertain_tool(self, run, state, decision, payload, context):
@@ -4390,6 +4577,9 @@ class AgentLoopEngine:
         return completed
 
     async def _fail(self, run, state, step_id, error, context, *, allow_recovery=True):
+        require_execution_ownership()
+        if is_lease_loss(error):
+            raise SageV2Error(error)
         error = localize_error(error, context.language)
         current = await self.runtime.get_run(run.run_id)
         if current.state in TERMINAL_RUN_STATES:

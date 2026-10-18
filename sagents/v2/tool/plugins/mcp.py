@@ -55,6 +55,9 @@ class McpServerConfig(StrictModel):
     args: tuple[str, ...] = ()
     env: dict[str, str] = Field(default_factory=dict)
     timeout_seconds: float = Field(default=30, gt=0)
+    # Connection/initialization and discovery are bounded independently of work.
+    # Long-running tools wait for their result unless the host opts into a deadline.
+    call_timeout_seconds: float | None = Field(default=None, gt=0)
     required: bool = True
     max_tools: int = Field(default=256, gt=0, le=10_000)
     max_pages: int = Field(default=64, gt=0, le=1_024)
@@ -443,8 +446,10 @@ class McpToolPlugin:
                 phase = "call"
                 response = await asyncio.wait_for(
                     session.call_tool(remote_name, call.arguments),
-                    timeout=server.timeout_seconds,
+                    timeout=server.call_timeout_seconds,
                 )
+                if response is None:
+                    raise RuntimeError("MCP tool returned no response")
                 phase = "cleanup"
         except Exception as exc:
             if phase == "cleanup":
@@ -453,10 +458,10 @@ class McpToolPlugin:
             before_dispatch = phase == "connect"
             diagnostic = (
                 RuntimeError(
-                    f"Tool did not return within {server.timeout_seconds:g} seconds; "
+                    f"Tool did not return within {server.call_timeout_seconds:g} seconds; "
                     f"{self._exception_details(exc)}"
                 )
-                if timeout
+                if timeout and not before_dispatch and server.call_timeout_seconds is not None
                 else exc
             )
             raise self._provider_error(
@@ -473,7 +478,9 @@ class McpToolPlugin:
                 metadata={
                     "mcp_result_received": False,
                     "mcp_phase": phase,
-                    "timeout_seconds": server.timeout_seconds,
+                    "timeout_seconds": (
+                        server.timeout_seconds if before_dispatch else server.call_timeout_seconds
+                    ),
                     "transport_failure": "timeout" if timeout else "connection",
                     **({"side_effect_state": "not_applied"} if before_dispatch else {}),
                 },
@@ -645,7 +652,10 @@ class McpToolPlugin:
                 # therefore hide a completed remote write.
                 side_effect_level=SideEffectLevel.WRITE,
                 idempotency_strategy=IdempotencyStrategy.RECONCILE_ONLY,
-                resume_strategy=ResumeStrategy.MANUAL_RESOLUTION,
+                resume_strategy=ResumeStrategy.AGENT_RECOVERY,
+                # Check local receipts before asking the model to inspect the
+                # remote task. This does not imply durable remote reconciliation.
+                supports_reconciliation=True,
                 approval_key=cls.approval_key(server.name, remote_name),
                 requires_approval=False,
                 required_scopes=("tool.external_side_effect",),

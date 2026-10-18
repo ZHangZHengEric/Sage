@@ -146,7 +146,7 @@ def workspace_sandbox_spec(
             allowed_operations=frozenset(FileOperation),
             allowed_roots=("/workspace",),
             max_file_bytes=64 * 1024 * 1024,
-            max_total_bytes=4 * 1024 * 1024 * 1024,
+            max_total_bytes=resources.disk_mb * 1024**2,
         ),
         process=process,
         network=network,

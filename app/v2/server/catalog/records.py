@@ -188,6 +188,7 @@ class McpServerRecord(BaseModel):
     description: str = ""
     tools: list[str] = Field(default_factory=list)
     timeout_seconds: float = Field(default=30, gt=0, le=900)
+    call_timeout_seconds: float | None = Field(default=None, gt=0)
 
     @model_validator(mode="after")
     def validate_transport(self) -> McpServerRecord:
@@ -212,6 +213,7 @@ class McpServerRecord(BaseModel):
             "description": self.description,
             "tools": list(self.tools),
             "timeout_seconds": self.timeout_seconds,
+            "call_timeout_seconds": self.call_timeout_seconds,
             "has_api_key": self.api_key is not None
             and bool(self.api_key.get_secret_value()),
         }
@@ -519,6 +521,9 @@ def upsert_mcp(
             description=str(payload.get("description") or "")[:500],
             timeout_seconds=(payload.get("timeout_seconds") if payload.get("timeout_seconds") is not None
                 else (existing.timeout_seconds if existing is not None else 30)),
+            call_timeout_seconds=(payload["call_timeout_seconds"]
+                if "call_timeout_seconds" in payload
+                else (existing.call_timeout_seconds if existing is not None else None)),
             tools=_unique_names(
                 tools
                 if tools is not None

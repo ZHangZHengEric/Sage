@@ -364,14 +364,8 @@ async def test_filesystem_scheduler_restores_lease_and_monotonic_fence(tmp_path)
     await first.close()
 
     restored = FilesystemScheduler(tmp_path, clock=clock)
-    assert (
-        await restored.claim(
-            "worker_early", lease_duration=timedelta(seconds=5), wait_timeout=0
-        )
-        is None
-    )
-    clock.advance(6)
-    assert await restored.reap_expired() == 1
+    # The exclusive single-host writer lock proves the old owner has exited.
+    # Reclaim immediately rather than waiting for its (potentially 48h) TTL.
     new = await restored.claim(
         "worker_new", lease_duration=timedelta(seconds=5), wait_timeout=0
     )

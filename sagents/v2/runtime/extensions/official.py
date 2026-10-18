@@ -48,6 +48,7 @@ from sagents.v2.runtime.credentials import (
     EnvironmentCredentialProvider,
     MappingCredentialProvider,
 )
+from sagents.v2.runtime.execution.dispatcher import DEFAULT_LEASE_SECONDS
 from sagents.v2.runtime.execution.jobs import InMemoryJobRuntime
 from sagents.v2.runtime.execution.sandbox import (
     CubeVolumeSandboxProvider,
@@ -1120,11 +1121,16 @@ def _continuation_config_schema(*, uses_model: bool = False) -> dict:
 
 def _scheduler_config_schema(*, durable: bool) -> dict:
     properties = {
+        "preserve_runs_on_shutdown": {"type": "boolean", "default": True},
         "max_pending_items": {"type": "integer", "minimum": 1},
         "max_retained_terminal_items": {"type": "integer", "minimum": 0},
         "max_concurrent_runs": {"type": "integer", "minimum": 1},
         "max_concurrent_runs_per_tenant": {"type": "integer", "minimum": 1},
-        "lease_seconds": {"type": "number", "exclusiveMinimum": 0},
+        "lease_seconds": {
+            "type": "number",
+            "exclusiveMinimum": 0,
+            "default": DEFAULT_LEASE_SECONDS,
+        },
     }
     required = []
     if durable:

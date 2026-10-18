@@ -789,6 +789,9 @@ async def test_loop_child_executor_creates_independent_serial_run_with_only_task
                     "response_language": "zh",
                     "current_time": "Mon, 31 Aug 2026 00:21:50 +0800",
                     "system_context": {"preference": "concise"},
+                    "runtime_components": {
+                        "configs": {"execution.sandbox": {"resources": {"disk_mb": 32768}}},
+                    },
                     "working_directory": "/workspace",
                     "workspace_files": "Working directory: /workspace",
                 }
@@ -842,6 +845,9 @@ async def test_loop_child_executor_creates_independent_serial_run_with_only_task
         "Mon, 31 Aug 2026 00:21:50 +0800"
     )
     assert command.config.metadata["system_context"] == {"preference": "concise"}
+    assert command.config.metadata["runtime_components"] == {
+        "configs": {"execution.sandbox": {"resources": {"disk_mb": 32768}}},
+    }
     assert "working_directory" not in command.config.metadata
     assert "workspace_files" not in command.config.metadata
     assert command.input[0].metadata["frozen_current_time_context"] == (

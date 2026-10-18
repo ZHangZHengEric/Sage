@@ -75,4 +75,5 @@ class BuildOptions:
         self.check_readiness = False
         self.dispatcher = None
         self.defer_dispatcher_start = False
+        self.manual_dispatcher_start = False
         self.revision_identity = False

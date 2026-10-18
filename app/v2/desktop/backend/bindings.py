@@ -101,7 +101,7 @@ class DesktopExecutionBindingProvider:
             ),
             allowed_roots=(resolved_workspace.as_posix(),),
             max_file_bytes=64 * 1024 * 1024,
-            max_total_bytes=4 * 1024 * 1024 * 1024,
+            max_total_bytes=self.resources.disk_mb * 1024**2,
         )
         process = ProcessPolicy(
             enabled=self.process_enabled and not effective_read_only,

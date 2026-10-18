@@ -14,6 +14,12 @@ from sagents.v2.contracts.errors import (
     SageV2Error,
 )
 
+from sagents.v2.runtime.execution.ownership import (
+    is_lease_loss,
+    revoke_ownership,
+    require_execution_ownership,
+)
+
 
 _T = TypeVar("_T")
 
@@ -161,7 +167,13 @@ class LeaseFencedSessionStore:
             await self._assert_lease_owns_run(lease, run_id)
             return await operation()
 
-        return await execute_fenced(lease, owned_operation)
+        require_execution_ownership()
+        try:
+            return await execute_fenced(lease, owned_operation)
+        except SageV2Error as exc:
+            if is_lease_loss(exc):
+                revoke_ownership()
+            raise
 
     async def _assert_lease_owns_run(self, lease: WorkerLease, run_id) -> None:
         if lease.work.run_id != run_id and not await self._is_descendant_run(
@@ -230,4 +242,10 @@ class LeaseFencedSessionStore:
                 )
             return await operation()
 
-        return await execute_fenced(lease, owned_operation)
+        require_execution_ownership()
+        try:
+            return await execute_fenced(lease, owned_operation)
+        except SageV2Error as exc:
+            if is_lease_loss(exc):
+                revoke_ownership()
+            raise

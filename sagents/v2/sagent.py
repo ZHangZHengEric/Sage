@@ -13,6 +13,10 @@ from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass
 from typing import Protocol
 
+from sagents.v2.runtime.execution.ownership import (
+    is_lease_loss,
+    require_execution_ownership,
+)
 from sagents.v2.contracts.commands import StartRun
 from sagents.v2.contracts.errors import (
     ErrorCategory,
@@ -488,10 +492,12 @@ class SAgent:
         recover = getattr(driver, "recover_interrupted", None)
         if recover is None:
             return None
+        result = None
         try:
             result = await recover(run_id, context)
         finally:
-            await self._close_driver(run_id, driver)
+            if result is None or result.state != RunState.RUNNING:
+                await self._close_driver(run_id, driver)
         return result
 
     def _discard_task(self, run_id, completed):
@@ -527,6 +533,21 @@ class SAgent:
                 )
             raise
         except Exception as exc:
+            try:
+                require_execution_ownership()
+                if is_lease_loss(exc):
+                    raise exc
+            except SageV2Error:
+                try:
+                    await self._close_driver(run_id, driver)
+                except BaseException as close_error:
+                    LOGGER.exception(
+                        "agent.driver.close_failed",
+                        "failed to close revoked driver",
+                        close_error,
+                        run_id=run_id,
+                    )
+                raise
             current = await self.runtime.get_run(run_id)
             if (
                 isinstance(exc, SageV2Error)
@@ -570,6 +591,9 @@ class SAgent:
     async def _fail_driver_crash(self, run_id, exc, context):
         """Record a driver crash without overwriting a concurrent pause/cancel."""
 
+        require_execution_ownership()
+        if is_lease_loss(exc):
+            raise exc
         error = (
             exc.info
             if isinstance(exc, SageV2Error)

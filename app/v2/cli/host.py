@@ -76,7 +76,9 @@ class WorkspaceSandboxSettings:
     max_wall_time_seconds: float = 300
     max_output_bytes: int = 4 * 1024 * 1024
     max_file_bytes: int = 64 * 1024 * 1024
-    max_total_bytes: int = 4 * 1024 * 1024 * 1024
+    # Omitted filesystem quotas follow the configured resource budget. Hosts
+    # can still explicitly impose a narrower filesystem limit.
+    max_total_bytes: int | None = None
 
 
 class LocalWorkspaceBindingProvider:
@@ -116,7 +118,11 @@ class LocalWorkspaceBindingProvider:
             allowed_roots=(self.workspace_root,),
             protected_paths=settings.protected_paths,
             max_file_bytes=settings.max_file_bytes,
-            max_total_bytes=settings.max_total_bytes,
+            max_total_bytes=(
+                settings.max_total_bytes
+                if settings.max_total_bytes is not None
+                else settings.resources.disk_mb * 1024**2
+            ),
         )
         # 只读（plan）模式下进程只能在 OS 只读沙箱内跑受限检查语法：
         # 白名单换成该语法能启动的命令，bash/python 等一概不在其中。
