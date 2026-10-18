@@ -233,3 +233,62 @@ async def test_goal_complete_returns_summary_guidance_including_repeated_call(
     ).goal_complete("Verified summary", invocation)
     assert result["summary"] == ("Saved summary" if completed else "Verified summary")
     assert result["next_step"] == tr("goal.explanation_required", "zh")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "mode,state",
+    [("goal", None), ("goal", SimpleNamespace(completed=False)), ("plan", None)],
+)
+@pytest.mark.parametrize("action", list(ContinuationAction))
+async def test_completion_gate_preserves_host_decisions_and_only_blocks_completion(
+    mode, state, action
+):
+    from sagents.v2.agent.policy import ContinuationDecision, InteractionDraft
+    from sagents.v2.contracts.items import UsageSummary
+    from sagents.v2.plan import PlanCompletionGatePolicy
+
+    original = ContinuationDecision(
+        action=action,
+        reason_code="host.recovery",
+        reason="Change the failed approach; attempt 2 of 3.",
+        metadata={"yiii_autonomous_replan": True, "recovery_attempt": 2},
+        usage=UsageSummary(input_tokens=13, output_tokens=5, cost=0.01),
+        interaction=InteractionDraft(
+            interaction_type="recovery", allowed_decisions=("submit",)
+        )
+        if action == ContinuationAction.REQUEST_INTERACTION
+        else None,
+    )
+    base = SimpleNamespace(decide=AsyncMock(return_value=original))
+    goals = SimpleNamespace(
+        is_goal_mode=AsyncMock(return_value=mode == "goal"),
+        is_plan_mode=AsyncMock(return_value=mode == "plan"),
+        get=AsyncMock(return_value=state),
+    )
+    gate = GoalCompletionGatePolicy if mode == "goal" else PlanCompletionGatePolicy
+    decision = await gate(base, goals).decide(
+        ContinuationContext(
+            run_id="r",
+            step_number=2,
+            max_steps=10,
+            response=ModelResponse(
+                response_id="response", text="I am done", finish_reason="stop"
+            ),
+        )
+    )
+    assert decision.usage == original.usage
+    assert decision.metadata == original.metadata
+    if action in {
+        ContinuationAction.CONTINUE_STEP,
+        ContinuationAction.FAIL,
+        ContinuationAction.REQUEST_INTERACTION,
+    }:
+        assert decision is original
+    else:
+        assert decision.action == ContinuationAction.CONTINUE_STEP
+        assert decision.reason_code == (
+            "goal.incomplete" if mode == "goal" else "plan.required"
+        )
+        assert decision.reason != original.reason
+    base.decide.assert_awaited_once()

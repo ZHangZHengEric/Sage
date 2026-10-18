@@ -47,6 +47,16 @@ yiii 已采用上述公开链路时，仅需升级 Sage，嵌套 Team 无需额�
 
 2026-10-19 验证：复跑 yiii 的 `verify_builder_nested_team.py` 中 `verify(False)` / `verify(True)`，两层与三层均 completed 且产物存在；三层是 1 个 sandbox_id、3 个 lease_owner_run_id。Sage 回归另覆盖越权 roster 拒绝、独立模型绑定与技能 preload、并行嵌套、租约释放、私有/只读边界、跨 Python 进程暂停恢复。未修改 yiii 的脚本或原报告。
 
+## Goal / Plan 完成门与宿主 continuation 插件
+
+标准 Builder 继续通过公开 `agent.continuation-policy` capability 接入宿主策略，无需 yiii 自建 loop 或新增完成门扩展点。
+
+Goal 未完成或 Plan 尚未成功提交时，已有的 `CONTINUE_STEP`、`FAIL`、`REQUEST_INTERACTION` 决策原样通过，保留 reason_code、reason、metadata 和 usage。完成门仍将提前结束请求（COMPLETE_RUN / COMPLETE_TURN / HANDOFF）改为继续执行，并保留宿主 metadata 与 usage；Goal 的 `goal_complete`、Plan 的用户批准提交及最终说明要求不变。
+
+宿主恢复标记（例如 `metadata.yiii_autonomous_replan`）持久化到 `continuation.decided.data.details`，计费用量进入 `usage.recorded`。恢复次数应从原 Run 的规范事件累计，避免上下文缩减或进程重启重置次数。yiii 现有 `judge.continue` 的恢复指导会按原机制进入下一次模型请求。
+
+Sage 公开 Builder 回归覆盖真实 `goal_submit`、连续三次自主恢复、Goal 与 Plan 跨 Python 进程恢复后的计数，以及完成门拒绝提前完成并在成功提交/完成后正常结束。
+
 ## yiii 需要迁移的装配路径
 
 当前 `python/yiii_agent_runtime/native_runtime.py` 虽然已有 Builder 创建的 App，但其 `compose_loop` 还手工调用了 sandbox provision、OfficialToolRuntime、ModeAwareAgentLoopFactory 和 AgentCompositionFactory.create_loop。该自建路径不会自动获得 Builder 的 Team 共享行为；仅升级 Sage 包不够。
