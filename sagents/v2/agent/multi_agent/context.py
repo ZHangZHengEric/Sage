@@ -41,8 +41,8 @@ class AgentRosterContextProvider:
         members = await self.registry.list()
         roster = (
             "\n".join(
-                f"- {member.agent_id}: {member.name} — "
-                f"{member.description or prompt_text('no_description', language)} ({prompt_text('leaf_label', language)})"
+                f"- {self.registry.display_id(member.agent_id)}: {member.name} — "
+                f"{member.description or prompt_text('no_description', language)} ({member.mode.value if member.is_declared_team else prompt_text('leaf_label', language)})"
                 for member in members
             )
             or "- " + prompt_text("no_agents", language)

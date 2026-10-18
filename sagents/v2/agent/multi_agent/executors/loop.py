@@ -101,9 +101,12 @@ class LoopChildRunExecutor:
         Session, preserving the child Agent's own conversation.
         """
 
-        if task.invocation_mode == AgentInvocationMode.DELEGATION:
-            # Existing Fibre/Team members retain their declared identity and
-            # capabilities but execute this delegated invocation as a leaf.
+        if (
+            task.invocation_mode == AgentInvocationMode.DELEGATION
+            and not descriptor.is_declared_team
+        ):
+            # Ordinary delegated members retain their identity and capabilities
+            # but execute as leaves. Explicit frozen Teams keep their roster.
             descriptor = descriptor.model_copy(update={"allow_delegation": False})
 
         await self.runtime.get_run(parent_run_id)
@@ -122,6 +125,7 @@ class LoopChildRunExecutor:
         metadata.update(
             {
                 "task_name": task.task_name,
+                "delegation_target": task.agent_id,
                 "original_task": task.original_task,
                 "parent_tool_call_id": task.parent_tool_call_id or "",
                 "workspace_policy": workspace_policy.value,
@@ -357,6 +361,7 @@ class LoopChildRunExecutor:
         if (
             descriptor is not None
             and command.invocation_mode == AgentInvocationMode.DELEGATION.value
+            and not descriptor.is_declared_team
         ):
             # Reapply the durable leaf boundary after process restart.
             descriptor = descriptor.model_copy(update={"allow_delegation": False})
@@ -373,7 +378,9 @@ class LoopChildRunExecutor:
                     if command.idempotency_key.startswith(prefix)
                     else run_id
                 ),
-                agent_id=descriptor.agent_id,
+                agent_id=str(
+                    command.config.metadata.get("delegation_target") or descriptor.agent_id
+                ),
                 task_name=str(
                     command.config.metadata.get("task_name") or descriptor.name
                 ),

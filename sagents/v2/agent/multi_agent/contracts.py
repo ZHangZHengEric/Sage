@@ -47,10 +47,21 @@ class AgentDescriptor(StrictModel):
     skills: tuple[SkillName, ...] = ()
     preload_skills: tuple[SkillName, ...] = ()
     dynamic: bool = False
+    # Populated from the frozen manifest, never inferred from mode or model output.
+    declared_subagents: tuple[Identifier, ...] = ()
+
     # A persistent Fibre/Team Agent may be selected as a member while executing
     # as a leaf for this invocation.  Keep its declared mode visible instead of
     # silently rewriting it to SIMPLE.
     allow_delegation: bool = True
+
+    @property
+    def is_declared_team(self) -> bool:
+        return (
+            self.mode == AgentMode.TEAM
+            and bool(self.declared_subagents)
+            and not self.dynamic
+        )
 
     @model_validator(mode="after")
     def validate_preload_skills(self) -> "AgentDescriptor":

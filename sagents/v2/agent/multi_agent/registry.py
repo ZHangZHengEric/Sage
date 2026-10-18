@@ -13,11 +13,30 @@ from sagents.v2.agent.multi_agent.contracts import AgentDescriptor, AgentMode
 
 
 class AgentRegistry:
-    def __init__(self, agents: tuple[AgentDescriptor, ...] = ()) -> None:
+    def __init__(
+        self,
+        agents: tuple[AgentDescriptor, ...] = (),
+        *,
+        aliases: dict[str, str] | None = None,
+    ) -> None:
         self._lock = asyncio.Lock()
         self._agents = {agent.agent_id: agent for agent in agents}
         if len(self._agents) != len(agents):
             raise ValueError("agent IDs must be unique")
+        self._aliases = dict(aliases or {})
+        for alias, target in self._aliases.items():
+            if target not in self._agents or (
+                alias in self._agents and alias != target
+            ):
+                raise ValueError(
+                    "roster aliases must name a unique member of this registry"
+                )
+
+    def display_id(self, agent_id: str) -> str:
+        return next(
+            (alias for alias, target in self._aliases.items() if target == agent_id),
+            agent_id,
+        )
 
     async def list(self) -> tuple[AgentDescriptor, ...]:
         async with self._lock:
@@ -25,7 +44,7 @@ class AgentRegistry:
 
     async def get(self, agent_id: str) -> AgentDescriptor:
         async with self._lock:
-            value = self._agents.get(agent_id)
+            value = self._agents.get(self._aliases.get(agent_id, agent_id))
         if value is None:
             raise SageV2Error(
                 RuntimeErrorInfo(

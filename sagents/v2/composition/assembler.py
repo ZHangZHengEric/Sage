@@ -336,7 +336,17 @@ class ApplicationAssembler:
                 resolved.agents, flow_nodes, selected_agent
             )
         else:
-            composition_members = selected_definition.subagents
+            reachable = {selected_agent}
+            pending = list(selected_definition.subagents)
+            while pending:
+                member_id = pending.pop()
+                if member_id not in reachable:
+                    reachable.add(member_id)
+                    pending.extend(resolved.agents[member_id].subagents)
+            composition_members = tuple(
+                member_id for member_id in resolved.agents
+                if member_id in reachable and member_id != selected_agent
+            )
         for member_id in composition_members:
             if member_id in models_by_agent:
                 continue
@@ -549,6 +559,7 @@ class ApplicationAssembler:
             tools=selected_definition.tools,
             skills=selected_definition.skills,
             preload_skills=selected_definition.preload_skills,
+            declared_subagents=selected_definition.subagents,
         )
         member_descriptors = tuple(
             AgentDescriptor(
@@ -560,7 +571,11 @@ class ApplicationAssembler:
                 tools=resolved.agents[member_id].tools,
                 skills=resolved.agents[member_id].skills,
                 preload_skills=resolved.agents[member_id].preload_skills,
-                allow_delegation=False,
+                declared_subagents=resolved.agents[member_id].subagents,
+                allow_delegation=(
+                    resolved.agents[member_id].mode == "team"
+                    and bool(resolved.agents[member_id].subagents)
+                ),
             )
             for member_id in composition_members
         )
@@ -597,10 +612,24 @@ class ApplicationAssembler:
             selected_catalog,
             selected_executor,
             continuation_runtime: OfficialToolRuntime | None,
+            entry_descriptor=root_descriptor,
         ):
-            # Each root driver receives a private mutable registry. Dynamic Fibre
-            # members therefore cannot leak into another Session built here.
-            registry = AgentRegistry(member_descriptors)
+            # Each loop owns its direct roster. Canonical IDs retain the frozen
+            # graph identity; local aliases are what its model delegates to.
+            # Dynamic Fibre members cannot leak across loops or Sessions.
+            descriptors = {
+                value.agent_id: value for value in (root_descriptor, *member_descriptors)
+            }
+            direct_ids = entry_descriptor.declared_subagents
+            if uses_flow and entry_descriptor.agent_id == selected_agent:
+                direct_ids = composition_members
+            prefix = entry_descriptor.agent_id + "."
+            registry = AgentRegistry(
+                tuple(descriptors[member_id] for member_id in direct_ids),
+                aliases={
+                    member_id.removeprefix(prefix): member_id for member_id in direct_ids
+                },
+            )
 
             def compose_with_runtime(
                 descriptor,
@@ -784,6 +813,12 @@ class ApplicationAssembler:
                     continuation_runtime,
                 )
 
+            async def compose_unbound_child(descriptor, child_run_id, child_context):
+                return make_loop(
+                    child_run_id, selected_catalog, selected_executor,
+                    continuation_runtime, descriptor,
+                )
+
             async def compose_bound_child(descriptor, child_run_id, child_context):
                 assert self.options.execution_binding_provider is not None
                 command = await driver_runtime.session_store.get_start_command(
@@ -799,7 +834,7 @@ class ApplicationAssembler:
                     ),
                     context=child_context,
                 )
-                if (root_descriptor.mode == AgentMode.TEAM
+                if (entry_descriptor.mode == AgentMode.TEAM
                         and request.workspace_policy == "shared_parent"
                         and continuation_runtime is not None):
                     share = getattr(continuation_runtime.sandbox, "share", None)
@@ -826,11 +861,9 @@ class ApplicationAssembler:
                         agent_id=descriptor.agent_id,
                     )
                     return (
-                        compose_with_runtime(
-                            descriptor,
-                            child_tools.catalog,
-                            child_tools.executor,
-                            child_tools.runtime,
+                        make_loop(
+                            child_run_id, child_tools.catalog, child_tools.executor,
+                            child_tools.runtime, descriptor,
                         ),
                         _CompositeRunResource(binding, child_tools.scope),
                     )
@@ -854,7 +887,7 @@ class ApplicationAssembler:
                     )
                 )
 
-            child_factory = None
+            child_factory = compose_unbound_child
             if uses_binding_tools:
                 child_factory = compose_bound_child
             elif self.options.tool_runtime is not None:
@@ -892,7 +925,7 @@ class ApplicationAssembler:
                 trace_sink=services["observability.trace-sink"],
                 log_sink=services["observability.log-sink"],
             )
-            if uses_flow:
+            if uses_flow and entry_descriptor.agent_id == selected_agent:
                 from sagents.v2.flow import FlowRuntime
                 from sagents.v2.flow.driver import AgentFlowDriver
                 from sagents.v2.flow.plugins.agent import NativeAgentFlowNode
@@ -916,7 +949,7 @@ class ApplicationAssembler:
                     selected_definition.entrypoint.flow,
                     mode_factory.child_executor,
                 )
-            return mode_factory.create_loop(root_descriptor, run_id)
+            return mode_factory.create_loop(entry_descriptor, run_id)
 
         def driver_factory(run_id):
             if not uses_binding_tools:

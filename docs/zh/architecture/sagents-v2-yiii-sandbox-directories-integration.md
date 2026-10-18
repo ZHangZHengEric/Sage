@@ -23,6 +23,30 @@ Sage 本地插件创建独立临时目录、Home、缓存、配置、数据和�
 
 本地插件的共享状态不等于共享一份聊天或一套工具权限。资源额度按整个共享实例合计；真实的整体资源故障会报告给相关成员。
 
+## 显式嵌套 Team（标准行为，无额外参数）
+
+`root(team) → director(team) → maker(simple)` 使用相同的公开 API，逐层绑定声明的成员：
+
+```python
+maker = await app.load_agent(maker_package)
+director = await app.load_agent(director_package, subagents={"maker": maker})
+root = await app.load_agent(root_package, subagents={"director": director})
+# root_package: mode=team, subagents=("director",)
+# director_package: mode=team, subagents=("maker",)
+# maker_package: mode=simple
+# 照常使用 app.entrypoint().run_stream(command, context, agent=root)。
+```
+
+Builder 会递归装配冻结图里的全部模型与组件，各层保留自己的工具、技能、preload 和模型选择。root 的 roster 只有 director；director 的 roster 使用本层别名 maker，持久化身份为 director.maker。root 无权绕过 director 直接委派 maker，director 无权委派 root 的其他成员；普通委派叶子不会获得递归委派权限。
+
+每层显式 Team 都有自己的委派控制器，最深层交互逐层传到根。扩展清单中的无序 scope 集合会排序后参与恢复指纹，避免不同 Python 进程误判 composition 变化。恢复旧 Run 时使用 `await app.agent_for_run(run_id, context)` 得到原 revision，再通过公开 Interaction 回复和 `continue_run(..., agent=restored)` 继续；不要把最新 load/update 返回的 handle 替换进旧 Run。
+
+默认 shared_parent 从**当前父层的实际环境**取得独立租约，因此嵌套层会保留父层已有的私有或只读边界。中间层释放自己的租约不撤销其他成员。等待子任务的 Team 暂时归还执行并发额度，避免多个中间 Team 占满额度后，最深层任务永远无法启动。
+
+yiii 已采用上述公开链路时，仅需升级 Sage，嵌套 Team 无需额外配置，也无需 yiii 自行创建 loop、provision 沙箱或管理租约。
+
+2026-10-19 验证：复跑 yiii 的 `verify_builder_nested_team.py` 中 `verify(False)` / `verify(True)`，两层与三层均 completed 且产物存在；三层是 1 个 sandbox_id、3 个 lease_owner_run_id。Sage 回归另覆盖越权 roster 拒绝、独立模型绑定与技能 preload、并行嵌套、租约释放、私有/只读边界、跨 Python 进程暂停恢复。未修改 yiii 的脚本或原报告。
+
 ## yiii 需要迁移的装配路径
 
 当前 `python/yiii_agent_runtime/native_runtime.py` 虽然已有 Builder 创建的 App，但其 `compose_loop` 还手工调用了 sandbox provision、OfficialToolRuntime、ModeAwareAgentLoopFactory 和 AgentCompositionFactory.create_loop。该自建路径不会自动获得 Builder 的 Team 共享行为；仅升级 Sage 包不够。

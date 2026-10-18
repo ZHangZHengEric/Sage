@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from contextlib import asynccontextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass
 
 from sagents.v2.runtime.execution.ownership import (
@@ -34,6 +35,12 @@ class _TenantLimiter:
     users: int = 0
 
 
+@dataclass
+class _Reservation:
+    tenant: _TenantLimiter
+    active: bool = False
+
+
 class DelegationConcurrencyLimiter:
     """Composition-scoped global and tenant concurrency budget for child Runs."""
 
@@ -44,6 +51,9 @@ class DelegationConcurrencyLimiter:
         self._max_per_tenant = max_per_tenant
         self._tenants: dict[str | None, _TenantLimiter] = {}
         self._lock = asyncio.Lock()
+        self._reservation: ContextVar[_Reservation | None] = ContextVar(
+            "delegation_reservation", default=None
+        )
 
     @asynccontextmanager
     async def slot(self, tenant_id: str | None):
@@ -53,15 +63,47 @@ class DelegationConcurrencyLimiter:
                 _TenantLimiter(asyncio.Semaphore(self._max_per_tenant)),
             )
             tenant.users += 1
+        reservation = _Reservation(tenant)
+        token = self._reservation.set(reservation)
         try:
-            async with self._global:
-                async with tenant.semaphore:
-                    yield
+            await self._acquire(reservation)
+            yield
         finally:
+            self._release(reservation)
+            self._reservation.reset(token)
             async with self._lock:
                 tenant.users -= 1
                 if tenant.users == 0 and self._tenants.get(tenant_id) is tenant:
                     self._tenants.pop(tenant_id, None)
+
+    async def _acquire(self, reservation: _Reservation) -> None:
+        await reservation.tenant.semaphore.acquire()
+        try:
+            await self._global.acquire()
+        except BaseException:
+            reservation.tenant.semaphore.release()
+            raise
+        reservation.active = True
+
+    def _release(self, reservation: _Reservation) -> None:
+        if reservation.active:
+            reservation.active = False
+            self._global.release()
+            reservation.tenant.semaphore.release()
+
+    @asynccontextmanager
+    async def awaiting_children(self):
+        # A Team waiting on descendants consumes no execution slot. Otherwise
+        # a full batch of Teams can hold every permit their own children need.
+        reservation = self._reservation.get()
+        yielded = reservation is not None and reservation.active
+        if yielded:
+            self._release(reservation)
+        try:
+            yield
+        finally:
+            if yielded:
+                await self._acquire(reservation)
 
 
 class MultiAgentCoordinator:
@@ -130,12 +172,12 @@ class MultiAgentCoordinator:
                         parent_session_id=parent_session_id,
                     )
         async with self._session_lock:
-            for task in batch.tasks:
+            for task, descriptor in zip(batch.tasks, descriptors, strict=True):
                 if task.child_session_id is None:
                     continue
                 owner = self._session_owners.get(task.child_session_id)
                 owner = owner or durable_owners.get(task.child_session_id)
-                if owner is not None and owner != task.agent_id:
+                if owner is not None and owner != descriptor.agent_id:
                     raise self._error(
                         "agent.child_session_owner_conflict",
                         "child session belongs to a different agent",
@@ -152,16 +194,17 @@ class MultiAgentCoordinator:
                 )
             async with self._session_lock:
                 if result.child_session_id is not None:
-                    self._session_owners[result.child_session_id] = task.agent_id
+                    self._session_owners[result.child_session_id] = descriptor.agent_id
             return result
 
-        settled = await asyncio.gather(
-            *(
-                one(task, descriptor)
-                for task, descriptor in zip(batch.tasks, descriptors, strict=True)
-            ),
-            return_exceptions=True,
-        )
+        async with self._concurrency_limiter.awaiting_children():
+            settled = await asyncio.gather(
+                *(
+                    one(task, descriptor)
+                    for task, descriptor in zip(batch.tasks, descriptors, strict=True)
+                ),
+                return_exceptions=True,
+            )
         results: list[DelegationResult] = []
         for task, value in zip(batch.tasks, settled, strict=True):
             if not isinstance(value, BaseException):
