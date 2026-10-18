@@ -92,6 +92,9 @@ class GoalCompletionGatePolicy:
 
         decision = await self.base.decide(context)
         if decision.action in {
+            # The gate restricts completion, not an existing continuation. Host
+            # recovery guidance, counters and policy usage must remain intact.
+            ContinuationAction.CONTINUE_STEP,
             ContinuationAction.FAIL,
             ContinuationAction.REQUEST_INTERACTION,
         }:
@@ -104,4 +107,6 @@ class GoalCompletionGatePolicy:
             action=ContinuationAction.CONTINUE_STEP,
             reason_code="goal.incomplete",
             reason=reason,
+            usage=decision.usage,
+            metadata=decision.metadata,
         )

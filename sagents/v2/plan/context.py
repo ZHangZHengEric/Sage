@@ -73,6 +73,9 @@ class PlanCompletionGatePolicy:
 
         decision = await self.base.decide(context)
         if decision.action in {
+            # The gate restricts completion, not an existing continuation. Host
+            # recovery guidance, counters and policy usage must remain intact.
+            ContinuationAction.CONTINUE_STEP,
             ContinuationAction.FAIL,
             ContinuationAction.REQUEST_INTERACTION,
         }:
@@ -81,4 +84,6 @@ class PlanCompletionGatePolicy:
             action=ContinuationAction.CONTINUE_STEP,
             reason_code="plan.required",
             reason=tr("plan.required", context.language),
+            usage=decision.usage,
+            metadata=decision.metadata,
         )
