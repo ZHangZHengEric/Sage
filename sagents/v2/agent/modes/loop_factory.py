@@ -82,10 +82,11 @@ class ModeAwareAgentLoopFactory:
                 if hasattr(value, "__await__"):
                     value = await value
                 loop = value[0] if isinstance(value, tuple) else value
-                # Host-bound children use the same runtime identity and child
-                # controller as normally composed children, not the raw manifest.
+                # Keep the admitted composition identity. An explicitly composed
+                # Team owns its controller for its own direct roster and recovery.
                 loop.expected_resolved_spec_hash = self.resolved_spec_hash
-                loop.delegated_run_controller = self.child_executor
+                if not descriptor.is_declared_team:
+                    loop.delegated_run_controller = self.child_executor
                 return value
             return self.create_loop(descriptor, run_id)
 

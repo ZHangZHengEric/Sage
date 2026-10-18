@@ -119,6 +119,12 @@ class ExtensionRegistry:
         return tuple(
             {
                 **registration.descriptor.model_dump(mode="json"),
+                # frozenset iteration changes with Python's hash seed. Inventory
+                # participates in persisted composition identities and must be
+                # canonical across worker processes and restarts.
+                "supported_scopes": sorted(
+                    scope.value for scope in registration.descriptor.supported_scopes
+                ),
                 "built_in": self.is_trusted_builtin(
                     registration.descriptor.plugin_id
                 ),

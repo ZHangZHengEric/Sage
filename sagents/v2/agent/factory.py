@@ -396,9 +396,10 @@ class AgentCompositionFactory:
             model=model,
             tool_catalog=InvocationGrantToolCatalog(
                 tool_catalog,
-                (*selected_tools, *additional_runtime_tools),
+                selected_tools,
                 self.runtime.session_store.get_start_command,
                 granted_catalogs=granted_catalogs,
+                runtime_tools=additional_runtime_tools,
                 fallback_invocation_mode=fallback_invocation_mode,
             ),
             tool_executor=tool_executor,

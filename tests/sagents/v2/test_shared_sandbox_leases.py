@@ -459,3 +459,24 @@ async def test_release_idempotency_is_scoped_to_each_member(tmp_path):
     finally:
         await parent.close()
         await child.close()
+
+
+@pytest.mark.asyncio
+async def test_intermediate_team_lease_close_preserves_grandchild_and_sibling(tmp_path):
+    provider, issuer, root = await provision(tmp_path)
+    director = await root.share(run_id="director", context=CONTEXT)
+    maker = await director.share(run_id="maker", context=CONTEXT)
+    sibling = await root.share(run_id="sibling", context=CONTEXT)
+    try:
+        await director.close()
+        assert (await director.status()).state == SandboxState.TERMINATED
+        for handle in (root, maker, sibling):
+            assert (await handle.status()).state == SandboxState.READY
+            await handle.filesystem.write_bytes(
+                handle.ref.owner_run_id + ".txt", b"alive",
+                **authorize(issuer, handle, "create", path=handle.ref.owner_run_id + ".txt"),
+            )
+        assert len({h.ref.sandbox_id for h in (root, director, maker, sibling)}) == 1
+    finally:
+        await asyncio.gather(root.close(), director.close(), maker.close(), sibling.close())
+    assert provider._rows[root.ref.sandbox_id].state == SandboxState.TERMINATED

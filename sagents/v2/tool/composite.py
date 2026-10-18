@@ -78,12 +78,16 @@ class InvocationGrantToolCatalog:
         *,
         fallback_invocation_mode: str | None = None,
         granted_catalogs: tuple[ToolCatalog, ...] = (),
+        runtime_tools: tuple[str, ...] = (),
     ) -> None:
         self._catalog = catalog
         self._base_allowed = frozenset(allowed_names) - self._CONTROL_TOOLS
         self._command_reader = command_reader
         self._fallback_invocation_mode = fallback_invocation_mode
         self._granted_catalogs = tuple(granted_catalogs)
+        # Trusted composition grants (delegation/skill loading) are derived
+        # from the frozen Agent, rather than the user-selected static tool set.
+        self._runtime_tools = frozenset(runtime_tools) - self._CONTROL_TOOLS
 
     async def _granted(self, run_id: str) -> frozenset[str]:
         """Name what the wholly granted catalogs are offering this Run.
@@ -127,7 +131,7 @@ class InvocationGrantToolCatalog:
             # narrows the Agent's own declared Tools, and cannot name Tools
             # that only exist once an external provider has been asked.
             base |= (await self._granted(run_id)) - self._CONTROL_TOOLS
-        return base | self._MODE_GRANTS.get(mode, frozenset())
+        return base | self._runtime_tools | self._MODE_GRANTS.get(mode, frozenset())
 
     async def list_tools(self, *, run_id: str) -> tuple[ToolDefinition, ...]:
         allowed = await self._allowed(run_id)
