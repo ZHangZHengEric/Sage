@@ -53,7 +53,7 @@ def create_app(service: ServerHost) -> FastAPI:
 
     app = FastAPI(
         title="Sage Server v2",
-        version="2.1.0",
+        version="2.1.1",
         lifespan=lifespan,
         description="Multi-user AG-UI host for sagents.v2.",
     )

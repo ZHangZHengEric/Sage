@@ -1,3 +1,14 @@
+---
+layout: default
+title: SDK 接入验收
+parent: 架构
+nav_order: 23
+lang: zh
+ref: v2-detail-sdk-unification
+---
+
+{% include lang_switcher.html %}
+
 # Sage v2 标准 SDK 接入验收
 
 完整接口与注册示例见 [SDK 宿主开发手册](sagents-host-development.md)。

@@ -50,7 +50,7 @@ JSON output, and media is verified by the capability check.
 
 Settings save automatically. Model and Agent settings are not overridden by environment variables. For source debugging, the backend accepts `--data-root /absolute/path`. Registered projects keep their own file roots.
 
-Desktop v2 does not import v1 data. [Sage 2.1.0](https://github.com/ZHangZHengEric/Sage/releases/tag/v2.1.0) installers are built by GitHub Actions from the Flutter v2 client and include Python and the v2 backend. The older Tauri releases remain v1. macOS packages use ad-hoc signing and are not notarized; Windows packages are not code-signed.
+Desktop v2 does not import v1 data. [Sage 2.1.1](https://github.com/ZHangZHengEric/Sage/releases/tag/v2.1.1) installers are built by GitHub Actions from the Flutter v2 client and include Python and the v2 backend. The older Tauri releases remain v1. macOS packages use ad-hoc signing and are not notarized; Windows packages are not code-signed.
 
 [Component reference](https://github.com/ZHangZHengEric/Sage/blob/main/app/v2/desktop/README.md) · [Troubleshooting](../TROUBLESHOOTING.md)
 
@@ -68,7 +68,7 @@ Ask naturally: “Compare these three plans”, “Make a compound-interest calc
 
 Sage uses the official [OpenUI](https://github.com/thesysdev/openui) streaming parser and its own native Flutter Glass renderer, with light/dark themes and 31 registered component types. The renderer updates for every incoming text chunk; token-by-token cadence depends on the model provider. Inputs become usable after validation and completion. Calculators and numeric chart bindings update locally, while a form button sends the values as the next user turn. Computed results can feed further calculations and charts through acyclic dependencies. If final validation fails, the existing preview remains visible with an incomplete status and submission disabled.
 
-Presentations stream into native 16:9 pages with navigation, thumbnails and fullscreen mode. After validation, export the same document to editable PPTX and open it in PowerPoint or Keynote. Supported slide blocks are text, metrics, tables and literal-data charts. PPTX import, freeform editing and animation are not included. This is Sage's own integration, not the full upstream renderer or OpenUI Cloud Reports API. These features are included in the 2.1.0 desktop packages.
+Presentations stream into native 16:9 pages with navigation, thumbnails and fullscreen mode. After validation, export the same document to editable PPTX and open it in PowerPoint or Keynote. Supported slide blocks are text, metrics, tables and literal-data charts. PPTX import, freeform editing and animation are not included. This is Sage's own integration, not the full upstream renderer or OpenUI Cloud Reports API. These features are included in the 2.1.1 desktop packages.
 
 Local-only input interfaces do not require submit buttons. Computed results and bound charts update on input changes; a submit button is a separate handoff to the assistant, not a recalculation control.
 

@@ -60,4 +60,4 @@ Agent 在助手消息里输出带有 `openui` 语言标记的代码块，其中�
 
 体验时要同时检查外观和行为：调整输入、切换标签、悬停图表、查看旧稿，以及打开导出的文稿。生成、校验、本地交互和导出是不同的检查环节。模型能力有帮助，但仅凭预览看起来正常，不能判断所有环节都正确。
 
-安装包内容与兼容限制见 [2.1.0 发布说明](https://github.com/ZHangZHengEric/Sage/blob/main/release_notes/v2.1.0.md)。
+安装包内容与兼容限制见 [2.1.1 发布说明](https://github.com/ZHangZHengEric/Sage/blob/main/release_notes/v2.1.1.md)。

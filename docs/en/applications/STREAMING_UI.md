@@ -60,4 +60,4 @@ The feature belongs to Desktop 2.1; it is not a promise that every Sage host ren
 
 When trying an interface, check both its appearance and its behavior: change an input, switch a tab, hover a chart, inspect a replaced draft, and open an exported deck. Generation, validation, local interaction and export are separate checks. Model quality helps, but a valid-looking preview alone does not establish that all four work.
 
-See the [2.1.0 release notes](https://github.com/ZHangZHengEric/Sage/blob/main/release_notes/v2.1.0.md) for package contents and compatibility limits.
+See the [2.1.1 release notes](https://github.com/ZHangZHengEric/Sage/blob/main/release_notes/v2.1.1.md) for package contents and compatibility limits.
