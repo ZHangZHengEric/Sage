@@ -1,3 +1,14 @@
+---
+layout: default
+title: Runtime 配置参考
+parent: 架构
+nav_order: 15
+lang: zh
+ref: v2-detail-sagents-runtime-reference
+---
+
+{% include lang_switcher.html %}
+
 # SAgents v2 Runtime 配置参考
 
 [接入开发指南](sagents-host-development.md) · [sage.yaml 配置参考](sagents-manifest-reference.md) · [代码阅读指南](code-reading-guide.md)
@@ -257,7 +268,7 @@ scope 的含义：process 与 App 进程服务同寿命；tenant 按租户隔离
 | `session.store` | `sage.session.filesystem` | `root=R`；持久化 Session、命令和事件 |
 | `memory.provider` | `sage.memory.filesystem-bm25` | `root=R/memory`；长期记忆检索与存储 |
 | `session-memory.provider` | `sage.session-memory.sqlite-bm25` | `root=R/session-memory`；会话记忆索引 |
-| `skill.loading` | `sage.skill.loading.lazy` | 按需激活 Skill，默认活动内容上限 6000 tokens |
+| `skill.loading` | `sage.skill.loading.lazy` | 按需激活 Skill，默认活动内容上限 24000 字符 |
 | `agent.continuation-policy` | `sage.agent.continuation.llm-judge` | 模型判断后续执行/结束 |
 | `context.reducer` | `sage.context.reducer.persistent-summary` | 持久化摘要压缩上下文 |
 | `context.summarizer` | `sage.context.summarizer.model` | 主模型生成摘要 |

@@ -1,6 +1,17 @@
+---
+layout: default
+title: 宿主开发指南
+parent: 架构
+nav_order: 13
+lang: zh
+ref: v2-detail-sagents-host-development
+---
+
+{% include lang_switcher.html %}
+
 # 基于 SAgents v2 开发宿主项目
 
-[English](../../en/architecture/sagents-host-development.md) · [代码阅读指南](code-reading-guide.md) · [可运行参考项目](../../../examples/sagents_v2_host/)
+[代码阅读指南](code-reading-guide.md) · [可运行参考项目](../../../examples/sagents_v2_host/)
 
 **新项目先采用一个装配入口、一份 Agent manifest 和统一的 Run 调试标识。**
 

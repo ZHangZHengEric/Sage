@@ -1,8 +1,17 @@
+---
+layout: default
+title: 代码阅读指南
+parent: 架构
+nav_order: 12
+lang: zh
+ref: v2-detail-code-reading-guide
+---
+
+{% include lang_switcher.html %}
+
 # Sage v2 代码阅读指南
 
 基于 sagents 开发新项目，请先看[统一开发入口、配置与调试规范](sagents-host-development.md)。字段查询见 [Runtime 配置参考](sagents-runtime-reference.md)和 [sage.yaml 配置参考](sagents-manifest-reference.md)。
-
-[English](../../en/architecture/code-reading-guide.md)
 
 Sage 分为可嵌入的 sagents 运行时，以及 desktop、server 两个产品宿主。
 建议先追踪一次 Run，不必从最大的文件开始，也不需要先理解 `app/v1`。

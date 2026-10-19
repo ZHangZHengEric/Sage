@@ -1,8 +1,17 @@
+---
+layout: default
+title: Code Reading Guide
+parent: Architecture
+nav_order: 12
+lang: en
+ref: v2-detail-code-reading-guide
+---
+
+{% include lang_switcher.html %}
+
 # Sage v2 code reading guide
 
 For a new host, start with the [development, configuration and debugging guide](sagents-host-development.md). Consult the [Runtime reference](sagents-runtime-reference.md) and [sage.yaml reference](sagents-manifest-reference.md) for fields.
-
-[English](../../en/architecture/code-reading-guide.md)
 
 Sage consists of an embeddable runtime and Desktop/Server product hosts. Trace one Run first; understanding `app/v1` or the largest file is unnecessary.
 
