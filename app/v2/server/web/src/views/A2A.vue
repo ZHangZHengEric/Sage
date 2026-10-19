@@ -1,4 +1,5 @@
 <script setup>
+import PageToolbar from '../components/PageToolbar.vue'
 import { computed, onMounted, ref } from 'vue'
 import { api, isForeign } from '../api.js'
 import ResourceDetails from '../components/ResourceDetails.vue'
@@ -104,7 +105,7 @@ async function load() {
 onMounted(load)
 </script>
 <template>
-  <section class="resource-page"><header class="page-head rs-page-head"><div class="rs-heading"><h1>工具</h1><span v-if="!loading" class="rs-count">{{ peers.length }}</span></div><button class="btn cta" type="button" :disabled="pending" @click="startNew"><AppIcon name="plus" />添加远端智能体</button></header><ToolSources /><div class="rs-toolbar"><span class="rs-small muted">远端智能体</span><label class="rs-search"><AppIcon name="search" /><input v-model="search" type="search" aria-label="搜索远端智能体" placeholder="搜索远端智能体" /></label></div>
+  <section class="resource-page" aria-label="远端智能体"><PageToolbar aria-label="远端智能体操作"><ToolSources /><template #actions><label class="rs-search"><AppIcon name="search" /><input v-model="search" type="search" aria-label="搜索远端智能体" placeholder="搜索远端智能体" /></label><button class="btn cta" type="button" :disabled="pending" @click="startNew"><AppIcon name="plus" />添加远端智能体</button></template></PageToolbar>
     <p v-if="error && !drawerOpen && !deleteTarget" class="error" role="alert">{{ error }}</p>
     <div v-if="loading" class="rs-grid" aria-busy="true" aria-label="正在加载远端智能体"><div v-for="n in 3" :key="n" class="rs-skeleton"><i></i><i></i><i></i></div></div>
     <div v-else-if="!visiblePeers.length" class="rs-empty"><span class="rs-icon"><AppIcon name="agent" /></span><h2>{{ search ? '没有匹配的远端智能体' : error ? '暂时无法加载连接' : '连接你的第一个远端智能体' }}</h2><button v-if="error" class="btn ghost" type="button" @click="load">重新加载</button><button v-else-if="search" class="btn ghost" type="button" @click="search = ''">清除搜索</button><button v-else class="btn cta" type="button" @click="startNew">添加远端智能体</button></div>

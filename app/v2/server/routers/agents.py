@@ -110,7 +110,7 @@ async def save_server_plugins(body: ServerPluginBody, user: AdminUser, host: Hos
 
 
 @agent_router.get("/api/tools", response_model=ApiResponse[list[ToolPublic]])
-async def list_tools(user: CurrentUser, packages: PackageDep, service: CatalogDep):
+async def list_tools(user: ReadUser, packages: PackageDep, service: CatalogDep):
     from sagents.v2.tool.plugins.agent_management import AgentManagementToolPlugin
 
     definitions = AgentManagementToolPlugin(packages).definitions

@@ -71,7 +71,7 @@ export const api = {
   executionPolicy: () => request('/api/auth/execution-policy'),
   saveExecutionPolicy: (body) => request('/api/auth/execution-policy',
     { method: 'PUT', body: JSON.stringify(body) }),
-  listKeys: () => list('/api/keys'),
+  listKeys: (all = true) => list('/api/keys', all),
   createKey: (body) => request('/api/keys', { method: 'POST', body: JSON.stringify(body) }),
   revokeKey: (id) => request(`/api/keys/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   packageResources: () => request('/api/agent-packages/resources'),
@@ -107,7 +107,7 @@ export const api = {
   saveModel: (body) =>
     request('/api/models', { method: 'POST', body: JSON.stringify(body) }),
   deleteModel: (id) => request(`/api/models/${id}`, { method: 'DELETE' }),
-  listTools: () => request('/api/tools'),
+  listTools: owner => read('/api/tools', owner),
   listAgents: (all = true) => list('/api/agents', all),
   agentSummaries: async (all = true) => all && isAdmin()
     ? (await request('/api/admin/agents')).map(item => ({ ...item, _owner: { user_id: item.user_id, username: item.username } }))
@@ -142,6 +142,10 @@ export const api = {
   listSkills: (all = true) => catalog('/api/skills', '/api/admin/skills', all),
   publishSkill: (body) =>
     request('/api/skills', { method: 'POST', body: JSON.stringify(body) }),
+  previewSkillImport: (body) =>
+    request('/api/skill-import-previews', { method: 'POST', body: JSON.stringify(body) }),
+  importSkills: (body) =>
+    request('/api/skill-imports', { method: 'POST', body: JSON.stringify(body) }),
   uploadSkills: (files) => {
     const body = new FormData()
     for (const file of files) body.append('files', file)

@@ -3,10 +3,12 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Protocol
 
-from sqlalchemy import select
+from sqlalchemy import select, update
+from sqlalchemy.exc import IntegrityError
 
 from app.v2.server.database import Database
 from app.v2.server.skills.orm import AgentSkillSelectionRow, SkillRow, SkillVersionRow
+from app.v2.server.skills.downloads import import_error
 from app.v2.server.skills.records import (
     AgentSkillBinding,
     SkillRecord,
@@ -22,7 +24,7 @@ def _now() -> str:
 class SkillStore(Protocol):
     async def get(self, skill_id: str) -> SkillRecord | None: ...
     async def list_visible(self, *, user_id: str, role: str) -> list[SkillRecord]: ...
-    async def publish(self, record: SkillRecord) -> SkillRecord: ...
+    async def publish(self, record: SkillRecord, *, expected_version_id: str | None = None) -> SkillRecord: ...
     async def disable(self, skill_id: str) -> None: ...
     async def replace_bindings(
         self,
@@ -67,7 +69,15 @@ class DatabaseSkillStore:
             rows = (await session.execute(statement)).all()
         return [_record(row, version) for row, version in rows]
 
-    async def publish(self, record: SkillRecord) -> SkillRecord:
+    async def publish(self, record: SkillRecord, *, expected_version_id: str | None = None) -> SkillRecord:
+        try:
+            return await self._publish(record, expected_version_id=expected_version_id)
+        except IntegrityError as exc:
+            if expected_version_id is None:
+                raise
+            raise import_error("技能已被其他操作更新，请重新预览", conflict=True) from exc
+
+    async def _publish(self, record: SkillRecord, *, expected_version_id: str | None) -> SkillRecord:
         reject_absolute_artifact_path(record.artifact_path)
         now = _now()
         skill_id = record.skill_id
@@ -84,6 +94,9 @@ class DatabaseSkillStore:
                 .scalars()
                 .first()
             )
+            current_version = existing.current_version_id if existing and existing.status == "active" else ""
+            if expected_version_id is not None and current_version != expected_version_id:
+                raise import_error("技能已被其他操作更新，请重新预览", conflict=True)
             if existing is None:
                 session.add(
                     SkillRow(
@@ -97,6 +110,19 @@ class DatabaseSkillStore:
                         updated_at=now,
                     )
                 )
+            elif expected_version_id is not None:
+                changed = await session.execute(
+                    update(SkillRow).where(
+                        SkillRow.skill_id == existing.skill_id,
+                        SkillRow.current_version_id == existing.current_version_id,
+                        SkillRow.status == existing.status,
+                    ).values(description=record.description, current_version_id=record.version_id,
+                             status="active", updated_at=now)
+                    .execution_options(synchronize_session=False)
+                )
+                if changed.rowcount != 1:
+                    raise import_error("技能已被其他操作更新，请重新预览", conflict=True)
+                skill_id = existing.skill_id
             else:
                 existing.description = record.description
                 existing.current_version_id = record.version_id
@@ -241,7 +267,7 @@ class MemorySkillStore:
             and (item.owner_user_id == user_id or role == "admin")
         ]
 
-    async def publish(self, record: SkillRecord) -> SkillRecord:
+    async def publish(self, record: SkillRecord, *, expected_version_id: str | None = None) -> SkillRecord:
         reject_absolute_artifact_path(record.artifact_path)
         current = next(
             (
@@ -252,6 +278,9 @@ class MemorySkillStore:
             ),
             None,
         )
+        current_version = current.version_id if current and current.status == "active" else ""
+        if expected_version_id is not None and current_version != expected_version_id:
+            raise import_error("技能已被其他操作更新，请重新预览", conflict=True)
         stored = record
         if current is not None and current.skill_id != record.skill_id:
             stored = SkillRecord(

@@ -4,6 +4,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { api } from './api.js'
 import { clearSession, getUser, isAdmin } from './auth.js'
 import AppIcon from './components/AppIcon.vue'
+import { createThemeController, readThemePreference, themeOptions } from './theme.js'
 
 const route = useRoute()
 const router = useRouter()
@@ -13,22 +14,13 @@ const admin = computed(() => { route.path; return isAdmin() })
 const collapsed = ref(localStorage.getItem('sage.server_v2.sidebar.collapsed') === 'true')
 const mobileMenu = ref(false)
 const accountMenu = ref(null)
-const groups = [
-  { label: '工作空间', icon: 'grid', links: [
-    { to: '/models', label: '模型供应商', icon: 'model' },
-    { to: '/tools', label: '工具', icon: 'tools', paths: ['/tools', '/mcp', '/a2a'] },
-    { to: '/skills', label: '技能', icon: 'skill' },
-  ] },
-  { label: '系统设置', icon: 'settings', admin: true, links: [
-    { to: '/plugins', label: '插件管理', icon: 'settings' },
-    { to: '/users', label: '用户管理', icon: 'user' },
-  ] },
-  { label: '开发者', icon: 'code', links: [
-    { to: '/studio', label: 'Studio', icon: 'code' },
-    { to: '/keys', label: 'API 密钥', icon: 'key' },
-  ] },
+const themePreference = ref(readThemePreference(localStorage))
+let themeController
+const resourceLinks = [
+  { to: '/models', label: '模型供应商', icon: 'model' },
+  { to: '/tools', label: '工具', icon: 'tools', paths: ['/tools', '/mcp', '/a2a'] },
+  { to: '/skills', label: '技能', icon: 'skill' },
 ]
-const visibleGroups = computed(() => groups.filter(group => !group.admin || admin.value))
 function toggleSidebar() {
   if (accountMenu.value) accountMenu.value.open = false
   collapsed.value = !collapsed.value
@@ -45,8 +37,12 @@ function closeAccountMenu() {
 function dismissAccountMenu(event) {
   if (accountMenu.value && !accountMenu.value.contains(event.target)) accountMenu.value.open = false
 }
-onMounted(() => document.addEventListener('pointerdown', dismissAccountMenu))
-onUnmounted(() => document.removeEventListener('pointerdown', dismissAccountMenu))
+onMounted(() => {
+  document.addEventListener('pointerdown', dismissAccountMenu)
+  themeController = createThemeController({ root: document.documentElement, storage: localStorage, media: window.matchMedia('(prefers-color-scheme: dark)'), onChange: value => { themePreference.value = value } })
+})
+onUnmounted(() => { document.removeEventListener('pointerdown', dismissAccountMenu); themeController?.dispose() })
+function setTheme(value) { themeController?.setMode(value) }
 async function logout() {
   try { await api.logout() } catch { /* Clear the local session even when offline. */ }
   clearSession()
@@ -66,17 +62,27 @@ async function logout() {
         <button class="nav-item" type="button" title="新建对话" @click="newChat"><AppIcon name="plus" /><span>新建对话</span></button>
         <router-link class="nav-item" to="/history" title="历史会话"><AppIcon name="history" /><span>历史会话</span></router-link>
         <router-link class="nav-item" to="/agents" title="智能体"><AppIcon name="agent" /><span>智能体</span></router-link>
-        <details v-for="group in visibleGroups" :key="group.label" class="nav-group" open>
-          <summary class="nav-item" :title="group.label"><AppIcon :name="group.icon" /><span>{{ group.label }}</span><AppIcon class="nav-chevron" name="chevron" /></summary>
+        <hr class="nav-divider" />
+        <router-link v-for="link in resourceLinks" :key="link.to" :to="link.to" class="nav-item" :class="{ 'router-link-active': link.paths?.includes(route.path) }" :title="link.label"><AppIcon :name="link.icon" /><span>{{ link.label }}</span></router-link>
+        <hr class="nav-divider" />
+        <router-link class="nav-item" to="/studio" title="Studio"><AppIcon name="code" /><span>Studio</span></router-link>
+        <hr class="nav-divider" />
+        <router-link class="nav-item" to="/settings" title="个人设置"><AppIcon name="settings" /><span>个人设置</span></router-link>
+        <details v-if="admin" class="nav-group" open>
+          <summary class="nav-item" title="系统设置"><AppIcon name="settings" /><span>系统设置</span><AppIcon class="nav-chevron" name="chevron" /></summary>
           <div class="nav-children">
-            <router-link v-for="link in group.links" :key="link.to" :to="link.to" class="nav-item" :class="{ 'router-link-active': link.paths?.includes(route.path) }" :title="link.label"><AppIcon :name="link.icon" /><span>{{ link.label }}</span></router-link>
+            <router-link class="nav-item" to="/plugins" title="插件管理"><AppIcon name="settings" /><span>插件管理</span></router-link>
+            <router-link class="nav-item" to="/users" title="用户管理"><AppIcon name="user" /><span>用户管理</span></router-link>
           </div>
         </details>
       </nav>
       <footer class="sidebar-footer">
         <details ref="accountMenu" class="account-menu" @keydown.esc.stop.prevent="closeAccountMenu">
           <summary class="nav-item" :title="user?.username"><span class="account-avatar">{{ user?.username?.[0]?.toUpperCase() || 'U' }}</span><span class="account-name">{{ user?.username }}</span><AppIcon class="nav-chevron" name="chevron" /></summary>
-          <div class="account-actions"><router-link class="nav-item" to="/settings" @click="closeAccountMenu"><AppIcon name="settings" />个人设置</router-link><button class="nav-item" type="button" @click="logout"><AppIcon name="logout" />退出登录</button></div>
+          <div class="account-actions">
+            <fieldset class="theme-picker"><legend>外观</legend><div class="theme-options"><button v-for="option in themeOptions" :key="option.value" type="button" :aria-pressed="themePreference === option.value" :aria-label="`外观：${option.label}`" @click="setTheme(option.value)"><AppIcon :name="option.icon" /><span>{{ option.label }}</span></button></div></fieldset>
+            <button class="nav-item" type="button" @click="logout"><AppIcon name="logout" />退出登录</button>
+          </div>
         </details>
       </footer>
     </aside>

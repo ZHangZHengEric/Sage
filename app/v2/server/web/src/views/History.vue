@@ -1,4 +1,5 @@
 <script setup>
+import PageToolbar from '../components/PageToolbar.vue'
 import { computed, onMounted, ref } from 'vue'
 import { api, isForeign } from '../api.js'
 import AppIcon from '../components/AppIcon.vue'
@@ -25,8 +26,8 @@ onMounted(async () => {
 })
 </script>
 <template>
-  <section>
-    <header class="page-head"><h1>历史会话</h1><div class="page-actions"><input v-model="search" class="search-input" placeholder="搜索会话" aria-label="搜索会话" /><router-link class="btn new-chat-link" :to="{ path: '/', query: { new: '1' } }"><AppIcon name="plus" />新建对话</router-link></div></header>
+  <section aria-label="历史会话">
+    <PageToolbar aria-label="会话操作"><template #actions><input v-model="search" class="search-input" placeholder="搜索会话" aria-label="搜索会话" /><router-link class="btn new-chat-link" :to="{ path: '/', query: { new: '1' } }"><AppIcon name="plus" />新建对话</router-link></template></PageToolbar>
     <p v-if="error" class="error" role="alert">{{ error }}</p>
     <p v-if="loading" class="page-loading" role="status">加载中…</p>
     <p v-else-if="!visible.length" class="empty">{{ search ? '没有匹配的会话' : '还没有会话' }}</p>

@@ -89,11 +89,17 @@ class AgentSkillOption(BaseModel):
     name: str
     description: str
 
+class AgentExternalToolGroup(BaseModel):
+    source: Literal["mcp", "a2a"]
+    name: str
+    tools: list[str]
+
 class AgentEditorResources(BaseModel):
     models: list[AgentModelOption]
     skills: list[AgentSkillOption]
     tools: list[AgentToolOption]
     external_tools: list[str]
+    external_tool_groups: list[AgentExternalToolGroup] = Field(default_factory=list)
     plugins: dict[str, object] | None = None
 
 class McpBody(BaseModel):

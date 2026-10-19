@@ -1,4 +1,5 @@
 <script setup>
+import PageToolbar from '../components/PageToolbar.vue'
 import { computed, onMounted, ref } from 'vue'
 import { getUser } from '../auth.js'
 import { api, isForeign } from '../api.js'
@@ -20,6 +21,7 @@ const pending = ref(false)
 const editing = ref('')
 const form = ref(emptyForm())
 const savedPlugins = ref({}), savedForm = ref(null), savedSkills = ref([])
+const budgetDefaults = ref({})
 const search = ref(''), ownerFilter = ref('all'), deleteOpen = ref(false), deleteTarget = ref(null), deleteError = ref('')
 const visibleAgents = computed(() => {
   const query = search.value.trim().toLowerCase()
@@ -29,7 +31,7 @@ const pluginCatalog = ref(null)
 const resourceRequests = new Map()
 const resourcesLoading = ref(false), resourcesError = ref('')
 const approvalLoading = ref(false), approvalError = ref('')
-const externalTools = ref([])
+const externalTools = ref([]), externalToolGroups = ref([])
 let editorSequence = 0, approvalRequest = null
 
 function emptyForm() {
@@ -70,6 +72,7 @@ function applyResources(data) {
   skills.value = data.skills
   officialTools.value = data.tools
   externalTools.value = data.external_tools
+  externalToolGroups.value = data.external_tool_groups || []
   const configurable = new Set(pluginCatalog.value?.configurable || [])
   const plugins = Object.fromEntries(Object.entries(form.value.plugins || {}).filter(([key]) => configurable.has(key)))
   form.value = { ...form.value, plugins }
@@ -138,12 +141,13 @@ async function openAgent(item, readonly = true) {
     const sequence = ++editorSequence
     resourcesLoading.value = true; resourcesError.value = ''; approvalError.value = ''
     approvalRequest = null; approvalLoading.value = false
-    models.value = []; skills.value = []; officialTools.value = []; externalTools.value = []
+    models.value = []; skills.value = []; officialTools.value = []; externalTools.value = []; externalToolGroups.value = []
     const resources = loadEditorResources(item._owner).then(data => ({ data }), error => ({ error }))
     const detail = await api.getAgent(item.id, item._owner)
     selectedAgent.value = item
     viewOnly.value = readonly || isForeign(item)
     editing.value = item.id
+    budgetDefaults.value = cloneConfiguration({ budgets: detail.package?.manifest?.policies?.budgets || {}, entrypoint: detail.package?.manifest?.agents?.[item.id]?.entrypoint || {} })
     form.value = {
       name: detail.name, description: detail.description || '', instructions: detail.instructions || '',
       plugins: cloneConfiguration(detail.package?.manifest?.runtime?.capabilities || {}),
@@ -179,6 +183,7 @@ async function startNew() {
     viewOnly.value = false; selectedAgent.value = null; selectedSkills.value = []; savedMessage.value = ''
     editing.value = ''
     form.value = emptyForm()
+    budgetDefaults.value = {}
     savedPlugins.value = {}
     savedForm.value = cloneConfiguration(form.value)
     savedSkills.value = []
@@ -211,11 +216,10 @@ onMounted(load)
 </script>
 
 <template>
-  <section class="agents-page" :class="{ 'editing-agent': drawerOpen }">
+  <section aria-label="智能体" class="agents-page" :class="{ 'editing-agent': drawerOpen }">
     <template v-if="!drawerOpen">
-      <header class="page-head agents-page-head"><div class="agent-list-heading"><h1>智能体</h1><span v-if="!loading" class="agent-count">{{ agents.length }}</span></div><button class="agent-action primary" type="button" :disabled="pending || loading" @click="startNew"><AppIcon name="plus" />创建智能体</button></header>
+      <PageToolbar aria-label="智能体操作"><template v-if="agents.length"><div class="agent-list-filters" aria-label="智能体筛选"><button v-for="[value, label] in [['all', '全部智能体'], ['own', '我的'], ['foreign', '其他用户']]" :key="value" type="button" :aria-pressed="ownerFilter === value" @click="ownerFilter = value">{{ label }}</button></div></template><template #actions><template v-if="agents.length"><label class="agent-search"><AppIcon name="search" /><input v-model="search" type="search" aria-label="搜索智能体" placeholder="搜索名称、用途或 ID" /></label></template><button class="agent-action primary" type="button" :disabled="pending || loading" @click="startNew"><AppIcon name="plus" />创建智能体</button></template></PageToolbar>
       <p v-if="savedMessage" class="agent-feedback success" role="status"><AppIcon name="check" />{{ savedMessage }}</p>
-      <div v-if="agents.length" class="agent-list-toolbar"><div class="agent-list-filters" aria-label="智能体筛选"><button v-for="[value, label] in [['all', '全部智能体'], ['own', '我的'], ['foreign', '其他用户']]" :key="value" type="button" :aria-pressed="ownerFilter === value" @click="ownerFilter = value">{{ label }}</button></div><label class="agent-search"><AppIcon name="search" /><input v-model="search" type="search" aria-label="搜索智能体" placeholder="搜索名称、用途或 ID" /></label></div>
       <p v-if="error && agents.length" class="agent-feedback error" role="alert">{{ error }}<button class="agent-action" type="button" :disabled="pending || loading" @click="load">重新加载</button></p>
       <div v-if="loading" class="agent-card-grid" aria-busy="true" aria-label="正在加载智能体"><div v-for="n in 3" :key="n" class="agent-card-skeleton"><i></i><i></i><i></i></div></div>
       <div v-else-if="error && !agents.length" class="agent-list-empty" role="alert"><AppIcon name="alert" /><h2>暂时无法加载智能体</h2><p>{{ error }}</p><button class="agent-action primary" type="button" @click="load">重新加载</button></div>
@@ -234,9 +238,9 @@ onMounted(load)
     <AgentEditor v-else v-model:form="form" v-model:selected-skills="selectedSkills"
       :agent-id="editing" :readonly="viewOnly" :can-edit="!isForeign(selectedAgent)" :busy="pending"
       :error="error" :message="savedMessage" :models="models" :tools="officialTools.filter(tool => tool.source !== 'mcp')" :approval-tools="officialTools"
-      :skills="skills" :external-tools="externalTools" :saved-plugins="savedPlugins" :plugin-catalog="pluginCatalog"
+      :skills="skills" :external-tools="externalTools" :external-tool-groups="externalToolGroups" :saved-plugins="savedPlugins" :plugin-catalog="pluginCatalog"
       :resources-loading="resourcesLoading" :resources-error="resourcesError" :approval-loading="approvalLoading" :approval-error="approvalError"
-      :saved-form="savedForm" :saved-skills="savedSkills" :can-delete="Boolean(editing && !isForeign(selectedAgent))"
+      :saved-form="savedForm" :saved-skills="savedSkills" :budget-defaults="budgetDefaults" :can-delete="Boolean(editing && !isForeign(selectedAgent))"
       @save="save" @edit="enableEdit" @close="closeEditor" @reload-resources="retryResources" @load-approval-tools="loadApprovalTools" @delete="requestDelete(selectedAgent)" />
     <FormDrawer v-model="deleteOpen" centered panel-class="agent-confirm-dialog" title="删除智能体" :busy="pending">
       <p class="agent-confirm-copy">确认删除「{{ deleteTarget?.name }}」？此操作无法在页面中撤销。</p><p v-if="deleteError" class="error" role="alert">{{ deleteError }}</p><div class="agent-confirm-actions"><button class="agent-action" type="button" :disabled="pending" @click="deleteOpen = false">取消</button><button class="agent-action danger" type="button" :disabled="pending" @click="remove(deleteTarget)">{{ pending ? '正在删除…' : '确认删除' }}</button></div>

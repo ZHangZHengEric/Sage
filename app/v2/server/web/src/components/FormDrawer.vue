@@ -55,11 +55,11 @@ onBeforeUnmount(() => { document.removeEventListener('focusin', rememberFocus); 
 </template>
 
 <style scoped>
-.form-drawer { position: fixed; inset: 0 0 0 auto; width: 70vw; max-width: none; height: 100dvh; max-height: none; margin: 0; padding: 0; border: 0; background: var(--surface, #fff); color: inherit; box-shadow: -8px 0 32px #0002; }
-.form-drawer::backdrop { background: #0006; }
+.form-drawer { position: fixed; inset: 0 0 0 auto; width: 70vw; max-width: none; height: 100dvh; max-height: none; margin: 0; padding: 0; border: 0; background: var(--surface, #fff); color: inherit; box-shadow: var(--shadow-popover); }
+.form-drawer::backdrop { background: var(--overlay); }
 .form-drawer-wide { width: min(1440px, 94vw); }
 .form-drawer-shell { display: flex; flex-direction: column; height: 100%; }
-.form-drawer-head { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: 1.25rem 1.5rem; border-bottom: 1px solid #8883; }
+.form-drawer-head { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: 1.25rem 1.5rem; border-bottom: 1px solid var(--border); }
 .form-drawer-head h2 { margin: 0; }
 .form-drawer-body { flex: 1; overflow: auto; padding: 1.5rem; }
 .form-drawer-body :deep(.panel) { box-shadow: none; margin: 0 0 1rem; }
