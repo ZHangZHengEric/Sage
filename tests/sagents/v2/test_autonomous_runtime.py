@@ -58,7 +58,7 @@ def facade(runtime, models, writes=None):
             tool_executor=InMemoryToolExecutor({"save": TOOL}, {"save": save}),
             tool_policy=DefaultToolPolicy(approval_strategy=ApprovalStrategy.AUTO_APPROVE),
         )
-    return SAgent(runtime=runtime, driver_factory=factory)
+    return SAgent._from_composition(runtime=runtime, driver_factory=factory)
 
 
 async def wait_for_deferred(runtime, run_id):
@@ -214,7 +214,7 @@ async def test_team_child_outage_releases_root_worker_and_preserves_siblings(mon
         )
         return factory.create_loop(descriptors["root"], run_id)
 
-    agent = SAgent(runtime=runtime, driver_factory=build)
+    agent = SAgent._from_composition(runtime=runtime, driver_factory=build)
     other_agent = facade(runtime, {other.run_id: models["other"]})
     dispatcher.attach_recovery_agent(agent)
     try:
@@ -317,7 +317,7 @@ async def main():
             output.flush()
             import os; os.fsync(output.fileno())
         return ToolExecutionResult(tool_call_id=call.tool_call_id, operation_id=call.operation_id, content=(TextBlock(text="saved"),))
-    agent = SAgent(runtime=runtime, driver_factory=lambda _: CrashLoop(
+    agent = SAgent._from_composition(runtime=runtime, driver_factory=lambda _: CrashLoop(
         runtime=runtime, model=model, tool_catalog=InMemoryToolCatalog((TOOL,)),
         tool_executor=InMemoryToolExecutor({"save": TOOL}, {"save": save}),
         tool_policy=DefaultToolPolicy(approval_strategy=ApprovalStrategy.AUTO_APPROVE),
@@ -413,10 +413,8 @@ async def test_explicit_deadline_wakes_scheduled_retry_and_is_not_bypassed(monke
     try:
         future = await dispatcher.submit(agent, handle, CONTEXT)
         run = await asyncio.wait_for(future, 2)
-        assert run.state == RunState.SUSPENDED
-        suspension = await runtime.session_store.get_suspension(run.suspension_id)
-        interaction = await runtime.session_store.get_interaction(suspension.interaction_id)
-        assert interaction.payload["reason_code"] == "budget.deadline"
+        assert run.state == RunState.FAILED
+        assert (await runtime.get_run_result(run.run_id)).error.code == "budget.deadline"
         assert len(model.requests) == 1
     finally:
         await dispatcher.close()
@@ -443,7 +441,7 @@ async def test_initial_tool_selection_outage_retries_without_user_input(monkeypa
     handle = await runtime.start_run(command("initial-selection"), CONTEXT)
     model = ScriptedModelProvider((completed(),))
     selection = Selection()
-    agent = SAgent(runtime=runtime, driver_factory=lambda _: AgentLoopEngine(
+    agent = SAgent._from_composition(runtime=runtime, driver_factory=lambda _: AgentLoopEngine(
         runtime=runtime, model=model, tool_catalog=InMemoryToolCatalog(()),
         tool_executor=InMemoryToolExecutor({}, {}), tool_selection_policy=selection,
     ))

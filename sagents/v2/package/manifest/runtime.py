@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from typing import Any, Literal
 
 from pydantic import Field, field_validator, model_validator
@@ -17,6 +18,19 @@ class CapabilitySelection(StrictModel):
     name: Identifier = "default"
     scope: ExtensionScope | None = None
     config: dict[str, Any] = Field(default_factory=dict)
+    grant_tools: bool = False
+
+    @field_validator("config")
+    @classmethod
+    def serializable_parameters(cls, value):
+        try:
+            json.dumps(value, allow_nan=False)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(
+                "plugin parameters must be finite JSON values; provide process objects "
+                "through registered factories and declared dependencies"
+            ) from exc
+        return value
 
     @model_validator(mode="before")
     @classmethod
@@ -42,6 +56,9 @@ class RuntimeConfig(StrictModel):
     plugin_trust_policy: Literal["trusted_declared", "built_in_only"] = (
         "trusted_declared"
     )
+    start_workers: bool = True
+    check_readiness: bool = False
+    state_root: str | None = None
     capabilities: dict[Identifier, CapabilityBinding] = Field(default_factory=dict)
     # Operational guarantees are requirements, not documentation.  The
     # builder fails closed when the selected provider cannot prove each value.

@@ -59,3 +59,26 @@ DEFAULT_SANDBOX_CONFIGS = {
         "filesystem_mode": "workspace",
     },
 }
+
+
+def effective_runtime(runtime: RuntimeConfig) -> RuntimeConfig:
+    """Freeze implicit Agent choices without changing the selected preset."""
+    implicit = {
+        "context.summary-store": "sage.context.summary-store.session-derived",
+        "context.summarizer": "sage.context.summarizer.model",
+        "context.unit-compactor": "sage.context.unit-compactor.reference",
+        "context.reducer": "sage.context.reducer.persistent-summary",
+        "skill.loading": "sage.skill.loading.lazy",
+        "agent.continuation-policy": "sage.agent.continuation.deterministic",
+        "memory.recall-query": "sage.memory.recall-query.direct",
+        "tool.selection-policy": "sage.tool-selection.llm",
+        "agent.tool-policy": "sage.agent.tool-policy.default",
+    }
+    choices = {**{key: CapabilitySelection(plugin=plugin) for key, plugin in implicit.items()}, **runtime.capabilities}
+    from sagents.v2.runtime.extensions.contracts import ExtensionScope
+    run_plugins = {"sage.context.summarizer.model", "sage.context.reducer.persistent-summary",
+                   "sage.agent.continuation.llm-judge", "sage.memory.recall-query.llm"}
+    for capability, choice in tuple(choices.items()):
+        if isinstance(choice, CapabilitySelection) and choice.scope is None and choice.plugin in run_plugins:
+            choices[capability] = choice.model_copy(update={"scope": ExtensionScope.RUN})
+    return RuntimeConfig.model_validate(runtime.model_copy(update={"capabilities": choices}).model_dump(mode="python"))

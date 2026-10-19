@@ -12,15 +12,12 @@ from sagents.v2.contracts.errors import SageV2Error
 class ScopedExternalTools:
     """Expose only tools authorized in the durable StartRun configuration."""
 
-    def __init__(self, provider, agents, *, dynamic_tools=()):
+    def __init__(self, provider, agents, *, command_reader, dynamic_tools=()):
         self.provider = provider
         self._grants = {name: frozenset(definition.tools) for name, definition in agents.items()}
         self._dynamic_tools = frozenset(dynamic_tools)
-        self._command_reader = None
-        self._operations: dict[str, str] = {}
-
-    def bind(self, command_reader):
         self._command_reader = command_reader
+        self._operations: dict[str, str] = {}
 
     async def _catalog(self, run_id):
         # An unbound provider must fail closed, including during validation.
@@ -41,6 +38,9 @@ class ScopedExternalTools:
         return await (await self._catalog(run_id)).get_tool(name, run_id=run_id)
 
     async def execute(self, call, context):
+        # Only reject grants for tools owned by this provider. A missing tool
+        # must let the executor chain reach runtime tools such as load_skill.
+        await self.provider.get_tool(call.tool_name, run_id=call.owner_run_id)
         await self.get_tool(call.tool_name, run_id=call.owner_run_id)
         self._operations[call.operation_id] = call.owner_run_id
         return await self.provider.execute(call, context)

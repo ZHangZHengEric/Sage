@@ -56,7 +56,11 @@ def _service_composition_identity(provider: Any) -> dict[str, Any]:
     if identity is None:
         root = getattr(provider, "root", None)
         identity = str(root) if root is not None else None
+    import sys
+    module_name = type(provider).__module__
+    source_hash = getattr(sys.modules.get(module_name), "__sage_source_sha256__", None)
+    provider_type = f"source:{source_hash}:{type(provider).__qualname__}" if source_hash else f"{module_name}.{type(provider).__qualname__}"
     return {
-        "type": f"{type(provider).__module__}.{type(provider).__qualname__}",
+        "type": provider_type,
         "identity": identity,
     }

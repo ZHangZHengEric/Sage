@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import inspect
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from sagents.v2.runtime.extensions.contracts import (
@@ -39,6 +39,9 @@ class ExtensionScopeHandle:
     composition_hash: str = ""
     _owned_ancestors: tuple["ExtensionScopeHandle", ...] = ()
     _closed: bool = False
+    configurations: dict[str, dict[str, Any]] = field(default_factory=dict)
+    # A view borrows existing scopes; it never assumes their shutdown ownership.
+    inherited_plugin_ids: frozenset[str] = frozenset()
 
     async def close(self, reason: StopReason = StopReason.SCOPE_CLOSED) -> None:
         if self._closed:
@@ -47,6 +50,8 @@ class ExtensionScopeHandle:
         failed_started: list[StartedExtension] = []
         while self._started:
             value = self._started.pop()
+            if value.registration.ownership == "borrowed":
+                continue
             try:
                 if value.registration.stop is not None:
                     result = value.registration.stop(value.instance, reason)

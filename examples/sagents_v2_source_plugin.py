@@ -4,6 +4,8 @@ Source extensions run with host Python privileges. This demo authorizes only its
 exact fixed bundle; generated or user-supplied code needs a real host policy.
 """
 from __future__ import annotations
+from sagents.v2 import ApplicationConfiguration
+from examples.sagents_v2_host.registrations import provided, runtime_for
 
 import asyncio
 import json
@@ -11,7 +13,7 @@ import tempfile
 from pathlib import Path
 
 from examples.sagents_v2_agent_management import step
-from sagents.v2 import AgentManagementService, AgentPackageBundle, SAgentBuilder
+from sagents.v2 import AgentManagementService, AgentPackageBundle
 from sagents.v2.contracts.principals import ActorRef, PrincipalType, RequestContext
 from sagents.v2.package.presets import BuiltinPackageFactory
 from sagents.v2.testing.plugins.scripted_model import ScriptedModelProvider
@@ -63,8 +65,7 @@ async def demo(root):
             raise PermissionError('outside the fixed demo grant')
 
     def build(package, session_root, ctx):
-        return (SAgentBuilder().with_models({"models": {"primary": {"provider": "openai-responses", "model": "scripted"}}}).with_defaults(session_root=session_root)
-                .with_model_provider(ScriptedModelProvider((step('unused'),))))
+        return (ApplicationConfiguration((provided('example.model-provider', lambda context, deps, value=ScriptedModelProvider((step('unused'),)): value, 'model.provider'),), runtime_for(session_root, package.manifest.runtime, capabilities={'model.provider': {'plugin': 'example.model-provider'}}), {'models': {'primary': {'provider': 'openai-responses', 'model': 'scripted'}}}))
 
     service = AgentManagementService(
         root, builder_factory=build, authorize=authorize, allow_source_plugins=True,

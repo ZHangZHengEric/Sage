@@ -38,6 +38,7 @@ import asyncio
 from uuid import uuid4
 
 from sagents.v2 import ActorRef, RequestContext, SAgentBuilder, StartRun
+from sagents.v2.composition.defaults import default_runtime
 from sagents.v2.contracts.commands import InputItem
 from sagents.v2.contracts.items import TextBlock
 from sagents.v2.contracts.principals import PrincipalType
@@ -70,8 +71,9 @@ models:
 async def main():
     manifest = SageManifestLoader().loads(AGENT_YAML)
     app = await (
-        SAgentBuilder().with_defaults(session_root="runtime")
-        .build(models_config_text=MODELS_YAML)
+        SAgentBuilder().build(
+            runtime=default_runtime("runtime"), models_config_text=MODELS_YAML,
+        )
     )
     try:
         agent = await app.load_agent(manifest)
@@ -108,11 +110,11 @@ The checked-in [executable example](https://github.com/ZHangZHengEric/Sage/blob/
 
 | Input | Usage |
 | --- | --- |
-| YAML string | `build(SageManifestLoader().loads(yaml_text))` |
-| Python dictionary | `build(SageManifest.model_validate(config))` |
-| Package file | `build("path/to/sage.yaml")` |
-| Resolved package | `build(resolved_manifest)` |
+| YAML string | `await app.load_agent(SageManifestLoader().loads(yaml_text))` |
+| Python dictionary | `await app.load_agent(SageManifest.model_validate(config))` |
+| Package file | `await app.load_agent("path/to/sage.yaml")` |
+| Resolved package | `await app.load_agent(resolved_manifest)` |
 
-Import both manifest types from `sagents.v2.package.manifest`. A raw string passed directly to `build()` is a **path**, not YAML content. String manifests should use inline instructions. File loading resolves instruction files relative to the package directory and checks that they remain inside it.
+Import both manifest types from `sagents.v2.package.manifest`. A raw string passed directly to `app.load_agent()` is a **path**, not YAML content. String manifests should use inline instructions. File loading resolves instruction files relative to the package directory and checks that they remain inside it.
 
 Next: [configuration](../CONFIGURATION.md), [tools](../MCP_SERVERS.md), and [runtime API](../api/API_REFERENCE.md).

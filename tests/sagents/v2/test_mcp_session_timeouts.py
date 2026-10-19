@@ -27,7 +27,7 @@ async def test_sdk_transport_read_timeout_matches_execution_policy(monkeypatch, 
         # response to a long-running POST rather than only for SSE events.
         timeout = httpx.Timeout(kwargs["timeout"], read=kwargs["sse_read_timeout"])
         assert timeout.connect == 30
-        assert timeout.read == deadline
+        assert timeout.read == (7200 if deadline is None else deadline)
         yield (None, None) if protocol == "sse" else (None, None, lambda: None)
 
     @asynccontextmanager
@@ -46,7 +46,18 @@ async def test_sdk_transport_read_timeout_matches_execution_policy(monkeypatch, 
         call_timeout_seconds=deadline,
     )):
         pass
-    assert observed["sse_read_timeout"] == deadline
+    assert observed["sse_read_timeout"] == (7200 if deadline is None else deadline)
+
+
+@pytest.mark.parametrize("value", [float("inf"), float("nan"), 0, -1])
+def test_call_timeout_must_be_finite_and_positive(value):
+    with pytest.raises(ValueError):
+        McpServerConfig(name="bounded", protocol="sse", url="https://example.test", call_timeout_seconds=value)
+
+
+def test_default_call_timeout_is_two_hours_and_can_be_overridden():
+    assert McpServerConfig(name="default", protocol="sse", url="https://example.test").call_timeout_seconds == 7200
+    assert McpServerConfig(name="custom", protocol="sse", url="https://example.test", call_timeout_seconds=14400).call_timeout_seconds == 14400
 
 
 @pytest.mark.asyncio
@@ -101,7 +112,7 @@ async def test_real_http_sdk_waits_for_long_json_tool_response(monkeypatch):
             await asyncio.sleep(0.1)
             # Inspect the actual timeout on the SDK's tool POST, rather than
             # only checking the arguments passed into its transport factory.
-            assert request.extensions["timeout"]["read"] is None
+            assert request.extensions["timeout"]["read"] == 7200
             result = {"content": [{"type": "text", "text": "done"}]}
         return httpx.Response(200, json={"jsonrpc": "2.0", "id": message["id"], "result": result})
 
@@ -114,7 +125,7 @@ async def test_real_http_sdk_waits_for_long_json_tool_response(monkeypatch):
     monkeypatch.setattr(mcp.client.streamable_http, "streamablehttp_client", transport)
     async with sdk_session(McpServerConfig(
         name="slow", protocol="streamable_http", url="http://127.0.0.1/mcp",
-        timeout_seconds=0.05,
+        timeout_seconds=5,
     )) as session:
         result = await session.call_tool("generate", {})
         assert result.content[0].text == "done"

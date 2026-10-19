@@ -219,9 +219,9 @@ async def test_spawned_external_tools_stay_within_parent_and_child_grants(parent
     from app.v2.server.runtime.integrations.external_tools import ScopedExternalTools
     from tests.app.v2.server.test_external_tool_scope import Provider
 
-    tools = ScopedExternalTools(Provider(), {}, dynamic_tools=("mcp_read",))
     async def command_reader(run_id):
         return SimpleNamespace(agent_id="spawned", parent_run_id=parent,
             config=SimpleNamespace(enabled_tools=enabled))
-    tools.bind(command_reader)
+    tools = ScopedExternalTools(Provider(), {}, command_reader=command_reader,
+        dynamic_tools=("mcp_read",))
     assert [tool.name for tool in await tools.list_tools(run_id="child")] == expected

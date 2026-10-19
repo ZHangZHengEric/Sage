@@ -21,16 +21,17 @@ from sagents.v2.package.manifest import SageManifest, SageManifestLoader
 manifest = SageManifestLoader().loads(yaml_text)
 # Or validate a Python dictionary:
 # manifest = SageManifest.model_validate(config_dict)
-app = await SAgentBuilder().with_defaults(session_root="runtime").build(manifest)
+app = await SAgentBuilder().build(runtime=manifest.runtime, models=model_config)
+agent = await app.load_agent(manifest)
 ```
 
-`build()` also accepts a `ResolvedSageManifest` or a path to a file named `sage.yaml`. Raw strings are paths. `loads()` does not resolve relative instruction files; use inline instructions or the file loader.
+`load_agent()` accepts a manifest, a `ResolvedSageManifest`, or a path to `sage.yaml`; `build()` accepts runtime and model configuration. Raw strings are paths. `loads()` does not resolve relative instruction files; use inline instructions or the file loader.
 
 ## Execution and ownership
 
 1. Obtain `app.entrypoint()`.
 2. Create a `RequestContext` with the authenticated `ActorRef` supplied by your host.
-3. Submit `StartRun` through `run_stream(command, context)`.
+3. Submit `StartRun` through `run_stream(command, context, agent=agent)`.
 4. Consume `stream.events`; `await stream.wait()` returns a `RunSnapshot` with `.state`.
 5. Close `app` in a `finally` block.
 

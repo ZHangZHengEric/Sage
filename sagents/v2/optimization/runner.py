@@ -84,10 +84,16 @@ class IsolatedOptimizationRunner:
                 target = root / name
                 target.parent.mkdir(parents=True, exist_ok=True)
                 target.write_text(text, encoding="utf-8")
-            builder = self.builder_factory(package.model_copy(deep=True), root, context)
-            if inspect.isawaitable(builder):
-                builder = await builder
-            app = await builder.build(runtime=manifest.runtime, tenant_id=context.actor.tenant_id)
+            configuration = self.builder_factory(package.model_copy(deep=True), root, context)
+            if inspect.isawaitable(configuration):
+                configuration = await configuration
+            from sagents.v2 import ApplicationConfiguration, SAgentBuilder
+            if not isinstance(configuration, ApplicationConfiguration):
+                raise TypeError("builder_factory must return ApplicationConfiguration")
+            builder = SAgentBuilder()
+            for registration in configuration.registrations:
+                builder.register(registration)
+            app = await builder.build(runtime=configuration.runtime, models=configuration.models, tenant_id=context.actor.tenant_id)
             try:
                 from sagents.v2.agent.management.loading import load_bundle_agents
                 await load_bundle_agents(app, package)

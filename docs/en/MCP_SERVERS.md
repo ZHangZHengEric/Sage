@@ -49,25 +49,24 @@ For a Bearer-authenticated server, use these values in Desktop's Settings → MC
 
 Server uses `url` in `/api/mcp` requests; Desktop's connection payload uses `streamable_http_url`. Let each host's interface construct its own payload. The current bridge accepts an API key for Bearer authentication; this is not an arbitrary-header or OAuth configuration example.
 
-For an embedded host, read the token explicitly from the process environment:
+Embedded hosts register a paired `tool.catalog` / `tool.executor` implementation
+with `builder.register(ExtensionRegistration(...))`, then select its plugin,
+Run scope and serializable parameters in runtime configuration. The factory
+receives the authenticated Run through a declared `execution.environment`
+dependency. It can construct `McpToolPlugin` for that Run without assembling any
+Agent execution components.
 
-```python
-import os
-from sagents.v2.tool import McpServerConfig, McpToolPlugin
+Declare `credentials.provider` as a dependency and resolve a `CredentialRef`
+using the Run's request context. Keep credential material in the provider
+instance; runtime configuration and durable metadata contain references rather
+than secret values. `${REMOTE_MCP_API_KEY}` in an API-key field is a literal
+value, not automatic environment expansion. Do not commit tokens to configuration
+or include them in screenshots or logs.
 
-key = os.environ["REMOTE_MCP_API_KEY"]
-if not key.strip():
-    raise ValueError("REMOTE_MCP_API_KEY must not be empty")
-
-mcp = McpToolPlugin((McpServerConfig(
-    name="remote",
-    protocol="streamable_http",
-    url="https://mcp.example.com/mcp",
-    api_key=key,
-),))
-```
-
-This constructs the provider without contacting the server. Register it as both catalog and executor with your v2 builder's `with_tool_provider(mcp, mcp)` before building the application. See the integration manual for combining providers. `${REMOTE_MCP_API_KEY}` in an API-key field is a literal value, not automatic environment expansion. Keep tokens out of committed configuration, screenshots, and logs.
+The runnable [standard host reference](../../examples/sagents_v2_standard_host/README.md)
+exercises MCP alongside files, Shell, Skills, nested Teams and restart recovery.
+See the [host integration manual](architecture/sagents-host-development.md) for
+the registration, configuration and lifecycle contracts.
 
 ### Discover, authorize, call, and close
 
@@ -75,6 +74,10 @@ This constructs the provider without contacting the server. Register it as both 
 2. **Authorize:** In the Server UI, select individual MCP/A2A tools under Agent → Edit → Available tools → External tools. The Server API `external_tools` allowlist defaults to empty (disabled). Standard packages keep these names in `tools`; the Server filters providers before injection. Newly discovered tools require explicit selection. For embedded Agents, include the discovered names in the Agent's `tools` allowlist. The host must also give the actor the required `tool.external_side_effect` scope. The MCP bridge marks every external tool as `WRITE` and `requires_approval=True`, even if its name or annotations suggest a read-only search. The default `CONFIGURED` policy asks for approval after scope checks; a host's selected strategy and approval memory can change that interaction. A service API key does not replace Sage authorization.
 3. **Call:** Review the selected tool and arguments in the host's approval flow, then inspect its result. Distinguish discovery/authentication failures from a tool response with `isError`. A timeout, cancellation, or lost response can leave the remote effect unknown; check the remote result before considering a retry.
 4. **Close:** The default bridge opens a short-lived SDK session for discovery or one call and closes its context afterward. Keep `await application.close()` in your embedded host's shutdown path. Disable or remove the connection to stop future use, and cancel an active Run separately; closing a local session does not revoke the service's API key or prove that remote work stopped.
+
+MCP calls default to a finite 7200-second (2-hour) deadline. Set `call_timeout_seconds` per server to another positive finite duration; legacy null values use the default. On timeout the Agent receives an unknown-outcome result and checks status or existing outputs before deciding whether retry is safe; the timeout itself does not request human intervention.
+
+This bounds one remote MCP call, not generic tool execution or the lifetime of an internal Team or delegated child Run. Internal child tasks have no default two-hour deadline; explicit task and ancestor deadlines, budgets, and cancellation still apply. For long jobs submitted through an external MCP service, each request retains its MCP deadline; use the service's submission and status APIs. A local request timeout does not prove cancellation of the remote job.
 
 ## Keyless Parallel search example
 

@@ -306,7 +306,7 @@ def test_web_export_captures_image_tool_exception_stack(tmp_path, monkeypatch, t
         broken_image_encoder,
     )
     provider = ScriptedModelProvider((
-        _step(1, "", "analyze_image", {"image_path": "/workspace/frame.png"}),
+        _step(1, "", "analyze_image", {"image_path": "frame.png"}),
         _step(2, "Image tool failed."),
     ))
     service = make_test_service(tmp_path, model_provider=provider)

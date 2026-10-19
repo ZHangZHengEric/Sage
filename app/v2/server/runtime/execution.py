@@ -63,14 +63,11 @@ class ProcessExecution:
         self._drives.clear()
 
     def bind_model(self, session_id: str, user_id: str) -> bool:
-        if self.model_pool is None:
-            return False
-        self.model_pool.bind_session_user(session_id, user_id)
-        return True
+        # Model ownership comes from the authenticated standard Run scope.
+        return False
 
     def unbind_model(self, session_id: str) -> None:
-        if self.model_pool is not None:
-            self.model_pool.unbind_session_user(session_id)
+        pass
 
     def has_model(self, catalog) -> bool:
         if self.fallback_model is not None:

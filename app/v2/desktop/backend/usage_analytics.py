@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from app.v2.desktop.backend.run_environment import catalog_agent_id
+
 from collections import Counter, defaultdict
 from datetime import datetime, time, timedelta, timezone
 from typing import Any
@@ -162,7 +164,7 @@ async def build_usage_overview(
         for run in runs:
             try:
                 command = await self.session_store.get_start_command(run.run_id)
-                run_agents[run.run_id] = command.agent_id
+                run_agents[run.run_id] = catalog_agent_id(command)
             except (OSError, ValueError, SageV2Error):
                 continue
 

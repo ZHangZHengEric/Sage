@@ -1,11 +1,13 @@
 """Public Builder/manifest/Run APIs only: no private composition patches."""
 
+from tests.sagents.v2.sdk_fixture import build_registered_app
+
 import asyncio
 import json
 
 import pytest
 
-from sagents.v2 import ActorRef, RequestContext, SAgentBuilder, StartRun
+from sagents.v2 import ActorRef, RequestContext, StartRun
 from sagents.v2.contracts.commands import InputItem, ReplyInteraction, RunConfig
 from sagents.v2.contracts.errors import SageV2Error
 from sagents.v2.contracts.items import TextBlock
@@ -178,13 +180,7 @@ async def build(root, manifest, *, approval=False, dynamic=False):
     )
     try:
         app = await (
-            SAgentBuilder().with_models(MODELS)
-            .with_defaults(session_root=root)
-            .with_session_store(store)
-            .with_derived_state_store(store)
-            .with_model_provider(model)
-            .with_tool_provider(plugin.catalog, plugin.executor)
-            .build(runtime=manifest.runtime)
+            build_registered_app(root, models=MODELS, model=model, tools=(plugin.catalog, plugin.executor,), runtime=manifest.runtime, providers={'session.store': store, 'derived-state.store': store})
         )
     except BaseException:
         await store.close()
@@ -264,7 +260,11 @@ async def test_public_fibre_spawn_inherits_parent_model_policy(tmp_path):
     app, store, model, calls = await build(tmp_path, manifest, dynamic=True)
     try:
         stream = await start(app, manifest, "b", "dynamic-parent")
-        assert (await asyncio.wait_for(stream.wait(), 10)).state.value == "completed"
+        result = await asyncio.wait_for(stream.wait(), 10)
+        if result.state.value != "completed":
+            suspension = await store.get_suspension(result.suspension_id)
+            interaction = await store.get_interaction(suspension.interaction_id)
+            pytest.fail(json.dumps(interaction.payload, indent=2))
         assert len(calls) == 1, [
             m.model_dump()
             for r in model.requests

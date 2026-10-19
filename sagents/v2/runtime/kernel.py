@@ -64,20 +64,49 @@ class HarnessRuntime:
     store as long as it preserves the declared atomic lifecycle semantics.
     """
 
-    def __init__(self, session_store: SessionStore, *, job_runtime=None) -> None:
+    def __init__(self, session_store: SessionStore, *, job_runtime=None,
+                 execution_binding_provider=None, derived_state_store=None) -> None:
         self.session_store = session_store
         self.job_runtime = job_runtime
+        self.execution_binding_provider = execution_binding_provider
+        self.derived_state_store = derived_state_store
+
+    async def record_execution_binding(self, binding, context):
+        """Persist observational binding facts; policy authority stays in StartRun."""
+        if self.derived_state_store is not None:
+            run = await self.get_run(binding.run_id)
+            await self.derived_state_store.put_derived_state(
+                run.session_id, "execution.binding", run.run_id, binding.diagnostics,
+            )
 
     async def start_run(self, command: StartRun, context: RequestContext) -> RunHandle:
         """Accept a Run request; execution is started separately by a driver."""
 
         from sagents.v2.memory.identity import bind_memory_identity
 
+        if command.parent_run_id:
+            parent = await self.session_store.get_run(command.parent_run_id)
+            await self.session_store.authorize_session_actor(parent.session_id, context)
         parent_command = (
             await self.session_store.get_start_command(command.parent_run_id)
             if command.parent_run_id else None
         )
         command = bind_memory_identity(command, context, parent_command=parent_command)
+        accept = getattr(self.execution_binding_provider, "accept_configuration", None)
+        if accept is not None:
+            command = await accept(command, context=context, parent_command=parent_command)
+        elif self.execution_binding_provider is not None:
+            raise SageV2Error(RuntimeErrorInfo(
+                code="execution.configuration_unsupported", category=ErrorCategory.VALIDATION,
+                message="execution.binding must implement accept_configuration before resources can be allocated",
+                safe_to_resume=False,
+            ))
+        elif command.config.execution_policy is not None or command.config.execution_snapshot is not None:
+            raise SageV2Error(RuntimeErrorInfo(
+                code="execution.configuration_unsupported", category=ErrorCategory.VALIDATION,
+                message="selected binding provider does not support execution configurations",
+                safe_to_resume=False,
+            ))
         result = await self.session_store.create_run(command, context)
         return result.handle
 

@@ -451,7 +451,7 @@ async def test_shutdown_records_a_typed_terminal_failure_instead_of_requeueing()
             closed.set()
 
     driver = SlowDriver()
-    agent = SAgent(runtime=control_runtime, driver_factory=lambda run_id: driver)
+    agent = SAgent._from_composition(runtime=control_runtime, driver_factory=lambda run_id: driver)
     dispatcher = LocalWorkerDispatcher(
         scheduler,
         max_concurrent_runs=1,
@@ -574,7 +574,7 @@ async def test_cancelled_execution_recovers_started_tool_instead_of_worker_shutd
         max_concurrent_runs=1,
         lease_scope_factory=fenced.lease_scope,
     )
-    agent = SAgent(runtime=runtime, driver_factory=lambda run_id: LoopDriver())
+    agent = SAgent._from_composition(runtime=runtime, driver_factory=lambda run_id: LoopDriver())
     agent.attach_dispatcher(dispatcher)
     stream = await agent.run_stream(
         StartRun(
@@ -782,7 +782,7 @@ async def test_close_during_recovery_records_shutdown():
         async def close(self):
             pass
 
-    agent = SAgent(runtime=runtime, driver_factory=lambda run_id: Driver())
+    agent = SAgent._from_composition(runtime=runtime, driver_factory=lambda run_id: Driver())
     dispatcher = LocalWorkerDispatcher(
         scheduler, max_concurrent_runs=1, lease_scope_factory=fenced.lease_scope, preserve_runs_on_shutdown=False
     )

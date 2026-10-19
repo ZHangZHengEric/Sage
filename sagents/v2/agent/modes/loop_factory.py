@@ -107,6 +107,7 @@ class ModeAwareAgentLoopFactory:
                 descriptor.tools,
                 self.runtime.session_store.get_start_command,
                 fallback_invocation_mode=self.fallback_invocation_mode,
+                granted_catalogs=getattr(self.base_catalog, "runtime_grants", ()),
             )
         ]
         executors: list[ToolExecutor] = [self.base_executor]
@@ -132,7 +133,7 @@ class ModeAwareAgentLoopFactory:
             suite = MultiAgentToolPlugin(coordinator=coordinator, runtime=self.runtime)
             catalogs.append(suite.catalog)
             executors.append(suite.executor)
-        catalog = CompositeToolCatalog(tuple(catalogs))
+        catalog = CompositeToolCatalog(tuple(catalogs), runtime_grants=getattr(self.base_catalog, "runtime_grants", ()))
         executor = CompositeToolExecutor(tuple(executors))
         if self.loop_composer is not None:
             loop = self.loop_composer(descriptor, run_id, catalog, executor)
@@ -179,6 +180,7 @@ class ModeAwareAgentLoopFactory:
                 descriptor.tools,
                 self.runtime.session_store.get_start_command,
                 fallback_invocation_mode=self.fallback_invocation_mode,
+                granted_catalogs=getattr(self.base_catalog, "runtime_grants", ()),
             )
         ]
         executors: list[ToolExecutor] = [self.base_executor]
@@ -201,7 +203,7 @@ class ModeAwareAgentLoopFactory:
             suite = MultiAgentToolPlugin(coordinator=coordinator, runtime=self.runtime)
             catalogs.append(suite.catalog)
             executors.append(suite.executor)
-        catalog = CompositeToolCatalog(tuple(catalogs))
+        catalog = CompositeToolCatalog(tuple(catalogs), runtime_grants=getattr(self.base_catalog, "runtime_grants", ()))
         executor = CompositeToolExecutor(tuple(executors))
         if self.loop_composer is not None:
             loop = self.loop_composer(descriptor, run_id, catalog, executor)

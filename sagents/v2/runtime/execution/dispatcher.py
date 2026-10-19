@@ -176,21 +176,39 @@ class LocalWorkerDispatcher:
         *,
         resume: bool = False,
     ) -> asyncio.Future[RunSnapshot]:
-        async with self._lifecycle:
-            await self._start_locked(recover=False)
-            current = self._requests.get(handle.run_id)
-            if current is not None:
-                return current.result
-            loop = asyncio.get_running_loop()
-            result: asyncio.Future[RunSnapshot] = loop.create_future()
-            request = _DispatchRequest(
-                agent=agent,
-                context=context,
-                resume=resume,
-                result=result,
-            )
-            self._requests[handle.run_id] = request
-            self._submissions_inflight += 1
+        while True:
+            predecessor = None
+            async with self._lifecycle:
+                await self._start_locked(recover=False)
+                current = self._requests.get(handle.run_id)
+                if current is not None:
+                    if resume and current.claimed:
+                        # A reply may be accepted while the previous suspended
+                        # drive is still releasing resources and its lease.
+                        # Wait for that generation, then schedule the durable
+                        # RESUMING state instead of returning its old result.
+                        predecessor = current.result
+                    else:
+                        return current.result
+                else:
+                    loop = asyncio.get_running_loop()
+                    result: asyncio.Future[RunSnapshot] = loop.create_future()
+                    request = _DispatchRequest(agent=agent, context=context,
+                        resume=resume, result=result)
+                    self._requests[handle.run_id] = request
+                    self._submissions_inflight += 1
+                    break
+            try:
+                await asyncio.shield(predecessor)
+            except Exception:
+                # Durable state decides whether the accepted resume survives a
+                # predecessor cleanup failure. Never replay a tool here.
+                pass
+            handle = await agent.runtime.get_run(handle.run_id)
+            if handle.state != RunState.RESUMING:
+                result = asyncio.get_running_loop().create_future()
+                result.set_result(handle)
+                return result
         try:
             revision = getattr(handle, "revision", None)
             if revision is None:
@@ -632,7 +650,13 @@ class LocalWorkerDispatcher:
         if checkpoint.state.get("execution_checkpoint") is not True:
             return None
         value = checkpoint.state.get("automatic_resume_at")
-        return datetime.fromisoformat(value) if isinstance(value, str) else value
+        due = datetime.fromisoformat(value) if isinstance(value, str) else value
+        if due is not None:
+            from sagents.v2.runtime.execution.budgets import evaluate_run_budget
+            budget = await evaluate_run_budget(store, await store.get_run(run_id), utc_now(), check_tokens=False)
+            if budget.deadline is not None:
+                due = min(due, budget.deadline)
+        return due
 
     async def _settle_deferred_controls(self):
         for run_id, request in tuple(self._requests.items()):

@@ -143,7 +143,7 @@ class DesktopMcpRecord(StrictModel):
     args: tuple[str, ...] = ()
     env: dict[str, str] = Field(default_factory=dict)
     timeout_seconds: float = Field(default=30, gt=0)
-    call_timeout_seconds: float | None = Field(default=None, gt=0)
+    call_timeout_seconds: float | None = Field(default=7200, gt=0, allow_inf_nan=False)
     kind: str = "external"
     description: str = ""
     tools: tuple[dict[str, Any], ...] = ()

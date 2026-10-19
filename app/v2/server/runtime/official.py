@@ -47,22 +47,30 @@ async def install_sandbox(execution, application, settings=None) -> None:
 
     if execution.sandbox_grant_issuer is not None:
         return
+    execution.sandbox_provider = application.service("server.file-sandbox")
+    execution.sandbox_grant_issuer = application.service("server.file-grants")
+
+
+def file_sandbox_registrations(settings):
+    from app.v2.server.runtime.sdk_plugins import service_registration
+    from sagents.v2.runtime.extensions import ExtensionDependency, ExtensionRegistration
+    from sagents.v2.runtime.execution.sandbox import LocalWorkspaceSandboxProvider
     issuer = SandboxGrantIssuer()
-    selection = (settings.plugin_overrides if settings else {}).get(
-        "execution.sandbox", {"plugin": "sage.sandbox.local-workspace"}
+    grants = service_registration("server.file-grants", issuer)
+    template = service_registration("server.file-sandbox", None, ownership="owned")
+    async def create(context, deps):
+        provider = LocalWorkspaceSandboxProvider(
+            deps.require("server.file-grants").verification_key,
+            linux_execution_uid=settings.linux_execution_uid,
+            linux_execution_gid=settings.linux_execution_gid,
+        )
+        await provider.validate_runtime(forbidden_roots=(settings.data_root,))
+        return provider
+    return grants, ExtensionRegistration(
+        descriptor=template.descriptor.model_copy(update={
+            "dependencies": (ExtensionDependency(capability="server.file-grants"),),
+        }), factory=create,
     )
-    provider = await application.process_provider(
-        "execution.sandbox", selection,
-        dependencies={
-            key: value for key, value in {
-                "verification_key": issuer.verification_key,
-                "linux_execution_uid": settings.linux_execution_uid if settings else None,
-                "linux_execution_gid": settings.linux_execution_gid if settings else None,
-            }.items() if value is not None
-        },
-    )
-    execution.sandbox_provider = provider
-    execution.sandbox_grant_issuer = issuer
 
 
 async def provision_workspace(

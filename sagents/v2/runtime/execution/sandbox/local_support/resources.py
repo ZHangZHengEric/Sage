@@ -332,9 +332,10 @@ class LocalResourceBoundary:
         execution_uid=None,
         execution_gid=None,
         extra_read_paths=(),
+        isolation_python=None,
     ):
         self.row = row
-        self.host_python = Path(sys.executable).resolve(strict=True)
+        self.host_python = Path(isolation_python or sys.executable).resolve(strict=True)
         self.cgroup_root = Path(cgroup_root) if cgroup_root else None
         self.quota_mount = Path(quota_mount) if quota_mount else None
         self.cgroup = None
@@ -374,8 +375,18 @@ class LocalResourceBoundary:
         return tuple(extras)
 
     async def prepare(self):
+        from .interpreter import inspect_isolation_python
+
+        interpreter = await asyncio.to_thread(
+            inspect_isolation_python, str(self.host_python), forbidden_roots=(self.row.root,),
+        )
+        self.extra_read_paths = tuple(dict.fromkeys((
+            *self.extra_read_paths, *interpreter["paths"], str(self.host_python.parent),
+        )))
         for trusted_path in (self.host_python, __file__, os.__file__):
-            resolved = Path(trusted_path).resolve(strict=True)
+            # Frozen modules need not exist as loose .py files. Only the
+            # separately probed isolation interpreter must be a real file.
+            resolved = Path(trusted_path).resolve()
             if resolved == self.row.root or self.row.root in resolved.parents:
                 raise PermissionError(
                     "host sandbox runtime must be installed outside the writable workspace"

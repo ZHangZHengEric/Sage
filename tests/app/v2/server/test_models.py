@@ -3,12 +3,11 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 import pytest
-from sagents.v2.model.contracts import ModelEventKind, ModelRequest
 
 from app.v2.server.catalog.records import apply_upsert, empty_catalog
 from app.v2.server.routers.schemas.catalog import ModelBody
-from app.v2.server.runtime.models import HostModelProvider, _build_catalog_provider
-from tests.app.v2.server.conftest import register_and_login, scripted_hello
+from app.v2.server.runtime.models import ServerModelClients, _build_catalog_provider
+from tests.app.v2.server.conftest import register_and_login
 from tests.app.v2.server.fakes import MemoryCatalogStore
 
 
@@ -26,33 +25,11 @@ async def _save_demo_model(catalog: MemoryCatalogStore, user_id: str = "user-1")
 
 
 @pytest.mark.asyncio
-async def test_host_provider_uses_session_bind_when_contextvar_empty(monkeypatch):
-    catalog = MemoryCatalogStore()
-    await _save_demo_model(catalog)
-    monkeypatch.setattr(
-        "app.v2.server.runtime.models._build_catalog_provider",
-        lambda record: scripted_hello(),
-    )
-
-    async def get_run(run_id: str):
-        assert run_id == "run_sagents"
-        return SimpleNamespace(session_id="thread-1")
-
-    provider = HostModelProvider(catalog, session_store=SimpleNamespace(get_run=get_run))
-    provider.bind_session_user("thread-1", "user-1")
-
-    events = [
-        event
-        async for event in provider.stream(
-            ModelRequest(
-                request_id="request_1",
-                run_id="run_sagents",
-                model_binding="primary",
-                messages=(),
-            )
-        )
-    ]
-    assert any(event.kind == ModelEventKind.TEXT_DELTA for event in events)
+async def test_transport_pool_has_no_session_owner_routing(monkeypatch):
+    pool = ServerModelClients()
+    assert not hasattr(pool, "bind_session_user")
+    assert not hasattr(pool, "stream")
+    await pool.close()
 
 
 def test_catalog_uses_orcarouter_default_base_url_when_omitted():

@@ -2,20 +2,14 @@ from __future__ import annotations
 
 import asyncio
 import inspect
-from contextlib import asynccontextmanager
 from contextvars import ContextVar
 
-from app.v2.server.catalog.repository import CatalogStore
 from app.v2.server.runtime.model_pool import ModelClientPool
 from sagents.v2._concurrency import auxiliary_capacity
-from sagents.v2.contracts.errors import ErrorCategory, RuntimeErrorInfo, SageV2Error
-from sagents.v2.model.contracts import ModelCapabilities, ModelRequest
 from sagents.v2.model.protocols import (
     create_registered_model_provider,
 )
-from sagents.v2.model.provider import ModelProvider
 from sagents.v2.runtime.credentials.contracts import CredentialMaterial
-from sagents.v2.runtime.session.contracts import SessionStore
 
 _current_user_id: ContextVar[str | None] = ContextVar(
     "server_v2_model_user", default=None
@@ -30,104 +24,13 @@ def reset_model_user(token) -> None:
     _current_user_id.reset(token)
 
 
-class HostModelProvider:
-    """Resolve the current user's catalog model, then the host fallback."""
+class ServerModelClients:
+    """Shared transport pool. Agent routes are resolved by registered Run providers."""
+    def __init__(self, *, max_clients=64):
+        self.pool = ModelClientPool(create_catalog_provider, close_model_provider, max_clients=max_clients)
 
-    def __init__(
-        self,
-        catalog: CatalogStore,
-        *,
-        fallback: ModelProvider | None = None,
-        session_store: SessionStore | None = None,
-        max_clients: int = 64,
-    ) -> None:
-        self._catalog = catalog
-        self._fallback = fallback
-        self.session_store = session_store
-        self._session_users: dict[str, str] = {}
-        self.pool = ModelClientPool(
-            create_catalog_provider, close_model_provider, max_clients=max_clients
-        )
-        self._session_bindings: dict[str, int] = {}
-
-    def bind_session_user(self, session_id: str, user_id: str) -> None:
-        current = self._session_users.get(session_id)
-        if current is not None and current != user_id:
-            raise ValueError("session model binding belongs to another user")
-        self._session_users[session_id] = user_id
-        self._session_bindings[session_id] = (
-            self._session_bindings.get(session_id, 0) + 1
-        )
-
-    def unbind_session_user(self, session_id: str) -> None:
-        remaining = self._session_bindings.get(session_id, 0) - 1
-        if remaining > 0:
-            self._session_bindings[session_id] = remaining
-        else:
-            self._session_bindings.pop(session_id, None)
-            self._session_users.pop(session_id, None)
-
-    async def capabilities(self, model_binding: str) -> ModelCapabilities:
-        async with self._borrow() as provider:
-            return await provider.capabilities(model_binding)
-
-    async def probe_capabilities(self, request):
-        async with self._borrow() as provider:
-            return await provider.probe_capabilities(request)
-
-    async def stream(self, request: ModelRequest):
-        async with self._borrow(run_id=request.run_id) as provider:
-            stream = provider.stream(request)
-            try:
-                async for event in stream:
-                    yield event
-            finally:
-                closer = getattr(stream, "aclose", None)
-                if closer is not None:
-                    await closer()
-
-    async def _user_id(self, run_id: str | None = None) -> str | None:
-        if run_id:
-            # A long-lived worker may inherit an earlier caller's ContextVar.
-            # An explicit Run identity is authoritative; never guess another
-            # user's model if its Session cannot be resolved.
-            if self.session_store is None:
-                raise RuntimeError("session store is not attached")
-            try:
-                run = await self.session_store.get_run(run_id)
-            except SageV2Error:
-                return None
-            return self._session_users.get(run.session_id)
-        return _current_user_id.get()
-
-    async def close(self) -> None:
+    async def close(self):
         await self.pool.close()
-        self._session_users.clear()
-        self._session_bindings.clear()
-        self.session_store = None
-
-    @asynccontextmanager
-    async def _borrow(self, run_id: str | None = None):
-        user_id = await self._user_id(run_id)
-        if user_id:
-            record = await self._catalog.default_model(user_id)
-            if record is not None:
-                lease = await self.pool.acquire(user_id, record)
-                try:
-                    yield lease.provider
-                finally:
-                    await lease.close()
-                return
-        if self._fallback is not None:
-            yield self._fallback
-            return
-        raise SageV2Error(
-            RuntimeErrorInfo(
-                code="server.model_not_configured",
-                category=ErrorCategory.VALIDATION,
-                message="configure a model before starting a run",
-            )
-        )
 
 
 async def close_model_provider(provider) -> None:

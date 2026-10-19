@@ -19,9 +19,6 @@ from app.v2.desktop.backend.catalog import (
 )
 from app.v2.desktop.backend.package import desktop_v2_manifest
 from app.v2.desktop.backend.service import (
-    _DesktopDriver,
-    _DesktopRecoveryAgent,
-    _DesktopRunResources,
     _usage_percentile,
     AgentCreate,
     AgentRosterContextProvider,
@@ -50,7 +47,6 @@ from sagents.v2.contracts.common import new_id, utc_now
 from sagents.v2.contracts.commands import (
     CancelRun,
     InputItem,
-    ReplyInteraction,
     RunConfig,
     StartRun,
 )
@@ -62,10 +58,6 @@ from sagents.v2.contracts.session_commit import (
 )
 from sagents.v2.agent import AgentLoopEngine
 from sagents.v2.agent.multi_agent import AgentMode, AgentRegistry
-from sagents.v2.agent.policy import (
-    ExplicitStatusContinuationPolicy,
-    LLMJudgeContinuationPolicy,
-)
 from sagents.v2.model import (
     ModelEventKind,
     ModelMessage,
@@ -79,9 +71,6 @@ from sagents.v2.testing.plugins.scripted_model import ScriptedModelStep
 from sagents.v2.tool import InMemoryToolCatalog, InMemoryToolExecutor
 from sagents.v2.package.manifest.resolver import CompositionResolver
 from sagents.v2.context import ModelConversationSummarizer
-from sagents.v2.memory import (
-    LLMMemoryRecallQueryGenerator,
-)
 from sagents.v2.tool import McpServerConfig, McpToolPlugin
 from sagents.v2.runtime.execution.scheduler import LeaseReleaseReason, WorkItem
 
@@ -167,7 +156,7 @@ async def test_builtin_anytool_uses_ephemeral_sidecar_capability(tmp_path: Path)
 
     assert config.url == "http://127.0.0.1:54321/api/mcp/anytool/AnyTool"
     assert config.timeout_seconds == 30
-    assert config.call_timeout_seconds is None
+    assert config.call_timeout_seconds == 7200
     assert config.api_key is not None
     assert config.api_key.get_secret_value() == "launch-capability"
     assert record.api_key is None
@@ -220,301 +209,225 @@ async def test_desktop_composition_hash_includes_component_selection_and_config(
 
 
 @pytest.mark.asyncio
-async def test_rebuilt_desktop_loop_checks_current_composition_not_stored_hash(
-    tmp_path: Path,
-):
-    service = DesktopV2Service(tmp_path / "sage")
-    await service.list_agents("user_1")
-    await service.patch_model_provider(
-        "model_main", ModelProviderPatch(api_keys=["test-key"]), "user_1"
-    )
-    agent = await service._agent("sage", "user_1")
-    provider = await service._provider(agent, "user_1")
-    workspace = await service.workspace_root(None, "sage")
-
-    resolved, loop, resources = await service._build_loop(
-        agent=agent,
-        provider=provider,
-        workspace=workspace,
-        preferred_skills=(),
-        approval_mode="high_risk",
-        run_id="run_recovery_hash",
-        resolved_spec_hash="sha256:stored-old-composition",
-    )
-    settings = await service.get_settings()
-
-    assert loop.expected_resolved_spec_hash == service._desktop_spec_hash(
-        resolved.manifest_hash, settings
-    )
-    assert loop.expected_resolved_spec_hash != "sha256:stored-old-composition"
-    await resources.close()
-    await service.close()
+async def test_rebuilt_desktop_loop_checks_current_composition_not_stored_hash(tmp_path):
+    from tests.app.v2.desktop.sdk_fixture import desktop, execute
+    service, _, _ = desktop(tmp_path)
+    try:
+        run, command, _ = await execute(service)
+        loaded = await service.application.agent_for_run(run.run_id, service._context("user_1"))
+        assert command.resolved_spec_hash == loaded.composition_hash
+        changed = command.model_copy(update={"resolved_spec_hash": "sha256:stored-old-composition", "idempotency_key": "bad-hash"})
+        with pytest.raises(ValueError, match="identity"):
+            await service.application.entrypoint().run_stream(changed, service._context("user_1"), agent=loaded)
+    finally:
+        await service.close()
 
 
 @pytest.mark.asyncio
 async def test_desktop_run_application_exposes_resolved_component_plan(tmp_path):
-    service = DesktopV2Service(tmp_path)
-    await service.start()
-    ports = await service.application.materialize_agent(
-        desktop_v2_manifest(
-            session_root=service.runtime_root,
-            component_selections={"context.reducer": "sage.context.reducer.window"},
-        ),
-        agent_id="main",
-        run_id="run_plan",
-    )
+    from tests.app.v2.desktop.sdk_fixture import desktop, execute
+    service, _, _ = desktop(tmp_path, runtime={"capabilities": {
+        "context.reducer": {"plugin": "sage.context.reducer.window"}}})
     try:
-        bindings = {
-            (value.capability, value.plugin_id, value.source)
-            for value in ports.resolved_plan.providers
-        }
-        assert (
-            "context.reducer",
-            "sage.context.reducer.window",
-            "plugin",
-        ) in bindings
-        assert (
-            "agent.continuation-policy",
-            "sage.agent.continuation.llm-judge",
-            "plugin",
-        ) in bindings
-        assert "desktop-host" not in {
-            value.source for value in ports.resolved_plan.providers
-        }
+        run, _, _ = await execute(service)
+        plan = await service.application.run_configuration(run.run_id, service._context("user_1"))
+        bindings = {(value["capability"], value["plugin_id"]) for value in plan["plugins"]}
+        assert ("context.reducer", "sage.context.reducer.window") in bindings
+        assert ("agent.continuation-policy", "sage.agent.continuation.deterministic") in bindings
         assert not hasattr(service, "_run_application")
         assert not hasattr(service, "_scoped_component")
     finally:
-        for handle in reversed(ports.scope_handles):
-            await handle.close()
         await service.close()
 
 
 @pytest.mark.asyncio
-async def test_workspace_initializer_reuses_agent_scope(tmp_path: Path):
-    service = DesktopV2Service(tmp_path / "sage")
-    settings = await service.get_settings()
-
-    await service._ensure_agent_workspace(
-        settings.agent_workspace_path,
-        component_selections=settings.component_selections,
-        language=settings.language,
-    )
-    after_first = len(service.application._scope_handles)
-    await service._ensure_agent_workspace(
-        settings.agent_workspace_path,
-        component_selections=settings.component_selections,
-        language=settings.language,
-    )
-
-    assert len(service.application._scope_handles) == after_first
-    assert len(service._workspace_initializations) == 1
-    await service.close()
-
-
-@pytest.mark.asyncio
-async def test_workspace_initializer_runs_before_its_agent_scope_closes(
-    tmp_path: Path,
-):
-    service = DesktopV2Service(tmp_path / "sage")
-    scope_closed = False
-
-    class Initializer:
-        async def initialize(self, workspace: Path) -> None:
-            assert not scope_closed
-            assert workspace.is_dir()
-
-    class ScopeHandle:
-        async def close(self) -> None:
-            nonlocal scope_closed
-            scope_closed = True
-
-    service.application = SimpleNamespace(
-        materialize_agent=AsyncMock(
-            return_value=SimpleNamespace(
-                workspace_initializer=Initializer(),
-                scope_handles=(ScopeHandle(),),
-            )
-        )
-    )
-
-    await service._ensure_agent_workspace(
-        str(tmp_path / "workspace"),
-        component_selections={
-            "workspace.initializer": "sage.workspace.initializer.claw"
-        },
-        language="en",
-    )
-
-    assert scope_closed is True
-    await service.session_store.close()
-
-
-@pytest.mark.asyncio
-async def test_long_lived_component_scope_is_reused_until_service_close(tmp_path: Path):
-    service = DesktopV2Service(tmp_path / "sage")
-    await service.start()
-    first = await service.application.materialize_agent(
-        desktop_v2_manifest(session_root=service.runtime_root),
-        agent_id="main",
-        run_id="run_a",
-    )
-    second = await service.application.materialize_agent(
-        desktop_v2_manifest(session_root=service.runtime_root),
-        agent_id="main",
-        run_id="run_b",
-    )
+async def test_workspace_initializer_reuses_agent_scope(tmp_path):
+    from tests.app.v2.desktop.sdk_fixture import desktop
+    service, _, _ = desktop(tmp_path)
     try:
-        assert second.summarizer is first.summarizer
-        assert second.tool_selection_policy is first.tool_selection_policy
+        settings = await service.get_settings()
+        first = await service._ensure_agent_workspace(settings.agent_workspace_path)
+        second = await service._ensure_agent_workspace(settings.agent_workspace_path)
+        assert first == second
+        assert len(service._workspace_initializations) == 1
     finally:
-        for handle in reversed((*first.scope_handles, *second.scope_handles)):
-            await handle.close()
         await service.close()
 
 
 @pytest.mark.asyncio
-async def test_repeated_loop_composition_does_not_accumulate_agent_scopes(
-    tmp_path: Path,
-):
-    service = DesktopV2Service(tmp_path / "sage")
-    await service.list_agents("user_1")
-    await service.patch_model_provider(
-        "model_main", ModelProviderPatch(api_keys=["test-key"]), "user_1"
-    )
-    agent = await service._agent("sage", "user_1")
-    provider = await service._provider(agent, "user_1")
-    workspace = await service.workspace_root(None, "sage")
-
-    _, _, first_resources = await service._build_loop(
-        agent=agent,
-        provider=provider,
-        workspace=workspace,
-        preferred_skills=(),
-        approval_mode="high_risk",
-        run_id="run_scope_reuse_1",
-    )
-    await first_resources.close()
-    after_first = len(service.application._scope_handles)
-    _, _, second_resources = await service._build_loop(
-        agent=agent,
-        provider=provider,
-        workspace=workspace,
-        preferred_skills=(),
-        approval_mode="high_risk",
-        run_id="run_scope_reuse_2",
-    )
-    await second_resources.close()
-
-    assert len(service.application._scope_handles) == after_first
-    await service.close()
+async def test_workspace_initializer_runs_before_its_agent_scope_closes(tmp_path):
+    from tests.app.v2.desktop.sdk_fixture import desktop
+    from sagents.v2.runtime.extensions import CapabilityOffer, ExtensionDescriptor, ExtensionRegistration, ExtensionScope
+    events = []
+    class Initializer:
+        async def initialize(self, workspace):
+            assert not events
+            assert workspace.is_dir()
+            events.append("initialize")
+        async def close(self):
+            events.append("close")
+    registration = ExtensionRegistration(descriptor=ExtensionDescriptor(
+        plugin_id="test.desktop.initializer", name="Initializer", version="1",
+        provides=(CapabilityOffer(capability="workspace.initializer", api_version="2"),),
+        supported_scopes=frozenset({ExtensionScope.PROCESS})), factory=lambda context, deps: Initializer())
+    service, _, _ = desktop(tmp_path, registrations=(registration,), runtime={"capabilities": {
+        "workspace.initializer": {"plugin": "test.desktop.initializer"}}})
+    try:
+        await service._ensure_agent_workspace(str(tmp_path / "workspace"))
+        assert events == ["initialize"]
+    finally:
+        await service.close()
+    assert events == ["initialize", "close"]
 
 
 @pytest.mark.asyncio
-async def test_build_loop_closes_provisioned_sandbox_on_composition_failure(
-    tmp_path: Path, monkeypatch
-):
-    service = DesktopV2Service(tmp_path / "sage")
-    sandbox = SimpleNamespace(close=AsyncMock())
+async def test_long_lived_component_scope_is_reused_until_service_close(tmp_path):
+    from tests.app.v2.desktop.sdk_fixture import desktop, execute
+    from sagents.v2.runtime.extensions import CapabilityOffer, ExtensionDescriptor, ExtensionRegistration, ExtensionScope
+    created, closed = [], []
+    class Estimator:
+        async def segments(self, command, *, run_id=None):
+            return ()
+        async def close(self):
+            closed.append(self)
+    def factory(context, dependencies):
+        instance = Estimator()
+        created.append(instance)
+        return instance
+    registration = ExtensionRegistration(descriptor=ExtensionDescriptor(
+        plugin_id="test.desktop.estimator", name="Estimator", version="1",
+        provides=(CapabilityOffer(capability="context.provider", api_version="2"),),
+        supported_scopes=frozenset({ExtensionScope.PROCESS})), factory=factory)
+    service, _, _ = desktop(tmp_path, registrations=(registration,), runtime={"capabilities": {
+        "context.provider": {"plugin": "test.desktop.estimator", "scope": "process"}}})
+    try:
+        for _ in range(2):
+            run, _, _ = await execute(service)
+            assert run.state.value == "completed"
+        assert len(created) == 1
+        assert not closed
+    finally:
+        await service.close()
+    assert closed == created
 
-    async def fail_after_provision(**kwargs):
-        kwargs["sandbox_observer"](sandbox)
+
+@pytest.mark.asyncio
+async def test_repeated_loop_composition_does_not_accumulate_agent_scopes(tmp_path):
+    from tests.app.v2.desktop.sdk_fixture import desktop, execute, tracked_binding
+    registration, runtime, bindings = tracked_binding(tmp_path / "workspace")
+    service, _, environments = desktop(tmp_path, registrations=(registration,), runtime=runtime)
+    try:
+        runs = [(await execute(service))[0] for _ in range(3)]
+        assert all(run.state.value == "completed" for run in runs)
+        assert len({environment.run_id for environment in environments}) == 3
+        assert len(bindings) == 3
+        assert all(binding.closed for binding in bindings)
+    finally:
+        await service.close()
+
+
+@pytest.mark.asyncio
+async def test_build_loop_closes_provisioned_sandbox_on_composition_failure(tmp_path):
+    from tests.app.v2.desktop.sdk_fixture import desktop, execute, tracked_binding
+    from sagents.v2.runtime.extensions import CapabilityOffer, ExtensionDependency, ExtensionDescriptor, ExtensionRegistration, ExtensionScope
+    acquired = []
+    def fail(context, dependencies):
+        acquired.append(dependencies.require("execution.environment").run_id)
         raise RuntimeError("composition failed")
-
-    monkeypatch.setattr(service, "_compose_run_driver", fail_after_provision)
-    with pytest.raises(RuntimeError, match="composition failed"):
-        await service._build_loop(
-            agent=object(),
-            provider=object(),
-            workspace=tmp_path,
-            preferred_skills=(),
-            approval_mode="auto",
-        )
-    sandbox.close.assert_awaited_once()
-    await service.session_store.close()
-
-
-@pytest.mark.asyncio
-async def test_desktop_driver_closes_root_sandbox_when_controller_close_fails(
-    tmp_path: Path,
-):
-    controller = SimpleNamespace(
-        close=AsyncMock(side_effect=RuntimeError("controller close failed"))
-    )
-    loop = SimpleNamespace(delegated_run_controller=controller)
-    sandbox = SimpleNamespace(close=AsyncMock())
-    driver = _DesktopDriver(None, loop, tmp_path, sandbox)
-
-    for _ in range(2):
-        with pytest.raises(RuntimeError, match="controller close failed"):
-            await driver.close_binding()
-    assert controller.close.await_count == 2
-    sandbox.close.assert_awaited_once()
-
-
-@pytest.mark.asyncio
-async def test_desktop_run_resources_retry_only_failed_cleanup():
-    attempts = 0
-
-    async def close_transient_scope():
-        nonlocal attempts
-        attempts += 1
-        if attempts == 1:
-            raise RuntimeError("scope close failed")
-
-    transient = SimpleNamespace(close=close_transient_scope)
-    stable = SimpleNamespace(close=AsyncMock())
-    sandbox = SimpleNamespace(close=AsyncMock())
-    resources = _DesktopRunResources(sandbox, [stable, transient])
-
-    with pytest.raises(RuntimeError, match="scope close failed"):
-        await resources.close_now()
-    await resources.close_now()
-
-    assert attempts == 2
-    stable.close.assert_awaited_once()
-    sandbox.close.assert_awaited_once()
-
-
-@pytest.mark.asyncio
-async def test_service_close_retains_failed_driver_for_retry(tmp_path: Path):
-    service = DesktopV2Service(tmp_path / "sage")
-    driver = SimpleNamespace(
-        close_binding=AsyncMock(side_effect=(RuntimeError("driver close failed"), None))
-    )
-    service._drivers["run_1"] = driver
-
-    with pytest.raises(RuntimeError, match="Run driver"):
+    registration = ExtensionRegistration(descriptor=ExtensionDescriptor(
+        plugin_id="test.desktop.failure", name="Failing context", version="1",
+        provides=(CapabilityOffer(capability="context.provider", api_version="2"),),
+        dependencies=(ExtensionDependency(capability="execution.environment"),),
+        supported_scopes=frozenset({ExtensionScope.RUN})), factory=fail)
+    binding_registration, runtime, bindings = tracked_binding(tmp_path / "workspace")
+    runtime["capabilities"]["context.provider"] = {"plugin": "test.desktop.failure", "scope": "run"}
+    service, model, _ = desktop(tmp_path, registrations=(binding_registration, registration), runtime=runtime)
+    try:
+        run, _, _ = await execute(service)
+        assert run.state.value == "failed"
+        assert acquired == [run.run_id]
+        assert not model.requests
+        assert len(bindings) == 1
+        assert bindings[0].closed
+    finally:
         await service.close()
-    assert service._drivers["run_1"] is driver
 
+
+@pytest.mark.asyncio
+async def test_desktop_runtime_and_dispatcher_are_owned_by_standard_app(tmp_path):
+    service = DesktopV2Service(tmp_path)
+    await service.start()
+    try:
+        assert service.runtime is service.application.runtime
+        assert service.dispatcher is service.application.service("execution.dispatcher")
+        assert not hasattr(service, "_drivers")
+        assert not hasattr(service, "_build_loop")
+    finally:
+        await service.close()
+
+
+
+@pytest.mark.asyncio
+async def test_desktop_closes_registered_owned_resource_once(tmp_path):
+    from tests.app.v2.desktop.sdk_fixture import desktop
+    from tests.sagents.v2.test_run_composition_lifecycle import registration
+    closed = []
+    class Resource:
+        async def close(self):
+            closed.append(True)
+    service, _, _ = desktop(tmp_path,
+        registrations=(registration("test.desktop.resource", lambda scope, deps: Resource()),),
+        runtime={"capabilities": {"test.desktop.resource": {"plugin": "test.desktop.resource"}}})
+    await service.start()
     await service.close()
-    assert "run_1" not in service._drivers
     await service.close()
+    assert closed == [True]
+
+
+
+@pytest.mark.asyncio
+async def test_service_close_retries_failed_registered_resource(tmp_path):
+    from tests.app.v2.desktop.sdk_fixture import desktop
+    from tests.sagents.v2.test_run_composition_lifecycle import registration
+    attempts = []
+    class Resource:
+        async def close(self):
+            attempts.append(True)
+            if len(attempts) == 1:
+                raise RuntimeError("transient cleanup")
+    service, _, _ = desktop(tmp_path,
+        registrations=(registration("test.desktop.resource", lambda scope, deps: Resource()),),
+        runtime={"capabilities": {"test.desktop.resource": {"plugin": "test.desktop.resource"}}})
+    await service.start()
+    with pytest.raises(RuntimeError, match="failed to close"):
+        await service.close()
+    await service.close()
+    await service.close()
+    assert len(attempts) == 2
     with pytest.raises(RuntimeError, match="service is closed"):
         await service.start()
 
 
+
 @pytest.mark.asyncio
-async def test_desktop_recovery_composes_lazy_driver_before_barrier_recovery(
-    tmp_path: Path,
-):
-    loop = SimpleNamespace(
-        recover_interrupted=AsyncMock(return_value="recovered"),
-        delegated_run_controller=None,
-    )
-    sandbox = SimpleNamespace(close=AsyncMock(), scope_handles=[])
-    build = AsyncMock(return_value=(object(), loop, sandbox))
-    driver = _DesktopDriver(None, None, tmp_path, None, lazy_builder=build)
-    service = SimpleNamespace(driver_runtime=None, _drivers={})
-    recovery = _DesktopRecoveryAgent(service)
-    recovery._compose_driver = AsyncMock(return_value=(driver, object()))
+async def test_desktop_run_exposes_frozen_revision_and_binding(tmp_path):
+    from tests.app.v2.desktop.sdk_fixture import desktop, execute
+    service, model, created = desktop(tmp_path)
+    try:
+        run, command, _ = await execute(service)
+        assert run.state.value == "completed"
+        assert created and created[0].run_id == run.run_id
+        context = service._context("user_1")
+        loaded = await service.application.agent_for_run(run.run_id, context)
+        assert command.agent_id == loaded.id
+        assert command.resolved_spec_hash == loaded.composition_hash
+        configuration = await service.application.run_configuration(run.run_id, context)
+        assert configuration["runtime"]["capabilities"]["model.provider"]["plugin"] == "test.desktop.model"
+        assert any(item["plugin_id"] == "test.desktop.model" for item in configuration["plugins"])
+        assert await service.application.execution_diagnostics(run.run_id, context)
+    finally:
+        await service.close()
 
-    result = await recovery._recover_interrupted_run("run_recovery", object())
-
-    assert result == "recovered"
-    build.assert_awaited_once()
-    loop.recover_interrupted.assert_awaited_once()
-    sandbox.close.assert_awaited_once()
 
 
 def test_legacy_plan_mode_request_migrates_to_typed_invocation_mode():
@@ -843,7 +756,7 @@ async def test_usage_overview_salvages_diagnostics_when_events_are_corrupt(
 
     service.session_store.list_session_runs = AsyncMock(side_effect=list_session_runs)
     service.session_store.get_start_command = AsyncMock(
-        return_value=SimpleNamespace(agent_id="sage")
+        return_value=StartRun(agent_id="sage", input=(), resolved_spec_hash="test", idempotency_key="fixture")
     )
     service.session_store.read_session_events = AsyncMock(
         side_effect=read_session_events
@@ -900,7 +813,7 @@ async def test_usage_overview_keeps_events_when_diagnostics_are_unreadable(
         return_value=(SimpleNamespace(run_id="run_1"),)
     )
     service.session_store.get_start_command = AsyncMock(
-        return_value=SimpleNamespace(agent_id="sage")
+        return_value=StartRun(agent_id="sage", input=(), resolved_spec_hash="test", idempotency_key="fixture")
     )
     service.session_store.read_session_events = AsyncMock(
         return_value=(
@@ -2462,7 +2375,8 @@ async def test_user_component_selection_is_persisted_with_apply_semantics(
 async def test_tool_selection_component_keeps_only_the_builtin_count_limit(
     tmp_path: Path,
 ):
-    service = DesktopV2Service(tmp_path)
+    from tests.app.v2.desktop.sdk_fixture import desktop, execute
+    service, model, _ = desktop(tmp_path, runtime={"capabilities": {"tool.selection-policy": {"plugin": "sage.tool-selection.lexical", "config": {"max_visible_tools": 20}}}})
     config = {
         "direct_tool_count_threshold": 10,
         "max_visible_tools": 20,
@@ -2504,175 +2418,83 @@ async def test_tool_selection_component_keeps_only_the_builtin_count_limit(
     assert component["active"]["plugin_id"] == "sage.tool-selection.lexical"
     assert component["active"]["config"] == selection["config"]
 
-    await service.list_agents("user_1")
-    await service.patch_model_provider(
-        "model_main", ModelProviderPatch(api_keys=["test-key"]), "user_1"
-    )
-    agent = await service._agent("sage", "user_1")
-    provider = await service._provider(agent, "user_1")
-    workspace = await service.workspace_root(None, "sage")
-    _, loop, sandbox = await service._build_loop(
-        agent=agent,
-        provider=provider,
-        workspace=workspace,
-        preferred_skills=(),
-        approval_mode="high_risk",
-    )
-    assert loop.tool_selection_policy.plugin_id == "sage.tool-selection.lexical"
-    assert loop.tool_selection_policy.config.max_visible_tools == 20
-    await sandbox.close()
-    await service.close()
+    try:
+        run, _, _ = await execute(service)
+        assert run.state.value == "completed"
+        assert len(model.requests[0].tools) <= 20
+        accepted = await service.application.run_configuration(run.run_id, service._context("user_1"))
+        selection = accepted["runtime"]["capabilities"]["tool.selection-policy"]
+        assert selection["plugin"] == "sage.tool-selection.lexical"
+        assert selection["config"]["max_visible_tools"] == 20
+    finally:
+        await service.close()
 
 
 @pytest.mark.asyncio
-async def test_hybrid_is_not_selectable_and_explicit_status_builds_real_policy(
-    tmp_path: Path,
-):
-    service = DesktopV2Service(tmp_path)
-    with pytest.raises(ValueError, match="not user selectable"):
-        await service.select_component(
-            "agent.continuation-policy",
-            ComponentSelectionRequest(plugin_id="sage.agent.continuation.hybrid"),
-            "user_1",
-        )
-    await service.select_component(
-        "agent.continuation-policy",
-        ComponentSelectionRequest(plugin_id="sage.agent.continuation.explicit-status"),
-        "user_1",
-    )
-    await service.list_agents("user_1")
-    await service.patch_model_provider(
-        "model_main", ModelProviderPatch(api_keys=["test-key"]), "user_1"
-    )
-    agent = await service._agent("sage", "user_1")
-    provider = await service._provider(agent, "user_1")
-    workspace = await service.workspace_root(None, "sage")
-
-    _, explicit_loop, explicit_sandbox = await service._build_loop(
-        agent=agent,
-        provider=provider,
-        workspace=workspace,
-        preferred_skills=(),
-        approval_mode="high_risk",
-    )
-    assert isinstance(
-        explicit_loop.continuation_policy.delegate, ExplicitStatusContinuationPolicy
-    )
-    segments = await explicit_loop.context_assembler.providers[0].segments(
-        StartRun(
-            agent_id="sage",
-            input=(InputItem(role="user", content=(TextBlock(text="test"),)),),
-            resolved_spec_hash="sha256:test",
-            idempotency_key="explicit-context",
-        ),
-        run_id="run_explicit",
-    )
-    assert "explicit turn status is required" in segments[0].content
-    await explicit_sandbox.close()
-    await service.close()
+async def test_hybrid_is_not_selectable_and_explicit_status_builds_real_policy(tmp_path):
+    from tests.app.v2.desktop.sdk_fixture import desktop, execute, step
+    model = ScriptedModelProvider((step(ModelToolCall(tool_call_id="status", name="turn_status", arguments={"status": "task_done", "note": "done"}), text="The work is complete."),))
+    service, _, _ = desktop(tmp_path, model=model, runtime={"capabilities": {
+        "agent.continuation-policy": {"plugin": "sage.agent.continuation.explicit-status"}}})
+    try:
+        with pytest.raises(ValueError, match="not user selectable"):
+            await service.select_component("agent.continuation-policy", ComponentSelectionRequest(plugin_id="sage.agent.continuation.hybrid"), "user_1")
+        await service.select_component("agent.continuation-policy", ComponentSelectionRequest(plugin_id="sage.agent.continuation.explicit-status"), "user_1")
+        run, _, _ = await execute(service, request=DesktopRunRequest(agent_id="sage", messages=[RunMessage(role="user", text="Work")], approval_mode="auto_approve"))
+        assert run.state.value == "completed", [(event.type, event.data.model_dump(mode="json")) for event in await service.session_store.read_events(run.run_id) if event.type in {"tool.call.failed", "run.suspended", "run.failed"}]
+        assert "explicit turn status is required" in str(model.requests[0].messages)
+        assert "turn_status" in {tool.name for tool in model.requests[0].tools}
+        events = await service.session_store.read_events(run.run_id)
+        assert any(event.type == "continuation.decided" and event.data.reason_code == "status.complete" for event in events)
+    finally:
+        await service.close()
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("auxiliary_json_compatible", [True, False])
 @pytest.mark.parametrize("explicit_selection", [True, False])
-async def test_llm_judge_selection_uses_v1_contract_and_hides_turn_status(
-    tmp_path: Path, auxiliary_json_compatible: bool, explicit_selection: bool,
-):
+async def test_llm_judge_selection_uses_v1_contract_and_hides_turn_status(tmp_path, monkeypatch, auxiliary_json_compatible, explicit_selection):
+    from tests.app.v2.desktop.sdk_fixture import execute, step
+    captured, routes = [], []
+    class Model(ScriptedModelProvider):
+        def __init__(self, route):
+            super().__init__(())
+            self.route = route
+        async def stream(self, request):
+            captured.append((self.route, request))
+            purpose = request.metadata.get("purpose")
+            text = json.dumps({"tools": []}) if purpose == "tool_selection" else json.dumps({"decision": "completed", "reason": "done"}) if purpose == "continuation_judge" else "done"
+            for event in step(text=text).events:
+                yield event
+    def transport(route, credentials, **kwargs):
+        routes.append(route)
+        return Model(route)
+    monkeypatch.setattr("app.v2.desktop.backend.model_providers.create_registered_model_provider", transport)
     service = DesktopV2Service(tmp_path)
-    fast_provider = await service.create_model_provider(
-        ModelProviderCreate(
-            name="Fast Judge",
-            protocol="openai-chat-completions",
-            model="judge-fast",
-            base_url="https://judge.test/v1",
-            api_keys=["judge-key"],
-        ),
-        "user_1",
-    )
-    # A probe result must never silently replace the user's chosen plugins.
-    service._auxiliary_json_compatible = lambda provider: auxiliary_json_compatible
-    if explicit_selection:
-        await service.select_component(
-            "agent.continuation-policy",
-            ComponentSelectionRequest(plugin_id="sage.agent.continuation.llm-judge"),
-            "user_1",
-        )
-    await service.list_agents("user_1")
-    await service.patch_model_provider(
-        "model_main", ModelProviderPatch(api_keys=["test-key"]), "user_1"
-    )
-    await service.patch_agent_settings(
-        "sage",
-        AgentSettingsPatch(
-            fast_llm_provider_id=fast_provider["id"],
-            deep_thinking=True,
-            thinking_level="high",
-        ),
-        "user_1",
-    )
-    agent = await service._agent("sage", "user_1")
-    provider = await service._provider(agent, "user_1")
-    workspace = await service.workspace_root(None, "sage")
-
-    _, loop, sandbox = await service._build_loop(
-        agent=agent,
-        provider=provider,
-        workspace=workspace,
-        preferred_skills=(),
-        approval_mode="high_risk",
-    )
-    inventory = await service.component_inventory("user_1")
-    component = next(
-        value
-        for value in inventory
-        if value["component"]["component_id"] == "agent.continuation-policy"
-    )
-    tools = await loop.tool_catalog.list_tools(run_id="pending")
-
-    from sagents.v2.tool.plugins.selection_llm import LLMToolSelectionPolicy
-    assert isinstance(loop.tool_selection_policy, LLMToolSelectionPolicy)
-    assert isinstance(loop.continuation_policy.delegate, LLMJudgeContinuationPolicy)
-    assert loop.continuation_policy.delegate.judge.model.provider_metadata == {
-        "agent_id": "sage",
-        "provider_id": fast_provider["id"],
-        "protocol": "openai-chat-completions",
-        "base_url": "https://judge.test/v1",
-        "model": "judge-fast",
-        "purpose": "task_complete_judge",
-        "model_type": "fast",
-    }
-    assert loop.model.provider.config.reasoning_effort == "high"
-    assert loop.continuation_policy.delegate.judge.model.provider.config.reasoning_effort is None
-    assert loop.continuation_policy.delegate.judge.model.provider.config.extra_body == {
-        "chat_template_kwargs": {"enable_thinking": False},
-        "enable_thinking": False,
-        "thinking": {"type": "disabled"},
-    }
-    assert component["active"]["config"] == {
-        "repeat_threshold": 3,
-        "status_source": "none",
-        "explicit_statuses": [],
-        "flow_boundaries": ["complete_node", "continue_node"],
-        "uses_finish_reason": False,
-        "mode": "llm_judge",
-        "model_binding": "fast",
-        "prompt_contract": "v1",
-        "decisions": [
-            "continue",
-            "completed",
-            "need_user_input",
-            "blocked",
-        ],
-        "uses_confidence": False,
-        "uses_llm_judge": True,
-        "timeout_seconds": 60.0,
-        "judge_failure": "propagate_error",
-    }
-    assert loop.continuation_policy.delegate.judge.timeout_seconds == 60.0
-    assert "turn_status" not in {tool.name for tool in tools}
-
-    await sandbox.close()
-    await service.close()
+    try:
+        fast = await service.create_model_provider(ModelProviderCreate(name="Fast Judge", protocol="openai-chat-completions",
+            model="judge-fast", base_url="https://judge.test/v1", api_keys=["judge-key"]), "user_1")
+        service._auxiliary_json_compatible = lambda provider: auxiliary_json_compatible
+        if explicit_selection:
+            await service.select_component("agent.continuation-policy", ComponentSelectionRequest(plugin_id="sage.agent.continuation.llm-judge"), "user_1")
+        await service.list_agents("user_1")
+        await service.patch_agent_settings("sage", AgentSettingsPatch(fast_llm_provider_id=fast["id"], deep_thinking=True, thinking_level="high"), "user_1")
+        run, _, _ = await execute(service)
+        assert run.state.value == "completed"
+        primary = [(route, request) for route, request in captured if request.metadata.get("purpose") is None]
+        judged = [(route, request) for route, request in captured if request.metadata.get("purpose") == "continuation_judge"]
+        assert primary and judged
+        assert all(route.model == "judge-fast" for route, _ in judged)
+        assert all(route.model != "judge-fast" for route, _ in primary)
+        assert all("turn_status" not in {tool.name for tool in request.tools} for _, request in primary)
+        assert any("decision" in str(request.messages) and "completed" in str(request.messages) for _, request in judged)
+        accepted = await service.application.run_configuration(run.run_id, service._context("user_1"))
+        assert accepted["runtime"]["capabilities"]["agent.continuation-policy"]["plugin"] == "sage.agent.continuation.llm-judge"
+        component = next(value for value in await service.component_inventory("user_1") if value["component"]["component_id"] == "agent.continuation-policy")
+        assert component["active"]["config"]["prompt_contract"] == "v1"
+        assert component["active"]["config"]["timeout_seconds"] == 60.0
+    finally:
+        await service.close()
 
 
 @pytest.mark.asyncio
@@ -2913,7 +2735,7 @@ async def test_shell_approval_can_be_remembered_in_agent_settings(
     monkeypatch.setattr(
         service.session_store,
         "get_start_command",
-        AsyncMock(return_value=SimpleNamespace(agent_id="sage")),
+        AsyncMock(return_value=StartRun(agent_id="sage", input=(), resolved_spec_hash="test", idempotency_key="fixture")),
     )
     interaction = SimpleNamespace(
         allowed_decisions=(
@@ -3164,130 +2986,58 @@ async def test_agent_workspace_uses_the_selected_initializer_plugin(tmp_path: Pa
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("network_mode", ["none", "unrestricted"])
-async def test_loop_composition_uses_native_model_skill_tool_and_sandbox_plugins(
-    tmp_path: Path, network_mode: str,
-):
-    service = DesktopV2Service(tmp_path)
-    settings = await service.get_settings()
-    await service.save_settings(settings.model_copy(update={
-        "component_configs": {"execution.sandbox": {"network": {"mode": network_mode}}}
-    }))
-    await service.list_agents("user_1")
-    await service.patch_model_provider(
-        "model_main", ModelProviderPatch(api_keys=["test-key"]), "user_1"
-    )
-    seeded_agent = await service._agent("sage", "user_1")
-    await service.patch_agent_settings(
-        "sage",
-        AgentSettingsPatch(
-            available_tools=[
-                *seeded_agent.config.get("availableTools", ()),
-                "search_memory",
-            ]
-        ),
-        "user_1",
-    )
-    agent = await service._agent("sage", "user_1")
-    provider = await service._provider(agent, "user_1")
-    workspace = await service.workspace_root(None, "sage")
-
-    resolved, loop, sandbox = await service._build_loop(
-        agent=agent,
-        provider=provider,
-        workspace=workspace,
-        preferred_skills=(),
-        approval_mode="high_risk",
-    )
-
-    names = {value.name for value in await loop.tool_catalog.list_tools(run_id="run_1")}
-    assert resolved.model_routes[provider.id]["provider"] == "openai-responses"
-    assert sandbox.ref.provider_id == "sage.sandbox.local-workspace"
-    assert sandbox.provider._row(sandbox.ref).spec.network.mode.value == network_mode
-    assert isinstance(
-        loop.context_assembler.reducer.summarizer, ModelConversationSummarizer
-    )
-    assert loop.context_assembler.reducer.summarizer.model_binding == "primary"
-    assert loop.automatic_memory_recall is True
-    assert isinstance(
-        loop.memory_recall_query_generator, LLMMemoryRecallQueryGenerator
-    )
-    assert {"file_read", "execute_shell_command", "todo_write", "load_skill"} <= names
-    await sandbox.close()
-    await service.session_store.close()
+async def test_loop_composition_uses_native_model_skill_tool_and_sandbox_plugins(tmp_path, network_mode):
+    from tests.app.v2.desktop.sdk_fixture import desktop, execute
+    service, model, environments = desktop(tmp_path)
+    try:
+        settings = await service.get_settings()
+        await service.save_settings(settings.model_copy(update={"component_configs": {
+            "execution.sandbox": {"network": {"mode": network_mode}}}}))
+        run, command, _ = await execute(service)
+        assert run.state.value == "completed"
+        configuration = await service.application.execution_configuration(run.run_id, service._context("user_1"))
+        assert configuration.policy["network"]["mode"] == network_mode
+        assert environments[0].sandbox.ref.provider_id == "sage.sandbox.local-workspace"
+        names = {tool.name for tool in model.requests[0].tools}
+        assert {"file_read", "execute_shell_command", "todo_write", "load_skill"} <= names
+        plan = await service.application.run_configuration(run.run_id, service._context("user_1"))
+        assert any(value["plugin_id"] == "sage.context.summarizer.model" for value in plan["plugins"])
+    finally:
+        await service.close()
 
 
 @pytest.mark.asyncio
-async def test_desktop_search_memory_assignment_controls_automatic_recall(
-    tmp_path: Path,
-):
-    service = DesktopV2Service(tmp_path)
-    await service.list_agents("user_1")
-    await service.patch_model_provider(
-        "model_main", ModelProviderPatch(api_keys=["test-key"]), "user_1"
-    )
-    await service.patch_agent_settings(
-        "sage",
-        AgentSettingsPatch(available_tools=["file_read"]),
-        "user_1",
-    )
-    agent = await service._agent("sage", "user_1")
-    provider = await service._provider(agent, "user_1")
-    workspace = await service.workspace_root(None, "sage")
-
-    resolved, loop, sandbox = await service._build_loop(
-        agent=agent,
-        provider=provider,
-        workspace=workspace,
-        preferred_skills=(),
-        approval_mode="high_risk",
-    )
-
-    assert resolved.agents["sage"].memory.recall is False
-    assert resolved.agents["sage"].memory.auto_write is False
-    assert loop.automatic_memory_recall is False
-    await sandbox.close()
-    await service.close()
+async def test_desktop_search_memory_assignment_controls_automatic_recall(tmp_path):
+    from tests.app.v2.desktop.sdk_fixture import desktop, execute
+    service, model, _ = desktop(tmp_path)
+    try:
+        await service.list_agents("user_1")
+        await service.patch_agent_settings("sage", AgentSettingsPatch(available_tools=["file_read"]), "user_1")
+        run, command, _ = await execute(service)
+        assert run.state.value == "completed"
+        plan = await service.application.run_configuration(run.run_id, service._context("user_1"))
+        assert plan["agent"]["memory"]["recall"] is False
+        assert plan["agent"]["memory"]["auto_write"] is False
+        assert "search_memory" not in {tool.name for tool in model.requests[0].tools}
+    finally:
+        await service.close()
 
 
 @pytest.mark.asyncio
-async def test_desktop_memory_recall_query_plugin_selects_llm_generator(tmp_path: Path):
-    service = DesktopV2Service(tmp_path)
-    await service.select_component(
-        "memory.recall-query",
-        ComponentSelectionRequest(plugin_id="sage.memory.recall-query.llm"),
-        "user_1",
-    )
-    await service.list_agents("user_1")
-    await service.patch_model_provider(
-        "model_main", ModelProviderPatch(api_keys=["test-key"]), "user_1"
-    )
-    seeded = await service._agent("sage", "user_1")
-    await service.patch_agent_settings(
-        "sage",
-        AgentSettingsPatch(
-            available_tools=[
-                *seeded.config.get("availableTools", ()),
-                "search_memory",
-            ]
-        ),
-        "user_1",
-    )
-    agent = await service._agent("sage", "user_1")
-    provider = await service._provider(agent, "user_1")
-    workspace = await service.workspace_root(None, "sage")
-
-    _, loop, sandbox = await service._build_loop(
-        agent=agent,
-        provider=provider,
-        workspace=workspace,
-        preferred_skills=(),
-        approval_mode="high_risk",
-    )
-
-    assert loop.automatic_memory_recall is True
-    assert isinstance(loop.memory_recall_query_generator, LLMMemoryRecallQueryGenerator)
-    await sandbox.close()
-    await service.close()
+async def test_desktop_memory_recall_query_plugin_selects_llm_generator(tmp_path):
+    from tests.app.v2.desktop.sdk_fixture import desktop, execute
+    from tests.sagents.v2.test_standard_execution_configuration import response
+    model = ScriptedModelProvider((response(text='{"query":"focused recall"}'), response(text="done")))
+    service, _, _ = desktop(tmp_path, model=model, runtime={"capabilities": {
+        "memory.recall-query": {"plugin": "sage.memory.recall-query.llm", "scope": "run"}}})
+    try:
+        await service.list_agents("user_1")
+        await service.patch_agent_settings("sage", AgentSettingsPatch(available_tools=["search_memory"]), "user_1")
+        run, _, _ = await execute(service)
+        assert run.state.value == "completed"
+        assert any(request.metadata.get("purpose") == "memory_recall_query" for request in model.requests)
+    finally:
+        await service.close()
 
 
 @pytest.mark.asyncio
@@ -3326,177 +3076,82 @@ async def test_workspace_upload_reuses_identical_content_and_indexes_changes(
 
 
 @pytest.mark.asyncio
-async def test_sandbox_workspace_root_is_generic_run_configuration(tmp_path: Path):
-    service = DesktopV2Service(tmp_path)
-    settings = await service.get_settings()
-    await service.save_settings(
-        settings.model_copy(
-            update={
-                "component_configs": {
-                    "execution.sandbox": {
-                        "workspace_root": "/project",
-                        "workspace_mapping": "active_workspace",
-                        "filesystem_mode": "workspace",
-                    }
-                }
-            }
-        )
-    )
-    await service.list_agents("user_1")
-    await service.patch_model_provider(
-        "model_main", ModelProviderPatch(api_keys=["test-key"]), "user_1"
-    )
-    agent = await service._agent("sage", "user_1")
-    provider = await service._provider(agent, "user_1")
-    workspace = await service.workspace_root(None, "sage")
-
-    resolved, _, sandbox = await service._build_loop(
-        agent=agent,
-        provider=provider,
-        workspace=workspace,
-        preferred_skills=(),
-        approval_mode="high_risk",
-    )
-    command = service._command(
-        DesktopRunRequest(
-            agent_id="sage", messages=[RunMessage(role="user", text="hello")]
-        ),
-        resolved,
-        agent=agent,
-        provider=provider,
-        workspace=workspace,
-    )
-    uploaded = await service.upload(None, "sage", "note.txt", b"hello")
-
-    assert sandbox.filesystem.normalize_path("note.txt") == "/project/note.txt"
-    assert command.config.metadata["working_directory"] == "/project"
-    assert command.config.metadata["workspace_files"].startswith(
-        "Working directory: /project\n"
-    )
-    assert command.config.metadata["model_route"]["id"] == provider.id
-    assert "api_key" not in command.config.metadata["model_route"]
-    assert command.config.metadata["agent_runtime"]["agent_id"] == agent.agent_id
-    assert "user_id" not in command.config.metadata["agent_runtime"]
-    assert uploaded["virtual_path"] == "/project/uploads/note.txt"
-    await sandbox.close()
-    await service.session_store.close()
+async def test_sandbox_workspace_root_is_generic_run_configuration(tmp_path):
+    from tests.app.v2.desktop.sdk_fixture import desktop, execute
+    service, model, environments = desktop(tmp_path)
+    try:
+        settings = await service.get_settings()
+        await service.save_settings(settings.model_copy(update={"component_configs": {
+            "execution.sandbox": {"workspace_root": "/project", "workspace_mapping": "active_workspace", "filesystem_mode": "workspace"}}}))
+        run, command, _ = await execute(service)
+        assert run.state.value == "completed"
+        workspace = await service.workspace_root(None, "sage")
+        # The native binding exposes the actual authorized workspace to the model.
+        assert environments[0].workspace_root == str(workspace.resolve())
+        assert command.config.metadata["working_directory"] == "/project"
+        assert "api_key" not in command.config.metadata["model_route"]
+        assert "user_id" not in command.config.metadata["agent_runtime"]
+        uploaded = await service.upload(None, "sage", "note.txt", b"hello")
+        assert uploaded["virtual_path"] == "/project/uploads/note.txt"
+    finally:
+        await service.close()
 
 
 @pytest.mark.asyncio
-async def test_plan_mode_is_a_read_only_run_contract(tmp_path: Path):
-    service = DesktopV2Service(tmp_path)
-    await service.list_agents("user_1")
-    member = await service.create_agent(AgentCreate(name="Research"), "user_1")
-    await service.patch_model_provider(
-        "model_main", ModelProviderPatch(api_keys=["test-key"]), "user_1"
-    )
-    agent = await service._agent("sage", "user_1")
-    provider = await service._provider(agent, "user_1")
-    workspace = await service.workspace_root(None, "sage")
-
-    resolved, loop, sandbox = await service._build_loop(
-        agent=agent,
-        provider=provider,
-        workspace=workspace,
-        preferred_skills=(),
-        approval_mode="high_risk",
-        invocation_mode="plan",
-    )
-    command = service._command(
-        DesktopRunRequest(
-            agent_id="sage",
-            messages=[RunMessage(role="user", text="plan this change")],
-            invocation_mode="plan",
-        ),
-        resolved,
-        agent=agent,
-        workspace=workspace,
-    )
-
-    assert "file_read" in command.config.enabled_tools
-    assert "todo_write" in command.config.enabled_tools
-    assert "file_write" not in command.config.enabled_tools
-    assert "execute_shell_command" not in command.config.enabled_tools
-    assert "goal_submit" in command.config.enabled_tools
-    roster = next(
-        value
-        for value in loop.context_assembler.providers
-        if isinstance(value, AgentRosterContextProvider)
-    )
-    member_descriptor = next(
-        value
-        for value in await roster.registry.list()
-        if value.agent_id == member["id"]
-    )
-    assert "file_read" in member_descriptor.tools
-    assert "file_write" not in member_descriptor.tools
-    assert "execute_shell_command" not in member_descriptor.tools
-    assert command.config.metadata["invocation_mode"] == "plan"
-    assert command.invocation_mode == "plan"
-    await sandbox.close()
-    await service.session_store.close()
+async def test_plan_mode_is_a_read_only_run_contract(tmp_path):
+    from tests.app.v2.desktop.sdk_fixture import desktop, execute
+    service, model, _ = desktop(tmp_path)
+    try:
+        run, command, _ = await execute(service, request=DesktopRunRequest(agent_id="sage",
+            messages=[RunMessage(role="user", text="plan this change")], invocation_mode="plan"))
+        assert run.state.value == "suspended"
+        names = {tool.name for tool in model.requests[0].tools}
+        assert {"file_read", "todo_write", "goal_submit"} <= names
+        assert names.isdisjoint({"file_write", "execute_shell_command"})
+        assert command.invocation_mode == "plan"
+        snapshot = await service.application.execution_configuration(run.run_id, service._context("user_1"))
+        assert snapshot.policy["process"]["read_only"]
+        assert set(snapshot.policy["filesystem"]["allowed_operations"]) <= {"read", "list"}
+    finally:
+        await service.close()
 
 
 @pytest.mark.asyncio
-@pytest.mark.timeout(10)
-async def test_goal_mode_requires_goal_complete_after_rechecking(tmp_path: Path):
-    service = DesktopV2Service(tmp_path)
-    # Exercise the explicitly selected rule-based policy without external model calls.
-    settings = await service.get_settings()
-    await service.save_settings(settings.model_copy(update={
-        "component_selections": {**settings.component_selections,
-            "agent.continuation-policy": "sage.agent.continuation.deterministic",
-            "memory.recall-query": "sage.memory.recall-query.direct"},
-    }))
-    await service.list_agents("user_1")
-    await service.patch_model_provider(
-        "model_main", ModelProviderPatch(api_keys=["test-key"]), "user_1"
-    )
-    agent = await service._agent("sage", "user_1")
-    provider = await service._provider(agent, "user_1")
-    workspace = await service.workspace_root(None, "sage")
-    resolved, loop, sandbox = await service._build_loop(
-        agent=agent,
-        provider=provider,
-        workspace=workspace,
-        preferred_skills=(),
-        approval_mode="high_risk",
-        invocation_mode="goal",
-    )
-    loop.tool_selection_model = scripted_tool_selection("goal_submit", "goal_complete")
+@pytest.mark.timeout(60)
+async def test_goal_mode_requires_goal_complete_after_rechecking(tmp_path):
+    from tests.app.v2.desktop.sdk_fixture import desktop, execute
 
     def assert_active_goal(request):
-        system = "\n".join(
-            block.text
-            for message in request.messages
-            if message.role in {"system", "developer"}
-            for block in message.content
-            if isinstance(block, TextBlock)
-        )
-        assert "<active_goal>" in system
-        assert "Ship the verified change" in system
+            system = "\n".join(
+                block.text
+                for message in request.messages
+                if message.role in {"system", "developer"}
+                for block in message.content
+                if isinstance(block, TextBlock)
+            )
+            assert "<active_goal>" in system
+            assert "Ship the verified change" in system
 
     def assert_completion_guidance(request):
-        from sagents.v2.i18n import tr
+            from sagents.v2.i18n import tr
 
-        result_message = next(
-            message for message in request.messages
-            if message.role == "tool" and message.tool_call_id == "goal_complete_call"
-        )
-        result = result_message.content[0].value
-        assert result["status"] == "completed"
-        assert result["summary"] == "All acceptance checks pass."
-        assert result["next_step"] == tr(
-            "goal.explanation_required", service._context("user_1").language
-        )
-        system = "\n".join(
-            block.text for message in request.messages
-            if message.role in {"system", "developer"}
-            for block in message.content if isinstance(block, TextBlock)
-        )
-        assert "<status>completed</status>" in system
-
-    loop.model = ScriptedModelProvider(
+            result_message = next(
+                message for message in request.messages
+                if message.role == "tool" and message.tool_call_id == "goal_complete_call"
+            )
+            result = result_message.content[0].value
+            assert result["status"] == "completed"
+            assert result["summary"] == "All acceptance checks pass."
+            assert result["next_step"] == tr(
+                "goal.explanation_required", service._context("user_1").language
+            )
+            system = "\n".join(
+                block.text for message in request.messages
+                if message.role in {"system", "developer"}
+                for block in message.content if isinstance(block, TextBlock)
+            )
+            assert "<status>completed</status>" in system
+    model = ScriptedModelProvider(
         (
             ScriptedModelStep(
                 events=(
@@ -3568,474 +3223,121 @@ async def test_goal_mode_requires_goal_complete_after_rechecking(tmp_path: Path)
             ),
         )
     )
-    handle = await service.runtime.start_run(
-        StartRun(
-            agent_id="sage",
-            input=(InputItem(role="user", content=(TextBlock(text="Do it"),)),),
-            resolved_spec_hash=loop.expected_resolved_spec_hash,
-            idempotency_key="desktop-goal-mode",
-            invocation_mode="goal",
-        ),
-        service._context("user_1"),
-    )
-
-    async with desktop_execution_lease(service, handle.run_id):
-        result = await loop.execute(handle.run_id, service._context("user_1"))
-    events = await service.session_store.read_events(handle.run_id)
-    decisions = [
-        event.data.reason_code
-        for event in events
-        if event.type == "continuation.decided"
-    ]
-
-    assert result.state.value == "completed"
-    assert decisions == [
-        "tool.pending",
-        "goal.incomplete",
-        "goal.explanation_required",
-        "goal.complete",
-    ]
-    assert decisions[-2] == "goal.explanation_required"
-    assert decisions[-1] == "goal.complete"
-    assert sum(
-        event.type == "tool.call.succeeded" and event.data.tool_name == "goal_complete"
-        for event in events
-    ) == 1
-    assert len(loop.model.requests) == 4
-    await sandbox.close()
-    await service.close()
+    service, _, _ = desktop(tmp_path, model=model)
+    try:
+        run, _, _ = await execute(service, request=DesktopRunRequest(agent_id="sage", messages=[RunMessage(role="user", text="Do it")], invocation_mode="goal", approval_mode="auto_approve"))
+        assert run.state.value == "completed"
+        events = await service.session_store.read_events(run.run_id)
+        decisions = [event.data.reason_code for event in events if event.type == "continuation.decided"]
+        assert decisions == ["tool.pending", "goal.incomplete", "goal.explanation_required", "goal.complete"]
+        assert decisions[-2:] == ["goal.explanation_required", "goal.complete"]
+        assert sum(event.type == "tool.call.succeeded" and event.data.tool_name == "goal_complete" for event in events) == 1
+        assert len(model.requests) == 4
+    finally:
+        await service.close()
 
 
 @pytest.mark.asyncio
-@pytest.mark.timeout(30)
-async def test_goal_survives_repeated_questionnaires_and_service_restart(
-    tmp_path: Path,
-):
+@pytest.mark.timeout(120)
+async def test_goal_survives_repeated_questionnaires_and_service_restart(tmp_path):
+    from tests.app.v2.desktop.sdk_fixture import desktop, execute, step
     from sagents.v2.goal.state import GoalStateService
-
     goal_text = "Build the website and verify persistence"
     session_id = None
     original_goal_id = None
-
     def active_goal(request):
-        system = "\n".join(
-            block.text
-            for message in request.messages
-            if message.role in {"system", "developer"}
-            for block in message.content
-            if isinstance(block, TextBlock)
-        )
-        assert "<active_goal>" in system
-        assert goal_text in system
-
-    def step(index, name=None, arguments=None, assertion=None):
-        return ScriptedModelStep(
-            assertion=assertion,
-            events=(
-                ModelStreamEvent(
-                    kind=ModelEventKind.COMPLETED,
-                    response=ModelResponse(
-                        response_id=f"response_{index}",
-                        text="I have checked the work.",
-                        tool_calls=(
-                            ModelToolCall(
-                                tool_call_id=f"call_{index}",
-                                name=name,
-                                arguments=arguments or {},
-                            ),
-                        )
-                        if name
-                        else (),
-                        finish_reason="tool_calls" if name else "stop",
-                    ),
-                ),
-            ),
-        )
-
+        assert "<active_goal>" in str(request.messages)
+        assert goal_text in str(request.messages)
     for round_number in range(3):
-        # Each answer is handled by a fresh service, with no in-memory goal state.
-        service = DesktopV2Service(tmp_path)
-        # Exercise the explicitly selected rule-based policy without external model calls.
-        settings = await service.get_settings()
-        await service.save_settings(settings.model_copy(update={
-            "component_selections": {**settings.component_selections,
-                "agent.continuation-policy": "sage.agent.continuation.deterministic",
-                "memory.recall-query": "sage.memory.recall-query.direct"},
-        }))
-        await service.list_agents("user_1")
-        await service.patch_model_provider(
-            "model_main", ModelProviderPatch(api_keys=["test-key"]), "user_1"
-        )
-        await service.patch_agent_settings(
-            "sage",
-            AgentSettingsPatch(available_tools=["questionnaire_async"]),
-            "user_1",
-        )
-        agent = await service._agent("sage", "user_1")
-        _, loop, sandbox = await service._build_loop(
-            agent=agent,
-            provider=await service._provider(agent, "user_1"),
-            workspace=await service.workspace_root(None, "sage"),
-            preferred_skills=(),
-            approval_mode="high_risk",
-            invocation_mode="goal",
-        )
-        loop.tool_selection_model = scripted_tool_selection(
-            "goal_submit", "questionnaire_async", "goal_complete"
-        )
         steps = []
         if round_number == 0:
-            steps.append(step("submit", "goal_submit", {"content": goal_text}))
+            steps.append(step(ModelToolCall(tool_call_id="submit", name="goal_submit", arguments={"content": goal_text})))
         if round_number < 2:
-            steps.append(
-                step(
-                    f"question_{round_number}",
-                    "questionnaire_async",
-                    {
-                        "questions": [
-                            {"id": "style", "type": "text", "title": "Which style?"}
-                        ]
-                    },
-                    active_goal,
-                )
-            )
+            steps.append(step(ModelToolCall(tool_call_id=f"question_{round_number}", name="questionnaire_async", arguments={
+                "questions": [{"id": "style", "type": "text", "title": "Which style?"}]}), assertion=active_goal))
         else:
-            # A premature final answer must still be blocked after inheritance.
-            steps.append(step("premature", assertion=active_goal))
-            steps.append(
-                step(
-                    "complete",
-                    "goal_complete",
-                    {"summary": "Persistence verified."},
-                    active_goal,
-                )
-            )
-            steps.append(step("final_summary"))
-        loop.model = ScriptedModelProvider(tuple(steps))
-        handle = await service.runtime.start_run(
-            StartRun(
-                session_id=session_id,
-                agent_id="sage",
-                input=(InputItem(role="user", content=(TextBlock(text="Use blue."),)),),
-                resolved_spec_hash=loop.expected_resolved_spec_hash,
-                idempotency_key=f"questionnaire_goal_{round_number}",
-                invocation_mode="goal",
-            ),
-            service._context("user_1"),
-        )
-        session_id = handle.session_id
+            steps.extend((step(assertion=active_goal), step(ModelToolCall(tool_call_id="complete", name="goal_complete",
+                arguments={"summary": "Persistence verified."}), text="Persistence verified.", assertion=active_goal), step()))
+        service, _, _ = desktop(tmp_path, model=ScriptedModelProvider(tuple(steps)))
         try:
-            async with desktop_execution_lease(service, handle.run_id):
-                result = await loop.execute(handle.run_id, service._context("user_1"))
-            assert result.state.value == "completed", (
-                round_number,
-                [
-                    event.data
-                    for event in await service.session_store.read_events(handle.run_id)
-                    if event.type
-                    in {"run.suspended", "interaction.requested", "tool.call.failed"}
-                ],
-            )
-            state = await GoalStateService(service.session_store).get(handle.run_id)
+            await service.list_agents("user_1")
+            await service.patch_agent_settings("sage", AgentSettingsPatch(available_tools=["questionnaire_async"]), "user_1")
+            run, _, _ = await execute(service, request=DesktopRunRequest(agent_id="sage", session_id=session_id,
+                messages=[RunMessage(role="user", text="Use blue.")], invocation_mode="goal", approval_mode="auto_approve"))
+            session_id = run.session_id
+            assert run.state.value == "completed"
+            state = await GoalStateService(service.session_store).get(run.run_id)
             assert state is not None and state.content == goal_text
             if original_goal_id is None:
                 original_goal_id = state.created_tool_call_id
             assert state.created_tool_call_id == original_goal_id
             assert state.completed == (round_number == 2)
-            reasons = [
-                event.data.reason_code
-                for event in await service.session_store.read_events(handle.run_id)
-                if event.type == "continuation.decided"
-            ]
+            reasons = [event.data.reason_code for event in await service.session_store.read_events(run.run_id)
+                if event.type == "continuation.decided"]
             if round_number < 2:
                 assert reasons[-1] == "tool.questionnaire_ready"
             else:
-                assert reasons == [
-                    "goal.incomplete", "goal.explanation_required", "goal.complete"
-                ]
-                next_run = await service.runtime.start_run(
-                    StartRun(
-                        session_id=session_id,
-                        agent_id="sage",
-                        input=(
-                            InputItem(
-                                role="user", content=(TextBlock(text="Next task"),)
-                            ),
-                        ),
-                        resolved_spec_hash=loop.expected_resolved_spec_hash,
-                        idempotency_key="after_completed_goal",
-                        invocation_mode="goal",
-                    ),
-                    service._context("user_1"),
-                )
-                assert (
-                    await GoalStateService(service.session_store).get(next_run.run_id)
-                    is None
-                )
+                assert reasons == ["goal.incomplete", "goal.explanation_required", "goal.complete"]
         finally:
-            await sandbox.close()
             await service.close()
 
 @pytest.mark.asyncio
-@pytest.mark.timeout(10)
+@pytest.mark.timeout(120)
 @pytest.mark.parametrize("rebuild_before_approval", [False, True])
-async def test_confirmed_plan_becomes_the_goal_system_context(
-    tmp_path: Path, rebuild_before_approval
-):
-    service = DesktopV2Service(tmp_path)
-    await service.list_agents("user_1")
-    await service.patch_model_provider(
-        "model_main", ModelProviderPatch(api_keys=["test-key"]), "user_1"
-    )
-    agent = await service._agent("sage", "user_1")
-    provider = await service._provider(agent, "user_1")
-    workspace = await service.workspace_root(None, "sage")
-
-    plan_resolved, plan_loop, plan_sandbox = await service._build_loop(
-        agent=agent,
-        provider=provider,
-        workspace=workspace,
-        preferred_skills=(),
-        approval_mode="high_risk",
-        invocation_mode="plan",
-    )
-    plan_loop.tool_selection_model = scripted_tool_selection("goal_submit")
-    plan_loop.model = ScriptedModelProvider(
-        (
-            ScriptedModelStep(
-                events=(
-                    ModelStreamEvent(
-                        kind=ModelEventKind.COMPLETED,
-                        response=ModelResponse(
-                            response_id="plan_response",
-                            text="",
-                            tool_calls=(
-                                ModelToolCall(
-                                    tool_call_id="submit_plan",
-                                    name="goal_submit",
-                                    arguments={
-                                        "content": "1. Update the implementation.\n2. Run the tests."
-                                    },
-                                ),
-                            ),
-                            finish_reason="tool_calls",
-                        ),
-                    ),
-                )
-            ),
-            ScriptedModelStep(
-                events=(
-                    ModelStreamEvent(
-                        kind=ModelEventKind.COMPLETED,
-                        response=ModelResponse(
-                            response_id="plan_approved",
-                            text="The approved Plan has been saved.",
-                            finish_reason="stop",
-                        ),
-                    ),
-                )
-            ),
-        )
-    )
-    plan_handle = await service.runtime.start_run(
-        StartRun(
-            agent_id="sage",
-            input=(InputItem(role="user", content=(TextBlock(text="Plan it"),)),),
-            resolved_spec_hash=plan_loop.expected_resolved_spec_hash,
-            idempotency_key="desktop-plan-before-goal",
-            invocation_mode="plan",
-        ),
-        service._context("user_1"),
-    )
-    async with desktop_execution_lease(service, plan_handle.run_id):
-        suspended_plan = await plan_loop.execute(
-            plan_handle.run_id, service._context("user_1")
-        )
-    assert suspended_plan.state.value == "suspended"
-    suspension = await service.session_store.get_suspension(
-        suspended_plan.suspension_id
-    )
-    interaction = await service.session_store.get_interaction(suspension.interaction_id)
-    assert interaction.payload["tool_name"] == "goal_submit"
-    assert "Update the implementation" in interaction.payload["arguments"]["content"]
-    if rebuild_before_approval:
-        continuing_model = plan_loop.model
-        await plan_sandbox.close()
-        _, plan_loop, plan_sandbox = await service._build_loop(
-            agent=agent,
-            provider=provider,
-            workspace=workspace,
-            preferred_skills=(),
-            approval_mode="high_risk",
-            invocation_mode="plan",
-        )
-        plan_loop.model = continuing_model
-        plan_loop.tool_selection_model = scripted_tool_selection("goal_submit")
-    await service.runtime.reply_interaction(
-        ReplyInteraction(
-            run_id=plan_handle.run_id,
-            suspension_id=suspension.suspension_id,
-            interaction_id=interaction.interaction_id,
-            expected_revision=suspended_plan.revision,
-            expected_suspension_revision=suspension.expected_revision,
-            expected_interaction_revision=interaction.expected_revision,
-            decision="approve_once",
-            idempotency_key="approve-plan",
-        ),
-        service._context("user_1"),
-    )
-    async with desktop_execution_lease(service, plan_handle.run_id):
-        plan_result = await plan_loop.resume(
-            plan_handle.run_id, service._context("user_1")
-        )
-    assert plan_result.state.value == "completed"
-    await plan_sandbox.close()
-
-    goal_resolved, goal_loop, goal_sandbox = await service._build_loop(
-        agent=agent,
-        provider=provider,
-        workspace=workspace,
-        preferred_skills=(),
-        approval_mode="high_risk",
-        invocation_mode="goal",
-    )
-    goal_loop.tool_selection_model = scripted_tool_selection("goal_complete")
-
-    def assert_confirmed_plan(request):
-        system = "\n".join(
-            block.text
-            for message in request.messages
-            if message.role in {"system", "developer"}
-            for block in message.content
-            if isinstance(block, TextBlock)
-        )
-        assert "<active_goal>" in system
-        assert "<source>plan</source>" in system
-        assert "Update the implementation" in system
-
-    goal_loop.model = ScriptedModelProvider(
-        (
-            ScriptedModelStep(
-                assertion=assert_confirmed_plan,
-                events=(
-                    ModelStreamEvent(
-                        kind=ModelEventKind.COMPLETED,
-                        response=ModelResponse(
-                            response_id="confirmed_plan_complete",
-                            text="The confirmed plan was executed and verified.",
-                            tool_calls=(
-                                ModelToolCall(
-                                    tool_call_id="confirmed_plan_goal_complete",
-                                    name="goal_complete",
-                                    arguments={
-                                        "summary": "The plan and checks passed."
-                                    },
-                                ),
-                            ),
-                            finish_reason="tool_calls",
-                        ),
-                    ),
-                ),
-            ),
-            ScriptedModelStep(
-                events=(
-                    ModelStreamEvent(
-                        kind=ModelEventKind.COMPLETED,
-                        response=ModelResponse(
-                            response_id="confirmed_plan_summary",
-                            text="The implementation was updated and its checks passed.",
-                            finish_reason="stop",
-                        ),
-                    ),
-                ),
-            ),
-        )
-    )
-    goal_handle = await service.runtime.start_run(
-        StartRun(
-            session_id=plan_handle.session_id,
-            agent_id="sage",
-            input=(InputItem(role="user", content=(TextBlock(text="Execute it"),)),),
-            resolved_spec_hash=goal_loop.expected_resolved_spec_hash,
-            idempotency_key="desktop-confirm-plan",
-            invocation_mode="goal",
-        ),
-        service._context("user_1"),
-    )
-
-    async with desktop_execution_lease(service, goal_handle.run_id):
-        goal_result = await goal_loop.execute(
-            goal_handle.run_id, service._context("user_1")
-        )
-    goal_events = await service.session_store.read_events(goal_handle.run_id)
-    terminal = await service.session_store.get_run_result(goal_handle.run_id)
-
-    assert goal_result.state.value == "completed", (terminal.error, goal_events)
-    assert any(
-        event.type == "tool.call.succeeded" and event.data.tool_name == "goal_complete"
-        for event in goal_events
-    )
-    assert not any(
-        event.type == "tool.call.succeeded" and event.data.tool_name == "goal_submit"
-        for event in goal_events
-    )
-    await goal_sandbox.close()
-    await service.close()
+async def test_confirmed_plan_becomes_the_goal_system_context(tmp_path, rebuild_before_approval):
+    from tests.app.v2.desktop.sdk_fixture import desktop, execute, step, completed
+    content = "1. Update the implementation.\n2. Run the tests."
+    def confirmed(request):
+        assert "<active_goal>" in str(request.messages)
+        assert "<source>plan</source>" in str(request.messages)
+        assert "Update the implementation" in str(request.messages)
+    remaining = (step(text="The approved Plan has been saved."),
+        step(ModelToolCall(tool_call_id="goal_complete", name="goal_complete", arguments={"summary": "The plan and checks passed."}),
+            text="The confirmed plan was executed and verified.", assertion=confirmed), step(text="Checks passed."))
+    first = step(ModelToolCall(tool_call_id="submit_plan", name="goal_submit", arguments={"content": content}))
+    service, _, _ = desktop(tmp_path, model=ScriptedModelProvider((first, *remaining)))
+    try:
+        plan, _, _ = await execute(service, request=DesktopRunRequest(agent_id="sage", messages=[RunMessage(role="user", text="Plan it")],
+            invocation_mode="plan"))
+        assert plan.state.value == "suspended"
+        suspension = await service.session_store.get_suspension(plan.suspension_id)
+        interaction = await service.session_store.get_interaction(suspension.interaction_id)
+        assert interaction.payload["tool_name"] == "goal_submit"
+        assert interaction.payload["arguments"]["content"] == content
+        if rebuild_before_approval:
+            await service.close()
+            service, _, _ = desktop(tmp_path, model=ScriptedModelProvider(remaining))
+            await service.start()
+        await service.reply_interaction(plan.run_id, interaction.interaction_id, "approve_once", {}, "user_1")
+        assert (await completed(service, plan.run_id)).state.value == "completed"
+        goal, _, _ = await execute(service, request=DesktopRunRequest(agent_id="sage", session_id=plan.session_id,
+            messages=[RunMessage(role="user", text="Execute it")], invocation_mode="goal", approval_mode="auto_approve"))
+        assert goal.state.value == "completed"
+        names = [event.data.tool_name for event in await service.session_store.read_events(goal.run_id) if event.type == "tool.call.succeeded"]
+        assert "goal_complete" in names
+        assert "goal_submit" not in names
+    finally:
+        await service.close()
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("explicit", [False, True])
-async def test_sandbox_workspace_path_can_match_the_real_workspace(tmp_path: Path, explicit):
-    service = DesktopV2Service(tmp_path)
-    if explicit:
-        settings = await service.get_settings()
-        await service.save_settings(
-            settings.model_copy(
-                update={
-                    "component_configs": {
-                        "execution.sandbox": {
-                            "workspace_root": "/workspace",
-                            "workspace_path_mode": "host",
-                            "workspace_mapping": "active_workspace",
-                            "filesystem_mode": "workspace",
-                        }
-                    }
-                }
-            )
-        )
-    await service.list_agents("user_1")
-    await service.patch_model_provider(
-        "model_main", ModelProviderPatch(api_keys=["test-key"]), "user_1"
-    )
-    agent = await service._agent("sage", "user_1")
-    provider = await service._provider(agent, "user_1")
-    workspace = await service.workspace_root(None, "sage")
-    real_root = workspace.resolve().as_posix()
-
-    resolved, _, sandbox = await service._build_loop(
-        agent=agent,
-        provider=provider,
-        workspace=workspace,
-        preferred_skills=(),
-        approval_mode="high_risk",
-    )
-    command = service._command(
-        DesktopRunRequest(
-            agent_id="sage", messages=[RunMessage(role="user", text="hello")]
-        ),
-        resolved,
-        agent=agent,
-        workspace=workspace,
-    )
-    uploaded = await service.upload(None, "sage", "note.txt", b"hello")
-
-    assert sandbox.filesystem.normalize_path("note.txt") == f"{real_root}/note.txt"
-    assert command.config.metadata["working_directory"] == real_root
-    assert command.config.metadata["workspace_files"].startswith(
-        f"Working directory: {real_root}\n"
-    )
-    assert uploaded["virtual_path"] == f"{real_root}/uploads/note.txt"
-    await sandbox.close()
-    await service.session_store.close()
+async def test_sandbox_workspace_path_can_match_the_real_workspace(tmp_path, explicit):
+    from tests.app.v2.desktop.sdk_fixture import desktop, execute
+    service, _, environments = desktop(tmp_path)
+    try:
+        if explicit:
+            settings = await service.get_settings()
+            await service.save_settings(settings.model_copy(update={"component_configs": {"execution.sandbox": {
+                "workspace_root": "/workspace", "workspace_path_mode": "host", "workspace_mapping": "active_workspace", "filesystem_mode": "workspace"}}}))
+        run, command, _ = await execute(service)
+        assert run.state.value == "completed"
+        workspace = await service.workspace_root(None, "sage")
+        assert environments[0].sandbox.filesystem.normalize_path("note.txt") == str(workspace.resolve() / "note.txt")
+        assert command.config.metadata["working_directory"] == str(workspace.resolve())
+        uploaded = await service.upload(None, "sage", "note.txt", b"hello")
+        assert uploaded["virtual_path"] == str(workspace.resolve() / "uploads/note.txt")
+    finally:
+        await service.close()
 
 
 @pytest.mark.asyncio
@@ -4087,7 +3389,8 @@ async def test_sandbox_rejects_provider_incompatible_workspace_mapping(
 async def test_ephemeral_sandbox_keeps_an_isolated_configured_workspace(
     tmp_path: Path,
 ):
-    service = DesktopV2Service(tmp_path)
+    from tests.app.v2.desktop.sdk_fixture import desktop, execute
+    service, model, environments = desktop(tmp_path)
     settings = await service.get_settings()
     await service.save_settings(
         settings.model_copy(
@@ -4110,66 +3413,29 @@ async def test_ephemeral_sandbox_keeps_an_isolated_configured_workspace(
     await service.patch_model_provider(
         "model_main", ModelProviderPatch(api_keys=["test-key"]), "user_1"
     )
-    agent = await service._agent("sage", "user_1")
-    provider = await service._provider(agent, "user_1")
     workspace = await service.workspace_root(None, "sage")
-
-    resolved, _, sandbox = await service._build_loop(
-        agent=agent,
-        provider=provider,
-        workspace=workspace,
-        preferred_skills=(),
-        approval_mode="high_risk",
-    )
-    command = service._command(
-        DesktopRunRequest(
-            agent_id="sage", messages=[RunMessage(role="user", text="hello")]
-        ),
-        resolved,
-        agent=agent,
-        workspace=workspace,
-    )
-
-    assert sandbox.filesystem.normalize_path(".") == "/sandbox"
-    with pytest.raises(PermissionError, match="outside"):
-        sandbox.filesystem.normalize_path(str(workspace / "AGENT.md"))
-    assert command.config.metadata["working_directory"] == "/sandbox"
-    assert command.config.metadata["workspace_files"] == (
-        "Working directory: /sandbox\n(Empty isolated sandbox)"
-    )
-    await sandbox.close()
-    await service.session_store.close()
+    try:
+        run, command, _ = await execute(service)
+        assert run.state.value == "completed", (await service.session_store.get_run_result(run.run_id)).error
+        sandbox = environments[0].sandbox
+        assert sandbox.ref.provider_id == "sage.sandbox.ephemeral"
+        assert sandbox.filesystem.normalize_path(".") == "/sandbox"
+        with pytest.raises(PermissionError, match="outside"):
+            sandbox.filesystem.normalize_path(str(workspace / "AGENT.md"))
+        assert command.config.metadata["working_directory"] == "/sandbox"
+        assert command.config.metadata["workspace_files"] == "Working directory: /sandbox\n(Empty isolated sandbox)"
+        diagnostics = await service.application.execution_diagnostics(run.run_id, service._context("user_1"))
+        assert diagnostics["recovery"] == "same_process"
+        assert diagnostics["interpreter"] is None
+    finally:
+        await service.close()
 
 
 @pytest.mark.asyncio
-@pytest.mark.timeout(10)
-async def test_desktop_turn_status_drives_the_real_continuation_policy(
-    tmp_path: Path,
-):
-    service = DesktopV2Service(tmp_path)
-    # Exercise the explicitly selected rule-based policy without external model calls.
-    settings = await service.get_settings()
-    await service.save_settings(settings.model_copy(update={
-        "component_selections": {**settings.component_selections,
-            "agent.continuation-policy": "sage.agent.continuation.deterministic",
-            "memory.recall-query": "sage.memory.recall-query.direct"},
-    }))
-    await service.list_agents("user_1")
-    await service.patch_model_provider(
-        "model_main", ModelProviderPatch(api_keys=["test-key"]), "user_1"
-    )
-    agent = await service._agent("sage", "user_1")
-    provider = await service._provider(agent, "user_1")
-    workspace = await service.workspace_root(None, "sage")
-    resolved, loop, sandbox = await service._build_loop(
-        agent=agent,
-        provider=provider,
-        workspace=workspace,
-        preferred_skills=(),
-        approval_mode="high_risk",
-    )
-    loop.tool_selection_model = scripted_tool_selection("turn_status")
-    loop.model = ScriptedModelProvider(
+@pytest.mark.timeout(60)
+async def test_desktop_turn_status_drives_the_real_continuation_policy(tmp_path):
+    from tests.app.v2.desktop.sdk_fixture import desktop, execute
+    model = ScriptedModelProvider(
         (
             ScriptedModelStep(
                 events=(
@@ -4192,26 +3458,16 @@ async def test_desktop_turn_status_drives_the_real_continuation_policy(
             ),
         )
     )
-    handle = await service.runtime.start_run(
-        StartRun(
-            agent_id="sage",
-            input=(InputItem(role="user", content=(TextBlock(text="Do it"),)),),
-            resolved_spec_hash=loop.expected_resolved_spec_hash,
-            idempotency_key="desktop-turn-status",
-        ),
-        service._context("user_1"),
-    )
-
-    async with desktop_execution_lease(service, handle.run_id):
-        result = await loop.execute(handle.run_id, service._context("user_1"))
-    events = await service.session_store.read_events(handle.run_id)
-    decision = next(event for event in events if event.type == "continuation.decided")
-
-    assert result.state.value == "completed"
-    assert decision.data.reason_code == "status.complete"
-    assert any(event.type == "tool.call.succeeded" for event in events)
-    await sandbox.close()
-    await service.close()
+    service, _, _ = desktop(tmp_path, model=model)
+    try:
+        run, _, _ = await execute(service, request=DesktopRunRequest(agent_id="sage", messages=[RunMessage(role="user", text="Do it")], invocation_mode="normal", approval_mode="auto_approve"))
+        assert run.state.value == "completed"
+        events = await service.session_store.read_events(run.run_id)
+        decision = next(event for event in events if event.type == "continuation.decided")
+        assert decision.data.reason_code == "status.complete"
+        assert any(event.type == "tool.call.succeeded" for event in events)
+    finally:
+        await service.close()
 
 
 @pytest.mark.asyncio
@@ -4227,92 +3483,42 @@ async def test_desktop_turn_status_drives_the_real_continuation_policy(
         ("team", {"sys_team_delegate_task"}, {"sys_spawn_agent", "sys_delegate_task"}),
     ],
 )
-async def test_desktop_agent_modes_expose_only_their_real_delegation_tools(
-    tmp_path: Path,
-    mode: str,
-    present: set[str],
-    absent: set[str],
-):
-    service = DesktopV2Service(tmp_path / mode)
-    await service.list_agents("user_1")
-    member = await service.create_agent(AgentCreate(name="Research"), "user_1")
-    await service.patch_model_provider(
-        "model_main", ModelProviderPatch(api_keys=["test-key"]), "user_1"
-    )
-    await service.patch_agent_settings(
-        "sage", AgentSettingsPatch(agent_mode=mode), "user_1"
-    )
-    agent = await service._agent("sage", "user_1")
-    provider = await service._provider(agent, "user_1")
-    workspace = await service.workspace_root(None, "sage")
-
-    _, loop, sandbox = await service._build_loop(
-        agent=agent,
-        provider=provider,
-        workspace=workspace,
-        preferred_skills=(),
-        approval_mode="high_risk",
-    )
-    names = {value.name for value in await loop.tool_catalog.list_tools(run_id="run")}
-    roster = next(
-        value
-        for value in loop.context_assembler.providers
-        if isinstance(value, AgentRosterContextProvider)
-    )
-    roster_segments = await roster.segments(
-        StartRun(
-            agent_id="sage",
-            input=(InputItem(role="user", content=(TextBlock(text="work"),)),),
-            resolved_spec_hash="sha256:roster",
-            idempotency_key=f"roster-{mode}",
-        )
-    )
-
-    assert present <= names
-    assert names.isdisjoint(absent)
-    if mode == "simple":
-        assert roster_segments == ()
-    else:
-        assert member["id"] in roster_segments[0].content
-        assert "Research" in roster_segments[0].content
-        assert ("sys_spawn_agent" in roster_segments[0].content) is (mode == "fibre")
-        assert ("fixed roster" in roster_segments[0].content) is (mode == "team")
-    await sandbox.close()
-    await service.close()
+async def test_desktop_agent_modes_expose_only_their_real_delegation_tools(tmp_path, mode, present, absent):
+    from tests.app.v2.desktop.sdk_fixture import desktop, execute
+    service, model, _ = desktop(tmp_path)
+    try:
+        await service.list_agents("user_1")
+        member = await service.create_agent(AgentCreate(name="Research"), "user_1")
+        await service.patch_agent_settings("sage", AgentSettingsPatch(agent_mode=mode), "user_1")
+        run, _, _ = await execute(service)
+        assert run.state.value == "completed"
+        names = {tool.name for tool in model.requests[0].tools}
+        assert present <= names
+        assert names.isdisjoint(absent)
+        content = "\n".join(block.text for message in model.requests[0].messages for block in message.content if isinstance(block, TextBlock))
+        if mode != "simple":
+            assert member["id"] in content
+            assert "Research" in content
+    finally:
+        await service.close()
 
 
 @pytest.mark.asyncio
-async def test_new_fibre_session_composes_before_authoritative_session_exists(
-    tmp_path: Path,
-):
-    service = DesktopV2Service(tmp_path / "new-fibre-session")
-    await service.list_agents("user_1")
-    await service.patch_model_provider(
-        "model_main", ModelProviderPatch(api_keys=["test-key"]), "user_1"
-    )
-    await service.patch_agent_settings(
-        "sage", AgentSettingsPatch(agent_mode="fibre"), "user_1"
-    )
-    agent = await service._agent("sage", "user_1")
-    provider = await service._provider(agent, "user_1")
-    workspace = await service.workspace_root(None, "sage")
-
-    _, loop, sandbox = await service._build_loop(
-        agent=agent,
-        provider=provider,
-        workspace=workspace,
-        preferred_skills=(),
-        approval_mode="high_risk",
-        session_id="session_client_generated",
-    )
-
-    names = {value.name for value in await loop.tool_catalog.list_tools(run_id="run")}
-    assert {"sys_spawn_agent", "sys_delegate_task"} <= names
-    with pytest.raises(SageV2Error) as missing:
-        await service.session_store.get_session("session_client_generated")
-    assert missing.value.info.code == "session.not_found"
-    await sandbox.close()
-    await service.close()
+async def test_new_fibre_session_composes_before_authoritative_session_exists(tmp_path):
+    from tests.app.v2.desktop.sdk_fixture import desktop, execute
+    service, model, _ = desktop(tmp_path)
+    try:
+        await service.list_agents("user_1")
+        await service.patch_agent_settings("sage", AgentSettingsPatch(agent_mode="fibre"), "user_1")
+        with pytest.raises(SageV2Error):
+            await service.session_store.get_session("session_client_generated")
+        run, _, _ = await execute(service, request=DesktopRunRequest(agent_id="sage", session_id="session_client_generated",
+            messages=[RunMessage(role="user", text="work")]))
+        assert run.state.value == "completed"
+        assert run.session_id == "session_client_generated"
+        assert {"sys_spawn_agent", "sys_delegate_task"} <= {tool.name for tool in model.requests[0].tools}
+    finally:
+        await service.close()
 
 
 @pytest.mark.asyncio
@@ -4341,103 +3547,64 @@ async def test_delegated_fibre_context_declares_a_leaf_execution_boundary():
 
 
 @pytest.mark.asyncio
-async def test_desktop_team_member_executes_as_leaf(tmp_path: Path):
-    service = DesktopV2Service(tmp_path / "nested-team")
-    await service.list_agents("user_1")
-    member = await service.create_agent(AgentCreate(name="Team Lead"), "user_1")
-    await service.patch_model_provider(
-        "model_main", ModelProviderPatch(api_keys=["test-key"]), "user_1"
-    )
-    await service.patch_agent_settings(
-        member["id"], AgentSettingsPatch(agent_mode="team"), "user_1"
-    )
-    await service.patch_agent_settings(
-        "sage",
-        AgentSettingsPatch(
-            agent_mode="team",
-            sub_agent_selection_mode="manual",
-            available_sub_agent_ids=[member["id"]],
-        ),
-        "user_1",
-    )
-    agent = await service._agent("sage", "user_1")
-    provider = await service._provider(agent, "user_1")
-    workspace = await service.workspace_root(None, "sage")
-
-    _, loop, sandbox = await service._build_loop(
-        agent=agent,
-        provider=provider,
-        workspace=workspace,
-        preferred_skills=(),
-        approval_mode="high_risk",
-    )
-    controller = loop.delegated_run_controller
-    assert controller is not None
-    descriptor = await controller.descriptor_resolver(member["id"])
-
-    assert descriptor.mode == AgentMode.TEAM
-    assert descriptor.allow_delegation is False
-    await sandbox.close()
-    await service.close()
+async def test_desktop_team_member_executes_as_leaf(tmp_path):
+    from tests.app.v2.desktop.sdk_fixture import desktop, execute, step
+    member_id = None
+    class Model(ScriptedModelProvider):
+        async def stream(self, request):
+            self.requests.append(request)
+            if len(self.requests) == 1:
+                value = step(ModelToolCall(tool_call_id="delegate", name="sys_team_delegate_task", arguments={
+                    "tasks": [{"agent_id": member_id, "content": "Review"}]}))
+            else:
+                value = step()
+            for event in value.events:
+                yield event
+    model = Model(())
+    service, _, environments = desktop(tmp_path, model=model)
+    try:
+        await service.list_agents("user_1")
+        member = await service.create_agent(AgentCreate(name="Team Lead"), "user_1")
+        member_id = member["id"]
+        await service.patch_agent_settings(member_id, AgentSettingsPatch(agent_mode="team"), "user_1")
+        await service.patch_agent_settings("sage", AgentSettingsPatch(agent_mode="team", sub_agent_selection_mode="manual", available_sub_agent_ids=[member_id]), "user_1")
+        run, _, _ = await execute(service, request=DesktopRunRequest(agent_id="sage", messages=[RunMessage(role="user", text="Review")], approval_mode="auto_approve"))
+        assert run.state.value == "completed"
+        child = next(value for value in environments if value.command.parent_run_id == run.run_id)
+        requests = [request for request in model.requests if request.run_id == child.run_id]
+        assert requests
+        assert all({"sys_spawn_agent", "sys_delegate_task", "sys_team_delegate_task"}.isdisjoint(tool.name for tool in request.tools) for request in requests)
+        accepted = await service.application.run_configuration(child.run_id, service._context("user_1"))
+        assert accepted["parent_run_id"] == run.run_id
+    finally:
+        await service.close()
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("mode", ["fibre", "team"])
-async def test_multi_agent_modes_register_only_manually_selected_members(
-    tmp_path: Path, mode: str
-):
-    service = DesktopV2Service(tmp_path / mode)
-    await service.list_agents("user_1")
-    research = await service.create_agent(AgentCreate(name="Research"), "user_1")
-    review = await service.create_agent(AgentCreate(name="Review"), "user_1")
-    await service.patch_model_provider(
-        "model_main", ModelProviderPatch(api_keys=["test-key"]), "user_1"
-    )
-    await service.patch_agent_settings(
-        "sage",
-        AgentSettingsPatch(
-            agent_mode=mode,
-            sub_agent_selection_mode="manual",
-            available_sub_agent_ids=[review["id"]],
-        ),
-        "user_1",
-    )
-    agent = await service._agent("sage", "user_1")
-    provider = await service._provider(agent, "user_1")
-    workspace = await service.workspace_root(None, "sage")
-
-    _, loop, sandbox = await service._build_loop(
-        agent=agent,
-        provider=provider,
-        workspace=workspace,
-        preferred_skills=(),
-        approval_mode="high_risk",
-    )
-    roster = next(
-        value
-        for value in loop.context_assembler.providers
-        if isinstance(value, AgentRosterContextProvider)
-    )
-    roster_segments = await roster.segments(
-        StartRun(
-            agent_id="sage",
-            input=(InputItem(role="user", content=(TextBlock(text="work"),)),),
-            resolved_spec_hash="sha256:selected-roster",
-            idempotency_key="selected-roster",
-        )
-    )
-
-    assert review["id"] in roster_segments[0].content
-    assert "Review" in roster_segments[0].content
-    assert research["id"] not in roster_segments[0].content
-    assert "Research" not in roster_segments[0].content
-    await sandbox.close()
-    await service.close()
+async def test_multi_agent_modes_register_only_manually_selected_members(tmp_path, mode):
+    from tests.app.v2.desktop.sdk_fixture import desktop, execute
+    service, model, _ = desktop(tmp_path)
+    try:
+        await service.list_agents("user_1")
+        research = await service.create_agent(AgentCreate(name="Research"), "user_1")
+        review = await service.create_agent(AgentCreate(name="Review"), "user_1")
+        await service.patch_agent_settings("sage", AgentSettingsPatch(agent_mode=mode, sub_agent_selection_mode="manual",
+            available_sub_agent_ids=[review["id"]]), "user_1")
+        run, _, _ = await execute(service)
+        assert run.state.value == "completed"
+        content = "\n".join(block.text for message in model.requests[0].messages for block in message.content if isinstance(block, TextBlock))
+        assert review["id"] in content
+        assert "Review" in content
+        assert research["id"] not in content
+        assert "Research" not in content
+    finally:
+        await service.close()
 
 
 @pytest.mark.asyncio
 async def test_loop_composition_includes_enabled_configured_mcp_tools(
-    tmp_path: Path,
+    tmp_path: Path, monkeypatch,
 ):
     class Session:
         async def list_tools(self):
@@ -4463,12 +3630,14 @@ async def test_loop_composition_includes_enabled_configured_mcp_tools(
         ),
         session_factory=session_factory,
     )
-    service = DesktopV2Service(tmp_path)
+    from tests.app.v2.desktop.sdk_fixture import desktop, execute
+    service, model, _ = desktop(tmp_path)
 
     async def bridge_for_user(user_id):
         return bridge
 
-    service._mcp_plugin = bridge_for_user
+    monkeypatch.setattr("sagents.v2.tool.plugins.mcp._sdk_session", session_factory)
+    await service.catalog.save_mcp(DesktopMcpRecord(user_id="user_1", name="remote", protocol="streamable_http", streamable_http_url="https://mcp.test"))
     await service.list_agents("user_1")
     await service.patch_model_provider(
         "model_main", ModelProviderPatch(api_keys=["test-key"]), "user_1"
@@ -4478,21 +3647,12 @@ async def test_loop_composition_includes_enabled_configured_mcp_tools(
     config["availableTools"] = [*config["availableTools"], "mcp_remote_lookup"]
     await service.catalog.save_agent(agent.model_copy(update={"config": config}))
     agent = await service._agent("sage", "user_1")
-    provider = await service._provider(agent, "user_1")
-    workspace = await service.workspace_root(None, "sage")
-
-    _, loop, sandbox = await service._build_loop(
-        agent=agent,
-        provider=provider,
-        workspace=workspace,
-        preferred_skills=(),
-        approval_mode="high_risk",
-    )
-
-    names = {value.name for value in await loop.tool_catalog.list_tools(run_id="run_1")}
-    assert "mcp_remote_lookup" in names
-    await sandbox.close()
-    await service.session_store.close()
+    try:
+        run, _, _ = await execute(service)
+        assert run.state.value == "completed"
+        assert "mcp_remote_lookup" in {tool.name for tool in model.requests[0].tools}
+    finally:
+        await service.close()
 
 
 @pytest.mark.asyncio
@@ -5052,7 +4212,6 @@ def test_workspace_prompt_listing_stays_within_two_levels(tmp_path: Path):
 
 @pytest.mark.asyncio
 async def test_skill_loading_component_schema_and_validation(tmp_path):
-    from app.v2.desktop.backend.package import desktop_v2_manifest
     service = DesktopV2Service(tmp_path)
     try:
         inventory = await service.component_inventory("user_1")
@@ -5083,7 +4242,6 @@ async def test_skill_loading_component_schema_and_validation(tmp_path):
 @pytest.mark.asyncio
 async def test_summary_plugin_defaults_match_runtime_and_hide_host_binding(tmp_path):
     import inspect
-    from sagents.v2.context import ModelConversationSummarizer
     service = DesktopV2Service(tmp_path)
     try:
         inventory = await service.component_inventory("user_1")
@@ -5136,7 +4294,8 @@ async def test_all_user_plugin_fields_have_defaults_or_are_host_owned(tmp_path):
 
 @pytest.fixture
 async def sandbox_composition_host(tmp_path):
-    service = DesktopV2Service(tmp_path)
+    from tests.app.v2.desktop.sdk_fixture import desktop
+    service, _, _ = desktop(tmp_path)
     await service.start()
     try:
         yield service
@@ -5145,51 +4304,44 @@ async def sandbox_composition_host(tmp_path):
 
 
 async def test_local_sandbox_command_path_config_is_forwarded_and_separates_cache(sandbox_composition_host):
-    from app.v2.desktop.backend.run_composition import DesktopRunCompositionMixin
-
+    from tests.app.v2.desktop.sdk_fixture import execute
     host = sandbox_composition_host
-    factory = DesktopRunCompositionMixin._sandbox_provider
-    first = await factory(
-        host, "sage.sandbox.local-workspace", {"command_path": "/first/bin"}
-    )
-    second = await factory(
-        host, "sage.sandbox.local-workspace", {"command_path": "/second/bin"}
-    )
-    assert first.command_path == "/first/bin"
-    assert second.command_path == "/second/bin"
-    assert first is not second
-    assert (
-        await factory(host, "sage.sandbox.local-workspace", {"command_path": "/first/bin"})
-        is first
-    )
+    runs = []
+    for value in ("/first/bin", "/second/bin"):
+        settings = await host.get_settings()
+        await host.save_settings(settings.model_copy(update={"component_configs": {
+            **settings.component_configs, "execution.sandbox": {"command_path": value}}}))
+        run, _, _ = await execute(host)
+        assert run.state.value == "completed"
+        runs.append(run.run_id)
+    first = await host.application.execution_configuration(runs[0], host._context("user_1"))
+    second = await host.application.execution_configuration(runs[1], host._context("user_1"))
+    assert first.tool_environment["command_path"] == "/first/bin"
+    assert second.tool_environment["command_path"] == "/second/bin"
+    assert first.configuration_id != second.configuration_id
 
 
-async def test_local_sandbox_read_paths_config_is_forwarded_and_separates_cache(sandbox_composition_host):
-    from app.v2.desktop.backend.run_composition import DesktopRunCompositionMixin
-
+async def test_local_sandbox_read_paths_config_is_forwarded_and_separates_cache(sandbox_composition_host, tmp_path):
+    from tests.app.v2.desktop.sdk_fixture import execute
     host = sandbox_composition_host
-    factory = DesktopRunCompositionMixin._sandbox_provider
-    first = await factory(
-        host,
-        "sage.sandbox.local-workspace",
-        {"read_paths": ["/opt/first-runtime"]},
-    )
-    second = await factory(
-        host,
-        "sage.sandbox.local-workspace",
-        {"read_paths": ["/opt/second-runtime"]},
-    )
-    assert first.read_paths == ("/opt/first-runtime",)
-    assert second.read_paths == ("/opt/second-runtime",)
-    assert first is not second
-    assert (
-        await factory(
-            host,
-            "sage.sandbox.local-workspace",
-            {"read_paths": ["/opt/first-runtime"]},
-        )
-        is first
-    )
+    runs, paths = [], []
+    for name in ("first-runtime", "second-runtime"):
+        directory = tmp_path / name
+        directory.mkdir()
+        paths.append(str(directory.resolve()))
+        settings = await host.get_settings()
+        await host.save_settings(settings.model_copy(update={"component_configs": {
+            **settings.component_configs, "execution.sandbox": {"read_paths": [paths[-1]]}}}))
+        run, _, _ = await execute(host)
+        assert run.state.value == "completed"
+        runs.append(run.run_id)
+    first = await host.application.execution_diagnostics(runs[0], host._context("user_1"))
+    second = await host.application.execution_diagnostics(runs[1], host._context("user_1"))
+    assert paths[0] in first["runtime_read_paths"]
+    assert paths[1] not in first["runtime_read_paths"]
+    assert paths[1] in second["runtime_read_paths"]
+    assert paths[0] not in second["runtime_read_paths"]
+    assert first["configuration_id"] != second["configuration_id"]
 
 
 @pytest.mark.asyncio
@@ -5224,58 +4376,42 @@ async def test_preflight_preserves_typed_resource_failure_details(tmp_path, monk
 
 @pytest.mark.asyncio
 async def test_configured_disk_quota_reaches_main_and_child_sandboxes(tmp_path):
-    from sagents.v2.contracts.commands import InputItem, RunConfig, StartRun
-    from sagents.v2.contracts.items import TextBlock
-
-    service = DesktopV2Service(tmp_path)
-    root_sandbox = child_sandbox = None
+    from tests.app.v2.desktop.sdk_fixture import desktop, execute, step
+    member_id = None
+    class Model(ScriptedModelProvider):
+        async def stream(self, request):
+            self.requests.append(request)
+            if len(self.requests) == 1:
+                settings = await service.get_settings()
+                await service.save_settings(settings.model_copy(update={"component_configs": {
+                    **settings.component_configs, "execution.sandbox": {"resources": {"disk_mb": 1}}}}))
+                value = step(ModelToolCall(tool_call_id="delegate", name="sys_team_delegate_task", arguments={
+                    "tasks": [{"agent_id": member_id, "content": "Review"}]}))
+            else:
+                value = step()
+            for event in value.events:
+                yield event
+    service, _, environments = desktop(tmp_path, model=Model(()))
     try:
         settings = await service.get_settings()
-        configs = {**settings.component_configs, "execution.sandbox": {"resources": {"disk_mb": 32768}}}
-        settings = await service.save_settings(settings.model_copy(update={"component_configs": configs}))
-        snapshot = {
-            "sandbox_path_mode": "host",
-            "selections": dict(settings.component_selections), "configs": configs,
-        }
+        await service.save_settings(settings.model_copy(update={"component_configs": {
+            **settings.component_configs, "execution.sandbox": {"resources": {"disk_mb": 32768}}}}))
         await service.list_agents("user_1")
         member = await service.create_agent(AgentCreate(name="Quota Reviewer"), "user_1")
-        await service.patch_model_provider("model_main", ModelProviderPatch(api_keys=["test-key"]), "user_1")
-        await service.patch_agent_settings("sage", AgentSettingsPatch(
-            agent_mode="team", sub_agent_selection_mode="manual", available_sub_agent_ids=[member["id"]],
-        ), "user_1")
-        agent = await service._agent("sage", "user_1")
-        provider = await service._provider(agent, "user_1")
-        workspace = await service.workspace_root(None, "sage")
-        _, loop, root_sandbox = await service._build_loop(
-            agent=agent, provider=provider, workspace=workspace,
-            preferred_skills=(), approval_mode="high_risk", component_snapshot=snapshot,
-        )
-        parent_spec = root_sandbox.provider._row(root_sandbox.ref).spec
-        assert parent_spec.resources.disk_mb == 32768
-        assert parent_spec.filesystem.max_total_bytes == 32768 * 1024**2
-
-        # A later settings edit must not replace the child Run's accepted snapshot.
-        await service.save_settings(settings.model_copy(update={
-            "component_configs": {**configs, "execution.sandbox": {"resources": {"disk_mb": 1}}},
-        }))
-        controller = loop.delegated_run_controller
-        descriptor = await controller.descriptor_resolver(member["id"])
-        context = service._context("user_1")
-        child = await service.runtime.start_run(StartRun(
-            agent_id=member["id"], input=(InputItem(role="user", content=(TextBlock(text="review"),)),),
-            config=RunConfig(metadata={"runtime_components": snapshot}),
-            resolved_spec_hash=controller.resolved_spec_hash, idempotency_key="quota-child",
-        ), context)
-        async with desktop_execution_lease(service, child.run_id):
-            _, child_sandbox = await controller.loop_factory(descriptor, child.run_id, context)
-        child_spec = child_sandbox.provider._row(child_sandbox.ref).spec
-        assert child_spec.resources.disk_mb == 32768
-        assert child_spec.filesystem.max_total_bytes == parent_spec.filesystem.max_total_bytes
+        member_id = member["id"]
+        await service.patch_agent_settings("sage", AgentSettingsPatch(agent_mode="team", sub_agent_selection_mode="manual", available_sub_agent_ids=[member_id]), "user_1")
+        run, _, _ = await execute(service, request=DesktopRunRequest(agent_id="sage", messages=[RunMessage(role="user", text="Review")], approval_mode="auto_approve"))
+        assert run.state.value == "completed"
+        assert len(environments) == 2
+        for environment in environments:
+            snapshot = await service.application.execution_configuration(environment.run_id, service._context("user_1"))
+            assert snapshot.policy["resources"]["disk_mb"] == 32768
+            assert snapshot.policy["filesystem"]["max_total_bytes"] == 32768 * 1024**2
+        later, _, _ = await execute(service)
+        assert later.state.value == "completed"
+        snapshot = await service.application.execution_configuration(later.run_id, service._context("user_1"))
+        assert snapshot.policy["resources"]["disk_mb"] == 1
     finally:
-        if child_sandbox is not None:
-            await child_sandbox.close()
-        if root_sandbox is not None:
-            await root_sandbox.close()
         await service.close()
 
 

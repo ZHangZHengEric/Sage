@@ -1,9 +1,10 @@
+from tests.sagents.v2.sdk_fixture import build_registered_package
 from tests.sagents.v2.model_fixture import TEST_MODELS
 from pathlib import Path
 
 import pytest
 
-from sagents.v2 import SAgentApplication, SAgentBuilder
+from sagents.v2 import SAgentApplication
 from sagents.v2.package.presets import BuiltinPackageFactory
 from sagents.v2.package.manifest.runtime import CapabilitySelection
 from sagents.v2.testing.plugins import ScriptedModelProvider
@@ -12,53 +13,29 @@ from sagents.v2.contracts.run_state import EventCursor
 
 
 @pytest.mark.asyncio
-async def test_builder_returns_application_with_one_close_boundary(tmp_path: Path):
-    package = BuiltinPackageFactory.create(
-        "assistant",
-        package_id="test.application",
-
-    )
-    application = await (
-        SAgentBuilder().with_models(TEST_MODELS)
-        .with_defaults(session_root=tmp_path / "sessions")
-        .with_model_provider(ScriptedModelProvider(()))
-        ._build_package(package)
-    )
-
-    assert isinstance(application, SAgentApplication)
-    assert application.service("session.access") is not None
-    with pytest.raises(KeyError):
-        application.service("session.store")
-    cursor = EventCursor(run_id="run_missing", run_sequence=0)
-    with pytest.raises(TypeError):
-        application.entrypoint().subscribe_events(cursor)  # type: ignore[call-arg]
-    with pytest.raises(TypeError):
-        application.subscribe_interface(  # type: ignore[call-arg]
-            "native", cursor
-        )
-    assert application.service("execution.scheduler") is not None
-    assert application.service("execution.job-runtime") is not None
-    assert application.service("artifact.store") is not None
-    assert application.service("package.registry") is not None
-    assert application.composition_hash.startswith("sha256:")
-    assert application.resolved_plan.composition_hash == application.composition_hash
-    assert application.resolved_plan.package_id == "test.application"
-    bindings = {
-        (value.capability, value.plugin_id, value.source)
-        for value in application.resolved_plan.providers
-    }
-    assert (
-        "session.store",
-        "sage.session.filesystem",
-        "plugin",
-    ) in bindings
-    assert ("model.provider", None, "host") in bindings
-    assert ("execution.dispatcher", None, "composition-root") in bindings
-    assert all(
-        "credential" not in value.name for value in application.resolved_plan.providers
-    )
-
-    await application.close()
+async def test_builder_returns_application_with_one_close_boundary(tmp_path):
+    package = BuiltinPackageFactory.create("assistant", package_id="test.application")
+    application = await build_registered_package(tmp_path / "sessions", models=TEST_MODELS,
+        model=ScriptedModelProvider(()), package=package)
+    try:
+        assert isinstance(application, SAgentApplication)
+        assert application.service("session.access") is not None
+        assert isinstance(application.service("session.store"), FilesystemSessionStore)
+        assert not hasattr(application.entrypoint(), "driver_factory")
+        with pytest.raises(TypeError):
+            application.subscribe_interface("native", EventCursor(run_id="missing", run_sequence=0))
+        for capability in ("execution.scheduler", "execution.job-runtime", "execution.dispatcher", "artifact.store", "package.registry"):
+            assert application.service(capability) is not None
+        loaded = application.loaded_agents[0]
+        assert loaded.composition_hash.startswith("sha256:")
+        assert loaded.resolved_plan.composition_hash == loaded.composition_hash
+        assert loaded.package_id == "test.application"
+        bindings = {(value.capability, value.plugin_id, value.source) for value in loaded.resolved_plan.providers}
+        assert ("session.store", "sage.session.filesystem", "plugin") in bindings
+        assert any(capability == "model.provider" and plugin == "test.fixture.model.provider" for capability, plugin, _ in bindings)
+        assert all("credential" not in value.name for value in loaded.resolved_plan.providers)
+    finally:
+        await application.close()
     await application.close()
     reopened = FilesystemSessionStore(tmp_path / "sessions")
     await reopened.close()
@@ -88,9 +65,7 @@ async def test_build_failure_rolls_back_started_extensions(tmp_path: Path):
 
     with pytest.raises(Exception):
         await (
-            SAgentBuilder().with_models(TEST_MODELS)
-            .with_model_provider(ScriptedModelProvider(()))
-            ._build_package(package)
+            build_registered_package(tmp_path, models=TEST_MODELS, model=ScriptedModelProvider(()), package=package)
         )
 
 
@@ -107,7 +82,7 @@ async def test_application_stops_execution_resources_before_closing_agents():
             assert order == ["dispatcher"]
             order.append("agent")
 
-    application = SAgentApplication(
+    application = SAgentApplication._from_composition(
         agents={"main": Agent()},
         entrypoint_agent_id="main",
         scope_handles=(),
@@ -121,32 +96,40 @@ async def test_application_stops_execution_resources_before_closing_agents():
 
 
 @pytest.mark.asyncio
-async def test_application_can_adopt_a_host_resource_with_explicit_close_order():
-    order: list[str] = []
-
+async def test_registered_host_resources_close_in_dependency_order(tmp_path):
+    from sagents.v2.package.manifest.runtime import RuntimeConfig
+    from sagents.v2.runtime.extensions import CapabilityOffer, ExtensionDependency, ExtensionDescriptor, ExtensionRegistration, ExtensionScope
+    from tests.sagents.v2.test_standard_execution_configuration import package, response, run
+    order = []
     class Resource:
-        def __init__(self, name: str):
+        def __init__(self, name):
             self.name = name
-
         async def close(self):
             order.append(self.name)
-
-    provider = Resource("provider")
-    application = SAgentApplication(
-        agents={"main": Resource("agent")},
-        entrypoint_agent_id="main",
-        scope_handles=(),
-        services={},
-        adapters={},
-        composition_hash="sha256:test",
-        owned_resources=(Resource("dispatcher"),),
-    )
-
-    await application.adopt_resource(provider, close_after_existing=True)
-    await application.adopt_resource(provider, close_after_existing=True)
+    def registration(name, dependencies=()):
+        def create(context, resolved):
+            if dependencies:
+                assert resolved.require("test.provider").name == "provider"
+            return Resource(name)
+        return ExtensionRegistration(descriptor=ExtensionDescriptor(plugin_id="test."+name, name=name, version="1",
+            provides=(CapabilityOffer(capability="test."+name, api_version="2"),),
+            dependencies=tuple(ExtensionDependency(capability=dependency) for dependency in dependencies),
+            supported_scopes=frozenset({ExtensionScope.PROCESS})), factory=create)
+    selected = {"test.provider": {"plugin": "test.provider"}, "test.dependent": {"plugin": "test.dependent"},
+        "tool.selection-policy": {"plugin": "sage.tool-selection.direct"},
+        "agent.continuation-policy": {"plugin": "sage.agent.continuation.deterministic"}}
+    application = await build_registered_package(tmp_path, models=TEST_MODELS, model=ScriptedModelProvider((response(),)),
+        package=package(), registrations=(registration("provider"), registration("dependent", ("test.provider",))),
+        runtime=RuntimeConfig.model_validate({"capabilities": selected}))
+    try:
+        result, _ = await run(application, application.loaded_agents[0], "resources")
+        assert result.state.value == "completed"
+        assert not order
+        assert not hasattr(application, "adopt_resource")
+    finally:
+        await application.close()
     await application.close()
-
-    assert order == ["dispatcher", "provider", "agent"]
+    assert order == ["dependent", "provider"]
 
 
 @pytest.mark.asyncio
@@ -167,7 +150,7 @@ async def test_application_close_retries_only_transient_teardown_failures():
     stable = Resource("stable")
     transient = Resource("transient", fail_once=True)
     agent = Resource("agent")
-    application = SAgentApplication(
+    application = SAgentApplication._from_composition(
         agents={"main": agent},
         entrypoint_agent_id="main",
         scope_handles=(),

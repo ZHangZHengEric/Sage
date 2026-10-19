@@ -1,14 +1,11 @@
 from dataclasses import replace
-from types import SimpleNamespace
 
 import pytest
 from pydantic import ValidationError
 
 from app.v2.server.config.settings import ServerSettings
-from app.v2.server.packages.builder import PackageBindings
 from app.v2.server.runtime.official import workspace_sandbox_spec
 from sagents.v2.package.manifest.agents import AgentDefinition
-from sagents.v2.runtime.execution import ExecutionBindingRequest
 from sagents.v2.runtime.execution.sandbox import NetworkMode, NetworkPolicy
 from tests.app.v2.server.conftest import make_settings, register_and_login
 from tests.app.v2.server.test_packages import settled
@@ -51,37 +48,32 @@ def test_package_rejects_unknown_sandbox_options():
 
 @pytest.mark.parametrize("ceiling", ["none", "unrestricted"])
 @pytest.mark.parametrize("network", [None, "none", "unrestricted"])
-@pytest.mark.parametrize("parent", [None, "parent-run"])
-async def test_package_network_reaches_actual_sandbox_spec(tmp_path, ceiling, network, parent):
-    specs = []
-    context = SimpleNamespace(actor=SimpleNamespace(principal_id="user", tenant_id="user"))
-
-    class Provider:
-        async def provision(self, spec, context, *, run_id):
-            specs.append(spec)
-            return SimpleNamespace(ref=SimpleNamespace(owner_run_id=run_id, tenant_id="user"))
-
-    bindings = PackageBindings(
-        SimpleNamespace(workspace_dir=lambda *args, **kwargs: tmp_path),
-        SimpleNamespace(sandbox_provider=Provider(), sandbox_grant_issuer=object()),
-        "user", agents={"worker": agent(network), "parent": agent("unrestricted")},
-        settings=make_settings(tmp_path, sandbox_network_mode=ceiling),
+async def test_standard_network_policy_is_frozen_for_accepted_run(tmp_path, ceiling, network):
+    from tests.sagents.v2.test_standard_execution_configuration import (
+        build, package, runtime, run, response, CONTEXT,
     )
-    request = ExecutionBindingRequest(
-        run_id="run", agent_id="worker", context=context, parent_run_id=parent,
-        workspace_policy="private_child" if parent else "shared_parent",
-    )
-    binding = await bindings.acquire(request)
-    binding.validate_for(request)
-    expected = NetworkMode.UNRESTRICTED if network == ceiling == "unrestricted" else NetworkMode.NONE
-    assert specs[-1].network == NetworkPolicy(
-        mode=expected, deny_private_networks=expected != NetworkMode.UNRESTRICTED,
-    )
-    assert specs[-1].filesystem.allowed_roots == ("/workspace",)
-    # A resumed Run rechecks the current host ceiling before provisioning.
-    bindings.settings = make_settings(tmp_path, sandbox_network_mode="none")
-    await bindings.acquire(request)
-    assert specs[-1].network.mode == NetworkMode.NONE
+    from sagents.v2.testing.plugins import ScriptedModelProvider
+    expected = "unrestricted" if network == ceiling == "unrestricted" else "none"
+    config = runtime(tmp_path)
+    binding = config.capabilities["execution.binding"]
+    parameters = {**binding.config, "policy": {**binding.config["policy"],
+        "network": {"mode": expected, "deny_private_networks": expected != "unrestricted"}}}
+    config = config.model_copy(update={"capabilities": {**config.capabilities,
+        "execution.binding": binding.model_copy(update={"config": parameters})}})
+    app = await build(tmp_path, ScriptedModelProvider((response(),)), config=config)
+    try:
+        loaded = await app.load_agent(package())
+        result, _ = await run(app, loaded, "network")
+        assert result.state.value == "completed"
+        frozen = await app.execution_configuration(result.run_id, CONTEXT)
+        assert frozen.policy["network"]["mode"] == expected
+        changed = binding.model_copy(update={"config": {**parameters, "policy": {
+            **parameters["policy"], "network": {"mode": "none", "deny_private_networks": True}}}})
+        await app.update_runtime(config.model_copy(update={"capabilities": {
+            **config.capabilities, "execution.binding": changed}}))
+        assert await app.execution_configuration(result.run_id, CONTEXT) == frozen
+    finally:
+        await app.close()
 
 
 def test_network_policy_changes_sandbox_fingerprint(tmp_path):
@@ -108,14 +100,14 @@ def test_saved_package_network_applies_when_server_executes(client, service, mon
     factory = service.agent_management.package_builder_factory
     factory.settings = replace(factory.settings, sandbox_network_mode=ceiling)
     specs = []
-    provider = service.execution.sandbox_provider
-    provision = provider.provision
+    from sagents.v2.runtime.execution.sandbox import LocalWorkspaceSandboxProvider
+    provision = LocalWorkspaceSandboxProvider.provision
 
-    async def capture(spec, context, *, run_id):
+    async def capture(provider, spec, context, *, run_id):
         specs.append(spec)
-        return await provision(spec, context, run_id=run_id)
+        return await provision(provider, spec, context, run_id=run_id)
 
-    monkeypatch.setattr(provider, "provision", capture)
+    monkeypatch.setattr(LocalWorkspaceSandboxProvider, "provision", capture)
     headers = {"Authorization": f"Bearer {register_and_login(client)}"}
     bundle = client.get("/api/agent-packages/template", headers=headers).json()["data"]
     bundle["manifest"]["agents"]["assistant"]["sandbox"] = {"network": network}
@@ -148,15 +140,15 @@ def test_flow_member_uses_own_network_policy(client, service, monkeypatch):
     from copy import deepcopy
 
     networks = {}
-    provider = service.execution.sandbox_provider
-    provision = provider.provision
+    from sagents.v2.runtime.execution.sandbox import LocalWorkspaceSandboxProvider
+    provision = LocalWorkspaceSandboxProvider.provision
 
-    async def capture(spec, context, *, run_id):
-        handle = await provision(spec, context, run_id=run_id)
+    async def capture(provider, spec, context, *, run_id):
+        handle = await provision(provider, spec, context, run_id=run_id)
         networks[run_id] = spec.network.mode
         return handle
 
-    monkeypatch.setattr(provider, "provision", capture)
+    monkeypatch.setattr(LocalWorkspaceSandboxProvider, "provision", capture)
     headers = {"Authorization": f"Bearer {register_and_login(client)}"}
     bundle = client.get("/api/agent-packages/template", headers=headers).json()["data"]
     agents = bundle["manifest"]["agents"]
@@ -186,7 +178,7 @@ def test_flow_member_uses_own_network_policy(client, service, monkeypatch):
     })
     assert response.status_code == 200, response.text
     state = settled(client, headers, "flow-network")
-    assert state["run"]["state"] == "completed", state
+    assert state["run"]["state"] == "completed", __import__("json").dumps(state, default=str)
     assert networks[state["run"]["run_id"]] == NetworkMode.UNRESTRICTED
     assert NetworkMode.NONE in networks.values()
 

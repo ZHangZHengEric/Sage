@@ -352,7 +352,9 @@ class _LocalProcessRuntime:
         }
         environment = {
             **inherited_env,
-            "PATH": self.provider.command_path,
+            "PATH": self.row.spec.metadata.get("tool_environment", {}).get(
+                "command_path", self.provider.command_path,
+            ),
             **request.env,
         }
         resolved = []
@@ -723,6 +725,7 @@ class LocalWorkspaceSandboxProvider:
         max_retained_terminal_items: int = 1024,
         command_path: str | None = None,
         read_paths: tuple[str, ...] | list[str] | None = None,
+        isolation_python: str | None = None,
         linux_cgroup_root: str | None = None,
         linux_quota_mount: str | None = None,
         linux_execution_uid: int | None = None,
@@ -746,6 +749,7 @@ class LocalWorkspaceSandboxProvider:
             else os.environ.get("PATH") or os.defpath
         )
         self.read_paths = _configured_read_paths(read_paths)
+        self.isolation_python = isolation_python
         self.verification_key = verification_key
         self._clock = clock
         self._terminal_ttl = timedelta(seconds=terminal_ttl_seconds)
@@ -759,7 +763,15 @@ class LocalWorkspaceSandboxProvider:
             execution_uid=linux_execution_uid,
             execution_gid=linux_execution_gid,
             extra_read_paths=self.read_paths,
+            isolation_python=isolation_python,
         )
+
+    async def validate_runtime(self, *, forbidden_roots=()):
+        """Validate the trusted helper without provisioning a Run sandbox."""
+        import asyncio
+        from ..local_support.interpreter import inspect_isolation_python
+        return await asyncio.to_thread(inspect_isolation_python, self.isolation_python,
+                                       forbidden_roots=forbidden_roots)
 
     async def capabilities(self) -> SandboxCapabilities:
         # Kernel hard limits come from the delegated cgroup subtree and the XFS
@@ -857,7 +869,15 @@ class LocalWorkspaceSandboxProvider:
             now,
             process_slots=asyncio.Semaphore(spec.process.max_processes),
         )
-        row.boundary = LocalResourceBoundary(row, **self._boundary_options)
+        boundary_options = dict(self._boundary_options)
+        environment = spec.metadata.get("tool_environment")
+        if environment is not None:
+            interpreter = environment["interpreter"]
+            boundary_options.update(
+                isolation_python=interpreter["executable"],
+                extra_read_paths=tuple(environment["read_paths"]),
+            )
+        row.boundary = LocalResourceBoundary(row, **boundary_options)
         try:
             await row.boundary.prepare()
         except BaseException:

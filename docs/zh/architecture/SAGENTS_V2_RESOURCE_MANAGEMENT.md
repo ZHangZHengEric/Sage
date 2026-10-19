@@ -26,7 +26,6 @@ service = AgentManagementService(
     root,
     builder_factory=build_package,
     authorize=authorize_package,
-    model_budget=budget,
     require_readiness=True,
     auto_release_idle_seconds=300,
 )
@@ -35,7 +34,7 @@ reclaimed = await service.release_idle(min_idle_seconds=300, limit=4)
 metrics = service.capacity()
 ```
 
-此片段要求宿主提供 root、bundle、context 和回调。所有相关服务与 Builder 必须共享同一个 budget；普通 Builder 用 `with_model_budget(budget)`。没有注入共享对象就没有跨 Application 总额度。
+`build_package` 返回 `ApplicationConfiguration`。每个参与的 App 都注册返回同一借用 budget 对象的 `execution.model-budget` 工厂，并在 runtime 选择它。分别配置相同数字不会共享总额度。
 
 ## 资源就绪性
 
@@ -81,7 +80,7 @@ SessionStore 仍是权威源。崩溃前可能尚未归档，内置文件存储�
 
 Flow 可达集合包括条件边、并行 branches、subflow 和成员 subagents，通过访问集合终止循环。只为入口及可达成员初始化模型；显式包验证仍检查所有 Agent。
 
-`InMemoryJobRuntime` 默认运行并发 32、准入 1024，并限制单任务输出字节/分块及聚合保留输出。通过 `AgentManagementService(..., job_runtime=jobs)` 或 `SAgentBuilder().with_job_runtime(jobs)` 共享同一对象。
+`InMemoryJobRuntime` 默认运行并发 32、准入 1024，并限制单任务输出字节/分块及聚合保留输出。通过注册 `execution.job-runtime` 工厂并在 runtime 选择来共享同一借用对象；管理工厂返回 `ApplicationConfiguration`，不再另行注入运行时。
 
 共享 JobRuntime 归宿主所有；先关闭使用者，再 `await jobs.close()`。未注入则每个 Application 各有实例，不具备跨应用总额度。Scheduler 队列保持应用隔离，避免 dispatcher 误领其他应用任务。
 

@@ -27,9 +27,7 @@ from app.v2.desktop.backend.package import (
     desktop_component_config_schema,
     stable_component_id as _stable_component_id,
 )
-from sagents.v2.tool.official import OfficialToolRuntime
 from sagents.v2.tool.plugins.official import (
-    OfficialToolPlugin,
     official_tool_categories,
     official_tool_definitions,
 )
@@ -45,10 +43,6 @@ from sagents.v2.model import (
     model_protocol_implementation,
 )
 from sagents.v2.model.protocols import create_registered_model_provider
-from sagents.v2.runtime.extensions import (
-    ExtensionScope,
-    ExtensionScopeContext,
-)
 from sagents.v2.skill import (
     SkillLoadTool,
 )
@@ -67,9 +61,6 @@ from app.v2.desktop.backend.schemas import (
     MCPConnectionRequest,
     ModelProviderCreate,
     ModelProviderPatch,
-)
-from app.v2.desktop.backend.run_lifecycle import (
-    DesktopRunResources as _DesktopRunResources,  # noqa: F401 - compatibility export
 )
 from app.v2.desktop.backend.run_context import (
     AgentRosterContextProvider as AgentRosterContextProvider,
@@ -292,15 +283,6 @@ class DesktopCatalogServiceMixin:
             for value in discovered
         )
         return definitions
-
-    def _official_tools(self, runtime: OfficialToolRuntime) -> OfficialToolPlugin:
-        return OfficialToolPlugin(
-            ExtensionScopeContext(
-                scope=ExtensionScope.AGENT,
-                scope_id="desktop-v2-official-tools",
-                config={"runtime": runtime},
-            )
-        )
 
     def _native_tool_definitions(self) -> tuple[ToolDefinition, ...]:
         definitions = official_tool_definitions()

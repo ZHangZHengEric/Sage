@@ -132,6 +132,16 @@ def register_official_plugins(registry: ExtensionRegistry) -> None:
     """Register every first-party host-selectable plugin."""
 
     existing = {value.descriptor.plugin_id for value in registry.registrations()}
+    from sagents.v2.runtime.execution.registration import local_execution_binding_registration
+    registry.register(local_execution_binding_registration())
+    from sagents.v2.runtime.execution.ephemeral_binding import ephemeral_execution_binding_registration
+    registry.register(ephemeral_execution_binding_registration())
+    from sagents.v2.runtime.execution.environment import run_environment_registration, tool_runtime_registration
+    registry.register(run_environment_registration())
+    registry.register(tool_runtime_registration())
+    from sagents.v2.runtime.extensions.core import core_registrations
+    for registration in core_registrations():
+        registry.register(registration)
     _register_session_and_memory(registry)
     _register_tools_skills_and_flow(registry)
     _register_infrastructure(registry)
@@ -318,9 +328,6 @@ def _register_infrastructure(registry: ExtensionRegistry) -> None:
                 context.config.get("summary_target_tokens", 1024)
             ),
             protected_recent_units=int(context.config.get("protected_recent_units", 4)),
-            max_summary_source_tokens=int(
-                context.config.get("max_summary_source_tokens", 24000)
-            ),
             unit_compactor=context.config.get("unit_compactor"),
             max_summary_calls=int(context.config.get("max_summary_calls", 64)),
         ),
@@ -392,7 +399,7 @@ def _register_infrastructure(registry: ExtensionRegistry) -> None:
                 )
             ),
         ),
-        scopes={ExtensionScope.AGENT},
+        scopes={ExtensionScope.AGENT, ExtensionScope.RUN},
         config_schema={
             "type": "object",
             "properties": {
@@ -964,7 +971,7 @@ def _register_infrastructure(registry: ExtensionRegistry) -> None:
                     ),
                 ),
                 supported_scopes=frozenset(
-                    {ExtensionScope.PROCESS, ExtensionScope.AGENT}
+                    {ExtensionScope.PROCESS, ExtensionScope.AGENT, ExtensionScope.RUN}
                 ),
                 config_schema={
                     "type": "object",
@@ -1492,7 +1499,7 @@ def _register_tools_skills_and_flow(registry: ExtensionRegistry) -> None:
     registry.register(
         ExtensionRegistration(
             descriptor=OfficialToolPlugin.descriptor,
-            factory=lambda context, dependencies: OfficialToolPlugin(context),
+            factory=lambda context, dependencies: OfficialToolPlugin(dependencies.require("execution.tool-runtime")),
             start=lambda plugin, context, dependencies: plugin.start(
                 context, dependencies
             ),

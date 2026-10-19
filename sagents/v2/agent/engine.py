@@ -270,6 +270,7 @@ class AgentLoopEngine:
         self.delegated_run_controller = delegated_run_controller
         self.expected_resolved_spec_hash = expected_resolved_spec_hash
         self.clock = clock
+        self._budget_usage_cache = {}
         from sagents.v2.runtime.lifecycle import DurableRunLifecycle
 
         self.lifecycle = DurableRunLifecycle(runtime)
@@ -1444,6 +1445,8 @@ class AgentLoopEngine:
         uncommitted output or repeat an external side effect after recovery.
         """
 
+        from sagents.v2.runtime.execution.budgets import evaluate_run_budget
+
         command = await self.runtime.session_store.get_start_command(run.run_id)
         command = with_session_context(command, run.session_id)
         context = self._context_for_command(context, command)
@@ -1453,8 +1456,13 @@ class AgentLoopEngine:
         while run.state in {RunState.RUNNING, RunState.SUSPEND_REQUESTED}:
             if run.state == RunState.SUSPEND_REQUESTED:
                 return await self._suspend_at_safe_point(run, state, context)
+            budget = await evaluate_run_budget(self.runtime.session_store, run, self.clock(), usage_cache=self._budget_usage_cache)
+            if budget.error is not None:
+                return await self._fail(run, state, None, budget.error, context, allow_recovery=False)
             if state.provider_retry_at is not None:
                 delay = max(0, (state.provider_retry_at - self.clock()).total_seconds())
+                if budget.deadline is not None:
+                    delay = min(delay, max(0, (budget.deadline - self.clock()).total_seconds()))
                 if delay > 0 and can_defer_run(run.run_id):
                     return run
                 if command.config.deadline_seconds is not None:
@@ -1470,19 +1478,9 @@ class AgentLoopEngine:
                     await self._release_run_resources(run.run_id)
                     return current
                 run = current
-                if (
-                    command.config.deadline_seconds is not None
-                    and (self.clock() - run.created_at).total_seconds()
-                    >= command.config.deadline_seconds
-                ):
-                    return await self._fail(
-                        run, state, None,
-                        RuntimeErrorInfo(
-                            code="budget.deadline", category=ErrorCategory.VALIDATION,
-                            message="Run deadline reached while waiting for provider recovery",
-                            safe_to_resume=True,
-                        ), context,
-                    )
+                budget = await evaluate_run_budget(self.runtime.session_store, run, self.clock(), usage_cache=self._budget_usage_cache)
+                if budget.error is not None:
+                    return await self._fail(run, state, None, budget.error, context, allow_recovery=False)
                 state = state.model_copy(update={
                     "provider_retry_at": None, "automatic_resume_at": None,
                     "automatic_resume_reason": None,
@@ -1610,6 +1608,14 @@ class AgentLoopEngine:
                         context,
                     )
                 request = prepared_step.request
+                budget = await evaluate_run_budget(self.runtime.session_store, run, self.clock(), usage_cache=self._budget_usage_cache)
+                if budget.error is not None:
+                    return await self._fail(run, state, step_id, budget.error, context, allow_recovery=False)
+                if budget.remaining_tokens is not None:
+                    request = request.model_copy(update={"max_output_tokens": min(
+                        request.max_output_tokens or budget.remaining_tokens,
+                        budget.remaining_tokens,
+                    )})
                 tools = prepared_step.tools
                 system_requirements = self._system_requirements(request.messages)
                 available_tools = tuple(tool.name for tool in tools)
@@ -1771,6 +1777,9 @@ class AgentLoopEngine:
             completed_tool_results: list[ToolExecutionResult] = []
             read_tools: set[str] = set()
             if response.tool_calls:
+                budget = await evaluate_run_budget(self.runtime.session_store, run, self.clock(), usage_cache=self._budget_usage_cache)
+                if budget.error is not None:
+                    return await self._fail(run, state, step_id, budget.error, context, allow_recovery=False)
                 # Phase 4: proposal and policy decision are committed before any
                 # external ToolExecutor receives the call.
                 settled = {
@@ -2008,6 +2017,9 @@ class AgentLoopEngine:
                 state, response, completed_tool_results, read_tools
             )
             repeated = repeated_cycles(state.response_fingerprints)
+            budget = await evaluate_run_budget(self.runtime.session_store, run, self.clock(), usage_cache=self._budget_usage_cache)
+            if budget.error is not None:
+                return await self._fail(run, state, step_id, budget.error, context, allow_recovery=False)
             signals = await self._continuation_signals(run.run_id, state)
             # Phase 5: completion is policy, not an implicit consequence of EOF
             # or a provider finish_reason.
@@ -2542,6 +2554,9 @@ class AgentLoopEngine:
     async def _control_aware_model_events(self, stream, run, command):
         """Poll durable control/deadline state without cancelling socket reads."""
 
+        from sagents.v2.runtime.execution.budgets import evaluate_run_budget
+
+        budget = await evaluate_run_budget(self.runtime.session_store, run, self.clock(), check_tokens=False)
         iterator = stream.__aiter__()
         pending = None
         poll_seconds = 0.1
@@ -2551,10 +2566,8 @@ class AgentLoopEngine:
                     pending = asyncio.create_task(anext(iterator))
                 timeout = poll_seconds
                 deadline_expired = False
-                if command.config.deadline_seconds is not None:
-                    remaining = command.config.deadline_seconds - max(
-                        0.0, (self.clock() - run.created_at).total_seconds()
-                    )
+                if budget.deadline is not None:
+                    remaining = (budget.deadline - self.clock()).total_seconds()
                     if remaining <= 0:
                         deadline_expired = True
                         timeout = 0
@@ -2570,14 +2583,9 @@ class AgentLoopEngine:
                     yield event, None
                     continue
                 if deadline_expired:
-                    raise SageV2Error(
-                        RuntimeErrorInfo(
-                            code="budget.deadline",
-                            category=ErrorCategory.VALIDATION,
-                            message=tr("error.budget.deadline", None),
-                            safe_to_resume=True,
-                        )
-                    )
+                    expired = await evaluate_run_budget(self.runtime.session_store, run, self.clock(), check_tokens=False)
+                    if expired.error is not None:
+                        raise SageV2Error(expired.error)
                 current = await self.runtime.get_run(run.run_id)
                 if current.state != RunState.RUNNING:
                     yield None, current
@@ -3027,6 +3035,9 @@ class AgentLoopEngine:
     async def _execute_tool_with_control(self, run, call, context):
         """Interrupt only when both Tool metadata and Executor permit it."""
 
+        from sagents.v2.runtime.execution.budgets import evaluate_run_budget
+
+        budget = await evaluate_run_budget(self.runtime.session_store, run, self.clock(), check_tokens=False)
         definition = await self.tool_catalog.get_tool(call.tool_name, run_id=run.run_id)
         command = await self.runtime.session_store.get_start_command(run.run_id)
         command = with_session_context(command, run.session_id)
@@ -3046,9 +3057,7 @@ class AgentLoopEngine:
                     return await self.runtime.get_run(run.run_id), execution.result()
                 current = await self.runtime.get_run(run.run_id)
                 deadline_expired = (
-                    command.config.deadline_seconds is not None
-                    and (self.clock() - current.created_at).total_seconds()
-                    >= command.config.deadline_seconds
+                    budget.deadline is not None and self.clock() >= budget.deadline
                 )
                 if current.state == RunState.RUNNING and not deadline_expired:
                     continue
@@ -4592,6 +4601,9 @@ class AgentLoopEngine:
             await self._release_run_resources(run.run_id)
             return current
         resumable = allow_recovery and (error.safe_to_resume or error.retryable)
+        if error.metadata.get("budget_scope") == "run_tree":
+            from sagents.v2.runtime.execution.budgets import stop_budget_descendants
+            await stop_budget_descendants(self.runtime, current, context)
         if current.state == RunState.RUNNING and resumable:
             decision = ContinuationDecision(
                 action=ContinuationAction.REQUEST_INTERACTION,
