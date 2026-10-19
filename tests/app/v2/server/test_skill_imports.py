@@ -96,7 +96,7 @@ def test_downloader_revalidates_redirect_dns_and_bounds_stream(monkeypatch):
         remaining = b'x' * 17
         def getheader(self, name):
             return None
-        def read(self, size):
+        def read1(self, size):
             chunk, self.remaining = self.remaining[:size], self.remaining[size:]
             return chunk
 

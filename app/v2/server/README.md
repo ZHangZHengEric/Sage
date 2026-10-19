@@ -250,3 +250,14 @@ Server API 用 `external_tools` 配置外部工具，页面与内置 `tools` 分
 - `DELETE /api/agents/{agent_id}/sessions/{session_id}`：独立清理该身份下的会话树和 thread 索引，重复调用成功，保留会话身份绑定及 workspace 文件；错误身份返回 404。有未结束任务时拒绝清理。是否与目录删除组合、调用顺序由业务后端决定。
 
 删除与 Run 创建、文件导入在当前 server 进程内互斥；请求取消时会等待文件线程退出后释放互斥。运行冲突保护适用于现有单进程 server v2，不提供多 worker、多实例或外部进程直接写 workspace 时的分布式文件租约。
+
+## 在线技能导入
+
+技能页的“导入技能”支持本地 ZIP、在线 ZIP 和 `npx skills add` 命令。远程导入先解析并展示技能列表，用户选择后导入；同名且内容不同的技能需要明确选择“更新已有技能”。导入不自动修改智能体绑定。
+
+- `POST /api/skill-import-previews`：登录用户提交 `{ "kind": "zip_url", "value": "https://example.com/skills.zip" }`，或 `{ "kind": "skills_cli", "value": "npx skills add vercel-labs/agent-skills --skill web-design-guidelines" }`。返回 `revision` 和 `candidates`；候选包含 `path`、`package_sha256`、`expected_version_id` 及 `new` / `unchanged` / `conflict` 状态。
+- `POST /api/skill-imports`：保留相同的 `kind`、`value`、`revision`，增加 `items` 数组。每项提交候选的 `path`、`package_sha256`、`expected_version_id` 和显式更新开关 `overwrite`。来源内容或目标版本变化时要求重新预览；各项结果沿用 ZIP 上传的 `success_count`、`failed_count`、`results` 和 `skills`。
+- 在线 ZIP 接受公开 HTTPS 443 地址，最大压缩体积 32 MiB、展开 64 MiB、2000 个条目，一次最多 32 个技能；重定向逐次校验，DNS 解析和连接固定到公开地址。使用 fake IP 的本机代理需要为服务端配置正常 DNS，私网和保留地址不会放行。
+- Skills CLI 当前支持公开 GitHub 仓库简写、仓库或 tree 目录地址，支持 `--skill` / `-s`、`--list` / `-l` 和 `--yes` / `-y`。`--global`、指定其他 Agent 和 Shell 表达式不接受。服务器需 Node.js 22.20 以上、npx，并能访问 GitHub 与 npm registry；调用固定 `skills@1.7.2`，在隔离的临时目录中进行项目级复制安装，不执行技能脚本或 npm 安装脚本，不继承服务端凭据。
+
+导入记录和内容仍使用已有的 Skill 版本及制品目录，不新增数据库表。npm 缓存位于 `{data_root}/runtime/skill-import-npm-cache`。已有工作区中的编辑版本保持优先级；更多设计见[远程导入方案](../../../docs/zh/architecture/skill-import-proposal.md)。
