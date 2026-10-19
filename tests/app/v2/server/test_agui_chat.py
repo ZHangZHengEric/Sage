@@ -42,7 +42,7 @@ def _run_input(thread_id: str = "thread-1", run_id: str = "run-1") -> dict:
 
 @pytest.mark.timeout(30)
 def test_agui_run_writes_correlated_json_sagents_logs_to_stdout(tmp_path, capsys):
-    service = make_test_service(tmp_path)
+    service = make_test_service(tmp_path, log_level="debug")
     with TestClient(create_app(service=service)) as client:
         token = register_and_login(client)
         capsys.readouterr()
@@ -68,11 +68,23 @@ def test_agui_run_writes_correlated_json_sagents_logs_to_stdout(tmp_path, capsys
         "agent.run.completed",
         "model.request.started",
         "model.request.completed",
+        "agui.first_text",
+        "model.first_text",
+        "agent.preparation.completed",
+        "agent.state.commit",
+        "server.run.agent_load",
+        "server.run.accepted",
     }
     assert run_events <= events
     run_rows = [row for row in rows if row["event"] in run_events]
     assert run_rows
     assert {row["correlation_id"] for row in run_rows} == {"request-agui-1"}
+    first = next(row for row in rows if row["event"] == "agui.first_text")
+    assert first["attributes"]["duration_ms"] >= 0
+    assert first["attributes"]["replayed"] is False
+    assert len([row for row in rows if row["event"] == "agui.first_text"]) == 1
+    assert "hello" not in json.dumps(first)
+    assert first["level"] == "debug"
 
 
 @pytest.mark.timeout(30)

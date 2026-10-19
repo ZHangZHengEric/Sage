@@ -5,6 +5,7 @@ import json
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from typing import Any
+from time import perf_counter
 
 from sagents.v2.contracts.events import RuntimeEvent, ItemEventData
 from sagents.v2.contracts.items import MessageItemData
@@ -126,6 +127,8 @@ async def canonical_agui_sse(
     last_event_id: str | None,
     restarted_after: int = 0,
     heartbeat_seconds: float = 20.0,
+    logger=None,
+    started_at: float | None = None,
 ) -> AsyncIterator[str]:
     """Project canonical Run events and live previews into an AG-UI SSE stream.
 
@@ -144,6 +147,8 @@ async def canonical_agui_sse(
     adapter = AgUiProtocolAdapter(enable_sage_extensions=True)
     owned_user_text = ClientOwnedUserTextFilter()
     opened = False
+    first_text_logged = False
+    assistant_messages: set[str] = set()
     async for event in _events_with_heartbeats(
         events, heartbeat_seconds=heartbeat_seconds
     ):
@@ -167,6 +172,8 @@ async def canonical_agui_sse(
             if not steered_message and not owned_user_text.allow(payload):
                 continue
             kind = payload.get("type")
+            if kind == "TEXT_MESSAGE_START" and payload.get("role") == "assistant":
+                assistant_messages.add(str(payload.get("messageId")))
             if not opened:
                 if kind == "RUN_STARTED":
                     opened = True
@@ -188,6 +195,15 @@ async def canonical_agui_sse(
             )
             if not position.follows(cursor):
                 continue
+            if (not first_text_logged and kind == "TEXT_MESSAGE_CONTENT" and payload.get("delta")
+                    and str(payload.get("messageId")) in assistant_messages):
+                first_text_logged = True
+                if logger is not None and started_at is not None:
+                    logger.debug("agui.first_text", "首段 Assistant 正文已就绪，准备发送 SSE",
+                        run_id=event.run_id, session_id=event.session_id,
+                        attributes={"thread_id": thread_id, "client_run_id": run_id,
+                                    "replayed": bool(last_event_id),
+                                    "duration_ms": round((perf_counter() - started_at) * 1000, 3)})
             yield format_sse(position.encode(), payload)
         if event.type in {
             "run.suspended",

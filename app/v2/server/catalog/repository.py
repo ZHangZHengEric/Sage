@@ -4,6 +4,7 @@ from typing import Protocol
 from datetime import datetime, timezone
 
 from app.v2.server.database import Database
+from app.v2.server.runtime.policy import ExecutionPolicy
 
 from sqlalchemy import delete, select, update
 
@@ -32,6 +33,7 @@ _SECTIONS = ("models", "mcp_servers", "a2a_agents")
 
 
 class CatalogStore(Protocol):
+    async def get_execution_policy(self, user_id: str, agent_id: str) -> ExecutionPolicy | None: ...
     async def get_agent(self, user_id: str, agent_id: str) -> AgentRecord: ...
     async def editor_catalog(self, user_id: str) -> UserCatalog: ...
     async def list_resources(
@@ -60,6 +62,14 @@ class DatabaseCatalogStore:
     def __init__(self, database: Database) -> None:
         self.database = database
         self.packages = DatabasePackageStore(database)
+
+    async def get_execution_policy(self, user_id: str, agent_id: str) -> ExecutionPolicy | None:
+        """Read live authorization without loading packages or locking the catalog."""
+        async with self.database.session() as session:
+            value = await session.scalar(select(AgentRow.execution_policy).where(
+                AgentRow.id == agent_id, AgentRow.owner_user_id == user_id,
+            ))
+        return ExecutionPolicy.model_validate(value) if value is not None else None
 
     async def get_agent(self, user_id: str, agent_id: str) -> AgentRecord:
         async with self.database.session() as session:

@@ -55,6 +55,6 @@ def apply_thread_upsert(
     return ThreadRecord(
         thread_id=thread_id,
         user_id=user_id,
-        title=title or (existing.title if existing is not None else title),
+        title=(existing.title if existing is not None else "") or title,
         agent_id=pinned,
     )

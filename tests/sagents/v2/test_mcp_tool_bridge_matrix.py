@@ -49,7 +49,12 @@ class FakeSession:
 
 
 @pytest.mark.asyncio
-async def test_mcp_bridge_namespaces_discovers_executes_and_deduplicates():
+async def test_mcp_bridge_namespaces_discovers_executes_and_deduplicates(monkeypatch):
+    from unittest.mock import MagicMock
+    from sagents.v2.tool.plugins import mcp
+
+    logger = MagicMock()
+    monkeypatch.setattr(mcp, "LOGGER", logger)
     session = FakeSession()
 
     @asynccontextmanager
@@ -71,6 +76,14 @@ async def test_mcp_bridge_namespaces_discovers_executes_and_deduplicates():
         "protocol_exactly_once": False,
     }
     tools = await bridge.list_tools(run_id="run_1")
+    await bridge.list_tools(run_id="run_2")
+    logger.debug.assert_called_once()
+    assert logger.debug.call_args.args[0] == "mcp.discovery.completed"
+    timing = logger.debug.call_args.kwargs
+    assert timing["outcome"] == "completed"
+    assert timing["tool_count"] == 1
+    assert all(timing[key] >= 0 for key in ("duration_ms", "connect_ms", "list_tools_ms", "close_ms"))
+    assert "url" not in timing
 
     assert [value.name for value in tools] == ["mcp_drive_search_files"]
     assert tools[0].requires_approval is False

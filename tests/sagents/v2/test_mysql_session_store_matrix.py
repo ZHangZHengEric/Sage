@@ -120,7 +120,9 @@ async def test_mysql_authorization_loads_persisted_session_before_owner_check():
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("snapshot_interval", [1, 256])
-async def test_mysql_create_and_commit_persist_only_target_session(snapshot_interval):
+async def test_mysql_create_and_commit_persist_only_target_session(snapshot_interval, monkeypatch):
+    logger = MagicMock()
+    monkeypatch.setattr(mysql_plugin, "LOGGER", logger)
     store = MysqlSessionStore("mysql://root@127.0.0.1/sage")
     state = store._coordinator
     state.snapshot_interval = snapshot_interval
@@ -179,6 +181,11 @@ async def test_mysql_create_and_commit_persist_only_target_session(snapshot_inte
     assert [row["run_id"] for row in payload["runs"]] == [first.handle.run_id]
     assert connection.commit.await_count == 3
     connection.rollback.assert_not_awaited()
+    commits = [call for call in logger.debug.call_args_list if call.args[0] == "session.mysql.commit"]
+    assert len(commits) == 3
+    for call in commits:
+        assert all(call.kwargs[key] >= 0 for key in (
+            "duration_ms", "preparation_ms", "connection_wait_ms", "write_ms", "commit_ms"))
 
 
 @pytest.mark.asyncio

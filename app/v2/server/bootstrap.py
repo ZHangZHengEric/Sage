@@ -156,7 +156,7 @@ class ServerHost:
             self.settings,
             plugin_overrides=ServerPluginConfig(self.paths.data_root, registry=self.extensions).read(),
         )
-        if self.diagnostics is None:
+        if self.diagnostics is None or self.diagnostics.closed:
             from app.v2.server.observability.diagnostics import SessionDiagnostics
 
             self.diagnostics = SessionDiagnostics(self.paths.runtime_root / "diagnostics")
@@ -359,6 +359,8 @@ class ServerHost:
         self.a2a_plugins.clear()
         self.execution.model_pool = None
         self.execution.model_budget = None
+        if self.diagnostics is not None:
+            await self.diagnostics.close()
 
     async def _expire_approvals(self, runs):
         while True:

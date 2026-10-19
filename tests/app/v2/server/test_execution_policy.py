@@ -1,10 +1,65 @@
 import pytest
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 from app.v2.server.runtime.policy import ExecutionPolicy, intersect_policies
 from app.v2.server.packages.tool_policy import server_tool_policy
 from sagents.v2.agent.policy import ToolPolicyAction, ToolPolicyContext
 from sagents.v2.contracts.principals import ActorRef, PrincipalType
 from sagents.v2.tool import SideEffectLevel, ToolCall, ToolDefinition
+
+
+@pytest.mark.parametrize("live_shell", ["sandboxed", "deny", None])
+async def test_live_execution_check_uses_only_current_agent_policy(live_shell):
+    from app.v2.server.runtime.policy import execution_metadata, live_execution_policy
+    from sagents.v2.contracts.commands import StartRun, RunConfig
+
+    frozen = ExecutionPolicy(shell="ask")
+    command = StartRun(agent_id="agent", input=(), idempotency_key="start", resolved_spec_hash="sha256:test",
+        config=RunConfig(metadata=execution_metadata(frozen, user_id="alice", agent_id="agent")))
+    users = SimpleNamespace(get_by_id=AsyncMock(return_value=SimpleNamespace(execution_policy=ExecutionPolicy(shell="sandboxed"))))
+    catalog = SimpleNamespace(
+        get=AsyncMock(side_effect=AssertionError("must not load full catalog")),
+        get_execution_policy=AsyncMock(return_value=ExecutionPolicy(shell=live_shell) if live_shell else None),
+    )
+    settings = SimpleNamespace(execution_shell_mode="sandboxed", approval_timeout_seconds=86400)
+    policy = await live_execution_policy(command, users=users, keys=None, catalog=catalog,
+                                         settings=settings, user_id="alice")
+    assert (policy.shell if policy else None) == ({"sandboxed": "ask", "deny": "deny", None: None}[live_shell])
+    users.get_by_id.assert_awaited_once_with("alice")
+    catalog.get_execution_policy.assert_awaited_once_with("alice", "agent")
+    users.get_by_id.return_value = None
+    assert await live_execution_policy(command, users=users, keys=None, catalog=catalog,
+                                        settings=settings, user_id="alice") is None
+    assert catalog.get_execution_policy.await_count == 2
+
+
+async def test_live_execution_reads_user_agent_and_key_concurrently():
+    import asyncio
+    from app.v2.server.runtime.policy import execution_metadata, live_execution_policy
+    from sagents.v2.contracts.commands import StartRun, RunConfig
+
+    arrived = set()
+    all_started = asyncio.Event()
+
+    async def read(name, value):
+        arrived.add(name)
+        if len(arrived) == 3:
+            all_started.set()
+        await all_started.wait()
+        return value
+
+    policy = ExecutionPolicy(shell="sandboxed")
+    command = StartRun(agent_id="agent", input=(), idempotency_key="start", resolved_spec_hash="sha256:test",
+        config=RunConfig(metadata=execution_metadata(policy, user_id="alice", agent_id="agent", key_id="key")))
+    result = await asyncio.wait_for(live_execution_policy(command,
+        users=SimpleNamespace(get_by_id=lambda _: read("user", SimpleNamespace(execution_policy=policy))),
+        catalog=SimpleNamespace(get_execution_policy=lambda *_: read("agent", policy)),
+        keys=SimpleNamespace(get=lambda _: read("key", SimpleNamespace(revoked=False,
+            owner_user_id="alice", agent_id="agent", allows=lambda _: True))),
+        settings=SimpleNamespace(execution_shell_mode="sandboxed", approval_timeout_seconds=86400),
+        user_id="alice"), timeout=1)
+    assert result == policy
 
 
 def context(name="execute_shell_command", level=SideEffectLevel.WRITE):
@@ -51,3 +106,23 @@ async def test_live_key_revocation_blocks_even_read_tools():
     policy = server_tool_policy(None, execution_policy=ExecutionPolicy(shell="sandboxed"),
                                current_policy=current)
     assert (await policy.decide(context("file_read", SideEffectLevel.READ))).action == ToolPolicyAction.DENY
+
+
+async def test_root_and_member_policy_checks_overlap_and_still_deny_revocation():
+    import asyncio
+    root_started, member_started = asyncio.Event(), asyncio.Event()
+
+    async def current():
+        root_started.set()
+        await member_started.wait()
+        return ExecutionPolicy(shell="sandboxed")
+
+    async def member(_):
+        member_started.set()
+        await root_started.wait()
+        return None
+
+    policy = server_tool_policy(None, execution_policy=ExecutionPolicy(shell="sandboxed"),
+                                current_policy=current, run_policy=member)
+    result = await asyncio.wait_for(policy.decide(context()), timeout=1)
+    assert result.action == ToolPolicyAction.DENY

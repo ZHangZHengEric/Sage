@@ -146,9 +146,8 @@ def server_registrations(host):
             grant = member_grants.get(selected.agent_id)
             if grant is None:
                 return None
-            catalog = await host.catalog_store.get(user)
-            member = next((item for item in catalog.agents if item.id == grant["agent_id"]), None)
-            return intersect_policies(ExecutionPolicy.model_validate(grant["policy"]), member.execution_policy) if member else None
+            member = await host.catalog_store.get_execution_policy(user, grant["agent_id"])
+            return intersect_policies(ExecutionPolicy.model_validate(grant["policy"]), member) if member is not None else None
 
         return server_tool_policy(host.agent_management, execution_policy=admitted,
                                   current_policy=current, run_policy=member_policy if member_grants else None,
@@ -166,7 +165,7 @@ def server_registrations(host):
             return None
         async def authorize(request, request_context):
             if (request_context.actor.principal_id != user or request_context.actor.tenant_id != user
-                    or request_context.actor.delegated_by or await host.users.get_by_id(user) is None):
+                    or request_context.actor.delegated_by):
                 raise PermissionError("Only the authenticated owner can configure this Agent")
             current = await live_execution_policy(command, users=host.users, keys=host.credentials.keys,
                 catalog=host.catalog_store, settings=host.settings, user_id=user, catalog_agent_id=frozen.agent.id)
