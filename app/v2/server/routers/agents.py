@@ -8,7 +8,7 @@ from app.v2.server.routers.deps import ReadUser, CatalogDep, CurrentUser, AdminU
 from app.v2.server.runtime.official import official_tool_catalog
 from app.v2.server.routers.render import success
 from app.v2.server.routers.schemas.common import AUTH_ERRORS, VALIDATION_ERRORS, ApiResponse
-from app.v2.server.routers.schemas.catalog import AgentBody, AgentPublic, ToolPublic
+from app.v2.server.routers.schemas.catalog import AgentBody, AgentPublic, AgentSummary, ToolPublic
 from app.v2.server.routers.schemas.skills import SkillBindBody, SkillPublic
 from app.v2.server.skills.agent_guidance import sync_agent_guidance
 from sagents.v2.contracts.errors import ErrorCategory, RuntimeErrorInfo, SageV2Error
@@ -186,6 +186,11 @@ async def list_agents(user: ReadUser, service: CatalogDep):
 async def create_agent(body: AgentBody, user: CurrentUser, service: CatalogDep):
     record = await service.create_agent(user.user_id, body.model_dump(exclude={key for key in ("tool_approval", "fast_model_id", "tools", "external_tools") if key not in body.model_fields_set}))
     return success(record.public_dict())
+
+
+@agent_router.get("/api/agents/summary", response_model=ApiResponse[list[AgentSummary]])
+async def agent_summaries(user: ReadUser, service: CatalogDep):
+    return success(await service.list_agent_summaries([user.user_id]))
 
 
 @agent_router.get("/api/agents/{agent_id}", response_model=ApiResponse[AgentPublic])

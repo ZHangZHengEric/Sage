@@ -36,3 +36,11 @@ class AdminService:
                 [user.user_id for user in users]
             )
         ]
+
+    async def list_agents(self) -> list[dict]:
+        users = await self.users.list_users()
+        names = {user.user_id: user.username for user in users}
+        return [
+            {**item, "username": names[item["user_id"]]}
+            for item in await self.catalog.list_agent_summaries(list(names))
+        ]
