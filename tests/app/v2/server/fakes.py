@@ -56,6 +56,13 @@ class MemoryCatalogStore:
     def __init__(self) -> None:
         self._catalogs: dict[str, UserCatalog] = {}
 
+    async def get_agent(self, user_id, agent_id):
+        return require_agent(self._catalogs.get(user_id) or empty_catalog(), agent_id).model_copy(deep=True)
+
+    async def editor_catalog(self, user_id):
+        catalog = self._catalogs.get(user_id) or UserCatalog()
+        return catalog.model_copy(update={"agents": []}, deep=True)
+
     async def list_resources(self, user_ids, section):
         return [(user_id, item) for user_id in user_ids
                 for item in getattr(self._catalogs.get(user_id) or empty_catalog(), section)]

@@ -32,6 +32,8 @@ _SECTIONS = ("models", "mcp_servers", "a2a_agents")
 
 
 class CatalogStore(Protocol):
+    async def get_agent(self, user_id: str, agent_id: str) -> AgentRecord: ...
+    async def editor_catalog(self, user_id: str) -> UserCatalog: ...
     async def list_resources(
         self, user_ids: list[str], section: str
     ) -> list[tuple[str, ModelRecord | McpServerRecord | A2AAgentRecord]]: ...
@@ -58,6 +60,31 @@ class DatabaseCatalogStore:
     def __init__(self, database: Database) -> None:
         self.database = database
         self.packages = DatabasePackageStore(database)
+
+    async def get_agent(self, user_id: str, agent_id: str) -> AgentRecord:
+        async with self.database.session() as session:
+            row = await session.scalar(select(AgentRow).where(
+                AgentRow.id == agent_id, AgentRow.owner_user_id == user_id,
+            ))
+            if row is None:
+                raise _not_found("agent not found")
+            stored = await session.scalar(select(ManagedRecordRow).where(
+                ManagedRecordRow.owner == package_owner(user_id),
+                ManagedRecordRow.kind == "bundle", ManagedRecordRow.ref == row.package_ref,
+            ))
+        if stored is None:
+            raise ValueError("catalog Agent package is missing")
+        package = AgentPackageBundle.model_validate(stored.payload)
+        if package.content_hash != row.package_ref:
+            raise ValueError("catalog Agent package hash mismatch")
+        return _agent_record(row, [], package=package)
+
+    async def editor_catalog(self, user_id: str) -> UserCatalog:
+        async with self.database.session() as session:
+            row = (await session.execute(select(
+                CatalogRow.models, CatalogRow.mcp_servers, CatalogRow.a2a_agents,
+            ).where(CatalogRow.user_id == user_id))).first()
+        return UserCatalog(**row._mapping) if row else UserCatalog()
 
     async def list_agent_summaries(self, user_ids: list[str]) -> list[dict]:
         if not user_ids:

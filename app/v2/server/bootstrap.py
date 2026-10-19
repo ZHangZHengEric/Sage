@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import replace
+from functools import cached_property
 
 from sagents.v2.application import SAgentApplication
 from sagents.v2.builder import SAgentBuilder
@@ -44,6 +45,11 @@ from app.v2.server.storage import prepare_server_v2_storage
 LOGGER = get_logger(__name__)
 
 class ServerHost:
+    @cached_property
+    def agent_plugin_catalog(self):
+        from app.v2.server.catalog.editor import build_plugin_catalog
+        return build_plugin_catalog(self)
+
     def __init__(
         self,
         settings: ServerSettings,
@@ -144,6 +150,7 @@ class ServerHost:
     async def start(self) -> None:
         if self._application is not None:
             return
+        self.__dict__.pop("agent_plugin_catalog", None)
         from app.v2.server.config.plugins import ServerPluginConfig
 
         self.settings = replace(

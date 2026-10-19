@@ -8,7 +8,9 @@ from app.v2.server.routers.deps import ReadUser, CatalogDep, CurrentUser, AdminU
 from app.v2.server.runtime.official import official_tool_catalog, tool_catalog_item
 from app.v2.server.routers.render import success
 from app.v2.server.routers.schemas.common import AUTH_ERRORS, VALIDATION_ERRORS, ApiResponse
-from app.v2.server.routers.schemas.catalog import AgentBody, AgentPublic, AgentSummary, ToolPublic
+from app.v2.server.routers.schemas.catalog import (
+    AgentBody, AgentPublic, AgentSummary, ToolPublic, AgentToolOption, AgentEditorResources,
+)
 from app.v2.server.routers.schemas.skills import SkillBindBody, SkillPublic
 from app.v2.server.skills.agent_guidance import sync_agent_guidance
 from sagents.v2.contracts.errors import ErrorCategory, RuntimeErrorInfo, SageV2Error
@@ -20,42 +22,7 @@ skill_binding_router = APIRouter(tags=["skills"], responses={**AUTH_ERRORS, **VA
 
 @agent_router.get("/api/plugins")
 async def list_plugins(user: CurrentUser, host: HostDep):
-    from app.v2.server.catalog.plugins import (
-        plugin_options,
-        AGENT_DEFAULTS,
-        DEFAULT_CONFIG,
-    )
-
-    defaults = {
-        provider.capability: provider.plugin_id
-        for provider in host.application.resolved_plan.providers
-        if provider.plugin_id
-    }
-    for option in plugin_options(host.extensions):
-        for capability in option["capabilities"]:
-            try:
-                implementation = host.application.service(capability)
-            except KeyError:
-                continue
-            plugin_id = getattr(implementation, "plugin_id", None)
-            if plugin_id:
-                defaults[capability] = plugin_id
-    for capability, plugin in AGENT_DEFAULTS.items():
-        defaults.setdefault(capability, plugin)
-    from app.v2.server.config.manifest import server_v2_manifest
-    default_config = dict(DEFAULT_CONFIG)
-    for key, selection in server_v2_manifest(host.settings).runtime.capabilities.items():
-        defaults[key] = selection.plugin
-        if key in AGENT_DEFAULTS:
-            default_config[key] = selection.config
-    return success(
-        {
-            "plugins": plugin_options(host.extensions),
-            "defaults": defaults,
-            "configurable": list(AGENT_DEFAULTS),
-            "default_config": default_config,
-        }
-    )
+    return success(host.agent_plugin_catalog)
 
 
 @agent_router.get("/api/plugins/server")
@@ -169,6 +136,29 @@ async def list_tools(user: CurrentUser, packages: PackageDep, service: CatalogDe
 async def list_agents(user: ReadUser, service: CatalogDep):
     agents = (await service.get(user.user_id)).agents
     return success([item.public_dict() for item in agents])
+
+
+@agent_router.get("/api/agents/editor-resources", response_model=ApiResponse[AgentEditorResources])
+async def agent_editor_resources(
+    user: ReadUser, service: CatalogDep, packages: PackageDep, host: HostDep,
+    include_plugins: bool = True,
+):
+    from sagents.v2.tool.plugins.agent_management import AgentManagementToolPlugin
+
+    resources = await service.editor_resources(user.user_id)
+    resources["tools"] = [
+        *official_tool_catalog(),
+        *[tool_catalog_item(item, category="agent-management", source="host")
+          for item in AgentManagementToolPlugin(packages).definitions],
+    ]
+    resources["plugins"] = host.agent_plugin_catalog if include_plugins else None
+    return success(resources)
+
+
+@agent_router.get("/api/tools/options", response_model=ApiResponse[list[AgentToolOption]])
+async def agent_tool_options(user: ReadUser, packages: PackageDep, service: CatalogDep):
+    # Remote discovery is only needed when opening per-tool approval choices.
+    return await list_tools(user, packages, service)
 
 
 @agent_router.post("/api/agents", response_model=ApiResponse[AgentPublic])
