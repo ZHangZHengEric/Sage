@@ -473,6 +473,104 @@ def _summary_completion(text: str) -> ModelStreamEvent:
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("batch_count", [1, 2, 3, 4, 5, 8])
+async def test_pressure_progressively_retires_recent_batches_even_inside_window(batch_count):
+    summarizer = RecordingSummarizer()
+    store = InMemoryConversationSummaryStore()
+    reducer = PersistentSummaryContextReducer(store, summarizer=summarizer)
+    user = ModelMessage(role="user", content=(TextBlock(text="exact request"),))
+
+    def batch(index):
+        call_id = f"call_{index}"
+        return (
+            ModelMessage(role="assistant", tool_calls=(
+                ModelToolCall(tool_call_id=call_id, name="query", arguments={}),
+            )),
+            ModelMessage(role="tool", tool_call_id=call_id,
+                         content=(TextBlock(text="x" * 5000),)),
+        )
+
+    batches = [batch(i) for i in range(batch_count)]
+    source = (user, *(m for unit in batches for m in unit))
+    forced = scope().model_copy(update={"force": True, "allow_summary_rewrite": False})
+    projection = await reducer.reduce(source, scope=forced)
+    retained_count = min(batch_count - 1, 4)
+    expected = tuple(m for unit in batches[-retained_count:] for m in unit) if retained_count else ()
+    assert projection.messages == (projection.messages[0], user, *expected)
+    previous_covered = projection.dropped_message_count
+    for _ in range(retained_count):
+        projection = await reducer.reduce(source, scope=forced)
+        assert projection.dropped_message_count == previous_covered + 2
+        previous_covered = projection.dropped_message_count
+    assert previous_covered == len(source)
+    assert len(summarizer.requests) == retained_count + 1
+    # The last complete Tool pair is reducible too; the user anchor stays exact.
+    assert projection.messages[1:] == (user,)
+    assert projection.historical_messages == source
+    await reducer.reduce(source, scope=forced)
+    assert len(summarizer.requests) == retained_count + 1
+
+
+@pytest.mark.asyncio
+async def test_pressure_does_not_regenerate_checkpoint_without_reducible_history():
+    from sagents.v2.context.summary import create_summary, message_digests_async
+
+    summarizer = RecordingSummarizer()
+    store = InMemoryConversationSummaryStore()
+    source = (ModelMessage(role="user", content=(TextBlock(text="exact request"),)),)
+    await store.save(
+        create_summary(
+            scope=scope(), previous=None, covered_messages=source,
+            covered_digests=await message_digests_async(source), text="checkpoint",
+        ),
+        expected_revision=None,
+    )
+    reducer = PersistentSummaryContextReducer(store, summarizer=summarizer)
+
+    projection = await reducer.reduce(
+        source, scope=scope().model_copy(update={"force": True, "allow_summary_rewrite": False})
+    )
+
+    assert summarizer.requests == []
+    assert projection.messages[-1] == source[0]
+    assert (await store.get("session_1")).revision == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("field", ["tool_outcomes", "todo_state_at_compaction_boundary"])
+async def test_summary_echoed_derived_fields_are_rebuilt_without_model_retry(field):
+    payload = {"summary": "verified", **{
+        key: [] for key in ModelConversationSummarizer._FIELDS[1:]
+    }, field: {"invented": "must not become authoritative"}}
+    model = ScriptedModelProvider((
+        ScriptedModelStep(events=(_summary_completion(json.dumps(payload)),)),
+    ))
+    value = await ModelConversationSummarizer(model).summarize(
+        SummarizationRequest(scope=scope(), messages=ledger()[1:4], target_tokens=512)
+    )
+
+    decoded = json.loads(value)
+    assert len(model.requests) == 1
+    assert "invented" not in decoded.get(field, {})
+    assert decoded["tool_outcomes"]["lookup "]["status"] == "completed"
+
+
+@pytest.mark.parametrize("change", ["unknown", "missing", "wrong_type"])
+def test_summary_still_rejects_invalid_required_contract(change):
+    payload = {"summary": "verified", **{
+        key: [] for key in ModelConversationSummarizer._FIELDS[1:]
+    }}
+    if change == "unknown":
+        payload["unknown"] = []
+    elif change == "missing":
+        del payload["open_tasks"]
+    else:
+        payload["decisions"] = "invalid"
+    with pytest.raises(ValueError):
+        ModelConversationSummarizer._parse_payload(json.dumps(payload))
+
+
+@pytest.mark.asyncio
 async def test_model_summarizer_retries_and_returns_the_structured_contract():
     payload = {
         "summary": "Goal and verified state",

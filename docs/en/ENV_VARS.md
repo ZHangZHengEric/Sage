@@ -16,6 +16,7 @@ ref: v2-ENV_VARS
 
 | Variable | Default / role |
 | --- | --- |
+| `SAGE_SERVER_REDIS_URL` | Optional Redis URL for Session archival; requires MySQL. |
 | `SAGE_SERVER_MYSQL_URL` | Required MySQL connection URL |
 | `SAGE_SERVER_HOST` | `127.0.0.1` |
 | `SAGE_SERVER_PORT` | `8090` |

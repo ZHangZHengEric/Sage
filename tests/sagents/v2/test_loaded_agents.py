@@ -220,6 +220,104 @@ async def test_restart_restores_pending_original_revision_after_update(tmp_path)
 
 
 @pytest.mark.asyncio
+async def test_startup_restore_does_not_swallow_cancellation(tmp_path, monkeypatch):
+    from sagents.v2.composition.revision_store import AgentRevisionStore
+
+    manifest = package()
+    app = await build_registered_app(tmp_path, models=TEST_MODELS, model=model(), runtime=manifest.runtime)
+    agent = await app.load_agent(manifest)
+    await app.runtime.start_run(command(agent, "cancel-startup"), context())
+    await app.close()
+
+    def cancelled(self, spec_hash):
+        raise asyncio.CancelledError()
+
+    monkeypatch.setattr(AgentRevisionStore, "read", cancelled)
+    with pytest.raises(asyncio.CancelledError):
+        await build_registered_app(tmp_path, models=TEST_MODELS, model=model(), runtime=manifest.runtime)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure", ["missing", "corrupt", "incompatible"])
+@pytest.mark.parametrize("healthy_pending", [False, True])
+async def test_startup_isolates_bad_revision_and_preserves_queued_work(tmp_path, monkeypatch, failure, healthy_pending):
+    from datetime import timedelta
+    from sagents.v2.contracts.common import utc_now
+    from sagents.v2.runtime.execution.scheduler import LeaseReleaseReason
+    from sagents.v2.package.manifest.runtime import CapabilitySelection
+
+    original = package()
+    original = original.model_copy(update={"runtime": original.runtime.model_copy(update={
+        "capabilities": {**original.runtime.capabilities, "execution.scheduler": CapabilitySelection(
+            plugin="sage.scheduler.filesystem", config={"root": str(tmp_path / "scheduler")},
+        )},
+    })})
+    changed = original.model_copy(
+        update={"metadata": original.metadata.model_copy(update={"version": "2"})}
+    )
+    app = await build_registered_app(
+        tmp_path, models=TEST_MODELS, model=model(), runtime=original.runtime,
+    )
+    bad = await app.load_agent(original)
+    good = await app.update_agent(agent=bad, package=changed)
+    pending = [
+        await app.runtime.start_run(command(bad, f"bad-{i}"), context())
+        for i in range(2)
+    ]
+    healthy = await app.runtime.start_run(command(good, "healthy"), context()) if healthy_pending else None
+    before = [await app.runtime.get_run(run.run_id) for run in pending]
+    dispatcher = app.service("execution.dispatcher")
+    scheduler_type = type(dispatcher.scheduler)
+    # Reproduce a durable queue entry left by a previous worker process.
+    work = dispatcher._work_item(before[0], context(), resume=False).model_copy(
+        update={"available_at": utc_now() + timedelta(hours=1)}
+    )
+    await dispatcher.scheduler.submit(work)
+    archive = app._loaded_agents.store
+    path = archive._path(bad.composition_hash)
+    if failure == "missing":
+        path.unlink()
+    elif failure == "corrupt":
+        path.write_text("invalid json")
+    else:
+        archive.save(good._resolved, bad.composition_hash)
+    await app.close()
+
+    deferred = asyncio.Event()
+    release = scheduler_type.release
+
+    async def observe_release(self, lease, reason, **kwargs):
+        await release(self, lease, reason, **kwargs)
+        if lease.work.run_id == pending[0].run_id and reason == LeaseReleaseReason.DEFERRED:
+            deferred.set()
+
+    monkeypatch.setattr(scheduler_type, "release", observe_release)
+    reopened = await build_registered_app(
+        tmp_path, models=TEST_MODELS, model=model(), runtime=original.runtime,
+    )
+    try:
+        assert {issue.run_id for issue in reopened.recovery_issues} == {r.run_id for r in pending}
+        await reopened.service("execution.scheduler").reschedule_pending(work.work_id, utc_now())
+        await asyncio.wait_for(deferred.wait(), 5)
+        if healthy is not None:
+            async with asyncio.timeout(5):
+                while (await reopened.runtime.get_run(healthy.run_id)).state.value != "completed":
+                    await asyncio.sleep(0.01)
+        assert [await reopened.runtime.get_run(run.run_id) for run in pending] == before
+        latest = await reopened.load_agent(changed)
+        assert {issue.run_id for issue in reopened.recovery_issues} == {r.run_id for r in pending}
+        stream = await reopened.entrypoint().run_stream(command(latest, "new-chat"), context(), agent=latest)
+        assert (await stream.wait()).state.value == "completed"
+        await stream.detach()
+        # A repaired archive can be restored on the next normal load pass.
+        archive.save(bad._resolved, bad.composition_hash)
+        await reopened.load_agent(changed)
+        assert reopened.recovery_issues == ()
+    finally:
+        await reopened.close()
+
+
+@pytest.mark.asyncio
 async def test_package_inputs_and_atomic_invalid_update(tmp_path):
     import json
     import yaml

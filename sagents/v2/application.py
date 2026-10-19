@@ -11,7 +11,7 @@ from typing import Any, TypeVar
 from pathlib import Path
 
 from sagents.v2.composition.inputs import PackageInput
-from sagents.v2.composition.loaded_agents import LoadedAgent
+from sagents.v2.composition.loaded_agents import LoadedAgent, StartupRecoveryIssue
 
 from sagents.v2.composition.contracts import (
     ApplicationResource as ApplicationResource,
@@ -227,6 +227,12 @@ class SAgentApplication:
 
 
 
+
+    @property
+    def recovery_issues(self) -> tuple[StartupRecoveryIssue, ...]:
+        """Host-level startup recovery issues from the latest restoration pass."""
+        self._ensure_open()
+        return self._loaded_agents.recovery_issues if self._loaded_agents is not None else ()
 
     async def load_agent(
         self,

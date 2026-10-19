@@ -82,9 +82,10 @@ class _ProjectedMessage:
 class SessionEventModelProjector:
     """Convert authoritative completed Items into ordered ModelMessages.
 
-    Lifecycle, reasoning, usage, policy, and protocol events are deliberately
-    ignored. Tool-call Items are folded into the assistant message from the same
-    Step, and ToolResult Items become provider-neutral `tool` messages. The
+    Tool-call Items are folded into the assistant message from the same Step,
+    and ToolResult Items become provider-neutral `tool` messages. Cancellation
+    closes missing tool pairs with explicit unknown-outcome messages. Other
+    lifecycle, reasoning, usage, policy, and protocol events are ignored. The
     normal ContextAssembler sanitizer performs the final complete-pair check.
     """
 
@@ -191,7 +192,39 @@ class SessionEventModelProjector:
                         step_key=step_key,
                     )
                 )
-        return order_tool_context(tuple(value.message for value in projected))
+        # Cancellation ends the Run even if a remote tool never replied. Close
+        # its model protocol pairs without inventing an execution receipt or
+        # resuming the cancelled work. This also repairs older Session history.
+        cancelled = {event.run_id for event in events if event.type == "run.cancelled"}
+        results = {
+            (value.step_key[0], value.message.tool_call_id)
+            for value in projected if value.message.role == "tool"
+        }
+        messages = []
+        for value in projected:
+            messages.append(value.message)
+            if value.step_key[0] not in cancelled:
+                continue
+            for call in value.message.tool_calls:
+                if (value.step_key[0], call.tool_call_id) in results:
+                    continue
+                messages.append(ModelMessage(
+                    role="tool",
+                    tool_call_id=call.tool_call_id,
+                    content=(TextBlock(text=(
+                        "Run cancelled. No tool result was received. The external "
+                        "execution outcome is unknown; do not assume success or "
+                        "automatically resume or repeat this operation."
+                    )),),
+                    metadata={
+                        "source_run_id": value.step_key[0],
+                        "tool_result_received": False,
+                        "execution_outcome": "unknown",
+                        "run_cancelled": True,
+                        "synthetic": True,
+                    },
+                ))
+        return order_tool_context(tuple(messages))
 
     @staticmethod
     def _assistant_for_step(

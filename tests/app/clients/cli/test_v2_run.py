@@ -1287,10 +1287,25 @@ async def test_run_orphaned_by_a_crash_is_settled_then_the_session_resumes(
     monkeypatch.setenv("SAGE_DEFAULT_LLM_API_KEY", "test-key")
     session_root = tmp_path / "runtime"
 
+    # A recoverable orphan retains its admitted Agent revision. Missing revisions
+    # now remain blocked so uncertain tool effects are not silently settled.
+    original = await build_cli_application(
+        package=build_preset_package("coder", scheduler_root=session_root / "scheduler"),
+        models=cli_model_catalog(MODEL),
+        session_root=session_root,
+        bindings=LocalWorkspaceBindingProvider(
+            tmp_path / "workspace", settings=WorkspaceSandboxSettings(process_enabled=False)
+        ),
+        model_provider=talk_model("unused"),
+    )
+    admitted_agent = next(agent for agent in original.loaded_agents if agent.id == "sage.cli.coder")
+    admitted_hash = admitted_agent.composition_hash
+    await original.close()
+
     store = open_session_store(session_root)
     runtime = HarnessRuntime(store)
     handle = await runtime.start_run(
-        build_start_run(agent_id="sage.cli.coder", task="orphan", resolved_spec_hash="sha256:x"),
+        build_start_run(agent_id="sage.cli.coder", task="orphan", resolved_spec_hash=admitted_hash),
         CONTEXT,
     )
     running = await runtime.start_execution(

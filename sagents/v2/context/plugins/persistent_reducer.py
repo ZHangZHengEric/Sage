@@ -17,6 +17,10 @@ from sagents.v2.contracts.errors import ErrorCategory, RuntimeErrorInfo, SageV2E
 from sagents.v2.contracts.items import TextBlock
 from sagents.v2.model.contracts import ModelMessage
 from sagents.v2.model.recovery import model_call_budget
+from sagents.v2.runtime.observability.logs import get_logger
+
+
+LOGGER = get_logger(__name__)
 
 
 class _ExtractiveConversationSummarizer:
@@ -145,13 +149,34 @@ class PersistentSummaryContextReducer:
                 ):
                     break
         if scope.force:
-            # API pressure must also retire completed work in the active turn.
-            # Stopping at the latest user boundary leaves long agent/tool loops
-            # mostly intact. Keep a recent window of whole batches instead;
-            # the exact latest user request is reinserted as an anchor below.
-            selected_count = max(
-                selected_count, len(units) - self.protected_recent_units
-            )
+            # The recent window is a preference, not a permanent exemption.
+            # Retain four (or the configured count) when there is more history;
+            # under continuing pressure retire at least one remaining unit.
+            # Coverage always advances over a complete prefix, with the exact
+            # latest user request reinserted as an anchor below.
+            selected_count = max(1, len(units) - self.protected_recent_units) if units else 0
+            latest_request = payload[request_index] if request_index is not None else None
+            # Summarizing only the user anchor cannot reduce the request: that
+            # exact message must still be present. Include the next whole unit.
+            while selected_count and all(
+                message is latest_request
+                for unit in units[:selected_count] for message in unit
+            ):
+                if selected_count == len(units):
+                    selected_count = 0
+                    break
+                selected_count += 1
+            for index, unit in enumerate(units[:selected_count]):
+                expected = {call.tool_call_id for call in unit[0].tool_calls}
+                actual = {m.tool_call_id for m in unit if m.role == "tool"}
+                if expected and expected != actual:
+                    selected_count = index
+                    break
+            if selected_count and all(
+                message is latest_request
+                for unit in units[:selected_count] for message in unit
+            ):
+                selected_count = 0
         compacted = []
         changed = []
         for unit in units if scope.allow_reference_compaction else ():
@@ -183,6 +208,17 @@ class PersistentSummaryContextReducer:
                 # A single oversized completed batch is reducible as a whole.
                 # Keep the exact user anchor and retain all facts in the ledger.
                 selected_count = len(units)
+        if not selected_count and previous is not None and not scope.allow_summary_rewrite:
+            # Rewriting the same checkpoint cannot advance canonical coverage.
+            # Required API recovery detects an unchanged projection upstream;
+            # advisory pressure simply reuses this checkpoint without an LLM.
+            return ContextProjection(
+                messages=current,
+                historical_messages=canonical[:canonical_covered],
+                source_message_count=len(messages),
+                dropped_message_count=canonical_covered,
+                strategy="persistent_summary",
+            )
         if selected_count or previous is not None:
             selected = tuple(m for unit in units[:selected_count] for m in unit)
             end = covered + len(selected)
@@ -197,6 +233,19 @@ class PersistentSummaryContextReducer:
                 (payload[request_index],)
                 if request_index is not None and request_index < end
                 else ()
+            )
+            LOGGER.bind(session_id=scope.session_id, run_id=scope.run_id).info(
+                "context.summary.selection",
+                "Selected a complete history prefix for compression",
+                attributes={
+                    "forced": scope.force,
+                    "previous_revision": previous.revision if previous else 0,
+                    "covered_message_count": canonical_covered,
+                    "selected_message_count": len(selected),
+                    "selected_characters": sum(len(m.model_dump_json()) for m in selected),
+                    "retained_message_count": len(retained),
+                    "retained_characters": sum(len(m.model_dump_json()) for m in retained),
+                },
             )
             with model_call_budget() as quota:
                 quota.remaining = min(quota.remaining, self.max_summary_calls)

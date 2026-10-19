@@ -53,6 +53,9 @@ from sagents.v2.tool import (
 )
 
 
+from sagents.v2.tool.result_processing import ToolResultProcessor
+
+
 class AgentCompositionFactory:
     """Turn a resolved manifest into a loop from injected capability ports.
 
@@ -67,9 +70,11 @@ class AgentCompositionFactory:
         runtime: RuntimePort,
         *,
         context_components: ContextComponentBundle | None = None,
+        tool_result_processor: ToolResultProcessor | None = None,
     ) -> None:
         self.runtime = runtime
         self.context_components = context_components or ContextComponentBundle()
+        self.tool_result_processor = tool_result_processor
 
     def create_skill_loader(
         self,
@@ -178,6 +183,7 @@ class AgentCompositionFactory:
         tool_catalog: ToolCatalog,
         tool_executor: ToolExecutor,
         context_assembler: ContextAssembler,
+        tool_result_runtime=None,
         tool_policy: DefaultToolPolicy | None = None,
         approval_memory: ApprovalMemory | None = None,
         continuation_policy: ContinuationPolicy | None = None,
@@ -207,6 +213,8 @@ class AgentCompositionFactory:
             model=model,
             tool_catalog=tool_catalog,
             tool_executor=tool_executor,
+            tool_result_processor=self.tool_result_processor,
+            tool_result_runtime=tool_result_runtime,
             tool_policy=tool_policy,
             approval_memory=approval_memory,
             continuation_policy=continuation_policy,
@@ -325,6 +333,7 @@ class AgentCompositionFactory:
         automatic_memory_recall: bool | None = None,
         artifact_store: ArtifactStore | None = None,
         expected_resolved_spec_hash: str | None = None,
+        tool_result_runtime=None,
         trace_sink=None,
         log_sink=None,
     ) -> AgentLoopEngine:
@@ -394,6 +403,7 @@ class AgentCompositionFactory:
                 )
         return self.create_engine(
             model=model,
+            tool_result_runtime=tool_result_runtime,
             tool_catalog=InvocationGrantToolCatalog(
                 tool_catalog,
                 selected_tools,

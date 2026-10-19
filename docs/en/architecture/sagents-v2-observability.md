@@ -17,6 +17,32 @@ ref: v2-detail-sagents-v2-observability
 
 `ObservedRunDriver` owns Agent and tool observations; `RecordingModelProvider` owns model observations. They emit the same vendor-independent `TraceSpan`. `sage.trace.otlp` exports generic/GenAI attributes, while `sage.trace.langfuse` adds Langfuse mappings over the shared OTLP transport. No database tables or durable observability queues are added.
 
+## Conversation latency diagnostics
+
+Enable `SAGE_SERVER_LOG_LEVEL=debug` to collect phase logs. Stable event names correlate through `correlation_id`, then native `run_id` and `session_id` after admission. Log messages are Chinese; fields contain identities, phases, counts and timings, without tool arguments or model bodies.
+
+| Event | Timing |
+| --- | --- |
+| `server.admission.phase` | Ownership, Session/binding reads, unbound Session validation, catalog reads, package parsing, Skills/user reads, snapshot/command construction, binding and Session index writes; `prepare` is total admission preparation |
+| `server.run.preparation.started` / `server.run.agent_load.started` | Workspace and Agent load lock waits in `lock_wait_ms` |
+| `server.run.agent_load` / `server.run.accepted` | Agent loading and Run admission |
+| `agent.preparation.completed` | History, self-configuration, Skill preload, tool selection, context construction and total model-request preparation |
+| `mcp.discovery.completed` | `connect_ms/list_tools_ms/close_ms`; cache hits do not rediscover |
+| `agent.state.commit` | Total state commit; `event_types` identifies its boundary |
+| `session.mysql.commit` | `preparation_ms/connection_wait_ms/write_ms/commit_ms` |
+| `model.first_text` | `first_text_ms` to the first nonempty body delta, excluding reasoning |
+| `agui.first_text` | ConversationService.start to preparing the first Assistant body SSE; excludes browser rendering; `replayed` marks replay |
+
+`model.request.completed` also records `first_text_ms`, which is empty for models without body deltas. `agui.run.started.preparation_ms` covers entry to Run preparation, and `agui.run.completed.duration_ms` includes admission and cleanup. Nested phases overlap and must not be added together.
+
+Live execution authorization reads current Agent policy, user and API Key concurrently with separate database Sessions. Root and child checks also run concurrently, intersected with frozen admission permissions. Revocation results are not cached. Dependent transaction writes and pre-tool durable boundaries remain sequential.
+
+Catalog reads load only the selected Agent and reachable Team members. Ordinary reads do not lock catalog rows; default initialization retains its existing transaction. Frozen configurations retain current credential lookup while subsequent loads read only resource catalogs. Session/ownership, catalog/unbound Session checks and Skills/user reads run concurrently with separate Sessions. Binding and index writes finish before admission. Team member versions are frozen for each Run.
+
+Reproduce the local catalog benchmark with `python -m scripts.v2.benchmark_v2_admission --agents 100 --samples 7`. On 2026-10-19, the same SQLite dataset with 100 test Agents and one default Agent took a median 24.870 ms for five SQL statements and 101 packages versus 1.419 ms for two statements and one package. This verifies reduced query scope, not production cold-start latency or elimination of an observed eleven-second entry wait.
+
+Server diagnostic SQLite writes use a single background worker and at most 64 pending operations. Inference and tools do not wait for diagnostic disk writes. Saturation and failures increment `capture_failures_since_start`. Export and shutdown flush for at most three seconds; exports mark pending writes with `diagnostic_writes_pending`. Shutdown timeout cancels queued operations and counts them. These best-effort records do not participate in recovery or add business tables.
+
 ## Filesystem diagnostics
 
 The filesystem diagnostic plugin's `root` is the SessionStore's `sessions` root. Both use the same location map. Requests live in their owning Session's `runs/<run_id>/llm_requests`, including nested children under `sub_sessions/<session_id>`. Old flat records remain readable and move into the owning Session on its next diagnostic write; Session state and history are not migrated by the sink.

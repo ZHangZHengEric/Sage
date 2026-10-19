@@ -1,3 +1,14 @@
+---
+layout: default
+title: 宿主控制接口
+parent: 架构
+nav_order: 20
+lang: zh
+ref: v2-detail-sagents-v2-host-controls
+---
+
+{% include lang_switcher.html %}
+
 # Desktop 与 Server 标准控制接口核对
 
 2026-10-19 对 Sage v2 的实际宿主入口和 SDK 调用链进行核对。Yiii 不在本次修改范围内。

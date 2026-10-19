@@ -14,6 +14,7 @@ _EXPORTS = {
     "RuntimeConfig": ("sagents.v2.package.manifest.runtime", "RuntimeConfig"),
     "default_runtime": ("sagents.v2.composition.defaults", "default_runtime"),
     "LoadedAgent": ("sagents.v2.composition.loaded_agents", "LoadedAgent"),
+    "StartupRecoveryIssue": ("sagents.v2.composition.loaded_agents", "StartupRecoveryIssue"),
     "AgentPackageTestGenerator": (
         "sagents.v2.optimization",
         "AgentPackageTestGenerator",
