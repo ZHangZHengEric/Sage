@@ -56,7 +56,6 @@ from sagents.v2.contracts.session_commit import (
     SessionCommitProposalStatus,
     SessionMergeStrategy,
 )
-from sagents.v2.agent import AgentLoopEngine
 from sagents.v2.agent.multi_agent import AgentMode, AgentRegistry
 from sagents.v2.model import (
     ModelEventKind,
@@ -68,7 +67,6 @@ from sagents.v2.model import (
     ScriptedModelProvider,
 )
 from sagents.v2.testing.plugins.scripted_model import ScriptedModelStep
-from sagents.v2.tool import InMemoryToolCatalog, InMemoryToolExecutor
 from sagents.v2.package.manifest.resolver import CompositionResolver
 from sagents.v2.context import ModelConversationSummarizer
 from sagents.v2.tool import McpServerConfig, McpToolPlugin
@@ -2230,7 +2228,7 @@ async def test_agent_runtime_failures_are_projected_to_structured_logs(
 
 
 @pytest.mark.asyncio
-async def test_preflight_failure_is_a_localized_terminal_event_not_an_http_error(
+async def test_preflight_failure_is_localized_without_admitting_a_fake_run(
     tmp_path: Path,
 ):
     service = DesktopV2Service(tmp_path)
@@ -2241,13 +2239,10 @@ async def test_preflight_failure_is_a_localized_terminal_event_not_an_http_error
         idempotency_key="preflight-localized-failure",
     )
 
-    frames = [
-        json.loads(value) async for value in service.run_events(request, "user_1")
-    ]
-
-    assert frames[0]["kind"] == "stream.opened"
-    failed = next(value for value in frames if value.get("type") == "run.failed")
-    error = failed["data"]["error"]
+    with pytest.raises(SageV2Error) as failure:
+        _ = [value async for value in service.run_events(request, "user_1")]
+    error = failure.value.info.model_dump(mode="json")
+    assert await service.list_sessions("user_1") == []
     assert error["code"] == "desktop.run_start_failed"
     assert error["message"] == "部分信息无效，无法处理该请求。"
     assert error["message_key"] == "error.validation"
@@ -3949,32 +3944,14 @@ async def test_desktop_command_keeps_non_image_files_as_markdown_references(
 async def test_desktop_exposes_snapshot_propose_publish_and_session_inventory(
     tmp_path: Path,
 ):
-    service = DesktopV2Service(tmp_path)
-    context = service._context("user_1")
-    handle = await service.runtime.start_run(
-        StartRun(
-            agent_id="sage",
-            input=(InputItem(role="user", content=(TextBlock(text="candidate"),)),),
-            session_concurrency_mode=SessionConcurrencyMode.SNAPSHOT_ISOLATED,
-            resolved_spec_hash="sha256:test",
-            idempotency_key="snapshot",
-        ),
-        context,
-    )
-    completed = ModelStreamEvent(
-        kind=ModelEventKind.COMPLETED,
-        response=ModelResponse(
-            response_id="response_1",
-            text="candidate answer",
-            finish_reason="stop",
-        ),
-    )
-    await AgentLoopEngine(
-        runtime=service.runtime,
-        model=ScriptedModelProvider((ScriptedModelStep(events=(completed,)),)),
-        tool_catalog=InMemoryToolCatalog(()),
-        tool_executor=InMemoryToolExecutor({}, {}),
-    ).execute(handle.run_id, context)
+    from tests.app.v2.desktop.sdk_fixture import desktop, execute
+
+    service, _, _ = desktop(tmp_path)
+    handle, _, _ = await execute(service, request=DesktopRunRequest(
+        agent_id="sage", messages=[RunMessage(role="user", text="candidate")],
+        session_concurrency_mode=SessionConcurrencyMode.SNAPSHOT_ISOLATED,
+    ))
+    assert handle.state.value == "completed"
 
     proposal = await service.propose_session_commit(handle.run_id, "user_1")
     published = await service.publish_session_commit(
@@ -4364,8 +4341,10 @@ async def test_preflight_preserves_typed_resource_failure_details(tmp_path, monk
         agent_id="sage", messages=[RunMessage(role="user", text="继续")],
         response_language="zh-CN", idempotency_key="typed-quota-failure",
     )
-    frames = [json.loads(value) async for value in service.run_events(request, "user_1")]
-    error = next(value for value in frames if value.get("type") == "run.failed")["data"]["error"]
+    with pytest.raises(SageV2Error) as failure:
+        _ = [value async for value in service.run_events(request, "user_1")]
+    error = failure.value.info.model_dump(mode="json")
+    assert await service.list_sessions("user_1") == []
     assert error["code"] == "sandbox.workspace_quota_exceeded"
     assert error["category"] == "resource_lost"
     assert "5000" in error["message"] and "4096" in error["message"]

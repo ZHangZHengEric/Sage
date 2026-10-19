@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from sagents.v2.prompt_i18n import prompt_text
-from sagents.v2._concurrency import auxiliary_capacity
+from sagents.v2.concurrency import auxiliary_capacity
 import json
 
 import httpx

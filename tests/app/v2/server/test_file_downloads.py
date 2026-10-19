@@ -39,7 +39,8 @@ def test_workspace_listing_and_download_are_scoped_and_skip_symlinks(client, ser
     assert content.headers["content-disposition"].startswith("attachment;")
     assert content.headers["cache-control"] == "no-store"
     assert client.get(f"/api/workspace/download?agent_id={agent_id}", params={"agent_id": agent_id, "path": "项目/说明.txt"}, headers=bob).status_code == 404
-    for path in ["../private.txt", "/etc/passwd", "a/../../private", "a\\b"]:
+    for path in ["../private.txt", "/etc/passwd", "a/../../private", "a\\b",
+                 "/workspace/../private.txt", "/workspace-other/private.txt", "/workspace//etc/passwd"]:
         assert client.get(f"/api/workspace/download?agent_id={agent_id}", params={"agent_id": agent_id, "path": path}, headers=alice).status_code == 400
     for path in ["outside/private.txt", "file-link"]:
         assert client.get(f"/api/workspace/download?agent_id={agent_id}", params={"agent_id": agent_id, "path": path}, headers=alice).status_code == 404
@@ -48,6 +49,17 @@ def test_workspace_listing_and_download_are_scoped_and_skip_symlinks(client, ser
         assert "workspace/项目/说明.txt" in archive.namelist()
         assert "workspace/项目/empty/" in archive.namelist()
         assert not any("outside" in name or "file-link" in name for name in archive.namelist())
+    # Sandbox-visible paths and frontend-relative paths select identical files.
+    mapped = client.get("/api/workspace/files", params={"agent_id": agent_id, "path": "/workspace/项目"}, headers=alice)
+    assert mapped.json()["data"] == listing
+    mapped_file = client.get("/api/workspace/download", params={"agent_id": agent_id, "path": "/workspace/项目/说明.txt"}, headers=alice)
+    assert mapped_file.content == content.content
+    mapped_folder = client.get("/api/workspace/download", params={"agent_id": agent_id, "path": "/workspace/项目"}, headers=alice)
+    with ZipFile(BytesIO(mapped_folder.content)) as archive:
+        assert archive.read("项目/说明.txt").decode() == "hello 世界"
+    mapped_root = client.get("/api/workspace/download", params={"agent_id": agent_id, "path": "/workspace"}, headers=alice)
+    with ZipFile(BytesIO(mapped_root.content)) as archive:
+        assert "workspace/项目/说明.txt" in archive.namelist()
     assert client.get(f"/api/workspace/files?agent_id={agent_id}", headers={**bob, "X-Sage-View-User": alice_id}).status_code == 403
 
 
@@ -77,7 +89,7 @@ def test_workspace_uses_session_owner_for_admin_and_rejects_other_users(client, 
     (root / "owner.txt").write_text("Alice workspace")
     admin_token = client.post("/api/auth/login", json={"username": "admin", "password": "admin12345"}).json()["data"]["access_token"]
     admin = {"Authorization": f"Bearer {admin_token}"}
-    params = {"thread_id": "thread-1"}
+    params = {"thread_id": "thread-1", "path": "/workspace"}
     listing = client.get("/api/workspace/files", params=params, headers=admin)
     assert listing.status_code == 200
     assert "owner.txt" in [item["name"] for item in listing.json()["data"]]

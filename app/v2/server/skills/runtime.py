@@ -10,7 +10,7 @@ import hashlib
 import json
 from pathlib import Path, PurePosixPath
 
-from sagents.v2._concurrency import bounded_to_thread
+from sagents.v2.concurrency import bounded_to_thread
 from sagents.v2.contracts.errors import ErrorCategory, RuntimeErrorInfo, SageV2Error
 from sagents.v2.skill import (
     SkillBundle,

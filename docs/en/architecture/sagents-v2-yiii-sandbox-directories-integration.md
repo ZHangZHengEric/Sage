@@ -13,7 +13,7 @@ ref: v2-detail-sagents-v2-yiii-sandbox-directories-integration
 
 # Integrating yiii sandbox directories and shared Teams through Builder
 
-This change is confined to Sage. Builder's public API is unchanged; the local plugin supplies shared Run leases. yiii should use standard Builder composition rather than provisioning child sandboxes, constructing loops or managing leases itself.
+This change is confined to Sage. The public API is `register → build → load_agent → run_stream`; the local plugin supplies shared Run leases. yiii should use standard Builder composition rather than provisioning child sandboxes, constructing loops or managing leases itself.
 
 <a id="工作区与目录"></a>
 
@@ -82,42 +82,36 @@ Public Builder regressions cover real goal_submit, three consecutive autonomous 
 
 ## yiii composition paths requiring migration
 
-The inspected python/yiii_agent_runtime/native_runtime.py creates App with Builder but compose_loop still manually provisions sandboxes and constructs OfficialToolRuntime, ModeAwareAgentLoopFactory and AgentCompositionFactory.create_loop. That custom path does not automatically gain Builder Team sharing; upgrading the package alone is insufficient.
-
-Return this custom assembly to the existing build()/load_agent()/run_stream() API:
+All hosts use the same public execution path. Register custom capability implementations with `builder.register(registration)` and select their plugin IDs, scopes and serializable parameters in runtime configuration. Models are passed to `build(models=...)`. Host-created objects also come from registered factories with explicit ownership.
 
 ```python
 from sagents.v2 import SAgentBuilder
-from sagents.v2.runtime.execution import LocalWorkspaceExecutionBindingProvider
+from sagents.v2.composition.defaults import default_runtime
 
-# SDK 提供通用的本地绑定适配器，无需导入 Desktop application。
-# resources、network、issuer、sandbox_provider 等仍按宿主已有配置传入。
-bindings = LocalWorkspaceExecutionBindingProvider(
-    workspace_root,
-    resources=resource_limits,
-    network=network_policy,
-)
-
-app = await (
-    SAgentBuilder()
-    .with_models(model_catalog)
-    .with_session_store(session_store)
-    .with_model_provider_factory(model_provider_factory)
-    .with_execution_binding_provider(bindings)  # 已有 Builder API
-    .with_additional_tools(mcp_catalog, mcp_executor)  # 已有 Builder API
-    .build(runtime=runtime_config)
-)
-
-# 先加载成员，再把成员 handle 绑定到 Team 包声明的别名。
-worker = await app.load_agent(worker_package)
-team = await app.load_agent(team_package, subagents={"worker": worker})
-# 使用已有 app.entrypoint().run_stream(command, context, agent=team)。
-# command.agent_id=team.id，resolved_spec_hash=team.composition_hash。
+builder = SAgentBuilder()
+# Optional: builder.register(project_tools_registration)
+runtime = default_runtime("./state").model_dump(mode="json")
+runtime["capabilities"]["execution.binding"] = {
+    "plugin": "sage.execution.binding.local-workspace",
+    "config": {"workspace": "/absolute/project/workspace"},
+}
+app = await builder.build(runtime=runtime, models="./models.yaml")
+try:
+    worker = await app.load_agent("./worker")
+    team = await app.load_agent("./team", subagents={"worker": worker})
+    # command.agent_id = team.id
+    # command.resolved_spec_hash = team.composition_hash
+    stream = await app.entrypoint().run_stream(command, context, agent=team)
+    async for event in stream.events:
+        handle_event(event)
+    result = await stream.wait()
+finally:
+    await app.close()
 ```
 
-Team Packages use mode: team and declare subagents. Official tools remain selected through tool.catalog: sage.tool.official. Models, MCP, Skills and policies use existing Builder/runtime/plugin hooks; variables above come from host settings. Preserve persisted revisions, model/tool bindings and recovery configuration rather than substituting current Project settings.
+The complete runnable media/MCP/Skill/nested-Team/restart example is [the standard host project](../../../examples/sagents_v2_standard_host/README.md). Registration details are in [host development](sagents-host-development.md). Team Packages declare their members; official tools use `tool.catalog: sage.tool.official`. Preserve persisted revisions and execution snapshots rather than substituting current Project settings.
 
-If an existing yiii capability cannot be expressed publicly, add the required Sage configuration/plugin support with Builder regressions. Do not restore custom loops. After closing App, the host closes bindings according to ownership; child tasks must not destroy the shared sandbox.
+Sage owns loop composition, sandbox provisioning and Run leases. A host never creates or installs a Driver, replaces child executors, or reconstructs execution in a plugin factory. This document describes the Sage integration contract; it is not a claim about the current Yiii checkout.
 
 <a id="更新-agent-提示"></a>
 

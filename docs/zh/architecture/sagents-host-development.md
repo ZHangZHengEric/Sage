@@ -192,3 +192,9 @@ Yiii 的 `/api/mcp/tools?agent_mode=all` 可用此结果替换基础工具加 Sk
 可直接运行 `python -m examples.sagents_v2_tool_catalog --agent-mode all --language zh`。验证入口为 `tests/sagents/v2/test_builtin_tool_metadata.py`，涵盖执行提供者 schema 一致性、标准 Simple/Team/Fibre Run 授权、元数据副本隔离和导入/查询无资源分配。
 
 本轮验证：Sage 元数据、官方工具、模式、Skill 与导入边界集合 **175 passed**；Yiii 现有 `tool_list_route` 目录/授权展示集合 **8 passed**。只读比较 `/api/mcp/tools?agent_mode=all` 返回中的 **15 条**内置工具（包含 Team 和 Skill），名称、描述、input schema 与新公开接口一致，原 Agent 授权关联保留。Yiii 源码未修改，因此仍需 Yiii 将调用切换到公开接口后复测，不能据此宣称其私有导入已消除。
+
+## 审批、暂停、取消与提交
+
+状态控制使用公开 `app.runtime` 的 `reply_interaction`、`pause_run`、`cancel_run`、`resume_run` 命令。普通暂停先接受 `ResumeRun`，交互暂停先接受 `ReplyInteraction`，再按原 Run 加载 Agent 并继续。候选会话使用 `app.entrypoint()` 的 `propose_session_commit`、`publish_session_commit`、`reject_session_commit`，以保留原版本和发布后的记忆处理。
+
+已在执行的重复 `continue_run` 只观察现有执行，终态返回现有结果。各宿主实际开放的控制、权限与生命周期边界见[Desktop / Server 控制接口核对](sagents-v2-host-controls.md)。

@@ -14,6 +14,8 @@ from .configuration import LocalExecutionPolicy
 
 class LocalExecutionBindingConfig(StrictModel):
     workspace: str
+    # Linux Server uses a stable mount; native Desktop leaves this unset.
+    workspace_alias: Literal["/workspace"] | None = None
     private_workspace_root: str | None = None
     policy: LocalExecutionPolicy = Field(default_factory=LocalExecutionPolicy)
     command_path: str | None = None
@@ -45,6 +47,7 @@ def local_execution_binding_registration() -> ExtensionRegistration:
         )
         return LocalWorkspaceExecutionBindingProvider(
             config.workspace, issuer=issuer, sandbox_provider=sandbox,
+            workspace_alias=config.workspace_alias,
             private_workspace_root=config.private_workspace_root,
             policy=config.policy,
             child_workspace_policy=config.child_workspace_policy,

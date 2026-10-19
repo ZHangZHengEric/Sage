@@ -136,7 +136,7 @@ agents:
 
 `agents.<id>.sandbox.network` 只接受 `none` 和 `unrestricted`，省略时为 `none`。该字段沿用 package Schema、导入、校验及版本库存机制；其他值或未知沙箱字段会被拒绝。每个 Agent 单独配置，子 Agent 不继承父 Agent 的网络声明。
 
-Server 在托管包每个 Run 创建实际工作区沙箱时读取该 Agent 的配置，包括子 Run 和恢复后重建的沙箱。实际权限取包声明与服务端上限的交集：任一为 `none` 即禁网。宿主可在构造 `ServerSettings(sandbox_network_mode="none", ...)` 时收紧全服务上限；默认上限为 `unrestricted`，仅允许包显式申请联网，未配置的包仍禁网。此上限没有环境变量入口。普通页面/API Agent 和托管包使用相同的网络策略；未配置的 Agent 保持禁网。
+Server 在受理新 Run 时冻结有效沙箱配置，实际执行时按该快照创建工作区沙箱；子 Run 按标准规则继承，恢复后重建沙箱也使用原快照，不重新读取 Agent 的最新配置。实际权限取包声明与服务端上限的交集：任一为 `none` 即禁网。宿主可在构造 `ServerSettings(sandbox_network_mode="none", ...)` 时收紧全服务上限；默认上限为 `unrestricted`，仅允许包显式申请联网，未配置的包仍禁网。此上限没有环境变量入口。普通页面/API Agent 和托管包使用相同的网络策略；未配置的 Agent 保持禁网。
 
 `unrestricted` 允许沙箱进程直接联网（包括私网），不提供域名白名单过滤；`none` 由实际沙箱隔离网络。网络模式参与沙箱 spec/policy 哈希，无法实施策略的宿主不会退化为无隔离执行。该配置控制沙箱内进程，不控制宿主侧模型、MCP、A2A 或可信源码插件的网络。
 
@@ -265,3 +265,7 @@ Server API 用 `external_tools` 配置外部工具，页面与内置 `tools` 分
 - Skills CLI 当前支持公开 GitHub 仓库简写、仓库或 tree 目录地址，支持 `--skill` / `-s`、`--list` / `-l` 和 `--yes` / `-y`。`--global`、指定其他 Agent 和 Shell 表达式不接受。服务器需 Node.js 22.20 以上、npx，并能访问 GitHub 与 npm registry；调用固定 `skills@1.7.2`，在隔离的临时目录中进行项目级复制安装，不执行技能脚本或 npm 安装脚本，不继承服务端凭据。
 
 导入记录和内容仍使用已有的 Skill 版本及制品目录，不新增数据库表。npm 缓存位于 `{data_root}/runtime/skill-import-npm-cache`。已有工作区中的编辑版本保持优先级；更多设计见[远程导入方案](../../../docs/zh/architecture/skill-import-proposal.md)。
+
+## 标准运行控制边界
+
+审批、问答、取消、已有暂停任务的继续和重启恢复均进入 Sage 标准 App/Runtime。产品后台任务只观察 SDK 执行并处理完成回调，不实现 Agent loop。当前 Server 未开放独立手动暂停或 Session 候选提交发布的 HTTP 接口；Goal/Plan 提交使用官方工具。各入口及验证边界见[标准控制接口核对](../../../docs/zh/architecture/sagents-v2-host-controls.md)。

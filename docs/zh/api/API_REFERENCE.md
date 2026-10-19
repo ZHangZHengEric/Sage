@@ -25,7 +25,7 @@ app = await SAgentBuilder().build(runtime=manifest.runtime, models=model_config)
 agent = await app.load_agent(manifest)
 ```
 
-`build()` 也接受 `ResolvedSageManifest`，或指向名为 `sage.yaml` 文件的路径。普通字符串按路径处理。`loads()` 不解析相对指令文件；应使用内联指令，或改用文件加载器。
+`load_agent()` 接受 manifest、`ResolvedSageManifest` 或指向 `sage.yaml` 的路径；`build()` 接受 runtime 和 models 配置。普通字符串按路径处理。`loads()` 不解析相对指令文件；应使用内联指令，或改用文件加载器。
 
 ## 执行与生命周期
 

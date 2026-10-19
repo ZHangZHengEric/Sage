@@ -2,27 +2,13 @@ from __future__ import annotations
 
 import asyncio
 import inspect
-from contextvars import ContextVar
 
 from app.v2.server.runtime.model_pool import ModelClientPool
-from sagents.v2._concurrency import auxiliary_capacity
+from sagents.v2.concurrency import auxiliary_capacity
 from sagents.v2.model.protocols import (
     create_registered_model_provider,
 )
 from sagents.v2.runtime.credentials.contracts import CredentialMaterial
-
-_current_user_id: ContextVar[str | None] = ContextVar(
-    "server_v2_model_user", default=None
-)
-
-
-def bind_model_user(user_id: str | None):
-    return _current_user_id.set(user_id)
-
-
-def reset_model_user(token) -> None:
-    _current_user_id.reset(token)
-
 
 class ServerModelClients:
     """Shared transport pool. Agent routes are resolved by registered Run providers."""

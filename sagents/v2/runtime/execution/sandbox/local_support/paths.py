@@ -28,6 +28,7 @@ class LocalSandboxPaths:
         home = "/home/agent" if self.platform == "linux" else str(self.home)
         temporary = "/tmp" if self.platform == "linux" else str(self.temporary)
         return {
+            "SAGE_WORKSPACE_ROOT": self.workspace_root if self.platform == "linux" else str(self.root),
             "HOME": home,
             "TMPDIR": temporary,
             "TMP": temporary,
@@ -105,7 +106,8 @@ class LocalSandboxPaths:
             "environment": self.environment,
             "directory_scope": "workspace-owned; included in sandbox disk quota",
             "path_rules": (
-                "Relative paths use the workspace, not HOME. File tools accept ~/, $HOME/, "
+                "Relative paths use the workspace, not HOME. SAGE_WORKSPACE_ROOT is the process-visible "
+                "workspace root; do not create a /workspace symlink. File tools accept ~/, $HOME/, "
                 "${TMPDIR}/ and the listed XDG variables using sandbox values. Shell uses normal "
                 "shell expansion. System executables/libraries are read-only; this is not a VM. "
                 + (

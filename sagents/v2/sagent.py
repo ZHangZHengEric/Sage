@@ -145,6 +145,7 @@ class SAgent:
             runtime.session_store, runtime=runtime
         )
         self._tasks: dict[str, asyncio.Task[RunSnapshot]] = {}
+        self._observers: set[asyncio.Task[RunSnapshot]] = set()
         self._drivers: dict[str, RunDriver] = {}
         self._closed = False
         self._closing = False
@@ -282,7 +283,20 @@ class SAgent:
         """Restart local execution after resume was durably accepted."""
 
         self._ensure_open()
-        run = await self.runtime.get_run(run_id)
+        run = await self._session_access.get_run(run_id, context)
+        if run.state in TERMINAL_RUN_STATES:
+            return await self._settled_execution(run_id)
+        if run.state in {RunState.RUNNING, RunState.QUEUED, RunState.SUSPEND_REQUESTED}:
+            async def observe_current_generation():
+                async for _ in self._terminal_stream(EventCursor(
+                    run_id=run_id, run_sequence=run.last_run_sequence,
+                ), context):
+                    pass
+                return await self._session_access.get_run(run_id, context)
+            observer = asyncio.create_task(observe_current_generation(), name=f"sagent-v2-observer:{run_id}")
+            self._observers.add(observer)
+            observer.add_done_callback(self._observers.discard)
+            return observer
         if run.state != RunState.RESUMING:
             raise ValueError(f"run must be resuming, got {run.state.value}")
         if self._dispatcher is None:
@@ -369,6 +383,11 @@ class SAgent:
                 )
             )
         self._closing = True
+        observers = tuple(self._observers)
+        for observer in observers:
+            observer.cancel()
+        if observers:
+            await asyncio.gather(*observers, return_exceptions=True)
         errors: list[Exception] = []
         for run_id, driver in tuple(self._drivers.items()):
             closer = getattr(driver, "close", None)

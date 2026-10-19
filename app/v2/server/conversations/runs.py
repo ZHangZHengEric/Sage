@@ -8,7 +8,6 @@ from time import perf_counter
 from datetime import timedelta
 
 from app.v2.server.observability.logging import get_logger
-from app.v2.server.runtime.models import bind_model_user, reset_model_user
 from sagents.v2.contracts.commands import CancelRun, ReplyInteraction, ResumeRun, SteerRun, InputItem
 from sagents.v2.contracts.items import TextBlock
 from sagents.v2.contracts.errors import ErrorCategory, RuntimeErrorInfo, SageV2Error
@@ -274,24 +273,13 @@ class RunService:
         run = await self.application.runtime.get_run(run_id)
         if run.state != RunState.RESUMING or self.execution.driving(run_id):
             return
-        token = bind_model_user(user_id)
-        bound = False
-        try:
-            bound = self.execution.bind_model(session_id, user_id)
-            loaded = await self.application.agent_for_run(run_id, context)
-            execution = await self.application.entrypoint().continue_run(run_id, context, agent=loaded)
-            task = asyncio.create_task(
-                self._continue_drive(
-                    execution, run_id=run_id, session_id=session_id, label=label
-                ),
-                name=f"server-v2-{label}-resume-{run_id}",
-            )
-            self.execution.adopt(run_id, task)
-            bound = False
-        finally:
-            if bound:
-                self.execution.unbind_model(session_id)
-            reset_model_user(token)
+        loaded = await self.application.agent_for_run(run_id, context)
+        execution = await self.application.entrypoint().continue_run(run_id, context, agent=loaded)
+        task = asyncio.create_task(
+            self._continue_drive(execution, run_id=run_id, session_id=session_id, label=label),
+            name=f"server-v2-{label}-resume-{run_id}",
+        )
+        self.execution.adopt(run_id, task)
 
     async def start_detached_run(
         self,
@@ -311,10 +299,8 @@ class RunService:
         it: a client that hangs up mid-answer, or asks for the Task back
         immediately, must not abort work the agent has already begun.
 
-        The model binding is handed to that task along with the drive. The
-        ContextVar travels because ``create_task`` copies the current context;
-        the session binding is released by the drive, not here, which is why
-        ``bound`` is cleared once the task owns it.
+        The SDK owns execution and the Run's model scope. This task observes
+        its future and applies product completion callbacks after it settles.
         """
 
         from app.v2.server.storage.workspaces import workspace_user
@@ -327,45 +313,36 @@ class RunService:
             LOGGER.debug("server.run.preparation.started", "开始准备运行",
                 session_id=session_id, agent_id=command.agent_id,
                 lock_wait_ms=round((perf_counter() - started) * 1000, 3))
-            token = bind_model_user(user_id)
-            bound = False
-            try:
-                bound = self.execution.bind_model(session_id, user_id)
-                application = self.application
-                loaded = await self._load_run_agent(command, user_id)
-                command = command.model_copy(update={"agent_id": loaded.id, "resolved_spec_hash": loaded.composition_hash})
-                with log_duration(LOGGER, "server.run.accepted", "运行接纳结束",
-                                  session_id=session_id, attributes={"interface": interface}):
-                    stream = await application.run_interface(
-                        interface,
-                        command,
-                        context,
-                        agent=loaded,
-                    )
-                run_id = stream.handle.run_id
-                if (
-                    self.execution.driving(run_id)
-                    or stream.handle.state in TERMINAL_RUN_STATES
-                    or stream.handle.state == RunState.SUSPENDED
-                ):
-                    await stream.detach()
-                    return run_id
-                task = asyncio.create_task(
-                    self._drive(
-                        stream,
-                        session_id=session_id,
-                        label=label,
-                        on_finished=on_finished,
-                    ),
-                    name=f"server-v2-{label}-{run_id}",
+            application = self.application
+            loaded = await self._load_run_agent(command, user_id)
+            command = command.model_copy(update={"agent_id": loaded.id, "resolved_spec_hash": loaded.composition_hash})
+            with log_duration(LOGGER, "server.run.accepted", "运行接纳结束",
+                              session_id=session_id, attributes={"interface": interface}):
+                stream = await application.run_interface(
+                    interface,
+                    command,
+                    context,
+                    agent=loaded,
                 )
-                self.execution.adopt(run_id, task)
-                bound = False
+            run_id = stream.handle.run_id
+            if (
+                self.execution.driving(run_id)
+                or stream.handle.state in TERMINAL_RUN_STATES
+                or stream.handle.state == RunState.SUSPENDED
+            ):
+                await stream.detach()
                 return run_id
-            finally:
-                if bound:
-                    self.execution.unbind_model(session_id)
-                reset_model_user(token)
+            task = asyncio.create_task(
+                self._drive(
+                    stream,
+                    session_id=session_id,
+                    label=label,
+                    on_finished=on_finished,
+                ),
+                name=f"server-v2-{label}-{run_id}",
+            )
+            self.execution.adopt(run_id, task)
+            return run_id
 
     async def _drive(self, stream, *, session_id: str, label: str, on_finished) -> None:
         run_id = stream.handle.run_id
@@ -385,7 +362,6 @@ class RunService:
             try:
                 await stream.detach()
             finally:
-                self.execution.unbind_model(session_id)
                 self.execution.release(run_id)
 
     async def _continue_drive(
@@ -402,7 +378,6 @@ class RunService:
                 label=label,
             )
         finally:
-            self.execution.unbind_model(session_id)
             self.execution.release(run_id)
 
 

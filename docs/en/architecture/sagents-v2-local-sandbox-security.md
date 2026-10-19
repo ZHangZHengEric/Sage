@@ -181,6 +181,6 @@ Canonical paths returned by file tools are usable by the current platform's Shel
 
 Standard Builder Team members use the local plugin's `share` capability by default. Leases share sandbox_id, directories, process slots and resource supervision, while retaining distinct owner_run_id and signature validation. Closing a member cancels only its running and queued tasks. With multiple attached handles, the last handle releases the lease; the last live lease closes the physical environment. Other members survive normal member completion.
 
-`LocalWorkspaceExecutionBindingProvider` plugs into `with_execution_binding_provider`; Desktop's compatible adapter uses the same SDK implementation. Builder's public API is unchanged. Shared Team policy fails explicitly when the plugin lacks Run leases. Private workspace policies still acquire separate host bindings.
+`LocalWorkspaceExecutionBindingProvider` is selected through runtime capability `execution.binding` using plugin `sage.execution.binding.local-workspace`. Custom binding providers use `builder.register(registration)` and the same standard execution path. Desktop and Server use this SDK mechanism. Shared Team policy fails explicitly when a provider lacks Run leases; private workspace policies acquire separate SDK-managed bindings.
 
 HOME/TMPDIR/XDG variables determine storage locations without changing host authorization. Local files, system access and computer-control capabilities remain governed by the execution plugin and host tool grants.

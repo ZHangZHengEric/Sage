@@ -275,3 +275,11 @@ read-only comparison matched 15 current built-in settings rows, including Team
 and Skill, on name, description and input schema while retaining their Agent
 associations. Yiii source was not modified: the host still needs to switch its
 call site and rerun acceptance before claiming its private imports are gone.
+
+## Approval, pause, cancellation and publication
+
+Use explicit public `app.runtime` commands: `reply_interaction`, `pause_run`, `cancel_run`, and `resume_run`. Accept `ResumeRun` for a plain suspension or `ReplyInteraction` for an interaction before restoring the original Agent and calling `continue_run`. A duplicate continuation observes existing execution; a terminal Run returns its existing result.
+
+Use `app.entrypoint().propose_session_commit`, `publish_session_commit`, and `reject_session_commit` for snapshot publication. These select the source Run's admitted Agent and retain post-publication memory processing. Server currently has no standalone manual-pause or Session-commit HTTP endpoint; Desktop exposes both. SDK support does not imply every host exposes an HTTP/UI control.
+
+See the [Desktop / Server audit](../../zh/architecture/sagents-v2-host-controls.md) for routes, ownership and validation boundaries.
