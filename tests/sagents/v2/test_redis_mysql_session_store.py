@@ -1,5 +1,6 @@
 from copy import deepcopy
 import asyncio
+import threading
 from unittest.mock import AsyncMock
 
 import fakeredis.aioredis
@@ -20,6 +21,25 @@ class Archive:
 
     async def _fetch_session(self, sid):
         return deepcopy(self.states.get(sid))
+
+    async def revision(self, sid):
+        state = self.states.get(sid)
+        return None if state is None else state["sessions"][0]["revision"]
+
+    async def archive_batch(self, sid, mutations):
+        from sagents.v2.runtime.session.mysql_state import _MysqlSessionState
+        if self.fail:
+            raise OSError("mysql unavailable")
+        rows = [(revision, encoded) for revision, encoded in mutations
+                if revision > self.states[sid]["sessions"][0]["revision"]]
+        if rows:
+            import json
+            sequence = json.loads(rows[-1][1])["upserts"]["sessions"][0]["last_sequence"]
+            self.states[sid] = _MysqlSessionState._replay_mutations(
+                self.states[sid], rows, rows[-1][0], sequence)
+
+    async def archive_attachments(self, sid, attachments):
+        self.attachments.update({(sid, key): value for key, value in attachments.items()})
 
     async def archive_session(self, payload, attachments):
         if self.fail:
@@ -433,3 +453,152 @@ async def test_unfinished_run_is_recovered_from_redis_after_restart():
     assert [row.run.run_id for row in runs] == [created.handle.run_id]
     assert archive.writes == 0
     await reopened.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("operation", ["_fetch_session", "_archive_session"])
+async def test_hot_session_replay_allows_writer_lease_renewal(operation):
+    redis = fakeredis.aioredis.FakeRedis(decode_responses=True)
+    value = store(redis, Archive())
+    created = await value.create_run(command(), CONTEXT)
+    await transition(value, created, RunState.CANCELLED, "cancel")
+    value.snapshot_interval = 1
+    entered, release, timed_out = threading.Event(), threading.Event(), threading.Event()
+    original = value._decode_hot
+
+    def slow_decode(fields):
+        entered.set()
+        if not release.wait(timeout=2):
+            timed_out.set()
+        return original(fields)
+
+    async def renew_while_replaying():
+        assert await asyncio.to_thread(entered.wait, 2)
+        await value._renew()
+        renewed_before_replay_finished = not release.is_set() and not timed_out.is_set()
+        release.set()
+        return renewed_before_replay_finished
+
+    value._decode_hot = slow_decode
+    heartbeat = asyncio.create_task(renew_while_replaying())
+    replay = asyncio.create_task(getattr(value, operation)(created.handle.session_id))
+    try:
+        renewed, _ = await asyncio.wait_for(asyncio.gather(heartbeat, replay), 5)
+        assert renewed, "Session replay blocked the event loop and prevented writer lease renewal"
+    finally:
+        release.set()
+        await asyncio.gather(heartbeat, replay, return_exceptions=True)
+        value._decode_hot = original
+        await value.close()
+
+
+@pytest.mark.asyncio
+async def test_running_commits_append_deltas_without_rewriting_session_snapshot():
+    redis = fakeredis.aioredis.FakeRedis(decode_responses=True)
+    value = store(redis, Archive())
+    value.snapshot_interval = 2
+    created = await value.create_run(command(), CONTEXT)
+    sid = created.handle.session_id
+    key = value._session_key(sid)
+    base = await redis.hget(key, "base")
+    try:
+        await transition(value, created, RunState.RUNNING, "running")
+        await transition(value, created, RunState.CANCELLED, "cancel")
+
+        fields = await redis.hgetall(key)
+        assert fields["base"] == base, "Hot commits must not rewrite the complete Session snapshot"
+        assert {"d:2", "d:3"}.issubset(fields)
+        expected = await value.export_session_state(sid)
+        assert await value._fetch_session(sid) == expected
+    finally:
+        await value.close()
+
+
+@pytest.mark.asyncio
+async def test_background_snapshot_chunks_survive_resume_and_reader_compaction_race():
+    redis = fakeredis.aioredis.FakeRedis(decode_responses=True)
+    value = store(redis, Archive())
+    value.snapshot_interval = 2
+    value.snapshot_chunk_chars = 1024
+    created = await value.create_run(command(), CONTEXT)
+    await transition(value, created, RunState.RUNNING, "running")
+    await transition(value, created, RunState.CANCELLED, "cancel")
+    sid = created.handle.session_id
+    expected = await value.export_session_state(sid)
+    old_fields = await value._read_hot(value._session_key(sid))
+    original = redis.hmget
+    compacted = False
+
+    async def compact_during_read(key, keys, *args):
+        nonlocal compacted
+        if key == value._session_key(sid) and any(str(name).startswith("d:") for name in keys) and not compacted:
+            compacted = True
+            await value._compact_hot(sid, old_fields)
+        return await original(key, keys, *args)
+
+    redis.hmget = compact_during_read
+    try:
+        assert await value._fetch_session(sid) == expected
+        assert compacted
+        await value.archive_pending()
+        token = await redis.hget(value._session_key(sid), "base_snapshot")
+        snapshot_key = value._key(f"snapshot:{token}")
+        parts = await redis.hgetall(snapshot_key)
+        assert len(parts) > 1
+        assert all(len(part.encode("utf-8")) <= 4096 for part in parts.values())
+        assert await redis.ttl(snapshot_key) > 0
+        await value.create_run(command("next").model_copy(update={"session_id": sid}), CONTEXT)
+        assert await redis.ttl(snapshot_key) == -1
+        assert len((await value._fetch_session(sid))["runs"]) == 2
+    finally:
+        redis.hmget = original
+        await value.close()
+
+
+@pytest.mark.asyncio
+async def test_large_initial_session_is_uploaded_as_bounded_chunks():
+    from sagents.v2.contracts.commands import InputItem
+    from sagents.v2.contracts.items import TextBlock
+    redis = fakeredis.aioredis.FakeRedis(decode_responses=True)
+    value = store(redis, Archive())
+    text = "大输入" * 40000
+    large = command().model_copy(update={"input": (InputItem(role="user", content=(TextBlock(text=text),)),)})
+    try:
+        created = await value.create_run(large, CONTEXT)
+        key = value._session_key(created.handle.session_id)
+        assert await redis.hget(key, "base") is None
+        token = await redis.hget(key, "base_snapshot")
+        parts = await redis.hgetall(value._key(f"snapshot:{token}"))
+        assert all(len(part.encode("utf-8")) <= value.snapshot_chunk_chars * 4 for part in parts.values())
+        loaded = await value._fetch_session(created.handle.session_id)
+        assert loaded["runs"][0]["start_command"]["input"][0]["content"][0]["text"] == text
+    finally:
+        await value.close()
+
+
+@pytest.mark.asyncio
+async def test_cold_read_racing_with_completed_deletion_preserves_tombstone():
+    redis = fakeredis.aioredis.FakeRedis(decode_responses=True)
+    archive = Archive()
+    value = store(redis, archive)
+    created = await value.create_run(command(), CONTEXT)
+    sid = created.handle.session_id
+    await transition(value, created, RunState.CANCELLED, "cancel")
+    await value.archive_pending()
+    key = value._session_key(sid)
+    await redis.delete(key)
+    original = archive._fetch_session
+
+    async def deleted_after_sql_read(session_id):
+        old_payload = await original(session_id)
+        # Completed deletion retains a durable tombstone without a revision.
+        await redis.hset(key, mapping={"deleted": "1"})
+        return old_payload
+
+    archive._fetch_session = deleted_after_sql_read
+    try:
+        assert await value._fetch_session(sid) is None
+        assert await redis.hgetall(key) == {"deleted": "1"}
+    finally:
+        archive._fetch_session = original
+        await value.close()

@@ -48,10 +48,23 @@ table prefix, excluding credentials. Managed Packages retain isolated namespaces
 Each existing SessionStore commit atomically writes execution state, canonical events,
 checkpoints, idempotency results and lookup indexes into Redis. Completion, failure,
 cancellation and suspension enqueue the Session for background archival in the same
-transaction. The worker writes a complete aggregate and newly appended events into
-the existing MySQL tables. It creates no audit business tables. A locked SQL revision
-comparison rejects stale snapshots and makes retries idempotent. A newer Redis
-revision prevents acknowledgement or expiry of the newer data.
+transaction; every 32 commits also schedules an active Session. The worker appends
+contiguous revisions to the existing session_mutations and run_events tables in
+transactions of at most 32 deltas and a 256 KiB target. A single indivisible record
+above that target is processed alone. Event inserts are limited by both bytes and
+128 rows. Each transaction publishes events, mutations, indexes and revision together;
+retries resume after the committed SQL revision. No audit tables are added. A newer
+Redis revision prevents acknowledgement or expiry of the newer data.
+
+Run commits no longer rewrite a full snapshot every 256 mutations. Background
+archival compacts Redis snapshots into chunks of at most 16K characters (64 KiB
+in UTF-8), then atomically publishes the base pointer and removes old deltas.
+Readers retry a concurrent base switch. Referenced chunks remain persistent while
+the Session is active. Legacy inline bases are readable and need a one-time atomic
+SQL baseline before incremental archival. All readers must support chunked bases
+before deployment. JSON replay and snapshot encoding run off the event loop. Replay
+validates changed rows per revision and builds the full state once. Approval expiry
+projects current suspended states without loading completed Session histories.
 
 Active and unarchived state has no TTL. Archived, quiescent Session caches expire
 after the retention interval and reload from MySQL. Failed archives retain their
@@ -75,7 +88,9 @@ on Redis host failure; `always` provides stricter persistence with a latency cos
 See [Redis persistence](https://redis.io/docs/latest/operate/oss_and_stack/management/persistence/)
 and [redis-py transactions](https://redis.io/docs/latest/develop/clients/redis-py/transpipe/).
 Drain in-flight Runs and pending archives before changing storage modes; never run
-the old MySQL writer concurrently against the same tables. This change does not
+the old MySQL writer concurrently against the same tables. Changing the MySQL host
+also changes the default Redis namespace: drain the previous namespace first or
+explicitly preserve its key_prefix. This change does not
 alter deployment configuration or migrate production data.
 
 Lifecycle deltas use `patches.runs` rather than repeatedly serializing unchanged

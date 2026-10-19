@@ -6,6 +6,7 @@ import asyncio
 import hashlib
 from time import perf_counter
 from datetime import timedelta
+from inspect import iscoroutinefunction
 
 from app.v2.server.observability.logging import get_logger
 from sagents.v2.contracts.commands import CancelRun, ReplyInteraction, ResumeRun, SteerRun, InputItem
@@ -231,7 +232,12 @@ class RunService:
 
     async def expire_approvals(self, threads, context_for):
         """One host maintenance pass, no waiting task per approval."""
-        for thread in await threads.list_all():
+        records = await threads.list_all()
+        filter_waiting = getattr(self.application.runtime.session_store, "filter_suspended_session_ids", None)
+        if iscoroutinefunction(filter_waiting):
+            waiting = await filter_waiting([thread.thread_id for thread in records])
+            records = [thread for thread in records if thread.thread_id in waiting]
+        for thread in records:
             context = context_for(thread.user_id)
             try:
                 runs = await self.session_access.list_session_runs(thread.thread_id, context)

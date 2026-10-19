@@ -12,6 +12,7 @@ import hashlib
 import json
 import time
 import uuid
+from typing import Any
 
 from sagents.v2.contracts.errors import ErrorCategory, RuntimeErrorInfo, SageV2Error
 from sagents.v2.contracts.run_state import RunState, TERMINAL_RUN_STATES
@@ -26,7 +27,10 @@ _STOPPED = TERMINAL_RUN_STATES | {RunState.SUSPENDED}
 
 
 class _RedisMysqlSessionState(_MysqlSessionState):
-    format_version = "sage.session.redis-mysql/v1"
+    format_version = "sage.session.redis-mysql/v2"
+    archive_batch_rows = 32
+    archive_batch_bytes = 256 * 1024
+    snapshot_chunk_chars = 16 * 1024
 
     def __init__(self, dsn, *, redis_url, table_prefix=None, key_prefix=None,
                  archive_interval_seconds=1.0, retention_seconds=3600, **kwargs):
@@ -41,7 +45,9 @@ class _RedisMysqlSessionState(_MysqlSessionState):
         self.redis_url = redis_url
         self.archive_interval_seconds = float(archive_interval_seconds)
         self.retention_seconds = int(retention_seconds)
-        self._redis = None
+        # redis-py does not narrow its bytes/str return types for decode_responses;
+        # keep the optional transport boundary dynamic, including injected clients.
+        self._redis: Any = None
         self._archive = MysqlSessionArchive(dsn, table_prefix=table_prefix)
         self._redis_ready = False
         self._redis_init_lock = asyncio.Lock()
@@ -124,7 +130,7 @@ class _RedisMysqlSessionState(_MysqlSessionState):
                 raise
             except Exception as exc:
                 LOGGER.warning("session.redis.worker_failed", "Session archive worker will retry",
-                               attributes={"error_type": type(exc).__name__})
+                               attributes=self._failure_attributes(exc))
             try:
                 await asyncio.wait_for(self._wake.wait(), self.archive_interval_seconds)
             except TimeoutError:
@@ -139,7 +145,14 @@ class _RedisMysqlSessionState(_MysqlSessionState):
             except Exception as exc:
                 self._lease_deadline = 0.0
                 LOGGER.warning("session.redis.lease_failed", "Redis writer lease renewal failed",
-                               attributes={"error_type": type(exc).__name__})
+                               attributes=self._failure_attributes(exc))
+
+    @staticmethod
+    def _failure_attributes(exc):
+        info = getattr(exc, "info", None)
+        return {"error_type": type(exc).__name__,
+                "error_code": getattr(info, "code", None),
+                "error_message": getattr(info, "message", str(exc))}
 
     @staticmethod
     def _lookup_key(values):
@@ -156,17 +169,22 @@ class _RedisMysqlSessionState(_MysqlSessionState):
         # Reload the archived base before appending the next delta in that case.
         if expected is not None and not await self._redis.exists(self._session_key(sid)):
             await self._fetch_session(sid)
-        compact = expected is None or self._persisted_mutation_counts.get(sid, 0) + 1 >= self.snapshot_interval
+        # Full snapshots are compacted by the archive worker, never by a Run commit.
+        compact = expected is None
         if compact:
             encoded = _json(self._dump_session_state_locked(sid))
         else:
             head["revision_sequences"] = {str(revision): head["last_sequence"]}
             encoded = _json(mutation)
+        staged_base = None
+        if compact and len(encoded.encode("utf-8")) > self.archive_batch_bytes:
+            staged_base = await self._stage_snapshot(encoded)
         rows = self._location_rows_after_mutation(sid, mutation)
         starts = self._start_rows_after_mutation(sid, mutation)
         stopped = any(row["state"] in _STOPPED for row in
                       [*mutation["upserts"].get("runs", ()), *mutation["patches"].get("runs", ())])
         quiescent = all(self._runs[rid].state in _STOPPED for rid in self._session_run_ids_locked(sid))
+        suspended = any(self._runs[rid].state == RunState.SUSPENDED for rid in self._session_run_ids_locked(sid))
         attachments = {identity: base64.b64encode(content).decode("ascii")
                        for identity, content in self._pending_attachments(sid)}
         commit_id = uuid.uuid4().hex
@@ -179,17 +197,36 @@ class _RedisMysqlSessionState(_MysqlSessionState):
                 if previous != (str(expected) if expected is not None else None):
                     raise self._conflict("session.revision_conflict", f"Redis Session revision changed for {sid}")
                 old_fields = await pipe.hkeys(key) if compact else ()
+                snapshot_token = await pipe.hget(key, "base_snapshot")
+                if staged_base:
+                    token, parts = staged_base
+                    staged_key = self._key(f"snapshot:{token}")
+                    await pipe.watch(staged_key)
+                    if await pipe.hlen(staged_key) != parts:
+                        raise self._storage_error("Redis snapshot staging expired before publication")
                 pipe.multi()
                 if compact:
                     stale = [field for field in old_fields if field.startswith("d:")]
                     if stale:
                         pipe.hdel(key, *stale)
-                pipe.hset(key, mapping={"revision": revision, "last_sequence": head["last_sequence"],
-                    "base" if compact else f"d:{revision}": encoded,
-                    "commit_id": commit_id, "quiescent": "1" if quiescent else "0"})
+                values = {"revision": revision, "last_sequence": head["last_sequence"],
+                          "commit_id": commit_id, "quiescent": "1" if quiescent else "0"}
+                if staged_base:
+                    token, parts = staged_base
+                    values.update(base_snapshot=token, base_parts=parts, base_revision=revision)
+                    pipe.persist(self._key(f"snapshot:{token}"))
+                else:
+                    values["base" if compact else f"d:{revision}"] = encoded
+                pipe.hset(key, mapping=values)
                 pipe.persist(key)
+                if snapshot_token:
+                    pipe.persist(self._key(f"snapshot:{snapshot_token}"))
                 pipe.sadd(self._key("resident"), sid)
-                if stopped or quiescent:
+                if suspended:
+                    pipe.sadd(self._key("suspended"), sid)
+                else:
+                    pipe.srem(self._key("suspended"), sid)
+                if stopped or quiescent or revision % self.archive_batch_rows == 0:
                     pipe.sadd(self._key("pending"), sid)
                 for kind, identity, _ in rows - self._persisted_locations.get(sid, set()):
                     pipe.hset(self._key("locations"), self._lookup_key((kind, identity)), sid)
@@ -219,7 +256,7 @@ class _RedisMysqlSessionState(_MysqlSessionState):
             {rid: len(self._run_events[rid]) for rid in self._session_run_ids_locked(sid)},
             rows, starts, 0 if compact else self._persisted_mutation_counts.get(sid, 0) + 1)
         self._forget_attachment_bytes(sid)
-        if stopped or quiescent:
+        if stopped or quiescent or revision % self.archive_batch_rows == 0:
             self._wake.set()
         LOGGER.debug("session.redis.commit", "Redis Session commit completed", session_id=sid,
             revision=revision, payload_bytes=len(encoded.encode()), snapshot=compact,
@@ -230,10 +267,62 @@ class _RedisMysqlSessionState(_MysqlSessionState):
         deltas = sorted((int(field[2:]), value) for field, value in fields.items() if field.startswith("d:"))
         return self._replay_mutations(base, deltas, int(fields["revision"]), int(fields["last_sequence"]))
 
+    async def _read_hot(self, key):
+        """Read an immutable base plus a bounded range of deltas, retrying compaction races."""
+        names = ("revision", "last_sequence", "deleted", "base_revision", "base_snapshot", "base_parts")
+        for _ in range(5):
+            values = await self._redis.hmget(key, names)
+            fields = {name: value for name, value in zip(names, values) if value is not None}
+            if fields.get("deleted") == "1":
+                return fields
+            if values[0] is None:
+                return {}
+            token = fields.get("base_snapshot")
+            if token:
+                snapshot_key = self._key(f"snapshot:{token}")
+                parts = []
+                for start in range(0, int(fields["base_parts"]), 8):
+                    parts.extend(await self._redis.hmget(snapshot_key,
+                        [str(i) for i in range(start, min(start + 8, int(fields["base_parts"])))]))
+                if any(part is None for part in parts):
+                    continue
+                fields["base"] = "".join(parts)
+            else:
+                fields["base"] = await self._redis.hget(key, "base")
+                if fields["base"] is None:
+                    continue
+            if "base_revision" in fields:
+                base_revision = int(fields["base_revision"])
+            else:
+                base_revision = await asyncio.to_thread(lambda: int(json.loads(fields["base"])["sessions"][0]["revision"]))
+            missing = False
+            for start in range(base_revision + 1, int(fields["revision"]) + 1, 8):
+                keys = [f"d:{i}" for i in range(start, min(start + 8, int(fields["revision"]) + 1))]
+                rows = await self._redis.hmget(key, keys)
+                if any(row is None for row in rows):
+                    missing = True
+                    break
+                fields.update(zip(keys, rows))
+            current = await self._redis.hmget(key, ("base_snapshot", "base_revision", "deleted"))
+            if not missing and current == [fields.get("base_snapshot"), fields.get("base_revision"), fields.get("deleted")]:
+                return fields
+        raise self._conflict("session.revision_conflict", "Redis Session base changed during loading")
+
+    async def _stage_snapshot(self, encoded):
+        token = uuid.uuid4().hex
+        key = self._key(f"snapshot:{token}")
+        count = 0
+        for count, start in enumerate(range(0, len(encoded), self.snapshot_chunk_chars), 1):
+            async with self._redis.pipeline(transaction=True) as pipe:
+                pipe.hset(key, str(count - 1), encoded[start:start + self.snapshot_chunk_chars])
+                pipe.expire(key, max(60, self.retention_seconds))
+                await pipe.execute()
+        return token, count
+
     async def _fetch_session(self, sid):
-        fields = await self._redis.hgetall(self._session_key(sid))
+        fields = await self._read_hot(self._session_key(sid))
         if fields:
-            return None if fields.get("deleted") == "1" else self._decode_hot(fields)
+            return None if fields.get("deleted") == "1" else await asyncio.to_thread(self._decode_hot, fields)
         if await self._redis.sismember(self._key("resident"), sid):
             raise self._storage_error(f"Unarchived Redis Session data is missing: {sid}")
         payload = await self._archive._fetch_session(sid)
@@ -241,25 +330,34 @@ class _RedisMysqlSessionState(_MysqlSessionState):
             return None
         payload.pop("_mutation_count", None)
         key = self._session_key(sid)
+        encoded = await asyncio.to_thread(_json, payload)
+        token, parts = await self._stage_snapshot(encoded)
+        snapshot_key = self._key(f"snapshot:{token}")
         async def seed():
             async with self._redis.pipeline() as pipe:
                 await self._owned(pipe)
                 await pipe.watch(key)
+                await pipe.watch(snapshot_key)
+                if await pipe.hlen(snapshot_key) != parts:
+                    raise self._storage_error("Redis snapshot staging expired before publication")
                 if not await pipe.exists(key):
                     head = payload["sessions"][0]
                     pipe.multi()
                     quiescent = all(row["state"] in _STOPPED for row in payload["runs"])
-                    pipe.hset(key, mapping={"base": _json(payload), "revision": head["revision"],
+                    pipe.hset(key, mapping={"base_snapshot": token, "base_parts": parts,
+                        "base_revision": head["revision"], "revision": head["revision"],
                         "last_sequence": head["last_sequence"], "archived_revision": head["revision"],
                         "quiescent": "1" if quiescent else "0"})
                     if quiescent:
                         pipe.expire(key, self.retention_seconds)
+                        pipe.expire(snapshot_key, self.retention_seconds)
                     else:
                         pipe.sadd(self._key("resident"), sid)
+                        pipe.persist(self._key(f"snapshot:{token}"))
                     await pipe.execute()
         await self._retry_transaction(seed)
-        fields = await self._redis.hgetall(key)
-        return None if fields.get("deleted") == "1" else self._decode_hot(fields)
+        fields = await self._read_hot(key)
+        return None if not fields or fields.get("deleted") == "1" else await asyncio.to_thread(self._decode_hot, fields)
 
     async def _ensure_session_loaded(self, sid, *, missing_ok=False):
         await self._ensure_ready()
@@ -317,6 +415,26 @@ class _RedisMysqlSessionState(_MysqlSessionState):
     async def has_nonterminal_runs(self):
         await self.list_dispatchable_runs()
         return await SessionStoreCoordinator.has_nonterminal_runs(self)
+
+    async def filter_suspended_session_ids(self, session_ids):
+        await self._ensure_ready()
+        selected = set()
+        ids = tuple(session_ids)
+        for start in range(0, len(ids), 128):
+            batch = ids[start:start + 128]
+            resident = await self._redis.smismember(self._key("resident"), list(batch))
+            waiting = await self._redis.smismember(self._key("suspended"), list(batch))
+            selected.update(sid for sid, pending in zip(batch, waiting) if pending)
+            cold = [sid for sid, hot, pending in zip(batch, resident, waiting) if not hot and not pending]
+            selected.update(await self._archive.filter_suspended_session_ids(cold))
+            # Legacy hot state predates the lightweight suspended index. Load
+            # only resident sessions once, never the whole historical catalog.
+            for sid, hot in zip(batch, resident):
+                if hot:
+                    await self._ensure_session_loaded(sid)
+                    if any(self._runs[rid].state == RunState.SUSPENDED for rid in self._session_run_ids_locked(sid)):
+                        selected.add(sid)
+        return selected
 
     async def _read_attachment_bytes(self, sid, identity):
         if (sid, identity) in self._attachment_payloads:
@@ -378,43 +496,107 @@ class _RedisMysqlSessionState(_MysqlSessionState):
                     await self._archive_session(sid)
                 except Exception as exc:
                     LOGGER.warning("session.mysql.archive_failed", "MySQL Session archive will retry",
-                                   session_id=sid, attributes={"error_type": type(exc).__name__})
+                                   session_id=sid, attributes=self._failure_attributes(exc))
+
+    async def _compact_hot(self, sid, fields):
+        """Stage small immutable chunks, then atomically publish the new base."""
+        payload = await asyncio.to_thread(self._decode_hot, fields)
+        encoded = await asyncio.to_thread(_json, payload)
+        token, parts = await self._stage_snapshot(encoded)
+        snapshot_key = self._key(f"snapshot:{token}")
+        key = self._session_key(sid)
+        published = False
+        async def publish():
+            nonlocal published
+            async with self._redis.pipeline() as pipe:
+                await self._owned(pipe)
+                await pipe.watch(key)
+                await pipe.watch(snapshot_key)
+                if await pipe.hlen(snapshot_key) != parts:
+                    raise self._storage_error("Redis snapshot staging expired before publication")
+                if await pipe.hget(key, "base_snapshot") != fields.get("base_snapshot"):
+                    return
+                if not await pipe.exists(key) or await pipe.hget(key, "deleted") == "1":
+                    return
+                pipe.multi()
+                pipe.persist(snapshot_key)
+                pipe.hset(key, mapping={"base_snapshot": token, "base_parts": parts,
+                                       "base_revision": fields["revision"]})
+                obsolete = ["base", *(name for name in fields if name.startswith("d:"))]
+                for start in range(0, len(obsolete), 128):
+                    pipe.hdel(key, *obsolete[start:start + 128])
+                await pipe.execute()
+                published = True
+        await self._retry_transaction(publish)
+        if published and fields.get("base_snapshot"):
+            await self._redis.delete(self._key(f"snapshot:{fields['base_snapshot']}"))
+        return payload
 
     async def _archive_session(self, sid):
         from redis.exceptions import WatchError
         started = time.perf_counter()
         key = self._session_key(sid)
-        fields = await self._redis.hgetall(key)
+        fields = await self._read_hot(key)
         if not fields:
             raise self._storage_error(f"Pending Redis Session data is missing: {sid}")
         deleted = fields.get("deleted") == "1"
         if deleted:
             await self._archive.delete_archived_sessions((sid,))
         else:
-            payload = self._decode_hot(fields)
+            base = await asyncio.to_thread(json.loads, fields["base"])
+            base_revision = int(base["sessions"][0]["revision"])
+            previous = await self._archive.revision(sid)
             content = await self._redis.hgetall(self._key(f"attachments:{sid}"))
-            await self._archive.archive_session(payload,
-                {identity: base64.b64decode(value) for identity, value in content.items()})
+            attachments = await asyncio.to_thread(lambda: {
+                identity: base64.b64decode(value) for identity, value in content.items()})
+            if previous is None or previous < base_revision:
+                # New sessions have a small initial base. Legacy compact snapshots
+                # need a one-time baseline before their retained journal can append.
+                await self._archive.archive_session(base, attachments)
+                previous = base_revision
+            else:
+                await self._archive.archive_attachments(sid, attachments)
+            batch, size = [], 0
+            for revision in range(previous + 1, int(fields["revision"]) + 1):
+                encoded = fields[f"d:{revision}"]
+                encoded_size = len(encoded.encode("utf-8"))
+                if batch and (len(batch) >= self.archive_batch_rows or size + encoded_size > self.archive_batch_bytes):
+                    await self._archive.archive_batch(sid, batch)
+                    batch, size = [], 0
+                    await asyncio.sleep(0)
+                batch.append((revision, encoded))
+                size += encoded_size
+            if batch:
+                await self._archive.archive_batch(sid, batch)
+            if len([name for name in fields if name.startswith("d:")]) >= self.snapshot_interval:
+                await self._compact_hot(sid, fields)
         try:
             async with self._redis.pipeline() as pipe:
                 await self._owned(pipe)
                 await pipe.watch(key)
-                current = await pipe.hgetall(key)
-                if current.get("revision") != fields.get("revision") or current.get("deleted") != fields.get("deleted"):
+                revision, current_deleted, quiescent = await pipe.hmget(key, ("revision", "deleted", "quiescent"))
+                if revision != fields.get("revision") or current_deleted != fields.get("deleted"):
                     return
+                token = await pipe.hget(key, "base_snapshot")
                 pipe.multi()
                 pipe.srem(self._key("pending"), sid)
                 if deleted:
                     pipe.delete(key, self._key(f"attachments:{sid}"), self._key(f"derived:{sid}"))
-                    # A small durable tombstone fences stale cold-store lookups.
+                    if token:
+                        pipe.delete(self._key(f"snapshot:{token}"))
                     pipe.hset(key, "deleted", "1")
                     pipe.hdel(self._key("parents"), sid)
                 else:
                     pipe.hset(key, "archived_revision", fields["revision"])
-                if deleted or fields.get("quiescent") == "1":
+                if deleted or quiescent == "1":
                     pipe.srem(self._key("resident"), sid)
+                    if deleted:
+                        pipe.srem(self._key("suspended"), sid)
                     if not deleted:
-                        for cached in (key, self._key(f"attachments:{sid}"), self._key(f"derived:{sid}")):
+                        cached_keys = [key, self._key(f"attachments:{sid}"), self._key(f"derived:{sid}")]
+                        if token:
+                            cached_keys.append(self._key(f"snapshot:{token}"))
+                        for cached in cached_keys:
                             pipe.expire(cached, self.retention_seconds)
                 await pipe.execute()
         except WatchError:
