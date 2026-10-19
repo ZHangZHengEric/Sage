@@ -2070,7 +2070,9 @@ async def test_component_inventory_explains_plugins_and_locks_model_protocol(
     ) == {"max_visible_tools", "model_timeout_seconds"}
     assert {
         value["plugin_id"] for value in by_id["context.unit-compactor"]["plugins"]
-    } == {"sage.context.unit-compactor.reference"}
+    } == {
+        "sage.context.unit-compactor.reference",
+    }
     assert by_id["observability.log-sink"]["active"] == {
         "plugin_id": "sage.logging.filesystem",
         "selected_plugin_id": "sage.logging.filesystem",
@@ -4215,6 +4217,7 @@ async def test_skill_loading_component_schema_and_validation(tmp_path):
         inventory = await service.component_inventory("user_1")
         component = next(v for v in inventory if v["component"]["component_id"] == "skill.loading")
         schema = component["plugins"][0]["config_schema"]
+        assert "max_active_tokens" not in schema["properties"]
         assert schema["properties"]["max_active_characters"]["default"] == 24000
         for invalid in (0, -1, True, 1.5, "12000"):
             with pytest.raises(ValueError):
@@ -4222,16 +4225,16 @@ async def test_skill_loading_component_schema_and_validation(tmp_path):
                     plugin_id="sage.skill.loading.lazy", config={"max_active_characters": invalid},
                 ), "user_1")
         await service.select_component("skill.loading", ComponentSelectionRequest(
-            plugin_id="sage.skill.loading.lazy", config={"max_active_characters": 12000},
+            plugin_id="sage.skill.loading.lazy", config={"max_active_characters": 48000},
         ), "user_1")
         inventory = await service.component_inventory("user_1")
         component = next(v for v in inventory if v["component"]["component_id"] == "skill.loading")
-        assert component["selected_config"] == {"max_active_characters": 12000}
+        assert component["selected_config"] == {"max_active_characters": 48000}
         settings = await service.get_settings()
         manifest = desktop_v2_manifest(session_root=tmp_path,
             component_selections=settings.component_selections,
             component_configs=settings.component_configs)
-        assert manifest.runtime.selections("skill.loading")[0].config == {"max_active_characters": 12000}
+        assert manifest.runtime.selections("skill.loading")[0].config == {"max_active_characters": 48000}
     finally:
         await service.session_store.close()
 

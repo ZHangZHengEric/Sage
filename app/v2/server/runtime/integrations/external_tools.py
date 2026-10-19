@@ -12,9 +12,10 @@ from sagents.v2.contracts.errors import SageV2Error
 class ScopedExternalTools:
     """Expose only tools authorized in the durable StartRun configuration."""
 
-    def __init__(self, provider, agents, *, command_reader):
+    def __init__(self, provider, agents, *, command_reader, dynamic_tools=()):
         self.provider = provider
         self._grants = {name: frozenset(definition.tools) for name, definition in agents.items()}
+        self._dynamic_tools = frozenset(dynamic_tools)
         self._command_reader = command_reader
         self._operations: dict[str, str] = {}
 
@@ -24,6 +25,8 @@ class ScopedExternalTools:
         if self._command_reader is not None:
             command = await self._command_reader(run_id)
             names = self._grants.get(command.agent_id, frozenset())
+            if command.agent_id not in self._grants and self._dynamic_tools and command.parent_run_id:
+                names = self._dynamic_tools
             if command.config.enabled_tools is not None:
                 names = names.intersection(command.config.enabled_tools)
         return FilteredToolCatalog(self.provider, names)

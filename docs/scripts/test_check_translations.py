@@ -1,3 +1,4 @@
+import re
 import tempfile
 import unittest
 
@@ -43,16 +44,14 @@ class TranslationChecks(unittest.TestCase):
         self.assertTrue(any("hierarchy" in e for e in translation_errors(self.pages)))
 
     def test_code_drift_is_rejected(self):
-        self.pages[self.target] = self.pages[self.target].replace(
-            "system_tokens: 16384", "system_tokens: 1"
-        )
+        self.pages[self.target] += "\n```yaml\nsystem_tokens: 1\n```\n"
         self.assertTrue(
             any("code examples" in e for e in translation_errors(self.pages))
         )
 
     def test_missing_section_is_rejected(self):
-        self.pages[self.target] = self.pages[self.target].replace(
-            "## Configuration", "Configuration"
+        self.pages[self.target] = re.sub(
+            r"^#{1,6} ", "", self.pages[self.target], count=1, flags=re.M
         )
         self.assertTrue(any("heading" in e for e in translation_errors(self.pages)))
 

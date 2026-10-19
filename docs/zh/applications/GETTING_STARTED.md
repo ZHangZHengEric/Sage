@@ -38,6 +38,7 @@ import asyncio
 from uuid import uuid4
 
 from sagents.v2 import ActorRef, RequestContext, SAgentBuilder, StartRun
+from sagents.v2.composition.defaults import default_runtime
 from sagents.v2.contracts.commands import InputItem
 from sagents.v2.contracts.items import TextBlock
 from sagents.v2.contracts.principals import PrincipalType
@@ -47,14 +48,6 @@ AGENT_YAML = """
 schema_version: sage/v2
 kind: application
 metadata: {id: example.assistant, version: 1.0.0, name: Assistant}
-credentials:
-  api-key: {source: env, key: MODEL_API_KEY}
-models:
-  primary:
-    provider: openai-responses
-    base_url: https://api.openai.com/v1
-    credential: api-key
-    model: your-model
 agents:
   main:
     name: Assistant
@@ -63,21 +56,36 @@ agents:
 entrypoint: {agent: main}
 """
 
+MODELS_YAML = """
+credentials:
+  api-key: {source: env, key: MODEL_API_KEY}
+models:
+  primary:
+    provider: openai-responses
+    base_url: https://api.openai.com/v1
+    credential: api-key
+    model: your-model
+"""
+
 
 async def main():
     manifest = SageManifestLoader().loads(AGENT_YAML)
-    app = await SAgentBuilder().build(runtime=manifest.runtime, models=model_config)
-agent = await app.load_agent(manifest)
+    app = await (
+        SAgentBuilder().build(
+            runtime=default_runtime("runtime"), models_config_text=MODELS_YAML,
+        )
+    )
     try:
+        agent = await app.load_agent(manifest)
         context = RequestContext(actor=ActorRef(
             principal_id="user-1", principal_type=PrincipalType.USER,
         ))
         stream = await app.entrypoint().run_stream(StartRun(
-            agent_id="main",
+            agent_id=agent.id,
             input=(InputItem(role="user", content=(TextBlock(text="Say hello!"),)),),
-            resolved_spec_hash=app.composition_hash,
+            resolved_spec_hash=agent.composition_hash,
             idempotency_key=str(uuid4()),
-        ), context)
+        ), context, agent=agent)
         async for event in stream.events:
             print(event.model_dump_json())
         print((await stream.wait()).state)
@@ -102,11 +110,11 @@ python quickstart.py
 
 | 输入方式 | 用法 |
 | --- | --- |
-| YAML 字符串 | `build(SageManifestLoader().loads(yaml_text))` |
-| Python 字典 | `build(SageManifest.model_validate(config))` |
-| 包文件 | `build("path/to/sage.yaml")` |
-| 已解析的包 | `build(resolved_manifest)` |
+| YAML 字符串 | `await app.load_agent(SageManifestLoader().loads(yaml_text))` |
+| Python 字典 | `await app.load_agent(SageManifest.model_validate(config))` |
+| 包文件 | `await app.load_agent("path/to/sage.yaml")` |
+| 已解析的包 | `await app.load_agent(resolved_manifest)` |
 
-两个 manifest 类型均从 `sagents.v2.package.manifest` 导入。直接传给 `build()` 的字符串是**路径**，不会自动识别为 YAML 内容。字符串配置应使用内联指令；文件加载会以包目录为基准解析指令文件，并限制文件位于包目录内。
+两个 manifest 类型均从 `sagents.v2.package.manifest` 导入。直接传给 `app.load_agent()` 的字符串是**路径**，不会自动识别为 YAML 内容。字符串配置应使用内联指令；文件加载会以包目录为基准解析指令文件，并限制文件位于包目录内。
 
 下一步：[配置](../CONFIGURATION.md)、[工具接入](../MCP_SERVERS.md)、[运行时 API](../api/API_REFERENCE.md)。

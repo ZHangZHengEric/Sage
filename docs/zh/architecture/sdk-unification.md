@@ -40,3 +40,5 @@ Server 同样使用标准 App、Agent 加载及执行入口。运行能力从实
 标准恢复允许祖先仍暂停时直接继续子 Run。Sage 在 loop 装配前恢复必要祖先的资源租约，并从原执行图选择实际子 Agent；不执行祖先模型、不重建任务、不套用最新配置。祖先资源未就绪与配置无法恢复分别报告可恢复状态和配置不兼容。
 
 接口示例、租约归属、释放顺序及验证范围见[多层子 Run 标准恢复](sagents-v2-run-tree-recovery.md)。
+
+合并远端更新后，Yiii 提供的 `video-asset-agent-pause-resume` 与 `video-asset-agent-host-restart` 原始验收命令均通过（2 passed），未修改 Yiii。两项验证祖先仍暂停时直接恢复叶子，随后按原 Run 逐层继续，并检查实际 Skill 上下文和产物。

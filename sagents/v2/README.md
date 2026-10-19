@@ -5,25 +5,67 @@ capabilities in serializable runtime configuration, and use the same public Run
 API for built-in and custom plugins.
 
 ```python
-from sagents.v2 import SAgentBuilder
+import asyncio
+from uuid import uuid4
 
-builder = SAgentBuilder()
-for registration in host_registrations:
-    builder.register(registration)
+from sagents.v2 import ActorRef, RequestContext, SAgentBuilder, StartRun
+from sagents.v2.composition.defaults import default_runtime
+from sagents.v2.contracts.commands import InputItem
+from sagents.v2.contracts.items import TextBlock
+from sagents.v2.contracts.principals import PrincipalType
+from sagents.v2.package.manifest import SageManifestLoader
 
-app = await builder.build(runtime=runtime_config, models=model_config)
-try:
-    agent = await app.load_agent(package, subagents=subagents)
-    command = command.model_copy(update={
-        "agent_id": agent.id,
-        "resolved_spec_hash": agent.composition_hash,
-    })
-    stream = await app.entrypoint().run_stream(command, context, agent=agent)
-    async for event in stream.events:
-        handle_event(event)
-    result = await stream.wait()
-finally:
-    await app.close()
+AGENT_YAML = """
+schema_version: sage/v2
+kind: application
+metadata: {id: example.assistant, version: 1.0.0, name: Assistant}
+agents:
+  main:
+    name: Assistant
+    instructions: {inline: "Be helpful and concise."}
+    models: {primary: primary}
+entrypoint: {agent: main}
+"""
+
+MODELS_YAML = """
+credentials:
+  api-key: {source: env, key: MODEL_API_KEY}
+models:
+  primary:
+    provider: openai-responses
+    base_url: https://api.openai.com/v1
+    credential: api-key
+    model: your-model
+"""
+
+
+async def main():
+    manifest = SageManifestLoader().loads(AGENT_YAML)
+    app = await (
+        SAgentBuilder().build(
+            runtime=default_runtime("runtime"), models_config_text=MODELS_YAML,
+        )
+    )
+    try:
+        agent = await app.load_agent(manifest)
+        context = RequestContext(actor=ActorRef(
+            principal_id="user-1", principal_type=PrincipalType.USER,
+        ))
+        stream = await app.entrypoint().run_stream(StartRun(
+            agent_id=agent.id,
+            input=(InputItem(role="user", content=(TextBlock(text="Say hello!"),)),),
+            resolved_spec_hash=agent.composition_hash,
+            idempotency_key=str(uuid4()),
+        ), context, agent=agent)
+        async for event in stream.events:
+            print(event.model_dump_json())
+        print((await stream.wait()).state)
+    finally:
+        await app.close()
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
 ```
 
 `package`, `command`, `context`, configuration and event handling belong to the

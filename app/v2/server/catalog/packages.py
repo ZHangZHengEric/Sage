@@ -89,3 +89,62 @@ def project_package(record):
     record.skills = list(definition.skills)
     record.tool_approval = definition.tool_approval
     return record
+
+
+def bind_catalog_members(record, catalog) -> AgentPackageBundle:
+    """Pin owned catalog revisions into the standard dependency graph.
+
+    Rebind at admission as well as save: later Runs see member edits, while an
+    admitted Run keeps the complete graph across queueing and recovery.
+    """
+    from sagents.v2.contracts.errors import ErrorCategory, RuntimeErrorInfo, SageV2Error
+
+    records = {item.id: item for item in catalog.agents}
+    records[record.id] = record
+
+    def invalid(message):
+        raise SageV2Error(RuntimeErrorInfo(
+            code="server.catalog.validation", category=ErrorCategory.VALIDATION,
+            message=message,
+        ))
+
+    def bind(current, path):
+        if current.id in path:
+            invalid("团队成员不能包含自身或形成循环依赖")
+        members = current.available_sub_agent_ids
+        if len(members) != len(set(members)):
+            invalid("团队成员不能重复")
+        dependencies = {}
+        for member_id in members:
+            member = records.get(member_id)
+            if member is None:
+                invalid("团队成员必须是当前用户已有的智能体")
+            dependencies[member_id] = bind(member, (*path, current.id))
+        package = current.package.model_copy(update={"dependencies": dependencies})
+        if path:
+            # A member's ordinary model setting is also its delegated setting.
+            definition = package.manifest.agents[current.id]
+            definition = definition.model_copy(update={
+                "delegation_model_bindings": {**definition.models, **definition.delegation_model_bindings},
+            })
+            package = package.model_copy(update={"manifest": package.manifest.model_copy(update={
+                "agents": {current.id: definition},
+            })})
+        return package
+
+    return AgentPackageBundle.model_validate(bind(record, ()).model_dump(mode="json"))
+
+
+def catalog_execution_grants(bundle, catalog):
+    """Freeze each compiled member's host execution ceiling with the Run."""
+    records = {item.id: item for item in catalog.agents}
+    grants = {}
+
+    def visit(package, alias):
+        agent_id = package.manifest.entrypoint.agent
+        grants[alias] = {"agent_id": agent_id, "policy": records[agent_id].execution_policy.model_dump()}
+        for name, child in package.dependencies.items():
+            visit(child, f"{alias}.{name}" if alias != bundle.manifest.entrypoint.agent else name)
+
+    visit(bundle, bundle.manifest.entrypoint.agent)
+    return grants

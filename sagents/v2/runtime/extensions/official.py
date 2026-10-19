@@ -340,6 +340,11 @@ def _register_infrastructure(registry: ExtensionRegistry) -> None:
                 "summary_target_tokens": {"type": "integer", "minimum": 1},
                 "protected_recent_units": {"type": "integer", "minimum": 1},
                 "max_summary_calls": {"type": "integer", "minimum": 1},
+                "max_summary_source_tokens": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "default": 24_000,
+                },
                 "unit_compactor": {},
             },
             "required": ["store"],

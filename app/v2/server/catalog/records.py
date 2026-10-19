@@ -139,6 +139,14 @@ class AgentRecord(BaseModel):
     def sandbox(self):
         return self.package.manifest.agents[self.id].sandbox
 
+    @property
+    def agent_mode(self):
+        return self.package.manifest.agents[self.id].mode
+
+    @property
+    def available_sub_agent_ids(self):
+        return list(self.package.manifest.agents[self.id].subagents)
+
     def with_configuration(self, **updates):
         from app.v2.server.catalog.packages import build_package
         sandbox = updates.pop("sandbox", None)
@@ -160,6 +168,8 @@ class AgentRecord(BaseModel):
             "instructions": self.instructions,
             "model_id": self.model_id or None,
             "fast_model_id": self.fast_model_id or None,
+            "agent_mode": self.agent_mode,
+            "available_sub_agent_ids": self.available_sub_agent_ids,
             "tools": list(self.tools),
             "external_tools": self.external_tools,
             "skills": list(self.skills),
@@ -444,6 +454,17 @@ def upsert_agent(
         record = record.model_copy(
             update={"package": AgentPackageBundle.model_validate(data)}
         ).with_configuration()
+    if "agent_mode" in payload or "available_sub_agent_ids" in payload:
+        data = record.package.model_dump(mode="json")
+        definition = data["manifest"]["agents"][record.id]
+        if "agent_mode" in payload:
+            definition["mode"] = payload["agent_mode"]
+        if "available_sub_agent_ids" in payload:
+            definition["subagents"] = payload["available_sub_agent_ids"]
+        record = record.model_copy(update={"package": AgentPackageBundle.model_validate(data)})
+    from app.v2.server.catalog.packages import bind_catalog_members
+
+    record = record.model_copy(update={"package": bind_catalog_members(record, catalog)}).with_configuration()
     if record.model_id and not any(
         item.id == record.model_id for item in catalog.models
     ):
