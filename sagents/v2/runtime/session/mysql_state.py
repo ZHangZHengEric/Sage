@@ -25,6 +25,7 @@ from sagents.v2.contracts.errors import (
 from sagents.v2.runtime.session.aggregate import SessionAggregate
 from sagents.v2.runtime.session.journal import (
     SessionAggregateSnapshotV2,
+    SessionRowSnapshot,
     SessionStateDeltaMutation,
 )
 from sagents.v2.runtime.session.state import SessionStoreCoordinator
@@ -1198,15 +1199,57 @@ class _MysqlSessionState(SessionStoreCoordinator):
                     (session_id,),
                 )
                 event_rows = await cursor.fetchall()
-        payload = self._replay_mutations(
-            dict(_decode_json(row[0])), mutation_rows, int(row[1]), int(row[2])
-        )
-        payload["_mutation_count"] = len(mutation_rows)
-        run_events: dict[str, list[dict[str, Any]]] = {}
-        for run_id, event in event_rows:
-            run_events.setdefault(run_id, []).append(_decode_json(event))
-        payload["run_events"] = run_events
-        return payload
+        def decode():
+            payload = self._replay_mutations(
+                dict(_decode_json(row[0])), mutation_rows, int(row[1]), int(row[2]))
+            payload["_mutation_count"] = len(mutation_rows)
+            run_events: dict[str, list[dict[str, Any]]] = {}
+            for run_id, event in event_rows:
+                run_events.setdefault(run_id, []).append(_decode_json(event))
+            payload["run_events"] = run_events
+            return payload
+        return await asyncio.to_thread(decode)
+
+    async def filter_suspended_session_ids(self, session_ids):
+        """Project current Run states without installing any Session history."""
+        selected = set()
+        ids = tuple(session_ids)
+        for start in range(0, len(ids), 128):
+            batch = ids[start:start + 128]
+            marks = ",".join(["%s"] * len(batch))
+            # A compact base can be older than its journal. Rank only the tiny
+            # state projections, never fetch checkpoint/event JSON into Python.
+            statement = f"""
+                WITH states AS (
+                    SELECT s.session_id, r.run_id, r.state,
+                        CAST(JSON_UNQUOTE(JSON_EXTRACT(s.compact_state, '$.sessions[0].revision')) AS UNSIGNED) AS revision
+                    FROM {self._table('sessions')} s,
+                        JSON_TABLE(s.compact_state, '$.runs[*]' COLUMNS (
+                            run_id VARCHAR(128) PATH '$.run_id', state VARCHAR(32) PATH '$.state')) r
+                    WHERE s.session_id IN ({marks})
+                    UNION ALL
+                    SELECT m.session_id, r.run_id, r.state, m.revision
+                    FROM {self._table('session_mutations')} m,
+                        JSON_TABLE(m.mutation, '$.upserts.runs[*]' COLUMNS (
+                            run_id VARCHAR(128) PATH '$.run_id', state VARCHAR(32) PATH '$.state')) r
+                    WHERE m.session_id IN ({marks})
+                    UNION ALL
+                    SELECT m.session_id, r.run_id, r.state, m.revision
+                    FROM {self._table('session_mutations')} m,
+                        JSON_TABLE(m.mutation, '$.patches.runs[*]' COLUMNS (
+                            run_id VARCHAR(128) PATH '$.run_id', state VARCHAR(32) PATH '$.state')) r
+                    WHERE m.session_id IN ({marks}) AND r.state IS NOT NULL
+                ), latest AS (
+                    SELECT session_id, state,
+                        ROW_NUMBER() OVER (PARTITION BY session_id, run_id ORDER BY revision DESC) AS position
+                    FROM states
+                ) SELECT DISTINCT session_id FROM latest WHERE position = 1 AND state = 'suspended'
+            """
+            async with self._reader_connection() as connection:
+                async with connection.cursor() as cursor:
+                    await cursor.execute(statement, batch * 3)
+                    selected.update(str(row[0]) for row in await cursor.fetchall())
+        return selected
 
     @staticmethod
     def _replay_mutations(compact, mutation_rows, revision, last_sequence):
@@ -1215,24 +1258,23 @@ class _MysqlSessionState(SessionStoreCoordinator):
                 SessionAggregateSnapshotV2.model_validate(compact)
             )
             current_revision = aggregate.revision
-            for next_revision, encoded in mutation_rows:
-                if int(next_revision) != current_revision + 1:
-                    raise ValueError("non-contiguous Session mutation revisions")
-                delta = dict(_decode_json(encoded))
-                session_rows = delta.get("upserts", {}).get("sessions", ())
-                if len(session_rows) != 1 or int(session_rows[0]["revision"]) != int(
-                    next_revision
-                ):
-                    raise ValueError("Session mutation has an invalid head")
-                head = dict(session_rows[0])
-                head["revision_sequences"] = {
-                    **aggregate.snapshot.sessions[0].revision_sequences,
-                    **head["revision_sequences"],
-                }
-                delta["upserts"]["sessions"] = [head]
-                aggregate = aggregate.apply(SessionStateDeltaMutation(**delta))
-                current_revision = int(next_revision)
+            revision_sequences = dict(aggregate.snapshot.sessions[0].revision_sequences)
+            def mutations():
+                nonlocal current_revision
+                for next_revision, encoded in mutation_rows:
+                    if int(next_revision) != current_revision + 1:
+                        raise ValueError("non-contiguous Session mutation revisions")
+                    delta = dict(_decode_json(encoded))
+                    session_rows = delta.get("upserts", {}).get("sessions", ())
+                    if len(session_rows) != 1 or int(session_rows[0]["revision"]) != int(next_revision):
+                        raise ValueError("Session mutation has an invalid head")
+                    head = SessionRowSnapshot.model_validate(session_rows[0])
+                    revision_sequences.update(head.revision_sequences)
+                    current_revision = int(next_revision)
+                    yield SessionStateDeltaMutation(**delta)
+            aggregate = aggregate.apply_many(mutations())
             state = aggregate.snapshot.model_dump(mode="json")
+            state["sessions"][0]["revision_sequences"] = revision_sequences
             if (
                 current_revision != revision
                 or state["sessions"][0]["last_sequence"] != last_sequence
