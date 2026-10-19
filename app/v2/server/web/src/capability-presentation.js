@@ -2,6 +2,7 @@ import { componentName, parameterDefaults } from './plugin-presentation.js'
 
 // Presentation only. Availability and schemas always come from the host catalog.
 const nodes = [
+  ['tool.result-processor', '工具结果处理', '工具与技能', 'file'],
   ['context.reducer', '上下文压缩', '上下文准备', 'history'],
   ['context.summarizer', '摘要生成', '上下文准备', 'file'],
   ['tool.selection-policy', '工具选择', '模型与工具', 'tools'],

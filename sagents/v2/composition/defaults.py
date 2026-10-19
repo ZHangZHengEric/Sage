@@ -13,6 +13,7 @@ DEFAULT_COMPONENTS = {
     "memory.provider": "sage.memory.filesystem-bm25",
     "memory.recall-query": "sage.memory.recall-query.llm",
     "tool.selection-policy": "sage.tool-selection.llm",
+    "tool.result-processor": "sage.tool.result-processor.file",
     "session-memory.provider": "sage.session-memory.sqlite-bm25",
     "observability.diagnostic-sink": "sage.observability.filesystem",
     "observability.log-sink": "sage.logging.filesystem",
@@ -72,6 +73,7 @@ def effective_runtime(runtime: RuntimeConfig) -> RuntimeConfig:
         "agent.continuation-policy": "sage.agent.continuation.deterministic",
         "memory.recall-query": "sage.memory.recall-query.direct",
         "tool.selection-policy": "sage.tool-selection.llm",
+        "tool.result-processor": "sage.tool.result-processor.file",
         "agent.tool-policy": "sage.agent.tool-policy.default",
     }
     choices = {**{key: CapabilitySelection(plugin=plugin) for key, plugin in implicit.items()}, **runtime.capabilities}
