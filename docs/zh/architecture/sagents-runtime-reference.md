@@ -173,7 +173,7 @@ finally:
 | `build(runtime={})` / `build(runtime=RuntimeConfig())` | 使用 RuntimeConfig 的字段默认值，未选择组件走装配器基础回退；不会自动叠加整套 Desktop 默认方案 |
 | `build(runtime=配置)` | 这份配置成为 App 的 runtime；随后 `load_agent` 使用 App runtime，Package 自带 runtime 不会再覆盖它 |
 
-`with_defaults(session_root=...)` 可以改变默认运行目录。默认方案共享的是组件选择，不会读取你电脑 Desktop 的 API Key、模型目录、数据库或个人设置。
+通过 `default_runtime(session_root)` 取得默认配置，再将配置传给 `build(runtime=...)`，可以改变默认运行目录。默认方案共享的是组件选择，不会读取你电脑 Desktop 的 API Key、模型目录、数据库或个人设置。
 
 若要在默认方案上只修改少量参数，先取得默认配置再修改，不要把一份只有两项的配置误认为“自动补齐 Desktop 默认”的覆盖配置：
 
@@ -224,6 +224,9 @@ finally:
 | `plugin_trust_policy` | `trusted_declared` / `built_in_only` | `trusted_declared` | 是否允许宿主信任并声明的扩展；built_in_only 只接受注册表认定的内置插件，不能通过自填 built_in 绕过 |
 | `capabilities` | 能力名 → Selection 或 Selection 数组 | `{}` | 选择插件实现、实例名、scope 和参数；单实例能力不能任意配置多个实现 |
 | `required_guarantees` | 能力名 → 保障名 → 期望值 | `{}` | 运行要求，装配时检查实际 provider；不能证明时拒绝，不是描述性备注 |
+| `start_workers` | boolean | `true` | 是否在 App 创建时启动 Worker；产品依赖准备好后可以显式启动标准 dispatcher |
+| `check_readiness` | boolean | `false` | 是否执行注册能力的 readiness 检查；不能代替真实模型与工具调用验收 |
+| `state_root` | string / null | `null` | Agent 版本及恢复状态目录，属于 App 身份，改变需要新建 App |
 
 Identifier 长度 1–192，首字符为字母或数字，后续可用字母、数字和 `._:@/-`。保障名不是任意配置开关，需对应 provider 支持的能力报告。当前内置 SessionStore/Scheduler 并不能提供完整分布式 claims/outbox/subscription 体系；仅切换到 MySQL/Postgres 不代表可多进程共同执行。
 
@@ -245,6 +248,7 @@ capabilities:
 | `name` | Identifier | `default` | 插件提供的能力名称；一个插件仅有一个对应 offer 时，装配器可以解析隐式 default；多 offer 时应明确指定 |
 | `scope` | `process` / `tenant` / `agent` / `run` / null | null | null 使用装配点默认生命周期；显式值必须在插件 supported_scopes 内，不应为了复用随意扩大作用域 |
 | `config` | 对象 | `{}` | 该插件的参数，按它自己的 schema/config_model 校验；不同插件的参数不能混用 |
+| `grant_tools` | boolean | `false` | 仅用于 `tool.catalog`，由可信宿主将该提供者的工具加入运行可用范围；请求身份与授权策略仍生效 |
 
 scope 的含义：process 与 App 进程服务同寿命；tenant 按租户隔离；agent 关联 Agent 实例/版本的装配作用域；run 关联运行作用域。scope 不自动提供跨进程共享，也不会自动给插件加锁。process/tenant/agent 插件必须能处理重叠调用。某些装配点只支持一个 scope 或需要宿主提供相应身份。
 
@@ -336,7 +340,7 @@ capabilities:
       table_prefix: sagent
 ```
 
-示例 DSN 仅为格式说明，不要提交真实密码。当前 runtime 文本没有通用 `${ENV}` 插值，建议宿主读环境/Secret 后构造配置或注入 SessionStore。Postgres/MySQL 分别需要 asyncpg/aiomysql；数据库存储并不让内存 Job、Scheduler 自动变成持久化或分布式实现。
+示例 DSN 仅为格式说明，不要提交真实密码。当前 runtime 文本没有通用 `${ENV}` 插值，建议通过正式凭据提供者或注册工厂解析连接凭据，宿主已有 SessionStore 也通过注册工厂提供。Postgres/MySQL 分别需要 asyncpg/aiomysql；数据库存储并不让内存 Job、Scheduler 自动变成持久化或分布式实现。
 
 ## 自定义插件、校验和生命周期
 
@@ -366,807 +370,1080 @@ finally:
 
 `build` 固定注册表与配置；加载 Agent 时实际装配和校验。未知参数、缺少依赖、不可用插件、scope/API 不匹配、能力保障不满足，都应在装配阶段处理，不能靠“参数被接受”判断组件已生效。`plugins` 声明不等于安装依赖包，YAML 也不等于任意 Python 动态 import。
 
-宿主注入的资源通常由宿主关闭；转交所有权用 `with_owned_resources`。App 持有的插件遵循作用域启动、失败回滚、关闭协议。用 try/finally 关闭 App；不要给每次请求重新创建整个 App，也不要手动关闭共享组件。
+宿主已有对象也通过注册工厂提供。注册项声明 `ownership="borrowed"` 时由宿主负责关闭；声明 `ownership="owned"` 时由 Sage 按插件协议释放。App 持有的插件遵循作用域启动、失败回滚、关闭协议。用 try/finally 关闭 App；不要给每次请求重新创建整个 App，也不要手动关闭共享组件。
 
 ## 排查配置与恢复问题
 
 1. 普通 SDK 看 `agent.resolved_plan` 和 `agent.resource_readiness`；`app.resolved_plan` 只是进程首次装配视图。
 2. 加载句柄的 `resolved_plan` 描述选择和依赖；`app.run_configuration()` 与 `execution_diagnostics()` 查询已授权 Run 的冻结配置及实际绑定。
 3. 在 Run 记录中关联 session_id、run_id、resolved_spec_hash，确认恢复使用受理时的版本。
-4. `update_agent` 更新 Agent，不热替换 App 共享存储/调度器。改变 runtime 时重新创建 App，并明确旧任务的恢复/迁移策略。
-5. 保留 `agent-revisions` 和 Session 数据。当前本机归档恢复要求 runtime 一致，不能把最新配置自动套到旧运行。
+4. `update_runtime` 修改后续加载的 Agent 配置；已受理 Run 保留原快照。`state_root`、存储、调度器、Job runtime 和安全配置属于 App 身份，变更这些项需要创建新 App。`update_models` / `update_agent` 发布新版本，不替换旧任务使用的版本。
+5. 保留 `agent-revisions` 和 Session 数据。恢复时使用原版本、原执行配置及其所需插件；当前 App 的新配置不能覆盖旧 Run。原实现、可信解释器或能力无法恢复时明确报不兼容。
 6. readiness 不是模型/工具真实可用性验证；还需有代表性的实际调用。
 
 ## 内置插件完整参数表
 
-下表按当前注册表逐一列出插件，包含没有参数的插件。`schema 必填` 是插件实例化阶段的要求，**不表示这些项都应由用户写 YAML**：标为“宿主对象”的项由装配层注入。参数默认值优先取注册 schema，再补充已核实的工厂/调度器默认值；“无固定值”表示由宿主/实现按上下文决定，不等于 null 或关闭。
+以下内容来自标准注册表的公开 `inventory()`。`config` 仅接受可序列化参数；工厂对象依赖通过声明的能力协议传递，不放进 runtime。Sage 创建对象与宿主借用对象都通过注册工厂提供，以注册项的 `ownership` 明确关闭责任。
 
-表中的范围是校验范围，bytes 为字节、seconds 为秒、tokens 为 API 输出预算或供应商实际 usage 阈值，不做本地输入估算。对象参数不能用名称字符串替代 Python 对象。插件注册不代表任何能力名放进 capabilities 都会自动创建它：工具、模型、Flow、接口分别由对应装配路径消费。请同时查看“提供能力”和使用位置。
+表中“必填”指所在对象内部的要求。嵌套对象本身未提供时，不表示必须提交其全部子字段。未声明默认值的参数以 schema 和实现契约为准。完整 JSON Schema（包括联合类型、额外字段策略和嵌套约束）可通过 `builder.inventory()` 查询；校验错误不会静默回退。
 
+### sage.agent.approval-memory.session
 
-### 插件索引
+Standard agent.approval-memory implementation with declared dependencies and lifecycle.
 
-| 能力 | 内置实现（点击查看参数） |
-| --- | --- |
-| `agent.continuation-policy` | [sage.agent.continuation.deterministic](#sageagentcontinuationdeterministic)、[sage.agent.continuation.explicit-status](#sageagentcontinuationexplicit-status)、[sage.agent.continuation.hybrid](#sageagentcontinuationhybrid)、[sage.agent.continuation.llm-judge](#sageagentcontinuationllm-judge) |
-| `artifact.store` | [sage.artifact.ephemeral](#sageartifactephemeral)、[sage.artifact.filesystem](#sageartifactfilesystem)、[sage.artifact.session](#sageartifactsession) |
-| `context.reducer` | [sage.context.reducer.persistent-summary](#sagecontextreducerpersistent-summary)、[sage.context.reducer.window](#sagecontextreducerwindow) |
-| `context.summarizer` | [sage.context.summarizer.extractive](#sagecontextsummarizerextractive)、[sage.context.summarizer.model](#sagecontextsummarizermodel) |
-| `context.summary-store` | [sage.context.summary-store.ephemeral](#sagecontextsummary-storeephemeral)、[sage.context.summary-store.session-derived](#sagecontextsummary-storesession-derived) |
-| `context.unit-compactor` | [sage.context.unit-compactor.reference](#sagecontextunit-compactorreference) |
-| `credentials.provider` | [sage.credentials.environment](#sagecredentialsenvironment)、[sage.credentials.mapping](#sagecredentialsmapping) |
-| `execution.job-runtime` | [sage.job.ephemeral](#sagejobephemeral) |
-| `execution.sandbox` | [sage.sandbox.cube-volume](#sagesandboxcube-volume)、[sage.sandbox.ephemeral](#sagesandboxephemeral)、[sage.sandbox.local-workspace](#sagesandboxlocal-workspace) |
-| `execution.scheduler` | [sage.scheduler.ephemeral](#sageschedulerephemeral)、[sage.scheduler.filesystem](#sageschedulerfilesystem) |
-| `flow.node` | [sage.flow.agent](#sageflowagent) |
-| `interface.protocol-adapter` | [sage.protocol.a2a](#sageprotocola2a)、[sage.protocol.acp](#sageprotocolacp)、[sage.protocol.ag-ui](#sageprotocolag-ui)、[sage.protocol.mcp](#sageprotocolmcp)、[sage.protocol.native](#sageprotocolnative) |
-| `memory.provider` | [sage.memory.filesystem-bm25](#sagememoryfilesystem-bm25)、[sage.memory.noop](#sagememorynoop) |
-| `memory.recall-query` | [sage.memory.recall-query.direct](#sagememoryrecall-querydirect)、[sage.memory.recall-query.llm](#sagememoryrecall-queryllm) |
-| `model.provider` | [sage.model.anthropic-messages](#sagemodelanthropic-messages)、[sage.model.gemini-generate-content](#sagemodelgemini-generate-content)、[sage.model.openai-chat-completions](#sagemodelopenai-chat-completions)、[sage.model.openai-responses](#sagemodelopenai-responses) |
-| `observability.diagnostic-sink` | [sage.observability.filesystem](#sageobservabilityfilesystem)、[sage.observability.noop](#sageobservabilitynoop) |
-| `observability.log-sink` | [sage.logging.filesystem](#sageloggingfilesystem)、[sage.logging.noop](#sageloggingnoop)、[sage.logging.stdout](#sageloggingstdout) |
-| `observability.trace-sink` | [sage.trace.langfuse](#sagetracelangfuse)、[sage.trace.noop](#sagetracenoop)、[sage.trace.otlp](#sagetraceotlp) |
-| `package.registry` | [sage.package-registry.ephemeral](#sagepackage-registryephemeral) |
-| `session-memory.provider` | [sage.session-memory.noop](#sagesession-memorynoop)、[sage.session-memory.sqlite-bm25](#sagesession-memorysqlite-bm25) |
-| `session.store` | [sage.session.ephemeral](#sagesessionephemeral)、[sage.session.filesystem](#sagesessionfilesystem)、[sage.session.mysql](#sagesessionmysql)、[sage.session.postgres](#sagesessionpostgres) |
-| `skill.catalog` | [sage.skill.filesystem](#sageskillfilesystem) |
-| `skill.loading` | [sage.skill.loading.lazy](#sageskillloadinglazy) |
-| `skill.source` | [sage.skill.filesystem](#sageskillfilesystem) |
-| `tool.catalog` | [sage.tool.ephemeral](#sagetoolephemeral)、[sage.tool.mcp](#sagetoolmcp)、[sage.tool.multi-agent](#sagetoolmulti-agent)、[sage.tool.official](#sagetoolofficial)、[sage.tool.skill](#sagetoolskill) |
-| `tool.executor` | [sage.tool.ephemeral](#sagetoolephemeral)、[sage.tool.mcp](#sagetoolmcp)、[sage.tool.multi-agent](#sagetoolmulti-agent)、[sage.tool.official](#sagetoolofficial)、[sage.tool.skill](#sagetoolskill) |
-| `tool.selection-policy` | [sage.tool-selection.direct](#sagetool-selectiondirect)、[sage.tool-selection.lexical](#sagetool-selectionlexical)、[sage.tool-selection.llm](#sagetool-selectionllm)、[sage.tool-selection.recent](#sagetool-selectionrecent) |
-| `workspace.initializer` | [sage.workspace.initializer.bare](#sageworkspaceinitializerbare)、[sage.workspace.initializer.claw](#sageworkspaceinitializerclaw) |
+版本：`2.0.0`；scope：process；所有权：`owned`。
+
+提供能力：`agent.approval-memory:default` (API `2`)。
+
+依赖：`derived-state.store` (API `>=2,<3`)。
+
+没有固定配置字段；是否允许额外参数以公开 Schema 为准。
 
 ### sage.agent.continuation.deterministic
 
 Applies ordered safety, budget, and completion rules without a model call.
 
-提供能力：`agent.continuation-policy:default`。支持 scope：agent, run。
+版本：`2.0.0`；scope：agent, run；所有权：`owned`。
 
-| 参数 | 类型 / 范围 | 默认值 | schema 必填 | 用途 |
+提供能力：`agent.continuation-policy:default` (API `2`)。
+
+| 参数 | 类型 | 必填 | Schema 默认值 | 约束 |
 | --- | --- | --- | --- | --- |
-| `repeat_threshold` | integer；minimum=1 | `3` | 否 | 检测重复执行/循环的阈值 |
+| `repeat_threshold` | `integer` | 否 | `3` | `{"minimum":1}` |
 
 ### sage.agent.continuation.explicit-status
 
 Completes only when the model emits an explicit turn_status.
 
-提供能力：`agent.continuation-policy:default`。支持 scope：agent, run。
+版本：`2.0.0`；scope：agent, run；所有权：`owned`。
 
-| 参数 | 类型 / 范围 | 默认值 | schema 必填 | 用途 |
+提供能力：`agent.continuation-policy:default` (API `2`)。
+
+| 参数 | 类型 | 必填 | Schema 默认值 | 约束 |
 | --- | --- | --- | --- | --- |
-| `repeat_threshold` | integer；minimum=1 | `3` | 否 | 检测重复执行/循环的阈值 |
+| `repeat_threshold` | `integer` | 否 | `3` | `{"minimum":1}` |
 
 ### sage.agent.continuation.hybrid
 
 Combines deterministic safety rules with an LLM judge for completion.
 
-提供能力：`agent.continuation-policy:default`。支持 scope：agent, run。
+版本：`2.0.0`；scope：agent, run；所有权：`owned`。
 
-| 参数 | 类型 / 范围 | 默认值 | schema 必填 | 用途 |
+提供能力：`agent.continuation-policy:default` (API `2`)。
+
+| 参数 | 类型 | 必填 | Schema 默认值 | 约束 |
 | --- | --- | --- | --- | --- |
-| `repeat_threshold` | integer；minimum=1 | `3` | 否 | 检测重复执行/循环的阈值 |
-| `model` | 宿主对象 | 无固定值；仍需提供/注入 | 是 | 模型依赖；通常是宿主注入的 ModelProvider；tiktoken 中则是 tokenizer 模型名 |
-| `model_binding` | string；minLength=1 | `"fast"` | 否 | 选择模型槽位，摘要固定 primary |
-| `timeout_seconds` | number；exclusiveMinimum=0 | `60.0` | 否 | 该组件操作的总等待上限（秒），不是整个 Run 预算 |
+| `repeat_threshold` | `integer` | 否 | `3` | `{"minimum":1}` |
+| `model` | `object` | 是 | 未声明 | `{}` |
+| `model_binding` | `string` | 否 | `"fast"` | `{"minLength":1}` |
+| `timeout_seconds` | `number` | 否 | `60.0` | `{"exclusiveMinimum":0}` |
 
 ### sage.agent.continuation.llm-judge
 
 Uses a judge model to decide completion when no tool call is pending.
 
-提供能力：`agent.continuation-policy:default`。支持 scope：agent, run。
+版本：`2.0.0`；scope：agent, run；所有权：`owned`。
 
-| 参数 | 类型 / 范围 | 默认值 | schema 必填 | 用途 |
+提供能力：`agent.continuation-policy:default` (API `2`)。
+
+| 参数 | 类型 | 必填 | Schema 默认值 | 约束 |
 | --- | --- | --- | --- | --- |
-| `repeat_threshold` | integer；minimum=1 | `3` | 否 | 检测重复执行/循环的阈值 |
-| `model` | 宿主对象 | 无固定值；仍需提供/注入 | 是 | 模型依赖；通常是宿主注入的 ModelProvider；tiktoken 中则是 tokenizer 模型名 |
-| `model_binding` | string；minLength=1 | `"fast"` | 否 | 选择模型槽位，摘要固定 primary |
-| `timeout_seconds` | number；exclusiveMinimum=0 | `60.0` | 否 | 该组件操作的总等待上限（秒），不是整个 Run 预算 |
+| `repeat_threshold` | `integer` | 否 | `3` | `{"minimum":1}` |
+| `model` | `object` | 是 | 未声明 | `{}` |
+| `model_binding` | `string` | 否 | `"fast"` | `{"minLength":1}` |
+| `timeout_seconds` | `number` | 否 | `60.0` | `{"exclusiveMinimum":0}` |
+
+### sage.agent.tool-policy.default
+
+Standard agent.tool-policy implementation with declared dependencies and lifecycle.
+
+版本：`2.0.0`；scope：process；所有权：`owned`。
+
+提供能力：`agent.tool-policy:default` (API `2`)。
+
+| 参数 | 类型 | 必填 | Schema 默认值 | 约束 |
+| --- | --- | --- | --- | --- |
+| `approval_strategy` | `string` | 否 | `"configured"` | `{"enum":["configured","always_ask","high_risk","auto_approve"]}` |
 
 ### sage.artifact.ephemeral
 
 Process-local artifact bytes without restart durability.
 
-提供能力：`artifact.store:default`。支持 scope：process, run。
+版本：`2.0.0`；scope：process, run；所有权：`owned`。
 
-没有可配置参数，使用 `config: {}`。
+提供能力：`artifact.store:default` (API `2`)。
+
+没有固定配置字段；是否允许额外参数以公开 Schema 为准。
 
 ### sage.artifact.filesystem
 
 Immutable binary artifact files with local restart durability.
 
-提供能力：`artifact.store:default`。支持 scope：process。
+版本：`2.0.0`；scope：process；所有权：`owned`。
 
-| 参数 | 类型 / 范围 | 默认值 | schema 必填 | 用途 |
+提供能力：`artifact.store:default` (API `2`)。
+
+| 参数 | 类型 | 必填 | Schema 默认值 | 约束 |
 | --- | --- | --- | --- | --- |
-| `root` | string；minLength=1 | 无固定值；仍需提供/注入 | 是 | 存储根目录；不同组件应使用对应独立目录 |
+| `root` | `string` | 是 | 未声明 | `{"minLength":1}` |
 
 ### sage.artifact.session
 
 Artifacts retained by the owning Session store.
 
-提供能力：`artifact.store:default`。支持 scope：process。
+版本：`2.0.0`；scope：process；所有权：`owned`。
 
-| 参数 | 类型 / 范围 | 默认值 | schema 必填 | 用途 |
+提供能力：`artifact.store:default` (API `2`)。
+
+| 参数 | 类型 | 必填 | Schema 默认值 | 约束 |
 | --- | --- | --- | --- | --- |
-| `session_store` | 宿主对象 | 无固定值；仍需提供/注入 | 是 | 宿主对象：SessionStore |
+| `session_store` | `object` | 是 | 未声明 | `{}` |
 
 ### sage.context.reducer.persistent-summary
 
-Summarizes older units into a durable rolling conversation summary.
+Summarizes complete history only after API rejection or reported usage reaches a configured limit.
 
-提供能力：`context.reducer:default`。支持 scope：agent, run。
+版本：`2.0.0`；scope：agent, run；所有权：`owned`。
 
-| 参数 | 类型 / 范围 | 默认值 | schema 必填 | 用途 |
+提供能力：`context.reducer:default` (API `2`)。
+
+| 参数 | 类型 | 必填 | Schema 默认值 | 约束 |
 | --- | --- | --- | --- | --- |
-| `store` | 宿主对象 | 无固定值；仍需提供/注入 | 是 | 宿主对象：摘要存储 |
-| `summarizer` | 宿主对象 | 无固定值 | 否 | 宿主对象：摘要生成器 |
-| `summary_target_tokens` | integer；minimum=1 | `1024` | 否 | 生成摘要的目标 token 数 |
-| `protected_recent_units` | integer；minimum=1 | `4` | 否 | 兼容旧配置；API 恢复按完整批次保留最新用户原文 |
-| `max_summary_calls` | integer；minimum=1 | `64` | 否 | 一次压缩允许的摘要调用上限 |
-| `max_summary_source_tokens` | integer；minimum=1 | `24000` | 否 | 兼容旧配置，已弃用；输入仅由 API 超长反馈分批 |
-| `unit_compactor` | 宿主对象 | 无固定值 | 否 | 宿主对象：上下文单元压缩器 |
+| `store` | `object` | 是 | 未声明 | `{}` |
+| `summarizer` | `object` | 否 | 未声明 | `{}` |
+| `summary_target_tokens` | `integer` | 否 | `1024` | `{"minimum":1}` |
+| `protected_recent_units` | `integer` | 否 | `4` | `{"minimum":1}` |
+| `max_summary_calls` | `integer` | 否 | `64` | `{"minimum":1}` |
+| `unit_compactor` | `object` | 否 | 未声明 | `{}` |
 
 ### sage.context.reducer.window
 
-Drops complete old units only on API feedback or an exact message-count trigger.
+Drops complete historical units only when explicitly requested.
 
-提供能力：`context.reducer:default`。支持 scope：agent, run。
+版本：`2.0.0`；scope：agent, run；所有权：`owned`。
 
-| 参数 | 类型 / 范围 | 默认值 | schema 必填 | 用途 |
-| --- | --- | --- | --- | --- |
+提供能力：`context.reducer:default` (API `2`)。
+
+没有固定配置字段；是否允许额外参数以公开 Schema 为准。
 
 ### sage.context.summarizer.extractive
 
 Preserves bounded task state and Tool outcomes without a model call.
 
-提供能力：`context.summarizer:default`。支持 scope：agent, process。
+版本：`2.0.0`；scope：agent, process；所有权：`owned`。
 
-没有可配置参数，使用 `config: {}`。
+提供能力：`context.summarizer:default` (API `2`)。
+
+没有固定配置字段；是否允许额外参数以公开 Schema 为准。
 
 ### sage.context.summarizer.model
 
 Uses a model binding to write conversation summaries.
 
-提供能力：`context.summarizer:default`。支持 scope：agent。
+版本：`2.0.0`；scope：agent, run；所有权：`owned`。
 
-| 参数 | 类型 / 范围 | 默认值 | schema 必填 | 用途 |
+提供能力：`context.summarizer:default` (API `2`)。
+
+| 参数 | 类型 | 必填 | Schema 默认值 | 约束 |
 | --- | --- | --- | --- | --- |
-| `model` | 宿主对象 | 无固定值；仍需提供/注入 | 是 | 模型依赖；通常是宿主注入的 ModelProvider；tiktoken 中则是 tokenizer 模型名 |
-| `model_binding` | string；const="primary" | `"primary"` | 否 | 选择模型槽位，摘要固定 primary |
-| `max_source_tokens` | integer；minimum=1 | `24000` | 否 | 单次摘要来源 token 上限 |
-| `timeout_seconds` | number；exclusiveMinimum=0 | `300.0` | 否 | 该组件操作的总等待上限（秒），不是整个 Run 预算 |
-| `idle_timeout_seconds` | number；exclusiveMinimum=0 | `60.0` | 否 | 摘要流连续无进展的超时（秒） |
+| `model` | `object` | 是 | 未声明 | `{}` |
+| `model_binding` | `string` | 否 | `"primary"` | `{"const":"primary"}` |
+| `max_source_tokens` | `integer` | 否 | `24000` | `{"minimum":1}` |
+| `timeout_seconds` | `number` | 否 | `300.0` | `{"exclusiveMinimum":0}` |
+| `idle_timeout_seconds` | `number` | 否 | `60.0` | `{"exclusiveMinimum":0}` |
 
 ### sage.context.summary-store.ephemeral
 
 In-memory conversation summaries without restart durability.
 
-提供能力：`context.summary-store:default`。支持 scope：agent, process。
+版本：`2.0.0`；scope：agent, process；所有权：`owned`。
 
-没有可配置参数，使用 `config: {}`。
+提供能力：`context.summary-store:default` (API `2`)。
+
+没有固定配置字段；是否允许额外参数以公开 Schema 为准。
 
 ### sage.context.summary-store.session-derived
 
 Persists conversation summaries through the selected SessionStore.
 
-提供能力：`context.summary-store:default`。支持 scope：agent, process。
+版本：`2.0.0`；scope：agent, process；所有权：`owned`。
 
-| 参数 | 类型 / 范围 | 默认值 | schema 必填 | 用途 |
+提供能力：`context.summary-store:default` (API `2`)。
+
+| 参数 | 类型 | 必填 | Schema 默认值 | 约束 |
 | --- | --- | --- | --- | --- |
-| `derived_state` | 宿主对象 | 无固定值；仍需提供/注入 | 是 | 宿主对象：派生状态存储 |
-
+| `derived_state` | `object` | 是 | 未声明 | `{}` |
 
 ### sage.context.unit-compactor.reference
 
 Compacts oversized units into durable references instead of dropping them.
 
-提供能力：`context.unit-compactor:default`。支持 scope：agent, process。
+版本：`2.0.0`；scope：agent, process；所有权：`owned`。
 
-| 参数 | 类型 / 范围 | 默认值 | schema 必填 | 用途 |
-| --- | --- | --- | --- | --- |
+提供能力：`context.unit-compactor:default` (API `2`)。
+
+没有固定配置字段；是否允许额外参数以公开 Schema 为准。
 
 ### sage.credentials.environment
 
 Resolves credentials from process environment variables.
 
-提供能力：`credentials.provider:default`。支持 scope：process, tenant。
+版本：`2.0.0`；scope：process, tenant；所有权：`owned`。
 
-| 参数 | 类型 / 范围 | 默认值 | schema 必填 | 用途 |
+提供能力：`credentials.provider:default` (API `2`)。
+
+| 参数 | 类型 | 必填 | Schema 默认值 | 约束 |
 | --- | --- | --- | --- | --- |
-| `declarations` | object | `{}` | 否 | 凭据声明映射，通常来自 App models 配置的 credentials |
-| `environment` | object / null | 省略时读取宿主 os.environ | 否 | Trace 为环境标签；credentials.environment 为宿主环境变量映射 |
+| `declarations` | `object` | 否 | 未声明 | `{}` |
+| `environment` | `['object', 'null']` | 否 | 未声明 | `{}` |
 
 ### sage.credentials.mapping
 
 Resolves credentials from an in-memory host-supplied mapping.
 
-提供能力：`credentials.provider:default`。支持 scope：process, tenant。
+版本：`2.0.0`；scope：process, tenant；所有权：`owned`。
 
-| 参数 | 类型 / 范围 | 默认值 | schema 必填 | 用途 |
+提供能力：`credentials.provider:default` (API `2`)。
+
+| 参数 | 类型 | 必填 | Schema 默认值 | 约束 |
 | --- | --- | --- | --- | --- |
-| `values` | object | `{}` | 否 | 宿主凭据值映射，不应硬编码密钥到公开配置 |
-| `source` | string；minLength=1 | `"host"` | 否 | 凭据来源标识 |
+| `values` | `object` | 否 | 未声明 | `{}` |
+| `source` | `string` | 否 | `"host"` | `{"minLength":1}` |
+
+### sage.derived-state.ephemeral
+
+Standard derived-state.store implementation with declared dependencies and lifecycle.
+
+版本：`2.0.0`；scope：process；所有权：`owned`。
+
+提供能力：`derived-state.store:default` (API `2`)。
+
+没有固定配置字段；是否允许额外参数以公开 Schema 为准。
+
+### sage.derived-state.session
+
+Standard derived-state.store implementation with declared dependencies and lifecycle.
+
+版本：`2.0.0`；scope：process；所有权：`borrowed`。
+
+提供能力：`derived-state.store:default` (API `2`)。
+
+依赖：`session.store` (API `>=2,<3`)。
+
+没有固定配置字段；是否允许额外参数以公开 Schema 为准。
+
+### sage.execution.binding.ephemeral
+
+Independent virtual files with explicit process-local recovery limits.
+
+版本：`1.0.0`；scope：process；所有权：`owned`。
+
+提供能力：`execution.binding:default` (API `2`)。
+
+依赖：`session.store` (API `>=2,<3`)。
+
+| 参数 | 类型 | 必填 | Schema 默认值 | 约束 |
+| --- | --- | --- | --- | --- |
+| `workspace_root` | `string` | 否 | `"/workspace"` | `{}` |
+| `policy` | `object` | 否 | 未声明 | `{"additionalProperties":false}` |
+| `policy.filesystem` | `object` | 否 | 未声明 | `{"additionalProperties":false}` |
+| `policy.filesystem.allowed_operations` | `array` | 是 | 未声明 | `{}` |
+| `policy.filesystem.allowed_roots` | `array` | 否 | `["/workspace"]` | `{}` |
+| `policy.filesystem.protected_paths` | `array` | 否 | `[]` | `{}` |
+| `policy.filesystem.max_file_bytes` | `integer / null` | 否 | `null` | `{}` |
+| `policy.filesystem.max_total_bytes` | `integer / null` | 否 | `null` | `{}` |
+| `policy.filesystem.allow_symlinks` | `boolean` | 否 | `false` | `{}` |
+| `policy.process` | `object` | 否 | 未声明 | `{"additionalProperties":false}` |
+| `policy.process.enabled` | `boolean` | 否 | `false` | `{}` |
+| `policy.process.read_only` | `boolean` | 否 | `false` | `{}` |
+| `policy.process.allowed_executables` | `array` | 否 | `[]` | `{}` |
+| `policy.process.allow_shell` | `boolean` | 否 | `false` | `{}` |
+| `policy.process.allowed_env_names` | `array` | 否 | `[]` | `{}` |
+| `policy.process.max_processes` | `integer` | 否 | `1` | `{"exclusiveMinimum":0}` |
+| `policy.process.max_wall_time_seconds` | `number / null` | 否 | `null` | `{}` |
+| `policy.process.max_output_bytes` | `integer` | 否 | `1048576` | `{"exclusiveMinimum":0}` |
+| `policy.process.allow_background_jobs` | `boolean` | 否 | `false` | `{}` |
+| `policy.resources` | `object` | 否 | 未声明 | `{"additionalProperties":false}` |
+| `policy.resources.cpu_percent` | `number` | 否 | `100` | `{"minimum":1}` |
+| `policy.resources.memory_mb` | `integer` | 否 | `1024` | `{"exclusiveMinimum":0}` |
+| `policy.resources.disk_mb` | `integer` | 否 | `4096` | `{"exclusiveMinimum":0}` |
+| `policy.resources.max_processes` | `integer` | 否 | `64` | `{"minimum":4}` |
+| `policy.resources.require_hard_limits` | `boolean` | 否 | `true` | `{}` |
+| `policy.network` | `object` | 否 | 未声明 | `{"additionalProperties":false}` |
+| `policy.network.mode` | `string` | 否 | `"none"` | `{"enum":["none","allowlist","proxy","unrestricted"]}` |
+| `policy.network.proxy_url` | `string / null` | 否 | `null` | `{}` |
+| `policy.network.allowed_hosts` | `array` | 否 | `[]` | `{}` |
+| `policy.network.allowed_ports` | `array` | 否 | `[]` | `{}` |
+| `policy.network.allowed_schemes` | `array` | 否 | `["https"]` | `{}` |
+| `policy.network.allowed_methods` | `array` | 否 | `["GET","HEAD"]` | `{}` |
+| `policy.network.allowed_request_headers` | `array` | 否 | `["accept","content-type","user-agent"]` | `{}` |
+| `policy.network.allow_listen` | `boolean` | 否 | `false` | `{}` |
+| `policy.network.deny_private_networks` | `boolean` | 否 | `true` | `{}` |
+| `policy.network.max_redirects` | `integer` | 否 | `5` | `{"minimum":0,"maximum":20}` |
+| `policy.network.max_request_body_bytes` | `integer` | 否 | `1048576` | `{"minimum":0}` |
+| `policy.network.max_response_bytes` | `integer` | 否 | `10485760` | `{"exclusiveMinimum":0}` |
+| `policy.network.max_wall_time_seconds` | `number` | 否 | `30` | `{"exclusiveMinimum":0}` |
+
+### sage.execution.binding.local-workspace
+
+Run-owned sandbox leases with admitted execution policy.
+
+版本：`1.0.0`；scope：process；所有权：`owned`。
+
+提供能力：`execution.binding:default` (API `2`)。
+
+| 参数 | 类型 | 必填 | Schema 默认值 | 约束 |
+| --- | --- | --- | --- | --- |
+| `workspace` | `string` | 是 | 未声明 | `{}` |
+| `private_workspace_root` | `string / null` | 否 | `null` | `{}` |
+| `policy` | `object` | 否 | 未声明 | `{"additionalProperties":false}` |
+| `policy.filesystem` | `object` | 否 | 未声明 | `{"additionalProperties":false}` |
+| `policy.filesystem.allowed_operations` | `array` | 是 | 未声明 | `{}` |
+| `policy.filesystem.allowed_roots` | `array` | 否 | `["/workspace"]` | `{}` |
+| `policy.filesystem.protected_paths` | `array` | 否 | `[]` | `{}` |
+| `policy.filesystem.max_file_bytes` | `integer / null` | 否 | `null` | `{}` |
+| `policy.filesystem.max_total_bytes` | `integer / null` | 否 | `null` | `{}` |
+| `policy.filesystem.allow_symlinks` | `boolean` | 否 | `false` | `{}` |
+| `policy.process` | `object` | 否 | 未声明 | `{"additionalProperties":false}` |
+| `policy.process.enabled` | `boolean` | 否 | `false` | `{}` |
+| `policy.process.read_only` | `boolean` | 否 | `false` | `{}` |
+| `policy.process.allowed_executables` | `array` | 否 | `[]` | `{}` |
+| `policy.process.allow_shell` | `boolean` | 否 | `false` | `{}` |
+| `policy.process.allowed_env_names` | `array` | 否 | `[]` | `{}` |
+| `policy.process.max_processes` | `integer` | 否 | `1` | `{"exclusiveMinimum":0}` |
+| `policy.process.max_wall_time_seconds` | `number / null` | 否 | `null` | `{}` |
+| `policy.process.max_output_bytes` | `integer` | 否 | `1048576` | `{"exclusiveMinimum":0}` |
+| `policy.process.allow_background_jobs` | `boolean` | 否 | `false` | `{}` |
+| `policy.resources` | `object` | 否 | 未声明 | `{"additionalProperties":false}` |
+| `policy.resources.cpu_percent` | `number` | 否 | `100` | `{"minimum":1}` |
+| `policy.resources.memory_mb` | `integer` | 否 | `1024` | `{"exclusiveMinimum":0}` |
+| `policy.resources.disk_mb` | `integer` | 否 | `4096` | `{"exclusiveMinimum":0}` |
+| `policy.resources.max_processes` | `integer` | 否 | `64` | `{"minimum":4}` |
+| `policy.resources.require_hard_limits` | `boolean` | 否 | `true` | `{}` |
+| `policy.network` | `object` | 否 | 未声明 | `{"additionalProperties":false}` |
+| `policy.network.mode` | `string` | 否 | `"none"` | `{"enum":["none","allowlist","proxy","unrestricted"]}` |
+| `policy.network.proxy_url` | `string / null` | 否 | `null` | `{}` |
+| `policy.network.allowed_hosts` | `array` | 否 | `[]` | `{}` |
+| `policy.network.allowed_ports` | `array` | 否 | `[]` | `{}` |
+| `policy.network.allowed_schemes` | `array` | 否 | `["https"]` | `{}` |
+| `policy.network.allowed_methods` | `array` | 否 | `["GET","HEAD"]` | `{}` |
+| `policy.network.allowed_request_headers` | `array` | 否 | `["accept","content-type","user-agent"]` | `{}` |
+| `policy.network.allow_listen` | `boolean` | 否 | `false` | `{}` |
+| `policy.network.deny_private_networks` | `boolean` | 否 | `true` | `{}` |
+| `policy.network.max_redirects` | `integer` | 否 | `5` | `{"minimum":0,"maximum":20}` |
+| `policy.network.max_request_body_bytes` | `integer` | 否 | `1048576` | `{"minimum":0}` |
+| `policy.network.max_response_bytes` | `integer` | 否 | `10485760` | `{"exclusiveMinimum":0}` |
+| `policy.network.max_wall_time_seconds` | `number` | 否 | `30` | `{"exclusiveMinimum":0}` |
+| `command_path` | `string / null` | 否 | `null` | `{}` |
+| `read_paths` | `array` | 否 | `[]` | `{}` |
+| `isolation_python` | `string / null` | 否 | `null` | `{}` |
+| `child_workspace_policy` | `string` | 否 | `"shared_parent"` | `{"enum":["shared_parent","private_child","read_only_parent"]}` |
+| `linux_cgroup_root` | `string / null` | 否 | `null` | `{}` |
+| `linux_quota_mount` | `string / null` | 否 | `null` | `{}` |
+| `linux_execution_uid` | `integer / null` | 否 | `null` | `{}` |
+| `linux_execution_gid` | `integer / null` | 否 | `null` | `{}` |
+
+### sage.execution.environment
+
+Authenticated identity and borrowed resources of the actual Run.
+
+版本：`2.0.0`；scope：run；所有权：`borrowed`。
+
+提供能力：`execution.environment:default` (API `2`)。
+
+没有固定配置字段；是否允许额外参数以公开 Schema 为准。
+
+### sage.execution.tool-runtime
+
+Official tools bound to the accepted Run sandbox and shared services.
+
+版本：`2.0.0`；scope：run；所有权：`owned`。
+
+提供能力：`execution.tool-runtime:default` (API `2`)。
+
+依赖：`execution.environment` (API `>=2,<3`)、`execution.job-runtime` (API `>=2,<3`)、`artifact.store` (API `>=2,<3`)、`tool.selection-policy` (API `>=2,<3`)。
+
+没有固定配置字段；是否允许额外参数以公开 Schema 为准。
 
 ### sage.flow.agent
 
 Runs a child Agent through the shared AgentLoopEngine.
 
-提供能力：`flow.node:agent`。支持 scope：run。
+版本：`2.0.0`；scope：run；所有权：`owned`。
 
-| 参数 | 类型 / 范围 | 默认值 | schema 必填 | 用途 |
+提供能力：`flow.node:agent` (API `2`)。
+
+| 参数 | 类型 | 必填 | Schema 默认值 | 约束 |
 | --- | --- | --- | --- | --- |
-| `runtime` | 宿主对象 | 无固定值；仍需提供/注入 | 是 | 宿主对象：RuntimePort |
-| `descriptor` | 宿主对象 | 无固定值；仍需提供/注入 | 是 | 宿主对象：Agent 描述 |
-| `child_executor` | 宿主对象 | 无固定值；仍需提供/注入 | 是 | 宿主对象：子 Agent 执行器 |
-| `workspace_policy` | string；enum=["private_child", "shared_parent", "read_only_parent"] | `"shared_parent"` | 否 | 子 Agent 与父 Agent 的工作区关系 |
+| `runtime` | `object` | 是 | 未声明 | `{}` |
+| `descriptor` | `object` | 是 | 未声明 | `{}` |
+| `child_executor` | `object` | 是 | 未声明 | `{}` |
+| `workspace_policy` | `string` | 否 | 未声明 | `{"enum":["private_child","shared_parent","read_only_parent"]}` |
 
 ### sage.job.ephemeral
 
 Process-local background Job runtime without restart durability.
 
-提供能力：`execution.job-runtime:default`。支持 scope：process。
+版本：`2.0.0`；scope：process；所有权：`owned`。
 
-| 参数 | 类型 / 范围 | 默认值 | schema 必填 | 用途 |
+提供能力：`execution.job-runtime:default` (API `2`)。
+
+| 参数 | 类型 | 必填 | Schema 默认值 | 约束 |
 | --- | --- | --- | --- | --- |
-| `runners` | object | `{}` | 否 | 宿主对象映射：后台 Job 执行器 |
-| `max_concurrent_jobs` | integer；minimum=1 | `32` | 否 | 同时执行 Job 上限 |
-| `max_admitted_jobs` | integer；minimum=1 | `1024` | 否 | 已受理 Job 数上限 |
-| `max_job_output_bytes` | integer；minimum=1 | `8388608` | 否 | 单 Job 输出字节上限 |
-| `max_job_output_chunks` | integer；minimum=1 | `8192` | 否 | 单 Job 输出分块数上限 |
-| `max_buffered_output_bytes` | integer；minimum=1 | `268435456` | 否 | 全部 Job 缓冲输出字节上限 |
-| `max_buffered_output_chunks` | integer；minimum=1 | `65536` | 否 | 全部 Job 缓冲分块上限 |
-| `terminal_ttl_seconds` | integer；minimum=1 | `86400` | 否 | 终态对象保留秒数，不是执行超时 |
-| `max_retained_terminal_jobs` | integer；minimum=0 | `4096` | 否 | 保留的终态 Job 数上限 |
-| `max_retained_output_bytes` | integer；minimum=0 | `268435456` | 否 | 保留的终态输出字节上限 |
-| `output_reconnect_window_seconds` | integer；minimum=0 | `300` | 否 | 输出重连窗口（秒） |
+| `runners` | `object` | 否 | 未声明 | `{}` |
+| `max_concurrent_jobs` | `integer` | 否 | `32` | `{"minimum":1}` |
+| `max_admitted_jobs` | `integer` | 否 | `1024` | `{"minimum":1}` |
+| `max_job_output_bytes` | `integer` | 否 | `8388608` | `{"minimum":1}` |
+| `max_job_output_chunks` | `integer` | 否 | `8192` | `{"minimum":1}` |
+| `max_buffered_output_bytes` | `integer` | 否 | `268435456` | `{"minimum":1}` |
+| `max_buffered_output_chunks` | `integer` | 否 | `65536` | `{"minimum":1}` |
+| `terminal_ttl_seconds` | `integer` | 否 | `86400` | `{"minimum":1}` |
+| `max_retained_terminal_jobs` | `integer` | 否 | `4096` | `{"minimum":0}` |
+| `max_retained_output_bytes` | `integer` | 否 | `268435456` | `{"minimum":0}` |
+| `output_reconnect_window_seconds` | `integer` | 否 | `300` | `{"minimum":0}` |
 
 ### sage.logging.filesystem
 
 Writes rotating structured operational logs to disk.
 
-提供能力：`observability.log-sink:default`。支持 scope：process。
+版本：`2.0.0`；scope：process；所有权：`owned`。
 
-| 参数 | 类型 / 范围 | 默认值 | schema 必填 | 用途 |
+提供能力：`observability.log-sink:default` (API `2`)。
+
+| 参数 | 类型 | 必填 | Schema 默认值 | 约束 |
 | --- | --- | --- | --- | --- |
-| `root` | string；minLength=1 | 无固定值；仍需提供/注入 | 是 | 存储根目录；不同组件应使用对应独立目录 |
-| `filename` | string；minLength=1 | `"sage.jsonl"` | 否 | 日志文件名 |
-| `max_bytes` | integer；minimum=1024 | `10485760` | 否 | 单日志文件轮转大小（字节） |
-| `backup_count` | integer；minimum=1 | `5` | 否 | 轮转日志保留份数 |
-| `min_level` | string；enum=["debug", "info", "warning", "error", "critical"] | `"info"` | 否 | 最低记录日志等级 |
+| `root` | `string` | 是 | 未声明 | `{"minLength":1}` |
+| `filename` | `string` | 否 | `"sage.jsonl"` | `{"minLength":1}` |
+| `max_bytes` | `integer` | 否 | `10485760` | `{"minimum":1024}` |
+| `backup_count` | `integer` | 否 | `5` | `{"minimum":1}` |
+| `min_level` | `string` | 否 | `"info"` | `{"enum":["debug","info","warning","error","critical"]}` |
 
 ### sage.logging.noop
 
 Discards structured operational logs.
 
-提供能力：`observability.log-sink:default`。支持 scope：process。
+版本：`2.0.0`；scope：process；所有权：`owned`。
 
-没有可配置参数，使用 `config: {}`。
+提供能力：`observability.log-sink:default` (API `2`)。
+
+没有固定配置字段；是否允许额外参数以公开 Schema 为准。
 
 ### sage.logging.stdout
 
 Writes one JSONL or console line per record to stdout or stderr.
 
-提供能力：`observability.log-sink:default`。支持 scope：process。
+版本：`2.0.0`；scope：process；所有权：`owned`。
 
-| 参数 | 类型 / 范围 | 默认值 | schema 必填 | 用途 |
+提供能力：`observability.log-sink:default` (API `2`)。
+
+| 参数 | 类型 | 必填 | Schema 默认值 | 约束 |
 | --- | --- | --- | --- | --- |
-| `stream` | string；enum=["stdout", "stderr"] | `"stdout"` | 否 | 日志输出流 |
-| `min_level` | string；enum=["debug", "info", "warning", "error", "critical"] | `"info"` | 否 | 最低记录日志等级 |
-| `format` | string；enum=["json", "text"] | `"json"` | 否 | 日志格式 |
+| `stream` | `string` | 否 | `"stdout"` | `{"enum":["stdout","stderr"]}` |
+| `min_level` | `string` | 否 | `"info"` | `{"enum":["debug","info","warning","error","critical"]}` |
+| `format` | `string` | 否 | `"json"` | `{"enum":["json","text"]}` |
 
 ### sage.memory.filesystem-bm25
 
 Durable scoped Memory records with incremental SQLite FTS5 BM25 recall.
 
-提供能力：`memory.provider:default`。支持 scope：agent, process, tenant。
+版本：`2.1.0`；scope：agent, process, tenant；所有权：`owned`。
 
-| 参数 | 类型 / 范围 | 默认值 | schema 必填 | 用途 |
+提供能力：`memory.provider:default` (API `2`)。
+
+| 参数 | 类型 | 必填 | Schema 默认值 | 约束 |
 | --- | --- | --- | --- | --- |
-| `root` | string；minLength=1 | 无固定值；仍需提供/注入 | 是 | 存储根目录；不同组件应使用对应独立目录 |
+| `root` | `string` | 是 | 未声明 | `{"minLength":1}` |
 
 ### sage.memory.noop
 
 Disables long-term Memory without changing Agent logic.
 
-提供能力：`memory.provider:default`。支持 scope：agent, process, tenant。
+版本：`2.0.0`；scope：agent, process, tenant；所有权：`owned`。
 
-没有可配置参数，使用 `config: {}`。
+提供能力：`memory.provider:default` (API `2`)。
+
+没有固定配置字段；是否允许额外参数以公开 Schema 为准。
 
 ### sage.memory.recall-query.direct
 
 Uses the current user input as the search_memory query without an additional model request.
 
-提供能力：`memory.recall-query:default`。支持 scope：agent, process, run。
+版本：`2.0.0`；scope：agent, process, run；所有权：`owned`。
 
-没有可配置参数，使用 `config: {}`。
+提供能力：`memory.recall-query:default` (API `2`)。
+
+没有固定配置字段；是否允许额外参数以公开 Schema 为准。
 
 ### sage.memory.recall-query.llm
 
 Uses a fast model to generate compact keywords before calling search_memory.
 
-提供能力：`memory.recall-query:default`。支持 scope：agent, run。
+版本：`2.0.0`；scope：agent, run；所有权：`owned`。
 
-| 参数 | 类型 / 范围 | 默认值 | schema 必填 | 用途 |
+提供能力：`memory.recall-query:default` (API `2`)。
+
+| 参数 | 类型 | 必填 | Schema 默认值 | 约束 |
 | --- | --- | --- | --- | --- |
-| `model` | 宿主对象 | 无固定值；仍需提供/注入 | 是 | 模型依赖；通常是宿主注入的 ModelProvider；tiktoken 中则是 tokenizer 模型名 |
-| `language` | string | `"en"` | 否 | 工作区模板/查询/Skill 提示语言 |
-| `timeout_seconds` | number；exclusiveMinimum=0 | `60.0` | 否 | 该组件操作的总等待上限（秒），不是整个 Run 预算 |
+| `model` | `object` | 是 | 未声明 | `{}` |
+| `language` | `string` | 否 | 未声明 | `{}` |
+| `timeout_seconds` | `number` | 否 | `60.0` | `{"exclusiveMinimum":0}` |
 
 ### sage.model.anthropic-messages
 
 Uses Claude system, content-block, tool-use, and SSE semantics.
 
-提供能力：`model.provider:anthropic-messages`。支持 scope：agent, run。
+版本：`3.0.0`；scope：agent, run；所有权：`owned`。
 
-| 参数 | 类型 / 范围 | 默认值 | schema 必填 | 用途 |
+提供能力：`model.provider:anthropic-messages` (API `2`)。
+
+| 参数 | 类型 | 必填 | Schema 默认值 | 约束 |
 | --- | --- | --- | --- | --- |
-| `route` | object | 无固定值；仍需提供/注入 | 是 | 模型路由对象，来自 App models 配置的 models |
-| `credential` | 宿主对象 | 省略时 None；通常由宿主解析注入 | 否 | 宿主对象：解析后的凭据 |
-| `client` | 宿主对象 | 省略时 None，使用协议默认客户端 | 否 | 宿主对象：模型协议客户端 |
-| `provider_instance_id` | string | 省略时 None，由实现生成/选择 | 否 | 宿主指定 provider 实例标识 |
+| `route` | `object` | 是 | 未声明 | `{}` |
+| `credential` | `object` | 否 | 未声明 | `{}` |
+| `client` | `object` | 否 | 未声明 | `{}` |
+| `provider_instance_id` | `string` | 否 | 未声明 | `{}` |
+
+### sage.model.concurrency-budget
+
+Standard execution.model-budget implementation with declared dependencies and lifecycle.
+
+版本：`2.0.0`；scope：process；所有权：`owned`。
+
+提供能力：`execution.model-budget:default` (API `2`)。
+
+| 参数 | 类型 | 必填 | Schema 默认值 | 约束 |
+| --- | --- | --- | --- | --- |
+| `limit` | `integer` | 否 | `8` | `{"exclusiveMinimum":0}` |
+| `max_waiting` | `integer` | 否 | `128` | `{"minimum":0}` |
+| `wait_timeout_seconds` | `number` | 否 | `60` | `{"exclusiveMinimum":0}` |
 
 ### sage.model.gemini-generate-content
 
 Uses native Gemini Parts, function calls, thought signatures, and SSE.
 
-提供能力：`model.provider:gemini-generate-content`。支持 scope：agent, run。
+版本：`1.0.0`；scope：agent, run；所有权：`owned`。
 
-| 参数 | 类型 / 范围 | 默认值 | schema 必填 | 用途 |
+提供能力：`model.provider:gemini-generate-content` (API `2`)。
+
+| 参数 | 类型 | 必填 | Schema 默认值 | 约束 |
 | --- | --- | --- | --- | --- |
-| `route` | object | 无固定值；仍需提供/注入 | 是 | 模型路由对象，来自 App models 配置的 models |
-| `credential` | 宿主对象 | 省略时 None；通常由宿主解析注入 | 否 | 宿主对象：解析后的凭据 |
-| `client` | 宿主对象 | 省略时 None，使用协议默认客户端 | 否 | 宿主对象：模型协议客户端 |
-| `provider_instance_id` | string | 省略时 None，由实现生成/选择 | 否 | 宿主指定 provider 实例标识 |
+| `route` | `object` | 是 | 未声明 | `{}` |
+| `credential` | `object` | 否 | 未声明 | `{}` |
+| `client` | `object` | 否 | 未声明 | `{}` |
+| `provider_instance_id` | `string` | 否 | 未声明 | `{}` |
 
 ### sage.model.openai-chat-completions
 
 Streams chat messages and function calls through /chat/completions.
 
-提供能力：`model.provider:openai-chat-completions`。支持 scope：agent, run。
+版本：`3.0.0`；scope：agent, run；所有权：`owned`。
 
-| 参数 | 类型 / 范围 | 默认值 | schema 必填 | 用途 |
+提供能力：`model.provider:openai-chat-completions` (API `2`)。
+
+| 参数 | 类型 | 必填 | Schema 默认值 | 约束 |
 | --- | --- | --- | --- | --- |
-| `route` | object | 无固定值；仍需提供/注入 | 是 | 模型路由对象，来自 App models 配置的 models |
-| `credential` | 宿主对象 | 省略时 None；通常由宿主解析注入 | 否 | 宿主对象：解析后的凭据 |
-| `client` | 宿主对象 | 省略时 None，使用协议默认客户端 | 否 | 宿主对象：模型协议客户端 |
-| `provider_instance_id` | string | 省略时 None，由实现生成/选择 | 否 | 宿主指定 provider 实例标识 |
+| `route` | `object` | 是 | 未声明 | `{}` |
+| `credential` | `object` | 否 | 未声明 | `{}` |
+| `client` | `object` | 否 | 未声明 | `{}` |
+| `provider_instance_id` | `string` | 否 | 未声明 | `{}` |
 
 ### sage.model.openai-responses
 
 Uses typed input/output items and Responses streaming events.
 
-提供能力：`model.provider:openai-responses`。支持 scope：agent, run。
+版本：`3.0.0`；scope：agent, run；所有权：`owned`。
 
-| 参数 | 类型 / 范围 | 默认值 | schema 必填 | 用途 |
+提供能力：`model.provider:openai-responses` (API `2`)。
+
+| 参数 | 类型 | 必填 | Schema 默认值 | 约束 |
 | --- | --- | --- | --- | --- |
-| `route` | object | 无固定值；仍需提供/注入 | 是 | 模型路由对象，来自 App models 配置的 models |
-| `credential` | 宿主对象 | 省略时 None；通常由宿主解析注入 | 否 | 宿主对象：解析后的凭据 |
-| `client` | 宿主对象 | 省略时 None，使用协议默认客户端 | 否 | 宿主对象：模型协议客户端 |
-| `provider_instance_id` | string | 省略时 None，由实现生成/选择 | 否 | 宿主指定 provider 实例标识 |
+| `route` | `object` | 是 | 未声明 | `{}` |
+| `credential` | `object` | 否 | 未声明 | `{}` |
+| `client` | `object` | 否 | 未声明 | `{}` |
+| `provider_instance_id` | `string` | 否 | 未声明 | `{}` |
 
 ### sage.observability.filesystem
 
 Writes model diagnostics under a filesystem root.
 
-提供能力：`observability.diagnostic-sink:default`。支持 scope：process。
+版本：`2.0.0`；scope：process；所有权：`owned`。
 
-| 参数 | 类型 / 范围 | 默认值 | schema 必填 | 用途 |
+提供能力：`observability.diagnostic-sink:default` (API `2`)。
+
+| 参数 | 类型 | 必填 | Schema 默认值 | 约束 |
 | --- | --- | --- | --- | --- |
-| `root` | string；minLength=1 | 无固定值；仍需提供/注入 | 是 | 存储根目录；不同组件应使用对应独立目录 |
-| `legacy_root` | string / null；minLength=1 | 省略时 None，不配置旧目录 | 否 | 旧诊断目录的读取兼容路径 |
+| `root` | `string` | 是 | 未声明 | `{"minLength":1}` |
+| `legacy_root` | `['string', 'null']` | 否 | 未声明 | `{"minLength":1}` |
 
 ### sage.observability.noop
 
 Discards model diagnostics.
 
-提供能力：`observability.diagnostic-sink:default`。支持 scope：process。
+版本：`2.0.0`；scope：process；所有权：`owned`。
 
-没有可配置参数，使用 `config: {}`。
+提供能力：`observability.diagnostic-sink:default` (API `2`)。
+
+没有固定配置字段；是否允许额外参数以公开 Schema 为准。
 
 ### sage.package-registry.ephemeral
 
 Process-local AgentPackage inventory without restart durability.
 
-提供能力：`package.registry:default`。支持 scope：process。
+版本：`2.0.0`；scope：process；所有权：`owned`。
 
-使用 `config: {}`。`resolver` 是宿主注入的对象依赖，不应写进 YAML；统一入口将它绑定到 App 当前模型目录，让新 Package 的模型 ID 校验使用相同配置。
+提供能力：`package.registry:default` (API `2`)。
+
+| 参数 | 类型 | 必填 | Schema 默认值 | 约束 |
+| --- | --- | --- | --- | --- |
+| `resolver` | `object` | 否 | 未声明 | `{}` |
 
 ### sage.protocol.a2a
 
 Projects Sage events into A2A frames.
 
-提供能力：`interface.protocol-adapter:a2a`。支持 scope：process, run。
+版本：`2.0.0`；scope：process, run；所有权：`owned`。
 
-没有可配置参数，使用 `config: {}`。
+提供能力：`interface.protocol-adapter:a2a` (API `2`)。
+
+没有固定配置字段；是否允许额外参数以公开 Schema 为准。
 
 ### sage.protocol.acp
 
 Projects Sage events into ACP frames.
 
-提供能力：`interface.protocol-adapter:acp`。支持 scope：process, run。
+版本：`2.0.0`；scope：process, run；所有权：`owned`。
 
-没有可配置参数，使用 `config: {}`。
+提供能力：`interface.protocol-adapter:acp` (API `2`)。
+
+没有固定配置字段；是否允许额外参数以公开 Schema 为准。
 
 ### sage.protocol.ag-ui
 
 Projects Sage events into AG-UI frames.
 
-提供能力：`interface.protocol-adapter:ag-ui`。支持 scope：process, run。
+版本：`2.0.0`；scope：process, run；所有权：`owned`。
 
-| 参数 | 类型 / 范围 | 默认值 | schema 必填 | 用途 |
+提供能力：`interface.protocol-adapter:ag-ui` (API `2`)。
+
+| 参数 | 类型 | 必填 | Schema 默认值 | 约束 |
 | --- | --- | --- | --- | --- |
-| `enable_sage_extensions` | boolean | `true` | 否 | 是否在 AG-UI 输出 Sage 扩展事件 |
+| `enable_sage_extensions` | `boolean` | 否 | `true` | `{}` |
 
 ### sage.protocol.mcp
 
 Projects Sage events into MCP progress and elicitation frames.
 
-提供能力：`interface.protocol-adapter:mcp`。支持 scope：process, run。
+版本：`2.0.0`；scope：process, run；所有权：`owned`。
 
-没有可配置参数，使用 `config: {}`。
+提供能力：`interface.protocol-adapter:mcp` (API `2`)。
+
+没有固定配置字段；是否允许额外参数以公开 Schema 为准。
 
 ### sage.protocol.native
 
 Exposes the native Sage event stream without protocol translation.
 
-提供能力：`interface.protocol-adapter:native`。支持 scope：process, run。
+版本：`2.0.0`；scope：process, run；所有权：`owned`。
 
-没有可配置参数，使用 `config: {}`。
+提供能力：`interface.protocol-adapter:native` (API `2`)。
+
+没有固定配置字段；是否允许额外参数以公开 Schema 为准。
 
 ### sage.sandbox.cube-volume
 
 Remote VM execution with a persistent Cube Volume workspace.
 
-提供能力：`execution.sandbox:default`。支持 scope：process。
+版本：`3.0.0`；scope：process；所有权：`owned`。
 
-| 参数 | 类型 / 范围 | 默认值 | schema 必填 | 用途 |
+提供能力：`execution.sandbox:default` (API `3`)。
+
+| 参数 | 类型 | 必填 | Schema 默认值 | 约束 |
 | --- | --- | --- | --- | --- |
-| `verification_key` | 宿主对象 | 无固定值；仍需提供/注入 | 是 | 宿主对象/私密值：校验执行授权，不应写入共享 Package |
-| `api_url` | string；minLength=1 | `""`；仍需提供/注入 | 是 | Cube 服务地址 |
-| `template_id` | string；minLength=1 | `""`；仍需提供/注入 | 是 | Cube 模板标识，必须有效且非空 |
-| `proxy_node_ip` | string；minLength=1 | `""`；仍需提供/注入 | 是 | Cube 代理节点地址，必须非空 |
-| `api_key` | string | 省略时 None | 否 | 连接服务的私密凭据，勿提交真实值 |
-| `volume_driver` | string | 省略时 None | 否 | Cube volume 驱动选项 |
-
-地址/模板字段的构造器占位默认空字符串不满足 schema 的非空要求；必须由宿主填充真实值。
+| `verification_key` | `object` | 是 | 未声明 | `{}` |
+| `api_url` | `string` | 是 | `""` | `{"minLength":1}` |
+| `template_id` | `string` | 是 | `""` | `{"minLength":1}` |
+| `proxy_node_ip` | `string` | 是 | `""` | `{"minLength":1}` |
+| `api_key` | `string` | 否 | 未声明 | `{}` |
+| `volume_driver` | `string` | 否 | 未声明 | `{}` |
 
 ### sage.sandbox.ephemeral
 
 In-process sandbox for tests and ephemeral runs.
 
-提供能力：`execution.sandbox:default`。支持 scope：process。
+版本：`3.0.0`；scope：process；所有权：`owned`。
 
-| 参数 | 类型 / 范围 | 默认值 | schema 必填 | 用途 |
+提供能力：`execution.sandbox:default` (API `3`)。
+
+| 参数 | 类型 | 必填 | Schema 默认值 | 约束 |
 | --- | --- | --- | --- | --- |
-| `verification_key` | 宿主对象 | 无固定值；仍需提供/注入 | 是 | 宿主对象/私密值：校验执行授权，不应写入共享 Package |
-| `terminal_ttl_seconds` | integer；minimum=1 | `86400` | 否 | 终态对象保留秒数，不是执行超时 |
-| `max_retained_terminal_items` | integer；minimum=0 | `1024` | 否 | 保留终态调度/沙箱条目数上限 |
-| `process_handlers` | object | 省略时 None，由实现使用空映射 | 否 | 宿主对象映射：内存沙箱进程处理器 |
-| `network_handlers` | object | 省略时 None，由实现使用空映射 | 否 | 宿主对象映射：内存沙箱网络处理器 |
+| `verification_key` | `object` | 是 | 未声明 | `{}` |
+| `terminal_ttl_seconds` | `integer` | 否 | `86400` | `{"minimum":1}` |
+| `max_retained_terminal_items` | `integer` | 否 | `1024` | `{"minimum":0}` |
+| `process_handlers` | `object` | 否 | 未声明 | `{}` |
+| `network_handlers` | `object` | 否 | 未声明 | `{}` |
 
 ### sage.sandbox.local-workspace
 
 Isolates local execution with Linux cgroups/quotas or macOS Seatbelt.
 
-提供能力：`execution.sandbox:default`。支持 scope：process。
+版本：`3.0.0`；scope：process；所有权：`owned`。
 
-| 参数 | 类型 / 范围 | 默认值 | schema 必填 | 用途 |
+提供能力：`execution.sandbox:default` (API `3`)。
+
+| 参数 | 类型 | 必填 | Schema 默认值 | 约束 |
 | --- | --- | --- | --- | --- |
-| `verification_key` | 宿主对象 | 无固定值；仍需提供/注入 | 是 | 宿主对象/私密值：校验执行授权，不应写入共享 Package |
-| `terminal_ttl_seconds` | integer；minimum=1 | `86400` | 否 | 终态对象保留秒数，不是执行超时 |
-| `max_retained_terminal_items` | integer；minimum=0 | `1024` | 否 | 保留终态调度/沙箱条目数上限 |
-| `network` | object | 当前工厂未消费 | 否 | 网络设置对象；本地插件工厂当前未直接传递此字段，实际网络授权走执行绑定 |
-| `command_path` | string；minLength=1 | 省略时 os.environ[PATH] 或 os.defpath | 否 | 沙箱命令搜索 PATH |
-| `read_paths` | array | 省略时空元组 | 否 | 宿主允许额外读取的路径 |
-| `linux_cgroup_root` | string | 省略时 None | 否 | Linux cgroup 资源控制根目录 |
-| `linux_quota_mount` | string | 省略时 None | 否 | Linux 配额所在挂载点 |
-| `linux_execution_uid` | integer；minimum=1 | 省略时 None | 否 | Linux 沙箱执行用户 ID |
-| `linux_execution_gid` | integer；minimum=1 | 省略时 None | 否 | Linux 沙箱执行组 ID |
-
-`network` 的 schema 字段如下；当前工厂未消费此对象，不应把它当成有效授权配置。请由宿主执行绑定设置网络策略。
-
-| 参数 | 类型 / 范围 | 默认值 | schema 必填 | 用途 |
-| --- | --- | --- | --- | --- |
-| `mode` | string；enum=["none", "unrestricted", "allowlist", "proxy"] | 无固定值 | 否 | 网络访问模式 |
-| `deny_private_networks` | boolean | 无固定值 | 否 | 是否禁止访问私有网络 |
-| `allowed_hosts` | array | 无固定值 | 否 | 允许访问的主机列表 |
-| `allowed_ports` | array | 无固定值 | 否 | 允许端口列表 |
-| `allowed_schemes` | array | 无固定值 | 否 | 允许的 URL 协议 |
-| `proxy_url` | string | 无固定值 | 否 | 网络代理地址 |
+| `verification_key` | `object` | 是 | 未声明 | `{}` |
+| `terminal_ttl_seconds` | `integer` | 否 | `86400` | `{"minimum":1}` |
+| `max_retained_terminal_items` | `integer` | 否 | `1024` | `{"minimum":0}` |
+| `network` | `object` | 否 | 未声明 | `{"additionalProperties":true}` |
+| `network.mode` | `string` | 否 | 未声明 | `{"enum":["none","unrestricted","allowlist","proxy"]}` |
+| `network.deny_private_networks` | `boolean` | 否 | 未声明 | `{}` |
+| `network.allowed_hosts` | `array` | 否 | 未声明 | `{}` |
+| `network.allowed_ports` | `array` | 否 | 未声明 | `{}` |
+| `network.allowed_schemes` | `array` | 否 | 未声明 | `{}` |
+| `network.proxy_url` | `string` | 否 | 未声明 | `{}` |
+| `command_path` | `string` | 否 | 未声明 | `{"minLength":1}` |
+| `read_paths` | `array` | 否 | 未声明 | `{}` |
+| `linux_cgroup_root` | `string` | 否 | 未声明 | `{}` |
+| `linux_quota_mount` | `string` | 否 | 未声明 | `{}` |
+| `linux_execution_uid` | `integer` | 否 | 未声明 | `{"minimum":1}` |
+| `linux_execution_gid` | `integer` | 否 | 未声明 | `{"minimum":1}` |
 
 ### sage.scheduler.ephemeral
 
 Process-local scheduler without restart durability.
 
-提供能力：`execution.scheduler:default`。支持 scope：process。
+版本：`2.0.0`；scope：process；所有权：`owned`。
 
-| 参数 | 类型 / 范围 | 默认值 | schema 必填 | 用途 |
+提供能力：`execution.scheduler:default` (API `2`)。
+
+| 参数 | 类型 | 必填 | Schema 默认值 | 约束 |
 | --- | --- | --- | --- | --- |
-| `max_pending_items` | integer；minimum=1 | `1024` | 否 | 调度队列待处理数量上限 |
-| `max_retained_terminal_items` | integer；minimum=0 | `4096` | 否 | 保留终态调度/沙箱条目数上限 |
-| `max_concurrent_runs` | integer；minimum=1 | `8` | 否 | App 调度并发 Run 上限 |
-| `max_concurrent_runs_per_tenant` | integer；minimum=1 | `2` | 否 | 单租户调度并发 Run 上限 |
-| `lease_seconds` | number；exclusiveMinimum=0 | `172800`（48 小时） | 否 | 执行租约时长（秒），由 dispatcher 定期续租 |
+| `preserve_runs_on_shutdown` | `boolean` | 否 | `true` | `{}` |
+| `max_pending_items` | `integer` | 否 | `1024` | `{"minimum":1}` |
+| `max_retained_terminal_items` | `integer` | 否 | `4096` | `{"minimum":0}` |
+| `max_concurrent_runs` | `integer` | 否 | 未声明 | `{"minimum":1}` |
+| `max_concurrent_runs_per_tenant` | `integer` | 否 | 未声明 | `{"minimum":1}` |
+| `lease_seconds` | `number` | 否 | `172800` | `{"exclusiveMinimum":0}` |
 
 ### sage.scheduler.filesystem
 
 Persists scheduler items on the local filesystem.
 
-提供能力：`execution.scheduler:default`。支持 scope：process。
+版本：`2.0.0`；scope：process；所有权：`owned`。
 
-| 参数 | 类型 / 范围 | 默认值 | schema 必填 | 用途 |
+提供能力：`execution.scheduler:default` (API `2`)。
+
+| 参数 | 类型 | 必填 | Schema 默认值 | 约束 |
 | --- | --- | --- | --- | --- |
-| `max_pending_items` | integer；minimum=1 | `1024` | 否 | 调度队列待处理数量上限 |
-| `max_retained_terminal_items` | integer；minimum=0 | `4096` | 否 | 保留终态调度/沙箱条目数上限 |
-| `max_concurrent_runs` | integer；minimum=1 | `8` | 否 | App 调度并发 Run 上限 |
-| `max_concurrent_runs_per_tenant` | integer；minimum=1 | `2` | 否 | 单租户调度并发 Run 上限 |
-| `lease_seconds` | number；exclusiveMinimum=0 | `172800`（48 小时） | 否 | 执行租约时长（秒），由 dispatcher 定期续租 |
-| `root` | string；minLength=1 | 无固定值；仍需提供/注入 | 是 | 存储根目录；不同组件应使用对应独立目录 |
+| `preserve_runs_on_shutdown` | `boolean` | 否 | `true` | `{}` |
+| `max_pending_items` | `integer` | 否 | 未声明 | `{"minimum":1}` |
+| `max_retained_terminal_items` | `integer` | 否 | 未声明 | `{"minimum":0}` |
+| `max_concurrent_runs` | `integer` | 否 | 未声明 | `{"minimum":1}` |
+| `max_concurrent_runs_per_tenant` | `integer` | 否 | 未声明 | `{"minimum":1}` |
+| `lease_seconds` | `number` | 否 | `172800` | `{"exclusiveMinimum":0}` |
+| `root` | `string` | 是 | 未声明 | `{"minLength":1}` |
 
 ### sage.session-memory.noop
 
 Disables searchable Session history without changing Agent logic.
 
-提供能力：`session-memory.provider:default`。支持 scope：agent, process。
+版本：`2.0.0`；scope：agent, process；所有权：`owned`。
 
-没有可配置参数，使用 `config: {}`。
+提供能力：`session-memory.provider:default` (API `2`)。
+
+没有固定配置字段；是否允许额外参数以公开 Schema 为准。
 
 ### sage.session-memory.sqlite-bm25
 
 Durable per-session BM25 index over canonical Session history.
 
-提供能力：`session-memory.provider:default`。支持 scope：agent, process。
+版本：`2.0.0`；scope：agent, process；所有权：`owned`。
 
-| 参数 | 类型 / 范围 | 默认值 | schema 必填 | 用途 |
+提供能力：`session-memory.provider:default` (API `2`)。
+
+| 参数 | 类型 | 必填 | Schema 默认值 | 约束 |
 | --- | --- | --- | --- | --- |
-| `root` | string；minLength=1 | 无固定值；仍需提供/注入 | 是 | 存储根目录；不同组件应使用对应独立目录 |
+| `root` | `string` | 是 | 未声明 | `{"minLength":1}` |
 
 ### sage.session.ephemeral
 
 Full lifecycle semantics without restart durability.
 
-提供能力：`session.store:default`。支持 scope：process。
+版本：`2.0.0`；scope：process；所有权：`owned`。
 
-没有可配置参数，使用 `config: {}`。
+提供能力：`session.store:default` (API `2`)。
+
+没有固定配置字段；是否允许额外参数以公开 Schema 为准。
 
 ### sage.session.filesystem
 
 Compact authoritative checksummed state per Session.
 
-提供能力：`session.store:default`。支持 scope：process。
+版本：`2.1.0`；scope：process；所有权：`owned`。
 
-| 参数 | 类型 / 范围 | 默认值 | schema 必填 | 用途 |
+提供能力：`session.store:default` (API `2`)。
+
+| 参数 | 类型 | 必填 | Schema 默认值 | 约束 |
 | --- | --- | --- | --- | --- |
-| `root` | string；minLength=1 | 无固定值；仍需提供/注入 | 是 | 存储根目录；不同组件应使用对应独立目录 |
+| `root` | `string` | 是 | 未声明 | `{"minLength":1}` |
 
 ### sage.session.mysql
 
 Durable per-Session MySQL store with appended Run events. No global Session index.
 
-提供能力：`session.store:default`。支持 scope：process。
+版本：`2.0.0`；scope：process；所有权：`owned`。
 
-| 参数 | 类型 / 范围 | 默认值 | schema 必填 | 用途 |
+提供能力：`session.store:default` (API `2`)。
+
+| 参数 | 类型 | 必填 | Schema 默认值 | 约束 |
 | --- | --- | --- | --- | --- |
-| `dsn` | string；minLength=1 | 无固定值；仍需提供/注入 | 是 | 数据库连接串 |
-| `table_prefix` | string | `"sagent"` | 否 | 数据库表名前缀 |
+| `dsn` | `string` | 是 | 未声明 | `{"minLength":1}` |
+| `table_prefix` | `string` | 否 | 未声明 | `{}` |
 
 ### sage.session.postgres
 
 Durable per-Session PostgreSQL store with appended Run events. Single-process writers; no global Session index.
 
-提供能力：`session.store:default`。支持 scope：process。
+版本：`2.2.0`；scope：process；所有权：`owned`。
 
-| 参数 | 类型 / 范围 | 默认值 | schema 必填 | 用途 |
+提供能力：`session.store:default` (API `2`)。
+
+| 参数 | 类型 | 必填 | Schema 默认值 | 约束 |
 | --- | --- | --- | --- | --- |
-| `dsn` | string；minLength=1 | 无固定值；仍需提供/注入 | 是 | 数据库连接串 |
-| `schema_name` | string；minLength=1 | `"sage_v2"` | 否 | Postgres schema 名 |
-| `table_prefix` | string；minLength=1 | `"sagent"` | 否 | 数据库表名前缀 |
+| `dsn` | `string` | 是 | 未声明 | `{"minLength":1}` |
+| `schema_name` | `string` | 否 | 未声明 | `{"minLength":1}` |
+| `table_prefix` | `string` | 否 | 未声明 | `{"minLength":1}` |
 
 ### sage.skill.filesystem
 
 Lazy, bounded, symlink-safe Skill catalog and source.
 
-提供能力：`skill.catalog:filesystem`、`skill.source:filesystem`。支持 scope：agent, process。
+版本：`2.0.0`；scope：agent, process；所有权：`owned`。
 
-| 参数 | 类型 / 范围 | 默认值 | schema 必填 | 用途 |
+提供能力：`skill.catalog:filesystem` (API `2`)、`skill.source:filesystem` (API `2`)。
+
+| 参数 | 类型 | 必填 | Schema 默认值 | 约束 |
 | --- | --- | --- | --- | --- |
-| `roots` | array；minItems=1 | 无固定值；仍需提供/注入 | 是 | Skill 搜索根目录数组 |
-| `max_files` | integer；minimum=1 | `2000` | 否 | 发现/读取 Skill 文件数上限 |
-| `max_total_bytes` | integer；minimum=1 | `67108864` | 否 | Skill 文件总字节上限 |
+| `roots` | `array` | 是 | 未声明 | `{"minItems":1}` |
+| `max_files` | `integer` | 否 | 未声明 | `{"minimum":1}` |
+| `max_total_bytes` | `integer` | 否 | 未声明 | `{"minimum":1}` |
 
 ### sage.skill.loading.lazy
 
-Loads Skill material only when it is asked for, within a token budget.
+Loads Skill material only when it is asked for, within a character storage limit.
 
-提供能力：`skill.loading:default`。支持 scope：agent, run。
+版本：`2.0.0`；scope：agent, run；所有权：`owned`。
 
-| 参数 | 类型 / 范围 | 默认值 | schema 必填 | 用途 |
+提供能力：`skill.loading:default` (API `2`)。
+
+| 参数 | 类型 | 必填 | Schema 默认值 | 约束 |
 | --- | --- | --- | --- | --- |
-| `max_active_characters` | integer；minimum=1 | `24000` | 否 | 活动 Skill 内容的精确字符存储上限 |
+| `max_active_characters` | `integer` | 否 | `24000` | `{"minimum":1}` |
 
 ### sage.tool-selection.direct
 
 Sends every policy-allowed Tool to the model. Best for small catalogs.
 
-提供能力：`tool.selection-policy:default`。支持 scope：agent, run。
+版本：`2.0.0`；scope：agent, run；所有权：`owned`。
 
-没有可配置参数，使用 `config: {}`。
+提供能力：`tool.selection-policy:default` (API `2`)。
+
+没有固定配置字段；是否允许额外参数以公开 Schema 为准。
 
 ### sage.tool-selection.lexical
 
 Ranks Tool names, descriptions, and parameters locally like a search engine.
 
-提供能力：`tool.selection-policy:default`。支持 scope：agent, run。
+版本：`2.0.0`；scope：agent, run；所有权：`owned`。
 
-| 参数 | 类型 / 范围 | 默认值 | schema 必填 | 用途 |
+提供能力：`tool.selection-policy:default` (API `2`)。
+
+| 参数 | 类型 | 必填 | Schema 默认值 | 约束 |
 | --- | --- | --- | --- | --- |
-| `max_visible_tools` | integer；minimum=1, maximum=10000 | `24` | 否 | 发送给模型的完整工具 schema 数量上限 |
-| `model_timeout_seconds` | number；exclusiveMinimum=0, maximum=120 | `60.0` | 否 | 模型辅助工具选择等待上限（秒） |
+| `max_visible_tools` | `integer` | 否 | `24` | `{"minimum":1,"maximum":10000}` |
+| `model_timeout_seconds` | `number` | 否 | `60.0` | `{"maximum":120,"exclusiveMinimum":0}` |
 
 ### sage.tool-selection.llm
 
 Uses a fast model and recent context to select relevant Tools.
 
-提供能力：`tool.selection-policy:default`。支持 scope：agent, run。
+版本：`2.0.0`；scope：agent, run；所有权：`owned`。
 
-| 参数 | 类型 / 范围 | 默认值 | schema 必填 | 用途 |
+提供能力：`tool.selection-policy:default` (API `2`)。
+
+| 参数 | 类型 | 必填 | Schema 默认值 | 约束 |
 | --- | --- | --- | --- | --- |
-| `max_visible_tools` | integer；minimum=1, maximum=10000 | `24` | 否 | 发送给模型的完整工具 schema 数量上限 |
-| `model_timeout_seconds` | number；exclusiveMinimum=0, maximum=120 | `60.0` | 否 | 模型辅助工具选择等待上限（秒） |
+| `max_visible_tools` | `integer` | 否 | `24` | `{"minimum":1,"maximum":10000}` |
+| `model_timeout_seconds` | `number` | 否 | `60.0` | `{"maximum":120,"exclusiveMinimum":0}` |
 
 ### sage.tool-selection.recent
 
 Keeps recently called Tools first, then fills the remaining count deterministically.
 
-提供能力：`tool.selection-policy:default`。支持 scope：agent, run。
+版本：`2.0.0`；scope：agent, run；所有权：`owned`。
 
-| 参数 | 类型 / 范围 | 默认值 | schema 必填 | 用途 |
+提供能力：`tool.selection-policy:default` (API `2`)。
+
+| 参数 | 类型 | 必填 | Schema 默认值 | 约束 |
 | --- | --- | --- | --- | --- |
-| `max_visible_tools` | integer；minimum=1, maximum=10000 | `24` | 否 | 发送给模型的完整工具 schema 数量上限 |
-| `model_timeout_seconds` | number；exclusiveMinimum=0, maximum=120 | `60.0` | 否 | 模型辅助工具选择等待上限（秒） |
+| `max_visible_tools` | `integer` | 否 | `24` | `{"minimum":1,"maximum":10000}` |
+| `model_timeout_seconds` | `number` | 否 | `60.0` | `{"maximum":120,"exclusiveMinimum":0}` |
 
 ### sage.tool.ephemeral
 
 In-memory Tool catalog and executor without restart durability.
 
-提供能力：`tool.catalog:ephemeral`、`tool.executor:ephemeral`。支持 scope：agent, process, run。
+版本：`2.0.0`；scope：agent, process, run；所有权：`owned`。
 
-| 参数 | 类型 / 范围 | 默认值 | schema 必填 | 用途 |
+提供能力：`tool.catalog:ephemeral` (API `2`)、`tool.executor:ephemeral` (API `2`)。
+
+| 参数 | 类型 | 必填 | Schema 默认值 | 约束 |
 | --- | --- | --- | --- | --- |
-| `tools` | 宿主对象 | `[]` | 否 | 宿主工具定义集合 |
-| `handlers` | 宿主对象 | `{}` | 否 | 宿主工具处理器映射 |
+| `tools` | `object` | 否 | 未声明 | `{}` |
+| `handlers` | `object` | 否 | 未声明 | `{}` |
 
 ### sage.tool.mcp
 
 Bridges configured MCP servers into the Sage Tool catalog and executor.
 
-提供能力：`tool.catalog:mcp`、`tool.executor:mcp`。支持 scope：agent, process。
+版本：`2.0.0`；scope：agent, process, run；所有权：`owned`。
 
-| 参数 | 类型 / 范围 | 默认值 | schema 必填 | 用途 |
+提供能力：`tool.catalog:mcp` (API `2`)、`tool.executor:mcp` (API `2`)。
+
+| 参数 | 类型 | 必填 | Schema 默认值 | 约束 |
 | --- | --- | --- | --- | --- |
-| `servers` | array | `[]` | 否 | MCP 服务列表，嵌套字段见下表 |
-| `session_factory` | 宿主对象 | 省略时 None，使用默认会话工厂 | 否 | 宿主对象：MCP 会话工厂 |
-
-`servers[]` 的完整字段：
-
-| 参数 | 类型 / 范围 | 默认值 | schema 必填 | 用途 |
-| --- | --- | --- | --- | --- |
-| `name` | string；minLength=1, maxLength=255 | 无固定值；仍需提供/注入 | 是 | MCP 服务唯一名称 |
-| `protocol` | string；enum=["stdio", "sse", "streamable_http"] | 无固定值；仍需提供/注入 | 是 | OTLP 协议或 MCP 传输协议 |
-| `url` | string / null | `null` | 否 | HTTP/SSE MCP 服务地址 |
-| `api_key` | string / null | `null` | 否 | 连接服务的私密凭据，勿提交真实值 |
-| `command` | string / null | `null` | 否 | stdio MCP 启动命令 |
-| `args` | array | `[]` | 否 | stdio 命令参数数组 |
-| `env` | object | `{}` | 否 | stdio 子进程环境变量映射 |
-| `timeout_seconds` | number；exclusiveMinimum=0 | `30` | 否 | MCP 连接、初始化和工具发现等待上限（秒），不限制工具执行时长 |
-| `call_timeout_seconds` | number / null；exclusiveMinimum=0 | `null` | 否 | 单次工具执行截止时间（秒）；默认持续等待结果，仍可取消。HTTP/SSE 读取等待同步使用此配置，避免 SDK 默认读取超时中断长任务 |
-| `required` | boolean | `true` | 否 | 此 MCP 服务是否为必需依赖 |
-| `max_tools` | integer；exclusiveMinimum=0, maximum=10000 | `256` | 否 | 发现工具数上限 |
-| `max_pages` | integer；exclusiveMinimum=0, maximum=1024 | `64` | 否 | 发现分页数上限 |
-| `max_schema_bytes` | integer；exclusiveMinimum=0, maximum=16777216 | `262144` | 否 | 工具 schema 大小上限（字节） |
-| `max_result_bytes` | integer；exclusiveMinimum=0, maximum=67108864 | `4194304` | 否 | 工具结果大小上限（字节） |
-
-`env` 缺省为空映射；stdio 必须有 command，HTTP/SSE 必须有 url；协议组合还有传输层校验。
+| `servers` | `array` | 否 | 未声明 | `{}` |
+| `servers[].name` | `string` | 是 | 未声明 | `{"minLength":1,"maxLength":255}` |
+| `servers[].protocol` | `string` | 是 | 未声明 | `{"enum":["stdio","sse","streamable_http"]}` |
+| `servers[].url` | `string / null` | 否 | `null` | `{}` |
+| `servers[].api_key` | `string / null` | 否 | `null` | `{}` |
+| `servers[].command` | `string / null` | 否 | `null` | `{}` |
+| `servers[].args` | `array` | 否 | `[]` | `{}` |
+| `servers[].env` | `object` | 否 | 未声明 | `{"additionalProperties":{"type":"string"}}` |
+| `servers[].timeout_seconds` | `number` | 否 | `30` | `{"exclusiveMinimum":0}` |
+| `servers[].call_timeout_seconds` | `number` | 否 | `7200` | `{"exclusiveMinimum":0}` |
+| `servers[].required` | `boolean` | 否 | `true` | `{}` |
+| `servers[].max_tools` | `integer` | 否 | `256` | `{"maximum":10000,"exclusiveMinimum":0}` |
+| `servers[].max_pages` | `integer` | 否 | `64` | `{"maximum":1024,"exclusiveMinimum":0}` |
+| `servers[].max_schema_bytes` | `integer` | 否 | `262144` | `{"maximum":16777216,"exclusiveMinimum":0}` |
+| `servers[].max_result_bytes` | `integer` | 否 | `4194304` | `{"maximum":67108864,"exclusiveMinimum":0}` |
+| `session_factory` | `object` | 否 | 未声明 | `{}` |
 
 ### sage.tool.multi-agent
 
 V2-native Fibre and Team delegation tools.
 
-提供能力：`tool.catalog:multi-agent`、`tool.executor:multi-agent`。支持 scope：agent, run。
+版本：`2.0.0`；scope：agent, run；所有权：`owned`。
 
-| 参数 | 类型 / 范围 | 默认值 | schema 必填 | 用途 |
+提供能力：`tool.catalog:multi-agent` (API `2`)、`tool.executor:multi-agent` (API `2`)。
+
+| 参数 | 类型 | 必填 | Schema 默认值 | 约束 |
 | --- | --- | --- | --- | --- |
-| `coordinator` | 宿主对象 | 无固定值；仍需提供/注入 | 是 | 宿主对象：多 Agent 协调器 |
-| `runtime` | 宿主对象 | 无固定值；仍需提供/注入 | 是 | 宿主对象：RuntimePort |
+| `coordinator` | `object` | 是 | 未声明 | `{}` |
+| `runtime` | `object` | 是 | 未声明 | `{}` |
 
 ### sage.tool.official
 
 V2-native decorator-backed workspace and runtime tools.
 
-提供能力：`tool.catalog:official`、`tool.executor:official`。支持 scope：agent, process, run。
+版本：`2.0.0`；scope：run；所有权：`owned`。
 
-| 参数 | 类型 / 范围 | 默认值 | schema 必填 | 用途 |
-| --- | --- | --- | --- | --- |
-| `runtime` | 宿主对象 | 无固定值；仍需提供/注入 | 是 | 宿主对象：RuntimePort |
+提供能力：`tool.catalog:official` (API `2`)、`tool.executor:official` (API `2`)。
+
+依赖：`execution.tool-runtime` (API `>=2,<3`)。
+
+没有固定配置字段；是否允许额外参数以公开 Schema 为准。
 
 ### sage.tool.skill
 
 Decorator-backed Tool operations owned by the Skill module.
 
-提供能力：`tool.catalog:skill`、`tool.executor:skill`。支持 scope：agent, run。
+版本：`2.0.0`；scope：agent, run；所有权：`owned`。
 
-| 参数 | 类型 / 范围 | 默认值 | schema 必填 | 用途 |
+提供能力：`tool.catalog:skill` (API `2`)、`tool.executor:skill` (API `2`)。
+
+| 参数 | 类型 | 必填 | Schema 默认值 | 约束 |
 | --- | --- | --- | --- | --- |
-| `loader` | 宿主对象 | 无固定值；仍需提供/注入 | 是 | 宿主对象：SkillLoader |
-| `language` | string | 省略时 None，由提示语言规则决定 | 否 | 工作区模板/查询/Skill 提示语言 |
+| `loader` | `object` | 是 | 未声明 | `{}` |
+| `language` | `string` | 否 | 未声明 | `{}` |
 
 ### sage.trace.langfuse
 
 Exports Agent, model and tool observations to Langfuse.
 
-提供能力：`observability.trace-sink:default`。支持 scope：process。
+版本：`2.0.0`；scope：process；所有权：`owned`。
 
-| 参数 | 类型 / 范围 | 默认值 | schema 必填 | 用途 |
+提供能力：`observability.trace-sink:default` (API `2`)。
+
+| 参数 | 类型 | 必填 | Schema 默认值 | 约束 |
 | --- | --- | --- | --- | --- |
-| `base_url` | string；minLength=1 | 无固定值；仍需提供/注入 | 是 | 服务入口地址 |
-| `public_key_env` | string | `"LANGFUSE_PUBLIC_KEY"` | 否 | 读取公钥的环境变量名 |
-| `secret_key_env` | string | `"LANGFUSE_SECRET_KEY"` | 否 | 读取密钥的环境变量名 |
-| `service_name` | string | `"sage"` | 否 | Trace 服务名 |
-| `ingestion_version` | integer；enum=[3, 4] | `4` | 否 | Langfuse ingestion 协议版本 |
-| `environment` | string | `"production"` | 否 | Trace 为环境标签；credentials.environment 为宿主环境变量映射 |
-| `content_mode` | string；enum=["metadata", "redacted"] | `"redacted"` | 否 | metadata 只记录元数据；redacted 记录脱敏内容 |
-| `max_content_chars` | integer；minimum=256, maximum=65536 | `16384` | 否 | Trace 内容字符截断上限 |
-| `sample_rate` | number；minimum=0, maximum=1 | `1.0` | 否 | Trace 采样比例 0–1 |
-| `max_queue_size` | integer；minimum=1 | `2048` | 否 | Trace 导出队列上限 |
-| `max_active_spans` | integer；minimum=1 | `4096` | 否 | 活动 Trace span 数上限 |
-| `timeout_seconds` | number；exclusiveMinimum=0, maximum=30 | `3.0` | 否 | 该组件操作的总等待上限（秒），不是整个 Run 预算 |
+| `base_url` | `string` | 是 | 未声明 | `{"minLength":1}` |
+| `public_key_env` | `string` | 否 | `"LANGFUSE_PUBLIC_KEY"` | `{}` |
+| `secret_key_env` | `string` | 否 | `"LANGFUSE_SECRET_KEY"` | `{}` |
+| `service_name` | `string` | 否 | `"sage"` | `{}` |
+| `ingestion_version` | `integer` | 否 | `4` | `{"enum":[3,4]}` |
+| `environment` | `string` | 否 | `"production"` | `{}` |
+| `content_mode` | `string` | 否 | `"redacted"` | `{"enum":["metadata","redacted"]}` |
+| `max_content_chars` | `integer` | 否 | `16384` | `{"minimum":256,"maximum":65536}` |
+| `sample_rate` | `number` | 否 | `1.0` | `{"minimum":0,"maximum":1}` |
+| `max_queue_size` | `integer` | 否 | `2048` | `{"minimum":1}` |
+| `max_active_spans` | `integer` | 否 | `4096` | `{"minimum":1}` |
+| `timeout_seconds` | `number` | 否 | `3.0` | `{"maximum":30,"exclusiveMinimum":0}` |
 
 ### sage.trace.noop
 
 Discards trace spans.
 
-提供能力：`observability.trace-sink:default`。支持 scope：process。
+版本：`2.0.0`；scope：process；所有权：`owned`。
 
-没有可配置参数，使用 `config: {}`。
+提供能力：`observability.trace-sink:default` (API `2`)。
+
+没有固定配置字段；是否允许额外参数以公开 Schema 为准。
 
 ### sage.trace.otlp
 
 Exports traces over OTLP to Jaeger or a compatible collector.
 
-提供能力：`observability.trace-sink:default`。支持 scope：process。
+版本：`2.0.0`；scope：process；所有权：`owned`。
 
-| 参数 | 类型 / 范围 | 默认值 | schema 必填 | 用途 |
+提供能力：`observability.trace-sink:default` (API `2`)。
+
+| 参数 | 类型 | 必填 | Schema 默认值 | 约束 |
 | --- | --- | --- | --- | --- |
-| `endpoint` | string；minLength=1 | `"http://127.0.0.1:4317"` | 否 | OTLP collector 地址 |
-| `service_name` | string；minLength=1 | `"sage"` | 否 | Trace 服务名 |
-| `protocol` | string；enum=["grpc", "http"] | `"grpc"` | 否 | OTLP 协议或 MCP 传输协议 |
-| `insecure` | boolean | `true` | 否 | OTLP 是否使用非 TLS 连接 |
-| `environment` | string | `"production"` | 否 | Trace 为环境标签；credentials.environment 为宿主环境变量映射 |
-| `content_mode` | string；enum=["metadata", "redacted"] | `"redacted"` | 否 | metadata 只记录元数据；redacted 记录脱敏内容 |
-| `max_content_chars` | integer；minimum=256, maximum=65536 | `16384` | 否 | Trace 内容字符截断上限 |
-| `sample_rate` | number；minimum=0, maximum=1 | `1.0` | 否 | Trace 采样比例 0–1 |
-| `max_queue_size` | integer；minimum=1 | `2048` | 否 | Trace 导出队列上限 |
-| `max_active_spans` | integer；minimum=1 | `4096` | 否 | 活动 Trace span 数上限 |
-| `timeout_seconds` | number；exclusiveMinimum=0, maximum=30 | `3.0` | 否 | 该组件操作的总等待上限（秒），不是整个 Run 预算 |
+| `endpoint` | `string` | 否 | `"http://127.0.0.1:4317"` | `{"minLength":1}` |
+| `service_name` | `string` | 否 | `"sage"` | `{"minLength":1}` |
+| `protocol` | `string` | 否 | `"grpc"` | `{"enum":["grpc","http"]}` |
+| `insecure` | `boolean` | 否 | `true` | `{}` |
+| `environment` | `string` | 否 | `"production"` | `{}` |
+| `content_mode` | `string` | 否 | `"redacted"` | `{"enum":["metadata","redacted"]}` |
+| `max_content_chars` | `integer` | 否 | `16384` | `{"minimum":256,"maximum":65536}` |
+| `sample_rate` | `number` | 否 | `1.0` | `{"minimum":0,"maximum":1}` |
+| `max_queue_size` | `integer` | 否 | `2048` | `{"minimum":1}` |
+| `max_active_spans` | `integer` | 否 | `4096` | `{"minimum":1}` |
+| `timeout_seconds` | `number` | 否 | `3.0` | `{"maximum":30,"exclusiveMinimum":0}` |
 
 ### sage.workspace.initializer.bare
 
 Creates an empty workspace root without starter files.
 
-提供能力：`workspace.initializer:default`。支持 scope：agent, process。
+版本：`2.0.0`；scope：agent, process；所有权：`owned`。
 
-没有可配置参数，使用 `config: {}`。
+提供能力：`workspace.initializer:default` (API `2`)。
+
+没有固定配置字段；是否允许额外参数以公开 Schema 为准。
 
 ### sage.workspace.initializer.claw
 
 Seeds a Claw-style workspace layout and starter files.
 
-提供能力：`workspace.initializer:default`。支持 scope：agent, process。
+版本：`2.0.0`；scope：agent, process；所有权：`owned`。
 
-| 参数 | 类型 / 范围 | 默认值 | schema 必填 | 用途 |
+提供能力：`workspace.initializer:default` (API `2`)。
+
+| 参数 | 类型 | 必填 | Schema 默认值 | 约束 |
 | --- | --- | --- | --- | --- |
-| `language` | string；minLength=1 | `"en"` | 否 | 工作区模板/查询/Skill 提示语言 |
+| `language` | `string` | 否 | `"en"` | `{"minLength":1}` |
 
 ## Run 的网络故障自动恢复
 
@@ -1174,7 +1451,7 @@ Seeds a Claw-style workspace layout and starter files.
 
 退避间隔为 1、2、4、8……秒，上限 60 秒。每次等待前原子写入 `step.retry_scheduled` 和运行检查点，保存连续失败次数及下次尝试时间。故障恢复或宿主接管运行后继续处理同一推理步骤，不重复执行已完成工具，不消耗正常步骤额度；成功推理后清零连续失败次数。暂停、取消和显式 `deadline_seconds` 仍有效。
 
-在内置调度器下，等待前持久化 `automatic_resume_at` 后归还 Worker 租约，调度项以该时间延迟重新入队，同时释放租户并发名额。原 Run 保持非终态，观察者的完成 Future 保持等待。Team/Fibre 成员的等待通过可核对的委派任务 ID 汇总给父任务，整棵调用树可在无活动调用时归还根 Worker；已完成兄弟任务的结果直接复用。暂停可提前唤醒等待任务，取消会结算原调用者。直接驱动 Loop 的宿主仍可使用进程内等待；自定义 Scheduler 应实现 `release(..., requeue=True, available_at=...)` 以启用让出 Worker。
+在内置调度器下，等待前持久化 `automatic_resume_at` 后归还 Worker 租约，调度项以该时间延迟重新入队，同时释放租户并发名额。原 Run 保持非终态，观察者的完成 Future 保持等待。Team/Fibre 成员的等待通过可核对的委派任务 ID 汇总给父任务，整棵调用树可在无活动调用时归还根 Worker；已完成兄弟任务的结果直接复用。暂停可提前唤醒等待任务，取消会结算原调用者。标准运行流程负责调度与等待；自定义 Scheduler 应实现 `release(..., requeue=True, available_at=...)` 以启用让出 Worker。
 
 恢复驱动或沙箱恢复报出明确可重试且可安全恢复的临时服务、限流或资源错误时，调度器会再次延迟入队，不把它改写为不确定副作用的终态失败。显式运行截止时间仍生效。入队/归还租约的持久化事务会在 Worker 取消前完成，避免关闭服务时中断 fsync 而损坏调度状态。
 

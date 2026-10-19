@@ -20,12 +20,14 @@ class _ExecutionBoundDriver:
         run_id: str,
         agent_id: str,
         loop_builder,
+        agent_resolver=None,
     ) -> None:
         self.runtime = runtime
         self.provider = provider
         self.run_id = run_id
         self.agent_id = agent_id
         self.loop_builder = loop_builder
+        self.agent_resolver = agent_resolver
         self.binding: RunExecutionBinding | None = None
         self.scope_handle = None
         self.loop = None
@@ -44,6 +46,8 @@ class _ExecutionBoundDriver:
                 return self.loop
             from sagents.v2.runtime.execution.environment import RunExecutionEnvironment, _bind_execution_environment
             command = await self.runtime.session_store.get_start_command(self.run_id)
+            if self.agent_resolver is not None:
+                self.agent_id = await self.agent_resolver(command)
             if self.provider is None:
                 with _bind_execution_environment(RunExecutionEnvironment(self.run_id, command, context)):
                     built = await self.loop_builder(context)
@@ -64,7 +68,8 @@ class _ExecutionBoundDriver:
                 context=context,
                 configuration=command.config.execution_snapshot,
             )
-            binding = await self.provider.acquire(request)
+            from sagents.v2.runtime.execution.recovery import acquire_execution_binding
+            binding = await acquire_execution_binding(self.provider, request, self.runtime)
             self.binding = binding
             try:
                 binding.validate_for(request)

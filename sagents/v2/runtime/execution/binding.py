@@ -54,6 +54,7 @@ class RunExecutionBinding:
     # 宿主可选携带的生命周期协调器：挂起时释放可安全暂停的算力。
     # 缺省为 None，`on_suspended` 即为空操作。
     lifecycle: ExecutionBindingLifecycleCoordinator | None = None
+    _dependencies: tuple[RunExecutionBinding, ...] = field(default=(), init=False, repr=False)
     _closed: bool = field(default=False, init=False, repr=False)
     _close_task: asyncio.Task[None] | None = field(default=None, init=False, repr=False)
     _close_lock: asyncio.Lock = field(
@@ -137,12 +138,24 @@ class RunExecutionBinding:
 
         async with self._close_lock:
             if self._close_task is None:
-                self._close_task = asyncio.create_task(self.sandbox.close())
+                self._close_task = asyncio.create_task(self._release())
             close_task = self._close_task
         # Shield the shared close operation so cancellation of one waiter does
         # not trigger a second provider close on retry.
         await asyncio.shield(close_task)
         self._closed = True
+
+    async def _release(self):
+        errors = []
+        for resource in (self.sandbox, *self._dependencies):
+            try:
+                await resource.close()
+            except BaseException as exc:
+                errors.append(exc)
+        if errors:
+            for error in errors[1:]:
+                errors[0].add_note(f"dependency cleanup failed: {error}")
+            raise errors[0]
 
     async def on_suspended(self, context: RequestContext) -> None:
         if self.lifecycle is not None:
@@ -168,7 +181,14 @@ class ExecutionBindingProvider(Protocol):
 
     async def acquire(
         self, request: ExecutionBindingRequest
-    ) -> RunExecutionBinding: ...
+    ) -> RunExecutionBinding:
+        """Acquire an independently closable handle for the accepted Run.
+
+        Resource-only ancestor recovery can acquire another handle for a Run
+        already in use. Providers must retain Run ownership and reference-count
+        such handles so releasing a descendant cannot cancel an active ancestor.
+        """
+        ...
 
     async def close(self) -> None:
         """Release provider-level resources during Host shutdown."""
