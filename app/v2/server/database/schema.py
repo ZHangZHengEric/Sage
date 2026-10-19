@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from sqlalchemy import inspect, text
+from sqlalchemy import inspect
 
 from app.v2.server.database import Database
 from app.v2.server.database.base import Base
@@ -16,40 +16,12 @@ async def create_host_schema(database: Database) -> None:
     if engine is None:
         raise RuntimeError("database is not started")
     async with engine.begin() as connection:
-        await connection.run_sync(Base.metadata.create_all)
-        await connection.run_sync(_upgrade_legacy_schema)
+        await connection.run_sync(_create_missing_host_tables)
 
 
-def _upgrade_legacy_schema(connection) -> None:
-    """Apply idempotent upgrades; create_all does not alter existing tables."""
-    inspector = inspect(connection)
-    if "agents" in {column["name"] for column in inspector.get_columns("catalogs")}:
-        raise RuntimeError(
-            "Legacy Agent catalog detected; run scripts.v2.migrate_agent_table before starting Server v2"
-        )
-    agent_columns = {column["name"] for column in inspector.get_columns("agents")}
-    if "package_ref" not in agent_columns:
-        connection.execute(text("ALTER TABLE agents ADD COLUMN package_ref VARCHAR(80)"))
-    if "tool_approval" not in agent_columns:
-        connection.execute(text("ALTER TABLE agents ADD COLUMN tool_approval JSON"))
-    user_columns = {column["name"] for column in inspector.get_columns("users")}
-    if "execution_policy" not in user_columns:
-        connection.execute(text("ALTER TABLE users ADD COLUMN execution_policy TEXT"))
-    columns = {column["name"] for column in inspector.get_columns("threads")}
-    if "agent_id" not in columns:
-        connection.execute(
-            text("ALTER TABLE threads ADD COLUMN agent_id VARCHAR(191) DEFAULT ''")
-        )
-    if connection.dialect.name in {"mysql", "mariadb"}:
-        thread_id = next(c for c in inspector.get_columns("threads") if c["name"] == "thread_id")
-        if thread_id["type"].length < 192:
-            connection.execute(text("ALTER TABLE threads MODIFY COLUMN thread_id VARCHAR(192) NOT NULL"))
-        description = next(
-            column
-            for column in inspector.get_columns("skills")
-            if column["name"] == "description"
-        )
-        if str(description["type"]).upper() != "LONGTEXT":
-            connection.execute(
-                text("ALTER TABLE skills MODIFY COLUMN description LONGTEXT NOT NULL")
-            )
+def _create_missing_host_tables(connection) -> None:
+    # One metadata query replaces a per-table existence check on every boot.
+    existing = set(inspect(connection).get_table_names())
+    missing = [table for table in Base.metadata.sorted_tables if table.name not in existing]
+    if missing:
+        Base.metadata.create_all(connection, tables=missing, checkfirst=False)

@@ -732,6 +732,7 @@ class SessionStoreCoordinator(SessionAttachmentMixin):
             )
         current_run_ids = self._session_run_ids_locked(session_id)
         upserts: dict[str, list[dict[str, Any]]] = {}
+        patches: dict[str, list[dict[str, Any]]] = {}
         deletes: dict[str, list[list[Any]]] = {}
         appends: dict[str, dict[str, list[dict[str, Any]]]] = {}
         replacements: dict[str, dict[str, list[dict[str, Any]]]] = {}
@@ -739,13 +740,20 @@ class SessionStoreCoordinator(SessionAttachmentMixin):
         session = self._sessions[session_id]
         if not undo.existed or undo.session is None or undo.session != session:
             upserts["sessions"] = [self._session_row_payload(session)]
-        changed_runs = [
-            self._run_row_payload(self._runs[run_id])
-            for run_id in sorted(current_run_ids)
-            if run_id not in undo.runs or undo.runs[run_id] != self._runs[run_id]
-        ]
-        if changed_runs:
-            upserts["runs"] = changed_runs
+        for run_id in sorted(current_run_ids):
+            row = self._runs[run_id]
+            previous = undo.runs.get(run_id)
+            if previous is None:
+                upserts.setdefault("runs", []).append(self._run_row_payload(row))
+            elif previous != row:
+                # Accepted commands can contain large frozen application specs.
+                # Ordinary lifecycle transitions only change small mutable fields.
+                patch = self._run_row_payload(row, include_request=False)
+                if previous.start_command != row.start_command:
+                    patch["start_command"] = row.start_command.model_dump(mode="json") if row.start_command else None
+                if previous.request_context != row.request_context:
+                    patch["request_context"] = row.request_context.model_dump(mode="json") if row.request_context else None
+                patches.setdefault("runs", []).append(patch)
         removed_runs = sorted(set(undo.runs) - current_run_ids)
         if removed_runs:
             deletes["runs"] = [[run_id] for run_id in removed_runs]
@@ -1013,6 +1021,7 @@ class SessionStoreCoordinator(SessionAttachmentMixin):
 
         return SessionStateDeltaMutation(
             upserts=upserts,
+            patches=patches,
             deletes=deletes,
             appends=appends,
             replacements=replacements,
@@ -1043,8 +1052,8 @@ class SessionStoreCoordinator(SessionAttachmentMixin):
             },
         }
 
-    def _run_row_payload(self, row: _RunRow) -> dict[str, Any]:
-        return {
+    def _run_row_payload(self, row: _RunRow, *, include_request: bool = True) -> dict[str, Any]:
+        payload = {
             "session_id": row.session_id,
             "run_id": row.run_id,
             "state": row.state.value,
@@ -1059,17 +1068,19 @@ class SessionStoreCoordinator(SessionAttachmentMixin):
             "updated_at": row.updated_at.isoformat(),
             "suspension_id": row.suspension_id,
             "checkpoint_id": row.checkpoint_id,
-            "start_command": (
+        }
+        if include_request:
+            payload["start_command"] = (
                 row.start_command.model_dump(mode="json")
                 if row.start_command is not None
                 else None
-            ),
-            "request_context": (
+            )
+            payload["request_context"] = (
                 row.request_context.model_dump(mode="json")
                 if row.request_context is not None
                 else None
-            ),
-        }
+            )
+        return payload
 
     def _restore_session_snapshots_locked(
         self, snapshots: dict[str, dict[str, Any] | None]

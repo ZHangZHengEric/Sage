@@ -34,7 +34,7 @@ Studio 支持 JSON 定义编辑、Schema/资源检查、保存、复制、分页
 
 `ServerHost(package_extensions=..., package_authorizer=...)` 注册扩展并设置授权。包可选择已授权的 flow.node、tool.catalog、memory.provider，其余基础设施由宿主固定。源码扩展默认关闭；启用时执行可信宿主 Python 代码，不能视为非可信代码隔离，也不自动 pip 安装。
 
-页面/API Agent 也持久化为库存内的标准 `AgentPackageBundle`，`agents.package_ref` 是配置引用，旧列仅为兼容投影；目录批量解析包，Skill 索引和包更新共用事务。启动幂等回填既有记录，ID、Session 和 workspace 保持不变。旧 `/api/agents/{id}/runs` 受理时冻结包，执行时使用冻结定义，网络再与当前 Agent/Server 上限取交集。
+页面/API Agent 也持久化为库存内的标准 `AgentPackageBundle`，`agents.package_ref` 是必需的配置引用；目录批量解析包，Skill 索引和包更新共用事务。启动只创建缺失表，现有记录缺失包引用时拒绝读取。旧 `/api/agents/{id}/runs` 受理时冻结包，执行时使用冻结定义，网络再与当前 Agent/Server 上限取交集。
 
 官方工具由 ExecutionBindingProvider 按真实 Run ID 绑定用户工作区与沙箱，子 Run 独立绑定。MCP、Skill 与模型来自当前用户目录，模型从宿主池借用租约，凭据不写入包库存。Skill 列表描述不截断，加载后的活跃内容另受 token 预算限制。
 

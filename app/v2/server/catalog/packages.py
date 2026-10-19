@@ -1,4 +1,4 @@
-"""Canonical standard packages for catalog Agents; rows are compatibility projections."""
+"""Canonical standard packages for catalog Agents."""
 
 from __future__ import annotations
 

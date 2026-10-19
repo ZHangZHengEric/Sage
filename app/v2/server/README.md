@@ -42,17 +42,7 @@ Docker 部署可使用仓库中的 `deploy/compose_v2.sh`，仅启动 v2 后端�
 
 Web 开发时可单独启动：在 `app/v2/server/web` 执行 `npm install && npm run dev`，Vite 将 API 请求代理到后端 `8090` 端口。执行 `npm run build` 后再启动后端，后端会托管 `web/dist`，可直接访问 `http://localhost:8090` 或 `/studio`。也可使用独立静态文件服务部署，并代理 API 请求到后端。
 
-已有 `catalogs.agents` JSON 列的数据库须先停写，再执行一次显式迁移：
-
-```bash
-python -m scripts.v2.migrate_agent_table --env app/v2/server/.env --backup /secure/path/before-agent-migration.json
-```
-
-脚本先保存权限为 `0600` 的本地全表行数据备份，再创建独立表；事务内生成 ID、迁移默认引用、技能绑定、密钥和历史会话，验证后移除 `catalogs.agents`。备份包含凭据哈希及模型配置，应放在受限目录，不能提交 Git。活跃 Run、带未折叠 journal 的会话、外部会话会阻止本脚本的数据迁移，须先按其存储协议处理。DDL 在 MySQL 上独立提交，数据迁移失败可重新运行；若数据提交成功但最终删列失败，可核对引用后调用迁移模块的 `finalize` 完成删列。
-
-迁移后必须启动这版 Server v2；旧服务和旧客户端使用的 `main` 或自定义 Agent ID 不再有效，客户端从 `/api/agents` 获取新 ID。运行包 manifest 内的 Agent 名称不属于用户目录 ID，不受此变更影响。
-
-启动时会幂等升级旧数据库：补齐 `threads.agent_id`、`users.execution_policy`，将 Skill 描述列扩展为 `LONGTEXT`。没有已保存执行设置的旧用户采用工作区内自动执行的默认策略；已保存的设置不变。升级账号需要对应表的 `ALTER` 权限。Skill 列表描述不截断，加载内容仍受 Skill 文件大小限制。已有的截断描述可重新导入原 Skill 文件修复。
+启动按当前 ORM 元数据创建缺失表，不执行历史表结构升级或 Agent 数据回填。Agent 配置统一通过 `agents.package_ref` 读取标准包。Skill 描述列使用 `LONGTEXT`，列表描述不截断，加载内容受 Skill 文件大小限制。
 
 读 `app/v2/server/.env`（进程环境变量优先）。生产必须设置 `SAGE_SERVER_JWT_SECRET`（至少 32 字节）。默认管理员：`admin` / `admin12345`。OpenAPI 在 `/docs`。
 
@@ -67,7 +57,7 @@ python -m scripts.v2.migrate_agent_table --env app/v2/server/.env --backup /secu
 | AG-UI 回放 | Sage Session `run_events` | Sage Session `run_events` |
 | 工作区 | `{data_root}/tenants/{user_id}/{agent_id}/workspace/` | 同左 |
 | Skill catalog | MySQL `skills` / `skill_versions` / `agent_skill_selections`；artifact 相对路径 `{data_root}/skills/...` | Memory mock + 同左磁盘 |
-| Agent / MCP / A2A peer | `catalogs` JSON：`agents[]`（提示词、model_id、tools、skills）+ `mcp_servers[]` + `a2a_agents[]` | 同左 |
+| Agent / MCP / A2A peer | `agents.package_ref` 引用 `managed_agent_records` 中的标准包；`catalogs` 保存模型、MCP 和 A2A peer | 同左 |
 | A2A API Key | MySQL `api_keys`（只存哈希） | Memory mock |
 
 对话：首次 run 把 `agent_id` 钉在会话上（之后忽略下拉/`forwardedProps`）；读 catalog Agent → Official 文件/沙箱工具 + MCP + A2A peer + skill 组成 Composite，通过 Package Builder 的统一 `build(package, runtime=...)` 装配，并借用进程 Application 的共享服务；循环走统一 `create_loop(...)`。进程 Application 只 build 一次。
@@ -102,19 +92,13 @@ ServerHost 必须注入 Database；生产库存使用 MySQL `managed_agent_recor
 
 ### 统一 Agent package 配置
 
-页面及 `POST/PUT /api/agents` 保存标准 `AgentPackageBundle` 到现有 `managed_agent_records` 不可变版本库存，`agents.package_ref` 引用当前内容哈希。`agents` 的旧配置列仅为兼容投影，读取、组装 manifest、Run 受理均以该引用的 package 为准；引用缺失或哈希不符会拒绝执行，不退回旧配置。`GET /api/agents/{id}` 返回 `package`、`package_ref` 和从 package 投影的 `sandbox`。
+页面及 `POST/PUT /api/agents` 保存标准 `AgentPackageBundle` 到现有 `managed_agent_records` 不可变版本库存，`agents.package_ref` 引用当前内容哈希。读取、组装 manifest、Run 受理均以该引用的 package 为准；引用缺失或哈希不符会拒绝操作。`GET /api/agents/{id}` 返回 `package`、`package_ref` 和从 package 投影的 `sandbox`。
 
 编辑产生新的内容版本，旧版本仍可读；不改变 Agent ID、已有 Session、API Key、默认 Agent 或 workspace 路径。Skill 绑定索引和 package 的 Skill 声明在同一数据库事务内更新。Run 受理冻结 package 和 Skill 版本；排队或审批后不会切换到之后编辑的包。网络在创建沙箱时取冻结配置、当前 Agent 上限和 Server 上限的交集。
 
 现有 `POST /api/agents/{id}/runs`、AG-UI 和 A2A 入口均沿用上述来源，无需业务方换接口。每次 Run 只解析配置、复用宿主服务，不重新创建一个托管 Application；目录中的 package 批量读取，避免逐 Agent 查询。
 
-启动会幂等添加可空 `agents.package_ref` 并回填旧 Agent 的标准包，默认网络 `none`，保留原 ID、模型、工具、审批及 Skill/source/version 绑定。旧列、线程、会话和文件不会被迁移重写。显式迁移可先停写再执行：
-
-```bash
-python -m scripts.v2.migrate_agent_packages --env deploy/standalone/.env --backup /secure/agent-packages-before.json
-```
-
-备份使用 `0600` 权限且禁止覆盖。升级后旧客户端省略 `sandbox` 字段的编辑会保留现有网络配置。API 配置示例：
+编辑时省略 `sandbox` 字段会保留现有网络配置。API 配置示例：
 
 ```json
 {"name": "Agent", "sandbox": {"network": "unrestricted"}}

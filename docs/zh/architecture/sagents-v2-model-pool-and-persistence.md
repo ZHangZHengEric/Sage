@@ -35,6 +35,53 @@ MySQL / PostgreSQL 提交由协调器按已持久化事件数，仅序列化待�
 
 该优化减少事件的重复序列化，不消除会话元数据、命令结果和分叉基础事件的处理成本，也不提供分布式 writer。
 
+## Redis 执行态与 MySQL 归档
+
+配置 `SAGE_SERVER_SESSION_REDIS_URL=redis://localhost:6379/1`，同时保留
+`SAGE_SERVER_MYSQL_URL`，Server 会选择 `sage.session.redis-mysql`。未配置 Redis
+时仍使用原 MySQL 实现。SDK Package 可以直接选择该插件，必填 `dsn` 和
+`redis_url`；`table_prefix` 复用原表，`key_prefix` 默认根据数据库地址、库名和表前缀
+生成，不含密码。托管 Package 的不同 MySQL 表前缀对应不同 Redis 命名空间。
+
+每一步仍通过原 SessionStore 接口提交事件、版本号、恢复点和幂等结果，Redis 事务
+原子更新这些数据及索引。Run 完成、失败、取消或挂起时，同一事务登记待归档 Session，
+后台把整个 Session 的当前状态及新增事件写入现有 MySQL 表；不新增审计业务表。
+MySQL 事务按版本比较，重复或较旧的归档不会覆盖新状态。归档完成期间如果发生了
+新提交，保留待归档标记并继续重试，不清理新数据。
+
+- 活跃和未归档数据没有 TTL。成功归档且所有 Run 均已结束或挂起后，Redis 缓存默认
+  保留 3600 秒（`retention_seconds`）；后续读取可从 MySQL 重新加载。
+- `archive_interval_seconds` 默认 1 秒；结束事件会立即唤醒后台归档。MySQL 写入失败
+  会保留数据和重试标记。MySQL 冷读取、首次幂等查找仍依赖 MySQL 可用。
+- 重启时从 Redis 的 resident 集合恢复未完成 Run；后台扫描持久化的 pending 集合
+  补做归档。进程关闭时最多等待 5 秒归档，未完成部分交给下一次启动。
+- 同一命名空间仅允许一个进程持有写租约，租约 30 秒，独立任务每 5 秒续租。
+  失去租约后拒绝继续写入。沿用单 writer、进程内订阅语义，不提供跨进程实时订阅。
+- 删除先在 Redis 原子写入 tombstone、删除查找索引，再异步删除 MySQL 数据。
+  不确定的事务响应通过提交 token 确认；无法确认时，下一次读取重新加载权威状态。
+- 派生缓存只存 Redis，可以重建。附件字节和引用一起进入 Redis，再随归档保存到
+  MySQL；未归档字节不设置过期时间。
+
+Redis 承担运行数据的持久化责任。启动会检查 `INFO memory` 的 `maxmemory_policy`
+为 `noeviction`，以及 `INFO persistence` 的 `aof_enabled=1`，不满足则拒绝启用。
+账号需要访问这些 INFO 信息。AOF 的 fsync 策略仍由部署管理：`everysec` 在 Redis
+主机故障时可能丢失约一秒数据；需要更严格的落盘语义时使用 `always` 并实测延迟。
+参见 [Redis 持久化文档](https://redis.io/docs/latest/operate/oss_and_stack/management/persistence/)
+及 [redis-py 事务文档](https://redis.io/docs/latest/develop/clients/redis-py/transpipe/)。
+
+切换存储模式前先停止接收新 Run，并等待执行中 Run 结束、待归档集合清空。不要在有
+未归档数据时关闭 Redis 模式，也不要让旧 MySQL writer 与新 Redis writer 同时使用
+同一组表。本次代码不修改部署环境或迁移生产数据。
+
+生命周期增量使用 `patches.runs` 记录小字段，不再重复序列化未变化的
+`start_command` 和 `request_context`。首次创建和完整快照保留完整数据；回放合并
+patch 后仍能还原请求、事件和恢复点。读取这些新增 journal patch 的所有进程都需
+升级到支持 patch 的版本。
+
+本地固定 60 KB 初始输入、200 次状态提交的合成基准，payload 中位数从 63650.5
+字节降至 2736.5 字节，序列化中位数从 0.1984 ms 降至 0.0629 ms。该结果只证明
+重复字段消除的收益，不包含 Redis/MySQL 网络、真实模型或端到端延迟。
+
 ## 验证
 
 项目要求 Python 3.12+。使用当前测试与基准核对行为，不将历史通过数量视作当前验收结果：
@@ -42,6 +89,8 @@ MySQL / PostgreSQL 提交由协调器按已持久化事件数，仅序列化待�
 ```bash
 python -m pytest tests/app/v2/server/test_model_pool.py
 python scripts/v2/benchmark_v2_session_projection.py --events 10000 --repeats 10
+python scripts/v2/benchmark_v2_session_commit.py --commits 200 --input-bytes 60000
+python -m pytest tests/sagents/v2/test_redis_mysql_session_store.py tests/sagents/v2/test_mysql_session_archive.py
 ```
 
 模型池测试覆盖并发初始化、用户和凭据隔离、容量、失败、取消、缓慢淘汰及关闭失败。SQL 投影测试覆盖增量追加、没有新增、历史截断、删除 Run 与完整导出。模拟数据库连接的测试不等同于真实 MySQL / PostgreSQL 验收。

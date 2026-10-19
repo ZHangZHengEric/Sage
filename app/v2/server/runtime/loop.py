@@ -122,8 +122,10 @@ async def load_catalog_agent(host, command, user_id):
     from app.v2.server.runtime.sdk_plugins import run_selections, execution_selection, select_run_capabilities
     from app.v2.server.catalog.model_config import app_models
     service = host._catalog_run_dependencies()
-    catalog = await service.catalog.get(user_id)
-    frozen = await _composition(service, command, catalog, user_id=user_id)
+    frozen = load_composition(command, user_id=user_id)
+    catalog = await service.catalog.editor_catalog(user_id) if frozen is not None else await service.catalog.get_for_run(user_id, command.agent_id)
+    if frozen is None:
+        frozen = await _composition(service, command, catalog, user_id=user_id)
     bundle = frozen.package or frozen.agent.package
     manifest = bundle.resolved_manifest() if frozen.package is not None else server_v2_run_manifest(
         service.settings, agent=frozen.agent, registry=getattr(service.catalog, "extensions", None),
