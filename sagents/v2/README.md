@@ -84,14 +84,6 @@ AGENT_YAML = """
 schema_version: sage/v2
 kind: application
 metadata: {id: example.assistant, version: 1.0.0, name: Assistant}
-credentials:
-  api-key: {source: env, key: MODEL_API_KEY}
-models:
-  primary:
-    provider: openai-responses
-    base_url: https://api.openai.com/v1
-    credential: api-key
-    model: your-model
 agents:
   main:
     name: Assistant
@@ -100,12 +92,26 @@ agents:
 entrypoint: {agent: main}
 """
 
+MODELS_YAML = """
+credentials:
+  api-key: {source: env, key: MODEL_API_KEY}
+models:
+  primary:
+    provider: openai-responses
+    base_url: https://api.openai.com/v1
+    credential: api-key
+    model: your-model
+"""
+
 
 async def main():
     manifest = SageManifestLoader().loads(AGENT_YAML)
-    app = await SAgentBuilder().with_defaults(session_root="runtime").build(runtime=manifest.runtime)
-    agent = await app.load_agent(manifest)
+    app = await (
+        SAgentBuilder().with_defaults(session_root="runtime")
+        .build(models_config_text=MODELS_YAML)
+    )
     try:
+        agent = await app.load_agent(manifest)
         context = RequestContext(actor=ActorRef(
             principal_id="user-1", principal_type=PrincipalType.USER,
         ))
