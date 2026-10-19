@@ -84,7 +84,7 @@ Compose 既有 `SYS_ADMIN`、`seccomp=unconfined`、`apparmor=unconfined`、`sys
 python deploy/images/frontend-test/acceptance.py
 ```
 
-该程序调用 Server 的 `install_sandbox` / `provision_workspace`，默认 `network=none`，通过文件 API 写入 fixture，通过匹配摘要的签名 grant 启动进程。它依次检查文件 API 拒绝 `/tmp` 写入、普通用户读取和执行 Node/预装模块/浏览器及匹配中文字体、IPv4/IPv6 外网被禁止、jsdom 点击更新 DOM、Chromium `file://` 页面点击/输入/断言和中文截图。截图和每项原始 stdout/stderr 留在打印的临时 workspace，父目录有汇总 `acceptance.json`；任何一项失败都非零退出，不以服务容器内成功代替实际沙箱通过。
+该程序通过 `register → build → load_agent → run_stream` 执行离线模型请求的官方文件和 Shell 工具，采用 Server 的标准进程策略参数与 `network=none`；Sage 负责创建沙箱、签名 grant 和释放 Run 资源。它依次检查文件 API 拒绝 `/tmp` 写入、普通用户读取和执行 Node/预装模块/浏览器及匹配中文字体、IPv4/IPv6 外网被禁止、jsdom 点击更新 DOM、Chromium `file://` 页面点击/输入/断言和中文截图。截图和每项原始 stdout/stderr 留在打印的临时 workspace，父目录有汇总 `acceptance.json`；任何一项失败都非零退出，不以服务容器内成功代替实际沙箱通过。
 
 在独立候选容器中沿用生产 Compose 的外层隔离配置运行，并增加外层断网：
 

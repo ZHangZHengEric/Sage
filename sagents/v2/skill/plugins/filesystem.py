@@ -7,7 +7,7 @@ import os
 import threading
 import yaml
 from collections import OrderedDict
-from sagents.v2._concurrency import bounded_to_thread
+from sagents.v2.concurrency import bounded_to_thread
 from pathlib import Path
 
 from sagents.v2.contracts.errors import (

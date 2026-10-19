@@ -16,6 +16,12 @@ MAX_ARCHIVE_ENTRIES = 20000
 
 
 def relative_path(value: str) -> PurePosixPath:
+    # UI tree entries remain relative. Also accept paths returned by Server
+    # tools; resolve the mount alias only within the already authorized root.
+    if value == "/workspace":
+        value = ""
+    elif value.startswith("/workspace/"):
+        value = value[len("/workspace/"):]
     path = PurePosixPath(value or ".")
     if path.is_absolute() or ".." in path.parts or "\\" in value or "\0" in value:
         raise ValueError("invalid workspace path")

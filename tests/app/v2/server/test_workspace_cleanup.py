@@ -59,7 +59,7 @@ async def test_cancelled_delete_keeps_admission_locked_until_worker_finishes():
 
     service = RunService(application=SimpleNamespace(run_interface=run_interface,
         resolved_plan=SimpleNamespace(entrypoint_agent_id="agent")),
-        session_access=None, execution=SimpleNamespace(bind_model=lambda *_: False, driving=lambda _: False))
+        session_access=None, execution=SimpleNamespace(driving=lambda _: False))
 
     async def load_agent(*args):
         return SimpleNamespace(id="agent", composition_hash="sha256:test")

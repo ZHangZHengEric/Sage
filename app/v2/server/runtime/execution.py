@@ -1,4 +1,4 @@
-"""Process-local Run drives, model leases, and sandbox handles."""
+"""Product observers and resources surrounding SDK-owned Run execution."""
 
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ LOGGER = get_logger(__name__)
 
 
 class ProcessExecution:
-    """Owns the drives for this process. Use cases bind models through this."""
+    """Tracks product observers; Sage owns Run execution and model identity."""
 
     def __init__(
         self,
@@ -61,13 +61,6 @@ class ProcessExecution:
             await asyncio.gather(*tuple(self._tasks), return_exceptions=True)
         self._tasks.clear()
         self._drives.clear()
-
-    def bind_model(self, session_id: str, user_id: str) -> bool:
-        # Model ownership comes from the authenticated standard Run scope.
-        return False
-
-    def unbind_model(self, session_id: str) -> None:
-        pass
 
     def has_model(self, catalog) -> bool:
         if self.fallback_model is not None:

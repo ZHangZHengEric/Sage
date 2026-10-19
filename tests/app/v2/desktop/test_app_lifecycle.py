@@ -136,3 +136,18 @@ def test_sidecar_ignores_caller_supplied_user_identity():
 
     assert response.status_code == 200
     service.delete_skill.assert_awaited_once_with("review", "default_user")
+
+
+def test_run_preflight_returns_typed_http_error_without_a_placeholder_run(tmp_path):
+    service = DesktopV2Service(tmp_path)
+    app = app_module.create_app(service=service, auth_token=AUTH_TOKEN)
+    with TestClient(app) as client:
+        response = client.post("/api/v2/runs/stream", headers=AUTH_HEADERS, json={
+            "agent_id": "missing_agent", "messages": [{"role": "user", "text": "开始"}],
+            "response_language": "zh-CN",
+        })
+        assert response.status_code == 400, response.text
+        error = response.json()["detail"]
+        assert error["code"] == "desktop.run_start_failed"
+        assert error["metadata"]["response_language"] == "zh"
+        assert client.get("/api/v2/sessions", headers=AUTH_HEADERS).json()["data"] == []

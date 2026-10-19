@@ -9,6 +9,9 @@ from typing import Any
 
 from sagents.v2.contracts.commands import StartRun
 from sagents.v2.contracts.principals import RequestContext
+from sagents.v2.contracts.session_commit import (
+    ProposeSessionCommit, PublishSessionCommit, RejectSessionCommit, SessionCommitProposal,
+)
 from sagents.v2.sagent import SAgentRunStream
 
 from sagents.v2.composition.inputs import package_input
@@ -80,6 +83,31 @@ class ApplicationEntrypoint:
         implementation = self._catalog.implementation(agent)
         await self._validate_run(run_id, context, agent)
         return await implementation.continue_run(run_id, context)
+
+    async def propose_session_commit(
+        self, command: ProposeSessionCommit, context: RequestContext,
+    ) -> SessionCommitProposal:
+        """Propose publication using the source Run's admitted Agent revision."""
+        agent = await self._catalog.application.agent_for_run(command.run_id, context)
+        return await self._catalog.implementation(agent).propose_session_commit(command, context)
+
+    async def publish_session_commit(
+        self, command: PublishSessionCommit, context: RequestContext,
+    ) -> SessionCommitProposal:
+        """Publish through the original Agent, including derived memory ingestion."""
+        access = self._catalog.application.service("session.access")
+        proposal = await access.get_session_commit_proposal(command.proposal_id, context)
+        agent = await self._catalog.application.agent_for_run(proposal.source_run_id, context)
+        return await self._catalog.implementation(agent).publish_session_commit(command, context)
+
+    async def reject_session_commit(
+        self, command: RejectSessionCommit, context: RequestContext,
+    ) -> SessionCommitProposal:
+        """Reject an authorized proposal without publishing candidate history."""
+        access = self._catalog.application.service("session.access")
+        proposal = await access.get_session_commit_proposal(command.proposal_id, context)
+        agent = await self._catalog.application.agent_for_run(proposal.source_run_id, context)
+        return await self._catalog.implementation(agent).reject_session_commit(command, context)
 
     async def _validate_run(self, run_id, context, agent):
         access = self._catalog.application.service("session.access")
