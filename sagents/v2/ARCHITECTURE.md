@@ -118,8 +118,10 @@ Supported lifetimes are `process -> tenant -> agent -> run`. A longer-lived
 plugin cannot depend on a shorter-lived plugin. Startup follows the resolved
 dependency order; failure and shutdown stop instances in reverse order.
 
-`sage.yaml.plugins` is an install/load allowlist and supplies plugin defaults.
-`runtime.capabilities` selects implementations. It must not be treated as an
+`builder.register(registration)` makes an implementation available. Installed
+entry points may be explicitly loaded and then registered by the host;
+`sage.yaml.plugins` supplies declarations and version/configuration constraints.
+`runtime.capabilities` selects registered implementations. It must not be treated as an
 instruction to install packages or as proof that a selected capability is wired
 into the standard composition root.
 
@@ -127,36 +129,30 @@ Tool catalog and executor are a paired capability from the same extension
 scope. A host must never combine a schema catalog from one plugin with an
 executor from another plugin unless an explicit adapter owns that mapping.
 
-Direct `SAgentBuilder.with_*` injection remains supported for tests and hosts
-that already own a client. It is an alternative composition input, not a second
-runtime architecture; the final composition identity must still expose which
-implementation was injected.
+Host-owned objects use the same registration factory contract with explicit
+borrowed ownership. Runtime parameters remain serializable. There is no parallel
+object-injection or host-defined execution-driver entry point.
 
 ## Composition roots
 
-`SAgentBuilder` owns plugin discovery, provider lifetimes, resource rollback,
-and construction of `SAgentApplication`. `AgentCompositionFactory` receives
+`SAgentBuilder` validates registrations and selections, owns provider lifetimes
+and rollback, and constructs `SAgentApplication`. `AgentCompositionFactory` receives
 already-resolved ports and wires an Agent loop without discovering plugins.
 `SAgent`, `AgentLoopEngine`, and `HarnessRuntime` must never consult a global
 registry at execution time.
 
-The Builder consumes manifest selections for `agent.continuation-policy`,
-`context.unit-compactor`, `context.summary-store`, `context.summarizer`, and
-`context.reducer`. Host-owned dependencies are locked inputs applied after
-manifest configuration, so configuration cannot replace the active Model,
-SessionStore, store, or summarizer. Generic composition uses
-`AgentCompositionFactory.create_engine`. Desktop product state (catalog,
-session index, MCP records, settings) stays outside `resolved_plan`;
-host-owned sinks, models, tools, and sandbox bindings enter through `with_*`.
-Desktop should not open Extension scopes. Next-run rematerialization uses
-`SAgentApplication.materialize_agent` on the process Application; it reuses the
-process scope and Dispatcher and must not call `build()` again.
-`SAgentApplication.resolved_plan` is
-the single inspectable final composition: capability, provider/source, scope,
-API version, plugin dependency edges, and the final hash. It intentionally
-excludes raw configuration and credentials. The Builder may still open
-separate lifetime scopes internally; that is a lifecycle detail, not a second
-execution composer.
+The host executes `build(runtime=..., models=...)`, `load_agent(package,
+subagents=...)`, and `entrypoint().run_stream(command, context, agent=loaded)`.
+The SDK assembles Agent loops, official tools, context, Team execution and
+Run-owned sandbox leases. Hosts do not construct or replace those components.
+Process-local services come from registration factories and declared dependencies.
+
+`LoadedAgent.resolved_plan` identifies the selected capability providers, scopes,
+API versions, dependency edges, implementation versions and composition hash.
+`app.run_configuration(run_id, context)` exposes the authorized Run's original
+Agent and runtime selection; `execution_configuration` and `execution_diagnostics`
+expose its accepted policy and actual sandbox capabilities. New App settings do
+not replace an admitted Run's configuration, including after restart.
 
 ## Provider boundary
 
@@ -248,8 +244,8 @@ depending on one in-process lifecycle implementation.
 
 Durable Session state does not imply durable execution. The default Scheduler,
 JobRuntime and package registry are single-process/ephemeral reference
-implementations. With `with_defaults(session_root=...)`, the ArtifactStore
-defaults to binary file snapshots under `session_root/artifacts`; hosts without a
+implementations. The standard runtime preset stores ArtifactStore binary
+snapshots under its state root's `artifacts` directory; hosts without a
 storage root may explicitly use the ephemeral store. The filesystem store supports
 processes sharing one local directory, not independent hosts. `analyze_image` reads through
 the sandbox, normalizes once, and stores an immutable content-addressed snapshot.
@@ -344,10 +340,10 @@ dynamic Agent roster depend on that narrow port, so a new authoritative
 Run/Event/Checkpoint backend does not have to ship a key-value cache to be a
 valid `SessionStore`, and a caller's type states whether its reads are
 authoritative. The shipped stores still satisfy both ports with one object and
-report `derived_state_authoritative: False`. When a host injects only a custom
-`SessionStore`, the Builder supplies a separate in-memory derived store; hosts
-that need durable projections inject `with_derived_state_store(...)`
-explicitly. Authorized deletion forgets independent derived values only after
+report `derived_state_authoritative: False`. A custom SessionStore without the
+derived-state port requires an explicitly registered and selected
+`derived-state.store` implementation; the Builder does not silently substitute
+volatile state. Authorized deletion forgets independent derived values only after
 the canonical Session tree has been deleted successfully.
 
 ## Architecture acceptance gates

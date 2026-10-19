@@ -4,7 +4,7 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
+from collections.abc import AsyncIterator, Mapping
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from typing import Any, TypeVar
@@ -12,13 +12,9 @@ from pathlib import Path
 
 from sagents.v2.composition.inputs import PackageInput
 from sagents.v2.composition.loaded_agents import LoadedAgent
-from sagents.v2.composition.host_execution import HostAgentExecution
 
 from sagents.v2.composition.contracts import (
     ApplicationResource as ApplicationResource,
-)
-from sagents.v2.composition.contracts import (
-    MaterializedAgentPorts as MaterializedAgentPorts,
 )
 from sagents.v2.composition.contracts import (
     ResolvedApplicationPlan as ResolvedApplicationPlan,
@@ -26,8 +22,6 @@ from sagents.v2.composition.contracts import (
 from sagents.v2.composition.contracts import (
     ResolvedProviderBinding as ResolvedProviderBinding,
 )
-from sagents.v2.composition.resources import ComposedRun, RunResources
-from sagents.v2.package.manifest.runtime import CapabilitySelection, RuntimeConfig
 from sagents.v2.contracts.commands import StartRun
 from sagents.v2.contracts.events import RuntimeEvent
 from sagents.v2.contracts.principals import RequestContext
@@ -64,7 +58,17 @@ class SAgentApplication:
     and the Agents composed from them.
     """
 
-    def __init__(
+    def __init__(self, *args, **kwargs):
+        raise TypeError("SAgentApplication is created by SAgentBuilder; use build(), load_agent() and entrypoint()")
+
+    @classmethod
+    def _from_composition(cls, **ports):
+        """Internal SDK assembly; host integrations use SAgentBuilder."""
+        instance = cls.__new__(cls)
+        instance._initialize(**ports)
+        return instance
+
+    def _initialize(
         self,
         *,
         agents: Mapping[str, SAgent],
@@ -97,18 +101,15 @@ class SAgentApplication:
         )
         self._owned_resources = list(owned_resources)
         self._pending_agents = list(self._agents.values())
-        self._composer: Any | None = None
         self._close_lock = asyncio.Lock()
         self._materialize_idle = asyncio.Condition(self._close_lock)
         self._materialize_inflight = 0
         self._closed = False
         self._closing = False
 
-    def _attach_composer(self, composer: Any) -> None:
-        self._composer = composer
-        composer.application = self
 
-    def retain_scope(self, scope: ExtensionScopeHandle) -> None:
+
+    def _retain_scope(self, scope: ExtensionScopeHandle) -> None:
         """Register a scope created by an in-flight assembly operation.
 
         Close waits for assembly to settle, so registration is valid while
@@ -152,6 +153,60 @@ class SAgentApplication:
             self._loaded_agents.model_resolver.models = selected
         return self.models
 
+    @property
+    def runtime_configuration(self):
+        """A detached copy of the selections used for new Agent revisions."""
+        if self._loaded_agents is None:
+            raise RuntimeError("runtime configuration requires a Builder-built App")
+        return self._loaded_agents.runtime.model_copy(deep=True)
+
+    async def initialize_workspace(self, path):
+        """Initialize a product workspace through the currently selected capability."""
+        from sagents.v2.runtime.extensions import ExtensionHost
+        if self._loaded_agents is None:
+            raise RuntimeError("workspace initialization requires a Builder-built App")
+        async with self._assembly_operation():
+            catalog = self._loaded_agents
+            handles = list(catalog.process_handles)
+            host = ExtensionHost(catalog.builder._registry,
+                built_in_only=catalog.runtime.plugin_trust_policy == "built_in_only")
+            initializer = await catalog.process_assembler._create_capability(
+                host, handles[0], handles, catalog.runtime, (),
+                capability="workspace.initializer", default_plugin="sage.workspace.initializer.claw",
+            )
+            import inspect
+            result = initializer.initialize(Path(path).expanduser().resolve())
+            return await result if inspect.isawaitable(result) else result
+
+    async def update_runtime(self, runtime):
+        """Select capabilities for subsequently loaded revisions; keep accepted Runs frozen.
+
+        An App keeps one authoritative store and execution queue. Changing those
+        process identities requires a new App rather than splitting its Run index.
+        """
+        from sagents.v2.composition.inputs import runtime_input
+        from sagents.v2.composition.defaults import effective_runtime
+        selected = runtime_input(runtime)
+        if selected is None:
+            raise ValueError("runtime configuration is required")
+        selected = effective_runtime(selected)
+        if self._loaded_agents is None:
+            raise RuntimeError("runtime updates require a Builder-built App")
+        async with self._assembly_operation(), self._loaded_agents.lock:
+            previous = self._loaded_agents.runtime
+            self._loaded_agents.builder._registry.validate_runtime(selected)
+            if previous.state_root != selected.state_root:
+                raise ValueError("state_root is an App identity; create a new App to change it")
+            for capability in ("session.store", "derived-state.store", "execution.scheduler", "execution.job-runtime"):
+                if previous.selections(capability) != selected.selections(capability):
+                    raise ValueError(f"{capability} is an App identity; create a new App to change it")
+            if (previous.plugin_trust_policy != selected.plugin_trust_policy
+                    or previous.deployment_profile != selected.deployment_profile):
+                raise ValueError("security profile is an App identity; create a new App to change it")
+            self._loaded_agents.runtime = selected
+            self._loaded_agents.process_assembler._runtime_config = selected
+        return selected.model_copy(deep=True)
+
     async def update_model(self, model_id, config):
         """Add or replace one model atomically; credentials live in App config."""
         from sagents.v2.model.catalog import ModelCatalogConfig
@@ -168,120 +223,10 @@ class SAgentApplication:
             self._loaded_agents.model_resolver.models = selected
         return self.models
 
-    async def compose_run(
-        self, compose: Callable[[RunResources], Awaitable[T]]
-    ) -> ComposedRun[T]:
-        """Compose a host-admitted Run under one resource ownership boundary.
 
-        The host resolves its catalog and policy; the callback registers only
-        newly owned resources. No Run is admitted, replayed, resumed or cancelled
-        here. Success transfers resources to the caller. Failure rolls back and
-        retains failed cleanup for application shutdown. Close waits for assembly.
-        """
-        async with self._assembly_operation():
-            resources = RunResources()
-            try:
-                value = await compose(resources)
-                return ComposedRun(value, resources)
-            except BaseException as exc:
-                await resources.rollback(exc)
-                if resources.pending:
-                    self._owned_resources.append(resources)
-                raise
 
-    async def adopt_resource(
-        self,
-        resource: ApplicationResource,
-        *,
-        close_after_existing: bool = True,
-    ) -> None:
-        """Transfer one host-created resource to the Application close boundary.
 
-        Composition helpers use this for resources they construct on behalf of
-        the caller. Resources adopted with ``close_after_existing`` settle only
-        after the resources already owned by the Application.
-        """
 
-        async with self._close_lock:
-            self._ensure_open()
-            if any(value is resource for value in self._owned_resources):
-                return
-            if close_after_existing:
-                self._owned_resources.insert(0, resource)
-            else:
-                self._owned_resources.append(resource)
-
-    async def process_provider(
-        self,
-        capability: str,
-        selection: CapabilitySelection | dict,
-        *,
-        dependencies: Mapping[str, Any] | None = None,
-    ) -> Any:
-        """Resolve a pre-registered process plugin using standard config/lifecycle.
-
-        The application owns the provider. Dependencies are trusted host objects,
-        not user configuration. Identical selections reuse a process instance.
-        """
-        selection = CapabilitySelection.model_validate(selection)
-        async with self._assembly_operation():
-            if self._composer is None:
-                raise RuntimeError("process_provider requires a Builder-built application")
-            return await self._composer.process_provider(
-                capability, selection, dependencies=dependencies,
-            )
-
-    async def materialize_agent(
-        self,
-        package: Any,
-        *,
-        runtime: RuntimeConfig | dict | None = None,
-        tenant_id: str | None = None,
-        agent_id: str | None = None,
-        run_id: str | None = None,
-        model: Any | None = None,
-        tool_catalog: Any | None = None,
-        tool_executor: Any | None = None,
-        locked_configs: Mapping[str, Mapping[str, Any]] | None = None,
-        cache_identities: Mapping[str, Any] | None = None,
-    ) -> MaterializedAgentPorts:
-        """Open Agent/Run ports from a new manifest without rebuilding the process root.
-
-        Reuses the Builder process scope and Dispatcher. Caller owns returned
-        Run-scoped ``scope_handles``.
-        """
-
-        async with self._assembly_operation():
-            if self._composer is None:
-                raise RuntimeError(
-                    "SAgentApplication.materialize_agent requires a Builder-built application"
-                )
-            return await self._composer.materialize_agent(
-                package,
-                runtime=RuntimeConfig.model_validate(runtime) if runtime is not None else None,
-                tenant_id=tenant_id,
-                agent_id=agent_id,
-                run_id=run_id,
-                model=model,
-                tool_catalog=tool_catalog,
-                tool_executor=tool_executor,
-                locked_configs=locked_configs,
-                cache_identities=cache_identities,
-            )
-
-    @staticmethod
-    def _execution_scope(resolved, execution):
-        """Own an externally supplied driver using the same shutdown boundary."""
-        agent_id = resolved.entrypoint_agent
-        return SAgentApplication(
-            agents={agent_id: execution.create_agent()}, entrypoint_agent_id=agent_id,
-            scope_handles=(), services={}, adapters={}, composition_hash=execution.spec_hash,
-            resolved_plan=ResolvedApplicationPlan(
-                package_id=resolved.package_id, manifest_hash=resolved.manifest_hash,
-                entrypoint_agent_id=agent_id, providers=(), dependencies=(),
-                composition_hash=execution.spec_hash,
-            ),
-        )
 
     async def load_agent(
         self,
@@ -289,18 +234,17 @@ class SAgentApplication:
         *,
         config_text: str | None = None,
         base_path: str | Path | None = None,
-        execution: HostAgentExecution | None = None,
         subagents: dict[str, LoadedAgent] | None = None,
     ) -> LoadedAgent:
         """Load one Package once; subsequent identical loads reuse its handle."""
         if self._loaded_agents is None:
             raise RuntimeError("load_agent requires build() without a Package")
-        agent = await self._loaded_agents.load(
-            package, config_text=config_text, base_path=base_path, execution=execution, subagents=subagents
-        )
-        if execution is None:
+        async with self._assembly_operation():
+            agent = await self._loaded_agents.load(
+                package, config_text=config_text, base_path=base_path, subagents=subagents
+            )
             await self._loaded_agents.restore_pending()
-        return agent
+            return agent
 
     async def update_agent(
         self,
@@ -309,7 +253,6 @@ class SAgentApplication:
         package: PackageInput | None = None,
         config_text: str | None = None,
         base_path: str | Path | None = None,
-        execution: HostAgentExecution | None = None,
         subagents: dict[str, LoadedAgent] | None = None,
     ) -> LoadedAgent:
         """Atomically publish a new revision without changing existing handles."""
@@ -320,7 +263,6 @@ class SAgentApplication:
             config_text=config_text,
             base_path=base_path,
             previous=agent,
-            execution=execution,
             subagents=subagents,
         )
 
@@ -330,6 +272,48 @@ class SAgentApplication:
             raise RuntimeError("agent_for_run requires build() without a Package")
         async with self._assembly_operation():
             return await self._loaded_agents.for_run(run_id, context)
+
+    async def execution_configuration(self, run_id, context):
+        """Return the authorized Run's durable, accepted execution snapshot."""
+        command = await self.service("session.access").get_start_command(run_id, context)
+        snapshot = command.config.execution_snapshot
+        # Frozen wire models can still contain mutable dictionaries. Never expose
+        # references owned by an in-memory store through an inspection endpoint.
+        return snapshot.model_copy(deep=True) if snapshot is not None else None
+
+    async def run_configuration(self, run_id, context):
+        """Inspect the authorized Run's original Agent and plugin configuration."""
+        from dataclasses import asdict
+        from copy import deepcopy
+
+        agent = await self.agent_for_run(run_id, context)
+        command = await self.service("session.access").get_start_command(run_id, context)
+        definition = agent._resolved.agents.get(command.agent_id) or agent._resolved.agents[agent._resolved.entrypoint_agent]
+        return deepcopy({
+            "run_id": run_id, "parent_run_id": command.parent_run_id,
+            "agent_id": definition.source_package_id or agent.id,
+            "execution_agent_id": command.agent_id, "agent_version": agent.version,
+            "source_agent_id": definition.source_agent_id,
+            "package_version": definition.source_package_version,
+            "package_id": definition.source_package_id or agent.package_id,
+            "graph_package_id": agent.package_id, "composition_hash": agent.composition_hash,
+            "runtime": agent._resolved.runtime.model_dump(mode="json"),
+            "plugins": [asdict(provider) for provider in agent.resolved_plan.providers],
+            "agent": definition.model_dump(mode="json"),
+            "agents": {key: value.model_dump(mode="json") for key, value in agent._resolved.agents.items()},
+            "execution": command.config.execution_snapshot.model_dump(mode="json")
+                if command.config.execution_snapshot is not None else None,
+        })
+
+    async def execution_diagnostics(self, run_id, context):
+        """Last acquired sandbox facts; an absent record does not imply execution."""
+        run = await self.service("session.access").get_run(run_id, context)
+        from copy import deepcopy
+
+        facts = await self.service("derived-state.store").get_derived_state(
+            run.session_id, "execution.binding", run_id,
+        )
+        return deepcopy(facts)
 
     @property
     def loaded_agents(self):
@@ -363,7 +347,7 @@ class SAgentApplication:
         self._ensure_open()
         if self._loaded_agents is not None:
             if self._loaded_agents.root is None:
-                raise RuntimeError("load an Agent before accessing runtime services")
+                return self.service("runtime.kernel")
             return self._loaded_agents.root.runtime
         return self._agents[self._entrypoint_agent_id].runtime
 
@@ -391,7 +375,13 @@ class SAgentApplication:
         """Start a Native run and project every event with explicit loss data."""
 
         self._ensure_open()
-        adapter = self._adapter(interface)
+        if self._loaded_agents is None:
+            adapter = self._adapter(interface)
+        else:
+            self._loaded_agents.implementation(agent)  # Validate this App owns the handle.
+            adapter = agent._application._adapters.get(interface) or self._adapters.get(interface)
+            if adapter is None:
+                raise KeyError(f"interface {interface!r} is not declared for this Agent or App")
         native = await self.entrypoint().run_stream(command, context, agent=agent)
         return InterfaceRunStream(
             native=native,
@@ -409,10 +399,19 @@ class SAgentApplication:
         """Replay canonical RuntimeEvents through one declared protocol adapter."""
 
         self._ensure_open()
-        native = self.agent(agent_id or self.resolved_plan.entrypoint_agent_id).subscribe_events(
-            cursor, context
-        )
-        return self._project(native, self._adapter(interface))
+        if self._loaded_agents is None:
+            native = self.agent(agent_id or self.resolved_plan.entrypoint_agent_id).subscribe_events(cursor, context)
+            return self._project(native, self._adapter(interface))
+
+        async def replay():
+            agent = await self.agent_for_run(cursor.run_id, context)
+            implementation = self._loaded_agents.implementation(agent)
+            adapter = agent._application._adapters.get(interface) or self._adapters.get(interface)
+            if adapter is None:
+                raise KeyError(f"interface {interface!r} is not declared for this Run's Agent or App")
+            async for event in self._project(implementation.subscribe_events(cursor, context), adapter):
+                yield event
+        return replay()
 
     async def close(self) -> None:
         async with self._close_lock:

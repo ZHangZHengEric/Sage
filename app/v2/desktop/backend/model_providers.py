@@ -154,7 +154,6 @@ class DesktopModelProviders:
             provider_instance_id=provider.id,
             capability_profile=plugin_profile,
         )
-        model = self.budget.wrap(model)
         self._providers[cache_key] = model
         return model
 

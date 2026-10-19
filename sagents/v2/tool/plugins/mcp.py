@@ -19,7 +19,7 @@ from urllib.parse import urlsplit
 
 from jsonschema import Draft202012Validator
 from jsonschema.exceptions import SchemaError, ValidationError
-from pydantic import Field, SecretStr, model_validator
+from pydantic import Field, SecretStr, field_validator, model_validator
 
 from sagents.v2.contracts.common import StrictModel
 from sagents.v2.contracts.errors import (
@@ -56,13 +56,19 @@ class McpServerConfig(StrictModel):
     env: dict[str, str] = Field(default_factory=dict)
     timeout_seconds: float = Field(default=30, gt=0)
     # Connection/initialization and discovery are bounded independently of work.
-    # Long-running tools wait for their result unless the host opts into a deadline.
-    call_timeout_seconds: float | None = Field(default=None, gt=0)
+    # Legacy null selections use the bounded default too. Long tools may opt
+    # into a larger finite deadline; timeout recovery belongs to the Agent.
+    call_timeout_seconds: float = Field(default=7200, gt=0, allow_inf_nan=False)
     required: bool = True
     max_tools: int = Field(default=256, gt=0, le=10_000)
     max_pages: int = Field(default=64, gt=0, le=1_024)
     max_schema_bytes: int = Field(default=262_144, gt=0, le=16_777_216)
     max_result_bytes: int = Field(default=4_194_304, gt=0, le=67_108_864)
+
+    @field_validator("call_timeout_seconds", mode="before")
+    @classmethod
+    def default_call_timeout(cls, value):
+        return 7200 if value is None else value
 
     @model_validator(mode="after")
     def validate_transport(self) -> "McpServerConfig":

@@ -59,6 +59,7 @@ from sagents.v2.contracts.errors import ErrorCategory, RuntimeErrorInfo
 from sagents.v2.contracts.interactions import InteractionRequest, InteractionType
 from sagents.v2.contracts.principals import ActorRef, PrincipalType, RequestContext
 from sagents.v2.contracts.run_state import RunState
+from sagents.v2.contracts.commands import StartRun
 from sagents.v2.agent.policy import (
     ApprovalMatcher,
     ApprovalStrategy,
@@ -1692,13 +1693,15 @@ async def test_binding_forwards_the_request_lifecycle(tmp_path):
             self.calls.append((run_id, context))
 
     provider = LocalWorkspaceBindingProvider(tmp_path)
-    plain = await provider.acquire(
-        ExecutionBindingRequest(run_id="run_1", agent_id="sage.cli.coder", context=CONTEXT)
-    )
+    admitted = await provider.accept_configuration(StartRun(agent_id="sage.cli.coder", input=(),
+        resolved_spec_hash="sha256:test", idempotency_key="binding"), context=CONTEXT)
+    plain = await provider.acquire(ExecutionBindingRequest(run_id="run_1", agent_id="sage.cli.coder", context=CONTEXT,
+        configuration=admitted.config.execution_snapshot))
     lifecycle = RecordingLifecycle()
     coordinated = await provider.acquire(
         ExecutionBindingRequest(
-            run_id="run_2", agent_id="sage.cli.coder", context=CONTEXT, lifecycle=lifecycle
+            run_id="run_2", agent_id="sage.cli.coder", context=CONTEXT, lifecycle=lifecycle,
+            configuration=admitted.config.execution_snapshot
         )
     )
     try:

@@ -1,6 +1,7 @@
 """Real Goal/Plan Builder runs with a public host continuation plugin."""
 
 from __future__ import annotations
+from tests.sagents.v2.sdk_fixture import build_registered_app
 
 import asyncio
 import json
@@ -11,7 +12,6 @@ import sys
 
 import pytest
 
-from sagents.v2 import SAgentBuilder
 from sagents.v2.agent.policy import (
     ApprovalStrategy,
     ContinuationAction,
@@ -227,16 +227,7 @@ async def open_app(root, model, *, premature_completion=False):
             return await super().decide(context)
 
     app = await (
-        SAgentBuilder()
-        .with_models(TEST_MODELS)
-        .with_defaults(session_root=root / "sessions")
-        .with_session_store(store)
-        .with_owned_resources(store)
-        .with_model_provider(model)
-        .with_execution_binding_provider(bindings)
-        .with_tool_policy(Policy(approval_strategy=ApprovalStrategy.AUTO_APPROVE))
-        .register(registration)
-        .build(runtime=runtime)
+        build_registered_app(root / 'sessions', models=TEST_MODELS, model=model, runtime=runtime, providers={'session.store': store, 'execution.binding': bindings, 'agent.tool-policy': Policy(approval_strategy=ApprovalStrategy.AUTO_APPROVE)}, resources=(store,), registrations=(registration,))
     )
     package = BuiltinPackageFactory.create(
         "assistant", package_id="test.completion-gates"

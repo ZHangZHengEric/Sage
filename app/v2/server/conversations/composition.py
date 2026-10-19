@@ -90,7 +90,10 @@ def load_composition(command: StartRun, *, user_id: str) -> RunComposition | Non
         call_depth = _depth(raw.get("call_depth"))
     except (SageV2Error, TypeError, ValueError) as exc:
         raise _invalid(str(exc)) from exc
-    if agent.id != command.agent_id:
+    expected_ids = {agent.id, agent.package.manifest.metadata.id}
+    if raw.get("package"):
+        expected_ids.add(raw["package"]["manifest"]["metadata"]["id"])
+    if command.agent_id not in expected_ids:
         raise _invalid("run composition does not match the Run agent")
     enabled = command.config.enabled_skills
     if enabled is None or tuple(record.name for record in skills) != tuple(enabled):

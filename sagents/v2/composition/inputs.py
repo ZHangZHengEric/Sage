@@ -25,6 +25,10 @@ def runtime_input(
         value = load_unique_yaml(config_text)
         if not isinstance(value, dict):
             raise ValueError("runtime config must be a mapping")
+    if isinstance(value, RuntimeConfig):
+        # model_copy(update=...) deliberately bypasses Pydantic validation.
+        # Re-parse its contents so callers cannot bypass parameter contracts.
+        value = value.model_dump(mode="python")
     return (
         RuntimeConfig.model_validate(value).model_copy(deep=True)
         if value is not None

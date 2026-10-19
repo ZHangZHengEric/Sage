@@ -90,6 +90,8 @@ def _supported_locked_config(
 ) -> dict[str, Any]:
     """Inject host-owned values only when the selected plugin declares them."""
 
+    if not extensions.is_trusted_builtin(plugin_id):
+        return {}
     schema = extensions.get(plugin_id).descriptor.config_schema or {}
     if schema.get("additionalProperties", True) is not False:
         return dict(locked_config)
@@ -99,7 +101,7 @@ def _supported_locked_config(
 
 def _selection(runtime: RuntimeConfig, capability: str) -> CapabilitySelection | None:
     values = runtime.selections(capability)
-    if len(values) > 1:
+    if len(values) > 1 and capability != "tool.catalog":
         raise ValueError(
             f"capability {capability!r} does not allow multiple selections here"
         )

@@ -21,7 +21,8 @@ from sagents.v2.package.manifest import SageManifest, SageManifestLoader
 manifest = SageManifestLoader().loads(yaml_text)
 # 也可以校验 Python 字典：
 # manifest = SageManifest.model_validate(config_dict)
-app = await SAgentBuilder().with_defaults(session_root="runtime").build(manifest)
+app = await SAgentBuilder().build(runtime=manifest.runtime, models=model_config)
+agent = await app.load_agent(manifest)
 ```
 
 `build()` 也接受 `ResolvedSageManifest`，或指向名为 `sage.yaml` 文件的路径。普通字符串按路径处理。`loads()` 不解析相对指令文件；应使用内联指令，或改用文件加载器。
@@ -30,7 +31,7 @@ app = await SAgentBuilder().with_defaults(session_root="runtime").build(manifest
 
 1. 获取 `app.entrypoint()`。
 2. 使用宿主认证后的 `ActorRef` 创建 `RequestContext`。
-3. 通过 `run_stream(command, context)` 提交 `StartRun`。
+3. 通过 `run_stream(command, context, agent=agent)` 提交 `StartRun`。
 4. 消费 `stream.events`；`await stream.wait()` 返回带 `.state` 的 `RunSnapshot`。
 5. 在 `finally` 中关闭 `app`。
 

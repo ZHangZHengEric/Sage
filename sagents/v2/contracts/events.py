@@ -424,6 +424,8 @@ EVENT_CATALOG.update(
         (
             "flow.started",
             "flow.node.started",
+            "flow.node.deferred",
+            "flow.node.result_received",
             "flow.node.suspended",
             "flow.node.resumed",
             "flow.node.completed",

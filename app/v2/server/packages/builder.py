@@ -8,18 +8,12 @@ from dataclasses import replace
 
 from app.v2.server.catalog.records import enabled_a2a_agents, enabled_mcp_servers
 from app.v2.server.config.manifest import server_v2_manifest
-from app.v2.server.conversations.composition import selected_mcp_servers, selected_a2a_agents
 from app.v2.server.runtime.loop import (
     open_model_lease,
     package_model_record,
-    prepare_tenant_binding,
 )
-from app.v2.server.runtime.official import provision_workspace, agent_network_policy, BoundWorkspaceHandle
-from sagents.v2 import SAgentBuilder
 from sagents.v2.contracts.errors import ErrorCategory, RuntimeErrorInfo, SageV2Error
-from sagents.v2.package.manifest.runtime import CapabilitySelection, RuntimeConfig
-from sagents.v2.package.manifest.models import ModelRoute
-from sagents.v2.runtime.execution import RunExecutionBinding
+from sagents.v2.package.manifest.runtime import CapabilitySelection
 
 
 class CatalogPackageModel:
@@ -82,273 +76,67 @@ class CatalogPackageModel:
                 await stream.aclose()
 
 
-class PackageBindings:
-    def __init__(self, paths, execution, user_id, *, agents, settings, command=None, catalog=None, root_agent_id=None):
-        self.paths, self.execution, self.user_id = paths, execution, user_id
-        self.agents, self.settings = agents, settings
-        self.command, self.catalog = command, catalog
-        self.root_agent_id = root_agent_id
-        self.workspaces = {}
-        self.handles = {}
-
-    def workspace_for_run(self, run_id):
-        return self.workspaces[run_id][0]
-
-    async def acquire(self, request):
-        if (
-            request.context.actor.principal_id != self.user_id
-            or request.context.actor.tenant_id != self.user_id
-        ):
-            raise PermissionError("execution identity does not match package owner")
-        from app.v2.server.storage.workspaces import workspace_user
-        owner = workspace_user(self.command, self.user_id) if self.command else self.user_id
-        policy = getattr(request.workspace_policy, "value", request.workspace_policy)
-        if policy == "private_child":
-            workspace = self.paths.workspace_dir(
-                owner, request.agent_id, private_run_id=request.run_id
-            )
-        elif policy == "shared_parent":
-            workspace = self.paths.workspace_dir(owner, request.agent_id)
-        else:
-            raise ValueError("unsupported workspace policy")
-        definition = self.agents.get(request.agent_id)
-        catalog_id = request.agent_id
-        if definition is None:
-            root = self.agents.get(self.root_agent_id)
-            if root is None or root.mode != "fibre" or request.parent_run_id is None:
-                raise PermissionError("execution Agent is not in the admitted graph")
-            # The runtime narrows spawned experts to their Fibre parent's grants.
-            definition, catalog_id = root, self.root_agent_id
-        # Resolve the live ceiling on every acquisition, including resumed Runs.
-        live = None
-        if self.command is not None:
-            from app.v2.server.runtime.policy import EXECUTION_METADATA_KEY
-            grants = self.command.config.metadata.get(EXECUTION_METADATA_KEY, {}).get("agents", {})
-            catalog_id = grants.get(catalog_id, {}).get("agent_id", catalog_id)
-            catalog = await self.catalog.get(self.user_id)
-            live_agent = next((item for item in catalog.agents if item.id == catalog_id), None)
-            from sagents.v2.package.manifest.agents import AgentSandboxConfig
-            live = live_agent.sandbox if live_agent else AgentSandboxConfig()
-        network = agent_network_policy(definition.sandbox, self.settings, live=live)
-        handle = await provision_workspace(
-            self.execution, workspace, request.context, run_id=request.run_id,
-            network=network,
-        )
-        token = object()
-        self.workspaces[request.run_id] = (workspace, token)
-        self.handles[request.agent_id] = handle
-        binding = RunExecutionBinding(
-            run_id=request.run_id,
-            agent_id=request.agent_id,
-            parent_run_id=request.parent_run_id,
-            workspace_root="/workspace",
-            host_workspace=str(workspace),
-            workspace_policy=request.workspace_policy,
-            sandbox=BoundWorkspaceHandle(handle, self.execution.sandbox_provider),
-            grant_issuer=self.execution.sandbox_grant_issuer,
-            lifecycle=request.lifecycle,
-        )
-        # The runtime owns the binding; discard the lookup when it is released.
-        import weakref
-        def forget():
-            if self.workspaces.get(request.run_id, (None, None))[1] is token:
-                self.workspaces.pop(request.run_id, None)
-        weakref.finalize(binding, forget)
-        return binding
-
-
-class PackageBuilder(SAgentBuilder):
-    def __init__(self, settings, run_quota, root, *, application=None):
-        super().__init__()
-        self.settings, self.run_quota, self.root = settings, run_quota, root
-        self.host_application = application
-        self.external_tool_providers = []
-
-    async def build(self, *, runtime=None, runtime_config_text=None, tenant_id=None, models=None, models_config_text=None):
-        from sagents.v2.composition.inputs import runtime_input
-        from sagents.v2.package.manifest.runtime import merge_capability_selections
-        from sagents.v2.runtime.execution.scheduler.plugins.ephemeral import InMemoryScheduler
-
-        selected = runtime_input(runtime, config_text=runtime_config_text) or RuntimeConfig()
-        settings = replace(self.settings, mysql_url=None) if self.root.name.startswith("validate-") else self.settings
-        base = server_v2_manifest(settings).runtime
-        capabilities = merge_capability_selections(base.capabilities, selected.capabilities)
-        if self.host_application is None and "session.store" in capabilities:
-            selection = capabilities["session.store"]
-            suffix = hashlib.sha256(str(self.root).encode()).hexdigest()[:24]
-            capabilities["session.store"] = selection.model_copy(update={
-                "config": {**selection.config, "table_prefix": f"managed_{suffix}"}
-            })
-        capabilities.setdefault("tool.catalog", CapabilitySelection(plugin="sage.tool.official"))
-        effective = base.model_copy(update={"capabilities": capabilities,
-            "plugin_trust_policy": selected.plugin_trust_policy})
-        if self.host_application is not None:
-            self.with_shared_runtime(self.host_application)
-        else:
-            scheduler = InMemoryScheduler(quota_group=self.run_quota,
-                max_pending_items=self.settings.max_pending_runs)
-            self.with_scheduler(scheduler)
-            self.with_owned_resources(scheduler)
-        application = await super().build(runtime=effective, tenant_id=tenant_id, models=models, models_config_text=models_config_text)
-        async def command_reader(run_id):
-            return await application.runtime.session_store.get_start_command(run_id)
-        for provider in self.external_tool_providers:
-            provider.bind(command_reader)
-        return application
-
-
-
 class ServerPackageBuilderFactory:
-    def __init__(
-        self,
-        *,
-        settings,
-        paths,
-        catalog,
-        skills,
-        execution,
-        mcp_plugins,
-        a2a_plugins,
-        extensions,
-        run_quota,
-        policy,
-        log_sink,
-        diagnostic_sink,
-    ):
-        self.settings = settings
-        self.paths = paths
-        self.catalog = catalog
-        self.skills = skills
-        self.execution = execution
-        self.mcp_plugins = mcp_plugins
-        self.a2a_plugins = a2a_plugins
-        self.extensions = extensions
-        self.run_quota = run_quota
-        self.policy = policy
-        self.log_sink = log_sink
-        self.diagnostic_sink = diagnostic_sink
+    """Describe registrations and serializable choices for managed Apps."""
+    def __init__(self, *, host, settings, paths, catalog, skills, execution,
+                 mcp_plugins, a2a_plugins, extensions, run_quota, policy, log_sink, diagnostic_sink):
+        self.host, self.settings, self.paths = host, settings, paths
+        self.catalog, self.skills, self.execution = catalog, skills, execution
+        self.extensions, self.run_quota, self.policy = extensions, run_quota, policy
+        self.log_sink, self.diagnostic_sink = log_sink, diagnostic_sink
 
-    async def build(self, bundle, root, context, management, *, catalog_run=None):
+    async def build(self, bundle, root, context, management):
         await self.policy.authorize("restore", bundle, context, management)
-        from app.v2.server.packages.tool_policy import server_tool_policy
-
-        user_id = context.actor.principal_id
-        catalog = (await self.catalog.get(user_id)).model_copy(deep=True)
-        command = catalog_run[1] if catalog_run is not None else None
-        service = catalog_run[0] if catalog_run is not None else None
-        from sagents.v2.agent.management.loading import bundle_agent_definitions
-        bindings = PackageBindings(
-            self.paths, self.execution, user_id,
-            agents=bundle_agent_definitions(bundle), settings=self.settings,
-            command=command, catalog=self.catalog,
-            root_agent_id=bundle.manifest.entrypoint.agent,
+        from sagents.v2 import ApplicationConfiguration
+        from app.v2.server.runtime.sdk_plugins import (
+            server_registrations, service_registration, service_selection,
+            run_selections, execution_selection, select_run_capabilities, SCHEDULER_CONFIG_SCHEMA,
         )
-        builder = (
-            PackageBuilder(self.settings, self.run_quota, root,
-                           application=service.application if service else None)
-            .with_defaults(session_root=root)
-            .with_log_sink(self.log_sink)
-            .with_diagnostic_sink(self.diagnostic_sink)
-            .with_model_budget(self.execution.model_budget)
-            .with_model_provider_factory(
-                lambda resolved, agent_id: CatalogPackageModel(
-                    self.catalog,
-                    self.execution,
-                    user_id,
-                    {binding: ModelRoute.model_validate(resolved.model_routes[route])
-                     for binding, route in resolved.agents[agent_id].model_bindings.items()},
-                    snapshot=catalog,
-                )
-            )
-            .with_execution_binding_provider(
-                bindings
-            )
-            .with_agent_management(management)
-            .with_tool_policy(server_tool_policy(management))
-        )
-        for registration in self.extensions:
-            builder.register(registration)
         from app.v2.server.catalog.model_config import app_models
-        frozen_models = command.config.metadata.get("server_v2.models") if command is not None else None
-        builder.with_models(frozen_models or app_models(catalog))
-        frozen = catalog_run[2] if catalog_run is not None else None
-        records = frozen.skills if frozen is not None else tuple(await self.skills.list_visible(user_id=user_id, role="user"))
-        binding = prepare_tenant_binding(
-            self.paths,
-            self.mcp_plugins,
-            self.a2a_plugins,
-            user_id,
-            records,
-            selected_mcp_servers(catalog, frozen.mcp_servers) if frozen else enabled_mcp_servers(catalog),
-            selected_a2a_agents(catalog, frozen.a2a_agents) if frozen else enabled_a2a_agents(catalog),
-            agent_id=bundle.manifest.entrypoint.agent,
-            workspace_for_run=bindings.workspace_for_run,
-            call_depth=frozen.call_depth if frozen else 0,
-        )
-        builder.with_skill_provider(
-            binding.provider, binding.provider, binding.workspace
-        )
-        from app.v2.server.runtime.integrations.external_tools import ScopedExternalTools
-        root_definition = bundle.manifest.agents[bundle.manifest.entrypoint.agent]
-        for tool in binding.external:
-            scoped = ScopedExternalTools(tool, bindings.agents,
-                dynamic_tools=root_definition.tools if root_definition.mode == "fibre" else ())
-            builder.external_tool_providers.append(scoped)
-            builder.with_additional_tools(scoped, scoped)
-        if catalog_run is not None:
-            from app.v2.server.runtime.policy import (
-                EXECUTION_METADATA_KEY, ExecutionPolicy, frozen_execution,
-                intersect_policies, live_execution_policy,
-            )
-
-            key_id, admitted_policy = frozen_execution(command)
-            async def current_policy():
-                return await live_execution_policy(command, users=service.users, keys=service.keys,
-                    catalog=self.catalog, settings=self.settings, user_id=user_id)
-            member_grants = command.config.metadata.get(EXECUTION_METADATA_KEY, {}).get("agents", {})
-
-            async def member_policy(run_id):
-                selected = await service.application.runtime.session_store.get_start_command(run_id)
-                # Dynamically spawned Fibre experts inherit their parent's ceiling.
-                while selected.agent_id not in member_grants and selected.parent_run_id:
-                    selected = await service.application.runtime.session_store.get_start_command(selected.parent_run_id)
-                grant = member_grants.get(selected.agent_id)
-                if grant is None:
-                    return None
-                live_catalog = await self.catalog.get(user_id)
-                member = next((item for item in live_catalog.agents if item.id == grant["agent_id"]), None)
-                return intersect_policies(ExecutionPolicy.model_validate(grant["policy"]), member.execution_policy) if member else None
-
-            builder.with_tool_policy(server_tool_policy(management,
-                execution_policy=admitted_policy, current_policy=current_policy,
-                run_policy=member_policy if member_grants else None,
-                machine_invocation=key_id is not None))
-            if (command.invocation_mode != "plan" and key_id is None
-                    and command.parent_run_id is None and admitted_policy.shell != "deny"):
-                import json
-                from sagents.v2.agent.self_configuration import SelfConfigurationService, SqliteSelfConfigurationStore
-                from sagents.v2.tool.plugins.sandbox_mcp import SandboxMcpSessionFactory
-                from app.v2.server.storage.workspaces import workspace_user
-
-                async def authorize_self_configuration(request, request_context):
-                    if (request_context.actor.principal_id != user_id
-                            or request_context.actor.tenant_id != user_id
-                            or request_context.actor.delegated_by
-                            or await service.users.get_by_id(user_id) is None):
-                        raise PermissionError("Only the authenticated owner can configure this Agent")
-                    live = await current_policy()
-                    if live is None or live.shell == "deny":
-                        raise PermissionError("The live execution grant does not permit capability changes")
-
-                def self_configuration(agent_id):
-                    if agent_id != command.agent_id:
-                        return None
-                    return SelfConfigurationService(
-                        store=SqliteSelfConfigurationStore(self.paths.runtime_root / "self-configuration.sqlite3"),
-                        owner=json.dumps(["server", user_id, agent_id]),
-                        workspace_root=self.paths.workspace_dir(workspace_user(command, user_id), agent_id),
-                        workspace_alias="/workspace", authorize=authorize_self_configuration,
-                        mcp_session_factory=SandboxMcpSessionFactory(bindings.handles[agent_id], self.execution.sandbox_grant_issuer),
-                    )
-                builder.with_self_configuration(self_configuration)
-        return builder
+        from app.v2.server.conversations.composition import composition_metadata
+        from sagents.v2.runtime.execution.scheduler.plugins.ephemeral import InMemoryScheduler
+        user = context.actor.principal_id
+        catalog = (await self.catalog.get(user)).model_copy(deep=True)
+        records = tuple(await self.skills.list_visible(user_id=user, role="user"))
+        from app.v2.server.catalog.records import AgentRecord
+        root_id = bundle.manifest.entrypoint.agent
+        agent = AgentRecord(id=root_id, name=bundle.manifest.agents[root_id].name, package=bundle)
+        mcp, a2a = enabled_mcp_servers(catalog), enabled_a2a_agents(catalog)
+        composition = composition_metadata(agent=agent, skills=records,
+            mcp_servers=tuple(item.name for item in mcp), a2a_agents=tuple(item.name for item in a2a), package=bundle)["server_v2.composition"]
+        choices = run_selections(owner=user, composition=composition, mcp=mcp, a2a=a2a)
+        choices.pop("agent.self-configuration", None)
+        choices["execution.binding"] = execution_selection(self.host, owner=user, agent_id=root_id,
+            command=None, sandbox=bundle.manifest.agents[root_id].sandbox, settings=self.settings)
+        registrations = [*self.extensions, *server_registrations(self.host)]
+        scheduler = InMemoryScheduler(quota_group=self.run_quota, max_pending_items=self.settings.max_pending_runs)
+        for capability, value, ownership in (
+            ("execution.scheduler", scheduler, "owned"),
+            ("execution.model-budget", self.execution.model_budget, "borrowed"),
+            ("server.model-clients", self.execution.model_pool, "borrowed"),
+            ("observability.log-sink", self.log_sink, "borrowed"),
+            ("observability.diagnostic-sink", self.diagnostic_sink, "borrowed"),
+        ):
+            scheduler_port = capability == "execution.scheduler"
+            registrations.append(service_registration(capability, value, ownership=ownership,
+                dependencies=("server.model-clients",) if scheduler_port else (),
+                config_schema=SCHEDULER_CONFIG_SCHEMA if scheduler_port else None))
+            choices[capability] = service_selection(capability, config={
+                "max_concurrent_runs": self.settings.max_concurrent_runs,
+                "max_concurrent_runs_per_tenant": self.settings.max_concurrent_runs_per_user,
+                "max_pending_items": self.settings.max_pending_runs,
+            } if scheduler_port else None)
+        settings = replace(self.settings, mysql_url=None) if root.name.startswith("validate-") else self.settings
+        runtime = server_v2_manifest(settings).runtime
+        capabilities = select_run_capabilities(runtime.capabilities, bundle.manifest.runtime, choices)
+        if capabilities.get("session.store") and settings.mysql_url:
+            selection = capabilities["session.store"]
+            suffix = hashlib.sha256(str(root).encode()).hexdigest()[:24]
+            capabilities["session.store"] = selection.model_copy(update={"config": {
+                **selection.config, "table_prefix": f"managed_{suffix}",
+            }})
+        else:
+            capabilities["session.store"] = CapabilitySelection(plugin="sage.session.filesystem", config={"root": str(root)})
+        runtime = runtime.model_copy(update={"capabilities": capabilities, "state_root": str(root),
+            "plugin_trust_policy": bundle.manifest.runtime.plugin_trust_policy})
+        return ApplicationConfiguration(tuple(registrations), runtime, app_models(catalog))

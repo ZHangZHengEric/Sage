@@ -63,7 +63,7 @@ async def provision(
 ):
     issuer = SandboxGrantIssuer(b"local-provider-test-key-32-bytes!!")
     provider = LocalWorkspaceSandboxProvider(
-        issuer.verification_key, read_paths=read_paths
+        issuer.verification_key, read_paths=(*read_paths, sys.prefix)
     )
     handle = await provider.provision(
         ResolvedSandboxSpec(

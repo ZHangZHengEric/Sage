@@ -139,7 +139,14 @@ def create_app(
         raise ValueError("Desktop sidecar auth token must not be empty")
     runtime_service = service or DesktopV2Service()
     terminals = terminal_manager or TerminalSessionManager()
-    client_leases = SidecarClientLeases(ttl_seconds=client_lease_ttl_seconds, keep_alive=lambda: getattr(runtime_service, "rsi_active", False))
+    client_leases = SidecarClientLeases(
+        ttl_seconds=client_lease_ttl_seconds,
+        keep_alive=lambda: (
+            runtime_service.has_background_work()
+            if hasattr(runtime_service, "has_background_work")
+            else getattr(runtime_service, "rsi_active", False)
+        ),
+    )
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI):

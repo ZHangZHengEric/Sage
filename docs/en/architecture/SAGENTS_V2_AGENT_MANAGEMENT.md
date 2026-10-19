@@ -29,7 +29,7 @@ Configuration and file contents determine an immutable ref. Runs bind an exact r
 
 ## Management tools
 
-Inject with `SAgentBuilder.with_agent_management(service)` and explicitly select tools in the Agent's `tools`. Injection alone does not authorize every Agent.
+Register an `agent.management` factory with `builder.register(registration)` and select it through runtime and explicitly select tools in the Agent's `tools`. Injection alone does not authorize every Agent.
 
 | Tool | Purpose |
 | --- | --- |
@@ -61,9 +61,9 @@ service = AgentManagementService(
 
 This is an integration fragment; the host implements the callbacks. Async `authorize(action, bundle, context)` returns None on success and raises on denial. It checks models, credential references, plugins, tools, budgets, paths, and external connections before loading plugins and again for execution, control, and activation. Authorization need not ask a human each time; ToolPolicy still selects interaction behavior.
 
-`builder_factory(bundle, session_root, context)` returns a new Builder synchronously or asynchronously. Configure the persistent session_root partitioned by user/package/Agent, inject models, memory, tools, and real Run sandbox bindings, and register admitted plugins. Skill integration uses `with_skill_provider(catalog, source, workspace)` and requires Agent Skill selection, load_skill authorization, and caller scope `skill.load`. Explicitly inject management and its tools when recursive Agent creation is allowed.
+`builder_factory(bundle, session_root, context)` returns an `ApplicationConfiguration` containing registrations, serializable runtime and App model configuration. The service constructs the real Builder, registers these implementations, builds the App and loads the package. Skill uses registered catalog/source/workspace ports and still requires the caller’s authorization.
 
-The service calls `builder.build(..., agent_id=...)`. Do not share mutable Builders or clients with unclear ownership. Validation composes in a separate temporary directory. Failed cleanup retains the Application and directory, enters draining, and rejects new work so close can retry cleanup.
+Management uses `build(runtime=..., models=...)` followed by `load_agent(package, subagents=...)`. Validation has its own temporary state root and rollback lifecycle; hosts do not return a Builder subclass or execution component.
 
 The host owns and closes the service; a child Application must not close it. `max_applications` limits resident instances plus build reservations. `max_concurrent_builds` defaults to 4; validation holds its slot until resources close. At capacity, the default attempts to reclaim instances idle for 300 seconds that have durable recovery and no nonterminal work. Set `auto_release_idle_seconds=None` to disable this. There is no periodic background eviction. See [resource management](SAGENTS_V2_RESOURCE_MANAGEMENT.md).
 
@@ -71,7 +71,7 @@ The host owns and closes the service; a child Application must not close it. `ma
 
 Standard [ExtensionRegistration](https://github.com/ZHangZHengEric/Sage/blob/main/sagents/v2/runtime/extensions/contracts.py) declares ID, version, API, configuration Schema, dependencies, scope, factory, and lifecycle hooks. Discover explicitly through `sage.extensions` or register with `builder.register(registration)`. Missing declarations, version conflicts, invalid configuration, and unbound nodes fail explicitly.
 
-Select standard nodes through `runtime.capabilities["flow.node"]` or bind host `RunnableNode` objects with `with_flow_tool_nodes`. The interface is `RunnableNode.run(FlowNodeContext) -> FlowNodeResult`. Builder supports process / tenant / agent-scoped nodes; Run scope requires a dedicated driver. Agent `entrypoint.type: flow` connects to FlowRuntime.
+Register a `flow.node` capability implementing `RunnableNode.run(FlowNodeContext) -> FlowNodeResult`, and select its named offer in runtime. Supported scopes are resolved and validated by the standard mechanism, including actual Run-scoped creation. No host Driver is required.
 
 Flow agent nodes use Native child Runs and pass earlier outputs as later task data; use subflow for nested flows. Builder rejects recursive Flow agents and unimplemented custom loops. Interaction nodes can select user_input and default to approval, with distinct authorization boundaries. Completed output is stored in `flow.completed.output` and returned as `flow_results` by management.
 

@@ -25,7 +25,7 @@ from sagents.v2.package.manifest import SageManifest, SageManifestLoader
 
 manifest = SageManifestLoader().loads(yaml_text)
 # Alternative: manifest = SageManifest.model_validate(config_dict)
-# Then: application = await builder.build(manifest)
+# Then: application = await builder.build(runtime=manifest.runtime, models=model_config)
 ```
 
 `loads()` validates YAML and rejects duplicate keys. `load("path/to/sage.yaml")` additionally resolves instruction files inside the package directory. Passing a plain string to `build()` selects file loading. Use inline instructions for in-memory packages.

@@ -95,6 +95,15 @@ def test_builtin_inventory_contains_only_real_factories():
         "sage.scheduler.filesystem",
         "sage.workspace.initializer.bare",
         "sage.workspace.initializer.claw",
+        "sage.execution.binding.local-workspace",
+        "sage.execution.binding.ephemeral",
+        "sage.execution.environment",
+        "sage.execution.tool-runtime",
+        "sage.agent.tool-policy.default",
+        "sage.agent.approval-memory.session",
+        "sage.derived-state.session",
+        "sage.derived-state.ephemeral",
+        "sage.model.concurrency-budget",
     } == set(inventory)
     assert all(callable(value.factory) for value in registry.registrations())
     assert (

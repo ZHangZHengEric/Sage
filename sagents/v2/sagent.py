@@ -114,7 +114,17 @@ class RecoveryAgent(Protocol):
 class SAgent:
     """High-level v2 facade with a Native event stream, never MessageChunk batches."""
 
-    def __init__(
+    def __init__(self, *args, **kwargs):
+        raise TypeError("SAgent is created by SAgentBuilder; use build(), load_agent() and entrypoint()")
+
+    @classmethod
+    def _from_composition(cls, **ports):
+        """Internal SDK assembly; host integrations use SAgentBuilder."""
+        instance = cls.__new__(cls)
+        instance._initialize(**ports)
+        return instance
+
+    def _initialize(
         self,
         *,
         runtime: RuntimePort,
@@ -126,7 +136,7 @@ class SAgent:
         session_access: AuthorizedSessionAccess | None = None,
     ) -> None:
         self.runtime = runtime
-        self.driver_factory = driver_factory
+        self._driver_factory = driver_factory
         self.memory_service = memory_service
         self.memory_scope = dict(memory_scope or {})
         self._owned_resources = list(owned_resources)
@@ -139,6 +149,7 @@ class SAgent:
         self._closed = False
         self._closing = False
 
+
     async def drive_admitted_run(self, run_id: str, context: RequestContext, *, resume=False):
         """Drive an existing Run under its host dispatcher, using this Package.
 
@@ -147,7 +158,7 @@ class SAgent:
         """
         self._ensure_open()
         await self._session_access.get_run(run_id, context)
-        driver = self.driver_factory(run_id)
+        driver = self._driver_factory(run_id)
         self._drivers[run_id] = driver
         return await self._drive(driver, run_id, context, resume=resume)
 
@@ -476,7 +487,7 @@ class SAgent:
         driver = self._drivers.get(run_id)
         if driver is None:
             try:
-                driver = self.driver_factory(run_id)
+                driver = self._driver_factory(run_id)
             except Exception as exc:
                 return await self._fail_driver_crash(run_id, exc, context)
             self._drivers[run_id] = driver
@@ -487,7 +498,7 @@ class SAgent:
 
         driver = self._drivers.get(run_id)
         if driver is None:
-            driver = self.driver_factory(run_id)
+            driver = self._driver_factory(run_id)
             self._drivers[run_id] = driver
         recover = getattr(driver, "recover_interrupted", None)
         if recover is None:
@@ -594,6 +605,7 @@ class SAgent:
         require_execution_ownership()
         if is_lease_loss(exc):
             raise exc
+        LOGGER.exception("agent.execution.failed", "Run execution failed", exc, run_id=run_id)
         error = (
             exc.info
             if isinstance(exc, SageV2Error)

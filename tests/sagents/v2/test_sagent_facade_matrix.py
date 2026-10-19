@@ -61,7 +61,7 @@ async def test_run_stream_returns_handle_and_individual_canonical_events_to_term
             tool_executor=InMemoryToolExecutor({}, {}),
         )
 
-    stream = await SAgent(runtime=runtime, driver_factory=factory).run_stream(
+    stream = await SAgent._from_composition(runtime=runtime, driver_factory=factory).run_stream(
         command(), CONTEXT
     )
     events = [event async for event in stream.events]
@@ -118,7 +118,7 @@ async def test_one_application_runs_one_hundred_conversations_asynchronously():
         async def resume(self, run_id, context):
             raise AssertionError("not used")
 
-    agent = SAgent(
+    agent = SAgent._from_composition(
         runtime=runtime,
         driver_factory=lambda run_id: Driver(),
         dispatcher=dispatcher,
@@ -171,7 +171,7 @@ async def test_detach_does_not_cancel_or_suspend_the_run():
         async def resume(self, run_id, context):
             raise AssertionError("not used")
 
-    stream = await SAgent(
+    stream = await SAgent._from_composition(
         runtime=runtime, driver_factory=lambda run_id: Driver()
     ).run_stream(command(), CONTEXT)
     first = await anext(stream.events)
@@ -195,7 +195,7 @@ async def test_unhandled_driver_crash_becomes_typed_terminal_failure():
         async def resume(self, run_id, context):
             raise RuntimeError("boom")
 
-    stream = await SAgent(
+    stream = await SAgent._from_composition(
         runtime=runtime, driver_factory=lambda run_id: CrashingDriver()
     ).run_stream(command(), CONTEXT)
     events = [event async for event in stream.events]
@@ -215,7 +215,7 @@ async def test_scheduler_submit_failure_is_a_durable_typed_run_failure():
             del agent, handle, context, resume
             raise RuntimeError("queue unavailable")
 
-    agent = SAgent(
+    agent = SAgent._from_composition(
         runtime=runtime,
         driver_factory=lambda run_id: None,
         dispatcher=FailingDispatcher(),
@@ -253,7 +253,7 @@ async def test_exact_terminal_start_retry_does_not_resubmit_scheduler_work():
             tool_executor=InMemoryToolExecutor({}, {}),
         )
 
-    agent = SAgent(
+    agent = SAgent._from_composition(
         runtime=runtime,
         driver_factory=factory,
         dispatcher=dispatcher,
@@ -285,7 +285,7 @@ async def test_completed_execution_is_removed_from_facade_task_registry():
             tool_executor=InMemoryToolExecutor({}, {}),
         )
 
-    agent = SAgent(runtime=runtime, driver_factory=factory)
+    agent = SAgent._from_composition(runtime=runtime, driver_factory=factory)
     stream = await agent.run_stream(command(), CONTEXT)
     assert (await stream.wait()).state == RunState.COMPLETED
     await asyncio.sleep(0)
@@ -309,7 +309,7 @@ async def test_close_failure_can_retry_without_reclosing_successful_resources():
 
     transient = Resource("transient", fail_once=True)
     stable = Resource("stable")
-    agent = SAgent(
+    agent = SAgent._from_composition(
         runtime=ephemeral_runtime(),
         driver_factory=lambda run_id: None,
         owned_resources=(transient, stable),
@@ -357,7 +357,7 @@ async def test_terminal_driver_cleanup_failure_does_not_replace_completed_result
                 raise OSError("cleanup unavailable")
 
     driver = CleanupFailureDriver()
-    agent = SAgent(
+    agent = SAgent._from_composition(
         runtime=runtime,
         driver_factory=lambda run_id: driver,
     )
@@ -429,7 +429,7 @@ async def test_stream_closes_at_suspension_so_a_client_can_resume_by_cursor():
         async def resume(self, run_id, context):
             raise AssertionError("not used")
 
-    stream = await SAgent(
+    stream = await SAgent._from_composition(
         runtime=runtime, driver_factory=lambda run_id: SuspendingDriver()
     ).run_stream(command(), CONTEXT)
     events = [event async for event in stream.events]
@@ -450,7 +450,7 @@ async def test_driver_factory_failure_after_acceptance_is_streamed_and_replayabl
     def factory(run_id):
         raise ConnectionError("model endpoint unreachable")
 
-    agent = SAgent(runtime=runtime, driver_factory=factory)
+    agent = SAgent._from_composition(runtime=runtime, driver_factory=factory)
     if entrypoint == "run_stream":
         stream = await agent.run_stream(command(), CONTEXT)
     else:
@@ -485,7 +485,7 @@ async def test_schedule_accepted_run_submission_failure_is_durable():
         async def submit(self, agent, handle, context, *, resume=False):
             raise ConnectionError("queue unreachable")
 
-    agent = SAgent(
+    agent = SAgent._from_composition(
         runtime=runtime,
         driver_factory=lambda run_id: None,
         dispatcher=FailingDispatcher(),
@@ -524,7 +524,7 @@ async def test_model_connection_failure_streams_recovery_before_suspension(
 
     runtime = ephemeral_runtime()
     model = ScriptedModelProvider((ScriptedModelStep(events=(), error=failure),) * 4)
-    agent = SAgent(
+    agent = SAgent._from_composition(
         runtime=runtime,
         driver_factory=lambda run_id: AgentLoopEngine(
             runtime=runtime,
@@ -577,7 +577,7 @@ async def test_factory_failure_survives_filesystem_store_reopen(tmp_path):
             )
         )
 
-    agent = SAgent(runtime=runtime, driver_factory=factory)
+    agent = SAgent._from_composition(runtime=runtime, driver_factory=factory)
     stream = await agent.run_stream(command(), CONTEXT)
 
     async def collect():

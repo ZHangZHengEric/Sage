@@ -120,12 +120,16 @@ class LoadedAgents:
 
         selection = runtime.capabilities.get("session.store")
         root = (
-            getattr(selection, "config", {}).get("root")
-            or builder._options.session_root
+            runtime.state_root or getattr(selection, "config", {}).get("root")
+            or builder._state.session_root
             or ".runtime/sagents"
         )
         self.store = AgentRevisionStore(root)
         self.restore_lock = asyncio.Lock()
+        from sagents.v2.runtime.extensions.pool import ApplicationScopePool
+        self.scope_pool = ApplicationScopePool()
+        self.process_handles = ()
+        self.process_dispatcher = None
 
     def implementation(self, agent):
         self.application._ensure_open()
@@ -136,7 +140,9 @@ class LoadedAgents:
         )
 
     async def load(self, *args, **kwargs):
+        self.application._ensure_open()
         async with self.lock:
+            self.application._ensure_open()
             return await self._load(*args, **kwargs)
 
     async def _load(
@@ -146,7 +152,6 @@ class LoadedAgents:
         config_text=None,
         base_path=None,
         previous=None,
-        execution=None,
         subagents=None,
         historical=False,
         expected_hash=None,
@@ -155,37 +160,27 @@ class LoadedAgents:
         if historical:
             # Private archive restoration: this is a compiled graph, not a Package input.
             resolved = package.model_copy(deep=True)
-            if resolved.runtime != self.runtime:
-                raise ValueError("saved Agent runtime differs from this App")
+            if (resolved.runtime.plugin_trust_policy != self.runtime.plugin_trust_policy
+                    or resolved.runtime.deployment_profile != self.runtime.deployment_profile):
+                raise ValueError("saved Agent security profile differs from this App")
         else:
             package = package_input(package, config_text=config_text, base_path=base_path)
             source = package.model_dump(mode="json")
             for child in (subagents or {}).values():
                 self.implementation(child)
-            if execution is not None:
-                if subagents:
-                    raise ValueError(
-                        "host execution resolves dependencies from its admitted snapshot"
-                    )
-                resolved = execution.resolve_descriptor(package, self.runtime, models=self.models)
-            else:
-                resolved = resolve_agent_graph(
-                    package,
-                    self.runtime,
-                    {
-                        name: child._resolved
-                        for name, child in (subagents or {}).items()
-                    },
-                    models=self.models,
-                )
+            resolved = resolve_agent_graph(
+                package,
+                self.runtime,
+                {
+                    name: child._resolved
+                    for name, child in (subagents or {}).items()
+                },
+                models=self.models,
+            )
         agent_id = resolved.entrypoint_agent
         if agent_id not in resolved.agents:
             raise ValueError("Package entrypoint must be its single Agent")
-        revision = (
-            resolved.manifest_hash
-            if execution is None
-            else f"{resolved.manifest_hash}:{execution.spec_hash}"
-        )
+        revision = resolved.manifest_hash
         key = (resolved.package_id, revision)
         async with self.application._assembly_operation():
             current = self.current.get(resolved.package_id)
@@ -211,51 +206,14 @@ class LoadedAgents:
                 self.current[resolved.package_id] = existing
                 self.sources[resolved.package_id] = source
                 return existing
-            if execution is not None:
-                if self.root is None:
-                    raise RuntimeError(
-                        "host execution requires initialized App services"
-                    )
-                assembled = self.application._execution_scope(resolved, execution)
-                handle = LoadedAgent(
-                    execution.agent_id or agent_id,
-                    revision,
-                    resolved.package_id,
-                    execution.spec_hash,
-                    assembled,
-                    self,
-                    resolved,
-                )
-                self.application._owned_resources.insert(-1, assembled)
-                self.current[resolved.package_id] = handle
-                self.sources[resolved.package_id] = source
-                self.revisions[key] = handle
-                return handle
             builder = copy(self.builder)
+            builder._scope_pool = self.scope_pool
+            builder._shared_process_handles = self.process_handles
             builder._model_resolver = self.model_resolver
-            builder._options = copy(self.builder._options)
-            if self.root is not None:
-                builder._options.owned_resources = []
-                builder.with_session_store(
-                    self.root.agent(
-                        self.root.resolved_plan.entrypoint_agent_id
-                    ).runtime.session_store
-                )
-                for method, capability in (
-                    ("with_derived_state_store", "derived-state.store"),
-                    ("with_memory_provider", "memory.provider"),
-                    ("with_session_memory_provider", "session-memory.provider"),
-                    ("with_diagnostic_sink", "observability.diagnostic-sink"),
-                ):
-                    getattr(builder, method)(self.root.service(capability))
-            builder._options.defer_dispatcher_start = True
-            builder._options.revision_identity = (
-                builder._options.run_driver_factory is None
-            )
-            if self.root is not None:
-                builder.with_scheduler(self.root.service("execution.scheduler"))
-                builder.with_job_runtime(self.root.service("execution.job-runtime"))
-                builder._options.dispatcher = self.root.service("execution.dispatcher")
+            builder._state = copy(self.builder._state)
+            builder._state.defer_dispatcher_start = True
+            builder._state.revision_identity = True
+            builder._state.dispatcher = self.process_dispatcher
             assembled = await builder._build_package(resolved, tenant_id=self.tenant_id)
             handle = LoadedAgent(
                 resolved.package_id,
@@ -274,8 +232,7 @@ class LoadedAgents:
                     raise ValueError(
                         "saved Agent revision no longer matches the runtime composition"
                     )
-                if self.builder._options.run_driver_factory is None:
-                    self.store.save(resolved, assembled.composition_hash)
+                self.store.save(resolved, assembled.composition_hash)
             except BaseException:
                 await assembled.close()
                 raise
@@ -283,8 +240,7 @@ class LoadedAgents:
             self.application._owned_resources.append(assembled)
             if self.root is None:
                 self.root = assembled
-                self.application._services = dict(assembled.services)
-                self.application._composer = assembled._composer
+                self.application._services = {**self.application._services, **assembled.services}
                 self.application.composition_hash = assembled.composition_hash
                 self.application.resolved_plan = assembled.resolved_plan
                 self.application.resource_readiness = assembled.resource_readiness
@@ -297,13 +253,12 @@ class LoadedAgents:
             if dispatcher in self.application._owned_resources:
                 self.application._owned_resources.remove(dispatcher)
             self.application._owned_resources.append(dispatcher)
-            if self.builder._options.run_driver_factory is None:
-                dispatcher.attach_recovery_agent(RevisionRecovery(self), replace=True)
-                dispatcher.recovery_filter = lambda run: any(
-                    value.composition_hash == run.resolved_spec_hash
-                    for value in self.revisions.values()
-                )
-            if self.builder._options.admitted_run_contract is None and not self.builder._options.manual_dispatcher_start:
+            dispatcher.attach_recovery_agent(RevisionRecovery(self), replace=True)
+            dispatcher.recovery_filter = lambda run: any(
+                value.composition_hash == run.resolved_spec_hash
+                for value in self.revisions.values()
+            )
+            if not self.builder._state.manual_dispatcher_start:
                 await dispatcher.start()
                 await dispatcher.refresh_recovery()
             return handle
@@ -321,10 +276,10 @@ class LoadedAgents:
         )
 
     async def restore_pending(self):
-        if self.root is None or self.builder._options.run_driver_factory is not None:
-            return
         async with self.restore_lock:
-            store = self.application.runtime.session_store
+            if self.application._closing or self.application._closed:
+                return
+            store = self.process_runtime.session_store
             reader = getattr(store, "list_dispatchable_runs", None)
             if reader is None:
                 return
@@ -345,7 +300,7 @@ class RevisionRecovery:
 
     def __init__(self, catalog):
         self.catalog = catalog
-        self.runtime = catalog.root.entrypoint().runtime
+        self.runtime = catalog.process_runtime
 
     async def _agent(self, run_id):
         run = await self.runtime.get_run(run_id)

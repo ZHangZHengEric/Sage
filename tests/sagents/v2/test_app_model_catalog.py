@@ -1,9 +1,11 @@
 """Public App catalog contract and immutable revision recovery boundaries."""
+
+from tests.sagents.v2.sdk_fixture import build_registered_app
+from tests.sagents.v2.sdk_fixture import fixture_configuration
 import asyncio
 
 import pytest
 from pydantic import ValidationError
-from sagents.v2 import SAgentBuilder
 from sagents.v2.model.catalog import model_catalog_input
 from sagents.v2.package.manifest.root import SageManifest
 from sagents.v2.testing.plugins import ScriptedModelProvider
@@ -23,7 +25,7 @@ def config(model="first"):
 
 
 def builder(tmp_path):
-    return SAgentBuilder().with_defaults(session_root=tmp_path).with_model_provider(ScriptedModelProvider(()))
+    return fixture_configuration(tmp_path, model=ScriptedModelProvider(()))
 
 
 @pytest.mark.parametrize("field", ["models", "credentials"])
@@ -48,7 +50,7 @@ def test_catalog_inputs_and_references(tmp_path):
 
 @pytest.mark.asyncio
 async def test_model_update_reloads_same_package_without_mutating_old_handle(tmp_path):
-    app = await builder(tmp_path).build(models=config())
+    app = await build_registered_app(configuration=builder(tmp_path), models=config())
     try:
         old = await app.load_agent(package())
         await app.update_model("shared", config("second")["models"]["shared"])
@@ -67,7 +69,7 @@ async def test_model_update_reloads_same_package_without_mutating_old_handle(tmp
 
 @pytest.mark.asyncio
 async def test_unrelated_models_do_not_change_agent_identity(tmp_path):
-    app = await builder(tmp_path).build(models=config())
+    app = await build_registered_app(configuration=builder(tmp_path), models=config())
     try:
         first = await app.load_agent(package())
         await app.update_model("other", {"provider": "openai-responses", "model": "other"})
@@ -80,7 +82,7 @@ async def test_unrelated_models_do_not_change_agent_identity(tmp_path):
 
 @pytest.mark.asyncio
 async def test_invalid_catalog_update_is_atomic_and_unknown_ids_fail(tmp_path):
-    app = await builder(tmp_path).build(models=config())
+    app = await build_registered_app(configuration=builder(tmp_path), models=config())
     try:
         old = app.models
         with pytest.raises(ValidationError):
@@ -95,11 +97,11 @@ async def test_invalid_catalog_update_is_atomic_and_unknown_ids_fail(tmp_path):
 
 @pytest.mark.asyncio
 async def test_old_catalog_revision_restores_from_archive(tmp_path):
-    app = await builder(tmp_path).build(models=config())
+    app = await build_registered_app(configuration=builder(tmp_path), models=config())
     old = await app.load_agent(package())
     archived = app._loaded_agents.store.read(old.composition_hash)
     await app.close()
-    app = await builder(tmp_path).build(models=config("replacement"))
+    app = await build_registered_app(configuration=builder(tmp_path), models=config('replacement'))
     try:
         new = await app.load_agent(package())
         restored = await app._loaded_agents.load(archived, historical=True, expected_hash=old.composition_hash)
@@ -112,7 +114,7 @@ async def test_old_catalog_revision_restores_from_archive(tmp_path):
 
 @pytest.mark.asyncio
 async def test_parallel_catalog_updates_do_not_lose_entries(tmp_path):
-    app = await builder(tmp_path).build(models=config())
+    app = await build_registered_app(configuration=builder(tmp_path), models=config())
     try:
         await asyncio.gather(*(app.update_model(f"model-{i}", {"provider": "openai-responses", "model": str(i)}) for i in range(12)))
         assert len(app.models.models) == 13
@@ -122,7 +124,7 @@ async def test_parallel_catalog_updates_do_not_lose_entries(tmp_path):
 
 @pytest.mark.asyncio
 async def test_registry_uses_current_app_catalog_for_new_packages(tmp_path):
-    app = await builder(tmp_path).build(models=config())
+    app = await build_registered_app(configuration=builder(tmp_path), models=config())
     try:
         await app.load_agent(package())
         await app.update_model("later", {"provider": "openai-responses", "model": "later"})

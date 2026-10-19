@@ -9,10 +9,8 @@ from typing import Any
 
 
 from app.v2.desktop.backend.shell_policy import (
-    ShellCommandOperationAssessor,
     normalize_shell_command,
 )
-from sagents.v2 import SAgent
 from sagents.v2.contracts.commands import (
     CancelRun,
     InputItem,
@@ -25,9 +23,6 @@ from sagents.v2.contracts.commands import (
 )
 from sagents.v2.contracts.common import new_id, utc_now
 from sagents.v2.contracts.errors import ErrorCategory, RuntimeErrorInfo, SageV2Error
-from sagents.v2.contracts.principals import (
-    RequestContext,
-)
 from sagents.v2.contracts.run_state import (
     EventCursor,
     RunState,
@@ -35,14 +30,6 @@ from sagents.v2.contracts.run_state import (
     TERMINAL_RUN_STATES,
 )
 from sagents.v2.package.manifest.resolver import CompositionResolver
-from sagents.v2.runtime.execution.sandbox import (
-    SandboxReleaseDisposition,
-)
-from sagents.v2.runtime.execution import (
-    ExecutionBindingLifecycleCoordinator,
-    ExecutionResourceState,
-)
-from sagents.v2.runtime.execution.jobs import InMemoryJobRuntime
 from sagents.v2.runtime.observability import (
     LogError,
     LogLevel,
@@ -53,17 +40,12 @@ from app.v2.desktop.backend.schemas import (
     RunMessage,
     RunMessageContent,
 )
-from app.v2.desktop.backend.run_lifecycle import (
-    DesktopDriver as _DesktopDriver,
-)
 from app.v2.desktop.backend.run_composition import DesktopRunCompositionMixin
 from app.v2.desktop.backend.studio import STUDIO_TOOLS
 from app.v2.desktop.backend.openui import OpenUiProjector
 from app.v2.desktop.backend.runtime_config import (
     _SKILL_NAME,
     _TOOL_NAME,
-    _agent_memory_enabled,
-    _agent_memory_behavior,
 )
 from app.v2.desktop.backend.usage_analytics import (
     _usage_percentile as _usage_percentile,
@@ -105,7 +87,6 @@ class DesktopRunServiceMixin(DesktopRunCompositionMixin):
                     yield line
                 return
         accepted_handle = None
-        driver: _DesktopDriver | None = None
         run_logger = self.logger.bind(correlation_id=request.idempotency_key)
         run_logger.info(
             "agent.run.requested",
@@ -188,54 +169,21 @@ class DesktopRunServiceMixin(DesktopRunCompositionMixin):
                 user_id=user_id,
                 workspace_id=f"desktop:{memory_workspace}:{agent.agent_id}",
             )})
-            accepted_handle = await self.runtime.start_run(command, context)
+            loaded = await self._load_run_agent(
+                agent, self._manifest(agent, provider, valid_tools, valid_skills), command,
+                models=self._model_catalog(agent, provider), environment=environment,
+            )
+            command = command.model_copy(update={
+                "agent_id": loaded.id, "resolved_spec_hash": loaded.composition_hash,
+            })
+            stream = await self.application.entrypoint().run_stream(command, context, agent=loaded)
+            accepted_handle = stream.handle
             if action_surface is not None:
                 self.openui_store.accepted(action_surface, accepted_handle.run_id)
             self._run_environments.setdefault(accepted_handle.run_id, environment)
-
-            async def build_driver():
-                return await self._build_loop(
-                    agent=agent,
-                    provider=provider,
-                    workspace=workspace,
-                    preferred_skills=tuple(request.preferred_skills),
-                    approval_mode=request.approval_mode,
-                    invocation_mode=request.invocation_mode,
-                    session_id=accepted_handle.session_id,
-                    run_id=accepted_handle.run_id,
-                    resolved_spec_hash=command.resolved_spec_hash,
-                    component_snapshot=command.config.metadata.get(
-                        "runtime_components"
-                    ),
-                    environment=environment,
-                )
-
-            driver = _DesktopDriver(
-                self, None, workspace, None, lazy_builder=build_driver
-            )
-            self._drivers[accepted_handle.run_id] = driver
-            loaded = await self._load_run_agent(
-                agent, self._manifest(agent, provider, valid_tools, valid_skills), command,
-                models=self._model_catalog(agent, provider),
-            )
-            stream = await self.application.entrypoint().schedule_accepted_run(
-                accepted_handle, context, agent=loaded,
-            )
         except asyncio.CancelledError:
-            if driver is not None:
-                await asyncio.shield(driver.close_binding())
             raise
         except Exception as exc:
-            if driver is not None:
-                try:
-                    await driver.close_binding()
-                except BaseException as close_exc:
-                    run_logger.exception(
-                        "agent.run.start_cleanup_failed",
-                        "Agent run resources failed to close after startup failure",
-                        close_exc,
-                        attributes={"agent_id": request.agent_id},
-                    )
             run_logger.exception(
                 "agent.run.start_failed",
                 "Agent run failed before execution started",
@@ -246,6 +194,7 @@ class DesktopRunServiceMixin(DesktopRunCompositionMixin):
             # membership is durably bound to the original Session identity.
             if accepted_handle is None and (
                 request.studio_id is not None or action_surface is not None
+                or (request.session_id is not None and self.studio_store.has_session(request.session_id))
             ):
                 raise
             language = str(
@@ -322,7 +271,6 @@ class DesktopRunServiceMixin(DesktopRunCompositionMixin):
                 if event.type == "run.failed":
                     return
         await self._index_session(stream.handle.session_id)
-        self._drivers[stream.handle.run_id] = driver
         self._ensure_run_observer(stream.handle.run_id)
         self.logger.info(
             "agent.run.opened",
@@ -330,11 +278,6 @@ class DesktopRunServiceMixin(DesktopRunCompositionMixin):
             session_id=stream.handle.session_id,
             run_id=stream.handle.run_id,
             attributes={"agent_id": request.agent_id},
-        )
-        stream.add_done_callback(
-            lambda _completed, key=stream.handle.run_id, value=driver: (
-                asyncio.create_task(self._discard_driver_if_terminal(key, value))
-            )
         )
         yield (
             json.dumps(
@@ -357,8 +300,6 @@ class DesktopRunServiceMixin(DesktopRunCompositionMixin):
         finally:
             if observed_boundary:
                 await stream.wait()
-            if stream.execution_done():
-                await self._discard_driver_if_terminal(stream.handle.run_id, driver)
             await self._index_session(stream.handle.session_id)
 
     async def _prepare_openui_action(self, request, user_id):
@@ -691,7 +632,7 @@ class DesktopRunServiceMixin(DesktopRunCompositionMixin):
             raise ValueError("shell approval has no command to remember")
 
         start_command = await self.session_store.get_start_command(run_id)
-        agent = await self._agent(start_command.agent_id, user_id)
+        agent = await self._agent(start_command.config.metadata.get("agent_runtime", {}).get("agent_id", start_command.agent_id), user_id)
         config = dict(agent.config or {})
         remembered = {
             normalized
@@ -713,287 +654,148 @@ class DesktopRunServiceMixin(DesktopRunCompositionMixin):
             await self._record_agent_version(updated)
             await self.catalog.save_agent(updated)
 
-        driver = self._drivers.get(run_id)
-        assessor = (
-            getattr(driver.loop.tool_policy, "operation_assessor", None)
-            if driver is not None and driver.loop is not None
-            else None
-        )
-        if isinstance(assessor, ShellCommandOperationAssessor):
-            assessor.approve_command(command)
         return command
 
     async def _continue(self, run_id: str, user_id: str) -> None:
         await self.start()
         self._ensure_run_observer(run_id)
         command = await self.session_store.get_start_command(run_id)
-        environment = await self._environment_for_command(command, user_id, run_id)
-        agent = await self._agent_in_environment(command, environment, user_id)
-        driver = self._drivers.get(run_id)
-        if driver is None:
-            provider = (
-                environment.provider(agent)
-                if environment is not None
-                else await self._provider_for_command(command, agent, user_id)
-            )
-            workspace_id = command.config.metadata.get("workspace_id")
-            workspace = (
-                environment.workspace
-                if environment is not None
-                else await self.workspace_root(workspace_id, command.agent_id)
-            )
+        context = self._context(user_id, language=str(command.config.metadata.get("response_language") or "en"))
+        loaded = await self.application.agent_for_run(run_id, context)
+        task = await self.application.entrypoint().continue_run(run_id, context, agent=loaded)
+        task.add_done_callback(lambda _completed: asyncio.create_task(self._index_run(run_id)))
 
-            async def build_driver():
-                return await self._build_loop(
-                    agent=agent,
-                    provider=provider,
-                    workspace=workspace,
-                    preferred_skills=tuple(
-                        command.config.metadata.get("preferred_skills") or ()
-                    ),
-                    approval_mode=str(
-                        command.config.metadata.get("approval_mode") or "high_risk"
-                    ),
-                    invocation_mode=command.invocation_mode or "normal",
-                    session_id=(await self.runtime.get_run(run_id)).session_id,
-                    run_id=run_id,
-                    resolved_spec_hash=command.resolved_spec_hash,
-                    component_snapshot=command.config.metadata.get(
-                        "runtime_components"
-                    ),
-                    environment=environment,
-                )
-
-            driver = _DesktopDriver(
-                self, None, workspace, None, lazy_builder=build_driver
-            )
-            self._drivers[run_id] = driver
-        provider = (
-            environment.provider(agent)
-            if environment is not None
-            else await self._provider_for_command(command, agent, user_id)
-        )
-        loaded = await self._load_run_agent(
-            agent,
-            self._manifest(agent, provider, tuple(command.config.enabled_tools or ()), tuple(command.config.enabled_skills or ())),
-            command, models=self._model_catalog(agent, provider),
-        )
-        task = await self.application.entrypoint().continue_run(
-            run_id,
-            self._context(
-                user_id,
-                language=str(command.config.metadata.get("response_language") or "en"),
-            ),
-            agent=loaded,
-        )
-        task.add_done_callback(
-            lambda _completed, key=run_id, value=driver: asyncio.create_task(
-                self._discard_driver_if_terminal(key, value)
-            )
-        )
-        task.add_done_callback(
-            lambda _completed, key=run_id: asyncio.create_task(self._index_run(key))
-        )
-
-    async def _load_run_agent(self, agent, manifest, command, *, models):
-        """Reuse a frozen definition; Run-specific resources stay in its driver."""
-        from sagents.v2 import HostAgentExecution
+    async def _load_run_agent(self, agent, manifest, command, *, models, environment):
+        """Freeze product configuration; Sage owns all execution assembly."""
+        from .sdk_plugins import desktop_run_selections
+        from sagents.v2.package.manifest.runtime import CapabilitySelection
+        from sagents.v2.runtime.execution.configuration import LocalExecutionPolicy
+        from sagents.v2.runtime.execution.sandbox import FileOperation
+        from .runtime_config import _resolved_sandbox_config
         if not hasattr(self, "_loaded_agent_lock"):
             self._loaded_agent_lock = asyncio.Lock()
-        memory_enabled = _agent_memory_enabled(
-            agent, self.memory_plugin_id, self.session_memory_plugin_id,
-        )
-        behavior = _agent_memory_behavior(agent)
-        execution = HostAgentExecution(
-            driver_factory=self._driver_for_loaded_agent,
-            spec_hash=command.resolved_spec_hash,
-            runtime=self.runtime,
-            dispatcher=self.dispatcher,
-            memory_service=self._memory_service_for_agent(agent) if memory_enabled and behavior.auto_write else None,
-            memory_scope={"recall": memory_enabled and behavior.recall,
-                          "auto_write": memory_enabled and behavior.auto_write,
-                          "scope": behavior.scope, "recall_limit": 8},
-        )
         async with self._loaded_agent_lock:
-            await self.application.update_models(models)
-            current = next((value for value in self.application.loaded_agents
-                            if value.package_id == manifest.metadata.id), None)
-            if current is None:
-                return await self.application.load_agent(manifest, execution=execution)
-            return await self.application.update_agent(agent=current, package=manifest, execution=execution)
-
-    def _driver_for_loaded_agent(self, run_id):
-        return self._drivers[run_id]
-
-    def _discard_driver(self, run_id: str, driver: _DesktopDriver) -> None:
-        if self._drivers.get(run_id) is driver:
-            self._drivers.pop(run_id, None)
-
-    def _schedule_agent_close(self, agent: SAgent) -> None:
-        task = asyncio.create_task(agent.close())
-        self._application_close_tasks.add(task)
-
-        def completed(value: asyncio.Task) -> None:
-            self._application_close_tasks.discard(value)
-            if value.cancelled():
-                return
-            error = value.exception()
-            if error is not None:
-                self.logger.exception(
-                    "agent.close_failed",
-                    "Per-Run SAgent failed to close",
-                    error,
-                )
-
-        task.add_done_callback(completed)
-
-    def _schedule_blocked_sandbox_cleanup(
-        self, resources, lifecycle, record, context: RequestContext
-    ) -> None:
-        async def cleanup() -> None:
-            try:
-                await asyncio.gather(
-                    *(
-                        lifecycle.job_runtime.wait(job_id)
-                        for job_id in record.blocking_job_ids
-                    )
-                )
-                future = await self.dispatcher.submit_cleanup(
-                    run_id=record.run_id,
-                    context=context,
-                    generation=record.generation,
-                    operation=lambda: lifecycle.reconcile_run(
-                        run_id=record.run_id, context=context
-                    ),
-                )
-                settled = await future
-                if settled.state in {
-                    ExecutionResourceState.RELEASE_REQUESTED,
-                    ExecutionResourceState.RELEASE_FAILED,
-                }:
-                    self._schedule_sandbox_reconcile_loop(
-                        lifecycle=lifecycle,
-                        record=settled,
-                        context=context,
-                    )
-            finally:
-                resources.defer_close = False
-                await resources.close_now()
-
-        task = asyncio.create_task(
-            cleanup(), name=f"sandbox-cleanup:{record.run_id}:{record.generation}"
-        )
-        self._sandbox_cleanup_tasks.add(task)
-        task.add_done_callback(self._sandbox_cleanup_completed)
-
-    def _sandbox_cleanup_completed(self, task: asyncio.Task) -> None:
-        self._sandbox_cleanup_tasks.discard(task)
-        if task.cancelled():
-            return
-        error = task.exception()
-        if error is not None:
-            self.logger.exception(
-                "sandbox.cleanup_task_failed",
-                "Background sandbox cleanup failed",
-                error,
+            selections = desktop_run_selections()
+            runtime = self.application.runtime_configuration
+            snapshot = command.config.metadata["runtime_components"]
+            # The settings translator only produces serializable plugin parameters.
+            from .package import desktop_v2_manifest
+            configured = desktop_v2_manifest(
+                session_root=self.runtime_root, component_selections=snapshot["selections"],
+                component_configs=snapshot["configs"],
+                language=command.config.metadata.get("response_language") or "en",
+            ).runtime
+            identity_caps = {"session.store", "derived-state.store", "execution.scheduler", "execution.job-runtime",
+                             "observability.log-sink", "observability.diagnostic-sink"}
+            capabilities = {**runtime.capabilities, **{
+                key: value for key, value in configured.capabilities.items() if key not in identity_caps
+            }, **selections}
+            official = CapabilitySelection(plugin="sage.tool.official")
+            external = CapabilitySelection(plugin="com.sage.desktop.run.tool-catalog", scope="run", grant_tools=True)
+            capabilities["tool.catalog"] = (official, external)
+            from sagents.v2.package.manifest.runtime import RuntimeConfig
+            supplied = RuntimeConfig.model_validate(self._host_runtime) if self._host_runtime is not None else None
+            raw = snapshot["configs"].get("execution.sandbox", {})
+            from .schemas import DesktopV2Settings
+            sandbox_plugin, sandbox = _resolved_sandbox_config(DesktopV2Settings(
+                component_selections=snapshot["selections"], component_configs=snapshot["configs"],
+            ))
+            if sandbox_plugin not in {"sage.sandbox.local-workspace", "sage.sandbox.ephemeral"} and not (supplied and "execution.binding" in supplied.capabilities):
+                raise ValueError("Select a registered execution.binding implementation for this sandbox provider")
+            policy = LocalExecutionPolicy.model_validate({
+                **({"filesystem": raw["filesystem"]} if "filesystem" in raw else {}),
+                **({"process": raw["process"]} if "process" in raw else {}),
+                "resources": sandbox["resources"], "network": sandbox.get("network", {}),
+            })
+            if command.invocation_mode == "plan":
+                policy = policy.narrow({"filesystem": {"allowed_operations": [FileOperation.READ, FileOperation.LIST]},
+                                        "process": {"read_only": True}})
+            capabilities["execution.binding"] = CapabilitySelection(
+                plugin="sage.execution.binding.local-workspace", config={
+                    "workspace": str(environment.workspace),
+                    "private_workspace_root": str(self.runtime_root / "private-workspaces"),
+                    "policy": policy.model_dump(mode="json"),
+                    **{key: raw[key] for key in ("command_path", "read_paths", "isolation_python", "child_workspace_policy",
+                                                "linux_cgroup_root", "linux_quota_mount", "linux_execution_uid", "linux_execution_gid") if key in raw},
+                },
             )
-
-    async def _recover_pending_sandbox_cleanups(self) -> None:
-        """Resume cleanup intents whose owning process disappeared while paused."""
-
-        for record in await self.session_store.list_pending_execution_releases():
-            if (
-                record.state == ExecutionResourceState.RELEASE_BLOCKED
-                and record.release_disposition == SandboxReleaseDisposition.DETACH
-            ):
-                continue
-            try:
-                run = await self.session_store.get_run(record.run_id)
-                session = await self.session_store.get_session(run.session_id)
-                if session.owner is None:
+            if sandbox_plugin == "sage.sandbox.ephemeral":
+                capabilities["execution.binding"] = CapabilitySelection(
+                    plugin="sage.execution.binding.ephemeral", config={
+                        "workspace_root": sandbox["workspace_root"],
+                        "policy": policy.model_copy(update={"process": policy.process.model_copy(update={"enabled": False})}).model_dump(mode="json"),
+                    },
+                )
+            if supplied is not None:
+                capabilities.update(supplied.capabilities)
+            runtime = runtime.model_copy(update={"capabilities": capabilities})
+            await self.application.update_runtime(runtime)
+            # Every declared member receives its own frozen route in the App model catalog.
+            from sagents.v2.model.catalog import ModelCatalogConfig
+            routes, credentials = dict(models.models), dict(models.credentials)
+            definitions = dict(manifest.agents)
+            pending = [agent.agent_id]
+            visited = set()
+            while pending:
+                source_id = pending.pop()
+                if source_id in visited:
                     continue
-                command = await self.session_store.get_start_command(record.run_id)
-                context = self._context(
-                    session.owner.principal_id,
-                    language=str(
-                        command.config.metadata.get("response_language") or "en"
-                    ),
-                )
-                provider = await self._sandbox_provider(record.sandbox_ref.provider_id)
-                lifecycle = ExecutionBindingLifecycleCoordinator(
-                    sandbox_provider=provider,
-                    session_store=self.driver_session_store,
-                    job_runtime=InMemoryJobRuntime({}),
-                )
-                self._schedule_sandbox_reconcile_loop(
-                    lifecycle=lifecycle,
-                    record=record,
-                    context=context,
-                )
-            except Exception as exc:
-                self.logger.warning(
-                    "sandbox.cleanup_recovery_failed",
-                    "Failed to schedule pending sandbox cleanup",
-                    attributes={"run_id": record.run_id, "error": str(exc)},
-                )
-
-    def _schedule_sandbox_reconcile_loop(
-        self, *, lifecycle, record, context: RequestContext
-    ) -> None:
-        async def reconcile() -> None:
-            current = record
-            attempt = current.retry_count
-            while current.state in {
-                ExecutionResourceState.RELEASE_BLOCKED,
-                ExecutionResourceState.RELEASE_REQUESTED,
-                ExecutionResourceState.RELEASE_FAILED,
-            }:
-                if current.next_retry_at is not None:
-                    delay = (current.next_retry_at - utc_now()).total_seconds()
-                    if delay > 0:
-                        await asyncio.sleep(min(delay, 300))
-                future = await self.dispatcher.submit_cleanup(
-                    run_id=current.run_id,
-                    context=context,
-                    generation=current.generation,
-                    attempt=attempt,
-                    operation=lambda: lifecycle.reconcile_run(
-                        run_id=current.run_id, context=context
-                    ),
-                )
-                current = await future
-                if (
-                    current.state == ExecutionResourceState.RELEASE_BLOCKED
-                    and current.release_disposition == SandboxReleaseDisposition.DETACH
-                ):
-                    return
-                attempt += 1
-
-        task = asyncio.create_task(
-            reconcile(), name=f"sandbox-reconcile:{record.run_id}:{record.generation}"
-        )
-        self._sandbox_cleanup_tasks.add(task)
-        task.add_done_callback(self._sandbox_cleanup_completed)
-
-    async def _discard_driver_if_terminal(
-        self, run_id: str, driver: _DesktopDriver
-    ) -> None:
-        try:
-            run = await self.runtime.get_run(run_id)
-        except Exception:
-            return
-        if run.state in TERMINAL_RUN_STATES or run.state == RunState.SUSPENDED:
-            try:
-                await driver.close_binding()
-            except BaseException as exc:
-                self.logger.exception(
-                    "driver.close_failed",
-                    "Run driver cleanup failed and remains available for retry",
-                    exc,
-                    run_id=run_id,
-                )
-                return
-            self._discard_driver(run_id, driver)
+                visited.add(source_id)
+                source = environment.agents[source_id]
+                provider = environment.provider(source)
+                candidate = self._manifest(source, provider,
+                    tuple(source.config.get("availableTools") or ()), tuple(source.config.get("availableSkills") or ()))
+                definition = candidate.agents[source_id]
+                from .runtime_config import _continuation_agent_instructions
+                completion = runtime.capabilities["agent.continuation-policy"].plugin
+                instructions = definition.instructions.model_copy(update={
+                    "inline": (definition.instructions.inline or "") + _continuation_agent_instructions(completion),
+                })
+                definition = definition.model_copy(update={
+                    "instructions": instructions,
+                    "tools": tuple(name for name in definition.tools
+                                   if name != "turn_status" or completion != "sage.agent.continuation.llm-judge"),
+                })
+                mode = str(source.config.get("agentMode") or "simple").lower()
+                manual = source.config.get("subAgentSelectionMode") == "manual"
+                members = tuple(str(value) for value in source.config.get("availableSubAgentIds") or ()) if manual else tuple(
+                    key for key in environment.agents if key != source_id)
+                # Automatic members are delegation leaves. Nested Teams must declare their direct roster.
+                if source_id != agent.agent_id and not manual:
+                    mode, members = "simple", ()
+                if mode == "simple":
+                    members = ()
+                missing = set(members) - set(environment.agents)
+                if missing:
+                    raise ValueError(f"Desktop roster contains unavailable Agents: {sorted(missing)}")
+                if source_id == agent.agent_id and command.config.metadata.get("ui_preference") == "interactive":
+                    if "sage-openui" not in definition.skills:
+                        raise ValueError("Interactive presentation requires the enabled sage-openui Skill")
+                    definition = definition.model_copy(update={"preload_skills": ("sage-openui",)})
+                definition = definition.model_copy(update={"mode": mode, "subagents": members})
+                if source_id != agent.agent_id:
+                    definitions[source_id] = definition
+                else:
+                    definitions[source_id] = definition.model_copy(update={"mode": mode, "subagents": members})
+                pending.extend(members)
+                catalog = self._model_catalog(source, provider)
+                routes.update(catalog.models)
+                credentials.update(catalog.credentials)
+            await self.application.update_models(ModelCatalogConfig(models=routes, credentials=credentials))
+            async def load(source_id, ancestors=()):
+                if source_id in ancestors:
+                    raise ValueError("Desktop Team declarations contain a cycle")
+                source = environment.agents[source_id]
+                provider = environment.provider(source)
+                package = manifest if source_id == agent.agent_id else self._manifest(
+                    source, provider, definitions[source_id].tools, definitions[source_id].skills)
+                package = package.model_copy(update={"agents": {source_id: definitions[source_id]}})
+                children = {name: await load(name, (*ancestors, source_id)) for name in definitions[source_id].subagents}
+                current = next((value for value in self.application.loaded_agents if value.package_id == package.metadata.id), None)
+                if current is None:
+                    return await self.application.load_agent(package, subagents=children)
+                return await self.application.update_agent(agent=current, package=package, subagents=children)
+            return await load(agent.agent_id)
 
     def _ensure_run_observer(self, run_id: str) -> None:
         current = self._run_observers.get(run_id)

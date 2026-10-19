@@ -143,7 +143,7 @@ async def test_start_writes_sagents_registration_to_stdout(tmp_path: Path, capsy
             for line in capsys.readouterr().out.splitlines()
             if '"format_version":"sage.log/v1"' in line
         ]
-        registered = next(row for row in rows if row["event"] == "sagents.registered")
+        registered = next(row for row in rows if row["event"] == "sagents.application.configured")
         assert registered["attributes"]["plugins"]
         assert sink.stdout.format == "json"
     finally:

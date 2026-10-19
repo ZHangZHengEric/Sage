@@ -49,8 +49,8 @@ async def test_concurrent_agent_patches_merge_different_fields(tmp_path):
 @pytest.mark.parametrize('recall,auto_write,scope', [(False, False, 'agent'), (True, False, 'session'), (False, True, 'principal')])
 async def test_explicit_memory_settings_survive_clone_and_drive_runtime(tmp_path, recall, auto_write, scope):
     from app.v2.desktop.backend.schemas import ModelProviderPatch
-    service = DesktopV2Service(tmp_path)
-    resources = None
+    from tests.app.v2.desktop.sdk_fixture import desktop, execute
+    service, _, _ = desktop(tmp_path)
     try:
         created = await service.create_agent(AgentCreate(name='Memory', settings=AgentSettingsPatch(
             available_tools=['search_memory'], available_skills=[],
@@ -62,12 +62,10 @@ async def test_explicit_memory_settings_survive_clone_and_drive_runtime(tmp_path
         await service.patch_model_provider('model_main', ModelProviderPatch(api_keys=['test-key']), 'user_1')
         agent = await service._agent(created['id'], 'user_1')
         provider = await service._provider(agent, 'user_1')
-        workspace = await service.workspace_root(None, agent.agent_id)
-        resolved, loop, resources = await service._build_loop(
-            agent=agent, provider=provider, workspace=workspace,
-            preferred_skills=(), approval_mode='high_risk',
-        )
-        assert loop.automatic_memory_recall is recall
+        run, command, _ = await execute(service, agent_id=agent.agent_id)
+        assert run.state.value == "completed"
+        accepted = await service.application.run_configuration(run.run_id, service._context("user_1"))
+        assert accepted["agent"]["memory"]["recall"] is recall
         assert service._memory_service_for_agent(agent).scope_mode == scope
         manifest = service._manifest(agent, provider, ('search_memory',), ())
         behavior = manifest.agents[agent.agent_id].memory
@@ -76,6 +74,4 @@ async def test_explicit_memory_settings_survive_clone_and_drive_runtime(tmp_path
         updated = await service.patch_agent_settings(agent.agent_id, AgentSettingsPatch(description='Changed'), 'user_1')
         assert updated['memory'] == created['memory']
     finally:
-        if resources is not None:
-            await resources.close()
         await service.close()

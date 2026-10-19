@@ -1,5 +1,6 @@
 """Preloads are per-Run initialization, never a permanent activation requirement."""
 from __future__ import annotations
+from tests.sagents.v2.sdk_fixture import build_registered_package
 
 import hashlib
 import json
@@ -388,19 +389,15 @@ async def test_preloads_finish_before_auxiliary_model_preparation():
 
 @pytest.mark.asyncio
 async def test_public_builder_wires_agent_package_preloads(tmp_path):
-    from sagents.v2 import SAgentBuilder
     from tests.sagents.v2.model_fixture import TEST_MODELS
     manifest = SageManifestLoader().loads(MANIFEST)
+    manifest = manifest.model_copy(update={"agents": {"root": manifest.agents["root"]}})
     provider, requests = source(), model(done())
-    app = await (SAgentBuilder().with_models(TEST_MODELS)
-        .with_defaults(session_root=tmp_path).with_model_provider(requests)
-        .with_tool_provider(InMemoryToolCatalog(()), InMemoryToolExecutor({}, {}))
-        .with_skill_provider(provider, provider, InMemorySkillWorkspace())
-        ._build_package(manifest))
+    app = await (build_registered_package(tmp_path, models=TEST_MODELS, model=requests, tools=(InMemoryToolCatalog(()), InMemoryToolExecutor({}, {}),), skills=(provider, provider, InMemorySkillWorkspace(),), package=manifest))
     try:
-        stream = await app.entrypoint().run_stream(StartRun(
+        stream = await app.entrypoint().run_stream((StartRun(
             agent_id="root", input=(InputItem(role="user", content=(TextBlock(text="work"),)),),
-            resolved_spec_hash=app.composition_hash, idempotency_key="builder"), CONTEXT)
+            resolved_spec_hash=app.composition_hash, idempotency_key="builder")).model_copy(update={"agent_id": app.loaded_agents[-1].id, "resolved_spec_hash": app.loaded_agents[-1].composition_hash}), CONTEXT, agent=app.loaded_agents[-1])
         assert (await stream.wait()).state == RunState.COMPLETED
         assert "Follow alpha" in content(requests.requests[0])
         assert [name for _, name in provider.fetches] == ["alpha"]

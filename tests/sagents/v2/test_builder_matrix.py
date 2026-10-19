@@ -1,14 +1,13 @@
+from tests.sagents.v2.sdk_fixture import build_registered_package
+from tests.sagents.v2.sdk_fixture import fixture_configuration
 from tests.sagents.v2.model_fixture import TEST_MODELS
 from sagents.v2.model.catalog import ModelCatalogConfig
-from sagents.v2.runtime.execution.sandbox import ResourceLimits
 from pathlib import Path
-import hashlib
 from types import SimpleNamespace
 
 import pytest
 
 from sagents.v2 import RunExecutionBinding, SAgentApplication, SAgentBuilder
-from sagents.v2.composition.drivers import _ExecutionBoundDriver
 from sagents.v2.composition.assembler import ApplicationAssembler
 from sagents.v2.contracts.commands import InputItem, StartRun
 from sagents.v2.contracts.items import TextBlock
@@ -37,29 +36,14 @@ from sagents.v2.contracts.errors import SageV2Error
 from sagents.v2.agent.policy import (
     ApprovalStrategy,
     DefaultToolPolicy,
-    ExplicitStatusContinuationPolicy,
     SessionApprovalMemory,
 )
 from sagents.v2.contracts.commands import ReplyInteraction
-from sagents.v2.context import (
-    ModelConversationSummarizer,
-    PersistentSummaryContextReducer,
-    ReferenceContextUnitCompactor,
-    SessionDerivedConversationSummaryStore,
-    WindowContextReducer,
-)
-from sagents.v2.runtime.execution import ExecutionBindingRequest
 from sagents.v2.runtime.execution.scheduler import InMemoryScheduler
 from sagents.v2.runtime.observability import NoopDiagnosticSink, NoopLogSink
 from sagents.v2.runtime.session import EphemeralSessionStore
 from sagents.v2.runtime.session import InMemoryDerivedStateStore
 from sagents.v2.runtime.execution.sandbox import (
-    FileOperation,
-    FileSystemPolicy,
-    LocalWorkspaceSandboxProvider,
-    NetworkPolicy,
-    ProcessPolicy,
-    ResolvedSandboxSpec,
     SandboxGrantIssuer,
 )
 from sagents.v2.testing.plugins.scripted_model import (
@@ -71,7 +55,6 @@ from sagents.v2.tool.contracts import (
     ToolDefinition,
     ToolExecutionResult,
 )
-from sagents.v2.tool.official import OfficialToolRuntime
 from sagents.v2.tool.plugins.ephemeral import (
     InMemoryToolCatalog,
     InMemoryToolExecutor,
@@ -142,11 +125,7 @@ async def test_public_builder_is_the_composition_entrypoint(tmp_path: Path):
         package_id="test.builder",
     )
     application = await (
-        SAgentBuilder()
-        .with_models(TEST_MODELS)
-        .with_defaults(session_root=tmp_path / "session-store")
-        .with_model_provider(ScriptedModelProvider(()))
-        ._build_package(package)
+        build_registered_package(tmp_path / 'session-store', models=TEST_MODELS, model=ScriptedModelProvider(()), package=package)
     )
 
     assert isinstance(application, SAgentApplication)
@@ -173,43 +152,18 @@ async def test_builder_transfers_host_resources_in_close_order(tmp_path: Path):
     scheduler = Resource("scheduler")
     models = Resource("models")
     application = await (
-        SAgentBuilder()
-        .with_models(TEST_MODELS)
-        .with_defaults(session_root=tmp_path / "session-store")
-        .with_model_provider(ScriptedModelProvider(()))
-        .with_owned_resources(scheduler, models)
-        ._build_package(package)
+        build_registered_package(tmp_path / 'session-store', models=TEST_MODELS, model=ScriptedModelProvider(()), package=package, resources=(scheduler, models,))
     )
 
     await application.close()
     assert closed == ["scheduler", "models"]
 
 
-@pytest.mark.asyncio
-async def test_builder_uses_host_run_driver_factory(tmp_path: Path):
-    package = BuiltinPackageFactory.create(
-        "assistant",
-        package_id="test.builder-host-driver",
-    )
-    driver = object()
-    run_ids = []
+def test_builder_exposes_only_registered_capabilities():
+    assert not any(name.startswith("with_") for name in dir(SAgentBuilder))
+    import sagents.v2 as sdk
+    assert not hasattr(sdk, "HostAgentExecution")
 
-    def make_driver(run_id):
-        run_ids.append(run_id)
-        return driver
-
-    application = await (
-        SAgentBuilder()
-        .with_models(TEST_MODELS)
-        .with_defaults(session_root=tmp_path / "session-store")
-        .with_model_provider(ScriptedModelProvider(()))
-        .with_run_driver_factory(make_driver)
-        ._build_package(package)
-    )
-
-    assert application.entrypoint().driver_factory("run-1") is driver
-    assert run_ids == ["run-1"]
-    await application.close()
 
 
 @pytest.mark.asyncio
@@ -224,13 +178,7 @@ async def test_builder_injects_derived_state_independently_from_session_store(
     derived_state = _RecordingDerivedStateStore()
 
     application = await (
-        SAgentBuilder()
-        .with_models(TEST_MODELS)
-        .with_defaults(session_root=tmp_path / "unused-session-store")
-        .with_session_store(session_store)
-        .with_derived_state_store(derived_state)
-        .with_model_provider(ScriptedModelProvider(()))
-        ._build_package(package)
+        build_registered_package(tmp_path / 'unused-session-store', models=TEST_MODELS, model=ScriptedModelProvider(()), package=package, providers={'session.store': session_store, 'derived-state.store': derived_state})
     )
 
     summary_store = application.service("context.summary-store")
@@ -249,12 +197,7 @@ async def test_builder_does_not_require_injected_session_store_to_hold_derived_s
     )
 
     application = await (
-        SAgentBuilder()
-        .with_models(TEST_MODELS)
-        .with_defaults(session_root=tmp_path / "unused-session-store")
-        .with_session_store(_AuthoritativeOnlySessionStore())
-        .with_model_provider(ScriptedModelProvider(()))
-        ._build_package(package)
+        build_registered_package(tmp_path / 'unused-session-store', models=TEST_MODELS, model=ScriptedModelProvider(()), package=package, providers={'session.store': _AuthoritativeOnlySessionStore()})
     )
 
     derived_state = application.service("derived-state.store")
@@ -271,12 +214,7 @@ async def test_builder_wires_session_deletion_to_session_memory_cleanup(tmp_path
     )
     session_memory = _RecordingSessionMemoryProvider()
     application = await (
-        SAgentBuilder()
-        .with_models(TEST_MODELS)
-        .with_defaults(session_root=tmp_path / "unused-session-store")
-        .with_session_memory_provider(session_memory)
-        .with_model_provider(ScriptedModelProvider(()))
-        ._build_package(package)
+        build_registered_package(tmp_path / 'unused-session-store', models=TEST_MODELS, model=ScriptedModelProvider(()), package=package, providers={'session-memory.provider': session_memory})
     )
     store = application.entrypoint().runtime.session_store
     context = RequestContext(
@@ -336,11 +274,7 @@ async def test_builder_fails_when_selected_provider_cannot_meet_required_guarant
 
     with pytest.raises(SageV2Error) as unsatisfied:
         await (
-            SAgentBuilder()
-            .with_models(TEST_MODELS)
-            .with_defaults(session_root=tmp_path / "session-store")
-            .with_model_provider(ScriptedModelProvider(()))
-            ._build_package(package)
+            build_registered_package(tmp_path / 'session-store', models=TEST_MODELS, model=ScriptedModelProvider(()), package=package)
         )
 
     assert unsatisfied.value.info.code == "runtime.capability_guarantee_unsatisfied"
@@ -365,11 +299,7 @@ async def test_distributed_profile_automatically_rejects_single_host_plugins(
 
     with pytest.raises(SageV2Error) as unsatisfied:
         await (
-            SAgentBuilder()
-            .with_models(TEST_MODELS)
-            .with_defaults(session_root=tmp_path / "session-store")
-            .with_model_provider(ScriptedModelProvider(()))
-            ._build_package(package)
+            build_registered_package(tmp_path / 'session-store', models=TEST_MODELS, model=ScriptedModelProvider(()), package=package)
         )
 
     assert unsatisfied.value.info.code == "runtime.capability_guarantee_unsatisfied"
@@ -407,7 +337,7 @@ def test_distributed_profile_rejects_weaker_explicit_guarantee():
 
 
 @pytest.mark.asyncio
-async def test_builtin_only_policy_rejects_external_declaration_before_import():
+async def test_builtin_only_policy_rejects_external_declaration_before_import(tmp_path):
     package = BuiltinPackageFactory.create(
         "assistant",
         package_id="test.builder-builtin-only",
@@ -422,7 +352,7 @@ async def test_builtin_only_policy_rejects_external_declaration_before_import():
     )
 
     with pytest.raises(SageV2Error) as rejected:
-        await SAgentBuilder().with_models(TEST_MODELS)._build_package(package)
+        await build_registered_package(tmp_path, models=TEST_MODELS, package=package)
 
     assert rejected.value.info.code == "extension.plugin_trust_policy_violation"
     assert rejected.value.info.metadata == {
@@ -432,53 +362,17 @@ async def test_builtin_only_policy_rejects_external_declaration_before_import():
 
 
 @pytest.mark.asyncio
-async def test_materialization_cannot_weaken_application_trust_or_change_profile(
-    tmp_path: Path,
-):
-    root = BuiltinPackageFactory.create(
-        "assistant",
-        package_id="test.builder-materialize-policy-root",
-    )
-    root = root.model_copy(
-        update={
-            "runtime": root.runtime.model_copy(
-                update={"plugin_trust_policy": "built_in_only"}
-            )
-        }
-    )
-    application = await (
-        SAgentBuilder()
-        .with_models(TEST_MODELS)
-        .with_defaults(session_root=tmp_path / "sessions")
-        .with_model_provider(ScriptedModelProvider(()))
-        ._build_package(root)
-    )
-    external = BuiltinPackageFactory.create(
-        "assistant",
-        package_id="test.builder-materialize-policy-external",
-    ).model_copy(update={"plugins": (PluginDeclaration(id="acme.untrusted"),)})
-    distributed = BuiltinPackageFactory.create(
-        "assistant",
-        package_id="test.builder-materialize-policy-distributed",
-    )
-    distributed = distributed.model_copy(
-        update={
-            "runtime": distributed.runtime.model_copy(
-                update={"deployment_profile": "distributed"}
-            )
-        }
-    )
-
+async def test_runtime_update_cannot_weaken_application_security_profile(tmp_path):
+    package = BuiltinPackageFactory.create("assistant", package_id="test.security")
+    runtime = package.runtime.model_copy(update={"plugin_trust_policy": "built_in_only"})
+    app = await SAgentBuilder().build(runtime=runtime, models=TEST_MODELS)
     try:
-        with pytest.raises(SageV2Error) as trust:
-            await application.materialize_agent(external)
-        with pytest.raises(SageV2Error) as profile:
-            await application.materialize_agent(distributed)
+        for changes in ({"plugin_trust_policy": "trusted_declared"}, {"deployment_profile": "distributed"}):
+            with pytest.raises(ValueError, match="security profile"):
+                await app.update_runtime(app.runtime_configuration.model_copy(update=changes))
     finally:
-        await application.close()
+        await app.close()
 
-    assert trust.value.info.code == "extension.plugin_trust_policy_violation"
-    assert profile.value.info.code == "runtime.deployment_profile_mismatch"
 
 
 @pytest.mark.asyncio
@@ -501,12 +395,7 @@ async def test_builder_reads_mapping_capabilities_from_an_injected_provider(
         }
     )
     application = await (
-        SAgentBuilder()
-        .with_models(TEST_MODELS)
-        .with_defaults(session_root=tmp_path / "unused-store")
-        .with_session_store(EphemeralSessionStore())
-        .with_model_provider(ScriptedModelProvider(()))
-        ._build_package(package)
+        build_registered_package(tmp_path / 'unused-store', models=TEST_MODELS, model=ScriptedModelProvider(()), package=package, providers={'session.store': EphemeralSessionStore()})
     )
 
     await application.close()
@@ -559,12 +448,7 @@ async def test_live_capability_conflict_cannot_be_masked_by_descriptor(tmp_path:
 
     with pytest.raises(SageV2Error) as conflict:
         await (
-            SAgentBuilder()
-            .with_models(TEST_MODELS)
-            .with_defaults(session_root=tmp_path / "sessions")
-            .register(registration)
-            .with_model_provider(ScriptedModelProvider(()))
-            ._build_package(package)
+            build_registered_package(tmp_path / 'sessions', models=TEST_MODELS, model=ScriptedModelProvider(()), package=package, registrations=(registration,))
         )
 
     assert conflict.value.info.code == "runtime.capability_descriptor_conflict"
@@ -582,20 +466,12 @@ async def test_application_composition_hash_includes_builder_storage_config(
     )
     provider = ScriptedModelProvider(())
     first = await (
-        SAgentBuilder()
-        .with_models(TEST_MODELS)
-        .with_defaults(session_root=tmp_path / "first")
-        .with_model_provider(provider)
-        ._build_package(package)
+        build_registered_package(tmp_path / 'first', models=TEST_MODELS, model=provider, package=package)
     )
     first_hash = first.composition_hash
     await first.close()
     second = await (
-        SAgentBuilder()
-        .with_models(TEST_MODELS)
-        .with_defaults(session_root=tmp_path / "second")
-        .with_model_provider(provider)
-        ._build_package(package)
+        build_registered_package(tmp_path / 'second', models=TEST_MODELS, model=provider, package=package)
     )
 
     assert second.composition_hash != first_hash
@@ -603,89 +479,33 @@ async def test_application_composition_hash_includes_builder_storage_config(
 
 
 @pytest.mark.asyncio
-async def test_builder_loop_fences_on_the_full_application_composition_hash(
-    tmp_path: Path,
-):
-    package = BuiltinPackageFactory.create(
-        "assistant",
-        package_id="test.builder-loop-composition-hash",
-    )
-    application = await (
-        SAgentBuilder()
-        .with_models(TEST_MODELS)
-        .with_defaults(session_root=tmp_path / "session-store")
-        .with_model_provider(ScriptedModelProvider(()))
-        ._build_package(package)
-    )
+async def test_standard_entrypoint_rejects_wrong_loaded_revision_identity(tmp_path):
+    package = BuiltinPackageFactory.create("assistant", package_id="test.fenced")
+    app = await build_registered_package(tmp_path, models=TEST_MODELS, model=ScriptedModelProvider(()), package=package)
+    try:
+        agent = app.loaded_agents[-1]
+        with pytest.raises(ValueError, match="identity"):
+            await app.entrypoint().run_stream(StartRun(agent_id=agent.id, input=(),
+                resolved_spec_hash="sha256:wrong", idempotency_key="wrong"), _POLICY_USER, agent=agent)
+    finally:
+        await app.close()
 
-    loop = application.entrypoint().driver_factory("run_1")
-    assert loop.expected_resolved_spec_hash == application.composition_hash
-    await application.close()
 
 
 @pytest.mark.asyncio
-async def test_builder_composes_selected_context_and_continuation_plugins(
-    tmp_path: Path,
-):
-    package = BuiltinPackageFactory.create(
-        "assistant",
-        package_id="test.selected-components",
-    )
-    capabilities = {
-        **package.runtime.capabilities,
-        "context.summary-store": CapabilitySelection(
-            plugin="sage.context.summary-store.session-derived",
-            config={"derived_state": "untrusted-manifest-value"},
-        ),
-        "context.summarizer": CapabilitySelection(
-            plugin="sage.context.summarizer.model",
-            config={"model": "untrusted-manifest-value"},
-        ),
-        "context.reducer": CapabilitySelection(
-            plugin="sage.context.reducer.persistent-summary",
-            config={
-                "store": "untrusted-manifest-value",
-                "summarizer": "untrusted-manifest-value",
-            },
-        ),
-        "agent.continuation-policy": CapabilitySelection(
-            plugin="sage.agent.continuation.explicit-status"
-        ),
-    }
-    route = ModelCatalogConfig.model_validate(TEST_MODELS).models["primary"]
-    route = route.model_copy(
-        update={"limits": route.limits.model_copy(update={"context_window": 32_000})}
-    )
-    package = package.model_copy(
-        update={
-            "runtime": package.runtime.model_copy(update={"capabilities": capabilities})
-        }
-    )
-    application = await (
-        SAgentBuilder()
-        .with_models(
-            {"models": {"primary": route}, "credentials": TEST_MODELS["credentials"]}
-        )
-        .with_defaults(session_root=tmp_path / "session-store")
-        .with_model_provider(ScriptedModelProvider(()))
-        ._build_package(package)
-    )
+async def test_builtin_runtime_cannot_supply_sdk_service_objects(tmp_path):
+    package = BuiltinPackageFactory.create("assistant", package_id="test.context-config")
+    for capability, plugin, parameter in (
+        ("context.summary-store", "sage.context.summary-store.session-derived", "derived_state"),
+        ("context.summarizer", "sage.context.summarizer.model", "model"),
+        ("context.reducer", "sage.context.reducer.persistent-summary", "summarizer"),
+    ):
+        runtime = package.runtime.model_copy(update={"capabilities": {
+            capability: CapabilitySelection(plugin=plugin, config={parameter: "untrusted-value"})}})
+        with pytest.raises(SageV2Error) as error:
+            await build_registered_package(tmp_path / capability, models=TEST_MODELS, package=package, runtime=runtime)
+        assert error.value.info.code == "extension.config_invalid"
 
-    loop = application.entrypoint().driver_factory("run_1")
-    reducer = loop.context_assembler.reducer
-    continuation = loop.continuation_policy.base.base
-
-    assert not hasattr(loop.context_assembler, "estimator")
-    assert isinstance(reducer, PersistentSummaryContextReducer)
-    assert not hasattr(reducer, "estimator")
-    assert isinstance(reducer.unit_compactor, ReferenceContextUnitCompactor)
-    assert not hasattr(reducer.unit_compactor, "estimator")
-    assert isinstance(reducer.store, SessionDerivedConversationSummaryStore)
-    assert reducer.store.derived_state is application.service("derived-state.store")
-    assert isinstance(reducer.summarizer, ModelConversationSummarizer)
-    assert reducer.summarizer.model is loop.model
-    assert isinstance(continuation, ExplicitStatusContinuationPolicy)
-    await application.close()
 
 
 @pytest.mark.parametrize(
@@ -693,48 +513,34 @@ async def test_builder_composes_selected_context_and_continuation_plugins(
     [("assistant", False), ("coder", True)],
 )
 @pytest.mark.asyncio
-async def test_search_memory_assignment_controls_recall_and_auto_write(
-    tmp_path: Path, preset: str, memory_enabled: bool
-):
-    package = BuiltinPackageFactory.create(
-        preset,
-        package_id=f"test.memory-gate.{preset}",
-    )
+async def test_search_memory_assignment_controls_real_recall(tmp_path, preset, memory_enabled):
+    from tests.sagents.v2.test_standard_execution_configuration import response, run
+    class Memory(NoopMemoryProvider):
+        def __init__(self):
+            self.queries = []
+        async def recall(self, query):
+            self.queries.append(query)
+            return ()
+    memory = Memory()
+    package = BuiltinPackageFactory.create(preset, package_id="test.memory." + preset)
     agent_id = package.entrypoint.agent
-    assert agent_id is not None
-    definition = package.agents[agent_id].model_copy(
-        update={
-            "subagents": (),
-            "memory": AgentMemoryBehavior(
-                recall=True,
-                auto_write=True,
-                scope="agent",
-            ),
-        }
-    )
-    package = package.model_copy(
-        update={"agents": {**package.agents, agent_id: definition}}
-    )
-    application = await (
-        SAgentBuilder()
-        .with_models(TEST_MODELS)
-        .with_defaults(session_root=tmp_path / preset / "session-store")
-        .with_memory_provider(NoopMemoryProvider())
-        .with_model_provider(ScriptedModelProvider(()))
-        ._build_package(package)
-    )
-    agent = application.entrypoint()
-    loop = agent.driver_factory("run_1")
+    definition = package.agents[agent_id].model_copy(update={"subagents": (),
+        "memory": AgentMemoryBehavior(recall=True, auto_write=True, scope="agent")})
+    package = package.model_copy(update={"agents": {agent_id: definition}})
+    runtime = package.runtime.model_copy(update={"capabilities": {**package.runtime.capabilities,
+        "tool.catalog": CapabilitySelection(plugin="sage.tool.official"),
+        "execution.binding": CapabilitySelection(plugin="sage.execution.binding.local-workspace", config={
+            "workspace": str(tmp_path / "workspace"), "policy": {"process": {"enabled": False}}})}})
+    app = await build_registered_package(tmp_path / "state", models=TEST_MODELS,
+        model=ScriptedModelProvider((response(), response())), package=package, runtime=runtime,
+        providers={"memory.provider": memory})
+    try:
+        result, events = await run(app, app.loaded_agents[-1], "recall")
+        assert result.state.value == "completed", events
+        assert bool(memory.queries) is memory_enabled
+    finally:
+        await app.close()
 
-    assert loop.automatic_memory_recall is memory_enabled
-    assert all(
-        value.__class__.__name__ != "MemoryContextSource"
-        for value in loop.context_assembler.providers
-    )
-    assert (agent.memory_service is not None) is memory_enabled
-    assert agent.memory_scope["recall"] is memory_enabled
-    assert agent.memory_scope["auto_write"] is memory_enabled
-    await application.close()
 
 
 @pytest.mark.asyncio
@@ -787,258 +593,97 @@ async def test_registered_third_party_model_plugin_is_selected_by_model_route(
     )
 
     application = await (
-        SAgentBuilder()
-        .with_models(models)
-        .with_defaults(session_root=tmp_path / "session-store")
-        .register(registration)
-        ._build_package(package)
+        build_registered_package(tmp_path / 'session-store', models=models, package=package, registrations=(registration,))
     )
 
-    model = application.entrypoint().driver_factory("run_1").model
-    assert model.provider is provider
-    await application.close()
+    from tests.sagents.v2.test_standard_execution_configuration import run
+    try:
+        result, events = await run(application, application.loaded_agents[-1], "custom-route")
+        assert result.state.value == "completed", events
+        assert provider.requests and provider.requests[0].run_id == result.run_id
+    finally:
+        await application.close()
 
 
 @pytest.mark.asyncio
-async def test_official_tools_are_explicit_and_never_auto_discovered(tmp_path: Path):
-    package = BuiltinPackageFactory.create(
-        "assistant",
-        package_id="test.official-tools",
-    )
-    package = package.model_copy(
-        update={
-            "runtime": package.runtime.model_copy(
-                update={
-                    "capabilities": {
-                        "tool.catalog": CapabilitySelection(
-                            plugin="sage.tool.official", name="official"
-                        )
-                    }
-                }
-            )
-        }
-    )
+async def test_official_tools_are_selected_with_standard_execution_binding(tmp_path):
+    package = BuiltinPackageFactory.create("assistant", package_id="test.official-tools")
+    config = package.runtime.model_copy(update={"capabilities": {
+        **package.runtime.capabilities,
+        "tool.catalog": CapabilitySelection(plugin="sage.tool.official"),
+        "execution.binding": CapabilitySelection(plugin="sage.execution.binding.local-workspace", config={
+            "workspace": str(tmp_path / "workspace"), "policy": {"process": {"enabled": False}},
+        }),
+    }})
+    app = await build_registered_package(tmp_path / "state", models=TEST_MODELS,
+        model=ScriptedModelProvider(()), package=package, runtime=config)
+    try:
+        plan = app.loaded_agents[-1].resolved_plan
+        assert any(item.plugin_id == "sage.execution.binding.local-workspace" for item in plan.providers)
+        assert any(item.plugin_id == "sage.tool.official" for item in plan.providers)
+    finally:
+        await app.close()
 
-    builder = (
-        SAgentBuilder()
-        .with_models(TEST_MODELS)
-        .with_defaults(session_root=tmp_path / "session-store")
-        .with_model_provider(ScriptedModelProvider(()))
-    )
-    with pytest.raises(ValueError, match="with_tool_runtime"):
-        await builder._build_package(package)
-
-    issuer = SandboxGrantIssuer()
-    provider = LocalWorkspaceSandboxProvider(issuer.verification_key)
-    digest = hashlib.sha256(str(tmp_path).encode()).hexdigest()
-    handle = await provider.provision(
-        ResolvedSandboxSpec(
-            resources=ResourceLimits(require_hard_limits=False),
-            spec_hash=f"sha256:{digest}",
-            architecture="native",
-            filesystem=FileSystemPolicy(allowed_operations=frozenset(FileOperation)),
-            process=ProcessPolicy(enabled=False),
-            network=NetworkPolicy(),
-            policy_hash=f"sha256:{digest}",
-            metadata={"host_workspace": str(tmp_path)},
-        ),
-        RequestContext(
-            actor=ActorRef(principal_id="user_1", principal_type=PrincipalType.USER)
-        ),
-        run_id="run_1",
-    )
-    application = await builder.with_tool_runtime(
-        OfficialToolRuntime(handle, issuer)
-    )._build_package(package)
-    assert isinstance(application, SAgentApplication)
-    await application.close()
 
 
 @pytest.mark.asyncio
-async def test_execution_binding_provider_receives_actual_run_and_closes_once(
-    tmp_path: Path,
-):
-    package = BuiltinPackageFactory.create(
-        "assistant",
-        package_id="test.run-binding",
-    )
-    package = package.model_copy(
-        update={
-            "runtime": package.runtime.model_copy(
-                update={
-                    "capabilities": {
-                        "tool.catalog": CapabilitySelection(
-                            plugin="sage.tool.official", name="official"
-                        )
-                    }
-                }
-            )
-        }
-    )
-
-    class BindingProvider:
+async def test_registered_binding_receives_accepted_actual_run_and_releases_lease(tmp_path):
+    from sagents.v2.runtime.execution.local_binding import LocalWorkspaceExecutionBindingProvider
+    from tests.sagents.v2.test_standard_execution_configuration import response, run, CONTEXT
+    class Binding(LocalWorkspaceExecutionBindingProvider):
         def __init__(self):
+            super().__init__(tmp_path / "workspace", process_enabled=False)
             self.requests = []
-            self.bindings = []
-
         async def acquire(self, request):
             self.requests.append(request)
-            issuer = SandboxGrantIssuer()
-            sandbox_provider = LocalWorkspaceSandboxProvider(issuer.verification_key)
-            digest = hashlib.sha256(request.run_id.encode()).hexdigest()
-            handle = await sandbox_provider.provision(
-                ResolvedSandboxSpec(
-                    resources=ResourceLimits(require_hard_limits=False),
-                    spec_hash=f"sha256:{digest}",
-                    architecture="native",
-                    filesystem=FileSystemPolicy(
-                        allowed_operations=frozenset(FileOperation)
-                    ),
-                    process=ProcessPolicy(enabled=False),
-                    network=NetworkPolicy(),
-                    policy_hash=f"sha256:{digest}",
-                    metadata={"host_workspace": str(tmp_path)},
-                ),
-                request.context,
-                run_id=request.run_id,
-            )
-            binding = RunExecutionBinding(
-                run_id=request.run_id,
-                parent_run_id=request.parent_run_id,
-                agent_id=request.agent_id,
-                workspace_root=str(tmp_path),
-                workspace_policy=request.workspace_policy,
-                sandbox=handle,
-                grant_issuer=issuer,
-            )
-            self.bindings.append(binding)
-            return binding
+            return await super().acquire(request)
+    binding = Binding()
+    package = BuiltinPackageFactory.create("assistant", package_id="test.binding")
+    runtime = package.runtime.model_copy(update={"capabilities": {
+        "tool.catalog": CapabilitySelection(plugin="sage.tool.official")}})
+    model = ScriptedModelProvider((response(),))
+    app = await build_registered_package(tmp_path / "state", models=TEST_MODELS, model=model,
+        package=package, runtime=runtime, providers={"execution.binding": binding})
+    try:
+        result, events = await run(app, app.loaded_agents[-1], "binding")
+        assert result.state.value == "completed", events
+        assert binding.requests[0].run_id == result.run_id
+        assert binding.requests[0].configuration == await app.execution_configuration(result.run_id, CONTEXT)
+        assert binding.bindings[0].closed
+        facts = await app.execution_diagnostics(result.run_id, CONTEXT)
+        assert facts["sandbox"]["owner_run_id"] == result.run_id
+        assert "<sandbox_environment>" in str(model.requests[0].messages)
+        assert "XDG_CACHE_HOME" in str(model.requests[0].messages)
+    finally:
+        await app.close()
+        await binding.close()
 
-        async def close(self):
-            return None
-
-    bindings = BindingProvider()
-    model = ScriptedModelProvider(
-        (
-            ScriptedModelStep(
-                events=(
-                    ModelStreamEvent(
-                        kind=ModelEventKind.COMPLETED,
-                        response=ModelResponse(
-                            response_id="done",
-                            text="done",
-                            finish_reason="stop",
-                        ),
-                    ),
-                )
-            ),
-        )
-    )
-    application = await (
-        SAgentBuilder()
-        .with_models(TEST_MODELS)
-        .with_defaults(session_root=tmp_path / "session-store")
-        .with_model_provider(model)
-        .with_execution_binding_provider(bindings)
-        ._build_package(package)
-    )
-    deferred = {
-        (value.capability, value.plugin_id, value.scope, value.source)
-        for value in application.resolved_plan.providers
-        if value.source == "plugin-deferred"
-    }
-    assert (
-        "tool.catalog",
-        "sage.tool.official",
-        "run",
-        "plugin-deferred",
-    ) in deferred
-    assert (
-        "tool.executor",
-        "sage.tool.official",
-        "run",
-        "plugin-deferred",
-    ) in deferred
-    agent = application.entrypoint()
-    agent_id = package.entrypoint.agent
-    stream = await agent.run_stream(
-        StartRun(
-            agent_id=agent_id,
-            input=(InputItem(role="user", content=(TextBlock(text="hello"),)),),
-            resolved_spec_hash=application.composition_hash,
-            idempotency_key="binding-run",
-        ),
-        RequestContext(
-            actor=ActorRef(principal_id="user_1", principal_type=PrincipalType.USER)
-        ),
-    )
-    result = await stream.wait()
-
-    assert bindings.requests[0].run_id == result.run_id
-    assert bindings.bindings[0].sandbox.ref.owner_run_id == result.run_id
-    assert bindings.bindings[0].closed is True
-    prompt = str(model.requests[0].messages)
-    assert "<sandbox_environment>" in prompt
-    assert "XDG_CACHE_HOME" in prompt
-    assert bindings.bindings[0].sandbox.describe_environment()["environment"]["HOME"] in prompt
-    await application.close()
 
 
 @pytest.mark.asyncio
-async def test_execution_bound_driver_rejects_mismatched_policy_and_closes(
-    tmp_path: Path,
-):
-    context = RequestContext(
-        actor=ActorRef(principal_id="user_1", principal_type=PrincipalType.USER)
-    )
-    issuer = SandboxGrantIssuer()
-    sandbox_provider = LocalWorkspaceSandboxProvider(issuer.verification_key)
-    handle = await sandbox_provider.provision(
-        ResolvedSandboxSpec(
-            resources=ResourceLimits(require_hard_limits=False),
-            spec_hash="sha256:mismatch",
-            architecture="native",
-            filesystem=FileSystemPolicy(allowed_operations=frozenset(FileOperation)),
-            process=ProcessPolicy(enabled=False),
-            network=NetworkPolicy(),
-            policy_hash="sha256:mismatch",
-            metadata={"host_workspace": str(tmp_path)},
-        ),
-        context,
-        run_id="run_mismatch",
-    )
-    binding = RunExecutionBinding(
-        run_id="run_mismatch",
-        parent_run_id=None,
-        agent_id="agent_1",
-        workspace_root=str(tmp_path),
-        workspace_policy="private_child",
-        sandbox=handle,
-        grant_issuer=issuer,
-    )
-
-    class Provider:
-        async def acquire(self, request: ExecutionBindingRequest):
+async def test_standard_run_rejects_invalid_registered_binding_and_closes_it(tmp_path):
+    from sagents.v2.runtime.execution.local_binding import LocalWorkspaceExecutionBindingProvider
+    from tests.sagents.v2.test_standard_execution_configuration import response, run
+    class InvalidBinding(LocalWorkspaceExecutionBindingProvider):
+        async def acquire(self, request):
+            binding = await super().acquire(request)
+            binding.workspace_policy = "private_child"
             return binding
+    binding = InvalidBinding(tmp_path / "workspace", process_enabled=False)
+    package = BuiltinPackageFactory.create("assistant", package_id="test.binding.invalid")
+    model = ScriptedModelProvider((response(),))
+    app = await build_registered_package(tmp_path / "state", models=TEST_MODELS, model=model,
+        package=package, providers={"execution.binding": binding})
+    try:
+        result, events = await run(app, app.loaded_agents[-1], "invalid-binding")
+        assert result.state.value in {"failed", "suspended"}
+        assert any("execution.workspace_policy_unsupported" in event.model_dump_json() for event in events)
+        assert binding.bindings[0].closed
+        assert model.requests == []
+    finally:
+        await app.close()
+        await binding.close()
 
-    class Store:
-        async def get_start_command(self, run_id):
-            return SimpleNamespace(
-                parent_run_id=None,
-                config=SimpleNamespace(metadata={"workspace_policy": "shared_parent"}),
-            )
-
-    driver = _ExecutionBoundDriver(
-        runtime=SimpleNamespace(session_store=Store()),
-        provider=Provider(),
-        run_id="run_mismatch",
-        agent_id="agent_1",
-        loop_builder=lambda _binding: pytest.fail("loop must not be composed"),
-    )
-    with pytest.raises(SageV2Error) as mismatch:
-        await driver._ensure_loop(context)
-    assert mismatch.value.info.code == "execution.workspace_policy_unsupported"
-    assert binding.closed is True
 
 
 @pytest.mark.asyncio
@@ -1084,23 +729,17 @@ async def test_builder_injects_host_log_and_diagnostic_sinks(tmp_path: Path):
     diagnostic_sink = NoopDiagnosticSink()
 
     application = await (
-        SAgentBuilder()
-        .with_models(TEST_MODELS)
-        .with_defaults(session_root=tmp_path / "session-store")
-        .with_model_provider(ScriptedModelProvider(()))
-        .with_log_sink(log_sink)
-        .with_diagnostic_sink(diagnostic_sink)
-        ._build_package(package)
+        build_registered_package(tmp_path / 'session-store', models=TEST_MODELS, model=ScriptedModelProvider(()), package=package, providers={'observability.log-sink': log_sink, 'observability.diagnostic-sink': diagnostic_sink})
     )
 
     assert application.service("observability.log-sink") is log_sink
     assert application.service("observability.diagnostic-sink") is diagnostic_sink
     assert _host_binding(
         application.resolved_plan, "observability.log-sink"
-    ).source == ("host")
+    ).source == "plugin"
     assert (
         _host_binding(application.resolved_plan, "observability.diagnostic-sink").source
-        == "host"
+        == "plugin"
     )
     await application.close()
 
@@ -1125,12 +764,7 @@ async def test_builder_logs_resolved_application_registration(tmp_path: Path):
         package_id="test.builder-registration",
     )
     application = await (
-        SAgentBuilder()
-        .with_models(TEST_MODELS)
-        .with_defaults(session_root=tmp_path / "session-store")
-        .with_model_provider(ScriptedModelProvider(()))
-        .with_log_sink(sink)
-        ._build_package(package)
+        build_registered_package(tmp_path / 'session-store', models=TEST_MODELS, model=ScriptedModelProvider(()), package=package, providers={'observability.log-sink': sink})
     )
     try:
         registration = next(
@@ -1158,11 +792,7 @@ async def test_builder_keeps_plugin_sinks_when_host_does_not_inject(
     )
 
     application = await (
-        SAgentBuilder()
-        .with_models(TEST_MODELS)
-        .with_defaults(session_root=tmp_path / "session-store")
-        .with_model_provider(ScriptedModelProvider(()))
-        ._build_package(package)
+        build_registered_package(tmp_path / 'session-store', models=TEST_MODELS, model=ScriptedModelProvider(()), package=package)
     )
 
     assert isinstance(application.service("observability.log-sink"), NoopLogSink)
@@ -1193,261 +823,36 @@ def _with_runtime_capabilities(package, **capabilities):
 
 
 @pytest.mark.asyncio
-async def test_materialize_agent_uses_next_manifest_without_a_second_dispatcher(
-    tmp_path: Path,
-):
-    package = BuiltinPackageFactory.create(
-        "assistant",
-        package_id="test.materialize-agent",
-    )
-    application = await (
-        SAgentBuilder()
-        .with_models(TEST_MODELS)
-        .with_defaults(session_root=tmp_path / "session-store")
-        .with_model_provider(ScriptedModelProvider(()))
-        ._build_package(package)
-    )
-    dispatcher = application.service("execution.dispatcher")
-    next_manifest = _with_runtime_capabilities(
-        package,
-        **{
-            "context.reducer": "sage.context.reducer.window",
-        },
-    )
-
-    ports = await application.materialize_agent(
-        next_manifest,
-        agent_id="assistant",
-        run_id="run_next",
-        model=ScriptedModelProvider(()),
-    )
+async def test_updated_agent_uses_new_selection_with_one_app_dispatcher(tmp_path):
+    from tests.sagents.v2.test_standard_execution_configuration import response, run, CONTEXT
+    package = BuiltinPackageFactory.create("assistant", package_id="test.updated-context")
+    app = await build_registered_package(tmp_path, models=TEST_MODELS,
+        model=ScriptedModelProvider((response(), response())), package=package)
     try:
-        assert not hasattr(ports, "token_estimator")
-        assert isinstance(ports.context_reducer, WindowContextReducer)
-        assert application.service("execution.dispatcher") is dispatcher
-        assert _host_binding(ports.resolved_plan, "context.reducer").plugin_id == (
-            "sage.context.reducer.window"
-        )
-        assert (
-            sum(
-                value.capability == "model.provider"
-                for value in ports.resolved_plan.providers
-            )
-            == 1
-        )
-        assert "desktop-host" not in {
-            value.source for value in ports.resolved_plan.providers
-        }
+        original = app.loaded_agents[-1]
+        dispatcher = app.service("execution.dispatcher")
+        config = app.runtime_configuration
+        await app.update_runtime(config.model_copy(update={"capabilities": {**config.capabilities,
+            "context.reducer": CapabilitySelection(plugin="sage.context.reducer.window")}}))
+        updated = await app.update_agent(agent=original, package=package)
+        assert original.composition_hash != updated.composition_hash
+        assert app.service("execution.dispatcher") is dispatcher
+        result, events = await run(app, updated, "updated-context")
+        assert result.state.value == "completed", events
+        report = await app.run_configuration(result.run_id, CONTEXT)
+        assert report["runtime"]["capabilities"]["context.reducer"]["plugin"] == "sage.context.reducer.window"
+        assert any(item["plugin_id"] == "sage.context.reducer.window" for item in report["plugins"])
     finally:
-        for handle in reversed(ports.scope_handles):
-            await handle.close()
-        await application.close()
+        await app.close()
 
 
-@pytest.mark.asyncio
-async def test_materialize_agent_reuses_agent_scoped_ports(tmp_path: Path):
-    package = BuiltinPackageFactory.create(
-        "assistant",
-        package_id="test.materialize-reuse",
-    )
-    application = await (
-        SAgentBuilder()
-        .with_models(TEST_MODELS)
-        .with_defaults(session_root=tmp_path / "session-store")
-        .with_model_provider(ScriptedModelProvider(()))
-        ._build_package(package)
-    )
-    first = await application.materialize_agent(
-        package, agent_id="assistant", run_id="run_1"
-    )
-    second = await application.materialize_agent(
-        package, agent_id="assistant", run_id="run_2"
-    )
-    try:
-        assert (
-            first.context_reducer.unit_compactor
-            is second.context_reducer.unit_compactor
-        )
-        assert first.tool_selection_policy is second.tool_selection_policy
-        assert first.continuation_policy is not second.continuation_policy
-    finally:
-        for handle in reversed((*first.scope_handles, *second.scope_handles)):
-            await handle.close()
-        await application.close()
 
 
-@pytest.mark.asyncio
-async def test_materialize_agent_isolates_cached_ports_by_tenant_and_agent(tmp_path):
-    package = BuiltinPackageFactory.create(
-        "assistant",
-        package_id="test.materialize-tenant-isolation",
-    )
-    application = await (
-        SAgentBuilder()
-        .with_models(TEST_MODELS)
-        .with_defaults(session_root=tmp_path / "session-store")
-        .with_model_provider(ScriptedModelProvider(()))
-        ._build_package(package, tenant_id="tenant_a")
-    )
-
-    tenant_a_first = await application.materialize_agent(
-        package,
-        agent_id="assistant",
-        run_id="run_a1",
-    )
-    tenant_a_second = await application.materialize_agent(
-        package,
-        agent_id="assistant",
-        run_id="run_a2",
-    )
-    tenant_b = await application.materialize_agent(
-        package,
-        tenant_id="tenant_b",
-        agent_id="assistant",
-        run_id="run_b1",
-    )
-    try:
-        assert (
-            tenant_a_first.context_reducer.unit_compactor
-            is tenant_a_second.context_reducer.unit_compactor
-        )
-        assert (
-            tenant_a_first.context_reducer.unit_compactor
-            is not tenant_b.context_reducer.unit_compactor
-        )
-        tenant_a_contexts = [
-            handle.context
-            for handle in application._scope_handles
-            if handle.context.tenant_id == "tenant_a"
-            and handle.context.agent_id == "assistant"
-        ]
-        tenant_b_contexts = [
-            handle.context
-            for handle in application._scope_handles
-            if handle.context.tenant_id == "tenant_b"
-            and handle.context.agent_id == "assistant"
-        ]
-        assert tenant_a_contexts
-        assert tenant_b_contexts
-        assert all(context.run_id is None for context in tenant_a_contexts)
-        assert all(context.run_id is None for context in tenant_b_contexts)
-    finally:
-        for handle in reversed(
-            (
-                *tenant_a_first.scope_handles,
-                *tenant_a_second.scope_handles,
-                *tenant_b.scope_handles,
-            )
-        ):
-            await handle.close()
-        await application.close()
 
 
-@pytest.mark.asyncio
-async def test_materialized_plan_reports_only_ports_selected_for_this_call(
-    tmp_path: Path,
-):
-    package = BuiltinPackageFactory.create(
-        "assistant",
-        package_id="test.materialize-plan-cache",
-    )
-    window = _with_runtime_capabilities(
-        package, **{"context.reducer": "sage.context.reducer.window"}
-    )
-    persistent = _with_runtime_capabilities(
-        package, **{"context.reducer": "sage.context.reducer.persistent-summary"}
-    )
-    application = await (
-        SAgentBuilder()
-        .with_models(TEST_MODELS)
-        .with_defaults(session_root=tmp_path / "session-store")
-        .with_model_provider(ScriptedModelProvider(()))
-        ._build_package(package)
-    )
-    first = await application.materialize_agent(
-        window, agent_id="assistant", run_id="run_1"
-    )
-    second = await application.materialize_agent(
-        persistent, agent_id="assistant", run_id="run_2"
-    )
-    catalog = object()
-    executor = object()
-    third = await application.materialize_agent(
-        window,
-        agent_id="assistant",
-        run_id="run_3",
-        tool_catalog=catalog,
-        tool_executor=executor,
-    )
-    try:
-        assert isinstance(third.context_reducer, WindowContextReducer)
-        assert _host_binding(third.resolved_plan, "context.reducer").plugin_id == (
-            "sage.context.reducer.window"
-        )
-        assert (
-            sum(
-                value.capability == "context.reducer"
-                for value in third.resolved_plan.providers
-            )
-            == 1
-        )
-        assert third.tool_catalog is catalog
-        assert third.tool_executor is executor
-        assert _host_binding(third.resolved_plan, "tool.catalog").source == "host"
-        assert _host_binding(third.resolved_plan, "tool.executor").source == "host"
-        assert (
-            sum(
-                value.capability == "model.provider"
-                for value in third.resolved_plan.providers
-            )
-            == 1
-        )
-    finally:
-        for handle in reversed(
-            (*first.scope_handles, *second.scope_handles, *third.scope_handles)
-        ):
-            await handle.close()
-        await application.close()
 
 
-@pytest.mark.asyncio
-async def test_materialize_agent_rolls_back_run_scopes_on_later_failure(
-    tmp_path: Path,
-):
-    package = BuiltinPackageFactory.create(
-        "assistant",
-        package_id="test.materialize-rollback",
-    )
-    application = await (
-        SAgentBuilder()
-        .with_models(TEST_MODELS)
-        .with_defaults(session_root=tmp_path / "session-store")
-        .with_model_provider(ScriptedModelProvider(()))
-        ._build_package(package)
-    )
-    composer = application._composer
-    original_port = composer._port
-    opened_run_handles = []
 
-    async def fail_after_continuation(*args, **kwargs):
-        value = await original_port(*args, **kwargs)
-        if kwargs["capability"] == "agent.continuation-policy":
-            opened_run_handles.extend(kwargs["run_handles"])
-        if kwargs["capability"] == "memory.recall-query":
-            raise RuntimeError("later component failed")
-        return value
-
-    composer._port = fail_after_continuation
-    try:
-        with pytest.raises(RuntimeError, match="later component failed"):
-            await application.materialize_agent(
-                package, agent_id="assistant", run_id="run_failure"
-            )
-        assert opened_run_handles
-        assert all(handle._closed for handle in opened_run_handles)
-    finally:
-        composer._port = original_port
-        await application.close()
 
 
 # ---------- with_tool_policy：宿主注入审批策略 ----------
@@ -1551,32 +956,26 @@ async def _policy_tool_handler(call, context):
 async def _build_with_tool_policy(session_root: Path, package, policy, model):
     tools = (_POLICY_READ_TOOL, _POLICY_WRITE_TOOL)
     builder = (
-        SAgentBuilder()
-        .with_models(TEST_MODELS)
-        .with_defaults(session_root=session_root)
-        .with_model_provider(model)
-        .with_tool_provider(
-            InMemoryToolCatalog(tools),
-            InMemoryToolExecutor(
-                {tool.name: tool for tool in tools},
-                {tool.name: _policy_tool_handler for tool in tools},
-            ),
-        )
+        fixture_configuration(session_root, models=TEST_MODELS, model=model, tools=(InMemoryToolCatalog(tools), InMemoryToolExecutor({tool.name: tool for tool in tools}, {tool.name: _policy_tool_handler for tool in tools}),))
     )
     if policy is not None:
-        builder = builder.with_tool_policy(policy)
-    return await builder._build_package(package)
+        from dataclasses import replace
+        additional = fixture_configuration(session_root, providers={"agent.tool-policy": policy})
+        builder = replace(builder, registrations=(*builder.registrations, *additional.registrations),
+            runtime=builder.runtime.model_copy(update={"capabilities": {
+                **builder.runtime.capabilities, "agent.tool-policy": additional.runtime.capabilities["agent.tool-policy"]}}))
+    return await build_registered_package(configuration=builder, package=package)
 
 
 async def _run_to_boundary(application: SAgentApplication, package, *, key: str):
     stream = await application.entrypoint().run_stream(
-        StartRun(
+        (StartRun(
             agent_id=package.entrypoint.agent,
             input=(InputItem(role="user", content=(TextBlock(text="go"),)),),
             resolved_spec_hash=application.composition_hash,
             idempotency_key=key,
-        ),
-        _POLICY_USER,
+        )).model_copy(update={"agent_id": application.loaded_agents[-1].id, "resolved_spec_hash": application.loaded_agents[-1].composition_hash}),
+        _POLICY_USER, agent=application.loaded_agents[-1],
     )
     event_types = [event.type async for event in stream.events]
     return event_types, await stream.wait()
@@ -1627,43 +1026,24 @@ async def test_builder_applies_host_injected_tool_policy_to_the_loop(
 
 
 @pytest.mark.asyncio
-async def test_host_tool_policy_is_visible_in_the_plan_but_does_not_fence_runs(
-    tmp_path: Path,
-):
-    package = _policy_package("test.tool-policy-identity")
-    session_root = tmp_path / "session-store"
-    hashes: dict[str, str] = {}
-    # 同一 session_root 顺序构建，排除存储身份带来的差异。
-    for label, policy in (
-        ("default", None),
-        ("auto", DefaultToolPolicy(approval_strategy=ApprovalStrategy.AUTO_APPROVE)),
-        ("ask", DefaultToolPolicy(approval_strategy=ApprovalStrategy.ALWAYS_ASK)),
-    ):
-        application = await _build_with_tool_policy(
-            session_root, package, policy, ScriptedModelProvider(())
-        )
+async def test_registered_tool_policy_is_part_of_frozen_composition_identity(tmp_path):
+    package = _policy_package("test.policy-identity")
+    identities = []
+    for strategy in (ApprovalStrategy.AUTO_APPROVE, ApprovalStrategy.ALWAYS_ASK):
+        runtime = package.runtime.model_copy(update={"capabilities": {**package.runtime.capabilities,
+            "agent.tool-policy": CapabilitySelection(plugin="sage.agent.tool-policy.default",
+                config={"approval_strategy": strategy.value})}})
+        app = await build_registered_package(tmp_path, models=TEST_MODELS, model=ScriptedModelProvider(()),
+            package=package, runtime=runtime)
         try:
-            hashes[label] = application.composition_hash
-            plan = application.resolved_plan
-            # 策略不是服务：既不暴露给 application.services，也不进入 hash。
-            assert "agent.tool-policy" not in application.services
-            if policy is None:
-                assert all(
-                    value.capability != "agent.tool-policy" for value in plan.providers
-                )
-                continue
-            binding = _host_binding(plan, "agent.tool-policy")
-            assert binding.source == "host"
-            assert binding.plugin_id is None
-            assert policy.composition_identity() == policy.policy_hash
-            loop = application.entrypoint().driver_factory("run_identity")
-            assert loop.tool_policy is policy
+            identities.append(app.loaded_agents[-1].composition_hash)
+            binding = _host_binding(app.loaded_agents[-1].resolved_plan, "agent.tool-policy")
+            assert binding.source == "plugin"
+            assert binding.plugin_id == "sage.agent.tool-policy.default"
+            assert app.service("agent.tool-policy").approval_strategy == strategy
         finally:
-            await application.close()
-
-    # 审批模式是宿主运行偏好：换一档不改变 composition hash，
-    # 上个进程挂起的 Run 在新的审批模式下仍能续跑。
-    assert hashes["default"] == hashes["auto"] == hashes["ask"]
+            await app.close()
+    assert identities[0] != identities[1]
 
 
 # ---------- 审批记忆接线 ----------
@@ -1708,86 +1088,54 @@ def _write_steps(*calls: tuple[str, dict]) -> ScriptedModelProvider:
 
 
 @pytest.mark.asyncio
-async def test_builder_wires_session_approval_memory_and_accepts_a_host_memory(
-    tmp_path: Path,
-):
+async def test_builder_wires_registered_borrowed_approval_memory(tmp_path):
     package = _policy_package("test.approval-memory")
-    application = await _build_with_tool_policy(
-        tmp_path / "default", package, None, ScriptedModelProvider(())
-    )
-    try:
-        memory = application.services["agent.approval-memory"]
-        assert isinstance(memory, SessionApprovalMemory)
-        loop = application.entrypoint().driver_factory("run_memory")
-        assert loop.approval_memory is memory
-        assert (
-            _host_binding(application.resolved_plan, "agent.approval-memory").source
-            == "host"
-        )
-    finally:
-        await application.close()
-
     host_memory = SessionApprovalMemory(InMemoryDerivedStateStore())
-    application = await (
-        SAgentBuilder()
-        .with_models(TEST_MODELS)
-        .with_defaults(session_root=tmp_path / "host")
-        .with_model_provider(ScriptedModelProvider(()))
-        .with_approval_memory(host_memory)
-        ._build_package(package)
-    )
+    app = await build_registered_package(tmp_path / "state", models=TEST_MODELS,
+        model=ScriptedModelProvider(()), package=package,
+        providers={"agent.approval-memory": host_memory})
     try:
-        assert application.services["agent.approval-memory"] is host_memory
-        loop = application.entrypoint().driver_factory("run_host")
-        assert loop.approval_memory is host_memory
+        assert app.service("agent.approval-memory") is host_memory
+        assert any(item.plugin_id == "test.fixture.agent.approval-memory" for item in app.loaded_agents[-1].resolved_plan.providers)
     finally:
-        await application.close()
+        await app.close()
+
 
 
 @pytest.mark.asyncio
-async def test_builder_layers_a_host_approval_memory_over_the_session_memory(
-    tmp_path: Path,
-):
+async def test_registered_approval_memory_layer_receives_declared_store(tmp_path):
+    from sagents.v2.runtime.extensions import ExtensionDependency
     class Layer:
         supported_scopes = frozenset({"session", "workspace"})
-
         def __init__(self, inner):
             self.inner = inner
-
-        async def lookup(self, *, session_id, matcher):
-            return await self.inner.lookup(session_id=session_id, matcher=matcher)
-
-        async def remember(self, *, session_id, approval):
-            await self.inner.remember(session_id=session_id, approval=approval)
-
-        async def forget(self, *, session_id, matcher=None):
-            return await self.inner.forget(session_id=session_id, matcher=matcher)
-
-        async def list_remembered(self, *, session_id):
-            return await self.inner.list_remembered(session_id=session_id)
-
+        async def lookup(self, **kwargs):
+            return await self.inner.lookup(**kwargs)
+        async def remember(self, **kwargs):
+            return await self.inner.remember(**kwargs)
+        async def forget(self, **kwargs):
+            return await self.inner.forget(**kwargs)
+        async def list_remembered(self, **kwargs):
+            return await self.inner.list_remembered(**kwargs)
+    registration = ExtensionRegistration(
+        descriptor=ExtensionDescriptor(plugin_id="test.approval.layer", name="Layer", version="1",
+            provides=(CapabilityOffer(capability="agent.approval-memory", api_version="2"),),
+            dependencies=(ExtensionDependency(capability="derived-state.store"),),
+            supported_scopes=frozenset({ExtensionScope.PROCESS}),
+            config_schema={"type": "object", "additionalProperties": False}),
+        factory=lambda scope, deps: Layer(SessionApprovalMemory(deps.require("derived-state.store"))))
     package = _policy_package("test.approval-memory-layer")
-    application = await (
-        SAgentBuilder()
-        .with_models(TEST_MODELS)
-        .with_defaults(session_root=tmp_path / "layer")
-        .with_model_provider(ScriptedModelProvider(()))
-        .with_approval_memory_layer(Layer)
-        ._build_package(package)
-    )
+    runtime = package.runtime.model_copy(update={"capabilities": {**package.runtime.capabilities,
+        "agent.approval-memory": CapabilitySelection(plugin="test.approval.layer")}})
+    app = await build_registered_package(tmp_path / "state", models=TEST_MODELS,
+        model=ScriptedModelProvider(()), package=package, runtime=runtime, registrations=(registration,))
     try:
-        memory = application.services["agent.approval-memory"]
+        memory = app.service("agent.approval-memory")
         assert isinstance(memory, Layer)
-        # 叠层收到的是 Kernel 的 session 记忆，session 作用域仍由它负责。
         assert isinstance(memory.inner, SessionApprovalMemory)
-        loop = application.entrypoint().driver_factory("run_layer")
-        assert loop.approval_memory is memory
-        assert (
-            _host_binding(application.resolved_plan, "agent.approval-memory").source
-            == "host"
-        )
     finally:
-        await application.close()
+        await app.close()
+
 
 
 @pytest.mark.asyncio
@@ -1827,7 +1175,7 @@ async def test_builder_remembers_approvals_in_the_session_derived_state(
             ),
             _POLICY_USER,
         )
-        final = await (await agent.continue_run(suspended.run_id, _POLICY_USER))
+        final = await (await agent.continue_run(suspended.run_id, _POLICY_USER, agent=application.loaded_agents[-1]))
 
         assert final.state == RunState.COMPLETED
         types = [event.type for event in await store.read_events(suspended.run_id)]
@@ -1849,326 +1197,15 @@ async def test_builder_remembers_approvals_in_the_session_derived_state(
         await application.close()
 
 
-@pytest.mark.asyncio
-async def test_closed_run_scopes_do_not_retain_materialization_locks(tmp_path):
-    package = BuiltinPackageFactory.create(
-        "assistant",
-        package_id="test.materialize-lock-cleanup",
-    )
-    application = await (
-        SAgentBuilder()
-        .with_models(TEST_MODELS)
-        .with_defaults(session_root=tmp_path / "session-store")
-        .with_model_provider(ScriptedModelProvider(()))
-        ._build_package(package)
-    )
-    try:
-        for index in range(20):
-            ports = await application.materialize_agent(
-                package, agent_id="assistant", run_id=f"run_{index}"
-            )
-            for handle in reversed(ports.scope_handles):
-                await handle.close()
-        assert not any(key[2] == "run" for key in application._composer._key_locks)
-    finally:
-        await application.close()
 
 
-@pytest.mark.asyncio
-async def test_materialization_lock_remains_shared_by_concurrent_waiters(
-    tmp_path, monkeypatch
-):
-    import asyncio
-
-    package = BuiltinPackageFactory.create(
-        "assistant",
-        package_id="test.materialize-lock-waiters",
-    )
-    application = await (
-        SAgentBuilder()
-        .with_models(TEST_MODELS)
-        .with_defaults(session_root=tmp_path / "session-store")
-        .with_model_provider(ScriptedModelProvider(()))
-        ._build_package(package)
-    )
-    entered = asyncio.Event()
-    release = asyncio.Event()
-    original = application._composer._instantiate
-    creations = 0
-
-    async def delayed(plugin_id, config, capability, **kwargs):
-        nonlocal creations
-        if capability == "context.unit-compactor":
-            creations += 1
-            entered.set()
-            await release.wait()
-        return await original(plugin_id, config, capability, **kwargs)
-
-    monkeypatch.setattr(application._composer, "_instantiate", delayed)
-    tasks = []
-    try:
-        tasks.append(
-            asyncio.create_task(application.materialize_agent(package, run_id="run_1"))
-        )
-        await asyncio.wait_for(entered.wait(), 5)
-        tasks.append(
-            asyncio.create_task(application.materialize_agent(package, run_id="run_2"))
-        )
-        await asyncio.sleep(0)
-        assert creations == 1
-        release.set()
-        first, second = await asyncio.wait_for(asyncio.gather(*tasks), 5)
-        assert creations == 1
-        assert (
-            first.context_reducer.unit_compactor
-            is second.context_reducer.unit_compactor
-        )
-        for handle in reversed((*first.scope_handles, *second.scope_handles)):
-            await handle.close()
-    finally:
-        release.set()
-        await asyncio.gather(*tasks, return_exceptions=True)
-        await application.close()
 
 
-@pytest.mark.asyncio
-async def test_skill_loading_config_reaches_factory_and_rematerialized_ports(tmp_path):
-    from sagents.v2.agent.factory import AgentCompositionFactory
-    from sagents.v2.package.manifest.resolver import CompositionResolver
-    from sagents.v2.skill import (
-        InMemorySkillActivationRepository,
-        InMemorySkillProvider,
-        InMemorySkillWorkspace,
-        SkillBundle,
-        SkillDescriptor,
-    )
-
-    package = BuiltinPackageFactory.create(
-        "assistant",
-        package_id="test.skill-config",
-    )
-    package = package.model_copy(
-        update={
-            "plugins": (
-                PluginDeclaration(
-                    id="sage.skill.loading.lazy",
-                    config={"max_active_characters": 36000},
-                ),
-            )
-        }
-    )
-    application = await (
-        SAgentBuilder()
-        .with_models(TEST_MODELS)
-        .with_defaults(session_root=tmp_path)
-        .with_model_provider(ScriptedModelProvider(()))
-        ._build_package(package)
-    )
-    try:
-        assert (
-            application.service("skill.loading").config.max_active_characters == 36000
-        )
-        configured = package.model_copy(
-            update={
-                "runtime": package.runtime.model_copy(
-                    update={
-                        "capabilities": {
-                            **package.runtime.capabilities,
-                            "skill.loading": CapabilitySelection(
-                                plugin="sage.skill.loading.lazy",
-                                config={"max_active_characters": 48000},
-                            ),
-                        }
-                    },
-                )
-            }
-        )
-        ports = await application.materialize_agent(
-            configured, run_id="run_skill_config"
-        )
-        assert ports.skill_loading.config.max_active_characters == 48000
-        assert any(
-            p.capability == "skill.loading" for p in ports.resolved_plan.providers
-        )
-        resolved = CompositionResolver(models=TEST_MODELS).resolve(configured)
-        provider = InMemorySkillProvider(
-            (
-                SkillBundle(
-                    descriptor=SkillDescriptor(
-                        name="large", description="large", source_id="test"
-                    ),
-                    files={"SKILL.md": b"x" * 30000},
-                    content_hash="sha256:large",
-                ),
-            )
-        )
-        # Exercise actual admission with a body larger than the old 6000 limit.
-        for plugin in (ports.skill_loading, None):
-            loader = AgentCompositionFactory(
-                application.entrypoint().runtime
-            ).create_skill_loader(
-                resolved,
-                "assistant",
-                catalog=provider,
-                source=provider,
-                workspace=InMemorySkillWorkspace(),
-                activations=InMemorySkillActivationRepository(),
-                skill_loading=plugin,
-            )
-            loader.catalog = provider
-            loaded = await loader.load("large", run_id="run_skill_config")
-            assert len(loaded.instructions) == 30000
-            assert loader.max_active_characters == 48000
-    finally:
-        await application.close()
 
 
-@pytest.mark.asyncio
-@pytest.mark.parametrize("runtime_limit", [None, 12000])
-async def test_skill_loading_locked_config_reaches_loader(tmp_path, runtime_limit):
-    from sagents.v2.skill import (
-        InMemorySkillActivationRepository,
-        InMemorySkillProvider,
-        InMemorySkillWorkspace,
-        SkillBundle,
-        SkillDescriptor,
-    )
-
-    package = BuiltinPackageFactory.create(
-        "assistant", package_id="test.skill-locked-config"
-    )
-    if runtime_limit is not None:
-        package = package.model_copy(
-            update={
-                "runtime": package.runtime.model_copy(
-                    update={
-                        "capabilities": {
-                            **package.runtime.capabilities,
-                            "skill.loading": CapabilitySelection(
-                                plugin="sage.skill.loading.lazy",
-                                config={"max_active_characters": runtime_limit},
-                            ),
-                        }
-                    }
-                )
-            }
-        )
-    application = await (
-        SAgentBuilder()
-        .with_models(TEST_MODELS)
-        .with_defaults(session_root=tmp_path)
-        .with_model_provider(ScriptedModelProvider(()))
-        ._build_package(package)
-    )
-    try:
-        default_ports = await application.materialize_agent(package)
-        ports = await application.materialize_agent(
-            package,
-            locked_configs={"skill.loading": {"max_active_characters": 48000}},
-        )
-        assert ports.skill_loading.config.max_active_characters == 48000
-        assert ports.skill_loading is not default_ports.skill_loading
-        assert default_ports.skill_loading.config.max_active_characters == (
-            runtime_limit if runtime_limit is not None else 24000
-        )
-        provider = InMemorySkillProvider(
-            (
-                SkillBundle(
-                    descriptor=SkillDescriptor(
-                        name="large", description="large", source_id="test"
-                    ),
-                    files={"SKILL.md": b"x" * 30000},
-                    content_hash="sha256:large",
-                ),
-            )
-        )
-        loader = ports.skill_loading.create_loader(
-            catalog=provider,
-            source=provider,
-            workspace=InMemorySkillWorkspace(),
-            activations=InMemorySkillActivationRepository(),
-        )
-        loaded = await loader.load("large", run_id="run_skill_locked_config")
-        assert len(loaded.instructions) == 30000
-        assert loader.max_active_characters == 48000
-    finally:
-        await application.close()
 
 
-@pytest.mark.asyncio
-async def test_materialized_user_config_is_not_overwritten_by_host_defaults(tmp_path):
-    from sagents.v2.agent.policy import LoopRecoveryRule
 
-    package = BuiltinPackageFactory.create(
-        "assistant",
-        package_id="test.user-config",
-    )
-    package = package.model_copy(
-        update={
-            "runtime": package.runtime.model_copy(
-                update={
-                    "capabilities": {
-                        **package.runtime.capabilities,
-                        "agent.continuation-policy": CapabilitySelection(
-                            plugin="sage.agent.continuation.hybrid",
-                            config={"repeat_threshold": 7, "timeout_seconds": 12},
-                        ),
-                        "memory.recall-query": CapabilitySelection(
-                            plugin="sage.memory.recall-query.llm",
-                            config={"timeout_seconds": 15},
-                        ),
-                        "context.summarizer": CapabilitySelection(
-                            plugin="sage.context.summarizer.model",
-                            config={
-                                "max_source_tokens": 16000,
-                                "timeout_seconds": 18,
-                                "idle_timeout_seconds": 9,
-                            },
-                        ),
-                    },
-                }
-            )
-        }
-    )
-    application = await (
-        SAgentBuilder()
-        .with_models(TEST_MODELS)
-        .with_defaults(session_root=tmp_path)
-        .with_model_provider(ScriptedModelProvider(()))
-        ._build_package(package)
-    )
-    try:
-        ports = await application.materialize_agent(package, run_id="configured-run")
-        assert ports.continuation_policy.judge.timeout_seconds == 12
-        assert ports.memory_query_generator.timeout_seconds == 15
-        assert ports.summarizer.max_source_tokens == 16000
-        assert ports.summarizer.timeout_seconds == 18
-        assert ports.summarizer.idle_timeout_seconds == 9
-        deterministic = package.model_copy(
-            update={
-                "runtime": package.runtime.model_copy(
-                    update={
-                        "capabilities": {
-                            **package.runtime.capabilities,
-                            "agent.continuation-policy": CapabilitySelection(
-                                plugin="sage.agent.continuation.deterministic",
-                                config={"repeat_threshold": 7},
-                            ),
-                        },
-                    }
-                )
-            }
-        )
-        ports = await application.materialize_agent(
-            deterministic, run_id="configured-deterministic"
-        )
-        assert (
-            next(
-                r
-                for r in ports.continuation_policy.rules
-                if isinstance(r, LoopRecoveryRule)
-            ).threshold
-            == 7
-        )
-    finally:
-        await application.close()
+# Scope reuse, concurrent tenant/Agent isolation, failed Run rollback and actual
+# Skill/configuration behavior are covered through public standard execution in
+# test_standard_capability_scopes.py; the removed materializer is not reintroduced.

@@ -4,9 +4,7 @@ import pytest
 
 from app.v2.desktop.backend.openui import OpenUiParser, OpenUiStore, openui_blocks
 from app.v2.desktop.backend.schemas import DesktopRunRequest, RunMessage
-from app.v2.desktop.backend.service import DesktopV2Service
 from app.v2.desktop.backend.schemas import ModelProviderPatch
-from sagents.v2.agent.policy.continuation import CompositeContinuationPolicy
 from sagents.v2.model.contracts import ModelEventKind, ModelResponse, ModelStreamEvent
 from sagents.v2.testing.plugins.scripted_model import (
     ScriptedModelProvider,
@@ -97,42 +95,17 @@ async def test_store_revision_owner_validation_and_durable_duplicate_protection(
 async def test_desktop_stream_and_action_replay_use_no_ui_tool(
     tmp_path, monkeypatch, ui_preference
 ):
-    service = DesktopV2Service(tmp_path)
-    await service.list_agents("owner")
-    await service.patch_model_provider(
-        "model_main", ModelProviderPatch(api_keys=["fake"]), "owner"
-    )
+    from tests.app.v2.desktop.sdk_fixture import desktop
     text = "Choose a city.\n```openui\n" + CODE + "\n```"
-    original = service._build_loop
     requests = []
-
-    async def build(**kwargs):
-        resolved, loop, resources = await original(**kwargs)
-        answer = text if not requests else "Received your city."
-        events = tuple(
-            ModelStreamEvent(kind=ModelEventKind.TEXT_DELTA, delta=char)
-            for char in answer
-        )
-        loop.model = ScriptedModelProvider(
-            (
-                ScriptedModelStep(
-                    events=(
-                        *events,
-                        ModelStreamEvent(
-                            kind=ModelEventKind.COMPLETED,
-                            response=ModelResponse(
-                                response_id="answer", text=answer, finish_reason="stop"
-                            ),
-                        ),
-                    ),
-                    assertion=requests.append,
-                ),
-            )
-        )
-        loop.continuation_policy = CompositeContinuationPolicy()
-        return resolved, loop, resources
-
-    monkeypatch.setattr(service, "_build_loop", build)
+    steps = []
+    for answer in (text, "Received your city."):
+        events = tuple(ModelStreamEvent(kind=ModelEventKind.TEXT_DELTA, delta=char) for char in answer)
+        steps.append(ScriptedModelStep(events=(*events, ModelStreamEvent(kind=ModelEventKind.COMPLETED,
+            response=ModelResponse(response_id="answer", text=answer, finish_reason="stop"))), assertion=requests.append))
+    service, _, _ = desktop(tmp_path, model=ScriptedModelProvider(tuple(steps)))
+    await service.list_agents("owner")
+    await service.patch_model_provider("model_main", ModelProviderPatch(api_keys=["fake"]), "owner")
     try:
         frames = [
             json.loads(line)
@@ -176,7 +149,7 @@ async def test_desktop_stream_and_action_replay_use_no_ui_tool(
         assert "built-in answer format" in system_text
         assert "Rendering has no tool-loading prerequisite" in system_text
         assert "operations independently required" in system_text
-        assert ("already preloaded by the Desktop host" in system_text) == (
+        assert ("preloaded by the standard Sage Skill loader" in system_text) == (
             ui_preference == "interactive"
         )
         if ui_preference == "interactive":
@@ -298,26 +271,26 @@ async def test_expanded_fields_claim_and_replay_preserve_types(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_interactive_skill_preload_uses_frozen_installer_layout(
-    tmp_path, monkeypatch
-):
-    from types import SimpleNamespace
-    from app.v2.desktop.backend import openui
-
+async def test_interactive_skill_preload_uses_frozen_installer_layout(tmp_path, monkeypatch):
+    from app.v2.desktop.backend import openui, workspace_service
+    from tests.app.v2.desktop.sdk_fixture import desktop, execute
     runtime = tmp_path / "_internal/app/v2/desktop/backend/openui_runtime"
     runtime.mkdir(parents=True)
     (runtime / "prompt.txt").write_text("component protocol")
     skill = tmp_path / "_internal/skills/sage-openui/SKILL.md"
     skill.parent.mkdir(parents=True)
-    skill.write_text("frozen builtin skill instructions")
+    skill.write_text("---\nname: sage-openui\ndescription: Frozen skill\n---\nfrozen builtin skill instructions")
     monkeypatch.setattr(openui, "RUNTIME", runtime)
-    command = SimpleNamespace(
-        config=SimpleNamespace(metadata={"ui_preference": "interactive"})
-    )
-    segments = await openui.OpenUiContextProvider().segments(command)
-    assert "frozen builtin skill instructions" in next(
-        s.content for s in segments if s.segment_id == "desktop_openui_skill"
-    )
+    monkeypatch.setattr(workspace_service, "__file__", str(runtime.parent / "workspace_service.py"))
+    service, model, _ = desktop(tmp_path / "service")
+    try:
+        run, _, _ = await execute(service, request=DesktopRunRequest(agent_id="sage", messages=[RunMessage(role="user", text="Render")], ui_preference="interactive"))
+        assert run.state.value == "completed"
+        assert "frozen builtin skill instructions" in str(model.requests[0].messages)
+        accepted = await service.application.run_configuration(run.run_id, service._context("user_1"))
+        assert accepted["agent"]["preload_skills"] == ["sage-openui"]
+    finally:
+        await service.close()
 
 
 @pytest.mark.asyncio

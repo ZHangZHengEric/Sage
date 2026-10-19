@@ -5,6 +5,8 @@ These are host extensions, not sandboxed Agent tools. Authorize before loading.
 from __future__ import annotations
 
 import sys
+import hashlib
+from dataclasses import replace
 import types
 import uuid
 
@@ -21,6 +23,7 @@ class SourcePluginScope:
         name = f"_sage_extension_{uuid.uuid4().hex}"
         module = types.ModuleType(name)
         module.__file__ = f"extensions/{declaration.id}.py"
+        module.__sage_source_sha256__ = hashlib.sha256(source.encode()).hexdigest()
         sys.modules[name] = module
         self.modules.append((name, module))
         exec(code, module.__dict__)
@@ -33,7 +36,9 @@ class SourcePluginScope:
         if descriptor.built_in:
             raise ValueError("source plugins cannot declare themselves built-in")
         validate_extension_version(registration, declaration.version)
-        return registration
+        return replace(registration, descriptor=descriptor.model_copy(update={"capabilities": {
+            **descriptor.capabilities, "source_sha256": hashlib.sha256(source.encode()).hexdigest(),
+        }}))
 
     async def close(self):
         for name, module in self.modules:

@@ -29,7 +29,7 @@ Agent 包把提示词、模型选择、工具、Skills 和流程放在一起，�
 
 ## 管理工具
 
-通过 `SAgentBuilder.with_agent_management(service)` 注入服务，在 Agent 的 `tools` 中显式选择工具；注入本身不授予所有 Agent 权限。
+通过 `builder.register(registration)` 注册 `agent.management` 工厂，并在 runtime 中选择，在 Agent 的 `tools` 中显式选择工具；注入本身不授予所有 Agent 权限。
 
 | 工具 | 作用 |
 | --- | --- |
@@ -61,9 +61,9 @@ service = AgentManagementService(
 
 这是接入片段，回调由宿主实现。异步 `authorize(action, bundle, context)` 成功返回 None，拒绝时抛错。它检查模型、凭据引用、插件、工具、预算、路径与外部连接，在加载插件前及后续运行、控制和激活时执行。授权不等于每次人工询问；交互仍由 ToolPolicy 决定。
 
-`builder_factory(bundle, session_root, context)` 同步或异步返回一个新的 Builder：使用按用户/包/Agent 划分的持久 session_root，注入模型、记忆、工具及真实 Run 沙箱绑定，注册已准入插件。Skill 接入使用 `with_skill_provider(catalog, source, workspace)`，并要求 Agent 的 Skill 选择、load_skill 授权与调用者的 `skill.load` scope。允许进一步创建 Agent 时，显式注入管理服务和管理工具。
+`builder_factory(bundle, session_root, context)` 返回 `ApplicationConfiguration`，包含注册项、可序列化 runtime 和 App 模型配置。管理服务创建标准 Builder、注册、build 并 load_agent。Skill 通过 catalog/source/workspace 能力接入，仍检查调用者授权。
 
-服务调用 `builder.build(..., agent_id=...)`。不要共享可变 Builder 或所有权不明的客户端。验证在独立临时目录装配；关闭失败保留 Application 与目录，进入 draining 并拒绝新操作，以便再次 close 清理。
+管理服务使用 `build(runtime=..., models=...)` 后再 `load_agent(package, subagents=...)`。验证使用独立临时状态根目录和回滚生命周期；宿主不返回 Builder 子类或执行组件。
 
 服务由宿主持有和关闭，不能被某个子 Application 关闭。`max_applications` 限制驻留实例及构建占位，`max_concurrent_builds` 默认 4，验证资源关闭后才释放构建名额。容量满时默认尝试回收闲置 300 秒、可持久恢复且无非终态任务的实例；设 `auto_release_idle_seconds=None` 关闭。没有后台定时回收。详见[资源管理](SAGENTS_V2_RESOURCE_MANAGEMENT.md)。
 
@@ -71,7 +71,7 @@ service = AgentManagementService(
 
 标准 [ExtensionRegistration](https://github.com/ZHangZHengEric/Sage/blob/main/sagents/v2/runtime/extensions/contracts.py) 声明 ID、版本、API、配置 Schema、依赖、作用域、factory 与生命周期 hooks。通过 `sage.extensions` 显式发现，或 `builder.register(registration)` 注册。缺失声明、版本冲突、无效配置及未绑定节点明确失败。
 
-`runtime.capabilities["flow.node"]` 选择标准节点，或用 `with_flow_tool_nodes` 绑定宿主 `RunnableNode`。接口为 `RunnableNode.run(FlowNodeContext) -> FlowNodeResult`。Builder 支持 process / tenant / agent scope 的节点，Run scope 需要专用 driver。Agent 的 `entrypoint.type: flow` 接入 FlowRuntime。
+注册实现 `RunnableNode.run(FlowNodeContext) -> FlowNodeResult` 的 `flow.node` 能力，在 runtime 选择具名 offer。标准机制校验作用域并支持实际 Run scope 的实例化，无需宿主 Driver。
 
 Flow agent 节点使用 Native 子 Run，前序输出作为后续任务数据；嵌套流程用 subflow。Builder 拒绝递归 Flow agent 和未实现的自定义 loop。interaction 节点可选择 user_input，默认 approval，两者权限边界不同。完成输出写入 `flow.completed.output`，管理服务以 `flow_results` 返回。
 

@@ -5,6 +5,8 @@ Uses scripted model responses to demonstrate the runtime, not model intelligence
 """
 
 from __future__ import annotations
+from sagents.v2 import ApplicationConfiguration
+from examples.sagents_v2_host.registrations import provided, runtime_for
 
 import asyncio
 import json
@@ -78,9 +80,7 @@ async def demo(root: Path):
 
     def builder_factory(package, session_root, ctx):
         return (
-            SAgentBuilder().with_models({"models": {"primary": {"provider": "openai-responses", "model": "scripted"}}})
-            .with_defaults(session_root=session_root)
-            .with_model_provider(ScriptedModelProvider((step("2 km = 2000 m"),)))
+            ApplicationConfiguration((provided('example.model-provider', lambda context, deps, value=ScriptedModelProvider((step('2 km = 2000 m'),)): value, 'model.provider'),), runtime_for(session_root, package.manifest.runtime, capabilities={'model.provider': {'plugin': 'example.model-provider'}}), {'models': {'primary': {'provider': 'openai-responses', 'model': 'scripted'}}})
         )
 
     service = AgentManagementService(
@@ -111,16 +111,11 @@ async def demo(root: Path):
             step("Expert created and task started."),
         )
     )
-    app = await (
-        SAgentBuilder().with_models({"models": {"primary": {"provider": "openai-responses", "model": "scripted"}}})
-        .with_defaults(session_root=root / "parent")
-        .with_model_provider(parent_model)
-        .with_agent_management(service)
-        .with_tool_policy(
-            DefaultToolPolicy(approval_strategy=ApprovalStrategy.AUTO_APPROVE)
-        )
-        .build(runtime=SageManifest.model_validate(parent_data).runtime)
-    )
+    configuration = ApplicationConfiguration((provided('example.model-provider', lambda context, deps, value=parent_model: value, 'model.provider'), provided('example.agent-management', lambda context, deps, value=service: value, 'agent.management'), provided('example.agent-tool-policy', lambda context, deps, value=DefaultToolPolicy(approval_strategy=ApprovalStrategy.AUTO_APPROVE): value, 'agent.tool-policy'),), runtime_for(root / 'parent', SageManifest.model_validate(parent_data).runtime, capabilities={'model.provider': {'plugin': 'example.model-provider'}, 'agent.management': {'plugin': 'example.agent-management'}, 'agent.tool-policy': {'plugin': 'example.agent-tool-policy'}}), {'models': {'primary': {'provider': 'openai-responses', 'model': 'scripted'}}})
+    builder = SAgentBuilder()
+    for registration in configuration.registrations:
+        builder.register(registration)
+    app = await builder.build(runtime=configuration.runtime, models=configuration.models)
     try:
         agent = await app.load_agent(SageManifest.model_validate(parent_data))
         stream = await app.entrypoint().run_stream(

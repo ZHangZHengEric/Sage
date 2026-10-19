@@ -12,7 +12,7 @@ from pydantic import Field, model_validator
 from sagents.v2.contracts.commands import RunConfig
 from sagents.v2.contracts.common import Identifier, StrictModel, VerbatimText
 from sagents.v2.contracts.errors import ErrorCategory, RuntimeErrorInfo, SageV2Error
-from sagents.v2.package.manifest.agents import AgentEntrypoint, AgentMemoryBehavior
+from sagents.v2.package.manifest.agents import AgentEntrypoint, AgentMemoryBehavior, AgentSandboxConfig
 from sagents.v2.package.manifest.flows import FlowDefinition
 from sagents.v2.package.manifest.credentials import CredentialDeclaration
 from sagents.v2.package.manifest.root import (
@@ -24,6 +24,9 @@ from sagents.v2.package.manifest.runtime import RuntimeConfig
 
 
 class ResolvedAgent(StrictModel):
+    source_package_id: str | None = None
+    source_agent_id: str | None = None
+    source_package_version: str | None = None
     name: str
     instructions: VerbatimText
     mode: Literal["simple", "fibre", "team"] = "simple"
@@ -37,6 +40,7 @@ class ResolvedAgent(StrictModel):
     preload_skills: tuple[str, ...] = ()
     subagents: tuple[str, ...] = ()
     memory: AgentMemoryBehavior = Field(default_factory=AgentMemoryBehavior)
+    sandbox: AgentSandboxConfig = Field(default_factory=AgentSandboxConfig)
 
     @model_validator(mode="after")
     def validate_preload_skills(self) -> "ResolvedAgent":
@@ -156,6 +160,8 @@ class CompositionResolver:
                 global_budget.max_steps,
             )
             resolved_agents[agent_id] = ResolvedAgent(
+                source_package_id=manifest.metadata.id, source_agent_id=agent_id,
+                source_package_version=manifest.metadata.version,
                 name=agent.name,
                 instructions=agent.instructions.inline or "",
                 mode=agent.mode,
@@ -168,7 +174,7 @@ class CompositionResolver:
                 skills=agent.skills,
                 preload_skills=agent.preload_skills,
                 subagents=agent.subagents,
-                memory=agent.memory,
+                memory=agent.memory, sandbox=agent.sandbox,
             )
             ceilings[agent_id] = PolicyCeiling(
                 allowed_tools=frozenset(agent.tools),
@@ -252,13 +258,27 @@ class CompositionResolver:
             }
         )
         bindings.update(agent.delegation_model_bindings)
-        return self.resolve_run_config(
+        config = self.resolve_run_config(
             resolved,
             agent_id,
             model_bindings=bindings,
             tools=tools,
             skills=skills,
         )
+        execution_policy = None
+        if parent_config.execution_snapshot is not None and agent.sandbox.network == "none":
+            execution_policy = {"network": {"mode": "none", "deny_private_networks": True}}
+        # These are ceilings, not a fresh allocation per child. Runtime checks
+        # also account for siblings and the ancestor's original creation time.
+        return config.model_copy(update={
+            "execution_policy": execution_policy,
+            "max_total_tokens": _minimum(config.max_total_tokens, parent_config.max_total_tokens),
+            "deadline_seconds": _minimum(config.deadline_seconds, parent_config.deadline_seconds),
+            "max_stages": parent_config.max_stages,
+            "automatic_stage_continuation": parent_config.automatic_stage_continuation,
+            "transient_retry_limit": parent_config.transient_retry_limit,
+            "priority": parent_config.priority,
+        })
 
     def resolve_run_config(
         self,

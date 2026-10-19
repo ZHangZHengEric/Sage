@@ -33,7 +33,7 @@ class DesktopRunEnvironment:
 class DesktopRunEnvironmentMixin:
     async def _agent_in_environment(self, command, environment, user_id):
         agent = (
-            environment.agents.get(command.agent_id)
+            environment.agents.get(catalog_agent_id(command))
             if environment is not None
             else None
         )
@@ -41,7 +41,7 @@ class DesktopRunEnvironmentMixin:
             return await self._agent_for_command(command, user_id)
         # Preserve Desktop's explicit "approve and remember" authorization
         # update without adopting unrelated catalog configuration changes.
-        current = await self.catalog.get_agent(command.agent_id, user_id)
+        current = await self.catalog.get_agent(catalog_agent_id(command), user_id)
         remembered = (
             current.config.get("approvedShellCommands") if current is not None else None
         )
@@ -214,3 +214,11 @@ class DesktopRunEnvironmentMixin:
         )
         self._run_environments[root_run_id] = environment
         return environment
+
+
+def catalog_agent_id(command):
+    """Translate SDK package identity back to Desktop's frozen catalog identity."""
+    source = command.config.metadata.get("agent_runtime", {}).get("agent_id")
+    if source and command.agent_id in {source, "desktop." + source}:
+        return source
+    return command.agent_id

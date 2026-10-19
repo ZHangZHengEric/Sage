@@ -114,7 +114,7 @@ class McpBody(BaseModel):
     disabled: bool = False
     description: str = ""
     timeout_seconds: float | None = Field(default=None, gt=0, le=900)
-    call_timeout_seconds: float | None = Field(default=None, gt=0)
+    call_timeout_seconds: float | None = Field(default=7200, gt=0, allow_inf_nan=False)
 
 class McpPublic(BaseModel):
     name: str

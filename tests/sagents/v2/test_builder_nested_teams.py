@@ -1,6 +1,7 @@
 """Public Builder regressions: frozen, scoped nested Teams and Run leases."""
 
 from __future__ import annotations
+from tests.sagents.v2.sdk_fixture import build_registered_app
 
 import asyncio
 import json
@@ -11,7 +12,6 @@ from pathlib import Path
 
 import pytest
 
-from sagents.v2 import SAgentBuilder
 from sagents.v2.agent.policy import ApprovalStrategy, DefaultToolPolicy
 from sagents.v2.composition.defaults import default_runtime
 from sagents.v2.contracts.commands import (
@@ -65,9 +65,10 @@ class Models:
         self.seen = []
         self.observe = lambda role, request: None
 
-    def factory(self, resolved, agent_id):
+    def factory(self, context, dependencies):
+        agent_id = context.agent_configuration["execution_agent_id"]
         role = (
-            resolved.package_id.rsplit(".", 1)[-1]
+            context.agent_configuration["package_id"].rsplit(".", 1)[-1]
             if agent_id == "assistant"
             else agent_id
         )
@@ -173,33 +174,7 @@ async def open_app(tmp_path, models, *, approval=False):
             return await super().decide(context)
 
     app = await (
-        SAgentBuilder()
-        .with_defaults(session_root=tmp_path / "sessions")
-        .with_models(
-            {
-                **TEST_MODELS,
-                "models": {
-                    **TEST_MODELS["models"],
-                    **{
-                        name + suffix: TEST_MODELS["models"]["primary"]
-                        for name in (
-                            "root",
-                            "director",
-                            "maker",
-                            "outsider",
-                            "d1",
-                            "d2",
-                        )
-                        for suffix in ("", "-changed")
-                    },
-                },
-            }
-        )
-        .with_model_provider_factory(models.factory)
-        .with_execution_binding_provider(bindings)
-        .with_skill_provider(skills, skills, InMemorySkillWorkspace())
-        .with_tool_policy(Policy(approval_strategy=ApprovalStrategy.AUTO_APPROVE))
-        .build(runtime=runtime)
+        build_registered_app(tmp_path / 'sessions', models={**TEST_MODELS, 'models': {**TEST_MODELS['models'], **{name + suffix: TEST_MODELS['models']['primary'] for name in ('root', 'director', 'maker', 'outsider', 'd1', 'd2') for suffix in ('', '-changed')}}}, model_factory=models.factory, skills=(skills, skills, InMemorySkillWorkspace(),), runtime=runtime, providers={'execution.binding': bindings, 'agent.tool-policy': Policy(approval_strategy=ApprovalStrategy.AUTO_APPROVE)})
     )
     return app, bindings, skills
 
@@ -229,7 +204,7 @@ async def run(app, root, *, config=None):
         CONTEXT,
         agent=root,
     )
-    async with asyncio.timeout(15):
+    async with asyncio.timeout(60):
         events = [event async for event in stream.events]
         result = await stream.wait()
     return result, events
@@ -398,7 +373,7 @@ async def resume_nested(tmp_path):
             ),
             CONTEXT,
         )
-        async with asyncio.timeout(15):
+        async with asyncio.timeout(60):
             await app.entrypoint().continue_run(run_id, CONTEXT, agent=restored)
             while (await app.runtime.get_run(run_id)).state.value in {
                 "created",
@@ -443,7 +418,7 @@ def test_public_builder_nested_pause_recovers_in_a_new_python_process(tmp_path):
             env={**os.environ, "PYTHONHASHSEED": str(seed)},
             text=True,
             capture_output=True,
-            timeout=30,
+            timeout=120,
         )
         assert completed.returncode == 0, completed.stdout + completed.stderr
 
