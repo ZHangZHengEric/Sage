@@ -7,6 +7,44 @@ import { createServer } from 'vite'
 
 const editorResources = (overrides = {}) => ({ models: [], skills: [], tools: [], external_tools: [], plugins: { configurable: [] }, ...overrides })
 
+test('ordinary agent settings roundtrip mode and members and scope choices to the owner', async t => {
+  const { api, mount } = await setup(t, 'Agents')
+  const agent = { id: 'director', name: 'Director', agent_mode: 'team', available_sub_agent_ids: ['writer'] }
+  t.mock.method(api, 'agentSummaries', async () => [agent, { id: 'writer', name: 'Writer' }, { id: 'foreign', name: 'Foreign', _owner: { user_id: 'alice' } }])
+  t.mock.method(api, 'agentEditorResources', async () => editorResources())
+  t.mock.method(api, 'getAgent', async () => agent)
+  t.mock.method(api, 'updateAgent', async (id, body) => ({ ...body, id }))
+  t.mock.method(api, 'bindAgentSkills', async () => [])
+  const state = await mount()
+  await state.openAgent(agent, false)
+  await new Promise(done => setImmediate(done))
+  assert.equal(state.form.agent_mode, 'team')
+  assert.deepEqual(state.form.available_sub_agent_ids, ['writer'])
+  assert.deepEqual(state.memberAgents.map(item => item.id), ['writer'])
+  state.form.agent_mode = 'fibre'
+  await state.save(false)
+  assert.equal(api.updateAgent.mock.calls[0].arguments[1].agent_mode, 'fibre')
+  assert.deepEqual(api.updateAgent.mock.calls[0].arguments[1].available_sub_agent_ids, ['writer'])
+  await state.startNew()
+  assert.equal(state.form.agent_mode, 'simple')
+  assert.deepEqual(state.form.available_sub_agent_ids, [])
+})
+
+test('agent mode controls render members for team and fibre and respect readonly settings', async t => {
+  const { Component } = await setup(t, 'AgentEditor', 'components')
+  for (const agent_mode of ['simple', 'fibre', 'team']) {
+    const html = await renderToString(createSSRApp(Component, {
+      form: { name: 'Director', agent_mode, available_sub_agent_ids: ['writer'] },
+      memberAgents: [{ id: 'writer', name: 'Writer' }], agentId: 'director', readonly: true,
+    }))
+    assert.match(html, /aria-label="运行模式"/)
+    assert.match(html, /Simple/); assert.match(html, /Fibre/); assert.match(html, /Team/)
+    assert.equal(html.includes('可用成员'), agent_mode !== 'simple')
+    if (agent_mode !== 'simple') assert.match(html, /Writer/)
+    assert.doesNotMatch(html, /选择成员<\/button>/)
+  }
+})
+
 async function setup(t, name, directory = 'views') {
   const server = await createServer({ optimizeDeps: { noDiscovery: true, include: [] }, server: { middlewareMode: true, watch: null, hmr: false, ws: false } })
   t.after(() => server.close())
@@ -303,7 +341,7 @@ test('agent editor saves V2 fields and selected skills before staying open or ex
   assert.equal(state.drawerOpen, true)
   assert.equal(state.editing, 'new-agent')
   assert.deepEqual(api.bindAgentSkills.mock.calls[0].arguments, ['new-agent', ['research']])
-  assert.deepEqual(Object.keys(api.createAgent.mock.calls[0].arguments[0]).sort(), ['budgets', 'description', 'execution_policy', 'external_tools', 'fast_model_id', 'instructions', 'memory', 'model_id', 'name', 'plugins', 'sandbox', 'tool_approval', 'tools'])
+  assert.deepEqual(Object.keys(api.createAgent.mock.calls[0].arguments[0]).sort(), ['agent_mode', 'available_sub_agent_ids', 'budgets', 'description', 'execution_policy', 'external_tools', 'fast_model_id', 'instructions', 'memory', 'model_id', 'name', 'plugins', 'sandbox', 'tool_approval', 'tools'])
   assert.deepEqual(api.createAgent.mock.calls[0].arguments[0].tool_approval, { default: 'auto_approve', tools: { file_read: 'ask', 'mcp:drive:write': 'auto_approve' } })
   await state.save(true)
   assert.equal(state.drawerOpen, false)

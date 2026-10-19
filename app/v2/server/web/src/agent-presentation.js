@@ -3,6 +3,7 @@ import { modelOutputBudget } from './model-presentation.js'
 export const agentSections = [
   { id: 'basic', label: '基本信息', icon: 'user' },
   { id: 'plugins', label: '能力编排', icon: 'grid' },
+  { id: 'team', label: '运行模式', icon: 'agent' },
   { id: 'memory', label: '记忆', icon: 'history' },
   { id: 'budgets', label: '运行预算', icon: 'clock' },
   { id: 'tools', label: '可用工具', icon: 'tools' },
@@ -12,6 +13,7 @@ export const agentSections = [
 ]
 const sectionKeys = {
   basic: ['name', 'description', 'instructions'], plugins: ['plugins', 'model_id', 'fast_model_id'],
+  team: ['agent_mode', 'available_sub_agent_ids'],
   memory: ['memory'], budgets: ['budgets'], tools: ['tools', 'external_tools'],
   approval: ['tool_approval'], execution: ['execution_policy', 'sandbox'],
 }

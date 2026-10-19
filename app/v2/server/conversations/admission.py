@@ -15,7 +15,6 @@ from app.v2.server.conversations.records import resolve_thread_agent_id
 from app.v2.server.skills.records import SkillRecord
 from app.v2.server.runtime.policy import ExecutionPolicy, execution_metadata, intersect_policies, server_ceiling
 from sagents.v2.contracts.errors import ErrorCategory, RuntimeErrorInfo, SageV2Error
-from sagents.v2.package.manifest import CompositionResolver
 
 
 @dataclass(frozen=True, slots=True)
@@ -101,11 +100,14 @@ class RunAdmission:
         )
         if package is None:
             agent = require_agent(catalog, requested or None)
+            from app.v2.server.catalog.packages import bind_catalog_members
+            agent = agent.model_copy(update={"package": bind_catalog_members(agent, catalog)})
         else:
             from app.v2.server.catalog.records import AgentRecord
             from app.v2.server.catalog.packages import is_external_tool
             package_manifest = package.resolved_manifest()
-            CompositionResolver().resolve(package_manifest, models=model_config)
+            from sagents.v2.agent.management.loading import resolve_bundle
+            resolve_bundle(package, package_manifest.runtime, models=model_config)
             root_id = package_manifest.entrypoint.agent
             if root_id is None:
                 raise SageV2Error(RuntimeErrorInfo(
@@ -127,12 +129,14 @@ class RunAdmission:
         # resolver intersects Agent budgets with the package policy ceiling.
         from app.v2.server.config.manifest import server_v2_run_manifest
         effective = package.resolved_manifest() if package else server_v2_run_manifest(self.settings, agent=agent, registry=getattr(self.catalog, "extensions", None))
-        resolved = CompositionResolver().resolve(effective, models=model_config)
-        if package is None:
+        bundle = package or agent.package.model_copy(update={"manifest": effective})
+        from sagents.v2.agent.management.loading import resolve_bundle, bundle_agent_definitions
+        resolved = resolve_bundle(bundle, effective.runtime, models=model_config)
+        if package is None and not bundle.dependencies:
             skills = tuple(await self.skills.bound_skills(owner_user_id=user_id, agent_id=agent.id))
         else:
             visible = await self.skills.list_visible(user_id=user_id, role="user")
-            selected = {name for definition in package.manifest.agents.values() for name in definition.skills}
+            selected = {name for definition in bundle_agent_definitions(bundle).values() for name in definition.skills}
             skills = tuple(item for item in visible if item.name in selected)
         user = await self.users.get_by_id(user_id) if self.users is not None else None
         if self.users is not None and user is None:
@@ -143,6 +147,11 @@ class RunAdmission:
             agent.execution_policy,
             server_ceiling(self.settings) if self.settings else ExecutionPolicy(shell="sandboxed"),
         )
+        grant_metadata = execution_metadata(policy, user_id=user_id, agent_id=agent.id, key_id=key_id)
+        if package is None and bundle.dependencies:
+            from app.v2.server.catalog.packages import catalog_execution_grants
+            from app.v2.server.runtime.policy import EXECUTION_METADATA_KEY
+            grant_metadata[EXECUTION_METADATA_KEY]["agents"] = catalog_execution_grants(bundle, catalog)
         return AdmittedRun(
             session_id=session_id,
             agent_id=agent.id,
@@ -155,7 +164,7 @@ class RunAdmission:
                 mcp_servers=tuple(item.name for item in enabled_mcp_servers(catalog)),
                 a2a_agents=tuple(item.name for item in enabled_a2a_agents(catalog)),
                 call_depth=call_depth, package=package,
-            ), **execution_metadata(policy, user_id=user_id, agent_id=agent.id, key_id=key_id)},
+            ), **grant_metadata},
             model_ready=self.execution.has_model(catalog),
             max_steps=resolved.policy_ceilings[agent.id].max_steps,
         )
