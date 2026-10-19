@@ -100,7 +100,7 @@ def download_public_https(url: str, *, max_bytes: int = MAX_DOWNLOAD_BYTES) -> b
                         raise import_error("下载超时，请重试")
                     if connection.sock is not None:
                         connection.sock.settimeout(min(15, remaining))
-                    chunk = response.read(min(65536, max_bytes + 1 - len(result)))
+                    chunk = response.read1(min(65536, max_bytes + 1 - len(result)))
                     if not chunk:
                         return bytes(result)
                     result.extend(chunk)

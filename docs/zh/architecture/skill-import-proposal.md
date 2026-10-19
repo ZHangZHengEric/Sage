@@ -4,6 +4,14 @@ Sage 可以在现有 ZIP 上传之外，增加 Git 仓库、在线 ZIP、技能�
 
 本文是设计提案，范围为 Server V2 和 Web V2。资料核对日期为 2026 年 10 月 19 日。
 
+## 当前实现范围
+
+Web 的导入弹框已增加“在线 ZIP”和“Skills CLI”，沿用本地 ZIP 上传。远程来源通过 `POST /api/skill-import-previews` 预览，用户选中技能后调用 `POST /api/skill-imports`。同名更新需明确勾选；发布时比较内容摘要和现有版本，逐项返回结果。
+
+Skills CLI 当前接受公开 GitHub 来源，解析命令后先获取固定 commit 的仓库 ZIP，将校验后的技能包交给固定版本 `skills@1.7.2` 做项目级复制安装，再发布到现有目录。服务器需要 Node.js 22.20 以上、npx，以及 GitHub 和 npm registry 网络访问。在线 ZIP 仅接受公开 HTTPS 的 443 端口地址。下载会重新校验每次重定向的 DNS，拒绝本机、私网和保留地址；本机代理若使用 fake IP，需要在服务器配置正常的 DNS 解析。
+
+当前没有接入市场、私有仓库、来源自动更新、单独 Git 地址入口或新数据库表。下文涉及这些能力的部分仍是后续设计。
+
 ## 开源项目参考
 
 | 项目 | 官方支持的做法 | Sage 可以借鉴的部分 |
@@ -19,7 +27,7 @@ skills.sh 可用于发现技能，实际获取应解析到具体仓库和路径�
 
 ## Sage 当前基础
 
-- Web 的 `Skills.vue` 只提供 ZIP 选择、拖入和批量上传；后端入口是 `POST /api/skills/upload`。后端另有 `POST /api/skills`，可直接发布 Markdown 内容，但页面没有对应的新建入口。
+- 原有 Web 的 `Skills.vue` 提供 ZIP 选择、拖入和批量上传；后端入口是 `POST /api/skills/upload`。后端另有 `POST /api/skills`，可直接发布 Markdown 内容，但页面没有对应的新建入口。新增远程入口复用这些已有包处理与目录发布能力。
 - `SkillCatalogService` 已支持 ZIP、目录和 Markdown 转为 `SkillPackage`，统一发布到现有 `skills`、`skill_versions`，文件放在版本目录下。相同内容复用已有版本；同一用户下同名但不同内容会发布新修订。
 - 当前 ZIP 校验器接收一个技能包，在全部文件属于同一个技能根目录时允许去除包装目录；整个多技能仓库的压缩包不能直接当成一个技能导入，需要先发现各个技能根目录。
 - Agent 通过已有绑定选择技能，运行时使用 `CatalogSkillProvider` 和 `ReadThroughSkillWorkspace` 按需读取、物化；工作区中已有的编辑版本会优先使用。
@@ -71,7 +79,7 @@ npx skills add vercel-labs/agent-skills --skill web-design-guidelines
 
 输入命令只用于解析允许的来源和选项，再通过参数数组启动后端控制的 CLI，不直接交给 shell。`--global`、其他 Agent 目标、`--all`、其他子命令和 shell 拼接不进入执行参数；超出支持范围时明确提示。`--list` 映射为预览，`--yes` 不跳过 Sage 的冲突处理。
 
-CLI 适配器复用统一的来源限制、准确 commit 和包摘要约束。首期将公开 GitHub 来源解析成准确 commit 的目录 URL后再交给 CLI；其他来源逐项开放。需要限制 CLI 的网络出口、运行时间、输出、临时目录总量和文件类型，不能假定 CLI 会执行 Sage 的全部校验。发现后的文件路径与元数据从实际文件读取，不把人类可读终端输出当成稳定 JSON API。
+CLI 适配器复用统一的来源限制、准确 commit 和包摘要约束。首期获取准确 commit 的仓库 ZIP，只将校验后的技能文件作为本地来源交给 CLI；其他来源逐项开放。适配器限制并发导入、运行时间、输出和文件总量，隔离 HOME，不继承服务端凭据，并禁用 npm 安装脚本。发现后的文件路径与元数据从实际文件读取，不把人类可读终端输出当成稳定 JSON API。
 
 这一入口纳入第一期。直接把 npm registry 中的包当作技能分发制品不在本次需求范围。
 
