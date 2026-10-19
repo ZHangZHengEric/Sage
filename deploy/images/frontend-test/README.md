@@ -4,6 +4,16 @@
 
 ## 路径与调用
 
+Linux Server 显式配置 `execution.binding.config.workspace_alias: /workspace`，将每个租户的真实 workspace 挂载到沙箱内 `/workspace`；Desktop 不设置该参数，继续使用真实路径。不要在容器根目录创建全局 `/workspace` 或软链接。共享子 Run 使用同一宿主目录，私有子 Run 使用独立宿主目录，但在 Server 沙箱内均显示为 `/workspace`。
+
+执行环境提供不可被请求环境变量覆盖的 `SAGE_WORKSPACE_ROOT`，检查器据此定位 `.sage-tests`，不依赖 Shell 当前子目录。无 Sage 环境变量的独立调用以当前目录为根。相对脚本参数始终相对此根；脚本上下文中的 `workspace` 也指向此根。脚本及产物必须留在根目录内，拒绝越界软链接。
+
+Server 文件浏览与下载先验证租户和 Agent 身份，再将 `/workspace`、`/workspace/...` 或相对路径解析到该身份的真实目录；树节点继续返回相对路径。目录 ZIP 与单文件下载使用同一约定，不暴露或迁移宿主目录。
+
+Shell 工具默认使用 Bash `pipefail`：`sage-frontend-test ... 2>&1 | tail -30` 中检查器失败会使工具返回非零。调用方仍须检查 `exit_code` 和检查器报告的 `status`；主动追加 `|| true` 或后续成功命令仍可覆盖失败。检查器启动前路径校验失败时输出失败 JSON 并退出 1；进入执行阶段后的报告保存在 artifacts。
+
+映射模式进入受理时冻结的 `tool_environment` 及配置摘要。旧的真实路径 Run 不会在恢复时悄悄切换为 `/workspace`，而是明确返回 `execution.configuration_incompatible`；请新建 Run，原工作区文件保留。
+
 | 内容 | 沙箱路径 |
 | --- | --- |
 | Node / npm | `/usr/local/bin/node`、`/usr/local/bin/npm` |
@@ -38,16 +48,16 @@ module.exports = async ({ JSDOM, assert }) => {
 通过 Shell 工具执行：
 
 ```sh
-sage-frontend-test jsdom /workspace/.sage-tests/dom.cjs
+sage-frontend-test jsdom .sage-tests/dom.cjs
 ```
 
 Playwright 脚本 `/workspace/.sage-tests/browser.cjs`：
 
 ```javascript
-module.exports = async ({ launch, assert, artifacts, pathToFileURL }) => {
+module.exports = async ({ launch, assert, artifacts, pathToFileURL, workspace }) => {
   const browser = await launch();
   const page = await browser.newPage();
-  await page.goto(pathToFileURL('/workspace/index.html').href);
+  await page.goto(pathToFileURL(workspace + '/index.html').href);
   await page.getByLabel('姓名').fill('中文');
   await page.getByRole('button', {name: '确认'}).click();
   assert.equal(await page.locator('#result').textContent(), '你好，中文');
@@ -57,10 +67,10 @@ module.exports = async ({ launch, assert, artifacts, pathToFileURL }) => {
 ```
 
 ```sh
-sage-frontend-test playwright /workspace/.sage-tests/browser.cjs
+sage-frontend-test playwright .sage-tests/browser.cjs
 ```
 
-脚本导出异步函数，入口提供 `require`（可加载预装 jsdom/playwright）、Node `assert`、`artifacts`、`tmp`、`pathToFileURL`，按模式提供 `JSDOM` 或 `launch`。此入口运行库脚本，不是 `@playwright/test` 测试发现器。非零退出表示失败，完整异常写 `report.json` 并打印；启动失败也保留报告。只支持 `.cjs`；ESM 的裸包 import 不使用 `NODE_PATH`，可通过提供的 `require` 加载依赖。入口管理浏览器关闭和临时目录清理；进程被强杀时依赖沙箱生命周期清理 scratch。
+脚本导出异步函数，入口提供 `require`（可加载预装 jsdom/playwright）、Node `assert`、`workspace`、`artifacts`、`tmp`、`pathToFileURL`，按模式提供 `JSDOM` 或 `launch`。此入口运行库脚本，不是 `@playwright/test` 测试发现器。非零退出表示失败，完整异常写 `report.json` 并打印；启动失败也保留报告。只支持 `.cjs`；ESM 的裸包 import 不使用 `NODE_PATH`，可通过提供的 `require` 加载依赖。入口管理浏览器关闭和临时目录清理；进程被强杀时依赖沙箱生命周期清理 scratch。
 
 文件工具**只能写 `/workspace`**，不要要求文件工具写 `/tmp`。入口可以自行管理隔离 `/tmp`。交付业务文件时，排除 `.sage-tests`、`.sage-sandbox-tmp` 和其中的脚本、截图、报告；如果任务涉及网站发布，使用明确的业务文件清单，不能递归上传整个 `/workspace`。本变更不新增发布功能，也不规定业务文件目录。`file://` 适合无服务器的静态页面；有 ES module fetch/CORS 或后端依赖的应用不能据此视为验收通过。禁止监听的策略下不能临时起 localhost HTTP 服务。
 
