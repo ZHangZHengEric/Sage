@@ -1,7 +1,7 @@
 <script setup>
 import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 
-const props = defineProps({ modelValue: Boolean, title: String, busy: Boolean, centered: Boolean })
+const props = defineProps({ modelValue: Boolean, title: String, busy: Boolean, centered: Boolean, wide: Boolean, panelClass: String })
 const emit = defineEmits(['update:modelValue'])
 const dialog = ref(null)
 const body = ref(null)
@@ -41,13 +41,14 @@ onBeforeUnmount(() => { document.removeEventListener('focusin', rememberFocus); 
 
 <template>
   <Teleport to="body">
-    <dialog ref="dialog" class="form-drawer" :class="{ 'form-dialog': centered }" :aria-label="title" @cancel.prevent="close" @click="event => { if (event.target === dialog) close() }">
+    <dialog ref="dialog" class="form-drawer" :class="[panelClass, { 'form-dialog': centered, 'form-drawer-wide': wide }]" :aria-label="title" @cancel.prevent="close" @click="event => { if (event.target === dialog) close() }">
       <div class="form-drawer-shell">
         <header class="form-drawer-head">
           <h2>{{ title }}</h2>
           <button class="btn ghost" type="button" :aria-label="centered ? '关闭弹框' : '关闭侧窗'" :disabled="busy" @click="close">关闭</button>
         </header>
         <div ref="body" class="form-drawer-body"><slot /></div>
+        <footer v-if="$slots.footer" class="form-drawer-footer"><slot name="footer" /></footer>
       </div>
     </dialog>
   </Teleport>
@@ -56,6 +57,7 @@ onBeforeUnmount(() => { document.removeEventListener('focusin', rememberFocus); 
 <style scoped>
 .form-drawer { position: fixed; inset: 0 0 0 auto; width: 70vw; max-width: none; height: 100dvh; max-height: none; margin: 0; padding: 0; border: 0; background: var(--surface, #fff); color: inherit; box-shadow: -8px 0 32px #0002; }
 .form-drawer::backdrop { background: #0006; }
+.form-drawer-wide { width: min(1440px, 94vw); }
 .form-drawer-shell { display: flex; flex-direction: column; height: 100%; }
 .form-drawer-head { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: 1.25rem 1.5rem; border-bottom: 1px solid #8883; }
 .form-drawer-head h2 { margin: 0; }
@@ -68,4 +70,5 @@ onBeforeUnmount(() => { document.removeEventListener('focusin', rememberFocus); 
 .form-dialog .form-drawer-shell { width: 100%; height: auto; min-height: 0; max-height: calc(100dvh - 2rem); }
 .form-dialog .form-drawer-head h2 { overflow-wrap: anywhere; min-width: 0; }
 .form-dialog .form-drawer-head button { flex-shrink: 0; }
+.form-drawer-footer { flex-shrink: 0; border-top: 1px solid var(--border); padding: 16px 24px; }
 </style>

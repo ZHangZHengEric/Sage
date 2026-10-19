@@ -1,7 +1,8 @@
 <script setup>
 import { computed, ref } from 'vue'
 import { labels, chooseSchema, initialValue } from '../config-schema.js'
-const props = defineProps({ modelValue: null, schema: { type: Object, default: () => ({}) }, root: { type: Object, default: () => ({}) }, label: String, disabled: Boolean, depth: { type: Number, default: 0 } })
+import FieldHelp from './FieldHelp.vue'
+const props = defineProps({ modelValue: null, schema: { type: Object, default: () => ({}) }, root: { type: Object, default: () => ({}) }, label: String, help: String, disabled: Boolean, depth: { type: Number, default: 0 } })
 const emit = defineEmits(['update:modelValue'])
 const key = ref(''), keyError = ref('')
 const definition = computed(() => chooseSchema(props.schema, props.modelValue, props.root))
@@ -22,6 +23,7 @@ function numeric(event) { update(event.target.value === '' ? null : Number(event
 </script>
 <template>
   <div class="schema-field">
+    <div v-if="help" class="schema-label-help"><span>{{ label }}</span><FieldHelp :label="label" :text="help" /></div>
     <select v-if="!definition.type && !definition.properties && !definition.enum && !definition.const" class="value-kind" aria-label="值类型" :disabled="disabled" :value="Array.isArray(modelValue) ? 'array' : modelValue === null ? 'null' : typeof modelValue" @change="update(({string: '', number: 0, boolean: false, object: {}, array: [], null: null})[$event.target.value])"><option value="string">文本</option><option value="number">数值</option><option value="boolean">开关</option><option value="object">对象</option><option value="array">列表</option><option value="null">空值</option></select>
     <template v-if="object">
       <details :open="depth < 2" class="schema-group"><summary>{{ label }}</summary>
@@ -47,9 +49,9 @@ function numeric(event) { update(event.target.value === '' ? null : Number(event
       <div v-for="(value, index) in modelValue || []" :key="index" class="schema-property"><SchemaField :model-value="value" :schema="definition.items || {}" :root="root" :label="`${label} ${index + 1}`" :depth="depth + 1" :disabled="disabled" @update:model-value="item(index, $event)" /><button class="icon-button" type="button" :disabled="disabled" :aria-label="`删除${label} ${index + 1}`" @click="update(modelValue.filter((_, i) => i !== index))">×</button></div>
       <button class="btn ghost" type="button" :disabled="disabled" @click="update([...(modelValue || []), initialValue(definition.items, root)])">添加{{ label }}</button>
     </div></details>
-    <label v-else-if="definition.enum" class="field"><span>{{ label }}</span><select :value="modelValue" :disabled="disabled" @change="update($event.target.value)"><option v-for="option in definition.enum" :key="option" :value="option">{{ definition['x-option-labels']?.[option] || option }}</option></select></label>
-    <label v-else-if="definition.type === 'boolean' || typeof modelValue === 'boolean'" class="config-check"><input type="checkbox" :checked="modelValue" :disabled="disabled" @change="update($event.target.checked)" />{{ label }}</label>
-    <label v-else-if="['integer', 'number'].includes(definition.type) || typeof modelValue === 'number'" class="field"><span>{{ label }}</span><input type="number" :value="modelValue" :min="definition.minimum ?? (definition.exclusiveMinimum != null ? definition.exclusiveMinimum + 1 : undefined)" :max="definition.maximum" :step="definition.type === 'integer' ? 1 : 'any'" :disabled="disabled" @input="numeric" /></label>
-    <label v-else class="field"><span>{{ label }}</span><textarea v-if="['提示词内容', '系统提示词'].includes(label) || String(modelValue || '').includes('\n')" :value="modelValue" :disabled="disabled" rows="5" @input="update($event.target.value)" /><input v-else :value="modelValue" :disabled="disabled || definition.const !== undefined" @input="update($event.target.value)" /></label>
+    <label v-else-if="definition.enum" class="field"><span :class="{ 'sr-only': help }">{{ label }}</span><select :value="modelValue" :disabled="disabled" @change="update($event.target.value)"><option v-for="option in definition.enum" :key="option" :value="option">{{ definition['x-option-labels']?.[option] || option }}</option></select></label>
+    <label v-else-if="definition.type === 'boolean' || typeof modelValue === 'boolean'" class="config-check"><input type="checkbox" :checked="modelValue" :disabled="disabled" @change="update($event.target.checked)" /><span :class="{ 'sr-only': help }">{{ label }}</span></label>
+    <label v-else-if="['integer', 'number'].includes(definition.type) || typeof modelValue === 'number'" class="field"><span :class="{ 'sr-only': help }">{{ label }}</span><input type="number" :value="modelValue" :min="definition.minimum ?? (definition.exclusiveMinimum != null ? definition.exclusiveMinimum + 1 : undefined)" :max="definition.maximum" :step="definition.type === 'integer' ? 1 : 'any'" :disabled="disabled" @input="numeric" /></label>
+    <label v-else class="field"><span :class="{ 'sr-only': help }">{{ label }}</span><textarea v-if="['提示词内容', '系统提示词'].includes(label) || String(modelValue || '').includes('\n')" :value="modelValue" :disabled="disabled" rows="5" @input="update($event.target.value)" /><input v-else :value="modelValue" :disabled="disabled || definition.const !== undefined" @input="update($event.target.value)" /></label>
   </div>
 </template>

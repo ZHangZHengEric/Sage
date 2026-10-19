@@ -1,112 +1,206 @@
 <script setup>
-import { computed, nextTick, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { api } from '../api.js'
 import { isAdmin } from '../auth.js'
-import { labels } from '../config-schema.js'
 import SchemaField from '../components/SchemaField.vue'
-import { componentGroups, pluginName, scopeNames, parameterDefaults, displayValue } from '../plugin-presentation.js'
-const catalog = ref(null), server = ref(null), error = ref(''), query = ref(''), active = ref(''), content = ref(null), navigation = ref(null)
-const preview = ref({})
+import AppIcon from '../components/AppIcon.vue'
+import FieldHelp from '../components/FieldHelp.vue'
+import FormDrawer from '../components/FormDrawer.vue'
+import { systemCategory, parameterHelp, parameterLabel, policyHelp } from '../system-settings-presentation.js'
+import { componentGroups, componentName, pluginName, parameterDefaults, displayValue } from '../plugin-presentation.js'
+import { pluginExplanation, selectionChanged } from '../capability-presentation.js'
+const pendingOpen = ref(false), loading = ref(true)
+const catalog = ref(null), server = ref(null), error = ref(''), active = ref('')
+const preview = ref({}), drafts = ref({})
 const editing = ref(''), draft = ref(null), saving = ref(false), saveError = ref(''), message = ref('')
+const allGroups = computed(() => componentGroups(catalog.value, [
+  ...(server.value?.providers || []),
+  ...new Set([...(server.value?.configurable || []), ...Object.keys(server.value?.defaults || {}), ...Object.keys(server.value?.saved || {}), ...Object.keys(server.value?.selections || {})]),
+].map(item => typeof item === 'string' ? { capability: item } : item)))
+const groups = allGroups
+const currentGroup = computed(() => allGroups.value.find(group => group.id === active.value))
 const editOptions = computed(() => catalog.value?.plugins.filter(p => p.capabilities.includes(editing.value)) || [])
 const editPlugin = computed(() => editOptions.value.find(p => p.id === draft.value?.plugin))
-const deploymentName = computed(() => pluginName(server.value?.defaults?.[editing.value]?.plugin))
+const inspected = computed(() => currentGroup.value && inspecting(currentGroup.value))
+const inspectedConfig = computed(() => currentGroup.value ? configuration(currentGroup.value) : {})
+const explanation = computed(() => pluginExplanation(inspected.value, inspectedConfig.value))
+function modificationRestriction(id) {
+  if (!server.value) return '仅管理员可修改系统默认配置。'
+  if (!server.value.configurable?.includes(id)) return '此项由服务端固定配置，页面不支持修改。'
+  const options = allGroups.value.find(group => group.id === id)?.plugins.filter(plugin => plugin.available !== false) || []
+  if (!options.length) return '当前没有可用实现，页面不支持修改。'
+  const hasParameters = options.some(plugin => Object.values(plugin.schema?.properties || {}).some(field =>
+    field.type || field.enum || field.$ref || field.anyOf || field.oneOf || field.allOf))
+  if (options.length === 1 && !hasParameters) return '当前只有一种可用实现，且没有可在页面修改的参数。'
+  return ''
+}
+function canConfigure(id) { return !modificationRestriction(id) }
+function implementationSelected(plugin) {
+  if (!canConfigure(active.value)) return currentIds(currentGroup.value).includes(plugin.id)
+  return (editing.value === active.value ? draft.value : server.value.saved?.[active.value])?.plugin === plugin.id
+}
+function keepDraft() {
+  if (editing.value) drafts.value[editing.value] = draft.value === null ? null : JSON.parse(JSON.stringify(draft.value))
+}
 function startEdit(group) {
-  editing.value = group.id
-  draft.value = server.value.saved[group.id] ? JSON.parse(JSON.stringify(server.value.saved[group.id])) : null
+  if (saving.value || !canConfigure(group.id)) return
+  keepDraft()
+  active.value = group.id; editing.value = group.id
+  const value = Object.hasOwn(drafts.value, group.id) ? drafts.value[group.id] : server.value.saved?.[group.id] || null
+  draft.value = value === null ? null : JSON.parse(JSON.stringify(value))
   saveError.value = ''; message.value = ''
 }
+function selectNode(id) {
+  if (saving.value) return
+  keepDraft(); editing.value = ''; active.value = id; saveError.value = ''
+  const group = allGroups.value.find(item => item.id === id)
+  if (group && canConfigure(id)) startEdit(group)
+}
 function choosePlugin(id) {
+  if (saving.value || !canConfigure(editing.value)) return
   if (!id) { draft.value = null; return }
   const plugin = editOptions.value.find(p => p.id === id)
+  if (!plugin || plugin.available === false) return
   const config = parameterDefaults(plugin)
-  if (plugin?.schema?.properties?.root && config.root === undefined) config.root = `${server.value.storage_root}/${editing.value}`
+  if (plugin.schema?.properties?.root && config.root === undefined && server.value.storage_root) config.root = `${server.value.storage_root}/${editing.value}`
   draft.value = { plugin: id, config }
 }
+function selectImplementation(plugin) {
+  if (saving.value) return
+  if (!canConfigure(active.value)) return
+  if (plugin.available === false) return
+  if (editing.value !== active.value) startEdit(currentGroup.value)
+  if (draft.value?.plugin !== plugin.id) choosePlugin(plugin.id)
+}
+function resetDefault() {
+  if (!canConfigure(active.value) || saving.value) return
+  if (editing.value !== active.value) startEdit(currentGroup.value)
+  choosePlugin('')
+}
+function cancelEdit() { delete drafts.value[editing.value]; editing.value = ''; draft.value = null; saveError.value = '' }
 async function saveServer() {
+  if (!editing.value || !canConfigure(editing.value) || saving.value) return
   saving.value = true; saveError.value = ''
+  const id = editing.value
   try {
-    server.value = await api.saveServerPlugins({ revision: server.value.revision, changes: { [editing.value]: draft.value } })
-    editing.value = ''
-    message.value = server.value.pending.length ? '已保存，重启 Server 后生效' : '已保存，与当前运行配置一致'
+    server.value = await api.saveServerPlugins({ revision: server.value.revision, changes: { [id]: draft.value } })
+    delete drafts.value[id]; delete preview.value[id]; editing.value = ''
+    message.value = server.value.pending.length ? '系统默认已保存，重启 Server 后生效' : '系统默认已保存，与当前运行配置一致'
   } catch (e) { saveError.value = e.message } finally { saving.value = false }
 }
 async function reloadServer() {
+  if (saving.value) return
   saving.value = true
-  try { server.value = await api.serverPlugins(); startEdit({ id: editing.value }) }
+  const id = editing.value || active.value
+  try { server.value = await api.serverPlugins(); delete drafts.value[id]; editing.value = ''; saving.value = false; startEdit({ id }) }
   catch (e) { saveError.value = e.message } finally { saving.value = false }
 }
 function savedName(group) { const selection = server.value?.saved?.[group.id] || server.value?.defaults?.[group.id]; return selection ? pluginName(selection.plugin) : '部署默认' }
-const groups = computed(() => componentGroups(catalog.value, server.value?.providers).filter(group => group.plugins.length !== 1).filter(group => !query.value || `${group.name} ${group.id} ${group.plugins.map(p => `${pluginName(p)} ${p.name} ${p.id}`).join(' ')}`.toLowerCase().includes(query.value.toLowerCase())))
-function bindings(group) { return server.value?.providers.filter(item => item.capability === group.id) || [] }
-function currentIds(group) { const rows = bindings(group); return rows.length ? [...new Set(rows.map(item => item.plugin_id).filter(Boolean))] : [catalog.value?.defaults[group.id]].filter(Boolean) }
+function bindings(group) { return server.value?.providers?.filter(item => item.capability === group.id) || [] }
+function currentIds(group) { const rows = bindings(group); return rows.length ? [...new Set(rows.map(item => item.plugin_id).filter(Boolean))] : [catalog.value?.defaults?.[group.id]].filter(Boolean) }
 function currentNames(group) { return currentIds(group).map(id => pluginName(group.plugins.find(p => p.id === id) || id)).join('、') || bindings(group).map(item => item.implementation).filter(Boolean).join('、') || '未指定' }
-function inspecting(group) { return group.plugins.find(p => p.id === (preview.value[group.id] || currentIds(group)[0])) }
-function parameterRows(group) {
-  const plugin = inspecting(group)
-  if (!plugin) return []
-  const selection = server.value?.selections?.[group.id]
-  const live = selection?.plugin === plugin.id ? selection.config : {}
-  return Object.entries(plugin?.schema?.properties || {}).map(([key]) => ({ key, label: labels[key] || key, value: displayValue(({ ...parameterDefaults(plugin), ...live })[key]) }))
+function inspecting(group) {
+  const id = editing.value === group.id ? draft.value?.plugin || server.value?.defaults?.[group.id]?.plugin
+    : preview.value[group.id] || server.value?.saved?.[group.id]?.plugin || currentIds(group)[0]
+  return group.plugins.find(p => p.id === id) || group.plugins[0]
 }
-function jump(id) { const body = content.value, target = body?.querySelector(`[data-component="${id}"]`); if (!body || !target) return; body.scrollTop += target.getBoundingClientRect().top - body.getBoundingClientRect().top; active.value = id }
-function trackSection() { if (!content.value) return; const top = content.value.getBoundingClientRect().top; for (const group of groups.value) if (content.value.querySelector(`[data-component="${group.id}"]`)?.getBoundingClientRect().top <= top + 110) active.value = group.id }
-watch(active, async id => {
-  await nextTick()
-  const nav = navigation.value, button = nav?.querySelector(`[data-nav="${id}"]`)
-  if (!nav || !button) return
-  const area = nav.getBoundingClientRect(), item = button.getBoundingClientRect()
-  if (item.left < area.left) nav.scrollLeft += item.left - area.left
-  else if (item.right > area.right) nav.scrollLeft += item.right - area.right
-  if (item.top < area.top) nav.scrollTop += item.top - area.top
-  else if (item.bottom > area.bottom) nav.scrollTop += item.bottom - area.bottom
+function configuration(group) {
+  const plugin = inspecting(group)
+  if (!plugin) return {}
+  const choices = editing.value === group.id ? [draft.value, server.value?.defaults?.[group.id]] : [server.value?.saved?.[group.id], server.value?.selections?.[group.id], server.value?.defaults?.[group.id]]
+  const selected = choices.find(selection => selection?.plugin === plugin.id)
+  return { ...parameterDefaults(plugin), ...(selected?.config || {}) }
+}
+function parameterRows(group) {
+  const plugin = inspecting(group), config = configuration(group)
+  return Object.keys(plugin?.schema?.properties || {}).map(key => ({ key, label: parameterLabel(key), value: displayValue(config[key]) }))
+}
+function localDraft(group) { return editing.value === group.id ? draft.value : drafts.value[group.id] }
+function dirty(group) {
+  return (editing.value === group.id || Object.hasOwn(drafts.value, group.id)) && selectionChanged(localDraft(group), server.value?.saved?.[group.id] || null)
+}
+const navigationItems = computed(() => groups.value.map(group => ({ ...group, icon: group.id.startsWith('memory') || group.id.startsWith('session-memory') ? 'history' : 'settings',
+  choice: dirty(group) ? pluginName(localDraft(group)?.plugin || server.value?.defaults?.[group.id]?.plugin) : canConfigure(group.id) ? savedName(group) : currentNames(group),
+  changed: dirty(group), sourceText: !canConfigure(group.id) ? '不可修改' : dirty(group) ? '未保存' : server.value?.pending?.includes(group.id) ? '待重启' : '系统默认',
+})))
+const categoryGroups = computed(() => {
+  const buckets = ['模型、工具与智能体', '记忆与上下文', '执行与资源', '运行基础']
+  return buckets.map(name => ({ name, items: navigationItems.value.filter(item => systemCategory(item.id) === name) })).filter(group => group.items.length)
 })
-watch(query, async () => { await nextTick(); active.value = groups.value[0]?.id || ''; if (content.value) content.value.scrollTop = 0 })
-onMounted(async () => { try { [catalog.value, server.value] = await Promise.all([api.listPlugins(), isAdmin() ? api.serverPlugins() : null]); active.value = groups.value[0]?.id || '' } catch (e) { error.value = e.message } })
+const pendingGroups = computed(() => (server.value?.pending || []).map(id => groups.value.find(group => group.id === id) || { id, name: componentName(id), plugins: [] }))
+const currentDirty = computed(() => currentGroup.value && dirty(currentGroup.value))
+const draftChanges = computed(() => {
+  const group = currentGroup.value
+  if (!group || !dirty(group)) return []
+  const saved = server.value?.saved?.[group.id] || null
+  const next = localDraft(group)
+  const deployment = server.value?.defaults?.[group.id]
+  const beforePlugin = saved?.plugin || deployment?.plugin || catalog.value?.defaults?.[group.id]
+  const afterPlugin = next?.plugin || deployment?.plugin || catalog.value?.defaults?.[group.id]
+  const changes = []
+  if (beforePlugin !== afterPlugin) changes.push({ key: '实现', before: pluginName(beforePlugin), after: pluginName(afterPlugin) })
+  else {
+    const definition = group.plugins.find(plugin => plugin.id === beforePlugin)
+    const before = { ...parameterDefaults(definition), ...((saved || deployment)?.config || {}) }
+    const after = configuration(group)
+    for (const key of new Set([...Object.keys(before), ...Object.keys(after)])) {
+      if (selectionChanged(before[key], after[key])) changes.push({ key: parameterLabel(key), before: displayValue(before[key]), after: displayValue(after[key]) })
+    }
+  }
+  if (!changes.length) changes.push({ key: '配置来源', before: saved ? '显式覆盖' : '跟随部署默认', after: next ? '显式覆盖' : '跟随部署默认' })
+  return changes
+})
+const parameterFields = computed(() => Object.entries(inspected.value?.schema?.properties || {}))
+function configureParameter(key, value) {
+  if (saving.value || !canConfigure(active.value) || editing.value !== active.value || !draft.value) return
+  const config = { ...configuration(currentGroup.value) }
+  if (value === undefined) delete config[key]; else config[key] = value
+  draft.value.config = config
+}
+watch(groups, value => { if (!value.some(group => group.id === active.value)) selectNode(value[0]?.id || '') })
+async function load() {
+  loading.value = true; error.value = ''
+  try {
+    const [plugins, settings] = await Promise.all([api.listPlugins(), isAdmin() ? api.serverPlugins() : null])
+    catalog.value = plugins; server.value = settings; selectNode(groups.value[0]?.id || '')
+  } catch (e) { error.value = e.message } finally { loading.value = false }
+}
+onMounted(load)
 </script>
 <template>
-  <section class="plugins-page">
-    <header class="page-head"><h1>插件</h1><input v-model="query" type="search" aria-label="搜索组件或插件" placeholder="搜索组件或插件" /></header>
-    <p v-if="message" role="status">{{ message }}</p>
-    <p v-if="server?.pending?.length" class="pending-config" role="status">{{ server.pending.length }} 项 Server 配置待重启生效</p>
-    <p v-if="error" class="error" role="alert">{{ error }}</p><p v-else-if="!catalog" role="status">加载中…</p>
-    <div v-else-if="groups.length" class="component-layout">
-      <nav ref="navigation" class="component-nav panel" aria-label="插件组件"><button v-for="group in groups" :key="group.id" :data-nav="group.id" :class="{ active: active === group.id }" :aria-current="active === group.id ? 'true' : undefined" @click="jump(group.id)">{{ group.name }}</button></nav>
-      <div ref="content" class="component-content" @scroll="trackSection">
-        <article v-for="group in groups" :key="group.id" :data-component="group.id" class="panel component-card">
-          <div class="component-head"><h2>{{ group.name }}</h2><div class="row"><button v-if="server?.configurable?.includes(group.id)" class="btn ghost" :disabled="!!editing" @click="startEdit(group)">配置 Server</button><router-link v-if="catalog.configurable?.includes(group.id)" class="btn ghost" to="/agents">配置智能体</router-link><router-link v-else-if="group.id === 'model.provider'" class="btn ghost" to="/models">模型配置</router-link></div></div>
-          <div class="current-choice"><span class="status-dot"></span><span>Server 默认：<strong>{{ currentNames(group) }}</strong></span></div>
-          <div v-if="server?.pending?.includes(group.id)" class="pending-config">已保存：{{ savedName(group) }} · 待重启</div>
-          <form v-if="editing === group.id" class="server-editor stack" @submit.prevent="saveServer">
-            <label class="field"><span>Server 默认插件</span><select :value="draft?.plugin || ''" :disabled="saving" @change="choosePlugin($event.target.value)"><option value="">跟随部署默认 · {{ deploymentName }}</option><option v-for="plugin in editOptions" :key="plugin.id" :value="plugin.id" :disabled="plugin.available === false">{{ pluginName(plugin) }}{{ plugin.available === false ? '（不可用）' : '' }}</option></select></label>
-            <SchemaField v-if="editPlugin && Object.keys(editPlugin.schema?.properties || {}).length" :schema="editPlugin.schema" :root="editPlugin.schema" :model-value="draft.config" label="插件参数" :disabled="saving" @update:model-value="draft.config = $event" />
-            <p v-if="saveError" class="error" role="alert">{{ saveError }}</p>
-            <div class="row"><button class="btn" :disabled="saving" type="submit">{{ saving ? '保存中…' : '保存 Server 配置' }}</button><button v-if="saveError" class="btn ghost" :disabled="saving" type="button" @click="reloadServer">重新加载配置</button><button class="btn ghost" :disabled="saving" type="button" @click="editing = ''">取消</button></div>
-          </form>
-          <div class="selected-tags"><span class="tag">{{ catalog.configurable?.includes(group.id) ? '智能体可覆盖' : server?.configurable?.includes(group.id) ? 'Server 可配置' : server ? '部署管理' : 'Server 管理' }}</span><span v-if="currentIds(group).length" class="tag">{{ bindings(group).length ? '正在使用' : '默认选择' }}</span><span v-for="scope in [...new Set(bindings(group).map(b => b.scope))]" :key="scope" class="tag">作用域：{{ scopeNames[scope] || scope }}</span></div>
-          <details v-if="group.plugins.length" class="plugin-options"><summary>查看可选实现（{{ group.plugins.length }}）</summary><div class="implementation-list"><button v-for="plugin in group.plugins" :key="plugin.id" class="implementation" :class="{ inspecting: inspecting(group)?.id === plugin.id }" :aria-pressed="inspecting(group)?.id === plugin.id" @click="preview[group.id] = plugin.id"><span>{{ pluginName(plugin) }}</span><span v-if="currentIds(group).includes(plugin.id)" class="implementation-status">当前</span></button></div></details>
-          <details v-if="parameterRows(group).length" class="plugin-options"><summary>插件参数 · {{ pluginName(inspecting(group)) }}</summary><dl class="parameter-list"><div v-for="row in parameterRows(group)" :key="row.key"><dt>{{ row.label }}</dt><dd>{{ row.value }}</dd></div></dl></details>
-          <details class="plugin-options technical"><summary>技术信息</summary><dl class="parameter-list"><div><dt>组件标识</dt><dd>{{ group.id }}</dd></div><div v-for="plugin in group.plugins" :key="plugin.id"><dt>{{ pluginName(plugin) }}</dt><dd>{{ plugin.id }}</dd></div></dl></details>
-        </article>
-      </div>
+  <section class="system-settings plugins-page" aria-label="系统插件">
+    <p v-if="message" class="system-message" role="status"><span><AppIcon name="check" />{{ message }}</span><button class="icon-button" type="button" aria-label="关闭提示" @click="message = ''"><AppIcon name="close" /></button></p>
+    <div v-if="error" class="system-error" role="alert"><span>{{ error }}</span><button class="btn ghost" type="button" :disabled="loading" @click="load">重新加载</button></div>
+    <div v-if="loading" class="system-skeleton" aria-busy="true" aria-label="正在加载系统插件"><i v-for="n in 4" :key="n"></i></div>
+    <div v-else-if="groups.length" class="system-workbench">
+      <nav class="system-navigation" aria-label="系统插件分类"><div v-for="category in categoryGroups" :key="category.name" class="system-category"><div class="system-category-title">{{ category.name }}</div><button v-for="node in category.items" :key="node.id" type="button" :class="{ active: active === node.id }" :aria-current="active === node.id ? 'true' : undefined" :disabled="saving" @click="selectNode(node.id)"><span class="navigation-title">{{ node.name }}<small :class="{ 'is-dirty': node.changed, 'is-pending': node.sourceText === '待重启' }">{{ ['不可修改', '未保存', '待重启'].includes(node.sourceText) ? node.sourceText : '' }}</small></span><span class="navigation-choice">{{ node.choice }}</span></button></div></nav>
+      <article v-if="currentGroup" class="system-inspector" :aria-label="`${currentGroup.name}系统默认配置`">
+        <div class="system-inspector-content">
+        <header class="inspector-head"><div><AppIcon name="settings" /><h1>{{ currentGroup.name }}</h1></div><span v-if="!canConfigure(active)" class="system-readonly-mark">不可修改</span></header>
+        <div v-if="pendingGroups.length" class="system-pending-notice"><span><AppIcon name="clock" />{{ pendingGroups.length }} 项系统默认配置待重启生效</span><button type="button" @click="pendingOpen = true">查看变更</button></div>
+        <dl class="configuration-status"><div><dt><i></i>当前运行</dt><dd>{{ currentNames(currentGroup) }}</dd></div><div v-if="server"><dt>已保存默认<FieldHelp label="已保存默认" :text="policyHelp.saved" /></dt><dd>{{ savedName(currentGroup) }}<span v-if="server.pending?.includes(active)" class="system-badge amber">待重启</span><span v-else class="system-badge neutral">与运行一致</span></dd></div></dl>
+        <form id="system-plugin-form" class="plugin-configuration" @submit.prevent="saveServer">
+          <section class="implementation-section"><div class="system-section-title"><h2>实现选择</h2><span>{{ currentGroup.plugins.length }} 个实现</span></div>
+            <div class="implementation-list" role="group" :aria-label="`${currentGroup.name}实现`">
+              <button v-if="canConfigure(active)" class="default-option" :class="{ selected: editing === active ? !draft : !server.saved?.[active] }" type="button" :disabled="saving" :aria-pressed="editing === active ? !draft : !server.saved?.[active]" @click="resetDefault"><span class="option-indicator" aria-hidden="true"></span><span class="implementation-copy"><strong>跟随部署默认</strong><code class="plugin-code">{{ server.defaults?.[active]?.plugin }}</code><span class="implementation-description">{{ pluginName(server.defaults?.[active]?.plugin) }}</span></span></button>
+              <button v-for="plugin in currentGroup.plugins" :key="plugin.id" type="button" class="implementation" :class="{ selected: implementationSelected(plugin) }" :disabled="saving || !canConfigure(active) || plugin.available === false" :aria-pressed="implementationSelected(plugin)" @click="selectImplementation(plugin)"><span class="option-indicator" aria-hidden="true"></span><span class="implementation-copy"><span class="implementation-heading"><strong>{{ pluginName(plugin) }}</strong><small>{{ plugin.available === false ? '当前不可用' : currentIds(currentGroup).includes(plugin.id) ? '运行中' : implementationSelected(plugin) ? '已选择' : '' }}</small></span><code class="plugin-code">{{ plugin.id }}</code><span class="implementation-description">{{ pluginExplanation(plugin).description }}</span></span></button>
+              <div v-if="!currentGroup.plugins.length" class="system-injected"><AppIcon name="lock" /><div><strong>宿主注入</strong><p>{{ currentNames(currentGroup) }}</p></div></div>
+            </div>
+            <p v-if="!canConfigure(active)" class="management-note"><AppIcon name="lock" />{{ modificationRestriction(active) }}</p>
+          </section>
+          <div class="configuration-section">
+            <section v-if="inspected" class="plugin-effects"><div class="system-section-title"><h2>{{ canConfigure(active) ? '选择后的影响' : '实现说明' }}</h2></div><ul><li v-for="effect in explanation.effects" :key="effect">{{ effect }}</li></ul></section>
+            <section v-if="parameterFields.length" class="system-parameters"><h2>配置参数</h2><template v-if="canConfigure(active) && editing === active && draft && editPlugin"><SchemaField v-for="[key, field] in parameterFields" :key="`${active}:${draft.plugin}:${key}`" :schema="field" :root="editPlugin.schema" :model-value="inspectedConfig[key]" :label="parameterLabel(key)" :help="parameterHelp(key, field)" :disabled="saving" @update:model-value="configureParameter(key, $event)" /></template><dl v-else class="system-parameter-values"><div v-for="row in parameterRows(currentGroup)" :key="row.key"><dt>{{ row.label }}<FieldHelp :label="row.label" :text="parameterHelp(row.key, inspected.schema.properties[row.key])" /></dt><dd>{{ row.value }}</dd></div></dl></section>
+            <p v-else class="system-no-parameters">{{ currentGroup.plugins.length ? '此实现无页面配置参数' : '此能力由宿主提供，页面仅供查看' }}</p>
+            <dl v-if="draftChanges.length" class="system-draft-changes" aria-label="本次配置变更"><div v-for="change in draftChanges" :key="change.key"><dt>{{ change.key }}</dt><dd><span>{{ change.before }}</span><AppIcon name="chevron" /><strong>{{ change.after }}</strong></dd></div></dl>
+          </div>
+        </form>
+        </div>
+        <footer class="system-save-footer"><div v-if="canConfigure(active)"><div v-if="saveError" class="system-error" role="alert"><span>{{ saveError }}，草稿已保留。</span><button class="system-reload" type="button" :disabled="saving" @click="reloadServer">丢弃本项草稿并重载</button></div><div class="system-save-row"><span class="system-save-state"><AppIcon :name="currentDirty ? 'settings' : 'check'" />{{ currentDirty ? (editing === active && !draft ? '保存后使用部署默认配置' : '本项有未保存修改') : '本项无未保存修改' }}</span><div class="row"><template v-if="editing === active"><button class="btn ghost" :disabled="saving || !currentDirty" type="button" @click="cancelEdit">撤销修改</button><button class="btn cta" :disabled="saving || !currentDirty" type="submit" form="system-plugin-form">{{ saving ? '保存中…' : '保存系统默认' }}</button></template><button v-else class="btn cta" type="button" @click="startEdit(currentGroup)">配置系统默认</button></div></div></div><span v-else class="system-save-state"><AppIcon name="lock" />此项不可在页面修改</span></footer>
+      </article>
     </div>
-    <p v-else-if="catalog" class="empty">没有匹配的组件或插件</p>
+    <div v-else-if="catalog && !error" class="system-empty"><AppIcon name="settings" /><h2>暂无系统插件</h2></div>
+    <FormDrawer v-model="pendingOpen" centered panel-class="system-settings system-pending-dialog" title="待重启的系统默认配置"><section v-for="group in pendingGroups" :key="group.id" class="system-pending-item"><h3>{{ group.name }}</h3><div><span>运行：{{ currentNames(group) }}</span><AppIcon name="chevron" /><span>已保存：{{ savedName(group) }}</span></div></section><p class="system-pending-explanation">保存不会立即改变运行中的实现。新系统默认配置需要重启 Server 后生效。</p><template #footer><div class="system-dialog-footer"><span>{{ pendingGroups.length }} 项待生效</span><button class="btn ghost" type="button" @click="pendingOpen = false">关闭</button></div></template></FormDrawer>
   </section>
 </template>
-<style scoped>
-.plugins-page { height: 100%; display: flex; flex-direction: column; min-height: 0; }
-.server-editor { padding: 16px; margin: 12px 0; border: 1px solid var(--border); border-radius: 12px; background: var(--muted); }.server-editor select { width: 100%; }.pending-config { color: var(--primary); font-size: 13px; margin: 8px 0 12px; }
-.component-layout { display: grid; grid-template-columns: 210px minmax(0, 1fr); gap: 20px; min-height: 0; flex: 1; }
-.component-nav { align-self: start; max-height: 100%; overflow: auto; padding: 8px; display: grid; gap: 3px; }
-.component-nav button { padding: 11px 12px; border: 0; background: transparent; color: var(--foreground); border-radius: 8px; text-align: left; cursor: pointer; }
-.component-nav button.active { background: color-mix(in srgb, var(--primary) 12%, transparent); color: var(--primary); }
-.component-nav button:hover { background: var(--muted); }
-.component-content { overflow: auto; min-width: 0; padding: 0 8px 24px 0; scroll-padding-top: 4px; }
-.component-card { margin-bottom: 14px; background: color-mix(in srgb, var(--card) 90%, transparent); backdrop-filter: blur(14px); }
-.component-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }.component-head h2 { font-size: 18px; margin: 0; }
-.current-choice { display: flex; align-items: center; gap: 9px; margin: 16px 0 12px; flex-wrap: wrap; }.status-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--primary); }
-.selected-tags { margin-bottom: 16px; }.plugin-options { border-top: 1px solid var(--border); padding: 12px 0; }.plugin-options:last-child { padding-bottom: 0; }.plugin-options summary { cursor: pointer; font-size: 13px; }
-.implementation-list { display: grid; gap: 4px; margin-top: 10px; }.implementation { display: flex; align-items: center; gap: 10px; padding: 10px; background: transparent; border: 1px solid transparent; color: var(--foreground); text-align: left; border-radius: 8px; cursor: pointer; }.implementation:hover,.implementation.inspecting { background: var(--muted); }.option-dot { width: 14px; height: 14px; border: 1px solid var(--border); border-radius: 50%; flex-shrink: 0; }.option-dot.selected { border: 4px solid var(--primary); }.implementation-status { margin-left: auto; color: var(--primary); font-size: 12px; }
-.parameter-list { margin: 14px 0 0; }.parameter-list > div { display: grid; grid-template-columns: minmax(120px, .9fr) minmax(0, 1.1fr); gap: 16px; padding: 8px 0; font-size: 13px; }.parameter-list dt { color: var(--muted-foreground); }.parameter-list dd { margin: 0; overflow-wrap: anywhere; }.technical dd { font-family: monospace; font-size: 12px; }
-@media (max-width: 760px) { .component-layout { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); gap: 12px; }.component-nav { display: flex; overflow-x: auto; }.component-nav button { flex-shrink: 0; }.component-content { padding-right: 0; }.parameter-list > div { grid-template-columns: 1fr; gap: 5px; } }
-</style>
+<style src="../system-settings.css"></style>

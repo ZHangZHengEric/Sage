@@ -14,13 +14,35 @@ function session(t, role = 'admin') {
 }
 const users = [{ user_id: 'admin', username: 'admin', role: 'admin' }, { user_id: 'alice', username: 'alice', role: 'user' }]
 
+test('admin agent summaries use one aggregate request and retain ownership', async t => {
+  session(t)
+  t.mock.method(globalThis, 'fetch', async url => {
+    assert.equal(url, '/api/admin/agents')
+    return Response.json({ data: [{ id: 'alice-agent', user_id: 'alice', username: 'alice' }] })
+  })
+  const rows = await api.agentSummaries()
+  assert.equal(fetch.mock.calls.length, 1)
+  assert.equal(isForeign(rows[0]), true)
+  assert.deepEqual(rows[0]._owner, { user_id: 'alice', username: 'alice' })
+})
+
+test('ordinary user agent summaries make one own-scope request', async t => {
+  session(t, 'user')
+  t.mock.method(globalThis, 'fetch', async url => {
+    assert.equal(url, '/api/agents/summary')
+    return Response.json({ data: [{ id: 'own' }] })
+  })
+  assert.deepEqual(await api.agentSummaries(), [{ id: 'own' }])
+  assert.equal(fetch.mock.calls.length, 1)
+})
+
 test('admin business lists include every owner and retain colliding names', async t => {
   session(t)
   t.mock.method(globalThis, 'fetch', async (url, init) => {
     assert.equal(init.headers.Authorization, 'Bearer token')
     return Response.json({ data: url === '/api/admin/users' ? users : [{ name: 'same-name' }] })
   })
-  for (const method of ['listAgents', 'listModels', 'listMcp', 'listA2aAgents', 'listKeys', 'packages', 'packageRuns']) {
+  for (const method of ['listAgents', 'listKeys', 'packages', 'packageRuns']) {
     const rows = await api[method]()
     assert.equal(rows.length, 2, method)
     assert.deepEqual(rows.map(row => row._owner.user_id), ['admin', 'alice'])
@@ -34,9 +56,14 @@ test('admin business lists include every owner and retain colliding names', asyn
 test('ordinary user lists stay in their own scope', async t => {
   session(t, 'user')
   t.mock.method(globalThis, 'fetch', async () => Response.json({ data: [{ id: 'own' }] }))
-  assert.deepEqual(await api.listAgents(), [{ id: 'own' }])
-  assert.equal(fetch.mock.calls.length, 1)
-  assert.equal(fetch.mock.calls[0].arguments[1].headers['X-Sage-View-User'], undefined)
+  for (const method of ['listAgents', 'listModels', 'listMcp', 'listA2aAgents', 'listSkills']) {
+    assert.deepEqual(await api[method](), [{ id: 'own' }])
+  }
+  assert.equal(fetch.mock.calls.length, 5)
+  for (const call of fetch.mock.calls) {
+    assert.equal(call.arguments[0].includes('/admin/'), false)
+    assert.equal(call.arguments[1].headers['X-Sage-View-User'], undefined)
+  }
 })
 
 test('admin own-only selectors and writes do not inherit a foreign read scope', async t => {
@@ -58,19 +85,32 @@ test('admin own-only selectors and writes do not inherit a foreign read scope', 
   assert.equal(fetch.mock.calls[8].arguments[1].headers['X-Sage-View-User'], undefined)
 })
 
-test('skills are attributed once across owners', async t => {
+test('workspace catalogs use one aggregate request and retain each owner', async t => {
   session(t)
-  const own = { skill_id: 'own', owner_user_id: 'admin' }
-  const foreign = { skill_id: 'foreign', owner_user_id: 'alice' }
+  const paths = { listModels: '/api/admin/models', listMcp: '/api/admin/mcp', listA2aAgents: '/api/admin/a2a-agents', listSkills: '/api/admin/skills' }
+  let expectedPath
   t.mock.method(globalThis, 'fetch', async (url, init) => {
-    const owner = init.headers['X-Sage-View-User']
-    let data
-    if (url === '/api/admin/users') data = users
-    else if (url === '/api/skills') data = owner === 'admin' ? [own, foreign] : [foreign]
-    return Response.json({ data })
+    assert.equal(url, expectedPath)
+    assert.equal(init.headers['X-Sage-View-User'], undefined)
+    return Response.json({ data: users.map(owner => ({ name: 'same', user_id: owner.user_id, username: owner.username })) })
   })
-  const skills = await api.listSkills()
-  assert.deepEqual(skills.map(row => [row.skill_id, row._owner.user_id]), [['own', 'admin'], ['foreign', 'alice']])
+  for (const [method, path] of Object.entries(paths)) {
+    expectedPath = path
+    const rows = await api[method]()
+    assert.deepEqual(rows.map(row => row._owner.user_id), ['admin', 'alice'])
+    assert.equal(isForeign(rows[1]), true)
+  }
+  assert.equal(fetch.mock.calls.length, 4)
+})
+
+test('own agent summaries skip admin aggregation for selectors', async t => {
+  session(t)
+  t.mock.method(globalThis, 'fetch', async url => {
+    assert.equal(url, '/api/agents/summary')
+    return Response.json({ data: [{ id: 'own' }] })
+  })
+  assert.deepEqual(await api.agentSummaries(false), [{ id: 'own' }])
+  assert.equal(fetch.mock.calls.length, 1)
 })
 
 test('workspace reads bind to the Session even without owner metadata', async t => {
