@@ -1,3 +1,14 @@
+---
+layout: default
+title: 任务树恢复
+parent: 架构
+nav_order: 21
+lang: zh
+ref: v2-detail-sagents-v2-run-tree-recovery
+---
+
+{% include lang_switcher.html %}
+
 # Sage v2 多层子 Run 的标准恢复
 
 标准流程允许直接继续一个已暂停的子 Run，祖先可以保持暂停。宿主不需要先驱动根 Agent，也不创建替代任务或手工 provision 沙箱。

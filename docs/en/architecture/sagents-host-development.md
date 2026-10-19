@@ -21,7 +21,6 @@ from sagents.v2 import SAgentBuilder
 builder = SAgentBuilder()
 for registration in host_registrations:
     builder.register(registration)
-
 app = await builder.build(runtime=runtime_config, models=model_config)
 try:
     agent = await app.load_agent(package, subagents=subagents)
@@ -55,27 +54,19 @@ from sagents.v2.runtime.extensions import (
     ExtensionRegistration, ExtensionScope,
 )
 
-registration = ExtensionRegistration(
+builder.register(ExtensionRegistration(
     descriptor=ExtensionDescriptor(
-        plugin_id="example.run.model",
-        name="Example Run model",
-        version="1.0.0",
-        api_version="2",
+        plugin_id="example.model", name="Example model", version="1.0.0",
         provides=(CapabilityOffer(capability="model.provider", api_version="2"),),
         dependencies=(ExtensionDependency(capability="session.store"),),
         supported_scopes=frozenset({ExtensionScope.RUN}),
         default_scope=ExtensionScope.RUN,
-        config_schema={"type": "object", "properties": {
-            "profile": {"type": "string"}}, "additionalProperties": False},
+        config_schema={"type": "object", "additionalProperties": False},
     ),
-    factory=lambda scope, dependencies: ExampleModel(
-        profile=scope.config.get("profile", "default"),
-        store=dependencies.require("session.store"),
-        run_id=scope.run_id,
-    ),
+    factory=lambda scope, deps: ExampleModel(
+        run_id=scope.run_id, store=deps.require("session.store")),
     ownership="owned",
-)
-builder.register(registration)
+))
 ```
 
 Select the registration separately:
@@ -83,10 +74,9 @@ Select the registration separately:
 ```yaml
 capabilities:
   model.provider:
-    plugin: example.run.model
+    plugin: example.model
     scope: run
-    config:
-      profile: media
+    config: {}
 ```
 
 `ExampleModel` implements Sage's model provider protocol. Registration does not
@@ -132,7 +122,7 @@ agent = await app.agent_for_run(run_id, context)
 task = await app.entrypoint().continue_run(run_id, context, agent=agent)
 result = await task
 snapshot = await app.execution_configuration(run_id, context)
-facts = await app.execution_diagnostics(run_id, context)
+diagnostics = await app.execution_diagnostics(run_id, context)
 configuration = await app.run_configuration(run_id, context)
 ```
 
@@ -190,6 +180,8 @@ Shell command path. Sage checks the interpreter, authorizes runtime directories
 and launches the helper. Diagnostics report actual interpreter, sandbox identity
 and enforcement capabilities; metered limits are not reported as kernel limits.
 
+See the complete configuration in the [SDK guide](../../../sagents/v2/README.md).
+
 ## Tools, Skill, continuation and budgets
 
 Select paired tool catalog/executor offers through registered plugins. Sage
@@ -219,6 +211,8 @@ is delivered as a tool result for the Agent. It does not impose a two-hour limit
 on internal delegation, Team tasks or the lifetime of a Run.
 
 ## Runnable host and validation
+
+The [standard media host](../../../examples/sagents_v2_standard_host/README.md) exercises media tools, Skills, Teams and recovery.
 
 Run `examples.sagents_v2_standard_host` for actual media dependencies, FFmpeg,
 MCP, Skill, nested Team and reopening persisted Runs. Its README documents native
@@ -282,4 +276,4 @@ Use explicit public `app.runtime` commands: `reply_interaction`, `pause_run`, `c
 
 Use `app.entrypoint().propose_session_commit`, `publish_session_commit`, and `reject_session_commit` for snapshot publication. These select the source Run's admitted Agent and retain post-publication memory processing. Server currently has no standalone manual-pause or Session-commit HTTP endpoint; Desktop exposes both. SDK support does not imply every host exposes an HTTP/UI control.
 
-See the [Desktop / Server audit](../../zh/architecture/sagents-v2-host-controls.md) for routes, ownership and validation boundaries.
+See the [Desktop / Server audit](sagents-v2-host-controls.md) for routes, ownership and validation boundaries.

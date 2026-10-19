@@ -130,6 +130,7 @@ parent: API
 | `GET` | `/api/observability/jaeger/auth` | `observability` |
 | `GET` | `/api/observability/jaeger/login` | `observability` |
 | `GET/POST/PUT/PATCH/DELETE/OPTIONS/HEAD` | `/api/observability/jaeger/{full_path:path}` | `observability` |
+| `GET` | `/api/observability/performance` | `observability` |
 | `GET` | `/api/agent-packages` | `packages` |
 | `POST` | `/api/agent-packages` | `packages` |
 | `GET` | `/api/agent-packages/capacity` | `packages` |
