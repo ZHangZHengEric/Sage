@@ -1,4 +1,5 @@
 from __future__ import annotations
+from tests.sagents.v2.sdk_fixture import build_registered_package
 from tests.sagents.v2.model_fixture import TEST_MODELS
 
 import os
@@ -11,7 +12,6 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from sagents.v2 import SAgentBuilder
 from sagents.v2.contracts.commands import InputItem, StartRun
 from sagents.v2.contracts.errors import SageV2Error
 from sagents.v2.contracts.events import RunEventData
@@ -382,7 +382,7 @@ def test_mysql_capabilities_claim_single_process_without_connecting():
 
 
 @pytest.mark.asyncio
-async def test_builder_rejects_mysql_plugin_without_dsn():
+async def test_builder_rejects_mysql_plugin_without_dsn(tmp_path):
     plugin = builtin_extension_registry().get("sage.session.mysql")
     if not plugin.descriptor.availability.available:
         pytest.skip("sage.session.mysql is unavailable without aiomysql")
@@ -407,9 +407,7 @@ async def test_builder_rejects_mysql_plugin_without_dsn():
         }
     )
     with pytest.raises(SageV2Error) as exc_info:
-        await SAgentBuilder().with_models(TEST_MODELS).with_model_provider(ScriptedModelProvider(()))._build_package(
-            package
-        )
+        await build_registered_package(tmp_path, models=TEST_MODELS, model=ScriptedModelProvider(()), package=package)
     assert exc_info.value.info.code == "extension.config_invalid"
 
 
@@ -648,7 +646,7 @@ async def test_delete_session_removes_durable_rows(mysql_dsn):
 
 
 @pytest.mark.asyncio
-async def test_builder_can_select_mysql_session_store(mysql_dsn):
+async def test_builder_can_select_mysql_session_store(mysql_dsn, tmp_path):
     prefix = _prefix()
     package = BuiltinPackageFactory.create(
         "assistant",
@@ -671,9 +669,7 @@ async def test_builder_can_select_mysql_session_store(mysql_dsn):
         }
     )
     application = await (
-        SAgentBuilder().with_models(TEST_MODELS)
-        .with_model_provider(ScriptedModelProvider(()))
-        ._build_package(package)
+        build_registered_package(tmp_path, models=TEST_MODELS, model=ScriptedModelProvider(()), package=package)
     )
     store = application.entrypoint().runtime.session_store
     assert store.table_prefix == prefix

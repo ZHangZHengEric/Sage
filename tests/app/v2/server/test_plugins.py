@@ -99,41 +99,32 @@ def test_agent_cannot_replace_host_plugins_or_injected_dependencies(client):
         assert response.status_code in (400, 422), response.text
 
 
-async def test_materialized_defaults_use_model_summary_and_honor_explicit_fallback(
-    service,
-):
-    from sagents.v2.context.plugins.summarizer_model import ModelConversationSummarizer
-    from sagents.v2.context.plugins.summarizer_extractive import (
-        ExtractiveConversationSummarizer,
-    )
-    from sagents.v2.testing.plugins import ScriptedModelProvider
+async def test_standard_run_uses_model_summary_and_honors_explicit_fallback(service, tmp_path):
     from app.v2.server.config.manifest import server_v2_manifest
     from sagents.v2.package.manifest.runtime import CapabilitySelection
-
-    await service.start()
+    from sagents.v2.testing.plugins import ScriptedModelProvider
+    from tests.sagents.v2.model_fixture import TEST_MODELS
+    from tests.sagents.v2.sdk_fixture import build_registered_app
+    from tests.sagents.v2.test_standard_execution_configuration import package, response, run, CONTEXT
+    runtime = server_v2_manifest(service.settings).runtime
+    runtime = runtime.model_copy(update={"capabilities": {**runtime.capabilities,
+        "tool.selection-policy": CapabilitySelection(plugin="sage.tool-selection.direct"),
+        "agent.continuation-policy": CapabilitySelection(plugin="sage.agent.continuation.deterministic")}})
+    app = await build_registered_app(tmp_path, models=TEST_MODELS, model=ScriptedModelProvider((response(), response())), runtime=runtime)
     try:
-        model = ScriptedModelProvider(())
-        manifest = server_v2_manifest(service.settings)
-        ports = await service.application.materialize_agent(
-            manifest, tenant_id="owner", agent_id="main", model=model
-        )
-        assert isinstance(ports.summarizer, ModelConversationSummarizer)
-        assert ports.summarizer.model is model
-        assert ports.summarizer.model_binding == "primary"
-        runtime = manifest.runtime.model_copy(
-            update={
-                "capabilities": {
-                    **manifest.runtime.capabilities,
-                    "context.summarizer": CapabilitySelection(
-                        plugin="sage.context.summarizer.extractive"
-                    ),
-                }
-            }
-        )
-        explicit = manifest.model_copy(update={"runtime": runtime})
-        ports = await service.application.materialize_agent(
-            explicit, tenant_id="owner", agent_id="main", model=model
-        )
-        assert isinstance(ports.summarizer, ExtractiveConversationSummarizer)
+        first = await app.load_agent(package())
+        result, _ = await run(app, first, "default-summary")
+        assert result.state.value == "completed"
+        original = await app.run_configuration(result.run_id, CONTEXT)
+        assert any(item["plugin_id"] == "sage.context.summarizer.model" for item in original["plugins"])
+        current = app.runtime_configuration
+        await app.update_runtime(current.model_copy(update={"capabilities": {**current.capabilities,
+            "context.summarizer": CapabilitySelection(plugin="sage.context.summarizer.extractive")}}))
+        second = await app.update_agent(agent=first, package=package())
+        next_result, _ = await run(app, second, "extractive-summary")
+        assert next_result.state.value == "completed"
+        selected = await app.run_configuration(next_result.run_id, CONTEXT)
+        assert any(item["plugin_id"] == "sage.context.summarizer.extractive" for item in selected["plugins"])
+        assert await app.run_configuration(result.run_id, CONTEXT) == original
     finally:
-        await service.close()
+        await app.close()

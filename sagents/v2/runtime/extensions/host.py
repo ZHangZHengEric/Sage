@@ -154,12 +154,15 @@ class ExtensionHost:
         plan: ExtensionCompositionPlan,
         *,
         parent: ExtensionScopeHandle | None = None,
+        available: tuple[ExtensionScopeHandle, ...] = (),
     ) -> ExtensionScopeHandle:
         self._validate_graph_trust(plan.graph)
         context = _normalized_scope_context(context)
+        inherited = _available_extensions(available, context, plan)
         if parent is None and any(
             _SCOPE_RANK[selected_scope] < _SCOPE_RANK[context.scope]
-            for selected_scope in plan.scopes.values()
+            and plugin_id not in inherited
+            for plugin_id, selected_scope in plan.scopes.items()
         ):
             raise _error(
                 "extension.scope_hierarchy_invalid",
@@ -181,16 +184,28 @@ class ExtensionHost:
                 )
 
         providers = parent.providers.as_dict() if parent is not None else {}
+        for plugin_id, source in inherited.items():
+            for offer in self.registry.get(plugin_id).descriptor.provides:
+                key = CapabilityKey(capability=offer.capability, name=offer.name)
+                value = source.providers[key]
+                if key in providers and providers[key] is not value:
+                    raise _error("extension.provider_key_conflict", ErrorCategory.CONFLICT,
+                                 f"inherited provider {key} has conflicting instances")
+                providers[key] = value
         started: list[StartedExtension] = []
         starting: StartedExtension | None = None
         try:
             for plugin_id in plan.graph.start_order:
+                if plugin_id in inherited:
+                    continue
                 if plan.scopes[plugin_id] != context.scope:
                     continue
                 registration = self.registry.get(plugin_id)
                 descriptor = registration.descriptor
                 plugin_context = context.model_copy(
-                    update={"config": dict(plan.configs[plugin_id])}
+                    update={"config": dict(plan.configs[plugin_id]),
+                            "agent_configuration": json.loads(json.dumps(context.agent_configuration))
+                            if context.agent_configuration is not None else None}
                 )
                 dependencies = ProviderSet(
                     {
@@ -270,6 +285,8 @@ class ExtensionHost:
             _started=started,
             parent=parent,
             composition_hash=plan.composition_hash,
+            configurations={key: dict(value) for key, value in plan.configs.items()},
+            inherited_plugin_ids=frozenset(inherited),
         )
 
     async def open_scope_hierarchy(
@@ -296,6 +313,7 @@ class ExtensionHost:
             parent_plugin_ids: set[str] = set()
             ancestor = current_parent
             while ancestor is not None:
+                parent_plugin_ids.update(ancestor.inherited_plugin_ids)
                 parent_plugin_ids.update(
                     value.registration.descriptor.plugin_id
                     for value in ancestor._started
@@ -501,6 +519,8 @@ class ExtensionHost:
                 reversed(started)
             )
             for value in rollback:
+                if value.registration.ownership == "borrowed":
+                    continue
                 stop = value.registration.stop or getattr(value.instance, "stop", None)
                 close = getattr(value.instance, "close", None)
                 if stop is not None or close is not None:
@@ -611,6 +631,8 @@ async def _stop_extension(
     reason: StopReason,
 ) -> None:
     registration = started.registration
+    if registration.ownership == "borrowed":
+        return
     if registration.stop is not None:
         result = registration.stop(started.instance, reason)
     else:
@@ -641,14 +663,45 @@ def _normalized_scope_context(
     """Expose only identities that belong to the current lifetime boundary."""
 
     if context.scope == ExtensionScope.PROCESS:
-        updates = {"tenant_id": None, "agent_id": None, "run_id": None}
+        updates = {"tenant_id": None, "agent_id": None, "run_id": None, "agent_configuration": None}
     elif context.scope == ExtensionScope.TENANT:
-        updates = {"agent_id": None, "run_id": None}
+        updates = {"agent_id": None, "run_id": None, "agent_configuration": None}
     elif context.scope == ExtensionScope.AGENT:
         updates = {"run_id": None}
     else:
         updates = {}
     return context.model_copy(update=updates) if updates else context
+
+
+def _available_extensions(sources, context, plan):
+    """Borrow only exact registered instances within the caller's identity scope."""
+    from sagents.v2.composition.identity import _config_identity
+
+    found = {}
+    for source in sources:
+        if source._closed or _SCOPE_RANK[source.context.scope] > _SCOPE_RANK[context.scope]:
+            continue
+        identity = source.context
+        if identity.scope in {ExtensionScope.AGENT, ExtensionScope.RUN} and identity.agent_configuration != context.agent_configuration:
+            continue
+        if identity.scope != ExtensionScope.PROCESS and identity.tenant_id != context.tenant_id:
+            continue
+        if identity.scope in {ExtensionScope.AGENT, ExtensionScope.RUN} and identity.agent_id != context.agent_id:
+            continue
+        if identity.scope == ExtensionScope.RUN and identity.run_id != context.run_id:
+            continue
+        for started in source._started:
+            plugin_id = started.registration.descriptor.plugin_id
+            if plugin_id not in plan.graph.plugin_ids or plan.scopes[plugin_id] != identity.scope:
+                continue
+            if _config_identity(source.configurations.get(plugin_id, {})) != _config_identity(plan.configs[plugin_id]):
+                continue
+            if plugin_id in found and found[plugin_id] is not source:
+                if found[plugin_id]._started != source._started:
+                    raise _error("extension.instance_conflict", ErrorCategory.CONFLICT,
+                                 f"multiple active instances selected for {plugin_id!r}")
+            found[plugin_id] = source
+    return found
 
 
 def _composition_hash(

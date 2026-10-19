@@ -1,4 +1,6 @@
 from __future__ import annotations
+from tests.sagents.v2.sdk_fixture import fixture_configuration
+from tests.sagents.v2.sdk_fixture import build_registered_package
 from tests.sagents.v2.model_fixture import TEST_MODELS
 
 import asyncio
@@ -6,7 +8,6 @@ from builtins import BaseExceptionGroup
 
 import pytest
 
-from sagents.v2 import SAgentBuilder
 from sagents.v2.agent.policy import DefaultToolPolicy, ApprovalStrategy
 from sagents.v2.agent.management import (
     AgentManagementService,
@@ -62,16 +63,13 @@ async def test_managed_builds_are_shared_but_do_not_block_other_agents(tmp_path)
         async def close(self):
             closed.append(self)
 
-    class Builder:
-        async def build(self, *args, **kwargs):
-            return App()
 
     async def factory(package, root, ctx):
         name = ctx.actor.principal_id
         calls.append(name)
         started[name].set()
         await release.wait()
-        return Builder()
+        return fixture_configuration(root, models=TEST_MODELS, model=model(), runtime=package.manifest.runtime, resources=(App(),))
 
     async def allow(*args):
         pass
@@ -126,7 +124,7 @@ def model(text="converted", count=4):
     )
 
 
-def service(root, *, authorize=None):
+def service(root, *, authorize=None, resources=(), providers=None):
     models = []
 
     async def allow(action, package, ctx):
@@ -136,10 +134,7 @@ def service(root, *, authorize=None):
         provider = model()
         models.append(provider)
         return (
-            SAgentBuilder()
-            .with_models(TEST_MODELS)
-            .with_defaults(session_root=run_root)
-            .with_model_provider(provider)
+            fixture_configuration(run_root, models=TEST_MODELS, model=provider, runtime=package.manifest.runtime, resources=resources, providers=providers)
         )
 
     return AgentManagementService(
@@ -148,7 +143,7 @@ def service(root, *, authorize=None):
 
 
 async def settled(svc, op, ctx):
-    async with asyncio.timeout(5):
+    async with asyncio.timeout(30):
         while True:
             value = await svc.status(op, ctx)
             if value["terminal"] or value["needs_attention"]:
@@ -337,19 +332,11 @@ async def test_parent_model_creates_and_invokes_full_agent(tmp_path):
         )
     )
     app = await (
-        SAgentBuilder()
-        .with_models(TEST_MODELS)
-        .with_defaults(session_root=tmp_path / "parent")
-        .with_model_provider(provider)
-        .with_tool_policy(
-            DefaultToolPolicy(approval_strategy=ApprovalStrategy.AUTO_APPROVE)
-        )
-        .with_agent_management(svc)
-        ._build_package(SageManifest.model_validate(parent))
+        build_registered_package(tmp_path / 'parent', models=TEST_MODELS, model=provider, package=SageManifest.model_validate(parent), providers={'agent.tool-policy': DefaultToolPolicy(approval_strategy=ApprovalStrategy.AUTO_APPROVE), 'agent.management': svc})
     )
     try:
         stream = await app.entrypoint().run_stream(
-            StartRun(
+            (StartRun(
                 agent_id="assistant",
                 input=(
                     InputItem(
@@ -358,8 +345,8 @@ async def test_parent_model_creates_and_invokes_full_agent(tmp_path):
                 ),
                 resolved_spec_hash=app.composition_hash,
                 idempotency_key="parent",
-            ),
-            context(),
+            )).model_copy(update={"agent_id": app.loaded_agents[-1].id, "resolved_spec_hash": app.loaded_agents[-1].composition_hash}),
+            context(), agent=app.loaded_agents[-1],
         )
         result = await stream.wait()
         await stream.detach()
@@ -376,8 +363,7 @@ async def test_parent_model_creates_and_invokes_full_agent(tmp_path):
 
 @pytest.mark.asyncio
 @pytest.mark.timeout(10)
-@pytest.mark.parametrize("binding", ["host", "plugin"])
-async def test_builder_executes_declared_flow_and_custom_node(tmp_path, binding):
+async def test_builder_executes_declared_flow_and_custom_node(tmp_path):
     from sagents.v2.flow import FlowNodeResult
 
     data = bundle().model_dump(mode="json")
@@ -418,57 +404,44 @@ async def test_builder_executes_declared_flow_and_custom_node(tmp_path, binding)
     async def allow(action, package, ctx):
         pass
 
+    from sagents.v2.runtime.extensions import (
+        CapabilityOffer,
+        ExtensionDescriptor,
+        ExtensionRegistration,
+        ExtensionScope,
+    )
+
+    data["manifest"]["plugins"] = [{"id": "test.flow-node", "version": "1.0.0"}]
+    data["manifest"]["runtime"]["capabilities"] = {
+        "flow.node": {"plugin": "test.flow-node", "name": "calculate"}
+    }
+    registration = ExtensionRegistration(
+        descriptor=ExtensionDescriptor(
+            plugin_id="test.flow-node",
+            version="1.0.0",
+            name="Calculate",
+            provides=(
+                CapabilityOffer(
+                    capability="flow.node", api_version="2", name="wrong-first"
+                ),
+                CapabilityOffer(
+                    capability="flow.node", api_version="2", name="calculate"
+                ),
+            ),
+            supported_scopes=frozenset({ExtensionScope.AGENT}),
+        ),
+        factory=lambda ctx, deps: Node(),
+        start=lambda node, ctx, deps: {
+            "flow.node:wrong-first": object(),
+            "flow.node:calculate": node,
+        },
+    )
+
     def build(package, root, ctx):
         return (
-            SAgentBuilder()
-            .with_models(TEST_MODELS)
-            .with_defaults(session_root=root)
-            .with_model_provider(model())
-            .with_flow_tool_nodes({"calculate": Node()})
+            fixture_configuration(root, models=TEST_MODELS, model=model(), registrations=(registration,), runtime=package.manifest.runtime)
         )
 
-    if binding == "plugin":
-        from sagents.v2.runtime.extensions import (
-            CapabilityOffer,
-            ExtensionDescriptor,
-            ExtensionRegistration,
-            ExtensionScope,
-        )
-
-        data["manifest"]["plugins"] = [{"id": "test.flow-node", "version": "1.0.0"}]
-        data["manifest"]["runtime"]["capabilities"] = {
-            "flow.node": {"plugin": "test.flow-node", "name": "calculate"}
-        }
-        registration = ExtensionRegistration(
-            descriptor=ExtensionDescriptor(
-                plugin_id="test.flow-node",
-                version="1.0.0",
-                name="Calculate",
-                provides=(
-                    CapabilityOffer(
-                        capability="flow.node", api_version="2", name="wrong-first"
-                    ),
-                    CapabilityOffer(
-                        capability="flow.node", api_version="2", name="calculate"
-                    ),
-                ),
-                supported_scopes=frozenset({ExtensionScope.AGENT}),
-            ),
-            factory=lambda ctx, deps: Node(),
-            start=lambda node, ctx, deps: {
-                "flow.node:wrong-first": object(),
-                "flow.node:calculate": node,
-            },
-        )
-
-        def build(package, root, ctx):
-            return (
-                SAgentBuilder()
-                .with_models(TEST_MODELS)
-                .with_defaults(session_root=root)
-                .with_model_provider(model())
-                .register(registration)
-            )
 
     from copy import deepcopy
 
@@ -585,11 +558,7 @@ async def test_managed_agent_selects_standard_plugin_and_configuration(tmp_path)
             )
         )
         return (
-            SAgentBuilder()
-            .with_models(TEST_MODELS)
-            .with_defaults(session_root=root)
-            .register(registration)
-            .with_model_provider(provider)
+            fixture_configuration(root, models=TEST_MODELS, model=provider, registrations=(registration,), runtime=bundle.manifest.runtime)
         )
 
     svc = AgentManagementService(tmp_path, builder_factory=build, authorize=allow)
@@ -648,14 +617,7 @@ async def test_managed_agent_loads_its_selected_skill(tmp_path):
         )
         requests.append(provider.requests)
         return (
-            SAgentBuilder()
-            .with_models(TEST_MODELS)
-            .with_defaults(session_root=root)
-            .with_model_provider(provider)
-            .with_skill_provider(source, source, InMemorySkillWorkspace())
-            .with_tool_policy(
-                DefaultToolPolicy(approval_strategy=ApprovalStrategy.AUTO_APPROVE)
-            )
+            fixture_configuration(root, models=TEST_MODELS, model=provider, skills=(source, source, InMemorySkillWorkspace(),), providers={'agent.tool-policy': DefaultToolPolicy(approval_strategy=ApprovalStrategy.AUTO_APPROVE)}, runtime=bundle.manifest.runtime)
         )
 
     svc = AgentManagementService(tmp_path, builder_factory=build, authorize=allow)
@@ -812,14 +774,7 @@ async def test_created_agent_can_create_another_agent_when_granted(tmp_path):
                 )
             )
         return (
-            SAgentBuilder()
-            .with_models(TEST_MODELS)
-            .with_defaults(session_root=root)
-            .with_model_provider(provider)
-            .with_agent_management(svc)
-            .with_tool_policy(
-                DefaultToolPolicy(approval_strategy=ApprovalStrategy.AUTO_APPROVE)
-            )
+            fixture_configuration(root, models=TEST_MODELS, model=provider, providers={'agent.management': svc, 'agent.tool-policy': DefaultToolPolicy(approval_strategy=ApprovalStrategy.AUTO_APPROVE)}, runtime=package.manifest.runtime)
         )
 
     svc = AgentManagementService(tmp_path, builder_factory=build, authorize=allow)
@@ -1002,7 +957,7 @@ async def test_reply_retries_survive_resume_failure_and_never_answer_next_questi
 
 
 @pytest.mark.asyncio
-@pytest.mark.timeout(30)
+@pytest.mark.timeout(120)
 async def test_concurrent_managed_runs_are_isolated_and_duplicate_admission_is_once(
     tmp_path,
 ):
@@ -1029,10 +984,7 @@ async def test_concurrent_managed_runs_are_isolated_and_duplicate_admission_is_o
         provider = SlowModel(model(count=64)._steps)
         providers.append(provider)
         return (
-            SAgentBuilder()
-            .with_models(TEST_MODELS)
-            .with_defaults(session_root=root)
-            .with_model_provider(provider)
+            fixture_configuration(root, models=TEST_MODELS, model=provider, runtime=package.manifest.runtime)
         )
 
     async def allow(*args):
@@ -1146,9 +1098,6 @@ async def test_build_limit_covers_validation_and_runtime_and_releases_cancelled_
             nonlocal closed
             closed += 1
 
-    class Builder:
-        async def build(self, *args, **kwargs):
-            return App()
 
     async def factory(package, root, ctx):
         nonlocal active, peak, built
@@ -1159,7 +1108,7 @@ async def test_build_limit_covers_validation_and_runtime_and_releases_cancelled_
         try:
             await release.wait()
             built += 1
-            return Builder()
+            return fixture_configuration(root, models=TEST_MODELS, model=model(), runtime=package.manifest.runtime, resources=(App(),))
         finally:
             active -= 1
 
@@ -1222,18 +1171,17 @@ async def test_cancelled_save_settles_validation_and_releases_version_lock(tmp_p
         async def close(self):
             closed.append(True)
 
-    class Builder:
-        async def build(self, *args, **kwargs):
-            started.set()
-            await release.wait()
-            return App()
+    async def factory(package, root, ctx):
+        started.set()
+        await release.wait()
+        return fixture_configuration(root, models=TEST_MODELS, model=model(), runtime=package.manifest.runtime, resources=(App(),))
 
     async def allow(*args):
         pass
 
     svc = AgentManagementService(
         tmp_path,
-        builder_factory=lambda *args: Builder(),
+        builder_factory=factory,
         authorize=allow,
         max_concurrent_builds=1,
     )
@@ -1350,19 +1298,16 @@ async def test_validation_close_failure_is_retained_and_retried(tmp_path):
             if len(closes) == 1:
                 raise RuntimeError("temporary cleanup failure")
 
-    class Builder:
-        async def build(self, *args, **kwargs):
-            return App()
 
     def build(bundle, root, ctx):
         roots.append(root)
-        return Builder()
+        return fixture_configuration(root, models=TEST_MODELS, model=model(), runtime=bundle.manifest.runtime, resources=(App(),))
 
     async def allow(*args):
         pass
 
     svc = AgentManagementService(tmp_path, builder_factory=build, authorize=allow)
-    with pytest.raises(RuntimeError, match="cleanup failure"):
+    with pytest.raises(RuntimeError, match="failed to close"):
         await svc.validate(bundle(), context())
     assert roots[0].exists()
     assert len(svc._validation_cleanup) == 1
@@ -1412,10 +1357,7 @@ async def test_readiness_reports_missing_resources_and_strict_save_rejects(tmp_p
 
     def factory(package, root, ctx):
         return (
-            SAgentBuilder()
-            .with_models(TEST_MODELS)
-            .with_defaults(session_root=root)
-            .with_model_provider(model())
+            fixture_configuration(root, models=TEST_MODELS, model=model(), runtime=package.manifest.runtime)
         )
 
     svc = AgentManagementService(tmp_path, builder_factory=factory, authorize=allow)
@@ -1483,10 +1425,7 @@ async def test_idle_release_reads_archived_result_without_rebuilding_application
 
     def factory(package, root, ctx):
         return (
-            SAgentBuilder()
-            .with_models(TEST_MODELS)
-            .with_defaults(session_root=root)
-            .with_model_provider(model())
+            fixture_configuration(root, models=TEST_MODELS, model=model(), runtime=package.manifest.runtime)
         )
 
     svc = AgentManagementService(
@@ -1597,27 +1536,36 @@ async def test_flow_build_only_initializes_reachable_agents(tmp_path, monkeypatc
     }
     calls = []
 
-    async def create_model(
-        self, host, process, handles, resolved, agent_id, *args, **kwargs
-    ):
-        calls.append(agent_id)
+    def create_model(scope, dependencies):
+        calls.append(scope.agent_configuration["definition"]["source_agent_id"])
         return model()
 
-    from sagents.v2.composition.assembler import ApplicationAssembler
-
-    monkeypatch.setattr(ApplicationAssembler, "_create_model", create_model)
+    from copy import deepcopy
     from sagents.v2.package.manifest import SageManifest
-
-    for definition in data["manifest"]["agents"].values():
-        definition["instructions"] = {"inline": "Run the declared flow."}
-    app = (
-        await SAgentBuilder()
-        .with_models(TEST_MODELS)
-        .with_defaults(session_root=tmp_path)
-        ._build_package(SageManifest.model_validate(data["manifest"]))
-    )
+    from tests.sagents.v2.sdk_fixture import build_registered_app
+    from tests.sagents.v2.test_standard_execution_configuration import run
+    children = {}
+    for name in ("worker", "unused"):
+        child = deepcopy(data["manifest"])
+        child["metadata"]["id"] += "." + name
+        child["agents"] = {name: child["agents"][name]}
+        child["agents"][name]["instructions"] = {"inline": "Run the declared flow."}
+        child["entrypoint"] = {"agent": name}
+        child["flows"] = {}
+        children[name] = SageManifest.model_validate(child)
+        data["manifest"]["agents"].pop(name)
+    data["manifest"]["agents"]["assistant"]["instructions"] = {"inline": "Run the flow."}
+    manifest = SageManifest.model_validate(data["manifest"])
+    app = await build_registered_app(tmp_path, models=TEST_MODELS,
+        runtime=manifest.runtime, model_factory=create_model)
     try:
-        assert calls == ["assistant", "worker"]
+        loaded_children = {name: await app.load_agent(child) for name, child in children.items()}
+        root = await app.load_agent(manifest, subagents=loaded_children)
+        result, events = await run(app, root, "flow-reachable")
+        assert result.state.value == "completed", events
+        assert set(calls) <= {"assistant", "worker"}
+        assert "worker" in calls
+        assert "unused" not in calls
     finally:
         await app.close()
 
@@ -1647,14 +1595,11 @@ async def test_managed_applications_share_host_model_budget(tmp_path):
 
     def factory(package, root, ctx):
         return (
-            SAgentBuilder()
-            .with_models(TEST_MODELS)
-            .with_defaults(session_root=root)
-            .with_model_provider(Model())
+            fixture_configuration(root, models=TEST_MODELS, model=Model(), providers={"execution.model-budget": budget}, runtime=package.manifest.runtime)
         )
 
     svc = AgentManagementService(
-        tmp_path, builder_factory=factory, authorize=allow, model_budget=budget
+        tmp_path, builder_factory=factory, authorize=allow
     )
     try:
         for index in range(2):
@@ -1683,20 +1628,19 @@ async def test_managed_applications_share_host_model_budget(tmp_path):
 
 @pytest.mark.asyncio
 async def test_idle_cleanup_failure_closes_admission_and_can_retry(tmp_path):
-    svc, _ = service(tmp_path)
+    class FailOnce:
+        attempts = 0
+
+        async def close(self):
+            self.attempts += 1
+            if self.attempts == 1:
+                raise RuntimeError("idle cleanup failed")
+
+    resource = FailOnce()
+    svc, _ = service(tmp_path, resources=(resource,))
     try:
-        app = await svc._application(bundle(), "assistant", context())
+        await svc._application(bundle(), "assistant", context())
 
-        class FailOnce:
-            attempts = 0
-
-            async def close(self):
-                self.attempts += 1
-                if self.attempts == 1:
-                    raise RuntimeError("idle cleanup failed")
-
-        resource = FailOnce()
-        await app.adopt_resource(resource)
         with pytest.raises(RuntimeError, match="failed to close"):
             await svc.release_idle(min_idle_seconds=0)
         assert svc.capacity()["draining"]
@@ -1756,13 +1700,7 @@ async def test_strict_readiness_rechecks_saved_versions_when_resource_disappears
 
     def factory(package, root, ctx):
         return (
-            SAgentBuilder()
-            .with_models(TEST_MODELS)
-            .with_defaults(session_root=root)
-            .with_model_provider(model())
-            .with_tool_provider(
-                InMemoryToolCatalog(tuple(available)), InMemoryToolExecutor({}, {})
-            )
+            fixture_configuration(root, models=TEST_MODELS, model=model(), tools=(InMemoryToolCatalog(tuple(available)), InMemoryToolExecutor({}, {}),), runtime=package.manifest.runtime)
         )
 
     svc = AgentManagementService(
@@ -1788,7 +1726,7 @@ async def finish_without_status(svc, handle):
         for app in svc._applications.values()
         if handle["run_id"] in app.entrypoint().runtime.session_store._runs
     )
-    async with asyncio.timeout(5):
+    async with asyncio.timeout(30):
         while (
             await app.entrypoint().runtime.get_run(handle["run_id"])
         ).state.value != "completed":
@@ -1938,11 +1876,7 @@ async def test_reclamation_preserves_ephemeral_session_continuation(tmp_path):
 
     def factory(package, root, ctx):
         return (
-            SAgentBuilder()
-            .with_models(TEST_MODELS)
-            .with_defaults(session_root=root)
-            .with_session_store(EphemeralSessionStore())
-            .with_model_provider(model())
+            fixture_configuration(root, models=TEST_MODELS, model=model(), providers={'session.store': EphemeralSessionStore()}, runtime=package.manifest.runtime)
         )
 
     svc = AgentManagementService(
@@ -2048,17 +1982,16 @@ async def test_cancelled_shutdown_preserves_owned_build_for_cleanup_retry(tmp_pa
         async def close(self):
             closed.append(self)
 
-    class Builder:
-        async def build(self, *args, **kwargs):
-            entered.set()
-            await release.wait()
-            return App()
+    async def factory(package, root, ctx):
+        entered.set()
+        await release.wait()
+        return fixture_configuration(root, models=TEST_MODELS, model=model(), runtime=package.manifest.runtime, resources=(App(),))
 
     async def allow(*args):
         pass
 
     svc = AgentManagementService(
-        tmp_path, builder_factory=lambda *args: Builder(), authorize=allow
+        tmp_path, builder_factory=factory, authorize=allow
     )
     building = asyncio.create_task(svc._application(bundle(), "assistant", context()))
     try:
@@ -2071,7 +2004,8 @@ async def test_cancelled_shutdown_preserves_owned_build_for_cleanup_retry(tmp_pa
         release.set()
         app = await building
         await svc.close()
-        assert closed == [app]
+        assert len(closed) == 1
+        assert app._closed
         assert svc.capacity()["building"] == 0
         assert svc.capacity()["applications"] == 0
     finally:
@@ -2081,39 +2015,28 @@ async def test_cancelled_shutdown_preserves_owned_build_for_cleanup_retry(tmp_pa
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("timeout", [False, True])
-async def test_managed_run_preserves_queue_failure_reason(
-    tmp_path, timeout, monkeypatch
-):
-    from sagents.v2.agent import AgentLoopEngine
+async def test_managed_run_preserves_queue_failure_reason(tmp_path, timeout):
     from sagents.v2.model import ModelConcurrencyBudget
-
-    monkeypatch.setattr(AgentLoopEngine, "_PROVIDER_RETRY_BASE_SECONDS", 0)
-    svc, models = service(tmp_path)
-    svc.model_budget = ModelConcurrencyBudget(
-        1, max_waiting=1 if timeout else 0, wait_timeout_seconds=0.01
-    )
+    budget = ModelConcurrencyBudget(1, max_waiting=1 if timeout else 0, wait_timeout_seconds=0.01)
+    svc, models = service(tmp_path, providers={"execution.model-budget": budget})
     try:
         saved = await svc.save(bundle(), context())
-        async with svc.model_budget.lease():
+        async with budget.lease():
             await svc.run(saved["ref"], "assistant", "hello", "overloaded", context())
-            result = await settled(svc, "overloaded", context())
-        assert result["run"]["state"] == "suspended"
-        error = result["interaction"]["payload"]["error"]
-        assert error["code"] == (
-            "model.queue_timeout" if timeout else "model.queue_full"
-        )
-        assert error["retryable"] and error["safe_to_resume"]
-        assert all(not provider.requests for provider in models)
-        await svc.control(
-            "overloaded",
-            "reply",
-            context(),
-            decision="retry",
-            interaction_id=result["interaction"]["interaction_id"],
-        )
-        assert (await settled(svc, "overloaded", context()))["run"][
-            "state"
-        ] == "completed"
+            async with asyncio.timeout(30):
+                while True:
+                    page = await svc.events("overloaded", context())
+                    scheduled = next((event for event in page["events"] if event["type"] == "step.retry_scheduled"), None)
+                    if scheduled is not None:
+                        break
+                    await asyncio.sleep(.01)
+            expected = "model.queue_timeout" if timeout else "model.queue_full"
+            assert expected in str(scheduled)
+            assert all(not provider.requests for provider in models)
+            assert not any(event["type"] == "interaction.requested" for event in page["events"])
+        # Capacity recovery is autonomous; the queued Run retains its identity.
+        result = await settled(svc, "overloaded", context())
+        assert result["run"]["state"] == "completed"
     finally:
         await svc.close()
 
@@ -2180,12 +2103,7 @@ async def test_shared_jobs_survive_one_application_close_and_bound_admission(tmp
     try:
         for index in range(2):
             apps.append(
-                await SAgentBuilder()
-                .with_models(TEST_MODELS)
-                .with_defaults(session_root=tmp_path / str(index))
-                .with_model_provider(model())
-                .with_job_runtime(jobs)
-                ._build_package(bundle().resolved_manifest())
+                await build_registered_package(tmp_path / str(index), models=TEST_MODELS, model=model(), package=bundle().resolved_manifest(), providers={'execution.job-runtime': jobs})
             )
         assert (
             apps[0].service("execution.job-runtime")

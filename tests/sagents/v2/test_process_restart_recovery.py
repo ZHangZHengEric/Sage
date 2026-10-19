@@ -468,7 +468,7 @@ async def test_dispatcher_recovers_entire_team_tree_after_hard_kill(tmp_path, sc
     factory, descriptor = team_factory(tmp_path, runtime, model)
     scheduler = FilesystemScheduler(tmp_path / "scheduler")
     dispatcher = LocalWorkerDispatcher(scheduler, max_concurrent_runs=1)
-    agent = SAgent(
+    agent = SAgent._from_composition(
         runtime=runtime,
         driver_factory=lambda run_id: factory.create_loop(descriptor, run_id),
     )

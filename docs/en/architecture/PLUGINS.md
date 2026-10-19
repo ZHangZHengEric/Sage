@@ -19,9 +19,9 @@ An `ExtensionRegistration` supplies identity, capability/API version, configurat
 
 ## How hosts compose providers
 
-1. Use `SAgentBuilder().with_defaults(...)` for standard providers.
+1. Register implementations with `builder.register(registration)` and select them in `build(runtime=..., models=...)`.
 2. Select plugin bindings in the manifest's `runtime.capabilities`.
-3. Inject host-owned providers through Builder methods such as `with_model_provider`, `with_session_store`, or `with_tool_runtime`.
+3. Existing objects are returned by registered factories with explicit ownership; runtime selects them. Do not add a separate object injection interface.
 4. Build once, inspect `application.resolved_plan`, and close the application when the host shuts down.
 
 Installed extensions can use the `sage.extensions` Python entry-point group. Source plugins require explicit host trust and authorization; they are executable host code, not an isolation mechanism.

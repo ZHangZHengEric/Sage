@@ -48,7 +48,7 @@ models:
 
 ### 更新与版本
 
-Builder 的 `.with_models(...)` 用于创建前配置；已经 build 的 App 通过以下接口更新：
+Builder 的 `build(models=...)` 用于创建前配置；已经 build 的 App 通过以下接口更新：
 
 ```python
 await app.update_models("./models.yaml")  # 原子替换整个目录
@@ -198,7 +198,7 @@ finally:
 
 1. App 在 `build` 时固定 runtime；改变 Agent Package 不等于改变 App 的进程资源。
 2. `plugins[].config` 提供插件声明参数；同一项 `capabilities.<能力>.config` 的参数优先于声明参数。部分装配路径还填入组件默认值，最终以 resolved plan 为准。
-3. 宿主 `with_*()` 显式注入的服务和装配器锁定依赖优先。`model`、`session_store`、`derived_state` 等对象不能靠 YAML 替换宿主对象。
+3. 宿主通过注册工厂提供进程对象，通过 runtime 明确选择实现和参数；依赖由标准能力装配器校验，不允许 YAML 填入模型或数据库连接等进程对象。
 4. Server、Desktop 会根据自己的配置、持久化存储和权限生成实际 runtime；共用 SDK 标准不意味着覆盖宿主的安全策略。
 
 如果希望采用 `sage.yaml` 中的 runtime，需要宿主明确读取后传入，参考项目就是这样处理的：
@@ -371,7 +371,7 @@ finally:
 ## 排查配置与恢复问题
 
 1. 普通 SDK 看 `agent.resolved_plan` 和 `agent.resource_readiness`；`app.resolved_plan` 只是进程首次装配视图。
-2. HostAgentExecution 的完整运行组件计划在宿主 Run 诊断中查看；加载句柄不是全部实际 provider 的运行报告。
+2. 加载句柄的 `resolved_plan` 描述选择和依赖；`app.run_configuration()` 与 `execution_diagnostics()` 查询已授权 Run 的冻结配置及实际绑定。
 3. 在 Run 记录中关联 session_id、run_id、resolved_spec_hash，确认恢复使用受理时的版本。
 4. `update_agent` 更新 Agent，不热替换 App 共享存储/调度器。改变 runtime 时重新创建 App，并明确旧任务的恢复/迁移策略。
 5. 保留 `agent-revisions` 和 Session 数据。当前本机归档恢复要求 runtime 一致，不能把最新配置自动套到旧运行。
@@ -1180,11 +1180,15 @@ Seeds a Claw-style workspace layout and starter files.
 
 `RunConfig.automatic_stage_continuation` 默认 `true`，达到 `max_steps` 的阶段边界时自动保存检查点、重置阶段步骤计数，并在同一 Run、同一会话中接续原目标。历史消息、工具结果、总 token 用量、重复行为检测状态不重置。`max_stages` 默认 `null`，可配置正整数限制阶段数；将 `automatic_stage_continuation` 设为 `false` 可恢复步骤上限后的人工恢复行为。截止时间、总 token 上限和显式人工交互不被阶段接续绕过。
 
-Flow 节点拥有独立的节点检查点协议；其 Agent 节点保留进程内等待和显式节点边界，不把未完成节点当作已完成的委派结果。上述自动让出 Worker 与阶段接续适用于原生 Agent Loop 及其 Team/Fibre 委派树。
+Flow 在执行节点前保存稳定的节点执行 ID，并将节点结果与游标、子流程栈原子持久化。运行中断后由 `AgentFlowDriver.recover_interrupted` 恢复，复用原子 Run 与已完成并行分支，不重复已完成操作。Agent 节点的延期等待向根调度项传递唤醒时间并释放 Worker；节点显式完成边界保留。普通 Tool 节点若只有派发记录而无可靠结果，仅通过 runner 的 `recover_interrupted(context)` 对账；缺少该能力时保存未知结果并暂停，不直接重放。恢复时检查原配置身份及 Flow 图哈希。
 
 Scheduler 配置 `preserve_runs_on_shutdown` 默认 `true`：正常关闭服务会保留未完成 Run 和检查点、归还租约，重启后通过持久化执行意图自动接管。设置为 `false` 可使用原有的关闭即失败行为。Filesystem Scheduler 持有独占写锁，新进程获得锁后立即回收旧租约；即使进程在保存检查点之后、延迟入队之前被强杀，也会依据检查点的唤醒时间恢复，不必等待 48 小时租约自然过期。
 
-Desktop 启动时先绑定宿主恢复驱动，再启动 Worker，不依赖新对话或手动继续。本地工作区仍在时，可以在相同所有者和策略下重建失去进程内引用的沙箱；这不重放进程或工具副作用。自定义宿主可用 `SAgentBuilder.with_deferred_execution_start()` 推迟 Worker 启动，安装恢复驱动后调用 `dispatcher.start()`。生产恢复应使用持久化 SessionStore；内存存储无法跨服务进程保存检查点。
+父子 Run 的 `max_total_tokens` 按执行树累计主任务、兄弟和后代的持久化 `usage.recorded`，不把父预算重新分配给每个子任务；子任务自身更严格的上限仍有效。截止时间取每个祖先的原始 `created_at + deadline_seconds` 中最早者，延迟启动、阶段接续、重启均不重置。每次开始新推理或工具批次前检查预算，并按剩余额度收窄模型输出上限；等待中的调度项最迟在祖先截止时间唤醒。预算耗尽先结算等待中的后代，再发布父任务失败。计费依据供应商实际 usage，已派发的并发推理及不可安全取消的外部操作仍需结算，可能超过阈值；这不是预付费式的精确硬限额。
+
+Desktop 通过标准 App 恢复归档 Agent 和原执行配置。runtime 的 `start_workers: false` 可以推迟 Worker 启动；宿主产品服务准备完毕后调用标准 dispatcher 的 `start()`。无需安装宿主恢复 Driver。恢复不自动重放不确定副作用；跨进程恢复应选择持久化 SessionStore。
+
+Desktop 最后一个窗口退出或客户端租约到期时，只要存在排队、运行、恢复或延期等待的普通根 Run，Sidecar 就继续保活；RSI 原有保活也保留。任务全部结算且没有客户端后，下一次空闲检查会关闭 Sidecar。纯人工等待的挂起 Run 保持持久化，但不单独要求后台进程常驻。
 
 不能把未知结果的写操作作为网络请求直接重发。鉴权、不可用的资源配置、磁盘配额不足、不可核对的外部副作用仍需各自的修复或确认策略；自动恢复不会删除已有产物、提高显式资源额度或宣告未验收目标完成。
 

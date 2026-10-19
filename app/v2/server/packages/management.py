@@ -18,6 +18,7 @@ class ServerAgentManagement(AgentManagementService):
         root,
         *,
         database,
+        host,
         settings,
         paths,
         users,
@@ -46,7 +47,7 @@ class ServerAgentManagement(AgentManagementService):
             extensions=extensions,
         )
         self.package_builder_factory = ServerPackageBuilderFactory(
-            settings=settings,
+            host=host, settings=settings,
             paths=paths,
             catalog=catalog,
             skills=skills,
@@ -74,8 +75,6 @@ class ServerAgentManagement(AgentManagementService):
             max_applications=settings.max_managed_applications,
             max_concurrent_builds=settings.max_managed_builds,
             authorize=self.authorize_package,
-            model_budget=model_budget,
-            job_runtime=job_runtime,
             allow_source_plugins=package_authorizer is not None,
             inventory=tuple(
                 {

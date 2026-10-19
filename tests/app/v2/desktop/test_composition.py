@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -12,6 +13,7 @@ from app.v2.desktop.backend.package import (
 )
 from app.v2.desktop.backend.service import DesktopV2Service
 from sagents.v2.agent.multi_agent import WorkspaceSharingPolicy
+from sagents.v2.contracts.commands import RunConfig, StartRun
 from sagents.v2.contracts.principals import ActorRef, PrincipalType, RequestContext
 from sagents.v2.runtime.execution import ExecutionBindingRequest
 from sagents.v2.runtime.observability import NoopDiagnosticSink, NoopLogSink
@@ -27,6 +29,18 @@ def _context() -> RequestContext:
             tenant_id="desktop",
         )
     )
+
+
+async def _acquire_accepted(bindings, request):
+    """Exercise the binding contract with admission preceding resource creation."""
+    command = await bindings.accept_configuration(StartRun(
+        agent_id=request.agent_id, input=(), resolved_spec_hash="test-composition",
+        idempotency_key=request.run_id, parent_run_id=request.parent_run_id,
+        config=RunConfig(metadata={"workspace_policy": getattr(request.workspace_policy, "value", request.workspace_policy)}),
+    ), context=request.context)
+    return await bindings.acquire(replace(
+        request, configuration=command.config.execution_snapshot,
+    ))
 
 
 def test_desktop_manifest_encodes_product_defaults(tmp_path: Path):
@@ -73,10 +87,7 @@ def test_desktop_manifest_applies_user_component_selections(tmp_path: Path):
         },
     )
     capabilities = manifest.runtime.capabilities
-    assert (
-        capabilities["context.token-estimator"].plugin
-        == "sage.context.token-estimator.unicode-heuristic"
-    )
+    assert "context.token-estimator" not in capabilities
     assert (
         capabilities["agent.continuation-policy"].plugin
         == "sage.agent.continuation.llm-judge"
@@ -87,7 +98,7 @@ def test_desktop_manifest_applies_user_component_selections(tmp_path: Path):
 async def test_desktop_binding_provisions_a_run_owned_sandbox(tmp_path: Path):
     workspace = tmp_path / "workspace"
     bindings = DesktopExecutionBindingProvider(workspace)
-    binding = await bindings.acquire(
+    binding = await _acquire_accepted(bindings,
         ExecutionBindingRequest(
             run_id="run_1",
             agent_id="main",
@@ -112,7 +123,7 @@ async def test_desktop_binding_enforces_workspace_sharing_policy(tmp_path: Path)
         private_workspace_root=private_root,
     )
     context = _context()
-    shared = await bindings.acquire(
+    shared = await _acquire_accepted(bindings,
         ExecutionBindingRequest(
             run_id="run_shared",
             agent_id="main",
@@ -120,7 +131,7 @@ async def test_desktop_binding_enforces_workspace_sharing_policy(tmp_path: Path)
             workspace_policy=WorkspaceSharingPolicy.SHARED_PARENT,
         )
     )
-    private = await bindings.acquire(
+    private = await _acquire_accepted(bindings,
         ExecutionBindingRequest(
             run_id="run_private",
             parent_run_id="run_shared",
@@ -129,7 +140,7 @@ async def test_desktop_binding_enforces_workspace_sharing_policy(tmp_path: Path)
             workspace_policy=WorkspaceSharingPolicy.PRIVATE_CHILD,
         )
     )
-    read_only = await bindings.acquire(
+    read_only = await _acquire_accepted(bindings,
         ExecutionBindingRequest(
             run_id="run_read_only",
             parent_run_id="run_shared",
@@ -156,7 +167,7 @@ async def test_desktop_binding_enforces_workspace_sharing_policy(tmp_path: Path)
     assert read_only_row.spec.filesystem.allowed_operations == frozenset(
         {"read", "list"}
     )
-    assert read_only_row.spec.process.enabled is False
+    assert read_only_row.spec.process.read_only is True
 
     await bindings.close()
 
@@ -164,7 +175,7 @@ async def test_desktop_binding_enforces_workspace_sharing_policy(tmp_path: Path)
     assert private.closed is True
     assert read_only.closed is True
     with pytest.raises(RuntimeError, match="provider is closed"):
-        await bindings.acquire(
+        await _acquire_accepted(bindings,
             ExecutionBindingRequest(
                 run_id="run_after_close",
                 agent_id="main",
@@ -240,9 +251,10 @@ async def test_desktop_builder_path_exposes_a_real_resolved_plan(tmp_path: Path)
         assert "desktop-host" not in sources
         assert application.service("observability.log-sink") is log_sink
         assert application.service("observability.diagnostic-sink") is diagnostic_sink
-        assert _provider(plan, "observability.log-sink").source == "host"
-        assert _provider(plan, "observability.diagnostic-sink").source == "host"
-        assert _provider(plan, "model.provider").source == "host"
+        for capability in ("observability.log-sink", "observability.diagnostic-sink", "model.provider"):
+            binding = _provider(plan, capability)
+            assert binding.source == "plugin"
+            assert binding.plugin_id == "com.sage.desktop." + capability.replace(".", "-")
         assert (
             _provider(plan, "memory.provider").plugin_id
             == (DESKTOP_COMPONENT_DEFAULTS["memory.provider"])
@@ -371,11 +383,11 @@ async def test_disk_quota_is_consistent_for_all_desktop_workspace_bindings(tmp_p
         tmp_path / "workspace", resources=ResourceLimits(disk_mb=disk_mb, require_hard_limits=False),
     )
     try:
-        await bindings.acquire(ExecutionBindingRequest(
+        await _acquire_accepted(bindings, ExecutionBindingRequest(
             run_id="parent", agent_id="parent", context=_context(),
         ))
         for index, policy in enumerate(WorkspaceSharingPolicy):
-            binding = await bindings.acquire(ExecutionBindingRequest(
+            binding = await _acquire_accepted(bindings, ExecutionBindingRequest(
                 run_id=f"quota-{index}", parent_run_id="parent", agent_id="member",
                 context=_context(), workspace_policy=policy,
             ))
@@ -402,7 +414,7 @@ async def test_workspace_larger_than_four_gib_can_write_under_configured_quota(t
         workspace, resources=ResourceLimits(disk_mb=32768, require_hard_limits=False),
     )
     try:
-        binding = await bindings.acquire(ExecutionBindingRequest(
+        binding = await _acquire_accepted(bindings, ExecutionBindingRequest(
             run_id="large-workspace", agent_id="main", context=_context(),
             workspace_policy=WorkspaceSharingPolicy.SHARED_PARENT,
         ))

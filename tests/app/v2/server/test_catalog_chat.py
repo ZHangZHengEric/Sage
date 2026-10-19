@@ -95,10 +95,14 @@ def test_agent_external_scope_reaches_the_actual_model_request(tmp_path, monkeyp
     service = make_test_service(tmp_path, model_provider=provider)
     from app.v2.server.catalog.records import McpServerRecord, A2AAgentRecord
     original_catalog = service.catalog.get
+    configured_users = set()
     async def catalog_with_tools(user_id):
         catalog = await original_catalog(user_id)
-        catalog.mcp_servers = [McpServerRecord(name='test', url='https://mcp.invalid', tools=['mcp_read'])]
-        catalog.a2a_agents = [A2AAgentRecord(name='peer', url='https://peer.invalid', skills=['a2a_peer_search'])]
+        if user_id not in configured_users:
+            catalog.mcp_servers = [McpServerRecord(name='test', url='https://mcp.invalid', tools=['mcp_read'])]
+            catalog.a2a_agents = [A2AAgentRecord(name='peer', url='https://peer.invalid', skills=['a2a_peer_search'])]
+            await service.catalog_store.save(user_id, catalog)
+            configured_users.add(user_id)
         return catalog
     monkeypatch.setattr(service.catalog, 'get', catalog_with_tools)
     for cache, name in [(service.mcp_plugins, 'mcp_read'), (service.a2a_plugins, 'a2a_peer_search')]:

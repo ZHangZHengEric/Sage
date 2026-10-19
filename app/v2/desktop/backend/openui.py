@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from app.v2.desktop.backend.run_environment import catalog_agent_id
+
 import asyncio
 from contextlib import contextmanager
 import hashlib
@@ -633,17 +635,12 @@ class OpenUiContextProvider:
             ),
         ]
         if interactive:
-            skill = RUNTIME.parents[3] / "skills" / "sage-openui" / "SKILL.md"
-            if not skill.is_file():
-                # Frozen installers keep built-in Skills next to the app package.
-                skill = RUNTIME.parents[4] / "skills" / "sage-openui" / "SKILL.md"
             segments.append(
                 ContextSegment(
                     segment_id="desktop_openui_skill",
                     stability=ContextStability.SEMI_STABLE,
                     priority=-41,
-                    content="The sage-openui Skill is already preloaded by the Desktop host; no load_skill tool call is needed.\n\n"
-                    + skill.read_text(),
+                    content="The sage-openui Skill is preloaded by the standard Sage Skill loader; no load_skill tool call is needed.",
                 )
             )
         return tuple(segments)
@@ -718,7 +715,7 @@ class OpenUiProjector:
                     saved = self.service.openui_store.publish(
                         owner=self.owner,
                         session=event.session_id,
-                        agent=command.agent_id,
+                        agent=catalog_agent_id(command),
                         run=event.run_id,
                         operation=f"{key}:{index}",
                         key=f"{key}:{index}",

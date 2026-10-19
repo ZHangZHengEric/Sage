@@ -277,7 +277,9 @@ async def test_failed_control_lookup_does_not_launch_an_unobserved_tool():
         async def execute(self, call, context):
             calls.append(call)
 
+    from sagents.v2.contracts.common import utc_now
     engine = SimpleNamespace(
+        clock=utc_now,
         tool_catalog=Catalog(),
         tool_executor=Executor(),
         runtime=SimpleNamespace(session_store=Store()),

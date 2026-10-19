@@ -1,5 +1,8 @@
 """One registration/configuration/lifecycle contract for package and host assembly."""
 
+from tests.sagents.v2.sdk_fixture import build_registered_package
+from tests.sagents.v2.sdk_fixture import fixture_configuration
+
 from tests.sagents.v2.model_fixture import TEST_MODELS
 
 import asyncio
@@ -11,7 +14,6 @@ import pytest
 from app.v2.desktop.backend.composition import build_desktop_application
 from examples.sagents_v2_host.__main__ import offline_model
 from examples.sagents_v2_host.plugins import compactor_registration
-from sagents.v2 import SAgentBuilder
 from sagents.v2.contracts.errors import SageV2Error
 from sagents.v2.package.manifest import SageManifestLoader
 from sagents.v2.package.manifest.resolver import CompositionResolver
@@ -31,24 +33,17 @@ def package():
 
 def builder(tmp_path, registration=None):
     return (
-        SAgentBuilder()
-        .with_models(TEST_MODELS)
-        .with_defaults(session_root=tmp_path)
-        .with_model_provider(offline_model())
-        .register(registration or compactor_registration())
+        fixture_configuration(tmp_path, models=TEST_MODELS, model=offline_model(), registrations=(registration or compactor_registration(),))
     )
 
 
 @pytest.mark.asyncio
 async def test_runtime_parameter_and_embedded_runtime_have_same_identity(tmp_path):
     manifest = package()
-    direct = await builder(tmp_path)._build_package(manifest)
+    direct = await build_registered_package(configuration=builder(tmp_path), package=manifest)
     identity = direct.composition_hash
     await direct.close()
-    separate = await builder(tmp_path)._build_package(
-        manifest.model_copy(update={"runtime": RuntimeConfig()}),
-        runtime=manifest.runtime.model_dump(mode="json"),
-    )
+    separate = await build_registered_package(configuration=builder(tmp_path), package=manifest.model_copy(update={'runtime': RuntimeConfig()}), runtime=manifest.runtime.model_dump(mode='json'))
     try:
         assert separate.composition_hash == identity
         assert separate.service("context.unit-compactor").minimum_characters == 4
@@ -70,17 +65,7 @@ async def test_invalid_registered_plugin_parameters_fail_before_factory(
         return original_factory(context, dependencies)
 
     with pytest.raises(SageV2Error) as caught:
-        await builder(tmp_path, replace(registration, factory=factory))._build_package(
-            package(),
-            runtime={
-                "capabilities": {
-                    "context.unit-compactor": {
-                        "plugin": registration.descriptor.plugin_id,
-                        "config": config,
-                    }
-                }
-            },
-        )
+        await build_registered_package(configuration=builder(tmp_path, replace(registration, factory=factory)), package=package(), runtime={'capabilities': {'context.unit-compactor': {'plugin': registration.descriptor.plugin_id, 'config': config}}})
     assert caught.value.info.code == "extension.config_invalid"
     assert calls == []
 
@@ -89,7 +74,7 @@ async def test_invalid_registered_plugin_parameters_fail_before_factory(
 async def test_resolved_package_cannot_silently_change_runtime(tmp_path):
     resolved = CompositionResolver(models=TEST_MODELS).resolve(package())
     with pytest.raises(ValueError, match="already resolved"):
-        await builder(tmp_path)._build_package(resolved, runtime=RuntimeConfig())
+        await build_registered_package(configuration=builder(tmp_path), package=resolved, runtime=RuntimeConfig())
 
 
 @pytest.mark.asyncio
@@ -143,37 +128,28 @@ async def test_process_provider_config_names_concurrency_and_shutdown(tmp_path):
         },
         stop=lambda value, reason: stopped.append(value),
     )
-    app = await builder(tmp_path).register(registration)._build_package(package())
+    from sagents.v2.package.manifest.runtime import CapabilitySelection
+    configuration = builder(tmp_path, registration)
+    config = configuration.runtime.model_copy(update={"capabilities": {
+        **configuration.runtime.capabilities,
+        "example.service": CapabilitySelection(plugin="example.host.service", name="left"),
+    }})
+    app = await build_registered_package(configuration=configuration, runtime=config, package=package())
     try:
-        selection = {"plugin": "example.host.service", "name": "left"}
-        values = await asyncio.gather(
-            *(app.process_provider("example.service", selection) for _ in range(12))
-        )
+        values = await asyncio.gather(*(asyncio.sleep(0, result=app.service("example.service")) for _ in range(12)))
         assert len(created) == 1
         assert all(value is created[0]["left"] for value in values)
-        right = await app.process_provider(
-            "example.service", {**selection, "name": "right"}
-        )
-        assert right is created[1]["right"]
-        assert right is not values[0]
-        with pytest.raises(ValueError, match="process scope"):
-            await app.process_provider("example.service", {**selection, "scope": "run"})
-        with pytest.raises(SageV2Error) as caught:
-            await app.process_provider(
-                "example.service", {**selection, "config": {"unknown": True}}
-            )
-        assert caught.value.info.code == "extension.config_invalid"
+        assert not hasattr(app, "process_provider")
     finally:
         await app.close()
-    assert len(stopped) == 2
+    assert stopped == created
     await app.close()
-    assert len(stopped) == 2
+    assert stopped == created
 
 
 @pytest.mark.asyncio
 async def test_server_registration_and_package_runtime_parameter(tmp_path):
     from app.v2.server.database import Database, DatabaseSettings
-    from app.v2.server.packages.builder import PackageBuilder
     from tests.app.v2.server.conftest import FixtureServerHost, make_settings
 
     registration = compactor_registration()
@@ -208,24 +184,10 @@ async def test_server_registration_and_package_runtime_parameter(tmp_path):
             host.application.service("context.unit-compactor").minimum_characters == 8
         )
 
-        class UnusedBindings:
-            async def acquire(self, request):
-                raise AssertionError(
-                    "configuration inspection must not acquire a workspace"
-                )
-
-        managed = await (
-            PackageBuilder(
-                settings, None, tmp_path / "package", application=host.application
-            )
-            .with_defaults(session_root=tmp_path / "package")
-            .with_model_provider(offline_model())
-            .register(registration)
-            .with_execution_binding_provider(UnusedBindings())
-            .build(runtime=package().runtime, models=TEST_MODELS)
-        )
+        configuration = fixture_configuration(tmp_path / "package", models=TEST_MODELS,
+            model=offline_model(), runtime=package().runtime, registrations=(registration,))
+        managed = await build_registered_package(configuration=configuration, package=package())
         try:
-            await managed.load_agent(package())
             assert managed.service("context.unit-compactor").minimum_characters == 4
         finally:
             await managed.close()

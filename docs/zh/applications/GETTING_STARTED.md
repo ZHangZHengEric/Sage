@@ -66,7 +66,8 @@ entrypoint: {agent: main}
 
 async def main():
     manifest = SageManifestLoader().loads(AGENT_YAML)
-    app = await SAgentBuilder().with_defaults(session_root="runtime").build(manifest)
+    app = await SAgentBuilder().build(runtime=manifest.runtime, models=model_config)
+agent = await app.load_agent(manifest)
     try:
         context = RequestContext(actor=ActorRef(
             principal_id="user-1", principal_type=PrincipalType.USER,

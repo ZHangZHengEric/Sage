@@ -47,9 +47,9 @@ class NativeAgentFlowNode:
             task_content += "\n\nPrior flow results (task data):\n" + json.dumps(
                 context.prior_results, ensure_ascii=False
             )
-        # Flow has its own node checkpoint protocol. Until it supports deferred
-        # node outcomes, keep child inference waits inside this node invocation.
-        with deferred_work_scope(False):
+        # The Flow checkpoints this stable node identity before delegation and
+        # propagates a deferred child's wake time to the root Dispatcher.
+        with deferred_work_scope(True):
             result = await self.child_executor.run_child(
                 self.descriptor,
                 DelegationTask(
@@ -74,6 +74,14 @@ class NativeAgentFlowNode:
             "outcome": result.outcome.value,
             "content": [value.model_dump(mode="json") for value in result.content],
         }
+        if result.outcome == RunState.RUNNING:
+            checkpoint = await self.runtime.session_store.get_latest_checkpoint(
+                result.child_run_id
+            )
+            output["automatic_resume_at"] = (
+                checkpoint.state.get("automatic_resume_at") if checkpoint else None
+            )
+            return FlowNodeResult(outcome=FlowNodeOutcome.DEFERRED, output=output)
         if result.outcome != RunState.COMPLETED:
             return FlowNodeResult(
                 outcome=(

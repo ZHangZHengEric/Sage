@@ -18,7 +18,7 @@ from typing import Literal
 
 from pydantic import Field
 
-from sagents.v2 import AgentPackageOptimizer, IsolatedOptimizationRunner, SAgentBuilder
+from sagents.v2 import AgentPackageOptimizer, IsolatedOptimizationRunner
 from sagents.v2.agent.management import AgentPackageBundle
 from sagents.v2.contracts.common import StrictModel, new_id, utc_now
 from sagents.v2.contracts.principals import ActorRef, PrincipalType, RequestContext
@@ -37,12 +37,10 @@ from sagents.v2.agent.policy.tool_policy import (
     ToolPolicyAction,
 )
 from sagents.v2.tool import SideEffectLevel
-from app.v2.desktop.backend.run_context import SandboxSkillWorkspace
 from sagents.v2.tool.plugins.official import (
     OfficialToolPlugin,
     official_tool_definitions,
 )
-from app.v2.desktop.backend.bindings import DesktopExecutionBindingProvider
 from app.v2.desktop.backend.runtime_config import _TOOL_NAME, _SKILL_NAME
 
 
@@ -179,23 +177,6 @@ class RsiStore:
             raise ValueError("RSI record not found")
         return json.loads(row[0])
 
-
-class _RsiSkillWorkspace:
-    def __init__(self, bindings):
-        self.bindings = bindings
-
-    async def materialize(self, bundle, *, run_id, destination):
-        binding = next(
-            (b for b in self.bindings.bindings if b.sandbox.ref.owner_run_id == run_id),
-            None,
-        )
-        if binding is None:
-            raise ValueError("Missing RSI sandbox binding")
-        if destination == "/workspace" or destination.startswith("/workspace/"):
-            destination = str(binding.workspace_root) + destination[len("/workspace") :]
-        return await SandboxSkillWorkspace(
-            binding.sandbox, self.bindings.issuer
-        ).materialize(bundle, run_id=run_id, destination=destination)
 
 
 class DesktopRsiMixin:
@@ -592,9 +573,6 @@ class DesktopRsiMixin:
                     target.write_bytes(base64.b64decode(content, validate=True))
                 selected = role_provider.get(bundle.manifest.metadata.id, provider)
                 model = await self._model_provider(selected, agent)
-                bindings = DesktopExecutionBindingProvider(
-                    workspace / "work", process_enabled=False
-                )
                 skills = FilesystemSkillProvider((workspace / "skills",))
 
                 def assess(call):
@@ -621,21 +599,45 @@ class DesktopRsiMixin:
                         )
                     return None
 
-                return (
-                    SAgentBuilder()
-                    .with_models(self._model_catalog(agent, selected))
-                    .with_defaults(session_root=workspace / "sessions")
-                    .with_model_provider(model)
-                    .with_execution_binding_provider(bindings)
-                    .with_skill_provider(skills, skills, _RsiSkillWorkspace(bindings))
-                    .with_tool_policy(
-                        DefaultToolPolicy(
-                            operation_assessor=assess,
-                            operation_assessor_id="desktop.rsi.local-workspace/v1",
-                        )
-                    )
-                    .with_owned_resources(bindings)
-                )
+                from sagents.v2 import ApplicationConfiguration
+                from sagents.v2.package.manifest.runtime import CapabilitySelection
+                from sagents.v2.runtime.extensions import CapabilityKey, CapabilityOffer, ExtensionDescriptor, ExtensionRegistration, ExtensionScope
+                registrations = []
+                choices = dict(bundle.manifest.runtime.capabilities)
+                policy = DefaultToolPolicy(operation_assessor=assess,
+                    operation_assessor_id="desktop.rsi.local-workspace/v1")
+                for capability, value, extras in (
+                    ("model.provider", model, ()),
+                    ("execution.model-budget", self.model_budget, ()),
+                    ("skill.catalog", skills, ("skill.source",)),
+                    ("agent.tool-policy", policy, ()),
+                ):
+                    plugin = "com.sage.desktop.rsi." + capability.replace(".", "-")
+                    names = (capability, *extras)
+                    registrations.append(ExtensionRegistration(
+                        descriptor=ExtensionDescriptor(plugin_id=plugin, name=capability, version="2",
+                            provides=tuple(CapabilityOffer(capability=name, api_version="2") for name in names),
+                            supported_scopes=frozenset({ExtensionScope.PROCESS}),
+                            config_schema={"type": "object", "additionalProperties": False}),
+                        factory=lambda context, deps, value=value: value, ownership="borrowed",
+                        start=(lambda instance, context, deps, names=names: {
+                            CapabilityKey(capability=name): instance for name in names
+                        }) if extras else None,
+                    ))
+                    choices[capability] = CapabilitySelection(plugin=plugin)
+                choices["session.store"] = CapabilitySelection(plugin="sage.session.filesystem", config={"root": str(workspace / "sessions")})
+                choices["execution.binding"] = CapabilitySelection(plugin="sage.execution.binding.local-workspace", config={
+                    "workspace": str(workspace / "work"), "policy": {"process": {"enabled": False}},
+                })
+                choices.setdefault("tool.catalog", CapabilitySelection(plugin="sage.tool.official"))
+                # RSI roles have their own structured evaluator. Select tools
+                # directly unless the frozen package explicitly chooses another
+                # policy, so default discovery cannot become another model task.
+                choices.setdefault("tool.selection-policy", CapabilitySelection(plugin="sage.tool-selection.direct"))
+                choices.setdefault("agent.continuation-policy", CapabilitySelection(plugin="sage.agent.continuation.deterministic"))
+                runtime = bundle.manifest.runtime.model_copy(update={"capabilities": choices, "state_root": str(workspace / "sessions")})
+                return ApplicationConfiguration(tuple(registrations), runtime, self._model_catalog(agent, selected))
+
 
             constraints = OptimizationConstraints(
                 editable_files=tuple(

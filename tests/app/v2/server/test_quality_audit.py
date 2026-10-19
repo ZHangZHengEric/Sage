@@ -1,5 +1,4 @@
-from __future__ import annotations
-
+"""Server ownership and frozen inputs through standard registered execution."""
 import asyncio
 import threading
 from types import SimpleNamespace
@@ -7,68 +6,108 @@ from types import SimpleNamespace
 import pytest
 
 from sagents.v2.contracts.commands import RunConfig
-from sagents.v2.contracts.errors import ErrorCategory, RuntimeErrorInfo, SageV2Error
+from sagents.v2.contracts.errors import SageV2Error
 from app.v2.server.identity.users import UserRecord
-from app.v2.server.packages.builder import PackageBuilder
-
 from app.v2.server.catalog.records import require_agent
-from app.v2.server.runtime.models import (
-    HostModelProvider,
-    bind_model_user,
-    create_catalog_provider,
-    reset_model_user,
-)
+from app.v2.server.runtime.models import bind_model_user, reset_model_user, create_catalog_provider
 from app.v2.server.conversations.composition import composition_metadata, load_composition
-from app.v2.server.runtime.driver import CatalogRunDriver
-from app.v2.server.runtime.loop import compose_catalog_loop
+from app.v2.server.runtime.loop import load_catalog_agent
 from tests.app.v2.server.conftest import make_test_service, scripted_hello
-from tests.app.v2.server.fakes import MemoryCatalogStore
 from tests.app.v2.server.test_models import _save_demo_model
 from tests.app.v2.server.test_skill_runtime import _command
 
 
+async def execute(host, command, owner):
+    loaded = await load_catalog_agent(host, command, owner)
+    command = command.model_copy(update={"agent_id": loaded.id, "resolved_spec_hash": loaded.composition_hash})
+    stream = await host.application.entrypoint().run_stream(command, host.contexts.for_user(owner), agent=loaded)
+    events = [event async for event in stream.events]
+    result = await stream.wait()
+    assert result.state.value == "completed", events
+    return result
+
+
 @pytest.mark.asyncio
-async def test_run_owner_overrides_stale_worker_context_and_unknown_run_is_not_guessed():
-    catalog = MemoryCatalogStore()
-
-    async def get_run(run):
-        if run == "run-b":
-            return SimpleNamespace(session_id="session-b")
-        raise SageV2Error(
-            RuntimeErrorInfo(
-                code="session.run_missing",
-                category=ErrorCategory.VALIDATION,
-                message="run missing",
-            )
-        )
-
-    model = HostModelProvider(catalog, session_store=SimpleNamespace(get_run=get_run))
-    model.bind_session_user("session-b", "user-b")
-    token = bind_model_user("user-a")
+async def test_registered_models_follow_authorized_run_not_stale_worker_context(tmp_path, monkeypatch):
+    host = make_test_service(tmp_path, fallback=False)
+    owners = []
+    def provider(record):
+        owners.append(record.model)
+        from tests.app.v2.server.conftest import CompletingJudgeModel
+        return CompletingJudgeModel(scripted_hello())
+    monkeypatch.setattr("app.v2.server.runtime.models._build_catalog_provider", provider)
+    await host.start()
     try:
-        assert await model._user_id("run-b") == "user-b"
-        assert await model._user_id("unknown-run") is None
-        with pytest.raises(SageV2Error, match="configure a model"):
-            async with model._borrow("unknown-run"):
-                pass
+        for owner in ("alice", "bob"):
+            await host.users.save(UserRecord(user_id=owner, username=owner, password_hash="unused"))
+            await host.catalog.upsert_model(owner, {"model": owner, "api_key": "test", "is_default": True})
+        token = bind_model_user("unrelated-worker")
+        try:
+            for owner in ("alice", "bob"):
+                agent = require_agent(await host.catalog.get(owner), (await host.catalog.get(owner)).default_agent_id)
+                command = _command().model_copy(update={"agent_id": agent.id, "idempotency_key": owner,
+                    "config": RunConfig(enabled_skills=(), metadata=composition_metadata(agent=agent, skills=(), mcp_servers=()))})
+                result = await execute(host, command, owner)
+                with pytest.raises(SageV2Error):
+                    await host.application.agent_for_run(result.run_id, host.contexts.for_user("other"))
+        finally:
+            reset_model_user(token)
+        assert set(owners) == {"alice", "bob"}
     finally:
-        reset_model_user(token)
-        await model.close()
+        await host.close()
 
 
 @pytest.mark.asyncio
-async def test_overlapping_session_bindings_are_not_removed_by_first_completion():
-    model = HostModelProvider(MemoryCatalogStore())
-    model.bind_session_user("session", "user")
-    model.bind_session_user("session", "user")
-    with pytest.raises(ValueError, match="another user"):
-        model.bind_session_user("session", "other")
-    model.unbind_session_user("session")
-    assert model._session_users == {"session": "user"}
-    model.unbind_session_user("session")
-    assert not model._session_users
-    assert not model._session_bindings
-    await model.close()
+async def test_loading_standard_revision_does_not_open_inference_client(tmp_path, monkeypatch):
+    host = make_test_service(tmp_path, fallback=False)
+    opened = []
+    monkeypatch.setattr("app.v2.server.runtime.models._build_catalog_provider", lambda record: opened.append(record))
+    await host.start()
+    try:
+        await host.users.save(UserRecord(user_id="user", username="user", password_hash="unused"))
+        await _save_demo_model(host.catalog, "user")
+        agent = (await host.catalog.get("user")).default_agent_id
+        loaded = await load_catalog_agent(host, _command().model_copy(update={"agent_id": agent}), "user")
+        assert loaded.composition_hash
+        assert opened == []
+    finally:
+        await host.close()
+    assert opened == []
+
+
+@pytest.mark.asyncio
+async def test_registered_run_uses_original_agent_and_skill_version(tmp_path, monkeypatch):
+    host = make_test_service(tmp_path)
+    await host.start()
+    observed = []
+    from app.v2.server.runtime import sdk_plugins
+    original = sdk_plugins.run_inputs
+    async def capture(*args):
+        values = await original(*args)
+        observed.append(values[2])
+        return values
+    monkeypatch.setattr(sdk_plugins, "run_inputs", capture)
+    try:
+        await host.users.save(UserRecord(user_id="user", username="user", password_hash="unused"))
+        catalog = await host.catalog.get("user")
+        admitted = require_agent(catalog, catalog.default_agent_id).with_configuration(instructions="Admitted instructions")
+        first = await host.skill_catalog.publish_markdown(name="demo",
+            content="---\nname: demo\ndescription: First\n---\n\n# First\n", user_id="user", role="user")
+        await host.skill_catalog.bind_agent_skills(owner_user_id="user", agent_id=admitted.id, names=["demo"])
+        records = tuple(await host.skill_catalog.bound_skills(owner_user_id="user", agent_id=admitted.id))
+        command = _command().model_copy(update={"agent_id": admitted.id, "config": RunConfig(
+            enabled_skills=("demo",), metadata=composition_metadata(agent=admitted, skills=records, mcp_servers=()))})
+        await host.skill_catalog.update_content(first.skill_id,
+            "---\nname: demo\ndescription: Second\n---\n\n# Second\n", user_id="user", role="user")
+        await host.skill_catalog.bind_agent_skills(owner_user_id="user", agent_id=admitted.id, names=[])
+        catalog.agents[0] = catalog.agents[0].with_configuration(instructions="Edited afterwards")
+        await host.catalog_store.save("user", catalog)
+        await execute(host, command, "user")
+        assert observed
+        assert all(value.agent.instructions == "Admitted instructions" for value in observed)
+        assert all(value.skills[0].version_id == first.version_id for value in observed)
+    finally:
+        await host.close()
 
 
 @pytest.mark.asyncio
@@ -110,215 +149,6 @@ async def test_cancelled_sdk_construction_closes_result_and_stays_off_event_loop
     assert closed == [True]
 
 
-@pytest.mark.asyncio
-@pytest.mark.parametrize("fail_materialization", [False, True])
-async def test_package_composition_never_opens_an_inference_client(
-    tmp_path, monkeypatch, fail_materialization
-):
-    service = make_test_service(tmp_path)
-    await service.start()
-    await service.users.save(UserRecord(user_id="user", username="user", password_hash="unused"))
-    agent_id = (await service.catalog.get("user")).default_agent_id
-    await _save_demo_model(service.catalog, "user")
-    provider = scripted_hello()
-    closed = []
-
-    async def close():
-        closed.append(True)
-
-    monkeypatch.setattr(provider, "close", close, raising=False)
-    monkeypatch.setattr(
-        "app.v2.server.runtime.models._build_catalog_provider", lambda record: provider
-    )
-    if fail_materialization:
-
-        async def fail(*args, **kwargs):
-            raise ValueError("materialization failed")
-
-        monkeypatch.setattr(PackageBuilder, "build", fail)
-    try:
-        if fail_materialization:
-            with pytest.raises(ValueError, match="materialization failed"):
-                await compose_catalog_loop(service, _command().model_copy(update={"agent_id": agent_id}), user_id="user")
-        else:
-            _, ports = await compose_catalog_loop(service, _command().model_copy(update={"agent_id": agent_id}), user_id="user")
-            driver = CatalogRunDriver(service, "run")
-            driver._resources = ports
-            await driver._close_resources()
-            await driver._close_resources()
-        assert closed == []
-        assert (await service.execution.model_pool.pool.snapshot())["active_leases"] == 0
-    finally:
-        await service.close()
-    # Building a Package no longer opens an inference client.
-    assert closed == []
-
-
-@pytest.mark.asyncio
-async def test_cleanup_failure_does_not_skip_other_run_resources():
-    closed = []
-
-    class Resource:
-        def __init__(self, index):
-            self.index = index
-
-        async def close(self):
-            closed.append(self.index)
-            if self.index == 2:
-                raise ValueError("close failed")
-
-    driver = CatalogRunDriver(None, "run")
-    from sagents.v2.composition.resources import RunResources
-    driver._resources = RunResources()
-    for i in range(3):
-        driver._resources.own(Resource(i))
-    with pytest.raises(ValueError, match="close failed"):
-        await driver._close_resources()
-    assert closed == [2, 1, 0]
-    with pytest.raises(ValueError, match="close failed"):
-        await driver._close_resources()
-    assert closed == [2, 1, 0, 2]
-
-
-@pytest.mark.asyncio
-async def test_catalog_loop_uses_materialized_skill_plugin_and_derived_activations(
-    tmp_path, monkeypatch
-):
-    service = make_test_service(tmp_path)
-    await service.start()
-    await service.users.save(UserRecord(user_id="user", username="user", password_hash="unused"))
-    agent_id = (await service.catalog.get("user")).default_agent_id
-    await service.skill_catalog.publish_markdown(
-        name="demo",
-        content="---\nname: demo\ndescription: Demo skill\n---\n\n# Demo\n",
-        user_id="user",
-        role="user",
-    )
-    await service.skill_catalog.bind_agent_skills(
-        owner_user_id="user", agent_id=agent_id, names=["demo"]
-    )
-    captured = {}
-    original = PackageBuilder.with_skill_provider
-
-    def capture(self, catalog, source, workspace):
-        captured["catalog"] = catalog
-        return original(self, catalog, source, workspace)
-
-    monkeypatch.setattr(PackageBuilder, "with_skill_provider", capture)
-
-    try:
-        _, ports = await compose_catalog_loop(service, _command().model_copy(update={"agent_id": agent_id}), user_id="user")
-        app = ports.services[0]
-        assert app.service("skill.loading").plugin_id == "sage.skill.loading.lazy"
-        assert (await captured["catalog"].get_skill("demo", run_id="run")).name == "demo"
-        driver = CatalogRunDriver(service, "run")
-        driver._resources = ports
-        await driver._close_resources()
-    finally:
-        await service.close()
-
-
-@pytest.mark.asyncio
-async def test_catalog_loop_uses_the_skill_versions_accepted_with_the_run(
-    tmp_path, monkeypatch
-):
-    service = make_test_service(tmp_path)
-    await service.start()
-    await service.users.save(UserRecord(user_id="user", username="user", password_hash="unused"))
-    agent_id = (await service.catalog.get("user")).default_agent_id
-    first = await service.skill_catalog.publish_markdown(
-        name="demo",
-        content="---\nname: demo\ndescription: First\n---\n\n# First\n",
-        user_id="user",
-        role="user",
-    )
-    await service.skill_catalog.bind_agent_skills(
-        owner_user_id="user", agent_id=agent_id, names=["demo"]
-    )
-    accepted = tuple(
-        await service.skill_catalog.bound_skills(owner_user_id="user", agent_id=agent_id)
-    )
-    command = _command().model_copy(
-        update={
-            "agent_id": agent_id,
-            "config": RunConfig(
-                enabled_skills=("demo",),
-                metadata=composition_metadata(
-                    agent=require_agent(await service.catalog.store.get("user"), agent_id),
-                    skills=accepted,
-                    mcp_servers=(),
-                ),
-            )
-        }
-    )
-    second = await service.skill_catalog.update_content(
-        first.skill_id,
-        "---\nname: demo\ndescription: Second\n---\n\n# Second\n",
-        user_id="user",
-        role="user",
-    )
-    await service.skill_catalog.bind_agent_skills(
-        owner_user_id="user", agent_id=agent_id, names=[]
-    )
-    captured = {}
-    original = PackageBuilder.with_skill_provider
-
-    def capture(self, catalog, source, workspace):
-        captured["catalog"] = catalog
-        return original(self, catalog, source, workspace)
-
-    monkeypatch.setattr(PackageBuilder, "with_skill_provider", capture)
-    try:
-        _, ports = await compose_catalog_loop(service, command, user_id="user")
-        descriptor = await captured["catalog"].get_skill("demo", run_id="run")
-        assert descriptor.version == first.version_id
-        assert descriptor.version != second.version_id
-        driver = CatalogRunDriver(service, "run")
-        driver._resources = ports
-        await driver._close_resources()
-    finally:
-        await service.close()
-
-
-@pytest.mark.asyncio
-async def test_catalog_loop_uses_the_agent_config_accepted_with_the_run(
-    tmp_path, monkeypatch
-):
-    service = make_test_service(tmp_path)
-    await service.start()
-    await service.users.save(UserRecord(user_id="user", username="user", password_hash="unused"))
-    agent_id = (await service.catalog.get("user")).default_agent_id
-    catalog = await service.catalog.store.get("user")
-    admitted = require_agent(catalog, agent_id).with_configuration(instructions="Admitted instructions")
-    command = _command().model_copy(
-        update={
-            "agent_id": agent_id,
-            "config": RunConfig(
-                enabled_skills=(),
-                metadata=composition_metadata(
-                    agent=admitted, skills=(), mcp_servers=()
-                ),
-            )
-        }
-    )
-    catalog.agents[0] = catalog.agents[0].with_configuration(instructions="Edited after the Run was admitted")
-    await service.catalog.store.save("user", catalog)
-    captured = {}
-    original = PackageBuilder._build_package
-
-    async def capture(self, manifest, **kwargs):
-        captured["instructions"] = manifest.agents[agent_id].instructions
-        return await original(self, manifest, **kwargs)
-
-    monkeypatch.setattr(PackageBuilder, "_build_package", capture)
-    try:
-        _, ports = await compose_catalog_loop(service, command, user_id="user")
-        assert captured["instructions"] == "Admitted instructions"
-        driver = CatalogRunDriver(service, "run")
-        driver._resources = ports
-        await driver._close_resources()
-    finally:
-        await service.close()
 
 
 def test_run_composition_rejects_a_user_skill_owned_by_another_tenant():

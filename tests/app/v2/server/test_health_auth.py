@@ -61,7 +61,7 @@ async def test_host_and_managed_agents_share_run_limits(tmp_path: Path):
         management = service.agent_management
         assert isinstance(management.store, DatabasePackageStore)
         scheduler = service.application.service("execution.scheduler")
-        assert management.model_budget is service.execution.model_budget
+        assert management.queries.model_budget is service.application.service("execution.model-budget") is service.execution.model_budget
         assert scheduler in service.package_queries.run_quota.members
         assert service.package_queries.capacity_snapshot(management.capacity())[
             "runs"

@@ -6,8 +6,6 @@ agent 自身无法选择或降低沙箱类型。
 
 from __future__ import annotations
 
-import hashlib
-import json
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -16,8 +14,7 @@ from sagents.v2.agent.policy import DefaultToolPolicy
 from sagents.v2.model import ModelProvider
 from sagents.v2.package.manifest.root import SageManifest
 from sagents.v2.runtime.execution import (
-    ExecutionBindingRequest,
-    RunExecutionBinding,
+    LocalExecutionPolicy, LocalWorkspaceExecutionBindingProvider,
 )
 from sagents.v2.runtime.execution.sandbox import (
     FileOperation,
@@ -25,11 +22,8 @@ from sagents.v2.runtime.execution.sandbox import (
     NetworkMode,
     NetworkPolicy,
     ProcessPolicy,
-    ResolvedSandboxSpec,
     ResourceLimits,
-    SandboxGrantIssuer,
 )
-from sagents.v2.runtime.execution.sandbox import LocalWorkspaceSandboxProvider
 from sagents.v2.runtime.execution.sandbox.read_only_shell import (
     READ_ONLY_SHELL_EXECUTABLES,
 )
@@ -81,33 +75,14 @@ class WorkspaceSandboxSettings:
     max_total_bytes: int | None = None
 
 
-class LocalWorkspaceBindingProvider:
-    """``ExecutionBindingProvider`` 实现：每个 Run 一个绑定到宿主目录的本地沙箱。
+class LocalWorkspaceBindingProvider(LocalWorkspaceExecutionBindingProvider):
+    """Translate CLI policy data into the standard SDK local binding."""
 
-    workspace 以宿主真实路径暴露给模型（对齐 Codex 的 in-process 体验），
-    allowed_roots 同样限定为该路径。
-    """
-
-    def __init__(
-        self,
-        workspace: str | Path,
-        *,
-        settings: WorkspaceSandboxSettings | None = None,
-        issuer: SandboxGrantIssuer | None = None,
-        sandbox_provider: LocalWorkspaceSandboxProvider | None = None,
-    ) -> None:
-        self.workspace = Path(workspace).expanduser().resolve(strict=True)
-        if not self.workspace.is_dir():
-            raise ValueError(f"workspace must be a directory: {self.workspace}")
-        self.workspace_root = self.workspace.as_posix()
+    def __init__(self, workspace, *, settings=None, issuer=None, sandbox_provider=None):
+        workspace = Path(workspace).expanduser().resolve(strict=True)
+        if not workspace.is_dir():
+            raise ValueError(f"workspace must be a directory: {workspace}")
         self.settings = settings or WorkspaceSandboxSettings()
-        self.issuer = issuer or SandboxGrantIssuer()
-        self.sandbox_provider = sandbox_provider or LocalWorkspaceSandboxProvider(
-            self.issuer.verification_key
-        )
-        self.bindings: list[RunExecutionBinding] = []
-
-    def sandbox_spec(self) -> ResolvedSandboxSpec:
         settings = self.settings
         filesystem = FileSystemPolicy(
             allowed_operations=(
@@ -115,7 +90,6 @@ class LocalWorkspaceBindingProvider:
                 if settings.read_only
                 else frozenset(FileOperation)
             ),
-            allowed_roots=(self.workspace_root,),
             protected_paths=settings.protected_paths,
             max_file_bytes=settings.max_file_bytes,
             max_total_bytes=(
@@ -167,53 +141,9 @@ class LocalWorkspaceBindingProvider:
         )
 
         validate_shell_network(network)
-        policy_source = json.dumps(
-            {
-                "filesystem": filesystem.model_dump(mode="json"),
-                "process": process.model_dump(mode="json"),
-                "network": network.model_dump(mode="json"),
-                "resources": settings.resources.model_dump(mode="json"),
-            },
-            sort_keys=True,
-        )
-        policy_hash = f"sha256:{hashlib.sha256(policy_source.encode()).hexdigest()}"
-        spec_source = json.dumps(
-            {"policy_hash": policy_hash, "workspace_root": self.workspace_root},
-            sort_keys=True,
-        )
-        spec_hash = f"sha256:{hashlib.sha256(spec_source.encode()).hexdigest()}"
-        return ResolvedSandboxSpec(
-            resources=settings.resources,
-            spec_hash=spec_hash,
-            workspace_root=self.workspace_root,
-            architecture="native",
-            filesystem=filesystem,
-            process=process,
-            network=network,
-            policy_hash=policy_hash,
-            metadata={"host_workspace": str(self.workspace)},
-        )
-
-    async def acquire(self, request: ExecutionBindingRequest) -> RunExecutionBinding:
-        handle = await self.sandbox_provider.provision(
-            self.sandbox_spec(), request.context, run_id=request.run_id
-        )
-        binding = RunExecutionBinding(
-            run_id=request.run_id,
-            parent_run_id=request.parent_run_id,
-            agent_id=request.agent_id,
-            workspace_root=self.workspace_root,
-            workspace_policy=request.workspace_policy,
-            sandbox=handle,
-            grant_issuer=self.issuer,
-            lifecycle=request.lifecycle,
-        )
-        self.bindings.append(binding)
-        return binding
-
-    async def close(self) -> None:
-        # 沙箱句柄由各 Run 的 binding 自己关闭；provider 本身无进程级资源。
-        return None
+        super().__init__(workspace, issuer=issuer, sandbox_provider=sandbox_provider,
+            policy=LocalExecutionPolicy(filesystem=filesystem, process=process,
+                                        network=network, resources=settings.resources))
 
 
 async def build_cli_application(
@@ -237,27 +167,60 @@ async def build_cli_application(
     用 ``application.close()`` 释放全部资源。
     """
 
-    builder = (
-        SAgentBuilder()
-        .with_defaults(session_root=Path(session_root).expanduser())
-        .with_execution_binding_provider(bindings)
+    from sagents.v2.agent.policy import SessionApprovalMemory
+    from sagents.v2.composition.defaults import default_runtime
+    from sagents.v2.package.manifest.runtime import CapabilitySelection, merge_capability_selections
+    from sagents.v2.runtime.extensions import (
+        CapabilityOffer, ExtensionDependency, ExtensionDescriptor, ExtensionRegistration, ExtensionScope,
     )
-    if model_provider is not None:
-        builder = builder.with_model_provider(model_provider)
-    if tool_policy is not None:
-        builder = builder.with_tool_policy(tool_policy)
+    builder = SAgentBuilder()
+    choices = {}
+    for capability, value in (
+        ("execution.binding", bindings), ("model.provider", model_provider),
+        ("agent.tool-policy", tool_policy),
+    ):
+        if value is None:
+            continue
+        plugin_id = "com.sage.cli." + capability.replace(".", "-")
+        builder.register(ExtensionRegistration(
+            descriptor=ExtensionDescriptor(
+                plugin_id=plugin_id, name=capability, version="2.0.0",
+                provides=(CapabilityOffer(capability=capability, api_version="2"),),
+                supported_scopes=frozenset({ExtensionScope.PROCESS}),
+                config_schema={"type": "object", "additionalProperties": False},
+            ), factory=lambda context, deps, value=value: value, ownership="borrowed",
+        ))
+        choices[capability] = CapabilitySelection(plugin=plugin_id, scope=ExtensionScope.PROCESS)
     store_root = (
         Path(approval_store).expanduser()
         if approval_store is not None
         else Path(session_root).expanduser() / "approvals"
     )
-    workspace = bindings.workspace
-    builder = builder.with_approval_memory_layer(
-        lambda session_memory: WorkspaceApprovalMemory(
-            session_memory, store_root=store_root, workspace=workspace
-        )
+    builder.register(ExtensionRegistration(
+        descriptor=ExtensionDescriptor(
+            plugin_id="com.sage.cli.approval-memory.workspace", name="Workspace approvals", version="2.0.0",
+            provides=(CapabilityOffer(capability="agent.approval-memory", api_version="2"),),
+            dependencies=(ExtensionDependency(capability="derived-state.store"),),
+            supported_scopes=frozenset({ExtensionScope.PROCESS}),
+            config_schema={"type": "object", "properties": {
+                "store_root": {"type": "string"}, "workspace": {"type": "string"},
+            }, "required": ["store_root", "workspace"], "additionalProperties": False},
+        ), factory=lambda context, deps: WorkspaceApprovalMemory(
+            SessionApprovalMemory(deps.require("derived-state.store")),
+            store_root=Path(context.config["store_root"]), workspace=Path(context.config["workspace"]),
+        ),
+    ))
+    choices["derived-state.store"] = CapabilitySelection(plugin="sage.derived-state.session")
+    choices["agent.approval-memory"] = CapabilitySelection(
+        plugin="com.sage.cli.approval-memory.workspace",
+        config={"store_root": str(store_root.resolve()), "workspace": str(bindings.workspace)},
     )
-    application = await builder.build(runtime=package.runtime, models=models)
+    defaults = default_runtime(session_root)
+    effective = package.runtime.model_copy(update={"state_root": str(Path(session_root).expanduser().resolve()), "capabilities": {
+        **merge_capability_selections({"session.store": defaults.capabilities["session.store"]},
+                                      package.runtime.capabilities), **choices,
+    }})
+    application = await builder.build(runtime=effective, models=models)
     try:
         from app.v2.cli.package import builtin_dependencies
         loaded = {}

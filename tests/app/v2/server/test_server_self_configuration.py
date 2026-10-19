@@ -51,7 +51,7 @@ def test_catalog_agent_registers_then_uses_local_skill_in_same_agui_run(
                     tool_call_id="configure",
                     name="agent_self_configure",
                     arguments={
-                        "add_skill_paths": ["/workspace/downloads/review"],
+                        "add_skill_paths": ["downloads/review"],
                         "system_prompt": "Use concise Chinese.",
                     },
                 )

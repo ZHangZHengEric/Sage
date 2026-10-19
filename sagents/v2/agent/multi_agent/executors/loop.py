@@ -148,6 +148,12 @@ class LoopChildRunExecutor:
             model_bindings=deepcopy(parent_command.config.model_bindings),
             enabled_tools=descriptor.tools,
             enabled_skills=descriptor.skills,
+            max_total_tokens=parent_command.config.max_total_tokens,
+            deadline_seconds=parent_command.config.deadline_seconds,
+            max_stages=parent_command.config.max_stages,
+            automatic_stage_continuation=parent_command.config.automatic_stage_continuation,
+            transient_retry_limit=parent_command.config.transient_retry_limit,
+            priority=parent_command.config.priority,
         )
         if self.run_config_resolver is not None:
             config = self.run_config_resolver(descriptor, parent_command)

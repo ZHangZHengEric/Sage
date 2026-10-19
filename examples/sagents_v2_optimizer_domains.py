@@ -7,6 +7,8 @@ No production agent is registered or activated. Credentials stay in memory.
 """
 
 from __future__ import annotations
+from sagents.v2 import ApplicationConfiguration
+from examples.sagents_v2_host.registrations import provided, runtime_for
 
 import argparse
 import asyncio
@@ -27,7 +29,6 @@ from sagents.v2 import (
     OptimizationConstraints,
     OptimizationFinalSuite,
     OptimizationSuite,
-    SAgentBuilder,
     OptimizationSuiteReviewRejected,
 )
 from sagents.v2.contracts.principals import ActorRef, PrincipalType, RequestContext
@@ -39,7 +40,6 @@ from sagents.v2.model.plugins.openai_responses import (
 from sagents.v2.package.presets import BuiltinPackageFactory
 from sagents.v2.runtime.credentials.contracts import CredentialMaterial
 from sagents.v2.skill import FilesystemSkillProvider
-from sagents.v2.skill.plugins.ephemeral import InMemorySkillWorkspace
 from sagents.v2.tool.decorators import tool
 from sagents.v2.tool.decorated import DecoratedToolProvider
 from sagents.v2.agent.policy import DefaultToolPolicy, ApprovalStrategy
@@ -501,31 +501,28 @@ async def run(args):
                 credential_id="benchmark", secret=selected["apiKey"], source="host"
             ),
         )
-        builder = (
-            SAgentBuilder().with_models({"models": {"primary": {
+        registrations = [provided("example.model", lambda context, deps: provider, "model.provider", ownership="owned")]
+        choices = {"model.provider": {"plugin": "example.model"}}
+        choices["execution.binding"] = {"plugin": "sage.execution.binding.local-workspace", "config": {
+            "workspace": str(root / "work"), "policy": {"process": {"enabled": False}},
+        }}
+        if args.mode in ("skills", "joint") and bundle.manifest.metadata.id == target.manifest.metadata.id:
+            skills = FilesystemSkillProvider((root / "skills",))
+            registrations.append(provided("example.skills", lambda context, deps: skills, "skill.catalog", "skill.source"))
+            choices["skill.catalog"] = {"plugin": "example.skills"}
+        if args.mode == "tools":
+            tools = DecoratedToolProvider(OrderTools())
+            registrations.append(provided("example.tools", lambda context, deps: tools, "tool.catalog", "tool.executor"))
+            choices["tool.catalog"] = {"plugin": "example.tools"}
+        policy = DefaultToolPolicy(approval_strategy=ApprovalStrategy.AUTO_APPROVE)
+        registrations.append(provided("example.policy", lambda context, deps: policy, "agent.tool-policy"))
+        choices["agent.tool-policy"] = {"plugin": "example.policy"}
+        return ApplicationConfiguration(tuple(registrations), runtime_for(root / "sessions", bundle.manifest.runtime, capabilities=choices), {"models": {"primary": {
                 "provider": "openai-responses", "model": model,
                 "base_url": selected["endpoint"],
                 "request": {"max_output_tokens": 4096},
                 "limits": {"context_window": int(selected.get("maxInputLength") or 64000)},
             }}})
-            .with_defaults(session_root=root / "sessions")
-            .with_model_provider(provider)
-            .with_owned_resources(provider)
-        )
-
-        if (
-            args.mode in ("skills", "joint")
-            and bundle.manifest.metadata.id == target.manifest.metadata.id
-        ):
-            skills = FilesystemSkillProvider((root / "skills",))
-            builder.with_skill_provider(skills, skills, InMemorySkillWorkspace())
-        if args.mode == "tools":
-            tools = DecoratedToolProvider(OrderTools())
-            builder.with_tool_provider(tools.catalog, tools.executor)
-        builder.with_tool_policy(
-            DefaultToolPolicy(approval_strategy=ApprovalStrategy.AUTO_APPROVE)
-        )
-        return builder
 
     native = IsolatedOptimizationRunner(builder_factory=factory, authorize=authorize)
     calls = []

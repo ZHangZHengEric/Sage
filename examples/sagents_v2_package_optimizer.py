@@ -6,6 +6,8 @@ host, configure evaluator/tuner ModelRoutes and supply sandboxed tool/Skill port
 """
 
 from __future__ import annotations
+from sagents.v2 import ApplicationConfiguration
+from examples.sagents_v2_host.registrations import provided, runtime_for
 
 import asyncio
 import json
@@ -20,7 +22,6 @@ from sagents.v2 import (
     OptimizationCase,
     OptimizationSuite,
     OptimizationFinalSuite,
-    SAgentBuilder,
 )
 from sagents.v2.contracts.principals import ActorRef, PrincipalType, RequestContext
 from sagents.v2.model.contracts import ModelEventKind, ModelResponse, ModelStreamEvent
@@ -109,9 +110,7 @@ async def demo(root: Path):
             )
         )
         return (
-            SAgentBuilder().with_models({"models": {"primary": {"provider": "openai-responses", "model": "scripted"}}})
-            .with_defaults(session_root=workspace / "sessions")
-            .with_model_provider(provider)
+            ApplicationConfiguration((provided('example.model-provider', lambda context, deps, value=provider: value, 'model.provider'),), runtime_for(workspace / 'sessions', bundle.manifest.runtime, capabilities={'model.provider': {'plugin': 'example.model-provider'}}), {'models': {'primary': {'provider': 'openai-responses', 'model': 'scripted'}}})
         )
 
     native = IsolatedOptimizationRunner(
@@ -169,9 +168,7 @@ async def demo(root: Path):
                         )
                     )
                     return (
-                        SAgentBuilder().with_models({"models": {"primary": {"provider": "openai-responses", "model": "scripted"}}})
-                        .with_defaults(session_root=workspace / "sessions")
-                        .with_model_provider(provider)
+                        ApplicationConfiguration((provided('example.model-provider', lambda context, deps, value=provider: value, 'model.provider'),), runtime_for(workspace / 'sessions', package.manifest.runtime, capabilities={'model.provider': {'plugin': 'example.model-provider'}}), {'models': {'primary': {'provider': 'openai-responses', 'model': 'scripted'}}})
                     )
 
                 grader = IsolatedOptimizationRunner(

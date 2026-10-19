@@ -26,7 +26,6 @@ service = AgentManagementService(
     root,
     builder_factory=build_package,
     authorize=authorize_package,
-    model_budget=budget,
     require_readiness=True,
     auto_release_idle_seconds=300,
 )
@@ -35,7 +34,7 @@ reclaimed = await service.release_idle(min_idle_seconds=300, limit=4)
 metrics = service.capacity()
 ```
 
-The host supplies root, bundle, context, and callbacks. All relevant services and Builders must share the same budget object; ordinary Builders use `with_model_budget(budget)`. Without a shared injection there is no cross-Application total limit.
+The `build_package` factory returns `ApplicationConfiguration`. Include an `execution.model-budget` registration returning the same borrowed `budget` object in every participating App configuration; runtime selects that registration. Merely declaring a numeric limit in separate Apps does not share capacity.
 
 ## Resource readiness
 
@@ -81,7 +80,7 @@ SessionStore remains authoritative. A crash may precede archival. Built-in file 
 
 Flow reachability includes conditional edges, parallel branches, subflows, and member subagents, using a visited set to terminate cycles. Only the entrypoint and reachable members initialize models; explicit package validation still checks every Agent.
 
-`InMemoryJobRuntime` defaults to 32 concurrent jobs and 1024 admitted jobs, with per-job byte/chunk and aggregate retained-output limits. Share it with `AgentManagementService(..., job_runtime=jobs)` or `SAgentBuilder().with_job_runtime(jobs)`.
+`InMemoryJobRuntime` defaults to 32 concurrent jobs and 1024 admitted jobs, with per-job byte/chunk and aggregate retained-output limits. Share it through an `execution.job-runtime` registration whose factory returns the borrowed object, and select it in runtime. Management factories return `ApplicationConfiguration`; they do not receive a separate runtime injection.
 
 The host owns injected JobRuntime objects. Close users first, then `await jobs.close()`. Without injection, each Application owns its instance and there is no cross-Application total limit. Scheduler queues remain isolated so dispatchers cannot claim another application's work.
 

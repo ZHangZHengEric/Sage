@@ -6,7 +6,7 @@ from importlib import metadata
 
 from sagents.v2.contracts.errors import ErrorCategory, RuntimeErrorInfo, SageV2Error
 from sagents.v2.runtime.extensions.contracts import ExtensionRegistration
-from sagents.v2.runtime.extensions.resolver import version_satisfies
+from sagents.v2.runtime.extensions.versions import version_satisfies
 
 
 ENTRY_POINT_GROUP = "sage.extensions"

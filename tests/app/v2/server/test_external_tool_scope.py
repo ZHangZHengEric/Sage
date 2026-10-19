@@ -2,6 +2,8 @@
 
 from types import SimpleNamespace
 
+from app.v2.server.runtime.integrations.external_tools import ScopedExternalTools
+
 import pytest
 
 from sagents.v2.contracts.errors import SageV2Error
@@ -11,7 +13,6 @@ from sagents.v2.contracts.principals import ActorRef, PrincipalType, RequestCont
 
 CONTEXT = RequestContext(actor=ActorRef(principal_id="agent", principal_type=PrincipalType.AGENT))
 
-from app.v2.server.runtime.integrations.external_tools import ScopedExternalTools
 
 
 class Provider(InMemoryToolCatalog):
@@ -45,8 +46,7 @@ def scoped():
     async def command_reader(run_id):
         return SimpleNamespace(agent_id=run_id, config=SimpleNamespace(enabled_tools=grants[run_id]))
     agents = {name: SimpleNamespace(tools=names) for name, names in {'root': ('mcp_read',), 'child': ('mcp_write',), 'narrowed': ('mcp_read',), 'default': ('mcp_read',), 'wide': ('mcp_read',)}.items()}
-    tools = ScopedExternalTools(provider, agents)
-    tools.bind(command_reader)
+    tools = ScopedExternalTools(provider, agents, command_reader=command_reader)
     return tools, provider
 
 
@@ -81,6 +81,79 @@ async def test_recovered_calls_are_authorized_before_reconciliation():
     assert provider.reconciled == []
     assert (await tools.reconcile_call(call('mcp_read'), CONTEXT)).state == ReconcileState.SUCCEEDED
     assert provider.reconciled == ['op']
+
+
+async def test_external_provider_does_not_intercept_runtime_skill_loading():
+    from sagents.v2.skill import (
+        InMemorySkillActivationRepository, InMemorySkillProvider,
+        InMemorySkillWorkspace, SkillBundle, SkillDescriptor, SkillLoader,
+    )
+    from sagents.v2.tool import CompositeToolExecutor
+    from sagents.v2.tool.plugins.skill import SkillToolPlugin
+
+    skills = InMemorySkillProvider((SkillBundle(
+        descriptor=SkillDescriptor(name="project", description="Project", source_id="test"),
+        files={"SKILL.md": b"Project instructions"}, content_hash="sha256:test",
+    ),))
+    loader = SkillLoader(
+        catalog=skills, source=skills, workspace=InMemorySkillWorkspace(),
+        activations=InMemorySkillActivationRepository(),
+    )
+    external, provider = scoped()
+    executor = CompositeToolExecutor((external, SkillToolPlugin(loader).executor))
+    invocation = call("load_skill").model_copy(update={
+        "arguments": {"skill_name": "project", "session_id": None},
+    })
+    result = await executor.execute(invocation, CONTEXT)
+    assert result.error is None
+    assert result.metadata["active_skills"] == ["project"]
+    assert [value.descriptor.name for value in await loader.loaded(run_id="root")] == ["project"]
+    assert provider.executed == []
+
+
+async def test_external_grant_denial_does_not_fall_through_to_another_executor():
+    from sagents.v2.tool import CompositeToolExecutor
+
+    external, provider = scoped()
+    fallback = Provider()
+    executor = CompositeToolExecutor((external, fallback))
+    with pytest.raises(SageV2Error) as caught:
+        await executor.execute(call("mcp_write"), CONTEXT)
+    assert caught.value.info.code == "tool.not_enabled"
+    assert caught.value.info.metadata["side_effect_state"] == "not_applied"
+    assert provider.executed == fallback.executed == []
+
+
+async def test_external_write_denied_before_execution_does_not_request_reconciliation():
+    from sagents.v2.agent.policy.tool_policy import ApprovalStrategy, DefaultToolPolicy
+    from sagents.v2.contracts.run_state import RunState
+    from sagents.v2.testing.plugins.scripted_model import ScriptedModelProvider, ScriptedModelStep
+    from tests.sagents.v2.test_agent_loop_matrix import (
+        CONTEXT as LOOP_CONTEXT, WRITE_TOOL, completed, setup_loop, tool_call,
+    )
+
+    model = ScriptedModelProvider((
+        ScriptedModelStep(events=(completed("", calls=(tool_call("write_value"),)),)),
+        ScriptedModelStep(events=(completed("handled"),)),
+    ))
+    runtime, handle, loop, _ = await setup_loop(model)
+    provider = Provider()
+    provider._tools["write_value"] = WRITE_TOOL
+
+    async def command_reader(run_id):
+        return SimpleNamespace(agent_id="denied", config=SimpleNamespace(enabled_tools=None))
+
+    loop.tool_executor = ScopedExternalTools(
+        provider, {"denied": SimpleNamespace(tools=())}, command_reader=command_reader,
+    )
+    loop.tool_policy = DefaultToolPolicy(approval_strategy=ApprovalStrategy.AUTO_APPROVE)
+    result = await loop.execute(handle.run_id, LOOP_CONTEXT)
+    events = await runtime.session_store.read_events(handle.run_id)
+    assert result.state == RunState.COMPLETED
+    assert not {"tool.call.unknown", "interaction.requested"}.intersection(event.type for event in events)
+    failure = next(event for event in events if event.type == "tool.call.failed")
+    assert failure.data.error.code == "tool.not_enabled"
+    assert provider.executed == []
 
 
 def test_dependency_receives_its_own_external_tools(tmp_path, monkeypatch):

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from app.v2.desktop.backend.run_environment import catalog_agent_id
+
 import asyncio
 import hashlib
 import json
@@ -648,6 +650,7 @@ class StudioTools:
             denied("Run has no Studio tool grant")
         if invocation.call.owner_agent_id not in (
             None,
+            catalog_agent_id(command),
             command.agent_id,
         ) or invocation.call.owner_session_id not in (None, command.session_id):
             denied("Tool call does not match its Studio member execution")
@@ -656,7 +659,7 @@ class StudioTools:
             self.binding["studio_id"],
             self.binding["member_id"],
             self.owner,
-            command.agent_id,
+            catalog_agent_id(command),
             command.session_id,
         )
 
@@ -896,7 +899,7 @@ class DesktopStudioMixin(StudioDeliveryMixin):
                     )
                     for run in runs
                 ]
-                if any(command.agent_id != member.agent_id for command in commands):
+                if any(catalog_agent_id(command) != member.agent_id for command in commands):
                     denied("Session Agent does not match Studio member")
         return await asyncio.to_thread(
             self.studio_store.sync, studio_id, user_id, request
@@ -955,7 +958,7 @@ class DesktopStudioMixin(StudioDeliveryMixin):
             binding["studio_id"],
             binding["member_id"],
             owner,
-            command.agent_id,
+            catalog_agent_id(command),
             run.session_id,
         )
         final_item, text = None, ""

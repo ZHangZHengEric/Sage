@@ -1,6 +1,8 @@
 from __future__ import annotations
+from tests.sagents.v2.sdk_fixture import build_registered_app
 
 import asyncio
+import sys
 
 import pytest
 
@@ -22,7 +24,7 @@ from tests.sagents.v2.test_local_workspace_sandbox_matrix import CONTEXT
 
 async def provision(root, *, max_processes=4):
     issuer = SandboxGrantIssuer()
-    provider = LocalWorkspaceSandboxProvider(issuer.verification_key)
+    provider = LocalWorkspaceSandboxProvider(issuer.verification_key, read_paths=(sys.prefix,))
     handle = await provider.provision(
         ResolvedSandboxSpec(
             spec_hash="sha256:shared",
@@ -182,7 +184,6 @@ async def test_child_cleanup_cancels_only_its_processes(tmp_path):
 async def test_standard_builder_team_uses_one_sandbox_and_parent_survives_child(
     tmp_path,
 ):
-    from sagents.v2 import SAgentBuilder
     from sagents.v2.agent.policy import ApprovalStrategy, DefaultToolPolicy
     from sagents.v2.contracts.commands import InputItem, StartRun
     from sagents.v2.contracts.items import TextBlock
@@ -265,19 +266,7 @@ async def test_standard_builder_team_uses_one_sandbox_and_parent_survives_child(
         }
     )
     app = await (
-        SAgentBuilder()
-        .with_models(TEST_MODELS)
-        .with_defaults(session_root=tmp_path / "sessions")
-        .with_execution_binding_provider(bindings)
-        .with_tool_policy(
-            DefaultToolPolicy(approval_strategy=ApprovalStrategy.AUTO_APPROVE)
-        )
-        .with_model_provider_factory(
-            lambda package, agent_id: (
-                parent_model if agent_id == "assistant" else child_model
-            )
-        )
-        .build(runtime=runtime_config)
+        build_registered_app(tmp_path / 'sessions', models=TEST_MODELS, model_factory=lambda context, deps: parent_model if context.agent_configuration['execution_agent_id'] == 'assistant' else child_model, runtime=runtime_config, providers={'execution.binding': bindings, 'agent.tool-policy': DefaultToolPolicy(approval_strategy=ApprovalStrategy.AUTO_APPROVE)})
     )
     try:
         child_package = BuiltinPackageFactory.create(

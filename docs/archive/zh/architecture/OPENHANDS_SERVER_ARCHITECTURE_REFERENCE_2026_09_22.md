@@ -125,7 +125,7 @@ OpenHands 对 host-local ACP 默认采用 native skill sourcing：ACP CLI 自己
 
 初次审计证据见 [per-Run composition](../../../../app/server_v2/services/skill_runtime.py)。当时 `materialize_agent()` 已返回按 manifest/scope materialize 的 `ports.skill_loading`，但 server_v2 没有把它传给 `create_skill_loader()`，于是 factory 又根据 manifest 创建默认插件。本次已经把该 port 传入 loader，并把 activation 从 `InMemorySkillActivationRepository` 切换到 `SessionDerivedSkillActivationRepository`。普通聊天仍保留动态 Agent loop 组装，但 Skill loading plugin 的配置和 scope lifecycle 已不再被旁路。
 
-相比之下，managed package 路径已正确调用 `builder.with_skill_provider(...)`，MCP 也通过 `with_additional_tools(...)` 注入：[managed builder](../../../../app/server_v2/services/management.py#L313-L343)。应把普通聊天收敛到同一模式，而不是维护两套组装规则。
+该历史检查中的手工 Skill/MCP 注入已由统一注册和 runtime 选择取代；当前接口见[标准宿主接入](../../../zh/architecture/sagents-host-development.md)。
 
 ### 5.3 当前每 Run 开销
 

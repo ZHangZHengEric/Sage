@@ -1379,23 +1379,18 @@ async def test_run_config_output_and_deadline_budgets_are_enforced_by_loop():
     model = ScriptedModelProvider(
         (ScriptedModelStep(events=(completed("otherwise final"),)),)
     )
+    runtime, handle, loop, _ = await setup_loop(model, max_output_tokens=321)
+    assert (await loop.execute(handle.run_id, CONTEXT)).state == RunState.COMPLETED
+    assert model.requests[0].max_output_tokens == 321
+    model = ScriptedModelProvider(())
     runtime, handle, loop, _ = await setup_loop(
-        model,
-        max_output_tokens=321,
-        deadline_seconds=1,
+        model, max_output_tokens=321, deadline_seconds=1,
         clock=lambda: datetime.now(timezone.utc) + timedelta(hours=1),
     )
-
     run = await loop.execute(handle.run_id, CONTEXT)
-    events = await runtime.session_store.read_events(handle.run_id)
-
-    assert model.requests[0].max_output_tokens == 321
-    assert run.state == RunState.SUSPENDED
-    assert events[-1].type == "run.suspended"
-    suspension = await runtime.session_store.get_suspension(run.suspension_id)
-    interaction = await runtime.session_store.get_interaction(suspension.interaction_id)
-    assert interaction.payload["reason_code"] == "budget.deadline"
-    assert interaction.payload["questions"]
+    assert not model.requests
+    assert run.state == RunState.FAILED
+    assert (await runtime.get_run_result(run.run_id)).error.code == "budget.deadline"
 
 
 @pytest.mark.asyncio
@@ -1805,11 +1800,10 @@ async def test_deadline_interrupts_a_blocked_model_stream():
 
     result = await asyncio.wait_for(loop.execute(handle.run_id, CONTEXT), timeout=1)
 
-    assert result.state == RunState.SUSPENDED
+    assert result.state == RunState.FAILED
     assert model.closed.is_set()
-    suspension = await runtime.session_store.get_suspension(result.suspension_id)
-    interaction = await runtime.session_store.get_interaction(suspension.interaction_id)
-    assert interaction.payload["reason_code"] == "budget.deadline"
+    assert (await runtime.get_run_result(result.run_id)).error.code == "budget.deadline"
+    assert not any(event.type == "interaction.requested" for event in await runtime.session_store.read_events(result.run_id))
 
 
 @pytest.mark.asyncio
@@ -1959,10 +1953,9 @@ async def test_deadline_cooperatively_cancels_a_blocked_tool():
     result = await asyncio.wait_for(loop.execute(handle.run_id, CONTEXT), timeout=1)
 
     assert started.is_set() and cancelled.is_set()
-    assert result.state == RunState.SUSPENDED
-    suspension = await runtime.session_store.get_suspension(result.suspension_id)
-    interaction = await runtime.session_store.get_interaction(suspension.interaction_id)
-    assert interaction.payload["reason_code"] == "budget.deadline"
+    assert result.state == RunState.FAILED
+    assert (await runtime.get_run_result(result.run_id)).error.code == "budget.deadline"
+    assert not any(event.type == "interaction.requested" for event in await runtime.session_store.read_events(result.run_id))
 
 
 @pytest.mark.asyncio
@@ -3158,6 +3151,14 @@ async def test_worker_restart_restores_token_budget_before_continuing_model():
     started = asyncio.Event()
 
     async def interrupted(call, context):
+        from sagents.v2.contracts.events import UsageEventData
+        current = await runtime.get_run(call.owner_run_id)
+        await runtime.session_store.commit_run(
+            run_id=current.run_id, expected_revision=current.revision,
+            expected_states={RunState.RUNNING}, new_state=RunState.RUNNING,
+            context=context, idempotency_key="late-usage",
+            drafts=(EventDraft(type="usage.recorded", data=UsageEventData(usage=UsageSummary(output_tokens=1))),),
+        )
         started.set()
         await asyncio.Event().wait()
 
@@ -3170,7 +3171,7 @@ async def test_worker_restart_restores_token_budget_before_continuing_model():
                             "",
                             calls=(tool_call(),),
                             input_tokens=900,
-                            output_tokens=100,
+                            output_tokens=99,
                         ),
                     )
                 ),
@@ -3197,31 +3198,11 @@ async def test_worker_restart_restores_token_budget_before_continuing_model():
     run = await loop.recover_interrupted(handle.run_id, CONTEXT)
     checkpoint = await runtime.session_store.get_checkpoint(run.checkpoint_id)
     state = AgentLoopCheckpointCodec.decode(checkpoint.state)
-    assert (state.total_input_tokens, state.total_output_tokens) == (900, 100)
-    suspension, interaction = await _pending_interaction(runtime, run)
-    await runtime.reply_interaction(
-        _approval_reply(
-            run.run_id,
-            run,
-            suspension,
-            interaction,
-            "confirm_succeeded",
-            "confirm-recovered",
-        ),
-        CONTEXT,
-    )
-    run = await loop.resume(run.run_id, CONTEXT)
-    assert run.state == RunState.SUSPENDED
-    events = await runtime.session_store.read_events(run.run_id)
-    reasons = [
-        event.data.reason_code
-        for event in events
-        if event.type == "continuation.decided"
-    ]
-    assert reasons[-1] == "budget.max_tokens"
-    checkpoint = await runtime.session_store.get_checkpoint(run.checkpoint_id)
-    state = AgentLoopCheckpointCodec.decode(checkpoint.state)
-    assert (state.total_input_tokens, state.total_output_tokens) == (900, 100)
+    assert (state.total_input_tokens, state.total_output_tokens) == (900, 99)
+    assert run.state == RunState.FAILED
+    assert (await runtime.get_run_result(run.run_id)).error.code == "budget.max_tokens"
+    from sagents.v2.runtime.execution.budgets import run_tree_tokens
+    assert await run_tree_tokens(runtime.session_store, run) == 1000
     assert model.requests == []
 
 
@@ -5172,11 +5153,10 @@ async def test_network_retry_respects_deadline_without_another_provider_request(
         model, deadline_seconds=0.05, transient_retry_limit=None,
     )
     result = await loop.execute(handle.run_id, CONTEXT)
-    assert result.state == RunState.SUSPENDED
+    assert result.state == RunState.FAILED
     assert len(model.requests) == 1
-    suspension = await runtime.session_store.get_suspension(result.suspension_id)
-    interaction = await runtime.session_store.get_interaction(suspension.interaction_id)
-    assert interaction.payload["reason_code"] == "budget.deadline"
+    assert (await runtime.get_run_result(result.run_id)).error.code == "budget.deadline"
+    assert not any(event.type == "interaction.requested" for event in await runtime.session_store.read_events(result.run_id))
 
 
 @pytest.mark.asyncio

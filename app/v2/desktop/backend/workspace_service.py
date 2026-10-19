@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
-import inspect
 import re
 from pathlib import Path
 from typing import Any
@@ -21,7 +20,6 @@ from sagents.v2.skill import (
     FilesystemSkillProvider,
 )
 from sagents.v2.skill.contracts import SkillDescriptor
-from app.v2.desktop.backend.package import desktop_v2_manifest
 from app.v2.desktop.backend.schemas import (
     AgentCreate as AgentCreate,
     AgentSettingsPatch as AgentSettingsPatch,
@@ -31,9 +29,6 @@ from app.v2.desktop.backend.schemas import (
     DesktopV2Settings,
     ModelProviderCreate as ModelProviderCreate,
     ModelProviderPatch as ModelProviderPatch,
-)
-from app.v2.desktop.backend.run_lifecycle import (
-    DesktopRunResources as _DesktopRunResources,  # noqa: F401 - compatibility export
 )
 from app.v2.desktop.backend.run_context import (
     AgentRosterContextProvider as AgentRosterContextProvider,
@@ -244,46 +239,18 @@ class DesktopWorkspaceServiceMixin:
             if initialization_key in self._workspace_initializations:
                 return workspace
             await self.start()
-            settings = await self.get_settings()
-            ports = await self.application.materialize_agent(
-                desktop_v2_manifest(
-                    session_root=self.runtime_root,
-                    component_selections=component_selections,
-                    component_configs=settings.component_configs,
-                    language=language,
-                ),
-                locked_configs={"workspace.initializer": {"language": language}},
-                cache_identities={
-                    "workspace.initializer": {
-                        "plugin": plugin_id,
-                        "language": language,
-                    }
-                },
-            )
-            initialization_error: BaseException | None = None
-            try:
-                initializer = ports.workspace_initializer
-                initialize = initializer.initialize
-                if inspect.iscoroutinefunction(initialize):
-                    result = initialize(workspace)
-                else:
-                    result = await asyncio.to_thread(initialize, workspace)
-                if inspect.isawaitable(result):
-                    await result
-            except BaseException as exc:
-                initialization_error = exc
-            cleanup_errors: list[BaseException] = []
-            for handle in reversed(ports.scope_handles):
-                try:
-                    await handle.close()
-                except BaseException as exc:
-                    cleanup_errors.append(exc)
-            if initialization_error is not None:
-                if cleanup_errors:
-                    raise initialization_error from cleanup_errors[0]
-                raise initialization_error
-            if cleanup_errors:
-                raise cleanup_errors[0]
+            from sagents.v2.package.manifest.runtime import CapabilitySelection, RuntimeConfig
+            runtime = self.application.runtime_configuration
+            supplied = RuntimeConfig.model_validate(self._host_runtime) if self._host_runtime is not None else None
+            selected = (supplied.capabilities.get("workspace.initializer") if supplied is not None else None)
+            if selected is None:
+                selected = CapabilitySelection(plugin=plugin_id, config={"language": language}
+                    if plugin_id == "sage.workspace.initializer.claw" else {})
+            if runtime.capabilities.get("workspace.initializer") != selected:
+                await self.application.update_runtime(runtime.model_copy(update={"capabilities": {
+                    **runtime.capabilities, "workspace.initializer": selected,
+                }}))
+            await self.application.initialize_workspace(workspace)
             self._workspace_initializations[initialization_key] = workspace
         return workspace
 
@@ -429,7 +396,7 @@ class DesktopWorkspaceServiceMixin:
     def _context(user_id: str, *, language: str = "en") -> RequestContext:
         return RequestContext(
             actor=ActorRef(
-                principal_id=user_id,
+                principal_id=user_id, tenant_id=user_id,
                 principal_type=PrincipalType.USER,
                 scopes=(
                     "tool.read",

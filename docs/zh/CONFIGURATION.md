@@ -25,7 +25,7 @@ from sagents.v2.package.manifest import SageManifest, SageManifestLoader
 
 manifest = SageManifestLoader().loads(yaml_text)
 # 也可以：manifest = SageManifest.model_validate(config_dict)
-# 然后：application = await builder.build(manifest)
+# 然后：application = await builder.build(runtime=manifest.runtime, models=model_config)
 ```
 
 `loads()` 校验 YAML 并拒绝重复键。`load("path/to/sage.yaml")` 还会解析包目录内的指令文件。直接给 `build()` 传普通字符串会走文件加载。内存配置使用内联指令。

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from app.v2.desktop.backend.run_environment import catalog_agent_id
+
 import asyncio
 import json
 import logging
@@ -17,7 +19,6 @@ from app.v2.desktop.backend.package import (
     stable_component_id as _stable_component_id,
 )
 from app.v2.desktop.backend.session_index import JsonDesktopSessionIndex
-from sagents.v2 import SAgent
 from sagents.v2.agent.multi_agent import (
     DelegationConcurrencyLimiter,
     SessionDynamicAgentRoster,
@@ -35,14 +36,10 @@ from sagents.v2.runtime.session import (
     SessionStore,
     DerivedStateStore,
     FilesystemSessionStore,
-    LeaseFencedSessionStore,
 )
 from sagents.v2.runtime.session.migration import adopt_unowned_sessions
 from sagents.v2.memory import MemoryService
 from sagents.v2.session_memory import SessionMemoryService
-from sagents.v2.runtime.execution.sandbox import (
-    SandboxGrantIssuer,
-)
 from sagents.v2.skill import (
     SessionDerivedSkillActivationRepository,
 )
@@ -52,7 +49,6 @@ from sagents.v2.runtime.observability import (
     LogSink,
     StructuredLogger,
 )
-from app.v2.desktop.backend.bindings import DesktopExecutionBindingProvider
 from app.v2.desktop.backend.composition import build_desktop_application
 from app.v2.desktop.backend.rsi import DesktopRsiMixin
 from app.v2.desktop.backend.catalog_service import DesktopCatalogServiceMixin
@@ -69,18 +65,10 @@ from app.v2.desktop.backend.schemas import (
     ModelProviderCreate as ModelProviderCreate,
     ModelProviderPatch as ModelProviderPatch,
 )
-from app.v2.desktop.backend.run_lifecycle import (
-    DesktopDriver as _DesktopDriver,
-    DesktopRunResources as _DesktopRunResources,  # noqa: F401 - compatibility export
-)
 from app.v2.desktop.backend.run_context import (
     AgentRosterContextProvider as AgentRosterContextProvider,
 )
 from app.v2.desktop.backend.run_service import DesktopRunServiceMixin
-from app.v2.desktop.backend.runtime_config import (
-    _agent_memory_enabled,
-    _agent_memory_behavior,
-)
 from app.v2.desktop.backend.usage_analytics import (
     _start_run_user_text,
     _usage_percentile as _usage_percentile,
@@ -91,105 +79,6 @@ from app.v2.desktop.backend.workspace_service import DesktopWorkspaceServiceMixi
 
 LOGGER = logging.getLogger(__name__)
 
-
-class _DesktopRecoveryAgent:
-    """Recompose a Desktop driver for a durable Run with lost scheduler work."""
-
-    def __init__(self, service: "DesktopV2Service") -> None:
-        self.service = service
-        self.runtime = service.driver_runtime
-
-    def ensure_execution(self, run_id, context, *, resume):
-        return asyncio.create_task(
-            self._execute(run_id, context, resume=resume),
-            name=f"desktop-recovery:{run_id}",
-        )
-
-    def _ensure_execution(self, run_id, context, *, resume):
-        return self.ensure_execution(run_id, context, resume=resume)
-
-    async def _compose_driver(self, run_id, context):
-        command = await self.service.session_store.get_start_command(run_id)
-        user_id = context.actor.principal_id
-        environment = await self.service._environment_for_command(
-            command, user_id, run_id
-        )
-        agent = await self.service._agent_in_environment(command, environment, user_id)
-        provider = (
-            environment.provider(agent)
-            if environment is not None
-            else await self.service._provider_for_command(command, agent, user_id)
-        )
-        workspace = (
-            environment.workspace
-            if environment is not None
-            else await self.service.workspace_root(
-                command.config.metadata.get("workspace_id"), command.agent_id
-            )
-        )
-
-        async def build():
-            return await self.service._build_loop(
-                agent=agent,
-                provider=provider,
-                workspace=workspace,
-                preferred_skills=tuple(
-                    command.config.metadata.get("preferred_skills") or ()
-                ),
-                approval_mode=str(
-                    command.config.metadata.get("approval_mode") or "high_risk"
-                ),
-                invocation_mode=command.invocation_mode or "normal",
-                session_id=(await self.runtime.get_run(run_id)).session_id,
-                run_id=run_id,
-                resolved_spec_hash=command.resolved_spec_hash,
-                component_snapshot=command.config.metadata.get("runtime_components"),
-                environment=environment,
-            )
-
-        driver = _DesktopDriver(self.service, None, workspace, None, lazy_builder=build)
-        self.service._drivers[run_id] = driver
-        return driver, agent
-
-    async def _execute(self, run_id, context, *, resume):
-        driver, agent = await self._compose_driver(run_id, context)
-        memory_enabled = _agent_memory_enabled(
-            agent,
-            self.service.memory_plugin_id,
-            self.service.session_memory_plugin_id,
-        )
-        facade = SAgent(
-            runtime=self.runtime,
-            driver_factory=lambda _: driver,
-            memory_service=(self.service._memory_service_for_agent(agent) if memory_enabled and _agent_memory_behavior(agent).auto_write else None),
-            memory_scope={"recall": False, "auto_write": memory_enabled and _agent_memory_behavior(agent).auto_write},
-        )
-        try:
-            execution = facade.ensure_execution(run_id, context, resume=resume)
-            return await execution
-        finally:
-            if self.service._drivers.get(run_id) is driver:
-                self.service._drivers.pop(run_id, None)
-
-    async def recover_interrupted_run(self, run_id, context):
-        driver, _ = await self._compose_driver(run_id, context)
-        try:
-            await driver._ensure_composed()
-            return await driver.loop.recover_interrupted(run_id, context)
-        finally:
-            await driver.close()
-            if self.service._drivers.get(run_id) is driver:
-                self.service._drivers.pop(run_id, None)
-
-    async def _recover_interrupted_run(self, run_id, context):
-        return await self.recover_interrupted_run(run_id, context)
-
-    async def fail_driver_crash(self, run_id, error, context):
-        facade = SAgent(runtime=self.runtime, driver_factory=lambda _: None)
-        return await facade.fail_driver_crash(run_id, error, context)
-
-    async def _fail_driver_crash(self, run_id, error, context):
-        return await self.fail_driver_crash(run_id, error, context)
 
 
 class DesktopV2Service(
@@ -214,6 +103,7 @@ class DesktopV2Service(
         sidecar_port: int | None = None,
         sidecar_auth_token: str | None = None,
         extensions=(),
+        runtime=None,
     ) -> None:
         """Create one process service. Injected stores are borrowed, never closed.
 
@@ -236,12 +126,12 @@ class DesktopV2Service(
         self.openui_store = OpenUiStore(self.runtime_root / "openui.sqlite3")
         self.openui_parser = OpenUiParser()
         self.extensions = builtin_extension_registry()
+        self._host_runtime = runtime
         self._host_extensions = tuple(extensions)
         for registration in self._host_extensions:
             self.extensions.register(registration)
         self._workspace_initializations: dict[tuple[str, str, str], Path] = {}
         self._workspace_initialization_lock = asyncio.Lock()
-        self._sandbox_grant_issuer = SandboxGrantIssuer()
         from sagents.v2.model.middleware.concurrency import ModelConcurrencyBudget
 
         self.model_budget = ModelConcurrencyBudget(
@@ -290,6 +180,7 @@ class DesktopV2Service(
             if session_store is not None
             else FilesystemSessionStore(self.runtime_root)
         )
+        self._owned_session_store = self.session_store if self._owns_session_store else None
         self._derived_state_store = derived_state_store
         self._run_environments = {}
         self.runtime = HarnessRuntime(self.session_store)
@@ -320,8 +211,6 @@ class DesktopV2Service(
         self.application = None
         self.scheduler = None
         self.dispatcher = None
-        self.driver_session_store = None
-        self.driver_runtime = None
         self.session_access = None
         self.delegation_limiter = None
         self.dynamic_agent_roster = None
@@ -331,7 +220,6 @@ class DesktopV2Service(
         self.memory_service = None
         self.session_memory_provider = None
         self.session_memory_service = None
-        self.execution_binding_provider = None
         self._start_lock = asyncio.Lock()
         self._closed = False
         self.session_index = JsonDesktopSessionIndex(
@@ -345,7 +233,6 @@ class DesktopV2Service(
         self._settings_lock = asyncio.Lock()
         self._settings_update_lock = asyncio.Lock()
         self._agent_update_lock = asyncio.Lock()
-        self._drivers: dict[str, _DesktopDriver] = {}
         self._run_observers: dict[str, asyncio.Task] = {}
         self._application_close_tasks: set[asyncio.Task] = set()
         self._sandbox_cleanup_tasks: set[asyncio.Task] = set()
@@ -370,11 +257,7 @@ class DesktopV2Service(
             settings = self._read_settings_sync()
             language = "en" if settings.language == "system" else settings.language
             workspace = self._agent_workspace_path(settings.agent_workspace_path)
-            execution_binding_provider = DesktopExecutionBindingProvider(
-                workspace,
-                issuer=self._sandbox_grant_issuer,
-                private_workspace_root=self.runtime_root / "private-workspaces",
-            )
+            from .sdk_plugins import desktop_registrations
             application = await build_desktop_application(
                 session_root=self.runtime_root,
                 workspace=workspace,
@@ -391,33 +274,26 @@ class DesktopV2Service(
                 component_selections=settings.component_selections,
                 component_configs=settings.component_configs,
                 language=language,
-                bindings=execution_binding_provider,
-                extensions=self._host_extensions,
+                runtime=self._host_runtime,
+                extensions=(*self._host_extensions, *desktop_registrations(self)),
                 defer_recovery=True,
             )
             try:
-                self.execution_binding_provider = execution_binding_provider
                 self.application = application
                 self._bind_process_runtime()
                 await self.dispatcher.start()
                 self._start_studio_delivery_worker()
             except BaseException:
-                self.execution_binding_provider = None
                 self.application = None
                 await application.close()
-                await execution_binding_provider.close()
                 raise
 
     def _bind_process_runtime(self) -> None:
         application = self.application
+        self.runtime = application.runtime
+        self.session_store = application.service("session.store")
         self.scheduler = application.service("execution.scheduler")
         self.dispatcher = application.service("execution.dispatcher")
-        self.driver_session_store = LeaseFencedSessionStore(
-            self.session_store, self.scheduler
-        )
-        self.driver_runtime = HarnessRuntime(self.driver_session_store)
-        self.dispatcher.attach_recovery_agent(_DesktopRecoveryAgent(self), replace=True)
-        self.dispatcher.recovery_filter = None
         self.session_access = application.service("session.access")
         self.delegation_limiter = DelegationConcurrencyLimiter(
             max_concurrency=8,
@@ -476,8 +352,11 @@ class DesktopV2Service(
             component_selections=settings.component_selections,
             language=settings.language,
         )
-        await self._recover_pending_sandbox_cleanups()
         return workspace
+
+    async def has_background_work(self) -> bool:
+        """Keep headless execution alive, including delayed/recoverable Runs."""
+        return self.rsi_active or bool(await self.session_store.list_dispatchable_runs())
 
     async def close(self) -> None:
         async with self._start_lock:
@@ -508,27 +387,8 @@ class DesktopV2Service(
         close_tasks = tuple(self._application_close_tasks)
         if close_tasks:
             await asyncio.gather(*close_tasks, return_exceptions=True)
-        drivers = tuple(self._drivers.items())
-        if drivers:
-            results = await asyncio.gather(
-                *(driver.close_binding() for _, driver in drivers),
-                return_exceptions=True,
-            )
-            close_errors = []
-            for (run_id, driver), result in zip(drivers, results, strict=True):
-                if isinstance(result, BaseException):
-                    close_errors.append(result)
-                elif self._drivers.get(run_id) is driver:
-                    self._drivers.pop(run_id, None)
-            if close_errors:
-                raise RuntimeError(
-                    f"{len(close_errors)} Desktop Run driver(s) failed to close"
-                ) from close_errors[0]
-        if self.execution_binding_provider is not None:
-            await self.execution_binding_provider.close()
-            self.execution_binding_provider = None
-        if self._owns_session_store:
-            await self.session_store.close()
+        if self._owned_session_store is not None:
+            await self._owned_session_store.close()
         self._run_environments.clear()
         self.model_providers.clear()
         self._workspace_initializations.clear()
@@ -696,7 +556,7 @@ class DesktopV2Service(
                 {
                     "session": session.model_dump(mode="json"),
                     "run": run.model_dump(mode="json"),
-                    "agent_id": command.agent_id,
+                    "agent_id": catalog_agent_id(command),
                     "parent_run_id": command.parent_run_id
                     or metadata.get("fork_source_run_id"),
                     "parent_tool_call_id": str(
@@ -734,7 +594,7 @@ class DesktopV2Service(
                     "kind": observation.kind,
                     "session": observation.session.model_dump(mode="json"),
                     "run": observation.run.model_dump(mode="json"),
-                    "agent_id": command.agent_id,
+                    "agent_id": catalog_agent_id(command),
                     "parent_run_id": command.parent_run_id
                     or metadata.get("fork_source_run_id"),
                     "parent_tool_call_id": str(
