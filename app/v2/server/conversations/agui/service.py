@@ -375,7 +375,7 @@ class ConversationService:
         context = self.context_for(user_id, correlation_id=correlation_id)
         with structured_log_context(correlation_id=correlation_id):
             native_run_id = await self.runs.start_detached_run(
-                "ag_ui",
+                "ag-ui",
                 command,
                 context,
                 user_id=user_id,

@@ -1,4 +1,5 @@
 from __future__ import annotations
+from tests.sagents.v2.sdk_fixture import build_registered_package
 from tests.sagents.v2.model_fixture import TEST_MODELS
 from copy import deepcopy
 
@@ -9,11 +10,9 @@ from typing import Any
 
 import pytest
 
-from sagents.v2 import SAgentBuilder
 from sagents.v2.contracts.errors import SageV2Error
 from sagents.v2.model import ModelProvider
 from sagents.v2.memory import NoopMemoryProvider
-from sagents.v2.package.manifest.resolver import CompositionResolver
 from sagents.v2.package.manifest.root import PluginDeclaration
 from sagents.v2.package.manifest.runtime import CapabilitySelection
 from sagents.v2.package.presets import BuiltinPackageFactory
@@ -51,7 +50,7 @@ def _model_registration(
 ) -> ExtensionRegistration:
     def factory(context, dependencies):
         if observed_configs is not None:
-            observed_configs.append(dict(context.config))
+            observed_configs.append({"config": dict(context.config), "models": context.agent_configuration["model_routes"]})
         return provider
 
     return ExtensionRegistration(
@@ -88,7 +87,6 @@ def _package_with_declared_model_plugin():
                     version=">=1,<2",
                     config={
                         "gateway_region": "cn-east",
-                        "route": "must-be-overridden-by-the-model-route",
                     },
                 ),
             ),
@@ -96,13 +94,14 @@ def _package_with_declared_model_plugin():
     )
 
 
-@pytest.mark.parametrize("use_resolved_manifest", [False, True])
+@pytest.mark.parametrize("use_package_file", [False, True])
 @pytest.mark.asyncio
 async def test_declared_entry_point_is_loaded_and_configured(
-    tmp_path: Path, monkeypatch, use_resolved_manifest: bool
+    tmp_path: Path, monkeypatch, use_package_file: bool
 ):
     monkeypatch.setenv("SAGE_MODEL_API_KEY", "test-key")
-    provider = ScriptedModelProvider(())
+    from tests.sagents.v2.test_standard_execution_configuration import response, run
+    provider = ScriptedModelProvider((response(),))
     observed_configs: list[dict[str, Any]] = []
     registration = _model_registration(provider, observed_configs=observed_configs)
     monkeypatch.setattr(
@@ -110,21 +109,32 @@ async def test_declared_entry_point_is_loaded_and_configured(
         "entry_points",
         lambda **kwargs: (_FakeEntryPoint("acme.model.private-gateway", registration),),
     )
+    from sagents.v2.package.manifest.runtime import RuntimeConfig
     package = _package_with_declared_model_plugin()
-    build_input = (
-        CompositionResolver(models=PLUGIN_MODELS).resolve(package) if use_resolved_manifest else package
-    )
+    selected = RuntimeConfig.model_validate({"capabilities": {
+        "model.provider": {"plugin": "acme.model.private-gateway", "name": "private-gateway", "scope": "agent"},
+        "agent.continuation-policy": {"plugin": "sage.agent.continuation.deterministic"},
+        "tool.selection-policy": {"plugin": "sage.tool-selection.direct"}}})
+    package = package.model_copy(update={"runtime": selected})
+    installed = discovery.load_installed_extension("acme.model.private-gateway", version_requirement=">=1,<2")
+    build_input = package
+    if use_package_file:
+        import json
+        build_input = tmp_path / "agent.json"
+        build_input.write_text(json.dumps(package.model_dump(mode="json")))
 
     application = await (
-        SAgentBuilder().with_models(PLUGIN_MODELS)
-        .with_defaults(session_root=tmp_path / "session-store")
-        ._build_package(build_input)
+        build_registered_package(tmp_path / 'session-store', models=PLUGIN_MODELS, package=build_input, registrations=(installed,))
     )
 
-    assert application.entrypoint().driver_factory("run_1").model.provider is provider
-    assert observed_configs[0]["gateway_region"] == "cn-east"
-    assert observed_configs[0]["route"]["model"] == "test-model"
-    await application.close()
+    try:
+        result, _ = await run(application, application.loaded_agents[0], "installed-model")
+        assert result.state.value == "completed"
+        assert len(provider.requests) == 1
+        assert observed_configs[0]["config"]["gateway_region"] == "cn-east"
+        assert observed_configs[0]["models"]["primary"]["model"] == "test-model"
+    finally:
+        await application.close()
 
 
 @pytest.mark.asyncio
@@ -132,23 +142,29 @@ async def test_manually_registered_declared_plugin_does_not_require_entry_point(
     tmp_path: Path, monkeypatch
 ):
     monkeypatch.setenv("SAGE_MODEL_API_KEY", "test-key")
-    provider = ScriptedModelProvider(())
+    from tests.sagents.v2.test_standard_execution_configuration import response, run
+    provider = ScriptedModelProvider((response(),))
     registration = _model_registration(provider)
 
     def unexpected_discovery(**kwargs):
         raise AssertionError("manual registrations must win before discovery")
 
     monkeypatch.setattr(discovery.metadata, "entry_points", unexpected_discovery)
+    from sagents.v2.package.manifest.runtime import RuntimeConfig
+    selected = RuntimeConfig.model_validate({"capabilities": {
+        "model.provider": {"plugin": "acme.model.private-gateway", "name": "private-gateway", "scope": "agent"},
+        "agent.continuation-policy": {"plugin": "sage.agent.continuation.deterministic"},
+        "tool.selection-policy": {"plugin": "sage.tool-selection.direct"}}})
     application = await (
-        SAgentBuilder().with_models(PLUGIN_MODELS)
-        .with_defaults(session_root=tmp_path / "session-store")
-        .register(registration)
-        ._build_package(_package_with_declared_model_plugin())
+        build_registered_package(tmp_path / 'session-store', models=PLUGIN_MODELS, package=_package_with_declared_model_plugin(), registrations=(registration,), runtime=selected)
     )
 
-    assert application.entrypoint().driver_factory("run_1").model.provider is provider
-    await application.close()
-
+    try:
+        result, _ = await run(application, application.loaded_agents[0], "manual-model")
+        assert result.state.value == "completed"
+        assert len(provider.requests) == 1
+    finally:
+        await application.close()
 
 @pytest.mark.asyncio
 async def test_resolved_manifest_preserves_runtime_plugin_selection(
@@ -201,18 +217,15 @@ async def test_resolved_manifest_preserves_runtime_plugin_selection(
             ),
         }
     )
-    resolved = CompositionResolver(models=PLUGIN_MODELS).resolve(package)
+    resolved = package
 
+    installed = discovery.load_installed_extension("acme.memory.private-store")
     application = await (
-        SAgentBuilder().with_models(PLUGIN_MODELS)
-        .with_defaults(session_root=tmp_path / "session-store")
-        .with_model_provider(ScriptedModelProvider(()))
-        ._build_package(resolved)
+        build_registered_package(tmp_path / 'session-store', models=PLUGIN_MODELS, model=ScriptedModelProvider(()), package=resolved, registrations=(installed,))
     )
 
     assert observed_configs == [{"namespace": "agent"}]
     await application.close()
-
 
 @pytest.mark.parametrize(
     ("entry_points", "error_code"),
@@ -332,10 +345,7 @@ async def test_manually_registered_plugin_still_obeys_manifest_version(tmp_path)
 
     with pytest.raises(SageV2Error) as mismatch:
         await (
-            SAgentBuilder().with_models(PLUGIN_MODELS)
-            .with_defaults(session_root=tmp_path / "session-store")
-            .register(_model_registration(provider))
-            ._build_package(package)
+            build_registered_package(tmp_path / 'session-store', models=PLUGIN_MODELS, package=package, registrations=(_model_registration(provider),))
         )
 
     assert mismatch.value.info.code == "extension.version_mismatch"

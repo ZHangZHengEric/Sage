@@ -1,5 +1,7 @@
 """Exercise image attachment wiring through the public builder and host loops."""
 
+from tests.sagents.v2.sdk_fixture import build_registered_package
+
 from tests.sagents.v2.model_fixture import TEST_MODELS
 
 
@@ -10,7 +12,6 @@ import uuid
 import pytest
 from PIL import Image
 
-from sagents.v2 import RunExecutionBinding, SAgentBuilder
 from sagents.v2.contracts.commands import InputItem, StartRun
 from sagents.v2.contracts.items import ImageBlock, TextBlock
 from sagents.v2.contracts.principals import ActorRef, PrincipalType, RequestContext
@@ -23,15 +24,6 @@ from sagents.v2.model.contracts import (
 )
 from sagents.v2.package.presets import BuiltinPackageFactory
 from sagents.v2.package.manifest.runtime import CapabilitySelection
-from sagents.v2.runtime.execution.sandbox import (
-    FileOperation,
-    FileSystemPolicy,
-    LocalWorkspaceSandboxProvider,
-    ProcessPolicy,
-    ResolvedSandboxSpec,
-    ResourceLimits,
-    SandboxGrantIssuer,
-)
 from sagents.v2.runtime.artifact import SessionArtifactStore
 from sagents.v2.runtime.session import FilesystemSessionStore
 from sagents.v2.runtime.session.plugins.mysql import MysqlSessionStore
@@ -59,35 +51,6 @@ async def test_builder_wires_durable_images_from_tool_to_request_and_session(
     workspace = tmp_path / "workspace"
     workspace.mkdir()
     Image.new("RGB", (32, 32), "red").save(workspace / "frame.png")
-    issuer = SandboxGrantIssuer()
-    provider = LocalWorkspaceSandboxProvider(issuer.verification_key)
-
-    class Bindings:
-        async def acquire(self, request):
-            handle = await provider.provision(
-                ResolvedSandboxSpec(
-                    resources=ResourceLimits(require_hard_limits=False),
-                    spec_hash="sha256:image",
-                    architecture="native",
-                    filesystem=FileSystemPolicy(
-                        allowed_operations=frozenset(FileOperation)
-                    ),
-                    process=ProcessPolicy(enabled=False),
-                    policy_hash="sha256:image",
-                    metadata={"host_workspace": str(workspace)},
-                ),
-                request.context,
-                run_id=request.run_id,
-            )
-            return RunExecutionBinding(
-                run_id=request.run_id,
-                agent_id=request.agent_id,
-                workspace_root=str(workspace),
-                workspace_policy=request.workspace_policy,
-                sandbox=handle,
-                grant_issuer=issuer,
-            )
-
     def completed(response_id, **kwargs):
         return ScriptedModelStep(
             events=(
@@ -109,7 +72,7 @@ async def test_builder_wires_durable_images_from_tool_to_request_and_session(
                         tool_call_id="image_call",
                         name="analyze_image",
                         arguments={
-                            "image_path": "/workspace/frame.png",
+                            "image_path": "frame.png",
                             "session_id": "ignored",
                             "prompt": "Inspect",
                         },
@@ -139,9 +102,10 @@ async def test_builder_wires_durable_images_from_tool_to_request_and_session(
                         "tool.catalog": CapabilitySelection(
                             plugin="sage.tool.official", name="official"
                         ),
-                        "tool.selection-policy": CapabilitySelection(
-                            plugin="sage.tool-selection.direct"
-                        ),
+                        "tool.selection-policy": CapabilitySelection(plugin="sage.tool-selection.direct"),
+                        "agent.continuation-policy": CapabilitySelection(plugin="sage.agent.continuation.deterministic"),
+                        "execution.binding": CapabilitySelection(plugin="sage.execution.binding.local-workspace", config={
+                            "workspace": str(workspace), "policy": {"process": {"enabled": False}}}),
                     }
                 }
             ),
@@ -153,30 +117,26 @@ async def test_builder_wires_durable_images_from_tool_to_request_and_session(
             plugin="sage.session.mysql", config={"dsn": mysql_dsn, "table_prefix": prefix}
         )
     application = await (
-        SAgentBuilder().with_models(TEST_MODELS)
-        .with_defaults(session_root=root)
-        .with_model_provider(model)
-        .with_execution_binding_provider(Bindings())
-        ._build_package(package)
+        build_registered_package(root, models=TEST_MODELS, model=model, package=package)
     )
     try:
         assert isinstance(application.service("artifact.store"), SessionArtifactStore)
         stream = await application.entrypoint().run_stream(
-            StartRun(
+            (StartRun(
                 agent_id=agent_id,
                 input=(
                     InputItem(role="user", content=(TextBlock(text="inspect image"),)),
                 ),
                 resolved_spec_hash=application.composition_hash,
                 idempotency_key="image-run",
-            ),
+            )).model_copy(update={"agent_id": application.loaded_agents[-1].id, "resolved_spec_hash": application.loaded_agents[-1].composition_hash}),
             RequestContext(
                 actor=ActorRef(
                     principal_id="owner",
                     principal_type=PrincipalType.USER,
                     tenant_id="tenant",
                 )
-            ),
+            ), agent=application.loaded_agents[-1],
         )
         run = await stream.wait()
         assert run.state == RunState.COMPLETED

@@ -2,66 +2,41 @@ import asyncio
 
 import pytest
 
-from app.v2.desktop.backend.catalog import DesktopModelProviderRecord
 from app.v2.desktop.backend.service import DesktopV2Service
 
 
 @pytest.mark.asyncio
-async def test_desktop_primary_and_auxiliary_providers_share_budget(
-    tmp_path, monkeypatch
-):
+async def test_desktop_standard_runs_share_the_registered_model_budget(tmp_path):
+    from tests.app.v2.desktop.sdk_fixture import desktop, execute
+    from sagents.v2.testing.plugins import ScriptedModelProvider
+    from tests.sagents.v2.test_standard_execution_configuration import response
+    release, started = asyncio.Event(), asyncio.Event()
     calls = []
-    release = asyncio.Event()
-    started = asyncio.Event()
-
-    class Provider:
+    class Model(ScriptedModelProvider):
         async def stream(self, request):
-            calls.append(request)
+            calls.append(request.run_id)
             started.set()
             await release.wait()
-            yield request
-
-    monkeypatch.setattr(
-        "app.v2.desktop.backend.model_providers.create_registered_model_provider",
-        lambda *args, **kwargs: Provider(),
-    )
-    service = DesktopV2Service(tmp_path, max_concurrent_model_calls=1)
+            async for event in super().stream(request):
+                yield event
+    model = Model((response(), response()))
+    service, _, _ = desktop(tmp_path, model=model, max_concurrent_model_calls=1)
     tasks = []
     try:
-        await service.start()
-        agent = await service._agent("sage", "user_1")
-        record = DesktopModelProviderRecord(
-            id="test",
-            user_id="user_1",
-            name="Test",
-            model="test",
-            protocol="openai-chat-completions",
-            base_url="https://example.invalid/v1",
-            api_key="test",
-        )
-        primary = await service._model_provider(record, agent, enable_thinking=True)
-        auxiliary = await service._model_provider(record, agent, enable_thinking=False)
-
-        async def consume(provider, name):
-            return [item async for item in provider.stream(name)]
-
-        tasks.append(asyncio.create_task(consume(primary, "primary")))
-        await started.wait()
-        tasks.append(asyncio.create_task(consume(auxiliary, "auxiliary")))
-        await asyncio.sleep(0)
-        assert service.model_budget.snapshot() == {
-            "limit": 1,
-            "active": 1,
-            "waiting": 1,
-            "max_waiting": 128,
-            "wait_timeout_seconds": 60,
-            "rejected": 0,
-            "timed_out": 0,
-        }
-        assert calls == ["primary"]
+        tasks.append(asyncio.create_task(execute(service)))
+        await asyncio.wait_for(started.wait(), 30)
+        tasks.append(asyncio.create_task(execute(service)))
+        async with asyncio.timeout(30):
+            while service.model_budget.waiting != 1:
+                await asyncio.sleep(0.01)
+        assert service.model_budget.active == 1
+        assert len(calls) == 1
         release.set()
-        assert await asyncio.gather(*tasks) == [["primary"], ["auxiliary"]]
+        results = await asyncio.gather(*tasks)
+        assert all(result[0].state.value == "completed" for result in results)
+        assert len(calls) == 2
         assert service.model_budget.active == 0
+        assert service.model_budget.waiting == 0
     finally:
         release.set()
         await asyncio.gather(*tasks, return_exceptions=True)

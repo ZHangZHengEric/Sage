@@ -1,3 +1,4 @@
+from tests.sagents.v2.sdk_fixture import build_registered_package
 from tests.sagents.v2.model_fixture import TEST_MODELS
 from contextlib import asynccontextmanager
 
@@ -396,7 +397,6 @@ def test_credentials_are_not_part_of_configuration_schema():
 async def test_public_builder_exposes_self_configuration_without_initial_skills(
     tmp_path,
 ):
-    from sagents.v2 import SAgentBuilder
     from sagents.v2.package.presets import BuiltinPackageFactory
 
     service(tmp_path)  # Prepare the host workspace before the Builder runs.
@@ -424,29 +424,37 @@ async def test_public_builder_exposes_self_configuration_without_initial_skills(
     package = BuiltinPackageFactory.create(
         "assistant", package_id="test.self-configuration",
     )
+    from sagents.v2.runtime.extensions import CapabilityOffer, ExtensionDependency, ExtensionDescriptor, ExtensionRegistration, ExtensionScope
+    from sagents.v2.package.manifest.runtime import CapabilitySelection
+    def create(context, dependencies):
+        environment = dependencies.require("execution.environment")
+        assert environment.run_id == context.run_id
+        return service(tmp_path, owner=f"user:{context.agent_id}")
+    self_registration = ExtensionRegistration(descriptor=ExtensionDescriptor(
+        plugin_id="test.self-configuration", name="Self configuration", version="1",
+        provides=(CapabilityOffer(capability="agent.self-configuration", api_version="2"),),
+        dependencies=(ExtensionDependency(capability="execution.environment"),), supported_scopes=frozenset({ExtensionScope.RUN})), factory=create)
+    package = package.model_copy(update={"runtime": package.runtime.model_copy(update={"capabilities": {
+        **package.runtime.capabilities,
+        "agent.self-configuration": CapabilitySelection(plugin="test.self-configuration", scope="run"),
+        "execution.binding": CapabilitySelection(plugin="sage.execution.binding.local-workspace", config={
+            "workspace": str(tmp_path / "workspace"), "policy": {"process": {"enabled": False}}}),
+        "tool.catalog": CapabilitySelection(plugin="sage.tool.official"),
+        "tool.selection-policy": CapabilitySelection(plugin="sage.tool-selection.direct"),
+        "agent.continuation-policy": CapabilitySelection(plugin="sage.agent.continuation.deterministic"),
+    }})})
     application = await (
-        SAgentBuilder().with_models(TEST_MODELS)
-        .with_defaults(session_root=tmp_path / "sessions")
-        .with_model_provider(model)
-        .with_tool_provider(InMemoryToolCatalog(()), InMemoryToolExecutor({}, {}))
-        .with_skill_provider(source, source, InMemorySkillWorkspace())
-        .with_tool_policy(
-            DefaultToolPolicy(approval_strategy=ApprovalStrategy.AUTO_APPROVE)
-        )
-        .with_self_configuration(
-            lambda agent_id: service(tmp_path, owner=f"user:{agent_id}")
-        )
-        ._build_package(package)
+        build_registered_package(tmp_path / 'sessions', models=TEST_MODELS, model=model, skills=(source, source, InMemorySkillWorkspace()), package=package, registrations=(self_registration,), providers={'agent.tool-policy': DefaultToolPolicy(approval_strategy=ApprovalStrategy.AUTO_APPROVE)})
     )
     try:
         stream = await application.entrypoint().run_stream(
-            StartRun(
+            (StartRun(
                 agent_id=package.entrypoint.agent,
                 input=(InputItem(role="user", content=(TextBlock(text="review"),)),),
                 resolved_spec_hash=application.composition_hash,
                 idempotency_key="builder-self-configure",
-            ),
-            CONTEXT,
+            )).model_copy(update={"agent_id": application.loaded_agents[-1].id, "resolved_spec_hash": application.loaded_agents[-1].composition_hash}),
+            CONTEXT, agent=application.loaded_agents[-1],
         )
         result = await stream.wait()
         assert result.state == RunState.COMPLETED

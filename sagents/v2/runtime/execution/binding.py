@@ -8,9 +8,11 @@ from typing import TYPE_CHECKING, Protocol
 
 from sagents.v2.contracts.errors import ErrorCategory, RuntimeErrorInfo, SageV2Error
 from sagents.v2.contracts.principals import RequestContext
+from sagents.v2.contracts.execution import ExecutionConfigurationSnapshot
 from sagents.v2.runtime.execution.sandbox import SandboxGrantIssuer, SandboxHandle
 
 if TYPE_CHECKING:
+    from sagents.v2.contracts.commands import StartRun
     from sagents.v2.agent.multi_agent.contracts import WorkspaceSharingPolicy
     from sagents.v2.runtime.execution.lifecycle import (
         ExecutionBindingLifecycleCoordinator,
@@ -27,6 +29,7 @@ class ExecutionBindingRequest:
     parent_run_id: str | None = None
     lifecycle: ExecutionBindingLifecycleCoordinator | None = None
     workspace_policy: WorkspaceSharingPolicy | str = "shared_parent"
+    configuration: ExecutionConfigurationSnapshot | None = None
 
 
 @dataclass
@@ -45,6 +48,9 @@ class RunExecutionBinding:
     grant_issuer: SandboxGrantIssuer
     parent_run_id: str | None = None
     host_workspace: str | None = None
+    configuration_id: str | None = None
+    configuration: ExecutionConfigurationSnapshot | None = None
+    diagnostics: dict = field(default_factory=dict)
     # 宿主可选携带的生命周期协调器：挂起时释放可安全暂停的算力。
     # 缺省为 None，`on_suspended` 即为空操作。
     lifecycle: ExecutionBindingLifecycleCoordinator | None = None
@@ -70,10 +76,21 @@ class RunExecutionBinding:
         """Apply the selected initializer to the host-bound workspace."""
         if self.host_workspace is not None:
             from pathlib import Path
-            await asyncio.to_thread(initializer.initialize, Path(self.host_workspace))
+            import inspect
+            result = await asyncio.to_thread(initializer.initialize, Path(self.host_workspace))
+            if inspect.isawaitable(result):
+                await result
 
     def validate_for(self, request: ExecutionBindingRequest) -> None:
         """Reject Host bindings that do not satisfy the requested identity/policy."""
+
+        if request.configuration is not None and self.configuration_id != request.configuration.configuration_id:
+            raise SageV2Error(RuntimeErrorInfo(
+                code="execution.binding_configuration_mismatch",
+                category=ErrorCategory.AUTHORIZATION,
+                message="binding did not apply the accepted execution configuration",
+                safe_to_resume=False,
+            ))
 
         if (
             self.run_id != request.run_id
@@ -134,6 +151,20 @@ class RunExecutionBinding:
 
 class ExecutionBindingProvider(Protocol):
     """Host port for acquiring actual-Run execution resources."""
+
+    async def accept_configuration(
+        self, command: StartRun, *, context: RequestContext,
+        parent_command: StartRun | None = None
+    ) -> StartRun:
+        """Validate authorization and freeze configuration before admission.
+
+        The provider must replace caller-supplied snapshots, inherit the parent
+        ceiling, and return serializable configuration. ``context`` is the
+        authenticated caller; identity must not come from model arguments.
+        This method must not
+        provision resources: the actual Run ID does not exist yet.
+        """
+        ...
 
     async def acquire(
         self, request: ExecutionBindingRequest

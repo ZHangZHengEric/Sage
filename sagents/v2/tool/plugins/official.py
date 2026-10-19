@@ -9,6 +9,7 @@ from typing import Any
 from sagents.v2.runtime.extensions import (
     CapabilityOffer,
     ExtensionDescriptor,
+    ExtensionDependency,
     ExtensionScope,
     ExtensionScopeContext,
 )
@@ -95,23 +96,14 @@ class OfficialToolPlugin:
                 capability="tool.executor", api_version="2", name="official"
             ),
         ),
-        supported_scopes=frozenset(
-            {ExtensionScope.PROCESS, ExtensionScope.AGENT, ExtensionScope.RUN}
-        ),
-        config_schema={
-            "type": "object",
-            "properties": {
-                "runtime": {},
-            },
-            "required": ["runtime"],
-            "additionalProperties": False,
-        },
+        supported_scopes=frozenset({ExtensionScope.RUN}), default_scope=ExtensionScope.RUN,
+        dependencies=(ExtensionDependency(capability="execution.tool-runtime"),),
+        config_schema={"type": "object", "additionalProperties": False},
         capabilities={"decorated_tools": True, "v2_native": True},
         built_in=True,
     )
 
-    def __init__(self, context: ExtensionScopeContext) -> None:
-        configured = context.config.get("runtime")
+    def __init__(self, configured: OfficialToolRuntime) -> None:
         if not isinstance(configured, OfficialToolRuntime):
             raise TypeError("sage.tool.official requires an OfficialToolRuntime")
         self.runtime = configured
@@ -132,7 +124,7 @@ class OfficialToolPlugin:
 
     async def stop(self, reason: Any) -> None:
         del reason
-        await self.runtime.close()
+        return None
 
 
 __all__ = [

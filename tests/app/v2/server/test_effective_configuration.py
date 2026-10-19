@@ -158,36 +158,42 @@ def test_both_entrypoints_recover_tool_errors_and_deliver_file(
 
 
 @pytest.mark.asyncio
-async def test_model_factory_resolves_each_agent_binding(tmp_path, monkeypatch):
-    from sagents.v2.package.manifest.models import ModelRoute
-    from sagents.v2.package.manifest.agents import AgentDefinition, ApplicationEntrypoint
-    from sagents.v2.package.manifest.root import SageManifest, ManifestMetadata
-    from sagents.v2 import SAgentBuilder
-    from tests.app.v2.server.conftest import scripted_hello
-
-    manifest = SageManifest(kind="agent-package", metadata=ManifestMetadata(id="models", name="Models", version="1.0.0"),
-        agents={"main": AgentDefinition(name="Main", instructions={"inline": "Main"}, mode="team", models={"primary": "custom-main"}, subagents=("child",)),
-                "child": AgentDefinition(name="Child", instructions={"inline": "Child"}, models={"primary": "custom-child"})},
-        entrypoint=ApplicationEntrypoint(agent="main"))
-    injected = {}
-    from sagents.v2.composition.assembler import ApplicationAssembler
-    original = ApplicationAssembler._create_capability
-    async def capture(self, *args, **kwargs):
-        if kwargs.get("capability") in {"context.summarizer", "agent.continuation-policy", "memory.recall-query"}:
-            injected[(kwargs["agent_id"], kwargs["capability"])] = kwargs["locked_config"]["model"]
-        return await original(self, *args, **kwargs)
-    monkeypatch.setattr(ApplicationAssembler, "_create_capability", capture)
-    seen = {}
-    def factory(resolved, agent_id):
-        seen[agent_id] = resolved.agents[agent_id].model_bindings
-        return scripted_hello()
-    app = await SAgentBuilder().with_models({"models": {"custom-main": ModelRoute(provider="server", model="main"), "custom-child": ModelRoute(provider="server", model="child")}}).with_defaults(session_root=tmp_path).with_model_provider_factory(factory)._build_package(manifest)
+async def test_registered_model_factory_resolves_each_agent_binding(tmp_path):
+    from tests.sagents.v2.sdk_fixture import build_registered_app
+    from tests.sagents.v2.test_standard_execution_configuration import response, run
+    from sagents.v2.model.contracts import ModelToolCall
+    from sagents.v2.testing.plugins import ScriptedModelProvider
+    from sagents.v2.package.manifest import SageManifest
+    from sagents.v2.package.manifest.runtime import RuntimeConfig
+    seen = []
+    def factory(scope, dependencies):
+        route = scope.agent_configuration["model_routes"]["primary"]
+        seen.append((scope.agent_id, route["model"]))
+        steps = (response(ModelToolCall(tool_call_id="delegate", name="sys_team_delegate_task",
+            arguments={"tasks": [{"agent_id": "child", "content": "Work"}]})), response()) if route["model"] == "main" else (response(),)
+        return ScriptedModelProvider(steps)
+    runtime = RuntimeConfig.model_validate({"capabilities": {
+        "agent.continuation-policy": {"plugin": "sage.agent.continuation.deterministic"},
+        "tool.selection-policy": {"plugin": "sage.tool-selection.direct"},
+    }})
+    def package(name, **fields):
+        return SageManifest.model_validate({"kind": "agent-package", "metadata": {
+            "id": "model." + name, "name": name, "version": "1"},
+            "agents": {name: {"name": name, "instructions": {"inline": "Help"},
+                              "models": {"primary": "custom-" + name}, **fields}},
+            "entrypoint": {"agent": name}})
+    app = await build_registered_app(tmp_path, runtime=runtime, model_factory=factory, models={"models": {
+        "custom-main": {"provider": "openai-responses", "model": "main"},
+        "custom-child": {"provider": "openai-responses", "model": "child"},
+    }})
     try:
-        assert seen == {"main": {"primary": "custom-main"}, "child": {"primary": "custom-child"}}
-        for capability in ("context.summarizer", "agent.continuation-policy", "memory.recall-query"):
-            assert injected[("main", capability)] is not injected[("child", capability)]
-        provider = next(row for row in app.resolved_plan.providers if row.capability == "model.provider")
-        assert provider.source == "host"
+        child = await app.load_agent(package("child"))
+        main = await app.load_agent(package("main", mode="team", subagents=["child"]), subagents={"child": child})
+        result, events = await run(app, main, "route-bindings")
+        assert result.state.value == "completed", events
+        assert {route for _, route in seen} == {"main", "child"}
+        assert len({agent for agent, _ in seen}) == 2
+        assert any(item.plugin_id == "test.fixture.model-factory" for item in main.resolved_plan.providers)
     finally:
         await app.close()
 

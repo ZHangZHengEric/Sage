@@ -1,3 +1,4 @@
+from tests.sagents.v2.sdk_fixture import build_registered_app, app_configuration
 from tests.sagents.v2.model_fixture import TEST_MODELS
 import asyncio
 
@@ -19,11 +20,7 @@ def package():
 async def test_load_reuse_update_and_close(tmp_path):
     manifest = package()
     app = (
-        await SAgentBuilder()
-        .with_models(TEST_MODELS)
-        .with_defaults(session_root=tmp_path)
-        .with_model_provider(ScriptedModelProvider(()))
-        .build(runtime=manifest.runtime)
+        await build_registered_app(tmp_path, models=TEST_MODELS, model=ScriptedModelProvider(()), runtime=manifest.runtime)
     )
     first, again = await asyncio.gather(
         app.load_agent(manifest), app.load_agent(manifest.model_dump())
@@ -51,15 +48,14 @@ async def test_default_runtime_matches_desktop(tmp_path):
     from app.v2.desktop.backend.package import desktop_v2_manifest
 
     app = (
-        await SAgentBuilder()
-        .with_models(TEST_MODELS)
-        .with_defaults(session_root=tmp_path)
-        .with_model_provider(ScriptedModelProvider(()))
-        .build()
+        await build_registered_app(tmp_path, models=TEST_MODELS, model=ScriptedModelProvider(()), runtime=desktop_v2_manifest(session_root=tmp_path).runtime)
     )
-    assert (
-        app._loaded_agents.runtime == desktop_v2_manifest(session_root=tmp_path).runtime
-    )
+    from sagents.v2.composition.defaults import effective_runtime
+
+    expected = effective_runtime(desktop_v2_manifest(session_root=tmp_path).runtime)
+    for capability, selection in expected.capabilities.items():
+        assert app.runtime_configuration.capabilities[capability] == selection
+    assert app.runtime_configuration.capabilities["model.provider"].plugin == "test.fixture.model.provider"
     try:
         await app.load_agent(package())
     finally:
@@ -73,15 +69,11 @@ async def test_revision_identity_survives_loading_order(tmp_path):
         update={"metadata": original.metadata.model_copy(update={"version": "2"})}
     )
 
-    def builder():
-        return (
-            SAgentBuilder()
-            .with_models(TEST_MODELS)
-            .with_defaults(session_root=tmp_path)
-            .with_model_provider(ScriptedModelProvider(()))
-        )
+    async def application():
+        return await build_registered_app(tmp_path, models=TEST_MODELS,
+            model=ScriptedModelProvider(()), runtime=original.runtime)
 
-    app = await builder().build(runtime=original.runtime)
+    app = await application()
     try:
         first = await app.load_agent(original)
         second = await app.update_agent(agent=first, package=changed)
@@ -91,7 +83,7 @@ async def test_revision_identity_survives_loading_order(tmp_path):
         ) is second._application.service("execution.dispatcher")
     finally:
         await app.close()
-    reopened = await builder().build(runtime=original.runtime)
+    reopened = await application()
     try:
         second = await reopened.load_agent(changed)
         assert second.composition_hash == expected
@@ -106,11 +98,7 @@ async def test_multiple_packages_with_same_internal_agent_name(tmp_path):
         update={"metadata": first.metadata.model_copy(update={"id": "test.other"})}
     )
     app = (
-        await SAgentBuilder()
-        .with_models(TEST_MODELS)
-        .with_defaults(session_root=tmp_path)
-        .with_model_provider(ScriptedModelProvider(()))
-        .build(runtime=first.runtime)
+        await build_registered_app(tmp_path, models=TEST_MODELS, model=ScriptedModelProvider(()), runtime=first.runtime)
     )
     try:
         one = await app.load_agent(first)
@@ -172,11 +160,7 @@ async def test_reusable_agent_runs_and_old_revision_survives_update(tmp_path):
     original = package()
     provider = model()
     app = (
-        await SAgentBuilder()
-        .with_models(TEST_MODELS)
-        .with_defaults(session_root=tmp_path)
-        .with_model_provider(provider)
-        .build(runtime=original.runtime)
+        await build_registered_app(tmp_path, models=TEST_MODELS, model=provider, runtime=original.runtime)
     )
     try:
         first = await app.load_agent(original)
@@ -210,22 +194,14 @@ async def test_restart_restores_pending_original_revision_after_update(tmp_path)
         update={"metadata": original.metadata.model_copy(update={"version": "2"})}
     )
     app = (
-        await SAgentBuilder()
-        .with_models(TEST_MODELS)
-        .with_defaults(session_root=tmp_path)
-        .with_model_provider(model())
-        .build(runtime=original.runtime)
+        await build_registered_app(tmp_path, models=TEST_MODELS, model=model(), runtime=original.runtime)
     )
     first = await app.load_agent(original)
     await app.update_agent(agent=first, package=changed)
     pending = await app.runtime.start_run(command(first, "recover-original"), context())
     await app.close()
     reopened = (
-        await SAgentBuilder()
-        .with_models(TEST_MODELS)
-        .with_defaults(session_root=tmp_path)
-        .with_model_provider(model())
-        .build(runtime=original.runtime)
+        await build_registered_app(tmp_path, models=TEST_MODELS, model=model(), runtime=original.runtime)
     )
     try:
         latest = await reopened.load_agent(changed)
@@ -254,11 +230,7 @@ async def test_package_inputs_and_atomic_invalid_update(tmp_path):
     data = manifest.model_dump(mode="json")
     (folder / "sage.yaml").write_text(yaml.safe_dump(data))
     app = (
-        await SAgentBuilder()
-        .with_models(TEST_MODELS)
-        .with_defaults(session_root=tmp_path / "state")
-        .with_model_provider(model())
-        .build(runtime=manifest.runtime)
+        await build_registered_app(tmp_path / 'state', models=TEST_MODELS, model=model(), runtime=manifest.runtime)
     )
     try:
         agent = await app.load_agent(folder)
@@ -320,14 +292,9 @@ async def test_app_owns_resources_without_loading_and_snapshots_registration(tmp
         async def close(self):
             closed.append(True)
 
-    builder = (
-        SAgentBuilder()
-        .with_models(TEST_MODELS)
-        .with_defaults(session_root=tmp_path)
-        .with_owned_resources(Resource())
-    )
-    app = await builder.build()
-    assert app._loaded_agents.builder.extensions is not builder.extensions
+    builder, runtime = app_configuration(tmp_path, resources=(Resource(),))
+    app = await builder.build(runtime=runtime, models=TEST_MODELS)
+    assert app._loaded_agents.builder._registry is not builder._registry
     await app.close()
     await app.close()
     assert closed == [True]
@@ -347,11 +314,7 @@ async def test_update_while_old_run_is_in_flight(tmp_path):
     provider = GatedModel(model()._steps)
     original = package()
     app = (
-        await SAgentBuilder()
-        .with_models(TEST_MODELS)
-        .with_defaults(session_root=tmp_path)
-        .with_model_provider(provider)
-        .build(runtime=original.runtime)
+        await build_registered_app(tmp_path, models=TEST_MODELS, model=provider, runtime=original.runtime)
     )
     try:
         old = await app.load_agent(original)
@@ -383,18 +346,10 @@ async def test_update_while_old_run_is_in_flight(tmp_path):
 async def test_entrypoint_requires_owned_agent_and_matching_command(tmp_path):
     manifest = package()
     app = (
-        await SAgentBuilder()
-        .with_models(TEST_MODELS)
-        .with_defaults(session_root=tmp_path / "one")
-        .with_model_provider(model())
-        .build(runtime=manifest.runtime)
+        await build_registered_app(tmp_path / 'one', models=TEST_MODELS, model=model(), runtime=manifest.runtime)
     )
     other = (
-        await SAgentBuilder()
-        .with_models(TEST_MODELS)
-        .with_defaults(session_root=tmp_path / "two")
-        .with_model_provider(model())
-        .build(runtime=manifest.runtime)
+        await build_registered_app(tmp_path / 'two', models=TEST_MODELS, model=model(), runtime=manifest.runtime)
     )
     try:
         agent = await app.load_agent(manifest)
@@ -431,12 +386,7 @@ async def test_plugin_validation_failure_keeps_loaded_revision(tmp_path):
         }
     )
     app = (
-        await SAgentBuilder()
-        .with_models(TEST_MODELS)
-        .register(compactor_registration())
-        .with_defaults(session_root=tmp_path)
-        .with_model_provider(model())
-        .build(runtime=runtime)
+        await build_registered_app(tmp_path, models=TEST_MODELS, model=model(), runtime=runtime, registrations=(compactor_registration(),))
     )
     try:
         original = await app.load_agent(manifest)
@@ -478,11 +428,7 @@ async def test_child_revision_is_pinned_across_update_and_restart(tmp_path):
 
     async def open_app():
         return (
-            await SAgentBuilder()
-            .with_models(TEST_MODELS)
-            .with_defaults(session_root=tmp_path)
-            .with_model_provider(model())
-            .build(runtime=parent_package.runtime)
+            await build_registered_app(tmp_path, models=TEST_MODELS, model=model(), runtime=parent_package.runtime)
         )
 
     app = await open_app()
@@ -548,3 +494,14 @@ def test_single_agent_bundle_preserves_historical_content_hash():
     raw["manifest"]["agents"]["second"] = raw["manifest"]["agents"]["assistant"]
     with pytest.raises(ValueError, match="exactly one Agent"):
         AgentPackageBundle.model_validate(raw)
+
+
+def test_public_sdk_types_cannot_accept_host_execution_assembly():
+    import inspect
+    from sagents.v2 import SAgent, SAgentApplication
+    with pytest.raises(TypeError, match="SAgentBuilder"):
+        SAgent(runtime=object(), driver_factory=lambda run_id: object())
+    with pytest.raises(TypeError, match="SAgentBuilder"):
+        SAgentApplication(agents={"host": object()}, entrypoint_agent_id="host", services={}, adapters={},
+            scope_handles=(), composition_hash="host")
+    assert "driver_factory" not in inspect.signature(SAgent).parameters

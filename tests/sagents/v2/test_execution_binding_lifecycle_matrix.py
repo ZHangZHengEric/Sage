@@ -425,3 +425,28 @@ async def test_binding_suspension_releases_safe_compute_through_real_coordinator
     assert record.compute_released is True
     assert (await provider.inspect(handle.ref)).state == SandboxState.TERMINATED
     assert (await store.get_run(run_id)).state == RunState.SUSPENDED
+
+
+@pytest.mark.asyncio
+async def test_local_provider_retains_failed_close_without_replaying_effects(tmp_path):
+    from types import SimpleNamespace
+    from sagents.v2.runtime.execution.local_binding import LocalWorkspaceExecutionBindingProvider
+    attempts = []
+    class Lease:
+        def __init__(self, name):
+            self.ref = SimpleNamespace(owner_run_id=name)
+            self.name = name
+        async def close(self):
+            attempts.append(self.name)
+            if self.name == "failed":
+                raise RuntimeError("lease release outcome unknown")
+    provider = LocalWorkspaceExecutionBindingProvider(tmp_path)
+    bad = _binding_for(Lease("failed"), provider.issuer)
+    good = _binding_for(Lease("successful"), provider.issuer)
+    provider.bindings.extend((bad, good))
+    for _ in range(2):
+        with pytest.raises(RuntimeError, match="failed to close"):
+            await provider.close()
+        assert provider.bindings == [bad]
+        assert good.closed and not bad.closed
+    assert attempts.count("failed") == attempts.count("successful") == 1

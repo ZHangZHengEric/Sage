@@ -1,4 +1,5 @@
 from __future__ import annotations
+from tests.sagents.v2.sdk_fixture import fixture_configuration
 from tests.sagents.v2.model_fixture import TEST_MODELS
 
 import asyncio
@@ -332,7 +333,6 @@ async def test_runner_authorization_errors_are_not_retried_as_invalid_patches():
 
 @pytest.mark.asyncio
 async def test_native_runner_runs_real_v2_application_and_materializes_files(tmp_path):
-    from sagents.v2 import SAgentBuilder
     from sagents.v2.model.contracts import (
         ModelEventKind,
         ModelResponse,
@@ -355,26 +355,7 @@ async def test_native_runner_runs_real_v2_application_and_materializes_files(tmp
             "skills/units/SKILL.md"
         ]
         return (
-            SAgentBuilder().with_models(TEST_MODELS)
-            .with_defaults(session_root=root / "sessions")
-            .with_model_provider(
-                ScriptedModelProvider(
-                    (
-                        ScriptedModelStep(
-                            events=(
-                                ModelStreamEvent(
-                                    kind=ModelEventKind.COMPLETED,
-                                    response=ModelResponse(
-                                        response_id="answer",
-                                        text="2 km = 2000 m",
-                                        finish_reason="stop",
-                                    ),
-                                ),
-                            )
-                        ),
-                    )
-                )
-            )
+            fixture_configuration(root / 'sessions', models=TEST_MODELS, model=ScriptedModelProvider((ScriptedModelStep(events=(ModelStreamEvent(kind=ModelEventKind.COMPLETED, response=ModelResponse(response_id='answer', text='2 km = 2000 m', finish_reason='stop')),)),)))
         )
 
     runner = IsolatedOptimizationRunner(
@@ -392,7 +373,6 @@ async def test_native_runner_runs_real_v2_application_and_materializes_files(tmp
 
 @pytest.mark.asyncio
 async def test_native_runner_cancellation_closes_driver_and_removes_workspace(tmp_path):
-    from sagents.v2 import SAgentBuilder
     from sagents.v2.testing.plugins.scripted_model import ScriptedModelProvider
 
     started = asyncio.Event()
@@ -414,9 +394,7 @@ async def test_native_runner_cancellation_closes_driver_and_removes_workspace(tm
     def factory(package, root, ctx):
         paths.append(root)
         return (
-            SAgentBuilder().with_models(TEST_MODELS)
-            .with_defaults(session_root=root / "sessions")
-            .with_model_provider(WaitingModel(()))
+            fixture_configuration(root / 'sessions', models=TEST_MODELS, model=WaitingModel(()))
         )
 
     runner = IsolatedOptimizationRunner(
@@ -848,7 +826,6 @@ async def test_opt_in_latency_improvement_preserves_quality():
 
 @pytest.mark.asyncio
 async def test_native_runner_preserves_tool_execution_evidence(tmp_path):
-    from sagents.v2 import SAgentBuilder
     from sagents.v2.model.contracts import (
         ModelEventKind,
         ModelResponse,
@@ -903,10 +880,7 @@ async def test_native_runner_preserves_tool_execution_evidence(tmp_path):
             )
         )
         return (
-            SAgentBuilder().with_models(TEST_MODELS)
-            .with_defaults(session_root=root / "sessions")
-            .with_model_provider(model)
-            .with_tool_provider(provider.catalog, provider.executor)
+            fixture_configuration(root / 'sessions', models=TEST_MODELS, model=model, tools=(provider.catalog, provider.executor,))
         )
 
     runner = IsolatedOptimizationRunner(
@@ -1065,7 +1039,6 @@ async def test_dialogue_user_driver_and_evaluator_preserve_original_goal_and_tur
 
 @pytest.mark.asyncio
 async def test_native_conversation_keeps_target_session_and_prior_messages(tmp_path):
-    from sagents.v2 import SAgentBuilder
     from sagents.v2.model.contracts import (
         ModelEventKind,
         ModelResponse,
@@ -1100,9 +1073,7 @@ async def test_native_conversation_keeps_target_session_and_prior_messages(tmp_p
             for index, text in enumerate(("Remembered", "42"))
         )
         return (
-            SAgentBuilder().with_models(TEST_MODELS)
-            .with_defaults(session_root=root / "sessions")
-            .with_model_provider(ScriptedModelProvider(steps))
+            fixture_configuration(root / 'sessions', models=TEST_MODELS, model=ScriptedModelProvider(steps))
         )
 
     runner = IsolatedOptimizationRunner(

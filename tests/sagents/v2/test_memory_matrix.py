@@ -353,7 +353,7 @@ async def test_empty_llm_recall_query_skips_search_and_continues_turn(query):
             history_reader=runtime.session_store,
         ),
     )
-    agent = SAgent(runtime=runtime, driver_factory=lambda _run_id: loop)
+    agent = SAgent._from_composition(runtime=runtime, driver_factory=lambda _run_id: loop)
     request = command(memory=True).model_copy(
         update={"input": (InputItem(role="user", content=(TextBlock(text="没有"),)),)}
     )
@@ -455,7 +455,7 @@ async def test_auto_ingestion_runs_after_commit_and_failure_does_not_rollback(
         tool_executor=InMemoryToolExecutor({}, {}),
         context_assembler=DefaultContextAssembler(),
     )
-    agent = SAgent(
+    agent = SAgent._from_composition(
         runtime=runtime,
         driver_factory=lambda _run_id: loop,
         memory_service=service,

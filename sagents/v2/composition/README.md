@@ -1,81 +1,34 @@
-# Reading application composition
+# Sage v2 composition implementation
 
-Start with the [repository code map](../../../docs/en/architecture/code-reading-guide.md).
-The public entry points remain `SAgentBuilder` and `SAgentApplication`; this
-package contains their implementation, not a second public framework.
+The public host interface is `SAgentBuilder.register`, `build(runtime, models)`,
+`SAgentApplication.load_agent`, the standard entrypoint and `close`.
+[SDK guide](../README.md) documents configuration and ownership.
 
-| File | Responsibility | Does not own |
-| --- | --- | --- |
-| `options.py` | Explicit host injections collected by Builder | Provider lifetime |
-| `resolution.py` | Resolve manifests, trust checks and selection rules | Live resources |
-| `providers.py` | Open selected providers through ExtensionHost | Plugin implementation |
-| `assembler.py` | Initial application wiring, Agent/Flow driver factories and capability validation | Host business policy |
-| `agent_components.py` | Named Agent component graph and dependency order | Plugin scope ownership |
-| `bound_tools.py` | Run-bound workspace and official-tool service wiring | Binding acquisition, retry or cleanup |
-| `materializer.py` | Scoped Agent ports and tenant/Agent-aware reuse in an existing application | Run admission |
-| `contracts.py` | Assembly result types | Construction or execution |
-| `identity.py` | Existing composition/cache identity rules | Credentials in plain text |
-| `drivers.py` | Bind actual Run IDs to execution resources before creating loops | Session transitions |
-| `resources.py` | Run ownership, rollback and retryable cleanup | Durable sandbox reconciliation |
+| Module | Responsibility |
+| --- | --- |
+| `configuration.py` | Serializable application choices plus explicit registrations returned by managed-host factories |
+| `bootstrap.py` | App process capabilities, authoritative store, dispatcher and recovery resolver; no placeholder Agent |
+| `loaded_agents.py` | Serialized publication of immutable Agent revisions and authorized recovery |
+| `agent_graph.py` | Explicit one-Agent package graph, direct Team members and ordinary delegate boundaries |
+| `revision_store.py` | Atomic persistent snapshots of resolved Agent revisions |
+| `resolution.py` | Manifest resolution, trust and selection rules |
+| `providers.py` | Dependency resolution and identity-aware scope borrowing through ExtensionHost |
+| `assembler.py` | SDK-owned Agent/Flow assembly and actual Run capability creation |
+| `agent_components.py` | Standard context and continuation dependency order |
+| `bound_tools.py` | Official tools from the actual Run execution environment |
+| `drivers.py` | Internal lazy binding after actual Run allocation; cleanup of independent owned resources |
+| `contracts.py` | Inspectable final provider selections and dependencies |
+| `identity.py` | Canonical configuration and registered implementation identity |
+| `defaults.py` | Explicit effective defaults frozen into revisions |
 
-## Initial application
+Hosts implement capability protocols. They do not construct these internal
+classes, replace execution attributes or provide a Driver. Process objects pass
+through registration factories and declared dependencies. Runtime selects one
+mechanism for both built-in and custom implementations.
 
-`SAgentBuilder.build()` passes explicit `BuildOptions` to
-`ApplicationAssembler.assemble()`. Assembly resolves the package, opens process
-services, composes Agent capabilities, creates drivers, validates guarantees,
-then starts the dispatcher and returns `SAgentApplication`. The Builder rolls
-back acquired scopes if construction fails. The identity algorithm and plugin
-scope IDs are preserved so existing admitted Runs remain recoverable.
-
-## Host-admitted Run
-
-Both hosts call `application.compose_run(compose)`. The callback resolves and
-wires its host-specific inputs and registers newly owned resources with the
-provided `RunResources`. Composition itself neither admits nor executes a Run.
-The result contains `value` (the host's assembled driver/value) and `resources`.
-The caller must close those resources when its execution boundary settles.
-
-Desktop uses `materialize_agent()` for scoped capability selection and keeps its
-sandbox lifecycle adapter. Server builds a package application using
-`with_shared_runtime(process_application)` to borrow the same process services.
-These adapters deliberately remain separate: desktop approvals and server
-identity/catalog policies are not interchangeable.
-
-## Ownership rules
-
-- An injected resource is borrowed unless ownership is explicitly transferred.
-- `resources.own(service)` registers a Run service.
-- `resources.own(sandbox, dependency=True)` registers its execution dependency.
-- Normal close attempts services in reverse order and keeps dependencies alive
-  if any service failed to close. Retrying closes only pending resources.
-- Composition failure attempts all acquired resources, retains the original
-  exception, and leaves failed cleanup with the application for shutdown retry.
-- Application close waits for admitted assembly operations to settle. It does
-  not take ownership of successful Run assemblies from the host.
-- Application scope handles are registered through `retain_scope()`, not by
-  mutating another object's private list.
-- Durable suspension/release/reconciliation remains in
-  `runtime/execution/lifecycle.py`; resource close is not a replacement for it.
-
-Plugins implement their own behavior and may duplicate code. They must not
-import sibling implementations. Shared selection here belongs to the host
-composition infrastructure, not to an implementation base class for plugins.
-
-## Custom loop hosts
-
-All hosts use `AgentCompositionFactory.create_loop()`. Explicit parameters
-select context provider order, developer instructions, budget Agent, completion
-gates and automatic memory recall. Defaults retain the standard package behavior.
-Desktop supplies the root Agent ID for member budgets and its existing prompt
-order/gates. Hosts no longer need separate engine/context wiring for these choices.
-
-`build(package, runtime=...)` applies the same RuntimeConfig before resolution;
-it replaces package runtime, never mutates an already resolved identity.
-Register plugins before building. `application.process_provider()` uses the same
-ExtensionHost validation and application-owned lifecycle for host providers.
-
-`AgentComponents` replaces positional component tuples in initial assembly.
-Its opener is injected by the application and registers resources before they
-are used. `BoundToolComposer` consumes an already validated binding and explicit
-service ports; both root and child drivers use it. Drivers remain responsible
-for acquisition and rollback, so composition does not retry external effects.
+Each App owns its scopes and dispatcher. Shared host objects are borrowed.
+Creation failure rolls back owned resources; cancellation and App shutdown wait
+for in-flight assembly to settle. Run cleanup attempts independent resources even
+if one close fails and retries only failed cleanup. Shared sandbox resources use
+separate Run leases. Durable execution recovery remains in the execution runtime;
+resource cleanup alone does not authorize replaying side effects.

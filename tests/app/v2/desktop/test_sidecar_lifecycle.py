@@ -145,3 +145,34 @@ async def test_idle_shutdown_remains_accepted_during_restart_handoff():
     repeated = await leases.request_shutdown_if_idle()
     assert repeated.shutdown_requested
     assert repeated.active_clients == 0
+
+
+@pytest.mark.asyncio
+async def test_background_run_keeps_detached_and_expired_sidecar_alive_until_finished():
+    from app.v2.desktop.backend.service import DesktopV2Service
+    from sagents.v2.contracts.commands import InputItem, StartRun
+    from sagents.v2.contracts.items import TextBlock
+    from sagents.v2.runtime import HarnessRuntime
+    from sagents.v2.runtime.session import EphemeralSessionStore
+    from tests.sagents.v2.test_autonomous_runtime import CONTEXT
+
+    store = EphemeralSessionStore()
+    runtime = HarnessRuntime(store)
+    service = type("Service", (), {"session_store": store, "rsi_active": False})()
+    def busy():
+        return DesktopV2Service.has_background_work(service)
+    handle = await runtime.start_run(StartRun(
+        agent_id="agent", input=(InputItem(role="user", content=(TextBlock(text="work"),)),),
+        resolved_spec_hash="sha256:keepalive", idempotency_key="work",
+    ), CONTEXT)
+    now = [0.0]
+    leases = SidecarClientLeases(monotonic=lambda: now[0], keep_alive=busy)
+    await leases.attach("desktop-client-one")
+    assert not (await leases.detach("desktop-client-one")).shutdown_requested
+    now[0] = 100
+    assert not (await leases.expire()).shutdown_requested
+    from sagents.v2.contracts.commands import CancelRun
+    run = await runtime.get_run(handle.run_id)
+    await runtime.cancel_run(CancelRun(run_id=run.run_id, expected_revision=run.revision,
+                                     idempotency_key="stop"), CONTEXT)
+    assert (await leases.expire()).shutdown_requested

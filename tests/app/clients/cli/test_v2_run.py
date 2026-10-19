@@ -59,6 +59,7 @@ from sagents.v2.contracts.errors import ErrorCategory, RuntimeErrorInfo
 from sagents.v2.contracts.interactions import InteractionRequest, InteractionType
 from sagents.v2.contracts.principals import ActorRef, PrincipalType, RequestContext
 from sagents.v2.contracts.run_state import RunState
+from sagents.v2.contracts.commands import StartRun
 from sagents.v2.agent.policy import (
     ApprovalMatcher,
     ApprovalStrategy,
@@ -443,7 +444,7 @@ async def test_prompt_decider_maps_keys_and_falls_back_on_eof():
     ) == InteractionAnswer("approve_and_remember", {"scope": "session"})
 
 
-async def test_provider_failure_becomes_recovery_question_then_cancels_headless(
+async def test_provider_failure_retries_autonomously_in_headless_mode(
     tmp_path,
 ):
     failing_model = ScriptedModelProvider(
@@ -458,6 +459,8 @@ async def test_provider_failure_becomes_recovery_question_then_cancels_headless(
                     safe_to_resume=True,
                 ),
             ),
+            ScriptedModelStep(events=(ModelStreamEvent(kind=ModelEventKind.COMPLETED,
+                response=ModelResponse(response_id="recovered", text="Recovered", finish_reason="stop")),)),
         )
     )
     _, _, agent, command = await make_agent(tmp_path, failing_model)
@@ -473,12 +476,12 @@ async def test_provider_failure_becomes_recovery_question_then_cancels_headless(
     )
     await agent.close()
 
-    assert outcome.state == RunState.CANCELLED
-    assert outcome.exit_code == 1
-    assert "interaction.requested" in outcome.event_types
-    assert "non-interactive decision: cancel" in err.getvalue()
-    assert "[run cancelled] reason=interaction_cancelled" in err.getvalue()
-    assert out.getvalue() == ""
+    assert outcome.state == RunState.COMPLETED
+    assert outcome.exit_code == 0
+    assert "step.retry_scheduled" in outcome.event_types
+    assert "interaction.requested" not in outcome.event_types
+    assert len(failing_model.requests) == 2
+    assert out.getvalue() == "Recovered\n"
 
 
 def test_binding_provider_exposes_host_workspace_paths(tmp_path):
@@ -1687,13 +1690,15 @@ async def test_binding_forwards_the_request_lifecycle(tmp_path):
             self.calls.append((run_id, context))
 
     provider = LocalWorkspaceBindingProvider(tmp_path)
-    plain = await provider.acquire(
-        ExecutionBindingRequest(run_id="run_1", agent_id="sage.cli.coder", context=CONTEXT)
-    )
+    admitted = await provider.accept_configuration(StartRun(agent_id="sage.cli.coder", input=(),
+        resolved_spec_hash="sha256:test", idempotency_key="binding"), context=CONTEXT)
+    plain = await provider.acquire(ExecutionBindingRequest(run_id="run_1", agent_id="sage.cli.coder", context=CONTEXT,
+        configuration=admitted.config.execution_snapshot))
     lifecycle = RecordingLifecycle()
     coordinated = await provider.acquire(
         ExecutionBindingRequest(
-            run_id="run_2", agent_id="sage.cli.coder", context=CONTEXT, lifecycle=lifecycle
+            run_id="run_2", agent_id="sage.cli.coder", context=CONTEXT, lifecycle=lifecycle,
+            configuration=admitted.config.execution_snapshot
         )
     )
     try:
@@ -2565,7 +2570,7 @@ async def test_workspace_remembered_approval_covers_later_sessions_in_the_same_w
     assert (workspace / "hello.txt").read_text() == "hello\n"
     store_file = workspace_approval_store_path(tmp_path / "runtime" / "approvals", workspace)
     assert store_file.is_file()
-    assert sorted(path.name for path in workspace.iterdir()) == [".sage-sandbox-tmp", "hello.txt"]
+    assert sorted(path.name for path in workspace.iterdir()) == [".sage-sandbox-home", ".sage-sandbox-tmp", "hello.txt"]
 
     # 进程 2：同一工作区、新会话。若仍询问，固定应答 deny 会让文件保持原样。
     (workspace / "hello.txt").write_text("stale\n")

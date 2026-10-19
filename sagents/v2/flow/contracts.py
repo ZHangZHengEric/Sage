@@ -13,6 +13,8 @@ from sagents.v2.contracts.principals import RequestContext
 
 
 class FlowNodeOutcome(str, Enum):
+    RUNNING = "running"
+    DEFERRED = "deferred"
     COMPLETED = "completed"
     SUSPENDED = "suspended"
     FAILED = "failed"
@@ -46,6 +48,7 @@ class ParallelBranchState(StrictModel):
     output: dict[str, Any] = Field(default_factory=dict)
     error: RuntimeErrorInfo | None = None
     child_run_id: Identifier | None = None
+    lifecycle_recorded: bool = True
 
 
 class PendingParallelState(StrictModel):
@@ -72,12 +75,14 @@ class FlowFrameState(StrictModel):
     pending_node_execution_id: Identifier | None = None
     pending_error: dict[str, Any] | None = None
     pending_parallel: PendingParallelState | None = None
+    node_result_ready: bool = False
 
 
 class FlowExecutionState(StrictModel):
     """Checkpoint payload for one Flow execution, including nested frames."""
 
     state_version: str = "2"
+    execution_checkpoint: bool = True
     flow_id: Identifier
     flow_execution_id: Identifier
     current_node_id: Identifier
@@ -90,6 +95,9 @@ class FlowExecutionState(StrictModel):
     pending_error: dict[str, Any] | None = None
     pending_parallel: PendingParallelState | None = None
     subflow_stack: tuple[FlowFrameState, ...] = ()
+    node_result_ready: bool = False
+    automatic_resume_at: str | None = None
+    flow_definition_hash: str | None = None
 
 
 class RunnableNode(Protocol):

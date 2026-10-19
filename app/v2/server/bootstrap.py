@@ -26,14 +26,13 @@ from app.v2.server.identity.service import IdentityService
 from app.v2.server.config.manifest import server_v2_manifest
 from app.v2.server.runtime.official import install_sandbox
 from app.v2.server.conversations.runs import RunService
-from app.v2.server.runtime.driver import CatalogRunDriver
 from app.v2.server.skills.service import SkillCatalogService
 from app.v2.server.config.settings import ServerSettings
 from app.v2.server.observability.logging import get_logger
 from app.v2.server.runtime.integrations.a2a import A2APluginCache
 from app.v2.server.database import Database
 from app.v2.server.runtime.integrations.mcp import McpPluginCache
-from app.v2.server.runtime.models import HostModelProvider
+from app.v2.server.runtime.models import ServerModelClients
 from app.v2.server.identity.key_repository import ApiKeyStore, DatabaseApiKeyStore
 from app.v2.server.identity.repository import DatabaseUserStore, UserStore
 from app.v2.server.catalog.repository import CatalogStore, DatabaseCatalogStore
@@ -192,37 +191,47 @@ class ServerHost:
             quota_group=run_quota,
             max_pending_items=self.settings.max_pending_runs,
         )
-        host_models: HostModelProvider | None = None
+        host_models: ServerModelClients | None = None
         try:
             self.execution.model_budget = model_budget
-            host_models = HostModelProvider(
-                self.catalog_store,
-                fallback=self.execution.fallback_model,
-                max_clients=self.settings.max_model_clients,
-            )
+            host_models = ServerModelClients(max_clients=self.settings.max_model_clients)
             self.execution.model_pool = host_models
-            builder = (
-                SAgentBuilder()
-                .with_defaults(session_root=self.paths.sessions_root)
-                .with_model_provider(host_models)
-                .with_log_sink(self.log_sink)
-                .with_diagnostic_sink(self.diagnostics)
-                .with_model_budget(model_budget)
-                .with_scheduler(scheduler)
-                .with_run_driver_factory(
-                    lambda run_id: CatalogRunDriver(
-                        self._catalog_run_dependencies(), run_id
-                    )
-                )
-                .with_owned_resources(scheduler, host_models)
-            )
-            for registration in self._registrations:
-                builder.register(registration)
+            from app.v2.server.runtime.sdk_plugins import server_registrations, service_registration, service_selection, SCHEDULER_CONFIG_SCHEMA
+            builder = SAgentBuilder()
+            choices = {}
             manifest = server_v2_manifest(self.settings)
-            self._application = await builder.build(runtime=manifest.runtime)
-            await self._application.load_agent(manifest)
+            for capability, value, ownership in (
+                ("observability.log-sink", self.log_sink, "borrowed"),
+                ("observability.diagnostic-sink", self.diagnostics, "borrowed"),
+                ("execution.model-budget", model_budget, "borrowed"),
+                ("execution.scheduler", scheduler, "owned"),
+                ("server.model-clients", host_models, "owned"),
+            ):
+                scheduler_port = capability == "execution.scheduler"
+                builder.register(service_registration(capability, value, ownership=ownership,
+                    dependencies=("server.model-clients",) if scheduler_port else (),
+                    config_schema=SCHEDULER_CONFIG_SCHEMA if scheduler_port else None))
+                choices[capability] = service_selection(capability, config=
+                    manifest.runtime.capabilities[capability].config if scheduler_port else None)
+            for registration in (*self._registrations, *server_registrations(self)):
+                builder.register(registration)
+            from app.v2.server.runtime.official import file_sandbox_registrations
+            for registration in file_sandbox_registrations(self.settings):
+                builder.register(registration)
+                capability = registration.descriptor.provides[0].capability
+                choices[capability] = service_selection(capability)
+            from sagents.v2.package.manifest.runtime import CapabilitySelection
+            choices["interface.protocol-adapter"] = (
+                CapabilitySelection(plugin="sage.protocol.ag-ui", name="ag-ui", scope="process", config={"enable_sage_extensions": True}),
+                CapabilitySelection(plugin="sage.protocol.a2a", name="a2a", scope="process"),
+            )
+            manifest = server_v2_manifest(self.settings)
+            runtime = manifest.runtime.model_copy(update={
+                "capabilities": {**manifest.runtime.capabilities, **choices},
+                "state_root": str(self.paths.sessions_root), "start_workers": False,
+            })
+            self._application = await builder.build(runtime=runtime)
             await install_sandbox(self.execution, self._application, self.settings)
-            host_models.session_store = self._application.runtime.session_store
             session_access = self._application.service("session.access")
             admission = RunAdmission(
                 threads=self.threads,
@@ -235,7 +244,7 @@ class ServerHost:
             runs = RunService(
                 application=self._application,
                 session_access=session_access,
-                execution=self.execution,
+                execution=self.execution, host=self,
                 users=self.users, keys=self.credentials.keys, catalog=self.catalog, settings=self.settings,
             )
             self.conversations = ConversationService(
@@ -274,6 +283,7 @@ class ServerHost:
             self.agent_management = ServerAgentManagement(
                 self.paths.data_root / "managed",
                 database=self.database,
+                host=self,
                 settings=self.settings,
                 paths=self.paths,
                 users=self.users,
@@ -292,6 +302,7 @@ class ServerHost:
                 job_runtime=self.application.service("execution.job-runtime"),
             )
             self.package_queries = self.agent_management.queries
+            await self.application.service("execution.dispatcher").start()
             self._track(
                 asyncio.create_task(
                     recover_pending_packages(

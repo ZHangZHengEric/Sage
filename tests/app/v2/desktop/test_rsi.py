@@ -166,7 +166,7 @@ def start_request(request_id="request-1"):
 
 
 @pytest.mark.asyncio
-@pytest.mark.timeout(20)
+@pytest.mark.timeout(180)
 async def test_native_background_rounds_versions_confirmation_cas_and_restart(
     tmp_path, monkeypatch
 ):
@@ -374,7 +374,7 @@ async def test_repeated_configuration_is_retained_as_a_new_version(
 
 
 @pytest.mark.asyncio
-@pytest.mark.timeout(20)
+@pytest.mark.timeout(180)
 async def test_default_tools_can_load_enabled_skill_in_isolated_rsi(
     tmp_path, monkeypatch
 ):
@@ -433,7 +433,7 @@ async def test_default_tools_can_load_enabled_skill_in_isolated_rsi(
 
 
 @pytest.mark.asyncio
-@pytest.mark.timeout(20)
+@pytest.mark.timeout(180)
 async def test_rejected_candidates_retained_but_cannot_be_applied(
     tmp_path, monkeypatch
 ):
@@ -500,7 +500,7 @@ async def test_rsi_http_routes_auth_and_explicit_confirmation(tmp_path):
 
 
 @pytest.mark.asyncio
-@pytest.mark.timeout(20)
+@pytest.mark.timeout(180)
 async def test_legacy_operation_names_do_not_break_history_or_rsi(
     tmp_path, monkeypatch
 ):

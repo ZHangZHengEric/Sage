@@ -130,7 +130,7 @@ async def test_expired_lease_recovers_same_team_and_saved_results(
         )
         return factory.create_loop(descriptor, run_id)
 
-    agent = SAgent(runtime=runtime, driver_factory=driver_factory)
+    agent = SAgent._from_composition(runtime=runtime, driver_factory=driver_factory)
     dispatcher = LocalWorkerDispatcher(
         scheduler,
         max_concurrent_runs=2,
@@ -366,7 +366,7 @@ async def test_lease_loss_with_remote_tool_in_flight_does_not_replay_it(
         factory.base_executor = Executor()
         return factory.create_loop(descriptor, run_id)
 
-    agent = SAgent(runtime=runtime, driver_factory=build)
+    agent = SAgent._from_composition(runtime=runtime, driver_factory=build)
     dispatcher = LocalWorkerDispatcher(
         scheduler,
         max_concurrent_runs=2,

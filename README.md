@@ -171,7 +171,7 @@ models:
 async def main():
     manifest = SageManifestLoader().loads(AGENT_YAML)
     app = await (
-        SAgentBuilder().with_defaults(session_root="runtime")
+        SAgentBuilder()
         .build(models_config_text=MODELS_YAML)
     )
     try:

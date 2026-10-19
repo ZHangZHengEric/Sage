@@ -211,17 +211,20 @@ async def run_example(root: Path, *, cancel_first: bool = False):
     tools = ProjectTools(store)
     manifest = SageManifestLoader().loads(MANIFEST)
     resolved = CompositionResolver().resolve(manifest, models=__import__("yaml").safe_load(MODELS_YAML))
-    app = await (
-        SAgentBuilder().with_models(models_config_text=MODELS_YAML)
-        .with_defaults(session_root=root / "runtime")
-        .with_session_store(store)
-        .with_model_provider(model)
-        .with_tool_provider(tools, tools)
-        .with_tool_policy(
-            DefaultToolPolicy(approval_strategy=ApprovalStrategy.AUTO_APPROVE)
-        )
-        .build(runtime=manifest.runtime)
-    )
+    from examples.sagents_v2_host.registrations import provided, runtime_for
+    builder = SAgentBuilder()
+    for registration in (
+        provided("example.store", lambda context, deps: store, "session.store"),
+        provided("example.model", lambda context, deps: model, "model.provider"),
+        provided("example.tools", lambda context, deps: tools, "tool.catalog", "tool.executor"),
+        provided("example.policy", lambda context, deps: DefaultToolPolicy(approval_strategy=ApprovalStrategy.AUTO_APPROVE), "agent.tool-policy"),
+    ):
+        builder.register(registration)
+    runtime = runtime_for(root / "runtime", manifest.runtime, capabilities={
+        "session.store": {"plugin": "example.store"}, "model.provider": {"plugin": "example.model"},
+        "tool.catalog": {"plugin": "example.tools"}, "agent.tool-policy": {"plugin": "example.policy"},
+    })
+    app = await builder.build(runtime=runtime, models_config_text=MODELS_YAML)
     agent = await app.load_agent(manifest)
     streams = []
     try:

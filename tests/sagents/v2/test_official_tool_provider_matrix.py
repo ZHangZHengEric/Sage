@@ -11,13 +11,13 @@ import errno
 import hashlib
 import json
 import os
+import sys
 
 import pytest
 
 from sagents.v2.contracts.errors import ErrorCategory, RuntimeErrorInfo, SageV2Error
 from sagents.v2.contracts.jobs import JobState
 from sagents.v2.contracts.principals import ActorRef, PrincipalType, RequestContext
-from sagents.v2.runtime.extensions import ExtensionScope, ExtensionScopeContext
 from sagents.v2.runtime.execution.sandbox import (
     FileOperation,
     FileSystemPolicy,
@@ -83,7 +83,9 @@ async def plugin_for(
     root: Path, *, filesystem: FileSystemPolicy | None = None
 ) -> OfficialToolPlugin:
     issuer = SandboxGrantIssuer()
-    provider = LocalWorkspaceSandboxProvider(issuer.verification_key)
+    provider = LocalWorkspaceSandboxProvider(issuer.verification_key,
+        command_path=os.pathsep.join((str(Path(sys.executable).parent), os.environ.get("PATH") or os.defpath)),
+        read_paths=(sys.prefix,))
     digest = hashlib.sha256(str(root).encode()).hexdigest()
     handle = await provider.provision(
         ResolvedSandboxSpec(
@@ -107,13 +109,7 @@ async def plugin_for(
         CONTEXT,
         run_id="run_1",
     )
-    return OfficialToolPlugin(
-        ExtensionScopeContext(
-            scope=ExtensionScope.AGENT,
-            scope_id="test-official-tools",
-            config={"runtime": OfficialToolRuntime(handle, issuer)},
-        )
-    )
+    return OfficialToolPlugin(OfficialToolRuntime(handle, issuer))
 
 
 NOW = datetime(2026, 9, 3, tzinfo=timezone.utc)
@@ -151,13 +147,7 @@ async def ephemeral_plugin_for(
         CONTEXT,
         run_id="run_1",
     )
-    return OfficialToolPlugin(
-        ExtensionScopeContext(
-            scope=ExtensionScope.AGENT,
-            scope_id="test-official-tools",
-            config={"runtime": OfficialToolRuntime(handle, issuer)},
-        )
-    )
+    return OfficialToolPlugin(OfficialToolRuntime(handle, issuer))
 
 
 def call(name: str, arguments: dict, *, index: int = 1) -> ToolCall:
@@ -595,7 +585,7 @@ async def test_turn_status_exposes_failed_as_a_typed_terminal_state(tmp_path: Pa
 
 
 @pytest.mark.asyncio
-async def test_stopping_run_scoped_plugin_unregisters_shell_runner(tmp_path: Path):
+async def test_owned_runtime_unregisters_shell_runner_after_borrowing_plugin_stops(tmp_path: Path):
     plugin = await plugin_for(tmp_path)
     jobs = plugin.runtime.job_runtime
 
@@ -609,6 +599,8 @@ async def test_stopping_run_scoped_plugin_unregisters_shell_runner(tmp_path: Pat
 
     assert ("run_1", "official.shell") in jobs._owner_runners
     await plugin.stop(None)
+    assert ("run_1", "official.shell") in jobs._owner_runners
+    await plugin.runtime.close()
     assert ("run_1", "official.shell") not in jobs._owner_runners
 
 

@@ -1,24 +1,14 @@
-"""Host-neutral assembly and resource ownership behavior (no model/network calls)."""
-
+"""Plugin ownership, assembly and shutdown through the standard SDK path."""
 import asyncio
-from types import SimpleNamespace
-from unittest.mock import AsyncMock
 
 import pytest
 
-from sagents.v2.application import SAgentApplication
-from sagents.v2.composition.resources import RunResources
-
-
-def application():
-    return SAgentApplication(
-        agents={"main": SimpleNamespace(close=AsyncMock())},
-        entrypoint_agent_id="main",
-        scope_handles=(),
-        services={},
-        adapters={},
-        composition_hash="test",
-    )
+from sagents.v2 import SAgentBuilder
+from sagents.v2.runtime.extensions import (
+    CapabilityOffer, ExtensionDependency, ExtensionDescriptor, ExtensionRegistration, ExtensionScope,
+)
+from tests.sagents.v2.model_fixture import TEST_MODELS
+from tests.sagents.v2.test_standard_execution_configuration import package
 
 
 class Resource:
@@ -29,215 +19,136 @@ class Resource:
         self.log.append(self.name)
         if self.failures:
             self.failures -= 1
-            raise RuntimeError(f"close {self.name}")
+            raise RuntimeError("close " + self.name)
+
+
+def registration(name, factory, *, ownership="owned", dependencies=(), scope=ExtensionScope.PROCESS, capability=None):
+    return ExtensionRegistration(
+        descriptor=ExtensionDescriptor(plugin_id=name, name=name, version="1",
+            provides=(CapabilityOffer(capability=capability or name, api_version="2"),),
+            supported_scopes=frozenset({scope}), default_scope=scope,
+            dependencies=tuple(ExtensionDependency(capability=value) for value in dependencies),
+            config_schema={"type": "object", "additionalProperties": False}),
+        factory=factory, ownership=ownership,
+    )
+
+
+def config(root, choices):
+    return {"state_root": str(root), "capabilities": {
+        "session.store": {"plugin": "sage.session.filesystem", "config": {"root": str(root)}},
+        **{name: {"plugin": plugin} for name, plugin in choices.items()},
+    }}
 
 
 @pytest.mark.asyncio
-async def test_services_close_before_dependencies_and_retry_only_failures():
+async def test_success_closes_only_owned_registered_resources_once(tmp_path):
     log = []
-    resources = RunResources()
-    sandbox = Resource("sandbox", log)
-    stable = Resource("stable", log)
-    transient = Resource("transient", log, failures=1)
-    resources.own(sandbox, dependency=True)
-    resources.own(stable)
-    resources.own(stable)  # Ownership registration is identity-idempotent.
-    resources.own(transient)
-    with pytest.raises(RuntimeError, match="transient"):
-        await resources.close()
-    assert log == ["transient", "stable"]
-    await resources.close()
-    await resources.close()
-    assert log == ["transient", "stable", "transient", "sandbox"]
-    assert not resources.pending
+    builder = SAgentBuilder()
+    for name, ownership in (("test.owned", "owned"), ("test.borrowed", "borrowed")):
+        value = Resource(name, log)
+        builder.register(registration(name, lambda context, deps, value=value: value, ownership=ownership))
+    app = await builder.build(runtime=config(tmp_path, {name: name for name in ("test.owned", "test.borrowed")}))
+    await asyncio.gather(app.close(), app.close())
+    assert log == ["test.owned"]
 
 
 @pytest.mark.asyncio
-async def test_success_transfers_only_registered_resources_to_host():
-    app = application()
+async def test_factory_failure_rolls_back_owned_dependencies_and_preserves_borrowed(tmp_path):
     log = []
-    borrowed = Resource("borrowed", log)
-    driver = SimpleNamespace(execute=AsyncMock(), borrowed=borrowed)
+    builder = SAgentBuilder()
+    for name, ownership in (("test.owned", "owned"), ("test.borrowed", "borrowed")):
+        value = Resource(name, log)
+        builder.register(registration(name, lambda context, deps, value=value: value, ownership=ownership))
+    def fail(context, deps):
+        assert deps.require("test.owned").name == "test.owned"
+        raise ValueError("factory failure")
+    builder.register(registration("test.failing", fail, dependencies=("test.owned", "test.borrowed")))
+    with pytest.raises(ValueError, match="factory failure"):
+        await builder.build(runtime=config(tmp_path, {name: name for name in ("test.owned", "test.borrowed", "test.failing")}))
+    assert log == ["test.owned"]
 
-    async def compose(resources):
-        resources.own(Resource("owned", log))
-        return driver
 
-    run = await app.compose_run(compose)
-    assert run.value is driver
-    driver.execute.assert_not_called()  # Composition must never start/replay a Run.
-    await run.close()
-    await app.close()
+@pytest.mark.asyncio
+async def test_cancelling_standard_build_rolls_back_created_scopes(tmp_path):
+    entered = asyncio.Event()
+    log = []
+    resource = Resource("owned", log)
+    builder = SAgentBuilder().register(registration("test.owned", lambda context, deps: resource))
+    async def blocked(context, deps):
+        entered.set()
+        await asyncio.Event().wait()
+    builder.register(registration("test.blocked", blocked, dependencies=("test.owned",)))
+    task = asyncio.create_task(builder.build(runtime=config(tmp_path, {name: name for name in ("test.owned", "test.blocked")})))
+    await asyncio.wait_for(entered.wait(), 5)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
     assert log == ["owned"]
 
 
 @pytest.mark.asyncio
-async def test_failed_composition_rolls_back_and_retains_failed_cleanup():
-    app = application()
+async def test_shutdown_waits_for_standard_agent_load_and_rejects_new_loads(tmp_path):
+    from sagents.v2.testing.plugins import ScriptedModelProvider
+    entered, release = asyncio.Event(), asyncio.Event()
     log = []
-    failure = ValueError("invalid manifest")
-
-    async def compose(resources):
-        resources.own(Resource("sandbox", log), dependency=True)
-        resources.own(Resource("scope", log, failures=1))
-        raise failure
-
-    with pytest.raises(ValueError) as caught:
-        await app.compose_run(compose)
-    assert caught.value is failure
-    assert log == ["scope", "sandbox"]
-    assert "close scope" in failure.__notes__[0]
-    await app.close()
-    assert log == ["scope", "sandbox", "scope"]
-
-
-@pytest.mark.asyncio
-async def test_cancellation_rolls_back_without_turning_into_success():
-    app = application()
-    acquired = asyncio.Event()
-    wait = asyncio.Event()
-    log = []
-
-    async def compose(resources):
-        resources.own(Resource("scope", log))
-        acquired.set()
-        await wait.wait()
-
-    task = asyncio.create_task(app.compose_run(compose))
-    await acquired.wait()
-    task.cancel()
-    with pytest.raises(asyncio.CancelledError):
-        await task
-    assert log == ["scope"]
-    await app.close()
-
-
-@pytest.mark.asyncio
-async def test_shutdown_waits_for_assembly_then_rejects_new_assembly():
-    app = application()
-    acquired = asyncio.Event()
-    release = asyncio.Event()
-    log = []
-
-    async def compose(resources):
-        resources.own(Resource("scope", log))
-        acquired.set()
+    class Model(ScriptedModelProvider):
+        async def close(self):
+            log.append("model")
+    async def create(context, deps):
+        entered.set()
         await release.wait()
-        raise ValueError("rollback")
-
-    task = asyncio.create_task(app.compose_run(compose))
-    await acquired.wait()
+        return Model(())
+    builder = SAgentBuilder().register(registration("test.model", create,
+        scope=ExtensionScope.AGENT, capability="model.provider"))
+    app = await builder.build(runtime=config(tmp_path, {"model.provider": "test.model"}), models=TEST_MODELS, tenant_id="owner")
+    loading = asyncio.create_task(app.load_agent(package()))
+    await asyncio.wait_for(entered.wait(), 5)
     shutdown = asyncio.create_task(app.close())
     await asyncio.sleep(0)
     assert not shutdown.done()
-    other = AsyncMock()
     with pytest.raises(RuntimeError, match="closing"):
-        await app.compose_run(other)
-    other.assert_not_awaited()
+        await app.load_agent(package())
     release.set()
-    with pytest.raises(ValueError, match="rollback"):
-        await task
+    await loading
     await shutdown
-    assert log == ["scope"]
-    with pytest.raises(RuntimeError, match="closed"):
-        await app.compose_run(other)
+    assert log == ["model"]
 
 
 @pytest.mark.asyncio
-async def test_concurrent_resource_close_does_not_duplicate_successful_cleanup():
-    resources = RunResources()
-    entered, release = asyncio.Event(), asyncio.Event()
+async def test_run_cleanup_attempts_independent_resources_and_retries_only_failures():
+    # A unit check of the SDK-owned cleanup primitive; no host Driver injection.
+    from sagents.v2.composition.drivers import _CompositeRunResource
+    log = []
+    resources = _CompositeRunResource(Resource("sandbox", log), Resource("scope", log, failures=1), Resource("controller", log))
+    with pytest.raises(RuntimeError, match="close scope"):
+        await resources.close()
+    assert log == ["controller", "scope", "sandbox"]
+    await asyncio.gather(resources.close(), resources.close())
+    assert log == ["controller", "scope", "sandbox", "scope"]
+
+
+def test_standard_application_has_no_host_assembly_or_driver_injection_ports():
+    from sagents.v2 import SAgentApplication
+    import sagents.v2 as sdk
+    assert not any(name.startswith("with_") for name in dir(SAgentBuilder))
+    assert not hasattr(sdk, "HostAgentExecution")
+    assert not any(hasattr(SAgentApplication, name) for name in (
+        "compose_run", "adopt_resource", "process_provider", "materialize_agent", "retain_scope",
+    ))
+
+
+@pytest.mark.asyncio
+async def test_registry_snapshot_preserves_bound_factory_owner(tmp_path):
     calls = []
-
-    async def close():
-        calls.append("close")
-        entered.set()
-        await release.wait()
-
-    resources.own(SimpleNamespace(close=close))
-    first = asyncio.create_task(resources.close())
-    await entered.wait()
-    second = asyncio.create_task(resources.close())
-    release.set()
-    await asyncio.gather(first, second)
-    assert calls == ["close"]
-
-
-@pytest.mark.asyncio
-async def test_shared_runtime_borrows_services_without_transferring_ownership(tmp_path):
-    from sagents.v2 import SAgentBuilder
-    from sagents.v2.package.manifest import SageManifestLoader
-    from sagents.v2.testing.plugins.scripted_model import ScriptedModelProvider
-
-    manifest = SageManifestLoader().loads("""
-schema_version: sage/v2
-kind: application
-metadata: {id: test.shared, version: 1.0.0, name: Shared}
-agents:
-  main: {name: Main, instructions: {inline: Hello}}
-entrypoint: {agent: main}
-""")
-    model = ScriptedModelProvider(())
-    host = (
-        await SAgentBuilder()
-        .with_defaults(session_root=tmp_path)
-        .with_model_provider(model)
-        ._build_package(manifest)
-    )
+    class Owner:
+        def create(self, context, deps):
+            calls.append(context.scope)
+            return self
+    owner = Owner()
+    builder = SAgentBuilder().register(registration("test.owner", owner.create, ownership="borrowed"))
+    app = await builder.build(runtime=config(tmp_path, {"test.owner": "test.owner"}))
     try:
-        child = (
-            await SAgentBuilder()
-            .with_shared_runtime(host)
-            .with_model_provider(model)
-            ._build_package(manifest)
-        )
-        assert (
-            child.entrypoint().runtime.session_store
-            is host.entrypoint().runtime.session_store
-        )
-        assert child.service("execution.scheduler") is host.service(
-            "execution.scheduler"
-        )
-        await child.close()
-        # Closing a borrowing Application must leave shared scheduling usable.
-        assert await host.service("execution.scheduler").capabilities()
-        assert host.entrypoint()
+        assert app.service("test.owner") is owner
+        assert calls == [ExtensionScope.PROCESS]
     finally:
-        await host.close()
-
-
-@pytest.mark.asyncio
-async def test_scope_registration_during_shutdown_requires_inflight_assembly():
-    app = application()
-    entered, release = asyncio.Event(), asyncio.Event()
-    scope = SimpleNamespace(close=AsyncMock())
-
-    async def compose(resources):
-        entered.set()
-        await release.wait()
-        app.retain_scope(scope)
-        return "ready"
-
-    assembly = asyncio.create_task(app.compose_run(compose))
-    await entered.wait()
-    shutdown = asyncio.create_task(app.close())
-    await asyncio.sleep(0)
-    release.set()
-    await assembly
-    await shutdown
-    scope.close.assert_awaited_once()
-
-    app = application()
-    entered, release = asyncio.Event(), asyncio.Event()
-
-    async def blocked_close():
-        entered.set()
-        await release.wait()
-
-    await app.adopt_resource(SimpleNamespace(close=blocked_close))
-    shutdown = asyncio.create_task(app.close())
-    await entered.wait()
-    with pytest.raises(RuntimeError, match="closing"):
-        app.retain_scope(SimpleNamespace(close=AsyncMock()))
-    release.set()
-    await shutdown
+        await app.close()

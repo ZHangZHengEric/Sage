@@ -37,7 +37,7 @@ async def test_documented_inspection_does_not_execute_model(
     assert report["plan"]["composition_hash"].startswith("sha256:")
     assert report["readiness"] is not None
     assert any(
-        p["capability"] == "model.provider" and p["source"] == "host"
+        p["capability"] == "model.provider" and p["source"] == "plugin" and p["plugin_id"] == "example.host.model"
         for p in report["plan"]["providers"]
     )
     assert model.requests == []

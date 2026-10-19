@@ -43,6 +43,7 @@ class FilteredToolCatalog:
                     category=ErrorCategory.POLICY_DENIED,
                     message=f"tool {name!r} is outside this run's resolved tool set",
                     safe_to_resume=True,
+                    metadata={"side_effect_state": "not_applied"},
                 )
             )
         return await self._catalog.get_tool(name, run_id=run_id)
@@ -181,8 +182,9 @@ class ExcludingToolCatalog:
 
 
 class CompositeToolCatalog:
-    def __init__(self, catalogs: tuple[ToolCatalog, ...]) -> None:
+    def __init__(self, catalogs: tuple[ToolCatalog, ...], *, runtime_grants=()) -> None:
         self._catalogs = catalogs
+        self.runtime_grants = tuple(runtime_grants)
 
     async def list_tools(self, *, run_id: str) -> tuple[ToolDefinition, ...]:
         merged: dict[str, ToolDefinition] = {}

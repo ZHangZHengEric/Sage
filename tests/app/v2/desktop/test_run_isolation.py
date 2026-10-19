@@ -177,16 +177,17 @@ async def test_desktop_runs_overlap_and_keep_model_context_and_mcp_directory(
     building = set()
     both_building = asyncio.Event()
     release_build = asyncio.Event()
-    original_build = service._build_loop
+    from app.v2.desktop.backend import sdk_plugins
+    original_inputs = sdk_plugins.desktop_run_inputs
 
-    async def delayed_build(**kwargs):
-        building.add(kwargs["run_id"])
+    async def delayed_inputs(host, context, deps):
+        building.add(context.run_id)
         if len(building) == 2:
             both_building.set()
         await release_build.wait()
-        return await original_build(**kwargs)
+        return await original_inputs(host, context, deps)
 
-    monkeypatch.setattr(service, "_build_loop", delayed_build)
+    monkeypatch.setattr(sdk_plugins, "desktop_run_inputs", delayed_inputs)
     requests = [
         request(projects["a"], "session-a"),
         request(projects["a" if same_project else "b"], "session-b", "model_b"),
@@ -232,9 +233,6 @@ async def test_desktop_runs_overlap_and_keep_model_context_and_mcp_directory(
                     run.suspension_id
                 )
                 # Force real driver recomposition on each approval boundary.
-                driver = service._drivers.get(run_id)
-                if driver is not None:
-                    await service._discard_driver_if_terminal(run_id, driver)
                 await service.reply_interaction(
                     run_id, suspension.interaction_id, "approve_once", {}, "user"
                 )

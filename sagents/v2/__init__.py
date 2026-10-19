@@ -13,10 +13,7 @@ from sagents.v2._lazy import exported_names, resolve_export
 _EXPORTS = {
     "RuntimeConfig": ("sagents.v2.package.manifest.runtime", "RuntimeConfig"),
     "default_runtime": ("sagents.v2.composition.defaults", "default_runtime"),
-    "HostAgentExecution": ("sagents.v2.composition.host_execution", "HostAgentExecution"),
     "LoadedAgent": ("sagents.v2.composition.loaded_agents", "LoadedAgent"),
-    "ComposedRun": ("sagents.v2.composition.resources", "ComposedRun"),
-    "RunResources": ("sagents.v2.composition.resources", "RunResources"),
     "AgentPackageTestGenerator": (
         "sagents.v2.optimization",
         "AgentPackageTestGenerator",
@@ -80,7 +77,6 @@ _EXPORTS = {
         "ExecutionBindingRequest",
     ),
     "InterfaceRunStream": ("sagents.v2.application", "InterfaceRunStream"),
-    "MaterializedAgentPorts": ("sagents.v2.application", "MaterializedAgentPorts"),
     "ProposeSessionCommit": ("sagents.v2.contracts", "ProposeSessionCommit"),
     "PublishSessionCommit": ("sagents.v2.contracts", "PublishSessionCommit"),
     "RejectSessionCommit": ("sagents.v2.contracts", "RejectSessionCommit"),
@@ -99,6 +95,7 @@ _EXPORTS = {
     "SAgent": ("sagents.v2.sagent", "SAgent"),
     "SAgentApplication": ("sagents.v2.application", "SAgentApplication"),
     "ModelCatalogConfig": ("sagents.v2.model.catalog", "ModelCatalogConfig"),
+    "ApplicationConfiguration": ("sagents.v2.composition.configuration", "ApplicationConfiguration"),
     "SAgentBuilder": ("sagents.v2.builder", "SAgentBuilder"),
     "SAgentRunStream": ("sagents.v2.sagent", "SAgentRunStream"),
     "SessionCommitProposal": ("sagents.v2.contracts", "SessionCommitProposal"),

@@ -89,8 +89,6 @@ class AgentManagementService:
         store=None,
         max_applications: int = 32,
         max_concurrent_builds: int = 4,
-        model_budget=None,
-        job_runtime=None,
         allow_source_plugins: bool = False,
         require_readiness: bool = False,
         auto_release_idle_seconds: float | None = 300,
@@ -112,8 +110,6 @@ class AgentManagementService:
         self.authorize = authorize
         self.inventory = inventory
         self.max_applications = max_applications
-        self.model_budget = model_budget
-        self.job_runtime = job_runtime
         self.allow_source_plugins = allow_source_plugins
         self.require_readiness = require_readiness
         self._last_used = {}
@@ -321,15 +317,16 @@ class AgentManagementService:
             root
             or self.root / "runs" / owner_key(context) / bundle.content_hash / identity
         )
-        builder = self.builder_factory(bundle.model_copy(deep=True), root, context)
-        if hasattr(builder, "__await__"):
-            builder = await builder
-        if self.model_budget is not None:
-            builder.with_model_budget(self.model_budget)
-        if self.job_runtime is not None:
-            builder.with_job_runtime(self.job_runtime)
-        if readiness:
-            builder.with_readiness_check()
+        configuration = self.builder_factory(bundle.model_copy(deep=True), root, context)
+        if hasattr(configuration, "__await__"):
+            configuration = await configuration
+        from sagents.v2 import ApplicationConfiguration, SAgentBuilder
+        if not isinstance(configuration, ApplicationConfiguration):
+            raise TypeError("builder_factory must return ApplicationConfiguration with registrations, runtime and models")
+        builder = SAgentBuilder()
+        for registration in configuration.registrations:
+            builder.register(registration)
+        runtime = configuration.runtime.model_copy(update={"check_readiness": readiness})
         sources = {}
         async def collect_sources(member, *, dependency=False):
             if dependency:
@@ -347,7 +344,7 @@ class AgentManagementService:
                     value = (declaration, source)
                     if declaration.id in sources and sources[declaration.id] != value:
                         raise ValueError("dependency source plugins must have unique registrations")
-                    if builder.extensions.contains(declaration.id):
+                    if any(item["plugin_id"] == declaration.id for item in builder.inventory()):
                         raise ValueError("source plugins cannot replace an already registered extension")
                     sources[declaration.id] = value
             for child in member.dependencies.values():
@@ -369,16 +366,27 @@ class AgentManagementService:
                         await task
                         raise
                     builder.register(registration)
-            manifest = bundle.resolved_manifest()
-            app = await builder.build(runtime=manifest.runtime, tenant_id=context.actor.tenant_id)
+            if scope is not None:
+                from sagents.v2.runtime.extensions import CapabilityOffer, ExtensionDescriptor, ExtensionRegistration, ExtensionScope
+                from sagents.v2.package.manifest.runtime import CapabilitySelection
+                capability = "package.source-modules"
+                builder.register(ExtensionRegistration(
+                    descriptor=ExtensionDescriptor(plugin_id="sage.package.source-modules", name="Package source modules", version="2",
+                        provides=(CapabilityOffer(capability=capability, api_version="2"),),
+                        supported_scopes=frozenset({ExtensionScope.PROCESS}),
+                        config_schema={"type": "object", "additionalProperties": False}),
+                    factory=lambda context, deps: scope,
+                ))
+                runtime = runtime.model_copy(update={"capabilities": {
+                    **runtime.capabilities, capability: CapabilitySelection(plugin="sage.package.source-modules"),
+                }})
+            app = await builder.build(runtime=runtime, models=configuration.models, tenant_id=context.actor.tenant_id)
             try:
                 from sagents.v2.agent.management.loading import load_bundle_agents
                 await load_bundle_agents(app, bundle)
             except BaseException:
                 await app.close()
                 raise
-            if scope is not None:
-                await app.adopt_resource(scope, close_after_existing=True)
             return app
         except BaseException:
             if scope is not None:
@@ -764,6 +772,11 @@ class AgentManagementService:
 
     def capacity(self):
         """Host diagnostics; not exposed as a cross-tenant model tool."""
+        budgets = {id(app.services["execution.model-budget"]): app.services["execution.model-budget"]
+                   for app in self._applications.values() if "execution.model-budget" in app.services}
+        model_calls = next(iter(budgets.values())).snapshot() if len(budgets) == 1 else (
+            {"shared": False, "providers": [value.snapshot() for value in budgets.values()]} if budgets else None
+        )
         return {
             "applications": len(self._applications),
             "building": len(self._application_builds),
@@ -773,7 +786,7 @@ class AgentManagementService:
             "automatic_idle_age": self.auto_release_idle_seconds,
             "draining": self._draining,
             "validation_cleanup_pending": len(self._validation_cleanup),
-            "model_calls": self.model_budget.snapshot() if self.model_budget else None,
+            "model_calls": model_calls,
         }
 
     async def release_idle(self, *, min_idle_seconds: float = 300, limit: int = 1):

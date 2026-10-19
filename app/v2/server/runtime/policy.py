@@ -41,12 +41,12 @@ def execution_metadata(policy: ExecutionPolicy, *, user_id: str, agent_id: str,
     }}
 
 
-def frozen_execution(command) -> tuple[str | None, ExecutionPolicy]:
+def frozen_execution(command, *, catalog_agent_id: str | None = None) -> tuple[str | None, ExecutionPolicy]:
     raw = command.config.metadata.get(EXECUTION_METADATA_KEY)
     if raw is None:
         return None, ExecutionPolicy()
     policy = ExecutionPolicy.model_validate(raw["policy"])
-    if raw["policy_hash"] != policy.fingerprint or raw["agent_id"] != command.agent_id:
+    if raw["policy_hash"] != policy.fingerprint or raw["agent_id"] != (catalog_agent_id or command.agent_id):
         raise ValueError("execution grant does not match the admitted Run")
     return raw["key_id"], policy
 
@@ -56,8 +56,9 @@ def server_ceiling(settings) -> ExecutionPolicy:
                            approval_timeout_seconds=settings.approval_timeout_seconds)
 
 
-async def live_execution_policy(command, *, users, keys, catalog, settings, user_id):
-    key_id, frozen = frozen_execution(command)
+async def live_execution_policy(command, *, users, keys, catalog, settings, user_id, catalog_agent_id=None):
+    source_agent_id = catalog_agent_id or command.agent_id
+    key_id, frozen = frozen_execution(command, catalog_agent_id=source_agent_id)
     raw = command.config.metadata.get(EXECUTION_METADATA_KEY)
     if raw is not None and raw.get("user_id") != user_id:
         return None
@@ -67,11 +68,11 @@ async def live_execution_policy(command, *, users, keys, catalog, settings, user
     if key_id is not None:
         key = await keys.get(key_id)
         if (key is None or key.revoked or key.owner_user_id != user_id
-                or (key.agent_id and key.agent_id != command.agent_id)
+                or (key.agent_id and key.agent_id != source_agent_id)
                 or not key.allows("a2a:invoke")):
             return None
     current = await catalog.get(user_id)
-    agent = next((a for a in current.agents if a.id == command.agent_id), None)
+    agent = next((a for a in current.agents if a.id == source_agent_id), None)
     if agent is None:
         return None
     return intersect_policies(frozen, user.execution_policy, agent.execution_policy,

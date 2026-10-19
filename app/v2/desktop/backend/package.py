@@ -113,7 +113,7 @@ DESKTOP_COMPONENT_DEFAULTS = {
     capability: str(spec["default"]) for capability, spec in DESKTOP_COMPONENTS.items()
 }
 
-# Builder consumes these at process build or via materialize_agent.
+# The standard App consumes these at build and Agent revision loading.
 # Sandbox stays a host binding.
 _MANIFEST_CAPABILITIES = (
     "skill.loading",

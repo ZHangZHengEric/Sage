@@ -55,7 +55,7 @@ def spec(root, **limits):
 
 async def local(root, **limits):
     issuer = SandboxGrantIssuer()
-    provider = LocalWorkspaceSandboxProvider(issuer.verification_key)
+    provider = LocalWorkspaceSandboxProvider(issuer.verification_key, command_path=os.pathsep.join((str(Path(sys.executable).parent), os.defpath)), read_paths=(sys.prefix,))
     handle = await provider.provision(
         spec(root, **limits), CONTEXT, run_id="resource-run"
     )
@@ -435,7 +435,7 @@ async def test_system_python_starts_inside_macos_sandbox(tmp_path):
     if available.returncode:
         pytest.skip("system Python requires installed developer tools")
     issuer = SandboxGrantIssuer()
-    provider = LocalWorkspaceSandboxProvider(issuer.verification_key)
+    provider = LocalWorkspaceSandboxProvider(issuer.verification_key, command_path=os.pathsep.join((str(Path(sys.executable).parent), os.defpath)), read_paths=(sys.prefix,))
     selected = spec(tmp_path)
     # This checks interpreter access, not startup latency. Apple's launcher can
     # invoke xcodebuild on a cold machine, exceeding the resource tests' 3s cap.

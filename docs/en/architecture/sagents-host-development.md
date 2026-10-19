@@ -1,239 +1,221 @@
-# Developing a host with SAgents v2
+# Sage v2 SDK integration
 
-[中文完整指南](../../zh/architecture/sagents-host-development.md) · [Code map](code-reading-guide.md) · [Runnable starter](../../../examples/sagents_v2_host/)
-
-Use one composition root, one Agent manifest, and common Run correlation IDs.
-Product UI, authentication and workspace policy belong to each host. Plugin
-loading, context budgets, Session history and recovery belong to the runtime.
-
-## Entry points
-
-```text
-SAgentBuilder.build(runtime=..., models=...) → App
-  → app.load_agent(package) → reusable LoadedAgent
-  → app.entrypoint().run_stream(command, context, agent=agent)
-  → stream.events / stream.wait() → app.close()
-```
-
-The starter separates manifest configuration (`sage.yaml`), process composition
-(`bootstrap.py`) and CLI/Run handling (`__main__.py`). Long-lived services build
-one process application at startup and reuse it in request handlers.
-
-From the repository root, with Python 3.12+:
-
-```bash
-.venv/bin/python -m examples.sagents_v2_host --offline --inspect
-.venv/bin/python -m examples.sagents_v2_host --offline
-.venv/bin/python -m examples.sagents_v2_host --offline --log-level debug --runtime-root /tmp/my-sagents-debug
-```
-
-These flags are starter conventions, not SDK-wide configuration switches.
-For a real model, edit provider/base_url/model in the starter manifest, supply
-`MODEL_API_KEY` through the environment and omit `--offline`. Never use the
-scripted provider to resume a Run admitted against a real model.
-`--inspect` builds and closes an application and opens configured services; it
-is not an I/O-free YAML validator. Offline replaces the model port only; the
-provided manifest contains no network tools.
-
-## Loading and updating
-
-One new Package defines exactly one Agent. Load it once and reuse the returned
-handle. `app.update_agent(agent=old, package=source)` publishes a new immutable
-revision; existing handles and admitted Runs retain their original revision.
-Identical loads reuse handles, invalid updates preserve the current version,
-and stale concurrent updates are rejected.
-
-`load_agent` accepts a file/directory path, manifest or dictionary. Use
-`config_text=` explicitly for YAML/JSON text; file references require `base_path`
-and cannot escape it. `build(runtime=...)` accepts RuntimeConfig, dictionaries
-or paths; text uses `runtime_config_text=`. Object/path and text inputs are
-mutually exclusive. A directory Package uses `sage.yaml`.
-
-Without runtime configuration, the SDK uses the same shared component defaults
-as Desktop, excluding personal settings and credentials. Explicit runtime
-replaces defaults; use `sagents.v2.default_runtime()` to
-start with the shared profile and customize selected capabilities. Resources
-open lazily when the first Agent loads. Commands use the loaded handle's `id`
-and `composition_hash`; the run entrypoint validates them.
-
-All revisions share a dispatcher and durable stores. Revisions remain alive
-until App shutdown, so frequent updates consume additional memory. Local SDK
-recovery snapshots are saved under `agent-revisions/` in the runtime data root.
-Use `await app.agent_for_run(run_id, context)` to authorize and retrieve the
-original revision before manually continuing a suspended Run.
-Keep snapshots with Session data; missing/incompatible revisions cannot be replaced
-with the latest version during recovery. This is local persistence, not a
-distributed package registry.
-
-Desktop and Server inject `HostAgentExecution` for their existing admission and
-frozen recovery contracts. Per-Run resources are still acquired and closed per
-Run. `build(package)` is removed and public loading rejects multi-Agent Packages.
-All hosts use build → load_agent → explicit Agent execution.
-
-Load child Packages independently and bind immutable handles:
-
-```python
-reviewer = await app.load_agent("./agents/reviewer")
-coder = await app.load_agent("./agents/coder", subagents={"reviewer": reviewer})
-```
-
-Updating reviewer does not change coder. Explicitly update coder with the new
-child handle to adopt it. Private recovery snapshots preserve the full compiled
-graph. Managed `AgentPackageBundle.dependencies` persists the individual child
-Packages; each is loaded through the same App API. CLI presets follow this
-pattern, and TUI uses the same CLI through `sage v2 chat --json`.
-
-## Delegated task Sessions
-
-Default delegation passes only the task message. Without `child_session_id`, it creates an independent serial Session whose first `user` message is the parent's task. With an existing child Session, it appends a new `user` task and retains that child's own history. `parent_run_id`, `parent_tool_call_id` and Session ancestry support tracing, result routing and storage layout; they do not implicitly copy parent messages or attachments. Put necessary background and resource references in content; original_task is tracing metadata and is not automatically sent as a child message. Explicit low-level `FORK` requests retain their snapshot semantics and are separate from default delegation.
-
-## Configuration boundaries
-
-| Input | Owner |
-| --- | --- |
-| Instructions, model routes, tool/Skill allowlists, budgets | Agent manifest |
-| Capability plugin IDs, scopes and plugin parameters | Manifest runtime/plugins |
-| Data paths, log level, manifest location | Host settings |
-| SessionStore, execution bindings, shared model budget, sinks | Bootstrap `Builder.with_*()` injections |
-| Input, Session, idempotency and admitted identity | `StartRun` |
-| Authenticated principal/tenant | Host-created `RequestContext` |
-| Secrets | Credential providers referenced by manifest; never committed plaintext |
-
-Loader environment overlays may override only `runtime`, `policies`, and
-`interfaces`. There is no universal environment-variable-over-YAML rule.
-Explicit host injections select their corresponding ports; trusted locked
-runtime dependencies cannot be replaced by plugin config. Inspect
-`agent.resolved_plan` for a standard SDK revision; `app.resolved_plan` is the
-initial process view. Host-injected execution reports its full component plan
-when the admitted Run is composed, not in the loaded definition.
-`with_shared_runtime()` borrows its documented services, not every host setting.
-
-## Common debugging contract
-
-The starter writes events/final state to stdout and structured `sage.log/v1`
-logs to stderr. `FilesystemDiagnosticSink` writes model evidence under the
-owning Session/Run in `runtime_root/sessions`. Diagnostics can contain business
-data and should remain private even after credential redaction.
-
-1. Inspect `app.resolved_plan`: capability, plugin ID, scope, source and composition hash.
-2. Use `with_readiness_check()` and inspect `app.resource_readiness`. Readiness is not live execution acceptance.
-3. Correlate Session, Run, step, model request and tool-call IDs where available.
-4. Treat Session events/state/checkpoints as authoritative; diagnostics never drive recovery.
-5. Inject `ScriptedModelProvider` for offline tests while retaining the same bootstrap and event path.
-
-Do not dump raw provider configs or change an admitted hash to bypass recovery
-validation. Preserve admitted snapshots and reconcile unknown tool outcomes
-instead of replaying effects.
-
-## One entry point, explicit host parameters
-
-Desktop, Server and third-party projects use `SAgentBuilder.build()` and the
-same `AgentCompositionFactory.create_loop()` loop assembly. Hosts supply their
-authentication, approval and workspace policies through parameters and existing
-ports. Internal assemblers/materializers remain implementation details.
-
-App owns model routes, credentials, request defaults, limits and capabilities.
-Pass these as `models="./models.yaml"` (or a dictionary / ModelCatalogConfig).
-Use `models_config_text=` for YAML/JSON text. Runtime components remain a separate
-`runtime` input. Packages only map model slots to App model IDs.
-
-Use `app.update_models(...)` to atomically replace the catalog, or
-`app.update_model(id, complete_route)` to replace one route. Reload an unchanged
-Package to adopt updated models; edit the Package with `update_agent`.
-Existing handles and admitted Runs keep their frozen configuration.
-Builder configuration only affects applications built afterwards.
+The application owns execution assembly. Hosts register implementations, select
+capabilities in serializable runtime configuration, and use the same public Run
+API for built-in and custom plugins.
 
 ```python
 from sagents.v2 import SAgentBuilder
-from examples.sagents_v2_host.plugins import compactor_registration
 
-builder = SAgentBuilder().with_defaults(session_root="./runtime")
-builder.register(compactor_registration())
-app = await builder.build(models="examples/sagents_v2_host/models.yaml", runtime={
-    "capabilities": {
-        "context.unit-compactor": {
-            "plugin": "example.context.reference-compactor",
-            "scope": "agent",
-            "config": {"minimum_characters": 4},
-        },
-    },
-})
-agent = await app.load_agent("examples/sagents_v2_host/sage.yaml")
-# Supply model credentials and close the application after use.
+builder = SAgentBuilder()
+for registration in host_registrations:
+    builder.register(registration)
+
+app = await builder.build(runtime=runtime_config, models=model_config)
+try:
+    agent = await app.load_agent(package, subagents=subagents)
+    command = command.model_copy(update={
+        "agent_id": agent.id,
+        "resolved_spec_hash": agent.composition_hash,
+    })
+    stream = await app.entrypoint().run_stream(command, context, agent=agent)
+    async for event in stream.events:
+        handle_event(event)
+    result = await stream.wait()
+finally:
+    await app.close()
 ```
 
-The starter's `plugins.py` implements an independent plugin with a parameter
-model, JSON Schema and registration factory. Its byte heuristic demonstrates
-integration, not a production tokenizer. Register first, then select using
-`CapabilitySelection` fields `plugin / name / scope / config`. Schema validation
-runs before the factory. Unknown fields are governed by each plugin's schema;
-the example rejects them. Trusted dependencies are separate from user config.
-Plugin implementations never need to import sibling implementations.
+`package`, `command`, `context`, configuration and event handling belong to the
+host. `subagents` maps declared direct member names to loaded Agent handles.
+Load each dependency package separately. An Agent package has one Agent; nested
+Teams are explicit package relationships. A delegated ordinary leaf does not
+gain a Team roster through its parent.
 
-Both hosts accept `extensions=(registration,)` at construction:
-`DesktopV2Service(...)` and `ServerHost(...)`. The old `package_extensions` argument is removed. Registration supplies implementations; runtime
-configuration selects them and supplies parameters.
+## Registration and selection
 
-Hosts that admit Runs themselves use the same existing integration interfaces:
+A registration describes a capability protocol and executable factory. The
+factory implements that capability, rather than reconstructing the Run Driver,
+Agent loop, official runtime or child executor.
 
-- `application.compose_run(callback)` owns rollback and Run resources, not admission.
-- `materialize_agent(..., runtime=...)` resolves scoped ports on an existing application.
-- `with_shared_runtime()` borrows process services for a package application.
-- `AgentCompositionFactory.create_loop()` accepts explicit `context_providers`,
-  `developer_instructions`, `context_agent_id`, `completion_gates` and
-  `automatic_memory_recall`. Omitted arguments preserve defaults. Desktop keeps
-  its prompt order, root context budget and root-only plan/goal gates here.
-- `application.process_provider(capability, selection, dependencies=...)` opens
-  registered process providers through the same validation/cache/lifecycle path.
-  The application owns these providers. Desktop uses this for sandbox providers;
-  custom constructor parameters go in its sandbox `provider_config`, separately
-  from per-sandbox execution specifications. Legacy constructor fields still work.
+```python
+from sagents.v2.runtime.extensions import (
+    CapabilityOffer, ExtensionDependency, ExtensionDescriptor,
+    ExtensionRegistration, ExtensionScope,
+)
 
-These host parameters do not authorize changes to admitted recovery inputs.
-Keep frozen snapshots and durable sandbox lifecycle handling unchanged.
-
-Server examples are `bootstrap.py`, `packages/builder.py`, and `runtime/loop.py`.
-Desktop examples are `backend/composition.py`, `run_composition.py`,
-`component_plan.py`, and `model_providers.py`. Product policies stay separate.
-Plugin implementations stay independent; duplication is allowed.
-
-Injected resources are borrowed unless explicitly transferred. After successful
-`compose_run()`, the host closes the returned `ComposedRun`; register only newly
-owned resources with `resources.own()`. Dependencies can be registered with
-`dependency=True`. Runtime cleanup is distinct from durable sandbox lifecycle.
-Closing an observer does not cancel a Run. Admission retries reuse idempotency
-keys; new operations use new keys. The starter defaults to a new key per launch
-and is not a production request-deduplication store.
-
-Built-in demo defaults do not establish multi-process or distributed recovery.
-Test configuration, offline execution, resource failure/cleanup, idempotency,
-approval/resume, frozen recovery inputs and unknown-effect reconciliation.
-Add child-Run isolation/recovery coverage for delegation.
-
-```bash
-.venv/bin/pytest -q tests/sagents/v2/test_host_starter_example.py tests/sagents/v2/test_unified_host_configuration.py
-.venv/bin/pytest -q tests/sagents/v2/test_builder_matrix.py tests/sagents/v2/test_run_composition_lifecycle.py
+registration = ExtensionRegistration(
+    descriptor=ExtensionDescriptor(
+        plugin_id="example.run.model",
+        name="Example Run model",
+        version="1.0.0",
+        api_version="2",
+        provides=(CapabilityOffer(capability="model.provider", api_version="2"),),
+        dependencies=(ExtensionDependency(capability="session.store"),),
+        supported_scopes=frozenset({ExtensionScope.RUN}),
+        default_scope=ExtensionScope.RUN,
+        config_schema={"type": "object", "properties": {
+            "profile": {"type": "string"}}, "additionalProperties": False},
+    ),
+    factory=lambda scope, dependencies: ExampleModel(
+        profile=scope.config.get("profile", "default"),
+        store=dependencies.require("session.store"),
+        run_id=scope.run_id,
+    ),
+    ownership="owned",
+)
+builder.register(registration)
 ```
 
-Tests have a default 30-second hang guard; use explicit assertions for performance
-contracts and test-specific timeout markers when needed.
+Select the registration separately:
 
-Desktop and Server both acquire sandbox providers through application-owned plugin lifecycles. Server configuration and Agent validation use the host registration registry.
+```yaml
+capabilities:
+  model.provider:
+    plugin: example.run.model
+    scope: run
+    config:
+      profile: media
+```
 
+`ExampleModel` implements Sage's model provider protocol. Registration does not
+select or instantiate it. A host-created object uses the same factory mechanism:
+return the existing object and declare `ownership="borrowed"`. The creator then
+closes it. Owned instances use their close method or the registration's stop hook;
+borrowed registrations cannot transfer a stop hook.
 
-## Verification
+Process, tenant, Agent and Run lifetimes are checked against declared scopes and
+dependencies. Longer-lived consumers cannot capture shorter-lived dependencies.
+Run factories receive the allocated Run identity. Agent and Run contexts expose
+SDK-resolved Agent configuration; process contexts do not carry an arbitrary
+Run's identity. Authorization must use the supplied request context or standard
+`session.access`, not model-supplied Project or Session ownership arguments.
 
-Run the Python suites under `tests/sagents/v2`, `tests/app/v2/server`,
-`tests/app/v2/desktop`, and `tests/app/clients/cli` (excluding optional live suites).
-Run `flutter test` in `app/v2/desktop`, and `cargo test --offline` in
-`app/clients/terminal`.
+Duplicate registrations, unavailable protocols, unknown selections, invalid
+parameters and incompatible scopes fail explicitly. Plugins are registered
+explicitly; a package declaration does not authorize importing arbitrary code.
+Use `builder.inventory()` and `agent.resolved_plan` to inspect registration and
+selection. Plan provider records include implementation version and source
+digest when provided by a source plugin.
 
-For an opt-in real-model Desktop test, run
-`SAGE_DESKTOP_LIVE_CATALOG="$HOME/sage/runtime/desktop-catalog.json" flutter test test/unified_sidecar_test.dart`.
-It uses the first Agent's configured model, or the explicit provider ID in
-`SAGE_DESKTOP_LIVE_MODEL`. It starts the real Python sidecar with isolated data,
-checks two turns and history recall, and incurs real model request costs.
+## Configuration ownership and recovery
 
-Internal assembly regression tests use private `_build_package` to inspect
-compiled execution graphs. Applications and public API tests use `build()` and
-`load_agent()`; private assembly methods are not integration entrypoints.
+Runtime configuration contains serializable plugin identities, scopes and
+parameters. Connections, locks and shared services remain in factories and
+explicit dependencies. Model credentials use the App model catalog and Sage
+credential references/providers, rather than opaque model routing wrappers.
+
+`app.update_runtime(runtime)` and `app.update_models(models)` affect subsequent
+Agent revisions. Load or update the Agent to use those selections. The App's
+store, queue and security profile are process identities; changing them requires
+a new App. Different Apps may independently select plugins and parameters.
+
+Accepted Runs keep their original Agent revision and execution snapshot. Child
+policies inherit the parent snapshot and may narrow its authorization. Current
+App settings do not replace an accepted Run's policy. Incompatible or missing
+registrations/configuration during restore fail rather than silently selecting
+current defaults.
+
+```python
+agent = await app.agent_for_run(run_id, context)
+task = await app.entrypoint().continue_run(run_id, context, agent=agent)
+result = await task
+snapshot = await app.execution_configuration(run_id, context)
+facts = await app.execution_diagnostics(run_id, context)
+configuration = await app.run_configuration(run_id, context)
+```
+
+These queries authorize access to the Run and return detached data. A Run waiting
+for an interaction must receive its normal reply before continuation. Uncertain
+external effects require their reconciliation contract; recovery is not a promise
+to repeat a side effect safely.
+
+## Local media execution
+
+Select `sage.execution.binding.local-workspace`; Sage accepts policy and creates
+the sandbox after assigning the actual Run ID. A host does not call `provision()`
+or emulate Sage's isolation command.
+
+```yaml
+capabilities:
+  execution.binding:
+    plugin: sage.execution.binding.local-workspace
+    scope: process
+    config:
+      workspace: /absolute/workspace
+      private_workspace_root: /absolute/private-workspaces
+      child_workspace_policy: shared_parent
+      isolation_python: /absolute/trusted/python3
+      command_path: /absolute/media/bin:/usr/bin:/bin
+      read_paths: [/absolute/media/runtime]
+      policy:
+        filesystem:
+          max_file_bytes: 536870912
+          allowed_operations: [read, list, write, create, delete, rename]
+        process:
+          enabled: true
+          allow_shell: true
+          allowed_executables: [bash, sh, python3, ffmpeg]
+          max_wall_time_seconds: 7200
+          max_output_bytes: 8388608
+        resources:
+          disk_mb: 32768
+          require_hard_limits: false
+        network:
+          mode: none
+          deny_private_networks: true
+```
+
+Use an actual configuration schema/inventory to check platform-specific resource
+fields. File total capacity inherits an explicitly selected disk quota when no
+smaller file-total ceiling is supplied. Read-only child workspaces restrict file
+and process writes. Private workspaces live outside the shared workspace. Shared
+sandboxes have Run-owned leases; releasing a child does not destroy a parent's
+remaining lease.
+
+The isolation helper interpreter is trusted CPython and can be packaged separately
+from a frozen host. It is distinct from the Python resolved through the Agent's
+Shell command path. Sage checks the interpreter, authorizes runtime directories
+and launches the helper. Diagnostics report actual interpreter, sandbox identity
+and enforcement capabilities; metered limits are not reported as kernel limits.
+
+## Tools, Skill, continuation and budgets
+
+Select paired tool catalog/executor offers through registered plugins. Sage
+assembles official file, Shell, Skill and task tools using the actual execution
+environment. A Run tool plugin can declare `execution.environment` to obtain its
+trusted request context, command and sandbox. Paired ports must use the same
+registration, name, parameters and scope.
+
+`tool.catalog` may select multiple named providers. `grant_tools: true` is an
+explicit trusted runtime grant for a dynamic catalog; a provider must still
+filter tools using the Run's accepted product authorization. Otherwise the Agent
+and command's static tool grants apply. A catalog registration alone is not a
+grant to expose every tool.
+
+Register Skill catalog/source pairs and optional workspace capability. Standard
+loading, preloading, activation budget and recovery remain SDK-owned. Configure
+context reducers, summarizers and `agent.continuation-policy` as corresponding
+capability plugins. Do not replace loop fields after construction.
+
+A shared model budget is an `execution.model-budget` registration selected in
+runtime. Returning the same borrowed budget from multiple App registrations
+shares its process object and leaves shutdown with its creator. Durable run-tree
+budgets are separate from the per-call transport timeout.
+
+External MCP calls default to 7,200 seconds, configurable per MCP server. Timeout
+is delivered as a tool result for the Agent. It does not impose a two-hour limit
+on internal delegation, Team tasks or the lifetime of a Run.
+
+## Runnable host and validation
+
+Run `examples.sagents_v2_standard_host` for actual media dependencies, FFmpeg,
+MCP, Skill, nested Team and reopening persisted Runs. Its README documents native
+and PyInstaller commands. `examples.sagents_v2_host` demonstrates a smaller host
+and custom context plugin. Desktop and Server product adapters register their
+corresponding capabilities; no host-defined Driver is required.
+
+SDK integration tests live in `tests/sagents/v2`; host tests live under
+`tests/app/v2`. Native isolation tests need platform sandbox support and process
+accounting permissions. Frozen-build evidence must be produced from the current
+sources. Yiii migration and its own acceptance tests are maintained by Yiii.

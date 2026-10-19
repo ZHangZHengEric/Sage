@@ -117,13 +117,11 @@ async def open_model_lease(
     return model, _OwnedModelScope(model)
 
 
-async def compose_catalog_loop(
-    service: CatalogRunDependencies, command: StartRun, *, user_id: str, run_id: str | None = None
-):
-    """Resolve the catalog ID to a Package, then use the shared Package builder."""
-    from app.v2.server.storage.workspaces import with_workspace_binding
-
-    command = await with_workspace_binding(command, user_id, service.threads)
+async def load_catalog_agent(host, command, user_id):
+    """Freeze product inputs, then load through the standard public App API."""
+    from app.v2.server.runtime.sdk_plugins import run_selections, execution_selection, select_run_capabilities
+    from app.v2.server.catalog.model_config import app_models
+    service = host._catalog_run_dependencies()
     catalog = await service.catalog.get(user_id)
     frozen = await _composition(service, command, catalog, user_id=user_id)
     bundle = frozen.package or frozen.agent.package
@@ -131,44 +129,29 @@ async def compose_catalog_loop(
         service.settings, agent=frozen.agent, registry=getattr(service.catalog, "extensions", None),
         skills=tuple(record.name for record in frozen.skills),
     )
-    owner_run_id = run_id or command.idempotency_key
-    factory = service.agent_management.package_builder_factory
-    context = service.contexts.for_user(user_id)
-    builder = await factory.build(
-        bundle, service.paths.runtime_root, context,
-        service.agent_management, catalog_run=(service, command, frozen),
-    )
-    builder.with_admitted_run_contract(owner_run_id, command.resolved_spec_hash)
-    async def compose(resources):
-        application = await builder.build(runtime=manifest.runtime, tenant_id=user_id)
-        try:
-            from sagents.v2.agent.management.loading import load_bundle_agents
-            loaded = await load_bundle_agents(application, bundle.model_copy(update={"manifest": manifest}))
-        except BaseException:
-            await application.close()
-            raise
-        resources.own(application)
-        return PackageRunDriver(application, loaded)
-
-    assembly = await service.application.compose_run(compose)
-    return assembly.value, assembly.resources
-
-
-class PackageRunDriver:
-    def __init__(self, application, agent):
-        self.application = application
-        self.agent = agent
-
-    async def execute(self, run_id, context):
-        return await self._drive(run_id, context)
-
-    async def resume(self, run_id, context):
-        return await self._drive(run_id, context, resume=True)
-
-    async def _drive(self, run_id, context, *, resume=False):
-        return await self.application.entrypoint().drive_admitted_run(
-            run_id, context, agent=self.agent, resume=resume,
-        )
+    from app.v2.server.conversations.composition import selected_mcp_servers, selected_a2a_agents
+    selections = run_selections(owner=user_id,
+        mcp=selected_mcp_servers(catalog, frozen.mcp_servers), a2a=selected_a2a_agents(catalog, frozen.a2a_agents))
+    runtime = service.application.runtime_configuration
+    identity = {"session.store", "derived-state.store", "execution.scheduler", "execution.job-runtime",
+                "observability.log-sink", "observability.diagnostic-sink"}
+    choices = select_run_capabilities(runtime.capabilities, manifest.runtime, selections)
+    for key in identity:
+        if key in runtime.capabilities:
+            choices[key] = runtime.capabilities[key]
+    choices["execution.binding"] = execution_selection(host, owner=user_id, agent_id=frozen.agent.id,
+                                                       command=command, sandbox=frozen.agent.sandbox)
+    await service.application.update_runtime(runtime.model_copy(update={"capabilities": choices}))
+    await service.application.update_models(command.config.metadata.get("server_v2.models") or app_models(catalog))
+    # Dependency packages are pinned independently; publish updates explicitly.
+    async def load(member):
+        children = {name: await load(child) for name, child in member.dependencies.items()}
+        package = manifest if member is bundle else member.resolved_manifest()
+        current = next((value for value in service.application.loaded_agents if value.package_id == package.metadata.id), None)
+        if current is None:
+            return await service.application.load_agent(package, subagents=children)
+        return await service.application.update_agent(agent=current, package=package, subagents=children)
+    return await load(bundle)
 
 
 async def _composition(service, command: StartRun, catalog, *, user_id: str):

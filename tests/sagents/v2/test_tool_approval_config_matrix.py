@@ -1,10 +1,10 @@
+from tests.sagents.v2.sdk_fixture import build_registered_package
 from contextlib import asynccontextmanager
 
 from tests.sagents.v2.model_fixture import TEST_MODELS
 
 import pytest
 
-from sagents.v2 import SAgentBuilder
 from sagents.v2.agent.policy.approval_config import ToolApprovalConfig
 from sagents.v2.contracts.commands import InputItem, StartRun
 from sagents.v2.contracts.items import TextBlock
@@ -90,22 +90,18 @@ async def test_restored_package_rules_control_actual_loop_dispatch(tmp_path, kin
         )
     )
     app = (
-        await SAgentBuilder().with_models(TEST_MODELS)
-        .with_defaults(session_root=tmp_path)
-        .with_model_provider(provider)
-        .with_tool_provider(catalog, executor)
-        ._build_package(package)
+        await build_registered_package(tmp_path, models=TEST_MODELS, model=provider, tools=(catalog, executor,), package=package)
     )
     actor = _POLICY_USER.actor.model_copy(update={"scopes": definition.required_scopes})
     try:
         stream = await app.entrypoint().run_stream(
-            StartRun(
+            (StartRun(
                 agent_id=agent_id,
                 input=(InputItem(role="user", content=(TextBlock(text="go"),)),),
                 resolved_spec_hash=app.composition_hash,
                 idempotency_key="test",
-            ),
-            _POLICY_USER.model_copy(update={"actor": actor}),
+            )).model_copy(update={"agent_id": app.loaded_agents[-1].id, "resolved_spec_hash": app.loaded_agents[-1].composition_hash}),
+            _POLICY_USER.model_copy(update={"actor": actor}), agent=app.loaded_agents[-1],
         )
         events = [event.type async for event in stream.events]
         result = await stream.wait()

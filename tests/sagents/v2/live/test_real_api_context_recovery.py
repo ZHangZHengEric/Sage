@@ -944,7 +944,9 @@ async def test_http_fault_gateway_retries_real_model_after_tool_without_reexecut
 async def test_real_multimodal_compression_preserves_current_image_and_verified_old_image_facts(
     latest_image,
 ):
-    import base64, struct, zlib
+    import base64
+    import struct
+    import zlib
     from sagents.v2.contracts.items import ImageBlock
     from tests.sagents.v2.live.test_gpt_5_6_luna_scenarios import _complete
 

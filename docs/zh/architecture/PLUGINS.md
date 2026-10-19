@@ -19,9 +19,9 @@ parent: 架构
 
 ## 宿主如何组合实现
 
-1. 用 `SAgentBuilder().with_defaults(...)` 接入标准实现。
+1. 使用 `builder.register(registration)` 注册实现，再用 `build(runtime=..., models=...)` 选择能力和参数。
 2. 在 manifest 的 `runtime.capabilities` 中选择插件绑定。
-3. 通过 `with_model_provider`、`with_session_store`、`with_tool_runtime` 等 Builder 方法注入宿主持有的实现。
+3. 已有对象通过注册工厂返回，并明确所有权；runtime 负责选择，不另设对象注入入口。
 4. 装配后检查 `application.resolved_plan`，宿主关闭时释放 Application。
 
 已安装扩展可以通过 `sage.extensions` Python entry-point 发布。源码插件需要宿主显式信任与授权，属于宿主可执行代码，不是隔离机制。

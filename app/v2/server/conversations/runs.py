@@ -18,7 +18,7 @@ LOGGER = get_logger(__name__)
 
 
 class RunService:
-    def __init__(self, *, application, session_access, execution, users=None, keys=None, catalog=None, settings=None) -> None:
+    def __init__(self, *, application, session_access, execution, users=None, keys=None, catalog=None, settings=None, host=None) -> None:
         # Serializes Run creation with destructive workspace/session operations.
         self.workspace_mutation_lock = asyncio.Lock()
         self.application = application
@@ -29,37 +29,14 @@ class RunService:
         self.catalog = catalog
         self.settings = settings
         self._agent_load_lock = asyncio.Lock()
+        self.host = host
 
     async def _load_run_agent(self, command, user_id):
-        from app.v2.server.conversations.composition import load_composition
-        from app.v2.server.config.manifest import server_v2_run_manifest
-        from sagents.v2 import HostAgentExecution
-        frozen = load_composition(command, user_id=user_id)
-        if frozen is None:
-            manifest = self.application.loaded_agents[0]._resolved
-        else:
-            manifest = frozen.package.resolved_manifest() if frozen.package is not None else server_v2_run_manifest(
-                self.settings, agent=frozen.agent,
-                registry=getattr(self.catalog, "extensions", None),
-                skills=tuple(record.name for record in frozen.skills),
-            )
-        root = self.application.agent(self.application.resolved_plan.entrypoint_agent_id)
-        execution = HostAgentExecution(
-            driver_factory=root.driver_factory, spec_hash=command.resolved_spec_hash,
-            runtime=self.application.runtime,
-            dispatcher=self.application.service("execution.dispatcher"),
-            agent_id=command.agent_id,
-        )
+        from app.v2.server.runtime.loop import load_catalog_agent
+        if self.host is None:
+            raise RuntimeError("Server capabilities have not been registered")
         async with self._agent_load_lock:
-            if frozen is not None:
-                from app.v2.server.catalog.model_config import app_models
-                models = command.config.metadata.get("server_v2.models")
-                await self.application.update_models(models or app_models(await self.catalog.get(user_id)))
-            current = next((value for value in self.application.loaded_agents
-                            if value.package_id == (manifest.package_id if hasattr(manifest, "package_id") else manifest.metadata.id)), None)
-            if current is None:
-                return await self.application.load_agent(manifest, execution=execution)
-            return await self.application.update_agent(agent=current, package=manifest, execution=execution)
+            return await load_catalog_agent(self.host, command, user_id)
 
     async def cancel_run(
         self,
@@ -248,16 +225,14 @@ class RunService:
         already running under a drive that is someone else's.
         """
 
-        agent = self.application.agent(self.application.resolved_plan.entrypoint_agent_id)
-        run = await agent.runtime.get_run(run_id)
+        run = await self.application.runtime.get_run(run_id)
         if run.state != RunState.RESUMING or self.execution.driving(run_id):
             return
         token = bind_model_user(user_id)
         bound = False
         try:
             bound = self.execution.bind_model(session_id, user_id)
-            command = await self.application.runtime.session_store.get_start_command(run_id)
-            loaded = await self._load_run_agent(command, user_id)
+            loaded = await self.application.agent_for_run(run_id, context)
             execution = await self.application.entrypoint().continue_run(run_id, context, agent=loaded)
             task = asyncio.create_task(
                 self._continue_drive(
@@ -308,6 +283,7 @@ class RunService:
                 bound = self.execution.bind_model(session_id, user_id)
                 application = self.application
                 loaded = await self._load_run_agent(command, user_id)
+                command = command.model_copy(update={"agent_id": loaded.id, "resolved_spec_hash": loaded.composition_hash})
                 stream = await application.run_interface(
                     interface,
                     command,

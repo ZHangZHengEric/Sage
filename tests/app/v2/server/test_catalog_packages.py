@@ -168,14 +168,14 @@ def test_existing_external_runs_use_persisted_package_sandbox(
     host.settings = replace(host.settings, sandbox_network_mode=ceiling)
     specs = []
     with TestClient(create_app(host)) as client:
-        provider = host.execution.sandbox_provider
-        original = provider.provision
+        from sagents.v2.runtime.execution.sandbox import LocalWorkspaceSandboxProvider
+        original = LocalWorkspaceSandboxProvider.provision
 
-        async def capture(spec, context, *, run_id):
+        async def capture(provider, spec, context, *, run_id):
             specs.append(spec)
-            return await original(spec, context, run_id=run_id)
+            return await original(provider, spec, context, run_id=run_id)
 
-        monkeypatch.setattr(provider, "provision", capture)
+        monkeypatch.setattr(LocalWorkspaceSandboxProvider, "provision", capture)
         token = register_and_login(client)
         auth = {"Authorization": f"Bearer {token}"}
         created = client.post(
@@ -219,7 +219,7 @@ def test_existing_external_runs_use_persisted_package_sandbox(
         assert "RUN_FINISHED" in response.text
         expected = "unrestricted" if requested == ceiling == "unrestricted" else "none"
         assert specs and all(spec.network.mode.value == expected for spec in specs)
-        assert all(spec.filesystem.allowed_roots == ("/workspace",) for spec in specs)
+        assert all(spec.filesystem.allowed_roots == (spec.workspace_root,) for spec in specs)
 
         # Corrupting the old columns must not change the configuration source.
         async def persisted():

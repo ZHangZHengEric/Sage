@@ -7,6 +7,7 @@ import pytest
 from app.v2.server.conversations.cleanup import finish_file_operation, require_idle
 from app.v2.server.conversations.runs import RunService
 from sagents.v2.contracts.errors import SageV2Error
+from sagents.v2.contracts.commands import StartRun
 from sagents.v2.contracts.run_state import RunState
 
 
@@ -61,7 +62,7 @@ async def test_cancelled_delete_keeps_admission_locked_until_worker_finishes():
         session_access=None, execution=SimpleNamespace(bind_model=lambda *_: False, driving=lambda _: False))
 
     async def load_agent(*args):
-        return object()
+        return SimpleNamespace(id="agent", composition_hash="sha256:test")
     service._load_run_agent = load_agent
 
     def delete():
@@ -78,7 +79,7 @@ async def test_cancelled_delete_keeps_admission_locked_until_worker_finishes():
         assert await asyncio.to_thread(entered.wait, 5)
         deletion.cancel()
         start = asyncio.create_task(service.start_detached_run(
-            "ag_ui", SimpleNamespace(agent_id="agent", session_id="s", config=SimpleNamespace(metadata={})),
+            "ag-ui", StartRun(agent_id="agent", session_id="s", input=(), resolved_spec_hash="sha256:test", idempotency_key="cleanup"),
             RequestContexts("en").for_user("u"),
             user_id="u", session_id="s", label="test"))
         await asyncio.sleep(0.02)

@@ -1,11 +1,8 @@
-from pathlib import Path
 from contextlib import asynccontextmanager
 from datetime import timedelta
 
 from sagents.v2.contracts.common import new_id, utc_now
 from sagents.v2.runtime.execution.scheduler import WorkItem, LeaseReleaseReason
-from sagents.v2.agent.policy.continuation import CompositeContinuationPolicy
-from sagents.v2.tool.plugins.selection_direct import DirectToolSelectionPolicy
 from sagents.v2.model import (
     ScriptedModelProvider,
     ModelEventKind,
@@ -35,7 +32,6 @@ from app.v2.desktop.backend.studio import (
     DesktopStudioMixin,
 )
 from sagents.v2.contracts.errors import SageV2Error
-from sagents.v2.package.manifest.resolver import CompositionResolver
 from sagents.v2.tool import ToolCall
 
 
@@ -259,258 +255,81 @@ def test_studio_request_requires_complete_identity():
 
 
 @pytest.mark.asyncio
-async def test_studio_tools_are_per_run_and_recovered_without_global_configuration(
-    tmp_path: Path,
-):
-    service = DesktopV2Service(tmp_path)
-    resources = []
+async def test_studio_tools_are_per_run_and_recovered_without_global_configuration(tmp_path):
+    from tests.app.v2.desktop.sdk_fixture import desktop, execute
+    def studio_payload(payload):
+        assert STUDIO_TOOLS <= {tool.name for tool in payload.tools}
+        assert "Check earlier design decisions" in str(payload.messages)
+    def plain_payload(payload):
+        assert not STUDIO_TOOLS.intersection(tool.name for tool in payload.tools)
+    model = ScriptedModelProvider((
+        scripted_step(calls=(ModelToolCall(tool_call_id="wire_read", name="studio_read_messages", arguments={"query": "earlier"}),
+            ModelToolCall(tool_call_id="wire_send", name="studio_send_message", arguments={"text": "Published through the real tool executor"})),
+            assertion=studio_payload), scripted_step(text="Finished"),
+        scripted_step(text="Ordinary reply", assertion=plain_payload)))
+    service, _, _ = desktop(tmp_path, model=model)
     try:
         await service.list_agents("owner")
-        await service.patch_model_provider(
-            "model_main", ModelProviderPatch(api_keys=["test-key"]), "owner"
-        )
-        await service.patch_agent_settings(
-            "sage", AgentSettingsPatch(available_tools=["file_read"]), "owner"
-        )
-        agent = await service._agent("sage", "owner")
-        provider = await service._provider(agent, "owner")
-        workspace = await service.workspace_root(None, "sage")
+        await service.patch_agent_settings("sage", AgentSettingsPatch(available_tools=["file_read"]), "owner")
         await service.sync_studio("group", group(), "owner")
         await service._stop_studio_delivery_worker()
-        resolved = CompositionResolver(models=service._model_catalog(agent, provider)).resolve(
-            service._manifest(agent, provider, ("file_read", "load_skill"), tuple(agent.config.get("availableSkills") or ()))
-        )
-        request = DesktopRunRequest(
-            agent_id="sage",
-            session_id="session_studio",
-            studio_id="group",
-            studio_member_id="member_sage",
-            studio_message_id="studio_message_first",
-            messages=[RunMessage(role="user", text="Check earlier design decisions")],
-        )
-        command = service._command(
-            request, resolved, agent=agent, provider=provider, workspace=workspace
-        )
+        request = DesktopRunRequest(agent_id="sage", session_id="session_studio", studio_id="group",
+            studio_member_id="member_sage", studio_message_id="studio_message_first",
+            messages=[RunMessage(role="user", text="Check earlier design decisions")], approval_mode="auto_approve")
+        handle, command, _ = await execute(service, user="owner", request=request)
+        assert handle.state.value == "completed", [(event.type, event.data.model_dump(mode="json")) for event in await service.session_store.read_events(handle.run_id) if event.type in {"tool.call.failed", "run.suspended", "run.failed"}]
         assert STUDIO_TOOLS <= set(command.config.enabled_tools)
-        handle = await service.runtime.start_run(command, service._context("owner"))
-        await service.sync_studio("group", group(), "owner")
-        for _ in range(2):
-            _, loop, sandbox = await service._build_loop(
-                agent=agent,
-                provider=provider,
-                workspace=workspace,
-                preferred_skills=(),
-                approval_mode="high_risk",
-                session_id=handle.session_id,
-                run_id=handle.run_id,
-            )
-            resources.append(sandbox)
-            names = {
-                t.name for t in await loop.tool_catalog.list_tools(run_id=handle.run_id)
-            }
-            assert STUDIO_TOOLS <= names
-            assert any(
-                isinstance(p, StudioContextProvider)
-                for p in loop.context_assembler.providers
-            )
-        regular = service._command(
-            DesktopRunRequest(
-                agent_id="sage",
-                session_id="session_plain",
-                messages=[RunMessage(role="user", text="ordinary")],
-            ),
-            resolved,
-            agent=agent,
-            provider=provider,
-            workspace=workspace,
-        )
+        regular_handle, regular, _ = await execute(service, user="owner", request=DesktopRunRequest(agent_id="sage",
+            session_id="session_plain", messages=[RunMessage(role="user", text="ordinary")]))
+        assert regular_handle.state.value == "completed"
         assert not STUDIO_TOOLS.intersection(regular.config.enabled_tools)
-        regular_handle = await service.runtime.start_run(
-            regular, service._context("owner")
-        )
-        _, regular_loop, sandbox = await service._build_loop(
-            agent=agent,
-            provider=provider,
-            workspace=workspace,
-            preferred_skills=(),
-            approval_mode="high_risk",
-            session_id=regular_handle.session_id,
-            run_id=regular_handle.run_id,
-        )
-        resources.append(sandbox)
-        assert not STUDIO_TOOLS.intersection(
-            t.name
-            for t in await regular_loop.tool_catalog.list_tools(
-                run_id=regular_handle.run_id
-            )
-        )
-        for name in STUDIO_TOOLS:
-            with pytest.raises(SageV2Error):
-                await regular_loop.tool_catalog.get_tool(
-                    name, run_id=regular_handle.run_id
-                )
-        assert not STUDIO_TOOLS.intersection(
-            (await service._agent("sage", "owner")).config["availableTools"]
-        )
-        # Being in the old Studio Session cannot silently retain tools outside Studio mode.
+        assert not STUDIO_TOOLS.intersection((await service._agent("sage", "owner")).config["availableTools"])
         with pytest.raises(SageV2Error):
-            service._command(
-                DesktopRunRequest(
-                    agent_id="sage", session_id="session_studio", messages=[]
-                ),
-                resolved,
-                agent=agent,
-                workspace=workspace,
-            )
+            _ = [frame async for frame in service.run_events(
+                DesktopRunRequest(agent_id="sage", session_id="session_studio", messages=[]), "owner")]
         with pytest.raises(SageV2Error):
-            service.studio_request_binding(
-                request.model_copy(update={"session_id": "session_plain"}), "owner"
-            )
+            service.studio_request_binding(request.model_copy(update={"session_id": "session_plain"}), "owner")
         with pytest.raises(SageV2Error):
             service.studio_request_binding(request, "intruder")
-
         binding = command.config.metadata["studio"]
         tool_provider = service.studio_tool_provider(handle.run_id, "owner", binding)
-        call = ToolCall(
-            tool_call_id="call_publish",
-            tool_name="studio_send_message",
-            arguments={
-                "text": "Earlier decision verified",
-                "recipient_member_ids": ["member_sage"],
-            },
-            operation_id="op_publish",
-            idempotency_key="key_publish",
-            owner_run_id=handle.run_id,
-        )
+        call = ToolCall(tool_call_id="call_publish", tool_name="studio_send_message", arguments={
+            "text": "Earlier decision verified", "recipient_member_ids": ["member_sage"]}, operation_id="op_publish",
+            idempotency_key="key_publish", owner_run_id=handle.run_id)
         result = await tool_provider.execute(call, service._context("owner"))
         assert result.content[0].value["kind"] == "note"
         recovered = service.studio_tool_provider(handle.run_id, "owner", binding)
-        replayed = await recovered.execute(call, service._context("owner"))
-        assert replayed.content == result.content
+        assert (await recovered.execute(call, service._context("owner"))).content == result.content
         with pytest.raises(SageV2Error):
             await tool_provider.execute(call, service._context("intruder"))
         with pytest.raises(SageV2Error):
-            await tool_provider.execute(
-                call.model_copy(update={"owner_run_id": regular_handle.run_id}),
-                service._context("owner"),
-            )
+            await tool_provider.execute(call.model_copy(update={"owner_run_id": regular_handle.run_id}), service._context("owner"))
         with pytest.raises(SageV2Error):
-            await recovered.execute(
-                call.model_copy(
-                    update={
-                        "tool_call_id": "bad",
-                        "idempotency_key": "bad",
-                        "arguments": {
-                            "text": "bad",
-                            "recipient_member_ids": ["outsider"],
-                        },
-                    }
-                ),
-                service._context("owner"),
-            )
-        read_call = call.model_copy(
-            update={
-                "tool_call_id": "read",
-                "tool_name": "studio_read_messages",
-                "operation_id": "read",
-                "idempotency_key": "read",
-                "arguments": {"query": "verified"},
-            }
-        )
-        read = await recovered.execute(read_call, service._context("owner"))
-        assert [m["text"] for m in read.content[0].value["messages"]] == [
-            "Earlier decision verified"
-        ]
-        assert len(service.studio_store.read("group", "owner")["messages"]) == 2
-
-        def assert_studio_payload(payload):
-            assert STUDIO_TOOLS <= {t.name for t in payload.tools}
-            assert "Check earlier design decisions" in str(payload.messages)
-
-        loop.tool_selection_policy = DirectToolSelectionPolicy()
-        loop.step_request_builder.tool_selection_policy = loop.tool_selection_policy
-        loop.continuation_policy = CompositeContinuationPolicy()
-        loop.model = ScriptedModelProvider(
-            (
-                scripted_step(
-                    calls=(
-                        ModelToolCall(
-                            tool_call_id="wire_read",
-                            name="studio_read_messages",
-                            arguments={"query": "earlier"},
-                        ),
-                        ModelToolCall(
-                            tool_call_id="wire_send",
-                            name="studio_send_message",
-                            arguments={
-                                "text": "Published through the real tool executor"
-                            },
-                        ),
-                    ),
-                    assertion=assert_studio_payload,
-                ),
-                scripted_step(text="Finished"),
-            )
-        )
-        async with execution_lease(service, handle.run_id):
-            await loop.execute(handle.run_id, service._context("owner"))
-        # Recover by public turn identity, without starting another Run.
-        found = await service.find_studio_run(
-            "group", "member_sage", "studio_message_first", "owner"
-        )
+            await recovered.execute(call.model_copy(update={"tool_call_id": "bad", "idempotency_key": "bad", "arguments": {
+                "text": "bad", "recipient_member_ids": ["outsider"]}}), service._context("owner"))
+        found = await service.find_studio_run("group", "member_sage", "studio_message_first", "owner")
         assert found["run_id"] == handle.run_id
         with pytest.raises(SageV2Error):
-            await service.find_studio_run(
-                "group", "member_sage", "studio_message_first", "outsider"
-            )
-        # Backfill from canonical Run events even with no Desktop client connected.
+            await service.find_studio_run("group", "member_sage", "studio_message_first", "outsider")
         public = await service.read_studio("group", "owner")
-        assert sum(m["text"] == "Finished" for m in public["messages"]) == 1
+        assert sum(message["text"] == "Finished" for message in public["messages"]) == 1
         await service.publish_studio_run_result(handle.run_id)
-        public = await service.read_studio("group", "owner")
-        assert sum(m["text"] == "Finished" for m in public["messages"]) == 1
+        assert sum(message["text"] == "Finished" for message in (await service.read_studio("group", "owner"))["messages"]) == 1
         events = await service.session_store.read_events(handle.run_id)
-        assert STUDIO_TOOLS <= {
-            e.data.tool_name for e in events if e.type == "tool.call.succeeded"
-        }
-        assert any(
-            m["text"] == "Published through the real tool executor"
-            for m in service.studio_store.read("group", "owner")["messages"]
-        )
-
-        def assert_plain_payload(payload):
-            assert not STUDIO_TOOLS.intersection(t.name for t in payload.tools)
-
-        regular_loop.tool_selection_policy = DirectToolSelectionPolicy()
-        regular_loop.step_request_builder.tool_selection_policy = (
-            regular_loop.tool_selection_policy
-        )
-        regular_loop.continuation_policy = CompositeContinuationPolicy()
-        regular_loop.model = ScriptedModelProvider(
-            (scripted_step(text="Ordinary reply", assertion=assert_plain_payload),)
-        )
-        async with execution_lease(service, regular_handle.run_id):
-            await regular_loop.execute(regular_handle.run_id, service._context("owner"))
-
+        assert STUDIO_TOOLS <= {event.data.tool_name for event in events if event.type == "tool.call.succeeded"}
+        assert any(message["text"] == "Published through the real tool executor" for message in service.studio_store.read("group", "owner")["messages"])
     finally:
-        for resource in resources:
-            await resource.close()
         await service.close()
-
-    reopened = DesktopV2Service(tmp_path)
+    reopened, _, _ = desktop(tmp_path)
     try:
         await reopened.start()
         await reopened._stop_studio_delivery_worker()
+        restored = await reopened.application.agent_for_run(handle.run_id, reopened._context("owner"))
+        assert restored.composition_hash == command.resolved_spec_hash
         restored_agent = await reopened._agent("sage", "owner")
-        restored_binding = await reopened.studio_run_binding(
-            handle.run_id, restored_agent, handle.session_id
-        )
-        replay_provider = reopened.studio_tool_provider(
-            handle.run_id, "owner", restored_binding
-        )
-        assert (
-            await replay_provider.execute(call, reopened._context("owner"))
-        ).content == result.content
+        restored_binding = await reopened.studio_run_binding(handle.run_id, restored_agent, handle.session_id)
+        replay_provider = reopened.studio_tool_provider(handle.run_id, "owner", restored_binding)
+        assert (await replay_provider.execute(call, reopened._context("owner"))).content == result.content
     finally:
         await reopened.close()
 
@@ -816,7 +635,9 @@ async def test_mention_delivery_executes_real_v2_run_and_reconciles_lost_receipt
 ):
     import asyncio
 
-    service = DesktopV2Service(tmp_path)
+    from tests.app.v2.desktop.sdk_fixture import desktop
+    requests = []
+    service, _, _ = desktop(tmp_path, model=ScriptedModelProvider((scripted_step(text="Internal completion, no reply needed", assertion=requests.append),)))
     try:
         await service.list_agents("owner")
         await service.patch_model_provider(
@@ -828,23 +649,6 @@ async def test_mention_delivery_executes_real_v2_run_and_reconciles_lost_receipt
         await service.sync_studio("group", group(), "owner")
         await service._stop_studio_delivery_worker()
         service._studio_delivery_tasks = {}
-        original = service._build_loop
-        requests = []
-
-        async def build(**kwargs):
-            resolved, loop, resources = await original(**kwargs)
-            loop.continuation_policy = CompositeContinuationPolicy()
-            loop.model = ScriptedModelProvider(
-                (
-                    scripted_step(
-                        text="Internal completion, no reply needed",
-                        assertion=requests.append,
-                    ),
-                )
-            )
-            return resolved, loop, resources
-
-        monkeypatch.setattr(service, "_build_loop", build)
         service.studio_store.send(
             "group",
             "owner",

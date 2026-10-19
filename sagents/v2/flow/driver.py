@@ -15,5 +15,10 @@ class AgentFlowDriver:
     async def resume(self, run_id, context):
         return await self.flow_runtime.resume(run_id, context)
 
+    async def recover_interrupted(self, run_id, context):
+        return await self.flow_runtime.recover_interrupted(
+            run_id, context, flow_id=self.flow_id
+        )
+
     async def close(self):
         await self.child_executor.close()

@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
+import inspect
 from dataclasses import dataclass
 import re
 import time
@@ -30,7 +31,7 @@ class SidecarClientLeases:
         *,
         ttl_seconds: float = 30.0,
         monotonic: Callable[[], float] = time.monotonic,
-        keep_alive: Callable[[], bool] = lambda: False,
+        keep_alive: Callable[[], bool | Awaitable[bool]] = lambda: False,
     ) -> None:
         if ttl_seconds <= 0:
             raise ValueError("sidecar client lease TTL must be positive")
@@ -63,7 +64,7 @@ class SidecarClientLeases:
         async with self._lock:
             self._prune_locked(self._monotonic())
             self._clients.pop(client_id, None)
-            should_shutdown = self._request_shutdown_if_empty_locked()
+            should_shutdown = await self._request_shutdown_if_empty_locked()
             return SidecarLeaseResult(
                 active_clients=len(self._clients),
                 shutdown_requested=should_shutdown,
@@ -74,8 +75,11 @@ class SidecarClientLeases:
             self._prune_locked(self._monotonic())
             # A relaunch may repeat the idle-shutdown request while the old
             # process is already draining. Report that handoff as accepted.
-            should_shutdown = self._closing or self._request_shutdown_if_empty_locked(
-                require_prior_client=False
+            should_shutdown = (
+                self._closing
+                or await self._request_shutdown_if_empty_locked(
+                    require_prior_client=False
+                )
             )
             return SidecarLeaseResult(
                 active_clients=len(self._clients),
@@ -86,7 +90,7 @@ class SidecarClientLeases:
         async with self._lock:
             now = self._monotonic()
             self._prune_locked(now)
-            should_shutdown = self._request_shutdown_if_empty_locked(
+            should_shutdown = await self._request_shutdown_if_empty_locked(
                 require_prior_client=now < self._unclaimed_deadline
             )
             return SidecarLeaseResult(
@@ -110,10 +114,15 @@ class SidecarClientLeases:
                 request_shutdown()
                 return
 
-    def _request_shutdown_if_empty_locked(
+    async def _request_shutdown_if_empty_locked(
         self, *, require_prior_client: bool = True
     ) -> bool:
-        if self._closing or self._clients or self.keep_alive():
+        if self._closing or self._clients:
+            return False
+        busy = self.keep_alive()
+        if inspect.isawaitable(busy):
+            busy = await busy
+        if busy:
             return False
         if require_prior_client and not self._ever_attached:
             return False

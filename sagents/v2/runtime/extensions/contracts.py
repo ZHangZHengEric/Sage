@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Awaitable, Callable, Iterator, Mapping
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any, ClassVar, Generic, Protocol, TypeVar
+from typing import Any, ClassVar, Generic, Literal, Protocol, TypeVar
 
 from pydantic import BaseModel, Field, model_validator
 
@@ -195,6 +195,9 @@ class ExtensionScopeContext(StrictModel):
     tenant_id: Identifier | None = None
     agent_id: Identifier | None = None
     run_id: Identifier | None = None
+    # SDK-owned, resolved Agent inputs for capability factories. Contains model
+    # routes and credential references, never a host execution assembly callback.
+    agent_configuration: dict[str, Any] | None = None
     config: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -226,3 +229,12 @@ class ExtensionRegistration(Generic[T]):
     start: StartHook[T] | None = None
     stop: StopHook[T] | None = None
     config_model: type[BaseModel] | None = None
+    # A borrowed provider participates in scope creation and dependency checks,
+    # but its creator retains shutdown responsibility, including on rollback.
+    ownership: Literal["owned", "borrowed"] = "owned"
+
+    def __post_init__(self):
+        if self.ownership not in {"owned", "borrowed"}:
+            raise ValueError("extension ownership must be owned or borrowed")
+        if self.ownership == "borrowed" and self.stop is not None:
+            raise ValueError("borrowed extensions cannot transfer a stop hook")

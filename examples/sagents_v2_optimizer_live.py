@@ -6,6 +6,8 @@ independent objective check results under --output. Makes billable model calls.
 """
 
 from __future__ import annotations
+from sagents.v2 import ApplicationConfiguration
+from examples.sagents_v2_host.registrations import provided, runtime_for
 
 import argparse
 import asyncio
@@ -23,7 +25,6 @@ from sagents.v2 import (
     OptimizationCase,
     OptimizationSuite,
     OptimizationFinalSuite,
-    SAgentBuilder,
 )
 from sagents.v2.contracts.principals import ActorRef, PrincipalType, RequestContext
 from sagents.v2.model.contracts import ModelCapabilities
@@ -293,24 +294,20 @@ async def main(args):
                 ),
                 credential=material,
             )
-        builder = (
-            SAgentBuilder().with_models({"models": {"primary": {
+        registrations = [provided("example.model", lambda context, deps: provider, "model.provider", ownership="owned")]
+        choices = {"model.provider": {"plugin": "example.model"}}
+        if args.challenge:
+            tools = DecoratedToolProvider(AuditTools())
+            registrations.append(provided("example.tools", lambda context, deps: tools, "tool.catalog", "tool.executor"))
+            policy = DefaultToolPolicy(approval_strategy=ApprovalStrategy.AUTO_APPROVE)
+            registrations.append(provided("example.policy", lambda context, deps: policy, "agent.tool-policy"))
+            choices.update({"tool.catalog": {"plugin": "example.tools"}, "agent.tool-policy": {"plugin": "example.policy"}})
+        return ApplicationConfiguration(tuple(registrations), runtime_for(root / "sessions", bundle.manifest.runtime, capabilities=choices), {"models": {"primary": {
                 "provider": config["protocol"], "model": model,
                 "base_url": config["base_url"],
                 "request": {"max_output_tokens": 4096},
                 "limits": {"context_window": config.get("max_model_len") or 64000},
             }}})
-            .with_defaults(session_root=root / "sessions")
-            .with_model_provider(provider)
-            .with_owned_resources(provider)
-        )
-        if args.challenge:
-            tools = DecoratedToolProvider(AuditTools())
-            builder.with_tool_provider(tools.catalog, tools.executor)
-            builder.with_tool_policy(
-                DefaultToolPolicy(approval_strategy=ApprovalStrategy.AUTO_APPROVE)
-            )
-        return builder
 
     native = IsolatedOptimizationRunner(builder_factory=factory, authorize=authorize)
     final_cases = (

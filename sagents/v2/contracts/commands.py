@@ -10,6 +10,7 @@ from pydantic import Field, model_validator
 
 from sagents.v2.contracts.common import Identifier, SkillName, StrictModel, ToolName
 from sagents.v2.contracts.errors import RuntimeErrorInfo
+from sagents.v2.contracts.execution import ExecutionConfigurationSnapshot
 from sagents.v2.contracts.items import ContentBlock
 from sagents.v2.contracts.run_state import SessionConcurrencyMode
 
@@ -53,6 +54,10 @@ class RunConfig(StrictModel):
     max_stages: int | None = Field(default=None, gt=0)
     flow_boundary: Literal["complete_node", "continue_node"] | None = None
     priority: int = Field(default=0, ge=-100, le=100)
+    execution_policy: dict[str, Any] | None = None
+    # Set by standard admission, never used as a host override. The driver
+    # consumes this exact persisted value on first execution and recovery.
+    execution_snapshot: ExecutionConfigurationSnapshot | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
