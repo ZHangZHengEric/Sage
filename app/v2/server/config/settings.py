@@ -47,7 +47,7 @@ class ServerSettings:
     language: str
     admin_username: str
     admin_password: str
-    log_level: str = "info"
+    log_level: str = "debug"
     log_format: str = "json"
     log_directory: str = "./logs"
     mysql_url: str | None = None

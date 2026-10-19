@@ -5,6 +5,8 @@ from __future__ import annotations
 from typing import Any
 
 from sagents.v2.agent.engine import AgentLoopEngine
+from sagents.v2.agent.step_request import DefaultAgentStepRequestBuilder
+from sagents.v2.runtime.observability.timing import log_duration
 from sagents.v2.runtime.observability.content import trace_content
 from sagents.v2.contracts.items import TextBlock
 from sagents.v2.contracts.principals import RequestContext
@@ -49,6 +51,38 @@ def _run_outcome_observation(
     return TraceStatus.UNSET, "agent.run.stopped", "agent run stopped", "warning"
 
 
+class _ObservedContextAssembler:
+    def __init__(self, assembler, logger):
+        self.assembler, self.logger = assembler, logger
+
+    def __getattr__(self, name):
+        return getattr(self.assembler, name)
+
+    async def initial_ledger(self, command, *, run_id=None):
+        with log_duration(self.logger, "agent.preparation.completed", "会话历史加载结束",
+                          run_id=run_id, attributes={"phase": "history"}):
+            return await self.assembler.initial_ledger(command, run_id=run_id)
+
+    async def prepare_messages(self, command, ledger, **kwargs):
+        with log_duration(self.logger, "agent.preparation.completed", "模型上下文构建结束",
+                          run_id=kwargs.get("run_id"), attributes={"phase": "context_projection"}):
+            return await self.assembler.prepare_messages(command, ledger, **kwargs)
+
+
+class _ObservedStepRequestBuilder:
+    def __init__(self, builder, logger):
+        self.builder, self.logger = builder, logger
+
+    def __getattr__(self, name):
+        return getattr(self.builder, name)
+
+    async def prepare(self, **kwargs):
+        with log_duration(self.logger, "agent.preparation.completed", "模型请求准备结束",
+                          run_id=kwargs["run_id"], turn_id=kwargs["turn_id"], step_id=kwargs["step_id"],
+                          attributes={"phase": "model_request"}):
+            return await self.builder.prepare(**kwargs)
+
+
 class ObservedRunDriver(AgentLoopEngine):
     """Project Agent Run and logical Tool-call lifecycles to host-owned sinks."""
 
@@ -62,11 +96,50 @@ class ObservedRunDriver(AgentLoopEngine):
         super().__init__(**engine_dependencies)
         self._observed_trace_sink = trace_sink
         self._observed_log_sink = log_sink
+        if log_sink is not None:
+            self.context_assembler = _ObservedContextAssembler(
+                self.context_assembler, self._structured_logger()
+            )
+            builder = self.step_request_builder
+            if isinstance(builder, DefaultAgentStepRequestBuilder):
+                builder.context_assembler = self.context_assembler
+            self.step_request_builder = _ObservedStepRequestBuilder(
+                builder, self._structured_logger()
+            )
 
     def _structured_logger(self) -> StructuredLogger | None:
         if self._observed_log_sink is None:
             return None
         return StructuredLogger(self._observed_log_sink, "sagents.agent")
+
+    async def _prepare_self_configuration(self, run_id, context):
+        if self.self_configuration is None:
+            return await super()._prepare_self_configuration(run_id, context)
+        with log_duration(self._structured_logger(), "agent.preparation.completed", "Agent 自配置准备结束",
+                          run_id=run_id, attributes={"phase": "self_configuration"}):
+            return await super()._prepare_self_configuration(run_id, context)
+
+    async def _initialize_skills(self, run, command, context):
+        if not self.preload_skills:
+            return await super()._initialize_skills(run, command, context)
+        with log_duration(self._structured_logger(), "agent.preparation.completed", "技能预加载结束",
+                          run_id=run.run_id, session_id=run.session_id, attributes={"phase": "skill_preloads"}):
+            return await super()._initialize_skills(run, command, context)
+
+    async def _prepare_tool_selection(self, *, command, run_id, messages, language):
+        if run_id in self._prepared_tool_selection_runs:
+            return
+        with log_duration(self._structured_logger(), "agent.preparation.completed", "工具目录与选择策略准备结束",
+                          run_id=run_id, attributes={"phase": "tool_selection"}):
+            return await super()._prepare_tool_selection(
+                command=command, run_id=run_id, messages=messages, language=language
+            )
+
+    async def _commit_running(self, run, context, drafts, **kwargs):
+        with log_duration(self._structured_logger(), "agent.state.commit", "Agent 状态提交结束",
+                          run_id=run.run_id, session_id=run.session_id,
+                          attributes={"event_types": [draft.type for draft in drafts], "revision": run.revision}):
+            return await super()._commit_running(run, context, drafts, **kwargs)
 
     async def _root_session_id(self, session_id: str) -> str:
         return await resolve_root_session_id(
@@ -172,7 +245,7 @@ class ObservedRunDriver(AgentLoopEngine):
             attributes=attributes,
         )
         try:
-            with structured_log_context(**correlation):
+            with structured_log_context(**correlation, run_id=run.run_id, session_id=run.session_id):
                 snapshot = await body(
                     run_id,
                     context.model_copy(

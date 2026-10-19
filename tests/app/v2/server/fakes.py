@@ -56,6 +56,10 @@ class MemoryCatalogStore:
     def __init__(self) -> None:
         self._catalogs: dict[str, UserCatalog] = {}
 
+    async def get_execution_policy(self, user_id, agent_id):
+        catalog = self._catalogs.get(user_id)
+        return next((agent.execution_policy for agent in catalog.agents if agent.id == agent_id), None) if catalog else None
+
     async def get_agent(self, user_id, agent_id):
         return require_agent(self._catalogs.get(user_id) or empty_catalog(), agent_id).model_copy(deep=True)
 

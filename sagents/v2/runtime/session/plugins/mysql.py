@@ -399,6 +399,7 @@ class _MysqlSessionState(SessionStoreCoordinator):
             await pool.wait_closed()
 
     async def _commit_storage_locked(self, session_id: str) -> None:
+        started_at = time.perf_counter()
         await self._ensure_ready()
         mutation = self._session_mutation_locked(session_id).model_dump(
             mode="json", exclude={"kind"}
@@ -437,8 +438,10 @@ class _MysqlSessionState(SessionStoreCoordinator):
         encoded_mutation = _json(mutation) if not should_snapshot else None
         next_run_sequences: dict[str, int] = {}
         failure: Exception | None = None
-        started_at = time.perf_counter()
+        prepared_at = time.perf_counter()
+        written_at = committed_at = prepared_at
         async with self._writer_connection() as connection:
+            acquired_at = time.perf_counter()
             try:
                 async with connection.cursor() as cursor:
                     if expected_revision is None:
@@ -529,7 +532,9 @@ class _MysqlSessionState(SessionStoreCoordinator):
                         )
                     await self._sync_locations(cursor, session_id, location_rows)
                     await self._sync_start_idempotency(cursor, session_id, start_rows)
+                written_at = time.perf_counter()
                 await connection.commit()
+                committed_at = time.perf_counter()
             except Exception as exc:
                 try:
                     await connection.rollback()
@@ -541,6 +546,9 @@ class _MysqlSessionState(SessionStoreCoordinator):
                     )
                 failure = exc
         if failure is not None:
+            LOGGER.debug("session.mysql.commit_failed", "MySQL 会话提交失败",
+                session_id=session_id, revision=new_revision,
+                duration_ms=round((time.perf_counter() - started_at) * 1000, 3))
             try:
                 await self._reload_session_from_storage_locked(session_id)
             except Exception as recovery_error:
@@ -560,7 +568,7 @@ class _MysqlSessionState(SessionStoreCoordinator):
         )
         LOGGER.debug(
             "session.mysql.commit",
-            "mysql session committed",
+            "MySQL 会话提交完成",
             session_id=session_id,
             revision=new_revision,
             snapshot=should_snapshot,
@@ -569,6 +577,10 @@ class _MysqlSessionState(SessionStoreCoordinator):
             ),
             event_count=sum(len(rows) for rows in events.values()),
             duration_ms=round((time.perf_counter() - started_at) * 1000, 2),
+            preparation_ms=round((prepared_at - started_at) * 1000, 3),
+            connection_wait_ms=round((acquired_at - prepared_at) * 1000, 3),
+            write_ms=round((written_at - acquired_at) * 1000, 3),
+            commit_ms=round((committed_at - written_at) * 1000, 3),
         )
 
     async def _persist_events(

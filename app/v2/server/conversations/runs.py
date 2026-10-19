@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+from time import perf_counter
 from datetime import timedelta
 
 from app.v2.server.observability.logging import get_logger
@@ -15,6 +16,7 @@ from sagents.v2.contracts.principals import RequestContext
 from sagents.v2.contracts.run_state import TERMINAL_RUN_STATES, RunState
 from sagents.v2.contracts.common import utc_now
 from app.v2.server.runtime.policy import frozen_execution, live_execution_policy
+from sagents.v2.runtime.observability.timing import log_duration
 
 LOGGER = get_logger(__name__)
 
@@ -37,8 +39,14 @@ class RunService:
         from app.v2.server.runtime.loop import load_catalog_agent
         if self.host is None:
             raise RuntimeError("Server capabilities have not been registered")
-        async with self._agent_load_lock:
-            return await load_catalog_agent(self.host, command, user_id)
+        with log_duration(LOGGER, "server.run.agent_load", "运行 Agent 加载结束",
+                          session_id=command.session_id, attributes={"agent_id": command.agent_id}):
+            started = perf_counter()
+            async with self._agent_load_lock:
+                LOGGER.debug("server.run.agent_load.started", "开始加载运行 Agent",
+                    session_id=command.session_id, agent_id=command.agent_id,
+                    lock_wait_ms=round((perf_counter() - started) * 1000, 3))
+                return await load_catalog_agent(self.host, command, user_id)
 
     async def cancel_run(
         self,
@@ -314,7 +322,11 @@ class RunService:
         context = context.model_copy(update={"memory_identity": MemoryIdentity(
             user_id=workspace_user(command, user_id), workspace_id=command.agent_id,
         )})
+        started = perf_counter()
         async with self.workspace_mutation_lock:
+            LOGGER.debug("server.run.preparation.started", "开始准备运行",
+                session_id=session_id, agent_id=command.agent_id,
+                lock_wait_ms=round((perf_counter() - started) * 1000, 3))
             token = bind_model_user(user_id)
             bound = False
             try:
@@ -322,12 +334,14 @@ class RunService:
                 application = self.application
                 loaded = await self._load_run_agent(command, user_id)
                 command = command.model_copy(update={"agent_id": loaded.id, "resolved_spec_hash": loaded.composition_hash})
-                stream = await application.run_interface(
-                    interface,
-                    command,
-                    context,
-                    agent=loaded,
-                )
+                with log_duration(LOGGER, "server.run.accepted", "运行接纳结束",
+                                  session_id=session_id, attributes={"interface": interface}):
+                    stream = await application.run_interface(
+                        interface,
+                        command,
+                        context,
+                        agent=loaded,
+                    )
                 run_id = stream.handle.run_id
                 if (
                     self.execution.driving(run_id)
