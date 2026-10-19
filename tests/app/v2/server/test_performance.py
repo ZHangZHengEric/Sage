@@ -283,12 +283,20 @@ def test_actual_sdk_request_includes_repeated_agent_loading(
 
     user, _ = identity(client, "timing-user")
     original = service.conversations.runs._load_run_agent
+    original_admission = service.conversations.admission.prepare
+    boundaries = {}
 
     async def slow_load(*args, **kwargs):
         await asyncio.sleep(0.05)  # repeated per-request initialization
         return await original(*args, **kwargs)
 
+    async def slow_admission(*args, **kwargs):
+        boundaries["admission"] = datetime.now(timezone.utc).timestamp()
+        await asyncio.sleep(0.05)
+        return await original_admission(*args, **kwargs)
+
     monkeypatch.setattr(service.conversations.runs, "_load_run_agent", slow_load)
+    monkeypatch.setattr(service.conversations.admission, "prepare", slow_admission)
     response = client.post("/api/agent", json=_run_input(), headers=user)
     assert response.status_code == 200
 
@@ -303,7 +311,10 @@ def test_actual_sdk_request_includes_repeated_agent_loading(
     metrics = client.get("/api/observability/performance", headers=admin).json()["data"]
     row = metrics["runs"][0]
     assert row["scope"] == "sdk_entry"
+    assert (
+        datetime.fromisoformat(row["started_at"]).timestamp() <= boundaries["admission"]
+    )
     assert row["state"] == "completed"
     assert row["coverage"] == "complete"
-    assert row["framework_ms"] >= 50
-    assert row["first_token_ms"] >= 50
+    assert row["framework_ms"] >= 100
+    assert row["first_token_ms"] >= 100

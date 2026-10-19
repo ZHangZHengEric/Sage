@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 from time import perf_counter
-from datetime import timedelta
+from datetime import datetime, timedelta
 
 from app.v2.server.observability.logging import get_logger
 from sagents.v2.contracts.commands import CancelRun, ReplyInteraction, ResumeRun, SteerRun, InputItem
@@ -122,6 +122,7 @@ class RunService:
         label: str,
         decide=None,
         expected=None,
+        performance_started_at: datetime | None = None,
     ) -> None:
         """Answer whatever a suspended Run is waiting on and put it back in flight.
 
@@ -136,6 +137,7 @@ class RunService:
         afterwards could be answering a question that has since changed.
         """
 
+        performance_started_at = performance_started_at or utc_now()
         access = self.session_access
         run = await access.get_run(run_id, context)
         if run.state != RunState.SUSPENDED or run.suspension_id is None:
@@ -204,6 +206,7 @@ class RunService:
             user_id=user_id,
             session_id=session_id,
             label=label,
+            performance_started_at=performance_started_at,
         )
 
     async def approval_expired(self, run, interaction) -> bool:
@@ -257,6 +260,7 @@ class RunService:
         user_id: str,
         session_id: str,
         label: str,
+        performance_started_at: datetime | None = None,
     ) -> None:
         """Restart local execution of a Run whose resume was already accepted.
 
@@ -270,7 +274,7 @@ class RunService:
         already running under a drive that is someone else's.
         """
 
-        resume_started_at = utc_now()
+        resume_started_at = performance_started_at or utc_now()
         run = await self.application.runtime.get_run(run_id)
         if run.state != RunState.RESUMING or self.execution.driving(run_id):
             return
@@ -295,6 +299,7 @@ class RunService:
         session_id: str,
         label: str,
         on_finished=None,
+        performance_started_at: datetime | None = None,
     ) -> str:
         """Start a Run that outlives the request which asked for it.
 
@@ -311,7 +316,7 @@ class RunService:
         from sagents.v2.contracts.principals import MemoryIdentity
         # The per-request SDK entry boundary precedes load/update/admission;
         # process startup and its one-time initialization happen elsewhere.
-        request_started_at = utc_now()
+        request_started_at = performance_started_at or utc_now()
         context = context.model_copy(update={"memory_identity": MemoryIdentity(
             user_id=workspace_user(command, user_id), workspace_id=command.agent_id,
         )})
