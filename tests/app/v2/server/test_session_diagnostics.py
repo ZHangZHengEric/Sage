@@ -1,6 +1,7 @@
 from io import BytesIO
 import json
 from types import SimpleNamespace
+from threading import Event
 from zipfile import ZipFile
 
 import pytest
@@ -9,6 +10,71 @@ from app.v2.server.observability.diagnostics import REDACTED, SessionDiagnostics
 from app.v2.server.storage.downloads import prepare_session_export
 from sagents.v2.runtime.observability.contracts import LogRecord
 from tests.app.v2.server.test_file_downloads import identity, _run_input
+
+
+async def test_slow_diagnostics_do_not_block_model_or_log_producers(tmp_path, monkeypatch):
+    import asyncio
+    from tests.app.v2.server.conftest import scripted_hello
+    from sagents.v2.model import ModelRequest, RecordingModelProvider
+
+    sink = SessionDiagnostics(tmp_path / "private")
+    entered, release = Event(), Event()
+    update = sink._update
+
+    def slow_update(*args):
+        entered.set()
+        assert release.wait(timeout=5)
+        return update(*args)
+
+    monkeypatch.setattr(sink, "_update", slow_update)
+    async def session_id(_):
+        return "session"
+    model = RecordingModelProvider(scripted_hello(), sink=sink, session_id_resolver=session_id)
+    request = ModelRequest(request_id="request", run_id="run", model_binding="primary", messages=())
+    try:
+        async def consume():
+            return [event async for event in model.stream(request)]
+        events = await asyncio.wait_for(consume(), timeout=1)
+        assert events[-1].response.text == "hello"
+        assert await asyncio.to_thread(entered.wait, 1)
+        sink.write(LogRecord(level="debug", event="test", message="测试", component="test",
+                             session_id="session", run_id="run"))
+    finally:
+        release.set()
+        await sink.close()
+    evidence = sink.snapshot("session", {"run"})
+    assert evidence["models"][0]["status"] == "completed"
+    assert evidence["models"][0]["first_token_at"]
+    assert evidence["logs"][0]["message"] == "测试"
+
+
+async def test_diagnostic_queue_is_bounded_and_reports_overflow(tmp_path, monkeypatch):
+    import asyncio
+
+    monkeypatch.setattr(SessionDiagnostics, "max_pending_writes", 2)
+    sink = SessionDiagnostics(tmp_path / "private")
+    entered, release = Event(), Event()
+    update = sink._update
+
+    def slow_update(*args):
+        entered.set()
+        assert release.wait(timeout=5)
+        return update(*args)
+
+    monkeypatch.setattr(sink, "_update", slow_update)
+    request = SimpleNamespace(run_id="run", request_id="request", metadata={})
+    try:
+        await sink.begin_model_request(session_id="session", request=request, provider={}, wire_request={})
+        assert await asyncio.to_thread(entered.wait, 1)
+        await sink.complete_model_request(session_id="session", request=request,
+            response=SimpleNamespace(model_dump=lambda **_: {"text": "done"}))
+        sink.write(LogRecord(level="debug", event="test", message="测试", component="test",
+                             session_id="session", run_id="run"))
+        assert sink.capture_failures == 1
+    finally:
+        release.set()
+        await sink.close()
+    assert sink.snapshot("session", {"run"})["models"][0]["status"] == "completed"
 
 
 async def test_large_model_stream_preserves_request_and_export_after_restart(tmp_path):
@@ -29,6 +95,7 @@ async def test_large_model_stream_preserves_request_and_export_after_restart(tmp
         session_id="large", request=request,
         response=SimpleNamespace(model_dump=lambda **_: {"output": "saved"}),
     )
+    await sink.close()
     evidence = SessionDiagnostics(tmp_path / "private").snapshot("large", {"run-large"})
     record = evidence["models"][0]
     assert record["request"]["messages"] == ["Create the project"]
@@ -116,6 +183,7 @@ async def test_capture_survives_restart_is_scoped_and_reports_limits(tmp_path):
             run_id="run-b",
         )
     )
+    await sink.close()
     sink = SessionDiagnostics(tmp_path / "private")
     evidence = sink.snapshot("a", {"run-a"})
     assert len(evidence["models"]) == 1
@@ -447,6 +515,7 @@ async def test_diagnostic_failure_does_not_stop_model_stream(tmp_path, monkeypat
     )
     events = [event async for event in model.stream(request)]
     assert events[-1].response.text == "hello"
+    await sink.close()
     assert sink.capture_failures > 0
 
 

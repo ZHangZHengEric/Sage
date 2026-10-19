@@ -17,6 +17,39 @@ ref: v2-detail-sagents-v2-observability
 
 `ObservedRunDriver` 负责 Agent 与工具，`RecordingModelProvider` 负责模型。它们产生同一份厂商无关 `TraceSpan`，`sage.trace.otlp` 导出通用/GenAI 字段，`sage.trace.langfuse` 在公共 OTLP 传输上添加 Langfuse 映射。没有新增数据库表或持久化观测队列。
 
+## 对话耗时诊断
+
+新增阶段日志使用 DEBUG 和中文文案，事件名保持稳定。通过
+`SAGE_SERVER_LOG_LEVEL=debug` 开启，按 `correlation_id` 关联同一次请求；
+进入运行后同时携带原生 `run_id` 和 `session_id`。
+
+| 事件 | 耗时含义 |
+| --- | --- |
+| `server.run.preparation.started` / `server.run.agent_load.started` | `lock_wait_ms` 区分工作区锁和 Agent 加载锁的等待 |
+| `server.run.agent_load` / `server.run.accepted` | Agent 装载、运行接纳的耗时 |
+| `agent.preparation.completed` | `phase` 区分历史读取、自配置、技能预加载、工具选择、上下文构建与整个模型请求准备 |
+| `mcp.discovery.completed` | 连接初始化、工具列表读取、连接清理的 `connect_ms/list_tools_ms/close_ms`；缓存命中不会重复发现 |
+| `agent.state.commit` | 状态提交整体耗时，`event_types` 标识提交边界 |
+| `session.mysql.commit` | 准备、连接等待、SQL 写入、事务提交的 `preparation_ms/connection_wait_ms/write_ms/commit_ms` |
+| `model.first_text` | 当前模型请求收到首个非空正文 delta 的 `first_text_ms`，排除 reasoning |
+| `agui.first_text` | 从 ConversationService.start 进入到首段 Assistant 正文准备发送 SSE 的耗时；不包含浏览器渲染，重放通过 `replayed` 标识 |
+
+`model.request.completed` 也包含 `first_text_ms`；只返回完整响应、没有正文 delta 的模型该字段为空。
+`agui.run.started` 的 `preparation_ms` 记录进入服务到开始准备运行前的耗时，
+`agui.run.completed` 的 `duration_ms` 记录包含接纳与收尾的整体耗时。
+父子阶段存在重叠，例如上下文构建包含在模型请求准备中，MySQL 提交包含在状态提交中，不能直接相加。
+日志只记录身份、阶段、计数和耗时，不记录工具参数或模型正文。
+
+Server 实时执行权限只查询当前 Agent 的策略字段，用户、Agent 和 API Key 使用独立数据库 Session 并行读取；
+根权限和子 Agent 权限检查也并行执行。结果仍与接纳时冻结的权限取交集，不缓存实时撤权结果。
+单个事务内存在依赖的写入以及工具执行前的持久化边界仍顺序等待。
+
+Server 既有诊断 SQLite 的模型记录与运行日志由单线程后台队列顺序写入，最多保留 64 个待处理操作，
+不会让推理和工具继续执行等待诊断写盘。队列饱和和写入失败计入 `capture_failures_since_start`。
+诊断导出和服务关闭最多等待 3 秒刷入；导出仍有待写入时，manifest 的
+`diagnostic_writes_pending` 为 true。关闭超时会取消尚未开始的诊断操作并计数；
+这些记录是 best effort 诊断资料，不参与运行恢复，不新增业务表。
+
 ## 文件诊断
 
 文件诊断插件的 `root` 指向 SessionStore 的 `sessions` 根目录，使用与 SessionStore 相同的位置映射。请求写入所属 Session 的 `runs/<run_id>/llm_requests`；子会话位于父会话的 `sub_sessions/<session_id>` 中，不另建平铺诊断目录。旧平铺记录仍可读取，在该 Session 下一次诊断写入时迁入正确目录；会话状态和历史不参与此迁移。

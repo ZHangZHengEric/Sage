@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import asyncio
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -62,18 +63,19 @@ async def live_execution_policy(command, *, users, keys, catalog, settings, user
     raw = command.config.metadata.get(EXECUTION_METADATA_KEY)
     if raw is not None and raw.get("user_id") != user_id:
         return None
-    user = await users.get_by_id(user_id)
+    reads = [users.get_by_id(user_id), catalog.get_execution_policy(user_id, source_agent_id)]
+    if key_id is not None:
+        reads.append(keys.get(key_id))
+    user, agent_policy, *key_records = await asyncio.gather(*reads)
     if user is None:
         return None
     if key_id is not None:
-        key = await keys.get(key_id)
+        key = key_records[0]
         if (key is None or key.revoked or key.owner_user_id != user_id
                 or (key.agent_id and key.agent_id != source_agent_id)
                 or not key.allows("a2a:invoke")):
             return None
-    current = await catalog.get(user_id)
-    agent = next((a for a in current.agents if a.id == source_agent_id), None)
-    if agent is None:
+    if agent_policy is None:
         return None
-    return intersect_policies(frozen, user.execution_policy, agent.execution_policy,
+    return intersect_policies(frozen, user.execution_policy, agent_policy,
                               server_ceiling(settings))

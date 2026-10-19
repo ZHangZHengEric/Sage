@@ -145,6 +145,7 @@ def prepare_session_export(session_id: str, state: dict, evidence: dict | None =
     from app.v2.server.observability.diagnostics import redact
 
     evidence = evidence or {"models": [], "logs": [], "unavailable": True}
+    pending_writes = bool(evidence.get("pending_writes"))
     if [row["session_id"] for row in state.get("sessions", [])] != [session_id]:
         raise ValueError("diagnostic Session identity mismatch")
     if any(run["session_id"] != session_id for run in state.get("runs", [])):
@@ -271,6 +272,7 @@ def prepare_session_export(session_id: str, state: dict, evidence: dict | None =
                         bool(row.get("truncated")) for row in evidence.get("logs", [])
                     ),
                     "dropped_logs": evidence.get("dropped_logs", 0),
+                    "diagnostic_writes_pending": pending_writes,
                     "capture_failures_since_start": evidence.get(
                         "capture_failures_since_start", 0
                     ),

@@ -7,10 +7,44 @@ from sqlalchemy import event
 
 from app.v2.server.catalog.orm import CatalogRow
 from app.v2.server.catalog.repository import DatabaseCatalogStore
+from app.v2.server.catalog.orm import AgentRow
+from app.v2.server.runtime.policy import ExecutionPolicy
 from app.v2.server.database import Database, DatabaseSettings
 from app.v2.server.database.schema import create_host_schema
 from tests.app.v2.server.conftest import register_and_login
 from tests.app.v2.server.test_admin import admin_login
+
+
+async def test_execution_policy_read_is_scoped_lightweight_and_observes_revocation(tmp_path):
+    database = Database(DatabaseSettings(url=f"sqlite+aiosqlite:///{tmp_path}/host.db"))
+    await database.start()
+    try:
+        await create_host_schema(database)
+        async with database.transaction() as session:
+            session.add(AgentRow(id="agent", owner_user_id="alice", name="Agent",
+                tools=[], execution_policy={"shell": "sandboxed"}, package_ref="missing-package"))
+        store = DatabaseCatalogStore(database)
+        statements = []
+        async with database.session() as session:
+            engine = session.bind
+        event.listen(engine.sync_engine, "before_cursor_execute",
+                     lambda conn, cursor, sql, params, ctx, many: statements.append(sql))
+        with patch.object(store, "get", side_effect=AssertionError("must not load catalog")):
+            assert await store.get_execution_policy("alice", "agent") == ExecutionPolicy(shell="sandboxed")
+        assert len(statements) == 1
+        assert "packages" not in statements[0].lower()
+        assert "instructions" not in statements[0].lower()
+        assert "FOR UPDATE" not in statements[0].upper()
+        assert await store.get_execution_policy("bob", "agent") is None
+        async with database.transaction() as session:
+            row = await session.get(AgentRow, "agent")
+            row.execution_policy = {"shell": "deny"}
+        assert (await store.get_execution_policy("alice", "agent")).shell == "deny"
+        async with database.transaction() as session:
+            await session.delete(await session.get(AgentRow, "agent"))
+        assert await store.get_execution_policy("alice", "agent") is None
+    finally:
+        await database.stop()
 
 
 @pytest.mark.parametrize("section", ["models", "mcp_servers", "a2a_agents"])
