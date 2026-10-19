@@ -31,13 +31,16 @@ export function messageForAguiError(event, fallback) {
   return event?.message || fallback?.message || fallback || 'run failed'
 }
 
-export function createAguiAgent({ onMessages, onError, onInteraction, agentId = '' } = {}) {
+export function createAguiAgent({ onMessages, onError, onInteraction, onStarted, onSteerApplied, agentId = '' } = {}) {
   const agent = new SageHttpAgent({
     url: AGENT_URL,
     agentId,
     fetch: createResumableFetch(),
   })
   agent.subscribe({
+    onRunStartedEvent() {
+      onStarted?.()
+    },
     onMessagesChanged({ messages }) {
       onMessages?.([...messages])
     },
@@ -62,6 +65,10 @@ export function createAguiAgent({ onMessages, onError, onInteraction, agentId = 
       if (event?.name === 'sage.interaction.requested') {
         onInteraction?.(event.value || null)
       } else if (INTERACTION_CLOSED.has(event?.name)) {
+        onInteraction?.(null)
+      } else if (event?.name === 'sage.steer.applied') {
+        onSteerApplied?.(event.value?.steer_id)
+      } else if (event?.name === 'sage.run.cancelled') {
         onInteraction?.(null)
       }
       return { messages: updateToolStates(messages, event) }

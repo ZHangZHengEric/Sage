@@ -19,7 +19,8 @@ export function hasTerminalEvent(text) {
       .join('\n')
     if (!data) continue
     try {
-      if (TERMINAL.has(JSON.parse(data).type)) return true
+      const event = JSON.parse(data)
+      if (TERMINAL.has(event.type) || (event.type === 'CUSTOM' && event.name === 'sage.run.cancelled')) return true
     } catch {
       // ignore a torn JSON frame; the next chunk or retry will complete it
     }

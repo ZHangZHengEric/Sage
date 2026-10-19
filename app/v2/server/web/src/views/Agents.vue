@@ -1,6 +1,6 @@
 <script setup>
 import PageToolbar from '../components/PageToolbar.vue'
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { getUser } from '../auth.js'
 import { api, isForeign } from '../api.js'
 import AgentEditor from '../components/AgentEditor.vue'
@@ -10,6 +10,18 @@ import { cloneConfiguration } from '../agent-presentation.js'
 
 const drawerOpen = ref(false)
 const viewOnly = ref(false), selectedAgent = ref(null), selectedSkills = ref([]), savedMessage = ref('')
+let savedMessageTimer
+function clearSavedMessage() {
+  clearTimeout(savedMessageTimer)
+  savedMessageTimer = undefined
+  savedMessage.value = ''
+}
+function notifySuccess(message) {
+  clearSavedMessage()
+  savedMessage.value = message
+  savedMessageTimer = setTimeout(clearSavedMessage, 3000)
+}
+onUnmounted(clearSavedMessage)
 const loading = ref(true)
 
 const agents = ref([])
@@ -105,12 +117,12 @@ async function loadApprovalTools() {
     if (sequence === editorSequence) { approvalError.value = exc.message; approvalRequest = null }
   } finally { if (sequence === editorSequence) approvalLoading.value = false }
 }
-function closeEditor() { editorSequence++; drawerOpen.value = false; resourcesLoading.value = false; error.value = '' }
+function closeEditor() { editorSequence++; drawerOpen.value = false; resourcesLoading.value = false; error.value = ''; clearSavedMessage() }
 
 async function save(exit = true) {
   if (viewOnly.value || isForeign(selectedAgent.value) || pending.value || resourcesLoading.value || resourcesError.value) return
   error.value = ''
-  savedMessage.value = ''
+  clearSavedMessage()
   pending.value = true
   try {
     const payload = cloneConfiguration(form.value)
@@ -124,8 +136,8 @@ async function save(exit = true) {
     savedForm.value = cloneConfiguration(payload)
     savedSkills.value = skillNames
     savedPlugins.value = cloneConfiguration(payload.plugins || {})
-    savedMessage.value = '已保存'
-    if (exit) drawerOpen.value = false
+    if (exit) closeEditor()
+    notifySuccess('已保存')
     try { await refresh() } catch (exc) { error.value = `配置已保存，但列表刷新失败：${exc.message}` }
   } catch (exc) {
     error.value = exc.message
@@ -136,7 +148,7 @@ async function save(exit = true) {
 
 async function openAgent(item, readonly = true) {
   if (pending.value) return
-  error.value = ''; savedMessage.value = ''; pending.value = true
+  error.value = ''; clearSavedMessage(); pending.value = true
   try {
     const sequence = ++editorSequence
     resourcesLoading.value = true; resourcesError.value = ''; approvalError.value = ''
@@ -173,6 +185,7 @@ function enableEdit() { if (!isForeign(selectedAgent.value)) viewOnly.value = fa
 
 async function startNew() {
   if (pending.value) return
+  clearSavedMessage()
   pending.value = true
   error.value = ''
   try {
@@ -180,7 +193,7 @@ async function startNew() {
     applyResources(await loadEditorResources())
     resourcesLoading.value = false; resourcesError.value = ''
     approvalRequest = null; approvalError.value = ''; approvalLoading.value = false
-    viewOnly.value = false; selectedAgent.value = null; selectedSkills.value = []; savedMessage.value = ''
+    viewOnly.value = false; selectedAgent.value = null; selectedSkills.value = []
     editing.value = ''
     form.value = emptyForm()
     budgetDefaults.value = {}
@@ -202,7 +215,7 @@ async function remove(item) {
   try {
     await api.deleteAgent(item.id)
     if (editing.value === item.id) { drawerOpen.value = false; editing.value = ''; selectedAgent.value = null }
-    deleteOpen.value = false; deleteTarget.value = null; savedMessage.value = '智能体已删除'
+    deleteOpen.value = false; deleteTarget.value = null; notifySuccess('智能体已删除')
     try { await refresh() } catch (exc) { error.value = `智能体已删除，但列表刷新失败：${exc.message}` }
   } catch (exc) { deleteError.value = exc.message }
   finally { pending.value = false }
@@ -232,7 +245,6 @@ onMounted(load)
           <div class="agent-card-model"><AppIcon name="model" />{{ item.model_name || item.model_id || '使用默认模型' }}</div>
           <footer><span class="agent-card-resources"><span><AppIcon name="tools" />{{ item.tool_count ?? '—' }} 工具</span><span><AppIcon name="skill" />{{ item.skill_count ?? '—' }} 技能</span><span v-if="item._owner" class="agent-card-owner">{{ item._owner.username }}</span></span><button class="agent-action subtle" type="button" :disabled="pending" :aria-label="`${isForeign(item) ? '查看' : '配置'} ${item.name}`" @click="openAgent(item, isForeign(item))">{{ isForeign(item) ? '查看' : '配置' }}<AppIcon name="chevron" /></button></footer>
         </article>
-        <button class="agent-create-card" type="button" :disabled="pending" @click="startNew"><span><AppIcon name="plus" /></span>创建新智能体</button>
       </div>
     </template>
     <AgentEditor v-else v-model:form="form" v-model:selected-skills="selectedSkills"

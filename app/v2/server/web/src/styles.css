@@ -345,7 +345,7 @@ h2 { font-size: 16px; }
 .md { font-size: 0.95rem; }
 .md :first-child { margin-top: 0; }
 .md :last-child { margin-bottom: 0; }
-.md pre, .tool-body, .tools pre {
+.md pre {
   overflow: auto;
   background: var(--muted);
   padding: var(--space-3);
@@ -358,45 +358,6 @@ h2 { font-size: 16px; }
   padding: 0 4px;
 }
 .md pre code { background: transparent; padding: 0; }
-
-.tools { list-style: none; padding: 0; margin: 8px 0 0; }
-.tools .tool-args {
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-  line-height: 1.6;
-  tab-size: 2;
-}
-.tools li { margin-top: 4px; }
-.tool-detail > summary, .reasoning-summary { display: flex; align-items: center; gap: 6px; list-style: none; padding: 6px 8px; font-size: 14px; border-radius: 6px; }
-.tool-detail > summary:hover, .reasoning-summary:hover { background: var(--muted); }
-.tool-detail > summary::-webkit-details-marker, .reasoning-summary::-webkit-details-marker { display: none; }
-.tool-detail > summary .app-icon, .reasoning-summary .app-icon { width: 14px; height: 14px; color: var(--muted-foreground); }
-.tool-detail > summary .app-icon:first-child { color: #6366f1; }
-.reasoning-summary .app-icon:first-child { color: #a855f7; }
-.tool-detail[open] > summary .app-icon:last-child, details[open] > .reasoning-summary .app-icon:last-child { transform: rotate(90deg); }
-.tools strong { font-weight: 500; overflow-wrap: anywhere; }
-.tool-detail-body { margin-left: 26px; }
-.reason { color: var(--muted-foreground); white-space: pre-wrap; margin: 8px 0 0 26px; font-size: 14px; line-height: 1.7; }
-
-.pending {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  color: var(--muted-foreground);
-  margin: 0;
-}
-.pending-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 999px;
-  background: var(--foreground);
-  animation: pulse-cursor 0.9s cubic-bezier(0.4, 0, 0.2, 1) infinite;
-}
-
-@keyframes pulse-cursor {
-  0%, 100% { transform: scale(1); opacity: 1; }
-  50% { transform: scale(1.5); opacity: 0.7; }
-}
 
 .admin-transcript {
   margin-top: var(--space-4);
@@ -423,29 +384,6 @@ h2 { font-size: 16px; }
 }
 .composer:focus-within { border-color: color-mix(in oklab, var(--primary) 28%, var(--border)); }
 
-.ask {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  margin-bottom: 8px;
-  padding: var(--space-4);
-  border: 1px solid color-mix(in oklab, var(--primary) 32%, var(--border));
-  border-radius: var(--composer-radius);
-  background: color-mix(in oklab, var(--primary) 6%, var(--composer-bg));
-}
-.ask-head { display: flex; align-items: center; gap: var(--space-2); }
-.ask p { margin: 0; font-size: 0.875rem; }
-.ask-args {
-  margin: 0;
-  max-height: 180px;
-  overflow: auto;
-  font-family: "IBM Plex Mono", ui-monospace, monospace;
-  font-size: 0.8125rem;
-  background: var(--muted);
-  border-radius: var(--space-2);
-  padding: var(--space-3);
-}
-.ask textarea { min-height: 48px; resize: vertical; }
 .composer textarea {
   min-height: 40px;
   max-height: 160px;
@@ -551,19 +489,6 @@ th, td { text-align: left; padding: var(--space-3) var(--space-2); border-bottom
 fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
 legend { font-size: 15px; font-weight: 600; margin-bottom: 16px; }
 @media (prefers-reduced-motion: reduce) { .app-sidebar { transition: none; } }
-
-/* Compact tool rows follow v1; colored state icons stay beside the tool name. */
-.tool-status { display: inline-flex; align-items: center; gap: 4px; flex-shrink: 0; font-size: 12px; font-weight: 400; color: var(--muted-foreground); }
-.tool-status[data-state="running"] { color: var(--status-active); }
-.tool-status[data-state="completed"] { color: var(--status-success); }
-.tool-status[data-state="awaiting_approval"], .tool-status[data-state="unknown"], .tool-status[data-state="reconciling"], .tool-status[data-state="incomplete"] { color: var(--status-warning); }
-.tool-detail > summary .tool-status .app-icon { width: 18px; height: 18px; color: inherit; }
-.tool-status[data-state="failed"], .tool-status[data-state="denied"] { color: var(--danger); }
-.tool-detail > summary { flex-wrap: wrap; cursor: pointer; }
-.tool-detail > summary:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
-.tool-spinner { width: 18px; height: 18px; border: 1.5px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: tool-spin 1s linear infinite; }
-@keyframes tool-spin { to { transform: rotate(360deg); } }
-@media (prefers-reduced-motion: reduce) { .tool-spinner { animation: none; } }
 
 /* Configuration surfaces use the same glass treatment in both color schemes. */
 .glass-config { padding: 18px; border: 1px solid var(--border); border-radius: 18px; background: color-mix(in srgb, var(--card) 92%, transparent); backdrop-filter: blur(16px); margin-block: 16px; }

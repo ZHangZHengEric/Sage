@@ -36,6 +36,11 @@ function canonical(value) {
 export function selectionChanged(current, saved) { return JSON.stringify(canonical(current)) !== JSON.stringify(canonical(saved)) }
 
 const explanations = {
+  'sage.protocol.ag-ui': ['面向聊天前端，传输流式回复、工具状态和审批交互。', ['将 Sage 运行事件转换为 AG-UI 消息，供聊天前端展示。', '审批、暂停恢复等扩展交互取决于 enable_sage_extensions 配置。', '适配器负责事件转换，协议入口由服务端部署管理。']],
+  'sage.protocol.a2a': ['面向其他智能体系统，传递任务状态、消息和产物。', ['将 Sage 运行事件转换为 A2A 的任务、消息和产物事件。', '等待用户输入或审批时映射为任务需要输入的状态。', 'A2A 不覆盖 Sage 的全部工具与推理细节。']],
+  'sage.protocol.native': ['提供 Sage 原生事件，保留完整的运行信息。', ['直接输出 Sage 原生运行事件，不进行其他协议的格式转换。', '保留运行、工具、审批、工作流和产物等原生语义。', '适合需要读取完整 Sage 运行信息的集成。']],
+  'sage.protocol.acp': ['面向 ACP 客户端，传递会话更新和权限请求。', ['将 Sage 事件转换为 ACP 会话更新、权限请求和输入请求。', '不提供 Sage 原生的精确游标回放与工作流语义。', '适配器的加载不代表已对外开放 ACP 服务。']],
+  'sage.protocol.mcp': ['转换 MCP 进度通知和信息补充请求；适配器本身不启动 MCP 服务。', ['将关联的运行事件转换为 MCP 进度通知和信息补充请求。', '工具页的 MCP 连接负责接入外部工具服务，此处负责事件格式转换。', '此适配器不提供完整的会话消息流，也不会自行启动 MCP 服务。']],
   'sage.tool-selection.direct': ['将全部已授权工具交给模型选择。', ['主模型看到全部已授权工具，不受展示数量限制。', '工具越多，工具定义占用的上下文通常越多。', '不额外调用模型筛选工具。']],
   'sage.tool-selection.lexical': ['按任务与工具描述的文字相关性筛选。', ['使用 BM25 在本地匹配任务与工具描述。', '不额外调用筛选模型；描述用词会影响匹配结果。']],
   'sage.tool-selection.llm': ['由快速模型理解任务并筛选工具。', ['每个 Run 在准备阶段调用模型筛选工具。', '增加筛选模型请求，耗时和成本取决于所用模型。']],
