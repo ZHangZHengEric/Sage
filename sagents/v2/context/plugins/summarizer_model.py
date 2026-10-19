@@ -438,6 +438,24 @@ class ModelConversationSummarizer:
             except (json.JSONDecodeError, ValueError) as exc:
                 last_error = str(exc)
                 continue
+            usage = completed.usage
+            if usage.reported and usage.input_tokens > 0:
+                reduced = usage.output_tokens < usage.input_tokens
+                LOGGER.bind(
+                    session_id=request.scope.session_id, run_id=request.scope.run_id,
+                    request_id=model_request.request_id,
+                ).info(
+                    "context.summary.model_usage",
+                    "Compared input and output usage for this summary call",
+                    attributes={"input_tokens": usage.input_tokens,
+                                "output_tokens": usage.output_tokens, "reduced": reduced},
+                )
+                if not reduced:
+                    raise SageV2Error(RuntimeErrorInfo(
+                        code="context.summary_no_progress", category=ErrorCategory.VALIDATION,
+                        message="Summary output tokens did not decrease from its input tokens",
+                        safe_to_resume=True,
+                    ))
             # The API output limit is the bound. Do not truncate verified
             # identifiers or drop requirements after a complete valid response.
             return json.dumps(payload, ensure_ascii=False, separators=(",", ":"))

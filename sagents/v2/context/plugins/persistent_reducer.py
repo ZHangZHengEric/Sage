@@ -149,24 +149,34 @@ class PersistentSummaryContextReducer:
                 ):
                     break
         if scope.force:
-            # API pressure must also retire completed work in the active turn.
-            # Stopping at the latest user boundary leaves long agent/tool loops
-            # mostly intact. Keep a recent window of whole batches instead;
-            # the exact latest user request is reinserted as an anchor below.
-            selected_count = max(
-                selected_count, len(units) - self.protected_recent_units
-            )
-            # A count-only recent window can pin a very large tool result and
-            # repeatedly summarize tiny batches in front of it. Under reported
-            # API pressure, retire a contiguous prefix through a dominant result
-            # (over half the serialized history). Always keep the latest
-            # whole batch; the exact user request is anchored separately below.
-            # This is relative source sizing, not a token/context-limit estimate.
-            sizes = [sum(len(m.model_dump_json()) for m in unit) for unit in units]
-            half = sum(sizes) // 2
-            for index in range(selected_count, len(units) - 1):
-                if sizes[index] > half:
-                    selected_count = index + 1
+            # The recent window is a preference, not a permanent exemption.
+            # Retain four (or the configured count) when there is more history;
+            # under continuing pressure retire at least one remaining unit.
+            # Coverage always advances over a complete prefix, with the exact
+            # latest user request reinserted as an anchor below.
+            selected_count = max(1, len(units) - self.protected_recent_units) if units else 0
+            latest_request = payload[request_index] if request_index is not None else None
+            # Summarizing only the user anchor cannot reduce the request: that
+            # exact message must still be present. Include the next whole unit.
+            while selected_count and all(
+                message is latest_request
+                for unit in units[:selected_count] for message in unit
+            ):
+                if selected_count == len(units):
+                    selected_count = 0
+                    break
+                selected_count += 1
+            for index, unit in enumerate(units[:selected_count]):
+                expected = {call.tool_call_id for call in unit[0].tool_calls}
+                actual = {m.tool_call_id for m in unit if m.role == "tool"}
+                if expected and expected != actual:
+                    selected_count = index
+                    break
+            if selected_count and all(
+                message is latest_request
+                for unit in units[:selected_count] for message in unit
+            ):
+                selected_count = 0
         compacted = []
         changed = []
         for unit in units if scope.allow_reference_compaction else ():
