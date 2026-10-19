@@ -24,7 +24,7 @@ def core_registrations():
     from sagents.v2.model import ModelConcurrencyBudget
     from sagents.v2.runtime.session import InMemoryDerivedStateStore
 
-    def registration(plugin, capability, factory, *, dependencies=(), config_model=None, ownership="owned"):
+    def registration(plugin, capability, factory, *, dependencies=(), config_model=None, ownership="owned", start=None):
         return ExtensionRegistration(
             descriptor=ExtensionDescriptor(
                 plugin_id=plugin, name=capability, version="2.0.0",
@@ -35,7 +35,7 @@ def core_registrations():
                 config_schema=config_model.model_json_schema() if config_model else {
                     "type": "object", "additionalProperties": False,
                 }, built_in=True,
-            ), factory=factory, config_model=config_model, ownership=ownership,
+            ), factory=factory, config_model=config_model, ownership=ownership, start=start,
         )
 
     def colocated(context, dependencies):
@@ -51,7 +51,10 @@ def core_registrations():
                      lambda context, deps: DefaultToolPolicy(**ToolPolicyConfig.model_validate(context.config).model_dump()),
                      config_model=ToolPolicyConfig),
         registration("sage.derived-state.session", "derived-state.store", colocated,
-                     dependencies=("session.store",), ownership="borrowed"),
+                     dependencies=("session.store",), ownership="borrowed",
+                     # Reuse the already started store through its derived-state
+                     # port; do not invoke its session plugin start hook again.
+                     start=lambda instance, context, deps: {"derived-state.store": instance}),
         registration("sage.derived-state.ephemeral", "derived-state.store",
                      lambda context, deps: InMemoryDerivedStateStore()),
         registration("sage.agent.approval-memory.session", "agent.approval-memory",
