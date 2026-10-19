@@ -473,43 +473,42 @@ def _summary_completion(text: str) -> ModelStreamEvent:
 
 
 @pytest.mark.asyncio
-async def test_pressure_retires_large_recent_result_without_recompressing_small_batches():
+@pytest.mark.parametrize("batch_count", [1, 2, 3, 4, 5, 8])
+async def test_pressure_progressively_retires_recent_batches_even_inside_window(batch_count):
     summarizer = RecordingSummarizer()
     store = InMemoryConversationSummaryStore()
     reducer = PersistentSummaryContextReducer(store, summarizer=summarizer)
     user = ModelMessage(role="user", content=(TextBlock(text="exact request"),))
 
-    def batch(index, size):
+    def batch(index):
         call_id = f"call_{index}"
         return (
             ModelMessage(role="assistant", tool_calls=(
                 ModelToolCall(tool_call_id=call_id, name="query", arguments={}),
             )),
             ModelMessage(role="tool", tool_call_id=call_id,
-                         content=(TextBlock(text="x" * size),)),
+                         content=(TextBlock(text="x" * 5000),)),
         )
 
-    # Match the incident: small older batches, a 45K result inside the four
-    # protected units, followed by a completed small batch.
-    large = batch(3, 45_000)
-    latest = batch(4, 300)
-    source = (user, *batch(1, 300), *batch(2, 300), *large, *latest)
-    forced = scope().model_copy(update={"force": True})
+    batches = [batch(i) for i in range(batch_count)]
+    source = (user, *(m for unit in batches for m in unit))
+    forced = scope().model_copy(update={"force": True, "allow_summary_rewrite": False})
     projection = await reducer.reduce(source, scope=forced)
-
-    assert len(summarizer.requests) == 1
-    assert large[-1] in summarizer.requests[0].messages
-    assert projection.messages[-2:] == latest
-    assert projection.messages[1] == user
-    assert projection.historical_messages == source[:-2]
-    assert sum(len(m.model_dump_json()) for m in projection.messages) < 5_000
-
-    # The next ordinary step reuses the checkpoint, preserving whole tool pairs.
-    appended = (*source, *batch(5, 300))
-    next_projection = await reducer.reduce(appended, scope=scope())
-    assert len(summarizer.requests) == 1
-    assert next_projection.messages[-4:] == (*latest, *batch(5, 300))
-    assert (await store.get("session_1")).revision == 1
+    retained_count = min(batch_count - 1, 4)
+    expected = tuple(m for unit in batches[-retained_count:] for m in unit) if retained_count else ()
+    assert projection.messages == (projection.messages[0], user, *expected)
+    previous_covered = projection.dropped_message_count
+    for _ in range(retained_count):
+        projection = await reducer.reduce(source, scope=forced)
+        assert projection.dropped_message_count == previous_covered + 2
+        previous_covered = projection.dropped_message_count
+    assert previous_covered == len(source)
+    assert len(summarizer.requests) == retained_count + 1
+    # The last complete Tool pair is reducible too; the user anchor stays exact.
+    assert projection.messages[1:] == (user,)
+    assert projection.historical_messages == source
+    await reducer.reduce(source, scope=forced)
+    assert len(summarizer.requests) == retained_count + 1
 
 
 @pytest.mark.asyncio

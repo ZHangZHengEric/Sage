@@ -8,7 +8,7 @@ import pytest
 from sagents.v2.context import ContextReductionScope, ModelConversationSummarizer
 from sagents.v2.context.summary import SummarizationRequest
 from sagents.v2.contracts.errors import SageV2Error
-from sagents.v2.contracts.items import TextBlock
+from sagents.v2.contracts.items import TextBlock, UsageSummary
 from sagents.v2.model import (
     ModelCapabilities,
     ModelEventKind,
@@ -46,6 +46,34 @@ CAPS = ModelCapabilities(
     supports_structured_output=True,
     max_output_tokens=32768,
 )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("output_tokens", [999, 1000, 1001])
+async def test_summary_uses_its_own_usage_without_a_minimum_reduction_percentage(output_tokens):
+    payload = {"summary": "verified", **{
+        key: [] for key in ModelConversationSummarizer._FIELDS[1:]
+    }}
+    model = ScriptedModelProvider((ScriptedModelStep(events=(ModelStreamEvent(
+        kind=ModelEventKind.COMPLETED,
+        response=ModelResponse(
+            response_id="summary_usage", text=json.dumps(payload), finish_reason="stop",
+            usage=UsageSummary(reported=True, input_tokens=1000, output_tokens=output_tokens),
+        ),
+    ),)),))
+    summary_request = SummarizationRequest(
+        scope=ContextReductionScope(context_key="context", session_id="session", run_id="run"),
+        messages=(ModelMessage(role="assistant", content=(TextBlock(text="facts " * 1000),)),),
+        target_tokens=1024,
+    )
+    summarizer = ModelConversationSummarizer(model)
+    if output_tokens < 1000:
+        assert json.loads(await summarizer.summarize(summary_request)) == payload
+    else:
+        with pytest.raises(SageV2Error) as caught:
+            await summarizer.summarize(summary_request)
+        assert caught.value.info.code == "context.summary_no_progress"
+    assert len(model.requests) == 1
 
 
 def request(**changes):

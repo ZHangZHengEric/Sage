@@ -82,36 +82,41 @@ class Summary:
 
 
 @pytest.mark.asyncio
-async def test_ineffective_advisory_compression_stops_until_meaningful_growth():
+async def test_continuing_usage_pressure_advances_coverage_without_a_reduction_percentage():
     summary = Summary()
+    store = InMemoryConversationSummaryStore()
     assembler = DefaultContextAssembler(
         budget=ContextBudget(max_input_tokens=32768),
-        reducer=PersistentSummaryContextReducer(
-            InMemoryConversationSummaryStore(), summarizer=summary,
-        ),
+        reducer=PersistentSummaryContextReducer(store, summarizer=summary),
     )
-    source = (message("older facts " * 3000), message("exact request", "user"))
-    assembler.observe_usage("run", 33195)
-    await assembler.prepare_projection(command(), source, run_id="run")
-    assert len(summary.requests) == 1
-
-    # Incident-shaped feedback: only 1.1% lower, still above the threshold.
-    assembler.observe_usage("run", 32830)
-    for usage in (33000, 34000, 40000):
+    source = (
+        message("exact request", "user"),
+        *(message(f"completed batch {i} " * 300) for i in range(6)),
+    )
+    revisions, coverage = [], []
+    # These values include the incident's 1.1% decrease and even subsequent
+    # growth. Every over-limit request still retires fresh complete history.
+    for usage in (33195, 32830, 33000, 34000, 40000):
         assembler.observe_usage("run", usage)
+        assert "run" in assembler._compression_requested
         await assembler.prepare_projection(command(), source, run_id="run")
-    assert len(summary.requests) == 1
-    assert "run" not in assembler._compression_requested
+        saved = await store.get(DefaultContextAssembler._summary_context_key("run"))
+        revisions.append(saved.revision)
+        coverage.append(saved.source_message_count)
+    assert len(summary.requests) == 5
+    assert revisions == [1, 2, 3, 4, 5]
+    assert all(after > before for before, after in zip(coverage, coverage[1:]))
+    assert coverage[-1] == len(source)
 
-    # Another Run is independent; substantial growth allows another evaluation.
-    assembler.observe_usage("other", 33000)
-    assert "other" in assembler._compression_requested
-    assembler.observe_usage("run", 42000)
-    assert "run" in assembler._compression_requested
+    # No new history means no extra advisory model call; no percentage pause.
+    assembler.observe_usage("run", 33000)
+    projection = await assembler.prepare_projection(command(), source, run_id="run")
+    assert len(summary.requests) == 5
+    assert projection.messages[-1] == source[0]
 
 
 @pytest.mark.asyncio
-async def test_ineffective_advisory_pause_keeps_required_api_recovery_available():
+async def test_no_fresh_history_still_allows_required_checkpoint_recovery():
     summary = Summary()
     assembler = DefaultContextAssembler(
         budget=ContextBudget(max_input_tokens=1000),
@@ -123,31 +128,12 @@ async def test_ineffective_advisory_pause_keeps_required_api_recovery_available(
     assembler.observe_usage("run", 1200)
     await assembler.prepare_projection(command(), source, run_id="run")
     assembler.observe_usage("run", 1150)
-    assert "run" not in assembler._compression_requested
-
-    # An actual rejection may still shrink an existing checkpoint. Unchanged
-    # output terminates recovery rather than resending the same rejected input.
+    await assembler.prepare_projection(command(), source, run_id="run")
+    assert len(summary.requests) == 1
     assembler.request_compression("run")
     with pytest.raises(SageV2Error, match="did not reduce|same rejected"):
         await assembler.prepare_projection(command(), source, run_id="run")
     assert len(summary.requests) == 2
-
-
-@pytest.mark.asyncio
-async def test_successful_compression_and_subthreshold_usage_clear_advisory_pause():
-    summary = Summary()
-    assembler = DefaultContextAssembler(
-        budget=ContextBudget(max_input_tokens=32768),
-        reducer=PersistentSummaryContextReducer(
-            InMemoryConversationSummaryStore(), summarizer=summary,
-        ),
-    )
-    source = (message("older facts " * 3000), message("exact request", "user"))
-    assembler.observe_usage("run", 33156)
-    await assembler.prepare_projection(command(), source, run_id="run")
-    assembler.observe_usage("run", 16785)
-    assembler.observe_usage("run", 33195)
-    assert "run" in assembler._compression_requested
 
 
 class FragmentModel:
@@ -750,7 +736,7 @@ def test_estimator_plugins_and_default_selections_are_removed():
 @pytest.mark.asyncio
 async def test_later_permanent_fragment_failure_keeps_previous_checkpoint():
     store = InMemoryConversationSummaryStore()
-    reducer = PersistentSummaryContextReducer(store, summarizer=Summary())
+    reducer = PersistentSummaryContextReducer(store, summarizer=Summary(), protected_recent_units=1)
     source = (message("facts " * 1000), message("first request", "user"))
     await reducer.reduce(source, scope=scope())
     previous = await store.get("session")
