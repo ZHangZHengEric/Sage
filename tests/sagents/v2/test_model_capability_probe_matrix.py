@@ -10,6 +10,9 @@ from sagents.v2.contracts.errors import (
     SageV2Error,
 )
 from sagents.v2.model import (
+    ModelCapabilityProbeOutcome,
+    ModelCapabilityProbeReport,
+    ModelCapabilityProbeRequest,
     ModelCapabilityProbeStatus,
     ModelEventKind,
     ModelResponse,
@@ -17,6 +20,7 @@ from sagents.v2.model import (
     ModelToolCall,
     probe_model_capabilities,
 )
+from sagents.v2.model.capability_probe import probe_model_reasoning_controls
 
 
 class ProbeProvider:
@@ -77,6 +81,160 @@ class ProbeProvider:
 
     def stream(self, request):
         return self._stream(request)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("supports_tools", [False, True])
+async def test_reasoning_matrix_bounds_concurrency_and_preserves_order_and_dependencies(
+    supports_tools,
+):
+    active = 0
+    peak = 0
+    ready = asyncio.Event()
+    completed_text = set()
+    calls = []
+
+    class ReasoningProvider:
+        def __init__(self, strategy=None, effort=None):
+            self.key = (strategy, effort)
+
+        async def stream(self, request):
+            nonlocal active, peak
+            _, effort = self.key
+            if effort is None:
+                yield ModelStreamEvent(
+                    kind=ModelEventKind.COMPLETED,
+                    response=ModelResponse(
+                        response_id="base", text="323", finish_reason="stop"
+                    ),
+                )
+                return
+            phase = "tools" if request.tools else "text"
+            calls.append((*self.key, phase))
+            if request.tools:
+                assert self.key in completed_text
+            active += 1
+            peak = max(peak, active)
+            if active == 4:
+                ready.set()
+            try:
+                await ready.wait()
+                # Finish out of input order to exercise deterministic aggregation.
+                for _ in range(2 if effort == "low" else 1):
+                    await asyncio.sleep(0)
+                if not request.tools:
+                    completed_text.add(self.key)
+                response = ModelResponse(
+                    response_id="probe",
+                    text="323" if effort != "max" else "",
+                    reasoning="checked" if effort != "max" else "",
+                    finish_reason="tool_calls" if request.tools else "stop",
+                    tool_calls=(
+                        ModelToolCall(
+                            tool_call_id="probe",
+                            name="sage_capability_probe",
+                            arguments={"value": "OK"},
+                        ),
+                    )
+                    if request.tools
+                    else (),
+                )
+                yield ModelStreamEvent(kind=ModelEventKind.COMPLETED, response=response)
+            finally:
+                active -= 1
+
+    report = ModelCapabilityProbeReport(
+        valid=True,
+        supports_tools=supports_tools,
+        outcomes=(ModelCapabilityProbeOutcome(name="json_object", status="supported"),),
+    )
+    _, metadata = await asyncio.wait_for(
+        probe_model_reasoning_controls(
+            base_provider=ReasoningProvider(),
+            provider_factory=ReasoningProvider,
+            report=report,
+            request=ModelCapabilityProbeRequest(
+                model_binding="primary",
+                route_fingerprint="probe",
+                reasoning_efforts=("low", "high", "max"),
+            ),
+            max_output_tokens=128,
+            disable_strategies=(),
+            effort_strategies=("reasoning_effort", "chat_template_reasoning_effort"),
+        ),
+        timeout=1,
+    )
+
+    assert peak == 4
+    assert active == 0
+    assert len(calls) == (10 if supports_tools else 6)
+    results = metadata["effort_strategy_outcomes"]
+    assert list(results) == ["reasoning_effort", "chat_template_reasoning_effort"]
+    for result in results.values():
+        assert list(result["outcomes"]) == ["low", "high", "max"]
+        assert result["supported"] == ["low", "high"]
+        assert result["text_only"] == ["low", "high"]
+        assert result["unsupported"] == ["max"]
+        assert "with_tools" not in result["outcomes"]["max"]
+
+
+@pytest.mark.asyncio
+async def test_reasoning_matrix_cancellation_drains_active_and_queued_probes():
+    active = 0
+    started = 0
+    ready = asyncio.Event()
+    blocked = asyncio.Event()
+
+    class BlockedProvider:
+        def __init__(self, strategy=None, effort=None):
+            self.effort = effort
+
+        async def stream(self, request):
+            nonlocal active, started
+            if self.effort is None:
+                yield ModelStreamEvent(
+                    kind=ModelEventKind.COMPLETED,
+                    response=ModelResponse(
+                        response_id="base", text="323", finish_reason="stop"
+                    ),
+                )
+                return
+            active += 1
+            started += 1
+            if active == 4:
+                ready.set()
+            try:
+                await blocked.wait()
+            finally:
+                active -= 1
+
+    task = asyncio.create_task(
+        probe_model_reasoning_controls(
+            base_provider=BlockedProvider(),
+            provider_factory=BlockedProvider,
+            report=ModelCapabilityProbeReport(
+                valid=True,
+                outcomes=(
+                    ModelCapabilityProbeOutcome(name="json_object", status="supported"),
+                ),
+            ),
+            request=ModelCapabilityProbeRequest(
+                model_binding="primary",
+                route_fingerprint="probe",
+            ),
+            max_output_tokens=128,
+            disable_strategies=(),
+            effort_strategies=("reasoning_effort", "chat_template_reasoning_effort"),
+        )
+    )
+    try:
+        await asyncio.wait_for(ready.wait(), timeout=1)
+    finally:
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+    assert active == 0
+    assert started == 4
 
 
 @pytest.mark.asyncio

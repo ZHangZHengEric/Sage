@@ -4,10 +4,11 @@ from __future__ import annotations
 
 
 class AdminService:
-    def __init__(self, *, users, threads, catalog) -> None:
+    def __init__(self, *, users, threads, catalog, skills) -> None:
         self.users = users
         self.threads = threads
         self.catalog = catalog
+        self.skills = skills
 
     async def list_users(self) -> list[dict]:
         return [user.public_dict() for user in await self.users.list_users()]
@@ -43,4 +44,19 @@ class AdminService:
         return [
             {**item, "username": names[item["user_id"]]}
             for item in await self.catalog.list_agent_summaries(list(names))
+        ]
+
+    async def list_resources(self, section: str) -> list[dict]:
+        names = {user.user_id: user.username for user in await self.users.list_users()}
+        return [
+            {**item.public_dict(), "user_id": owner, "username": names[owner]}
+            for owner, item in await self.catalog.list_resources(list(names), section)
+        ]
+
+    async def list_skills(self, user_id: str) -> list[dict]:
+        names = {user.user_id: user.username for user in await self.users.list_users()}
+        return [
+            {**item.public_dict(), "user_id": item.owner_user_id,
+             "username": names.get(item.owner_user_id, item.owner_user_id)}
+            for item in await self.skills.list_visible(user_id=user_id, role="admin")
         ]

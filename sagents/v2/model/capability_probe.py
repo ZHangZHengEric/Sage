@@ -159,13 +159,13 @@ async def probe_model_reasoning_controls(
                     selected_json = json_outcome
                     break
 
-    strategy_results: dict[str, dict[str, Any]] = {}
-    for effort_strategy in effort_strategies:
-        supported: list[str] = []
-        text_only: list[str] = []
-        unsupported: list[str] = []
-        outcomes: dict[str, Any] = {}
-        for effort in request.reasoning_efforts:
+    effort_slots = asyncio.Semaphore(4)
+
+    async def probe_effort(
+        effort_strategy: str, effort: str
+    ) -> tuple[bool, bool, dict[str, Any]]:
+        # Keep text/tool dependencies and provider state within one combination.
+        async with effort_slots:
             candidate = provider_factory(effort_strategy, effort)
             text_outcome = await probe_model_connection(
                 candidate,
@@ -182,8 +182,6 @@ async def probe_model_reasoning_controls(
             text_supported = text_outcome.supported and (
                 effort_strategy != "chat_template_reasoning_effort" or observed
             )
-            if text_supported:
-                text_only.append(effort)
             tool_outcome = None
             if text_supported and report.supports_tools:
                 tool_outcome = await probe_model_tool_calling(
@@ -197,6 +195,32 @@ async def probe_model_reasoning_controls(
                 not report.supports_tools
                 or (tool_outcome is not None and tool_outcome.supported)
             )
+            return text_supported, runtime_supported, values
+
+    # TaskGroup drains sibling probes on cancellation or unexpected failure.
+    async with asyncio.TaskGroup() as group:
+        batches = [
+            (
+                strategy,
+                [
+                    (effort, group.create_task(probe_effort(strategy, effort)))
+                    for effort in request.reasoning_efforts
+                ],
+            )
+            for strategy in effort_strategies
+        ]
+
+    strategy_results: dict[str, dict[str, Any]] = {}
+    for effort_strategy, tasks in batches:
+        supported: list[str] = []
+        text_only: list[str] = []
+        unsupported: list[str] = []
+        outcomes: dict[str, Any] = {}
+        # Select strategies in declaration order, independent of completion order.
+        for effort, task in tasks:
+            text_supported, runtime_supported, values = task.result()
+            if text_supported:
+                text_only.append(effort)
             (supported if runtime_supported else unsupported).append(effort)
             outcomes[effort] = values
         strategy_results[effort_strategy] = {

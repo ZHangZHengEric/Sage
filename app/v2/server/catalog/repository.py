@@ -19,6 +19,8 @@ from sagents.v2.contracts.errors import ErrorCategory, RuntimeErrorInfo, SageV2E
 from app.v2.server.catalog.records import (
     AgentRecord,
     ModelRecord,
+    McpServerRecord,
+    A2AAgentRecord,
     UserCatalog,
     apply_delete,
     apply_upsert,
@@ -30,6 +32,9 @@ _SECTIONS = ("models", "mcp_servers", "a2a_agents")
 
 
 class CatalogStore(Protocol):
+    async def list_resources(
+        self, user_ids: list[str], section: str
+    ) -> list[tuple[str, ModelRecord | McpServerRecord | A2AAgentRecord]]: ...
     async def list_agent_summaries(self, user_ids: list[str]) -> list[dict]: ...
     async def agent_owner(self, agent_id: str) -> str | None: ...
     async def get(self, user_id: str) -> UserCatalog: ...
@@ -272,10 +277,27 @@ class DatabaseCatalogStore:
     async def list_all_models(
         self, user_ids: list[str]
     ) -> list[tuple[str, ModelRecord]]:
+        return await self.list_resources(user_ids, "models")
+
+    async def list_resources(self, user_ids: list[str], section: str):
+        # Resource lists never need Agent packages, bindings, or catalog write locks.
+        record_type = {
+            "models": ModelRecord,
+            "mcp_servers": McpServerRecord,
+            "a2a_agents": A2AAgentRecord,
+        }[section]
+        if not user_ids:
+            return []
+        column = getattr(CatalogRow, section)
+        async with self.database.session() as session:
+            rows = (await session.execute(select(
+                CatalogRow.user_id, column,
+            ).where(CatalogRow.user_id.in_(user_ids)))).all()
+        documents = {user_id: items for user_id, items in rows}
         return [
-            (user_id, model)
+            (user_id, record_type.model_validate(item))
             for user_id in user_ids
-            for model in (await self.get(user_id)).models
+            for item in documents.get(user_id, [])
         ]
 
     async def default_model(self, user_id: str) -> ModelRecord | None:
