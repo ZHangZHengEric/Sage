@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from typing import Any, Literal
 
-from pydantic import Field, field_validator, model_validator
+from pydantic import Field, field_validator, model_serializer, model_validator
 
 from sagents.v2.contracts.common import Identifier, StrictModel
 from sagents.v2.runtime.extensions.contracts import ExtensionScope
@@ -19,6 +19,14 @@ class CapabilitySelection(StrictModel):
     scope: ExtensionScope | None = None
     config: dict[str, Any] = Field(default_factory=dict)
     grant_tools: bool = False
+
+    @model_serializer(mode="wrap")
+    def serialize_selection(self, handler):
+        data = handler(self)
+        # Preserve immutable package hashes from before this field existed.
+        if not self.grant_tools:
+            data.pop("grant_tools", None)
+        return data
 
     @field_validator("config")
     @classmethod
@@ -65,6 +73,15 @@ class RuntimeConfig(StrictModel):
     required_guarantees: dict[Identifier, dict[Identifier, Any]] = Field(
         default_factory=dict
     )
+
+    @model_serializer(mode="wrap")
+    def serialize_runtime(self, handler):
+        data = handler(self)
+        # Newly introduced defaults must not invalidate stored package refs.
+        for name, default in (("start_workers", True), ("check_readiness", False), ("state_root", None)):
+            if getattr(self, name) == default:
+                data.pop(name, None)
+        return data
 
     @field_validator("capabilities", mode="before")
     @classmethod
