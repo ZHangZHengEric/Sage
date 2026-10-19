@@ -202,11 +202,11 @@ def _runtime_capabilities(
         )
     if settings is not None and settings.mysql_url:
         capabilities["session.store"] = CapabilitySelection(
-            plugin="sage.session.redis-mysql" if settings.session_redis_url else "sage.session.mysql",
+            plugin="sage.session.redis-mysql" if settings.redis_url else "sage.session.mysql",
             config={
                 "dsn": settings.mysql_url,
                 "table_prefix": "",
-                **({"redis_url": settings.session_redis_url} if settings.session_redis_url else {}),
+                **({"redis_url": settings.redis_url} if settings.redis_url else {}),
             },
         )
     if settings is not None and settings.effective_trace_backend != "noop":

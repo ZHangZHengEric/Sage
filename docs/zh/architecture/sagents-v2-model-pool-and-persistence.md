@@ -37,7 +37,7 @@ MySQL / PostgreSQL 提交由协调器按已持久化事件数，仅序列化待�
 
 ## Redis 执行态与 MySQL 归档
 
-配置 `SAGE_SERVER_SESSION_REDIS_URL=redis://localhost:6379/1`，同时保留
+配置 `SAGE_SERVER_REDIS_URL=redis://localhost:6379/1`，同时保留
 `SAGE_SERVER_MYSQL_URL`，Server 会选择 `sage.session.redis-mysql`。未配置 Redis
 时仍使用原 MySQL 实现。SDK Package 可以直接选择该插件，必填 `dsn` 和
 `redis_url`；`table_prefix` 复用原表，`key_prefix` 默认根据数据库地址、库名和表前缀
