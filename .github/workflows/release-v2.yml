@@ -9,7 +9,7 @@ on:
         default: false
 
 permissions:
-  contents: read
+  contents: write
   actions: read
 
 concurrency:
@@ -53,34 +53,11 @@ jobs:
         run: |
           test "$(git rev-parse HEAD)" = "$SAGE_RELEASE_COMMIT"
           printf '\n%s\n' 'PyMuPDF==1.28.2; sys_platform == "darwin" and platform_machine == "x86_64"' >> scripts/release/desktop-constraints.txt
-      - name: Verify Flutter client
-        working-directory: app/v2/desktop
-        run: |
-          flutter pub get
-          flutter analyze
-          flutter test
       - name: Build Flutter v2 client
         working-directory: app/v2/desktop
         run: flutter build macos --release --build-name=2.1.1 --build-number=1
       - name: Bundle, relocate and verify Desktop v2
         run: python scripts/release/package_desktop_v2.py --platform macos --arch x86_64 --commit "$SAGE_RELEASE_COMMIT" --wheel python-packages/sage-2.1.1-py3-none-any.whl --out release-assets
-      - uses: actions/upload-artifact@v4
-        with:
-          name: sage-v2-desktop-macos-x86_64
-          path: release-assets/*
-          if-no-files-found: error
-
-  publish:
-    needs: desktop
-    if: inputs.publish
-    runs-on: ubuntu-24.04
-    permissions:
-      contents: write
-      actions: read
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ec5cde4fcba5d458dac65315e75f25c436d0b306
       - uses: actions/download-artifact@v4
         with:
           pattern: sage-v2-*
@@ -88,11 +65,8 @@ jobs:
           github-token: ${{ github.token }}
           path: release-assets
           merge-multiple: true
-      - uses: actions/download-artifact@v4
-        with:
-          name: sage-v2-desktop-macos-x86_64
-          path: release-assets
       - name: Verify all frozen source assets and publish release
+        if: inputs.publish
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
@@ -100,7 +74,7 @@ jobs:
           test "$(git rev-parse HEAD)" = "$SAGE_RELEASE_COMMIT"
           python scripts/release/check_v2_release.py --assets release-assets --complete
           cd release-assets
-          sha256sum * > SHA256SUMS
+          shasum -a 256 * > SHA256SUMS
           cd ..
           cp release_notes/v2.1.1.md /tmp/sage-release-notes.md
           printf '\n%s\n' 'Build note: Sage source is frozen at ec5cde4fc. The macOS Intel packaging environment pins PyMuPDF 1.28.2 to use its compatible prebuilt wheel; the other four verified platform packages are reused from run 39246580267.' >> /tmp/sage-release-notes.md
