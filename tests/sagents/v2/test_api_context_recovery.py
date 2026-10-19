@@ -81,6 +81,75 @@ class Summary:
         return self.text
 
 
+@pytest.mark.asyncio
+async def test_ineffective_advisory_compression_stops_until_meaningful_growth():
+    summary = Summary()
+    assembler = DefaultContextAssembler(
+        budget=ContextBudget(max_input_tokens=32768),
+        reducer=PersistentSummaryContextReducer(
+            InMemoryConversationSummaryStore(), summarizer=summary,
+        ),
+    )
+    source = (message("older facts " * 3000), message("exact request", "user"))
+    assembler.observe_usage("run", 33195)
+    await assembler.prepare_projection(command(), source, run_id="run")
+    assert len(summary.requests) == 1
+
+    # Incident-shaped feedback: only 1.1% lower, still above the threshold.
+    assembler.observe_usage("run", 32830)
+    for usage in (33000, 34000, 40000):
+        assembler.observe_usage("run", usage)
+        await assembler.prepare_projection(command(), source, run_id="run")
+    assert len(summary.requests) == 1
+    assert "run" not in assembler._compression_requested
+
+    # Another Run is independent; substantial growth allows another evaluation.
+    assembler.observe_usage("other", 33000)
+    assert "other" in assembler._compression_requested
+    assembler.observe_usage("run", 42000)
+    assert "run" in assembler._compression_requested
+
+
+@pytest.mark.asyncio
+async def test_ineffective_advisory_pause_keeps_required_api_recovery_available():
+    summary = Summary()
+    assembler = DefaultContextAssembler(
+        budget=ContextBudget(max_input_tokens=1000),
+        reducer=PersistentSummaryContextReducer(
+            InMemoryConversationSummaryStore(), summarizer=summary,
+        ),
+    )
+    source = (message("older facts " * 3000), message("exact request", "user"))
+    assembler.observe_usage("run", 1200)
+    await assembler.prepare_projection(command(), source, run_id="run")
+    assembler.observe_usage("run", 1150)
+    assert "run" not in assembler._compression_requested
+
+    # An actual rejection may still shrink an existing checkpoint. Unchanged
+    # output terminates recovery rather than resending the same rejected input.
+    assembler.request_compression("run")
+    with pytest.raises(SageV2Error, match="did not reduce|same rejected"):
+        await assembler.prepare_projection(command(), source, run_id="run")
+    assert len(summary.requests) == 2
+
+
+@pytest.mark.asyncio
+async def test_successful_compression_and_subthreshold_usage_clear_advisory_pause():
+    summary = Summary()
+    assembler = DefaultContextAssembler(
+        budget=ContextBudget(max_input_tokens=32768),
+        reducer=PersistentSummaryContextReducer(
+            InMemoryConversationSummaryStore(), summarizer=summary,
+        ),
+    )
+    source = (message("older facts " * 3000), message("exact request", "user"))
+    assembler.observe_usage("run", 33156)
+    await assembler.prepare_projection(command(), source, run_id="run")
+    assembler.observe_usage("run", 16785)
+    assembler.observe_usage("run", 33195)
+    assert "run" in assembler._compression_requested
+
+
 class FragmentModel:
     """Reject from provider feedback, rather than a preflight token estimate."""
 
