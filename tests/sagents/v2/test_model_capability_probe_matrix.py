@@ -80,6 +80,102 @@ class ProbeProvider:
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("wrapped", [False, True])
+@pytest.mark.parametrize(
+    ("probe", "message", "status_code", "expected"),
+    [
+        (
+            "structured_output",
+            "This response_format type is unavailable now",
+            400,
+            "unsupported",
+        ),
+        (
+            "structured_output",
+            "unsupported response_format: json_schema",
+            422,
+            "unsupported",
+        ),
+        (
+            "structured_output",
+            "'json_schema' is not supported with this model",
+            400,
+            "unsupported",
+        ),
+        ("json_object", "This model does not support json_object", 400, "unsupported"),
+        (
+            "structured_output",
+            "Invalid JSON schema: unsupported keyword const",
+            400,
+            "error",
+        ),
+        ("structured_output", "response_format: invalid schema", 422, "error"),
+        (
+            "structured_output",
+            "This response_format type is unavailable now",
+            401,
+            "error",
+        ),
+        (
+            "structured_output",
+            "This response_format type is unavailable now",
+            500,
+            "error",
+        ),
+        (
+            "structured_output",
+            "This response_format type is unavailable now",
+            None,
+            "error",
+        ),
+        ("structured_output", "max_tokens exceeds model limit", 400, "error"),
+        ("connection", "unsupported response_format: json_schema", 400, "error"),
+    ],
+)
+async def test_output_probe_distinguishes_format_rejections_from_errors(
+    wrapped, probe, message, status_code, expected
+):
+    class RejectedFormatProvider(ProbeProvider):
+        async def _stream(self, request):
+            if probe == "structured_output":
+                target = request.response_schema is not None
+            elif probe == "json_object":
+                target = request.response_format == "json_object"
+            else:
+                target = "connection" in request.request_id
+            if target:
+                if wrapped:
+                    raise SageV2Error(
+                        RuntimeErrorInfo(
+                            code="model.provider_permanent",
+                            category=ErrorCategory.PROVIDER_PERMANENT,
+                            message=message,
+                            provider_code=str(status_code)
+                            if status_code is not None
+                            else None,
+                        )
+                    )
+                error = RuntimeError(message)
+                error.status_code = status_code
+                raise error
+            async for event in super()._stream(request):
+                yield event
+
+    report = await probe_model_capabilities(
+        RejectedFormatProvider(), model_binding="primary"
+    )
+    outcome = report.outcome(probe)
+    assert outcome.status.value == expected
+    assert outcome.error == message
+    assert outcome.provider_code == (
+        str(status_code) if status_code is not None else None
+    )
+    assert outcome.metadata["diagnostic_error"] == message
+    if probe == "structured_output":
+        assert report.supports_json_object is True
+
+
+@pytest.mark.asyncio
 async def test_probe_suite_keeps_independent_results_after_one_rejection():
     provider = ProbeProvider()
 

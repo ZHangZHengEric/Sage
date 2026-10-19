@@ -24,6 +24,7 @@ from sagents.v2.tool.plugins.official import (
     official_tool_categories,
     official_tool_definitions,
 )
+from sagents.v2.tool.contracts import ToolDefinition
 
 DEFAULT_OFFICIAL_TOOLS = (
     "file_read",
@@ -88,14 +89,26 @@ def official_tool_catalog() -> list[dict[str, object]]:
     defaults = set(DEFAULT_OFFICIAL_TOOLS)
     categories = official_tool_categories()
     return [
-        {
-            "name": item.name,
-            "category": categories.get(item.name, ""),
-            "source": "official",
-            "default": item.name in defaults,
-        }
+        tool_catalog_item(item, category=categories.get(item.name, ""), default=item.name in defaults)
         for item in official_tool_definitions()
     ]
+
+
+def tool_catalog_item(
+    definition: ToolDefinition, *, category: str = "", source: str = "official", default: bool = False
+) -> dict[str, object]:
+    """Project discovery metadata; browsing a definition never invokes its tool."""
+    return {
+        "name": definition.name,
+        "description": definition.description,
+        "input_schema": definition.input_schema,
+        "side_effect_level": definition.side_effect_level.value,
+        "requires_approval": definition.requires_approval,
+        "approval_key": definition.approval_key,
+        "category": category,
+        "source": source,
+        "default": default,
+    }
 
 
 def workspace_sandbox_spec(

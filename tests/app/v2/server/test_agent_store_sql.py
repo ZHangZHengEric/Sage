@@ -81,3 +81,32 @@ async def test_approval_preferences_survive_database_reload(store):
     await store.create_agent("alice", agent)
     reloaded = await DatabaseCatalogStore(store.database).get("alice")
     assert next(a for a in reloaded.agents if a.id == agent.id).tool_approval == rules
+
+
+async def test_agent_summaries_initialize_defaults_and_batch_existing_catalogs(store, monkeypatch):
+    from app.v2.server.catalog.orm import AgentRow
+
+    initial = await store.list_agent_summaries(['alice', 'bob'])
+    assert [item['user_id'] for item in initial] == ['alice', 'bob']
+    assert all(item['name'] == 'Main Assistant' for item in initial)
+    model = await store.upsert_model('alice', {'model': 'Alice model', 'api_key': 'secret'})
+    agent = AgentRecord(id='agent-summary', name='Summary', model_id=model.id, tools=['file_read'], skills=['writer'])
+    await store.create_agent('alice', agent)
+    async with store.database.transaction() as session:
+        row = await session.get(AgentRow, agent.id)
+        row.name = 'Obsolete name'
+        row.model_id = 'obsolete-model'
+        row.tools = ['obsolete', 'tools']
+
+    async def no_full_catalog(*args):
+        raise AssertionError('summary must not load full catalogs or packages')
+
+    monkeypatch.setattr(store, 'get', no_full_catalog)
+    monkeypatch.setattr(store, '_catalog', no_full_catalog)
+    rows = await store.list_agent_summaries(['alice', 'bob'])
+    assert len(rows) == 3
+    assert rows[0]['id'] == initial[0]['id']
+    assert rows[1] == dict(id=agent.id, user_id='alice', name='Summary', description='',
+                           model_id=model.id, model_name='Alice model', tool_count=1, skill_count=1)
+    assert [item['user_id'] for item in await store.list_agent_summaries(['bob'])] == ['bob']
+    assert await store.list_agent_summaries([]) == []

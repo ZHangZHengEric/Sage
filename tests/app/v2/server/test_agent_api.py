@@ -1,6 +1,34 @@
 from tests.app.v2.server.conftest import register_and_login
 
 
+def test_tool_directory_projects_real_definitions_without_executing_tools(client, monkeypatch):
+    from types import SimpleNamespace
+    from sagents.v2.tool.contracts import ToolDefinition
+    from sagents.v2.tool.plugins.official import official_tool_definitions
+
+    external = ToolDefinition(
+        name="mcp_notes_read", description="Read an existing note.",
+        input_schema={"type": "object", "properties": {"id": {"type": "string"}}, "required": ["id"]},
+    )
+    async def list_tools(*, run_id):
+        assert run_id == "catalog"
+        return (external,)
+    monkeypatch.setattr(client.app.state.service.catalog.mcp_plugins, "get", lambda *args: SimpleNamespace(list_tools=list_tools))
+    token = register_and_login(client)
+    response = client.get("/api/tools", headers={"Authorization": f"Bearer {token}"})
+    assert response.status_code == 200
+    rows = {item["name"]: item for item in response.json()["data"]}
+    official = next(item for item in official_tool_definitions() if item.name == "file_read")
+    for definition in (official, external):
+        row = rows[definition.name]
+        assert row["description"] == definition.description
+        assert row["input_schema"] == definition.input_schema
+        assert row["side_effect_level"] == definition.side_effect_level.value
+        assert row["requires_approval"] == definition.requires_approval
+    assert rows["file_read"]["default"] is True
+    assert rows[external.name]["source"] == "mcp"
+
+
 def test_create_update_and_list_agents(client):
     token = register_and_login(client)
     headers = {"Authorization": f"Bearer {token}"}
