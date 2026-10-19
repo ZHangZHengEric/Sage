@@ -163,6 +163,19 @@ App settings do not replace an accepted Run's policy. Incompatible or missing
 registrations/configuration during restore fail rather than silently selecting
 current defaults.
 
+Startup isolates unavailable, corrupt or incompatible historical Agent revisions.
+Other revisions and new conversations remain usable. `app.recovery_issues` returns
+an immutable host-level snapshot of affected Run/Session IDs, revision hashes and
+reasons from the latest restore pass. Blocked Runs retain their original state,
+checkpoints and tool receipts; they are not silently rerouted or replayed. Process
+store/bootstrap failures and startup cancellation still abort construction.
+
+User cancellation is terminal and excluded from startup restoration. When a
+cancelled Run has a tool call without a result, Session history supplies a
+synthetic tool message stating that no result was received and the external
+outcome is unknown. This closes the model protocol pair for subsequent turns
+without claiming an execution receipt or continuing the cancelled Run.
+
 ```python
 agent = await app.agent_for_run(run_id, context)
 task = await app.entrypoint().continue_run(run_id, context, agent=agent)

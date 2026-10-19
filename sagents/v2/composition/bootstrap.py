@@ -83,6 +83,10 @@ async def initialize_process(catalog):
     catalog.process_assembler = assembler
     from sagents.v2.composition.loaded_agents import RevisionRecovery
     dispatcher.attach_recovery_agent(RevisionRecovery(catalog))
+    dispatcher.recovery_filter = lambda run: any(
+        handle.composition_hash == run.resolved_spec_hash
+        for handle in catalog.revisions.values()
+    )
     app.composition_hash = assembler._composition_hash(
         "sha256:" + hashlib.sha256(runtime.model_dump_json().encode()).hexdigest(),
         handles, services, registry=builder._registry, runtime=runtime,
