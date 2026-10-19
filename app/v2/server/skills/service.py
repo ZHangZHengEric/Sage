@@ -237,9 +237,9 @@ class SkillCatalogService:
     async def bound_skills(
         self, *, owner_user_id: str, agent_id: str
     ) -> list[SkillRecord]:
-        visible = await self.store.list_visible(user_id=owner_user_id, role="user")
-        bindings = await self.store.list_bindings(
-            owner_user_id=owner_user_id, agent_id=agent_id
+        visible, bindings = await asyncio.gather(
+            self.store.list_visible(user_id=owner_user_id, role="user"),
+            self.store.list_bindings(owner_user_id=owner_user_id, agent_id=agent_id),
         )
         return resolve_bound_skills(visible, bindings)
 

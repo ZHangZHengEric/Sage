@@ -39,6 +39,12 @@ class CatalogService:
     async def get(self, user_id: str):
         return await self.store.get(user_id)
 
+    async def get_for_run(self, user_id: str, agent_id: str | None = None):
+        return await self.store.get_for_run(user_id, agent_id)
+
+    async def editor_catalog(self, user_id: str):
+        return await self.store.editor_catalog(user_id)
+
     async def get_execution_policy(self, user_id: str, agent_id: str):
         return await self.store.get_execution_policy(user_id, agent_id)
 

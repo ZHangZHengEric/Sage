@@ -96,7 +96,7 @@ def server_registrations(host):
         from sagents.v2.tool import CompositeToolCatalog, CompositeToolExecutor
         from sagents.v2.tool.plugins.ephemeral import InMemoryToolCatalog, InMemoryToolExecutor
         run, command, frozen, user = await run_inputs(host, context, deps)
-        catalog = await host.catalog_store.get(user)
+        catalog = await host.catalog_store.editor_catalog(user)
         servers = selected_mcp_servers(catalog, frozen.mcp_servers)
         peers = selected_a2a_agents(catalog, frozen.a2a_agents)
         for key, records in (("mcp_fingerprints", servers), ("a2a_fingerprints", peers)):

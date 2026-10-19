@@ -197,9 +197,12 @@ class DatabaseSkillStore:
                     raise ValueError("Skill binding owner does not match Agent")
                 store = DatabaseCatalogStore(self.database)
                 package_row = await store.packages._get(session, package_owner(owner_user_id), "bundle", agent.package_ref) if agent.package_ref else None
-                if agent.package_ref and package_row is None:
+                if package_row is None:
                     raise ValueError("catalog Agent package is missing")
-                record = _agent_record(agent, [], package=AgentPackageBundle.model_validate(package_row.payload) if package_row else None)
+                package = AgentPackageBundle.model_validate(package_row.payload)
+                if package.content_hash != agent.package_ref:
+                    raise ValueError("catalog Agent package hash mismatch")
+                record = _agent_record(agent, package=package)
                 record = record.with_configuration(skills=[binding.skill_name for binding in bindings])
                 agent.package_ref = await store.packages.save_in_transaction(session, package_owner(owner_user_id), record.package)
                 for field, value in _agent_values(record).items():

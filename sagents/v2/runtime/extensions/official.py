@@ -109,6 +109,7 @@ from sagents.v2.runtime.session import (
     EphemeralSessionStore,
     FilesystemSessionStore,
     MysqlSessionStore,
+    RedisMysqlSessionStore,
     PostgresSessionStore,
 )
 from sagents.v2.skill.plugins.filesystem import FilesystemSkillProvider
@@ -1342,6 +1343,43 @@ def _register_session_and_memory(registry: ExtensionRegistry) -> None:
                     if "table_prefix" not in context.config
                     else str(context.config.get("table_prefix") or "")
                 ),
+            ),
+        )
+    )
+    registry.register(
+        ExtensionRegistration(
+            descriptor=ExtensionDescriptor(
+                **_identity(RedisMysqlSessionStore),
+                version="2.0.0",
+                provides=(CapabilityOffer(capability="session.store", api_version="2"),),
+                supported_scopes=frozenset({ExtensionScope.PROCESS}),
+                config_schema={
+                    "type": "object",
+                    "properties": {
+                        "dsn": {"type": "string", "minLength": 1},
+                        "redis_url": {"type": "string", "minLength": 1},
+                        "table_prefix": {"type": "string"},
+                        "key_prefix": {"type": "string", "minLength": 1},
+                        "archive_interval_seconds": {"type": "number", "exclusiveMinimum": 0},
+                        "retention_seconds": {"type": "integer", "minimum": 1},
+                    },
+                    "required": ["dsn", "redis_url"], "additionalProperties": False,
+                },
+                capabilities={
+                    "durable": True, "global_session_index": False, "multi_process_writes": False,
+                    "supports_actor_authorization": True, "supports_session_attachments": True,
+                    "cross_process_subscribe": False, "transactional_outbox": False, "atomic_session_cas": True,
+                },
+                availability=ExtensionAvailability(
+                    available=all(importlib.util.find_spec(name) is not None for name in ("aiomysql", "redis")),
+                    reason=None if all(importlib.util.find_spec(name) is not None for name in ("aiomysql", "redis"))
+                    else "optional aiomysql and redis packages are required",
+                ),
+                built_in=True,
+            ),
+            factory=lambda context, dependencies: RedisMysqlSessionStore(
+                **{key: value for key, value in context.config.items() if key != "dsn"},
+                dsn=str(context.config["dsn"]),
             ),
         )
     )
