@@ -16,7 +16,7 @@ router = APIRouter(
 @router.get("", response_model=ApiResponse[list[ModelPublic]])
 async def list_models(user: ReadUser, service: CatalogDep):
     return success(
-        [item.public_dict() for item in (await service.get(user.user_id)).models]
+        [item.public_dict() for _, item in await service.list_resources([user.user_id], "models")]
     )
 
 

@@ -9,7 +9,7 @@ export const componentNames = {
   'execution.sandbox': '执行沙箱', 'execution.scheduler': '运行调度', 'execution.job-runtime': '后台任务',
   'session.store': '会话存储', 'workspace.initializer': '工作区初始化', 'model.provider': '模型接口',
   'artifact.store': '产物存储', 'credentials.provider': '凭据管理', 'package.registry': 'Agent 包管理',
-  'interface.protocol-adapter': '接入协议', 'skill.catalog': 'Skill 目录', 'skill.source': 'Skill 来源',
+  'interface.protocol-adapter': '协议适配器', 'skill.catalog': 'Skill 目录', 'skill.source': 'Skill 来源',
   'tool.catalog': '工具目录', 'tool.executor': '工具执行', 'flow.node': '工作流节点',
 }
 const names = {

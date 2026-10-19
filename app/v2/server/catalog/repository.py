@@ -8,7 +8,7 @@ from app.v2.server.database import Database
 from sqlalchemy import delete, select, update
 
 from app.v2.server.catalog.orm import AgentRow, CatalogRow
-from app.v2.server.catalog.packages import package_owner
+from app.v2.server.catalog.packages import is_external_tool, package_owner
 from app.v2.server.packages.repository import DatabasePackageStore
 from app.v2.server.packages.orm import ManagedRecordRow
 from sagents.v2.agent.management import AgentPackageBundle
@@ -19,6 +19,8 @@ from sagents.v2.contracts.errors import ErrorCategory, RuntimeErrorInfo, SageV2E
 from app.v2.server.catalog.records import (
     AgentRecord,
     ModelRecord,
+    McpServerRecord,
+    A2AAgentRecord,
     UserCatalog,
     apply_delete,
     apply_upsert,
@@ -30,6 +32,12 @@ _SECTIONS = ("models", "mcp_servers", "a2a_agents")
 
 
 class CatalogStore(Protocol):
+    async def get_agent(self, user_id: str, agent_id: str) -> AgentRecord: ...
+    async def editor_catalog(self, user_id: str) -> UserCatalog: ...
+    async def list_resources(
+        self, user_ids: list[str], section: str
+    ) -> list[tuple[str, ModelRecord | McpServerRecord | A2AAgentRecord]]: ...
+    async def list_agent_summaries(self, user_ids: list[str]) -> list[dict]: ...
     async def agent_owner(self, agent_id: str) -> str | None: ...
     async def get(self, user_id: str) -> UserCatalog: ...
     async def create_agent(self, user_id: str, record: AgentRecord) -> None: ...
@@ -52,6 +60,94 @@ class DatabaseCatalogStore:
     def __init__(self, database: Database) -> None:
         self.database = database
         self.packages = DatabasePackageStore(database)
+
+    async def get_agent(self, user_id: str, agent_id: str) -> AgentRecord:
+        async with self.database.session() as session:
+            row = await session.scalar(select(AgentRow).where(
+                AgentRow.id == agent_id, AgentRow.owner_user_id == user_id,
+            ))
+            if row is None:
+                raise _not_found("agent not found")
+            stored = await session.scalar(select(ManagedRecordRow).where(
+                ManagedRecordRow.owner == package_owner(user_id),
+                ManagedRecordRow.kind == "bundle", ManagedRecordRow.ref == row.package_ref,
+            ))
+        if stored is None:
+            raise ValueError("catalog Agent package is missing")
+        package = AgentPackageBundle.model_validate(stored.payload)
+        if package.content_hash != row.package_ref:
+            raise ValueError("catalog Agent package hash mismatch")
+        return _agent_record(row, [], package=package)
+
+    async def editor_catalog(self, user_id: str) -> UserCatalog:
+        async with self.database.session() as session:
+            row = (await session.execute(select(
+                CatalogRow.models, CatalogRow.mcp_servers, CatalogRow.a2a_agents,
+            ).where(CatalogRow.user_id == user_id))).first()
+        return UserCatalog(**row._mapping) if row else UserCatalog()
+
+    async def list_agent_summaries(self, user_ids: list[str]) -> list[dict]:
+        if not user_ids:
+            return []
+        catalog_statement = select(
+            CatalogRow.user_id, CatalogRow.default_agent_id, CatalogRow.models,
+        ).where(CatalogRow.user_id.in_(user_ids))
+        async with self.database.session() as session:
+            catalogs = (await session.execute(catalog_statement)).all()
+        initialized = {row.user_id for row in catalogs}
+        missing = [user_id for user_id in user_ids if user_id not in initialized]
+        # Preserve lazy creation of the user's default agent, without loading
+        # packages or taking write locks for already initialized catalogs.
+        for user_id in missing:
+            async with self.database.transaction() as session:
+                await self._catalog(session, user_id)
+        statement = select(
+            AgentRow.id, AgentRow.owner_user_id, AgentRow.package_ref,
+        ).where(AgentRow.owner_user_id.in_(user_ids)).order_by(AgentRow.id)
+        async with self.database.session() as session:
+            if missing:
+                catalogs = (await session.execute(catalog_statement)).all()
+            rows = (await session.execute(statement)).all()
+        # Legacy records still use the existing migration path. Initialized
+        # records are read without validating or resolving complete packages.
+        legacy_owners = {row.owner_user_id for row in rows if not row.package_ref}
+        for user_id in legacy_owners:
+            await self.get(user_id)
+        owners = {user_id: package_owner(user_id) for user_id in user_ids}
+        async with self.database.session() as session:
+            if legacy_owners:
+                rows = (await session.execute(statement)).all()
+            refs = {row.package_ref for row in rows}
+            packages = (await session.execute(select(
+                ManagedRecordRow.owner, ManagedRecordRow.ref,
+                ManagedRecordRow.payload["manifest"]["agents"].label("definitions"),
+            ).where(
+                ManagedRecordRow.owner.in_(owners.values()),
+                ManagedRecordRow.kind == "bundle", ManagedRecordRow.ref.in_(refs),
+            ))).all() if refs else []
+        definitions = {(row.owner, row.ref): row.definitions for row in packages}
+        models = {row.user_id: {model["id"]: model["model"] for model in row.models}
+                  for row in catalogs}
+        defaults = {row.user_id: row.default_agent_id for row in catalogs}
+        owner_order = {user_id: index for index, user_id in enumerate(user_ids)}
+        result = []
+        for row in sorted(rows, key=lambda row: (
+            owner_order[row.owner_user_id], row.id != defaults[row.owner_user_id], row.id,
+        )):
+            agents = definitions.get((owners[row.owner_user_id], row.package_ref))
+            if agents is None or row.id not in agents:
+                raise ValueError("catalog Agent package is missing; refusing legacy fallback")
+            agent = agents[row.id]
+            model_id = agent.get("models", {}).get("primary", "default")
+            model_id = "" if model_id == "default" else model_id
+            result.append(dict(
+                id=row.id, user_id=row.owner_user_id, name=agent["name"],
+                description=agent.get("description") or "", model_id=model_id,
+                model_name=models[row.owner_user_id].get(model_id, model_id),
+                tool_count=sum(not is_external_tool(name) for name in agent.get("tools", [])),
+                skill_count=len(agent.get("skills", [])),
+            ))
+        return result
 
     async def agent_owner(self, agent_id: str) -> str | None:
         async with self.database.session() as session:
@@ -208,10 +304,27 @@ class DatabaseCatalogStore:
     async def list_all_models(
         self, user_ids: list[str]
     ) -> list[tuple[str, ModelRecord]]:
+        return await self.list_resources(user_ids, "models")
+
+    async def list_resources(self, user_ids: list[str], section: str):
+        # Resource lists never need Agent packages, bindings, or catalog write locks.
+        record_type = {
+            "models": ModelRecord,
+            "mcp_servers": McpServerRecord,
+            "a2a_agents": A2AAgentRecord,
+        }[section]
+        if not user_ids:
+            return []
+        column = getattr(CatalogRow, section)
+        async with self.database.session() as session:
+            rows = (await session.execute(select(
+                CatalogRow.user_id, column,
+            ).where(CatalogRow.user_id.in_(user_ids)))).all()
+        documents = {user_id: items for user_id, items in rows}
         return [
-            (user_id, model)
+            (user_id, record_type.model_validate(item))
             for user_id in user_ids
-            for model in (await self.get(user_id)).models
+            for item in documents.get(user_id, [])
         ]
 
     async def default_model(self, user_id: str) -> ModelRecord | None:

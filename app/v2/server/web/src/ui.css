@@ -1,0 +1,62 @@
+button, input, textarea, select { font: inherit; }
+/* Shared controls. Page styles own placement and density, never a second palette. */
+.btn, .agent-action {
+  display: inline-flex; align-items: center; justify-content: center; gap: 7px;
+  min-height: var(--control-height); padding: 8px 13px; border: 1px solid var(--border);
+  border-radius: var(--radius); background: var(--card); color: var(--foreground);
+  font-size: var(--control-font); font-weight: 550; line-height: 1.5; text-decoration: none; white-space: nowrap;
+  transition: background var(--duration-fast) var(--ease-standard), border-color var(--duration-fast), box-shadow var(--duration-fast);
+}
+.btn:not(.ghost), .btn.cta, .agent-action.primary { background: var(--primary); color: var(--primary-foreground); border-color: var(--primary); }
+.btn:not(:disabled):hover, .agent-action:not(:disabled):hover { border-color: var(--border-hover); background: var(--muted); }
+.btn:not(.ghost):not(:disabled):hover, .btn.cta:not(:disabled):hover, .agent-action.primary:not(:disabled):hover { background: var(--primary-hover); border-color: var(--primary-hover); }
+.agent-action.subtle { background: var(--muted); border-color: transparent; }
+.agent-action.danger { background: var(--destructive); border-color: var(--destructive); color: var(--destructive-foreground); }
+.agent-action.danger:not(:disabled):hover { background: color-mix(in srgb, var(--destructive) 88%, var(--foreground)); }
+.btn:disabled, .agent-action:disabled { opacity: .55; cursor: not-allowed; }
+.btn .app-icon, .agent-action .app-icon { width: 15px; height: 15px; }
+input:not([type]), input:is([type="text"], [type="password"], [type="search"], [type="number"], [type="email"], [type="url"]), textarea, select {
+  border: 1px solid var(--border); border-radius: var(--radius); background: var(--card); color: var(--foreground);
+  min-height: var(--control-height); padding: 9px 11px; font-size: var(--control-font);
+}
+input::placeholder, textarea::placeholder { color: var(--muted-foreground); opacity: .8; }
+input[type="checkbox"], input[type="radio"] { accent-color: var(--primary); }
+.model-search input, .rs-search input, .system-settings .system-user-search input {
+  width: 100%; margin: 0; padding: 9px 11px 9px 35px; border-radius: var(--radius);
+  background: var(--card); font-size: var(--control-font);
+}
+.model-search > .app-icon, .rs-search > .app-icon, .system-settings .system-user-search > .app-icon { position: absolute; top: 12px; left: 11px; width: 15px; height: 15px; color: var(--muted-foreground); }
+.agent-search { display: flex; align-items: center; gap: 8px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--card); color: var(--muted-foreground); padding: 0 11px; min-width: 0; }
+.agent-search > .app-icon { width: 15px; height: 15px; }
+.agent-search input { min-width: 0; width: 100%; min-height: 36px; padding: 9px 0; border: 0; outline: 0; background: transparent; font-size: var(--control-font); }
+.agent-search:focus-within { outline: 2px solid var(--accent); outline-offset: 2px; }
+.model-filters, .rs-filters, .agent-list-filters, .system-settings .system-role-filters { display: flex; gap: 3px; padding: 3px; width: fit-content; max-width: 100%; border: 0; border-radius: var(--radius); background: var(--muted); }
+.model-filters button, .rs-filters button, .agent-list-filters button, .system-settings .system-role-filters button { padding: 7px 12px; border: 0; border-radius: 6px; background: transparent; color: var(--muted-foreground); font-size: 11px; white-space: nowrap; }
+.model-filters button[aria-pressed="true"], .rs-filters button[aria-pressed="true"], .agent-list-filters button[aria-pressed="true"], .system-settings .system-role-filters button[aria-pressed="true"] { background: var(--card); color: var(--foreground); box-shadow: 0 1px 3px var(--shadow-color); font-weight: 550; }
+.model-card, .rs-card, .agent-summary-card { border: 1px solid var(--border); border-radius: var(--radius-card); padding: 22px; background: var(--card); transition: border-color var(--duration-fast), box-shadow var(--duration-fast); }
+@media (hover: hover) { .model-card:hover, .rs-card:hover, .agent-summary-card:hover { border-color: var(--border-hover); box-shadow: 0 0 0 1px var(--border), 0 5px 18px var(--shadow-color); } }
+.model-section, .rs-section, .agent-config-section { border: 1px solid var(--border); border-radius: var(--radius-card); background: var(--card); }
+.model-monogram, .rs-icon, .agent-avatar { background: var(--muted); color: var(--foreground); border: 1px solid var(--border); border-radius: 10px; }
+.model-page, .resource-page, .agents-page { background: var(--background); border-radius: 0; }
+.model-switch, .agent-switch { position: relative; flex: 0 0 34px; width: 34px; height: 20px; border: 0; border-radius: 20px; padding: 0; background: var(--border-hover); transition: background var(--duration-fast); }
+.model-switch::before, .agent-switch::after { content: ''; position: absolute; top: 3px; left: 3px; width: 14px; height: 14px; border-radius: 50%; background: var(--card); transition: transform var(--duration-fast); }
+.model-switch[aria-checked="true"], .agent-switch[aria-checked="true"] { background: var(--primary); }
+.model-switch[aria-checked="true"]::before, .agent-switch[aria-checked="true"]::after { transform: translateX(14px); background: var(--primary-foreground); }
+.model-switch:disabled, .agent-switch:disabled { opacity: .6; cursor: not-allowed; }
+.theme-picker { min-width: 0; margin: 5px 3px; padding: 9px 6px 12px; border: 0; border-block: 1px solid var(--border); }
+.theme-picker legend { float: left; width: 100%; padding: 0 0 9px; margin: 0; font-size: 11px; color: var(--muted-foreground); }
+.theme-options { clear: both; display: grid; grid-template-columns: 1fr 1fr 1.3fr; gap: 3px; padding: 3px; border-radius: var(--radius); background: var(--muted); }
+.theme-options > button { display: flex; flex-direction: column; align-items: center; gap: 5px; min-height: 53px; padding: 7px 3px; border: 1px solid transparent; border-radius: 6px; background: transparent; color: var(--muted-foreground); font-size: 10px; }
+.theme-options > button .app-icon { width: 16px; height: 16px; }
+.theme-options > button[aria-pressed="true"] { border-color: var(--border); background: var(--card); color: var(--foreground); box-shadow: 0 1px 3px var(--shadow-color); }
+.theme-options > button:hover { color: var(--foreground); }
+@media (prefers-reduced-motion: reduce) { .btn, .agent-action, .model-card, .rs-card, .agent-summary-card, .model-switch, .model-switch::before, .agent-switch, .agent-switch::after { transition: none; } }
+
+.agent-field > input, .agent-field > textarea, .agent-field > select, .agent-unit-input { width: 100%; min-width: 0; }
+.agent-unit-input { border: 1px solid var(--border); border-radius: var(--radius); background: var(--card); }
+.agent-unit-input > input { font-size: var(--control-font); }
+
+/* Preserve compact canvas actions while sharing the button skin. */
+.plugin-config .canvas-toolbar .btn { min-height: 0; }
+
+.model-card-actions .btn, .rs-card-footer .btn, .agent-summary-card .agent-action, .system-settings .system-user-action-column .btn { min-height: var(--control-height-small); padding: 6px 10px; border-color: transparent; background: var(--muted); color: var(--foreground); font-size: 11px; }

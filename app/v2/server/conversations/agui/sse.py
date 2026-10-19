@@ -6,7 +6,8 @@ from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from typing import Any
 
-from sagents.v2.contracts.events import RuntimeEvent
+from sagents.v2.contracts.events import RuntimeEvent, ItemEventData
+from sagents.v2.contracts.items import MessageItemData
 from sagents.v2.interfaces.protocols.ag_ui import AgUiProtocolAdapter
 from sagents.v2.interfaces.protocols.contracts import ProtocolFrame
 
@@ -156,7 +157,14 @@ async def canonical_agui_sse(
                 thread_id=thread_id,
                 run_id=run_id,
             )
-            if not owned_user_text.allow(payload):
+            # Initial inbound user text belongs to the client. Steering input
+            # becomes a new canonical Message only when the driver applies it.
+            steered_message = (
+                isinstance(event.data, ItemEventData) and event.data.item is not None
+                and isinstance(event.data.item.data, MessageItemData)
+                and bool(event.data.item.data.metadata.get("steer_id"))
+            )
+            if not steered_message and not owned_user_text.allow(payload):
                 continue
             kind = payload.get("type")
             if not opened:

@@ -1,0 +1,72 @@
+/* Porcelain / graphite. All pages and teleported dialogs inherit these tokens. */
+:root {
+  color-scheme: light;
+  --background: #f6f7f9;
+  --foreground: #20232a;
+  --card: #ffffff;
+  --muted: #f0f2f5;
+  --muted-foreground: #69717e;
+  --primary: #242831;
+  --primary-foreground: #ffffff;
+  --primary-hover: #383e49;
+  --accent: #596bd8;
+  --accent-soft: #eef0fc;
+  --border: #e3e6ec;
+  --border-hover: #b8beca;
+  --sidebar: #ffffff;
+  --destructive: #b34c48;
+  --destructive-foreground: #ffffff;
+  --status-success: #39785e;
+  --status-success-bg: #edf5f1;
+  --status-warning: #986a25;
+  --status-warning-bg: #faf3e6;
+  --status-active: var(--accent);
+  --tooltip-background: #252933;
+  --tooltip-foreground: #f5f6f8;
+  --overlay: #14182066;
+  --shadow-color: #161b260c;
+  --shadow-popover: 0 8px 28px #14182014, 0 2px 6px #14182008;
+  --radius: 8px;
+  --radius-card: 15px;
+  --radius-dialog: 18px;
+  --control-height: 38px;
+  --control-height-small: 32px;
+  --control-font: 12px;
+  --duration-fast: 150ms;
+  --ease-standard: cubic-bezier(.2, .7, .2, 1);
+  --space-1: .25rem; --space-2: .5rem; --space-3: .75rem; --space-4: 1rem; --space-5: 1.5rem; --space-6: 2rem;
+  --thread-max-width: 56rem;
+  --composer-radius: 16px; --composer-padding: 12px;
+  --composer-bg: color-mix(in srgb, var(--muted) 30%, var(--background));
+  --bg: var(--background); --surface: var(--card); --text: var(--foreground); --line: var(--border);
+  --ink: var(--primary); --cta: var(--primary); --cta-ink: var(--primary-foreground); --danger: var(--destructive);
+  --capability-accent: var(--primary); --capability-soft: var(--muted);
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --background: #14171c;
+  --foreground: #e7e9ee;
+  --card: #1d2128;
+  --muted: #292e37;
+  --muted-foreground: #a7aebb;
+  --primary: #e3e7ee;
+  --primary-foreground: #20242c;
+  --primary-hover: #cbd1dc;
+  --accent: #a3afff;
+  --accent-soft: #292e49;
+  --border: #353b45;
+  --border-hover: #616b7a;
+  --sidebar: #191d23;
+  --destructive: #f29892;
+  --destructive-foreground: #311b19;
+  --status-success: #92cdb0;
+  --status-success-bg: #21352c;
+  --status-warning: #dfbd7a;
+  --status-warning-bg: #372e20;
+  --tooltip-background: #e5e8ee;
+  --tooltip-foreground: #20232a;
+  --overlay: #080b12aa;
+  --shadow-color: #00000022;
+  --shadow-popover: 0 8px 30px #00000040;
+}
+@media (prefers-reduced-motion: reduce) { :root { --duration-fast: 0ms; } }

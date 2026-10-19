@@ -2,7 +2,10 @@ from fastapi import APIRouter, Query
 
 from app.v2.server.routers.deps import AdminDep, ConversationDep, AdminUser
 from app.v2.server.routers.schemas.common import ADMIN_ERRORS, ApiResponse
-from app.v2.server.routers.schemas.admin import AdminModelPublic, AdminThreadPublic
+from app.v2.server.routers.schemas.admin import (
+    AdminAgentSummary, AdminModelPublic, AdminThreadPublic,
+    AdminMcpPublic, AdminA2AAgentPublic, AdminSkillPublic,
+)
 from app.v2.server.routers.schemas.conversations import ThreadEventPage
 from app.v2.server.routers.schemas.identity import UserPublic
 from app.v2.server.routers.render import success
@@ -23,6 +26,26 @@ async def admin_threads(_: AdminUser, service: AdminDep):
 @router.get("/models", response_model=ApiResponse[list[AdminModelPublic]])
 async def admin_models(_: AdminUser, service: AdminDep):
     return success(await service.list_models())
+
+
+@router.get("/agents", response_model=ApiResponse[list[AdminAgentSummary]])
+async def admin_agents(_: AdminUser, service: AdminDep):
+    return success(await service.list_agents())
+
+
+@router.get("/mcp", response_model=ApiResponse[list[AdminMcpPublic]])
+async def admin_mcp(_: AdminUser, service: AdminDep):
+    return success(await service.list_resources("mcp_servers"))
+
+
+@router.get("/a2a-agents", response_model=ApiResponse[list[AdminA2AAgentPublic]])
+async def admin_a2a_agents(_: AdminUser, service: AdminDep):
+    return success(await service.list_resources("a2a_agents"))
+
+
+@router.get("/skills", response_model=ApiResponse[list[AdminSkillPublic]])
+async def admin_skills(user: AdminUser, service: AdminDep):
+    return success(await service.list_skills(user.user_id))
 
 
 @router.get(

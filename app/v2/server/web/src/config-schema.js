@@ -10,17 +10,18 @@ export const labels = {
   provider: '协议', plugin: '插件', base_url: 'API 地址', credential: '凭据', model: '模型',
   request: '请求参数', limits: '模型限制', capabilities: '能力', capability_profile: '能力探测档案',
   max_output_tokens: '最大输出 Token', context_window: '上下文窗口', temperature: 'Temperature', top_p: 'Top P', reasoning_effort: '推理强度', extra: '扩展参数',
-  multimodal: '多模态', structured_output: '结构化输出', tool_calling: '工具调用', reasoning: '推理', parallel_tool_calls: '并行工具调用',
+  multimodal: '多模态', structured_output: 'JSON / Schema 输出', tool_calling: '工具调用', reasoning: '推理', parallel_tool_calls: '并行工具调用',
   type: '类型', loop: '循环', flow: '工作流', config: '配置', preset: '预设', deployment_profile: '部署模式',
   plugin_trust_policy: '插件信任策略', required_guarantees: '运行保障', delegation_model_bindings: '委派模型绑定',
   model_binding: '模型绑定', timeout_seconds: '超时时间（秒）', idle_timeout_seconds: '流空闲超时（秒）',
   max_source_tokens: '摘要输入 Token 上限', summary_target_tokens: '摘要目标 Token', protected_recent_units: '保留近期消息组数',
   max_summary_calls: '单轮摘要调用上限', max_summary_source_tokens: '摘要输入 Token 上限', repeat_threshold: '重复检测阈值',
-  max_visible_tools: '工具数量上限', model_timeout_seconds: '模型选择超时（秒）', max_concurrent_runs: '运行并发上限',
+  max_visible_tools: '最多展示工具数', model_timeout_seconds: '筛选模型超时（秒）', max_concurrent_runs: '运行并发上限',
   max_concurrent_runs_per_tenant: '每用户运行并发上限', max_pending_items: '等待任务上限',
   root: '存储目录', directory: '日志目录', min_level: '日志级别', stream: '输出位置', format: '输出格式',
   table_prefix: '数据库表前缀', encoding_name: '分词编码', max_bytes: '文件大小上限（字节）', backup_count: '保留文件数',
   enabled: '启用', agent: '智能体', scenarios: '场景', gates: '质量门禁', nodes: '节点', edges: '连线', schema_version: 'Schema 版本',
+  max_active_characters: '活动技能字符上限',
 }
 export function resolveSchema(schema = {}, root = {}) {
   if (schema.$ref) return resolveSchema(root.$defs?.[schema.$ref.split('/').at(-1)] || {}, root)

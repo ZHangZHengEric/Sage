@@ -22,7 +22,7 @@ router = APIRouter(
 
 @router.get("", response_model=ApiResponse[list[A2AAgentPublic]])
 async def list_a2a_agents(user: ReadUser, service: CatalogDep):
-    agents = (await service.get(user.user_id)).a2a_agents
+    agents = [item for _, item in await service.list_resources([user.user_id], "a2a_agents")]
     return success([item.public_dict() for item in agents])
 
 

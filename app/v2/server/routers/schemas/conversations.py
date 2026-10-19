@@ -45,6 +45,15 @@ class ThreadResumeBody(BaseModel):
     decision: str
     payload: dict = Field(default_factory=dict)
 
+class ThreadCancelBody(BaseModel):
+    runId: str = Field(min_length=1, max_length=128)
+
+
+class ThreadSteerBody(ThreadCancelBody):
+    messageId: str = Field(min_length=1, max_length=128)
+    text: str = Field(min_length=1, max_length=100000)
+
+
 class ThreadPublic(BaseModel):
     thread_id: str
     user_id: str

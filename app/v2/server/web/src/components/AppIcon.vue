@@ -1,11 +1,20 @@
 <script setup>
 defineProps({ name: String })
 const paths = {
+  sun: 'M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8ZM12 2v2m0 16v2M2 12h2m16 0h2M5 5l1.5 1.5m11 11L19 19M5 19l1.5-1.5m11-11L19 5',
+  moon: 'M20.8 13A9 9 0 0 1 11 3.2 9 9 0 1 0 20.8 13Z',
+  monitor: 'M3 4h18v13H3V4Zm9 13v4m-4 0h8',
+  copy: 'M8 8h13v13H8V8ZM3 16V3h13',
+  lock: 'M5 10h14v11H5V10Zm3 0V7a4 4 0 0 1 8 0v3m-4 5v2',
+  help: 'M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18Zm-2 6a2 2 0 1 1 3 2c-1 1-1 1-1 2m0 3h.01',
+  eye: 'M2 12s4-7 10-7 10 7 10 7-4 7-10 7-10-7-10-7Zm10-3a3 3 0 1 0 0 6 3 3 0 0 0 0-6',
+  link: 'm10 13 4-4M8 15l-2 2a3 3 0 0 1-4-4l5-5a3 3 0 0 1 4 0m2 1 2-2a3 3 0 0 1 4 4l-5 5a3 3 0 0 1-4 0',
+  trash: 'M3 6h18M9 6V3h6v3M5 6l1 15h12l1-15M10 10v7m4-7v7',
   clock: 'M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18Zm0 4v5l3 2',
   shield: 'm12 3 8 3v6c0 5-8 9-8 9s-8-4-8-9V6l8-3Zm0 5v5m0 3h.01',
+  'shield-question': 'm12 3 8 3v6c0 5-8 9-8 9s-8-4-8-9V6l8-3ZM10 9a2 2 0 1 1 3 2c-1 1-1 1-1 2m0 3h.01',
   alert: 'M12 3 2 21h20L12 3Zm0 6v5m0 3h.01',
   ban: 'M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18ZM6 6l12 12',
-  more: 'M5 12h.01M12 12h.01M19 12h.01',
   folder: 'M3 7V4h6l2 3h10v13H3V7Z',
   download: 'M12 3v12m-5-5 5 5 5-5M4 16v5h16v-5',
   file: 'M14 2H4v20h16V8l-6-6Zm0 0v6h6M8 13h8M8 17h8',
@@ -33,5 +42,5 @@ const paths = {
 }
 </script>
 <template>
-  <svg class="app-icon" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path :d="paths[name] || paths.code" /></svg>
+  <svg class="app-icon" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><g v-if="name === 'more'" fill="currentColor" stroke="none"><circle cx="5" cy="12" r="1.8" /><circle cx="12" cy="12" r="1.8" /><circle cx="19" cy="12" r="1.8" /></g><path v-else :d="paths[name] || paths.code" /></svg>
 </template>
