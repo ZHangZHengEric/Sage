@@ -67,6 +67,36 @@ def test_only_one_admin_is_bootstrapped(client: TestClient):
     assert login.json()["data"]["user"]["role"] == "admin"
 
 
+def test_agent_summaries_include_owner_models_and_enforce_scope(client):
+    alice = {"Authorization": f"Bearer {register_and_login(client, 'alice')}"}
+    bob = {"Authorization": f"Bearer {register_and_login(client, 'bob')}"}
+    model = client.post('/api/models', headers=alice, json={
+        'model': 'alice-model', 'api_key': 'private-key',
+    }).json()['data']
+    agent = client.post('/api/agents', headers=alice, json={
+        'name': 'Alice agent', 'model_id': model['id'],
+        'instructions': 'Private instructions', 'tools': ['file_read'],
+    }).json()['data']
+    own = client.get('/api/agents/summary', headers=alice)
+    assert own.status_code == 200, own.text
+    summary = next(item for item in own.json()['data'] if item['id'] == agent['id'])
+    assert summary['model_name'] == 'alice-model'
+    assert summary['tool_count'] == 1
+    assert summary['skill_count'] == 0
+    assert set(summary) == {'id', 'name', 'description', 'model_id', 'model_name', 'tool_count', 'skill_count'}
+    assert agent['id'] not in {item['id'] for item in client.get('/api/agents/summary', headers=bob).json()['data']}
+    assert client.get('/api/admin/agents', headers=alice).status_code == 403
+    admin = {"Authorization": f"Bearer {admin_login(client)}"}
+    all_agents = client.get('/api/admin/agents', headers=admin)
+    assert all_agents.status_code == 200, all_agents.text
+    assert {item['username'] for item in all_agents.json()['data']} == {'admin', 'alice', 'bob'}
+    summary = next(item for item in all_agents.json()['data'] if item['id'] == agent['id'])
+    assert summary['username'] == 'alice'
+    assert summary['model_name'] == 'alice-model'
+    assert 'private-key' not in all_agents.text
+    assert 'Private instructions' not in all_agents.text
+
+
 def test_admin_read_scope_covers_user_data_without_changing_identity(client):
     alice = {"Authorization": f"Bearer {register_and_login(client, 'alice')}"}
     bob = {"Authorization": f"Bearer {register_and_login(client, 'bob')}"}
@@ -93,7 +123,7 @@ def test_admin_read_scope_covers_user_data_without_changing_identity(client):
 
     admin = {'Authorization': f'Bearer {admin_login(client)}', 'X-Sage-View-User': alice_id}
     paths = [
-        '/api/agents', f"/api/agents/{agent['id']}", f"/api/agents/{agent['id']}/skills",
+        '/api/agents', '/api/agents/summary', f"/api/agents/{agent['id']}", f"/api/agents/{agent['id']}/skills",
         '/api/models', '/api/mcp', '/api/a2a-agents', '/api/keys',
         '/api/skills', f'/api/skills/{skill_id}', '/api/auth/execution-policy',
         '/api/approvals', '/api/threads', '/api/threads/alice-private-thread/events?offset=0&limit=2',
