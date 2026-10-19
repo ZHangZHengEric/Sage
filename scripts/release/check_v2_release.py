@@ -9,7 +9,7 @@ import tomllib
 import zipfile
 
 ROOT = Path(__file__).resolve().parents[2]
-VERSION = '2.1.0'
+VERSION = '2.1.1'
 
 
 def main() -> None:
@@ -34,8 +34,8 @@ def main() -> None:
     assert next(p['version'] for p in lock['package'] if p['name'] == 'sage-terminal') == VERSION
     for readme in ('README.md', 'README_CN.md'):
         text = (ROOT / readme).read_text()
-        assert 'Version-2.1.0-green.svg' in text, readme
-        assert '/releases/tag/v2.1.0' in text, readme
+        assert 'Version-2.1.1-green.svg' in text, readme
+        assert '/releases/tag/v2.1.1' in text, readme
     assert not (ROOT / '.github/workflows/release-desktop.yml').exists(), 'Legacy application release must stay disabled'
     workflow = (ROOT / '.github/workflows/release-v2.yml').read_text()
     assert 'app/v1' not in workflow and 'desktop-v1' not in workflow
@@ -67,7 +67,7 @@ def main() -> None:
             for name in expected:
                 assert (args.assets / name).is_file(), f'Missing release asset: {name}'
                 assert (args.assets / name).stat().st_size > 0, f'Empty release asset: {name}'
-    print('Sage 2.1 release versions and package boundaries verified.')
+    print(f'Sage {VERSION} release versions and package boundaries verified.')
 
 
 if __name__ == '__main__':

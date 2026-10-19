@@ -86,30 +86,18 @@ All hosts use the same public execution path. Register custom capability impleme
 
 ```python
 from sagents.v2 import SAgentBuilder
-from sagents.v2.composition.defaults import default_runtime
 
 builder = SAgentBuilder()
-# Optional: builder.register(project_tools_registration)
-runtime = default_runtime("./state").model_dump(mode="json")
-runtime["capabilities"]["execution.binding"] = {
-    "plugin": "sage.execution.binding.local-workspace",
-    "config": {"workspace": "/absolute/project/workspace"},
-}
-app = await builder.build(runtime=runtime, models="./models.yaml")
-try:
-    worker = await app.load_agent("./worker")
-    team = await app.load_agent("./team", subagents={"worker": worker})
-    # command.agent_id = team.id
-    # command.resolved_spec_hash = team.composition_hash
-    stream = await app.entrypoint().run_stream(command, context, agent=team)
-    async for event in stream.events:
-        handle_event(event)
-    result = await stream.wait()
-finally:
-    await app.close()
+for registration in host_registrations:
+    builder.register(registration)
+app = await builder.build(runtime=runtime_config, models=model_catalog)
+worker = await app.load_agent(worker_package)
+team = await app.load_agent(team_package, subagents={"worker": worker})
+# command.agent_id=team.id，resolved_spec_hash=team.composition_hash。
+stream = await app.entrypoint().run_stream(command, context, agent=team)
 ```
 
-The complete runnable media/MCP/Skill/nested-Team/restart example is [the standard host project](../../../examples/sagents_v2_standard_host/README.md). Registration details are in [host development](sagents-host-development.md). Team Packages declare their members; official tools use `tool.catalog: sage.tool.official`. Preserve persisted revisions and execution snapshots rather than substituting current Project settings.
+The complete runnable media/MCP/Skill/nested-Team/restart example is the standard host project. Registration details are in host development. Team Packages declare their members; official tools use `tool.catalog: sage.tool.official`. Preserve persisted revisions and execution snapshots rather than substituting current Project settings.
 
 Sage owns loop composition, sandbox provisioning and Run leases. A host never creates or installs a Driver, replaces child executors, or reconstructs execution in a plugin factory. This document describes the Sage integration contract; it is not a claim about the current Yiii checkout.
 

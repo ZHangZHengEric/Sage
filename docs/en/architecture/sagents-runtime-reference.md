@@ -427,790 +427,1066 @@ Ranges are validation constraints. Bytes and seconds are literal units. Tokens m
 
 <a id="插件索引"></a>
 
-### Plugin index
+### sage.agent.approval-memory.session
 
-| Capability | Built-in implementations (parameter links) |
-| --- | --- |
-| `agent.continuation-policy` | [sage.agent.continuation.deterministic](#sageagentcontinuationdeterministic), [sage.agent.continuation.explicit-status](#sageagentcontinuationexplicit-status), [sage.agent.continuation.hybrid](#sageagentcontinuationhybrid), [sage.agent.continuation.llm-judge](#sageagentcontinuationllm-judge) |
-| `artifact.store` | [sage.artifact.ephemeral](#sageartifactephemeral), [sage.artifact.filesystem](#sageartifactfilesystem), [sage.artifact.session](#sageartifactsession) |
-| `context.reducer` | [sage.context.reducer.persistent-summary](#sagecontextreducerpersistent-summary), [sage.context.reducer.window](#sagecontextreducerwindow) |
-| `context.summarizer` | [sage.context.summarizer.extractive](#sagecontextsummarizerextractive), [sage.context.summarizer.model](#sagecontextsummarizermodel) |
-| `context.summary-store` | [sage.context.summary-store.ephemeral](#sagecontextsummary-storeephemeral), [sage.context.summary-store.session-derived](#sagecontextsummary-storesession-derived) |
-| `context.unit-compactor` | [sage.context.unit-compactor.reference](#sagecontextunit-compactorreference) |
-| `credentials.provider` | [sage.credentials.environment](#sagecredentialsenvironment), [sage.credentials.mapping](#sagecredentialsmapping) |
-| `execution.job-runtime` | [sage.job.ephemeral](#sagejobephemeral) |
-| `execution.sandbox` | [sage.sandbox.cube-volume](#sagesandboxcube-volume), [sage.sandbox.ephemeral](#sagesandboxephemeral), [sage.sandbox.local-workspace](#sagesandboxlocal-workspace) |
-| `execution.scheduler` | [sage.scheduler.ephemeral](#sageschedulerephemeral), [sage.scheduler.filesystem](#sageschedulerfilesystem) |
-| `flow.node` | [sage.flow.agent](#sageflowagent) |
-| `interface.protocol-adapter` | [sage.protocol.a2a](#sageprotocola2a), [sage.protocol.acp](#sageprotocolacp), [sage.protocol.ag-ui](#sageprotocolag-ui), [sage.protocol.mcp](#sageprotocolmcp), [sage.protocol.native](#sageprotocolnative) |
-| `memory.provider` | [sage.memory.filesystem-bm25](#sagememoryfilesystem-bm25), [sage.memory.noop](#sagememorynoop) |
-| `memory.recall-query` | [sage.memory.recall-query.direct](#sagememoryrecall-querydirect), [sage.memory.recall-query.llm](#sagememoryrecall-queryllm) |
-| `model.provider` | [sage.model.anthropic-messages](#sagemodelanthropic-messages), [sage.model.gemini-generate-content](#sagemodelgemini-generate-content), [sage.model.openai-chat-completions](#sagemodelopenai-chat-completions), [sage.model.openai-responses](#sagemodelopenai-responses) |
-| `observability.diagnostic-sink` | [sage.observability.filesystem](#sageobservabilityfilesystem), [sage.observability.noop](#sageobservabilitynoop) |
-| `observability.log-sink` | [sage.logging.filesystem](#sageloggingfilesystem), [sage.logging.noop](#sageloggingnoop), [sage.logging.stdout](#sageloggingstdout) |
-| `observability.trace-sink` | [sage.trace.langfuse](#sagetracelangfuse), [sage.trace.noop](#sagetracenoop), [sage.trace.otlp](#sagetraceotlp) |
-| `package.registry` | [sage.package-registry.ephemeral](#sagepackage-registryephemeral) |
-| `session-memory.provider` | [sage.session-memory.noop](#sagesession-memorynoop), [sage.session-memory.sqlite-bm25](#sagesession-memorysqlite-bm25) |
-| `session.store` | [sage.session.ephemeral](#sagesessionephemeral), [sage.session.filesystem](#sagesessionfilesystem), [sage.session.mysql](#sagesessionmysql), [sage.session.postgres](#sagesessionpostgres) |
-| `skill.catalog` | [sage.skill.filesystem](#sageskillfilesystem) |
-| `skill.loading` | [sage.skill.loading.lazy](#sageskillloadinglazy) |
-| `skill.source` | [sage.skill.filesystem](#sageskillfilesystem) |
-| `tool.catalog` | [sage.tool.ephemeral](#sagetoolephemeral), [sage.tool.mcp](#sagetoolmcp), [sage.tool.multi-agent](#sagetoolmulti-agent), [sage.tool.official](#sagetoolofficial), [sage.tool.skill](#sagetoolskill) |
-| `tool.executor` | [sage.tool.ephemeral](#sagetoolephemeral), [sage.tool.mcp](#sagetoolmcp), [sage.tool.multi-agent](#sagetoolmulti-agent), [sage.tool.official](#sagetoolofficial), [sage.tool.skill](#sagetoolskill) |
-| `tool.selection-policy` | [sage.tool-selection.direct](#sagetool-selectiondirect), [sage.tool-selection.lexical](#sagetool-selectionlexical), [sage.tool-selection.llm](#sagetool-selectionllm), [sage.tool-selection.recent](#sagetool-selectionrecent) |
-| `workspace.initializer` | [sage.workspace.initializer.bare](#sageworkspaceinitializerbare), [sage.workspace.initializer.claw](#sageworkspaceinitializerclaw) |
+Standard agent.approval-memory implementation with declared dependencies and lifecycle.
+
+Version: `2.0.0`; scope: process; ownership: `owned`。
+
+Provides: `agent.approval-memory:default` (API `2`)。
+
+Dependencies: `derived-state.store` (API `>=2,<3`)。
+
+No fixed configuration fields; consult the public schema for additional parameters.
 
 ### sage.agent.continuation.deterministic
 
 Applies ordered safety, budget, and completion rules without a model call.
 
-Offers: `agent.continuation-policy:default`; scopes: agent, run.
+Version: `2.0.0`; scope: agent, run; ownership: `owned`。
 
-| Parameter | Type / range | Default | Schema required | Purpose |
+Provides: `agent.continuation-policy:default` (API `2`)。
+
+| Parameter | Type | Required | Schema Default | Constraints |
 | --- | --- | --- | --- | --- |
-| `repeat_threshold` | integer; minimum=1 | `3` | No | Repeated behavior/loop threshold |
+| `repeat_threshold` | `integer` | No | `3` | `{"minimum":1}` |
 
 ### sage.agent.continuation.explicit-status
 
 Completes only when the model emits an explicit turn_status.
 
-Offers: `agent.continuation-policy:default`; scopes: agent, run.
+Version: `2.0.0`; scope: agent, run; ownership: `owned`。
 
-| Parameter | Type / range | Default | Schema required | Purpose |
+Provides: `agent.continuation-policy:default` (API `2`)。
+
+| Parameter | Type | Required | Schema Default | Constraints |
 | --- | --- | --- | --- | --- |
-| `repeat_threshold` | integer; minimum=1 | `3` | No | Repeated behavior/loop threshold |
+| `repeat_threshold` | `integer` | No | `3` | `{"minimum":1}` |
 
 ### sage.agent.continuation.hybrid
 
 Combines deterministic safety rules with an LLM judge for completion.
 
-Offers: `agent.continuation-policy:default`; scopes: agent, run.
+Version: `2.0.0`; scope: agent, run; ownership: `owned`。
 
-| Parameter | Type / range | Default | Schema required | Purpose |
+Provides: `agent.continuation-policy:default` (API `2`)。
+
+| Parameter | Type | Required | Schema Default | Constraints |
 | --- | --- | --- | --- | --- |
-| `repeat_threshold` | integer; minimum=1 | `3` | No | Repeated behavior/loop threshold |
-| `model` | Host object | No fixed value; requires input/injection | Yes | Model dependency, normally host ModelProvider; tokenizer model name for legacy tiktoken config |
-| `model_binding` | string; minLength=1 | `"fast"` | No | Model slot; summarization is locked to primary |
-| `timeout_seconds` | number; exclusiveMinimum=0 | `60.0` | No | Component-operation timeout in seconds, not total Run budget |
+| `repeat_threshold` | `integer` | No | `3` | `{"minimum":1}` |
+| `model` | `object` | Yes | Not declared | `{}` |
+| `model_binding` | `string` | No | `"fast"` | `{"minLength":1}` |
+| `timeout_seconds` | `number` | No | `60.0` | `{"exclusiveMinimum":0}` |
 
 ### sage.agent.continuation.llm-judge
 
 Uses a judge model to decide completion when no tool call is pending.
 
-Offers: `agent.continuation-policy:default`; scopes: agent, run.
+Version: `2.0.0`; scope: agent, run; ownership: `owned`。
 
-| Parameter | Type / range | Default | Schema required | Purpose |
+Provides: `agent.continuation-policy:default` (API `2`)。
+
+| Parameter | Type | Required | Schema Default | Constraints |
 | --- | --- | --- | --- | --- |
-| `repeat_threshold` | integer; minimum=1 | `3` | No | Repeated behavior/loop threshold |
-| `model` | Host object | No fixed value; requires input/injection | Yes | Model dependency, normally host ModelProvider; tokenizer model name for legacy tiktoken config |
-| `model_binding` | string; minLength=1 | `"fast"` | No | Model slot; summarization is locked to primary |
-| `timeout_seconds` | number; exclusiveMinimum=0 | `60.0` | No | Component-operation timeout in seconds, not total Run budget |
+| `repeat_threshold` | `integer` | No | `3` | `{"minimum":1}` |
+| `model` | `object` | Yes | Not declared | `{}` |
+| `model_binding` | `string` | No | `"fast"` | `{"minLength":1}` |
+| `timeout_seconds` | `number` | No | `60.0` | `{"exclusiveMinimum":0}` |
+
+### sage.agent.tool-policy.default
+
+Standard agent.tool-policy implementation with declared dependencies and lifecycle.
+
+Version: `2.0.0`; scope: process; ownership: `owned`。
+
+Provides: `agent.tool-policy:default` (API `2`)。
+
+| Parameter | Type | Required | Schema Default | Constraints |
+| --- | --- | --- | --- | --- |
+| `approval_strategy` | `string` | No | `"configured"` | `{"enum":["configured","always_ask","high_risk","auto_approve"]}` |
 
 ### sage.artifact.ephemeral
 
 Process-local artifact bytes without restart durability.
 
-Offers: `artifact.store:default`; scopes: process, run.
+Version: `2.0.0`; scope: process, run; ownership: `owned`。
 
-No configurable parameters; use `config: {}`.
+Provides: `artifact.store:default` (API `2`)。
+
+No fixed configuration fields; consult the public schema for additional parameters.
 
 ### sage.artifact.filesystem
 
 Immutable binary artifact files with local restart durability.
 
-Offers: `artifact.store:default`; scopes: process.
+Version: `2.0.0`; scope: process; ownership: `owned`。
 
-| Parameter | Type / range | Default | Schema required | Purpose |
+Provides: `artifact.store:default` (API `2`)。
+
+| Parameter | Type | Required | Schema Default | Constraints |
 | --- | --- | --- | --- | --- |
-| `root` | string; minLength=1 | No fixed value; requires input/injection | Yes | Storage root; use the component-specific directory |
+| `root` | `string` | Yes | Not declared | `{"minLength":1}` |
 
 ### sage.artifact.session
 
 Artifacts retained by the owning Session store.
 
-Offers: `artifact.store:default`; scopes: process.
+Version: `2.0.0`; scope: process; ownership: `owned`。
 
-| Parameter | Type / range | Default | Schema required | Purpose |
+Provides: `artifact.store:default` (API `2`)。
+
+| Parameter | Type | Required | Schema Default | Constraints |
 | --- | --- | --- | --- | --- |
-| `session_store` | Host object | No fixed value; requires input/injection | Yes | Host SessionStore |
+| `session_store` | `object` | Yes | Not declared | `{}` |
 
 ### sage.context.reducer.persistent-summary
 
-Summarizes older units into a durable rolling conversation summary.
+Summarizes complete history only after API rejection or reported usage reaches a configured limit.
 
-Offers: `context.reducer:default`; scopes: agent, run.
+Version: `2.0.0`; scope: agent, run; ownership: `owned`。
 
-| Parameter | Type / range | Default | Schema required | Purpose |
+Provides: `context.reducer:default` (API `2`)。
+
+| Parameter | Type | Required | Schema Default | Constraints |
 | --- | --- | --- | --- | --- |
-| `store` | Host object | No fixed value; requires input/injection | Yes | Host summary store |
-| `summarizer` | Host object | No fixed value | No | Host summarizer |
-| `summary_target_tokens` | integer; minimum=1 | `1024` | No | Target summary output tokens |
-| `protected_recent_units` | integer; minimum=1 | `4` | No | Compatibility option; API recovery retains complete batches and latest user text |
-| `max_summary_calls` | integer; minimum=1 | `64` | No | Summary calls per compression operation |
-| `max_summary_source_tokens` | integer; minimum=1 | `24000` | No | Deprecated compatibility option; API overflow controls input splitting |
-| `unit_compactor` | Host object | No fixed value | No | Host context unit compactor |
+| `store` | `object` | Yes | Not declared | `{}` |
+| `summarizer` | `object` | No | Not declared | `{}` |
+| `summary_target_tokens` | `integer` | No | `1024` | `{"minimum":1}` |
+| `protected_recent_units` | `integer` | No | `4` | `{"minimum":1}` |
+| `max_summary_calls` | `integer` | No | `64` | `{"minimum":1}` |
+| `max_summary_source_tokens` | `integer` | No | `24000` | `{"minimum":1}` |
+| `unit_compactor` | `object` | No | Not declared | `{}` |
+
+`max_summary_source_tokens` 作为已有配置字段被 schema 接受；当前内置 reducer 工厂不以它控制输入长度。需要配置摘要源预算时，使用所选 summarizer 能力的正式Parameter。
 
 ### sage.context.reducer.window
 
-Drops complete old units only on API feedback or an exact message-count trigger.
+Drops complete historical units only when explicitly requested.
 
-Offers: `context.reducer:default`; scopes: agent, run.
+Version: `2.0.0`; scope: agent, run; ownership: `owned`。
 
-| Parameter | Type / range | Default | Schema required | Purpose |
-| --- | --- | --- | --- | --- |
+Provides: `context.reducer:default` (API `2`)。
+
+No fixed configuration fields; consult the public schema for additional parameters.
 
 ### sage.context.summarizer.extractive
 
 Preserves bounded task state and Tool outcomes without a model call.
 
-Offers: `context.summarizer:default`; scopes: agent, process.
+Version: `2.0.0`; scope: agent, process; ownership: `owned`。
 
-No configurable parameters; use `config: {}`.
+Provides: `context.summarizer:default` (API `2`)。
+
+No fixed configuration fields; consult the public schema for additional parameters.
 
 ### sage.context.summarizer.model
 
 Uses a model binding to write conversation summaries.
 
-Offers: `context.summarizer:default`; scopes: agent.
+Version: `2.0.0`; scope: agent, run; ownership: `owned`。
 
-| Parameter | Type / range | Default | Schema required | Purpose |
+Provides: `context.summarizer:default` (API `2`)。
+
+| Parameter | Type | Required | Schema Default | Constraints |
 | --- | --- | --- | --- | --- |
-| `model` | Host object | No fixed value; requires input/injection | Yes | Model dependency, normally host ModelProvider; tokenizer model name for legacy tiktoken config |
-| `model_binding` | string; const="primary" | `"primary"` | No | Model slot; summarization is locked to primary |
-| `max_source_tokens` | integer; minimum=1 | `24000` | No | Source-token bound for one summary |
-| `timeout_seconds` | number; exclusiveMinimum=0 | `300.0` | No | Component-operation timeout in seconds, not total Run budget |
-| `idle_timeout_seconds` | number; exclusiveMinimum=0 | `60.0` | No | Summary stream idle timeout in seconds |
+| `model` | `object` | Yes | Not declared | `{}` |
+| `model_binding` | `string` | No | `"primary"` | `{"const":"primary"}` |
+| `max_source_tokens` | `integer` | No | `24000` | `{"minimum":1}` |
+| `timeout_seconds` | `number` | No | `300.0` | `{"exclusiveMinimum":0}` |
+| `idle_timeout_seconds` | `number` | No | `60.0` | `{"exclusiveMinimum":0}` |
 
 ### sage.context.summary-store.ephemeral
 
 In-memory conversation summaries without restart durability.
 
-Offers: `context.summary-store:default`; scopes: agent, process.
+Version: `2.0.0`; scope: agent, process; ownership: `owned`。
 
-No configurable parameters; use `config: {}`.
+Provides: `context.summary-store:default` (API `2`)。
+
+No fixed configuration fields; consult the public schema for additional parameters.
 
 ### sage.context.summary-store.session-derived
 
 Persists conversation summaries through the selected SessionStore.
 
-Offers: `context.summary-store:default`; scopes: agent, process.
+Version: `2.0.0`; scope: agent, process; ownership: `owned`。
 
-| Parameter | Type / range | Default | Schema required | Purpose |
+Provides: `context.summary-store:default` (API `2`)。
+
+| Parameter | Type | Required | Schema Default | Constraints |
 | --- | --- | --- | --- | --- |
-| `derived_state` | Host object | No fixed value; requires input/injection | Yes | Host derived-state store |
+| `derived_state` | `object` | Yes | Not declared | `{}` |
 
 ### sage.context.unit-compactor.reference
 
 Compacts oversized units into durable references instead of dropping them.
 
-Offers: `context.unit-compactor:default`; scopes: agent, process.
+Version: `2.0.0`; scope: agent, process; ownership: `owned`。
 
-| Parameter | Type / range | Default | Schema required | Purpose |
-| --- | --- | --- | --- | --- |
+Provides: `context.unit-compactor:default` (API `2`)。
+
+No fixed configuration fields; consult the public schema for additional parameters.
 
 ### sage.credentials.environment
 
 Resolves credentials from process environment variables.
 
-Offers: `credentials.provider:default`; scopes: process, tenant.
+Version: `2.0.0`; scope: process, tenant; ownership: `owned`。
 
-| Parameter | Type / range | Default | Schema required | Purpose |
+Provides: `credentials.provider:default` (API `2`)。
+
+| Parameter | Type | Required | Schema Default | Constraints |
 | --- | --- | --- | --- | --- |
-| `declarations` | object | `{}` | No | Credential declarations, normally App model credentials |
-| `environment` | object / null | Read host os.environ when omitted | No | Trace environment label; credential provider host environment map |
+| `declarations` | `object` | No | Not declared | `{}` |
+| `environment` | `['object', 'null']` | No | Not declared | `{}` |
 
 ### sage.credentials.mapping
 
 Resolves credentials from an in-memory host-supplied mapping.
 
-Offers: `credentials.provider:default`; scopes: process, tenant.
+Version: `2.0.0`; scope: process, tenant; ownership: `owned`。
 
-| Parameter | Type / range | Default | Schema required | Purpose |
+Provides: `credentials.provider:default` (API `2`)。
+
+| Parameter | Type | Required | Schema Default | Constraints |
 | --- | --- | --- | --- | --- |
-| `values` | object | `{}` | No | Host credential value map; never hardcode secrets in public config |
-| `source` | string; minLength=1 | `"host"` | No | Credential source ID |
+| `values` | `object` | No | Not declared | `{}` |
+| `source` | `string` | No | `"host"` | `{"minLength":1}` |
+
+### sage.derived-state.ephemeral
+
+Standard derived-state.store implementation with declared dependencies and lifecycle.
+
+Version: `2.0.0`; scope: process; ownership: `owned`。
+
+Provides: `derived-state.store:default` (API `2`)。
+
+No fixed configuration fields; consult the public schema for additional parameters.
+
+### sage.derived-state.session
+
+Standard derived-state.store implementation with declared dependencies and lifecycle.
+
+Version: `2.0.0`; scope: process; ownership: `borrowed`。
+
+Provides: `derived-state.store:default` (API `2`)。
+
+Dependencies: `session.store` (API `>=2,<3`)。
+
+No fixed configuration fields; consult the public schema for additional parameters.
+
+### sage.execution.binding.ephemeral
+
+Independent virtual files with explicit process-local recovery limits.
+
+Version: `1.0.0`; scope: process; ownership: `owned`。
+
+Provides: `execution.binding:default` (API `2`)。
+
+Dependencies: `session.store` (API `>=2,<3`)。
+
+| Parameter | Type | Required | Schema Default | Constraints |
+| --- | --- | --- | --- | --- |
+| `workspace_root` | `string` | No | `"/workspace"` | `{}` |
+| `policy` | `object` | No | Not declared | `{"additionalProperties":false}` |
+| `policy.filesystem` | `object` | No | Not declared | `{"additionalProperties":false}` |
+| `policy.filesystem.allowed_operations` | `array` | Yes | Not declared | `{}` |
+| `policy.filesystem.allowed_roots` | `array` | No | `["/workspace"]` | `{}` |
+| `policy.filesystem.protected_paths` | `array` | No | `[]` | `{}` |
+| `policy.filesystem.max_file_bytes` | `integer / null` | No | `null` | `{}` |
+| `policy.filesystem.max_total_bytes` | `integer / null` | No | `null` | `{}` |
+| `policy.filesystem.allow_symlinks` | `boolean` | No | `false` | `{}` |
+| `policy.process` | `object` | No | Not declared | `{"additionalProperties":false}` |
+| `policy.process.enabled` | `boolean` | No | `false` | `{}` |
+| `policy.process.read_only` | `boolean` | No | `false` | `{}` |
+| `policy.process.allowed_executables` | `array` | No | `[]` | `{}` |
+| `policy.process.allow_shell` | `boolean` | No | `false` | `{}` |
+| `policy.process.allowed_env_names` | `array` | No | `[]` | `{}` |
+| `policy.process.max_processes` | `integer` | No | `1` | `{"exclusiveMinimum":0}` |
+| `policy.process.max_wall_time_seconds` | `number / null` | No | `null` | `{}` |
+| `policy.process.max_output_bytes` | `integer` | No | `1048576` | `{"exclusiveMinimum":0}` |
+| `policy.process.allow_background_jobs` | `boolean` | No | `false` | `{}` |
+| `policy.resources` | `object` | No | Not declared | `{"additionalProperties":false}` |
+| `policy.resources.cpu_percent` | `number` | No | `100` | `{"minimum":1}` |
+| `policy.resources.memory_mb` | `integer` | No | `1024` | `{"exclusiveMinimum":0}` |
+| `policy.resources.disk_mb` | `integer` | No | `4096` | `{"exclusiveMinimum":0}` |
+| `policy.resources.max_processes` | `integer` | No | `64` | `{"minimum":4}` |
+| `policy.resources.require_hard_limits` | `boolean` | No | `true` | `{}` |
+| `policy.network` | `object` | No | Not declared | `{"additionalProperties":false}` |
+| `policy.network.mode` | `string` | No | `"none"` | `{"enum":["none","allowlist","proxy","unrestricted"]}` |
+| `policy.network.proxy_url` | `string / null` | No | `null` | `{}` |
+| `policy.network.allowed_hosts` | `array` | No | `[]` | `{}` |
+| `policy.network.allowed_ports` | `array` | No | `[]` | `{}` |
+| `policy.network.allowed_schemes` | `array` | No | `["https"]` | `{}` |
+| `policy.network.allowed_methods` | `array` | No | `["GET","HEAD"]` | `{}` |
+| `policy.network.allowed_request_headers` | `array` | No | `["accept","content-type","user-agent"]` | `{}` |
+| `policy.network.allow_listen` | `boolean` | No | `false` | `{}` |
+| `policy.network.deny_private_networks` | `boolean` | No | `true` | `{}` |
+| `policy.network.max_redirects` | `integer` | No | `5` | `{"minimum":0,"maximum":20}` |
+| `policy.network.max_request_body_bytes` | `integer` | No | `1048576` | `{"minimum":0}` |
+| `policy.network.max_response_bytes` | `integer` | No | `10485760` | `{"exclusiveMinimum":0}` |
+| `policy.network.max_wall_time_seconds` | `number` | No | `30` | `{"exclusiveMinimum":0}` |
+
+### sage.execution.binding.local-workspace
+
+Run-owned sandbox leases with admitted execution policy.
+
+Version: `1.0.0`; scope: process; ownership: `owned`。
+
+Provides: `execution.binding:default` (API `2`)。
+
+| Parameter | Type | Required | Schema Default | Constraints |
+| --- | --- | --- | --- | --- |
+| `workspace` | `string` | Yes | Not declared | `{}` |
+| `private_workspace_root` | `string / null` | No | `null` | `{}` |
+| `policy` | `object` | No | Not declared | `{"additionalProperties":false}` |
+| `policy.filesystem` | `object` | No | Not declared | `{"additionalProperties":false}` |
+| `policy.filesystem.allowed_operations` | `array` | Yes | Not declared | `{}` |
+| `policy.filesystem.allowed_roots` | `array` | No | `["/workspace"]` | `{}` |
+| `policy.filesystem.protected_paths` | `array` | No | `[]` | `{}` |
+| `policy.filesystem.max_file_bytes` | `integer / null` | No | `null` | `{}` |
+| `policy.filesystem.max_total_bytes` | `integer / null` | No | `null` | `{}` |
+| `policy.filesystem.allow_symlinks` | `boolean` | No | `false` | `{}` |
+| `policy.process` | `object` | No | Not declared | `{"additionalProperties":false}` |
+| `policy.process.enabled` | `boolean` | No | `false` | `{}` |
+| `policy.process.read_only` | `boolean` | No | `false` | `{}` |
+| `policy.process.allowed_executables` | `array` | No | `[]` | `{}` |
+| `policy.process.allow_shell` | `boolean` | No | `false` | `{}` |
+| `policy.process.allowed_env_names` | `array` | No | `[]` | `{}` |
+| `policy.process.max_processes` | `integer` | No | `1` | `{"exclusiveMinimum":0}` |
+| `policy.process.max_wall_time_seconds` | `number / null` | No | `null` | `{}` |
+| `policy.process.max_output_bytes` | `integer` | No | `1048576` | `{"exclusiveMinimum":0}` |
+| `policy.process.allow_background_jobs` | `boolean` | No | `false` | `{}` |
+| `policy.resources` | `object` | No | Not declared | `{"additionalProperties":false}` |
+| `policy.resources.cpu_percent` | `number` | No | `100` | `{"minimum":1}` |
+| `policy.resources.memory_mb` | `integer` | No | `1024` | `{"exclusiveMinimum":0}` |
+| `policy.resources.disk_mb` | `integer` | No | `4096` | `{"exclusiveMinimum":0}` |
+| `policy.resources.max_processes` | `integer` | No | `64` | `{"minimum":4}` |
+| `policy.resources.require_hard_limits` | `boolean` | No | `true` | `{}` |
+| `policy.network` | `object` | No | Not declared | `{"additionalProperties":false}` |
+| `policy.network.mode` | `string` | No | `"none"` | `{"enum":["none","allowlist","proxy","unrestricted"]}` |
+| `policy.network.proxy_url` | `string / null` | No | `null` | `{}` |
+| `policy.network.allowed_hosts` | `array` | No | `[]` | `{}` |
+| `policy.network.allowed_ports` | `array` | No | `[]` | `{}` |
+| `policy.network.allowed_schemes` | `array` | No | `["https"]` | `{}` |
+| `policy.network.allowed_methods` | `array` | No | `["GET","HEAD"]` | `{}` |
+| `policy.network.allowed_request_headers` | `array` | No | `["accept","content-type","user-agent"]` | `{}` |
+| `policy.network.allow_listen` | `boolean` | No | `false` | `{}` |
+| `policy.network.deny_private_networks` | `boolean` | No | `true` | `{}` |
+| `policy.network.max_redirects` | `integer` | No | `5` | `{"minimum":0,"maximum":20}` |
+| `policy.network.max_request_body_bytes` | `integer` | No | `1048576` | `{"minimum":0}` |
+| `policy.network.max_response_bytes` | `integer` | No | `10485760` | `{"exclusiveMinimum":0}` |
+| `policy.network.max_wall_time_seconds` | `number` | No | `30` | `{"exclusiveMinimum":0}` |
+| `command_path` | `string / null` | No | `null` | `{}` |
+| `read_paths` | `array` | No | `[]` | `{}` |
+| `isolation_python` | `string / null` | No | `null` | `{}` |
+| `child_workspace_policy` | `string` | No | `"shared_parent"` | `{"enum":["shared_parent","private_child","read_only_parent"]}` |
+| `linux_cgroup_root` | `string / null` | No | `null` | `{}` |
+| `linux_quota_mount` | `string / null` | No | `null` | `{}` |
+| `linux_execution_uid` | `integer / null` | No | `null` | `{}` |
+| `linux_execution_gid` | `integer / null` | No | `null` | `{}` |
+
+### sage.execution.environment
+
+Authenticated identity and borrowed resources of the actual Run.
+
+Version: `2.0.0`; scope: run; ownership: `borrowed`。
+
+Provides: `execution.environment:default` (API `2`)。
+
+No fixed configuration fields; consult the public schema for additional parameters.
+
+### sage.execution.tool-runtime
+
+Official tools bound to the accepted Run sandbox and shared services.
+
+Version: `2.0.0`; scope: run; ownership: `owned`。
+
+Provides: `execution.tool-runtime:default` (API `2`)。
+
+Dependencies: `execution.environment` (API `>=2,<3`)、`execution.job-runtime` (API `>=2,<3`)、`artifact.store` (API `>=2,<3`)、`tool.selection-policy` (API `>=2,<3`)。
+
+No fixed configuration fields; consult the public schema for additional parameters.
 
 ### sage.flow.agent
 
 Runs a child Agent through the shared AgentLoopEngine.
 
-Offers: `flow.node:agent`; scopes: run.
+Version: `2.0.0`; scope: run; ownership: `owned`。
 
-| Parameter | Type / range | Default | Schema required | Purpose |
+Provides: `flow.node:agent` (API `2`)。
+
+| Parameter | Type | Required | Schema Default | Constraints |
 | --- | --- | --- | --- | --- |
-| `runtime` | Host object | No fixed value; requires input/injection | Yes | Host RuntimePort |
-| `descriptor` | Host object | No fixed value; requires input/injection | Yes | Host Agent descriptor |
-| `child_executor` | Host object | No fixed value; requires input/injection | Yes | Host child-Agent executor |
-| `workspace_policy` | string; enum=["private_child", "shared_parent", "read_only_parent"] | `"shared_parent"` | No | Parent/child workspace sharing policy |
+| `runtime` | `object` | Yes | Not declared | `{}` |
+| `descriptor` | `object` | Yes | Not declared | `{}` |
+| `child_executor` | `object` | Yes | Not declared | `{}` |
+| `workspace_policy` | `string` | No | Not declared | `{"enum":["private_child","shared_parent","read_only_parent"]}` |
 
 ### sage.job.ephemeral
 
 Process-local background Job runtime without restart durability.
 
-Offers: `execution.job-runtime:default`; scopes: process.
+Version: `2.0.0`; scope: process; ownership: `owned`。
 
-| Parameter | Type / range | Default | Schema required | Purpose |
+Provides: `execution.job-runtime:default` (API `2`)。
+
+| Parameter | Type | Required | Schema Default | Constraints |
 | --- | --- | --- | --- | --- |
-| `runners` | object | `{}` | No | Host background Job runner map |
-| `max_concurrent_jobs` | integer; minimum=1 | `32` | No | Maximum running Jobs |
-| `max_admitted_jobs` | integer; minimum=1 | `1024` | No | Maximum admitted Jobs |
-| `max_job_output_bytes` | integer; minimum=1 | `8388608` | No | Output bytes per Job |
-| `max_job_output_chunks` | integer; minimum=1 | `8192` | No | Output chunks per Job |
-| `max_buffered_output_bytes` | integer; minimum=1 | `268435456` | No | Total buffered Job bytes |
-| `max_buffered_output_chunks` | integer; minimum=1 | `65536` | No | Total buffered Job chunks |
-| `terminal_ttl_seconds` | integer; minimum=1 | `86400` | No | Terminal retention seconds, not execution timeout |
-| `max_retained_terminal_jobs` | integer; minimum=0 | `4096` | No | Maximum retained terminal Jobs |
-| `max_retained_output_bytes` | integer; minimum=0 | `268435456` | No | Maximum retained terminal output bytes |
-| `output_reconnect_window_seconds` | integer; minimum=0 | `300` | No | Output reconnection window in seconds |
+| `runners` | `object` | No | Not declared | `{}` |
+| `max_concurrent_jobs` | `integer` | No | `32` | `{"minimum":1}` |
+| `max_admitted_jobs` | `integer` | No | `1024` | `{"minimum":1}` |
+| `max_job_output_bytes` | `integer` | No | `8388608` | `{"minimum":1}` |
+| `max_job_output_chunks` | `integer` | No | `8192` | `{"minimum":1}` |
+| `max_buffered_output_bytes` | `integer` | No | `268435456` | `{"minimum":1}` |
+| `max_buffered_output_chunks` | `integer` | No | `65536` | `{"minimum":1}` |
+| `terminal_ttl_seconds` | `integer` | No | `86400` | `{"minimum":1}` |
+| `max_retained_terminal_jobs` | `integer` | No | `4096` | `{"minimum":0}` |
+| `max_retained_output_bytes` | `integer` | No | `268435456` | `{"minimum":0}` |
+| `output_reconnect_window_seconds` | `integer` | No | `300` | `{"minimum":0}` |
 
 ### sage.logging.filesystem
 
 Writes rotating structured operational logs to disk.
 
-Offers: `observability.log-sink:default`; scopes: process.
+Version: `2.0.0`; scope: process; ownership: `owned`。
 
-| Parameter | Type / range | Default | Schema required | Purpose |
+Provides: `observability.log-sink:default` (API `2`)。
+
+| Parameter | Type | Required | Schema Default | Constraints |
 | --- | --- | --- | --- | --- |
-| `root` | string; minLength=1 | No fixed value; requires input/injection | Yes | Storage root; use the component-specific directory |
-| `filename` | string; minLength=1 | `"sage.jsonl"` | No | Log filename |
-| `max_bytes` | integer; minimum=1024 | `10485760` | No | Log rotation size in bytes |
-| `backup_count` | integer; minimum=1 | `5` | No | Rotated log backup count |
-| `min_level` | string; enum=["debug", "info", "warning", "error", "critical"] | `"info"` | No | Minimum log level |
+| `root` | `string` | Yes | Not declared | `{"minLength":1}` |
+| `filename` | `string` | No | `"sage.jsonl"` | `{"minLength":1}` |
+| `max_bytes` | `integer` | No | `10485760` | `{"minimum":1024}` |
+| `backup_count` | `integer` | No | `5` | `{"minimum":1}` |
+| `min_level` | `string` | No | `"info"` | `{"enum":["debug","info","warning","error","critical"]}` |
 
 ### sage.logging.noop
 
 Discards structured operational logs.
 
-Offers: `observability.log-sink:default`; scopes: process.
+Version: `2.0.0`; scope: process; ownership: `owned`。
 
-No configurable parameters; use `config: {}`.
+Provides: `observability.log-sink:default` (API `2`)。
+
+No fixed configuration fields; consult the public schema for additional parameters.
 
 ### sage.logging.stdout
 
 Writes one JSONL or console line per record to stdout or stderr.
 
-Offers: `observability.log-sink:default`; scopes: process.
+Version: `2.0.0`; scope: process; ownership: `owned`。
 
-| Parameter | Type / range | Default | Schema required | Purpose |
+Provides: `observability.log-sink:default` (API `2`)。
+
+| Parameter | Type | Required | Schema Default | Constraints |
 | --- | --- | --- | --- | --- |
-| `stream` | string; enum=["stdout", "stderr"] | `"stdout"` | No | Log output stream |
-| `min_level` | string; enum=["debug", "info", "warning", "error", "critical"] | `"info"` | No | Minimum log level |
-| `format` | string; enum=["json", "text"] | `"json"` | No | Log format |
+| `stream` | `string` | No | `"stdout"` | `{"enum":["stdout","stderr"]}` |
+| `min_level` | `string` | No | `"info"` | `{"enum":["debug","info","warning","error","critical"]}` |
+| `format` | `string` | No | `"json"` | `{"enum":["json","text"]}` |
 
 ### sage.memory.filesystem-bm25
 
 Durable scoped Memory records with incremental SQLite FTS5 BM25 recall.
 
-Offers: `memory.provider:default`; scopes: agent, process, tenant.
+Version: `2.1.0`; scope: agent, process, tenant; ownership: `owned`。
 
-| Parameter | Type / range | Default | Schema required | Purpose |
+Provides: `memory.provider:default` (API `2`)。
+
+| Parameter | Type | Required | Schema Default | Constraints |
 | --- | --- | --- | --- | --- |
-| `root` | string; minLength=1 | No fixed value; requires input/injection | Yes | Storage root; use the component-specific directory |
+| `root` | `string` | Yes | Not declared | `{"minLength":1}` |
 
 ### sage.memory.noop
 
 Disables long-term Memory without changing Agent logic.
 
-Offers: `memory.provider:default`; scopes: agent, process, tenant.
+Version: `2.0.0`; scope: agent, process, tenant; ownership: `owned`。
 
-No configurable parameters; use `config: {}`.
+Provides: `memory.provider:default` (API `2`)。
+
+No fixed configuration fields; consult the public schema for additional parameters.
 
 ### sage.memory.recall-query.direct
 
 Uses the current user input as the search_memory query without an additional model request.
 
-Offers: `memory.recall-query:default`; scopes: agent, process, run.
+Version: `2.0.0`; scope: agent, process, run; ownership: `owned`。
 
-No configurable parameters; use `config: {}`.
+Provides: `memory.recall-query:default` (API `2`)。
+
+No fixed configuration fields; consult the public schema for additional parameters.
 
 ### sage.memory.recall-query.llm
 
 Uses a fast model to generate compact keywords before calling search_memory.
 
-Offers: `memory.recall-query:default`; scopes: agent, run.
+Version: `2.0.0`; scope: agent, run; ownership: `owned`。
 
-| Parameter | Type / range | Default | Schema required | Purpose |
+Provides: `memory.recall-query:default` (API `2`)。
+
+| Parameter | Type | Required | Schema Default | Constraints |
 | --- | --- | --- | --- | --- |
-| `model` | Host object | No fixed value; requires input/injection | Yes | Model dependency, normally host ModelProvider; tokenizer model name for legacy tiktoken config |
-| `language` | string | `"en"` | No | Workspace/query/Skill prompt language |
-| `timeout_seconds` | number; exclusiveMinimum=0 | `60.0` | No | Component-operation timeout in seconds, not total Run budget |
+| `model` | `object` | Yes | Not declared | `{}` |
+| `language` | `string` | No | Not declared | `{}` |
+| `timeout_seconds` | `number` | No | `60.0` | `{"exclusiveMinimum":0}` |
 
 ### sage.model.anthropic-messages
 
 Uses Claude system, content-block, tool-use, and SSE semantics.
 
-Offers: `model.provider:anthropic-messages`; scopes: agent, run.
+Version: `3.0.0`; scope: agent, run; ownership: `owned`。
 
-| Parameter | Type / range | Default | Schema required | Purpose |
+Provides: `model.provider:anthropic-messages` (API `2`)。
+
+| Parameter | Type | Required | Schema Default | Constraints |
 | --- | --- | --- | --- | --- |
-| `route` | object | No fixed value; requires input/injection | Yes | Model routes from App catalog |
-| `credential` | Host object | None when omitted; normally injected by host | No | Host resolved credential |
-| `client` | Host object | None when omitted; protocol default client | No | Host model protocol client |
-| `provider_instance_id` | string | None when omitted; generated/selected by implementation | No | Host provider instance identity |
+| `route` | `object` | Yes | Not declared | `{}` |
+| `credential` | `object` | No | Not declared | `{}` |
+| `client` | `object` | No | Not declared | `{}` |
+| `provider_instance_id` | `string` | No | Not declared | `{}` |
+
+### sage.model.concurrency-budget
+
+Standard execution.model-budget implementation with declared dependencies and lifecycle.
+
+Version: `2.0.0`; scope: process; ownership: `owned`。
+
+Provides: `execution.model-budget:default` (API `2`)。
+
+| Parameter | Type | Required | Schema Default | Constraints |
+| --- | --- | --- | --- | --- |
+| `limit` | `integer` | No | `8` | `{"exclusiveMinimum":0}` |
+| `max_waiting` | `integer` | No | `128` | `{"minimum":0}` |
+| `wait_timeout_seconds` | `number` | No | `60` | `{"exclusiveMinimum":0}` |
 
 ### sage.model.gemini-generate-content
 
 Uses native Gemini Parts, function calls, thought signatures, and SSE.
 
-Offers: `model.provider:gemini-generate-content`; scopes: agent, run.
+Version: `1.0.0`; scope: agent, run; ownership: `owned`。
 
-| Parameter | Type / range | Default | Schema required | Purpose |
+Provides: `model.provider:gemini-generate-content` (API `2`)。
+
+| Parameter | Type | Required | Schema Default | Constraints |
 | --- | --- | --- | --- | --- |
-| `route` | object | No fixed value; requires input/injection | Yes | Model routes from App catalog |
-| `credential` | Host object | None when omitted; normally injected by host | No | Host resolved credential |
-| `client` | Host object | None when omitted; protocol default client | No | Host model protocol client |
-| `provider_instance_id` | string | None when omitted; generated/selected by implementation | No | Host provider instance identity |
+| `route` | `object` | Yes | Not declared | `{}` |
+| `credential` | `object` | No | Not declared | `{}` |
+| `client` | `object` | No | Not declared | `{}` |
+| `provider_instance_id` | `string` | No | Not declared | `{}` |
 
 ### sage.model.openai-chat-completions
 
 Streams chat messages and function calls through /chat/completions.
 
-Offers: `model.provider:openai-chat-completions`; scopes: agent, run.
+Version: `3.0.0`; scope: agent, run; ownership: `owned`。
 
-| Parameter | Type / range | Default | Schema required | Purpose |
+Provides: `model.provider:openai-chat-completions` (API `2`)。
+
+| Parameter | Type | Required | Schema Default | Constraints |
 | --- | --- | --- | --- | --- |
-| `route` | object | No fixed value; requires input/injection | Yes | Model routes from App catalog |
-| `credential` | Host object | None when omitted; normally injected by host | No | Host resolved credential |
-| `client` | Host object | None when omitted; protocol default client | No | Host model protocol client |
-| `provider_instance_id` | string | None when omitted; generated/selected by implementation | No | Host provider instance identity |
+| `route` | `object` | Yes | Not declared | `{}` |
+| `credential` | `object` | No | Not declared | `{}` |
+| `client` | `object` | No | Not declared | `{}` |
+| `provider_instance_id` | `string` | No | Not declared | `{}` |
 
 ### sage.model.openai-responses
 
 Uses typed input/output items and Responses streaming events.
 
-Offers: `model.provider:openai-responses`; scopes: agent, run.
+Version: `3.0.0`; scope: agent, run; ownership: `owned`。
 
-| Parameter | Type / range | Default | Schema required | Purpose |
+Provides: `model.provider:openai-responses` (API `2`)。
+
+| Parameter | Type | Required | Schema Default | Constraints |
 | --- | --- | --- | --- | --- |
-| `route` | object | No fixed value; requires input/injection | Yes | Model routes from App catalog |
-| `credential` | Host object | None when omitted; normally injected by host | No | Host resolved credential |
-| `client` | Host object | None when omitted; protocol default client | No | Host model protocol client |
-| `provider_instance_id` | string | None when omitted; generated/selected by implementation | No | Host provider instance identity |
+| `route` | `object` | Yes | Not declared | `{}` |
+| `credential` | `object` | No | Not declared | `{}` |
+| `client` | `object` | No | Not declared | `{}` |
+| `provider_instance_id` | `string` | No | Not declared | `{}` |
 
 ### sage.observability.filesystem
 
 Writes model diagnostics under a filesystem root.
 
-Offers: `observability.diagnostic-sink:default`; scopes: process.
+Version: `2.0.0`; scope: process; ownership: `owned`。
 
-| Parameter | Type / range | Default | Schema required | Purpose |
+Provides: `observability.diagnostic-sink:default` (API `2`)。
+
+| Parameter | Type | Required | Schema Default | Constraints |
 | --- | --- | --- | --- | --- |
-| `root` | string; minLength=1 | No fixed value; requires input/injection | Yes | Storage root; use the component-specific directory |
-| `legacy_root` | string / null; minLength=1 | None when omitted; no legacy directory | No | Legacy diagnostic read path |
+| `root` | `string` | Yes | Not declared | `{"minLength":1}` |
+| `legacy_root` | `['string', 'null']` | No | Not declared | `{"minLength":1}` |
 
 ### sage.observability.noop
 
 Discards model diagnostics.
 
-Offers: `observability.diagnostic-sink:default`; scopes: process.
+Version: `2.0.0`; scope: process; ownership: `owned`。
 
-No configurable parameters; use `config: {}`.
+Provides: `observability.diagnostic-sink:default` (API `2`)。
+
+No fixed configuration fields; consult the public schema for additional parameters.
 
 ### sage.package-registry.ephemeral
 
 Process-local AgentPackage inventory without restart durability.
 
-Offers: `package.registry:default`; scopes: process.
+Version: `2.0.0`; scope: process; ownership: `owned`。
 
-Use config: {}. resolver is an injected dependency, not YAML. The shared entrypoint binds it to the current App model catalog so new Packages validate against the same models.
+Provides: `package.registry:default` (API `2`)。
+
+| Parameter | Type | Required | Schema Default | Constraints |
+| --- | --- | --- | --- | --- |
+| `resolver` | `object` | No | Not declared | `{}` |
 
 ### sage.protocol.a2a
 
 Projects Sage events into A2A frames.
 
-Offers: `interface.protocol-adapter:a2a`; scopes: process, run.
+Version: `2.0.0`; scope: process, run; ownership: `owned`。
 
-No configurable parameters; use `config: {}`.
+Provides: `interface.protocol-adapter:a2a` (API `2`)。
+
+No fixed configuration fields; consult the public schema for additional parameters.
 
 ### sage.protocol.acp
 
 Projects Sage events into ACP frames.
 
-Offers: `interface.protocol-adapter:acp`; scopes: process, run.
+Version: `2.0.0`; scope: process, run; ownership: `owned`。
 
-No configurable parameters; use `config: {}`.
+Provides: `interface.protocol-adapter:acp` (API `2`)。
+
+No fixed configuration fields; consult the public schema for additional parameters.
 
 ### sage.protocol.ag-ui
 
 Projects Sage events into AG-UI frames.
 
-Offers: `interface.protocol-adapter:ag-ui`; scopes: process, run.
+Version: `2.0.0`; scope: process, run; ownership: `owned`。
 
-| Parameter | Type / range | Default | Schema required | Purpose |
+Provides: `interface.protocol-adapter:ag-ui` (API `2`)。
+
+| Parameter | Type | Required | Schema Default | Constraints |
 | --- | --- | --- | --- | --- |
-| `enable_sage_extensions` | boolean | `true` | No | Expose Sage extension events in AG-UI |
+| `enable_sage_extensions` | `boolean` | No | `true` | `{}` |
 
 ### sage.protocol.mcp
 
 Projects Sage events into MCP progress and elicitation frames.
 
-Offers: `interface.protocol-adapter:mcp`; scopes: process, run.
+Version: `2.0.0`; scope: process, run; ownership: `owned`。
 
-No configurable parameters; use `config: {}`.
+Provides: `interface.protocol-adapter:mcp` (API `2`)。
+
+No fixed configuration fields; consult the public schema for additional parameters.
 
 ### sage.protocol.native
 
 Exposes the native Sage event stream without protocol translation.
 
-Offers: `interface.protocol-adapter:native`; scopes: process, run.
+Version: `2.0.0`; scope: process, run; ownership: `owned`。
 
-No configurable parameters; use `config: {}`.
+Provides: `interface.protocol-adapter:native` (API `2`)。
+
+No fixed configuration fields; consult the public schema for additional parameters.
 
 ### sage.sandbox.cube-volume
 
 Remote VM execution with a persistent Cube Volume workspace.
 
-Offers: `execution.sandbox:default`; scopes: process.
+Version: `3.0.0`; scope: process; ownership: `owned`。
 
-| Parameter | Type / range | Default | Schema required | Purpose |
+Provides: `execution.sandbox:default` (API `3`)。
+
+| Parameter | Type | Required | Schema Default | Constraints |
 | --- | --- | --- | --- | --- |
-| `verification_key` | Host object | No fixed value; requires input/injection | Yes | Host object/private verification key; keep out of shared Packages |
-| `api_url` | string; minLength=1 | `""`; still requires input/injection | Yes | Cube service address |
-| `template_id` | string; minLength=1 | `""`; still requires input/injection | Yes | Valid nonempty Cube template ID |
-| `proxy_node_ip` | string; minLength=1 | `""`; still requires input/injection | Yes | Nonempty Cube proxy node address |
-| `api_key` | string | None when omitted | No | Private connection credential; never commit real values |
-| `volume_driver` | string | None when omitted | No | Cube volume driver options |
-
-Empty constructor placeholders for address/template fields fail nonempty schema constraints. Hosts must supply actual values.
+| `verification_key` | `object` | Yes | Not declared | `{}` |
+| `api_url` | `string` | Yes | `""` | `{"minLength":1}` |
+| `template_id` | `string` | Yes | `""` | `{"minLength":1}` |
+| `proxy_node_ip` | `string` | Yes | `""` | `{"minLength":1}` |
+| `api_key` | `string` | No | Not declared | `{}` |
+| `volume_driver` | `string` | No | Not declared | `{}` |
 
 ### sage.sandbox.ephemeral
 
 In-process sandbox for tests and ephemeral runs.
 
-Offers: `execution.sandbox:default`; scopes: process.
+Version: `3.0.0`; scope: process; ownership: `owned`。
 
-| Parameter | Type / range | Default | Schema required | Purpose |
+Provides: `execution.sandbox:default` (API `3`)。
+
+| Parameter | Type | Required | Schema Default | Constraints |
 | --- | --- | --- | --- | --- |
-| `verification_key` | Host object | No fixed value; requires input/injection | Yes | Host object/private verification key; keep out of shared Packages |
-| `terminal_ttl_seconds` | integer; minimum=1 | `86400` | No | Terminal retention seconds, not execution timeout |
-| `max_retained_terminal_items` | integer; minimum=0 | `1024` | No | Maximum retained terminal scheduler/sandbox entries |
-| `process_handlers` | object | None when omitted; implementation uses an empty map | No | Host process-handler map for memory sandbox |
-| `network_handlers` | object | None when omitted; implementation uses an empty map | No | Host network-handler map for memory sandbox |
+| `verification_key` | `object` | Yes | Not declared | `{}` |
+| `terminal_ttl_seconds` | `integer` | No | `86400` | `{"minimum":1}` |
+| `max_retained_terminal_items` | `integer` | No | `1024` | `{"minimum":0}` |
+| `process_handlers` | `object` | No | Not declared | `{}` |
+| `network_handlers` | `object` | No | Not declared | `{}` |
 
 ### sage.sandbox.local-workspace
 
 Isolates local execution with Linux cgroups/quotas or macOS Seatbelt.
 
-Offers: `execution.sandbox:default`; scopes: process.
+Version: `3.0.0`; scope: process; ownership: `owned`。
 
-| Parameter | Type / range | Default | Schema required | Purpose |
+Provides: `execution.sandbox:default` (API `3`)。
+
+| Parameter | Type | Required | Schema Default | Constraints |
 | --- | --- | --- | --- | --- |
-| `verification_key` | Host object | No fixed value; requires input/injection | Yes | Host object/private verification key; keep out of shared Packages |
-| `terminal_ttl_seconds` | integer; minimum=1 | `86400` | No | Terminal retention seconds, not execution timeout |
-| `max_retained_terminal_items` | integer; minimum=0 | `1024` | No | Maximum retained terminal scheduler/sandbox entries |
-| `network` | object | Not consumed by current factory | No | Network config not passed by local plugin factory; execution bindings grant network policy |
-| `command_path` | string; minLength=1 | os.environ[PATH] or os.defpath when omitted | No | Sandbox command-search PATH |
-| `read_paths` | array | Empty tuple when omitted | No | Host-authorized additional read paths |
-| `linux_cgroup_root` | string | None when omitted | No | Linux cgroup resource root |
-| `linux_quota_mount` | string | None when omitted | No | Linux quota mount |
-| `linux_execution_uid` | integer; minimum=1 | None when omitted | No | Linux execution UID |
-| `linux_execution_gid` | integer; minimum=1 | None when omitted | No | Linux execution GID |
-
-The network schema is shown below, but the current factory does not consume it as authorization. Configure network policy through the host execution binding.
-
-| Parameter | Type / range | Default | Schema required | Purpose |
-| --- | --- | --- | --- | --- |
-| `mode` | string; enum=["none", "unrestricted", "allowlist", "proxy"] | No fixed value | No | Network mode |
-| `deny_private_networks` | boolean | No fixed value | No | Deny private network targets |
-| `allowed_hosts` | array | No fixed value | No | Allowed hosts |
-| `allowed_ports` | array | No fixed value | No | Allowed ports |
-| `allowed_schemes` | array | No fixed value | No | Allowed URL schemes |
-| `proxy_url` | string | No fixed value | No | Network proxy URL |
+| `verification_key` | `object` | Yes | Not declared | `{}` |
+| `terminal_ttl_seconds` | `integer` | No | `86400` | `{"minimum":1}` |
+| `max_retained_terminal_items` | `integer` | No | `1024` | `{"minimum":0}` |
+| `network` | `object` | No | Not declared | `{"additionalProperties":true}` |
+| `network.mode` | `string` | No | Not declared | `{"enum":["none","unrestricted","allowlist","proxy"]}` |
+| `network.deny_private_networks` | `boolean` | No | Not declared | `{}` |
+| `network.allowed_hosts` | `array` | No | Not declared | `{}` |
+| `network.allowed_ports` | `array` | No | Not declared | `{}` |
+| `network.allowed_schemes` | `array` | No | Not declared | `{}` |
+| `network.proxy_url` | `string` | No | Not declared | `{}` |
+| `command_path` | `string` | No | Not declared | `{"minLength":1}` |
+| `read_paths` | `array` | No | Not declared | `{}` |
+| `linux_cgroup_root` | `string` | No | Not declared | `{}` |
+| `linux_quota_mount` | `string` | No | Not declared | `{}` |
+| `linux_execution_uid` | `integer` | No | Not declared | `{"minimum":1}` |
+| `linux_execution_gid` | `integer` | No | Not declared | `{"minimum":1}` |
 
 ### sage.scheduler.ephemeral
 
 Process-local scheduler without restart durability.
 
-Offers: `execution.scheduler:default`; scopes: process.
+Version: `2.0.0`; scope: process; ownership: `owned`。
 
-| Parameter | Type / range | Default | Schema required | Purpose |
+Provides: `execution.scheduler:default` (API `2`)。
+
+| Parameter | Type | Required | Schema Default | Constraints |
 | --- | --- | --- | --- | --- |
-| `max_pending_items` | integer; minimum=1 | `1024` | No | Pending scheduler queue limit |
-| `max_retained_terminal_items` | integer; minimum=0 | `4096` | No | Maximum retained terminal scheduler/sandbox entries |
-| `max_concurrent_runs` | integer; minimum=1 | `8` | No | Maximum concurrent App Runs |
-| `max_concurrent_runs_per_tenant` | integer; minimum=1 | `2` | No | Maximum concurrent Runs per tenant |
-| `lease_seconds` | number; exclusiveMinimum=0 | `172800` (48 hours) | No | Execution lease seconds; dispatcher renews periodically |
+| `preserve_runs_on_shutdown` | `boolean` | No | `true` | `{}` |
+| `max_pending_items` | `integer` | No | `1024` | `{"minimum":1}` |
+| `max_retained_terminal_items` | `integer` | No | `4096` | `{"minimum":0}` |
+| `max_concurrent_runs` | `integer` | No | Not declared | `{"minimum":1}` |
+| `max_concurrent_runs_per_tenant` | `integer` | No | Not declared | `{"minimum":1}` |
+| `lease_seconds` | `number` | No | `172800` | `{"exclusiveMinimum":0}` |
 
 ### sage.scheduler.filesystem
 
 Persists scheduler items on the local filesystem.
 
-Offers: `execution.scheduler:default`; scopes: process.
+Version: `2.0.0`; scope: process; ownership: `owned`。
 
-| Parameter | Type / range | Default | Schema required | Purpose |
+Provides: `execution.scheduler:default` (API `2`)。
+
+| Parameter | Type | Required | Schema Default | Constraints |
 | --- | --- | --- | --- | --- |
-| `max_pending_items` | integer; minimum=1 | `1024` | No | Pending scheduler queue limit |
-| `max_retained_terminal_items` | integer; minimum=0 | `4096` | No | Maximum retained terminal scheduler/sandbox entries |
-| `max_concurrent_runs` | integer; minimum=1 | `8` | No | Maximum concurrent App Runs |
-| `max_concurrent_runs_per_tenant` | integer; minimum=1 | `2` | No | Maximum concurrent Runs per tenant |
-| `lease_seconds` | number; exclusiveMinimum=0 | `172800` (48 hours) | No | Execution lease seconds; dispatcher renews periodically |
-| `root` | string; minLength=1 | No fixed value; requires input/injection | Yes | Storage root; use the component-specific directory |
+| `preserve_runs_on_shutdown` | `boolean` | No | `true` | `{}` |
+| `max_pending_items` | `integer` | No | Not declared | `{"minimum":1}` |
+| `max_retained_terminal_items` | `integer` | No | Not declared | `{"minimum":0}` |
+| `max_concurrent_runs` | `integer` | No | Not declared | `{"minimum":1}` |
+| `max_concurrent_runs_per_tenant` | `integer` | No | Not declared | `{"minimum":1}` |
+| `lease_seconds` | `number` | No | `172800` | `{"exclusiveMinimum":0}` |
+| `root` | `string` | Yes | Not declared | `{"minLength":1}` |
 
 ### sage.session-memory.noop
 
 Disables searchable Session history without changing Agent logic.
 
-Offers: `session-memory.provider:default`; scopes: agent, process.
+Version: `2.0.0`; scope: agent, process; ownership: `owned`。
 
-No configurable parameters; use `config: {}`.
+Provides: `session-memory.provider:default` (API `2`)。
+
+No fixed configuration fields; consult the public schema for additional parameters.
 
 ### sage.session-memory.sqlite-bm25
 
 Durable per-session BM25 index over canonical Session history.
 
-Offers: `session-memory.provider:default`; scopes: agent, process.
+Version: `2.0.0`; scope: agent, process; ownership: `owned`。
 
-| Parameter | Type / range | Default | Schema required | Purpose |
+Provides: `session-memory.provider:default` (API `2`)。
+
+| Parameter | Type | Required | Schema Default | Constraints |
 | --- | --- | --- | --- | --- |
-| `root` | string; minLength=1 | No fixed value; requires input/injection | Yes | Storage root; use the component-specific directory |
+| `root` | `string` | Yes | Not declared | `{"minLength":1}` |
 
 ### sage.session.ephemeral
 
 Full lifecycle semantics without restart durability.
 
-Offers: `session.store:default`; scopes: process.
+Version: `2.0.0`; scope: process; ownership: `owned`。
 
-No configurable parameters; use `config: {}`.
+Provides: `session.store:default` (API `2`)。
+
+No fixed configuration fields; consult the public schema for additional parameters.
 
 ### sage.session.filesystem
 
 Compact authoritative checksummed state per Session.
 
-Offers: `session.store:default`; scopes: process.
+Version: `2.1.0`; scope: process; ownership: `owned`。
 
-| Parameter | Type / range | Default | Schema required | Purpose |
+Provides: `session.store:default` (API `2`)。
+
+| Parameter | Type | Required | Schema Default | Constraints |
 | --- | --- | --- | --- | --- |
-| `root` | string; minLength=1 | No fixed value; requires input/injection | Yes | Storage root; use the component-specific directory |
+| `root` | `string` | Yes | Not declared | `{"minLength":1}` |
 
 ### sage.session.mysql
 
 Durable per-Session MySQL store with appended Run events. No global Session index.
 
-Offers: `session.store:default`; scopes: process.
+Version: `2.0.0`; scope: process; ownership: `owned`。
 
-| Parameter | Type / range | Default | Schema required | Purpose |
+Provides: `session.store:default` (API `2`)。
+
+| Parameter | Type | Required | Schema Default | Constraints |
 | --- | --- | --- | --- | --- |
-| `dsn` | string; minLength=1 | No fixed value; requires input/injection | Yes | Database connection string |
-| `table_prefix` | string | `"sagent"` | No | Database table prefix |
+| `dsn` | `string` | Yes | Not declared | `{"minLength":1}` |
+| `table_prefix` | `string` | No | Not declared | `{}` |
 
 ### sage.session.postgres
 
 Durable per-Session PostgreSQL store with appended Run events. Single-process writers; no global Session index.
 
-Offers: `session.store:default`; scopes: process.
+Version: `2.2.0`; scope: process; ownership: `owned`。
 
-| Parameter | Type / range | Default | Schema required | Purpose |
+Provides: `session.store:default` (API `2`)。
+
+| Parameter | Type | Required | Schema Default | Constraints |
 | --- | --- | --- | --- | --- |
-| `dsn` | string; minLength=1 | No fixed value; requires input/injection | Yes | Database connection string |
-| `schema_name` | string; minLength=1 | `"sage_v2"` | No | Postgres schema name |
-| `table_prefix` | string; minLength=1 | `"sagent"` | No | Database table prefix |
+| `dsn` | `string` | Yes | Not declared | `{"minLength":1}` |
+| `schema_name` | `string` | No | Not declared | `{"minLength":1}` |
+| `table_prefix` | `string` | No | Not declared | `{"minLength":1}` |
 
 ### sage.skill.filesystem
 
 Lazy, bounded, symlink-safe Skill catalog and source.
 
-Offers: `skill.catalog:filesystem`、`skill.source:filesystem`; scopes: agent, process.
+Version: `2.0.0`; scope: agent, process; ownership: `owned`。
 
-| Parameter | Type / range | Default | Schema required | Purpose |
+Provides: `skill.catalog:filesystem` (API `2`)、`skill.source:filesystem` (API `2`)。
+
+| Parameter | Type | Required | Schema Default | Constraints |
 | --- | --- | --- | --- | --- |
-| `roots` | array; minItems=1 | No fixed value; requires input/injection | Yes | Skill search root directories |
-| `max_files` | integer; minimum=1 | `2000` | No | Maximum discovered/read Skill files |
-| `max_total_bytes` | integer; minimum=1 | `67108864` | No | Total Skill file bytes |
+| `roots` | `array` | Yes | Not declared | `{"minItems":1}` |
+| `max_files` | `integer` | No | Not declared | `{"minimum":1}` |
+| `max_total_bytes` | `integer` | No | Not declared | `{"minimum":1}` |
 
 ### sage.skill.loading.lazy
 
-Loads Skill material only when it is asked for, within a token budget.
+Loads Skill material only when it is asked for, within a character storage limit.
 
-Offers: `skill.loading:default`; scopes: agent, run.
+Version: `2.0.0`; scope: agent, run; ownership: `owned`。
 
-| Parameter | Type / range | Default | Schema required | Purpose |
+Provides: `skill.loading:default` (API `2`)。
+
+| Parameter | Type | Required | Schema Default | Constraints |
 | --- | --- | --- | --- | --- |
-| `max_active_characters` | integer; minimum=1 | `24000` | No | Exact active Skill content character limit |
+| `max_active_characters` | `integer` | No | `24000` | `{"minimum":1}` |
 
 ### sage.tool-selection.direct
 
 Sends every policy-allowed Tool to the model. Best for small catalogs.
 
-Offers: `tool.selection-policy:default`; scopes: agent, run.
+Version: `2.0.0`; scope: agent, run; ownership: `owned`。
 
-No configurable parameters; use `config: {}`.
+Provides: `tool.selection-policy:default` (API `2`)。
+
+No fixed configuration fields; consult the public schema for additional parameters.
 
 ### sage.tool-selection.lexical
 
 Ranks Tool names, descriptions, and parameters locally like a search engine.
 
-Offers: `tool.selection-policy:default`; scopes: agent, run.
+Version: `2.0.0`; scope: agent, run; ownership: `owned`。
 
-| Parameter | Type / range | Default | Schema required | Purpose |
+Provides: `tool.selection-policy:default` (API `2`)。
+
+| Parameter | Type | Required | Schema Default | Constraints |
 | --- | --- | --- | --- | --- |
-| `max_visible_tools` | integer; minimum=1, maximum=10000 | `24` | No | Maximum full tool schemas visible to the model |
-| `model_timeout_seconds` | number; exclusiveMinimum=0, maximum=120 | `60.0` | No | Auxiliary tool-selection timeout in seconds |
+| `max_visible_tools` | `integer` | No | `24` | `{"minimum":1,"maximum":10000}` |
+| `model_timeout_seconds` | `number` | No | `60.0` | `{"maximum":120,"exclusiveMinimum":0}` |
 
 ### sage.tool-selection.llm
 
 Uses a fast model and recent context to select relevant Tools.
 
-Offers: `tool.selection-policy:default`; scopes: agent, run.
+Version: `2.0.0`; scope: agent, run; ownership: `owned`。
 
-| Parameter | Type / range | Default | Schema required | Purpose |
+Provides: `tool.selection-policy:default` (API `2`)。
+
+| Parameter | Type | Required | Schema Default | Constraints |
 | --- | --- | --- | --- | --- |
-| `max_visible_tools` | integer; minimum=1, maximum=10000 | `24` | No | Maximum full tool schemas visible to the model |
-| `model_timeout_seconds` | number; exclusiveMinimum=0, maximum=120 | `60.0` | No | Auxiliary tool-selection timeout in seconds |
+| `max_visible_tools` | `integer` | No | `24` | `{"minimum":1,"maximum":10000}` |
+| `model_timeout_seconds` | `number` | No | `60.0` | `{"maximum":120,"exclusiveMinimum":0}` |
 
 ### sage.tool-selection.recent
 
 Keeps recently called Tools first, then fills the remaining count deterministically.
 
-Offers: `tool.selection-policy:default`; scopes: agent, run.
+Version: `2.0.0`; scope: agent, run; ownership: `owned`。
 
-| Parameter | Type / range | Default | Schema required | Purpose |
+Provides: `tool.selection-policy:default` (API `2`)。
+
+| Parameter | Type | Required | Schema Default | Constraints |
 | --- | --- | --- | --- | --- |
-| `max_visible_tools` | integer; minimum=1, maximum=10000 | `24` | No | Maximum full tool schemas visible to the model |
-| `model_timeout_seconds` | number; exclusiveMinimum=0, maximum=120 | `60.0` | No | Auxiliary tool-selection timeout in seconds |
+| `max_visible_tools` | `integer` | No | `24` | `{"minimum":1,"maximum":10000}` |
+| `model_timeout_seconds` | `number` | No | `60.0` | `{"maximum":120,"exclusiveMinimum":0}` |
 
 ### sage.tool.ephemeral
 
 In-memory Tool catalog and executor without restart durability.
 
-Offers: `tool.catalog:ephemeral`、`tool.executor:ephemeral`; scopes: agent, process, run.
+Version: `2.0.0`; scope: agent, process, run; ownership: `owned`。
 
-| Parameter | Type / range | Default | Schema required | Purpose |
+Provides: `tool.catalog:ephemeral` (API `2`)、`tool.executor:ephemeral` (API `2`)。
+
+| Parameter | Type | Required | Schema Default | Constraints |
 | --- | --- | --- | --- | --- |
-| `tools` | Host object | `[]` | No | Host tool definitions |
-| `handlers` | Host object | `{}` | No | Host tool-handler map |
+| `tools` | `object` | No | Not declared | `{}` |
+| `handlers` | `object` | No | Not declared | `{}` |
 
 ### sage.tool.mcp
 
 Bridges configured MCP servers into the Sage Tool catalog and executor.
 
-Offers: `tool.catalog:mcp`、`tool.executor:mcp`; scopes: agent, process.
+Version: `2.0.0`; scope: agent, process, run; ownership: `owned`。
 
-| Parameter | Type / range | Default | Schema required | Purpose |
+Provides: `tool.catalog:mcp` (API `2`)、`tool.executor:mcp` (API `2`)。
+
+| Parameter | Type | Required | Schema Default | Constraints |
 | --- | --- | --- | --- | --- |
-| `servers` | array | `[]` | No | MCP servers; nested fields below |
-| `session_factory` | Host object | None when omitted; default session factory | No | Host MCP session factory |
-
-Complete servers[] fields:
-
-| Parameter | Type / range | Default | Schema required | Purpose |
-| --- | --- | --- | --- | --- |
-| `name` | string; minLength=1, maxLength=255 | No fixed value; requires input/injection | Yes | Unique MCP server name |
-| `protocol` | string; enum=["stdio", "sse", "streamable_http"] | No fixed value; requires input/injection | Yes | OTLP protocol or MCP transport |
-| `url` | string / null | `null` | No | HTTP/SSE MCP server URL |
-| `api_key` | string / null | `null` | No | Private connection credential; never commit real values |
-| `command` | string / null | `null` | No | stdio MCP command |
-| `args` | array | `[]` | No | stdio argument array |
-| `env` | object | `{}` | No | stdio subprocess environment map |
-| `timeout_seconds` | number; exclusiveMinimum=0 | `30` | No | MCP connection, initialization and discovery timeout in seconds, excluding tool execution |
-| `call_timeout_seconds` | number / null; exclusiveMinimum=0 | `null` | No | Tool execution timeout in seconds; default waits until completion with cancellation. HTTP/SSE read timeout follows this value rather than interrupting long tasks |
-| `required` | boolean | `true` | No | Whether this MCP server is required |
-| `max_tools` | integer; exclusiveMinimum=0, maximum=10000 | `256` | No | Discovered tool limit |
-| `max_pages` | integer; exclusiveMinimum=0, maximum=1024 | `64` | No | Discovery page limit |
-| `max_schema_bytes` | integer; exclusiveMinimum=0, maximum=16777216 | `262144` | No | Tool schema byte limit |
-| `max_result_bytes` | integer; exclusiveMinimum=0, maximum=67108864 | `4194304` | No | Tool result byte limit |
-
-env defaults to {}. stdio requires command; HTTP/SSE requires url. Transport-specific validation also applies.
+| `servers` | `array` | No | Not declared | `{}` |
+| `servers[].name` | `string` | Yes | Not declared | `{"minLength":1,"maxLength":255}` |
+| `servers[].protocol` | `string` | Yes | Not declared | `{"enum":["stdio","sse","streamable_http"]}` |
+| `servers[].url` | `string / null` | No | `null` | `{}` |
+| `servers[].api_key` | `string / null` | No | `null` | `{}` |
+| `servers[].command` | `string / null` | No | `null` | `{}` |
+| `servers[].args` | `array` | No | `[]` | `{}` |
+| `servers[].env` | `object` | No | Not declared | `{"additionalProperties":{"type":"string"}}` |
+| `servers[].timeout_seconds` | `number` | No | `30` | `{"exclusiveMinimum":0}` |
+| `servers[].call_timeout_seconds` | `number` | No | `7200` | `{"exclusiveMinimum":0}` |
+| `servers[].required` | `boolean` | No | `true` | `{}` |
+| `servers[].max_tools` | `integer` | No | `256` | `{"maximum":10000,"exclusiveMinimum":0}` |
+| `servers[].max_pages` | `integer` | No | `64` | `{"maximum":1024,"exclusiveMinimum":0}` |
+| `servers[].max_schema_bytes` | `integer` | No | `262144` | `{"maximum":16777216,"exclusiveMinimum":0}` |
+| `servers[].max_result_bytes` | `integer` | No | `4194304` | `{"maximum":67108864,"exclusiveMinimum":0}` |
+| `session_factory` | `object` | No | Not declared | `{}` |
 
 ### sage.tool.multi-agent
 
 V2-native Fibre and Team delegation tools.
 
-Offers: `tool.catalog:multi-agent`、`tool.executor:multi-agent`; scopes: agent, run.
+Version: `2.0.0`; scope: agent, run; ownership: `owned`。
 
-| Parameter | Type / range | Default | Schema required | Purpose |
+Provides: `tool.catalog:multi-agent` (API `2`)、`tool.executor:multi-agent` (API `2`)。
+
+| Parameter | Type | Required | Schema Default | Constraints |
 | --- | --- | --- | --- | --- |
-| `coordinator` | Host object | No fixed value; requires input/injection | Yes | Host multi-Agent coordinator |
-| `runtime` | Host object | No fixed value; requires input/injection | Yes | Host RuntimePort |
+| `coordinator` | `object` | Yes | Not declared | `{}` |
+| `runtime` | `object` | Yes | Not declared | `{}` |
 
 ### sage.tool.official
 
 V2-native decorator-backed workspace and runtime tools.
 
-Offers: `tool.catalog:official`、`tool.executor:official`; scopes: agent, process, run.
+Version: `2.0.0`; scope: run; ownership: `owned`。
 
-| Parameter | Type / range | Default | Schema required | Purpose |
-| --- | --- | --- | --- | --- |
-| `runtime` | Host object | No fixed value; requires input/injection | Yes | Host RuntimePort |
+Provides: `tool.catalog:official` (API `2`)、`tool.executor:official` (API `2`)。
+
+Dependencies: `execution.tool-runtime` (API `>=2,<3`)。
+
+No fixed configuration fields; consult the public schema for additional parameters.
 
 ### sage.tool.skill
 
 Decorator-backed Tool operations owned by the Skill module.
 
-Offers: `tool.catalog:skill`、`tool.executor:skill`; scopes: agent, run.
+Version: `2.0.0`; scope: agent, run; ownership: `owned`。
 
-| Parameter | Type / range | Default | Schema required | Purpose |
+Provides: `tool.catalog:skill` (API `2`)、`tool.executor:skill` (API `2`)。
+
+| Parameter | Type | Required | Schema Default | Constraints |
 | --- | --- | --- | --- | --- |
-| `loader` | Host object | No fixed value; requires input/injection | Yes | Host SkillLoader |
-| `language` | string | None when omitted; resolved by prompt-language rules | No | Workspace/query/Skill prompt language |
+| `loader` | `object` | Yes | Not declared | `{}` |
+| `language` | `string` | No | Not declared | `{}` |
 
 ### sage.trace.langfuse
 
 Exports Agent, model and tool observations to Langfuse.
 
-Offers: `observability.trace-sink:default`; scopes: process.
+Version: `2.0.0`; scope: process; ownership: `owned`。
 
-| Parameter | Type / range | Default | Schema required | Purpose |
+Provides: `observability.trace-sink:default` (API `2`)。
+
+| Parameter | Type | Required | Schema Default | Constraints |
 | --- | --- | --- | --- | --- |
-| `base_url` | string; minLength=1 | No fixed value; requires input/injection | Yes | Service endpoint |
-| `public_key_env` | string | `"LANGFUSE_PUBLIC_KEY"` | No | Public-key environment variable name |
-| `secret_key_env` | string | `"LANGFUSE_SECRET_KEY"` | No | Secret-key environment variable name |
-| `service_name` | string | `"sage"` | No | Trace service name |
-| `ingestion_version` | integer; enum=[3, 4] | `4` | No | Langfuse ingestion protocol version |
-| `environment` | string | `"production"` | No | Trace environment label; credential provider host environment map |
-| `content_mode` | string; enum=["metadata", "redacted"] | `"redacted"` | No | metadata records metadata only; redacted records sanitized content |
-| `max_content_chars` | integer; minimum=256, maximum=65536 | `16384` | No | Trace content character limit |
-| `sample_rate` | number; minimum=0, maximum=1 | `1.0` | No | Trace sampling ratio 0–1 |
-| `max_queue_size` | integer; minimum=1 | `2048` | No | Trace export queue limit |
-| `max_active_spans` | integer; minimum=1 | `4096` | No | Maximum active Trace spans |
-| `timeout_seconds` | number; exclusiveMinimum=0, maximum=30 | `3.0` | No | Component-operation timeout in seconds, not total Run budget |
+| `base_url` | `string` | Yes | Not declared | `{"minLength":1}` |
+| `public_key_env` | `string` | No | `"LANGFUSE_PUBLIC_KEY"` | `{}` |
+| `secret_key_env` | `string` | No | `"LANGFUSE_SECRET_KEY"` | `{}` |
+| `service_name` | `string` | No | `"sage"` | `{}` |
+| `ingestion_version` | `integer` | No | `4` | `{"enum":[3,4]}` |
+| `environment` | `string` | No | `"production"` | `{}` |
+| `content_mode` | `string` | No | `"redacted"` | `{"enum":["metadata","redacted"]}` |
+| `max_content_chars` | `integer` | No | `16384` | `{"minimum":256,"maximum":65536}` |
+| `sample_rate` | `number` | No | `1.0` | `{"minimum":0,"maximum":1}` |
+| `max_queue_size` | `integer` | No | `2048` | `{"minimum":1}` |
+| `max_active_spans` | `integer` | No | `4096` | `{"minimum":1}` |
+| `timeout_seconds` | `number` | No | `3.0` | `{"maximum":30,"exclusiveMinimum":0}` |
 
 ### sage.trace.noop
 
 Discards trace spans.
 
-Offers: `observability.trace-sink:default`; scopes: process.
+Version: `2.0.0`; scope: process; ownership: `owned`。
 
-No configurable parameters; use `config: {}`.
+Provides: `observability.trace-sink:default` (API `2`)。
+
+No fixed configuration fields; consult the public schema for additional parameters.
 
 ### sage.trace.otlp
 
 Exports traces over OTLP to Jaeger or a compatible collector.
 
-Offers: `observability.trace-sink:default`; scopes: process.
+Version: `2.0.0`; scope: process; ownership: `owned`。
 
-| Parameter | Type / range | Default | Schema required | Purpose |
+Provides: `observability.trace-sink:default` (API `2`)。
+
+| Parameter | Type | Required | Schema Default | Constraints |
 | --- | --- | --- | --- | --- |
-| `endpoint` | string; minLength=1 | `"http://127.0.0.1:4317"` | No | OTLP collector endpoint |
-| `service_name` | string; minLength=1 | `"sage"` | No | Trace service name |
-| `protocol` | string; enum=["grpc", "http"] | `"grpc"` | No | OTLP protocol or MCP transport |
-| `insecure` | boolean | `true` | No | Use non-TLS OTLP connection |
-| `environment` | string | `"production"` | No | Trace environment label; credential provider host environment map |
-| `content_mode` | string; enum=["metadata", "redacted"] | `"redacted"` | No | metadata records metadata only; redacted records sanitized content |
-| `max_content_chars` | integer; minimum=256, maximum=65536 | `16384` | No | Trace content character limit |
-| `sample_rate` | number; minimum=0, maximum=1 | `1.0` | No | Trace sampling ratio 0–1 |
-| `max_queue_size` | integer; minimum=1 | `2048` | No | Trace export queue limit |
-| `max_active_spans` | integer; minimum=1 | `4096` | No | Maximum active Trace spans |
-| `timeout_seconds` | number; exclusiveMinimum=0, maximum=30 | `3.0` | No | Component-operation timeout in seconds, not total Run budget |
+| `endpoint` | `string` | No | `"http://127.0.0.1:4317"` | `{"minLength":1}` |
+| `service_name` | `string` | No | `"sage"` | `{"minLength":1}` |
+| `protocol` | `string` | No | `"grpc"` | `{"enum":["grpc","http"]}` |
+| `insecure` | `boolean` | No | `true` | `{}` |
+| `environment` | `string` | No | `"production"` | `{}` |
+| `content_mode` | `string` | No | `"redacted"` | `{"enum":["metadata","redacted"]}` |
+| `max_content_chars` | `integer` | No | `16384` | `{"minimum":256,"maximum":65536}` |
+| `sample_rate` | `number` | No | `1.0` | `{"minimum":0,"maximum":1}` |
+| `max_queue_size` | `integer` | No | `2048` | `{"minimum":1}` |
+| `max_active_spans` | `integer` | No | `4096` | `{"minimum":1}` |
+| `timeout_seconds` | `number` | No | `3.0` | `{"maximum":30,"exclusiveMinimum":0}` |
 
 ### sage.workspace.initializer.bare
 
 Creates an empty workspace root without starter files.
 
-Offers: `workspace.initializer:default`; scopes: agent, process.
+Version: `2.0.0`; scope: agent, process; ownership: `owned`。
 
-No configurable parameters; use `config: {}`.
+Provides: `workspace.initializer:default` (API `2`)。
+
+No fixed configuration fields; consult the public schema for additional parameters.
 
 ### sage.workspace.initializer.claw
 
 Seeds a Claw-style workspace layout and starter files.
 
-Offers: `workspace.initializer:default`; scopes: agent, process.
+Version: `2.0.0`; scope: agent, process; ownership: `owned`。
 
-| Parameter | Type / range | Default | Schema required | Purpose |
+Provides: `workspace.initializer:default` (API `2`)。
+
+| Parameter | Type | Required | Schema Default | Constraints |
 | --- | --- | --- | --- | --- |
-| `language` | string; minLength=1 | `"en"` | No | Workspace/query/Skill prompt language |
-
-<a id="run-的网络故障自动恢复"></a>
+| `language` | `string` | No | `"en"` | `{"minLength":1}` |
 
 ## Automatic Run recovery from network failures
 

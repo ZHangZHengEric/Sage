@@ -1,7 +1,7 @@
 {
   "name": "sage-server-v2-web",
   "private": true,
-  "version": "2.1.0",
+  "version": "2.1.1",
   "type": "module",
   "scripts": {
     "test": "node --test tests/*.test.js",

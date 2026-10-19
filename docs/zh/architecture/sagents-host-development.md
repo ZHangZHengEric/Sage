@@ -123,6 +123,36 @@ configuration = await app.run_configuration(run_id, context)
 | `command_path`、`read_paths` | Agent Shell 搜索路径与额外只读运行时目录 |
 | `isolation_python` | 隔离辅助程序使用的可信真实 CPython |
 
+```yaml
+capabilities:
+  execution.binding:
+    plugin: sage.execution.binding.local-workspace
+    scope: process
+    config:
+      workspace: /absolute/workspace
+      private_workspace_root: /absolute/private-workspaces
+      child_workspace_policy: shared_parent
+      isolation_python: /absolute/trusted/python3
+      command_path: /absolute/media/bin:/usr/bin:/bin
+      read_paths: [/absolute/media/runtime]
+      policy:
+        filesystem:
+          max_file_bytes: 536870912
+          allowed_operations: [read, list, write, create, delete, rename]
+        process:
+          enabled: true
+          allow_shell: true
+          allowed_executables: [bash, sh, python3, ffmpeg]
+          max_wall_time_seconds: 7200
+          max_output_bytes: 8388608
+        resources:
+          disk_mb: 32768
+          require_hard_limits: false
+        network:
+          mode: none
+          deny_private_networks: true
+```
+
 具体字段以 `LocalExecutionBindingConfig` 的 schema 为准。完整可校验的媒体配置见
 [英文 SDK 接入文档](../../../sagents/v2/README.md)。
 未单独指定更小的文件总量时，显式磁盘额度覆盖旧默认容量。子任务继承父任务已受理策略，
@@ -172,7 +202,7 @@ from sagents.v2.tool import builtin_tool_definitions
 catalog = [
     {"name": value.name, "description": value.description,
      "inputSchema": value.input_schema}
-    for value in builtin_tool_definitions(agent_mode="all", language="zh")
+    for value in builtin_tool_definitions(agent_mode="all", language="en")
 ]
 ```
 

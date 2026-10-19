@@ -191,7 +191,7 @@ def create_app(
 
     app = FastAPI(
         title="Sage Desktop v2",
-        version="2.1.0",
+        version="2.1.1",
         lifespan=lifespan,
     )
     app.state.v2_service = runtime_service
