@@ -28,6 +28,8 @@ from app.v2.server.routers.schemas.conversations import (
     ThreadEventPage,
     ThreadPublic,
     ThreadResumeBody,
+    ThreadCancelBody,
+    ThreadSteerBody,
 )
 from app.v2.server.storage.downloads import prepare_download, prepare_session_export
 from app.v2.server.storage.external_workspaces import (
@@ -184,6 +186,29 @@ async def resume_thread(
             "X-Sage-AG-UI-Replay": "session-store",
         },
     )
+
+
+@thread_router.post("/{thread_id}/cancel")
+async def cancel_thread_run(
+    thread_id: str,
+    body: ThreadCancelBody,
+    user: CurrentUser,
+    service: ConversationDep,
+):
+    return success(await service.cancel(thread_id, run_id=body.runId, user_id=user.user_id))
+
+
+@thread_router.post("/{thread_id}/steer")
+async def steer_thread_run(
+    thread_id: str,
+    body: ThreadSteerBody,
+    user: CurrentUser,
+    service: ConversationDep,
+):
+    return success(await service.steer(
+        thread_id, run_id=body.runId, user_id=user.user_id,
+        message_id=body.messageId, text=body.text,
+    ))
 
 
 @thread_router.delete("/{thread_id}", response_model=ApiResponse[None])

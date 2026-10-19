@@ -19,12 +19,14 @@ const allGroups = computed(() => componentGroups(catalog.value, [
 ].map(item => typeof item === 'string' ? { capability: item } : item)))
 const groups = allGroups
 const currentGroup = computed(() => allGroups.value.find(group => group.id === active.value))
+const isProtocolGroup = computed(() => active.value === 'interface.protocol-adapter')
 const editOptions = computed(() => catalog.value?.plugins.filter(p => p.capabilities.includes(editing.value)) || [])
 const editPlugin = computed(() => editOptions.value.find(p => p.id === draft.value?.plugin))
 const inspected = computed(() => currentGroup.value && inspecting(currentGroup.value))
 const inspectedConfig = computed(() => currentGroup.value ? configuration(currentGroup.value) : {})
 const explanation = computed(() => pluginExplanation(inspected.value, inspectedConfig.value))
 function modificationRestriction(id) {
+  if (id === 'interface.protocol-adapter') return '协议适配器可同时启用多种，由服务端部署管理，此页面仅供查看。'
   if (!server.value) return '仅管理员可修改系统默认配置。'
   if (!server.value.configurable?.includes(id)) return '此项由服务端固定配置，页面不支持修改。'
   const options = allGroups.value.find(group => group.id === id)?.plugins.filter(plugin => plugin.available !== false) || []
@@ -97,8 +99,21 @@ async function reloadServer() {
 }
 function savedName(group) { const selection = server.value?.saved?.[group.id] || server.value?.defaults?.[group.id]; return selection ? pluginName(selection.plugin) : '部署默认' }
 function bindings(group) { return server.value?.providers?.filter(item => item.capability === group.id) || [] }
-function currentIds(group) { const rows = bindings(group); return rows.length ? [...new Set(rows.map(item => item.plugin_id).filter(Boolean))] : [catalog.value?.defaults?.[group.id]].filter(Boolean) }
-function currentNames(group) { return currentIds(group).map(id => pluginName(group.plugins.find(p => p.id === id) || id)).join('、') || bindings(group).map(item => item.implementation).filter(Boolean).join('、') || '未指定' }
+function currentIds(group) {
+  const rows = bindings(group)
+  if (rows.length || group.id === 'interface.protocol-adapter') return [...new Set(rows.map(item => item.plugin_id).filter(Boolean))]
+  return [catalog.value?.defaults?.[group.id]].filter(Boolean)
+}
+function protocolStatus(plugin) {
+  if (!Array.isArray(server.value?.providers)) return '状态未知'
+  return currentIds(currentGroup.value).includes(plugin.id) ? '已启用' : '未启用'
+}
+function currentNames(group) {
+  if (group.id === 'interface.protocol-adapter') {
+    if (!Array.isArray(server.value?.providers)) return '状态未知'
+    return currentIds(group).map(id => pluginName(group.plugins.find(p => p.id === id) || id)).join('、') || '暂无已启用协议'
+  }
+  return currentIds(group).map(id => pluginName(group.plugins.find(p => p.id === id) || id)).join('、') || bindings(group).map(item => item.implementation).filter(Boolean).join('、') || '未指定' }
 function inspecting(group) {
   const id = editing.value === group.id ? draft.value?.plugin || server.value?.defaults?.[group.id]?.plugin
     : preview.value[group.id] || server.value?.saved?.[group.id]?.plugin || currentIds(group)[0]
@@ -174,21 +189,38 @@ onMounted(load)
     <div v-if="loading" class="system-skeleton" aria-busy="true" aria-label="正在加载系统插件"><i v-for="n in 4" :key="n"></i></div>
     <div v-else-if="groups.length" class="system-workbench">
       <nav class="system-navigation" aria-label="系统插件分类"><div v-for="category in categoryGroups" :key="category.name" class="system-category"><div class="system-category-title">{{ category.name }}</div><button v-for="node in category.items" :key="node.id" type="button" :class="{ active: active === node.id }" :aria-current="active === node.id ? 'true' : undefined" :disabled="saving" @click="selectNode(node.id)"><span class="navigation-title">{{ node.name }}<small :class="{ 'is-dirty': node.changed, 'is-pending': node.sourceText === '待重启' }">{{ ['不可修改', '未保存', '待重启'].includes(node.sourceText) ? node.sourceText : '' }}</small></span><span class="navigation-choice">{{ node.choice }}</span></button></div></nav>
-      <article v-if="currentGroup" class="system-inspector" :aria-label="`${currentGroup.name}系统默认配置`">
+      <article v-if="currentGroup" class="system-inspector" :aria-label="`${currentGroup.name}${isProtocolGroup ? '状态' : '系统默认配置'}`">
         <div class="system-inspector-content">
         <header class="inspector-head"><div><AppIcon name="settings" /><h1>{{ currentGroup.name }}</h1></div><span v-if="!canConfigure(active)" class="system-readonly-mark">不可修改</span></header>
         <div v-if="pendingGroups.length" class="system-pending-notice"><span><AppIcon name="clock" />{{ pendingGroups.length }} 项系统默认配置待重启生效</span><button type="button" @click="pendingOpen = true">查看变更</button></div>
-        <dl class="configuration-status"><div><dt><i></i>当前运行</dt><dd>{{ currentNames(currentGroup) }}</dd></div><div v-if="server"><dt>已保存默认<FieldHelp label="已保存默认" :text="policyHelp.saved" /></dt><dd>{{ savedName(currentGroup) }}<span v-if="server.pending?.includes(active)" class="system-badge amber">待重启</span><span v-else class="system-badge neutral">与运行一致</span></dd></div></dl>
+        <dl class="configuration-status"><div><dt><i></i>{{ isProtocolGroup ? '已启用协议' : '当前运行' }}</dt><dd>{{ currentNames(currentGroup) }}</dd></div><div v-if="server && !isProtocolGroup"><dt>已保存默认<FieldHelp label="已保存默认" :text="policyHelp.saved" /></dt><dd>{{ savedName(currentGroup) }}<span v-if="server.pending?.includes(active)" class="system-badge amber">待重启</span><span v-else class="system-badge neutral">与运行一致</span></dd></div></dl>
         <form id="system-plugin-form" class="plugin-configuration" @submit.prevent="saveServer">
-          <section class="implementation-section"><div class="system-section-title"><h2>实现选择</h2><span>{{ currentGroup.plugins.length }} 个实现</span></div>
-            <div class="implementation-list" role="group" :aria-label="`${currentGroup.name}实现`">
+          <section class="implementation-section"><div class="system-section-title"><h2>{{ isProtocolGroup ? '协议列表' : '实现选择' }}</h2><span>{{ currentGroup.plugins.length }} {{ isProtocolGroup ? '个协议' : '个实现' }}</span></div>
+            <div v-if="isProtocolGroup" class="protocol-adapter-list" role="list" aria-label="协议适配器">
+              <article v-for="plugin in currentGroup.plugins" :key="plugin.id" class="protocol-adapter" role="listitem">
+                <div class="implementation-copy">
+                  <div class="implementation-heading"><strong>{{ pluginName(plugin) }}</strong><span class="system-badge" :class="protocolStatus(plugin) === '已启用' ? 'protocol-enabled' : 'neutral'">{{ protocolStatus(plugin) }}</span></div>
+                  <code class="plugin-code">{{ plugin.id }}</code>
+                  <p class="implementation-description">{{ pluginExplanation(plugin).description }}</p>
+                  <span v-if="plugin.available === false" class="protocol-unavailable">当前环境不可用</span>
+                </div>
+              </article>
+            </div>
+            <div v-else class="implementation-list" role="group" :aria-label="`${currentGroup.name}实现`">
               <button v-if="canConfigure(active)" class="default-option" :class="{ selected: editing === active ? !draft : !server.saved?.[active] }" type="button" :disabled="saving" :aria-pressed="editing === active ? !draft : !server.saved?.[active]" @click="resetDefault"><span class="option-indicator" aria-hidden="true"></span><span class="implementation-copy"><strong>跟随部署默认</strong><code class="plugin-code">{{ server.defaults?.[active]?.plugin }}</code><span class="implementation-description">{{ pluginName(server.defaults?.[active]?.plugin) }}</span></span></button>
               <button v-for="plugin in currentGroup.plugins" :key="plugin.id" type="button" class="implementation" :class="{ selected: implementationSelected(plugin) }" :disabled="saving || !canConfigure(active) || plugin.available === false" :aria-pressed="implementationSelected(plugin)" @click="selectImplementation(plugin)"><span class="option-indicator" aria-hidden="true"></span><span class="implementation-copy"><span class="implementation-heading"><strong>{{ pluginName(plugin) }}</strong><small>{{ plugin.available === false ? '当前不可用' : currentIds(currentGroup).includes(plugin.id) ? '运行中' : implementationSelected(plugin) ? '已选择' : '' }}</small></span><code class="plugin-code">{{ plugin.id }}</code><span class="implementation-description">{{ pluginExplanation(plugin).description }}</span></span></button>
               <div v-if="!currentGroup.plugins.length" class="system-injected"><AppIcon name="lock" /><div><strong>宿主注入</strong><p>{{ currentNames(currentGroup) }}</p></div></div>
             </div>
             <p v-if="!canConfigure(active)" class="management-note"><AppIcon name="lock" />{{ modificationRestriction(active) }}</p>
           </section>
-          <div class="configuration-section">
+          <div v-if="isProtocolGroup" class="configuration-section">
+            <section class="plugin-effects"><div class="system-section-title"><h2>接入说明</h2></div><ul>
+              <li>同一次运行可以通过多种协议适配器输出；每种协议保留的信息范围不同。</li>
+              <li>启用状态表示适配器已在当前 Server 中加载，对外服务入口仍由部署配置管理。</li>
+              <li>工具页的 MCP 连接用于接入外部工具；此处的 MCP 适配器用于转换进度和交互事件。</li>
+            </ul></section>
+          </div>
+          <div v-else class="configuration-section">
             <section v-if="inspected" class="plugin-effects"><div class="system-section-title"><h2>{{ canConfigure(active) ? '选择后的影响' : '实现说明' }}</h2></div><ul><li v-for="effect in explanation.effects" :key="effect">{{ effect }}</li></ul></section>
             <section v-if="parameterFields.length" class="system-parameters"><h2>配置参数</h2><template v-if="canConfigure(active) && editing === active && draft && editPlugin"><SchemaField v-for="[key, field] in parameterFields" :key="`${active}:${draft.plugin}:${key}`" :schema="field" :root="editPlugin.schema" :model-value="inspectedConfig[key]" :label="parameterLabel(key)" :help="parameterHelp(key, field)" :disabled="saving" @update:model-value="configureParameter(key, $event)" /></template><dl v-else class="system-parameter-values"><div v-for="row in parameterRows(currentGroup)" :key="row.key"><dt>{{ row.label }}<FieldHelp :label="row.label" :text="parameterHelp(row.key, inspected.schema.properties[row.key])" /></dt><dd>{{ row.value }}</dd></div></dl></section>
             <p v-else class="system-no-parameters">{{ currentGroup.plugins.length ? '此实现无页面配置参数' : '此能力由宿主提供，页面仅供查看' }}</p>

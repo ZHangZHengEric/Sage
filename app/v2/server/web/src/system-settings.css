@@ -186,3 +186,10 @@
 }
 
 @media (prefers-reduced-motion: reduce) { .system-settings .selected .option-indicator::after { animation: none; } }
+
+/* Protocol adapters are concurrent deployment capabilities, not a single choice. */
+.system-settings .protocol-adapter-list { border-top: 1px solid var(--border); }
+.system-settings .protocol-adapter { padding: 15px 10px; border-bottom: 1px solid var(--border); }
+.system-settings .protocol-adapter .implementation-description { margin-bottom: 0; }
+.system-settings .system-badge.protocol-enabled { background: var(--status-success-bg); color: var(--status-success); }
+.system-settings .protocol-unavailable { display: block; color: var(--status-warning); font-size: 11px; margin-top: 6px; }

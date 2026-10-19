@@ -53,6 +53,62 @@ test('transcript joins tool results, hides empty assistants, and folds completed
   assert.match(html, /Standalone result/)
 })
 
+test('history keeps reasoning before an answer started before the first reasoning delta', async (t) => {
+  const sequence = [
+    { type: 'RUN_STARTED', threadId: 'thread', runId: 'run' },
+    { type: 'REASONING_START', messageId: 'reason' },
+    { type: 'REASONING_MESSAGE_START', messageId: 'reason', role: 'reasoning' },
+    { type: 'TEXT_MESSAGE_START', messageId: 'answer', role: 'assistant' },
+    { type: 'REASONING_MESSAGE_CONTENT', messageId: 'reason', delta: 'Thinking first' },
+    { type: 'REASONING_MESSAGE_END', messageId: 'reason' },
+    { type: 'REASONING_END', messageId: 'reason' },
+    { type: 'TEXT_MESSAGE_CONTENT', messageId: 'answer', delta: 'Answer second' },
+    { type: 'TEXT_MESSAGE_END', messageId: 'answer' },
+    { type: 'RUN_FINISHED', threadId: 'thread', runId: 'run' },
+  ]
+  t.mock.method(globalThis, 'fetch', async () => new Response(sequence.map(event =>
+    `data: ${JSON.stringify(event)}\n\n`).join(''), { headers: { 'Content-Type': 'text/event-stream' } }))
+  const agent = createAguiAgent()
+  await agent.runAgent({ runId: 'run', tools: [], context: [] })
+  const server = await createServer({ server: { middlewareMode: true, watch: null, hmr: false, ws: false } })
+  t.after(() => server.close())
+  const { default: Transcript } = await server.ssrLoadModule('/src/components/AguiTranscript.vue')
+  for (const messages of [agent.messages, messagesFromEvents(sequence)]) {
+    assert.deepEqual(messages.map(message => message.id), ['reason', 'answer'])
+    assert.equal(messages[0].content, 'Thinking first')
+    assert.equal(messages[0].reasoningStreaming, false)
+    const html = await renderToString(createSSRApp(Transcript, { messages }))
+    assert.ok(html.indexOf('Thinking first') < html.indexOf('Answer second'))
+    assert.doesNotMatch(html, /<details[^>]* open/)
+  }
+})
+
+test('process-only messages have no avatar or empty text, and copy actions belong to the last reply of each turn', async (t) => {
+  const server = await createServer({ optimizeDeps: { noDiscovery: true, entries: [] }, server: { middlewareMode: true, watch: null, hmr: false, ws: false } })
+  t.after(() => server.close())
+  const { default: Transcript } = await server.ssrLoadModule('/src/components/AguiTranscript.vue')
+  const tool = id => ({ id, role: 'assistant', content: '', toolCalls: [{ id: `call-${id}`, function: { name: 'load_skill', arguments: '{}' }, executionState: 'completed' }] })
+  const messages = [
+    { id: 'q1', role: 'user', content: '第一个问题' },
+    { id: 'intro', role: 'assistant', content: '先加载分析工具。' },
+    tool('first'),
+    { id: 'reason', role: 'reasoning', content: '分析中', reasoningStreaming: false },
+    tool('second'),
+    { id: 'answer1', role: 'assistant', content: '第一轮结论' },
+    { id: 'q2', role: 'user', content: '第二个问题' },
+    { id: 'answer2', role: 'assistant', content: '第二轮结论' },
+  ]
+  const html = await renderToString(createSSRApp(Transcript, { messages }))
+  assert.equal((html.match(/class="msg-avatar"/g) || []).length, 3)
+  assert.equal((html.match(/复制回复/g) || []).length, 2)
+  assert.doesNotMatch(html.slice(0, html.indexOf('第一轮结论')), /复制回复/)
+  assert.doesNotMatch(html, /<p class="plain"><\/p>/)
+  assert.equal((html.match(/aria-label="工具调用"/g) || []).length, 2)
+  assert.doesNotMatch(html, /<header><svg[^]*?<span>工具调用<\/span>/)
+  const streaming = await renderToString(createSSRApp(Transcript, { messages, pending: true }))
+  assert.doesNotMatch(streaming, /复制回复/)
+})
+
 test('JSON tool results remain strings and render in both stream and history', async (t) => {
   const content = JSON.stringify({ status: 'success', message: '写入成功', count: 0 })
   const structuredEvents = events.map(event => event.type === 'TOOL_CALL_RESULT'

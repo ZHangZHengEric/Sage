@@ -8,6 +8,7 @@ const INTERACTION_CLOSED = new Set([
   'sage.interaction.resolved',
   'sage.interaction.expired',
   'sage.interaction.cancelled',
+  'sage.run.cancelled',
 ])
 
 /** Rebuild AG-UI Message[] from persisted protocol events. */
@@ -77,6 +78,18 @@ export function messagesFromEvents(events) {
           content: event.content || '',
           toolCallId: event.toolCallId,
         })
+        break
+      }
+      case 'REASONING_MESSAGE_START': {
+        const id = event.messageId || 'reasoning'
+        const existing = byId.get(id)
+        if (existing) {
+          existing.reasoningStreaming = true
+        } else {
+          const created = { id, role: 'reasoning', content: '', reasoningStreaming: true }
+          byId.set(id, created)
+          messages.push(created)
+        }
         break
       }
       case 'REASONING_MESSAGE_END':
