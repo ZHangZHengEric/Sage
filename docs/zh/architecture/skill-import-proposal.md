@@ -1,3 +1,14 @@
+---
+layout: default
+title: 技能远程导入
+parent: 架构
+nav_order: 17
+lang: zh
+ref: v2-detail-skill-import-proposal
+---
+
+{% include lang_switcher.html %}
+
 # Sage 技能远程导入方案
 
 Sage 可以在现有 ZIP 上传之外，增加 Git 仓库、在线 ZIP、技能市场和团队 HTTP 目录四种来源，并支持粘贴 `npx skills add ...` 命令导入。建议第一期实现公开 GitHub 仓库、在线 ZIP 和 Skills CLI 导入入口，第二期接入 ClawHub 和更新检查，团队目录按内部共享需求增加。所有来源最终都发布为 Sage 已有的技能版本，再由用户在智能体配置中选择。

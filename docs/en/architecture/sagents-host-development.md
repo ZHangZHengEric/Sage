@@ -1,8 +1,19 @@
+---
+layout: default
+title: Host Development
+parent: Architecture
+nav_order: 13
+lang: en
+ref: v2-detail-sagents-host-development
+---
+
+{% include lang_switcher.html %}
+
 <a id="基于-sagents-v2-开发宿主项目"></a>
 
 # Developing a host with SAgents v2
 
-[English](../../en/architecture/sagents-host-development.md) · [Code reading guide](code-reading-guide.md) · [Runnable starter](../../../examples/sagents_v2_host/)
+[Code reading guide](code-reading-guide.md) · [Runnable starter](../../../examples/sagents_v2_host/)
 
 **Start with one composition root, one Agent manifest and shared Run correlation identifiers.**
 

@@ -1,3 +1,14 @@
+---
+layout: default
+title: yiii 沙箱接入
+parent: 架构
+nav_order: 16
+lang: zh
+ref: v2-detail-sagents-v2-yiii-sandbox-directories-integration
+---
+
+{% include lang_switcher.html %}
+
 # yiii 通过标准 Builder 接入沙箱目录与 Team 共享实例
 
 本次只修改 Sage，未修改 yiii。Builder 的公开调用方式不变；共享通过本地沙箱插件的 Run 租约能力实现。yiii 应使用标准 Builder 装配 Agent，不再自行 provision 子沙箱、创建 Agent loop 或维护租约。
