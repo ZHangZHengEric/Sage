@@ -1,16 +1,24 @@
 from __future__ import annotations
 
 from urllib.parse import quote, urlparse
+import asyncio
+from datetime import datetime, timedelta, timezone
+import sqlite3
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Request, Query, HTTPException
 from fastapi.responses import RedirectResponse, Response
 
 from app.v2.server.routers.deps import AdminUser, OptionalUser
+from app.v2.server.routers.deps import HostDep
+from app.v2.server.routers.render import success
 
 router = APIRouter(prefix="/api/observability", tags=["observability"])
 
 
-def _public_jaeger_url(request: Request, path_suffix: str = "/", query: str = "") -> str:
+def _public_jaeger_url(
+    request: Request, path_suffix: str = "/", query: str = ""
+) -> str:
     base = (request.app.state.service.settings.jaeger_public_url or "").rstrip("/")
     suffix = "/" + (path_suffix or "/").lstrip("/")
     url = f"{base}{suffix}"
@@ -70,8 +78,54 @@ async def redirect_jaeger_path(request: Request, full_path: str):
 
 
 console_router = APIRouter(prefix="/api/observability", tags=["observability"])
+performance_router = APIRouter(prefix="/api/observability", tags=["observability"])
+
+
+@performance_router.get("/performance")
+async def performance(
+    _: AdminUser,
+    host: HostDep,
+    start: datetime | None = None,
+    end: datetime | None = None,
+    agent_id: str = Query(default="", max_length=256),
+    bucket: str = Query(default="hour", pattern="^(hour|day)$"),
+    timezone_name: str = Query(default="Asia/Shanghai", max_length=64),
+):
+    from app.v2.server.observability.performance import report
+
+    end = end or datetime.now(timezone.utc)
+    start = start or end - timedelta(hours=24)
+    if (
+        start.tzinfo is None
+        or end.tzinfo is None
+        or not timedelta(0) < end - start <= timedelta(days=31)
+    ):
+        raise HTTPException(422, "选择带时区的起止时间，范围不超过 31 天")
+    try:
+        ZoneInfo(timezone_name)
+    except (ZoneInfoNotFoundError, ValueError) as exc:
+        raise HTTPException(422, "无效时区") from exc
+    diagnostics = host.diagnostics
+    if diagnostics is None or not diagnostics.available:
+        raise HTTPException(503, "性能记录暂不可用")
+    try:
+        result = await asyncio.to_thread(
+            report,
+            diagnostics.path,
+            start=start.timestamp(),
+            end=end.timestamp(),
+            agent_id=agent_id,
+            bucket=bucket,
+            timezone_name=timezone_name,
+        )
+    except (OSError, sqlite3.Error) as exc:
+        raise HTTPException(503, "性能记录暂不可用") from exc
+    result["capture_failures"] = diagnostics.capture_failures
+    return success(result)
 
 
 @console_router.get("/console")
 async def open_trace_console(request: Request, user: AdminUser):
-    return RedirectResponse(url=request.app.state.service.settings.trace_console_url, status_code=307)
+    return RedirectResponse(
+        url=request.app.state.service.settings.trace_console_url, status_code=307
+    )
