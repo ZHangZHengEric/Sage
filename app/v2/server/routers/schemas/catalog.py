@@ -51,6 +51,15 @@ class AgentPublic(BaseModel):
     package: AgentPackageBundle | None = None
     package_ref: str | None = None
 
+class AgentSummary(BaseModel):
+    id: str
+    name: str
+    description: str = ""
+    model_id: str = ""
+    model_name: str = ""
+    tool_count: int
+    skill_count: int
+
 class ToolPublic(BaseModel):
     approval_key: str | None = None
     name: str

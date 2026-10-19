@@ -39,6 +39,9 @@ class CatalogService:
     async def get(self, user_id: str):
         return await self.store.get(user_id)
 
+    async def list_agent_summaries(self, user_ids: list[str]) -> list[dict]:
+        return await self.store.list_agent_summaries(user_ids)
+
     async def list_all_models(self, user_ids: list[str]):
         return await self.store.list_all_models(user_ids)
 

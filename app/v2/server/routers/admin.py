@@ -2,7 +2,7 @@ from fastapi import APIRouter, Query
 
 from app.v2.server.routers.deps import AdminDep, ConversationDep, AdminUser
 from app.v2.server.routers.schemas.common import ADMIN_ERRORS, ApiResponse
-from app.v2.server.routers.schemas.admin import AdminModelPublic, AdminThreadPublic
+from app.v2.server.routers.schemas.admin import AdminAgentSummary, AdminModelPublic, AdminThreadPublic
 from app.v2.server.routers.schemas.conversations import ThreadEventPage
 from app.v2.server.routers.schemas.identity import UserPublic
 from app.v2.server.routers.render import success
@@ -23,6 +23,11 @@ async def admin_threads(_: AdminUser, service: AdminDep):
 @router.get("/models", response_model=ApiResponse[list[AdminModelPublic]])
 async def admin_models(_: AdminUser, service: AdminDep):
     return success(await service.list_models())
+
+
+@router.get("/agents", response_model=ApiResponse[list[AdminAgentSummary]])
+async def admin_agents(_: AdminUser, service: AdminDep):
+    return success(await service.list_agents())
 
 
 @router.get(
