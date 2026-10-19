@@ -10,7 +10,7 @@ const props = defineProps({
   selected: { type: Array, default: () => [] }, readonly: Boolean, disabled: Boolean, pending: Boolean,
 })
 const emit = defineEmits(['update:selected'])
-const noun = computed(() => props.kind === 'tools' ? '工具' : '技能')
+const noun = computed(() => ({ tools: '工具', skills: '技能', agents: '成员' })[props.kind])
 const selectedSet = computed(() => new Set(props.selected))
 const selectedItems = computed(() => props.items.filter(item => selectedSet.value.has(item.id)))
 const unavailableCount = computed(() => selectedItems.value.filter(item => !item.available).length)
@@ -85,23 +85,23 @@ function turnPage(value) { page.value = value; scrollCatalog() }
       <h2>可用{{ noun }}</h2><span class="agent-selection-count">{{ selectedItems.length }} 已选</span>
       <span v-if="!pending && unavailableCount" class="agent-resource-warning">{{ unavailableCount }} 项不可用</span>
       <slot name="status" />
-      <FieldHelp :label="`${noun}选择`" :text="kind === 'tools' ? '仅授权所选的具体工具。批量选择针对当前目录，不会自动授权以后新增的工具。实际调用仍受工具审批和执行权限限制。' : '选择允许智能体使用的技能。技能绑定在保存智能体后更新，不会自动授权技能涉及的工具。'" />
+      <FieldHelp :label="`${noun}选择`" :text="kind === 'agents' ? '选择允许委派任务的当前用户智能体。新运行使用成员的最新配置，已开始的运行保留其配置快照。' : kind === 'tools' ? '仅授权所选的具体工具。批量选择针对当前目录，不会自动授权以后新增的工具。实际调用仍受工具审批和执行权限限制。' : '选择允许智能体使用的技能。技能绑定在保存智能体后更新，不会自动授权技能涉及的工具。'" />
       <button v-if="!readonly && selectedItems.length" type="button" class="agent-action" :disabled="disabled" @click="show()"><AppIcon name="plus" />添加{{ noun }}</button>
     </header>
     <div v-if="selectedItems.length && kind === 'tools'" class="agent-resource-summary">{{ summary }}</div>
     <div v-if="selectedItems.length" class="agent-resource-chosen-list">
       <div v-for="item in selectedItems.slice(0, 6)" :key="item.id" class="agent-resource-chosen-row">
-        <span class="agent-resource-symbol"><AppIcon :name="kind === 'tools' ? 'tools' : 'skill'" /></span>
+        <span class="agent-resource-symbol"><AppIcon :name="kind === 'tools' ? 'tools' : kind === 'agents' ? 'agent' : 'skill'" /></span>
         <span class="agent-resource-name"><strong>{{ item.title }}</strong><code v-if="item.title !== item.name">{{ item.name }}</code><small v-else-if="item.description">{{ item.description }}</small></span>
         <span v-if="!pending && !item.available" class="agent-resource-warning">当前不可用</span><span v-else-if="kind === 'tools'" class="agent-resource-origin">{{ item.connections?.map(group => group.name).join('、') || item.sourceLabel }}</span>
         <button v-if="!readonly" type="button" class="agent-icon-button" :aria-label="`移除 ${item.name}`" :disabled="disabled" @click="remove(item)"><AppIcon name="close" /></button>
       </div>
       <button type="button" class="agent-resource-view-all" :disabled="disabled" @click="show(true)">{{ selectedItems.length > 6 ? `查看全部 ${selectedItems.length} 项已选` : readonly ? '查看已选详情' : '管理已选' }}<AppIcon name="chevron" /></button>
     </div>
-    <div v-else class="agent-resource-empty"><AppIcon :name="kind === 'tools' ? 'tools' : 'skill'" /><span>{{ pending ? '正在加载资源…' : `尚未选择${noun}` }}</span><button v-if="!readonly" type="button" class="agent-action" :disabled="disabled" @click="show()">添加{{ noun }}</button></div>
+    <div v-else class="agent-resource-empty"><AppIcon :name="kind === 'tools' ? 'tools' : kind === 'agents' ? 'agent' : 'skill'" /><span>{{ pending ? '正在加载资源…' : `尚未选择${noun}` }}</span><button v-if="!readonly" type="button" class="agent-action" :disabled="disabled" @click="show()">添加{{ noun }}</button></div>
     <p v-if="removed && !selectedSet.has(removed.id)" class="agent-resource-undo" role="status">已移除 {{ removed.title }}<button type="button" class="agent-text-button" :disabled="disabled || readonly" @click="undo">撤销</button></p>
-    <FormDrawer v-model="open" centered :panel-class="`agent-resource-dialog ${kind === 'skills' ? 'agent-resource-skills' : ''}`" :title="`${readonly ? '查看已选' : manage ? '管理已选' : '选择'}${noun}`" :busy="disabled">
-      <div class="agent-resource-picker" :class="{ 'agent-resource-picker-single': kind === 'skills' }">
+    <FormDrawer v-model="open" centered :panel-class="`agent-resource-dialog ${kind !== 'tools' ? 'agent-resource-skills' : ''}`" :title="`${readonly ? '查看已选' : manage ? '管理已选' : '选择'}${noun}`" :busy="disabled">
+      <div class="agent-resource-picker" :class="{ 'agent-resource-picker-single': kind !== 'tools' }">
         <nav v-if="kind === 'tools'" class="agent-resource-sources" :aria-label="`${noun}来源`">
           <button type="button" :aria-pressed="!source && !connection" @click="chooseSource('')">全部{{ noun }}<span>{{ browseItems.length }}</span></button>
           <template v-for="group in sources" :key="group.id">

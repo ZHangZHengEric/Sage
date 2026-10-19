@@ -1,3 +1,14 @@
+---
+layout: default
+title: Code Reading Guide
+parent: Architecture
+nav_order: 12
+lang: en
+ref: v2-detail-code-reading-guide
+---
+
+{% include lang_switcher.html %}
+
 # Sage v2 code map
 
 The public path is `SAgentBuilder.register` → `build(runtime=..., models=...)` →

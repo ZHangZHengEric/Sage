@@ -1,3 +1,14 @@
+---
+layout: default
+title: Host Development
+parent: Architecture
+nav_order: 13
+lang: en
+ref: v2-detail-sagents-host-development
+---
+
+{% include lang_switcher.html %}
+
 # Sage v2 SDK integration
 
 The application owns execution assembly. Hosts register implementations, select

@@ -26,6 +26,8 @@ class AgentBody(BaseModel):
     instructions: str = ""
     model_id: str = ""
     fast_model_id: str | None = None
+    agent_mode: Literal["simple", "fibre", "team"] = "simple"
+    available_sub_agent_ids: list[str] = Field(default_factory=list)
     tools: list[str] = Field(default_factory=default_agent_tools)
     external_tools: list[str] = Field(default_factory=list)
     tool_approval: ToolApprovalConfig | None = None
@@ -42,6 +44,8 @@ class AgentPublic(BaseModel):
     instructions: str = ""
     model_id: str | None = None
     fast_model_id: str | None = None
+    agent_mode: Literal["simple", "fibre", "team"] = "simple"
+    available_sub_agent_ids: list[str] = Field(default_factory=list)
     tools: list[str] = Field(default_factory=list)
     external_tools: list[str] = Field(default_factory=list)
     skills: list[str] = Field(default_factory=list)

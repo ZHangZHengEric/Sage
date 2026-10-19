@@ -82,11 +82,15 @@ def test_desktop_manifest_applies_user_component_selections(tmp_path: Path):
     manifest = desktop_v2_manifest(
         session_root=tmp_path,
         component_selections={
-            "context.token-estimator": "sage.context.token-estimator.unicode-heuristic",
+            "context.unit-compactor": "sage.context.unit-compactor.reference",
             "agent.continuation-policy": "hybrid",
         },
     )
     capabilities = manifest.runtime.capabilities
+    assert (
+        capabilities["context.unit-compactor"].plugin
+        == "sage.context.unit-compactor.reference"
+    )
     assert "context.token-estimator" not in capabilities
     assert (
         capabilities["agent.continuation-policy"].plugin

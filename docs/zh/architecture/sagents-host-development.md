@@ -1,3 +1,14 @@
+---
+layout: default
+title: 宿主开发指南
+parent: 架构
+nav_order: 13
+lang: zh
+ref: v2-detail-sagents-host-development
+---
+
+{% include lang_switcher.html %}
+
 # Sage v2 标准宿主接入
 
 宿主通过 `builder.register(registration)` 注册实现，通过可序列化的 runtime

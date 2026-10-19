@@ -173,3 +173,5 @@
   .agent-summary-card, .agent-action, .agent-switch, .agent-switch::after, .agent-subsection > summary > .app-icon:last-child { transition: none; }
   .agent-card-skeleton i { animation: none; }
 }
+
+.agent-mode { margin-bottom: 22px; }

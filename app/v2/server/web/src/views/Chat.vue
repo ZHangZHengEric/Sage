@@ -7,6 +7,7 @@ import { messagesBeforeLastRun, messagesFromEvents, pendingInteraction } from '.
 import AguiTranscript from '../components/AguiTranscript.vue'
 import WorkspacePanel from '../components/WorkspacePanel.vue'
 import AppIcon from '../components/AppIcon.vue'
+import ChatSkillInput from '../components/ChatSkillInput.vue'
 const workspaceOpen = ref(false)
 import { useRoute, useRouter } from 'vue-router'
 const route = useRoute(), router = useRouter()
@@ -16,6 +17,8 @@ const initializing = ref(true), configurationLoaded = ref(false), setupFailed = 
 const threads = ref([])
 const threadId = ref('')
 const text = ref('')
+const selectedSkills = ref([])
+const userMessage = computed(() => [...selectedSkills.value.map(name => `<skill>${name}</skill>`), text.value.trim()].filter(Boolean).join(' '))
 const historyEvents = shallowRef([]), historyOffset = ref(0), historyTotal = ref(0), historyLoading = ref(false)
 let historyRevision = 0
 let waitingForDecisionReplay = false
@@ -84,7 +87,7 @@ const isStart = computed(() => !currentThread.value && !route?.query?.thread && 
 const canSend = computed(() => configurationLoaded.value && !initializing.value && !setupFailed.value && !readOnly.value && !historyLoading.value && !historyFailed.value &&
   historyOffset.value >= historyTotal.value && (hasModel.value || Boolean(agentPackage.value)) && agentAvailable.value &&
   !activeInteraction.value && !stopping.value && !supplementing.value &&
-  (!pending.value || streamStarted.value) && Boolean(text.value.trim()))
+  (!pending.value || streamStarted.value) && Boolean(userMessage.value))
 
 function inputKeydown(event) {
   if (event.key !== 'Enter' || event.isComposing || event.keyCode === 229 || event.shiftKey || event.altKey) return
@@ -145,10 +148,7 @@ function selectAgent() {
 }
 
 function resizeInput() {
-  const el = input.value
-  if (!el) return
-  el.style.height = 'auto'
-  el.style.height = `${Math.min(el.scrollHeight, 160)}px`
+  input.value?.resize()
 }
 
 async function loadThreads() {
@@ -169,6 +169,7 @@ function applyThreadAgent(id) {
 }
 
 async function openThread(id) {
+  selectedSkills.value = []
   agent.value?.abortRun?.()
   bindAgent()
   waitingForDecisionReplay = false
@@ -222,6 +223,7 @@ async function loadHistory() {
 }
 
 function startNew() {
+  selectedSkills.value = []
   agent.value?.abortRun?.()
   bindAgent()
   waitingForDecisionReplay = false
@@ -246,10 +248,11 @@ function startNew() {
 }
 
 async function send() {
-  const content = text.value.trim()
+  const content = userMessage.value
   if (!configurationLoaded.value || setupFailed.value || (!agentPackage.value && !hasModel.value) || !agentAvailable.value || readOnly.value || historyLoading.value || historyFailed.value || historyOffset.value < historyTotal.value || !content || pending.value || interaction.value) return
   if (!threadId.value) threadId.value = newId('thread')
   text.value = ''
+  selectedSkills.value = []
   nextTick(resizeInput)
   pending.value = true
   streamStarted.value = false; stopping.value = false
@@ -295,7 +298,7 @@ function restoreUnappliedSupplements() {
 async function submit() {
   if (!canSend.value) return
   if (!pending.value) return send()
-  const draft = text.value, content = draft.trim(), revision = historyRevision
+  const draft = text.value, content = userMessage.value, revision = historyRevision
   const runId = activeRunId.value, id = threadId.value
   if (!runId) return
   if (!supplementAttempt || supplementAttempt.runId !== runId || supplementAttempt.content !== content) {
@@ -306,7 +309,7 @@ async function submit() {
   try {
     const result = await api.steerThreadRun(id, { runId, messageId: attempt.messageId, text: content })
     if (revision !== historyRevision) return
-    if (text.value === draft) text.value = ''
+    if (text.value === draft && userMessage.value === content) { text.value = ''; selectedSkills.value = [] }
     supplementAttempt = null
     if (result.state !== 'applied' && !appliedSupplements.has(result.steer_id)) {
       queuedSupplements.value = [...queuedSupplements.value, { ...attempt, steerId: result.steer_id }]
@@ -461,10 +464,9 @@ onUnmounted(() => {
         <footer v-if="!readOnly && historyOffset >= historyTotal && !historyLoading" class="thread-footer">
           <button v-if="activeInteraction" type="button" class="conversation-pending-anchor" :aria-busy="Boolean(deciding)" @click="transcript?.focusInteraction()"><AppIcon :name="activeInteraction.interaction_type === 'approval' ? 'shield' : 'chat'" />{{ deciding ? '正在提交决定…' : activeInteraction.interaction_type === 'approval' ? '查看审批' : '查看问题' }}<AppIcon name="chevron" /></button>
           <form v-else class="composer" @submit.prevent="submit">
-            <label class="sr-only" for="chat-input">消息</label>
-            <textarea id="chat-input" ref="input" v-model="text" rows="1"
-              :placeholder="composerPlaceholder"
-              @input="resizeInput" @keydown="inputKeydown" />
+            <ChatSkillInput ref="input" v-model="text" v-model:skills="selectedSkills"
+              :agent-id="selectedAgentId" :agent-package="agentPackage" :disabled="initializing || !agentAvailable"
+              :placeholder="composerPlaceholder" @keydown="inputKeydown" />
             <div class="conversation-composer-tools">
               <label v-if="!initializing && agentAvailable" class="conversation-agent" :class="{ locked: agentLocked }">
                 <AppIcon :name="agentLocked ? 'lock' : 'agent'" /><span class="sr-only">智能体</span>
@@ -478,7 +480,7 @@ onUnmounted(() => {
                   <AppIcon v-if="!agentLocked" name="chevron" class="conversation-agent-chevron" />
                 </span>
               </label>
-              <button v-if="pending && !text.trim()" class="send" type="button" :disabled="stopping || supplementing || !streamStarted" :aria-label="stopping ? '正在终止' : '终止'" :title="stopping ? '正在终止' : '终止'" @click="stop">
+              <button v-if="pending && !userMessage" class="send" type="button" :disabled="stopping || supplementing || !streamStarted" :aria-label="stopping ? '正在终止' : '终止'" :title="stopping ? '正在终止' : '终止'" @click="stop">
                 <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="2" /></svg>
               </button>
               <button v-else class="send" type="submit" :disabled="!canSend" aria-label="发送" title="发送">
@@ -502,7 +504,7 @@ onUnmounted(() => {
 .conversation-page .thread-bar { min-height: 62px; }
 .conversation-page .thread-footer { width: min(848px, 100%); padding-bottom: 22px; }
 .conversation-page .composer { background: var(--card); border-radius: var(--radius-card); padding: 14px; box-shadow: 0 2px 8px var(--shadow-color); }
-.conversation-page .composer textarea { min-height: 54px; padding: 5px 4px; font-size: 14px; }
+.conversation-page .composer :deep(textarea) { min-height: 54px; padding: 5px 4px; font-size: 14px; }
 .conversation-composer-tools { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
 .conversation-agent { display: inline-flex; align-items: center; gap: 6px; min-width: 0; max-width: calc(100% - 48px); padding: 0 6px; border-radius: var(--radius); color: var(--muted-foreground); }
 .conversation-agent:not(.locked):has(select:enabled):hover { background: var(--muted); }
@@ -521,7 +523,7 @@ onUnmounted(() => {
 .conversation-welcome img { width: 43px; height: 43px; }
 .conversation-welcome h1 { margin: 0; font-size: 27px; font-weight: 550; letter-spacing: -.6px; }
 .conversation-start .thread-footer { width: min(738px, 100%); padding-top: 0; padding-bottom: 0; }
-.conversation-start .composer textarea { min-height: 69px; }
+.conversation-start .composer :deep(textarea) { min-height: 69px; }
 .conversation-notices { flex-shrink: 0; width: min(800px, 100%); padding: 0 24px 12px; margin: 0 auto; font-size: 12px; }
 .conversation-notices p { margin: 0 0 8px; }
 .conversation-start .conversation-notices { width: min(738px, 100%); }

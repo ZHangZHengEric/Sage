@@ -662,6 +662,21 @@ class ApplicationAssembler:
         )
         runtime_composition_hash: str | None = None
 
+        def register_dynamic_configuration(descriptor):
+            if descriptor.agent_id in self._agent_configurations:
+                return
+            root = self._agent_configurations[selected_agent]
+            self._agent_configurations[descriptor.agent_id] = {
+                **root,
+                "scope_agent_id": f"{resolved.package_id}:{descriptor.agent_id}",
+                "execution_agent_id": descriptor.agent_id,
+                "definition": {**root["definition"],
+                               "name": descriptor.name,
+                               "instructions": descriptor.instructions,
+                               "tools": list(descriptor.tools),
+                               "skills": list(descriptor.skills)},
+            }
+
         async def make_loop(
             run_id,
             selected_catalog,
@@ -690,16 +705,7 @@ class ApplicationAssembler:
                 run_models = dict(models_by_agent)
                 if entry_descriptor.agent_id not in run_models:
                     run_models[entry_descriptor.agent_id] = run_models[selected_agent]
-                    self._agent_configurations[entry_descriptor.agent_id] = {
-                        **self._agent_configurations[selected_agent],
-                        "scope_agent_id": f"{resolved.package_id}:{entry_descriptor.agent_id}",
-                        "execution_agent_id": entry_descriptor.agent_id,
-                        "definition": {**self._agent_configurations[selected_agent]["definition"],
-                                       "name": entry_descriptor.name,
-                                       "instructions": entry_descriptor.instructions,
-                                       "tools": list(entry_descriptor.tools),
-                                       "skills": list(entry_descriptor.skills)},
-                    }
+                    register_dynamic_configuration(entry_descriptor)
                 model_selection = _selection(runtime_config, "model.provider")
                 if model_selection is not None and (
                         self._selection_scope(model_selection, ExtensionScope.AGENT) == ExtensionScope.RUN
@@ -994,6 +1000,7 @@ class ApplicationAssembler:
                     )
 
                 async def compose_unbound_child(descriptor, child_run_id, child_context):
+                    register_dynamic_configuration(descriptor)
                     command = await driver_runtime.session_store.get_start_command(child_run_id)
                     with _bind_execution_environment(RunExecutionEnvironment(child_run_id, command, child_context)):
                         catalog, executor, tool_scope = await self._create_tools(
@@ -1012,6 +1019,7 @@ class ApplicationAssembler:
 
                 async def compose_bound_child(descriptor, child_run_id, child_context):
                     assert self.state.execution_binding_provider is not None
+                    register_dynamic_configuration(descriptor)
                     command = await driver_runtime.session_store.get_start_command(
                         child_run_id
                     )

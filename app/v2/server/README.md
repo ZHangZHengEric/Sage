@@ -86,6 +86,10 @@ python -m scripts.v2.migrate_agent_table --env app/v2/server/.env --backup /secu
 
 普通智能体可以覆盖前八项。优先级为：智能体显式配置 → Server 已生效配置 → 插件默认值。同一实现合并参数；不同实现替换整项选择。智能体选择“跟随默认”不会写入覆盖。Server 保存后尚未重启的配置不会成为智能体默认值。Studio 独立 Package 使用 `ServerPackagePolicy` 的额外授权，不扩大普通智能体的权限。
 
+普通智能体设置的「运行模式」支持 Simple、Fibre、Team。Fibre 和 Team 可以选择当前用户已有的智能体作为成员；Fibre 还可在运行中创建临时专家。成员不能重复、包含自身或形成循环依赖。成员保留各自的模型、工具、技能和执行权限上限。
+
+`POST /api/agents` 和 `PUT /api/agents/{agent_id}` 接收 `agent_mode`（`simple` / `fibre` / `team`）及 `available_sub_agent_ids`（成员 ID 列表）；详情和列表返回相同字段。新建默认为 Simple、无成员；更新省略这两个字段时保留原配置，传空成员列表则清空。配置直接保存在现有 Package 的 `mode`、`subagents` 和依赖包中。新运行读取成员的最新配置，并通过既有 Run 配置快照冻结整个团队，排队及恢复不会重新读取成员业务配置；实时权限收紧仍然有效。
+
 本地 BM25 记忆使用 `sage.memory.filesystem-bm25`，必填 `root`，页面默认放在 `{data_root}/runtime/plugins/memory.provider`。这只启用存储提供者；自动召回、写入和 `search_memory` 授权仍属于 Agent 行为，需要单独配置。
 
 ## 完整 Agent 包平台与 Studio

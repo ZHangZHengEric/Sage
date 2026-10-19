@@ -1,3 +1,14 @@
+---
+layout: default
+title: Agent Manifest 配置参考
+parent: 架构
+nav_order: 14
+lang: zh
+ref: v2-detail-sagents-manifest-reference
+---
+
+{% include lang_switcher.html %}
+
 # SAgents v2 sage.yaml 配置参考
 
 [接入开发指南](sagents-host-development.md) · [Runtime 配置参考](sagents-runtime-reference.md) · [代码阅读指南](code-reading-guide.md)
@@ -282,7 +293,7 @@ runtime:
       config: {minimum_characters: 3}
 ```
 
-在宿主选择这份 runtime 且已注册示例插件时，selection.config 的 3.5 优先于插件声明中的 4.0。普通 load_agent 不会因为看到这段 runtime 就自动改变 App。自定义插件参数同样经过 schema/config_model 校验，资源同样由作用域管理；插件实现保持独立。
+在宿主选择这份 runtime 且已注册示例插件时，selection.config 的 3 优先于插件声明中的 4。普通 load_agent 不会因为看到这段 runtime 就自动改变 App。自定义插件参数同样经过 schema/config_model 校验，资源同样由作用域管理；插件实现保持独立。
 
 ## interfaces
 

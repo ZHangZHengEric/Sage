@@ -31,7 +31,7 @@ def bundle_agent_definitions(bundle):
     for alias, child in bundle.dependencies.items():
         child_root = child.manifest.entrypoint.agent
         for name, definition in bundle_agent_definitions(child).items():
-            if name == child.manifest.metadata.id:
+            if name == child.manifest.metadata.id and name != child_root:
                 continue
             target = alias if name == child_root else f"{alias}.{name}"
             if target in result:

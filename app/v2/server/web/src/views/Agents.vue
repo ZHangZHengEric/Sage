@@ -25,6 +25,8 @@ onUnmounted(clearSavedMessage)
 const loading = ref(true)
 
 const agents = ref([])
+const memberAgents = computed(() => agents.value.filter(item => item.id !== editing.value &&
+  (selectedAgent.value?._owner ? item._owner?.user_id === selectedAgent.value._owner.user_id : !isForeign(item))))
 const models = ref([])
 const skills = ref([])
 const officialTools = ref([])
@@ -52,6 +54,7 @@ function emptyForm() {
     description: '',
     instructions: 'Be helpful, concise, and explicit about uncertainty.',
     model_id: '', fast_model_id: '',
+    agent_mode: 'simple', available_sub_agent_ids: [],
     budgets: {},
     memory: { recall: true, auto_write: true, scope: 'agent' },
     plugins: {},
@@ -166,6 +169,7 @@ async function openAgent(item, readonly = true) {
       budgets: structuredClone(detail.package?.manifest?.agents?.[item.id]?.budgets || {}),
       memory: structuredClone(detail.package?.manifest?.agents?.[item.id]?.memory || { recall: false, auto_write: false, scope: 'agent' }),
       model_id: detail.model_id || '', fast_model_id: detail.fast_model_id || '', tools: [...(detail.tools || [])],
+      agent_mode: detail.agent_mode || 'simple', available_sub_agent_ids: [...(detail.available_sub_agent_ids || [])],
       external_tools: [...(detail.external_tools || [])],
       tool_approval: detail.tool_approval ? structuredClone(detail.tool_approval) : null,
       execution_policy: { ...(detail.execution_policy || emptyForm().execution_policy) },
@@ -250,7 +254,7 @@ onMounted(load)
     <AgentEditor v-else v-model:form="form" v-model:selected-skills="selectedSkills"
       :agent-id="editing" :readonly="viewOnly" :can-edit="!isForeign(selectedAgent)" :busy="pending"
       :error="error" :message="savedMessage" :models="models" :tools="officialTools.filter(tool => tool.source !== 'mcp')" :approval-tools="officialTools"
-      :skills="skills" :external-tools="externalTools" :external-tool-groups="externalToolGroups" :saved-plugins="savedPlugins" :plugin-catalog="pluginCatalog"
+      :skills="skills" :member-agents="memberAgents" :external-tools="externalTools" :external-tool-groups="externalToolGroups" :saved-plugins="savedPlugins" :plugin-catalog="pluginCatalog"
       :resources-loading="resourcesLoading" :resources-error="resourcesError" :approval-loading="approvalLoading" :approval-error="approvalError"
       :saved-form="savedForm" :saved-skills="savedSkills" :budget-defaults="budgetDefaults" :can-delete="Boolean(editing && !isForeign(selectedAgent))"
       @save="save" @edit="enableEdit" @close="closeEditor" @reload-resources="retryResources" @load-approval-tools="loadApprovalTools" @delete="requestDelete(selectedAgent)" />

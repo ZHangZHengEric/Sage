@@ -46,7 +46,8 @@ def server_v2_run_manifest(
             "description": agent.description
             if agent is not None
             else source.description,
-            "skills": tuple(skills),
+            "skills": tuple(name for name in skills if name in source.skills)
+            if agent is not None and agent.package.dependencies else tuple(skills),
             "tools": tuple(selected_tools),
             "tool_approval": agent.tool_approval
             if agent is not None

@@ -122,16 +122,37 @@ def server_registrations(host):
 
     async def policy(context, deps):
         from app.v2.server.packages.tool_policy import server_tool_policy
-        from app.v2.server.runtime.policy import frozen_execution, live_execution_policy
-        _, command, frozen, user = await run_inputs(host, context, deps)
+        from app.v2.server.runtime.policy import (
+            EXECUTION_METADATA_KEY, ExecutionPolicy, frozen_execution,
+            intersect_policies, live_execution_policy,
+        )
+        run, command, frozen, user = await run_inputs(host, context, deps)
         if "server_v2.execution" not in command.config.metadata:
             return server_tool_policy(host.agent_management)
         key_id, admitted = frozen_execution(command, catalog_agent_id=frozen.agent.id)
         async def current():
             return await live_execution_policy(command, users=host.users, keys=host.credentials.keys,
                 catalog=host.catalog_store, settings=host.settings, user_id=user, catalog_agent_id=frozen.agent.id)
+        member_grants = command.config.metadata[EXECUTION_METADATA_KEY].get("agents", {})
+
+        async def member_policy(run_id):
+            if run_id != run.run_id:
+                raise PermissionError("tool policy cannot read a different Run")
+            selected = run.command
+            store = deps.require("session.store")
+            # Dynamically spawned Fibre experts inherit their parent's ceiling.
+            while selected.agent_id not in member_grants and selected.parent_run_id:
+                selected = await store.get_start_command(selected.parent_run_id)
+            grant = member_grants.get(selected.agent_id)
+            if grant is None:
+                return None
+            catalog = await host.catalog_store.get(user)
+            member = next((item for item in catalog.agents if item.id == grant["agent_id"]), None)
+            return intersect_policies(ExecutionPolicy.model_validate(grant["policy"]), member.execution_policy) if member else None
+
         return server_tool_policy(host.agent_management, execution_policy=admitted,
-                                  current_policy=current, machine_invocation=key_id is not None)
+                                  current_policy=current, run_policy=member_policy if member_grants else None,
+                                  machine_invocation=key_id is not None)
 
     async def self_configuration(context, deps):
         import json
