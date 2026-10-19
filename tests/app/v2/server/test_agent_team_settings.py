@@ -1,7 +1,7 @@
 import pytest
 
 from tests.app.v2.server.conftest import register_and_login
-from tests.app.v2.server.test_catalog_packages import store
+from tests.app.v2.server.test_catalog_packages import store as store
 
 
 def identity(client, name="alice"):
