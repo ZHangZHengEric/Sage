@@ -48,13 +48,17 @@ async function list(path, all = true) {
     const page = await read(path, owner)
     const rows = Array.isArray(page) ? page : page.items
     for (const item of rows) {
-      // System skills appear once; admin's visible skill list also includes
-      // other owners, who are read in their own scope below.
-      if (path === '/api/skills' && item.owner_user_id !== owner.user_id) continue
       items.push({ ...item, _owner: owner })
     }
   }
   return items
+}
+
+async function catalog(path, adminPath, all = true) {
+  if (!all || !isAdmin()) return request(path)
+  return (await request(adminPath)).map(item => ({
+    ...item, _owner: { user_id: item.user_id, username: item.username },
+  }))
 }
 
 export const api = {
@@ -97,7 +101,7 @@ export const api = {
     }),
   session: () => request('/api/auth/session'),
   logout: () => request('/api/auth/logout', { method: 'POST' }),
-  listModels: (all = true) => list('/api/models', all),
+  listModels: (all = true) => catalog('/api/models', '/api/admin/models', all),
   getModel: (id, owner) => read(`/api/models/${encodeURIComponent(id)}`, owner),
   probeModel: (body) => request('/api/models/probe', { method: 'POST', body: JSON.stringify(body) }),
   saveModel: (body) =>
@@ -105,20 +109,25 @@ export const api = {
   deleteModel: (id) => request(`/api/models/${id}`, { method: 'DELETE' }),
   listTools: () => request('/api/tools'),
   listAgents: (all = true) => list('/api/agents', all),
+  agentSummaries: async (all = true) => all && isAdmin()
+    ? (await request('/api/admin/agents')).map(item => ({ ...item, _owner: { user_id: item.user_id, username: item.username } }))
+    : request('/api/agents/summary'),
   getAgent: (id, owner) => read(`/api/agents/${id}`, owner),
+  agentEditorResources: (owner, includePlugins = true) => read(`/api/agents/editor-resources?include_plugins=${includePlugins}`, owner),
+  agentApprovalTools: owner => read('/api/tools/options', owner),
   createAgent: (body) =>
     request('/api/agents', { method: 'POST', body: JSON.stringify(body) }),
   updateAgent: (id, body) =>
     request(`/api/agents/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
   deleteAgent: (id) => request(`/api/agents/${id}`, { method: 'DELETE' }),
-  listMcp: (all = true) => list('/api/mcp', all),
+  listMcp: (all = true) => catalog('/api/mcp', '/api/admin/mcp', all),
   createMcp: (body) =>
     request('/api/mcp', { method: 'POST', body: JSON.stringify(body) }),
   updateMcp: (name, body) =>
     request(`/api/mcp/${name}`, { method: 'PUT', body: JSON.stringify(body) }),
   deleteMcp: (name) => request(`/api/mcp/${name}`, { method: 'DELETE' }),
   refreshMcp: (name) => request(`/api/mcp/${name}/refresh`, { method: 'POST' }),
-  listA2aAgents: (all = true) => list('/api/a2a-agents', all),
+  listA2aAgents: (all = true) => catalog('/api/a2a-agents', '/api/admin/a2a-agents', all),
   createA2aAgent: (body) =>
     request('/api/a2a-agents', { method: 'POST', body: JSON.stringify(body) }),
   updateA2aAgent: (name, body) =>
@@ -130,7 +139,7 @@ export const api = {
     request(`/api/a2a-agents/${encodeURIComponent(name)}`, { method: 'DELETE' }),
   refreshA2aAgent: (name) =>
     request(`/api/a2a-agents/${encodeURIComponent(name)}/refresh`, { method: 'POST' }),
-  listSkills: (all = true) => list('/api/skills', all),
+  listSkills: (all = true) => catalog('/api/skills', '/api/admin/skills', all),
   publishSkill: (body) =>
     request('/api/skills', { method: 'POST', body: JSON.stringify(body) }),
   uploadSkills: (files) => {

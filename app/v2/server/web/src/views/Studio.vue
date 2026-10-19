@@ -136,14 +136,14 @@ onUnmounted(() => { disposed = true; statusRevision++; clearInterval(timer) })
         <details><summary>运行详情</summary><pre aria-label="运行结果">{{ JSON.stringify(status, null, 2) }}</pre></details>
       </template>
     </fieldset>
-    <FormDrawer v-model="definitionOpen" title="定义与版本" :busy="busy">
+    <FormDrawer v-model="definitionOpen" title="定义与版本" :busy="busy" wide>
       <PackageEditor v-if="foreignBundle" :model-value="editor" :schema="schema" disabled />
       <fieldset v-else :disabled="busy">
       <p v-if="error" class="error" role="alert">{{ error }}</p>
       <p v-if="message" role="status">{{ message }}</p>
       <label>导入现有 Agent <select v-model="importId"><option value="">空白模板</option><option v-for="a in agents" :key="a.id" :value="a.id">{{ a.name }}</option></select></label>
       <button @click="importDraft">导入为草稿</button>
-      <PackageEditor v-model="editor" :schema="schema" :resources="resources" :disabled="busy" />
+      <PackageEditor v-model="editor" :saved-value="savedText" :schema="schema" :resources="resources" :disabled="busy" />
       <button @click="action(async () => { const r = await api.validatePackage(JSON.parse(editor)); message = r.valid ? (r.readiness?.ready ? '配置验证通过，资源已就绪' : '配置验证通过') : '配置验证未通过' })">验证与资源检查</button>
       <button @click="save">保存版本</button>
       <details><summary>宿主能力与完整 Schema</summary><pre>{{ JSON.stringify(schema, null, 2) }}</pre></details>
