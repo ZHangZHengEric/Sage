@@ -23,6 +23,7 @@ _LOGGER = get_logger(__name__)
 
 def register_routers(app: FastAPI, *, jaeger: bool = False, trace_console: bool = False) -> None:
     app.include_router(health.router)
+    app.include_router(observability.performance_router)
     app.include_router(auth.router)
     app.include_router(models.router)
     app.include_router(agents.router)

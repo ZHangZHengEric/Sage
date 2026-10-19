@@ -270,9 +270,13 @@ class RunService:
         already running under a drive that is someone else's.
         """
 
+        resume_started_at = utc_now()
         run = await self.application.runtime.get_run(run_id)
         if run.state != RunState.RESUMING or self.execution.driving(run_id):
             return
+        LOGGER.info("server.run.performance.resuming", "恢复运行性能计时起点",
+            session_id=session_id, run_id=run_id,
+            attributes={"started_at": resume_started_at.isoformat()})
         loaded = await self.application.agent_for_run(run_id, context)
         execution = await self.application.entrypoint().continue_run(run_id, context, agent=loaded)
         task = asyncio.create_task(
@@ -305,6 +309,9 @@ class RunService:
 
         from app.v2.server.storage.workspaces import workspace_user
         from sagents.v2.contracts.principals import MemoryIdentity
+        # The per-request SDK entry boundary precedes load/update/admission;
+        # process startup and its one-time initialization happen elsewhere.
+        request_started_at = utc_now()
         context = context.model_copy(update={"memory_identity": MemoryIdentity(
             user_id=workspace_user(command, user_id), workspace_id=command.agent_id,
         )})
@@ -325,6 +332,9 @@ class RunService:
                     agent=loaded,
                 )
             run_id = stream.handle.run_id
+            LOGGER.info("server.run.performance.accepted", "运行性能计时起点",
+                session_id=session_id, run_id=run_id,
+                attributes={"agent_id": command.agent_id, "started_at": request_started_at.isoformat()})
             if (
                 self.execution.driving(run_id)
                 or stream.handle.state in TERMINAL_RUN_STATES
@@ -348,6 +358,9 @@ class RunService:
         run_id = stream.handle.run_id
         try:
             snapshot = await stream.wait()
+            LOGGER.info("server.run.performance.finished", "运行性能计时结束",
+                session_id=session_id, run_id=run_id,
+                attributes={"run_state": snapshot.state.value})
             if on_finished is not None:
                 await on_finished(snapshot)
         except Exception as exc:
@@ -368,7 +381,10 @@ class RunService:
         self, execution, *, run_id: str, session_id: str, label: str
     ) -> None:
         try:
-            await execution
+            snapshot = await execution
+            LOGGER.info("server.run.performance.finished", "运行性能计时结束",
+                session_id=session_id, run_id=run_id,
+                attributes={"run_state": snapshot.state.value})
         except Exception as exc:
             LOGGER.exception(
                 "run.background_resume.failed",
