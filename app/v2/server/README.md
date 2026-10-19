@@ -269,3 +269,9 @@ Server API 用 `external_tools` 配置外部工具，页面与内置 `tools` 分
 ## 标准运行控制边界
 
 审批、问答、取消、已有暂停任务的继续和重启恢复均进入 Sage 标准 App/Runtime。产品后台任务只观察 SDK 执行并处理完成回调，不实现 Agent loop。当前 Server 未开放独立手动暂停或 Session 候选提交发布的 HTTP 接口；Goal/Plan 提交使用官方工具。各入口及验证边界见[标准控制接口核对](../../../docs/zh/architecture/sagents-v2-host-controls.md)。
+
+### 工作区路径约定
+
+Linux Server 的标准 `execution.binding` 显式使用 `workspace_alias: /workspace`，文件工具、Shell 和前端检查器共用沙箱内路径 `/workspace`；真实数据仍保留在 `tenants/<租户>/<Agent>/workspace`。Desktop 和 SDK 默认使用真实路径。执行环境发布 `SAGE_WORKSPACE_ROOT`，检查器以此定位 `.sage-tests`，不要求 Agent 建软链接或修复环境。
+
+Web 工作目录树、单文件和目录 ZIP 下载按已授权的租户及 Agent 解析；API 接受相对路径与 `/workspace/...`，返回树节点使用相对路径，拒绝 `..`、其他绝对路径和软链接。Shell 默认启用 `pipefail`，检查命令经 `tail` 或 `tee` 输出时仍保留失败退出码。映射模式随 Run 配置冻结，旧真实路径 Run 恢复时不会静默切换模式；需新建 Run，工作区文件无需迁移。检查器用法见 [前端测试环境](../../../deploy/images/frontend-test/README.md)。
