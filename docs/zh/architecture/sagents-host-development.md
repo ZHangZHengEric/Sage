@@ -161,3 +161,40 @@ Desktop、Server 将产品差异放在对应能力插件中，Agent 执行由 SD
 
 SDK 测试位于 `tests/sagents/v2`，应用测试位于 `tests/app/v2`。原生隔离需要平台能力
 及进程计量权限；冻结版验证结果必须来自当前源码。Yiii 的迁移和应用验收由 Yiii 自身负责。
+
+## 设置页查询内置工具元数据
+
+无需创建 App 或 Run，使用公开接口：
+
+```python
+from sagents.v2.tool import builtin_tool_definitions
+
+catalog = [
+    {"name": value.name, "description": value.description,
+     "inputSchema": value.input_schema}
+    for value in builtin_tool_definitions(agent_mode="all", language="zh")
+]
+```
+
+返回按名称排序、元数据已深拷贝的 `tuple[ToolDefinition, ...]`，与执行提供者复用同一份声明。查询不创建模型、coordinator、Driver、沙箱或连接，不需要注册执行组件或反射私有类。`language=None` 保留工具的原始文本；传入语言则使用标准本地化投影。`agent_mode` 支持 SDK 的 `AgentMode` 枚举或下表字符串，未知值明确报 `ValueError`，不回退到其他模式。
+
+| agent_mode | 目录内容 |
+| --- | --- |
+| `simple`、`flow` | 官方基础工具和 `load_skill` |
+| `team` | 基础、Skill 和 `sys_team_delegate_task` |
+| `fibre` | 基础、Skill、`sys_spawn_agent` 和 `sys_delegate_task` |
+| `all` | 上述模式的并集，无重复名称 |
+
+静态目录用于设置与能力说明，不代表特定 Run 已获授权。宿主仍按自身 Agent 授权事实展示可用角色，运行时继续执行原有 Agent、调用边界和工具授权；普通委派叶子不会因目录中列出 Team/Fibre 工具而获得委派能力。MCP、自定义工具及可选宿主管理能力的元数据由对应提供者负责。`official_tool_definitions()` 继续保持仅返回基础工具的原有含义。
+
+Yiii 的 `/api/mcp/tools?agent_mode=all` 可用此结果替换基础工具加 Skill/Team 私有反射得到的列表，再合并原 MCP 元数据；保留现有 `agents` 授权展示筛选，不按静态目录重新授予权限。SDK 模式名称为 `simple`，产品的 Single 等名称应由宿主显式映射。
+
+可直接运行 `python -m examples.sagents_v2_tool_catalog --agent-mode all --language zh`。验证入口为 `tests/sagents/v2/test_builtin_tool_metadata.py`，涵盖执行提供者 schema 一致性、标准 Simple/Team/Fibre Run 授权、元数据副本隔离和导入/查询无资源分配。
+
+本轮验证：Sage 元数据、官方工具、模式、Skill 与导入边界集合 **175 passed**；Yiii 现有 `tool_list_route` 目录/授权展示集合 **8 passed**。只读比较 `/api/mcp/tools?agent_mode=all` 返回中的 **15 条**内置工具（包含 Team 和 Skill），名称、描述、input schema 与新公开接口一致，原 Agent 授权关联保留。Yiii 源码未修改，因此仍需 Yiii 将调用切换到公开接口后复测，不能据此宣称其私有导入已消除。
+
+## 审批、暂停、取消与提交
+
+状态控制使用公开 `app.runtime` 的 `reply_interaction`、`pause_run`、`cancel_run`、`resume_run` 命令。普通暂停先接受 `ResumeRun`，交互暂停先接受 `ReplyInteraction`，再按原 Run 加载 Agent 并继续。候选会话使用 `app.entrypoint()` 的 `propose_session_commit`、`publish_session_commit`、`reject_session_commit`，以保留原版本和发布后的记忆处理。
+
+已在执行的重复 `continue_run` 只观察现有执行，终态返回现有结果。各宿主实际开放的控制、权限与生命周期边界见[Desktop / Server 控制接口核对](sagents-v2-host-controls.md)。

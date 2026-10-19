@@ -1,5 +1,7 @@
 # withling 验收记录（2026-10-16）
 
+本页是当时旧沙箱装配路径的历史记录。当前 `acceptance.py` 已迁到标准 SDK；此记录不能代替迁移后镜像的重新验收。
+
 预装已实现，**完整 Chromium 验收未通过**。不能将本环境称为可用的浏览器端到端测试环境；目前可用的是离线 jsdom 交互测试。
 
 仅在 `withling` 上构建 Sage 独立候选镜像 `sage-server:frontend-validation-20261016`，调用 Server v2 的 `install_sandbox`、`provision_workspace` 和签名 grant 执行验收。不挂载生产数据，不替换正在运行的服务，不修改 `/srv/Sage` checkout，不修改 Wishseen 代码或部署。容器外层 `--network none`，沙箱 `network=none`，外层其余隔离参数沿用 Sage v2 Compose。

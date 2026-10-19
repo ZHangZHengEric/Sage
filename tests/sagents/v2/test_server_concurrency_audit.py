@@ -6,7 +6,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from sagents.v2._concurrency import bounded_to_thread
+from sagents.v2.concurrency import bounded_to_thread
 from sagents.v2.contracts.common import utc_now
 from sagents.v2.contracts.errors import SageV2Error
 from sagents.v2.contracts.jobs import JobCompletion, JobSpec, JobState

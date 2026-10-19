@@ -230,3 +230,56 @@ SDK integration tests live in `tests/sagents/v2`; host tests live under
 `tests/app/v2`. Native isolation tests need platform sandbox support and process
 accounting permissions. Frozen-build evidence must be produced from the current
 sources. Yiii migration and its own acceptance tests are maintained by Yiii.
+
+## Settings metadata without execution resources
+
+```python
+from sagents.v2.tool import builtin_tool_definitions
+
+catalog = [
+    {"name": value.name, "description": value.description,
+     "inputSchema": value.input_schema}
+    for value in builtin_tool_definitions(agent_mode="all", language="en")
+]
+```
+
+The synchronous public query returns detached, name-sorted `ToolDefinition`
+values from the actual execution declarations. It creates no App, Run, model,
+coordinator, Driver, sandbox or connection. Hosts do not import private method
+owners or reflect on implementation classes. Omit `language` for canonical
+metadata, or select the standard localized projection.
+
+`agent_mode` accepts the SDK `AgentMode` enum or `simple`, `flow`, `team`,
+`fibre`, `all`. Unknown values raise `ValueError` without a fallback. Every mode
+includes official base tools and `load_skill`. Team adds
+`sys_team_delegate_task`; Fibre adds `sys_spawn_agent` and `sys_delegate_task`.
+`all` is their union without duplicates. `official_tool_definitions()` retains
+its base-only contract. Product mode names such as Single need an explicit host
+mapping to SDK mode names.
+
+Static metadata is not a Run's authorization. Preserve the host's existing Agent
+grants when displaying tool/Agent associations; viewing the catalog does not
+enable tools or grant delegation to ordinary leaves. MCP, custom tools and
+optional host management tools retain their own provider metadata. For Yiii's
+`/api/mcp/tools?agent_mode=all`, replace private reflection with this query, then
+retain the existing MCP merge and Agent authorization display filtering.
+
+Run `python -m examples.sagents_v2_tool_catalog --agent-mode all` for JSON output.
+`tests/sagents/v2/test_builtin_tool_metadata.py` verifies execution-provider
+schema parity, actual standard Run grants, detached metadata and resource-free
+import/query behavior.
+
+Validation: **175 passed** across metadata, official tools, modes, Skill and
+import boundaries; Yiii's existing settings tool-route suite **8 passed**. A
+read-only comparison matched 15 current built-in settings rows, including Team
+and Skill, on name, description and input schema while retaining their Agent
+associations. Yiii source was not modified: the host still needs to switch its
+call site and rerun acceptance before claiming its private imports are gone.
+
+## Approval, pause, cancellation and publication
+
+Use explicit public `app.runtime` commands: `reply_interaction`, `pause_run`, `cancel_run`, and `resume_run`. Accept `ResumeRun` for a plain suspension or `ReplyInteraction` for an interaction before restoring the original Agent and calling `continue_run`. A duplicate continuation observes existing execution; a terminal Run returns its existing result.
+
+Use `app.entrypoint().propose_session_commit`, `publish_session_commit`, and `reject_session_commit` for snapshot publication. These select the source Run's admitted Agent and retain post-publication memory processing. Server currently has no standalone manual-pause or Session-commit HTTP endpoint; Desktop exposes both. SDK support does not imply every host exposes an HTTP/UI control.
+
+See the [Desktop / Server audit](../../zh/architecture/sagents-v2-host-controls.md) for routes, ownership and validation boundaries.

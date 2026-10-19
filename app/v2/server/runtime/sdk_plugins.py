@@ -207,6 +207,17 @@ def run_selections(*, owner, composition=None, mcp=(), a2a=()):
     return choices
 
 
+# Product defaults expressed as standard execution.binding policy parameters.
+# An explicit process field in plugin_overrides replaces its product default.
+SERVER_PROCESS_DEFAULTS = {
+    "enabled": True, "allow_shell": True,
+    "allowed_executables": ["bash", "sh", "python", "python3", "rg", "git", "node", "sage-frontend-test"],
+    "allowed_env_names": ["PATH", "PYTHONPATH", "NODE_PATH", "PLAYWRIGHT_BROWSERS_PATH",
+        "PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD", "FONTCONFIG_FILE", "npm_config_offline", "npm_config_update_notifier"],
+    "max_wall_time_seconds": 300, "max_output_bytes": 4 * 1024**2,
+}
+
+
 def execution_selection(host, *, owner, agent_id, command, sandbox, settings=None):
     from app.v2.server.runtime.official import agent_network_policy
     from app.v2.server.storage.workspaces import workspace_user
@@ -214,8 +225,10 @@ def execution_selection(host, *, owner, agent_id, command, sandbox, settings=Non
     from sagents.v2.runtime.execution.sandbox import FileOperation
     settings = settings or host.settings
     raw = dict(settings.plugin_overrides.get("execution.binding", {}).get("config", {}))
+    configured_policy = raw.pop("policy", {})
     policy = LocalExecutionPolicy.model_validate({
-        **raw.pop("policy", {}),
+        **configured_policy,
+        "process": {**SERVER_PROCESS_DEFAULTS, **configured_policy.get("process", {})},
         "network": agent_network_policy(sandbox, settings).model_dump(mode="json"),
     })
     if command is not None and command.invocation_mode == "plan":
@@ -229,6 +242,9 @@ def execution_selection(host, *, owner, agent_id, command, sandbox, settings=Non
         "linux_execution_uid": settings.linux_execution_uid,
         "linux_execution_gid": settings.linux_execution_gid,
         **raw,
+        # Product contract: Linux tenants always see /workspace. Desktop uses
+        # the same SDK binding without this explicit mount alias.
+        "workspace_alias": "/workspace",
     })
 
 

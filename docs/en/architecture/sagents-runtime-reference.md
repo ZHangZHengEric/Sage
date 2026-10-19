@@ -65,7 +65,7 @@ your-model, window sizes and reasoning options are examples requiring real provi
 
 ### Updates and revisions
 
-Builder.with_models(...) configures before build. Update a running App through:
+`build(models=...)` configures the model catalog before build. Update a running App through:
 
 ```python
 await app.update_models("./models.yaml")  # 原子替换整个目录
@@ -195,7 +195,7 @@ Distinguish these cases:
 | `build(runtime={})` / `build(runtime=RuntimeConfig())` | RuntimeConfig field defaults and assembler fallbacks, without layering the full Desktop profile |
 | build(runtime=config) | App uses this runtime; subsequently loaded Packages cannot override it |
 
-with_defaults(session_root=...) changes the runtime root. Shared defaults select components without reading Desktop API keys, catalogs, databases or personal settings.
+Use `default_runtime(session_root)` and pass its result to `build(runtime=..., models=...)` to choose the runtime root. Shared defaults select components without reading Desktop API keys, catalogs, databases or personal settings.
 
 For small overrides, copy default_runtime() before editing. A two-component explicit config does not automatically inherit the Desktop profile:
 
@@ -404,14 +404,14 @@ See independent [plugins.py](../../../examples/sagents_v2_host/plugins.py). Regi
 
 build fixes registry/configuration and Agent loading performs composition/validation. Unknown options, missing dependencies, unavailable plugins, incompatible scope/API and unsupported guarantees must fail there. Accepted parameters alone do not prove activation. Plugin declarations do not install dependencies, and YAML does not perform arbitrary Python imports.
 
-Hosts normally close injected resources. Transfer ownership explicitly with with_owned_resources. App-owned plugins follow scoped startup, rollback and shutdown. Close App with try/finally, reuse it across requests and do not manually close shared providers.
+Register host-created objects through factories with `ownership="borrowed"`; the host closes these objects. The default `ownership="owned"` transfers resource cleanup to the plugin lifecycle. App-owned plugins follow scoped startup, rollback and shutdown. Close App with try/finally, reuse it across requests and do not manually close App-owned providers.
 
 <a id="排查配置与恢复问题"></a>
 
 ## Configuration and recovery diagnosis
 
 1. Inspect agent.resolved_plan and agent.resource_readiness; app.resolved_plan is only the initial process view.
-2. Full HostAgentExecution plans appear in Run diagnostics, not speculative loaded-handle reports.
+2. Query `app.execution_configuration(run_id, context)` and `app.execution_diagnostics(run_id, context)` for the admitted configuration and actual binding.
 3. Correlate session_id, run_id and resolved_spec_hash; recovery must retain the admitted revision.
 4. update_agent does not replace shared storage/scheduling. Rebuild App for runtime changes with an explicit old-Run migration/recovery policy.
 5. Retain agent-revisions and Sessions. Local archived recovery requires matching runtime, not the latest settings.
@@ -1228,7 +1228,7 @@ Flow nodes keep independent checkpoints, in-process waits and explicit node boun
 
 Scheduler preserve_runs_on_shutdown defaults to true. Clean shutdown retains unfinished Runs/checkpoints and returns leases for takeover after restart. false restores fail-on-shutdown behavior. Filesystem Scheduler holds an exclusive writer lock; a new owner reclaims old leases immediately. A crash between checkpoint and delayed requeue recovers from the recorded wake time without waiting for the 48-hour lease.
 
-Desktop installs the host recovery driver before starting Workers, without needing new conversations or manual continuation. Existing local workspaces can restore sandbox references under the same owner/policy without replaying tools. Custom hosts can use with_deferred_execution_start(), install the driver and call dispatcher.start(). Cross-process recovery requires durable SessionStore.
+Desktop and Server use standard App recovery of archived Agent revisions and admitted execution configuration. Set the top-level runtime field `start_workers: false` when product startup must finish before workers start, then use the public dispatcher `start()` method. No host recovery driver is installed. Existing local workspaces restore leases under their admitted owner and policy without replaying tools. Cross-process recovery requires a durable SessionStore.
 
 Unknown writes cannot be resent as ordinary network retries. Authentication, invalid resource config, disk quota and uncertain effects require their own resolution. Recovery does not delete artifacts, raise explicit limits or claim an unverified goal complete.
 

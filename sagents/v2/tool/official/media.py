@@ -9,7 +9,7 @@ from urllib.parse import urlparse
 
 from PIL import Image, ImageOps
 
-from sagents.v2._concurrency import bounded_to_thread
+from sagents.v2.concurrency import bounded_to_thread
 from sagents.v2.contracts.common import new_id
 from sagents.v2.contracts.errors import SageV2Error
 from sagents.v2.contracts.items import JsonBlock

@@ -161,7 +161,7 @@ def message_digest(
 
 async def message_digests_async(messages, *, include_source_metadata: bool = False):
     from copy import deepcopy
-    from sagents.v2._concurrency import bounded_to_thread
+    from sagents.v2.concurrency import bounded_to_thread
 
     def prepare():
         snapshot = deepcopy(messages)

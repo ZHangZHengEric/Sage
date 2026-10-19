@@ -38,8 +38,8 @@ export const budgetFields = [
   { key: 'total_tokens', label: '总 Token 预算', unit: 'Token', min: 1, help: '限制整次运行累计消耗的输入与输出 Token 总量。留空继承全局总量预算；全局也未设置时，不额外设置总 Token 上限。模型容量、单次输出预算等限制仍然有效。' },
 ]
 
-// Context defaults: AgentCompositionFactory.create_context; stage defaults:
-// AgentLoopEngine and the flow driver. Inherited data is presentation-only.
+// Values mirror Sage runtime/Agent budget defaults. Inherited data is
+// presentation-only; execution policy is resolved by the standard SDK.
 export function agentBudgetPlaceholder(key, form = {}, models = [], defaults = {}) {
   const model = models.find(item => item.id === form.model_id) || (!form.model_id && models.find(item => item.is_default)) || {}
   const global = defaults.budgets || {}

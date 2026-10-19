@@ -276,3 +276,32 @@ execute ancestor Agents or create replacement Runs. Dependency handles close
 with the child without cancelling independent ancestor handles.
 
 See the [tree recovery contract and example](../../docs/zh/architecture/sagents-v2-run-tree-recovery.md).
+
+## Settings tool metadata without a Run
+
+```python
+from sagents.v2.tool import builtin_tool_definitions
+
+rows = [
+    {"name": tool.name, "description": tool.description,
+     "inputSchema": tool.input_schema}
+    for tool in builtin_tool_definitions(agent_mode="all", language="zh")
+]
+```
+
+This synchronous query returns detached `ToolDefinition` values from the same
+implementation definitions used by execution. It creates no App, Run, model,
+coordinator, sandbox or connection. Modes are `simple`, `team`, `fibre`, `flow`,
+and `all`; unknown values raise `ValueError`. Every mode includes official base
+and Skill metadata. Team adds `sys_team_delegate_task`; Fibre adds
+`sys_spawn_agent` and `sys_delegate_task`; `all` is their union. Omit `language`
+for canonical implementation text, or select the standard localized projection.
+
+This is the standard built-in Agent catalog, not a Run's authorized tools.
+Keep the host's Agent grants and external/custom tool metadata separate; querying
+or displaying a definition does not enable it. Mode alone cannot determine a
+particular delegation leaf's permissions. Optional host management tools also
+belong to their configured provider, not this standard catalog. Hosts do not
+import private method owners or reflect on implementation classes.
+
+Runnable JSON example: `python -m examples.sagents_v2_tool_catalog --agent-mode all`.

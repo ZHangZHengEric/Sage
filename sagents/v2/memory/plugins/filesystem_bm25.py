@@ -17,7 +17,7 @@ import re
 import sqlite3
 from pathlib import Path
 
-from sagents.v2._concurrency import bounded_to_thread
+from sagents.v2.concurrency import bounded_to_thread
 
 from sagents.v2.memory.contracts import (
     MemoryCapabilities,

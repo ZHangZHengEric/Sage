@@ -45,6 +45,7 @@ from sagents.v2.tool.selection import (
 )
 
 _LAZY_EXPORTS = {
+    "builtin_tool_definitions": ("sagents.v2.tool.metadata", "builtin_tool_definitions"),
     "DirectToolSelectionPolicy": (
         "sagents.v2.tool.plugins.selection_direct",
         "DirectToolSelectionPolicy",
@@ -97,6 +98,7 @@ __all__ = [
     "ToolCancellationState",
     "ToolCatalog",
     "ToolDefinition",
+    "builtin_tool_definitions",
     "ToolExecutionResult",
     "ToolExecutor",
     "ToolInvocation",

@@ -630,7 +630,7 @@ class DesktopV2Service(
         await self.start()
         context = self._context(user_id)
         run = await self.session_access.get_run(run_id, context)
-        result = await self.runtime.propose_session_commit(
+        result = await self.application.entrypoint().propose_session_commit(
             ProposeSessionCommit(
                 run_id=run_id,
                 expected_run_revision=run.revision,
@@ -653,7 +653,7 @@ class DesktopV2Service(
             proposal_id, context
         )
         session = await self.session_access.get_session(proposal.session_id, context)
-        result = await self.runtime.publish_session_commit(
+        result = await self.application.entrypoint().publish_session_commit(
             PublishSessionCommit(
                 proposal_id=proposal_id,
                 expected_proposal_revision=proposal.revision,
@@ -673,7 +673,7 @@ class DesktopV2Service(
             proposal_id, context
         )
         session = await self.session_access.get_session(proposal.session_id, context)
-        result = await self.runtime.reject_session_commit(
+        result = await self.application.entrypoint().reject_session_commit(
             RejectSessionCommit(
                 proposal_id=proposal_id,
                 expected_proposal_revision=proposal.revision,

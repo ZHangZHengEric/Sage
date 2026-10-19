@@ -1,4 +1,4 @@
-"""Offline acceptance through the Server v2 provisioning and signed-grant path.
+"""Offline acceptance through registered plugins and standard SDK execution.
 
 Run in the candidate image: python deploy/images/frontend-test/acceptance.py
 Nonzero exit means acceptance failed, including a Chromium policy rejection.
@@ -12,14 +12,19 @@ import json
 import os
 import tempfile
 from pathlib import Path
-from types import SimpleNamespace
+import shlex
 
-from app.v2.server.runtime.official import install_sandbox, provision_workspace
+from app.v2.server.runtime.sdk_plugins import SERVER_PROCESS_DEFAULTS
 from sagents.v2 import SAgentBuilder
 from sagents.v2.package.presets import BuiltinPackageFactory
 from sagents.v2.testing.plugins.scripted_model import ScriptedModelProvider
 from sagents.v2.contracts.principals import ActorRef, PrincipalType, RequestContext
-from sagents.v2.runtime.execution.sandbox import OperationIntent, ProcessRequest
+from sagents.v2.agent.policy import ApprovalStrategy, DefaultToolPolicy
+from sagents.v2.contracts.commands import InputItem, StartRun
+from sagents.v2.contracts.items import TextBlock
+from sagents.v2.model.contracts import ModelResponse, ModelStreamEvent, ModelToolCall
+from sagents.v2.runtime.extensions import CapabilityOffer, ExtensionDescriptor, ExtensionRegistration, ExtensionScope
+from sagents.v2.testing.plugins.scripted_model import ScriptedModelStep
 
 PAGE = """<!doctype html><meta charset="utf-8">
 <style>body{font:32px 'Noto Sans CJK SC',sans-serif;background:white;color:black}</style>
@@ -27,18 +32,18 @@ PAGE = """<!doctype html><meta charset="utf-8">
 <script>document.querySelector('button').onclick=()=>{
  document.querySelector('#result').textContent='你好，'+document.querySelector('input').value;
 };</script>"""
-JSDOM = """module.exports = async ({JSDOM, assert, require}) => {
- const dom = new JSDOM(require('node:fs').readFileSync('/workspace/.sage-tests/page.html','utf8'), {runScripts:'dangerously'});
+JSDOM = """module.exports = async ({JSDOM, assert, require, workspace}) => {
+ const dom = new JSDOM(require('node:fs').readFileSync(workspace+'/.sage-tests/page.html','utf8'), {runScripts:'dangerously'});
  try {
   dom.window.document.querySelector('input').value='沙箱';
   dom.window.document.querySelector('button').click();
   assert.equal(dom.window.document.querySelector('#result').textContent,'你好，沙箱');
  } finally { dom.window.close(); }
 };"""
-PLAYWRIGHT = """module.exports = async ({launch, assert, artifacts, pathToFileURL}) => {
+PLAYWRIGHT = """module.exports = async ({launch, assert, artifacts, pathToFileURL, workspace}) => {
  const browser = await launch();
  const page = await browser.newPage();
- await page.goto(pathToFileURL('/workspace/.sage-tests/page.html').href);
+ await page.goto(pathToFileURL(workspace+'/.sage-tests/page.html').href);
  await page.getByLabel('姓名').fill('沙箱');
  await page.getByRole('button', {name:'确认'}).click();
  assert.equal(await page.locator('#result').textContent(),'你好，沙箱');
@@ -95,110 +100,109 @@ async def main():
     gid = int(os.environ.get("SAGE_SERVER_LINUX_EXECUTION_GID", os.getegid()))
     if os.geteuid() == 0:
         os.chown(workspace, uid, gid)
-    execution = SimpleNamespace(sandbox_grant_issuer=None)
-    application = await (
-        SAgentBuilder().with_defaults(session_root=parent / "runtime")
-        .with_model_provider(ScriptedModelProvider(()))
-        .build(BuiltinPackageFactory.create(
-            "assistant", package_id="frontend.acceptance", model="unused",
-        ))
-    )
-    context = RequestContext(
-        actor=ActorRef(
-            principal_id="frontend_acceptance", principal_type=PrincipalType.USER
-        )
-    )
+    operations = [
+        ("fixture-" + name, "file_write", {"file_path": ".sage-tests/" + name, "content": content})
+        for name, content in {"page.html": PAGE, "dom.cjs": JSDOM, "browser.cjs": PLAYWRIGHT}.items()
+    ]
+    operations.append(("file_api_boundary", "file_write", {"file_path": "/tmp/outside.txt", "content": "forbidden"}))
+    for name, argv in {
+        "runtime": ("node", "-e", RUNTIME),
+        "offline": ("python", "-c", OFFLINE),
+        "jsdom": ("sage-frontend-test", "jsdom", ".sage-tests/dom.cjs"),
+        "playwright": ("sage-frontend-test", "playwright", ".sage-tests/browser.cjs"),
+    }.items():
+        operations.append((name, "execute_shell_command", {
+            "command": shlex.join(argv), "block_until_ms": 120000,
+        }))
+    steps = tuple(ScriptedModelStep(events=(ModelStreamEvent(kind="completed", response=ModelResponse(
+        response_id="response-" + name, finish_reason="tool_calls",
+        tool_calls=(ModelToolCall(tool_call_id=name, name=tool, arguments=arguments),),
+    )),)) for name, tool, arguments in operations)
+    model = ScriptedModelProvider((*steps, ScriptedModelStep(events=(ModelStreamEvent(
+        kind="completed", response=ModelResponse(response_id="done", text="Finished", finish_reason="stop")),))))
+
+    def registration(plugin, capability, value):
+        return ExtensionRegistration(descriptor=ExtensionDescriptor(
+            plugin_id=plugin, name=plugin, version="1",
+            provides=(CapabilityOffer(capability=capability, api_version="2"),),
+            supported_scopes=frozenset({ExtensionScope.AGENT}),
+            config_schema={"type": "object", "additionalProperties": False},
+        ), factory=lambda context, dependencies: value, ownership="borrowed")
+
+    builder = SAgentBuilder()
+    builder.register(registration("acceptance.model", "model.provider", model))
+    builder.register(registration("acceptance.policy", "agent.tool-policy", DefaultToolPolicy(approval_strategy=ApprovalStrategy.AUTO_APPROVE)))
+    application = await builder.build(runtime={
+        "state_root": str(parent / "runtime"),
+        "capabilities": {
+            "session.store": {"plugin": "sage.session.filesystem", "config": {"root": str(parent / "sessions")}},
+            "model.provider": {"plugin": "acceptance.model"},
+            "agent.tool-policy": {"plugin": "acceptance.policy"},
+            "agent.continuation-policy": {"plugin": "sage.agent.continuation.deterministic"},
+            "tool.selection-policy": {"plugin": "sage.tool-selection.direct"},
+            "tool.catalog": {"plugin": "sage.tool.official"},
+            "execution.binding": {"plugin": "sage.execution.binding.local-workspace", "config": {
+                "workspace": str(workspace), "workspace_alias": "/workspace",
+                "linux_execution_uid": uid, "linux_execution_gid": gid,
+                "policy": {"process": {**SERVER_PROCESS_DEFAULTS, "max_wall_time_seconds": 60}},
+            }},
+        },
+    }, models={"models": {"primary": {"provider": "openai-chat-completions", "model": "offline"}}})
+    context = RequestContext(actor=ActorRef(principal_id="frontend_acceptance", principal_type=PrincipalType.USER))
     summary = {"workspace": str(workspace), "network": "none", "checks": {}}
-    handle = None
     try:
-        await install_sandbox(
-            execution, application, SimpleNamespace(
-                linux_execution_uid=uid, linux_execution_gid=gid, plugin_overrides={},
-            ),
-        )
-        handle = await provision_workspace(
-            execution, workspace, context, run_id="frontend_acceptance"
-        )
-
-        def authorize(operation, **fields):
-            intent = OperationIntent(
-                operation=operation,
-                run_id="frontend_acceptance",
-                tool_call_id="acceptance",
-                sandbox_id=handle.ref.sandbox_id,
-                **fields,
-            )
-            grant = execution.sandbox_grant_issuer.issue(
-                ref=handle.ref, intent=intent, allowed_operations=frozenset({operation})
-            )
-            return intent, grant
-
-        for name, content in {
-            "page.html": PAGE,
-            "dom.cjs": JSDOM,
-            "browser.cjs": PLAYWRIGHT,
-        }.items():
-            target = f"/workspace/.sage-tests/{name}"
-            intent, grant = authorize("create", path=target)
-            await handle.filesystem.write_bytes(
-                target, content.encode(), intent=intent, grant=grant
-            )
-        # A negative file API check ensures the runner's /tmp is not exposed to file tools.
-        try:
-            intent, grant = authorize("write", path="/tmp/outside.txt")
-            await handle.filesystem.write_bytes(
-                "/tmp/outside.txt", b"forbidden", intent=intent, grant=grant
-            )
-        except (ValueError, PermissionError) as error:
-            summary["checks"]["file_api_boundary"] = {
-                "passed": True,
-                "error": str(error),
-            }
-        else:
-            summary["checks"]["file_api_boundary"] = {"passed": False}
-
-        for name, argv in {
-            "runtime": ("node", "-e", RUNTIME),
-            "offline": ("python", "-c", OFFLINE),
-            "jsdom": ("sage-frontend-test", "jsdom", "/workspace/.sage-tests/dom.cjs"),
-            "playwright": (
-                "sage-frontend-test",
-                "playwright",
-                "/workspace/.sage-tests/browser.cjs",
-            ),
-        }.items():
-            request = ProcessRequest(argv=argv, cwd="/workspace", timeout_seconds=60)
-            intent, grant = authorize(
-                "process.run",
-                executable=argv[0],
-                argv=argv,
-                path=request.cwd,
-                metadata={"process_request_digest": request.digest()},
-            )
-            result = await handle.process.run(request, intent=intent, grant=grant)
-            summary["checks"][name] = {
-                "passed": result.exit_code == 0
-                and not result.timed_out
-                and not result.truncated,
-                "exit_code": result.exit_code,
-                "stdout": result.stdout.decode(errors="replace"),
-                "stderr": result.stderr.decode(errors="replace"),
-            }
+        package = BuiltinPackageFactory.create("assistant", package_id="frontend.acceptance")
+        agent_id = package.entrypoint.agent
+        definition = package.agents[agent_id]
+        package = package.model_copy(update={"agents": {agent_id: definition.model_copy(update={
+            "tools": ("file_write", "execute_shell_command"),
+        })}})
+        agent = await application.load_agent(package)
+        stream = await application.entrypoint().run_stream(StartRun(
+            agent_id=agent.id, resolved_spec_hash=agent.composition_hash,
+            input=(InputItem(role="user", content=(TextBlock(text="Run offline frontend checks"),)),),
+            idempotency_key="frontend-acceptance",
+        ), context, agent=agent)
+        receipts = {}
+        async for event in stream.events:
+            item = getattr(event.data, "item", None)
+            if event.type == "item.completed" and item is not None and item.data.kind == "tool_result":
+                receipts[item.data.tool_call_id] = item.data.model_dump(mode="json")
+        run = await stream.wait()
+        summary["run_id"] = run.run_id
+        summary["state"] = run.state.value
+        summary["diagnostics"] = await application.execution_diagnostics(run.run_id, context)
+        for name, _, _ in operations:
+            receipt = receipts.get(name)
+            if name.startswith("fixture-"):
+                if not receipt or receipt.get("error"):
+                    raise RuntimeError(f"fixture failed: {name}: {receipt}")
+                continue
+            if name == "file_api_boundary":
+                summary["checks"][name] = {"passed": bool(receipt and (receipt.get("error") or {}).get("code") == "sandbox.permission_denied"), "receipt": receipt}
+            else:
+                payload = {}
+                if receipt:
+                    for block in receipt.get("content", []):
+                        if block.get("kind") == "json":
+                            payload = block["value"]
+                summary["checks"][name] = {
+                    "passed": bool(receipt and not receipt.get("error") and payload.get("success")
+                                   and payload.get("exit_code") == 0), "result": payload, "receipt": receipt,
+                }
+        if run.state.value != "completed":
+            raise RuntimeError(f"acceptance Run did not complete: {run.state.value}")
     except Exception as error:
         summary["error"] = f"{type(error).__name__}: {error}"
     finally:
-        try:
-            if handle is not None:
-                await handle.destroy()
-        finally:
-            await application.close()
+        await application.close()
     (parent / "acceptance.json").write_text(
         json.dumps(summary, ensure_ascii=False, indent=2)
     )
     print(json.dumps(summary, ensure_ascii=False, indent=2))
     return (
         0
-        if len(summary["checks"]) == 5
+        if "error" not in summary and len(summary["checks"]) == 5
         and all(c["passed"] for c in summary["checks"].values())
         else 1
     )
