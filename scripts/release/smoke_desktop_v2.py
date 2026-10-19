@@ -46,7 +46,7 @@ async def check_openui():
         await parser.close()
 asyncio.run(check_openui())
 from sagents.v2 import SAgentBuilder
-assert importlib.metadata.version('sage') == '2.1.0'
+assert importlib.metadata.version('sage') == '2.1.1'
 assert any((Path(app.__file__).parent / 'skills').glob('*/SKILL.md'))
 assert not any(n.startswith(('app.v1.', 'sagents.v1.')) for n in sys.modules)
 # Verify native one-writer locks, including Windows, across processes.

@@ -38,7 +38,6 @@ import asyncio
 from uuid import uuid4
 
 from sagents.v2 import ActorRef, RequestContext, SAgentBuilder, StartRun
-from sagents.v2.composition.defaults import default_runtime
 from sagents.v2.contracts.commands import InputItem
 from sagents.v2.contracts.items import TextBlock
 from sagents.v2.contracts.principals import PrincipalType
@@ -68,13 +67,13 @@ models:
 """
 
 
-async def main():
+async def main(*, runtime=None, registrations=()):
+    from sagents.v2.composition.defaults import default_runtime
     manifest = SageManifestLoader().loads(AGENT_YAML)
-    app = await (
-        SAgentBuilder().build(
-            runtime=default_runtime("runtime"), models_config_text=MODELS_YAML,
-        )
-    )
+    builder = SAgentBuilder()
+    for registration in registrations:
+        builder.register(registration)
+    app = await builder.build(runtime=runtime or default_runtime("runtime"), models_config_text=MODELS_YAML)
     try:
         agent = await app.load_agent(manifest)
         context = RequestContext(actor=ActorRef(
