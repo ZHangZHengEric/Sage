@@ -155,3 +155,32 @@ SAGE_TEST_EXECUTION_GID
 ```
 
 Skipped tests due to missing platforms or dedicated resources are not passes. Command-construction unit tests do not establish real Linux cgroup/XFS acceptance.
+
+## Standard local directories and environment
+
+The plugin creates these directories within the existing host workspace, retaining project files and treating the workspace as a working directory rather than OS root:
+
+| Purpose | Host storage relative to workspace | Linux process path | Native macOS process path |
+| --- | --- | --- | --- |
+| Workspace | `.` | `workspace_root` | Absolute host workspace |
+| Temporary files | `.sage-sandbox-tmp/` | `/tmp`, `/var/tmp`, also backing `/dev/shm` | Actual path inside workspace |
+| Home | `.sage-sandbox-home/` | `/home/agent` | Actual path inside workspace |
+| Cache | `.sage-sandbox-home/.cache/` | `$HOME/.cache` | `$HOME/.cache` |
+| Configuration | `.sage-sandbox-home/.config/` | `$HOME/.config` | `$HOME/.config` |
+| Data and state | `.sage-sandbox-home/.local/share/`, `.local/state/` | Corresponding HOME directories | Corresponding HOME directories |
+
+The plugin supplies `HOME`, `TMPDIR`, `TMP`, `TEMP`, `XDG_CACHE_HOME`, `XDG_CONFIG_HOME`, `XDG_DATA_HOME` and `XDG_STATE_HOME`. Temporary storage keeps its existing location; Home is separate. All directories count toward the workspace disk quota, follow workspace lifetime and are shared by Runs explicitly sharing the workspace. Existing read-only policies still apply.
+
+File tools accept workspace-relative paths, in-workspace host absolute paths, `~/`, `$HOME/`, `${TMPDIR}/` and the listed variable prefixes. They use plugin values without consulting host HOME or performing arbitrary shell expansion. Linux also accepts mounted process-visible paths. Traversal, symlink, protected-path and signed-grant checks remain enforced.
+
+Canonical paths returned by file tools are usable by the current platform's Shell: mounted paths on Linux and actual host workspace paths on macOS. macOS file tools accept the old `workspace_root` alias as input, but Shell does not remap absolute paths. Use canonical outputs or environment variables rather than host `/tmp` or `/private/tmp` aliases. Linux workspace_root cannot overlap `/home/agent` or `/var/tmp`.
+
+`describe_environment()` exposes OS, isolation, workspace, directory variables, network mode, quotas and path rules. Shared composition projects this optional description into `<sandbox_environment>` without interpreting plugin layout. Plugins without this method retain existing behavior. Hosts composing loops manually can use `SandboxEnvironmentContextProvider`; see [yiii integration](sagents-v2-yiii-sandbox-directories-integration.md).
+
+## Team instances and Run leases
+
+Standard Builder Team members use the local plugin's `share` capability by default. Leases share sandbox_id, directories, process slots and resource supervision, while retaining distinct owner_run_id and signature validation. Closing a member cancels only its running and queued tasks. With multiple attached handles, the last handle releases the lease; the last live lease closes the physical environment. Other members survive normal member completion.
+
+`LocalWorkspaceExecutionBindingProvider` plugs into `with_execution_binding_provider`; Desktop's compatible adapter uses the same SDK implementation. Builder's public API is unchanged. Shared Team policy fails explicitly when the plugin lacks Run leases. Private workspace policies still acquire separate host bindings.
+
+HOME/TMPDIR/XDG variables determine storage locations without changing host authorization. Local files, system access and computer-control capabilities remain governed by the execution plugin and host tool grants.

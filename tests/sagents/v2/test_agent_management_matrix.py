@@ -2081,13 +2081,13 @@ async def test_cancelled_shutdown_preserves_owned_build_for_cleanup_retry(tmp_pa
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("timeout", [False, True])
-async def test_managed_run_preserves_queue_failure_reason(
+async def test_managed_run_retries_queue_failure_and_preserves_reason(
     tmp_path, timeout, monkeypatch
 ):
     from sagents.v2.agent import AgentLoopEngine
     from sagents.v2.model import ModelConcurrencyBudget
 
-    monkeypatch.setattr(AgentLoopEngine, "_PROVIDER_RETRY_BASE_SECONDS", 0)
+    monkeypatch.setattr(AgentLoopEngine, "_PROVIDER_RETRY_BASE_SECONDS", 0.05)
     svc, models = service(tmp_path)
     svc.model_budget = ModelConcurrencyBudget(
         1, max_waiting=1 if timeout else 0, wait_timeout_seconds=0.01
@@ -2095,22 +2095,23 @@ async def test_managed_run_preserves_queue_failure_reason(
     try:
         saved = await svc.save(bundle(), context())
         async with svc.model_budget.lease():
-            await svc.run(saved["ref"], "assistant", "hello", "overloaded", context())
-            result = await settled(svc, "overloaded", context())
-        assert result["run"]["state"] == "suspended"
-        error = result["interaction"]["payload"]["error"]
-        assert error["code"] == (
+            handle = await svc.run(saved["ref"], "assistant", "hello", "overloaded", context())
+            app = await svc._application(await svc.get(saved["ref"], context()), "assistant", context())
+            store = app.entrypoint().runtime.session_store
+            async with asyncio.timeout(5):
+                while True:
+                    events = await store.read_events(handle["run_id"])
+                    retries = [event for event in events if event.type == "step.retry_scheduled"]
+                    if retries:
+                        break
+                    await asyncio.sleep(0.01)
+            assert not any(event.type == "interaction.requested" for event in events)
+            assert all(not provider.requests for provider in models)
+        error = retries[0].data.error
+        assert error.code == (
             "model.queue_timeout" if timeout else "model.queue_full"
         )
-        assert error["retryable"] and error["safe_to_resume"]
-        assert all(not provider.requests for provider in models)
-        await svc.control(
-            "overloaded",
-            "reply",
-            context(),
-            decision="retry",
-            interaction_id=result["interaction"]["interaction_id"],
-        )
+        assert error.retryable and error.safe_to_resume
         assert (await settled(svc, "overloaded", context()))["run"][
             "state"
         ] == "completed"

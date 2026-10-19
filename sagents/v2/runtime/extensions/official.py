@@ -336,6 +336,7 @@ def _register_infrastructure(registry: ExtensionRegistry) -> None:
                 "max_summary_source_tokens": {
                     "type": "integer",
                     "minimum": 1,
+                    "default": 24_000,
                 },
                 "unit_compactor": {},
             },

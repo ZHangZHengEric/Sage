@@ -38,7 +38,7 @@ async def provision(root, *, max_processes=4):
                 enabled=True,
                 max_processes=max_processes,
                 max_wall_time_seconds=20,
-                allowed_executables=("python",),
+                allowed_executables=("sh",),
                 allow_shell=True,
             ),
         ),
@@ -150,7 +150,7 @@ async def test_child_cleanup_cancels_only_its_processes(tmp_path):
     try:
         for handle in (parent, child, sibling):
             request = ProcessRequest(
-                argv=("python", "-c", "import time; time.sleep(15)"), cwd=str(tmp_path)
+                argv=("sh", "-c", "sleep 15"), cwd=str(tmp_path)
             )
             tasks.append(
                 asyncio.create_task(
@@ -364,7 +364,7 @@ async def test_closing_queued_member_never_runs_its_command(tmp_path):
     tasks = []
     try:
         parent_request = ProcessRequest(
-            argv=("python", "-c", "import time; time.sleep(15)"), cwd=str(tmp_path)
+            argv=("sh", "-c", "sleep 15"), cwd=str(tmp_path)
         )
         tasks.append(
             asyncio.create_task(
@@ -379,9 +379,9 @@ async def test_closing_queued_member_never_runs_its_command(tmp_path):
                 await asyncio.sleep(0.01)
         request = ProcessRequest(
             argv=(
-                "python",
+                "sh",
                 "-c",
-                "from pathlib import Path; Path('must-not-exist').touch()",
+                ": > must-not-exist",
             ),
             cwd=str(tmp_path),
         )
