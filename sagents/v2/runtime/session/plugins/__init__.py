@@ -4,6 +4,9 @@ from sagents.v2._lazy import exported_names, resolve_export
 
 
 _EXPORTS = {
+    "RedisMysqlSessionStore": (
+        "sagents.v2.runtime.session.plugins.redis_mysql", "RedisMysqlSessionStore",
+    ),
     "EphemeralSessionStore": (
         "sagents.v2.runtime.session.plugins.ephemeral",
         "EphemeralSessionStore",

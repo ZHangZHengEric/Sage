@@ -25,6 +25,7 @@ ref: v2-detail-sagents-v2-observability
 
 | 事件 | 耗时含义 |
 | --- | --- |
+| `server.admission.phase` | `phase` 区分外部归属、会话/绑定读取、无绑定 Session 校验、目录读取、包解析、技能/用户读取、快照/命令构建、归属绑定与会话索引保存；`prepare` 为接纳准备总计 |
 | `server.run.preparation.started` / `server.run.agent_load.started` | `lock_wait_ms` 区分工作区锁和 Agent 加载锁的等待 |
 | `server.run.agent_load` / `server.run.accepted` | Agent 装载、运行接纳的耗时 |
 | `agent.preparation.completed` | `phase` 区分历史读取、自配置、技能预加载、工具选择、上下文构建与整个模型请求准备 |
@@ -43,6 +44,18 @@ ref: v2-detail-sagents-v2-observability
 Server 实时执行权限只查询当前 Agent 的策略字段，用户、Agent 和 API Key 使用独立数据库 Session 并行读取；
 根权限和子 Agent 权限检查也并行执行。结果仍与接纳时冻结的权限取交集，不缓存实时撤权结果。
 单个事务内存在依赖的写入以及工具执行前的持久化边界仍顺序等待。
+
+入口目录读取只加载当前 Agent 及其可达团队成员，不读取无关 Package 或旧技能索引；
+普通读取不获取目录行锁，仅首次创建默认目录时使用现有初始化事务。
+运行已持有配置快照时，后续装载、工具适配器与模型供应器只读取资源目录，继续获取实时凭据。
+会话/归属读取、目录/无绑定 Session 校验、技能/用户读取分别并行；每个数据库操作持有独立 Session，
+会话归属绑定与索引保存仍在运行接纳前完成。团队成员按本次读取冻结版本，下一次运行可见成员更新。
+
+可复现的本地目录读取基准：
+`python -m scripts.v2.benchmark_v2_admission --agents 100 --samples 7`。
+2026-10-19，同一份 SQLite 数据（100 个测试 Agent 和 1 个默认 Agent），
+全量路径为 5 条 SQL、101 个包，中位 24.870 ms；限定路径为 2 条 SQL、1 个包，中位 1.419 ms。
+这验证了查询和解析范围的缩小，不代表生产冷启动或入口 11 秒等待已被消除；应通过阶段日志复测。
 
 Server 既有诊断 SQLite 的模型记录与运行日志由单线程后台队列顺序写入，最多保留 64 个待处理操作，
 不会让推理和工具继续执行等待诊断写盘。队列饱和和写入失败计入 `capture_failures_since_start`。

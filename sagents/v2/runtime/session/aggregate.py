@@ -62,6 +62,18 @@ class SessionAggregate:
             for row in rows:
                 current[tuple(row.get(key) for key in keys)] = row
             state[collection] = list(current.values())
+        for collection, rows in delta["patches"].items():
+            keys = _IDENTITIES[collection]
+            current = {
+                tuple(value.get(key) for key in keys): value
+                for value in state.get(collection, ())
+            }
+            for row in rows:
+                identity = tuple(row.get(key) for key in keys)
+                if identity not in current:
+                    raise ValueError(f"cannot patch missing {collection} row: {identity}")
+                current[identity] = {**current[identity], **row}
+            state[collection] = list(current.values())
         for collection, identities in delta["deletes"].items():
             keys = _IDENTITIES[collection]
             removed = {tuple(value) for value in identities}

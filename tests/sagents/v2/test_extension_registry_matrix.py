@@ -55,6 +55,7 @@ def test_builtin_inventory_contains_only_real_factories():
         "sage.session.filesystem",
         "sage.session.postgres",
         "sage.session.mysql",
+        "sage.session.redis-mysql",
         "sage.session.ephemeral",
         "sage.session-memory.noop",
         "sage.session-memory.sqlite-bm25",

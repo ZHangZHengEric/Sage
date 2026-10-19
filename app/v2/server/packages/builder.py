@@ -24,7 +24,7 @@ class CatalogPackageModel:
 
     @asynccontextmanager
     async def provider(self, binding):
-        catalog = self.snapshot if self.snapshot is not None else await self.catalog.get(self.user_id)
+        catalog = self.snapshot if self.snapshot is not None else await self.catalog.editor_catalog(self.user_id)
         route = self.routes.get(binding) or self.routes.get("primary")
         selected = route.credential.removeprefix("server-model:") if route and route.credential else "default"
         record = package_model_record(catalog, selected)
@@ -126,7 +126,7 @@ class ServerPackageBuilderFactory:
                 "max_concurrent_runs_per_tenant": self.settings.max_concurrent_runs_per_user,
                 "max_pending_items": self.settings.max_pending_runs,
             } if scheduler_port else None)
-        settings = replace(self.settings, mysql_url=None) if root.name.startswith("validate-") else self.settings
+        settings = replace(self.settings, mysql_url=None, redis_url=None) if root.name.startswith("validate-") else self.settings
         runtime = server_v2_manifest(settings).runtime
         capabilities = select_run_capabilities(runtime.capabilities, bundle.manifest.runtime, choices)
         if capabilities.get("session.store") and settings.mysql_url:

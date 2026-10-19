@@ -27,6 +27,7 @@ from sagents.v2.package.presets import BuiltinPackageFactory
 from sagents.v2.package.manifest.runtime import CapabilitySelection
 from sagents.v2.runtime.extensions.official import builtin_extension_registry
 from sagents.v2.runtime.session.plugins import mysql as mysql_plugin
+from sagents.v2.runtime.session import mysql_state
 from sagents.v2.runtime.session.plugins.mysql import (
     MysqlSessionStore,
     _MysqlSessionState,
@@ -122,7 +123,7 @@ async def test_mysql_authorization_loads_persisted_session_before_owner_check():
 @pytest.mark.parametrize("snapshot_interval", [1, 256])
 async def test_mysql_create_and_commit_persist_only_target_session(snapshot_interval, monkeypatch):
     logger = MagicMock()
-    monkeypatch.setattr(mysql_plugin, "LOGGER", logger)
+    monkeypatch.setattr(mysql_state, "LOGGER", logger)
     store = MysqlSessionStore("mysql://root@127.0.0.1/sage")
     state = store._coordinator
     state.snapshot_interval = snapshot_interval
@@ -176,7 +177,8 @@ async def test_mysql_create_and_commit_persist_only_target_session(snapshot_inte
             if "INSERT INTO `sagent_session_mutations`" in call.args[0]
         )
         assert params[0] == first.handle.session_id
-        payload = json.loads(params[2])["upserts"]
+        delta = json.loads(params[2])
+        payload = {**delta["upserts"], **delta["patches"]}
     assert [row["session_id"] for row in payload["sessions"]] == [first.handle.session_id]
     assert [row["run_id"] for row in payload["runs"]] == [first.handle.run_id]
     assert connection.commit.await_count == 3
@@ -373,7 +375,7 @@ async def test_bootstrap_creates_missing_tables_only():
 
 
 def test_mysql_upsert_uses_row_alias_instead_of_values_function():
-    source = Path(mysql_plugin.__file__).read_text(encoding="utf-8")
+    source = Path(mysql_state.__file__).read_text(encoding="utf-8")
     assert "AS incoming" in source
     assert "VALUES(parent_session_id)" not in source
     assert "VALUES(value)" not in source
