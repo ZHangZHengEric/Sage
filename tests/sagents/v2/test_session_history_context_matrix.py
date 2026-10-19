@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+
 import pytest
 
 from sagents.v2.agent import AgentLoopEngine
@@ -105,6 +107,88 @@ async def execute(runtime, handle, model, *, definitions=(), handlers=None):
         tool_catalog=catalog,
         tool_executor=executor,
     ).execute(handle.run_id, CONTEXT)
+
+
+@pytest.mark.asyncio
+async def test_user_cancel_without_tool_reply_allows_next_turn_after_restart(tmp_path):
+    from sagents.v2.contracts.commands import CancelRun
+    from sagents.v2.context.session_history import SessionEventModelProjector
+
+    store = FilesystemSessionStore(tmp_path)
+    runtime = HarnessRuntime(store)
+    first = await runtime.start_run(command("start tool", "cancel-first"), CONTEXT)
+    started = asyncio.Event()
+    definition = ToolDefinition(
+        name="save_value", description="Save a value", input_schema={"type": "object"},
+        side_effect_level=SideEffectLevel.READ,
+    )
+
+    async def no_reply(call, context):
+        started.set()
+        await asyncio.Event().wait()
+
+    task = asyncio.create_task(execute(
+        runtime, first,
+        ScriptedModelProvider((ScriptedModelStep(events=(completed(calls=(
+            ModelToolCall(tool_call_id="cancelled-call", name="save_value", arguments={}),
+        )),)),)),
+        definitions=(definition,), handlers={"save_value": no_reply},
+    ))
+    try:
+        await asyncio.wait_for(started.wait(), 5)
+        run = await runtime.get_run(first.run_id)
+        receipt = await runtime.cancel_run(CancelRun(
+            run_id=run.run_id, expected_revision=run.revision,
+            idempotency_key="user-cancel", reason="user_cancelled",
+        ), CONTEXT)
+        assert receipt.decision.value == "accepted"
+    finally:
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+        await store.close()
+
+    store = FilesystemSessionStore(tmp_path)
+    runtime = HarnessRuntime(store)
+    try:
+        assert (await runtime.get_run(first.run_id)).state.value == "cancelled"
+        assert await store.list_dispatchable_runs() == ()
+        events = await store.read_events(first.run_id)
+        projected = SessionEventModelProjector().project(events)
+        missing = [m for m in projected if m.role == "tool" and m.tool_call_id == "cancelled-call"]
+        assert len(missing) == 1
+        assert missing[0].metadata["tool_result_received"] is False
+        assert missing[0].metadata["execution_outcome"] == "unknown"
+        # Active/suspended histories must keep their original recovery semantics.
+        active_history = SessionEventModelProjector().project(tuple(
+            event for event in events if event.type != "run.cancelled"
+        ))
+        assert not any(m.metadata.get("synthetic") for m in active_history)
+        # A real result, including one recorded late, always takes precedence.
+        from sagents.v2.contracts.items import ToolCallItemData, ToolResultItemData
+        call_event = next(event for event in events if getattr(event.data, "item", None)
+                          and isinstance(event.data.item.data, ToolCallItemData))
+        late_result = call_event.model_copy(update={"data": call_event.data.model_copy(update={
+            "item": call_event.data.item.model_copy(update={
+                "item_id": "late-result", "data": ToolResultItemData(
+                    tool_call_id="cancelled-call", content=(TextBlock(text="actual result"),),
+                    metadata={"tool_result_received": True},
+                ),
+            }),
+        })})
+        received = [m for m in SessionEventModelProjector().project((*events, late_result)) if m.role == "tool"]
+        assert len(received) == 1
+        assert received[0].content[0].text == "actual result"
+        assert received[0].metadata["tool_result_received"] is True
+        second = await runtime.start_run(
+            command("new question", "after-cancel", session_id=first.session_id), CONTEXT,
+        )
+        provider = ScriptedModelProvider((ScriptedModelStep(events=(completed("new answer"),)),))
+        result = await execute(runtime, second, provider)
+        assert result.state.value == "completed"
+        assert any(m.tool_call_id == "cancelled-call" for m in provider.requests[0].messages if m.role == "tool")
+        assert provider.requests[0].messages[-1].content[0].text == "new question"
+    finally:
+        await store.close()
 
 
 @pytest.mark.asyncio

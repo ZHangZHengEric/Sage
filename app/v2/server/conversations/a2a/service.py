@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
+from sagents.v2.contracts.common import utc_now
 
 from a2a.server.events.event_queue import Event
 from a2a.types.a2a_pb2 import AgentCard, Message, Task, TaskState
@@ -243,6 +244,7 @@ class A2AService:
     async def _start(self, message: Message, key: ApiKeyRecord) -> _Started:
         """Admit one A2A message and put its Run in flight."""
 
+        performance_started_at = utc_now()
         if message.task_id:
             return await self._resume(message, key)
         require_scope(key, SCOPE_INVOKE)
@@ -292,6 +294,7 @@ class A2AService:
             user_id=user_id,
             session_id=session_id,
             label="a2a",
+            performance_started_at=performance_started_at,
         )
         return _Started(
             run_id=run_id,
@@ -311,6 +314,7 @@ class A2AService:
         has to be expressed in.
         """
 
+        performance_started_at = utc_now()
         require_scope(key, SCOPE_INVOKE)
         context = self._context_for(key, correlation_id=get_request_id())
         task_id = message.task_id
@@ -337,6 +341,7 @@ class A2AService:
                 user_id=key.owner_user_id,
                 session_id=run.session_id,
                 label="a2a",
+                performance_started_at=performance_started_at,
                 decide=lambda interaction: _authorized_answer(interaction, message, key),
             )
         except SageV2Error as exc:

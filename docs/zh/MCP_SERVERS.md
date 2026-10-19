@@ -70,6 +70,8 @@ MCP 调用默认时限为 7200 秒（2 小时），可通过每个服务的 `cal
 
 该时限仅约束单次 MCP 远端调用，不是通用工具执行超时，也不限制内部 Team 或委派子 Run 的总运行时长。内部子任务没有默认两小时期限；只有显式配置的任务及祖先期限、预算或取消会形成相应约束。若通过外部 MCP 服务提交远端长任务，单次请求仍受 MCP 时限约束，应使用服务提供的任务提交与状态查询接口；本地请求超时不能证明远端任务已取消。
 
+参见[宿主开发指南](architecture/sagents-host-development.md)。
+
 ## 免 Key 的 Parallel 搜索示例
 
 [可运行的 SAgents v2 示例](../../examples/PARALLEL_SEARCH.md)通过 Streamable HTTP

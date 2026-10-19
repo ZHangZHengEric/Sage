@@ -1,4 +1,5 @@
 export const labels = {
+  max_inline_characters: '内联字符上限',
   metadata: '包信息', id: 'ID', version: '版本', name: '名称', description: '描述', kind: '类型',
   agents: '智能体', models: '模型路由', credentials: '凭据绑定', runtime: '运行时', policies: '全局策略',
   plugins: '插件', flows: '工作流', entrypoint: '入口', interfaces: '接口', tests: '测试', environments: '环境', files: '资源文件',

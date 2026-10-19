@@ -121,6 +121,9 @@ class ContextReductionScope(StrictModel):
 
     force: bool = False
     allow_reference_compaction: bool = True
+    # Only an actual rejected request justifies rewriting a checkpoint without
+    # advancing history coverage. Advisory usage pressure should reuse it.
+    allow_summary_rewrite: bool = True
     context_key: Identifier
     session_id: Identifier
     run_id: Identifier

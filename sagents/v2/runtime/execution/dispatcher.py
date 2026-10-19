@@ -408,6 +408,21 @@ class LocalWorkerDispatcher:
                     if self.lease_scope_factory is not None
                     else _NullAsyncScope()
                 )
+                # Old queue entries can outlive an unavailable Agent revision.
+                # Release outside the fenced store scope; preserve the intent
+                # and queue entry without entering that revision's driver.
+                if request.recovered and self.recovery_filter is not None:
+                    current = await request.agent.runtime.get_run(lease.work.run_id)
+                    if current.state not in TERMINAL_RUN_STATES and not self.recovery_filter(current):
+                        await self._release_lease(
+                            lease, LeaseReleaseReason.DEFERRED,
+                            requeue=True, available_at=utc_now() + timedelta(seconds=60),
+                        )
+                        requeued = True
+                        self._discard_request(lease.work.run_id, request)
+                        if not request.result.done():
+                            request.result.set_result(current)
+                        continue
                 async with scope:
                     # A crash can happen after the checkpoint but before the
                     # lease is delayed. Honor the durable timestamp on takeover.

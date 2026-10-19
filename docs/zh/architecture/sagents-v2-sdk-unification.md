@@ -1,3 +1,14 @@
+---
+layout: default
+title: 标准 SDK 接入
+parent: 架构
+nav_order: 22
+lang: zh
+ref: v2-detail-sagents-v2-sdk-unification
+---
+
+{% include lang_switcher.html %}
+
 # Sage v2 标准宿主接入
 
 宿主通过 `builder.register(registration)` 注册实现，通过可序列化的 runtime

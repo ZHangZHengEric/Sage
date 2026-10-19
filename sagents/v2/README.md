@@ -5,11 +5,12 @@ capabilities in serializable runtime configuration, and use the same public Run
 API for built-in and custom plugins.
 
 ```python
+"""Set MODEL_API_KEY and replace your-model below; no sage.yaml file is needed."""
+
 import asyncio
 from uuid import uuid4
 
 from sagents.v2 import ActorRef, RequestContext, SAgentBuilder, StartRun
-from sagents.v2.composition.defaults import default_runtime
 from sagents.v2.contracts.commands import InputItem
 from sagents.v2.contracts.items import TextBlock
 from sagents.v2.contracts.principals import PrincipalType
@@ -39,13 +40,13 @@ models:
 """
 
 
-async def main():
+async def main(*, runtime=None, registrations=()):
+    from sagents.v2.composition.defaults import default_runtime
     manifest = SageManifestLoader().loads(AGENT_YAML)
-    app = await (
-        SAgentBuilder().build(
-            runtime=default_runtime("runtime"), models_config_text=MODELS_YAML,
-        )
-    )
+    builder = SAgentBuilder()
+    for registration in registrations:
+        builder.register(registration)
+    app = await builder.build(runtime=runtime or default_runtime("runtime"), models_config_text=MODELS_YAML)
     try:
         agent = await app.load_agent(manifest)
         context = RequestContext(actor=ActorRef(
@@ -161,6 +162,19 @@ policies inherit the parent snapshot and may narrow its authorization. Current
 App settings do not replace an accepted Run's policy. Incompatible or missing
 registrations/configuration during restore fail rather than silently selecting
 current defaults.
+
+Startup isolates unavailable, corrupt or incompatible historical Agent revisions.
+Other revisions and new conversations remain usable. `app.recovery_issues` returns
+an immutable host-level snapshot of affected Run/Session IDs, revision hashes and
+reasons from the latest restore pass. Blocked Runs retain their original state,
+checkpoints and tool receipts; they are not silently rerouted or replayed. Process
+store/bootstrap failures and startup cancellation still abort construction.
+
+User cancellation is terminal and excluded from startup restoration. When a
+cancelled Run has a tool call without a result, Session history supplies a
+synthetic tool message stating that no result was received and the external
+outcome is unknown. This closes the model protocol pair for subsequent turns
+without claiming an execution receipt or continuing the cancelled Run.
 
 ```python
 agent = await app.agent_for_run(run_id, context)

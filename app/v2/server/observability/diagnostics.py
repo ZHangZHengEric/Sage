@@ -132,6 +132,8 @@ class SessionDiagnostics:
             if self.path.is_symlink():
                 raise ValueError("diagnostic database cannot be a symlink")
             with closing(self._connect()) as db, db:
+                from .performance import SCHEMA
+                db.executescript(SCHEMA)
                 db.executescript("""
                     PRAGMA journal_mode=WAL;
                     CREATE TABLE IF NOT EXISTS models (
@@ -230,6 +232,8 @@ class SessionDiagnostics:
                     run_id=request.run_id,
                     request_id=request.request_id,
                 )
+                from .performance import project_model
+                project_model(db, record)
                 db.execute(
                     "INSERT OR REPLACE INTO models VALUES(?,?,?,?)",
                     (
@@ -317,6 +321,13 @@ class SessionDiagnostics:
     def _write_log(self, record):
         try:
             with closing(self._connect()) as db, db:
+                from .performance import project_log
+                project_log(db, {
+                    "event": record.event, "timestamp": record.timestamp,
+                    "session_id": record.session_id, "run_id": record.run_id,
+                    "turn_id": record.turn_id, "request_id": record.request_id,
+                    "tool_call_id": record.tool_call_id, "attributes": record.attributes,
+                })
                 scope = (record.session_id, record.run_id)
                 db.execute(
                     "INSERT INTO logs(session_id, run_id, payload) VALUES(?,?,?)",

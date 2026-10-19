@@ -952,6 +952,7 @@ class ApplicationAssembler:
                         model=run_models[descriptor.agent_id],
                         tool_catalog=catalog,
                         tool_executor=executor,
+                        tool_result_runtime=active_runtime,
                         memory_service=(
                             memory_services_by_agent.get(definition_id, memory_service)
                             if member_memory_enabled and definition.memory.recall
@@ -1653,7 +1654,7 @@ class ApplicationAssembler:
             "model.provider", "context.summarizer", "context.reducer", "context.unit-compactor",
             "memory.recall-query", "skill.loading", "agent.continuation-policy", "agent.tool-policy",
             "agent.self-configuration", "agent.output-checker", "context.segment-provider", "skill.catalog",
-            "skill.workspace", "tool.selection-policy",
+            "skill.workspace", "tool.selection-policy", "tool.result-processor",
         }
         if run_id is None and (selected_scope == ExtensionScope.RUN or (
                 tenant_id is None and selected_scope in {ExtensionScope.TENANT, ExtensionScope.AGENT}

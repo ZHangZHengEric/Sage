@@ -71,6 +71,7 @@ async function logout() {
         <details v-if="admin" class="nav-group" open>
           <summary class="nav-item" title="系统设置"><AppIcon name="settings" /><span>系统设置</span><AppIcon class="nav-chevron" name="chevron" /></summary>
           <div class="nav-children">
+            <router-link class="nav-item" to="/performance" title="运行性能"><AppIcon name="clock" /><span>运行性能</span></router-link>
             <router-link class="nav-item" to="/plugins" title="插件管理"><AppIcon name="settings" /><span>插件管理</span></router-link>
             <router-link class="nav-item" to="/users" title="用户管理"><AppIcon name="user" /><span>用户管理</span></router-link>
           </div>

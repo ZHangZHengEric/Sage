@@ -154,6 +154,15 @@ def register_official_plugins(registry: ExtensionRegistry) -> None:
 
 
 def _register_infrastructure(registry: ExtensionRegistry) -> None:
+    from sagents.v2.tool.plugins.result_file import FileToolResultProcessor
+
+    _one(
+        registry, FileToolResultProcessor, "tool.result-processor",
+        lambda context, dependencies: FileToolResultProcessor(**context.config),
+        scopes={ExtensionScope.PROCESS, ExtensionScope.AGENT, ExtensionScope.RUN},
+        config_schema={"type": "object", "additionalProperties": False,
+                       "properties": {"max_inline_characters": {"type": "integer", "minimum": 1}}},
+    )
 
     bounded_config_schema = {
         "type": "object",

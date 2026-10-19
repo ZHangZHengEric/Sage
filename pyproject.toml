@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "sage"
-version = "2.1.0"
+version = "2.1.1"
 description = "A platform for custom, self-evolving AI agents with multi-round RSI, Desktop, Server, and Python APIs."
 readme = "README.md"
 # Sage 2.0 applications and runtime require Python 3.12+.

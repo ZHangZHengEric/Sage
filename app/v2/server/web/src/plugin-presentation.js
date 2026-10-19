@@ -1,5 +1,6 @@
 // Names follow Desktop v2 settings_screen.dart and its Chinese localization.
 export const componentNames = {
+  'tool.result-processor': '工具结果处理',
   'derived-state.store': '运行状态存储', 'session.access': '会话访问控制', 'agent.approval-memory': '审批记忆',
   'agent.continuation-policy': 'Run 完成判定', 'tool.selection-policy': '工具选择策略',
   'memory.provider': '长期记忆', 'memory.recall-query': '记忆检索词生成', 'session-memory.provider': '会话记忆',
@@ -13,6 +14,7 @@ export const componentNames = {
   'tool.catalog': '工具目录', 'tool.executor': '工具执行', 'flow.node': '工作流节点',
 }
 const names = {
+  'sage.tool.result-processor.file': '超长结果保存到文件',
   'sage.agent.continuation.deterministic': '无工具调用即完成', 'sage.agent.continuation.llm-judge': '无工具调用 + LLM Judge',
   'sage.agent.continuation.hybrid': '混合完成判定', 'sage.agent.continuation.explicit-status': '结束工具（turn_status）',
   'sage.context.summarizer.model': '模型摘要', 'sage.context.summarizer.extractive': '抽取式摘要',

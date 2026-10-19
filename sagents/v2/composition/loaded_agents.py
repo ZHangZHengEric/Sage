@@ -16,6 +16,21 @@ from sagents.v2.sagent import SAgentRunStream
 
 from sagents.v2.composition.inputs import package_input
 from sagents.v2.composition.agent_graph import resolve_agent_graph
+from sagents.v2.runtime.observability.logs import get_logger
+
+
+_LOGGER = get_logger(__name__)
+
+
+@dataclass(frozen=True)
+class StartupRecoveryIssue:
+    """A Run left untouched because its admitted revision could not be restored."""
+
+    run_id: str
+    session_id: str
+    resolved_spec_hash: str
+    code: str
+    message: str
 
 
 @dataclass(frozen=True, eq=False)
@@ -154,6 +169,7 @@ class LoadedAgents:
         )
         self.store = AgentRevisionStore(root)
         self.restore_lock = asyncio.Lock()
+        self.recovery_issues: tuple[StartupRecoveryIssue, ...] = ()
         from sagents.v2.runtime.extensions.pool import ApplicationScopePool
         self.scope_pool = ApplicationScopePool()
         self.process_handles = ()
@@ -171,7 +187,11 @@ class LoadedAgents:
         self.application._ensure_open()
         async with self.lock:
             self.application._ensure_open()
-            return await self._load(*args, **kwargs)
+            handle = await self._load(*args, **kwargs)
+            expected_hash = kwargs.get("expected_hash")
+            if expected_hash is not None and handle.composition_hash != expected_hash:
+                raise ValueError("saved Agent revision no longer matches the runtime composition")
+            return handle
 
     async def _load(
         self,
@@ -311,6 +331,8 @@ class LoadedAgents:
             reader = getattr(store, "list_dispatchable_runs", None)
             if reader is None:
                 return
+            issues = []
+            failures = {}
             for intent in await reader():
                 spec_hash = intent.run.resolved_spec_hash
                 if any(
@@ -318,9 +340,34 @@ class LoadedAgents:
                     for handle in self.revisions.values()
                 ):
                     continue
-                package = self.store.read(spec_hash)
-                if package is not None:
-                    await self.load(package, historical=True, expected_hash=spec_hash)
+                if spec_hash not in failures:
+                    try:
+                        package = self.store.read(spec_hash)
+                        if package is None:
+                            raise FileNotFoundError("the admitted Agent revision is unavailable")
+                        await self.load(package, historical=True, expected_hash=spec_hash)
+                    except Exception as exc:
+                        # Cancellation and process exits must still abort startup.
+                        # Do not mutate the Run: a crossed tool barrier may carry
+                        # an external outcome that only its original Agent can reconcile.
+                        failures[spec_hash] = exc
+                    else:
+                        continue
+                error = failures[spec_hash]
+                issue = StartupRecoveryIssue(
+                    run_id=intent.run.run_id,
+                    session_id=intent.run.session_id,
+                    resolved_spec_hash=spec_hash,
+                    code="recovery.agent_revision_unavailable",
+                    message=str(error),
+                )
+                issues.append(issue)
+                _LOGGER.exception(
+                    issue.code, "Run recovery blocked; continuing App startup", error,
+                    run_id=issue.run_id, session_id=issue.session_id,
+                    resolved_spec_hash=spec_hash,
+                )
+            self.recovery_issues = tuple(issues)
 
 
 class RevisionRecovery:

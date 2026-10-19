@@ -6,6 +6,7 @@ import hashlib
 import json
 import asyncio
 from time import perf_counter
+from sagents.v2.contracts.common import utc_now
 
 from app.v2.server.conversations.agui.mapping import to_start_run, validate_agui_id
 from app.v2.server.conversations.agui.sse import (
@@ -275,6 +276,7 @@ class ConversationService:
                     agent_id: str | None = None, workspace_directory: str | None = None,
                     runtime_context: dict | None = None, package=None, api_key=None):
         started_at = perf_counter()
+        performance_started_at = utc_now()
         logger = StructuredLogger(self.log_sink, "server_v2.agui").bind(correlation_id=get_request_id())
         if workspace_directory is not None:
             from app.v2.server.storage.external_workspaces import workspace_parts
@@ -400,6 +402,7 @@ class ConversationService:
                 user_id=user_id,
                 session_id=thread_id,
                 label="agui",
+                performance_started_at=performance_started_at,
                 on_finished=self._agui_finished(
                     command,
                     thread_id=thread_id,
@@ -441,6 +444,7 @@ class ConversationService:
         exactly as it is when starting a Run.
         """
 
+        performance_started_at = utc_now()
         thread_id = validate_agui_id(thread_id, field="threadId")
         run_id = validate_agui_id(run_id, field="runId")
         thread = await self.threads.find(thread_id)
@@ -475,6 +479,7 @@ class ConversationService:
                 user_id=user_id,
                 session_id=thread_id,
                 label="agui",
+                performance_started_at=performance_started_at,
                 decide=lambda interaction: (
                     (decision, dict(payload))
                     if decision in interaction.allowed_decisions
