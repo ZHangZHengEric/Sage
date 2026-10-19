@@ -17,8 +17,6 @@ from sagents.v2.contracts.commands import (
     PauseRun,
     ReplyInteraction,
     ResumeRun,
-    RunConfig,
-    StartRun,
     SteerRun,
 )
 from sagents.v2.contracts.common import new_id, utc_now
@@ -190,86 +188,14 @@ class DesktopRunServiceMixin(DesktopRunCompositionMixin):
                 exc,
                 attributes={"agent_id": request.agent_id},
             )
-            # A failed Studio preflight must not allocate a replacement Session:
-            # membership is durably bound to the original Session identity.
-            if accepted_handle is None and (
-                request.studio_id is not None or action_surface is not None
-                or (request.session_id is not None and self.studio_store.has_session(request.session_id))
-            ):
-                raise
-            language = str(
-                request.response_language or self._read_settings_sync().language or "en"
+            from sagents.v2.i18n import localize_error
+
+            error = exc.info if isinstance(exc, SageV2Error) else RuntimeErrorInfo(
+                code="desktop.run_start_failed",
+                category=ErrorCategory.VALIDATION if isinstance(exc, (ValueError, FileNotFoundError, PermissionError)) else ErrorCategory.INTERNAL,
+                message=str(exc), safe_to_resume=False,
             )
-            if language == "system":
-                language = "zh"
-            context = self._context(user_id, language=language)
-            fallback = StartRun(
-                agent_id=request.agent_id or "desktop_unconfigured_agent",
-                input=tuple(
-                    InputItem(
-                        role=value.role,
-                        content=content,
-                    )
-                    for value in request.messages
-                    if (
-                        content := self._run_message_content(
-                            value,
-                            provider=None,
-                            workspace=None,
-                            workspace_root="/workspace",
-                        )
-                    )
-                ),
-                config=RunConfig(metadata={"response_language": language}),
-                resolved_spec_hash="sha256:desktop-preflight-v1",
-                idempotency_key=(
-                    request.idempotency_key or new_id("desktop_preflight_failure")
-                ),
-            )
-            handle = accepted_handle or await self.runtime.start_run(fallback, context)
-            failed = await self.runtime.fail_run(
-                run_id=handle.run_id,
-                expected_revision=(await self.runtime.get_run(handle.run_id)).revision,
-                error=exc.info.model_copy(update={"safe_to_resume": False})
-                if isinstance(exc, SageV2Error)
-                else RuntimeErrorInfo(
-                    code="desktop.run_start_failed",
-                    category=(
-                        exc.info.category
-                        if isinstance(exc, SageV2Error)
-                        else ErrorCategory.VALIDATION
-                        if isinstance(
-                            exc,
-                            (ValueError, FileNotFoundError, PermissionError),
-                        )
-                        else ErrorCategory.INTERNAL
-                    ),
-                    message=(
-                        exc.info.message if isinstance(exc, SageV2Error) else str(exc)
-                    ),
-                    safe_to_resume=False,
-                ),
-                context=context,
-                idempotency_key=f"desktop-preflight-fail:{handle.run_id}",
-            )
-            self._run_environments.pop(handle.run_id, None)
-            await self._index_session(failed.session_id)
-            yield (
-                json.dumps(
-                    {
-                        "kind": "stream.opened",
-                        "handle": handle.model_dump(mode="json"),
-                    },
-                    ensure_ascii=False,
-                )
-                + "\n"
-            )
-            async for event in self.runtime.subscribe_events(
-                EventCursor(run_id=handle.run_id, run_sequence=0)
-            ):
-                yield event.model_dump_json() + "\n"
-                if event.type == "run.failed":
-                    return
+            raise SageV2Error(localize_error(error, request.response_language or (await self.get_settings()).language)) from exc
         await self._index_session(stream.handle.session_id)
         self._ensure_run_observer(stream.handle.run_id)
         self.logger.info(

@@ -42,3 +42,7 @@ Server 同样使用标准 App、Agent 加载及执行入口。运行能力从实
 接口示例、租约归属、释放顺序及验证范围见[多层子 Run 标准恢复](sagents-v2-run-tree-recovery.md)。
 
 合并远端更新后，Yiii 提供的 `video-asset-agent-pause-resume` 与 `video-asset-agent-host-restart` 原始验收命令均通过（2 passed），未修改 Yiii。两项验证祖先仍暂停时直接恢复叶子，随后按原 Run 逐层继续，并检查实际 Skill 上下文和产物。
+
+## 宿主控制接口核对
+
+审批、提交、取消、暂停和恢复的实际入口、已修正旧路径及未开放的 Server 控制见[标准控制接口核对](sagents-v2-host-controls.md)。本页上方测试数为对应轮次记录，新增控制验收结果单独记录。

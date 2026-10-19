@@ -6,6 +6,7 @@ import asyncio
 import hashlib
 import json
 import subprocess
+import sys
 from dataclasses import replace
 from pathlib import Path
 
@@ -36,6 +37,7 @@ class LocalWorkspaceExecutionBindingProvider:
         self,
         workspace: str | Path,
         *,
+        workspace_alias: str | None = None,
         issuer: SandboxGrantIssuer | None = None,
         sandbox_provider: LocalWorkspaceSandboxProvider | None = None,
         private_workspace_root: str | Path | None = None,
@@ -52,6 +54,9 @@ class LocalWorkspaceExecutionBindingProvider:
         self.workspace = Path(workspace).expanduser().resolve()
         self.workspace.mkdir(parents=True, exist_ok=True)
         self.workspace_root = self.workspace.as_posix()
+        if workspace_alias not in {None, "/workspace"}:
+            raise ValueError("workspace_alias must be /workspace or unset")
+        self.workspace_alias = workspace_alias
         self.private_workspace_root = (
             Path(private_workspace_root).expanduser().resolve()
             if private_workspace_root is not None
@@ -140,6 +145,7 @@ class LocalWorkspaceExecutionBindingProvider:
                     child_workspace_policy=self.child_workspace_policy.value,
                     policy=policy.model_dump(mode="json"),
                     tool_environment={
+                        **({"workspace_alias": self.workspace_alias} if self.workspace_alias else {}),
                         "command_path": self.sandbox_provider.command_path,
                         "read_paths": list(self.sandbox_provider.read_paths),
                         "interpreter": interpreter,
@@ -174,6 +180,8 @@ class LocalWorkspaceExecutionBindingProvider:
                     or snapshot.private_workspace_root != str(self.private_workspace_root)):
                 raise ValueError("accepted workspace/provider is unavailable")
             interpreter = snapshot.tool_environment["interpreter"]
+            if snapshot.tool_environment.get("workspace_alias") != self.workspace_alias:
+                raise ValueError("accepted workspace mapping changed; start a new Run")
             actual = await asyncio.to_thread(
                 inspect_isolation_python, interpreter["executable"],
                 forbidden_roots=(self.workspace, self.private_workspace_root),
@@ -187,6 +195,10 @@ class LocalWorkspaceExecutionBindingProvider:
         except (KeyError, ValueError, OSError, subprocess.SubprocessError) as exc:
             raise self._incompatible(str(exc)) from exc
 
+    def _sandbox_workspace(self, workspace: Path) -> str:
+        # Seatbelt has no mount namespace. Desktop keeps native paths on every OS.
+        return self.workspace_alias if self.workspace_alias and sys.platform == "linux" else workspace.as_posix()
+
     def sandbox_spec(
         self,
         *,
@@ -196,6 +208,7 @@ class LocalWorkspaceExecutionBindingProvider:
         tool_environment: dict | None = None,
     ) -> ResolvedSandboxSpec:
         resolved_workspace = (workspace or self.workspace).resolve()
+        sandbox_workspace = self._sandbox_workspace(resolved_workspace)
         selected = policy or self.policy
         effective_read_only = self.read_only if read_only is None else read_only
         filesystem = selected.filesystem.model_copy(update={
@@ -203,7 +216,7 @@ class LocalWorkspaceExecutionBindingProvider:
                 selected.filesystem.allowed_operations & {FileOperation.READ, FileOperation.LIST}
                 if effective_read_only else selected.filesystem.allowed_operations
             ),
-            "allowed_roots": (resolved_workspace.as_posix(),),
+            "allowed_roots": (sandbox_workspace,),
             "max_total_bytes": min(
                 selected.filesystem.max_total_bytes or selected.resources.disk_mb * 1024**2,
                 selected.resources.disk_mb * 1024**2,
@@ -227,7 +240,7 @@ class LocalWorkspaceExecutionBindingProvider:
         spec_source = json.dumps(
             {
                 "policy_hash": policy_hash,
-                "workspace_root": resolved_workspace.as_posix(),
+                "workspace_root": sandbox_workspace,
                 "host_workspace": str(resolved_workspace),
                 "tool_environment": tool_environment,
             },
@@ -236,7 +249,7 @@ class LocalWorkspaceExecutionBindingProvider:
         spec_hash = f"sha256:{hashlib.sha256(spec_source.encode()).hexdigest()}"
         return ResolvedSandboxSpec(
             spec_hash=spec_hash,
-            workspace_root=resolved_workspace.as_posix(),
+            workspace_root=sandbox_workspace,
             architecture="native",
             filesystem=filesystem,
             process=process,
@@ -282,7 +295,9 @@ class LocalWorkspaceExecutionBindingProvider:
             parent = next((value for value in self.bindings
                            if value.run_id == request.parent_run_id), None)
             if parent is not None and policy != WorkspaceSharingPolicy.PRIVATE_CHILD:
-                workspace = Path(parent.workspace_root)
+                # Binding paths are sandbox-visible; never treat /workspace as
+                # a host directory when sharing or narrowing a parent's lease.
+                workspace = parent.sandbox.filesystem.row.root
             if request.parent_run_id and policy != WorkspaceSharingPolicy.PRIVATE_CHILD and parent is None:
                 raise SageV2Error(RuntimeErrorInfo(
                     code="execution.parent_binding_not_ready", category=ErrorCategory.RESOURCE_LOST,
@@ -313,7 +328,7 @@ class LocalWorkspaceExecutionBindingProvider:
                 run_id=request.run_id,
                 parent_run_id=request.parent_run_id,
                 agent_id=request.agent_id,
-                workspace_root=workspace.as_posix(),
+                workspace_root=self._sandbox_workspace(workspace),
                 workspace_policy=policy,
                 sandbox=handle,
                 grant_issuer=self.issuer,

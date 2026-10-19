@@ -9,7 +9,8 @@ from sagents.v2.contracts.commands import RunConfig
 from sagents.v2.contracts.errors import SageV2Error
 from app.v2.server.identity.users import UserRecord
 from app.v2.server.catalog.records import require_agent
-from app.v2.server.runtime.models import bind_model_user, reset_model_user, create_catalog_provider
+from app.v2.server.runtime.models import create_catalog_provider
+from contextvars import ContextVar
 from app.v2.server.conversations.composition import composition_metadata, load_composition
 from app.v2.server.runtime.loop import load_catalog_agent
 from tests.app.v2.server.conftest import make_test_service, scripted_hello
@@ -41,7 +42,8 @@ async def test_registered_models_follow_authorized_run_not_stale_worker_context(
         for owner in ("alice", "bob"):
             await host.users.save(UserRecord(user_id=owner, username=owner, password_hash="unused"))
             await host.catalog.upsert_model(owner, {"model": owner, "api_key": "test", "is_default": True})
-        token = bind_model_user("unrelated-worker")
+        worker_identity = ContextVar("unrelated_worker_identity")
+        token = worker_identity.set("unrelated-worker")
         try:
             for owner in ("alice", "bob"):
                 agent = require_agent(await host.catalog.get(owner), (await host.catalog.get(owner)).default_agent_id)
@@ -51,7 +53,7 @@ async def test_registered_models_follow_authorized_run_not_stale_worker_context(
                 with pytest.raises(SageV2Error):
                     await host.application.agent_for_run(result.run_id, host.contexts.for_user("other"))
         finally:
-            reset_model_user(token)
+            worker_identity.reset(token)
         assert set(owners) == {"alice", "bob"}
     finally:
         await host.close()

@@ -1,4 +1,9 @@
-"""Per-event-loop admission for shared auxiliary work, without global loop ownership."""
+"""Public admission helpers for auxiliary work, scoped to each asyncio event loop.
+
+Groups: context-cpu (2), skill-io (8), context-summary (4), memory-io (8),
+model-init (4). These helpers do not schedule or drive Agent Runs. Cancellation
+of a bounded thread observer retains its slot until the worker actually exits.
+"""
 
 from __future__ import annotations
 
@@ -6,6 +11,8 @@ import asyncio
 from contextlib import asynccontextmanager
 import threading
 from weakref import WeakKeyDictionary, ref
+
+__all__ = ["auxiliary_capacity", "bounded_to_thread"]
 
 _SLOTS = WeakKeyDictionary()
 _GUARD = threading.Lock()
@@ -19,6 +26,8 @@ _LIMITS = {
 
 
 def _semaphore(kind):
+    if kind not in _LIMITS:
+        raise ValueError(f"unknown auxiliary capacity: {kind}")
     loop = asyncio.get_running_loop()
     with _GUARD:
         groups = _SLOTS.setdefault(loop, {})

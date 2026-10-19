@@ -20,7 +20,7 @@ from urllib.parse import urlsplit
 from pydantic import Field
 
 from sagents.v2.prompt_i18n import prompt_text, run_prompt_language
-from sagents.v2._concurrency import bounded_to_thread
+from sagents.v2.concurrency import bounded_to_thread
 from sagents.v2.contracts.common import StrictModel
 from sagents.v2.contracts.errors import ErrorCategory, RuntimeErrorInfo, SageV2Error
 from sagents.v2.contracts.items import JsonBlock

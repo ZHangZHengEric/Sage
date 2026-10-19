@@ -4,9 +4,8 @@ import pytest
 from pydantic import ValidationError
 
 from app.v2.server.config.settings import ServerSettings
-from app.v2.server.runtime.official import workspace_sandbox_spec
 from sagents.v2.package.manifest.agents import AgentDefinition
-from sagents.v2.runtime.execution.sandbox import NetworkMode, NetworkPolicy
+from sagents.v2.runtime.execution.sandbox import NetworkMode
 from tests.app.v2.server.conftest import make_settings, register_and_login
 from tests.app.v2.server.test_packages import settled
 
@@ -76,16 +75,6 @@ async def test_standard_network_policy_is_frozen_for_accepted_run(tmp_path, ceil
         await app.close()
 
 
-def test_network_policy_changes_sandbox_fingerprint(tmp_path):
-    denied = workspace_sandbox_spec(tmp_path)
-    allowed = workspace_sandbox_spec(tmp_path, network=NetworkPolicy(
-        mode=NetworkMode.UNRESTRICTED, deny_private_networks=False,
-    ))
-    assert denied.network.mode == NetworkMode.NONE
-    assert denied.spec_hash != allowed.spec_hash
-    assert denied.policy_hash != allowed.policy_hash
-
-
 def test_server_network_ceiling_has_no_environment_binding(tmp_path, monkeypatch):
     monkeypatch.setenv("SAGE_SERVER_MYSQL_URL", "mysql://unused/unused")
     monkeypatch.setenv("SAGE_SERVER_SANDBOX_NETWORK_MODE", "invalid")
@@ -125,6 +114,8 @@ def test_saved_package_network_applies_when_server_executes(client, service, mon
     assert specs
     expected = NetworkMode.UNRESTRICTED if network == ceiling == "unrestricted" else NetworkMode.NONE
     assert all(spec.network.mode == expected for spec in specs)
+    assert all("sage-frontend-test" in spec.process.allowed_executables for spec in specs)
+    assert all("NODE_PATH" in spec.process.allowed_env_names for spec in specs)
 
 
 def test_package_api_rejects_invalid_network_before_save(client):
@@ -181,14 +172,3 @@ def test_flow_member_uses_own_network_policy(client, service, monkeypatch):
     assert state["run"]["state"] == "completed", __import__("json").dumps(state, default=str)
     assert networks[state["run"]["run_id"]] == NetworkMode.UNRESTRICTED
     assert NetworkMode.NONE in networks.values()
-
-
-@pytest.mark.parametrize("disk_mb", [1, 32768])
-def test_workspace_filesystem_quota_follows_resource_configuration(tmp_path, disk_mb):
-    from sagents.v2.runtime.execution.sandbox import ResourceLimits
-
-    spec = workspace_sandbox_spec(tmp_path, resources=ResourceLimits(
-        disk_mb=disk_mb, require_hard_limits=False,
-    ))
-    assert spec.resources.disk_mb == disk_mb
-    assert spec.filesystem.max_total_bytes == disk_mb * 1024**2

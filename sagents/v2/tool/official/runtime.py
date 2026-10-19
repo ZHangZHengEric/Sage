@@ -382,7 +382,8 @@ class OfficialToolRuntime:
         command = str(spec.payload["command"])
         cwd = str(spec.payload["cwd"])
         env = dict(spec.payload.get("env") or {})
-        argv = ("bash", "-c", command)
+        # Preserve a failing check's status when output is piped through tail/tee.
+        argv = ("bash", "-o", "pipefail", "-c", command)
         request = ProcessRequest(argv=argv, cwd=cwd, env=env)
         intent = OperationIntent(
             operation="process.run",
