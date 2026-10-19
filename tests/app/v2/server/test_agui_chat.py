@@ -85,6 +85,13 @@ def test_agui_run_writes_correlated_json_sagents_logs_to_stdout(tmp_path, capsys
     assert len([row for row in rows if row["event"] == "agui.first_text"]) == 1
     assert "hello" not in json.dumps(first)
     assert first["level"] == "debug"
+    admission_rows = [row for row in rows if row["event"] == "server.admission.phase"]
+    assert {row["attributes"]["phase"] for row in admission_rows} >= {
+        "thread_read", "binding_read", "catalog_read", "session_ownership", "package_resolve",
+        "skills_read", "user_read", "command_build", "thread_bind", "thread_upsert", "prepare",
+    }
+    assert {row["correlation_id"] for row in admission_rows} == {"request-agui-1"}
+    assert all(row["level"] == "debug" for row in admission_rows)
 
 
 @pytest.mark.timeout(30)

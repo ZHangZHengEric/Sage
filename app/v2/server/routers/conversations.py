@@ -41,6 +41,7 @@ from sagents.v2.agent.management import AgentPackageBundle
 from sagents.v2.contracts.errors import ErrorCategory, RuntimeErrorInfo, SageV2Error
 from sagents.v2.runtime.session.plugins.filesystem import FilesystemSessionStore
 from sagents.v2.runtime.session.plugins.mysql import MysqlSessionStore
+from sagents.v2.runtime.session.plugins.redis_mysql import RedisMysqlSessionStore
 
 agent_router = APIRouter(prefix="/api", tags=["agent"], responses=AUTH_ERRORS)
 thread_router = APIRouter(
@@ -247,7 +248,7 @@ async def session_download(thread_id: str, user: AdminUser, host: HostDep):
     ):
         raise HTTPException(404, "thread not found")
     store = service.application.runtime.session_store
-    if not isinstance(store, (MysqlSessionStore, FilesystemSessionStore)):
+    if not isinstance(store, (MysqlSessionStore, RedisMysqlSessionStore, FilesystemSessionStore)):
         raise HTTPException(
             409, "this Session store does not support diagnostic export"
         )

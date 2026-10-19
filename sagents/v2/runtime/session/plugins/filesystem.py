@@ -1491,6 +1491,15 @@ class _FilesystemSessionState(SessionStoreCoordinator):
             "session_commit_proposals": ("proposal_id",),
             "session_commit_command_results": ("target_id", "idempotency_key"),
         }
+        for collection, rows in delta.get("patches", {}).items():
+            keys = identities[collection]
+            current = {tuple(row.get(key) for key in keys): row for row in state.get(collection, ())}
+            for row in rows:
+                identity = tuple(row.get(key) for key in keys)
+                if identity not in current:
+                    raise ValueError(f"cannot patch missing {collection} row: {identity}")
+                current[identity] = {**current[identity], **row}
+            state[collection] = list(current.values())
         for collection, rows in delta.get("upserts", {}).items():
             keys = identities[collection]
             current = {

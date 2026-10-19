@@ -197,6 +197,7 @@ class SessionSnapshotEnvelopeV3(StrictModel):
 class SessionStateDeltaMutation(StrictModel):
     kind: Literal["state_delta"] = "state_delta"
     upserts: dict[str, list[dict[str, Any]]] = {}
+    patches: dict[str, list[dict[str, Any]]] = {}
     deletes: dict[str, list[list[Any]]] = {}
     appends: dict[str, dict[str, list[dict[str, Any]]]] = {}
     replacements: dict[str, dict[str, list[dict[str, Any]]]] = {}

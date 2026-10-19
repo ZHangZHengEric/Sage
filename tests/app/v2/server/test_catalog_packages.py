@@ -11,14 +11,13 @@ from app.v2.server.catalog.packages import package_owner
 from app.v2.server.catalog.repository import DatabaseCatalogStore
 from app.v2.server.catalog.records import AgentRecord
 from app.v2.server.packages.repository import DatabasePackageStore
-from app.v2.server.skills.orm import AgentSkillSelectionRow
 from app.v2.server.skills.records import AgentSkillBinding
 from app.v2.server.skills.repository import DatabaseSkillStore
 from app.v2.server.main import create_app
 from app.v2.server.database import Database, DatabaseSettings
 from app.v2.server.database.schema import create_host_schema
-from app.v2.server.identity.orm import UserRow, ApiKeyRow
-from app.v2.server.conversations.orm import ThreadRow
+from app.v2.server.identity.orm import UserRow
+from sagents.v2.contracts.errors import SageV2Error
 from tests.app.v2.server.test_external_chat import make_host
 from tests.app.v2.server.conftest import register_and_login
 
@@ -62,76 +61,6 @@ async def test_package_is_persistent_authority_and_old_versions_remain_readable(
     old = await store.packages.get(package_owner("alice"), old_ref)
     assert old.manifest.agents[agent.id].name == "Before"
     assert old.manifest.agents[agent.id].sandbox.network == "none"
-
-
-async def test_legacy_migration_preserves_ids_models_tools_bindings_and_is_idempotent(
-    store, tmp_path
-):
-    agent = AgentRecord(
-        id="agent_legacy",
-        name="Legacy",
-        instructions="keep",
-        model_id="my-model",
-        tools=["file_write"],
-    )
-    await store.create_agent("alice", agent)
-    workspace = tmp_path / "tenants/alice/agent_legacy/workspace"
-    workspace.mkdir(parents=True)
-    (workspace / "keep.txt").write_text("unchanged")
-    async with store.database.transaction() as db:
-        row = await db.get(AgentRow, agent.id)
-        row.package_ref = None
-        db.add(
-            ThreadRow(
-                thread_id="existing-session",
-                user_id="alice",
-                title="keep",
-                agent_id=agent.id,
-                updated_at="before",
-            )
-        )
-        db.add(
-            ApiKeyRow(
-                key_id="key",
-                owner_user_id="alice",
-                agent_id=agent.id,
-                name="keep",
-                key_hash="hash",
-                scopes="a2a:invoke",
-                created_at="before",
-                revoked_at="",
-            )
-        )
-        db.add(
-            AgentSkillSelectionRow(
-                owner_user_id="alice",
-                agent_id=agent.id,
-                skill_name="demo",
-                source_skill_id="skill-demo",
-                position=0,
-            )
-        )
-    await store.migrate_packages()
-    first = next(a for a in (await store.get("alice")).agents if a.id == agent.id)
-    assert first.id == agent.id and first.model_id == "my-model"
-    assert first.instructions == "keep" and first.tools == ["file_write"]
-    assert first.skills == ["demo"] and first.sandbox.network == "none"
-    await store.migrate_packages()
-    second = next(a for a in (await store.get("alice")).agents if a.id == agent.id)
-    assert second.package == first.package
-    async with store.database.session() as db:
-        binding = await db.scalar(
-            select(AgentSkillSelectionRow).where(
-                AgentSkillSelectionRow.agent_id == agent.id
-            )
-        )
-        assert binding.source_skill_id == "skill-demo" and binding.position == 0
-        assert (await db.get(ThreadRow, "existing-session")).agent_id == agent.id
-        key = await db.get(ApiKeyRow, "key")
-        assert (
-            key.agent_id == agent.id and key.key_hash == "hash" and key.revoked_at == ""
-        )
-    assert (workspace / "keep.txt").read_text() == "unchanged"
 
 
 async def test_skill_index_and_package_commit_and_rollback_together(store, monkeypatch):
@@ -267,6 +196,71 @@ async def test_package_reads_are_batched_for_a_catalog(store):
     assert len(queries) == 1
 
 
+async def test_run_catalog_reads_only_selected_package_without_locks(store):
+    from sqlalchemy import event
+    from sqlalchemy.dialects import mysql
+
+    selected = AgentRecord(id="selected", name="Selected", instructions="canonical")
+    unrelated = AgentRecord(id="unrelated", name="Unrelated")
+    await store.create_agent("alice", selected)
+    await store.create_agent("alice", unrelated)
+    async with store.database.transaction() as db:
+        (await db.get(AgentRow, unrelated.id)).package_ref = "missing-package"
+        (await db.get(AgentRow, selected.id)).instructions = "obsolete projection"
+    statements = []
+    def capture(conn, cursor, sql, params, context, many):
+        statements.append(str(context.compiled.statement.compile(dialect=mysql.dialect())))
+    event.listen(store.database._engine.sync_engine, "before_cursor_execute", capture)
+    try:
+        catalog = await store.get_for_run("alice", selected.id)
+    finally:
+        event.remove(store.database._engine.sync_engine, "before_cursor_execute", capture)
+    assert [agent.id for agent in catalog.agents] == [selected.id]
+    assert catalog.agents[0].instructions == "canonical"
+    assert len(statements) == 2
+    assert all("FOR UPDATE" not in sql.upper() for sql in statements)
+    assert not any("agent_skill_selections" in sql for sql in statements)
+    assert (await store.get_for_run("alice")).agents[0].id == catalog.default_agent_id
+    with pytest.raises(SageV2Error):
+        await store.get_for_run("bob", selected.id)
+
+
+async def test_run_catalog_resolves_live_members_and_preserves_frozen_revision(store):
+    from app.v2.server.catalog.records import upsert_agent
+    from app.v2.server.catalog.packages import bind_catalog_members, catalog_execution_grants
+
+    child = AgentRecord(id="child", name="Child", instructions="before")
+    await store.create_agent("alice", child)
+    parent, _ = upsert_agent(await store.get("alice"), {
+        "id": "parent", "name": "Parent", "agent_mode": "team",
+        "available_sub_agent_ids": [child.id],
+    })
+    await store.create_agent("alice", parent)
+    catalog = await store.get_for_run("alice", parent.id)
+    assert {agent.id for agent in catalog.agents} == {parent.id, child.id}
+    bundle = bind_catalog_members(catalog.agents[0], catalog)
+    grants = catalog_execution_grants(bundle, catalog)
+    assert grants[child.id]["agent_id"] == child.id
+    await store.update_agent("alice", child.with_configuration(instructions="after"))
+    refreshed = await store.get_for_run("alice", parent.id)
+    assert next(agent for agent in refreshed.agents if agent.id == child.id).instructions == "after"
+    assert bundle.dependencies[child.id].manifest.agents[child.id].instructions.inline == "before"
+    async with store.database.transaction() as db:
+        (await db.get(AgentRow, child.id)).owner_user_id = "other-owner"
+    scoped = await store.get_for_run("alice", parent.id)
+    with pytest.raises(SageV2Error, match="团队成员"):
+        bind_catalog_members(scoped.agents[0], scoped)
+
+
+async def test_run_catalog_initializes_default_and_fails_closed_on_missing_package(store):
+    catalog = await store.get_for_run("alice")
+    assert catalog.agents[0].id == catalog.default_agent_id
+    async with store.database.transaction() as db:
+        (await db.get(AgentRow, catalog.default_agent_id)).package_ref = "missing"
+    with pytest.raises(ValueError, match="package is missing"):
+        await store.get_for_run("alice")
+
+
 async def test_missing_inventory_fails_closed_instead_of_using_legacy_columns(store):
     agent = (await store.get("alice")).agents[0]
     async with store.database.transaction() as db:
@@ -274,6 +268,32 @@ async def test_missing_inventory_fails_closed_instead_of_using_legacy_columns(st
         row.package_ref = "f" * 64
     with pytest.raises(ValueError, match="package is missing"):
         await store.get("alice")
+
+
+@pytest.mark.parametrize("reader", ["catalog", "agent", "summary", "run", "skill_binding"])
+async def test_missing_package_reference_is_rejected_without_backfill(store, reader):
+    agent = (await store.get("alice")).agents[0]
+    async with store.database.transaction() as db:
+        (await db.get(AgentRow, agent.id)).package_ref = ""
+    with pytest.raises(ValueError, match="package is missing"):
+        if reader == "catalog":
+            await store.get("alice")
+        elif reader == "agent":
+            await store.get_agent("alice", agent.id)
+        elif reader == "summary":
+            await store.list_agent_summaries(["alice"])
+        elif reader == "run":
+            await store.get_for_run("alice", agent.id)
+        else:
+            await DatabaseSkillStore(store.database).replace_bindings(
+                owner_user_id="alice", agent_id=agent.id,
+                bindings=[AgentSkillBinding("alice", agent.id, "demo", "source", 0)],
+            )
+    async with store.database.session() as db:
+        assert (await db.get(AgentRow, agent.id)).package_ref == ""
+    assert await DatabaseSkillStore(store.database).list_bindings(
+        owner_user_id="alice", agent_id=agent.id,
+    ) == []
 
 
 async def test_agent_edit_rolls_back_if_package_write_fails(store, monkeypatch):

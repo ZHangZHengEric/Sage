@@ -60,6 +60,17 @@ class MemoryCatalogStore:
         catalog = self._catalogs.get(user_id)
         return next((agent.execution_policy for agent in catalog.agents if agent.id == agent_id), None) if catalog else None
 
+    async def get_for_run(self, user_id, agent_id=None):
+        catalog = (self._catalogs.get(user_id) or await self.get(user_id)).model_copy(deep=True)
+        records = {agent.id: agent for agent in catalog.agents}
+        selected = require_agent(catalog, agent_id)
+        pending, visited = {selected.id}, set()
+        while pending:
+            visited.update(pending)
+            pending = {member for identity in pending if identity in records
+                       for member in records[identity].available_sub_agent_ids} - visited
+        return catalog.model_copy(update={"agents": [agent for agent in catalog.agents if agent.id in visited]})
+
     async def get_agent(self, user_id, agent_id):
         return require_agent(self._catalogs.get(user_id) or empty_catalog(), agent_id).model_copy(deep=True)
 

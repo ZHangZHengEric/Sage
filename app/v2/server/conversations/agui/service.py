@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import asyncio
 from time import perf_counter
 
 from app.v2.server.conversations.agui.mapping import to_start_run, validate_agui_id
@@ -20,6 +21,7 @@ from sagents.v2.contracts.items import MessageItemData, TextBlock
 from sagents.v2.contracts.run_state import EventCursor, RunState, TERMINAL_RUN_STATES
 from sagents.v2.interfaces.protocols.ag_ui import AgUiProtocolAdapter
 from sagents.v2.runtime.observability import StructuredLogger, structured_log_context
+from sagents.v2.runtime.observability.timing import log_duration
 
 
 def _error(code, message, category=ErrorCategory.VALIDATION):
@@ -65,8 +67,9 @@ class ConversationService:
                               separators=(",", ":"))
         legacy_id = "external_" + hashlib.sha256(identity.encode()).hexdigest()
         for candidate in (legacy_id, session_id):
-            record = await self.threads.find(candidate)
-            binding = await self.threads.binding(candidate)
+            record, binding = await asyncio.gather(
+                self.threads.find(candidate), self.threads.binding(candidate),
+            )
             if record is None and binding is None:
                 try:
                     await self.session_access.get_session(candidate, self.context_for(owner_id))
@@ -272,6 +275,7 @@ class ConversationService:
                     agent_id: str | None = None, workspace_directory: str | None = None,
                     runtime_context: dict | None = None, package=None, api_key=None):
         started_at = perf_counter()
+        logger = StructuredLogger(self.log_sink, "server_v2.agui").bind(correlation_id=get_request_id())
         if workspace_directory is not None:
             from app.v2.server.storage.external_workspaces import workspace_parts
             if agent_id is None:
@@ -285,7 +289,9 @@ class ConversationService:
         if agent_id is not None:
             stream_thread_id, stream_run_id = request.thread_id, request.run_id
             validate_agui_id(stream_run_id, field="runId")
-            user_id, internal_id = await self._scope(user_id, agent_id, stream_thread_id, for_start=True)
+            with log_duration(logger, "server.admission.phase", "外部会话归属解析结束",
+                              session_id=stream_thread_id, attributes={"phase": "external_scope"}):
+                user_id, internal_id = await self._scope(user_id, agent_id, stream_thread_id, for_start=True)
             internal_run_id = "external_" + hashlib.sha256((internal_id + ":" + stream_run_id).encode()).hexdigest()
             request = request.model_copy(update={
                 "thread_id": internal_id, "run_id": internal_run_id,
@@ -296,15 +302,17 @@ class ConversationService:
         )
         requested_agent = str(props.get("agentId") or "").strip()
         thread_id = validate_agui_id(request.thread_id, field="threadId")
-        admitted = await self.admission.prepare(
-            user_id=user_id,
-            session_id=thread_id,
-            agent_id=requested_agent,
-            pin_existing=True,
-            package=package,
-            tenant_id=workspace_user_id if agent_id is not None else None,
-            key_id=api_key.key_id if api_key is not None else None,
-        )
+        with log_duration(logger, "server.admission.phase", "运行接纳参数准备结束",
+                          session_id=thread_id, attributes={"phase": "prepare"}):
+            admitted = await self.admission.prepare(
+                user_id=user_id,
+                session_id=thread_id,
+                agent_id=requested_agent,
+                pin_existing=True,
+                package=package,
+                tenant_id=workspace_user_id if agent_id is not None else None,
+                key_id=api_key.key_id if api_key is not None else None,
+            )
         enabled = tuple(item.name for item in admitted.skills)
         metadata = {**admitted.metadata, "server_v2.workspace_user_id": workspace_user_id}
         if runtime_context:
@@ -318,14 +326,16 @@ class ConversationService:
         if workspace_directory is not None:
             metadata["server_v2.external.workspace_path"] = workspace_directory
             metadata["working_directory"] = "/workspace/" + workspace_directory
-        thread_id, run_id, agent_id, command = to_start_run(
-            request,
-            composition_hash=self.application.composition_hash,
-            default_agent_id=admitted.agent_id,
-            enabled_skills=enabled,
-            max_steps=admitted.max_steps,
-            metadata=metadata,
-        )
+        with log_duration(logger, "server.admission.phase", "运行命令构建结束",
+                          session_id=thread_id, attributes={"phase": "command_build"}):
+            thread_id, run_id, agent_id, command = to_start_run(
+                request,
+                composition_hash=self.application.composition_hash,
+                default_agent_id=admitted.agent_id,
+                enabled_skills=enabled,
+                max_steps=admitted.max_steps,
+                metadata=metadata,
+            )
         if stream_run_id is not None:
             command = command.model_copy(update={"config": command.config.model_copy(update={
                 "metadata": {**command.config.metadata, "server_v2.external.run_id": stream_run_id}})})
@@ -357,15 +367,19 @@ class ConversationService:
                 command = stored
                 break
         # Validate and claim ownership before Run creation or workspace writes.
-        await self.threads.bind(SessionBinding(
-            thread_id, user_id, workspace_user_id, admitted.agent_id,
-        ))
+        with log_duration(logger, "server.admission.phase", "会话归属绑定结束",
+                          session_id=thread_id, attributes={"phase": "thread_bind"}):
+            await self.threads.bind(SessionBinding(
+                thread_id, user_id, workspace_user_id, admitted.agent_id,
+            ))
         title = ""
         if command.input and command.input[0].content:
             title = getattr(command.input[0].content[0], "text", "")[:80]
-        await self.threads.upsert(
-            thread_id, user_id, title=title, agent_id=admitted.agent_id
-        )
+        with log_duration(logger, "server.admission.phase", "会话索引保存结束",
+                          session_id=thread_id, attributes={"phase": "thread_upsert"}):
+            await self.threads.upsert(
+                thread_id, user_id, title=title, agent_id=admitted.agent_id
+            )
         if not admitted.model_ready:
             return single_error_sse(
                 (
