@@ -32,6 +32,10 @@ Load each dependency package separately. An Agent package has one Agent; nested
 Teams are explicit package relationships. A delegated ordinary leaf does not
 gain a Team roster through its parent.
 
+`SAgent` and `SAgentApplication` are created by the Builder. Direct construction
+with execution components or a custom Driver is rejected. Hosts use `load_agent`
+and the public Run APIs for execution and recovery.
+
 ## Registration and selection
 
 A registration describes a capability protocol and executable factory. The
@@ -219,3 +223,14 @@ SDK integration tests live in `tests/sagents/v2`; host tests live under
 `tests/app/v2`. Native isolation tests need platform sandbox support and process
 accounting permissions. Frozen-build evidence must be produced from the current
 sources. Yiii migration and its own acceptance tests are maintained by Yiii.
+
+## Direct child Run recovery
+
+A suspended child can be resumed while its ancestors remain suspended. Use
+`agent_for_run`, the standard suspension/interaction APIs, and `continue_run`.
+Sage restores resource-only ancestor leases from accepted snapshots and selects
+the child's actual definition from the original execution graph. It does not
+execute ancestor Agents or create replacement Runs. Dependency handles close
+with the child without cancelling independent ancestor handles.
+
+See the [tree recovery contract and example](../../docs/zh/architecture/sagents-v2-run-tree-recovery.md).

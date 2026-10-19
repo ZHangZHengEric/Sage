@@ -24,7 +24,9 @@ from tests.sagents.v2.test_local_workspace_sandbox_matrix import CONTEXT
 
 async def provision(root, *, max_processes=4):
     issuer = SandboxGrantIssuer()
-    provider = LocalWorkspaceSandboxProvider(issuer.verification_key, read_paths=(sys.prefix,))
+    provider = LocalWorkspaceSandboxProvider(
+        issuer.verification_key, read_paths=(sys.prefix,)
+    )
     handle = await provider.provision(
         ResolvedSandboxSpec(
             spec_hash="sha256:shared",
@@ -40,7 +42,7 @@ async def provision(root, *, max_processes=4):
                 enabled=True,
                 max_processes=max_processes,
                 max_wall_time_seconds=20,
-                allowed_executables=("python",),
+                allowed_executables=(sys.executable,),
                 allow_shell=True,
             ),
         ),
@@ -152,7 +154,8 @@ async def test_child_cleanup_cancels_only_its_processes(tmp_path):
     try:
         for handle in (parent, child, sibling):
             request = ProcessRequest(
-                argv=("python", "-c", "import time; time.sleep(15)"), cwd=str(tmp_path)
+                argv=(sys.executable, "-c", "import time; time.sleep(15)"),
+                cwd=str(tmp_path),
             )
             tasks.append(
                 asyncio.create_task(
@@ -265,8 +268,21 @@ async def test_standard_builder_team_uses_one_sandbox_and_parent_survives_child(
             }
         }
     )
-    app = await (
-        build_registered_app(tmp_path / 'sessions', models=TEST_MODELS, model_factory=lambda context, deps: parent_model if context.agent_configuration['execution_agent_id'] == 'assistant' else child_model, runtime=runtime_config, providers={'execution.binding': bindings, 'agent.tool-policy': DefaultToolPolicy(approval_strategy=ApprovalStrategy.AUTO_APPROVE)})
+    app = await build_registered_app(
+        tmp_path / "sessions",
+        models=TEST_MODELS,
+        model_factory=lambda context, deps: (
+            parent_model
+            if context.agent_configuration["execution_agent_id"] == "assistant"
+            else child_model
+        ),
+        runtime=runtime_config,
+        providers={
+            "execution.binding": bindings,
+            "agent.tool-policy": DefaultToolPolicy(
+                approval_strategy=ApprovalStrategy.AUTO_APPROVE
+            ),
+        },
     )
     try:
         child_package = BuiltinPackageFactory.create(
@@ -353,7 +369,8 @@ async def test_closing_queued_member_never_runs_its_command(tmp_path):
     tasks = []
     try:
         parent_request = ProcessRequest(
-            argv=("python", "-c", "import time; time.sleep(15)"), cwd=str(tmp_path)
+            argv=(sys.executable, "-c", "import time; time.sleep(15)"),
+            cwd=str(tmp_path),
         )
         tasks.append(
             asyncio.create_task(
@@ -368,7 +385,7 @@ async def test_closing_queued_member_never_runs_its_command(tmp_path):
                 await asyncio.sleep(0.01)
         request = ProcessRequest(
             argv=(
-                "python",
+                sys.executable,
                 "-c",
                 "from pathlib import Path; Path('must-not-exist').touch()",
             ),
@@ -462,10 +479,70 @@ async def test_intermediate_team_lease_close_preserves_grandchild_and_sibling(tm
         for handle in (root, maker, sibling):
             assert (await handle.status()).state == SandboxState.READY
             await handle.filesystem.write_bytes(
-                handle.ref.owner_run_id + ".txt", b"alive",
-                **authorize(issuer, handle, "create", path=handle.ref.owner_run_id + ".txt"),
+                handle.ref.owner_run_id + ".txt",
+                b"alive",
+                **authorize(
+                    issuer, handle, "create", path=handle.ref.owner_run_id + ".txt"
+                ),
             )
         assert len({h.ref.sandbox_id for h in (root, director, maker, sibling)}) == 1
     finally:
-        await asyncio.gather(root.close(), director.close(), maker.close(), sibling.close())
+        await asyncio.gather(
+            root.close(), director.close(), maker.close(), sibling.close()
+        )
     assert provider._rows[root.ref.sandbox_id].state == SandboxState.TERMINATED
+
+
+@pytest.mark.asyncio
+async def test_explicit_resource_recovery_of_detached_child_preserves_active_parent(
+    tmp_path,
+):
+    provider, issuer, parent = await provision(tmp_path)
+    child = await parent.share(run_id="child", context=CONTEXT)
+    from sagents.v2.runtime.execution.sandbox import (
+        SandboxReleaseDisposition,
+        SandboxReleaseRequest,
+    )
+
+    old_row = child.filesystem.row
+    old_release = SandboxReleaseRequest(
+        ref=child.ref,
+        disposition=SandboxReleaseDisposition.TERMINATE,
+        reason="pause",
+        expected_revision=(await child.status()).revision,
+        idempotency_key="old-pause",
+    )
+    await provider.release(old_release, CONTEXT)
+    await child.close()
+    with pytest.raises(ValueError, match="already has a lease"):
+        await parent.share(run_id="child", context=CONTEXT)
+    restored = await provider.share_run("parent", CONTEXT, run_id="child", resume=True)
+    attached = await provider.attach(parent.ref, CONTEXT)
+    try:
+        assert restored.ref.sandbox_id == parent.ref.sandbox_id
+        assert restored.ref.owner_run_id == "child"
+        assert old_row.lease_terminated
+        assert restored.filesystem.row is not old_row
+        assert (await restored.status()).revision > old_row.revision
+        assert (await provider.release(old_release, CONTEXT)).duplicate
+        assert (await restored.status()).state == SandboxState.READY
+        with pytest.raises(SageV2Error, match="released"):
+            await child.filesystem.read_bytes(
+                "stale.txt", **authorize(issuer, child, "read", path="stale.txt")
+            )
+        # A recovered child owns only its new handle, not the ancestor's handle.
+        await restored.close()
+        await attached.close()
+        assert (await parent.status()).state == SandboxState.READY
+        await parent.filesystem.write_bytes(
+            "alive.txt",
+            b"parent",
+            **authorize(issuer, parent, "create", path="alive.txt"),
+        )
+    finally:
+        await restored.close()
+        await attached.close()
+        await parent.close()
+    assert (await provider.inspect(parent.ref)).state == SandboxState.TERMINATED
+    await provider.purge_terminated(parent.ref)
+    assert not provider._rows

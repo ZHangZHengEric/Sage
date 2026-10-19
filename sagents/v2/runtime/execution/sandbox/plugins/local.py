@@ -902,10 +902,10 @@ class LocalWorkspaceSandboxProvider:
         row.attached_clients += 1
         return _LocalHandle(self, row)
 
-    async def share(self, ref, context, *, run_id):
+    async def share(self, ref, context, *, run_id, resume=False):
         """Lease this same sandbox to a child Run without broadening its policy.
 
-        Callers are trusted host composition code, never model-supplied IDs.
+        Called by trusted binding providers, never model-supplied IDs.
         Grants remain signed against the child owner and the same sandbox ID.
         """
         parent = self._row(ref)
@@ -914,12 +914,20 @@ class LocalWorkspaceSandboxProvider:
         resource = parent.resource
         async with resource.lease_lock:
             self._require_ready(parent)
+            revision = 0
             if run_id in resource.issued_runs:
-                raise ValueError("sandbox already has a lease for this Run; attach its ref instead")
+                previous = resource.members.get(run_id)
+                if (not resume or previous is None
+                        or not previous.lease_terminated or previous.attached_clients):
+                    raise ValueError("sandbox already has a lease for this Run; attach its ref instead")
+                # Replace a detached member, keeping its old handle fenced and
+                # release revisions monotonic. Old release receipts stay valid
+                # as idempotent observations and cannot close the new handle.
+                revision = previous.revision + 1
             child = _LocalRow(
                 ref=parent.ref.model_copy(update={"owner_run_id": run_id}),
                 spec=parent.spec, root=parent.root, state=SandboxState.READY,
-                created_at=self._clock(), updated_at=self._clock(),
+                created_at=self._clock(), updated_at=self._clock(), revision=revision,
                 mutation_lock=resource.mutation_lock, process_slots=resource.process_slots,
                 boundary=resource.boundary, resource=resource,
             )
@@ -927,15 +935,15 @@ class LocalWorkspaceSandboxProvider:
             resource.issued_runs.add(run_id)
             return _LocalHandle(self, child)
 
-    async def share_run(self, parent_run_id, context, *, run_id):
-        """Host adapter for custom composers that persist parent Run IDs."""
+    async def share_run(self, parent_run_id, context, *, run_id, resume=False):
+        """Acquire the declared descendant lease during standard resource binding."""
         candidates = [member for resource in self._rows.values()
                       for member in resource.members.values()
                       if member.ref.owner_run_id == parent_run_id and not member.lease_terminated
                       and member.ref.tenant_id == context.actor.tenant_id]
         if len(candidates) != 1:
             raise ValueError("parent Run must have exactly one live sandbox lease")
-        return await self.share(candidates[0].ref, context, run_id=run_id)
+        return await self.share(candidates[0].ref, context, run_id=run_id, resume=resume)
 
     async def reacquire_workspace(self, ref, spec, context, *, run_id):
         """Rebuild lost local compute around the same durable host workspace.
