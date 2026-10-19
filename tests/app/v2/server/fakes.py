@@ -56,6 +56,10 @@ class MemoryCatalogStore:
     def __init__(self) -> None:
         self._catalogs: dict[str, UserCatalog] = {}
 
+    async def list_resources(self, user_ids, section):
+        return [(user_id, item) for user_id in user_ids
+                for item in getattr(self._catalogs.get(user_id) or empty_catalog(), section)]
+
     async def list_agent_summaries(self, user_ids):
         result = []
         for user_id in user_ids:

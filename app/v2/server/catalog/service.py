@@ -45,6 +45,9 @@ class CatalogService:
     async def list_all_models(self, user_ids: list[str]):
         return await self.store.list_all_models(user_ids)
 
+    async def list_resources(self, user_ids: list[str], section: str):
+        return await self.store.list_resources(user_ids, section)
+
     @asynccontextmanager
     async def _lock(self, user_id: str, section: str):
         key = f"{user_id}\0{section}"

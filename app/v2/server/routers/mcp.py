@@ -10,7 +10,7 @@ router = APIRouter(tags=["mcp"], responses={**AUTH_ERRORS, **VALIDATION_ERRORS})
 
 @router.get("/api/mcp", response_model=ApiResponse[list[McpPublic]])
 async def list_mcp(user: ReadUser, service: CatalogDep):
-    servers = (await service.get(user.user_id)).mcp_servers
+    servers = [item for _, item in await service.list_resources([user.user_id], "mcp_servers")]
     return success([item.public_dict() for item in servers])
 
 

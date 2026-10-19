@@ -253,6 +253,7 @@ class ServerHost:
                 users=self.users,
                 threads=self.threads,
                 catalog=self.catalog,
+                skills=self.skill_catalog,
             )
             self.a2a = A2AService(
                 threads=self.threads,

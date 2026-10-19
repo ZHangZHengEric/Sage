@@ -147,8 +147,8 @@ async def list_tools(user: CurrentUser, packages: PackageDep, service: CatalogDe
     from sagents.v2.tool.plugins.agent_management import AgentManagementToolPlugin
 
     definitions = AgentManagementToolPlugin(packages).definitions
-    catalog = await service.get(user.user_id)
-    plugin = service.mcp_plugins.get(user.user_id, catalog.mcp_servers)
+    servers = [item for _, item in await service.list_resources([user.user_id], "mcp_servers")]
+    plugin = service.mcp_plugins.get(user.user_id, servers)
     external = await plugin.list_tools(run_id="catalog") if plugin is not None else ()
     return success(
         [
