@@ -492,7 +492,16 @@ class ModelConversationSummarizer:
                 if text.lstrip().lower().startswith("json\n"):
                     text = text.lstrip()[5:]
         parsed = json.loads(text)
-        if not isinstance(parsed, dict) or set(parsed) != set(cls._FIELDS):
+        # Older checkpoints also contain host-derived task facts. A model can
+        # echo those keys even though all seven requested fields are valid.
+        # The host rebuilds these facts from the ledger after parsing, so ignore
+        # only those known keys rather than paying for another full generation.
+        derived_fields = {"tool_outcomes", "todo_state_at_compaction_boundary"}
+        if (
+            not isinstance(parsed, dict)
+            or not set(cls._FIELDS).issubset(parsed)
+            or set(parsed) - set(cls._FIELDS) - derived_fields
+        ):
             raise ValueError("summary JSON has the wrong fields")
         if not isinstance(parsed["summary"], str):
             raise ValueError("summary JSON field 'summary' must be a string")

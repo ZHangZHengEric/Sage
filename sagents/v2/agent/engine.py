@@ -148,6 +148,9 @@ from sagents.v2.i18n import (
 )
 
 
+from sagents.v2.tool.result_processing import ToolResultProcessor
+
+
 class _SkillInitializationPaused(Exception):
     """A completed preload is a safe boundary for a requested pause."""
 
@@ -169,6 +172,8 @@ class AgentLoopEngine:
         model: ModelProvider,
         tool_catalog: ToolCatalog,
         tool_executor: ToolExecutor,
+        tool_result_processor: ToolResultProcessor | None = None,
+        tool_result_runtime=None,
         tool_policy: DefaultToolPolicy | None = None,
         approval_memory: ApprovalMemory | None = None,
         tool_selection_policy: ToolSelectionPolicy | None = None,
@@ -237,6 +242,8 @@ class AgentLoopEngine:
         self.model = model
         self.tool_catalog = tool_catalog
         self.tool_executor = tool_executor
+        self.tool_result_processor = tool_result_processor
+        self.tool_result_runtime = tool_result_runtime
         self.tool_policy = tool_policy or DefaultToolPolicy()
         # 审批记忆：没有端口时 approve_and_remember 只等价于 approve_once。
         self.approval_memory = approval_memory
@@ -4073,6 +4080,11 @@ class AgentLoopEngine:
                     "error": localized,
                     "content": content,
                 }
+            )
+
+        if self.tool_result_processor is not None:
+            result = await self.tool_result_processor.process(
+                result, call=call, context=context, runtime=self.tool_result_runtime,
             )
 
         item_id = new_id("item")

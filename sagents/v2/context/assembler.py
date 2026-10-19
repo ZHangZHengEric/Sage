@@ -41,6 +41,10 @@ from sagents.v2.context.session_history import (
 )
 from sagents.v2.contracts.run_state import SessionConcurrencyMode
 from sagents.v2.skill.tags import strip_skill_tags
+from sagents.v2.runtime.observability.logs import get_logger
+
+
+LOGGER = get_logger(__name__)
 
 
 class ContextAssembler(Protocol):
@@ -300,6 +304,7 @@ class DefaultContextAssembler:
                 command.config.metadata.get("response_language") or "en"
             ),
             force=run_id in self._compression_requested,
+            allow_summary_rewrite=self._compression_requested.get(run_id, False),
             allow_reference_compaction=not (
                 self._compression_requested.get(run_id, False)
                 and self._projection_signatures.get(run_id, (None, None))[1]
@@ -387,6 +392,11 @@ class DefaultContextAssembler:
                 - self.budget.reserve_input_tokens,
             )
             if input_tokens >= maximum:
+                LOGGER.bind(run_id=run_id).info(
+                    "context.compression.usage_pressure",
+                    "Provider-reported input usage reached the compression threshold",
+                    attributes={"input_tokens": input_tokens, "threshold_tokens": maximum},
+                )
                 self.request_compression(run_id, required=False)
 
     @classmethod

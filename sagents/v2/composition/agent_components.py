@@ -29,6 +29,7 @@ from sagents.v2.memory import (
 from sagents.v2.model import ModelProvider
 from sagents.v2.runtime.contracts import RuntimePort
 from sagents.v2.skill.plugins.loading import SkillLoadingPlugin
+from sagents.v2.tool.plugins.result_file import FileToolResultProcessor
 
 
 @dataclass(frozen=True)
@@ -49,6 +50,7 @@ class AgentComponents:
             "context.reducer": self.context.reducer,
             "skill.loading": self.skill_loading,
             "agent.continuation-policy": self.continuation_policy,
+            "tool.result-processor": self.factory.tool_result_processor,
         }
 
     @classmethod
@@ -104,7 +106,14 @@ class AgentComponents:
             summarizer=summarizer,
             reducer=context_reducer,
         )
-        factory = AgentCompositionFactory(runtime, context_components=components)
+        result_processor = await open_capability(
+            capability="tool.result-processor",
+            default_plugin=FileToolResultProcessor.plugin_id,
+            agent_id=agent_id,
+        )
+        factory = AgentCompositionFactory(
+            runtime, context_components=components, tool_result_processor=result_processor,
+        )
         memory_query_generator = await open_capability(
             capability="memory.recall-query",
             default_plugin=DirectMemoryRecallQueryGenerator.plugin_id,

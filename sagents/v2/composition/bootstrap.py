@@ -45,7 +45,7 @@ async def initialize_process(catalog):
     services["memory.provider"] = await assembler._create_memory_provider(host, root, handles, runtime, ())
     services["session-memory.provider"] = await assembler._create_session_memory_provider(host, root, handles, runtime, ())
     # These capabilities require an Agent definition or the actual Run binding.
-    agent_capabilities = {"tool.catalog", "tool.executor", "tool.selection-policy", "skill.catalog",
+    agent_capabilities = {"tool.catalog", "tool.executor", "tool.selection-policy", "tool.result-processor", "skill.catalog",
         "skill.workspace", "skill.loading", "flow.node", "context.reducer", "context.summarizer",
         "context.unit-compactor", "context.segment-provider", "agent.continuation-policy",
         "agent.self-configuration", "agent.output-checker", "memory.recall-query"}
