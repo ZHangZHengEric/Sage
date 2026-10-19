@@ -71,6 +71,7 @@ class RecordingModelProvider:
         request: ModelRequest,
         error: BaseException | None = None,
         attributes: Mapping[str, Any] | None = None,
+        level: str = "info",
     ) -> None:
         if self.logger is None:
             return
@@ -82,7 +83,7 @@ class RecordingModelProvider:
         if error is not None:
             bound.exception(event, message, error, attributes=attributes)
             return
-        bound.info(event, message, attributes=attributes)
+        bound.log(level, event, message, attributes=attributes)
 
     async def _diagnose(self, method: str, **kwargs: Any) -> None:
         try:
@@ -265,6 +266,12 @@ class RecordingModelProvider:
                     and event.delta
                 ):
                     first_text_at = utc_now()
+                    self._log(
+                        "model.first_text", "收到模型首段正文", level="debug",
+                        session_id=session_id, request=request,
+                        attributes={"model_binding": request.model_binding, "purpose": purpose,
+                                    "first_text_ms": elapsed_ms(started_at, first_text_at)},
+                    )
                 if event.kind == ModelEventKind.COMPLETED:
                     assert event.response is not None
                     await persist_first_token()
@@ -290,6 +297,7 @@ class RecordingModelProvider:
                             "finish_reason": event.response.finish_reason,
                             "duration_ms": elapsed_ms(started_at, finished),
                             "ttfb_ms": elapsed_ms(started_at, first_token_at),
+                            "first_text_ms": elapsed_ms(started_at, first_text_at),
                         },
                     )
                     finalized = True

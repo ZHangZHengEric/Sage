@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from time import perf_counter
 
 from app.v2.server.conversations.agui.mapping import to_start_run, validate_agui_id
 from app.v2.server.conversations.agui.sse import (
@@ -270,6 +271,7 @@ class ConversationService:
     async def start(self, request, *, user_id: str, last_event_id: str | None = None,
                     agent_id: str | None = None, workspace_directory: str | None = None,
                     runtime_context: dict | None = None, package=None, api_key=None):
+        started_at = perf_counter()
         if workspace_directory is not None:
             from app.v2.server.storage.external_workspaces import workspace_parts
             if agent_id is None:
@@ -358,8 +360,11 @@ class ConversationService:
         await self.threads.bind(SessionBinding(
             thread_id, user_id, workspace_user_id, admitted.agent_id,
         ))
+        title = ""
+        if command.input and command.input[0].content:
+            title = getattr(command.input[0].content[0], "text", "")[:80]
         await self.threads.upsert(
-            thread_id, user_id, title="", agent_id=admitted.agent_id
+            thread_id, user_id, title=title, agent_id=admitted.agent_id
         )
         if not admitted.model_ready:
             return single_error_sse(
@@ -387,6 +392,7 @@ class ConversationService:
                     client_run_id=run_id,
                     user_id=user_id,
                     agent_id=agent_id,
+                    started_at=started_at,
                 ),
             )
             events = self.session_access.subscribe_events(
@@ -398,6 +404,8 @@ class ConversationService:
                 thread_id=thread_id,
                 run_id=stream_run_id or run_id,
                 last_event_id=last_event_id,
+                logger=StructuredLogger(self.log_sink, "server_v2.agui").bind(correlation_id=correlation_id),
+                started_at=started_at,
             )
 
     async def resume(
@@ -542,6 +550,7 @@ class ConversationService:
         client_run_id: str,
         user_id: str,
         agent_id: str,
+        started_at: float,
     ):
         logger = StructuredLogger(self.log_sink, "server_v2.agui").bind(
             thread_id=thread_id, run_id=client_run_id
@@ -549,19 +558,17 @@ class ConversationService:
         logger.info(
             "agui.run.started",
             "AG-UI run started",
-            attributes={"agent_id": agent_id, "user_id": user_id},
+            attributes={"agent_id": agent_id, "user_id": user_id,
+                        "preparation_ms": round((perf_counter() - started_at) * 1000, 3)},
         )
 
         async def _finished(snapshot) -> None:
-            title = ""
-            if command.input:
-                first = command.input[0].content[0]
-                title = getattr(first, "text", "")[:80]
             await self.threads.upsert(
-                thread_id, user_id, title=title, agent_id=agent_id
+                thread_id, user_id, agent_id=agent_id
             )
             status = snapshot.state.value
             log_terminal = logger.warning if status == "failed" else logger.info
-            log_terminal(f"agui.run.{status}", f"AG-UI run {status}")
+            log_terminal(f"agui.run.{status}", f"AG-UI run {status}",
+                         attributes={"duration_ms": round((perf_counter() - started_at) * 1000, 3)})
 
         return _finished

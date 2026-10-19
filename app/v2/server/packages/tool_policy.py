@@ -1,5 +1,7 @@
 """Management tools use the package authorizer; other tools retain normal approvals."""
 
+import asyncio
+
 from sagents.v2.agent.policy.approval_config import ToolApprovalConfig
 from sagents.v2.agent.policy import (
     DefaultToolPolicy,
@@ -43,8 +45,12 @@ def server_tool_policy(management, *, execution_policy=None, current_policy=None
     class ServerToolPolicy(DefaultToolPolicy):
         async def decide(self, context):
             effective = configured
+            if current_policy is not None and run_policy is not None:
+                live, member = await asyncio.gather(current_policy(), run_policy(context.run_id))
+            else:
+                live = await current_policy() if current_policy is not None else configured
+                member = await run_policy(context.run_id) if run_policy is not None else configured
             if current_policy is not None:
-                live = await current_policy()
                 if live is None:
                     decision = await super().decide(context)
                     return decision.model_copy(update={"action": ToolPolicyAction.DENY,
@@ -52,7 +58,6 @@ def server_tool_policy(management, *, execution_policy=None, current_policy=None
                         "allowed_decisions": (), "interaction_payload": {}})
                 effective = intersect_policies(configured, live)
             if run_policy is not None:
-                member = await run_policy(context.run_id)
                 if member is None:
                     decision = await super().decide(context)
                     return decision.model_copy(update={"action": ToolPolicyAction.DENY,

@@ -13,6 +13,7 @@ import base64
 import hashlib
 import json
 import re
+from time import perf_counter
 from collections.abc import Callable
 from typing import Any, Literal
 from urllib.parse import urlsplit
@@ -42,6 +43,9 @@ from sagents.v2.tool.contracts import (
 from sagents.v2.tool._idempotency import call_fingerprint
 from sagents.v2.tool._mcp_session import McpClientSession as McpClientSession
 from sagents.v2.tool._mcp_session import sdk_session as _sdk_session
+from sagents.v2.runtime.observability.logs import get_logger
+
+LOGGER = get_logger(__name__)
 
 
 class McpServerConfig(StrictModel):
@@ -247,9 +251,17 @@ class McpToolPlugin:
     async def _discover_server(
         self, server: McpServerConfig
     ) -> tuple[McpServerConfig, tuple[Any, ...] | None, RuntimeErrorInfo | None]:
+        started = perf_counter()
+        connected = listed = None
+        outcome = "failed"
+        tool_count = 0
         try:
             async with self.session_factory(server) as session:
+                connected = perf_counter()
                 raw_tools = await self._list_server_tools(server, session)
+                listed = perf_counter()
+                tool_count = len(raw_tools)
+            outcome = "completed"
         except SageV2Error as error:
             if server.required:
                 raise
@@ -267,6 +279,14 @@ class McpToolPlugin:
             if server.required:
                 raise error from exc
             return server, None, error.info
+        finally:
+            finished = perf_counter()
+            LOGGER.debug("mcp.discovery.completed", "MCP 工具发现结束",
+                server=server.name, protocol=server.protocol, outcome=outcome,
+                duration_ms=round((finished - started) * 1000, 3), tool_count=tool_count,
+                connect_ms=round(((connected or finished) - started) * 1000, 3),
+                list_tools_ms=round(((listed or finished) - connected) * 1000, 3) if connected else None,
+                close_ms=round((finished - listed) * 1000, 3) if listed else None)
         return server, raw_tools, None
 
     async def _list_server_tools(

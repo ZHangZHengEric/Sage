@@ -56,6 +56,24 @@ def test_run_outcomes_have_distinct_observability(state, status, event, level):
     assert observed_level == level
 
 
+def test_stage_timing_keeps_failure_and_correlation_without_exception_payload():
+    from sagents.v2.runtime.observability.timing import log_duration
+
+    logs = _CapturingLogSink()
+    logger = StructuredLogger(logs, "test")
+    with pytest.raises(ValueError, match="private"):
+        with structured_log_context(correlation_id="timing-request", run_id="run"):
+            with log_duration(logger, "test.stage", "阶段结束"):
+                raise ValueError("private")
+    record = logs.records[0]
+    assert record.correlation_id == "timing-request"
+    assert record.run_id == "run"
+    assert record.level == LogLevel.DEBUG
+    assert record.attributes["outcome"] == "failed"
+    assert record.attributes["duration_ms"] >= 0
+    assert "private" not in record.model_dump_json()
+
+
 @pytest.mark.asyncio
 async def test_recording_sink_keeps_requests_and_redacts_secrets(tmp_path):
     sink = FilesystemDiagnosticSink(tmp_path / "diagnostics")
@@ -694,14 +712,18 @@ async def test_recording_provider_emits_model_request_logs(tmp_path):
     )
     [event async for event in recording.stream(request)]
     events = [record.event for record in logs.records]
-    assert events == ["model.request.started", "model.request.completed"]
-    completed = logs.records[1]
+    assert events == ["model.request.started", "model.first_text", "model.request.completed"]
+    first_text = logs.records[1]
+    assert first_text.attributes["first_text_ms"] >= 0
+    assert "text" not in first_text.attributes
+    completed = logs.records[2]
     assert completed.session_id == "session_1"
     assert completed.run_id == "run_1"
     assert completed.request_id == "request_1"
     assert completed.attributes["model_binding"] == "primary"
     assert completed.attributes["agent_id"] == "main"
     assert completed.attributes["duration_ms"] >= 0
+    assert completed.attributes["first_text_ms"] == first_text.attributes["first_text_ms"]
 
 
 @pytest.mark.asyncio
@@ -892,6 +914,17 @@ async def test_loop_emits_model_and_tool_logs():
         record for record in logs.records if record.event == "tool.call.completed"
     )
     assert "result" not in tool_completed.attributes
+    preparations = [record for record in logs.records if record.event == "agent.preparation.completed"]
+    assert {record.attributes["phase"] for record in preparations} >= {
+        "history", "tool_selection", "model_request", "context_projection"}
+    assert all(record.run_id == handle.run_id for record in preparations)
+    assert all(record.attributes["duration_ms"] >= 0 for record in preparations)
+    commits = [record for record in logs.records if record.event == "agent.state.commit"]
+    assert commits
+    assert all(record.attributes["outcome"] == "completed" for record in commits)
+    assert all(record.attributes["duration_ms"] >= 0 for record in commits)
+    assert any("tool.call.dispatching" in record.attributes["event_types"] for record in commits)
+    assert all(record.level == LogLevel.DEBUG for record in (*preparations, *commits))
 
 
 @pytest.mark.asyncio

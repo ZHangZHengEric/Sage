@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
 from contextlib import closing
 from datetime import datetime
 from functools import lru_cache
@@ -10,6 +11,7 @@ import json
 from pathlib import Path
 import re
 import sqlite3
+from threading import BoundedSemaphore, Lock
 from typing import Any
 
 from sagents.v2.contracts.common import utc_now
@@ -113,11 +115,17 @@ class SessionDiagnostics:
     # limit discarded otherwise complete captures from ordinary long outputs.
     max_record_bytes = 32 * 1024 * 1024
     max_logs_per_run = 10000
+    max_pending_writes = 64
 
     def __init__(self, root: Path):
         self.path = root / "evidence.sqlite3"
         self.capture_failures = 0
         self.available = True
+        self.closed = False
+        self._writer = ThreadPoolExecutor(max_workers=1, thread_name_prefix="sage-diagnostics")
+        self._write_slots = BoundedSemaphore(self.max_pending_writes)
+        self._writer_lock = Lock()
+        self._last_write = None
         try:
             root.mkdir(parents=True, exist_ok=True, mode=0o700)
             root.chmod(0o700)
@@ -142,6 +150,49 @@ class SessionDiagnostics:
         except (OSError, ValueError, sqlite3.Error):
             self.available = False
             self.capture_failures += 1
+
+    def _enqueue(self, operation, *args):
+        """Diagnostics are ordered, bounded and never hold up execution."""
+        with self._writer_lock:
+            if self.closed or not self.available or not self._write_slots.acquire(blocking=False):
+                self.capture_failures += 1
+                return
+            try:
+                future = self._writer.submit(operation, *args)
+            except RuntimeError:
+                self._write_slots.release()
+                self.capture_failures += 1
+                return
+            self._last_write = future
+            def finished(done):
+                self._write_slots.release()
+                if done.cancelled():
+                    self.capture_failures += 1
+            future.add_done_callback(finished)
+
+    def _flush(self):
+        with self._writer_lock:
+            pending = self._last_write
+        if pending is not None:
+            try:
+                pending.result(timeout=3)
+            except FutureTimeoutError:
+                self.capture_failures += 1
+                return False
+            except Exception:
+                # Individual writes already account for capture failures.
+                pass
+        return True
+
+    async def close(self):
+        with self._writer_lock:
+            if self.closed:
+                return
+            self.closed = True
+        try:
+            await asyncio.to_thread(self._flush)
+        finally:
+            self._writer.shutdown(wait=False, cancel_futures=True)
 
     def _connect(self):
         if not self.available:
@@ -195,7 +246,7 @@ class SessionDiagnostics:
     async def begin_model_request(
         self, *, session_id, request, provider, wire_request=None
     ):
-        await asyncio.to_thread(
+        self._enqueue(
             self._update,
             session_id,
             request,
@@ -219,7 +270,7 @@ class SessionDiagnostics:
         )
 
     async def complete_model_request(self, *, session_id, request, response):
-        await asyncio.to_thread(
+        self._enqueue(
             self._update,
             session_id,
             request,
@@ -232,7 +283,7 @@ class SessionDiagnostics:
         )
 
     async def fail_model_request(self, *, session_id, request, error):
-        await asyncio.to_thread(
+        self._enqueue(
             self._update,
             session_id,
             request,
@@ -245,12 +296,12 @@ class SessionDiagnostics:
         )
 
     async def record_model_stream(self, *, session_id, request, evidence):
-        await asyncio.to_thread(self._update, session_id, request, {"stream": evidence})
+        self._enqueue(self._update, session_id, request, {"stream": evidence})
 
     async def record_model_first_token(
         self, *, session_id, request, observed_at: datetime
     ):
-        await asyncio.to_thread(
+        self._enqueue(
             self._update,
             session_id,
             request,
@@ -261,6 +312,9 @@ class SessionDiagnostics:
         # Process-wide/HTTP records without a trusted Run association are excluded.
         if not self.available or not record.session_id or not record.run_id:
             return
+        self._enqueue(self._write_log, record)
+
+    def _write_log(self, record):
         try:
             with closing(self._connect()) as db, db:
                 scope = (record.session_id, record.run_id)
@@ -284,7 +338,11 @@ class SessionDiagnostics:
 
     def snapshot(self, session_id: str, run_ids: set[str]):
         try:
-            return self._snapshot(session_id, run_ids)
+            flushed = self._flush()
+            snapshot = self._snapshot(session_id, run_ids)
+            if not flushed:
+                snapshot["pending_writes"] = True
+            return snapshot
         except (OSError, ValueError, sqlite3.Error):
             return {
                 "models": [],
