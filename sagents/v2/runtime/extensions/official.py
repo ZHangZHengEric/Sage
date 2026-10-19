@@ -161,7 +161,7 @@ def _register_infrastructure(registry: ExtensionRegistry) -> None:
         lambda context, dependencies: FileToolResultProcessor(**context.config),
         scopes={ExtensionScope.PROCESS, ExtensionScope.AGENT, ExtensionScope.RUN},
         config_schema={"type": "object", "additionalProperties": False,
-                       "properties": {"max_inline_characters": {"type": "integer", "minimum": 1024}}},
+                       "properties": {"max_inline_characters": {"type": "integer", "minimum": 1}}},
     )
 
     bounded_config_schema = {

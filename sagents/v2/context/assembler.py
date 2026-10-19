@@ -134,6 +134,7 @@ class DefaultContextAssembler:
         self.budget = budget
         self._compression_requested = {}
         self._projection_signatures = OrderedDict()
+        self._compression_feedback = OrderedDict()
         self.reducer = reducer or PersistentSummaryContextReducer(
             InMemoryConversationSummaryStore()
         )
@@ -323,6 +324,14 @@ class DefaultContextAssembler:
             projection = await self.reducer.reduce(
                 messages, self.budget, scope=scope.model_copy(update={"force": False})
             )
+            feedback = self._compression_feedback.get(run_id)
+            if feedback is not None:
+                feedback["suppressed_at"] = feedback.get("last_input", 0)
+        else:
+            if scope.force and not required:
+                feedback = self._compression_feedback.get(run_id)
+                if feedback is not None:
+                    feedback["pending_input"] = feedback.get("last_input", 0)
         self._compression_requested.pop(run_id, None)
         view = self._apply_inference_view(projection.messages, volatile)
         artifact_store = self.artifact_store
@@ -391,6 +400,30 @@ class DefaultContextAssembler:
                 - self.budget.reserve_output_tokens
                 - self.budget.reserve_input_tokens,
             )
+            feedback = self._compression_feedback.setdefault(run_id, {})
+            self._compression_feedback.move_to_end(run_id)
+            while len(self._compression_feedback) > 128:
+                self._compression_feedback.popitem(last=False)
+            previous = feedback.pop("pending_input", None)
+            feedback["last_input"] = input_tokens
+            # Judge benefit using actual subsequent provider usage, including
+            # tools/system overhead. A successful but ineffective summary must
+            # not trigger another LLM summary on every step. Retry advisory
+            # compression only after 25% growth or a return below the threshold.
+            if previous and input_tokens >= maximum and input_tokens * 10 >= previous * 9:
+                feedback["suppressed_at"] = max(previous, input_tokens)
+                LOGGER.bind(run_id=run_id).warning(
+                    "context.compression.ineffective",
+                    "Pausing advisory compression after insufficient reduction",
+                    attributes={"before_input_tokens": previous, "after_input_tokens": input_tokens,
+                                "threshold_tokens": maximum},
+                )
+            if input_tokens < maximum:
+                feedback.pop("suppressed_at", None)
+            suppressed_at = feedback.get("suppressed_at")
+            if suppressed_at and input_tokens * 4 < suppressed_at * 5:
+                return
+            feedback.pop("suppressed_at", None)
             if input_tokens >= maximum:
                 LOGGER.bind(run_id=run_id).info(
                     "context.compression.usage_pressure",

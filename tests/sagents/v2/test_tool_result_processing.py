@@ -44,7 +44,9 @@ async def test_result_limit_preserves_full_content_media_status_and_identity(lim
         assert result is original
         assert writes == {}
         return
-    assert len(result.content[0].text) <= limit
+    original_text = json.dumps(original.content[0].value, ensure_ascii=False)
+    assert result.content[0].text.startswith(original_text[:limit] + "\n\n")
+    assert len(result.content[0].text) <= limit + 1024
     assert result.content[1] == image
     assert result.error == original.error
     assert result.operation_id == CALL.operation_id
@@ -93,7 +95,7 @@ async def test_registered_processor_bounds_next_model_request_and_persists_reada
         result, events = await run(app, agent, "offload")
         assert result.state.value == "completed", result
         message = next(m for m in model.requests[1].messages if m.role == "tool")
-        assert len(message.content[0].text) <= 2048
+        assert len(message.content[0].text) <= 2048 + 1024
         assert message.metadata["result_offloaded"]
         saved = list((workspace / ".sage/tool-results").glob("*.json"))
         assert len(saved) == 1

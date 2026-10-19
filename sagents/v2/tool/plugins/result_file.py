@@ -18,8 +18,8 @@ class FileToolResultProcessor:
     description = "Saves oversized Tool results in the bound workspace and returns a bounded preview."
 
     def __init__(self, *, max_inline_characters: int = 12_000):
-        if type(max_inline_characters) is not int or max_inline_characters < 1024:
-            raise ValueError("max_inline_characters must be an integer of at least 1024")
+        if type(max_inline_characters) is not int or max_inline_characters < 1:
+            raise ValueError("max_inline_characters must be a positive integer")
         self.max_inline_characters = max_inline_characters
 
     async def process(
@@ -54,17 +54,17 @@ class FileToolResultProcessor:
             logger.warning("tool.result.offload_failed", "Could not save Tool result; preserving complete result",
                            attributes={"original_characters": len(text)})
             return result
-        display_path = path if len(path) <= self.max_inline_characters // 2 else relative_path
         notice = (
             f"[Tool result {'failed' if result.error else 'succeeded'}; full output saved]\n"
-            f"Original characters: {len(text)}. Full result: {display_path}\n"
+            f"Original characters: {len(text)}. Full result: {path}\n"
             "Read selected line ranges or extract needed fields with shell; avoid reading the whole file.\n"
-            "Preview (may end inside a value):\n"
+            "The preview above may end inside a value.\n"
         )
-        preview = notice + text[:max(0, self.max_inline_characters - len(notice))]
+        preview = text[:self.max_inline_characters] + "\n\n" + notice
         media = tuple(b for b in result.content if not isinstance(b, (TextBlock, JsonBlock)))
         logger.info("tool.result.offloaded", "Saved oversized Tool result",
                     attributes={"original_characters": len(text), "inline_characters": len(preview),
+                                "preview_characters": min(len(text), self.max_inline_characters),
                                 "max_inline_characters": self.max_inline_characters})
         return result.model_copy(update={
             "content": (TextBlock(text=preview), *media),
