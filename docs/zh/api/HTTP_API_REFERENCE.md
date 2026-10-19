@@ -145,3 +145,7 @@ parent: API
 成功与失败的 JSON 都包含 `request_id`，服务端同时返回 `X-Request-ID`。流式响应使用 AG-UI 事件格式。
 
 [路由源码](https://github.com/ZHangZHengEric/Sage/blob/main/app/v2/server/routers/) · [服务端启动](../applications/WEB.md)
+
+### 工具目录详情
+
+`GET /api/tools` 每项除了 `name`、`category`、`source`、`default` 和 `approval_key`，还返回 `description`、`input_schema`、`side_effect_level`、`requires_approval`。这些字段直接来自当前可发现的 `ToolDefinition`，用于只读目录和详情；读取目录不会执行工具。`default` 表示新智能体初始工具集，批准声明也不替代智能体当前的授权和执行策略。

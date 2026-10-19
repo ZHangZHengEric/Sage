@@ -63,6 +63,10 @@ class AgentSummary(BaseModel):
 class ToolPublic(BaseModel):
     approval_key: str | None = None
     name: str
+    description: str = ""
+    input_schema: dict[str, object] = Field(default_factory=dict)
+    side_effect_level: str = "none"
+    requires_approval: bool = False
     category: str = ""
     source: str = "official"
     default: bool = False

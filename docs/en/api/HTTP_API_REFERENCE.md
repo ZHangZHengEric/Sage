@@ -145,3 +145,7 @@ Host infrastructure also exposes `GET /livez`, `GET /readyz`, and `GET /metrics`
 Success and error JSON carry `request_id`; the server also returns `X-Request-ID`. Streaming responses follow AG-UI event framing.
 
 [Router source](https://github.com/ZHangZHengEric/Sage/blob/main/app/v2/server/routers/) · [Server setup](../applications/WEB.md)
+
+### Tool directory details
+
+Each `GET /api/tools` entry includes `description`, `input_schema`, `side_effect_level`, and `requires_approval` alongside `name`, `category`, `source`, `default`, and `approval_key`. These fields project the currently discoverable `ToolDefinition` for read-only browsing; listing tools never invokes them. `default` identifies the initial tool set for new Agents. Tool approval declarations do not replace the Agent's current grants or execution policy.

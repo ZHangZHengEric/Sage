@@ -5,7 +5,7 @@ from pydantic import BaseModel, ConfigDict
 from sagents.v2.package.manifest.runtime import CapabilitySelection
 
 from app.v2.server.routers.deps import ReadUser, CatalogDep, CurrentUser, AdminUser, HostDep, PackageDep, SkillDep
-from app.v2.server.runtime.official import official_tool_catalog
+from app.v2.server.runtime.official import official_tool_catalog, tool_catalog_item
 from app.v2.server.routers.render import success
 from app.v2.server.routers.schemas.common import AUTH_ERRORS, VALIDATION_ERRORS, ApiResponse
 from app.v2.server.routers.schemas.catalog import AgentBody, AgentPublic, AgentSummary, ToolPublic
@@ -154,22 +154,11 @@ async def list_tools(user: CurrentUser, packages: PackageDep, service: CatalogDe
         [
             *official_tool_catalog(),
             *[
-                dict(
-                    name=item.name,
-                    approval_key=item.approval_key,
-                    category="MCP",
-                    source="mcp",
-                    default=False,
-                )
+                tool_catalog_item(item, category="MCP", source="mcp")
                 for item in external
             ],
             *[
-                dict(
-                    name=item.name,
-                    category="agent-management",
-                    source="host",
-                    default=False,
-                )
+                tool_catalog_item(item, category="agent-management", source="host")
                 for item in definitions
             ],
         ]

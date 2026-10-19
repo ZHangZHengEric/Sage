@@ -12,6 +12,7 @@ from sagents.v2.model.recovery import collect_response, model_call_budget
 
 import asyncio
 import json
+import re
 from collections.abc import Awaitable, Callable, Mapping
 from typing import Any
 
@@ -773,7 +774,9 @@ async def _request(
         diagnostic = _compact_probe_error(exc.info.message, name=name)
         return None, ModelCapabilityProbeOutcome(
             name=name,
-            status=ModelCapabilityProbeStatus.ERROR,
+            status=_output_format_error_status(
+                name, exc.info.message, exc.info.provider_code
+            ),
             error=exc.info.message,
             error_code=exc.info.code,
             error_category=exc.info.category.value,
@@ -785,7 +788,7 @@ async def _request(
         message = str(exc)
         return None, ModelCapabilityProbeOutcome(
             name=name,
-            status=ModelCapabilityProbeStatus.ERROR,
+            status=_output_format_error_status(name, message, status),
             error=message,
             error_code=type(exc).__name__,
             provider_code=str(status) if status is not None else None,
@@ -799,6 +802,32 @@ async def _request(
             error_code="model.probe_incomplete",
         )
     return completed, None
+
+
+def _output_format_error_status(
+    name: ProbeName, message: str, provider_code: str | int | None
+) -> ModelCapabilityProbeStatus:
+    """Only explicit format rejection proves an output capability unsupported.
+
+    Invalid schemas, authentication, transport and provider failures remain errors.
+    Keep the provider's original diagnostic on either outcome.
+    """
+    if name not in {"structured_output", "json_object"} or str(provider_code) not in {
+        "400",
+        "422",
+    }:
+        return ModelCapabilityProbeStatus.ERROR
+    output_format = r"(?:response_format(?:\s+type)?|json_schema|json_object)"
+    rejection = r"(?:not\s+supported|unsupported|unavailable|not\s+available)"
+    if re.search(
+        rf"\b{output_format}\b[\"']?\s+(?:is\s+)?{rejection}\b"
+        rf"|\b{rejection}\s+{output_format}\b"
+        rf"|\bdoes\s+not\s+support\s+[\"']?{output_format}\b",
+        " ".join(message.split()),
+        re.IGNORECASE,
+    ):
+        return ModelCapabilityProbeStatus.UNSUPPORTED
+    return ModelCapabilityProbeStatus.ERROR
 
 
 def _compact_probe_error(message: str, *, name: ProbeName) -> str:
