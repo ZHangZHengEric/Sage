@@ -42,6 +42,8 @@ parent: API
 
 按实际情况替换 ID。新的逻辑请求使用新的 Run ID，重连不应创建另一个逻辑任务。
 
+智能体列表页使用 `GET /api/agents/summary` 获取当前用户的摘要；管理员使用 `GET /api/admin/agents` 一次获取全部用户的摘要和归属。摘要包含 `id`、`name`、`description`、`model_id`、`model_name`、`tool_count`、`skill_count`，管理员结果另外包含 `user_id`、`username`。完整配置仍通过智能体详情接口读取。
+
 ## 路由清单
 
 以下清单对应当前注册的路由源码。Jaeger 路由按宿主配置启用，入站 A2A 路由取决于 SDK extra。完整 schema 请使用 OpenAPI，此清单不替代客户端 SDK。
@@ -60,7 +62,9 @@ parent: API
 | `GET` | `/api/admin/threads` | `admin` |
 | `GET` | `/api/admin/threads/{thread_id}/events` | `admin` |
 | `GET` | `/api/admin/users` | `admin` |
+| `GET` | `/api/admin/agents` | `admin` |
 | `GET` | `/api/agents` | `agents` |
+| `GET` | `/api/agents/summary` | `agents` |
 | `POST` | `/api/agents` | `agents` |
 | `DELETE` | `/api/agents/{agent_id}` | `agents` |
 | `GET` | `/api/agents/{agent_id}` | `agents` |

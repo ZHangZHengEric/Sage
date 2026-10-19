@@ -56,6 +56,20 @@ class MemoryCatalogStore:
     def __init__(self) -> None:
         self._catalogs: dict[str, UserCatalog] = {}
 
+    async def list_agent_summaries(self, user_ids):
+        result = []
+        for user_id in user_ids:
+            catalog = await self.get(user_id)
+            models = {model.id: model.model for model in catalog.models}
+            for agent in catalog.agents:
+                result.append(dict(
+                    id=agent.id, user_id=user_id, name=agent.name,
+                    description=agent.description, model_id=agent.model_id,
+                    model_name=models.get(agent.model_id, agent.model_id),
+                    tool_count=len(agent.tools), skill_count=len(agent.skills),
+                ))
+        return result
+
     async def agent_owner(self, agent_id):
         return next((uid for uid, catalog in self._catalogs.items()
                      if any(a.id == agent_id for a in catalog.agents)), None)

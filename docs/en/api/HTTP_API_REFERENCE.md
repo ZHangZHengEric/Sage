@@ -42,6 +42,8 @@ This page describes **`app/v2/server`**, not the legacy server. Open the running
 
 Replace IDs appropriately. A new logical request needs a new Run ID; reconnection must not create another logical task.
 
+The agent list uses `GET /api/agents/summary` for the current user. Admins use `GET /api/admin/agents` to retrieve all owners in one request. Summaries contain `id`, `name`, `description`, `model_id`, `model_name`, `tool_count`, and `skill_count`; admin summaries also contain `user_id` and `username`. Fetch the agent detail endpoint for full configuration.
+
 ## Route inventory
 
 The inventory below follows the registered router source. Jaeger routes depend on host configuration; inbound A2A routes depend on the SDK extra. Use OpenAPI for full schemas rather than treating this list as a client SDK.
@@ -60,7 +62,9 @@ The inventory below follows the registered router source. Jaeger routes depend o
 | `GET` | `/api/admin/threads` | `admin` |
 | `GET` | `/api/admin/threads/{thread_id}/events` | `admin` |
 | `GET` | `/api/admin/users` | `admin` |
+| `GET` | `/api/admin/agents` | `admin` |
 | `GET` | `/api/agents` | `agents` |
+| `GET` | `/api/agents/summary` | `agents` |
 | `POST` | `/api/agents` | `agents` |
 | `DELETE` | `/api/agents/{agent_id}` | `agents` |
 | `GET` | `/api/agents/{agent_id}` | `agents` |
