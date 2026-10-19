@@ -14,10 +14,11 @@
 .agent-card-model { display: flex; gap: 7px; align-items: center; margin-top: auto; margin-bottom: 18px; color: var(--primary); font-size: 12px; overflow-wrap: anywhere; }
 .agent-card-model .app-icon { width: 15px; height: 15px; }
 .agent-summary-card > footer { padding-top: 14px; border-top: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-.agent-card-resources { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; color: var(--muted-foreground); font-size: 11px; }
-.agent-card-resources > span { display: inline-flex; align-items: center; gap: 3px; }
+.agent-card-resources { display: flex; flex: 1; min-width: 0; align-items: center; gap: 8px; color: var(--muted-foreground); font-size: 11px; }
+.agent-card-resources > span { display: inline-flex; flex-shrink: 0; align-items: center; gap: 3px; white-space: nowrap; }
 .agent-card-resources .app-icon { width: 13px; height: 13px; }
-.agent-card-resources .agent-card-owner { max-width: 90px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.agent-card-resources .agent-card-owner { display: block; flex-shrink: 1; min-width: 0; max-width: 90px; overflow: hidden; text-overflow: ellipsis; }
+.agent-summary-card > footer > .agent-action { flex-shrink: 0; }
 .agent-create-card { border: 1px dashed var(--border-hover); border-radius: var(--radius-card); background: transparent; color: var(--muted-foreground); min-height: 234px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 13px; font-size: 13px; }
 .agent-create-card > span { width: 42px; height: 42px; display: grid; place-items: center; background: var(--muted); color: var(--primary); border-radius: var(--radius-card); }
 .agent-create-card:hover { background: var(--muted); border-color: var(--primary); color: var(--primary); }
