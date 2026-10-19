@@ -1,0 +1,195 @@
+/* Page-specific layout; colors and base controls live in theme.css and ui.css. */
+.system-settings { color: var(--foreground); font-size: 14px; container-type: inline-size; }
+.system-settings h1, .system-settings h2, .system-settings h3 { margin: 0; font-size: 14px; font-weight: 600; }
+.system-settings .icon-button { width: 30px; height: 30px; }
+.system-settings .icon-button .app-icon { width: 14px; height: 14px; }
+.system-settings .field-help { color: var(--muted-foreground); }
+.system-settings .field-help .field-tooltip { color: var(--tooltip-foreground); }
+.system-settings .system-badge { display: inline-flex; align-items: center; padding: 2px 7px; border-radius: 5px; color: var(--primary); background: var(--muted); font-size: 11px; font-weight: 400; white-space: nowrap; }
+.system-settings .system-badge.neutral { color: var(--muted-foreground); background: var(--background); }
+.system-settings .system-badge.amber { color: var(--status-warning); background: var(--status-warning-bg); }
+.system-settings .system-message, .system-settings .system-error { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 13px; margin: 0 0 16px; border-radius: var(--radius); font-size: 12px; overflow-wrap: anywhere; }
+.system-settings .system-message { color: var(--primary); background: var(--muted); }
+.system-settings .system-message > span { display: flex; align-items: center; gap: 7px; }
+.system-settings .system-message .app-icon { width: 16px; height: 16px; }
+.system-settings .system-error { color: var(--destructive); background: color-mix(in srgb, var(--destructive) 6%, var(--card)); }
+.system-settings .system-error .btn { font-size: 11px; flex-shrink: 0; }
+.system-settings .system-skeleton { padding: 28px; border: 1px solid var(--border); border-radius: var(--radius-card); background: var(--card); }
+.system-settings .system-skeleton i { display: block; width: 70%; height: 15px; border-radius: 5px; background: var(--muted); margin: 12px 0 30px; }
+.system-settings .system-skeleton i:nth-child(even) { width: 45%; }
+.system-settings .system-empty { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 18px; min-height: 340px; padding: 32px; border: 1px dashed var(--border); border-radius: var(--radius-card); color: var(--muted-foreground); text-align: center; }
+.system-settings .system-empty > .app-icon { width: 28px; height: 28px; color: var(--primary); }
+.system-settings.plugins-page { height: 100%; display: flex; flex-direction: column; min-height: 0; padding: 20px; border-radius: var(--radius-card); background: var(--background); }
+.system-settings .system-workbench { display: grid; grid-template-columns: 218px minmax(0, 1fr); flex: 1; min-height: 0; overflow: hidden; border: 1px solid var(--border); border-radius: var(--radius-card); background: var(--card); }
+.system-settings .system-navigation { overflow: auto; padding: 12px; border-right: 1px solid var(--border); scrollbar-width: thin; }
+.system-settings .system-category-title { padding: 12px 10px 7px; color: var(--muted-foreground); font-size: 11px; letter-spacing: .4px; }
+.system-settings .system-category:first-child .system-category-title { padding-top: 3px; }
+.system-settings .system-navigation button { width: 100%; display: block; text-align: left; padding: 10px; margin: 2px 0; border: 0; border-radius: var(--radius); color: var(--foreground); background: transparent; }
+.system-settings .system-navigation button:hover { background: var(--background); }
+.system-settings .system-navigation button.active { color: var(--primary); background: var(--muted); }
+.system-settings .navigation-title { display: flex; align-items: center; justify-content: space-between; gap: 7px; font-size: 13px; font-weight: 500; }
+.system-settings .navigation-title small { white-space: nowrap; color: var(--muted-foreground); font-size: 10px; font-weight: 400; }
+.system-settings .navigation-title small.is-dirty { color: var(--primary); }
+.system-settings .navigation-title small.is-pending { color: var(--status-warning); }
+.system-settings .navigation-choice { display: block; margin-top: 3px; font-size: 11px; color: var(--muted-foreground); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.system-settings .system-inspector { display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden; padding: 22px 25px 0; }
+.system-settings .system-inspector-content { display: flex; flex-direction: column; flex: 1; min-height: 0; overflow: auto; scrollbar-width: thin; }
+.system-settings .inspector-head { display: flex; align-items: center; justify-content: space-between; gap: 14px; margin-bottom: 20px; }
+.system-settings .inspector-head > div { display: flex; align-items: center; gap: 9px; }
+.system-settings .inspector-head .app-icon { width: 16px; height: 16px; color: var(--primary); }
+.system-settings .system-readonly-mark { font-size: 11px; color: var(--muted-foreground); }
+.system-settings .system-pending-notice { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 13px; margin-bottom: 20px; border-radius: var(--radius); background: var(--status-warning-bg); color: var(--status-warning); font-size: 12px; }
+.system-settings .system-pending-notice > span { display: flex; align-items: center; gap: 8px; }
+.system-settings .system-pending-notice .app-icon { width: 15px; height: 15px; }
+.system-settings .system-pending-notice button { padding: 3px 0; background: transparent; border: 0; color: inherit; text-decoration: underline; white-space: nowrap; font-size: 11px; }
+.system-settings .configuration-status { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; padding-bottom: 20px; border-bottom: 1px solid var(--border); margin: 0 0 22px; }
+.system-settings .configuration-status > div { min-width: 0; }
+.system-settings .configuration-status dt { display: flex; align-items: center; gap: 5px; min-height: 26px; color: var(--muted-foreground); font-size: 11px; margin-bottom: 4px; }
+.system-settings .configuration-status dt i { width: 5px; height: 5px; border-radius: 50%; background: var(--primary); }
+.system-settings .configuration-status dd { display: flex; align-items: center; flex-wrap: wrap; gap: 7px; margin: 0; font-size: 13px; overflow-wrap: anywhere; }
+.system-settings .plugin-configuration { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-items: start; gap: 25px; flex: 1; min-width: 0; }
+.system-settings .implementation-section, .system-settings .configuration-section { min-width: 0; }
+.system-settings .system-section-title { display: flex; align-items: center; justify-content: space-between; gap: 9px; margin-bottom: 13px; }
+.system-settings .system-section-title > span { font-size: 11px; color: var(--muted-foreground); }
+.system-settings .implementation-list { border-top: 1px solid var(--border); }
+.system-settings .implementation, .system-settings .default-option { display: flex; align-items: flex-start; gap: 10px; width: 100%; text-align: left; padding: 15px 10px; border: 0; border-bottom: 1px solid var(--border); border-left: 2px solid transparent; border-radius: 0; background: transparent; color: var(--foreground); }
+.system-settings .implementation:not(:disabled):hover, .system-settings .default-option:not(:disabled):hover { background: var(--background); }
+.system-settings .implementation.selected, .system-settings .default-option.selected { background: var(--muted); border-left-color: var(--primary); }
+.system-settings .implementation:disabled { opacity: .78; cursor: not-allowed; }
+.system-settings .option-indicator { width: 15px; height: 15px; border: 1px solid var(--border); border-radius: 50%; flex-shrink: 0; margin-top: 4px; position: relative; }
+.system-settings .selected .option-indicator { border-color: var(--primary); }
+.system-settings .selected .option-indicator::after { content: ''; position: absolute; inset: 3px; border-radius: 50%; background: var(--primary); animation: settings-radio 140ms ease-out; }
+@keyframes settings-radio { from { opacity: .3; transform: scale(.5); } to { opacity: 1; transform: scale(1); } }
+.system-settings .implementation-copy { flex: 1; min-width: 0; }
+.system-settings .implementation-copy strong { font-size: 13px; font-weight: 550; }
+.system-settings .implementation-heading { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 6px; }
+.system-settings .implementation-heading small { color: var(--muted-foreground); font-size: 10px; }
+.system-settings .plugin-code { display: block; margin-top: 4px; color: var(--muted-foreground); font-size: 10px; line-height: 1.8; overflow-wrap: anywhere; word-break: break-word; }
+.system-settings .implementation-description { display: block; color: var(--muted-foreground); font-size: 12px; line-height: 1.9; margin-top: 7px; }
+.system-settings .management-note { display: flex; align-items: flex-start; gap: 7px; margin: 15px 0 0; color: var(--muted-foreground); font-size: 12px; line-height: 1.9; }
+.system-settings .management-note .app-icon { margin-top: 4px; width: 14px; height: 14px; }
+.system-settings .system-injected { display: flex; align-items: flex-start; gap: 10px; padding: 18px 10px; border-bottom: 1px solid var(--border); color: var(--muted-foreground); }
+.system-settings .system-injected .app-icon { width: 16px; height: 16px; margin-top: 3px; }
+.system-settings .system-injected p { margin: 6px 0 0; font-size: 12px; }
+.system-settings .configuration-section { padding-left: 25px; border-left: 1px solid var(--border); }
+.system-settings .plugin-effects ul { padding-left: 17px; margin: 0 0 20px; font-size: 12px; color: var(--muted-foreground); line-height: 1.95; }
+.system-settings .plugin-effects li { margin-bottom: 7px; }
+.system-settings .system-parameters { padding-top: 18px; border-top: 1px solid var(--border); }
+.system-settings .system-parameters > h2 { margin-bottom: 15px; }
+.system-settings .system-parameters > .schema-field { margin-bottom: 17px; }
+.system-settings .schema-label-help { display: flex; align-items: center; gap: 3px; margin-bottom: 7px; font-size: 12px; }
+.system-settings .schema-field .field { margin: 0; gap: 0; }
+.system-settings .schema-field input, .system-settings .schema-field select, .system-settings .schema-field textarea { margin: 0; }
+.system-settings .schema-field input[type="checkbox"] { min-height: 0; padding: 0; width: auto; }
+.system-settings .schema-field .schema-group { margin: 0; border-radius: var(--radius); }
+.system-settings .schema-field .schema-group > summary { padding: 8px 10px; font-size: 12px; }
+.system-settings .schema-field .btn { font-size: 12px; }
+.system-settings .system-parameter-values { margin: 0; }
+.system-settings .system-parameter-values > div { border-bottom: 1px solid var(--border); padding: 10px 0; font-size: 12px; }
+.system-settings .system-parameter-values dt { display: flex; align-items: center; gap: 4px; color: var(--muted-foreground); }
+.system-settings .system-parameter-values dd { margin: 5px 0 0; overflow-wrap: anywhere; }
+.system-settings .system-no-parameters { color: var(--muted-foreground); font-size: 12px; padding-top: 16px; border-top: 1px solid var(--border); }
+.system-settings .system-draft-changes { border-top: 1px solid var(--border); margin: 18px 0 0; padding-top: 14px; color: var(--primary); font-size: 11px; }
+.system-settings .system-draft-changes > div { margin-bottom: 8px; }
+.system-settings .system-draft-changes dt { margin-bottom: 5px; }
+.system-settings .system-draft-changes dd { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin: 0; overflow-wrap: anywhere; }
+.system-settings .system-draft-changes dd span { color: var(--muted-foreground); }
+.system-settings .system-draft-changes .app-icon { width: 12px; height: 12px; }
+.system-settings .system-save-footer { flex-shrink: 0; position: sticky; bottom: 0; z-index: 3; margin-top: 16px; padding: 15px 0; border-top: 1px solid var(--border); background: var(--card); }
+.system-settings .system-save-row { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; }
+.system-settings .system-save-row .row { gap: 7px; margin-left: auto; }
+.system-settings .system-save-state { display: flex; align-items: center; gap: 7px; font-size: 11px; color: var(--muted-foreground); }
+.system-settings .system-save-state .app-icon { width: 15px; height: 15px; }
+.system-settings .system-save-footer .system-error { margin-bottom: 12px; }
+.system-settings .system-reload { padding: 0; border: 0; background: transparent; color: inherit; text-decoration: underline; font-size: 11px; flex-shrink: 0; }
+.system-settings.users-settings { min-height: 100%; padding: 26px 28px; border-radius: var(--radius-card); background: var(--background); }
+.system-settings .system-user-search { position: relative; width: 260px; max-width: 100%; }
+.system-settings .system-user-table { overflow: hidden; border: 1px solid var(--border); border-radius: var(--radius-card); background: var(--card); }
+.system-settings .system-user-table th { font-size: 11px; color: var(--muted-foreground); font-weight: 400; background: color-mix(in srgb, var(--background) 70%, var(--card)); }
+.system-settings .system-user-table th, .system-settings .system-user-table td { padding: 15px 18px; border-color: var(--border); }
+.system-settings .system-user-table tbody tr:last-child td { border-bottom: 0; }
+.system-settings .system-user-table tbody tr:hover { background: color-mix(in srgb, var(--muted) 40%, transparent); }
+.system-settings .system-person { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.system-settings .system-person strong { font-size: 13px; font-weight: 550; overflow-wrap: anywhere; }
+.system-settings .system-avatar { display: inline-grid; place-items: center; width: 34px; height: 34px; border-radius: var(--radius); background: var(--muted); color: var(--primary); font-size: 13px; font-weight: 600; flex-shrink: 0; }
+.system-settings .system-id { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.system-settings .system-id code { max-width: 190px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; color: var(--muted-foreground); font-size: 11px; }
+.system-settings .system-user-policy { display: inline-flex; align-items: center; gap: 6px; color: var(--muted-foreground); font-size: 12px; }
+.system-settings .system-user-policy i { width: 5px; height: 5px; border-radius: 50%; background: var(--primary); flex-shrink: 0; }
+.system-settings .system-user-action-column { text-align: right; }
+.system-settings .system-user-action-column .app-icon { width: 13px; height: 13px; }
+.form-drawer.form-dialog.system-user-dialog { width: min(490px, calc(100vw - 28px)); border-radius: var(--radius-card); }
+.form-drawer.form-dialog.system-pending-dialog { width: min(620px, calc(100vw - 28px)); border-radius: var(--radius-card); }
+.system-settings.form-drawer::backdrop { background: var(--shadow-color); backdrop-filter: blur(3px); }
+.system-settings .form-drawer-head { flex-shrink: 0; border-color: var(--border); padding: 17px 24px; }
+.system-settings .form-drawer-head h2 { font-size: 14px; }
+.system-settings .form-drawer-head .btn { font-size: 12px; border-color: transparent; }
+.system-settings .form-drawer-body { padding: 24px; min-height: 0; }
+.system-settings .form-drawer-footer { border-color: var(--border); padding: 14px 24px; }
+.system-settings .system-dialog-footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.system-user-dialog .system-dialog-footer { justify-content: flex-end; }
+.system-settings .system-dialog-footer > span { color: var(--muted-foreground); font-size: 11px; }
+.system-settings .system-person-head { display: flex; align-items: center; gap: 12px; padding-bottom: 22px; margin-bottom: 21px; border-bottom: 1px solid var(--border); }
+.system-settings .system-person-head .system-avatar { width: 44px; height: 44px; border-radius: 14px; font-size: 18px; }
+.system-settings .system-person-head h2 { margin-bottom: 5px; }
+.system-settings .system-person-head .system-badge { margin-right: 5px; }
+.system-settings .system-detail-id { display: flex; align-items: center; gap: 8px; margin-bottom: 23px; color: var(--muted-foreground); }
+.system-settings .system-detail-id code { font-size: 11px; overflow-wrap: anywhere; }
+.system-settings .system-policy-details { margin: 0; }
+.system-settings .system-policy-details > div { padding: 13px 0; border-bottom: 1px solid var(--border); }
+.system-settings .system-policy-details > div:last-child { border: 0; }
+.system-settings .system-policy-details dt { display: flex; align-items: center; gap: 3px; margin-bottom: 5px; color: var(--muted-foreground); font-size: 12px; }
+.system-settings .system-policy-details dd { margin: 0; font-size: 13px; overflow-wrap: anywhere; }
+.system-settings .system-copy-feedback { margin: 15px 0 0; font-size: 12px; color: var(--primary); }
+.system-settings .system-pending-item { border-bottom: 1px solid var(--border); padding: 0 0 16px; margin-bottom: 16px; }
+.system-settings .system-pending-item h3 { margin-bottom: 8px; }
+.system-settings .system-pending-item > div { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; color: var(--muted-foreground); font-size: 12px; }
+.system-settings .system-pending-item .app-icon { width: 14px; height: 14px; }
+.system-settings .system-pending-explanation { margin: 0; font-size: 12px; color: var(--muted-foreground); line-height: 1.9; }
+@container (max-width: 900px) {
+  .system-settings .system-user-policy-column { display: none; }
+  .system-settings .plugin-configuration { grid-template-columns: minmax(0, 1fr); }
+  .system-settings .configuration-section { border: 0; border-top: 1px solid var(--border); padding: 22px 0 0; }
+}
+@container (max-width: 700px) {
+  .system-settings .system-workbench { display: flex; flex-direction: column; }
+  .system-settings .system-navigation { display: flex; flex-shrink: 0; flex-wrap: nowrap; gap: 4px; overflow-x: auto; padding: 10px; border-right: 0; border-bottom: 1px solid var(--border); }
+  .system-settings .system-category { display: contents; }
+  .system-settings .system-category-title { display: none; }
+  .system-settings .system-navigation button { flex: 0 0 auto; width: auto; max-width: 190px; margin: 0; padding: 8px 10px; }
+  .system-settings .navigation-title { font-size: 12px; gap: 10px; }
+  .system-settings .navigation-title small { font-size: 9px; }
+  .system-settings .navigation-choice { font-size: 10px; max-width: 165px; }
+  .system-settings .system-inspector { flex: 1; padding: 20px 16px 0; }
+  .system-settings .configuration-status { grid-template-columns: 1fr; gap: 12px; }
+  .system-settings .configuration-status > div { display: flex; align-items: flex-start; gap: 15px; }
+  .system-settings .configuration-status dt { width: 86px; flex-shrink: 0; margin: 0; }
+  .system-settings .configuration-status dd { font-size: 12px; padding-top: 3px; }
+  .system-settings .system-pending-notice { font-size: 11px; padding: 9px 10px; }
+  .system-settings .system-pending-notice button { font-size: 10px; }
+  .system-settings .system-save-footer { margin-top: 20px; }
+  .system-settings .system-save-footer .system-error { flex-direction: column; align-items: flex-start; }
+  .system-settings .system-user-search { width: 100%; }
+  .system-settings .system-user-id-column { display: none; }
+  .system-settings .system-user-table th, .system-settings .system-user-table td { padding: 13px 10px; }
+  .system-settings .system-person { gap: 8px; }
+  .system-settings .system-person .system-avatar { width: 29px; height: 29px; font-size: 12px; }
+  .system-settings .system-person strong { font-size: 12px; }
+}
+@media (max-width: 700px) {
+  .system-settings.plugins-page { height: 100%; min-height: 0; padding: 10px; }
+  .system-settings.users-settings { padding: 22px 14px; }
+  .form-drawer.form-dialog.system-user-dialog, .form-drawer.form-dialog.system-pending-dialog { width: 100%; max-height: 94dvh; margin: auto 0 0; border-radius: 20px 20px 0 0; }
+  .system-settings .form-drawer-shell { max-height: 94dvh; }
+  .system-settings .form-drawer-head, .system-settings .form-drawer-footer { padding: 14px 20px; }
+  .system-settings .form-drawer-body { padding: 20px; }
+}
+
+@media (prefers-reduced-motion: reduce) { .system-settings .selected .option-indicator::after { animation: none; } }
+
+/* Protocol adapters are concurrent deployment capabilities, not a single choice. */
+.system-settings .protocol-adapter-list { border-top: 1px solid var(--border); }
+.system-settings .protocol-adapter { padding: 15px 10px; border-bottom: 1px solid var(--border); }
+.system-settings .protocol-adapter .implementation-description { margin-bottom: 0; }
+.system-settings .system-badge.protocol-enabled { background: var(--status-success-bg); color: var(--status-success); }
+.system-settings .protocol-unavailable { display: block; color: var(--status-warning); font-size: 11px; margin-top: 6px; }

@@ -1,3 +1,18 @@
+## 2026-10-19 支持 Web 对话运行中终止和追加输入
+
+- 运行中保持输入框可编辑，空输入显示终止，有内容显示发送；补充要求通过原任务的 V2 steering inbox 在下一处理节点接收，终止复用 CancelRun。
+- 为网页登录态提供受会话所有者和精确 Run 校验的取消与追加接口；保留部分输出、失败草稿及未接收补充，HTTP 重试复用已有输入记录，不增加业务或审计存储。
+
+## 2026-10-19 Simplify Server V2 Web conversation process layout
+
+- Align reasoning and tool records with the reply body, remove avatars from tool-only messages, and replace large tool cards with compact expandable rows.
+- Keep one copy action after the last text reply in each user turn; preserve tool details and approval controls.
+
+## 2026-10-19 Fix reasoning order in Server V2 Web history
+
+- Reserve the reasoning message position when its start event arrives, so opening history keeps reasoning before the answer even when the answer starts before the first reasoning delta.
+- Add a regression test for matching live/history order and folded completed reasoning.
+
 ## 2026-10-15 17:40 文件会话存储启动耗时与历史数据解耦
 
 - 新增按文件指纹校验的会话摘要索引；启动、调度恢复和按 run_id 查找不再完整读取已完成会话，60 会话启动从约 9.9 秒降到 0.15 秒。流式 delta 改为不落盘的 preview，取消或失败时半截文字作为 cancelled/failed item 落盘；视图已是最新时加载不再重写。

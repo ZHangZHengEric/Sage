@@ -51,12 +51,56 @@ class AgentPublic(BaseModel):
     package: AgentPackageBundle | None = None
     package_ref: str | None = None
 
+class AgentSummary(BaseModel):
+    id: str
+    name: str
+    description: str = ""
+    model_id: str = ""
+    model_name: str = ""
+    tool_count: int
+    skill_count: int
+
 class ToolPublic(BaseModel):
     approval_key: str | None = None
     name: str
+    description: str = ""
+    input_schema: dict[str, object] = Field(default_factory=dict)
+    side_effect_level: str = "none"
+    requires_approval: bool = False
     category: str = ""
     source: str = "official"
     default: bool = False
+
+class AgentToolOption(BaseModel):
+    name: str
+    description: str = ""
+    approval_key: str | None = None
+    category: str = ""
+    source: str = "official"
+    default: bool = False
+
+class AgentModelOption(BaseModel):
+    id: str
+    model: str
+    is_default: bool
+
+class AgentSkillOption(BaseModel):
+    skill_id: str
+    name: str
+    description: str
+
+class AgentExternalToolGroup(BaseModel):
+    source: Literal["mcp", "a2a"]
+    name: str
+    tools: list[str]
+
+class AgentEditorResources(BaseModel):
+    models: list[AgentModelOption]
+    skills: list[AgentSkillOption]
+    tools: list[AgentToolOption]
+    external_tools: list[str]
+    external_tool_groups: list[AgentExternalToolGroup] = Field(default_factory=list)
+    plugins: dict[str, object] | None = None
 
 class McpBody(BaseModel):
     name: str

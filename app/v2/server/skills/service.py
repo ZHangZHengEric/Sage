@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import shutil
 from pathlib import Path
 from pathlib import PurePosixPath
 
@@ -63,7 +64,7 @@ class SkillCatalogService:
         role: str,
     ) -> SkillRecord:
         package = inspect_skill_markdown(name=name, content=content)
-        return await self._publish_package(
+        return await self.publish_package(
             package,
             owner_user_id=user_id,
         )
@@ -77,7 +78,7 @@ class SkillCatalogService:
         role: str,
     ) -> SkillRecord:
         package = inspect_skill_zip(payload, filename=filename)
-        return await self._publish_package(
+        return await self.publish_package(
             package,
             owner_user_id=user_id,
         )
@@ -140,7 +141,7 @@ class SkillCatalogService:
         role: str,
     ) -> SkillRecord:
         package = inspect_skill_directory(source)
-        return await self._publish_package(
+        return await self.publish_package(
             package,
             owner_user_id=user_id,
         )
@@ -175,7 +176,7 @@ class SkillCatalogService:
                 description=package.description,
                 files=files,
             )
-        return await self._publish_package(
+        return await self.publish_package(
             package,
             owner_user_id=current.owner_user_id,
             skill_id=current.skill_id,
@@ -349,14 +350,16 @@ class SkillCatalogService:
         path = match.absolute_path(self.data_root)
         return path if path.is_dir() else None
 
-    async def _publish_package(
+    async def publish_package(
         self,
         package: SkillPackage,
         *,
         owner_user_id: str,
         skill_id: str | None = None,
         revision: int = 1,
+        expected_version_id: str | None = None,
     ) -> SkillRecord:
+        """Publish a validated bundle, optionally comparing the catalog version."""
         visible = await self.store.list_visible(
             user_id=owner_user_id or "",
             role="user",
@@ -382,7 +385,7 @@ class SkillCatalogService:
             version_id=version_id,
         )
         destination = resolve_artifact_path(self.data_root, relative)
-        write_skill_package(destination, package)
+        await asyncio.to_thread(write_skill_package, destination, package)
         record = SkillRecord(
             skill_id=skill_id
             or (existing.skill_id if existing is not None else new_skill_id()),
@@ -397,7 +400,13 @@ class SkillCatalogService:
             file_count=package.file_count,
             total_bytes=package.total_bytes,
         )
-        return await self.store.publish(record)
+        try:
+            if expected_version_id is not None:
+                return await self.store.publish(record, expected_version_id=expected_version_id)
+            return await self.store.publish(record)
+        except SageV2Error:
+            await asyncio.to_thread(shutil.rmtree, destination, ignore_errors=True)
+            raise
 
 
 def _can_see(record: SkillRecord, *, user_id: str, role: str) -> bool:

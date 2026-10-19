@@ -9,6 +9,9 @@ from app.v2.server.routers.schemas.common import (
 )
 from app.v2.server.routers.schemas.skills import (
     SkillFilePublic,
+    SkillImportBody,
+    SkillImportPreview,
+    SkillImportSource,
     SkillPublic,
     SkillPublishBody,
     SkillUpdateBody,
@@ -16,8 +19,19 @@ from app.v2.server.routers.schemas.skills import (
     WorkspaceSkillBody,
 )
 from sagents.v2.contracts.errors import ErrorCategory, RuntimeErrorInfo, SageV2Error
+from app.v2.server.skills.imports import SkillImportService
 
 router = APIRouter(tags=["skills"], responses={**AUTH_ERRORS, **VALIDATION_ERRORS})
+
+
+@router.post("/api/skill-import-previews", response_model=ApiResponse[SkillImportPreview])
+async def preview_skill_import(body: SkillImportSource, user: CurrentUser, service: SkillDep):
+    return success(await SkillImportService(service).preview(body, user_id=user.user_id))
+
+
+@router.post("/api/skill-imports", response_model=ApiResponse[SkillUploadResult])
+async def import_skills(body: SkillImportBody, user: CurrentUser, service: SkillDep):
+    return success(await SkillImportService(service).publish(body, user_id=user.user_id))
 
 
 @router.get("/api/skills", response_model=ApiResponse[list[SkillPublic]])

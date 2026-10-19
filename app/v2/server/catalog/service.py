@@ -39,8 +39,14 @@ class CatalogService:
     async def get(self, user_id: str):
         return await self.store.get(user_id)
 
+    async def list_agent_summaries(self, user_ids: list[str]) -> list[dict]:
+        return await self.store.list_agent_summaries(user_ids)
+
     async def list_all_models(self, user_ids: list[str]):
         return await self.store.list_all_models(user_ids)
+
+    async def list_resources(self, user_ids: list[str], section: str):
+        return await self.store.list_resources(user_ids, section)
 
     @asynccontextmanager
     async def _lock(self, user_id: str, section: str):
@@ -96,11 +102,32 @@ class CatalogService:
             return record
 
     async def get_agent(self, user_id: str, agent_id: str) -> dict:
-        catalog = await self.store.get(user_id)
-        record = require_agent(catalog, agent_id)
+        record = await self.store.get_agent(user_id, agent_id)
         payload = record.public_dict()
         payload["skills"] = list(await self.skills.bound_names(user_id, agent_id))
         return payload
+
+    async def editor_resources(self, user_id: str) -> dict:
+        catalog, skills = await asyncio.gather(
+            self.store.editor_catalog(user_id),
+            self.skills.list_visible(user_id=user_id, role="user"),
+        )
+        return {
+            "models": [{"id": item.id, "model": item.model, "is_default": item.is_default}
+                       for item in catalog.models],
+            "skills": [{"skill_id": item.skill_id, "name": item.name, "description": item.description}
+                       for item in skills],
+            "external_tools": list(dict.fromkeys([
+                *[name for server in catalog.mcp_servers if not server.disabled for name in server.tools],
+                *[name for peer in catalog.a2a_agents if not peer.disabled for name in peer.skills],
+            ])),
+            "external_tool_groups": [
+                *[{"source": "mcp", "name": server.name, "tools": list(server.tools)}
+                  for server in catalog.mcp_servers if not server.disabled],
+                *[{"source": "a2a", "name": peer.name, "tools": list(peer.skills)}
+                  for peer in catalog.a2a_agents if not peer.disabled],
+            ],
+        }
 
     async def update_agent(
         self, user_id: str, agent_id: str, payload: dict

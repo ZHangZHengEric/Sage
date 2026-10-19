@@ -470,6 +470,49 @@ class ConversationService:
                 restarted_after=restarted_after,
             )
 
+    async def _browser_run(self, thread_id: str, *, run_id: str, user_id: str):
+        """Resolve an exact browser Run; never fall back to a newer Run."""
+        from app.v2.server.conversations.records import require_owned_thread
+
+        validate_agui_id(thread_id, field="threadId")
+        validate_agui_id(run_id, field="runId")
+        require_owned_thread(await self.threads.find(thread_id), user_id)
+        binding = await self.threads.binding(thread_id)
+        if binding is not None and (
+            binding.owner_id != user_id or binding.tenant_id != user_id
+        ):
+            raise _error("not_found", "run not found")
+        context = self.context_for(user_id)
+        runs = await self.session_access.list_session_runs(thread_id, context)
+        selected = next((run for run in runs if run.run_id == run_id), None)
+        if selected is None:
+            for run in runs:
+                command = await self.session_access.get_start_command(run.run_id, context)
+                if command.idempotency_key == run_id:
+                    selected = run
+                    break
+        if selected is None:
+            raise _error("not_found", "run not found")
+        return selected, context
+
+    async def steer(self, thread_id: str, *, run_id: str, user_id: str,
+                    message_id: str, text: str):
+        selected, context = await self._browser_run(thread_id, run_id=run_id, user_id=user_id)
+        validate_agui_id(message_id, field="messageId")
+        return await self.runs.steer_run(
+            selected.run_id, context, message_id=message_id, text=text,
+        )
+
+    async def cancel(self, thread_id: str, *, run_id: str, user_id: str):
+        """Cancel only the named Run in a browser user's own Session."""
+        selected, context = await self._browser_run(thread_id, run_id=run_id, user_id=user_id)
+        cancelled = selected.state not in TERMINAL_RUN_STATES
+        if cancelled:
+            await self.runs.cancel_run(
+                selected.run_id, context, expected_revision=selected.revision,
+            )
+        return {"session_id": thread_id, "runId": run_id, "cancelled": cancelled}
+
     async def delete(
         self, thread_id: str, user_id: str, *, admin: bool = False
     ) -> None:

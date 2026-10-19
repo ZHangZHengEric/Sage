@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 from datetime import timedelta
 
 from app.v2.server.observability.logging import get_logger
 from app.v2.server.runtime.models import bind_model_user, reset_model_user
-from sagents.v2.contracts.commands import CancelRun, ReplyInteraction, ResumeRun
+from sagents.v2.contracts.commands import CancelRun, ReplyInteraction, ResumeRun, SteerRun, InputItem
+from sagents.v2.contracts.items import TextBlock
 from sagents.v2.contracts.errors import ErrorCategory, RuntimeErrorInfo, SageV2Error
 from sagents.v2.contracts.principals import RequestContext
 from sagents.v2.contracts.run_state import TERMINAL_RUN_STATES, RunState
@@ -66,6 +68,42 @@ class RunService:
             context,
         )
         _accepted(receipt)
+
+    async def steer_run(self, run_id, context, *, message_id, text):
+        """Reuse the durable steering inbox and its safe-point delivery."""
+        run = await self.session_access.get_run(run_id, context)
+        content = text.strip()
+        if not content:
+            raise SageV2Error(RuntimeErrorInfo(
+                code="server.conversations.steer.empty", category=ErrorCategory.VALIDATION,
+                message="supplemental input must not be empty",
+            ))
+        inputs = (InputItem(role="user", content=(TextBlock(text=content),),
+                            metadata={"web_message_id": message_id}),)
+        # HTTP retries must reuse the accepted entry even after its Run revision
+        # advances or completes; reconstructing a CAS command would change it.
+        entries = await self.application.runtime.session_store.list_steers(run_id)
+        for entry in entries:
+            if any(item.metadata.get("web_message_id") == message_id for item in entry.input):
+                if entry.input != inputs:
+                    raise SageV2Error(RuntimeErrorInfo(
+                        code="server.conversations.steer.conflict", category=ErrorCategory.CONFLICT,
+                        message="messageId is already bound to different input",
+                    ))
+                return {"steer_id": entry.steer_id, "state": entry.status.value}
+        events = await self.session_access.read_events(run_id, context)
+        turn = next((event.turn_id for event in reversed(events) if event.type == "turn.started"), None)
+        if run.state != RunState.RUNNING or turn is None:
+            raise SageV2Error(RuntimeErrorInfo(
+                code="server.conversations.steer.conflict", category=ErrorCategory.CONFLICT,
+                message="Run is no longer accepting supplemental input",
+            ))
+        receipt = await self.application.runtime.steer_run(SteerRun(
+            run_id=run_id, expected_revision=run.revision, expected_turn_id=turn,
+            idempotency_key=f"web-steer:{hashlib.sha256(message_id.encode()).hexdigest()}", input=inputs,
+        ), context)
+        _accepted(receipt)
+        return {"steer_id": receipt.result["steer_id"], "state": "pending"}
 
     async def resume_detached_run(
         self,
