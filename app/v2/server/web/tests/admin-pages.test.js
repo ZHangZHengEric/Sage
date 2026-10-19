@@ -399,6 +399,7 @@ test('MCP connection editing retains existing timeout settings and never echoes 
   const { api, mount } = await setup(t, 'Mcp')
   const item = { name: 'notes', protocol: 'streamable_http', url: 'https://example.test/mcp', timeout_seconds: 12.5, call_timeout_seconds: 180, has_api_key: true }
   t.mock.method(api, 'listMcp', async () => [item])
+  t.mock.method(api, 'listTools', async () => [])
   t.mock.method(api, 'updateMcp', async () => ({}))
   const state = await mount()
   state.edit(item)
@@ -411,8 +412,8 @@ test('MCP connection editing retains existing timeout settings and never echoes 
   assert.equal(state.drawerOpen, false)
 })
 
-test('personal settings reads and saves only the current account policy even for admins', async t => {
-  const { api, mount } = await setup(t, 'PersonalSettings')
+test('execution settings reads and saves only the current account policy even for admins', async t => {
+  const { api, mount } = await setup(t, 'ExecutionSettings')
   t.mock.method(api, 'adminUsers', async () => { throw new Error('must not fetch other users') })
   t.mock.method(api, 'executionPolicy', async () => ({ shell: 'ask', on_approval_required: 'suspend', approval_timeout_seconds: 3600 }))
   t.mock.method(api, 'saveExecutionPolicy', async body => body)
@@ -423,6 +424,22 @@ test('personal settings reads and saves only the current account policy even for
   await state.save()
   assert.deepEqual(api.saveExecutionPolicy.mock.calls[0].arguments, [{ shell: 'deny', on_approval_required: 'suspend', approval_timeout_seconds: 1800 }])
   assert.equal(api.adminUsers.mock.calls.length, 0)
+})
+
+test('personal API keys stay in the current account scope and preserve creation permissions', async t => {
+  const { api, mount } = await setup(t, 'ApiKeys')
+  t.mock.method(api, 'listKeys', async all => { assert.equal(all, false); return [] })
+  t.mock.method(api, 'listAgents', async all => { assert.equal(all, false); return [{ id: 'own', name: 'Own' }] })
+  t.mock.method(api, 'createKey', async () => ({ api_key: 'one-time-fixture' }))
+  const state = await mount()
+  assert.equal(state.ready, true)
+  state.startNew()
+  state.form.name = 'Integration'
+  state.form.approve = true
+  await state.create()
+  assert.deepEqual(api.createKey.mock.calls[0].arguments, [{ name: 'Integration', agent_id: 'own', scopes: ['a2a:invoke', 'a2a:read', 'a2a:approve'] }])
+  assert.equal(state.issued, 'one-time-fixture')
+  assert.equal(api.listKeys.mock.calls.length, 2)
 })
 
 test('user execution policy viewer switches to the selected row without changing policies', async t => {
@@ -667,18 +684,18 @@ test('package model slots select App model IDs without embedding model routes', 
 })
 
 
-test('agent editor selects external tools independently and keeps unavailable selections removable', async t => {
+test('agent editor combines selected tools while preserving independent scopes and missing grants', async t => {
   const { Component, mount } = await setup(t, 'AgentEditor', 'components')
   let form = { name: 'Scoped', tools: ['file_read'], external_tools: ['mcp_old'], execution_policy: { shell: 'ask' } }
   const state = await mount({ form, externalTools: ['mcp_read', 'a2a_peer_search'],
     'onUpdate:form': value => { form = value } })
-  assert.deepEqual(state.availableExternalTools, ['mcp_read', 'a2a_peer_search', 'mcp_old'])
-  state.toggleExternalTool('mcp_read')
+  state.setSelectedTools(['tools:file_read', 'external_tools:mcp_old', 'external_tools:mcp_read'])
   assert.deepEqual(form.external_tools, ['mcp_old', 'mcp_read'])
   assert.deepEqual(form.tools, ['file_read'])
   const html = await renderToString(createSSRApp(Component, { form, externalTools: ['mcp_read', 'a2a_peer_search'] }))
-  assert.match(html, /仅允许所选工具/)
+  assert.match(html, /3 已选/)
   assert.match(html, /mcp_read/)
+  assert.doesNotMatch(html, /未选择时使用服务端默认工具/)
 })
 
 test('agents retain external scope through opening and saving, excluding disabled connections', async t => {
@@ -851,23 +868,49 @@ test('system plugins with fixed bindings or no editable configuration are visibl
   assert.equal(state.editing, editable)
 })
 
-test('agent A editor filters by purpose and only selects visible results while retaining unknown grants', async t => {
+test('agent picker searches purpose, isolates modal drafts, and preserves selection across pages', async t => {
+  const { mount } = await setup(t, 'AgentResourceSelection', 'components')
+  const { agentToolChoices } = await import('../src/agent-resource-selection.js')
+  const items = agentToolChoices([{ name: 'file_read', source: 'official', category: 'files' }],
+    Array.from({ length: 240 }, (_, index) => `mcp_research_${index}`), [], [], ['lost'])
+  const updates = []
+  const state = await mount({ kind: 'tools', items, selected: ['external_tools:lost'],
+    'onUpdate:selected': value => updates.push(value) })
+  await state.show()
+  state.query = 'research'; await nextTick()
+  assert.equal(state.results.length, 240)
+  state.bulk(true)
+  assert.equal(state.draft.size, 241)
+  state.turnPage(5)
+  assert.equal(state.visibleItems.length, 20)
+  assert.equal(state.visibleItems.every(item => state.draft.has(item.id)), true)
+  assert.equal(updates.length, 0)
+  state.open = false
+  await state.show()
+  assert.deepEqual([...state.draft], ['external_tools:lost'])
+  state.query = '读取文件'; await nextTick()
+  assert.equal(state.results.length, 1)
+  state.bulk(true); state.confirm()
+  assert.deepEqual(updates, [['external_tools:lost', 'tools:file_read']])
+  const readonly = await mount({ kind: 'tools', items, selected: ['external_tools:lost'], readonly: true,
+    'onUpdate:selected': () => { throw new Error('readonly mutation') } })
+  await readonly.show(); readonly.bulk(true); readonly.toggle(items[0], true); readonly.remove(items[0]); readonly.confirm()
+  assert.deepEqual([...readonly.draft], ['external_tools:lost'])
+})
+
+test('agent resource confirmation preserves order and blocks writes while busy', async t => {
   const { mount } = await setup(t, 'AgentEditor', 'components')
-  const original = { name: 'Agent', tools: ['unknown_tool'], execution_policy: { shell: 'ask' } }
+  const form = { name: 'Agent', tools: ['later', 'first'], external_tools: ['lost'], execution_policy: { shell: 'ask' } }
   let updated
-  const state = await mount({ form: original, tools: [
-    { name: 'file_read', source: 'official', category: 'files', description: 'Read text' },
-    { name: 'external_search', category: 'web', description: 'Search research sources' },
-  ], 'onUpdate:form': value => { updated = value } })
-  state.toolSearch = 'research'
-  assert.deepEqual(state.displayedTools.map(tool => tool.name), ['external_search'])
-  state.selectTools(true)
-  assert.deepEqual(updated.tools, ['unknown_tool', 'external_search'])
-  assert.deepEqual(original.tools, ['unknown_tool'])
-  state.toolSearch = '读取文件'
-  assert.deepEqual(state.displayedTools.map(tool => tool.name), ['file_read'])
-  const busy = await mount({ form: original, busy: true, 'onUpdate:form': () => { throw new Error('busy mutation') } })
-  busy.toggleTool('file_read'); busy.toggleExternalTool('mcp:read'); busy.updateBudget('max_steps', 10)
+  const state = await mount({ form, tools: [{ name: 'first' }, { name: 'later' }],
+    'onUpdate:form': value => { updated = value } })
+  state.setSelectedTools(state.selectedToolIds)
+  assert.deepEqual(updated, form)
+  state.setSelectedTools([...state.selectedToolIds, 'external_tools:missing:undo'])
+  assert.deepEqual(updated.external_tools, ['lost', 'missing:undo'])
+  const busy = await mount({ form, busy: true, 'onUpdate:form': () => { throw new Error('busy mutation') },
+    'onUpdate:selectedSkills': () => { throw new Error('busy mutation') } })
+  busy.setSelectedTools([]); busy.setSelectedSkills([]); busy.updateBudget('max_steps', 10)
 })
 
 test('agent A editor protects unsaved edits and returns to basic when scrolled above other sections', async t => {
@@ -941,4 +984,121 @@ test('agent A keeps foreign and busy mutations blocked and retains failed deleti
   assert.equal(state.deleteTarget.id, 'own')
   assert.equal(state.deleteError, 'Deletion failed')
   assert.equal(state.pending, false)
+})
+
+test('tool directory separates built-ins from MCP and agent management in both cards and categories', async t => {
+  const { api, mount } = await setup(t, 'Tools')
+  t.mock.method(api, 'listTools', async () => [
+    { name: 'file_read', source: 'official', category: 'files' },
+    { name: 'file_read', source: 'mcp', category: 'MCP' },
+    { name: 'create_agent', source: 'host', category: 'agent-management' },
+  ])
+  const state = await mount()
+  assert.deepEqual(state.categories, ['files'])
+  assert.deepEqual(state.visible.map(view => [view.item.source, view.item.name]), [['official', 'file_read']])
+  state.search = 'create_agent'
+  assert.equal(state.visible.length, 0)
+})
+
+test('MCP page defaults to a full tool inventory with independent owner failures and searchable service filters', async t => {
+  const { api, mount } = await setup(t, 'Mcp')
+  const alice = { user_id: 'alice', username: 'Alice' }
+  const own = { name: 'notes', tools: ['mcp_notes_read'] }, foreign = { name: 'notes', tools: ['foreign_read'], _owner: alice }, stopped = { name: 'stopped', disabled: true, tools: ['cached_tool'] }
+  t.mock.method(api, 'listMcp', async () => [own, foreign, stopped])
+  t.mock.method(api, 'listTools', async owner => {
+    if (owner?.user_id === 'alice') throw new Error('Offline')
+    return [{ name: 'mcp_notes_read', source: 'mcp', approval_key: 'mcp:notes:read', description: 'Search all notes', input_schema: { type: 'object' } }, { name: 'file_read', source: 'official' }]
+  })
+  const state = await mount()
+  assert.equal(state.mode, 'tools')
+  assert.equal(state.inventory.length, 3)
+  assert.equal(state.inventory.find(row => row.tool.name === 'cached_tool').state, 'disabled')
+  assert.equal(state.inventory.find(row => row.tool.name === 'foreign_read').hasDefinition, false)
+  assert.match(state.toolErrors[0], /Alice.*Offline/)
+  assert.deepEqual(api.listTools.mock.calls.map(call => call.arguments[0]?.user_id), [undefined, 'alice'])
+  state.search = 'all notes'
+  assert.deepEqual(state.visibleTools.map(row => row.tool.name), ['mcp_notes_read'])
+  state.showTools(foreign)
+  assert.deepEqual(state.visibleTools.map(row => row.tool.name), ['foreign_read'])
+  state.mode = 'connections'; await nextTick()
+  assert.equal(state.visibleServers.length, 3)
+})
+
+test('MCP page ignores stale tool definitions after a connection list refresh', async t => {
+  const { api, mount } = await setup(t, 'Mcp')
+  let finish
+  t.mock.method(api, 'listMcp', async () => [{ name: 'old', tools: ['mcp_old'] }])
+  t.mock.method(api, 'listTools', () => new Promise(resolve => { finish = resolve }))
+  const state = await mount()
+  assert.equal(state.toolsLoading, true)
+  state.mode = 'connections'; await nextTick()
+  api.listMcp.mock.mockImplementation(async () => [])
+  await state.refresh()
+  finish([{ name: 'mcp_old', source: 'mcp', approval_key: 'mcp:old:read' }])
+  await new Promise(resolve => setImmediate(resolve)); await nextTick()
+  assert.deepEqual(state.inventory, [])
+  assert.deepEqual(state.catalogs, [])
+})
+
+test('tool approval modal keeps paginated rule changes local until confirmation and uses real approval keys', async t => {
+  const { mount } = await setup(t, 'AgentToolApproval', 'components')
+  const tools = Array.from({ length: 235 }, (_, index) => ({ name: `mcp_notes_read_${index}`,
+    source: 'mcp', approval_key: `mcp:notes:read.remote.${index}`, description: 'Read research notes' }))
+  const original = { 'mcp:old:write': 'ask', untouched: 'auto_approve' }, updates = []
+  let loads = 0
+  const state = await mount({ tools, modelValue: original, defaultMode: 'ask', onLoad: () => loads++,
+    'onUpdate:modelValue': value => updates.push(value) })
+  await state.show()
+  assert.equal(loads, 1)
+  assert.equal(state.rules.length, 237)
+  state.setRule('mcp:notes:read.remote.0', 'auto_approve')
+  state.turnPage(4)
+  assert.equal(state.visibleRules.length, 20)
+  state.query = 'research'; await nextTick()
+  assert.equal(state.results.length, 235)
+  assert.equal(state.page, 1)
+  assert.equal(state.draft['mcp:notes:read.remote.0'], 'auto_approve')
+  assert.equal(updates.length, 0)
+  state.open = false
+  await state.show()
+  assert.equal(state.draft['mcp:notes:read.remote.0'], undefined)
+  state.confirm()
+  assert.equal(updates.length, 0)
+  await state.show()
+  state.setRule('mcp:old:write', 'inherit')
+  state.setRule('mcp:notes:read.remote.0', 'ask')
+  state.customOnly = true; await nextTick()
+  assert.equal(state.results.length, 2)
+  state.confirm()
+  assert.deepEqual(updates, [{ untouched: 'auto_approve', 'mcp:notes:read.remote.0': 'ask' }])
+  assert.deepEqual(original, { 'mcp:old:write': 'ask', untouched: 'auto_approve' })
+})
+
+test('approval changes remain blocked for read-only, busy, failed and loading catalogs', async t => {
+  const { mount } = await setup(t, 'AgentToolApproval', 'components')
+  for (const guard of [{ readonly: true }, { disabled: true }, { loading: true }, { error: 'Discovery failed' }]) {
+    const state = await mount({ ...guard, modelValue: { write: 'ask' },
+      'onUpdate:modelValue': () => { throw new Error('blocked approval mutation') } })
+    await state.show(); state.setRule('write', 'auto_approve'); state.confirm()
+    assert.equal(state.draft.write, guard.disabled ? undefined : 'ask')
+  }
+})
+
+test('agent approval discovery starts in the subpage and confirming rules preserves defaults and tool grants', async t => {
+  const { mount } = await setup(t, 'AgentEditor', 'components')
+  const form = { name: 'Agent', tools: ['file_read'], external_tools: ['mcp_notes_read'],
+    tool_approval: { default: 'ask', tools: { file_read: 'auto_approve' } } }
+  let updated, loads = 0
+  const state = await mount({ form, 'onLoad-approval-tools': () => loads++, 'onUpdate:form': value => { updated = value } })
+  state.activeSection = 'approval'; await nextTick()
+  assert.equal(loads, 0)
+  state.setApprovalRules({ file_read: 'auto_approve', 'mcp:notes:read.remote': 'ask' })
+  assert.equal(updated.tool_approval.default, 'ask')
+  assert.deepEqual(updated.tools, form.tools)
+  assert.deepEqual(updated.external_tools, form.external_tools)
+  assert.deepEqual(form.tool_approval.tools, { file_read: 'auto_approve' })
+  const readonly = await mount({ form, readonly: true, 'onUpdate:form': () => { throw new Error('readonly mutation') } })
+  readonly.setApprovalRules({})
+  const legacy = await mount({ form: { name: 'Legacy', tool_approval: null }, 'onUpdate:form': () => { throw new Error('legacy policy changed') } })
+  legacy.setApprovalRules({ file_read: 'ask' })
 })

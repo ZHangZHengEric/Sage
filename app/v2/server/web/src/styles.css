@@ -1,37 +1,6 @@
-:root {
-  --background: hsl(0 0% 100%);
-  --foreground: hsl(222.2 84% 4.9%);
-  --card: hsl(0 0% 100%);
-  --muted: hsl(210 40% 96.1%);
-  --muted-foreground: hsl(215.4 16.3% 46.9%);
-  --primary: hsl(222.2 47.4% 11.2%);
-  --primary-foreground: hsl(210 40% 98%);
-  --border: hsl(214.3 31.8% 91.4%);
-  --sidebar: rgba(255, 255, 255, .85);
-  --destructive: hsl(0 84.2% 60.2%);
-  --radius: .5rem;
-  --thread-max-width: 56rem;
-  --composer-radius: 16px;
-  --composer-padding: 12px;
-  --composer-bg: color-mix(in srgb, var(--muted) 30%, var(--background));
-  --bg: var(--background);
-  --surface: var(--card);
-  --text: var(--foreground);
-  --line: var(--border);
-  --ink: var(--primary);
-  --cta: var(--primary);
-  --cta-ink: var(--primary-foreground);
-  --danger: var(--destructive);
-  --status-success: #15803d;
-  --status-warning: #a16207;
-  --status-active: #2563eb;
-  --space-1: 0.25rem;
-  --space-2: 0.5rem;
-  --space-3: 0.75rem;
-  --space-4: 1rem;
-  --space-5: 1.5rem;
-  --space-6: 2rem;
-}
+@import './theme.css';
+@import './ui.css';
+
 
 * { box-sizing: border-box; }
 html, body, #app { height: 100%; overscroll-behavior: none; }
@@ -43,7 +12,6 @@ body {
   line-height: 1.6;
 }
 
-button, input, textarea, select { font: inherit; }
 a { color: inherit; }
 button, a, summary { cursor: pointer; }
 .mono { font-family: "IBM Plex Mono", ui-monospace, monospace; }
@@ -65,16 +33,17 @@ code { font-family: "IBM Plex Mono", ui-monospace, monospace; font-size: 0.9em; 
 .app-sidebar {
   width: 246px; flex: 0 0 246px; display: flex; flex-direction: column; min-height: 0;
   border-right: 1px solid color-mix(in srgb, var(--border) 55%, transparent);
-  background: radial-gradient(circle at top left, #60a5fa06, transparent 30%), var(--sidebar);
+  background: var(--sidebar);
   transition: width 180ms ease, flex-basis 180ms ease;
 }
 .sidebar-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 14px 4px; }
 .sidebar-brand { display: flex; align-items: center; gap: 8px; padding-left: 6px; font-size: 16px; font-weight: 650; }
 .sidebar-brand img { width: 24px; height: 24px; }
 .sidebar-nav { display: flex; flex-direction: column; gap: 4px; overflow-y: auto; flex: 1; padding: 8px 10px 18px; }
+.nav-divider { flex-shrink: 0; width: auto; height: 0; margin: var(--space-2) var(--space-3); border: 0; border-top: 1px solid var(--border); }
 .nav-item {
   display: flex; align-items: center; gap: 10px; width: 100%; min-height: 38px;
-  border: 1px solid transparent; border-radius: 16px; padding: 8px 12px; background: transparent;
+  border: 1px solid transparent; border-radius: var(--radius); padding: 8px 12px; background: transparent;
   text-align: left; text-decoration: none; color: var(--muted-foreground); font-size: 14px; font-weight: 500;
 }
 .nav-item:hover, .nav-item.router-link-active { background: var(--muted); color: var(--foreground); }
@@ -94,7 +63,7 @@ code { font-family: "IBM Plex Mono", ui-monospace, monospace; font-size: 0.9em; 
 .account-avatar { display: grid; place-items: center; flex: 0 0 30px; height: 30px; border: 1px solid var(--border); border-radius: 10px; background: var(--muted); color: var(--primary); font-size: 13px; font-weight: 600; }
 .account-name { flex: 1; }
 .account-menu .nav-chevron { color: var(--muted-foreground); }
-.account-actions { position: absolute; bottom: 0; left: calc(100% + 12px); width: 192px; padding: 5px; background: var(--card); border: 1px solid var(--border); border-radius: 12px; box-shadow: 0 8px 28px #0f172a14, 0 2px 6px #0f172a06; z-index: 30; }
+.account-actions { position: absolute; bottom: 0; left: calc(100% + 12px); width: 248px; padding: 5px; background: var(--card); border: 1px solid var(--border); border-radius: 12px; box-shadow: var(--shadow-popover); z-index: 30; }
 .account-menu[open] .account-actions { animation: account-menu-in 140ms ease-out; }
 .account-actions .nav-item { min-height: 38px; border-radius: 8px; padding: 8px 10px; white-space: nowrap; }
 .account-actions .nav-item + .nav-item { margin-top: 2px; }
@@ -188,27 +157,8 @@ h2 { font-size: 16px; }
 
 .field { display: flex; flex-direction: column; gap: var(--space-2); margin-bottom: var(--space-4); }
 .field span { font-size: 0.8125rem; color: var(--muted-foreground); }
-input, textarea, select {
-  border: 1px solid var(--border);
-  background: var(--card);
-  padding: var(--space-3);
-  color: var(--foreground);
-  border-radius: var(--radius);
-}
 
-.btn {
-  border: 1px solid var(--primary);
-  background: var(--primary);
-  color: var(--primary-foreground);
-  padding: 8px 14px;
-  font-size: 13px;
-  border-radius: 10px;
-  transition: background-color 160ms ease, color 160ms ease, border-color 160ms ease;
-}
-.btn.ghost { background: transparent; color: var(--foreground); border-color: var(--border); }
-.btn.ghost:hover { border-color: var(--primary); }
-.btn.cta { background: var(--primary); border-color: var(--primary); color: var(--primary-foreground); }
-.btn:disabled { opacity: 0.55; cursor: not-allowed; }
+
 .row { display: flex; gap: var(--space-3); flex-wrap: wrap; }
 
 .login {
@@ -640,22 +590,5 @@ legend { font-size: 15px; font-weight: 600; margin-bottom: 16px; }
 .capability-report dl { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 8px 16px; }
 .capability-report dd { margin: 0; overflow-wrap: anywhere; }
 @media (max-width: 600px) { .config-grid { grid-template-columns: minmax(0, 1fr); } .glass-config { padding: 12px; } .schema-body { padding-inline: 8px; } }
-@media (prefers-color-scheme: dark) {
-  :root {
-    color-scheme: dark;
-    --background: #0d1119;
-    --foreground: #edf2f9;
-    --card: #151c28;
-    --muted: #202b3c;
-    --muted-foreground: #abb8cc;
-    --primary: #dbeafe;
-    --primary-foreground: #101827;
-    --border: #354257;
-    --sidebar: rgba(16, 23, 35, .92);
-    --destructive: #fb9292;
-    --status-success: #86efac;
-    --status-warning: #fcd34d;
-    --status-active: #93c5fd;
-  }
-}
+
 :focus-visible { outline: 2px solid var(--status-active); outline-offset: 3px; }

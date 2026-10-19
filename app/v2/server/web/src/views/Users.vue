@@ -1,4 +1,5 @@
 <script setup>
+import PageToolbar from '../components/PageToolbar.vue'
 import { computed, onMounted, ref } from 'vue'
 import { api } from '../api.js'
 import AppIcon from '../components/AppIcon.vue'
@@ -30,10 +31,9 @@ async function load() {
 onMounted(load)
 </script>
 <template>
-  <section class="system-settings users-settings">
-    <header class="system-users-head"><h1>用户管理</h1><span v-if="!loading" class="system-badge neutral">{{ users.length }} 人</span></header>
+  <section class="system-settings users-settings" aria-label="用户管理">
     <p v-if="message" class="system-message" role="status"><span>{{ message }}</span><button class="icon-button" type="button" aria-label="关闭提示" @click="message = ''"><AppIcon name="close" /></button></p>
-    <div v-if="users.length" class="system-users-toolbar"><div class="system-role-filters" aria-label="用户角色筛选"><button v-for="[value, label] in [['all', '全部用户'], ['admin', '管理员'], ['user', '普通用户']]" :key="value" type="button" :aria-pressed="role === value" @click="role = value">{{ label }}</button></div><label class="system-user-search"><AppIcon name="search" /><input v-model="search" type="search" placeholder="搜索用户名或用户 ID" aria-label="搜索用户名或用户 ID" /></label></div>
+    <PageToolbar v-if="users.length" aria-label="用户筛选"><div class="system-role-filters" aria-label="用户角色筛选"><button v-for="[value, label] in [['all', '全部用户'], ['admin', '管理员'], ['user', '普通用户']]" :key="value" type="button" :aria-pressed="role === value" @click="role = value">{{ label }}</button></div><template #actions><label class="system-user-search"><AppIcon name="search" /><input v-model="search" type="search" placeholder="搜索用户名或用户 ID" aria-label="搜索用户名或用户 ID" /></label></template></PageToolbar>
     <div v-if="error" class="system-error" role="alert"><span>{{ error }}</span><button class="btn ghost" type="button" :disabled="loading" @click="load">重新加载</button></div>
     <div v-if="loading" class="system-skeleton" aria-busy="true" aria-label="正在加载用户"><i v-for="n in 4" :key="n"></i></div>
     <div v-else-if="!users.length && !error" class="system-empty"><AppIcon name="user" /><h2>暂无用户</h2></div>

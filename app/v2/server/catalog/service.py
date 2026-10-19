@@ -121,6 +121,12 @@ class CatalogService:
                 *[name for server in catalog.mcp_servers if not server.disabled for name in server.tools],
                 *[name for peer in catalog.a2a_agents if not peer.disabled for name in peer.skills],
             ])),
+            "external_tool_groups": [
+                *[{"source": "mcp", "name": server.name, "tools": list(server.tools)}
+                  for server in catalog.mcp_servers if not server.disabled],
+                *[{"source": "a2a", "name": peer.name, "tools": list(peer.skills)}
+                  for peer in catalog.a2a_agents if not peer.disabled],
+            ],
         }
 
     async def update_agent(

@@ -22,6 +22,7 @@ def test_editor_resources_are_lightweight_scoped_and_never_discover_tools(client
     assert data['models'][0]['model'] == 'alice-model'
     assert set(data['models'][0]) == {'id', 'model', 'is_default'}
     assert data['skills'][0]['name'] == 'research'
+    assert data['external_tool_groups'] == [{'source': 'mcp', 'name': 'notes', 'tools': []}]
     assert data['plugins']['configurable']
     assert all('input_schema' not in tool for tool in data['tools'])
     assert 'secret-alice' not in own.text and 'private body' not in own.text
@@ -103,3 +104,25 @@ def test_plugin_definitions_are_reused_for_the_running_host(client, monkeypatch)
         second = client.get('/api/agents/editor-resources', headers=headers).json()['data']['plugins']
         assert first == second
         assert options.call_count == 1
+
+
+async def test_editor_resource_groups_use_cached_scoped_connections_only():
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+    from app.v2.server.catalog.service import CatalogService
+
+    catalog = SimpleNamespace(models=[], mcp_servers=[
+        SimpleNamespace(name="文书_资料", tools=["mcp_notes_read"], disabled=False),
+        SimpleNamespace(name="disabled", tools=["mcp_disabled_read"], disabled=True),
+    ], a2a_agents=[SimpleNamespace(name="研究助手", skills=["a2a_research_search"], disabled=False)])
+    store = SimpleNamespace(editor_catalog=AsyncMock(return_value=catalog))
+    skills = SimpleNamespace(list_visible=AsyncMock(return_value=[]))
+    service = CatalogService(store, mcp_plugins=None, a2a_plugins=None, skills=skills)
+    resources = await service.editor_resources("alice")
+    assert resources["external_tool_groups"] == [
+        {"source": "mcp", "name": "文书_资料", "tools": ["mcp_notes_read"]},
+        {"source": "a2a", "name": "研究助手", "tools": ["a2a_research_search"]},
+    ]
+    assert resources["external_tools"] == ["mcp_notes_read", "a2a_research_search"]
+    store.editor_catalog.assert_awaited_once_with("alice")
+    skills.list_visible.assert_awaited_once_with(user_id="alice", role="user")

@@ -1,4 +1,5 @@
 <script setup>
+import PageToolbar from '../components/PageToolbar.vue'
 import { computed, onMounted, ref, watch } from 'vue'
 import { api, isForeign } from '../api.js'
 import AppIcon from '../components/AppIcon.vue'
@@ -111,16 +112,9 @@ onMounted(load)
 </script>
 
 <template>
-  <section class="model-page">
-    <header class="page-head model-page-head">
-      <div class="model-heading"><h1>模型供应商</h1><span v-if="!loading" class="model-count">{{ models.length }}</span></div>
-      <button class="btn cta" type="button" :disabled="busy || loading" @click="startNew"><AppIcon name="plus" />新增模型</button>
-    </header>
+  <section class="model-page" aria-label="模型供应商">
+    <PageToolbar aria-label="模型操作"><template v-if="models.length"><div class="model-filters" aria-label="模型筛选"><button v-for="[value, label] in filters" :key="value" type="button" :aria-pressed="filter === value" @click="filter = value">{{ label }}</button></div></template><template #actions><template v-if="models.length"><label class="model-search"><AppIcon name="search" /><input v-model="search" type="search" aria-label="搜索模型或供应商" placeholder="搜索模型或供应商" /></label></template><button class="btn cta" type="button" :disabled="busy || loading" @click="startNew"><AppIcon name="plus" />新增模型</button></template></PageToolbar>
     <div v-if="message" class="model-message" role="status"><span><AppIcon name="check" />{{ message }}</span><button class="icon-button" type="button" aria-label="关闭提示" @click="message = ''"><AppIcon name="close" /></button></div>
-    <div v-if="models.length" class="model-toolbar">
-      <div class="model-filters" aria-label="模型筛选"><button v-for="[value, label] in filters" :key="value" type="button" :aria-pressed="filter === value" @click="filter = value">{{ label }}</button></div>
-      <label class="model-search"><AppIcon name="search" /><input v-model="search" type="search" aria-label="搜索模型或供应商" placeholder="搜索模型或供应商" /></label>
-    </div>
     <p v-if="error && !drawerOpen && models.length" class="error model-list-error" role="alert">{{ error }}<button class="btn ghost" type="button" :disabled="busy || loading" @click="load">重新加载</button></p>
     <div v-if="loading" class="model-grid" aria-busy="true" aria-label="正在加载模型"><div v-for="n in 3" :key="n" class="model-skeleton"><i></i><i></i><i></i></div></div>
     <div v-else-if="error && !models.length" class="model-empty" role="alert"><span class="model-empty-icon"><AppIcon name="link" /></span><h2>暂时无法加载模型</h2><p>{{ error }}</p><button class="btn cta" type="button" @click="load">重新加载</button></div>

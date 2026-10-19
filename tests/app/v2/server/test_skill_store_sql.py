@@ -10,6 +10,7 @@ from app.v2.server.database import Database, DatabaseSettings
 from app.v2.server.database.schema import create_host_schema
 from app.v2.server.skills.records import AgentSkillBinding, SkillRecord
 from app.v2.server.skills.repository import DatabaseSkillStore
+from sagents.v2.contracts.errors import SageV2Error
 
 
 def _record(name: str, *, owner: str = "user_1") -> SkillRecord:
@@ -74,6 +75,18 @@ async def test_list_visible_follows_the_current_version_after_republish(store):
 
     visible = await store.list_visible(user_id="user_1", role="user")
     assert [(item.name, item.revision) for item in visible] == [("mine", 2)]
+
+
+async def test_import_publish_compares_version_before_switching(store):
+    first = await store.publish(_record("one"), expected_version_id="")
+    second = replace(first, version_id="one-v2", revision=2)
+    with pytest.raises(SageV2Error):
+        await store.publish(second, expected_version_id="stale")
+    assert (await store.get(first.skill_id)).version_id == first.version_id
+    await store.publish(second, expected_version_id=first.version_id)
+    assert (await store.get(first.skill_id)).version_id == second.version_id
+    with pytest.raises(SageV2Error):
+        await store.publish(replace(second, version_id="one-v3"), expected_version_id=first.version_id)
 
 
 async def test_bindings_are_scoped_to_one_agent(store):

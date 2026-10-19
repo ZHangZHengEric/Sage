@@ -50,5 +50,5 @@ onBeforeUnmount(() => { if (typeof window !== 'undefined') hide() })
 .field-help > button { display: grid; place-items: center; width: 26px; height: 26px; padding: 0; border: 0; border-radius: 50%; background: transparent; color: var(--muted-foreground); }
 .field-help > button:hover, .field-help > button[aria-expanded="true"] { color: var(--primary); background: var(--muted); }
 .field-help .app-icon { width: 14px; height: 14px; }
-.field-tooltip { position: fixed; z-index: 100; width: min(290px, calc(100vw - 24px)); padding: 13px 15px; border: 1px solid #ffffff1f; border-radius: 12px; background: #263128; color: #f8faf5; box-shadow: 0 8px 30px #0002; font-size: 12px; font-weight: 400; line-height: 1.8; text-align: left; white-space: normal; overflow-wrap: anywhere; }
+.field-tooltip { position: fixed; z-index: 100; width: min(290px, calc(100vw - 24px)); padding: 13px 15px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--tooltip-background); color: var(--tooltip-foreground); box-shadow: var(--shadow-popover); font-size: 12px; font-weight: 400; line-height: 1.8; text-align: left; white-space: normal; overflow-wrap: anywhere; }
 </style>

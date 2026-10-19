@@ -3,7 +3,10 @@ import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { api, isForeign } from '../api.js'
 import FormDrawer from '../components/FormDrawer.vue'
 import PackageEditor from '../components/PackageEditor.vue'
+import PageToolbar from '../components/PageToolbar.vue'
+import AppIcon from '../components/AppIcon.vue'
 
+const tab = ref('versions'), ready = ref(false)
 const definitionOpen = ref(false), runOpen = ref(false), legacyContinuation = ref(false)
 import { onBeforeRouteLeave, useRouter } from 'vue-router'
 const router = useRouter()
@@ -100,7 +103,7 @@ async function activate(row) {
 onMounted(() => action(async () => {
   const [s, a, bundle] = await Promise.all([api.packageSchema(), api.listAgents(false), api.packageTemplate()])
   if (disposed) return
-  schema.value = s; agents.value = a; setBundle(bundle); await refresh()
+  schema.value = s; agents.value = a; setBundle(bundle); await refresh(); ready.value = true
   timer = setInterval(async () => {
     if (polling || busy.value || !operation.value || status.value?.terminal || status.value?.needs_attention) return
     polling = true
@@ -111,63 +114,50 @@ onUnmounted(() => { disposed = true; statusRevision++; clearInterval(timer) })
 </script>
 
 <template>
-  <section class="studio">
-    <h1>Agent Studio</h1>
-    <p role="alert" v-if="error && !definitionOpen && !runOpen" class="error">{{ error }}</p><p role="status">{{ message }}</p>
-    <fieldset :disabled="busy">
-      <legend>定义与版本</legend>
-      <div class="list-toolbar"><h2>版本库</h2><button class="btn cta" @click="startNew">新增定义</button></div>
-      <ul><li v-for="p in packages" :key="`${p._owner?.user_id || ''}:${p.ref}`"><span v-if="p._owner" class="tag">{{ p._owner.username }}</span> {{ p.package }} · {{ p.version }} {{ p.active ? '（活动）' : '' }} <button @click="load(p)">打开</button><button v-if="!isForeign(p)" @click="activate(p)">切换到此版本</button></li></ul>
-      <button :disabled="offset === 0" @click="action(async () => { offset -= 50; await refresh() })">上一页</button>
-      <button :disabled="packages.length < 50" @click="action(async () => { offset += 50; await refresh() })">下一页</button>
-    </fieldset>
-    <fieldset :disabled="busy">
-      <legend>运行与多轮反馈</legend>
-      <div class="list-toolbar"><h2>任务历史</h2><button class="btn cta" :disabled="!savedRef || foreignBundle" @click="runOpen = true">新增任务</button></div><ul><li v-for="r in runs" :key="`${r._owner?.user_id || ''}:${r.operation}`"><button @click="action(() => inspect(r.operation, r._owner))"><span v-if="r._owner" class="tag">{{ r._owner.username }}</span> {{ r.operation }} · {{ r.agent }}</button></li></ul>
-      <button :disabled="runOffset === 0" @click="action(async () => { runOffset -= 50; await refresh() })">上一页任务</button>
-      <button :disabled="runs.length < 50" @click="action(async () => { runOffset += 50; await refresh() })">下一页任务</button>
-      <template v-if="operation">
-        <button @click="action(() => inspect(operation))">刷新状态</button><button :disabled="foreignRun || status?.terminal" @click="control('cancel')">取消任务</button><button :disabled="foreignRun || !status?.terminal" @click="continueConversation">继续此会话</button>
-        <div v-if="status?.needs_attention && !foreignRun"><p>{{ status.interaction.payload?.prompt }}</p><label>决策<select v-model="decision"><option value="" disabled>请选择</option><option v-for="choice in status.interaction.allowed_decisions" :key="choice" :value="choice">{{ choice }}</option></select></label><label>回复 payload（JSON）<textarea v-model="reply" /></label><button @click="control('reply')">提交反馈并恢复</button><button @click="control('approve')">提交人工审批决定</button></div>
-        <details><summary>执行事件</summary><ol><li v-for="event in events" :key="event.event_id"><details><summary>{{ event.run_sequence }} · {{ event.type }}</summary><pre>{{ JSON.stringify(event, null, 2) }}</pre></details></li></ol><button @click="action(() => inspect(operation))">加载后续事件</button></details>
-        <p>状态：{{ status?.run?.state || status?.state }}</p>
-        <pre v-if="answer" aria-label="回答">{{ answer }}</pre>
-        <pre v-if="status?.flow_results">{{ JSON.stringify(status.flow_results, null, 2) }}</pre>
+  <section class="studio" aria-label="Studio">
+    <PageToolbar aria-label="Studio 操作">
+      <nav class="source-tabs" aria-label="Studio 分类"><button :aria-pressed="tab === 'versions'" @click="tab = 'versions'">版本库</button><button :aria-pressed="tab === 'runs'" @click="tab = 'runs'">运行记录</button></nav>
+      <template #actions><button v-if="tab === 'versions'" class="btn cta" :disabled="busy || !ready" @click="startNew"><AppIcon name="plus" />新增定义</button><button v-else class="btn cta" :disabled="busy || !clean || foreignBundle" @click="runOpen = true"><AppIcon name="plus" />新增任务</button></template>
+    </PageToolbar>
+    <p role="alert" v-if="error && !definitionOpen && !runOpen" class="developer-feedback error">{{ error }}</p><p v-if="message && !definitionOpen && !runOpen" role="status" class="developer-feedback">{{ message }}</p>
+    <div v-if="busy && !ready" class="developer-skeleton" aria-busy="true" aria-label="正在加载 Studio"><i v-for="n in 3" :key="n"></i></div>
+    <div v-else-if="!ready && error" class="developer-empty"><p>暂时无法加载 Studio</p><button class="btn ghost" @click="router.go(0)">重新加载</button></div>
+    <template v-else-if="ready && tab === 'versions'">
+      <div v-if="!packages.length" class="developer-empty"><AppIcon name="code" /><p>{{ offset ? '没有更多版本' : '还没有保存的版本' }}</p><button v-if="!offset" class="btn cta" :disabled="busy" @click="startNew">新增定义</button></div>
+      <div v-else class="developer-table" :aria-busy="busy"><table aria-label="版本库"><thead><tr><th>定义</th><th>版本</th><th>状态</th><th>操作</th></tr></thead><tbody>
+        <tr v-for="p in packages" :key="`${p._owner?.user_id || ''}:${p.ref}`"><td><strong>{{ p.package }}</strong><small v-if="p._owner" class="developer-meta">{{ p._owner.username }}</small></td><td class="mono">{{ p.version }}</td><td><span class="developer-badge" :class="{ neutral: !p.active }">{{ p.active ? '活动版本' : '已保存' }}</span></td><td><div class="developer-actions"><button class="btn ghost" :disabled="busy" @click="load(p)">打开</button><button v-if="!isForeign(p)" class="btn ghost" :disabled="busy || p.active" @click="activate(p)">切换到此版本</button></div></td></tr>
+      </tbody></table></div>
+      <nav v-if="offset || packages.length >= 50" class="developer-pagination" aria-label="版本分页"><button class="btn ghost" :disabled="busy || offset === 0" @click="action(async () => { offset -= 50; await refresh() })">上一页</button><span>第 {{ offset / 50 + 1 }} 页</span><button class="btn ghost" :disabled="busy || packages.length < 50" @click="action(async () => { offset += 50; await refresh() })">下一页</button></nav>
+    </template>
+    <template v-else-if="ready">
+      <div v-if="!runs.length" class="developer-empty"><AppIcon name="history" /><p>{{ runOffset ? '没有更多运行记录' : '还没有运行记录' }}</p></div>
+      <div v-else class="developer-table" :aria-busy="busy"><table aria-label="运行记录"><thead><tr><th>任务</th><th>入口 Agent</th><th>操作</th></tr></thead><tbody><tr v-for="r in runs" :key="`${r._owner?.user_id || ''}:${r.operation}`"><td class="mono">{{ r.operation }}<small v-if="r._owner" class="developer-meta">{{ r._owner.username }}</small></td><td>{{ r.agent }}</td><td><button class="btn ghost" :disabled="busy" @click="action(() => inspect(r.operation, r._owner))">查看</button></td></tr></tbody></table></div>
+      <nav v-if="runOffset || runs.length >= 50" class="developer-pagination" aria-label="运行记录分页"><button class="btn ghost" :disabled="busy || runOffset === 0" @click="action(async () => { runOffset -= 50; await refresh() })">上一页</button><span>第 {{ runOffset / 50 + 1 }} 页</span><button class="btn ghost" :disabled="busy || runs.length < 50" @click="action(async () => { runOffset += 50; await refresh() })">下一页</button></nav>
+      <fieldset v-if="operation" class="studio-detail" :disabled="busy" aria-label="运行详情">
+        <div class="developer-actions"><button class="btn ghost" @click="action(() => inspect(operation))">刷新状态</button><button class="btn ghost" :disabled="foreignRun || status?.terminal" @click="control('cancel')">取消任务</button><button class="btn ghost" :disabled="foreignRun || !status?.terminal" @click="continueConversation">继续此会话</button></div>
+        <div v-if="status?.needs_attention && !foreignRun" class="developer-form stack"><p>{{ status.interaction.payload?.prompt }}</p><label class="field">决策<select v-model="decision"><option value="" disabled>请选择</option><option v-for="choice in status.interaction.allowed_decisions" :key="choice" :value="choice">{{ choice }}</option></select></label><label class="field">回复 payload（JSON）<textarea v-model="reply" /></label><div class="developer-actions"><button class="btn cta" @click="control('reply')">提交反馈并恢复</button><button class="btn ghost" @click="control('approve')">提交人工审批决定</button></div></div>
+        <p>状态：<span class="developer-badge">{{ status?.run?.state || status?.state }}</span></p>
+        <pre v-if="answer" aria-label="回答">{{ answer }}</pre><pre v-if="status?.flow_results">{{ JSON.stringify(status.flow_results, null, 2) }}</pre>
+        <details><summary>执行事件</summary><ol><li v-for="event in events" :key="event.event_id"><details><summary>{{ event.run_sequence }} · {{ event.type }}</summary><pre>{{ JSON.stringify(event, null, 2) }}</pre></details></li></ol><button class="btn ghost" @click="action(() => inspect(operation))">加载后续事件</button></details>
         <details><summary>运行详情</summary><pre aria-label="运行结果">{{ JSON.stringify(status, null, 2) }}</pre></details>
-      </template>
-    </fieldset>
-    <FormDrawer v-model="definitionOpen" title="定义与版本" :busy="busy" wide>
+      </fieldset>
+    </template>
+    <FormDrawer v-model="definitionOpen" title="定义与版本" panel-class="developer-drawer studio-drawer" :busy="busy" wide>
       <PackageEditor v-if="foreignBundle" :model-value="editor" :schema="schema" disabled />
-      <fieldset v-else :disabled="busy">
-      <p v-if="error" class="error" role="alert">{{ error }}</p>
-      <p v-if="message" role="status">{{ message }}</p>
-      <label>导入现有 Agent <select v-model="importId"><option value="">空白模板</option><option v-for="a in agents" :key="a.id" :value="a.id">{{ a.name }}</option></select></label>
-      <button @click="importDraft">导入为草稿</button>
-      <PackageEditor v-model="editor" :saved-value="savedText" :schema="schema" :resources="resources" :disabled="busy" />
-      <button @click="action(async () => { const r = await api.validatePackage(JSON.parse(editor)); message = r.valid ? (r.readiness?.ready ? '配置验证通过，资源已就绪' : '配置验证通过') : '配置验证未通过' })">验证与资源检查</button>
-      <button @click="save">保存版本</button>
-      <details><summary>宿主能力与完整 Schema</summary><pre>{{ JSON.stringify(schema, null, 2) }}</pre></details>
-      <label>复制为新包 <input v-model="forkId" placeholder="新包 ID" /></label><input aria-label="新版本" v-model="forkVersion" />
-      <button :disabled="!clean || !forkId" @click="action(async () => { const r = await api.forkPackage(savedRef, forkId, forkVersion); setBundle(await api.package(r.ref), r.ref); await refresh() })">复制已保存版本</button>
+      <fieldset v-else :disabled="busy" class="developer-form">
+        <p v-if="error" class="developer-feedback error" role="alert">{{ error }}</p><p v-if="message" class="developer-feedback" role="status">{{ message }}</p>
+        <div class="row"><label class="field">导入现有 Agent<select v-model="importId"><option value="">空白模板</option><option v-for="a in agents" :key="a.id" :value="a.id">{{ a.name }}</option></select></label><button class="btn ghost" @click="importDraft">导入为草稿</button></div>
+        <PackageEditor v-model="editor" :saved-value="savedText" :schema="schema" :resources="resources" :disabled="busy" />
+        <details><summary>宿主能力与完整 Schema</summary><pre>{{ JSON.stringify(schema, null, 2) }}</pre></details>
+        <div class="studio-fork"><label class="field">复制为新包<input v-model="forkId" placeholder="新包 ID" /></label><label class="field">新版本<input v-model="forkVersion" /></label><button class="btn ghost" :disabled="!clean || !forkId" @click="action(async () => { const r = await api.forkPackage(savedRef, forkId, forkVersion); setBundle(await api.package(r.ref), r.ref); await refresh() })">复制已保存版本</button></div>
       </fieldset>
+      <template v-if="!foreignBundle" #footer><div class="developer-actions"><button class="btn ghost" :disabled="busy" @click="action(async () => { const r = await api.validatePackage(JSON.parse(editor)); message = r.valid ? (r.readiness?.ready ? '配置验证通过，资源已就绪' : '配置验证通过') : '配置验证未通过' })">验证与资源检查</button><button class="btn cta" :disabled="busy" @click="save">保存版本</button></div></template>
     </FormDrawer>
-    <FormDrawer v-model="runOpen" title="新增任务" :busy="busy">
-      <fieldset :disabled="busy || foreignBundle">
-      <p v-if="error" class="error" role="alert">{{ error }}</p>
-      <label>入口 Agent <select v-model="selectedAgent"><option v-for="id in definitions" :key="id">{{ id }}</option></select></label>
-      <label>任务<textarea v-model="content" rows="3" /></label>
-      <label>续接 Session（留空新建）<input v-model="sessionId" /></label>
-      <button :disabled="!clean || !content.trim()" @click="run">运行已保存版本</button>
-      <p v-if="!clean">运行前请先保存当前定义。</p>
-      </fieldset>
+    <FormDrawer v-model="runOpen" title="新增任务" panel-class="developer-drawer studio-drawer" :busy="busy">
+      <form id="studio-run-form" @submit.prevent="run"><fieldset :disabled="busy || foreignBundle" class="developer-form stack"><p v-if="error" class="developer-feedback error" role="alert">{{ error }}</p><label class="field">入口 Agent<select v-model="selectedAgent"><option v-for="id in definitions" :key="id">{{ id }}</option></select></label><label class="field">任务<textarea v-model="content" rows="3" /></label><label class="field">续接 Session（留空新建）<input v-model="sessionId" /></label><p v-if="!clean" class="developer-hint">运行前请先保存当前定义。</p></fieldset></form>
+      <template #footer><div class="developer-actions"><button class="btn cta" type="submit" form="studio-run-form" :disabled="busy || foreignBundle || !clean || !content.trim()">运行已保存版本</button></div></template>
     </FormDrawer>
   </section>
 </template>
 
-<style scoped>
-.studio { width: 100%; margin: 0; }
-fieldset { border: 1px solid #8885; border-radius: 12px; margin: 20px 0; padding: 20px; min-width: 0; }
-label { display: block; margin: 12px 0; } textarea { width: 100%; box-sizing: border-box; }
-.editor textarea, pre { font-family: monospace; } pre { overflow: auto; max-height: 500px; white-space: pre-wrap; overflow-wrap: anywhere; }
-button, input, select { margin: 5px; padding: 7px 12px; } button { border: 1px solid #8885; border-radius: 8px; cursor: pointer; background: var(--card); color: var(--foreground); } button:disabled { cursor: default; opacity: .5; } .error { color: var(--destructive); }
-</style>
+<style src="../developer-surfaces.css"></style>

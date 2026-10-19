@@ -58,13 +58,25 @@ export const modelHelp = {
 
 // Mirrors protocol defaults and apply_capability_profile in sagents/v2/model/plugins.
 // A per-run output budget can override these model-level request defaults.
+export function modelOutputBudget(model = {}, requested = null) {
+  const configured = requested ?? (model.protocol === 'anthropic-messages' ? 4096 : null)
+  const probed = model.capability_profile?.effective_max_output_tokens
+  return Number.isFinite(probed) && probed > 0 ? Math.min(configured ?? probed, probed) : configured
+}
+
+export function modelFieldPlaceholder(key, model = {}) {
+  const value = key === 'request_max_output_tokens' ? modelOutputBudget(model) : null
+  const label = value != null ? value.toLocaleString('en-US') : ['context_window', 'max_output_tokens'].includes(key) ? '未声明' : '不指定'
+  return `${label}（系统默认）`
+}
+
 export function modelFieldHelp(key, model = {}) {
   if (key !== 'request_max_output_tokens') return modelHelp[key]
   const anthropic = model.protocol === 'anthropic-messages'
   const probed = model.capability_profile?.effective_max_output_tokens
   let fallback
   if (Number.isFinite(probed) && probed > 0) {
-    const tokens = anthropic ? Math.min(4096, probed) : probed
+    const tokens = modelOutputBudget(model)
     fallback = `留空时：根据当前协议和有效探测结果，默认使用 ${tokens.toLocaleString('en-US')} Token。`
   } else {
     fallback = anthropic ? '留空时：当前 Anthropic Messages 协议默认使用 4,096 Token。' : '留空时：当前协议不主动指定输出预算，由服务商采用模型默认值。'

@@ -1,0 +1,51 @@
+/* Layout for personal credentials and Studio; controls use the shared UI tokens. */
+.personal-settings, .studio { min-width: 0; color: var(--foreground); font-size: 14px; }
+.personal-settings > .page-toolbar .source-tabs, .studio > .page-toolbar .source-tabs { gap: var(--space-5); }
+.personal-settings .source-tabs a, .studio .source-tabs button { position: relative; padding: 8px 0; border: 0; border-radius: 0; background: transparent; color: var(--muted-foreground); font-size: var(--control-font); }
+.personal-settings .source-tabs .router-link-exact-active, .studio .source-tabs button[aria-pressed="true"] { color: var(--primary); background: transparent; font-weight: 600; }
+.personal-settings .source-tabs .router-link-exact-active::after, .studio .source-tabs button[aria-pressed="true"]::after { content: ''; position: absolute; inset: auto 0 0; height: 2px; background: var(--primary); }
+.developer-feedback { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); flex-wrap: wrap; padding: var(--space-3) var(--space-4); margin: 0 0 var(--space-4); border-radius: var(--radius); background: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
+.developer-feedback.error { background: color-mix(in srgb, var(--destructive) 6%, var(--card)); }
+.developer-table { width: 100%; overflow-x: auto; border: 1px solid var(--border); border-radius: var(--radius-card); background: var(--card); }
+.developer-table table { width: 100%; min-width: 640px; margin: 0; border-collapse: collapse; text-align: left; font-size: 12px; }
+.developer-table th, .developer-table td { padding: var(--space-4) var(--space-5); border-bottom: 1px solid var(--border); vertical-align: middle; overflow-wrap: anywhere; }
+.developer-table th { color: var(--muted-foreground); background: var(--muted); font-size: 11px; font-weight: 500; }
+.developer-table tr:last-child td { border-bottom: 0; }
+.developer-table th:last-child, .developer-table td:last-child { width: 1%; white-space: nowrap; }
+.developer-table .btn, .developer-pagination .btn { min-height: var(--control-height-small); padding: 6px 10px; font-size: 11px; }
+.developer-table .mono { font-size: 11px; }
+.developer-table .developer-actions { flex-wrap: nowrap; }
+.developer-meta { display: block; margin-top: var(--space-1); color: var(--muted-foreground); font-size: 11px; overflow-wrap: anywhere; }
+.developer-actions { display: flex; align-items: center; flex-wrap: wrap; justify-content: flex-end; gap: var(--space-2); }
+.developer-badge { display: inline-flex; padding: 2px 7px; border-radius: var(--radius); background: var(--muted); color: var(--primary); font-size: 11px; white-space: nowrap; }
+.developer-badge.neutral { color: var(--muted-foreground); }
+.developer-empty { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: var(--space-4); min-height: 260px; padding: var(--space-6); border: 1px dashed var(--border); border-radius: var(--radius-card); color: var(--muted-foreground); text-align: center; }
+.developer-empty p { margin: 0; font-size: 13px; }
+.developer-empty > .app-icon { width: 28px; height: 28px; }
+.developer-skeleton { padding: var(--space-5); border: 1px solid var(--border); border-radius: var(--radius-card); background: var(--card); }
+.developer-skeleton i { display: block; height: 15px; width: 70%; margin: var(--space-4) 0 var(--space-6); background: var(--muted); border-radius: var(--radius); }
+.developer-pagination { display: flex; align-items: center; justify-content: flex-end; gap: var(--space-3); margin-top: var(--space-4); font-size: 12px; color: var(--muted-foreground); }
+.developer-drawer .form-drawer-head h2 { font-size: 16px; }
+.developer-drawer .form-drawer-body { font-size: 13px; }
+.developer-drawer fieldset { border: 0; margin: 0; padding: 0; }
+.developer-drawer .field { display: flex; flex-direction: column; gap: var(--space-2); min-width: 0; }
+.developer-drawer .field > input, .developer-drawer .field > select, .developer-drawer textarea { width: 100%; min-width: 0; }
+.studio-detail .field { display: flex; flex-direction: column; gap: var(--space-2); }
+.studio-detail .field > textarea, .studio-detail .field > select { width: 100%; }
+.developer-hint { margin: 0; font-size: 12px; color: var(--muted-foreground); line-height: 1.8; }
+.developer-checkbox { display: flex; align-items: center; gap: var(--space-2); }
+.developer-issued { padding: var(--space-4); margin-top: var(--space-5); border: 1px solid var(--border); border-radius: var(--radius); background: var(--muted); }
+.developer-issued textarea { font-family: ui-monospace, monospace; }
+.studio-detail { margin-top: var(--space-5); padding: var(--space-5); border: 1px solid var(--border); border-radius: var(--radius-card); background: var(--card); }
+.studio-detail > .developer-actions { justify-content: flex-start; margin-bottom: var(--space-4); }
+.studio-detail details, .studio-drawer details { margin-top: var(--space-4); }
+.studio-detail summary, .studio-drawer summary { font-size: 12px; color: var(--muted-foreground); }
+.studio-detail pre, .studio-drawer pre { max-height: 500px; overflow: auto; padding: var(--space-4); background: var(--muted); border-radius: var(--radius); font-size: 12px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.studio-drawer .package-editor { margin-block: var(--space-5); }
+.studio-fork { display: grid; grid-template-columns: minmax(0, 1fr) minmax(100px, .5fr) auto; align-items: end; gap: var(--space-3); padding-top: var(--space-5); margin-top: var(--space-5); border-top: 1px solid var(--border); }
+@media (max-width: 640px) {
+  .developer-table th, .developer-table td { padding: var(--space-3) var(--space-4); }
+  .developer-pagination { gap: var(--space-2); }
+  .studio-detail { padding: var(--space-4); }
+  .studio-fork { grid-template-columns: 1fr; }
+}
