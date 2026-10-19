@@ -6,6 +6,7 @@ import asyncio
 import hashlib
 import json
 import subprocess
+from dataclasses import replace
 from pathlib import Path
 
 from sagents.v2.agent.multi_agent import WorkspaceSharingPolicy
@@ -268,12 +269,26 @@ class LocalWorkspaceExecutionBindingProvider:
                 if workspace.is_symlink() or workspace.resolve().parent != self.private_workspace_root.resolve():
                     raise self._incompatible("private workspace escaped its accepted root")
             self.bindings = [value for value in self.bindings if not value.closed]
+            existing = next((value for value in self.bindings if value.run_id == request.run_id), None)
+            if existing is not None:
+                if (existing.configuration_id != snapshot.configuration_id
+                        or existing.parent_run_id != request.parent_run_id):
+                    raise self._incompatible("live Run lease differs from its accepted configuration")
+                handle = await self.sandbox_provider.attach(existing.sandbox.ref, request.context)
+                binding = replace(existing, agent_id=request.agent_id, sandbox=handle)
+                binding.lifecycle = request.lifecycle
+                self.bindings.append(binding)
+                return binding
             parent = next((value for value in self.bindings
                            if value.run_id == request.parent_run_id), None)
             if parent is not None and policy != WorkspaceSharingPolicy.PRIVATE_CHILD:
                 workspace = Path(parent.workspace_root)
             if request.parent_run_id and policy != WorkspaceSharingPolicy.PRIVATE_CHILD and parent is None:
-                raise self._incompatible("shared workspace requires the parent's live policy lease")
+                raise SageV2Error(RuntimeErrorInfo(
+                    code="execution.parent_binding_not_ready", category=ErrorCategory.RESOURCE_LOST,
+                    message="shared workspace requires the parent resource lease; use standard Run recovery",
+                    retryable=True, safe_to_resume=True,
+                ))
             if (request.parent_run_id and policy == WorkspaceSharingPolicy.SHARED_PARENT
                     and parent.configuration is not None
                     and parent.configuration.policy == snapshot.policy
@@ -281,7 +296,7 @@ class LocalWorkspaceExecutionBindingProvider:
                 handle = await self.sandbox_provider.share_run(
                     request.parent_run_id,
                     request.context,
-                    run_id=request.run_id,
+                    run_id=request.run_id, resume=True,
                 )
                 workspace = handle.filesystem.row.root
             else:

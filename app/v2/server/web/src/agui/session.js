@@ -2,13 +2,9 @@ import { updateToolStates } from './tool-state.js'
 import { HttpAgent } from '@ag-ui/client'
 import { getToken } from '../auth.js'
 import { createResumableFetch } from './resume.js'
+import { interactionAfterEvent } from './interaction-state.js'
 
 const AGENT_URL = '/api/agent'
-const INTERACTION_CLOSED = new Set([
-  'sage.interaction.resolved',
-  'sage.interaction.expired',
-  'sage.interaction.cancelled',
-])
 
 class SageHttpAgent extends HttpAgent {
   /** The answer the next run carries, or null when it starts fresh work. */
@@ -32,6 +28,12 @@ export function messageForAguiError(event, fallback) {
 }
 
 export function createAguiAgent({ onMessages, onError, onInteraction, onStarted, onSteerApplied, agentId = '' } = {}) {
+  let interaction = null
+  function updateInteraction(event) {
+    const next = interactionAfterEvent(interaction, event)
+    if (next !== interaction || event.type === 'RUN_STARTED') onInteraction?.(next)
+    interaction = next
+  }
   const agent = new SageHttpAgent({
     url: AGENT_URL,
     agentId,
@@ -39,6 +41,7 @@ export function createAguiAgent({ onMessages, onError, onInteraction, onStarted,
   })
   agent.subscribe({
     onRunStartedEvent() {
+      updateInteraction({ type: 'RUN_STARTED' })
       onStarted?.()
     },
     onMessagesChanged({ messages }) {
@@ -62,18 +65,14 @@ export function createAguiAgent({ onMessages, onError, onInteraction, onStarted,
       return { messages: updateToolStates(messages, event) }
     },
     onCustomEvent({ event, messages }) {
-      if (event?.name === 'sage.interaction.requested') {
-        onInteraction?.(event.value || null)
-      } else if (INTERACTION_CLOSED.has(event?.name)) {
-        onInteraction?.(null)
-      } else if (event?.name === 'sage.steer.applied') {
+      updateInteraction(event)
+      if (event?.name === 'sage.steer.applied') {
         onSteerApplied?.(event.value?.steer_id)
-      } else if (event?.name === 'sage.run.cancelled') {
-        onInteraction?.(null)
       }
       return { messages: updateToolStates(messages, event) }
     },
     onRunErrorEvent({ event }) {
+      updateInteraction(event)
       onError?.(messageForAguiError(event))
     },
     onRunFailed({ error }) {

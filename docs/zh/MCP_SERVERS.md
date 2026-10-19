@@ -49,25 +49,15 @@ Server MCP 只接受 `sse` 和 `streamable_http`，拒绝租户 `stdio` 命令�
 
 Server 的 `/api/mcp` 请求使用 `url`，Desktop 的连接载荷使用 `streamable_http_url`。让各宿主的界面生成对应载荷，不混用两套字段。当前桥接支持用 API Key 进行 Bearer 鉴权；本例不是任意 Header 或 OAuth 配置。
 
-嵌入式宿主应显式从进程环境读取 token：
+嵌入式宿主通过 `builder.register(ExtensionRegistration(...))` 注册成对的
+`tool.catalog` / `tool.executor` 实现，在 runtime 中选择插件、Run scope 和可序列化参数。
+工厂声明 `execution.environment` 依赖，取得当前 Run 的可信身份后创建 `McpToolPlugin`。
+插件只实现工具协议，不组装 Agent 执行链。
 
-```python
-import os
-from sagents.v2.tool import McpServerConfig, McpToolPlugin
-
-key = os.environ["REMOTE_MCP_API_KEY"]
-if not key.strip():
-    raise ValueError("REMOTE_MCP_API_KEY must not be empty")
-
-mcp = McpToolPlugin((McpServerConfig(
-    name="remote",
-    protocol="streamable_http",
-    url="https://mcp.example.com/mcp",
-    api_key=key,
-),))
-```
-
-这一步只构造 provider，不连接服务。在构建 v2 application 前，用 builder 的 `with_tool_provider(mcp, mcp)` 将其注册为 catalog 和 executor；组合多个 provider 的方式见集成手册。API Key 字段中的 `${REMOTE_MCP_API_KEY}` 是字面值，不会自动展开环境变量。不要把 token 放入提交的配置、截图或日志。
+凭据通过声明的 `credentials.provider` 依赖，使用 Run 请求上下文解析 `CredentialRef`。
+密钥保存在凭据提供者中，配置和持久化元数据只保存引用。
+`${REMOTE_MCP_API_KEY}` 是字面值，不会自动展开环境变量。
+完整注册、配置及标准执行示例见[标准宿主参考项目](../../examples/sagents_v2_standard_host/README.md)。
 
 ### 发现、授权、调用与清理
 

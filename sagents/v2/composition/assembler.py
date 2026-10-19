@@ -1034,7 +1034,8 @@ class ApplicationAssembler:
                         context=child_context,
                         configuration=command.config.execution_snapshot,
                     )
-                    binding = await self.state.execution_binding_provider.acquire(request)
+                    from sagents.v2.runtime.execution.recovery import acquire_execution_binding
+                    binding = await acquire_execution_binding(self.state.execution_binding_provider, request, driver_runtime)
                     try:
                         binding.validate_for(request)
                         await driver_runtime.record_execution_binding(binding, child_context)
@@ -1134,31 +1135,45 @@ class ApplicationAssembler:
                 await _CompositeRunResource(*owned).close()
                 raise
 
+        descriptors_by_id = {value.agent_id: value for value in (root_descriptor, *member_descriptors)}
+
+        async def run_descriptor(command):
+            if command.agent_id in descriptors_by_id:
+                return descriptors_by_id[command.agent_id]
+            if command.parent_run_id is None:
+                return root_descriptor
+            raise ValueError(f"admitted child Agent {command.agent_id!r} is unavailable in its frozen graph")
+
         def driver_factory(run_id):
+            async def resolve_agent(command):
+                return (await run_descriptor(command)).agent_id
+
             if not uses_binding_tools:
                 async def compose_unbound(context):
+                    descriptor = await run_descriptor(await session_store.get_start_command(run_id))
                     pair = await self._create_tools(extension_host, process_root, scope_handles,
                         runtime_config, plugin_declarations, return_handle=True,
-                        tenant_id=tenant_id or context.actor.tenant_id, agent_id=selected_agent, run_id=run_id)
+                        tenant_id=tenant_id or context.actor.tenant_id, agent_id=descriptor.agent_id, run_id=run_id)
                     catalog, executor, tools_scope = pair
                     sources = tools_scope.provider_scopes if tools_scope is not None else ()
                     try:
-                        loop, scope = await make_loop(run_id, catalog, executor, None, available_scopes=sources)
+                        loop, scope = await make_loop(run_id, catalog, executor, None, descriptor, available_scopes=sources)
                     except BaseException:
                         if tools_scope is not None:
                             await tools_scope.close()
                         raise
                     return loop, _CompositeRunResource(tools_scope, scope)
                 return _ExecutionBoundDriver(runtime=control_runtime, provider=None, run_id=run_id,
-                    agent_id=selected_agent, loop_builder=compose_unbound)
+                    agent_id=selected_agent, loop_builder=compose_unbound, agent_resolver=resolve_agent)
 
             async def loop_builder(binding: RunExecutionBinding):
+                descriptor = await run_descriptor(await session_store.get_start_command(run_id))
                 tools = await bound_tools.compose(
-                    binding, tenant_id=tenant_id or binding.sandbox.ref.tenant_id, agent_id=selected_agent,
+                    binding, tenant_id=tenant_id or binding.sandbox.ref.tenant_id, agent_id=descriptor.agent_id,
                 )
                 try:
                     loop, scope = await make_loop(
-                        run_id, tools.catalog, tools.executor, tools.runtime, available_scopes=tools.scope.provider_scopes,
+                        run_id, tools.catalog, tools.executor, tools.runtime, descriptor, available_scopes=tools.scope.provider_scopes,
                     )
                 except BaseException:
                     await tools.scope.close()
@@ -1171,6 +1186,7 @@ class ApplicationAssembler:
                 run_id=run_id,
                 agent_id=selected_agent,
                 loop_builder=loop_builder,
+                agent_resolver=resolve_agent,
             )
 
         session_access = AuthorizedSessionAccess(
