@@ -64,6 +64,7 @@ def test_builtin_inventory_contains_only_real_factories():
         "sage.tool.mcp",
         "sage.tool.multi-agent",
         "sage.tool.official",
+        "sage.tool.result-processor.file",
         "sage.tool.skill",
         "sage.tool-selection.direct",
         "sage.tool-selection.lexical",
