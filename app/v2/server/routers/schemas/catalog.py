@@ -71,6 +71,31 @@ class ToolPublic(BaseModel):
     source: str = "official"
     default: bool = False
 
+class AgentToolOption(BaseModel):
+    name: str
+    description: str = ""
+    approval_key: str | None = None
+    category: str = ""
+    source: str = "official"
+    default: bool = False
+
+class AgentModelOption(BaseModel):
+    id: str
+    model: str
+    is_default: bool
+
+class AgentSkillOption(BaseModel):
+    skill_id: str
+    name: str
+    description: str
+
+class AgentEditorResources(BaseModel):
+    models: list[AgentModelOption]
+    skills: list[AgentSkillOption]
+    tools: list[AgentToolOption]
+    external_tools: list[str]
+    plugins: dict[str, object] | None = None
+
 class McpBody(BaseModel):
     name: str
     protocol: Literal["sse", "streamable_http"] = "streamable_http"
