@@ -83,10 +83,11 @@ class CatalogPackageModel:
 
 
 class PackageBindings:
-    def __init__(self, paths, execution, user_id, *, agents, settings, command=None, catalog=None):
+    def __init__(self, paths, execution, user_id, *, agents, settings, command=None, catalog=None, root_agent_id=None):
         self.paths, self.execution, self.user_id = paths, execution, user_id
         self.agents, self.settings = agents, settings
         self.command, self.catalog = command, catalog
+        self.root_agent_id = root_agent_id
         self.workspaces = {}
         self.handles = {}
 
@@ -110,15 +111,25 @@ class PackageBindings:
             workspace = self.paths.workspace_dir(owner, request.agent_id)
         else:
             raise ValueError("unsupported workspace policy")
-        # Resolve on every acquisition, including child Runs and resumed Runs.
-        # Indexing fails closed if the runtime asks for an undeclared Agent.
+        definition = self.agents.get(request.agent_id)
+        catalog_id = request.agent_id
+        if definition is None:
+            root = self.agents.get(self.root_agent_id)
+            if root is None or root.mode != "fibre" or request.parent_run_id is None:
+                raise PermissionError("execution Agent is not in the admitted graph")
+            # The runtime narrows spawned experts to their Fibre parent's grants.
+            definition, catalog_id = root, self.root_agent_id
+        # Resolve the live ceiling on every acquisition, including resumed Runs.
         live = None
         if self.command is not None:
+            from app.v2.server.runtime.policy import EXECUTION_METADATA_KEY
+            grants = self.command.config.metadata.get(EXECUTION_METADATA_KEY, {}).get("agents", {})
+            catalog_id = grants.get(catalog_id, {}).get("agent_id", catalog_id)
             catalog = await self.catalog.get(self.user_id)
-            live_agent = next((item for item in catalog.agents if item.id == request.agent_id), None)
+            live_agent = next((item for item in catalog.agents if item.id == catalog_id), None)
             from sagents.v2.package.manifest.agents import AgentSandboxConfig
             live = live_agent.sandbox if live_agent else AgentSandboxConfig()
-        network = agent_network_policy(self.agents[request.agent_id].sandbox, self.settings, live=live)
+        network = agent_network_policy(definition.sandbox, self.settings, live=live)
         handle = await provision_workspace(
             self.execution, workspace, request.context, run_id=request.run_id,
             network=network,
@@ -230,6 +241,7 @@ class ServerPackageBuilderFactory:
             self.paths, self.execution, user_id,
             agents=bundle_agent_definitions(bundle), settings=self.settings,
             command=command, catalog=self.catalog,
+            root_agent_id=bundle.manifest.entrypoint.agent,
         )
         builder = (
             PackageBuilder(self.settings, self.run_quota, root,
@@ -277,19 +289,39 @@ class ServerPackageBuilderFactory:
             binding.provider, binding.provider, binding.workspace
         )
         from app.v2.server.runtime.integrations.external_tools import ScopedExternalTools
+        root_definition = bundle.manifest.agents[bundle.manifest.entrypoint.agent]
         for tool in binding.external:
-            scoped = ScopedExternalTools(tool, bindings.agents)
+            scoped = ScopedExternalTools(tool, bindings.agents,
+                dynamic_tools=root_definition.tools if root_definition.mode == "fibre" else ())
             builder.external_tool_providers.append(scoped)
             builder.with_additional_tools(scoped, scoped)
         if catalog_run is not None:
-            from app.v2.server.runtime.policy import frozen_execution, live_execution_policy
+            from app.v2.server.runtime.policy import (
+                EXECUTION_METADATA_KEY, ExecutionPolicy, frozen_execution,
+                intersect_policies, live_execution_policy,
+            )
 
             key_id, admitted_policy = frozen_execution(command)
             async def current_policy():
                 return await live_execution_policy(command, users=service.users, keys=service.keys,
                     catalog=self.catalog, settings=self.settings, user_id=user_id)
+            member_grants = command.config.metadata.get(EXECUTION_METADATA_KEY, {}).get("agents", {})
+
+            async def member_policy(run_id):
+                selected = await service.application.runtime.session_store.get_start_command(run_id)
+                # Dynamically spawned Fibre experts inherit their parent's ceiling.
+                while selected.agent_id not in member_grants and selected.parent_run_id:
+                    selected = await service.application.runtime.session_store.get_start_command(selected.parent_run_id)
+                grant = member_grants.get(selected.agent_id)
+                if grant is None:
+                    return None
+                live_catalog = await self.catalog.get(user_id)
+                member = next((item for item in live_catalog.agents if item.id == grant["agent_id"]), None)
+                return intersect_policies(ExecutionPolicy.model_validate(grant["policy"]), member.execution_policy) if member else None
+
             builder.with_tool_policy(server_tool_policy(management,
                 execution_policy=admitted_policy, current_policy=current_policy,
+                run_policy=member_policy if member_grants else None,
                 machine_invocation=key_id is not None))
             if (command.invocation_mode != "plan" and key_id is None
                     and command.parent_run_id is None and admitted_policy.shell != "deny"):

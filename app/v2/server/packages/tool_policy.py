@@ -10,7 +10,7 @@ from sagents.v2.tool.plugins.agent_management import AgentManagementToolPlugin
 from app.v2.server.runtime.policy import ExecutionPolicy, intersect_policies
 
 
-def server_tool_policy(management, *, execution_policy=None, current_policy=None, machine_invocation=False):
+def server_tool_policy(management, *, execution_policy=None, current_policy=None, run_policy=None, machine_invocation=False):
     names = {item.name for item in AgentManagementToolPlugin(management).definitions} if management is not None else set()
     configured = execution_policy or ExecutionPolicy()
 
@@ -51,6 +51,14 @@ def server_tool_policy(management, *, execution_policy=None, current_policy=None
                         "reason": "The originating execution credential was revoked or removed",
                         "allowed_decisions": (), "interaction_payload": {}})
                 effective = intersect_policies(configured, live)
+            if run_policy is not None:
+                member = await run_policy(context.run_id)
+                if member is None:
+                    decision = await super().decide(context)
+                    return decision.model_copy(update={"action": ToolPolicyAction.DENY,
+                        "reason": "The delegated Agent was removed or its execution grant was revoked",
+                        "allowed_decisions": (), "interaction_payload": {}})
+                effective = intersect_policies(effective, member)
             # Rebuild with the complete effective configuration in the audit hash.
             policy = server_tool_policy(management, execution_policy=effective,
                 machine_invocation=machine_invocation).with_approval_config(self.tool_approval) if effective != configured else self

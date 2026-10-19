@@ -44,6 +44,14 @@ export function agentSkillChoices(skills, selected = []) {
   return [...items.values()]
 }
 
+export function agentMemberChoices(agents, selected = []) {
+  const items = new Map(agents.map(agent => [agent.id, { id: agent.id, name: agent.id,
+    title: agent.name, description: agent.description || '', source: 'agents', sourceLabel: '智能体', available: true }]))
+  for (const id of selected) if (!items.has(id)) items.set(id, { id, name: id, title: id,
+    description: '', source: 'agents', sourceLabel: '智能体', available: false })
+  return [...items.values()]
+}
+
 export function filterResourceChoices(items, selected, { query = '', source = '', connection = '', category = '', state = 'all' } = {}) {
   const search = query.trim().toLocaleLowerCase()
   return items.filter(item => (!source || item.source === source) && (!connection || item.connections?.some(group => group.id === connection)) &&

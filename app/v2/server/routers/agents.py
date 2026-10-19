@@ -163,7 +163,7 @@ async def agent_tool_options(user: ReadUser, packages: PackageDep, service: Cata
 
 @agent_router.post("/api/agents", response_model=ApiResponse[AgentPublic])
 async def create_agent(body: AgentBody, user: CurrentUser, service: CatalogDep):
-    record = await service.create_agent(user.user_id, body.model_dump(exclude={key for key in ("tool_approval", "fast_model_id", "tools", "external_tools") if key not in body.model_fields_set}))
+    record = await service.create_agent(user.user_id, body.model_dump(exclude={key for key in ("tool_approval", "fast_model_id", "tools", "external_tools", "agent_mode", "available_sub_agent_ids") if key not in body.model_fields_set}))
     return success(record.public_dict())
 
 
@@ -182,7 +182,7 @@ async def update_agent(
     agent_id: str, body: AgentBody, user: CurrentUser, service: CatalogDep
 ):
     record = await service.update_agent(
-        user.user_id, agent_id, body.model_dump(exclude={key for key in ("tool_approval", "fast_model_id", "tools", "external_tools") if key not in body.model_fields_set})
+        user.user_id, agent_id, body.model_dump(exclude={key for key in ("tool_approval", "fast_model_id", "tools", "external_tools", "agent_mode", "available_sub_agent_ids") if key not in body.model_fields_set})
     )
     return success(record.public_dict())
 
