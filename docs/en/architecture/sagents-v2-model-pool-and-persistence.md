@@ -37,7 +37,7 @@ This reduces repeated event serialization, not the cost of Session metadata, com
 
 ## Redis execution state and MySQL archival
 
-Set `SAGE_SERVER_SESSION_REDIS_URL=redis://localhost:6379/1` alongside the existing
+Set `SAGE_SERVER_REDIS_URL=redis://localhost:6379/1` alongside the existing
 `SAGE_SERVER_MYSQL_URL` to select `sage.session.redis-mysql`. Without Redis configured,
 the Server keeps the existing MySQL backend. SDK Packages can select the same plugin
 with required `dsn` and `redis_url`, optional `table_prefix`, `key_prefix`,

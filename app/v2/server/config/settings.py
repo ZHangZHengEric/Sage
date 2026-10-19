@@ -51,7 +51,7 @@ class ServerSettings:
     log_format: str = "json"
     log_directory: str = "./logs"
     mysql_url: str | None = None
-    session_redis_url: str | None = None
+    redis_url: str | None = None
     jaeger_url: str | None = None
     jaeger_service_name: str = "sage-server"
     jaeger_public_url: str = "http://127.0.0.1:16686/jaeger"
@@ -92,8 +92,8 @@ class ServerSettings:
     plugin_overrides: dict = field(default_factory=dict, repr=False)
 
     def __post_init__(self) -> None:
-        if self.session_redis_url and not self.mysql_url:
-            raise ValueError("session_redis_url requires mysql_url for Session archival")
+        if self.redis_url and not self.mysql_url:
+            raise ValueError("redis_url requires mysql_url for Session archival")
         if self.sandbox_network_mode not in {"none", "unrestricted"}:
             raise ValueError("sandbox_network_mode must be none or unrestricted")
         ids = (self.linux_execution_uid, self.linux_execution_gid)
@@ -194,7 +194,7 @@ class ServerSettings:
             linux_execution_uid=int(value) if (value := _env("SAGE_SERVER_LINUX_EXECUTION_UID")) else None,
             linux_execution_gid=int(value) if (value := _env("SAGE_SERVER_LINUX_EXECUTION_GID")) else None,
             mysql_url=mysql_url,
-            session_redis_url=_env("SAGE_SERVER_SESSION_REDIS_URL") or None,
+            redis_url=_env("SAGE_SERVER_REDIS_URL") or None,
             trace_backend=_env("SAGE_SERVER_TRACE_BACKEND") or None,
             trace_otlp_endpoint=_env("SAGE_SERVER_TRACE_OTLP_ENDPOINT"),
             trace_otlp_protocol=_env("SAGE_SERVER_TRACE_OTLP_PROTOCOL", "grpc"),
