@@ -104,7 +104,8 @@ async def main():
         ("fixture-" + name, "file_write", {"file_path": ".sage-tests/" + name, "content": content})
         for name, content in {"page.html": PAGE, "dom.cjs": JSDOM, "browser.cjs": PLAYWRIGHT}.items()
     ]
-    operations.append(("file_api_boundary", "file_write", {"file_path": "/tmp/outside.txt", "content": "forbidden"}))
+    # /tmp is workspace-owned scratch storage on Linux, so it is not an escape.
+    operations.append(("file_api_boundary", "file_write", {"file_path": "/etc/sage-frontend-outside.txt", "content": "forbidden"}))
     for name, argv in {
         "runtime": ("node", "-e", RUNTIME),
         "offline": ("python", "-c", OFFLINE),
