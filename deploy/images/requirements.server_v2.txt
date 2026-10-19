@@ -21,6 +21,7 @@ psutil>=5.9.0
 PyJWT>=2.8.0,<3
 starlette>=0.40.0
 aiomysql>=0.2.0
+redis>=5.0.0
 SQLAlchemy[asyncio]>=2.0,<2.2
 prometheus-client>=0.20.0
 a2a-sdk[fastapi]>=1.1.4,<2
