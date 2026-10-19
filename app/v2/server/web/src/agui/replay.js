@@ -1,14 +1,9 @@
 import { updateToolStates } from './tool-state.js'
+import { interactionAfterEvent } from './interaction-state.js'
 const TEXT_MESSAGE_EVENTS = new Set([
   'TEXT_MESSAGE_START',
   'TEXT_MESSAGE_CONTENT',
   'TEXT_MESSAGE_END',
-])
-const INTERACTION_CLOSED = new Set([
-  'sage.interaction.resolved',
-  'sage.interaction.expired',
-  'sage.interaction.cancelled',
-  'sage.run.cancelled',
 ])
 
 /** Rebuild AG-UI Message[] from persisted protocol events. */
@@ -128,22 +123,14 @@ export function messagesFromEvents(events) {
 
 /** The question this thread is still waiting on, or null when it is not.
  *
- * A request stays open until its own resolution says otherwise, so the scan
- * matches ids rather than assuming the latest close belongs to the latest
- * question.
+ * Run cancellation/failure and a new Run also retire the previous question.
+ * RUN_FINISHED alone is insufficient: suspended streams can finish while
+ * their question still needs an answer.
  */
 export function pendingInteraction(events) {
   let pending = null
   for (const event of events || []) {
-    if (event.type !== 'CUSTOM') continue
-    if (event.name === 'sage.interaction.requested') {
-      pending = event.value || null
-    } else if (
-      INTERACTION_CLOSED.has(event.name) &&
-      event.value?.interaction_id === pending?.interaction_id
-    ) {
-      pending = null
-    }
+    pending = interactionAfterEvent(pending, event)
   }
   return pending
 }
