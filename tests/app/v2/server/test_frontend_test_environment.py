@@ -46,16 +46,11 @@ async def test_image_acceptance_collects_actual_standard_tool_receipts(tmp_path,
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     monkeypatch.setattr(module.tempfile, "mkdtemp", lambda **kwargs: str(tmp_path))
-    monkeypatch.setattr(module, "RUNTIME", "console.log('runtime plumbing')")
-    monkeypatch.setattr(module, "OFFLINE", "print('offline plumbing')")
     join = module.shlex.join
     def local_command(argv):
-        if argv[0] == "sage-frontend-test":
-            return join(("node", "-e", "console.log('runner plumbing')"))
-        if argv[0] == "python":
-            # This plumbing probe needs no venv packages or site initialization.
-            return join((argv[0], "-I", "-S", *argv[1:]))
-        return join(argv)
+        # This test verifies SDK receipt collection; real Node/browser probes
+        # run in the candidate Linux image, independent of host installations.
+        return join(("bash", "-c", "printf '%s\\n' \"$1\"", "plumbing", join(argv)))
     monkeypatch.setattr(module.shlex, "join", local_command)
     assert await module.main() == 0
     summary = json.loads((tmp_path / "acceptance.json").read_text())
