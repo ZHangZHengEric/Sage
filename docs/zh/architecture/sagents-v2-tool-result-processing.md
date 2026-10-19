@@ -1,3 +1,14 @@
+---
+layout: default
+title: 工具结果处理
+parent: 架构
+nav_order: 24
+lang: zh
+ref: v2-detail-sagents-v2-tool-result-processing
+---
+
+{% include lang_switcher.html %}
+
 # 工具结果处理
 
 标准 v2 组合默认启用 `tool.result-processor`，内置实现为
