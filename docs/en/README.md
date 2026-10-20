@@ -11,12 +11,14 @@ permalink: /en/
 
 # Overview
 
-This documentation covers **SAgents v2**, **Desktop v2**, and **Server v2**, on Python **3.12+**.
+This documentation covers **SAgents**, **Desktop**, and **Server**, on Python **3.12+**.
+
+Unversioned names refer to the current v2 implementation. Legacy installation and entry points are documented separately in the [Sage v1 guide](https://github.com/ZHangZHengEric/Sage/blob/main/app/v1/README.md).
 
 | Your goal | Start here |
 | --- | --- |
-| Run Sage locally | [Desktop v2](applications/DESKTOP.md) |
-| Use the multi-user web app | [Server v2](applications/WEB.md) |
+| Run Sage locally | [Desktop](applications/DESKTOP.md) |
+| Use the multi-user web app | [Server](applications/WEB.md) |
 | Run an agent from Python | [Quick start](applications/GETTING_STARTED.md) |
 | Compose plugins and Agent packages | [Configuration](CONFIGURATION.md) · [Extensions](architecture/PLUGINS.md) |
 | Integrate a client | [Python API](api/API_REFERENCE.md) · [HTTP API](api/HTTP_API_REFERENCE.md) |

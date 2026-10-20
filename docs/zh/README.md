@@ -11,12 +11,14 @@ permalink: /zh/
 
 # 概览
 
-本文档面向 **SAgents v2**、**Desktop v2** 和 **Server v2**，要求 Python **3.12+**。
+本文档面向 **SAgents**、**Desktop** 和 **Server**，要求 Python **3.12+**。
+
+不带版本的名称默认指当前 v2 实现。旧版安装和入口单独见 [Sage v1 指南](https://github.com/ZHangZHengEric/Sage/blob/main/app/v1/README.md)。
 
 | 你的目标 | 从这里开始 |
 | --- | --- |
-| 在本地使用 Sage | [Desktop v2](applications/DESKTOP.md) |
-| 使用多用户 Web 应用 | [Server v2](applications/WEB.md) |
+| 在本地使用 Sage | [Desktop](applications/DESKTOP.md) |
+| 使用多用户 Web 应用 | [Server](applications/WEB.md) |
 | 从 Python 运行 Agent | [快速开始](applications/GETTING_STARTED.md) |
 | 组合插件与 Agent 包 | [配置](CONFIGURATION.md) · [插件扩展](architecture/PLUGINS.md) |
 | 集成客户端 | [Python API](api/API_REFERENCE.md) · [HTTP API](api/HTTP_API_REFERENCE.md) |

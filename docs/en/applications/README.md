@@ -13,8 +13,8 @@ has_children: true
 
 | Entry point | Requirements | Guide |
 | --- | --- | --- |
-| Desktop v2 | Python 3.12+, Flutter, native desktop toolchain | [Desktop](DESKTOP.md) |
-| Server v2 | Python 3.12+, MySQL, Node.js 22.12+ | [Server](WEB.md) |
+| Desktop | Python 3.12+, Flutter, native desktop toolchain | [Desktop](DESKTOP.md) |
+| Server | Python 3.12+, MySQL, Node.js 22.12+ | [Server](WEB.md) |
 | Embedded runtime | Python 3.12+ and a model provider | [Python quick start](GETTING_STARTED.md) |
 
-Desktop and Server share SAgents v2 but own separate identity, credentials, settings, and conversation indexes. Desktop v2 does not import v1 data. The legacy `scripts/v1/dev-up.sh` does not start Server v2.
+Desktop and Server share SAgents but own separate identity, credentials, settings, and conversation indexes. Desktop does not import v1 data. The legacy `scripts/v1/dev-up.sh` does not start Server.

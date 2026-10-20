@@ -15,8 +15,8 @@ has_children: true
 
 ```mermaid
 flowchart TB
-    desktop[Desktop v2] --> runtime[SAgents v2]
-    server[Server v2] --> runtime
+    desktop[Desktop] --> runtime[SAgents]
+    server[Server] --> runtime
     custom[Your Python host] --> runtime
     runtime --> model[Models and context]
     runtime --> tools[Tools and Skills]
@@ -41,4 +41,4 @@ Hosts own authentication, credentials, UI, global conversation indexes, and tool
 
 ## Deployment boundary
 
-The built-in schedulers and session stores do not make a distributed runtime. SQL persistence, per-user limits, and fencing are separate guarantees. Server v2 supports one worker. Native local process execution is not container isolation; security depends on the selected provider and the guarantees it actually enforces.
+The built-in schedulers and session stores do not make a distributed runtime. SQL persistence, per-user limits, and fencing are separate guarantees. Server supports one worker. Native local process execution is not container isolation; security depends on the selected provider and the guarantees it actually enforces.

@@ -1,6 +1,6 @@
-# Sage Server v2
+# Sage Server
 
-[v2 code reading guide](../../../docs/en/architecture/code-reading-guide.md) · [中文阅读指南](../../../docs/zh/architecture/code-reading-guide.md)
+[code reading guide](../../../docs/en/architecture/code-reading-guide.md) · [中文阅读指南](../../../docs/zh/architecture/code-reading-guide.md)
 
 
 多用户 AG-UI 服务。后端代码在 `app/v2/server/`，前端在 `web/`。
@@ -33,7 +33,7 @@ Server 只支持单 worker：SessionStore 只接受一个 writer（`multi_proces
 
 ```bash
 # 后端依赖（仓库根目录，Python 3.12+ 环境）
-python -m pip install -e '.[server-v2]'
+python -m pip install -e '.[server]'
 
 python -m app.v2.server --data-root /tmp/sage-server-v2
 ```
@@ -178,7 +178,7 @@ Web 侧对应 `POST /api/threads/{thread_id}/resume`（body 给 `runId` / `decis
 
 鉴权失败不出现在 JSON-RPC 错误表里：A2A 没有对应错误码，所以 scope 在 HTTP 层结算（403），跨租户读不到的 Task 报 `TaskNotFound`。流式请求若在第一个事件之前就被拒（例如订阅别人的 Task），SDK 返回的是普通 JSON-RPC 错误响应而非 SSE——此时还没有流可以放错误帧。
 
-`a2a-sdk` 会引入 protobuf，因此放在可选 extra 里（`'.[server-v2]'` 已包含，单独装是 `'.[a2a]'`）；没装时 A2A 路由不注册，启动日志会说明，其余接口不受影响。Agent Card 中的 URL 取 `SAGE_SERVER_PUBLIC_URL`，未配置则回落到请求的 base URL。
+`a2a-sdk` 会引入 protobuf，因此放在可选 extra 里（`'.[server]'` 已包含，单独装是 `'.[a2a]'`）；没装时 A2A 路由不注册，启动日志会说明，其余接口不受影响。Agent Card 中的 URL 取 `SAGE_SERVER_PUBLIC_URL`，未配置则回落到请求的 base URL。
 
 ### 调用别的 Agent（出站）
 

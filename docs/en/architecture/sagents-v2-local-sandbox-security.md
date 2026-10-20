@@ -73,8 +73,8 @@ System DNS Fake-IP mappings (for example `198.18.0.0/15`) are non-global and rej
 Desktop defaults proxy modes to HTTP/HTTPS. CLI supports:
 
 ```bash
-sage v2 run "task" --network-mode allowlist --network-host pypi.org --network-host files.pythonhosted.org
-sage v2 run "task" --network-mode proxy --network-proxy http://127.0.0.1:8080
+sage run "task" --network-mode allowlist --network-host pypi.org --network-host files.pythonhosted.org
+sage run "task" --network-mode proxy --network-proxy http://127.0.0.1:8080
 ```
 
 These options apply to `run`, `chat` and `resume`. Repeat `--network-port` to configure ports; `--network-allow-private` permits private destinations. Host/port/proxy options require a proxy mode. Server hosts can pass `NetworkPolicy` to `workspace_sandbox_spec` or `provision_workspace`. Direct spec callers must set `deny_private_networks=false` for `unrestricted` and select `allowed_schemes` for proxy modes.

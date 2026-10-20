@@ -19,7 +19,7 @@ This page describes **`app/v2/server`**, not the legacy server. Open the running
 
 ## A2A and API keys
 
-`/api/keys` manages Agent-bound machine credentials; keep the returned secret securely. Inbound `/a2a/v1` and the Agent Card routes require the `a2a` extra (included in `server-v2`) and a Bearer API Key, not a user JWT. Cards and task reads require `a2a:read`; sending and cancellation require `a2a:invoke`. Cards are authenticated because one origin serves multiple users. Manage outbound peers through `/api/a2a-agents`; outbound calls do not require the inbound SDK extra.
+`/api/keys` manages Agent-bound machine credentials; keep the returned secret securely. Inbound `/a2a/v1` and the Agent Card routes require the `a2a` extra (included in `server`) and a Bearer API Key, not a user JWT. Cards and task reads require `a2a:read`; sending and cancellation require `a2a:invoke`. Cards are authenticated because one origin serves multiple users. Manage outbound peers through `/api/a2a-agents`; outbound calls do not require the inbound SDK extra.
 
 ## Chat and replay
 

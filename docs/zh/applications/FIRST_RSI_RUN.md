@@ -13,7 +13,7 @@ ref: v2-applications-FIRST_RSI_RUN
 
 RSI 是 Recursive Self-Improvement（递归自我改进）的缩写。本教程展示 Sage 如何比较 Agent package 候选、拒绝较差的提案，并返回选定版本而不激活它。这里使用仓库现有的 Python 示例，不涉及 Desktop 应用。
 
-**模型响应和评分均由脚本预设。** 工作流通过真实的 SAgents v2 运行时执行，但该示例不展示模型学会单位换算，也不衡量真实模型的改进。运行这个脚本示例不需要模型 API 密钥。
+**模型响应和评分均由脚本预设。** 工作流通过真实的 SAgents 运行时执行，但该示例不展示模型学会单位换算，也不衡量真实模型的改进。运行这个脚本示例不需要模型 API 密钥。
 
 ## 1. 准备 Python 环境
 

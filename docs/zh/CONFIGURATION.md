@@ -14,9 +14,9 @@ ref: v2-CONFIGURATION
 
 | 宿主 | 配置来源 |
 | --- | --- |
-| 嵌入式 SAgents v2 | `SageManifest`：YAML 字符串、校验后的 Python 字典或 `sage.yaml`。 |
-| Desktop v2 | 应用持久化设置和 catalog，在界面配置模型与 Agent。 |
-| Server v2 | `SAGE_SERVER_*` 环境变量，加上各用户的模型、Agent、Skill 与 MCP catalog。 |
+| 嵌入式 SAgents | `SageManifest`：YAML 字符串、校验后的 Python 字典或 `sage.yaml`。 |
+| Desktop | 应用持久化设置和 catalog，在界面配置模型与 Agent。 |
+| Server | `SAGE_SERVER_*` 环境变量，加上各用户的模型、Agent、Skill 与 MCP catalog。 |
 
 ## 加载 manifest
 
@@ -35,7 +35,7 @@ manifest = SageManifestLoader().loads(yaml_text)
 ## OrcaRouter 模型
 
 `orcarouter` 是可选的 provider 预设，复用现有 OpenAI-compatible Chat Completions
-实现。在 Server v2 模型表单中选择 `orcarouter`，填写模型 ID 和 API Key。
+实现。在 Server 模型表单中选择 `orcarouter`，填写模型 ID 和 API Key。
 默认地址为 `https://api.orcarouter.ai/v1`，手动设置的自定义 Base URL 会保留。
 
 嵌入式 manifest 可添加以下模型路由，并在完整 manifest 中配置引用的凭据：

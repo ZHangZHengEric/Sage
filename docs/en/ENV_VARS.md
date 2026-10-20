@@ -10,7 +10,7 @@ ref: v2-ENV_VARS
 
 # Environment Variables
 
-## Server v2
+## Server
 
 `python -m app.v2.server` reads `app/v2/server/.env`; process environment variables take precedence. The source of truth is [ServerSettings](https://github.com/ZHangZHengEric/Sage/blob/main/app/v2/server/config/settings.py).
 
@@ -63,6 +63,6 @@ Concurrency and capacity values must be positive. They are per-process limits, n
 
 ## Desktop and embedded runtime
 
-Desktop v2 reads persisted settings, not environment overrides for Agents/models. Use the backend's `--data-root` argument for an isolated source-debug data directory.
+Desktop reads persisted settings, not environment overrides for Agents/models. Use the backend's `--data-root` argument for an isolated source-debug data directory.
 
 Embedded packages declare credential environment names explicitly. `MODEL_API_KEY` in the quick start is selected by its manifest, not a universal runtime setting. Legacy `SAGE_DEFAULT_*` variables do not configure this example.

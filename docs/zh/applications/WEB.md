@@ -1,6 +1,6 @@
 ---
 layout: default
-title: Server v2
+title: Server
 nav_order: 3
 lang: zh
 ref: v2-applications-WEB
@@ -9,18 +9,18 @@ parent: 应用入口
 
 {% include lang_switcher.html %}
 
-# Server v2
+# Server
 
 ## 环境要求
 
-Python 3.12+、MySQL 和 Node.js 22.12+。先完成[源码环境安装](GETTING_STARTED.md)。**Redis 已不是 Server v2 的启动依赖。**
+Python 3.12+、MySQL 和 Node.js 22.12+。先完成[源码环境安装](GETTING_STARTED.md)。**Redis 已不是 Server 的启动依赖。**
 
 ## 启动
 
 在仓库根目录、已激活 Python 环境的终端中运行：
 
 ```bash
-python -m pip install -e '.[server-v2]'
+python -m pip install -e '.[server]'
 cp app/v2/server/.env.example app/v2/server/.env
 ```
 
@@ -47,6 +47,6 @@ python -m app.v2.server
 - 工作区文件保存在配置的数据根目录下，按租户分隔。
 - 使用**单 worker**。内置 SessionStore 拒绝第二个 writer；Scheduler 和 JobRuntime 不提供多宿主持久运行保证。
 
-Server v2 部署位于 [`deploy/`](https://github.com/ZHangZHengEric/Sage/blob/main/deploy/README.md)；v1 的 Compose 和 Kubernetes 部署位于 [`app/v1/deploy/`](https://github.com/ZHangZHengEric/Sage/blob/main/app/v1/deploy/README.md)。
+Server 部署位于 [`deploy/`](https://github.com/ZHangZHengEric/Sage/blob/main/deploy/README.md)；v1 的 Compose 和 Kubernetes 部署位于 [`app/v1/deploy/`](https://github.com/ZHangZHengEric/Sage/blob/main/app/v1/deploy/README.md)。
 
 [环境变量](../ENV_VARS.md) · [HTTP API](../api/HTTP_API_REFERENCE.md) · [组件参考](https://github.com/ZHangZHengEric/Sage/blob/main/app/v2/server/README.md)

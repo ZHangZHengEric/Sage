@@ -92,7 +92,7 @@ OTLP 导出保留 Sage 的 128 位 trace ID、64 位 span ID，根 span 无父�
 安装已有可选依赖：
 
 ```bash
-python -m pip install -e '.[server-v2,otel]'
+python -m pip install -e '.[server,otel]'
 ```
 
 Langfuse：

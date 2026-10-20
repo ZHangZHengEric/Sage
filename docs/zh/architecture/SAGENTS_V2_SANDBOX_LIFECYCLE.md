@@ -9,9 +9,9 @@ ref: v2-detail-SAGENTS_V2_SANDBOX_LIFECYCLE
 
 {% include lang_switcher.html %}
 
-# SAgents v2 沙箱暂停、释放与恢复
+# SAgents 沙箱暂停、释放与恢复
 
-SAgents v2 将审批状态与执行计算分开持久化。`InteractionRequest`、Agent
+SAgents 将审批状态与执行计算分开持久化。`InteractionRequest`、Agent
 `Checkpoint` 和 `Suspension` 属于 Session Aggregate，因此沙箱释放、应用重启或
 清理重试都不会移除待处理审批。前端继续只读取 Snapshot 中的 pending
 Interaction，不展示内部资源记录。

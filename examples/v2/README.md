@@ -1,4 +1,4 @@
-# Sage v2 Examples
+# Sage Examples
 
 These examples use the current `sagents.v2` SDK. Run commands from the repository
 root with Python 3.12+ after `python -m pip install -e .`.

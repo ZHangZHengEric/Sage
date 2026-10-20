@@ -10,7 +10,7 @@ ref: v2-ENV_VARS
 
 # 环境变量
 
-## Server v2
+## Server
 
 `python -m app.v2.server` 读取 `app/v2/server/.env`，进程环境变量优先。默认值以 [ServerSettings](https://github.com/ZHangZHengEric/Sage/blob/main/app/v2/server/config/settings.py) 为准。
 
@@ -63,6 +63,6 @@ ref: v2-ENV_VARS
 
 ## Desktop 与嵌入式运行时
 
-Desktop v2 读取持久化设置，不通过环境变量覆盖 Agent/模型。需要隔离源码调试数据时，使用后端 `--data-root` 参数。
+Desktop 读取持久化设置，不通过环境变量覆盖 Agent/模型。需要隔离源码调试数据时，使用后端 `--data-root` 参数。
 
 嵌入式包显式声明凭据来源变量名。快速开始中的 `MODEL_API_KEY` 由该 manifest 选择，不是全局固定配置。旧版 `SAGE_DEFAULT_*` 变量不配置此示例。

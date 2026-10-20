@@ -40,7 +40,7 @@ def _build_cli_error_payload(exc: Exception, *, verbose: bool) -> Dict[str, Any]
             "message": f"Missing dependency: {exc.name}",
             "next_steps": [
                 "Install project dependencies first, for example: `pip install -e .`.",
-                "For the Desktop or Server host, install `.[desktop-v2]` or `.[server-v2]`.",
+                "For the Desktop or Server host, install `.[desktop]` or `.[server]`.",
             ],
             "debug_detail": None,
             "exit_code": 1,

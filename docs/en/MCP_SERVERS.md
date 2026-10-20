@@ -81,7 +81,7 @@ This bounds one remote MCP call, not generic tool execution or the lifetime of a
 
 ## Keyless Parallel search example
 
-The [runnable SAgents v2 example](../../examples/v2/PARALLEL_SEARCH.md) uses
+The [runnable SAgents example](../../examples/v2/PARALLEL_SEARCH.md) uses
 Parallel Search MCP over Streamable HTTP to discover and execute web search and
 page fetch through the v2 bridge without a Parallel API key. It demonstrates
 explicit host-side calls; see the authorization steps above when wiring an Agent.

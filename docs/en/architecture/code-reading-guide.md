@@ -9,7 +9,7 @@ ref: v2-detail-code-reading-guide
 
 {% include lang_switcher.html %}
 
-# Sage v2 code map
+# Sage code map
 
 The public path is `SAgentBuilder.register` → `build(runtime=..., models=...)` →
 `load_agent` → `entrypoint().run_stream(..., agent=agent)` → `close`.

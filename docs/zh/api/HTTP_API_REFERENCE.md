@@ -19,7 +19,7 @@ parent: API
 
 ## A2A 与 API Key
 
-`/api/keys` 管理绑定 Agent 的机器凭据，请妥善保管返回的密钥。入站 `/a2a/v1` 和 Agent Card 路由要求安装 `a2a` extra（已包含在 `server-v2` 中），使用 Bearer API Key，而非用户 JWT。Card 和任务读取要求 `a2a:read`，发送与取消要求 `a2a:invoke`。同一来源服务多个用户，因此 Card 也需要鉴权。出站 peer 通过 `/api/a2a-agents` 管理，出站调用不要求安装入站 SDK extra。
+`/api/keys` 管理绑定 Agent 的机器凭据，请妥善保管返回的密钥。入站 `/a2a/v1` 和 Agent Card 路由要求安装 `a2a` extra（已包含在 `server` 中），使用 Bearer API Key，而非用户 JWT。Card 和任务读取要求 `a2a:read`，发送与取消要求 `a2a:invoke`。同一来源服务多个用户，因此 Card 也需要鉴权。出站 peer 通过 `/api/a2a-agents` 管理，出站调用不要求安装入站 SDK extra。
 
 ## 对话与回放
 

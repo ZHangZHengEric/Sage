@@ -74,6 +74,6 @@ MCP 调用默认时限为 7200 秒（2 小时），可通过每个服务的 `cal
 
 ## 免 Key 的 Parallel 搜索示例
 
-[可运行的 SAgents v2 示例](../../examples/v2/PARALLEL_SEARCH.md)通过 Streamable HTTP
+[可运行的 SAgents 示例](../../examples/v2/PARALLEL_SEARCH.md)通过 Streamable HTTP
 使用 Parallel Search MCP，在不提供 Parallel API Key 的情况下，经 v2 桥接发现并调用
 网页搜索和页面抓取工具。示例由宿主显式调用；接入 Agent 时，请按上面的授权步骤配置。

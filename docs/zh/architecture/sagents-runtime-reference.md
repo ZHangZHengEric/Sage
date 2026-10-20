@@ -9,7 +9,7 @@ ref: v2-detail-sagents-runtime-reference
 
 {% include lang_switcher.html %}
 
-# SAgents v2 Runtime 配置参考
+# SAgents Runtime 配置参考
 
 Skill 可按“保存管理”和“加载使用”两组配置，详见
 [Skill 插件配置与版本行为](sagents-skill-management-and-usage.md)。

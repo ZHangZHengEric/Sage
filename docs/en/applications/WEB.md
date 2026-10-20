@@ -1,6 +1,6 @@
 ---
 layout: default
-title: Server v2
+title: Server
 nav_order: 3
 lang: en
 ref: v2-applications-WEB
@@ -9,18 +9,18 @@ parent: Applications
 
 {% include lang_switcher.html %}
 
-# Server v2
+# Server
 
 ## Requirements
 
-Python 3.12+, MySQL, and Node.js 22.12+. Complete the [source setup](GETTING_STARTED.md) first. **Redis is not a Server v2 startup dependency.**
+Python 3.12+, MySQL, and Node.js 22.12+. Complete the [source setup](GETTING_STARTED.md) first. **Redis is not a Server startup dependency.**
 
 ## Start
 
 Run from the checkout root with the Python environment active:
 
 ```bash
-python -m pip install -e '.[server-v2]'
+python -m pip install -e '.[server]'
 cp app/v2/server/.env.example app/v2/server/.env
 ```
 
@@ -47,6 +47,6 @@ Startup idempotently upgrades legacy tables: it adds missing `threads.agent_id` 
 - Workspace files live under the configured data root's tenant directories.
 - Run **one worker**. The built-in SessionStore rejects a second writer; the Scheduler and JobRuntime do not supply multi-host durability.
 
-Server v2 deployment lives in [`deploy/`](https://github.com/ZHangZHengEric/Sage/blob/main/deploy/README.md). The v1 Compose and Kubernetes deployment lives in [`app/v1/deploy/`](https://github.com/ZHangZHengEric/Sage/blob/main/app/v1/deploy/README.md).
+Server deployment lives in [`deploy/`](https://github.com/ZHangZHengEric/Sage/blob/main/deploy/README.md). The v1 Compose and Kubernetes deployment lives in [`app/v1/deploy/`](https://github.com/ZHangZHengEric/Sage/blob/main/app/v1/deploy/README.md).
 
 [Environment reference](../ENV_VARS.md) · [HTTP API](../api/HTTP_API_REFERENCE.md) · [Component reference](https://github.com/ZHangZHengEric/Sage/blob/main/app/v2/server/README.md)

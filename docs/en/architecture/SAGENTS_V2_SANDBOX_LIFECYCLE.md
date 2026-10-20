@@ -9,9 +9,9 @@ ref: v2-detail-SAGENTS_V2_SANDBOX_LIFECYCLE
 
 {% include lang_switcher.html %}
 
-# SAgents v2 sandbox suspension, release, and restore
+# SAgents sandbox suspension, release, and restore
 
-SAgents v2 persists approval state independently from execution compute.
+SAgents persists approval state independently from execution compute.
 `InteractionRequest`, the Agent `Checkpoint`, and `Suspension` remain in the Session
 Aggregate while a sandbox is released, cleanup is retried, or the application restarts.
 The frontend continues to render pending Interactions from the server Snapshot and does

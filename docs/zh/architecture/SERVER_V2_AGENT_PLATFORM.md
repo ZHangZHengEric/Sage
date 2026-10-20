@@ -9,13 +9,13 @@ ref: v2-detail-SERVER_V2_AGENT_PLATFORM
 
 {% include lang_switcher.html %}
 
-# Server v2 Agent 平台
+# Server Agent 平台
 
 如果只是给现有 Agent 发消息，使用普通聊天即可。需要保存一组完整配置、比较版本、测试后再切换版本时，使用 `/studio` 中的 Agent 包管理。两者共用 v2 运行时，但入口和任务记录各有自己的工作流程。
 
 ## 职责与入口
 
-SAgents v2 提供定义、装配、Flow、执行、持久化和交互；Server 提供身份、权限、用户目录、宿主配置和 HTTP/Web 入口。HTTP 与模型管理工具使用同一个 AgentManagementService。
+SAgents 提供定义、装配、Flow、执行、持久化和交互；Server 提供身份、权限、用户目录、宿主配置和 HTTP/Web 入口。HTTP 与模型管理工具使用同一个 AgentManagementService。
 
 普通聊天通过 `/api/agent` 使用 AG-UI。完整包工作流位于 `/api/agent-packages` 与 `/studio`，可从 catalog Agent 导入草稿，保留提示词、模型、工具和 Skill 选择；导入不修改原 Agent，后续编辑也不自动传播到已保存包。
 
