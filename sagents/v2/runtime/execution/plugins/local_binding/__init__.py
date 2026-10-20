@@ -34,6 +34,10 @@ from sagents.v2.runtime.execution.sandbox import (
 class LocalWorkspaceExecutionBindingProvider:
     """``ExecutionBindingProvider`` for a local-workspace sandbox."""
 
+    plugin_id = "sage.execution.binding.local-workspace"
+    name = "Local workspace execution binding"
+    description = "Run-owned sandbox leases with admitted execution policy."
+
     def __init__(
         self,
         workspace: str | Path,

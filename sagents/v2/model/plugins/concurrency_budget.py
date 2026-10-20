@@ -12,6 +12,10 @@ from sagents.v2.contracts.errors import ErrorCategory, RuntimeErrorInfo, SageV2E
 class ModelConcurrencyBudget:
     """Bound live model calls, without holding a slot while agents await tools."""
 
+    plugin_id = "sage.model.concurrency-budget"
+    name = "execution.model-budget"
+    description = "Standard execution.model-budget implementation with declared dependencies and lifecycle."
+
     def __init__(
         self,
         limit: int = 8,

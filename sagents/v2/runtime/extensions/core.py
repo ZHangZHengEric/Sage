@@ -47,7 +47,7 @@ def core_registrations():
         return store
 
     return (
-        registration("sage.agent.tool-policy.default", "agent.tool-policy",
+        registration(DefaultToolPolicy.plugin_id, "agent.tool-policy",
                      lambda context, deps: DefaultToolPolicy(**ToolPolicyConfig.model_validate(context.config).model_dump()),
                      config_model=ToolPolicyConfig),
         registration("sage.derived-state.session", "derived-state.store", colocated,
@@ -55,12 +55,12 @@ def core_registrations():
                      # Reuse the already started store through its derived-state
                      # port; do not invoke its session plugin start hook again.
                      start=lambda instance, context, deps: {"derived-state.store": instance}),
-        registration("sage.derived-state.ephemeral", "derived-state.store",
+        registration(InMemoryDerivedStateStore.plugin_id, "derived-state.store",
                      lambda context, deps: InMemoryDerivedStateStore()),
-        registration("sage.agent.approval-memory.session", "agent.approval-memory",
+        registration(SessionApprovalMemory.plugin_id, "agent.approval-memory",
                      lambda context, deps: SessionApprovalMemory(deps.require("derived-state.store")),
                      dependencies=("derived-state.store",)),
-        registration("sage.model.concurrency-budget", "execution.model-budget",
+        registration(ModelConcurrencyBudget.plugin_id, "execution.model-budget",
                      lambda context, deps: ModelConcurrencyBudget(**ModelBudgetConfig.model_validate(context.config).model_dump()),
                      config_model=ModelBudgetConfig),
     )

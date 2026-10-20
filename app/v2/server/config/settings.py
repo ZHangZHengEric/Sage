@@ -53,6 +53,8 @@ class ServerSettings:
     mysql_url: str | None = None
     redis_url: str | None = None
     session_store_plugin: str | None = None
+    session_store_key_prefix: str | None = None
+    scheduler_plugin: str = "sage.scheduler.ephemeral"
     jaeger_url: str | None = None
     jaeger_service_name: str = "sage-server"
     jaeger_public_url: str = "http://127.0.0.1:16686/jaeger"
@@ -99,15 +101,24 @@ class ServerSettings:
     plugin_overrides: dict = field(default_factory=dict, repr=False)
 
     def __post_init__(self) -> None:
-        if self.session_store_plugin not in {None, "sage.session.mysql", "sage.session.redis-mysql",
-                                            "sage.session.redis-mysql-distributed"}:
+        if self.session_store_plugin not in {None, "sage.session.mysql", "sage.session.redis-mysql"}:
             raise ValueError("Unsupported Server session_store_plugin")
         if self.session_store_plugin is not None and not self.mysql_url:
             raise ValueError("session_store_plugin requires mysql_url")
-        if self.session_store_plugin in {"sage.session.redis-mysql", "sage.session.redis-mysql-distributed"} and not self.redis_url:
+        if self.session_store_plugin == "sage.session.redis-mysql" and not self.redis_url:
             raise ValueError("Redis SessionStore plugin requires redis_url")
         if self.redis_url and not self.mysql_url:
             raise ValueError("redis_url requires mysql_url for Session archival")
+        if self.scheduler_plugin not in {"sage.scheduler.ephemeral", "sage.scheduler.redis-distributed"}:
+            raise ValueError("Unsupported Server scheduler_plugin")
+        if self.scheduler_plugin == "sage.scheduler.redis-distributed" and (
+            not self.mysql_url or not self.redis_url or self.session_store_plugin == "sage.session.mysql"
+        ):
+            raise ValueError("Distributed scheduler requires Redis + MySQL SessionStore")
+        if self.session_store_key_prefix is not None and (
+            not self.session_store_key_prefix.strip() or not self.redis_url or self.session_store_plugin == "sage.session.mysql"
+        ):
+            raise ValueError("session_store_key_prefix requires Redis + MySQL SessionStore and a nonempty prefix")
         if self.sandbox_network_mode not in {"none", "unrestricted"}:
             raise ValueError("sandbox_network_mode must be none or unrestricted")
         ids = (self.linux_execution_uid, self.linux_execution_gid)
@@ -214,6 +225,8 @@ class ServerSettings:
             mysql_url=mysql_url,
             redis_url=_env("SAGE_SERVER_REDIS_URL") or None,
             session_store_plugin=_env("SAGE_SERVER_SESSION_STORE_PLUGIN") or None,
+            session_store_key_prefix=_env("SAGE_SERVER_SESSION_STORE_KEY_PREFIX") or None,
+            scheduler_plugin=_env("SAGE_SERVER_SCHEDULER_PLUGIN", "sage.scheduler.ephemeral"),
             trace_backend=_env("SAGE_SERVER_TRACE_BACKEND") or None,
             trace_otlp_endpoint=_env("SAGE_SERVER_TRACE_OTLP_ENDPOINT"),
             trace_otlp_protocol=_env("SAGE_SERVER_TRACE_OTLP_PROTOCOL", "grpc"),

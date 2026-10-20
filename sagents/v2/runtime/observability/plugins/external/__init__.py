@@ -13,9 +13,9 @@ import traceback
 from urllib.parse import quote, urlsplit
 import httpx
 from sagents.v2.runtime.observability.raw import RawEvidencePipeline, reconstruct
-from sagents.v2.runtime.observability.query import query_budget, request as query_request, performance_spans
+from sagents.v2.runtime.observability.query import query_budget, request as query_request
+from sagents.v2.runtime.observability.plugins.external.query import performance_spans
 from sagents.v2.contracts.common import utc_now
-from sagents.v2.runtime.observability.plugins.diagnostic_noop import NoopDiagnosticSink
 from sagents.v2.runtime.observability.traces import current_trace_context, current_trace_sink
 from sagents.v2.runtime.observability.tool_evidence import tool_evidence
 from sagents.v2.runtime.observability.model_evidence import model_evidence
@@ -35,8 +35,13 @@ def _otlp_value(value):
         return [_otlp_value(item) for item in value["arrayValue"].get("values", [])]
     return next(iter(value.values()), None)
 
-class ExternalEvidenceSink(NoopDiagnosticSink):
+class ExternalEvidenceSink:
     """Trace-backed diagnostic capability; never reads or writes Session storage."""
+
+    plugin_id = "sage.observability.external"
+    name = "External observation evidence"
+    description = "Diagnostic capture and authorized evidence queries over external trace backends."
+
     available = True
 
     def __init__(

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from sagents.v2.context.auxiliary import stream_auxiliary_model
+from sagents.v2.context.plugins.summarizer_model.auxiliary import stream_auxiliary_model
 
 import asyncio
 import json

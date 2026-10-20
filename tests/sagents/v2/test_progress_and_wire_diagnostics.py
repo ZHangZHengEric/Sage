@@ -5,7 +5,7 @@ import json
 import pytest
 
 from sagents.v2.context.contracts import ContextReductionScope
-from sagents.v2.context.progress_summary import bounded_snapshot
+from sagents.v2.context.plugins._shared.progress_summary import bounded_snapshot
 from sagents.v2.context.summary import SummarizationRequest
 from sagents.v2.contracts.items import TextBlock
 from sagents.v2.model.contracts import ModelMessage, ModelRequest, ModelStreamEvent

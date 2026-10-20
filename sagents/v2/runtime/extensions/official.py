@@ -81,12 +81,14 @@ from sagents.v2.runtime.extensions.contracts import (
     CapabilityOffer,
     ExtensionAvailability,
     ExtensionDescriptor,
+    ExtensionDependency,
     ExtensionRegistration,
     ExtensionScope,
     plugin_identity,
 )
 from sagents.v2.runtime.extensions.registry import ExtensionRegistry
 from sagents.v2.tool.plugins.mcp import McpServerConfig, McpToolPlugin
+from sagents.v2.tool.contracts import ToolDefinition
 from sagents.v2.tool.plugins.selection_direct import DirectToolSelectionPolicy
 from sagents.v2.tool.plugins.selection_lexical import LexicalToolSelectionPolicy
 from sagents.v2.tool.plugins.selection_llm import LLMToolSelectionPolicy
@@ -106,13 +108,12 @@ from sagents.v2.model.protocols import (
     model_protocol_implementation,
 )
 from sagents.v2.package.manifest.models import ModelRoute
-from sagents.v2.runtime.credentials.contracts import CredentialMaterial
+from sagents.v2.package.manifest.credentials import CredentialDeclaration
 from sagents.v2.runtime.session import (
     EphemeralSessionStore,
     FilesystemSessionStore,
     MysqlSessionStore,
     RedisMysqlSessionStore,
-    PostgresSessionStore,
 )
 from sagents.v2.skill.plugins.filesystem import FilesystemSkillProvider
 from sagents.v2.skill.plugins.loading import SkillLoadingConfig, SkillLoadingPlugin
@@ -121,6 +122,7 @@ from sagents.v2.tool.plugins.ephemeral import EphemeralToolPlugin
 from sagents.v2.tool.plugins.official import OfficialToolPlugin
 from sagents.v2.tool.plugins.skill import SkillToolPlugin
 from sagents.v2.flow.plugins.agent import NativeAgentFlowNode
+from sagents.v2.agent.multi_agent.contracts import AgentDescriptor
 
 
 def builtin_extension_registry() -> ExtensionRegistry:
@@ -152,6 +154,7 @@ def register_official_plugins(registry: ExtensionRegistry) -> None:
     _register_distributed_runtime(registry)
     _register_tools_skills_and_flow(registry)
     _register_infrastructure(registry)
+    _register_distributed_jobs(registry)
     _register_model_protocols(registry)
     added = {
         value.descriptor.plugin_id for value in registry.registrations()
@@ -160,24 +163,8 @@ def register_official_plugins(registry: ExtensionRegistry) -> None:
 
 
 def _register_distributed_runtime(registry):
-    from copy import deepcopy
-    from sagents.v2.runtime.session import DistributedRedisMysqlSessionStore
     from sagents.v2.runtime.execution.scheduler import RedisDistributedScheduler
 
-    original = registry.get(RedisMysqlSessionStore.plugin_id).descriptor
-    schema = deepcopy(original.config_schema)
-    schema["properties"].update({
-        "coordination_ttl_seconds": {"type": "number", "exclusiveMinimum": 0},
-        "coordination_wait_seconds": {"type": "number", "exclusiveMinimum": 0},
-        "event_poll_seconds": {"type": "number", "exclusiveMinimum": 0},
-        "max_preview_events": {"type": "integer", "minimum": 1},
-        "preview_retention_seconds": {"type": "integer", "minimum": 1},
-    })
-    registry.register(ExtensionRegistration(
-        descriptor=original.model_copy(update={**_identity(DistributedRedisMysqlSessionStore),
-            "config_schema": schema, "capabilities": {**original.capabilities,
-                "multi_process_writes": True, "cross_process_subscribe": True, "atomic_worker_fence": True}}),
-        factory=lambda context, dependencies: DistributedRedisMysqlSessionStore(**context.config)))
     scheduler_schema = _scheduler_config_schema(durable=False)
     scheduler_schema["properties"].update({
         "redis_url": {"type": "string", "minLength": 1},
@@ -197,6 +184,28 @@ def _register_distributed_runtime(registry):
         capabilities={"durable_across_process_restart": True, "multi_process_writes": True,
             "supports_distributed_claims": True, "supports_leases": True, "supports_fencing": True,
             "supports_atomic_tenant_quota": True, "supports_atomic_fenced_mutations": True})
+
+
+def _register_distributed_jobs(registry):
+    from copy import deepcopy
+    from sagents.v2.runtime.execution.jobs import RedisDistributedJobRuntime
+    original = registry.get(InMemoryJobRuntime.plugin_id).descriptor
+    schema = deepcopy(original.config_schema)
+    schema["properties"].update({
+        "redis_url": {"type": "string", "minLength": 1},
+        "key_prefix": {"type": "string", "minLength": 1},
+        "lease_seconds": {"type": "number", "exclusiveMinimum": 0},
+        "poll_interval_seconds": {"type": "number", "exclusiveMinimum": 0},
+    })
+    schema["required"] = ["redis_url"]
+    registry.register(ExtensionRegistration(
+        descriptor=original.model_copy(update={**_identity(RedisDistributedJobRuntime),
+            "availability": ExtensionAvailability(available=importlib.util.find_spec("redis") is not None,
+                reason=None if importlib.util.find_spec("redis") is not None else "optional redis package is required"),
+            "config_schema": schema, "capabilities": {**original.capabilities,
+                "durable_across_process_restart": True, "multi_process_writes": True,
+                "supports_reconnect": True, "supports_remote_cancel": True, "supports_adoption": False}}),
+        factory=lambda context, dependencies: RedisDistributedJobRuntime(**context.config)))
 
 
 def _register_infrastructure(registry: ExtensionRegistry) -> None:
@@ -315,7 +324,7 @@ def _register_infrastructure(registry: ExtensionRegistry) -> None:
         "agent.continuation-policy",
         lambda context, dependencies: LLMJudgeContinuationPolicy(
             LLMContinuationJudge(
-                context.config["model"],
+                dependencies.require_unique("model.provider"),
                 model_binding=str(context.config.get("model_binding", "fast")),
                 timeout_seconds=float(
                     context.config.get(
@@ -324,6 +333,7 @@ def _register_infrastructure(registry: ExtensionRegistry) -> None:
                 ),
             ),
         ),
+        dependencies=(ExtensionDependency(capability="model.provider"),),
         scopes={ExtensionScope.AGENT, ExtensionScope.RUN},
         config_schema=_continuation_config_schema(uses_model=True),
     )
@@ -333,7 +343,7 @@ def _register_infrastructure(registry: ExtensionRegistry) -> None:
         "agent.continuation-policy",
         lambda context, dependencies: HybridContinuationPolicy(
             LLMContinuationJudge(
-                context.config["model"],
+                dependencies.require_unique("model.provider"),
                 model_binding=str(context.config.get("model_binding", "fast")),
                 timeout_seconds=float(
                     context.config.get(
@@ -343,6 +353,7 @@ def _register_infrastructure(registry: ExtensionRegistry) -> None:
             ),
             repeat_threshold=int(context.config.get("repeat_threshold", 3)),
         ),
+        dependencies=(ExtensionDependency(capability="model.provider"),),
         scopes={ExtensionScope.AGENT, ExtensionScope.RUN},
         config_schema=_continuation_config_schema(uses_model=True),
     )
@@ -378,21 +389,20 @@ def _register_infrastructure(registry: ExtensionRegistry) -> None:
         PersistentSummaryContextReducer,
         "context.reducer",
         lambda context, dependencies: PersistentSummaryContextReducer(
-            context.config["store"],
-            summarizer=context.config.get("summarizer"),
+            dependencies.require_unique("context.summary-store"),
+            summarizer=dependencies.require_unique("context.summarizer"),
             summary_target_tokens=int(
                 context.config.get("summary_target_tokens", 1024)
             ),
             protected_recent_units=int(context.config.get("protected_recent_units", 4)),
-            unit_compactor=context.config.get("unit_compactor"),
+            unit_compactor=dependencies.require_unique("context.unit-compactor"),
             max_summary_calls=int(context.config.get("max_summary_calls", 64)),
         ),
+        dependencies=(ExtensionDependency(capability="context.summary-store"), ExtensionDependency(capability="context.summarizer"), ExtensionDependency(capability="context.unit-compactor")),
         scopes={ExtensionScope.AGENT, ExtensionScope.RUN},
         config_schema={
             "type": "object",
             "properties": {
-                "store": {},
-                "summarizer": {},
                 "summary_target_tokens": {"type": "integer", "minimum": 1},
                 "protected_recent_units": {"type": "integer", "minimum": 1},
                 "max_summary_calls": {"type": "integer", "minimum": 1},
@@ -401,9 +411,7 @@ def _register_infrastructure(registry: ExtensionRegistry) -> None:
                     "minimum": 1,
                     "default": 24_000,
                 },
-                "unit_compactor": {},
             },
-            "required": ["store"],
             "additionalProperties": False,
         },
     )
@@ -419,13 +427,12 @@ def _register_infrastructure(registry: ExtensionRegistry) -> None:
         SessionDerivedConversationSummaryStore,
         "context.summary-store",
         lambda context, dependencies: SessionDerivedConversationSummaryStore(
-            context.config["derived_state"]
+            dependencies.require_unique("derived-state.store")
         ),
+        dependencies=(ExtensionDependency(capability="derived-state.store"),),
         scopes={ExtensionScope.PROCESS, ExtensionScope.AGENT},
         config_schema={
             "type": "object",
-            "properties": {"derived_state": {}},
-            "required": ["derived_state"],
             "additionalProperties": False,
         },
     )
@@ -441,7 +448,7 @@ def _register_infrastructure(registry: ExtensionRegistry) -> None:
         ModelConversationSummarizer,
         "context.summarizer",
         lambda context, dependencies: ModelConversationSummarizer(
-            context.config["model"],
+            dependencies.require_unique("model.provider"),
             model_binding=str(context.config.get("model_binding", "primary")),
             max_source_tokens=int(context.config.get("max_source_tokens", 24000)),
             timeout_seconds=float(
@@ -455,11 +462,11 @@ def _register_infrastructure(registry: ExtensionRegistry) -> None:
                 )
             ),
         ),
+        dependencies=(ExtensionDependency(capability="model.provider"),),
         scopes={ExtensionScope.AGENT, ExtensionScope.RUN},
         config_schema={
             "type": "object",
             "properties": {
-                "model": {},
                 "model_binding": {
                     "type": "string",
                     "const": "primary",
@@ -482,7 +489,6 @@ def _register_infrastructure(registry: ExtensionRegistry) -> None:
                     "default": DEFAULT_AUXILIARY_MODEL_TIMEOUT_SECONDS,
                 },
             },
-            "required": ["model"],
             "additionalProperties": False,
         },
         capabilities={"uses_model": True, "bounded_timeout": True},
@@ -598,14 +604,18 @@ def _register_infrastructure(registry: ExtensionRegistry) -> None:
         "execution.sandbox",
         lambda context, dependencies: InMemorySandboxProvider(
             _bytes(context.config["verification_key"]),
-            process_handlers=context.config.get("process_handlers"),
-            network_handlers=context.config.get("network_handlers"),
+            process_handlers=dependencies.get_provider("execution.sandbox.process-handlers"),
+            network_handlers=dependencies.get_provider("execution.sandbox.network-handlers"),
             terminal_ttl_seconds=int(
                 context.config.get("terminal_ttl_seconds", 86_400)
             ),
             max_retained_terminal_items=int(
                 context.config.get("max_retained_terminal_items", 1024)
             ),
+        ),
+        dependencies=(
+            ExtensionDependency(capability="execution.sandbox.process-handlers", name="default", optional=True),
+            ExtensionDependency(capability="execution.sandbox.network-handlers", name="default", optional=True),
         ),
         scopes={ExtensionScope.PROCESS},
         api_version="3",
@@ -694,7 +704,8 @@ def _register_infrastructure(registry: ExtensionRegistry) -> None:
         EnvironmentCredentialProvider,
         "credentials.provider",
         lambda context, dependencies: EnvironmentCredentialProvider(
-            context.config.get("declarations", {}),
+            {key: CredentialDeclaration.model_validate(value)
+             for key, value in context.config.get("declarations", {}).items()},
             context.config.get("environment"),
         ),
         scopes={ExtensionScope.PROCESS, ExtensionScope.TENANT},
@@ -966,13 +977,12 @@ def _register_infrastructure(registry: ExtensionRegistry) -> None:
         SessionArtifactStore,
         "artifact.store",
         lambda context, dependencies: SessionArtifactStore(
-            context.config["session_store"]
+            dependencies.require_unique("session.store")
         ),
+        dependencies=(ExtensionDependency(capability="session.store"),),
         scopes={ExtensionScope.PROCESS},
         config_schema={
             "type": "object",
-            "required": ["session_store"],
-            "properties": {"session_store": {}},
             "additionalProperties": False,
         },
     )
@@ -1009,10 +1019,11 @@ def _register_infrastructure(registry: ExtensionRegistry) -> None:
         InMemoryAgentPackageRegistry,
         "package.registry",
         lambda context, dependencies: InMemoryAgentPackageRegistry(
-            resolver=context.config.get("resolver")
+            resolver=dependencies.require_unique("package.resolver")
         ),
+        dependencies=(ExtensionDependency(capability="package.resolver"),),
         scopes={ExtensionScope.PROCESS},
-        config_schema=_optional_object_config_schema("resolver"),
+        config_schema=_strict_empty_config_schema(),
         capabilities={
             "durable_across_process_restart": False,
             "supports_package_signatures": False,
@@ -1049,6 +1060,7 @@ def _register_infrastructure(registry: ExtensionRegistry) -> None:
         ExtensionRegistration(
             descriptor=ExtensionDescriptor(
                 **_identity(McpToolPlugin),
+                dependencies=(ExtensionDependency(capability="mcp.session-factory", name="default", optional=True),),
                 version="2.0.0",
                 provides=(
                     CapabilityOffer(
@@ -1068,7 +1080,6 @@ def _register_infrastructure(registry: ExtensionRegistry) -> None:
                             "type": "array",
                             "items": McpServerConfig.model_json_schema(),
                         },
-                        "session_factory": {},
                     },
                     "additionalProperties": False,
                 },
@@ -1084,7 +1095,7 @@ def _register_infrastructure(registry: ExtensionRegistry) -> None:
                     McpServerConfig.model_validate(value)
                     for value in context.config.get("servers", ())
                 ),
-                session_factory=context.config.get("session_factory"),
+                session_factory=dependencies.get_provider("mcp.session-factory"),
             ),
             start=lambda provider, context, dependencies: {
                 "tool.catalog:mcp": provider,
@@ -1110,6 +1121,7 @@ def _one(
     factory,
     *,
     scopes: set[ExtensionScope],
+    dependencies: tuple[ExtensionDependency, ...] = (),
     provider_name: str = "default",
     multi_provider: bool = False,
     availability: ExtensionAvailability | None = None,
@@ -1133,6 +1145,7 @@ def _one(
                         multi_provider=multi_provider,
                     ),
                 ),
+                dependencies=dependencies,
                 supported_scopes=frozenset(scopes),
                 config_schema=(
                     config_schema
@@ -1181,14 +1194,6 @@ def _root_config_schema() -> dict:
     }
 
 
-def _optional_object_config_schema(name: str) -> dict:
-    return {
-        "type": "object",
-        "properties": {name: {}},
-        "additionalProperties": False,
-    }
-
-
 def _continuation_config_schema(*, uses_model: bool = False) -> dict:
     properties = {
         "repeat_threshold": {"type": "integer", "minimum": 1, "default": 3},
@@ -1197,7 +1202,6 @@ def _continuation_config_schema(*, uses_model: bool = False) -> dict:
     if uses_model:
         properties.update(
             {
-                "model": {},
                 "model_binding": {"type": "string", "minLength": 1, "default": "fast"},
                 "timeout_seconds": {
                     "type": "number",
@@ -1206,7 +1210,6 @@ def _continuation_config_schema(*, uses_model: bool = False) -> dict:
                 },
             }
         )
-        required.append("model")
     return {
         "type": "object",
         "properties": properties,
@@ -1288,8 +1291,6 @@ def _sandbox_config_schema(*, in_memory: bool) -> dict:
     if in_memory:
         properties.update(
             {
-                "process_handlers": {"type": "object"},
-                "network_handlers": {"type": "object"},
             }
         )
     return {
@@ -1336,52 +1337,6 @@ def _register_session_and_memory(registry: ExtensionRegistry) -> None:
             ),
             factory=lambda context, dependencies: FilesystemSessionStore(
                 context.config["root"],
-            ),
-        )
-    )
-    registry.register(
-        ExtensionRegistration(
-            descriptor=ExtensionDescriptor(
-                **_identity(PostgresSessionStore),
-                version="2.2.0",
-                provides=(
-                    CapabilityOffer(capability="session.store", api_version="2"),
-                ),
-                supported_scopes=frozenset({ExtensionScope.PROCESS}),
-                config_schema={
-                    "type": "object",
-                    "properties": {
-                        "dsn": {"type": "string", "minLength": 1},
-                        "schema_name": {"type": "string", "minLength": 1},
-                        "table_prefix": {"type": "string", "minLength": 1},
-                    },
-                    "required": ["dsn"],
-                    "additionalProperties": False,
-                },
-                capabilities={
-                    "durable": True,
-                    "global_session_index": False,
-                    "multi_process_writes": False,
-                    "supports_actor_authorization": True,
-                    "supports_session_attachments": True,
-                    "cross_process_subscribe": False,
-                    "transactional_outbox": False,
-                    "atomic_session_cas": True,
-                },
-                availability=ExtensionAvailability(
-                    available=importlib.util.find_spec("asyncpg") is not None,
-                    reason=(
-                        None
-                        if importlib.util.find_spec("asyncpg") is not None
-                        else "optional asyncpg package is not installed"
-                    ),
-                ),
-                built_in=True,
-            ),
-            factory=lambda context, dependencies: PostgresSessionStore(
-                str(context.config["dsn"]),
-                schema_name=str(context.config.get("schema_name") or "sage_v2"),
-                table_prefix=str(context.config.get("table_prefix") or "sagent"),
             ),
         )
     )
@@ -1446,7 +1401,7 @@ def _register_session_and_memory(registry: ExtensionRegistry) -> None:
         ExtensionRegistration(
             descriptor=ExtensionDescriptor(
                 **_identity(RedisMysqlSessionStore),
-                version="2.0.0",
+                version="3.0.0",
                 provides=(CapabilityOffer(capability="session.store", api_version="2"),),
                 supported_scopes=frozenset({ExtensionScope.PROCESS}),
                 config_schema={
@@ -1464,13 +1419,18 @@ def _register_session_and_memory(registry: ExtensionRegistry) -> None:
                         "key_prefix": {"type": "string", "minLength": 1},
                         "archive_interval_seconds": {"type": "number", "exclusiveMinimum": 0},
                         "retention_seconds": {"type": "integer", "minimum": 1},
+                        "coordination_ttl_seconds": {"type": "number", "exclusiveMinimum": 0},
+                        "coordination_wait_seconds": {"type": "number", "exclusiveMinimum": 0},
+                        "event_poll_seconds": {"type": "number", "exclusiveMinimum": 0},
+                        "max_preview_events": {"type": "integer", "minimum": 1},
+                        "preview_retention_seconds": {"type": "integer", "minimum": 1},
                     },
                     "required": ["dsn", "redis_url"], "additionalProperties": False,
                 },
                 capabilities={
-                    "durable": True, "global_session_index": False, "multi_process_writes": False,
+                    "durable": True, "global_session_index": False, "multi_process_writes": True,
                     "supports_actor_authorization": True, "supports_session_attachments": True,
-                    "cross_process_subscribe": False, "transactional_outbox": False, "atomic_session_cas": True,
+                    "cross_process_subscribe": True, "atomic_worker_fence": True, "transactional_outbox": False, "atomic_session_cas": True,
                 },
                 availability=ExtensionAvailability(
                     available=all(importlib.util.find_spec(name) is not None for name in ("aiomysql", "redis")),
@@ -1507,6 +1467,7 @@ def _register_session_and_memory(registry: ExtensionRegistry) -> None:
         ExtensionRegistration(
             descriptor=ExtensionDescriptor(
                 **_identity(LLMMemoryRecallQueryGenerator),
+                dependencies=(ExtensionDependency(capability="model.provider"),),
                 version="2.0.0",
                 provides=(
                     CapabilityOffer(capability="memory.recall-query", api_version="2"),
@@ -1515,22 +1476,20 @@ def _register_session_and_memory(registry: ExtensionRegistry) -> None:
                 config_schema={
                     "type": "object",
                     "properties": {
-                        "model": {},
-                        "language": {"type": "string"},
+                                "language": {"type": "string"},
                         "timeout_seconds": {
                             "type": "number",
                             "exclusiveMinimum": 0,
                             "default": DEFAULT_AUXILIARY_MODEL_TIMEOUT_SECONDS,
                         },
                     },
-                    "required": ["model"],
                     "additionalProperties": False,
                 },
                 capabilities={"uses_model": True},
                 built_in=True,
             ),
             factory=lambda context, dependencies: LLMMemoryRecallQueryGenerator(
-                context.config["model"],
+                dependencies.require_unique("model.provider"),
                 language=str(context.config.get("language") or "en"),
                 timeout_seconds=float(
                     context.config.get(
@@ -1630,8 +1589,8 @@ def _register_tools_skills_and_flow(registry: ExtensionRegistry) -> None:
         ExtensionRegistration(
             descriptor=EphemeralToolPlugin.descriptor,
             factory=lambda context, dependencies: EphemeralToolPlugin(
-                tools=tuple(context.config.get("tools") or ()),
-                handlers=context.config.get("handlers") or {},
+                tools=tuple(ToolDefinition.model_validate(item) for item in context.config.get("tools", ())),
+                handlers=dependencies.get_provider("tool.handlers"),
             ),
             start=lambda plugin, context, dependencies: {
                 "tool.catalog:ephemeral": plugin.catalog,
@@ -1653,7 +1612,7 @@ def _register_tools_skills_and_flow(registry: ExtensionRegistry) -> None:
         ExtensionRegistration(
             descriptor=SkillToolPlugin.descriptor,
             factory=lambda context, dependencies: SkillToolPlugin(
-                context.config["loader"], language=context.config.get("language"),
+                dependencies.require_unique("skill.loader"), language=context.config.get("language"),
                 allow_editing=context.config.get("allow_editing", False),
             ),
             start=lambda plugin, context, dependencies: {
@@ -1666,8 +1625,8 @@ def _register_tools_skills_and_flow(registry: ExtensionRegistry) -> None:
         ExtensionRegistration(
             descriptor=MultiAgentToolPlugin.descriptor,
             factory=lambda context, dependencies: MultiAgentToolPlugin(
-                coordinator=context.config["coordinator"],
-                runtime=context.config["runtime"],
+                coordinator=dependencies.require_unique("agent.coordinator"),
+                runtime=dependencies.require_unique("runtime.kernel"),
             ),
             start=lambda plugin, context, dependencies: {
                 "tool.catalog:multi-agent": plugin.catalog,
@@ -1726,6 +1685,8 @@ def _register_tools_skills_and_flow(registry: ExtensionRegistry) -> None:
         ExtensionRegistration(
             descriptor=ExtensionDescriptor(
                 **_identity(NativeAgentFlowNode),
+                dependencies=(ExtensionDependency(capability="runtime.kernel"),
+                              ExtensionDependency(capability="agent.child-executor")),
                 version="2.0.0",
                 provides=(
                     CapabilityOffer(
@@ -1736,9 +1697,7 @@ def _register_tools_skills_and_flow(registry: ExtensionRegistry) -> None:
                 config_schema={
                     "type": "object",
                     "properties": {
-                        "runtime": {},
-                        "descriptor": {},
-                        "child_executor": {},
+                        "descriptor": {"type": "object"},
                         "workspace_policy": {
                             "type": "string",
                             "enum": [
@@ -1748,12 +1707,17 @@ def _register_tools_skills_and_flow(registry: ExtensionRegistry) -> None:
                             ],
                         },
                     },
-                    "required": ["runtime", "descriptor", "child_executor"],
+                    "required": ["descriptor"],
                     "additionalProperties": False,
                 },
                 built_in=True,
             ),
-            factory=lambda context, dependencies: NativeAgentFlowNode(**context.config),
+            factory=lambda context, dependencies: NativeAgentFlowNode(
+                runtime=dependencies.require_unique("runtime.kernel"),
+                descriptor=AgentDescriptor.model_validate(context.config["descriptor"]),
+                child_executor=dependencies.require_unique("agent.child-executor"),
+                **{key: value for key, value in context.config.items() if key == "workspace_policy"},
+            ),
         )
     )
 
@@ -1765,6 +1729,8 @@ def _register_model_protocols(registry: ExtensionRegistry) -> None:
             ExtensionRegistration(
                 descriptor=ExtensionDescriptor(
                     **_identity(implementation),
+                    dependencies=(ExtensionDependency(capability="credentials.provider"),
+                                  ExtensionDependency(capability="model.client", name="default", optional=True)),
                     version=implementation.plugin_version,
                     provides=(
                         CapabilityOffer(
@@ -1780,8 +1746,6 @@ def _register_model_protocols(registry: ExtensionRegistry) -> None:
                         "type": "object",
                         "properties": {
                             "route": {"type": "object"},
-                            "credential": {},
-                            "client": {},
                             "provider_instance_id": {"type": "string"},
                         },
                         "required": ["route"],
@@ -1795,20 +1759,22 @@ def _register_model_protocols(registry: ExtensionRegistry) -> None:
         )
 
 
-def _model_factory(context, dependencies):
+async def _model_factory(context, dependencies):
+    from sagents.v2.runtime.credentials.contracts import CredentialRef
+    from sagents.v2.contracts.principals import ActorRef, PrincipalType, RequestContext
+
     route = ModelRoute.model_validate(context.config["route"])
-    credential_data = context.config.get("credential")
-    credential = (
-        credential_data
-        if isinstance(credential_data, CredentialMaterial)
-        else CredentialMaterial.model_validate(credential_data)
-        if credential_data is not None
-        else None
-    )
+    credential = None
+    if route.credential is not None:
+        credential = await dependencies.require_unique("credentials.provider").resolve(
+            CredentialRef(credential_id=route.credential, purpose="model.inference"),
+            RequestContext(actor=ActorRef(
+                principal_id="sagent-builder", principal_type=PrincipalType.SERVICE,
+                tenant_id=context.tenant_id,
+            )),
+        )
     return create_registered_model_provider(
-        route,
-        credential,
-        client=context.config.get("client"),
+        route, credential, client=dependencies.get_provider("model.client"),
         provider_instance_id=context.config.get("provider_instance_id"),
     )
 

@@ -26,7 +26,7 @@ from sagents.v2.package.manifest.models import (
     ModelLimits,
     ModelCapabilityDeclaration,
 )
-from sagents.v2.model.middleware.concurrency import ModelConcurrencyBudget
+from sagents.v2.model.plugins.concurrency_budget import ModelConcurrencyBudget
 from sagents.v2.model.protocols import create_registered_model_provider
 from sagents.v2.runtime.credentials import CredentialMaterial
 

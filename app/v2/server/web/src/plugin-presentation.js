@@ -30,7 +30,7 @@ const names = {
   'sage.logging.filesystem': '轮转文件日志', 'sage.logging.stdout': '控制台日志', 'sage.logging.noop': '关闭日志',
   'sage.trace.langfuse': 'Langfuse 追踪', 'sage.trace.phoenix': 'Phoenix 追踪', 'sage.trace.otlp': 'OpenTelemetry 追踪', 'sage.trace.noop': '关闭追踪',
   'sage.sandbox.local-workspace': '本地工作区沙箱', 'sage.sandbox.ephemeral': '临时内存沙箱', 'sage.sandbox.cube-volume': 'Cube Volume 沙箱',
-  'sage.session.filesystem': '文件 Session 存储', 'sage.session.ephemeral': '临时 Session 存储', 'sage.session.mysql': 'MySQL 会话存储', 'sage.session.postgres': 'PostgreSQL 会话存储',
+  'sage.session.filesystem': '文件 Session 存储', 'sage.session.ephemeral': '临时 Session 存储', 'sage.session.mysql': 'MySQL 会话存储',
   'sage.workspace.initializer.bare': '空白工作区', 'sage.workspace.initializer.claw': 'Claw Mode',
   'sage.artifact.session': 'Session 产物存储',
   'sage.artifact.ephemeral': '临时产物存储', 'sage.artifact.filesystem': '文件产物存储',

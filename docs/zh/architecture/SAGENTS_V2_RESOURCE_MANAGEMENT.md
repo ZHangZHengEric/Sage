@@ -90,4 +90,4 @@ Flow 可达集合包括条件边、并行 branches、subflow 和成员 subagents
 
 尚不承诺全进程内存限制、跨进程公平调度、任意存储的离线读取、非可信源码隔离安装或真实模型长时间容量。插件自行创建的线程和子进程不因共享 JobRuntime 就受到控制。
 
-实现入口：[service.py](https://github.com/ZHangZHengEric/Sage/blob/main/sagents/v2/agent/management/service.py) · [readiness.py](https://github.com/ZHangZHengEric/Sage/blob/main/sagents/v2/agent/management/readiness.py) · [concurrency.py](https://github.com/ZHangZHengEric/Sage/blob/main/sagents/v2/model/middleware/concurrency.py)。
+实现入口：[service.py](https://github.com/ZHangZHengEric/Sage/blob/main/sagents/v2/agent/management/service.py) · [readiness.py](https://github.com/ZHangZHengEric/Sage/blob/main/sagents/v2/agent/management/readiness.py) · [concurrency_budget.py](https://github.com/ZHangZHengEric/Sage/blob/main/sagents/v2/model/plugins/concurrency_budget.py)。

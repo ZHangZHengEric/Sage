@@ -39,7 +39,7 @@ from sagents.v2.model.contracts import (
     ModelResponse,
     ModelStreamEvent,
 )
-from sagents.v2.model.wire import (
+from sagents.v2.model.plugins._shared.wire import (
     compact_json,
     minimum_reasoning_control,
     parse_tool_arguments,

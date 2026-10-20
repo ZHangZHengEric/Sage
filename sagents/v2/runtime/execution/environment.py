@@ -2,7 +2,7 @@
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, ClassVar
 
 from sagents.v2.contracts.commands import StartRun
 from sagents.v2.contracts.principals import RequestContext
@@ -16,6 +16,11 @@ class RunExecutionEnvironment:
     borrowed sandboxes or issuers. No loop, driver or executor replacement port
     is exposed by this contract.
     """
+
+    plugin_id: ClassVar[str] = "sage.execution.environment"
+    name: ClassVar[str] = "Accepted Run environment"
+    description: ClassVar[str] = "Authenticated identity and borrowed resources of the actual Run."
+
     run_id: str
     command: StartRun
     context: RequestContext
@@ -52,7 +57,7 @@ def run_environment_registration():
         return environment
     return ExtensionRegistration(
         descriptor=ExtensionDescriptor(
-            plugin_id="sage.execution.environment", name="Accepted Run environment", version="2.0.0",
+            plugin_id=RunExecutionEnvironment.plugin_id, name="Accepted Run environment", version="2.0.0",
             description="Authenticated identity and borrowed resources of the actual Run.",
             provides=(CapabilityOffer(capability="execution.environment", api_version="2"),),
             supported_scopes=frozenset({ExtensionScope.RUN}), default_scope=ExtensionScope.RUN,
@@ -82,7 +87,7 @@ def tool_runtime_registration():
         return runtime
     return ExtensionRegistration(
         descriptor=ExtensionDescriptor(
-            plugin_id="sage.execution.tool-runtime", name="Run tool environment", version="2.0.0",
+            plugin_id=OfficialToolRuntime.plugin_id, name="Run tool environment", version="2.0.0",
             description="Official tools bound to the accepted Run sandbox and shared services.",
             provides=(CapabilityOffer(capability="execution.tool-runtime", api_version="2"),),
             dependencies=tuple(ExtensionDependency(capability=capability) for capability in (

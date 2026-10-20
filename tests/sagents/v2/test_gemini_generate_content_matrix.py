@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from sagents.v2.runtime.extensions import CapabilityKey, ProviderSet
+
 import json
 
 import httpx
@@ -325,10 +327,11 @@ async def test_injected_client_is_not_closed_by_provider():
     await client.aclose()
 
 
-def test_registry_selects_gemini_by_explicit_protocol_not_model_name():
+@pytest.mark.asyncio
+async def test_registry_selects_gemini_by_explicit_protocol_not_model_name():
     assert resolve_model_protocol("gemini").value == "gemini-generate-content"
     registry = builtin_extension_registry()
-    provider = registry.get("sage.model.gemini-generate-content").factory(
+    provider = await registry.get("sage.model.gemini-generate-content").factory(
         ExtensionScopeContext(
             scope=ExtensionScope.RUN,
             scope_id="run_gemini",
@@ -336,10 +339,9 @@ def test_registry_selects_gemini_by_explicit_protocol_not_model_name():
                 "route": ModelRoute(
                     provider="gemini", model="custom-gateway-model"
                 ).model_dump(mode="json"),
-                "client": object(),
             },
         ),
-        {},
+        ProviderSet({CapabilityKey(capability="model.client"): object()}),
     )
     assert isinstance(provider, GeminiGenerateContentModelProvider)
     assert (

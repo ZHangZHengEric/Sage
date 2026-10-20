@@ -29,8 +29,9 @@ class LocalExecutionBindingConfig(StrictModel):
 
 
 def local_execution_binding_registration() -> ExtensionRegistration:
+    from sagents.v2.runtime.execution.plugins.local_binding import LocalWorkspaceExecutionBindingProvider
+
     def create(context, dependencies):
-        from sagents.v2.runtime.execution.plugins.local_binding import LocalWorkspaceExecutionBindingProvider
         from sagents.v2.runtime.execution.sandbox import (
             LocalWorkspaceSandboxProvider,
             SandboxGrantIssuer,
@@ -58,7 +59,7 @@ def local_execution_binding_registration() -> ExtensionRegistration:
 
     return ExtensionRegistration(
         descriptor=ExtensionDescriptor(
-            plugin_id="sage.execution.binding.local-workspace",
+            plugin_id=LocalWorkspaceExecutionBindingProvider.plugin_id,
             name="Local workspace execution binding",
             description="Run-owned sandbox leases with admitted execution policy.",
             version="1.0.0",

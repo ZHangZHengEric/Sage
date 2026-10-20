@@ -1,7 +1,7 @@
 import json
 
 from sagents.v2.context import ContextReductionScope
-from sagents.v2.context.progress_summary import task_snapshot
+from sagents.v2.context.plugins._shared.progress_summary import task_snapshot
 from sagents.v2.context.summary import SummarizationRequest
 from sagents.v2.contracts.items import ImageBlock, TextBlock
 from sagents.v2.model import ModelMessage, ModelToolCall

@@ -90,4 +90,4 @@ Tests cover readiness, disappearing resources, shared budgets, cancellation, fai
 
 There is no guarantee of process-wide memory limits, cross-process fair scheduling, offline reading for arbitrary stores, isolated installation of untrusted source, or long-running real-model capacity. Threads and subprocesses created independently by plugins are not controlled merely by sharing JobRuntime.
 
-Implementation: [service.py](https://github.com/ZHangZHengEric/Sage/blob/main/sagents/v2/agent/management/service.py) · [readiness.py](https://github.com/ZHangZHengEric/Sage/blob/main/sagents/v2/agent/management/readiness.py) · [concurrency.py](https://github.com/ZHangZHengEric/Sage/blob/main/sagents/v2/model/middleware/concurrency.py).
+Implementation: [service.py](https://github.com/ZHangZHengEric/Sage/blob/main/sagents/v2/agent/management/service.py) · [readiness.py](https://github.com/ZHangZHengEric/Sage/blob/main/sagents/v2/agent/management/readiness.py) · [concurrency_budget.py](https://github.com/ZHangZHengEric/Sage/blob/main/sagents/v2/model/plugins/concurrency_budget.py).

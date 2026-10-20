@@ -19,25 +19,8 @@ DEFAULT_CONFIG = {
     "context.summarizer": {"model_binding": "primary"},
     "agent.continuation-policy": {"model_binding": "fast"},
 }
-INJECTED = {
-    "model",
-    "store",
-    "estimator",
-    "summarizer",
-    "unit_compactor",
-    "derived_state",
-    "session_store",
-}
-
-
 def configuration_schema(descriptor):
-    schema = deepcopy(descriptor.config_schema or {"type": "object", "properties": {}})
-    for field in INJECTED:
-        schema.get("properties", {}).pop(field, None)
-    schema["required"] = [
-        key for key in schema.get("required", []) if key not in INJECTED
-    ]
-    return schema
+    return deepcopy(descriptor.config_schema or {"type": "object", "properties": {}})
 
 
 def plugin_options(registry=None):
@@ -87,8 +70,6 @@ def validate_agent_plugins(selections, *, registry=None):
                 raise ValueError("plugin is unavailable")
             if not any(o.capability == capability for o in descriptor.provides):
                 raise ValueError("plugin does not provide this capability")
-            if INJECTED.intersection(value.get("config", {})):
-                raise ValueError("host-injected dependencies cannot be configured")
             validate(value.get("config", {}), configuration_schema(descriptor))
         except (ValueError, ValidationError, KeyError) as exc:
             raise SageV2Error(

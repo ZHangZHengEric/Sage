@@ -271,22 +271,3 @@ def test_pending_run_cannot_gain_permission_from_user_setting_changes(tmp_path):
         assert client.portal.call(policies) == ("ask", "ask")
         client.put("/api/auth/execution-policy", headers=headers, json={"shell": "deny"})
         assert client.portal.call(policies) == ("ask", "deny")
-
-
-def test_automatic_shell_runs_and_preserves_workspace_after_cleanup(tmp_path):
-    provider = ScriptedModelProvider((_step(1, "run", "execute_shell_command",
-        {"command": "printf blue > shell_result.txt"}), _step(2, "done")))
-    host = make_test_service(tmp_path, model_provider=provider)
-    with TestClient(create_app(service=host)) as client:
-        token = register_and_login(client)
-        key = issue(client, token, policy={"shell": "sandboxed"})
-        task = send(client, key["api_key"], "run")["result"]["task"]
-        assert task["status"]["state"] == "TASK_STATE_COMPLETED"
-        files = list(tmp_path.rglob("shell_result.txt"))
-        tool_results = [
-            message.model_dump(mode="json")
-            for message in provider.requests[-1].messages
-            if message.role == "tool"
-        ]
-        assert len(files) == 1, tool_results
-        assert files[0].read_text() == "blue"

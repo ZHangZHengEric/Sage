@@ -25,9 +25,9 @@ from sagents.v2.skill.provider import (
     InvocationGrantSkillCatalog,
     SkillLoader,
 )
-from sagents.v2.skill.tool import SkillLoadTool
 
 _LAZY_EXPORTS = {
+    "SkillLoadTool": ("sagents.v2.tool.plugins.skill.operations", "SkillLoadTool"),
     "SqliteSkillRepository": ("sagents.v2.skill.plugins.repository", "SqliteSkillRepository"),
     "MemorySkillRepository": ("sagents.v2.skill.plugins.repository", "MemorySkillRepository"),
     "AutoSyncSkillWorkspace": ("sagents.v2.skill.plugins.workspace", "AutoSyncSkillWorkspace"),

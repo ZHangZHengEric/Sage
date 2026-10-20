@@ -141,12 +141,18 @@ class ExtensionRegistry:
         except (TypeError, ValueError) as exc:
             raise SageV2Error(RuntimeErrorInfo(code="extension.config_invalid", category=ErrorCategory.VALIDATION,
                 message="plugin parameters must be finite JSON; register process objects through factories")) from exc
-        if self.is_trusted_builtin(plugin_id):
-            internal_ports = {"model", "store", "summarizer", "unit_compactor", "derived_state",
-                              "session_store", "resolver", "runtime", "sandbox", "grant_issuer", "client"}
-            if set(parameters) & internal_ports:
-                raise SageV2Error(RuntimeErrorInfo(code="extension.config_invalid", category=ErrorCategory.VALIDATION,
-                    message="SDK service objects are dependencies, not runtime configuration parameters"))
+        from jsonschema import Draft202012Validator, ValidationError
+        schema = dict(self.get(plugin_id).descriptor.config_schema or {})
+        # Composition may supply scalar defaults later. Validate supplied fields
+        # now, before creating any unrelated resources or resolving credentials.
+        schema.pop("required", None)
+        try:
+            Draft202012Validator(schema).validate(parameters)
+        except ValidationError as exc:
+            raise SageV2Error(RuntimeErrorInfo(
+                code="extension.config_invalid", category=ErrorCategory.VALIDATION,
+                message=f"invalid configuration for extension {plugin_id!r}: {exc.validator}",
+            )) from exc
 
     def validate_runtime(self, runtime) -> None:
         """Validate capability identities and lifetimes before opening resources."""
@@ -176,28 +182,23 @@ class ExtensionRegistry:
                       if catalog.plugin == executor.plugin and catalog.name == executor.name]
             if len(paired) != 1 or (executor.scope, executor.config) != (paired[0].scope, paired[0].config):
                 raise ValueError("tool.executor must select the same registered pair, scope and parameters as tool.catalog")
-        # Built-in adapters receive SDK-managed model/context ports. Apply the
-        # same lifetime rule used by explicitly declared plugin dependencies.
-        dependencies = {
-            "sage.context.summarizer.model": ("model.provider",),
-            "sage.agent.continuation.llm-judge": ("model.provider",),
-            "sage.agent.continuation.hybrid": ("model.provider",),
-            "sage.memory.recall-query.llm": ("model.provider",),
-            "sage.context.reducer.persistent-summary": (
-                "context.summary-store", "context.summarizer", "context.unit-compactor"),
-        }
+
+        # Validate every selected plugin by its declared dependencies. Resolution
+        # checks missing/default providers; no built-in plugin IDs are special.
         rank = {value: index for index, value in enumerate(ExtensionScope)}
         for capability in runtime.capabilities:
             for consumer in runtime.selections(capability):
-                if not self.is_trusted_builtin(consumer.plugin):
-                    continue
-                for dependency in dependencies.get(consumer.plugin, ()):
-                    providers = runtime.selections(dependency)
-                    provider_scope = scope(providers[0]) if providers else (
-                        ExtensionScope.AGENT if dependency == "model.provider" else ExtensionScope.PROCESS)
-                    if rank[provider_scope] > rank[scope(consumer)]:
-                        raise SageV2Error(RuntimeErrorInfo(code="extension.invalid_scope_dependency", category=ErrorCategory.VALIDATION,
-                            message=f"{consumer.plugin!r} at {scope(consumer).value!r} cannot capture {dependency!r} at {provider_scope.value!r}"))
+                descriptor = self.get(consumer.plugin).descriptor
+                for dependency in descriptor.dependencies:
+                    for provider in runtime.selections(dependency.capability):
+                        if dependency.name is not None and provider.name != dependency.name:
+                            continue
+                        if rank[scope(provider)] > rank[scope(consumer)]:
+                            raise SageV2Error(RuntimeErrorInfo(
+                                code="extension.invalid_scope_dependency", category=ErrorCategory.VALIDATION,
+                                message=f"{consumer.plugin!r} at {scope(consumer).value!r} cannot capture "
+                                        f"{dependency.capability!r} at {scope(provider).value!r}",
+                            ))
 
     def trust_builtins(self, plugin_ids) -> None:
         """Record Host-owned built-ins independently from plugin self-reporting."""

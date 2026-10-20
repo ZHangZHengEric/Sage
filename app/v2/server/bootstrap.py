@@ -6,7 +6,7 @@ from functools import cached_property
 
 from sagents.v2.application import SAgentApplication
 from sagents.v2.builder import SAgentBuilder
-from sagents.v2.model.middleware.concurrency import ModelConcurrencyBudget
+from sagents.v2.model.plugins.concurrency_budget import ModelConcurrencyBudget
 from sagents.v2.model.provider import ModelProvider
 from sagents.v2.runtime.observability.contracts import LogSink
 from sagents.v2.runtime.execution.scheduler.plugins.ephemeral import (

@@ -4,7 +4,6 @@ import pytest
 
 from sagents.v2.runtime.session.plugins.ephemeral import EphemeralSessionStore
 from sagents.v2.runtime.session.plugins.mysql import _MysqlSessionState
-from sagents.v2.runtime.session.plugins.postgres import _PostgresSessionState
 from tests.sagents.v2.test_mysql_session_store_matrix import CONTEXT, command
 
 
@@ -43,29 +42,16 @@ async def test_incremental_projection_skips_persisted_event_serialization():
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("backend", ["mysql", "postgres"])
-@pytest.mark.parametrize(
-    "persisted,total,delta",
-    [(10000, 10001, True), (10000, 10000, True), (10000, 1, True), (1, 2, False)],
-)
-async def test_sql_event_delta_counts_and_truncation(backend, persisted, total, delta):
-    store = (
-        _MysqlSessionState("mysql://user:password@localhost/test")
-        if backend == "mysql"
-        else _PostgresSessionState("postgresql://localhost/test")
-    )
-    store._persisted_run_sequences = {"run": persisted, "removed": 2}
-    store._persisted_session_runs = {"session": {"run", "removed"}}
+@pytest.mark.parametrize('persisted,total,delta', [(10000, 10001, True), (10000, 10000, True), (10000, 1, True), (1, 2, False)])
+async def test_sql_event_delta_counts_and_truncation(persisted, total, delta):
+    store = _MysqlSessionState('mysql://user:password@localhost/test')
+    store._persisted_run_sequences = {'run': persisted, 'removed': 2}
+    store._persisted_session_runs = {'session': {'run', 'removed'}}
     start = persisted if delta and persisted <= total else 0
-    rows = [{"run_sequence": n + 1} for n in range(start, total)]
+    rows = [{'run_sequence': n + 1} for n in range(start, total)]
     connection = AsyncMock()
-    result = await store._persist_events(
-        connection,
-        "session",
-        {"run": rows},
-        **({"event_totals": {"run": total}} if delta else {}),
-    )
-    assert result == {"run": total}
+    result = await store._persist_events(connection, 'session', {'run': rows}, **{'event_totals': {'run': total}} if delta else {})
+    assert result == {'run': total}
     assert connection.execute.await_count == 1 + (persisted > total)
     expected = total if persisted > total else total - persisted
     if expected:
@@ -74,5 +60,4 @@ async def test_sql_event_delta_counts_and_truncation(backend, persisted, total, 
         assert inserted[-1][2] == total
     else:
         connection.executemany.assert_not_awaited()
-    # Durable counters only advance after the surrounding transaction commits.
-    assert store._persisted_run_sequences["run"] == persisted
+    assert store._persisted_run_sequences['run'] == persisted

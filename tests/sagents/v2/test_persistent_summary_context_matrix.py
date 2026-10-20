@@ -833,7 +833,7 @@ async def test_summary_timeout_retries_are_bounded_and_logged(
 ):
     import httpx
     import sagents.v2.context.plugins.summarizer_model as module
-    from sagents.v2.model.wire import provider_error
+    from sagents.v2.model.plugins._shared.wire import provider_error
     from sagents.v2.runtime.observability.logs import StructuredLogger
 
     class Sink:

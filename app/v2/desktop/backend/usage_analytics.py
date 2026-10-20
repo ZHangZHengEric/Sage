@@ -9,7 +9,7 @@ from typing import Any
 from sagents.v2.contracts.commands import StartRun
 from sagents.v2.contracts.common import utc_now
 from sagents.v2.contracts.errors import SageV2Error
-from sagents.v2.model.usage import canonical_token_usage, has_token_usage
+from sagents.v2.model import canonical_token_usage, has_token_usage
 
 
 async def build_usage_overview(

@@ -10,7 +10,6 @@ class AssemblyState:
     execution_binding_provider: Any = None
     tool_policy: Any = None
     agent_management: Any = None
-    model_budget: Any = None
     check_readiness: bool = False
     dispatcher: Any = None
     defer_dispatcher_start: bool = False

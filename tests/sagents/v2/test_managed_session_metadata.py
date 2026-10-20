@@ -213,33 +213,3 @@ async def test_unarchived_redis_managed_heads_do_not_install_cold_aggregates(liv
                     await redis.delete(*keys)
             finally:
                 await redis.aclose()
-
-
-async def test_real_postgres_managed_heads_preserve_context_without_aggregate_load():
-    from sagents.v2.runtime.session.plugins.postgres import PostgresSessionStore
-    dsn = os.environ.get('SAGE_V2_TEST_POSTGRES_DSN')
-    if not dsn:
-        pytest.skip('set SAGE_V2_TEST_POSTGRES_DSN for real PostgreSQL metadata projection')
-    schema = 'managed_' + uuid4().hex[:10]
-    value = PostgresSessionStore(dsn, schema=schema)
-    try:
-        request, parent, first, second, nested, flow = await populate(value)
-        await value.close()
-        value = PostgresSessionStore(dsn, schema=schema)
-        await value._coordinator._ensure_ready()
-        value._coordinator._fetch_session = AsyncMock(side_effect=AssertionError('heads fetched PostgreSQL aggregate'))
-        value._coordinator._ensure_session_loaded = AsyncMock(side_effect=AssertionError('heads installed PostgreSQL aggregate'))
-        provider = AgentRosterContextProvider(AgentRegistry(), AgentMode.TEAM, session_store=value)
-        for _ in range(2):
-            managed = next(segment for segment in await provider.segments(request, run_id=parent.run_id)
-                           if segment.segment_id == 'managed_sessions')
-            assert json.loads(managed.content.splitlines()[-2]) == [
-                {'agent_id':'qualified.worker', 'session_id':first.session_id, 'state':'cancelled', 'task':'latest title with se'},
-                {'agent_id':'qualified.worker', 'session_id':second.session_id, 'state':'queued', 'task':'second'},
-            ]
-        assert not value._coordinator._sessions
-    finally:
-        if value._coordinator._pool is not None:
-            async with value._coordinator._pool.acquire() as connection:
-                await connection.execute(f'DROP SCHEMA {schema} CASCADE')
-        await value.close()

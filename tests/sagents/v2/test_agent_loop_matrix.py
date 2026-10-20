@@ -4068,7 +4068,7 @@ async def test_nonresumable_request_preparation_failure_emits_terminal_questionn
 
 
 def argument_error(*, truncated=True, usage=None):
-    from sagents.v2.model.wire import parse_tool_arguments
+    from sagents.v2.model.plugins._shared.wire import parse_tool_arguments
 
     try:
         parse_tool_arguments(

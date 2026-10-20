@@ -9,6 +9,10 @@ from typing import Any
 class InMemoryDerivedStateStore:
     """Default derived storage for hosts that inject an authoritative store only."""
 
+    plugin_id = "sage.derived-state.ephemeral"
+    name = "derived-state.store"
+    description = "Standard derived-state.store implementation with declared dependencies and lifecycle."
+
     def __init__(self) -> None:
         self._values: dict[tuple[str, str, str], Any] = {}
         self._lock = asyncio.Lock()

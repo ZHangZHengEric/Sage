@@ -19,14 +19,12 @@ from sagents.v2.context import (
     SessionDerivedConversationSummaryStore,
 )
 from sagents.v2.context.contracts import ContextUnitCompactor
-from sagents.v2.runtime.session.contracts import DerivedStateStore
 from sagents.v2.context.components import ContextComponentBundle
 from sagents.v2.context.plugins.summarizer_model import ModelConversationSummarizer
 from sagents.v2.memory import (
     DirectMemoryRecallQueryGenerator,
     MemoryRecallQueryGenerator,
 )
-from sagents.v2.model import ModelProvider
 from sagents.v2.runtime.contracts import RuntimePort
 from sagents.v2.skill.plugins.loading import SkillLoadingPlugin
 from sagents.v2.tool.plugins.result_file import FileToolResultProcessor
@@ -59,20 +57,16 @@ class AgentComponents:
         *,
         open_capability: Callable[..., Awaitable[Any]],
         agent_id: str,
-        model: ModelProvider,
         runtime: RuntimePort,
-        derived_state: DerivedStateStore,
     ) -> AgentComponents:
         summary_store = await open_capability(
             capability="context.summary-store",
             default_plugin=SessionDerivedConversationSummaryStore.plugin_id,
-            locked_config={"derived_state": derived_state},
             agent_id=agent_id,
         )
         summarizer = await open_capability(
             capability="context.summarizer",
             default_plugin=ModelConversationSummarizer.plugin_id,
-            locked_config={"model": model},
             agent_id=agent_id,
         )
         unit_compactor = await open_capability(
@@ -83,11 +77,6 @@ class AgentComponents:
         context_reducer = await open_capability(
             capability="context.reducer",
             default_plugin=PersistentSummaryContextReducer.plugin_id,
-            locked_config={
-                "store": summary_store,
-                "summarizer": summarizer,
-                "unit_compactor": unit_compactor,
-            },
             agent_id=agent_id,
         )
         skill_loading = await open_capability(
@@ -98,7 +87,6 @@ class AgentComponents:
         continuation_policy = await open_capability(
             capability="agent.continuation-policy",
             default_plugin=CompositeContinuationPolicy.plugin_id,
-            locked_config={"model": model},
             agent_id=agent_id,
         )
         components = ContextComponentBundle(
@@ -117,7 +105,6 @@ class AgentComponents:
         memory_query_generator = await open_capability(
             capability="memory.recall-query",
             default_plugin=DirectMemoryRecallQueryGenerator.plugin_id,
-            locked_config={"model": model},
             agent_id=agent_id,
         )
         return cls(

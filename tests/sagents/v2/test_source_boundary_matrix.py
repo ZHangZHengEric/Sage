@@ -148,7 +148,6 @@ def test_session_port_does_not_depend_on_store_implementations():
     implementation_modules = {
         "sagents.v2.runtime.session.plugins.ephemeral",
         "sagents.v2.runtime.session.plugins.filesystem",
-        "sagents.v2.runtime.session.plugins.postgres",
         "sagents.v2.runtime.session.plugins.mysql",
     }
 
@@ -164,12 +163,10 @@ def test_session_port_does_not_depend_on_store_implementations():
 def test_session_backends_share_state_machine_without_inheriting_each_other():
     """Concrete SessionStore backends may depend only on the shared state core."""
 
-    filesystem = V2_ROOT / "runtime" / "session" / "plugins" / "filesystem.py"
-    postgres = V2_ROOT / "runtime" / "session" / "plugins" / "postgres.py"
+    filesystem = V2_ROOT / "runtime" / "session" / "plugins" / "filesystem"
     mysql = V2_ROOT / "runtime" / "session" / "plugins" / "mysql"
     state = V2_ROOT / "runtime" / "session" / "state.py"
-    filesystem_imports = {module for _, module in _import_targets(filesystem)}
-    postgres_imports = {module for _, module in _import_targets(postgres)}
+    filesystem_imports = {module for path in filesystem.rglob("*.py") for _, module in _import_targets(path)}
     mysql_imports = {
         module
         for path in mysql.rglob("*.py")
@@ -178,17 +175,11 @@ def test_session_backends_share_state_machine_without_inheriting_each_other():
     state_imports = {module for _, module in _import_targets(state)}
 
     assert "sagents.v2.runtime.session.plugins.ephemeral" not in filesystem_imports
-    assert "sagents.v2.runtime.session.plugins.postgres" not in filesystem_imports
     assert "sagents.v2.runtime.session.plugins.mysql" not in filesystem_imports
-    assert "sagents.v2.runtime.session.plugins.filesystem" not in postgres_imports
-    assert "sagents.v2.runtime.session.plugins.ephemeral" not in postgres_imports
-    assert "sagents.v2.runtime.session.plugins.mysql" not in postgres_imports
     assert "sagents.v2.runtime.session.plugins.filesystem" not in mysql_imports
     assert "sagents.v2.runtime.session.plugins.ephemeral" not in mysql_imports
-    assert "sagents.v2.runtime.session.plugins.postgres" not in mysql_imports
     assert "sagents.v2.runtime.session.plugins.filesystem" not in state_imports
     assert "sagents.v2.runtime.session.plugins.ephemeral" not in state_imports
-    assert "sagents.v2.runtime.session.plugins.postgres" not in state_imports
     assert "sagents.v2.runtime.session.plugins.mysql" not in state_imports
 
 
@@ -487,6 +478,8 @@ def test_domain_ports_do_not_import_their_plugin_implementations():
         (V2_ROOT / "agent" / "policy" / "tool_policy.py", "sagents.v2.agent.policy.plugins"),
         (V2_ROOT / "agent" / "policy" / "approval_memory.py", "sagents.v2.agent.policy.plugins"),
         (V2_ROOT / "runtime" / "session" / "child_heads.py", "sagents.v2.runtime.session.plugins"),
+        (V2_ROOT / "runtime" / "session" / "metadata_replay.py", "sagents.v2.runtime.session.plugins"),
+        (V2_ROOT / "runtime" / "observability" / "query.py", "sagents.v2.runtime.observability.plugins"),
         (V2_ROOT / "package" / "registry" / "contracts.py", "sagents.v2.package.registry.plugins"),
         (V2_ROOT / "context" / "summary.py", "sagents.v2.context.plugins"),
         (V2_ROOT / "tool" / "selection.py", "sagents.v2.tool.plugins"),

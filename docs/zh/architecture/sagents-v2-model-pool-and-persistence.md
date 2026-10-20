@@ -29,7 +29,7 @@ Server 宿主持有客户端，Run 借用租约。相同用户、模型记录、
 
 ## SQL 事件增量序列化
 
-MySQL / PostgreSQL 提交由协调器按已持久化事件数，仅序列化待追加部分，再交给原事务写入。完整快照导出默认仍输出完整历史。
+MySQL 提交由协调器按已持久化事件数，仅序列化待追加部分，再交给原事务写入。完整快照导出默认仍输出完整历史。
 
 若内存历史短于已持久化前缀，导出完整当前历史，由 SQL 事务删除旧记录后重建。删除 Run 的清理及成功提交后更新计数的顺序不变。串行 writer 连接仍顺序执行 SQL 事务，以保持写锁与提交一致性。
 
@@ -66,10 +66,8 @@ JSON 重放与后台快照序列化在线程中执行；重放逐条校验变更
   会保留数据和重试标记。MySQL 冷读取、首次幂等查找仍依赖 MySQL 可用。
 - 重启时从 Redis 的 resident 集合恢复未完成 Run；后台扫描持久化的 pending 集合
   补做归档。进程关闭时最多等待 5 秒归档，未完成部分交给下一次启动。
-- 同一命名空间仅允许一个进程持有写租约，租约 30 秒，独立任务每 5 秒续租。
-  启动时若旧租约尚未释放，最多等待 35 秒，每秒重试；旧进程异常退出时可等待租约
-  自然过期，无需反复退出重启。超时仍拒绝启动，不抢占活跃进程的租约。
-  运行期间失去租约后拒绝继续写入。沿用单 writer、进程内订阅语义，不提供跨进程实时订阅。
+- 同一命名空间可由多个 Sage 实例访问，使用可续期的会话操作锁协调写入，
+  支持跨进程事件订阅。调度器独立选择，启用共享存储不会自动启用多实例执行。
 - 删除先在 Redis 原子写入 tombstone、删除查找索引，再异步删除 MySQL 数据。
   不确定的事务响应通过提交 token 确认；无法确认时，下一次读取重新加载权威状态。
 - 派生缓存只存 Redis，可以重建。附件字节和引用一起进入 Redis，再随归档保存到
@@ -98,10 +96,9 @@ patch 后仍能还原请求、事件和恢复点。读取这些新增 journal pa
 
 ## 分布式 SessionStore 与 Scheduler 插件
 
-新增 `sage.session.redis-mysql-distributed` 与 `sage.scheduler.redis-distributed`，
-与原有单进程插件使用独立名称。Server 设置
-`SAGE_SERVER_SESSION_STORE_PLUGIN=sage.session.redis-mysql-distributed`，并配置
-MySQL、Redis 地址，即选择分布式会话及配套调度器。Run 租约为 30 秒，
+`sage.session.redis-mysql` 提供共享会话状态。Server 配置 MySQL、Redis 地址后，显式设置
+`SAGE_SERVER_SCHEDULER_PLUGIN=sage.scheduler.redis-distributed`，启用分布式调度器
+及独立命名的后台任务插件 `sage.job.redis-distributed`。Run 租约为 30 秒，
 全局和用户并发额度共享，托管 App 使用独立执行队列。各节点须采用一致的数据库、
 Redis、额度配置；托管存储根目录在各节点上须具有一致标识。默认选择保持原行为。
 
@@ -116,12 +113,25 @@ Scheduler 通过 Redis CAS 原子更新有界共享队列快照。不同 App 的
 工作项，额度统一计算。Run 修改期间阻止租约接管，存储事务拒绝已过期或被替换的
 操作令牌。Dispatcher 会确认其他实例的完成状态，并周期补投已接受但未入队的 Run。
 该实现面向有界队列的一致性，共享协调快照不代表无限调度吞吐。分布式存储和调度器
-必须配套选择并使用同一 Redis 地址，不匹配时启动失败。
+须使用同一 Redis 地址，分布式调度器要求共享存储支持提交时的执行者令牌检查；不匹配时启动失败。
 
-切换前须停止旧 writer 并排空待归档数据。新插件默认使用独立 Redis 前缀，复用
-既有 MySQL 表；旧 writer 不能与其同时写这些表。这两个插件协调 Run/会话状态，
-现有进程内 JobRuntime、本地记忆数据库、工作区文件和沙箱进程仍需要对应的共享资源
-或所属实例路由方案。进程故障不会迁移存活中的系统进程，租约接管也不保证外部工具
+合并后的插件保留原分布式版的默认 Redis 前缀
+`sage:session:{<identity hash>}:distributed`、journal 格式及 MySQL 表。
+升级前停止所有旧 writer。原分布式部署将插件 ID 改为 `sage.session.redis-mysql`，
+并显式选择分布式调度器以保留多实例执行。原单写者部署须在所有实例上设置
+`SAGE_SERVER_SESSION_STORE_KEY_PREFIX`（SDK 使用 `key_prefix`）为准确的原命名空间，
+或者排空执行中 Run 和待归档数据后采用新默认前缀。MySQL 表前缀须保持一致。
+托管 App 会在显式 Server 前缀后追加 `:managed_<app hash>`，原有托管命名空间须
+逐个迁移或先排空待归档状态。旧、新 writer 不能同时运行；不自动复制命名空间、
+保留旧插件别名或迁移生产数据。新 Job 插件通过 Redis CAS 共享任务状态、
+字节输出游标、请求幂等及全局额度；取消请求由原节点执行，并在进程清理结束后发布终态。
+节点租约默认 30 秒，失效后 Job 标为 `failed/job.worker_lost`，保留已有输出，不重放命令。
+旧节点的输出和完成提交均须验证任务令牌及有效租约。终态输出有 TTL、重连窗口和容量上限，
+节点关闭只停止自己持有的 Job。官方 Shell 工具按 Run 所有权授权跨节点查询和取消。
+
+工作区跨节点插件暂不提供，也没有 `shared_workspace_root` 配置。本地记忆数据库、工作区文件
+和沙箱进程仍需要对应的共享资源或所属实例路由方案，当前不能视为完整的跨节点部署。
+进程故障不会迁移存活中的系统进程，租约接管也不保证外部工具
 副作用恰好执行一次。
 
 ## 验证
@@ -135,7 +145,7 @@ python scripts/v2/benchmark_session_commit.py --commits 200 --input-bytes 60000
 python -m pytest tests/sagents/v2/test_redis_mysql_session_store.py tests/sagents/v2/test_mysql_session_archive.py
 ```
 
-模型池测试覆盖并发初始化、用户和凭据隔离、容量、失败、取消、缓慢淘汰及关闭失败。SQL 投影测试覆盖增量追加、没有新增、历史截断、删除 Run 与完整导出。模拟数据库连接的测试不等同于真实 MySQL / PostgreSQL 验收。
+模型池测试覆盖并发初始化、用户和凭据隔离、容量、失败、取消、缓慢淘汰及关闭失败。SQL 投影测试覆盖增量追加、没有新增、历史截断、删除 Run 与完整导出。模拟数据库连接的测试不等同于真实 MySQL 验收。
 
 基准只计合成长事件列表的协调器序列化，不计 SQL、网络、模型或任务完成率；不能换算为生产 QPS。真实端点的长时间负载需要单独验证。
 

@@ -20,6 +20,7 @@ from sagents.v2.runtime.contracts import RuntimePort
 from sagents.v2.runtime.extensions import (
     CapabilityOffer,
     ExtensionDescriptor,
+    ExtensionDependency,
     ExtensionScope,
 )
 from sagents.v2.contracts.items import JsonBlock
@@ -119,10 +120,11 @@ class MultiAgentToolPlugin:
             ),
         ),
         supported_scopes=frozenset({ExtensionScope.AGENT, ExtensionScope.RUN}),
+        dependencies=(ExtensionDependency(capability="agent.coordinator"),
+                      ExtensionDependency(capability="runtime.kernel")),
         config_schema={
             "type": "object",
-            "properties": {"coordinator": {}, "runtime": {}},
-            "required": ["coordinator", "runtime"],
+            "properties": {},
             "additionalProperties": False,
         },
         capabilities={

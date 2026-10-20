@@ -3,10 +3,15 @@
 from __future__ import annotations
 
 from sagents.v2.runtime.execution.sandbox import FileOperation
-from sagents.v2.skill.workspace import SandboxSkillWorkspaceBase
+from sagents.v2.skill.plugins._shared.workspace import SandboxSkillWorkspaceBase
 
 
 class SandboxSkillWorkspace(SandboxSkillWorkspaceBase):
+
+    plugin_id = "sage.skill.workspace.sandbox"
+    name = "Sandbox Skill workspace"
+    description = "Materializes immutable Skill bundles through signed sandbox grants."
+
     async def materialize(self, bundle, *, run_id, destination):
         destination = self.sandbox.filesystem.normalize_path(destination)
         async with self._lock:

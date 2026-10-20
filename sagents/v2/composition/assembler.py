@@ -36,12 +36,10 @@ from sagents.v2.composition.providers import open_provider
 from sagents.v2.composition.resolution import (
     _merge_plugin_config,
     _selection,
-    _supported_locked_config,
     _validate_declared_plugin_trust,
 )
 from sagents.v2.composition.resolution import _resolve_package as resolve_package
 from sagents.v2.contracts.errors import ErrorCategory, RuntimeErrorInfo, SageV2Error
-from sagents.v2.contracts.principals import ActorRef, PrincipalType, RequestContext
 from sagents.v2.context.sandbox_environment import SandboxEnvironmentContextProvider
 from sagents.v2.goal import GoalStateService
 from sagents.v2.interfaces.protocols.native import NativeProtocolAdapter
@@ -50,19 +48,18 @@ from sagents.v2.memory import (
     MemoryService,
     NoopMemoryProvider,
 )
-from sagents.v2.model import RecordingModelProvider
 from sagents.v2.model.protocols import model_protocol_descriptor
 from sagents.v2.package.manifest.resolver import (
     CompositionResolver,
     ResolvedSageManifest,
 )
 from sagents.v2.package.manifest.root import PluginDeclaration, SageManifest
-from sagents.v2.package.manifest.runtime import RuntimeConfig
+from sagents.v2.package.manifest.runtime import CapabilitySelection, RuntimeConfig
 from sagents.v2.package.registry import InMemoryAgentPackageRegistry
 from sagents.v2.runtime import HarnessRuntime
 from sagents.v2.runtime.artifact import SessionArtifactStore
 from sagents.v2.runtime.artifact.binding import bind_artifact_store
-from sagents.v2.runtime.credentials import CredentialRef, EnvironmentCredentialProvider
+from sagents.v2.runtime.credentials import EnvironmentCredentialProvider
 from sagents.v2.runtime.execution import (
     ExecutionBindingRequest,
     LocalWorkerDispatcher,
@@ -187,6 +184,10 @@ class ApplicationAssembler:
             plugin_declarations,
             trust_policy=runtime_config.plugin_trust_policy,
         )
+        from sagents.v2.composition.model_providers import observed_model_registry
+        self.extensions = observed_model_registry(
+            self.extensions, with_budget=bool(runtime_config.selections("execution.model-budget")),
+        )
         extension_host = ExtensionHost(
             self.extensions,
             built_in_only=runtime_config.plugin_trust_policy == "built_in_only",
@@ -286,7 +287,7 @@ class ApplicationAssembler:
             plugin_declarations,
             capability="credentials.provider",
             default_plugin=EnvironmentCredentialProvider.plugin_id,
-            default_config={"declarations": resolved.credentials},
+            default_config={"declarations": {key: value.model_dump(mode="json") for key, value in resolved.credentials.items()}},
             default_scope=ExtensionScope.PROCESS,
         )
         services, adapters = await self._create_application_services(
@@ -296,8 +297,6 @@ class ApplicationAssembler:
             runtime_config,
             plugin_declarations,
             resolved,
-            session_store=session_store,
-            credential_provider=credential_provider,
         )
         policy_selection = _selection(runtime_config, "agent.tool-policy")
         if policy_selection is not None:
@@ -355,7 +354,6 @@ class ApplicationAssembler:
                 resolved,
                 selected_agent,
                 plugin_declarations,
-                credential_provider,
                 tenant_id=tenant_id,
             )
         models_by_agent = {selected_agent: model}
@@ -389,8 +387,7 @@ class ApplicationAssembler:
                     resolved,
                     member_id,
                     plugin_declarations,
-                    credential_provider,
-                    tenant_id=tenant_id,
+                        tenant_id=tenant_id,
                 )
             )
             models_by_agent[member_id] = member_model
@@ -407,20 +404,6 @@ class ApplicationAssembler:
 
         standard_skills = _selection(runtime_config, "skill.catalog") is not None
 
-        if _selection(runtime_config, "execution.model-budget") is not None:
-            if self.state.model_budget is not None:
-                raise ValueError("execution.model-budget has conflicting configuration sources")
-            self.state.model_budget = await self._create_capability(
-                extension_host, process_root, scope_handles, runtime_config,
-                plugin_declarations, capability="execution.model-budget",
-                default_plugin="sage.model.concurrency-budget",
-            )
-        if self.state.model_budget is not None:
-            models_by_agent = {
-                key: self.state.model_budget.wrap(provider)
-                for key, provider in models_by_agent.items()
-            }
-
         async def resolve_session_id(run_id: str) -> str:
             return (await session_store.get_run(run_id)).session_id
 
@@ -430,21 +413,6 @@ class ApplicationAssembler:
         bind_trace_sink = getattr(diagnostic_sink, "bind_trace_sink", None)
         if callable(bind_trace_sink):
             bind_trace_sink(trace_sink)
-        models_by_agent = {
-            member_id: (
-                provider
-                if isinstance(provider, RecordingModelProvider)
-                else RecordingModelProvider(
-                    provider,
-                    sink=diagnostic_sink,
-                    trace_sink=trace_sink,
-                    log_sink=log_sink,
-                    session_id_resolver=resolve_session_id,
-                    provider_metadata={"agent_id": member_id},
-                )
-            )
-            for member_id, provider in models_by_agent.items()
-        }
         tool_selection = (
             await self._create_tool_selection(
                 extension_host,
@@ -552,13 +520,11 @@ class ApplicationAssembler:
             tenant_id=tenant_id,
         )
         component_sets = {}
-        for member_id, model in models_by_agent.items():
+        for member_id in models_by_agent:
             component_sets[member_id] = await AgentComponents.compose(
                 open_capability=open_agent_capability,
                 agent_id=member_id,
-                model=model,
                 runtime=driver_runtime,
-                derived_state=derived_state,
             )
         root_components = component_sets[selected_agent]
         # Selecting a plugin is executable configuration, including auxiliary
@@ -712,29 +678,22 @@ class ApplicationAssembler:
                     run_models[entry_descriptor.agent_id] = run_models[selected_agent]
                     register_dynamic_configuration(entry_descriptor)
                 model_selection = _selection(runtime_config, "model.provider")
-                if model_selection is not None and (
+                if model_selection is None or (
                         self._selection_scope(model_selection, ExtensionScope.AGENT) == ExtensionScope.RUN
                         or tenant_id is None and self._selection_scope(model_selection, ExtensionScope.AGENT) != ExtensionScope.PROCESS):
                     model = await self._create_model(
                         extension_host, process_root, scope_handles, resolved,
-                        entry_descriptor.agent_id, plugin_declarations, credential_provider,
+                        entry_descriptor.agent_id, plugin_declarations,
                         tenant_id=active_tenant, run_id=run_id, return_handle=True, available=(*available_scopes, *owned),
                     )
                     model, model_scope = model
                     if model_scope.context.scope == ExtensionScope.RUN:
                         scope_handles.remove(model_scope)
                         owned.append(model_scope)
-                    if self.state.model_budget is not None:
-                        model = self.state.model_budget.wrap(model)
-                    run_models[entry_descriptor.agent_id] = RecordingModelProvider(
-                        model, sink=diagnostic_sink, trace_sink=trace_sink, log_sink=log_sink,
-                        session_id_resolver=resolve_session_id,
-                        provider_metadata={"agent_id": entry_descriptor.agent_id},
-                    )
+                    run_models[entry_descriptor.agent_id] = model
                 active_components = await AgentComponents.compose(
                     open_capability=open_active_capability, agent_id=entry_descriptor.agent_id,
-                    model=run_models[entry_descriptor.agent_id], runtime=driver_runtime,
-                    derived_state=derived_state,
+                    runtime=driver_runtime,
                 )
                 active_policy = self.state.tool_policy
                 policy_selection = _selection(runtime_config, "agent.tool-policy")
@@ -1431,7 +1390,6 @@ class ApplicationAssembler:
         resolved,
         agent_id,
         declarations: tuple[PluginDeclaration, ...],
-        credential_provider,
         *,
         tenant_id: str | None,
         run_id: str | None = None,
@@ -1456,36 +1414,15 @@ class ApplicationAssembler:
             plugin_id = model_protocol_descriptor(route_data["provider"]).plugin_id
         else:
             plugin_id = str(selected_plugin)
-        config = _merge_plugin_config(
-            declarations,
-            plugin_id,
-            {"route": route_data, "client": None},
-        )
-        credential_id = route_data.get("credential")
-        if credential_id is not None:
-            config["credential"] = await credential_provider.resolve(
-                CredentialRef(
-                    credential_id=credential_id,
-                    purpose="model.inference",
-                ),
-                RequestContext(
-                    actor=ActorRef(
-                        principal_id="sagent-builder",
-                        principal_type=PrincipalType.SERVICE,
-                    )
-                ),
-            )
-        return await self._instantiate(
-            host,
-            parent,
-            handles,
-            plugin_id,
-            config,
-            "model.provider",
-            scope=ExtensionScope.AGENT,
-            scope_id=f"agent-{agent_id}",
-            tenant_id=tenant_id,
-            agent_id=agent_id,
+        selected_runtime = resolved.runtime.model_copy(update={"capabilities": {
+            **resolved.runtime.capabilities,
+            "model.provider": CapabilitySelection(plugin=plugin_id, config={"route": route_data}),
+        }})
+        return await self._create_capability(
+            host, parent, handles, selected_runtime, declarations,
+            capability="model.provider", default_plugin=plugin_id,
+            default_scope=ExtensionScope.AGENT, tenant_id=tenant_id,
+            agent_id=agent_id, run_id=run_id, return_handle=return_handle, available=available,
         )
 
     async def _create_tools(self, host, parent, handles, runtime, declarations, **kwargs):
@@ -1639,7 +1576,6 @@ class ApplicationAssembler:
         default_plugin,
         default_config=None,
         default_scope=ExtensionScope.PROCESS,
-        locked_config=None,
         tenant_id: str | None = None,
         agent_id: str | None = None,
         run_id: str | None = None,
@@ -1653,14 +1589,6 @@ class ApplicationAssembler:
             **dict(selection.config if selection else {}),
         }
         config = _merge_plugin_config(declarations, plugin_id, config)
-        # Host-owned runtime identities are dependencies, not user/plugin
-        # configuration. Apply them last so a manifest cannot replace a model,
-        # SessionStore, estimator, or another trusted composition input.
-        config.update(
-            _supported_locked_config(
-                self.extensions, plugin_id, dict(locked_config or {})
-            )
-        )
         selected_scope = self._selection_scope(selection, default_scope) if selection else default_scope
         dynamic_agent_ports = {
             "model.provider", "context.summarizer", "context.reducer", "context.unit-compactor",
@@ -1885,10 +1813,31 @@ class ApplicationAssembler:
         runtime,
         declarations,
         resolved,
-        *,
-        session_store,
-        credential_provider,
     ):
+        from sagents.v2.runtime.extensions import CapabilityOffer, ExtensionDescriptor, ExtensionRegistration
+
+        # The host owns this live catalog resolver. Publish it through the same
+        # factory/dependency mechanism as any externally registered provider.
+        resolver_id = "sage.composition.package-resolver"
+        if not self.extensions.contains(resolver_id):
+            resolver = self.model_resolver or CompositionResolver(models={
+                "models": resolved.model_routes,
+                "credentials": resolved.credentials,
+            })
+            self.extensions.register(ExtensionRegistration(
+                descriptor=ExtensionDescriptor(
+                    plugin_id=resolver_id, name="App package resolver", version="2.0.0",
+                    description="Host-owned live model catalog resolver for Agent Packages.",
+                    provides=(CapabilityOffer(capability="package.resolver", api_version="2"),),
+                    supported_scopes=frozenset({ExtensionScope.PROCESS}),
+                    config_schema={"type": "object", "additionalProperties": False}, built_in=True,
+                ), factory=lambda context, dependencies: resolver, ownership="borrowed",
+            ))
+            self.extensions.trust_builtins((resolver_id,))
+        await self._create_capability(
+            host, parent, handles, runtime, declarations,
+            capability="package.resolver", default_plugin=resolver_id,
+        )
         services = {
             "execution.scheduler": await self._create_capability(
                 host,
@@ -1916,7 +1865,6 @@ class ApplicationAssembler:
                 declarations,
                 capability="artifact.store",
                 default_plugin=SessionArtifactStore.plugin_id,
-                locked_config={"session_store": session_store},
             ),
             "package.registry": await self._create_capability(
                 host,
@@ -1926,10 +1874,6 @@ class ApplicationAssembler:
                 declarations,
                 capability="package.registry",
                 default_plugin=InMemoryAgentPackageRegistry.plugin_id,
-                locked_config={"resolver": self.model_resolver or CompositionResolver(models={
-                    "models": resolved.model_routes,
-                    "credentials": resolved.credentials,
-                })},
             ),
             "observability.diagnostic-sink": (
                 await self._create_capability(
@@ -2013,6 +1957,7 @@ class ApplicationAssembler:
         *,
         services: Mapping[str, Any],
         handles,
+        only_capabilities: frozenset[str] | None = None,
     ) -> None:
         """Verify manifest guarantees against live providers or descriptors."""
 
@@ -2040,6 +1985,8 @@ class ApplicationAssembler:
             visit(handle)
 
         for capability, required in required_guarantees.items():
+            if only_capabilities is not None and capability not in only_capabilities:
+                continue
             observed: dict[str, Any] | None = None
             provider = services.get(capability)
             capability_reader = getattr(provider, "capabilities", None)
@@ -2181,8 +2128,7 @@ class ApplicationAssembler:
     def _composition_hash(manifest_hash, handles, services, *, registry=None, runtime=None) -> str:
         selected_ids = {plugin for handle in handles for plugin in handle.graph.plugin_ids}
         if registry is not None and runtime is not None:
-            from sagents.v2.runtime.extensions import CapabilityRequirement
-            from sagents.v2.runtime.extensions.resolver import ExtensionResolver, version_satisfies
+            from sagents.v2.runtime.extensions.versions import version_satisfies
             sources = {}
             for handle in handles:
                 for offer in handle.graph.capabilities:
@@ -2192,12 +2138,8 @@ class ApplicationAssembler:
                 values = runtime.selections(capability)
                 if len(values) == 1:
                     choices[capability] = values[0].plugin
-            resolver = ExtensionResolver(registry)
             for capability in runtime.capabilities:
                 for choice in runtime.selections(capability):
-                    offers = [offer for offer in registry.get(choice.plugin).descriptor.provides if offer.capability == capability]
-                    name = choice.name if any(offer.name == choice.name for offer in offers) else offers[0].name
-                    relevant = {capability: choice.plugin}
                     pending = [choice.plugin]
                     visited = set()
                     while pending:
@@ -2216,12 +2158,11 @@ class ApplicationAssembler:
                                 if len(candidates) == 1:
                                     selected = candidates.pop()
                             if selected is not None:
-                                relevant[dependency.capability] = selected
                                 pending.append(selected)
-                    graph = resolver.resolve((CapabilityRequirement(capability=capability,
-                        api_version="3" if capability == "execution.sandbox" else ">=2,<3", name=name),),
-                        selections=relevant)
-                    selected_ids.update(graph.plugin_ids)
+                    # App-level plans can defer an Agent's model choice until
+                    # load_agent. Hash declared/selected providers without
+                    # pretending this partial configuration is executable.
+                    selected_ids.update(visited)
         payload = {
             "manifest": manifest_hash,
             "plans": (sorted((item for item in registry.inventory() if item["plugin_id"] in selected_ids), key=lambda item: item["plugin_id"])
@@ -2294,6 +2235,16 @@ class ApplicationAssembler:
                         source_digest=str(registration.descriptor.capabilities.get("source_sha256", "")),
                     )
                 )
+        # Deferred providers have the same declared graph as started providers;
+        # their actual instances are allocated only after Run admission.
+        for consumer in bindings:
+            descriptor = self.extensions.get(consumer.plugin_id).descriptor
+            for dependency in descriptor.dependencies:
+                for provider in bindings:
+                    if (provider.capability == dependency.capability
+                            and (dependency.name is None or provider.name == dependency.name)
+                            and provider.plugin_id != consumer.plugin_id):
+                        dependencies.add((consumer.plugin_id, provider.plugin_id))
         for capability in services:
             if (
                 capability in plugin_capabilities

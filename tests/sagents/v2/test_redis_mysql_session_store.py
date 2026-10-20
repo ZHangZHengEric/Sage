@@ -1,7 +1,7 @@
 from copy import deepcopy
+from contextlib import asynccontextmanager
 import asyncio
 import threading
-import time
 from unittest.mock import AsyncMock
 
 import fakeredis.aioredis
@@ -19,6 +19,13 @@ class Archive:
         self.writes = 0
         self.fail = False
         self.attachments = {}
+        self._session_guards = {}
+
+    @asynccontextmanager
+    async def session_guard(self, sid):
+        lock = self._session_guards.setdefault(sid, asyncio.Lock())
+        async with lock:
+            yield
 
     async def _fetch_session(self, sid):
         return deepcopy(self.states.get(sid))
@@ -80,10 +87,10 @@ class Archive:
         return self.attachments[(sid, identity)]
 
 
-def store(redis, archive, *, background=False):
+def store(redis, archive, *, background=False, key_prefix=None):
     redis.info = AsyncMock(side_effect=lambda section: {"maxmemory_policy": "noeviction", "aof_enabled": 1})
     value = RedisMysqlSessionStore("mysql://unused/test", redis_url="redis://unused/0",
-                                   archive_interval_seconds=3600)
+                                   archive_interval_seconds=3600, key_prefix=key_prefix)
     value._redis = redis
     value._archive = archive
     if not background:
@@ -120,7 +127,7 @@ async def test_running_writes_only_redis_and_terminal_run_archives_once():
 
 
 @pytest.mark.asyncio
-async def test_pending_archive_prefetches_session_reads_and_revisions_in_one_batch():
+async def test_pending_archive_rechecks_each_session_and_preserves_all_states():
     redis = fakeredis.aioredis.FakeRedis(decode_responses=True)
     archive = Archive()
     value = store(redis, archive)
@@ -143,10 +150,9 @@ async def test_pending_archive_prefetches_session_reads_and_revisions_in_one_bat
     try:
         await value.archive_pending()
         assert archive.states == expected
-        archive.revision.assert_not_awaited()
-        archive.revisions.assert_awaited_once()
-        assert set(archive.revisions.await_args.args[0]) == set(expected)
-        assert individual_reads == []
+        assert {call.args[0] for call in archive.revision.await_args_list} == set(expected)
+        archive.revisions.assert_not_awaited()
+        assert individual_reads  # Re-read after acquiring the Session guard.
     finally:
         redis.execute_command = original
         await value.close()
@@ -214,7 +220,7 @@ async def test_background_worker_archives_without_blocking_terminal_commit():
 
 
 @pytest.mark.asyncio
-async def test_archive_of_old_revision_cannot_expire_new_running_state():
+async def test_following_run_after_serialized_archive_stays_resident_without_ttl():
     redis = fakeredis.aioredis.FakeRedis(decode_responses=True)
     archive = Archive()
     value = store(redis, archive)
@@ -230,14 +236,14 @@ async def test_archive_of_old_revision_cannot_expire_new_running_state():
     task = asyncio.create_task(value.archive_pending())
     await asyncio.wait_for(entered.wait(), 1)
     sid = created.handle.session_id
-    following = await value.create_run(command("next").model_copy(update={"session_id": sid}), CONTEXT)
-    await transition(value, following, RunState.RUNNING, "next-running")
+    following_task = asyncio.create_task(value.create_run(command("next").model_copy(update={"session_id": sid}), CONTEXT))
     release.set()
     await task
-    assert await redis.sismember(value._key("pending"), sid)
+    following = await following_task
+    await transition(value, following, RunState.RUNNING, "next-running")
     assert await redis.ttl(value._session_key(sid)) == -1
     await value.archive_pending()
-    assert archive.states[sid]["runs"][-1]["state"] == "running"
+    assert (await value.get_run(following.handle.run_id)).state == RunState.RUNNING
     assert await redis.sismember(value._key("resident"), sid)
     assert await redis.ttl(value._session_key(sid)) == -1
     await value.close()
@@ -363,96 +369,28 @@ async def test_delete_is_authoritative_during_mysql_outage_and_retried_on_reopen
 
 
 @pytest.mark.asyncio
-async def test_namespace_allows_only_one_live_writer():
+@pytest.mark.parametrize("key_prefix", [None, "previous-single-writer-namespace"])
+async def test_namespace_allows_multiple_live_writers_and_refreshes_shared_state(key_prefix):
     server = fakeredis.FakeServer()
     archive = Archive()
-    first = store(fakeredis.aioredis.FakeRedis(server=server, decode_responses=True), archive)
-    await first.create_run(command(), CONTEXT)
-    second = store(fakeredis.aioredis.FakeRedis(server=server, decode_responses=True), archive)
-    with pytest.raises(SageV2Error, match="already owned"):
-        await second.create_run(command("other"), CONTEXT)
-    await first.close()
-    await second.close()
-
-
-@pytest.mark.asyncio
-async def test_start_waits_for_crashed_writer_lease_to_expire():
-    redis = fakeredis.aioredis.FakeRedis(decode_responses=True)
-    value = store(redis, Archive())
-    owner_key = value._key("owner")
-    await redis.set(owner_key, "crashed-process", px=100)
+    first = store(fakeredis.aioredis.FakeRedis(server=server, decode_responses=True), archive, key_prefix=key_prefix)
+    second = store(fakeredis.aioredis.FakeRedis(server=server, decode_responses=True), archive, key_prefix=key_prefix)
+    if key_prefix is not None:
+        assert first.key_prefix == second.key_prefix == key_prefix
     try:
-        services = await asyncio.wait_for(value.start(None, ()), timeout=2)
-        assert services["session.store"] is value
-        assert await redis.get(owner_key) == value._owner
-        created = await value.create_run(command(), CONTEXT)
-        assert (await value.get_run(created.handle.run_id)).state == RunState.QUEUED
-    finally:
-        await value.close()
-
-
-@pytest.mark.asyncio
-async def test_start_times_out_without_stealing_live_writer_lease(monkeypatch):
-    from sagents.v2.runtime.session.plugins.mysql import redis as redis_mysql
-
-    monkeypatch.setattr(redis_mysql, "_OWNER_STARTUP_WAIT_SECONDS", 0.1)
-    server = fakeredis.FakeServer()
-    archive = Archive()
-    first = store(fakeredis.aioredis.FakeRedis(server=server, decode_responses=True), archive)
-    second = store(fakeredis.aioredis.FakeRedis(server=server, decode_responses=True), archive)
-    await first.create_run(command(), CONTEXT)
-    try:
-        started = time.monotonic()
-        with pytest.raises(SageV2Error, match="already owned"):
-            await asyncio.wait_for(second.start(None, ()), timeout=1)
-        assert time.monotonic() - started >= 0.1
-        assert await first._redis.get(first._key("owner")) == first._owner
-        assert not second._redis_ready
-        assert second._worker is None
-        assert second._lease_worker is None
-        await first.create_run(command("still-owned"), CONTEXT)
+        created = await first.create_run(command(), CONTEXT)
+        assert (await second.get_run(created.handle.run_id)).state == RunState.QUEUED
+        await transition(second, created, RunState.RUNNING, "running")
+        assert (await first.get_run(created.handle.run_id)).state == RunState.RUNNING
     finally:
         await second.close()
         await first.close()
 
 
-@pytest.mark.asyncio
-@pytest.mark.parametrize("cancel", [False, True], ids=["released", "cancelled"])
-async def test_start_wait_can_finish_on_release_or_be_cancelled(cancel):
-    redis = fakeredis.aioredis.FakeRedis(decode_responses=True)
-    value = store(redis, Archive())
-    owner_key = value._key("owner")
-    await redis.set(owner_key, "previous-process", ex=30)
-    attempted = asyncio.Event()
-    original = redis.set
 
-    async def observed_set(*args, **kwargs):
-        result = await original(*args, **kwargs)
-        attempted.set()
-        return result
 
-    redis.set = observed_set
-    task = asyncio.create_task(value.start(None, ()))
-    try:
-        await asyncio.wait_for(attempted.wait(), timeout=1)
-        assert not task.done()
-        assert not value._redis_ready
-        if cancel:
-            task.cancel()
-            with pytest.raises(asyncio.CancelledError):
-                await task
-            assert await redis.get(owner_key) == "previous-process"
-            assert value._worker is None
-            assert value._lease_worker is None
-        else:
-            await redis.delete(owner_key)
-            services = await asyncio.wait_for(task, timeout=2)
-            assert services["session.store"] is value
-            assert await redis.get(owner_key) == value._owner
-    finally:
-        task.cancel()
-        await asyncio.gather(task, return_exceptions=True)
-        await value.close()
+
+
 
 
 @pytest.mark.asyncio
@@ -635,7 +573,7 @@ async def test_unfinished_run_is_recovered_from_redis_after_restart():
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("operation", ["_fetch_session", "_archive_session"])
-async def test_hot_session_replay_allows_writer_lease_renewal(operation):
+async def test_hot_session_replay_allows_redis_coordination_progress(operation):
     redis = fakeredis.aioredis.FakeRedis(decode_responses=True)
     value = store(redis, Archive())
     created = await value.create_run(command(), CONTEXT)
@@ -652,7 +590,7 @@ async def test_hot_session_replay_allows_writer_lease_renewal(operation):
 
     async def renew_while_replaying():
         assert await asyncio.to_thread(entered.wait, 2)
-        await value._renew()
+        assert await redis.ping()
         renewed_before_replay_finished = not release.is_set() and not timed_out.is_set()
         release.set()
         return renewed_before_replay_finished
@@ -662,7 +600,7 @@ async def test_hot_session_replay_allows_writer_lease_renewal(operation):
     replay = asyncio.create_task(getattr(value, operation)(created.handle.session_id))
     try:
         renewed, _ = await asyncio.wait_for(asyncio.gather(heartbeat, replay), 5)
-        assert renewed, "Session replay blocked the event loop and prevented writer lease renewal"
+        assert renewed, "Session replay blocked the event loop and Redis coordination"
     finally:
         release.set()
         await asyncio.gather(heartbeat, replay, return_exceptions=True)

@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from sagents.v2.context.contracts import ContextProjection
 from sagents.v2.context.partition import conversation_units, current_turn_boundary
-from sagents.v2.context.references import compact_unit_to_references
-from sagents.v2.context.progress_summary import bounded_snapshot
+from sagents.v2.context.plugins._shared.references import compact_unit_to_references
+from sagents.v2.context.plugins._shared.progress_summary import bounded_snapshot
 from sagents.v2.context.summary import (
     create_summary,
     message_digests_async,

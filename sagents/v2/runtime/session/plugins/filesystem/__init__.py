@@ -465,7 +465,7 @@ class _FilesystemSessionState(FilesystemManagedSessionHeads, SessionStoreCoordin
             apply_view_delta,
             views_from_payload,
         )
-        from sagents.v2.runtime.session.metadata_replay import read_filesystem_metadata
+        from sagents.v2.runtime.session.plugins.filesystem.metadata import read_filesystem_metadata
         ids = validate_view_ids(session_ids, options.get('run_ids'))
         result = await super().read_session_views(ids, **options)
         replay_options = {key: options[key] for key in ('include_events','run_ids') if key in options}
@@ -483,7 +483,7 @@ class _FilesystemSessionState(FilesystemManagedSessionHeads, SessionStoreCoordin
 
     async def _run_metadata_batch(self, session_ids):
         from sagents.v2.runtime.session.run_metadata import metadata_from_payload
-        from sagents.v2.runtime.session.metadata_replay import read_filesystem_metadata
+        from sagents.v2.runtime.session.plugins.filesystem.metadata import read_filesystem_metadata
         rows, owners = await super()._run_metadata_batch(session_ids)
         loaded = set(owners)
         def read():

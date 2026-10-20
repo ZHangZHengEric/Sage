@@ -21,25 +21,27 @@ async def initialize_process(catalog):
     assembler._runtime_config = runtime
     assembler._agent_configurations = {}
     assembler._application = app
-    host = ExtensionHost(builder._registry, built_in_only=runtime.plugin_trust_policy == "built_in_only")
+    from sagents.v2.composition.model_providers import observed_model_registry
+    assembler.extensions = observed_model_registry(builder._registry,
+        with_budget=bool(runtime.selections("execution.model-budget")))
+    host = ExtensionHost(assembler.extensions, built_in_only=runtime.plugin_trust_policy == "built_in_only")
     root = await host.open_scope(ExtensionScopeContext(scope=ExtensionScope.PROCESS,
         scope_id=new_id("app")), host.plan(()))
     handles.append(root)
     app._retain_scope(root)
-    async def open_capability(capability, plugin, *, locked=None, config=None):
+    async def open_capability(capability, plugin, *, config=None):
         return await assembler._create_capability(host, root, handles, runtime, (),
             capability=capability, default_plugin=plugin, default_config=config,
-            locked_config=locked, tenant_id=catalog.tenant_id)
+            tenant_id=catalog.tenant_id)
     store = await assembler._create_session_store(host, root, handles, runtime, ())
     store_choice = _selection(runtime, "session.store")
     colocated = store_choice is None or builder._registry.is_trusted_builtin(store_choice.plugin)
     derived = await open_capability("derived-state.store",
         "sage.derived-state.session" if colocated else "sage.derived-state.ephemeral")
     credentials = await open_capability("credentials.provider", EnvironmentCredentialProvider.plugin_id,
-                                       config={"declarations": catalog.models.credentials})
+                                       config={"declarations": {key: value.model_dump(mode="json") for key, value in catalog.models.credentials.items()}})
     services, adapters = await assembler._create_application_services(host, root, handles, runtime, (),
-        SimpleNamespace(interfaces={}, model_routes={}, credentials={}),
-        session_store=store, credential_provider=credentials)
+        SimpleNamespace(interfaces={}, model_routes={}, credentials={}))
     services.update({"session.store": store, "derived-state.store": derived,
                      "credentials.provider": credentials})
     services["memory.provider"] = await assembler._create_memory_provider(host, root, handles, runtime, ())
@@ -55,8 +57,7 @@ async def initialize_process(catalog):
         for choice in runtime.selections(capability):
             if assembler._selection_scope(choice, ExtensionScope.PROCESS) != ExtensionScope.PROCESS:
                 continue
-            locked = {"derived_state": derived} if capability == "context.summary-store" else None
-            services[capability] = await open_capability(capability, choice.plugin, locked=locked)
+            services[capability] = await open_capability(capability, choice.plugin)
     binding = services.get("execution.binding")
     control = HarnessRuntime(store, job_runtime=services["execution.job-runtime"],
                              execution_binding_provider=binding, derived_state_store=derived)
@@ -65,6 +66,8 @@ async def initialize_process(catalog):
     capabilities = await scheduler.capabilities()
     from sagents.v2.runtime.session.fencing import validate_distributed_pair
     validate_distributed_pair(store, scheduler, capabilities)
+    await assembler._validate_required_guarantees(runtime, services=services, handles=handles,
+        only_capabilities=frozenset(services))
     if not capabilities.supports_fencing or not capabilities.supports_atomic_fenced_mutations:
         raise ValueError("execution.scheduler must support atomic fenced mutations")
     values = (_selection(runtime, "execution.scheduler").config
@@ -92,7 +95,7 @@ async def initialize_process(catalog):
     )
     app.composition_hash = assembler._composition_hash(
         "sha256:" + hashlib.sha256(runtime.model_dump_json().encode()).hexdigest(),
-        handles, services, registry=builder._registry, runtime=runtime,
+        handles, services, registry=assembler.extensions, runtime=runtime,
     )
     pending = tuple((choice.plugin, assembler._selection_scope(choice, ExtensionScope.AGENT))
         for capability in runtime.capabilities for choice in runtime.selections(capability)

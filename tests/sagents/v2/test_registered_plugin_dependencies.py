@@ -188,7 +188,9 @@ async def test_run_scoped_model_context_and_continuation_open_after_admission(tm
             assert environment.sandbox.ref.owner_run_id == accepted.run_id
             assert context.agent_configuration["model_routes"]["primary"]
             if capability != "model.provider":
-                assert dependencies.require("model.provider") is run_models[context.run_id]
+                assert dependencies.require("model.provider").provider is run_models[context.run_id]
+            if capability == "agent.continuation-policy":
+                assert dependencies.require("context.summarizer").model is dependencies.require("model.provider")
             created.append((capability, context.run_id))
             value = implementation(context.run_id)
             if capability == "model.provider":
@@ -200,7 +202,8 @@ async def test_run_scoped_model_context_and_continuation_open_after_admission(tm
                 provides=(CapabilityOffer(capability=capability, api_version="2"),),
                 dependencies=(ExtensionDependency(capability="session.store"),
                               ExtensionDependency(capability="execution.environment"),
-                              *((ExtensionDependency(capability="model.provider"),) if capability != "model.provider" else ())),
+                              *((ExtensionDependency(capability="model.provider"),) if capability != "model.provider" else ()),
+                              *((ExtensionDependency(capability="context.summarizer"),) if capability == "agent.continuation-policy" else ())),
                 supported_scopes=frozenset({ExtensionScope.RUN}),
                 config_schema={"type": "object", "additionalProperties": False},
             ), factory=create,
@@ -210,6 +213,7 @@ async def test_run_scoped_model_context_and_continuation_open_after_admission(tm
     try:
         loaded = await app.load_agent(package())
         assert created == []
+        assert ("sage.context.summarizer.model", "test.run.model.provider") in loaded.resolved_plan.dependencies
         outcomes = await asyncio.gather(*(run(app, loaded, key) for key in ("run-a", "run-b")))
         assert all(result.state.value == "completed" for result, _ in outcomes), outcomes
         ids = {result.run_id for result, _ in outcomes}

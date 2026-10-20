@@ -29,6 +29,11 @@ class ScriptedModelStep:
 class ScriptedModelProvider:
     """Deterministic, concurrency-safe model provider for contract tests."""
 
+    plugin_id = "sage.model.scripted"
+    name = "Scripted model provider"
+    description = "Deterministic model responses for contract tests and embedded simulations."
+
+
     def __init__(
         self,
         steps: tuple[ScriptedModelStep, ...],

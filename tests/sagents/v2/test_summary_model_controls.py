@@ -35,7 +35,7 @@ from sagents.v2.model.plugins.gemini_generate_content import (
     GeminiGenerateContentConfig,
     GeminiGenerateContentModelProvider,
 )
-from sagents.v2.model.wire import minimum_reasoning_control
+from sagents.v2.model.plugins._shared.wire import minimum_reasoning_control
 
 CAPS = ModelCapabilities(
     supports_streaming=True,

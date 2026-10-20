@@ -13,6 +13,8 @@ from sagents.v2.agent.policy import (
 from sagents.v2.contracts.errors import SageV2Error
 from sagents.v2.runtime.extensions import (
     CapabilityOffer,
+    CapabilityKey,
+    ProviderSet,
     CapabilityRequirement,
     ExtensionDescriptor,
     ExtensionHost,
@@ -30,6 +32,9 @@ def test_builtin_inventory_contains_only_real_factories():
     registry = builtin_extension_registry()
     inventory = {value["plugin_id"]: value for value in registry.inventory()}
 
+    assert {key for key in inventory if key.startswith("sage.session.")} == {
+        "sage.session.ephemeral", "sage.session.filesystem", "sage.session.mysql", "sage.session.redis-mysql",
+    }
     assert {
         "sage.agent.continuation.deterministic",
         "sage.agent.continuation.llm-judge",
@@ -49,14 +54,13 @@ def test_builtin_inventory_contains_only_real_factories():
         "sage.credentials.mapping",
         "sage.flow.agent",
         "sage.job.ephemeral",
+        "sage.job.redis-distributed",
         "sage.memory.filesystem-bm25",
         "sage.memory.recall-query.direct",
         "sage.memory.recall-query.llm",
         "sage.session.filesystem",
-        "sage.session.postgres",
         "sage.session.mysql",
         "sage.session.redis-mysql",
-        "sage.session.redis-mysql-distributed",
         "sage.session.ephemeral",
         "sage.session-memory.noop",
         "sage.session-memory.sqlite-bm25",
@@ -143,10 +147,6 @@ def test_builtin_inventory_contains_only_real_factories():
         is False
     )
     assert (
-        inventory["sage.session.postgres"]["capabilities"]["multi_process_writes"]
-        is False
-    )
-    assert (
         inventory["sage.session.mysql"]["capabilities"]["multi_process_writes"] is False
     )
     assert inventory["sage.tool.ephemeral"]["capabilities"]["durable"] is False
@@ -162,6 +162,11 @@ def test_builtin_inventory_contains_only_real_factories():
 
 
 def test_official_plugins_declare_identity():
+    from sagents.v2.model import (
+        OpenAIChatCompletionsModelProvider,
+        OpenAICompatibleModelProvider,
+    )
+
     registry = builtin_extension_registry()
     missing = [
         value["plugin_id"]
@@ -175,6 +180,10 @@ def test_official_plugins_declare_identity():
         "Deterministic continuation policy",
         "Applies ordered safety, budget, and completion rules without a model call.",
     )
+    # Both public entry points implement the same Chat Completions protocol.
+    assert plugin_identity(OpenAICompatibleModelProvider) == plugin_identity(
+        OpenAIChatCompletionsModelProvider
+    )
 
 
 def test_plugin_identity_rejects_incomplete_classes():
@@ -183,6 +192,140 @@ def test_plugin_identity_rejects_incomplete_classes():
 
     with pytest.raises(TypeError, match="name, description"):
         plugin_identity(Incomplete)
+
+    class UndeclaredIdentity(CompositeContinuationPolicy):
+        pass
+
+    with pytest.raises(TypeError, match="plugin_id"):
+        plugin_identity(UndeclaredIdentity)
+
+
+@pytest.mark.parametrize(
+    "plugin_id",
+    [
+        "sage.agent.tool-policy.default",
+        "sage.agent.approval-memory.session",
+        "sage.derived-state.ephemeral",
+        "sage.model.concurrency-budget",
+        "sage.execution.binding.local-workspace",
+        "sage.execution.binding.ephemeral",
+        "sage.execution.environment",
+        "sage.execution.tool-runtime",
+    ],
+)
+def test_service_plugin_factories_return_their_own_declared_identity(
+    plugin_id, tmp_path
+):
+    from sagents.v2.contracts.commands import StartRun
+    from sagents.v2.contracts.principals import ActorRef, PrincipalType, RequestContext
+    from sagents.v2.runtime.artifact import InMemoryArtifactStore
+    from sagents.v2.runtime.execution.environment import (
+        RunExecutionEnvironment,
+        _bind_execution_environment,
+    )
+    from sagents.v2.runtime.execution.jobs import InMemoryJobRuntime
+    from sagents.v2.runtime.extensions.contracts import CapabilityKey, ProviderSet
+    from sagents.v2.runtime.session import (
+        EphemeralSessionStore,
+        InMemoryDerivedStateStore,
+    )
+
+    # Borrowed host resources are not exercised by identity construction.
+    environment = RunExecutionEnvironment(
+        run_id="identity-run",
+        command=StartRun(
+            agent_id="agent",
+            input=(),
+            resolved_spec_hash="sha256:identity",
+            idempotency_key="identity",
+        ),
+        context=RequestContext(
+            actor=ActorRef(principal_id="user", principal_type=PrincipalType.USER)
+        ),
+        sandbox=object(),
+        grant_issuer=object(),
+    )
+    providers = {
+        "derived-state.store": InMemoryDerivedStateStore(),
+        "session.store": EphemeralSessionStore(),
+        "execution.environment": environment,
+        "execution.job-runtime": InMemoryJobRuntime({}),
+        "artifact.store": InMemoryArtifactStore(),
+        "tool.selection-policy": object(),
+    }
+    dependencies = ProviderSet(
+        {CapabilityKey(capability=key): value for key, value in providers.items()}
+    )
+    registration = builtin_extension_registry().get(plugin_id)
+    context = ExtensionScopeContext(
+        scope=registration.descriptor.resolved_default_scope(),
+        scope_id="identity-scope",
+        run_id=environment.run_id,
+        config={"workspace": str(tmp_path)}
+        if plugin_id.endswith("local-workspace")
+        else {},
+    )
+    with _bind_execution_environment(environment):
+        instance = registration.factory(context, dependencies)
+    assert plugin_identity(type(instance))[0] == registration.descriptor.plugin_id
+
+
+def test_external_diagnostic_sink_has_a_distinct_identity():
+    from sagents.v2.runtime.observability.plugins.diagnostic_noop import (
+        NoopDiagnosticSink,
+    )
+    from sagents.v2.runtime.observability.plugins.external import ExternalEvidenceSink
+
+    assert (
+        plugin_identity(ExternalEvidenceSink)[0]
+        != plugin_identity(NoopDiagnosticSink)[0]
+    )
+
+
+def test_package_source_module_scope_declares_its_plugin_identity():
+    from sagents.v2.agent.management.plugins.source_modules import SourcePluginScope
+
+    assert plugin_identity(SourcePluginScope)[0] == "sage.package.source-modules"
+
+
+@pytest.mark.parametrize(
+    ("module", "implementation", "expected_id"),
+    [
+        ("skill.plugins.ephemeral", "InMemorySkillProvider", "sage.skill.ephemeral"),
+        (
+            "skill.plugins.ephemeral",
+            "InMemorySkillWorkspace",
+            "sage.skill.workspace.ephemeral",
+        ),
+        (
+            "skill.plugins.ephemeral",
+            "InMemorySkillActivationRepository",
+            "sage.skill.activation.ephemeral",
+        ),
+        (
+            "skill.plugins.session",
+            "SessionDerivedSkillActivationRepository",
+            "sage.skill.activation.session-derived",
+        ),
+        (
+            "skill.plugins.sandbox",
+            "SandboxSkillWorkspace",
+            "sage.skill.workspace.sandbox",
+        ),
+        (
+            "testing.plugins.scripted_model",
+            "ScriptedModelProvider",
+            "sage.model.scripted",
+        ),
+    ],
+)
+def test_directly_injected_plugins_declare_identity(
+    module, implementation, expected_id
+):
+    from importlib import import_module
+
+    plugin = getattr(import_module(f"sagents.v2.{module}"), implementation)
+    assert plugin_identity(plugin)[0] == expected_id
 
 
 def test_every_registered_plugin_has_a_pydantic_config_boundary():
@@ -206,9 +349,6 @@ def test_every_registered_plugin_has_a_pydantic_config_boundary():
     ("capability", "plugin_id"),
     [
         ("session-memory.provider", "sage.session-memory.sqlite-bm25"),
-        ("agent.continuation-policy", "sage.agent.continuation.llm-judge"),
-        ("context.reducer", "sage.context.reducer.persistent-summary"),
-        ("context.summarizer", "sage.context.summarizer.model"),
         ("observability.log-sink", "sage.logging.filesystem"),
     ],
 )
@@ -275,7 +415,7 @@ def test_ephemeral_tool_plugin_factory_exposes_paired_catalog_and_executor():
         scope=ExtensionScope.PROCESS,
         scope_id="test-tools",
     )
-    plugin = registration.factory(context, {})
+    plugin = registration.factory(context, ProviderSet())
 
     assert plugin.__class__.__name__ == "EphemeralToolPlugin"
     assert plugin.plugin_id == "sage.tool.ephemeral"
@@ -311,9 +451,8 @@ def test_every_continuation_plugin_factory_creates_a_real_policy(
         ExtensionScopeContext(
             scope=ExtensionScope.AGENT,
             scope_id="test-continuation",
-            config={"model": ScriptedModelProvider(())},
         ),
-        {},
+        ProviderSet({CapabilityKey(capability="model.provider"): ScriptedModelProvider(())}),
     )
 
     assert isinstance(value, expected_type)

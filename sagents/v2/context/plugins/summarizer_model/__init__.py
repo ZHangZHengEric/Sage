@@ -9,13 +9,13 @@ import json
 
 import httpx
 
-from sagents.v2.context.progress_summary import task_snapshot
+from sagents.v2.context.plugins._shared.progress_summary import task_snapshot
 from sagents.v2.context.summary import SummarizationRequest, summary_safe_block_text
 from sagents.v2.contracts.common import new_id
 from sagents.v2.contracts.errors import ErrorCategory, RuntimeErrorInfo, SageV2Error
 from sagents.v2.contracts.items import JsonBlock, TextBlock
 from sagents.v2.model.contracts import ModelEventKind, ModelMessage, ModelRequest
-from sagents.v2.model.wire import stream_incomplete_error
+from sagents.v2.model.plugins._shared.wire import stream_incomplete_error
 from sagents.v2.model.recovery import (
     adaptive_summary,
     consume_model_call,

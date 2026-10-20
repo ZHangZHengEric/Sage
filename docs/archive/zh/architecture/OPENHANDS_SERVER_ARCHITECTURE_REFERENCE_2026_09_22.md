@@ -112,7 +112,7 @@ OpenHands 对 host-local ACP 默认采用 native skill sourcing：ACP CLI 自己
 
 当前核心设计形成了清晰的四个 port：`SkillCatalog`、`SkillSource`、`SkillWorkspace`、`SkillActivationRepository`；`SkillBundle` 校验相对安全路径：[Skill contracts](../../../../sagents/v2/skill/contracts.py#L23-L77)。`SkillLoader` 只在显式 load 时 fetch Level-2 bundle，按 run/name 串行化 activation，按 content hash 幂等恢复，并执行 active-context token budget：[lazy loader](../../../../sagents/v2/skill/provider.py#L87-L181)、[恢复与预算](../../../../sagents/v2/skill/provider.py#L183-L237)。Level-1 context 只列元数据且有 128 项/12 KB 上限：[AvailableSkills context](../../../../sagents/v2/skill/context.py#L16-L65)。
 
-`SkillToolPlugin` 只把 domain tool 投影为 `tool.catalog` / `tool.executor`，声明 AGENT/RUN scope；schema 和行为仍由 Skill domain 的 decorated method 拥有：[SkillToolPlugin](../../../../sagents/v2/tool/plugins/skill.py#L15-L45)、[`load_skill` 权限与幂等语义](../../../../sagents/v2/skill/tool.py#L19-L112)。Builder 已注册此 extension，并能通过 `with_skill_provider()` 注入宿主 port：[官方注册](../../../../sagents/v2/runtime/extensions/official.py#L1377-L1387)、[Builder seam](../../../../sagents/v2/builder.py#L385-L388)。因此不需要重写 Skill 核心抽象。
+`SkillToolPlugin` 只把 domain tool 投影为 `tool.catalog` / `tool.executor`，声明 AGENT/RUN scope；schema 和行为仍由 Skill domain 的 decorated method 拥有：[SkillToolPlugin](../../../../sagents/v2/tool/plugins/skill/__init__.py#L15-L45)、[`load_skill` 权限与幂等语义](../../../../sagents/v2/tool/plugins/skill/operations.py#L19-L112)。Builder 已注册此 extension，并能通过 `with_skill_provider()` 注入宿主 port：[官方注册](../../../../sagents/v2/runtime/extensions/official.py#L1377-L1387)、[Builder seam](../../../../sagents/v2/builder.py#L385-L388)。因此不需要重写 Skill 核心抽象。
 
 ### 5.2 普通 `app/server_v2` 接入的审计问题与修正
 

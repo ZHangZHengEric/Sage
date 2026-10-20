@@ -256,7 +256,7 @@ finally:
 | `check_readiness` | boolean | `false` | 是否执行注册能力的 readiness 检查；不能代替真实模型与工具调用验收 |
 | `state_root` | string / null | `null` | Agent 版本及恢复状态目录，属于 App 身份，改变需要新建 App |
 
-Identifier 长度 1–192，首字符为字母或数字，后续可用字母、数字和 `._:@/-`。保障名不是任意配置开关，需对应 provider 支持的能力报告。当前内置 SessionStore/Scheduler 并不能提供完整分布式 claims/outbox/subscription 体系；仅切换到 MySQL/Postgres 不代表可多进程共同执行。
+Identifier 长度 1–192，首字符为字母或数字，后续可用字母、数字和 `._:@/-`。保障名不是任意配置开关，需对应 provider 支持的能力报告。分布式调度要求支持共享写入与提交时执行权校验的会话存储；Redis/MySQL 与 Redis 调度器需要使用相同的 Redis 地址。仅切换到 MySQL 不代表可多进程共同执行。
 
 ## CapabilitySelection 全部字段
 
@@ -361,14 +361,13 @@ capabilities:
 ```yaml
 capabilities:
   session.store:
-    plugin: sage.session.postgres
+    plugin: sage.session.mysql
     config:
-      dsn: postgresql://user:password@localhost/sage
-      schema_name: sage_v2
+      dsn: mysql://user:password@localhost/sage
       table_prefix: sagent
 ```
 
-示例 DSN 仅为格式说明，不要提交真实密码。当前 runtime 文本没有通用 `${ENV}` 插值，建议通过正式凭据提供者或注册工厂解析连接凭据，宿主已有 SessionStore 也通过注册工厂提供。Postgres/MySQL 分别需要 asyncpg/aiomysql；数据库存储并不让内存 Job、Scheduler 自动变成持久化或分布式实现。
+示例 DSN 仅为格式说明，不要提交真实密码。当前 runtime 文本没有通用 `${ENV}` 插值，建议通过正式凭据提供者或注册工厂解析连接凭据，宿主已有 SessionStore 也通过注册工厂提供。MySQL 需要 aiomysql；数据库存储并不让内存 Job、Scheduler 自动变成持久化或分布式实现。
 
 ## 自定义插件、校验和生命周期
 
@@ -397,6 +396,8 @@ finally:
 完整独立插件见 [plugins.py](../../../examples/v2/host/plugins.py)。注册提供 descriptor、config_schema/config_model、factory，以及需要时的 start/stop。插件可以依赖 SDK 公共契约，不要依赖另一个插件实现；不要求为了复用抽取共同基类。
 
 `build` 固定注册表与配置；加载 Agent 时实际装配和校验。未知参数、缺少依赖、不可用插件、scope/API 不匹配、能力保障不满足，都应在装配阶段处理，不能靠“参数被接受”判断组件已生效。`plugins` 声明不等于安装依赖包，YAML 也不等于任意 Python 动态 import。
+
+`config` 在配置、规划和插件上下文入口均只接受有限 JSON 值，不再接收模型、存储、客户端或回调对象。内置插件与自定义插件统一在 `ExtensionDescriptor.dependencies` 声明所需能力，并在工厂中通过 `dependencies.require_unique("model.provider")` 等方法获取实例；指定名称的依赖使用 `require(capability, name)`。依赖进入同一份解析图，统一检查版本、启动顺序、作用域和关闭责任。选择缺失或生命周期不合法时装配失败，不回退到对象配置。
 
 宿主已有对象也通过注册工厂提供。注册项声明 `ownership="borrowed"` 时由宿主负责关闭；声明 `ownership="owned"` 时由 Sage 按插件协议释放。App 持有的插件遵循作用域启动、失败回滚、关闭协议。用 try/finally 关闭 App；不要给每次请求重新创建整个 App，也不要手动关闭共享组件。
 
@@ -459,10 +460,11 @@ Combines deterministic safety rules with an LLM judge for completion.
 
 提供能力：`agent.continuation-policy:default` (API `2`)。
 
+依赖能力：`model.provider`。
+
 | 参数 | 类型 | 必填 | Schema 默认值 | 约束 |
 | --- | --- | --- | --- | --- |
 | `repeat_threshold` | `integer` | 否 | `3` | `{"minimum":1}` |
-| `model` | `object` | 是 | 未声明 | `{}` |
 | `model_binding` | `string` | 否 | `"fast"` | `{"minLength":1}` |
 | `timeout_seconds` | `number` | 否 | `60.0` | `{"exclusiveMinimum":0}` |
 
@@ -474,10 +476,11 @@ Uses a judge model to decide completion when no tool call is pending.
 
 提供能力：`agent.continuation-policy:default` (API `2`)。
 
+依赖能力：`model.provider`。
+
 | 参数 | 类型 | 必填 | Schema 默认值 | 约束 |
 | --- | --- | --- | --- | --- |
 | `repeat_threshold` | `integer` | 否 | `3` | `{"minimum":1}` |
-| `model` | `object` | 是 | 未声明 | `{}` |
 | `model_binding` | `string` | 否 | `"fast"` | `{"minLength":1}` |
 | `timeout_seconds` | `number` | 否 | `60.0` | `{"exclusiveMinimum":0}` |
 
@@ -523,9 +526,9 @@ Artifacts retained by the owning Session store.
 
 提供能力：`artifact.store:default` (API `2`)。
 
-| 参数 | 类型 | 必填 | Schema 默认值 | 约束 |
-| --- | --- | --- | --- | --- |
-| `session_store` | `object` | 是 | 未声明 | `{}` |
+依赖能力：`session.store`。
+
+没有固定配置字段；额外参数以公开 Schema 为准。
 
 ### sage.context.reducer.persistent-summary
 
@@ -535,15 +538,14 @@ Summarizes complete history only after API rejection or reported usage reaches a
 
 提供能力：`context.reducer:default` (API `2`)。
 
+依赖能力：`context.summary-store`、`context.summarizer`、`context.unit-compactor`。
+
 | 参数 | 类型 | 必填 | Schema 默认值 | 约束 |
 | --- | --- | --- | --- | --- |
-| `store` | `object` | 是 | 未声明 | `{}` |
-| `summarizer` | `object` | 否 | 未声明 | `{}` |
 | `summary_target_tokens` | `integer` | 否 | `1024` | `{"minimum":1}` |
 | `protected_recent_units` | `integer` | 否 | `4` | `{"minimum":1}` |
 | `max_summary_calls` | `integer` | 否 | `64` | `{"minimum":1}` |
 | `max_summary_source_tokens` | `integer` | 否 | `24000` | `{"minimum":1}` |
-| `unit_compactor` | `object` | 否 | 未声明 | `{}` |
 
 `max_summary_source_tokens` 作为已有配置字段被 schema 接受；当前内置 reducer 工厂不以它控制输入长度。需要配置摘要源预算时，使用所选 summarizer 能力的正式参数。
 
@@ -575,9 +577,10 @@ Uses a model binding to write conversation summaries.
 
 提供能力：`context.summarizer:default` (API `2`)。
 
+依赖能力：`model.provider`。
+
 | 参数 | 类型 | 必填 | Schema 默认值 | 约束 |
 | --- | --- | --- | --- | --- |
-| `model` | `object` | 是 | 未声明 | `{}` |
 | `model_binding` | `string` | 否 | `"primary"` | `{"const":"primary"}` |
 | `max_source_tokens` | `integer` | 否 | `24000` | `{"minimum":1}` |
 | `timeout_seconds` | `number` | 否 | `300.0` | `{"exclusiveMinimum":0}` |
@@ -601,9 +604,9 @@ Persists conversation summaries through the selected SessionStore.
 
 提供能力：`context.summary-store:default` (API `2`)。
 
-| 参数 | 类型 | 必填 | Schema 默认值 | 约束 |
-| --- | --- | --- | --- | --- |
-| `derived_state` | `object` | 是 | 未声明 | `{}` |
+依赖能力：`derived-state.store`。
+
+没有固定配置字段；额外参数以公开 Schema 为准。
 
 ### sage.context.unit-compactor.reference
 
@@ -804,11 +807,11 @@ Runs a child Agent through the shared AgentLoopEngine.
 
 提供能力：`flow.node:agent` (API `2`)。
 
+依赖能力：`runtime.kernel`、`agent.child-executor`。
+
 | 参数 | 类型 | 必填 | Schema 默认值 | 约束 |
 | --- | --- | --- | --- | --- |
-| `runtime` | `object` | 是 | 未声明 | `{}` |
 | `descriptor` | `object` | 是 | 未声明 | `{}` |
-| `child_executor` | `object` | 是 | 未声明 | `{}` |
 | `workspace_policy` | `string` | 否 | 未声明 | `{"enum":["private_child","shared_parent","read_only_parent"]}` |
 
 ### sage.job.ephemeral
@@ -913,9 +916,10 @@ Uses a fast model to generate compact keywords before calling search_memory.
 
 提供能力：`memory.recall-query:default` (API `2`)。
 
+依赖能力：`model.provider`。
+
 | 参数 | 类型 | 必填 | Schema 默认值 | 约束 |
 | --- | --- | --- | --- | --- |
-| `model` | `object` | 是 | 未声明 | `{}` |
 | `language` | `string` | 否 | 未声明 | `{}` |
 | `timeout_seconds` | `number` | 否 | `60.0` | `{"exclusiveMinimum":0}` |
 
@@ -927,11 +931,11 @@ Uses Claude system, content-block, tool-use, and SSE semantics.
 
 提供能力：`model.provider:anthropic-messages` (API `2`)。
 
+依赖能力：`credentials.provider`、`model.client:default`（可选）。
+
 | 参数 | 类型 | 必填 | Schema 默认值 | 约束 |
 | --- | --- | --- | --- | --- |
 | `route` | `object` | 是 | 未声明 | `{}` |
-| `credential` | `object` | 否 | 未声明 | `{}` |
-| `client` | `object` | 否 | 未声明 | `{}` |
 | `provider_instance_id` | `string` | 否 | 未声明 | `{}` |
 
 ### sage.model.concurrency-budget
@@ -956,11 +960,11 @@ Uses native Gemini Parts, function calls, thought signatures, and SSE.
 
 提供能力：`model.provider:gemini-generate-content` (API `2`)。
 
+依赖能力：`credentials.provider`、`model.client:default`（可选）。
+
 | 参数 | 类型 | 必填 | Schema 默认值 | 约束 |
 | --- | --- | --- | --- | --- |
 | `route` | `object` | 是 | 未声明 | `{}` |
-| `credential` | `object` | 否 | 未声明 | `{}` |
-| `client` | `object` | 否 | 未声明 | `{}` |
 | `provider_instance_id` | `string` | 否 | 未声明 | `{}` |
 
 ### sage.model.openai-chat-completions
@@ -971,11 +975,11 @@ Streams chat messages and function calls through /chat/completions.
 
 提供能力：`model.provider:openai-chat-completions` (API `2`)。
 
+依赖能力：`credentials.provider`、`model.client:default`（可选）。
+
 | 参数 | 类型 | 必填 | Schema 默认值 | 约束 |
 | --- | --- | --- | --- | --- |
 | `route` | `object` | 是 | 未声明 | `{}` |
-| `credential` | `object` | 否 | 未声明 | `{}` |
-| `client` | `object` | 否 | 未声明 | `{}` |
 | `provider_instance_id` | `string` | 否 | 未声明 | `{}` |
 
 ### sage.model.openai-responses
@@ -986,11 +990,11 @@ Uses typed input/output items and Responses streaming events.
 
 提供能力：`model.provider:openai-responses` (API `2`)。
 
+依赖能力：`credentials.provider`、`model.client:default`（可选）。
+
 | 参数 | 类型 | 必填 | Schema 默认值 | 约束 |
 | --- | --- | --- | --- | --- |
 | `route` | `object` | 是 | 未声明 | `{}` |
-| `credential` | `object` | 否 | 未声明 | `{}` |
-| `client` | `object` | 否 | 未声明 | `{}` |
 | `provider_instance_id` | `string` | 否 | 未声明 | `{}` |
 
 ### sage.observability.filesystem
@@ -1024,9 +1028,9 @@ Process-local AgentPackage inventory without restart durability.
 
 提供能力：`package.registry:default` (API `2`)。
 
-| 参数 | 类型 | 必填 | Schema 默认值 | 约束 |
-| --- | --- | --- | --- | --- |
-| `resolver` | `object` | 否 | 未声明 | `{}` |
+依赖能力：`package.resolver`。
+
+没有固定配置字段；额外参数以公开 Schema 为准。
 
 ### sage.protocol.a2a
 
@@ -1105,13 +1109,13 @@ In-process sandbox for tests and ephemeral runs.
 
 提供能力：`execution.sandbox:default` (API `3`)。
 
+依赖能力：`execution.sandbox.process-handlers:default`（可选）, `execution.sandbox.network-handlers:default`（可选）.
+
 | 参数 | 类型 | 必填 | Schema 默认值 | 约束 |
 | --- | --- | --- | --- | --- |
 | `verification_key` | `object` | 是 | 未声明 | `{}` |
 | `terminal_ttl_seconds` | `integer` | 否 | `86400` | `{"minimum":1}` |
 | `max_retained_terminal_items` | `integer` | 否 | `1024` | `{"minimum":0}` |
-| `process_handlers` | `object` | 否 | 未声明 | `{}` |
-| `network_handlers` | `object` | 否 | 未声明 | `{}` |
 
 ### sage.sandbox.local-workspace
 
@@ -1232,19 +1236,27 @@ Durable per-Session MySQL store with appended Run events. No global Session inde
 | `dsn` | `string` | 是 | 未声明 | `{"minLength":1}` |
 | `table_prefix` | `string` | 否 | 未声明 | `{}` |
 
-### sage.session.postgres
+### sage.session.redis-mysql
 
-Durable per-Session PostgreSQL store with appended Run events. Single-process writers; no global Session index.
+Redis execution state shared by Sage instances, with canonical history and attachment bytes archived to MySQL. Supports multi-process writes, cross-process subscriptions and atomic worker fencing. Redis requires AOF and noeviction. Scheduling is selected independently.
 
-版本：`2.2.0`；scope：process；所有权：`owned`。
+Version: `3.0.0`; scope: process; ownership: `owned`。
 
-提供能力：`session.store:default` (API `2`)。
+Provides: `session.store:default` (API `2`)。
 
-| 参数 | 类型 | 必填 | Schema 默认值 | 约束 |
+| Parameter | Type | Required | Schema Default | Constraints |
 | --- | --- | --- | --- | --- |
-| `dsn` | `string` | 是 | 未声明 | `{"minLength":1}` |
-| `schema_name` | `string` | 否 | 未声明 | `{"minLength":1}` |
-| `table_prefix` | `string` | 否 | 未声明 | `{"minLength":1}` |
+| `dsn` | `string` | Yes | Not declared | MySQL DSN |
+| `redis_url` | `string` | Yes | Not declared | Redis URL |
+| `table_prefix` | `string` | No | Not declared | MySQL table namespace |
+| `key_prefix` | `string` | No | Derived from MySQL identity with `:distributed` suffix | Redis namespace |
+| `archive_interval_seconds` | `number` | No | `1` | Positive |
+| `retention_seconds` | `integer` | No | `3600` | At least 1 |
+| `coordination_ttl_seconds` | `number` | No | `30` | Positive |
+| `coordination_wait_seconds` | `number` | No | `10` | Positive |
+| `event_poll_seconds` | `number` | No | `0.1` | Positive |
+| `max_preview_events` | `integer` | No | `2048` | At least 1 |
+| `preview_retention_seconds` | `integer` | No | `300` | At least 1 |
 
 ### sage.skill.filesystem
 
@@ -1349,10 +1361,11 @@ In-memory Tool catalog and executor without restart durability.
 
 提供能力：`tool.catalog:ephemeral` (API `2`)、`tool.executor:ephemeral` (API `2`)。
 
+依赖能力：`tool.handlers:default`（可选）。
+
 | 参数 | 类型 | 必填 | Schema 默认值 | 约束 |
 | --- | --- | --- | --- | --- |
 | `tools` | `object` | 否 | 未声明 | `{}` |
-| `handlers` | `object` | 否 | 未声明 | `{}` |
 
 ### sage.tool.mcp
 
@@ -1361,6 +1374,8 @@ Bridges configured MCP servers into the Sage Tool catalog and executor.
 版本：`2.0.0`；scope：agent, process, run；所有权：`owned`。
 
 提供能力：`tool.catalog:mcp` (API `2`)、`tool.executor:mcp` (API `2`)。
+
+依赖能力：`mcp.session-factory:default`（可选）。
 
 | 参数 | 类型 | 必填 | Schema 默认值 | 约束 |
 | --- | --- | --- | --- | --- |
@@ -1379,7 +1394,6 @@ Bridges configured MCP servers into the Sage Tool catalog and executor.
 | `servers[].max_pages` | `integer` | 否 | `64` | `{"maximum":1024,"exclusiveMinimum":0}` |
 | `servers[].max_schema_bytes` | `integer` | 否 | `262144` | `{"maximum":16777216,"exclusiveMinimum":0}` |
 | `servers[].max_result_bytes` | `integer` | 否 | `4194304` | `{"maximum":67108864,"exclusiveMinimum":0}` |
-| `session_factory` | `object` | 否 | 未声明 | `{}` |
 
 ### sage.tool.multi-agent
 
@@ -1389,10 +1403,9 @@ V2-native Fibre and Team delegation tools.
 
 提供能力：`tool.catalog:multi-agent` (API `2`)、`tool.executor:multi-agent` (API `2`)。
 
-| 参数 | 类型 | 必填 | Schema 默认值 | 约束 |
-| --- | --- | --- | --- | --- |
-| `coordinator` | `object` | 是 | 未声明 | `{}` |
-| `runtime` | `object` | 是 | 未声明 | `{}` |
+依赖能力：`agent.coordinator`、`runtime.kernel`。
+
+没有固定配置字段；额外参数以公开 Schema 为准。
 
 ### sage.tool.official
 
@@ -1414,9 +1427,10 @@ Decorator-backed Tool operations owned by the Skill module.
 
 提供能力：`tool.catalog:skill` (API `2`)、`tool.executor:skill` (API `2`)。
 
+依赖能力：`skill.loader`。
+
 | 参数 | 类型 | 必填 | Schema 默认值 | 约束 |
 | --- | --- | --- | --- | --- |
-| `loader` | `object` | 是 | 未声明 | `{}` |
 | `language` | `string` | 否 | 未声明 | `{}` |
 
 ### sage.trace.langfuse

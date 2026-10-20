@@ -17,7 +17,9 @@ ref: v2-ENV_VARS
 | 变量 | 默认值 / 用途 |
 | --- | --- |
 | `SAGE_SERVER_REDIS_URL` | 可选的 Session 归档 Redis 地址；需要同时配置 MySQL。 |
-| `SAGE_SERVER_SESSION_STORE_PLUGIN` | 默认未设置，按连接地址选择 MySQL 或单写者 Redis/MySQL。设为 `sage.session.redis-mysql-distributed` 时选择分布式会话及配套 Redis 调度器，须同时配置两个连接地址。 |
+| `SAGE_SERVER_SESSION_STORE_PLUGIN` | 默认未设置，按连接地址选择 MySQL 或 Redis/MySQL。`sage.session.redis-mysql` 支持多实例共享状态。 |
+| `SAGE_SERVER_SCHEDULER_PLUGIN` | 默认 `sage.scheduler.ephemeral`；显式设为 `sage.scheduler.redis-distributed` 时启用共享 Run 调度及 `sage.job.redis-distributed`，须同时配置 MySQL、Redis 地址。工作区文件仍为节点本地目录。 |
+| `SAGE_SERVER_SESSION_STORE_KEY_PREFIX` | 可显式指定 Redis 会话命名空间；共享会话的实例须使用相同前缀。 |
 | `SAGE_SERVER_MYSQL_URL` | 必须配置的 MySQL 连接地址 |
 | `SAGE_SERVER_HOST` | `127.0.0.1` |
 | `SAGE_SERVER_PORT` | `8090` |
@@ -66,7 +68,7 @@ ref: v2-ENV_VARS
 | `SAGE_SERVER_PHOENIX_API_KEY_ENV` | `PHOENIX_API_KEY`；保存 Phoenix API 密钥的环境变量名 |
 | `SAGE_SERVER_PUBLIC_URL` | 默认空：使用请求来源地址；反向代理后的 A2A 应设置公开来源地址 |
 
-并发和容量参数必须为正数，约束单进程，不是分布式配额。Redis 不再是启动依赖或 AG-UI 回放存储。
+并发和容量参数必须为正数。默认调度器按单进程计数，分布式调度器在各实例之间共享 Run 额度。分布式 Job 插件另有共享的接纳、执行和输出上限。选择 Redis 运行时插件时须提供 Redis；该选择不会使本地工作区和记忆数据库自动支持跨节点。
 
 ## Desktop 与嵌入式运行时
 

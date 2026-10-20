@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from sagents.v2.context.references import compact_unit_to_references
+from sagents.v2.context.plugins._shared.references import compact_unit_to_references
 
 
 class ReferenceContextUnitCompactor:
