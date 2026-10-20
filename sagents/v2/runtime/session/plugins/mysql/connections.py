@@ -85,7 +85,7 @@ class MysqlConnectionBudget:
 
                 async def release():
                     try:
-                        if reader:
+                        if reader and not connection.closed:
                             await connection.rollback()
                     except BaseException:
                         # Never recycle uncertain transaction state.
@@ -93,7 +93,18 @@ class MysqlConnectionBudget:
                         raise
                     finally:
                         await lease.__aexit__(*exception)
-                await finish_connection_cleanup(release())
+                try:
+                    await finish_connection_cleanup(release())
+                except Exception as cleanup_error:
+                    cancellation = exception[1]
+                    if not isinstance(cancellation, asyncio.CancelledError):
+                        raise
+                    # Cancellation may have arrived in the query, before the
+                    # shielded cleanup started. Preserve it so shutdown exits
+                    # background loops instead of treating cleanup as a retry.
+                    cancellation.add_note(
+                        f"MySQL connection cleanup also failed: {cleanup_error!r}"
+                    )
         finally:
             if acquired:
                 self._slots.release()

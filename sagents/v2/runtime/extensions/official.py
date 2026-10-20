@@ -398,7 +398,11 @@ def _register_infrastructure(registry: ExtensionRegistry) -> None:
             unit_compactor=dependencies.require_unique("context.unit-compactor"),
             max_summary_calls=int(context.config.get("max_summary_calls", 64)),
         ),
-        dependencies=(ExtensionDependency(capability="context.summary-store"), ExtensionDependency(capability="context.summarizer"), ExtensionDependency(capability="context.unit-compactor")),
+        dependencies=(
+            ExtensionDependency(capability="context.summary-store"),
+            ExtensionDependency(capability="context.summarizer"),
+            ExtensionDependency(capability="context.unit-compactor"),
+        ),
         scopes={ExtensionScope.AGENT, ExtensionScope.RUN},
         config_schema={
             "type": "object",
