@@ -105,4 +105,7 @@ class PhoenixTraceSink(OtlpTraceTransport):
         elif span.name == "tool.call":
             values["tool.name"] = values.get("tool_name")
             values["tool.parameters"] = values.get("input")
+        # Scalar keys shadow Phoenix's nested OpenInference input/output fields.
+        values.pop("input", None)
+        values.pop("output", None)
         return values

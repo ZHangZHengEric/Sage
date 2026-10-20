@@ -81,6 +81,35 @@ console_router = APIRouter(prefix="/api/observability", tags=["observability"])
 performance_router = APIRouter(prefix="/api/observability", tags=["observability"])
 
 
+def _trace_console(host):
+    sink = host.application.service("observability.trace-sink")
+    settings = host.settings
+    plugin = getattr(sink, "plugin_id", "")
+    if plugin == "sage.trace.phoenix":
+        entry = ("phoenix", "Phoenix", settings.phoenix_public_url)
+    elif plugin == "sage.trace.langfuse":
+        entry = ("langfuse", "Langfuse", settings.langfuse_public_url or settings.langfuse_base_url)
+    elif plugin == "sage.trace.otlp" and settings.jaeger_url and not settings.trace_otlp_endpoint:
+        entry = ("jaeger", "Jaeger", settings.jaeger_public_url)
+    else:
+        return None
+    service_id, label, url = entry
+    parsed = urlparse(url)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc or parsed.username is not None:
+        return None
+    return {"id": service_id, "label": label, "href": url, "external": True}
+
+
+@performance_router.get("/services")
+async def observability_services(_: AdminUser, host: HostDep):
+    links = []
+    if host.diagnostics is not None and host.diagnostics.available:
+        links.append({"id": "performance", "label": "运行性能", "href": "/performance", "external": False})
+    if console := _trace_console(host):
+        links.append(console)
+    return success(links)
+
+
 @performance_router.get("/performance")
 async def performance(
     _: AdminUser,
@@ -125,7 +154,8 @@ async def performance(
 
 
 @console_router.get("/console")
-async def open_trace_console(request: Request, user: AdminUser):
-    return RedirectResponse(
-        url=request.app.state.service.settings.trace_console_url, status_code=307
-    )
+async def open_trace_console(_: AdminUser, host: HostDep):
+    console = _trace_console(host)
+    if console is None:
+        raise HTTPException(404, "未启用观测控制台")
+    return RedirectResponse(url=console["href"], status_code=307)

@@ -144,3 +144,61 @@ def test_phoenix_environment_manifest_and_admin_selection(tmp_path, monkeypatch)
     assert store.read() == saved
     assert "never-save-this-key" not in store.path.read_text()
     assert builtin_extension_registry().get(selection.plugin).descriptor.config_schema["required"] == ["endpoint"]
+
+
+@pytest.mark.parametrize(
+    "options, console",
+    [
+        ({"trace_backend": "noop"}, None),
+        ({"trace_backend": "phoenix", "phoenix_endpoint": "http://internal/v1/traces",
+          "phoenix_public_url": "https://phoenix.example"}, ("phoenix", "Phoenix", "https://phoenix.example")),
+        ({"trace_backend": "phoenix", "phoenix_endpoint": "http://internal/v1/traces"}, None),
+        ({"trace_backend": "langfuse", "langfuse_base_url": "https://lf.example"},
+         ("langfuse", "Langfuse", "https://lf.example")),
+        ({"jaeger_url": "http://internal:4317", "jaeger_public_url": "https://jaeger.example"},
+         ("jaeger", "Jaeger", "https://jaeger.example")),
+        ({"trace_backend": "otlp", "trace_otlp_endpoint": "http://collector:4317"}, None),
+    ],
+)
+def test_observability_services_follow_active_backend(tmp_path, monkeypatch, options, console):
+    pytest.importorskip("opentelemetry.exporter.otlp.proto.http.trace_exporter")
+    monkeypatch.setenv("LANGFUSE_PUBLIC_KEY", "pk-test")
+    monkeypatch.setenv("LANGFUSE_SECRET_KEY", "sk-test")
+    service = make_test_service(tmp_path, **options)
+    with TestClient(create_app(service=service)) as client:
+        assert client.get("/api/observability/services").status_code == 401
+        client.post("/api/auth/login", json={"username": "admin", "password": "admin12345"})
+        response = client.get("/api/observability/services")
+        assert response.status_code == 200
+        links = response.json()["data"]
+        assert links == [
+            {"id": "performance", "label": "运行性能", "href": "/performance", "external": False},
+            *([{"id": console[0], "label": console[1], "href": console[2], "external": True}]
+              if console else []),
+        ]
+        if console is None:
+            assert client.get("/api/observability/console", follow_redirects=False).status_code == 404
+        # Availability is live; failed diagnostic capture must not be advertised.
+        service.diagnostics.available = False
+        assert all(link["id"] != "performance" for link in client.get("/api/observability/services").json()["data"])
+
+
+def test_observability_uses_started_plugin_and_rejects_non_admin(tmp_path):
+    from app.v2.server.config.plugins import ServerPluginConfig, revision
+
+    service = make_test_service(
+        tmp_path, trace_backend="phoenix", phoenix_endpoint="http://internal/v1/traces",
+        phoenix_public_url="https://phoenix.example",
+    )
+    ServerPluginConfig(tmp_path).save(
+        {"observability.trace-sink": {"plugin": "sage.trace.noop"}}, revision({})
+    )
+    with TestClient(create_app(service=service)) as client:
+        client.post("/api/auth/login", json={"username": "admin", "password": "admin12345"})
+        links = client.get("/api/observability/services").json()["data"]
+        assert [link["id"] for link in links] == ["performance"]
+        assert client.get("/api/observability/console", follow_redirects=False).status_code == 404
+        client.post("/api/auth/register", json={"username": "viewer", "password": "viewer12345"})
+        client.post("/api/auth/login", json={"username": "viewer", "password": "viewer12345"})
+        assert client.get("/api/observability/services").status_code == 403
+        assert client.get("/api/observability/console", follow_redirects=False).status_code == 403

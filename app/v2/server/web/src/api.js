@@ -62,6 +62,7 @@ async function catalog(path, adminPath, all = true) {
 }
 
 export const api = {
+  observabilityServices: () => request('/api/observability/services'),
   performance: params => request(`/api/observability/performance?${new URLSearchParams(params)}`),
   performanceAgents: () => request('/api/admin/agents'),
   listPlugins: () => request('/api/plugins'),
