@@ -47,6 +47,6 @@ python -m app.v2.server
 - 工作区文件保存在配置的数据根目录下，按租户分隔。
 - 使用**单 worker**。内置 SessionStore 拒绝第二个 writer；Scheduler 和 JobRuntime 不提供多宿主持久运行保证。
 
-[`deploy/`](https://github.com/ZHangZHengEric/Sage/blob/main/deploy/README.md) 包含多套部署配置，使用前应核对具体环境的镜像和启动模块，不能将所有 Compose 环境都视作 Server v2。
+Server v2 部署位于 [`deploy/`](https://github.com/ZHangZHengEric/Sage/blob/main/deploy/README.md)；v1 的 Compose 和 Kubernetes 部署位于 [`app/v1/deploy/`](https://github.com/ZHangZHengEric/Sage/blob/main/app/v1/deploy/README.md)。
 
 [环境变量](../ENV_VARS.md) · [HTTP API](../api/HTTP_API_REFERENCE.md) · [组件参考](https://github.com/ZHangZHengEric/Sage/blob/main/app/v2/server/README.md)

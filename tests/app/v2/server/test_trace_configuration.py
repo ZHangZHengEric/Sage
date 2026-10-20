@@ -53,6 +53,7 @@ def test_trace_env_settings_and_explicit_noop_override(tmp_path, monkeypatch):
         {"trace_backend": "unknown"},
         {"trace_backend": "otlp"},
         {"trace_backend": "langfuse"},
+        {"trace_backend": "phoenix"},
         {"trace_sample_rate": 2},
         {"trace_content_mode": "raw"},
         {"trace_max_content_chars": 1},
@@ -78,7 +79,8 @@ def test_generic_otlp_http_configuration(tmp_path):
     assert config["insecure"] is False
 
 
-def test_langfuse_health_and_admin_console(tmp_path: Path, monkeypatch):
+@pytest.mark.parametrize("backend", ["langfuse", "phoenix"])
+def test_trace_health_and_admin_console(tmp_path: Path, monkeypatch, backend):
     pytest.importorskip("opentelemetry.exporter.otlp.proto.http.trace_exporter")
     # Host startup really constructs the registered plugin; no external I/O is
     # needed until a Run emits spans.
@@ -86,14 +88,16 @@ def test_langfuse_health_and_admin_console(tmp_path: Path, monkeypatch):
     monkeypatch.setenv("LANGFUSE_SECRET_KEY", "sk-test")
     service = make_test_service(
         tmp_path,
-        trace_backend="langfuse",
+        trace_backend=backend,
+        phoenix_endpoint="http://localhost:6006/v1/traces",
+        phoenix_public_url="https://phoenix.example/projects/p",
         langfuse_base_url="https://internal.example",
         langfuse_public_url="https://lf.example/project/p",
     )
     with TestClient(create_app(service=service)) as client:
         health = client.get("/health").json()["data"]
         assert health["trace_enabled"] is True
-        assert health["trace_backend"] == "langfuse"
+        assert health["trace_backend"] == backend
         assert health["trace_console"] is True
         metrics = client.get("/metrics").text
         assert "trace_failed_exports" in metrics
@@ -110,4 +114,33 @@ def test_langfuse_health_and_admin_console(tmp_path: Path, monkeypatch):
         assert response.status_code == 200
         response = client.get("/api/observability/console", follow_redirects=False)
         assert response.status_code == 307
-        assert response.headers["location"] == "https://lf.example/project/p"
+        assert response.headers["location"] == (
+            "https://lf.example/project/p" if backend == "langfuse"
+            else "https://phoenix.example/projects/p"
+        )
+
+
+def test_phoenix_environment_manifest_and_admin_selection(tmp_path, monkeypatch):
+    from app.v2.server.config.plugins import ServerPluginConfig, revision
+
+    monkeypatch.setenv("SAGE_SERVER_MYSQL_URL", "mysql://localhost/db")
+    monkeypatch.setenv("SAGE_SERVER_TRACE_BACKEND", "phoenix")
+    monkeypatch.setenv("SAGE_SERVER_PHOENIX_ENDPOINT", "https://phoenix.example/v1/traces")
+    monkeypatch.setenv("SAGE_SERVER_PHOENIX_PROJECT_NAME", "sage-test")
+    monkeypatch.setenv("SAGE_SERVER_PHOENIX_API_KEY_ENV", "CUSTOM_PHOENIX_KEY")
+    monkeypatch.setenv("CUSTOM_PHOENIX_KEY", "never-save-this-key")
+    settings = ServerSettings.from_env(data_root=tmp_path)
+    manifest = server_v2_manifest(settings)
+    selection = manifest.runtime.capabilities["observability.trace-sink"]
+    assert selection.plugin == "sage.trace.phoenix"
+    assert selection.config["project_name"] == "sage-test"
+    assert selection.config["api_key_env"] == "CUSTOM_PHOENIX_KEY"
+    assert not settings.trace_console_url
+    assert "never-save-this-key" not in manifest.model_dump_json()
+    store = ServerPluginConfig(tmp_path)
+    saved = store.save(
+        {"observability.trace-sink": selection.model_dump(mode="json")}, revision({})
+    )
+    assert store.read() == saved
+    assert "never-save-this-key" not in store.path.read_text()
+    assert builtin_extension_registry().get(selection.plugin).descriptor.config_schema["required"] == ["endpoint"]

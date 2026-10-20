@@ -198,7 +198,7 @@ Server API 用 `external_tools` 配置外部工具，页面与内置 `tools` 分
 
 ## 模型观测
 
-支持 `sage.trace.otlp` 和 `sage.trace.langfuse`，共用运行、工具、模型输入输出、token 与首 token 观测。配置见 [V2 观测说明](../../../docs/zh/architecture/sagents-v2-observability.md) 和 `.env.example`。Langfuse/OTLP 需要安装 `.[otel]`；管理页按选中的后端显示入口。
+支持独立选择 `sage.trace.otlp`、`sage.trace.langfuse` 或 `sage.trace.phoenix`，共用运行、工具、模型输入输出、token 与首 token 观测。配置见 [V2 观测说明](../../../docs/zh/architecture/sagents-v2-observability.md) 和 `.env.example`。这些导出插件需要安装 `.[otel]`；配置公开访问地址后，管理页显示对应平台入口。
 
 
 ### 内网业务调用 V2 chat

@@ -33,6 +33,8 @@ from sagents.v2.runtime.observability.traces import (
 )
 
 _LAZY_EXPORTS = {
+    "PhoenixTraceSink": ("sagents.v2.runtime.observability.plugins.phoenix", "PhoenixTraceSink"),
+    "phoenix_available": ("sagents.v2.runtime.observability.plugins.phoenix", "phoenix_available"),
     "LangfuseTraceSink": ("sagents.v2.runtime.observability.plugins.langfuse", "LangfuseTraceSink"),
     "langfuse_available": ("sagents.v2.runtime.observability.plugins.langfuse", "langfuse_available"),
     "FilesystemDiagnosticSink": (
@@ -67,6 +69,8 @@ _LAZY_EXPORTS = {
 }
 
 __all__ = [
+    "PhoenixTraceSink",
+    "phoenix_available",
     "LangfuseTraceSink",
     "langfuse_available",
     "DiagnosticSink",

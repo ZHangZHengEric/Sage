@@ -172,7 +172,7 @@ The frontend subscribes to chunks via SSE and renders them based on `MessageChun
 ## Deployment Shapes
 
 - `python -m app.server.main` for development.
-- `deploy/prod/docker-compose.yml` / `deploy/images/` images for production (recommended).
+- `app/v1/deploy/prod/docker-compose.yml` / `app/v1/deploy/images/` images for production (recommended).
 
 See [Configuration](CONFIGURATION.md) and [Getting Started](../../../en/applications/GETTING_STARTED.md).
 

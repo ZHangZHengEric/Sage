@@ -67,6 +67,7 @@ class OtlpTraceTransport:
         max_queue_size: int = 2048,
         max_active_spans: int = 4096,
         timeout_seconds: float = 3.0,
+        resource_attributes: Mapping[str, str] | None = None,
     ) -> None:
         protocol = protocol.strip().lower()
         if protocol not in {"grpc", "http"}:
@@ -83,6 +84,7 @@ class OtlpTraceTransport:
             protocol,
         )
         self.insecure, self.environment = bool(insecure), environment
+        self.resource_attributes = dict(resource_attributes or {})
         self.content_mode, self.max_content_chars = content_mode, max_content_chars
         self.max_active_spans, self.timeout_seconds = max_active_spans, timeout_seconds
         self._lock = threading.RLock()
@@ -356,7 +358,7 @@ class OtlpTraceTransport:
             )
         )
         provider = TracerProvider(
-            resource=Resource.create({SERVICE_NAME: self.service_name}),
+            resource=Resource.create({**self.resource_attributes, SERVICE_NAME: self.service_name}),
             sampler=TraceIdRatioBased(sample_rate),
             id_generator=SageIdGenerator(),
             span_limits=SpanLimits(max_attribute_length=self.max_content_chars + 128),

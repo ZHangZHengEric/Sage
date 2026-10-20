@@ -47,6 +47,6 @@ Startup idempotently upgrades legacy tables: it adds missing `threads.agent_id` 
 - Workspace files live under the configured data root's tenant directories.
 - Run **one worker**. The built-in SessionStore rejects a second writer; the Scheduler and JobRuntime do not supply multi-host durability.
 
-[`deploy/`](https://github.com/ZHangZHengEric/Sage/blob/main/deploy/README.md) contains several stacks. Inspect the image and module used by a Compose environment before treating it as a Server v2 deployment.
+Server v2 deployment lives in [`deploy/`](https://github.com/ZHangZHengEric/Sage/blob/main/deploy/README.md). The v1 Compose and Kubernetes deployment lives in [`app/v1/deploy/`](https://github.com/ZHangZHengEric/Sage/blob/main/app/v1/deploy/README.md).
 
 [Environment reference](../ENV_VARS.md) · [HTTP API](../api/HTTP_API_REFERENCE.md) · [Component reference](https://github.com/ZHangZHengEric/Sage/blob/main/app/v2/server/README.md)

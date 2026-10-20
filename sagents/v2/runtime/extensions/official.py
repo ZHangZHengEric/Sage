@@ -68,6 +68,8 @@ from sagents.v2.runtime.observability import (
     OtlpTraceSink,
     LangfuseTraceSink,
     langfuse_available,
+    PhoenixTraceSink,
+    phoenix_available,
     StdoutLogSink,
     otel_available,
 )
@@ -856,6 +858,38 @@ def _register_infrastructure(registry: ExtensionRegistry) -> None:
                 "secret_key_env": {"type": "string", "default": "LANGFUSE_SECRET_KEY"},
                 "service_name": {"type": "string", "default": "sage"},
                 "ingestion_version": {"type": "integer", "enum": [3, 4], "default": 4},
+                **_TRACE_PROPERTIES,
+            },
+            "additionalProperties": False,
+        },
+        capabilities={"exports_otlp": True},
+    )
+    _one(
+        registry,
+        PhoenixTraceSink,
+        "observability.trace-sink",
+        lambda context, dependencies: PhoenixTraceSink(
+            endpoint=context.config["endpoint"],
+            project_name=context.config.get("project_name", "sage"),
+            api_key=os.environ.get(
+                context.config.get("api_key_env", "PHOENIX_API_KEY"), ""
+            ),
+            service_name=context.config.get("service_name", "sage"),
+            **_trace_options(context.config),
+        ),
+        scopes={ExtensionScope.PROCESS},
+        availability=ExtensionAvailability(
+            available=phoenix_available(),
+            reason=None if phoenix_available() else "optional OTLP HTTP exporter is not installed",
+        ),
+        config_schema={
+            "type": "object",
+            "required": ["endpoint"],
+            "properties": {
+                "endpoint": {"type": "string", "minLength": 1},
+                "project_name": {"type": "string", "minLength": 1, "default": "sage"},
+                "api_key_env": {"type": "string", "default": "PHOENIX_API_KEY"},
+                "service_name": {"type": "string", "default": "sage"},
                 **_TRACE_PROPERTIES,
             },
             "additionalProperties": False,

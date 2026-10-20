@@ -6,8 +6,9 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 
 def test_deployment_does_not_bundle_elasticsearch():
     deployment_sources = (
-        REPO_ROOT / "deploy/compose.sh",
-        REPO_ROOT / "deploy/prod/docker-compose.yml",
+        REPO_ROOT / "app/v1/deploy/compose.sh",
+        REPO_ROOT / "app/v1/deploy/prod/docker-compose.yml",
+        REPO_ROOT / "app/v1/deploy/README.md",
         REPO_ROOT / "deploy/README.md",
         REPO_ROOT / "scripts/v1/dev-up.sh",
         REPO_ROOT / "docs/en/applications/WEB.md",
@@ -27,4 +28,4 @@ def test_deployment_does_not_bundle_elasticsearch():
         for marker in bundled_elasticsearch_markers:
             assert marker not in content, f"{source} still contains {marker}"
 
-    assert not (REPO_ROOT / "deploy/images/Dockerfile.es").exists()
+    assert not (REPO_ROOT / "app/v1/deploy/images/Dockerfile.es").exists()

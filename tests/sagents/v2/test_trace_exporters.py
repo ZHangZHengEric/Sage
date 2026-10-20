@@ -28,6 +28,7 @@ from sagents.v2.runtime.observability import (
 from sagents.v2.runtime.observability.content import trace_content
 from sagents.v2.runtime.observability.plugins.otlp import OtlpTraceSink
 from sagents.v2.runtime.observability.plugins.langfuse import LangfuseTraceSink
+from sagents.v2.runtime.observability.plugins.phoenix import PhoenixTraceSink
 from sagents.v2.runtime.observability.traces import current_trace_context
 from sagents.v2.testing.plugins.scripted_model import (
     ScriptedModelProvider,
@@ -45,6 +46,8 @@ def make_sink(kind="otlp", **options):
             exporter=exporter,
             **options,
         )
+    elif kind == "phoenix":
+        sink = PhoenixTraceSink(endpoint="http://localhost:6006/v1/traces", exporter=exporter, **options)
     else:
         sink = OtlpTraceSink(exporter=exporter, **options)
     return sink, exporter
@@ -61,7 +64,7 @@ def request():
     )
 
 
-@pytest.mark.parametrize("kind", ["otlp", "langfuse"])
+@pytest.mark.parametrize("kind", ["otlp", "langfuse", "phoenix"])
 def test_export_preserves_root_remote_and_ended_parent_ids(kind):
     sink, exporter = make_sink(kind)
     root = TraceSpan(trace_id="1" * 32, span_id="2" * 16, name="agent.run")
@@ -88,7 +91,7 @@ def test_export_preserves_root_remote_and_ended_parent_ids(kind):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("kind", ["otlp", "langfuse"])
+@pytest.mark.parametrize("kind", ["otlp", "langfuse", "phoenix"])
 async def test_complete_generation_contains_content_usage_and_first_token(kind):
     sink, exporter = make_sink(kind)
     response = ModelResponse(
@@ -299,7 +302,8 @@ def test_sampling_and_active_limit_are_bounded():
     sink.close()
 
 
-def test_real_http_export_uses_langfuse_endpoint_auth_and_protobuf():
+@pytest.mark.parametrize("kind, api_key", [("langfuse", ""), ("phoenix", "test-key"), ("phoenix", "")])
+def test_real_http_export_uses_backend_endpoint_auth_and_protobuf(kind, api_key):
     pytest.importorskip("opentelemetry.exporter.otlp.proto.http.trace_exporter")
     from opentelemetry.proto.collector.trace.v1.trace_service_pb2 import (
         ExportTraceServiceRequest,
@@ -327,12 +331,16 @@ def test_real_http_export_uses_langfuse_endpoint_auth_and_protobuf():
     worker = threading.Thread(target=server.serve_forever, daemon=True)
     worker.start()
     try:
-        sink = LangfuseTraceSink(
-            base_url=f"http://127.0.0.1:{server.server_port}",
-            public_key="pk-test",
-            secret_key="sk-test",
-            timeout_seconds=2,
-        )
+        if kind == "langfuse":
+            sink = LangfuseTraceSink(
+                base_url=f"http://127.0.0.1:{server.server_port}",
+                public_key="pk-test", secret_key="sk-test", timeout_seconds=2,
+            )
+        else:
+            sink = PhoenixTraceSink(
+                endpoint=f"http://127.0.0.1:{server.server_port}/prefix/v1/traces",
+                project_name="sage-wire", api_key=api_key, timeout_seconds=2,
+            )
         root = StructuredTracer(sink, "test").start_span(
             "agent.run", session_id="session"
         )
@@ -340,10 +348,18 @@ def test_real_http_export_uses_langfuse_endpoint_auth_and_protobuf():
         sink.close()
         assert sink.failed_exports == 0
         path, headers, body = received[0]
-        assert path == "/api/public/otel/v1/traces"
-        assert headers["authorization"] == "Basic cGstdGVzdDpzay10ZXN0"
-        assert headers["x-langfuse-ingestion-version"] == "4"
+        if kind == "langfuse":
+            assert path == "/api/public/otel/v1/traces"
+            assert headers["authorization"] == "Basic cGstdGVzdDpzay10ZXN0"
+            assert headers["x-langfuse-ingestion-version"] == "4"
+        else:
+            assert path == "/prefix/v1/traces"
+            assert headers.get("authorization") == (f"Bearer {api_key}" if api_key else None)
+            assert "x-langfuse-ingestion-version" not in headers
         data = ExportTraceServiceRequest.FromString(body)
+        if kind == "phoenix":
+            resources = {item.key: item.value.string_value for item in data.resource_spans[0].resource.attributes}
+            assert resources["openinference.project.name"] == "sage-wire"
         exported = data.resource_spans[0].scope_spans[0].spans[0]
         assert exported.trace_id.hex() == root.span.trace_id
         assert exported.span_id.hex() == root.span.span_id

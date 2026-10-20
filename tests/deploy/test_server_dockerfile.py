@@ -3,7 +3,7 @@ from pathlib import Path
 
 def test_server_installs_one_shared_browser_after_playwright_versions_are_resolved():
     repo_root = Path(__file__).resolve().parents[2]
-    dockerfile = (repo_root / "deploy/images/Dockerfile.server").read_text(
+    dockerfile = (repo_root / "app/v1/deploy/images/Dockerfile.server").read_text(
         encoding="utf-8"
     )
 
@@ -24,7 +24,7 @@ def test_server_installs_one_shared_browser_after_playwright_versions_are_resolv
 
 def test_server_downloads_playwright_browsers_from_domestic_mirror():
     repo_root = Path(__file__).resolve().parents[2]
-    dockerfile = (repo_root / "deploy/images/Dockerfile.server").read_text(
+    dockerfile = (repo_root / "app/v1/deploy/images/Dockerfile.server").read_text(
         encoding="utf-8"
     )
 
@@ -45,7 +45,7 @@ def test_server_downloads_playwright_browsers_from_domestic_mirror():
 
 def test_server_prunes_desktop_only_im_dependencies():
     repo_root = Path(__file__).resolve().parents[2]
-    dockerfile = (repo_root / "deploy/images/Dockerfile.server").read_text(
+    dockerfile = (repo_root / "app/v1/deploy/images/Dockerfile.server").read_text(
         encoding="utf-8"
     )
 
@@ -61,7 +61,7 @@ def test_server_prunes_desktop_only_im_dependencies():
 
 def test_server_does_not_install_removed_auth_or_verification_dependencies():
     repo_root = Path(__file__).resolve().parents[2]
-    dockerfile = (repo_root / "deploy/images/Dockerfile.server").read_text(
+    dockerfile = (repo_root / "app/v1/deploy/images/Dockerfile.server").read_text(
         encoding="utf-8"
     )
 

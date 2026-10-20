@@ -1,6 +1,6 @@
 ---
 layout: default
-title: 模型观测与 Langfuse
+title: 模型观测、Langfuse 与 Phoenix
 parent: 架构
 nav_order: 10
 lang: zh
@@ -9,13 +9,13 @@ ref: v2-detail-sagents-v2-observability
 
 {% include lang_switcher.html %}
 
-# SAgents V2 模型观测与 Langfuse
+# SAgents V2 模型观测、Langfuse 与 Phoenix
 
 ## 职责
 
 `DiagnosticSink` 保存本地模型请求/响应及 wire request，供 Session 的模型诊断查看使用；它不是恢复依据。`TraceSink` 表达 Agent、模型、工具的生命周期、输入输出、用量、状态与父子关系。两者直接消费执行时的数据，互不读取对方的文件，也不依赖观测后端恢复 Run。诊断写入失败只告警，不中断模型调用。
 
-`ObservedRunDriver` 负责 Agent 与工具，`RecordingModelProvider` 负责模型。它们产生同一份厂商无关 `TraceSpan`，`sage.trace.otlp` 导出通用/GenAI 字段，`sage.trace.langfuse` 在公共 OTLP 传输上添加 Langfuse 映射。没有新增数据库表或持久化观测队列。
+`ObservedRunDriver` 负责 Agent 与工具，`RecordingModelProvider` 负责模型。它们产生同一份厂商无关 `TraceSpan`，`sage.trace.otlp` 导出通用/GenAI 字段，`sage.trace.langfuse` 和 `sage.trace.phoenix` 分别在公共 OTLP 传输上添加平台字段映射。没有新增数据库表或持久化观测队列。
 
 ## 对话耗时诊断
 
@@ -110,6 +110,23 @@ SAGE_SERVER_LANGFUSE_INGESTION_VERSION=4
 
 地址应为所选区域/自托管实例的根 URL。插件追加 `/api/public/otel/v1/traces`，使用 OTLP/HTTP protobuf 和 Basic Auth；v4 添加 ingestion header，兼容的 v3 实例选择 3。浏览器入口可通过 `SAGE_SERVER_LANGFUSE_PUBLIC_URL` 指向具体项目。项目密钥仅从环境读取，manifest 只保存环境变量名；可用 `SAGE_SERVER_LANGFUSE_PUBLIC_KEY_ENV` 和 `SAGE_SERVER_LANGFUSE_SECRET_KEY_ENV` 更改名字。
 
+Phoenix（与 Langfuse 独立选择）：
+
+```dotenv
+SAGE_SERVER_TRACE_BACKEND=phoenix
+SAGE_SERVER_PHOENIX_ENDPOINT=http://127.0.0.1:6006/v1/traces
+SAGE_SERVER_PHOENIX_PROJECT_NAME=sage
+SAGE_SERVER_PHOENIX_PUBLIC_URL=http://127.0.0.1:6006
+# 需要认证的实例才设置；本地无认证实例可以省略
+PHOENIX_API_KEY=your-api-key
+```
+
+`endpoint` 是完整的 OTLP/HTTP protobuf 接收地址，包含 `/v1/traces`；云端实例填写提供的完整地址并保留路径前缀。API Key 使用 Bearer Auth，可通过 `SAGE_SERVER_PHOENIX_API_KEY_ENV` 更改读取的环境变量名，manifest 不保存密钥值。可选的 `SAGE_SERVER_PHOENIX_PUBLIC_URL` 单独配置浏览器入口。
+
+SDK 插件 ID 为 `sage.trace.phoenix`，配置字段为 `endpoint`、`project_name`、`api_key_env`、`service_name` 及公共 trace 选项。Server 的「链路追踪」插件中可单独选择 Phoenix；保存后重启 Server 生效。
+
+Phoenix 项目使用资源字段 `openinference.project.name`；Agent、模型、工具分别映射为 OpenInference 的 `AGENT`、`LLM`、`TOOL`。`session.id` 使用根 Session 聚合子 Agent，原始 Sage 身份仍保留。缓存和推理 token 作为 prompt/completion 的子计数，total 仅计算 input + output。内容模式、脱敏和首 token/首正文事件沿用公共观测。此插件导出评测所需的运行数据，不主动发起评测或写入评分。
+
 通用 OTLP：
 
 ```dotenv
@@ -118,7 +135,7 @@ SAGE_SERVER_TRACE_OTLP_ENDPOINT=http://127.0.0.1:4318/v1/traces
 SAGE_SERVER_TRACE_OTLP_PROTOCOL=http
 ```
 
-gRPC 时选择 `grpc` 并使用 collector 的 gRPC 地址；只有明文 gRPC 才设置 `SAGE_SERVER_TRACE_OTLP_INSECURE=true`。没有显式 TRACE_BACKEND 时，旧 `SAGE_SERVER_JAEGER_URL` 配置继续选择 OTLP。显式 `noop` 关闭观测。两种后端都支持内容限制、环境、采样和导出超时。通用 collector 认证可使用 OTel 的 exporter headers 环境配置。
+gRPC 时选择 `grpc` 并使用 collector 的 gRPC 地址；只有明文 gRPC 才设置 `SAGE_SERVER_TRACE_OTLP_INSECURE=true`。没有显式 TRACE_BACKEND 时，旧 `SAGE_SERVER_JAEGER_URL` 配置继续选择 OTLP。显式 `noop` 关闭观测。这些后端都支持内容限制、环境、采样和导出超时。通用 collector 认证可使用 OTel 的 exporter headers 环境配置。
 
 非 Server 宿主通过 `observability.trace-sink` 选择同名插件，配置 schema 见官方插件注册表；队列默认 2048、活动 span 默认 4096，可分别设置 max_queue_size/max_active_spans。插件是进程级资源，宿主关闭时调用 stop/close。当前 capability 单选；需要同时投递多个后端时可在外部 OTel Collector 分流。
 
@@ -133,3 +150,5 @@ Server `/metrics` 提供进程累计的 `trace_failed_exports`、`trace_dropped_
 部署验收还需在目标 Langfuse 中执行一轮带工具的对话，确认 Agent/Generation/Tool 调用树、Session 聚合、模型用量和首 token 时间；再使 exporter 不可达，确认对话仍完成。测试接收端成功不能代替目标实例 UI 和 ingestion 的联调。
 
 参考：[Langfuse OTLP 接入与属性映射](https://langfuse.com/integrations/native/opentelemetry)。
+
+Phoenix 参考：[OTLP 配置](https://arize.com/docs/phoenix/tracing/how-to-tracing/setup-tracing/setup-using-phoenix-otel)、[OpenInference 字段规范](https://github.com/Arize-ai/openinference/blob/main/spec/semantic_conventions.md)。

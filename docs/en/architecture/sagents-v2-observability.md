@@ -1,6 +1,6 @@
 ---
 layout: default
-title: Model Observability and Langfuse
+title: Model Observability, Langfuse and Phoenix
 parent: Architecture
 nav_order: 10
 lang: en
@@ -9,13 +9,13 @@ ref: v2-detail-sagents-v2-observability
 
 {% include lang_switcher.html %}
 
-# SAgents V2 Model Observability and Langfuse
+# SAgents V2 Model Observability, Langfuse and Phoenix
 
 ## Responsibilities
 
 `DiagnosticSink` saves local model requests/responses and wire requests for the Session model diagnostics view; it is not a recovery source. `TraceSink` represents Agent, model, and tool lifecycles, inputs and outputs, usage, status, and parent relationships. Each consumes execution data directly without reading the other's files or relying on the observability backend for Run recovery. Diagnostic write failures produce warnings without interrupting model calls.
 
-`ObservedRunDriver` owns Agent and tool observations; `RecordingModelProvider` owns model observations. They emit the same vendor-independent `TraceSpan`. `sage.trace.otlp` exports generic/GenAI attributes, while `sage.trace.langfuse` adds Langfuse mappings over the shared OTLP transport. No database tables or durable observability queues are added.
+`ObservedRunDriver` owns Agent and tool observations; `RecordingModelProvider` owns model observations. They emit the same vendor-independent `TraceSpan`. `sage.trace.otlp` exports generic/GenAI attributes, while `sage.trace.langfuse` and `sage.trace.phoenix` add their respective platform mappings over the shared OTLP transport. No database tables or durable observability queues are added.
 
 ## Conversation latency diagnostics
 
@@ -90,6 +90,23 @@ SAGE_SERVER_LANGFUSE_INGESTION_VERSION=4
 
 Use the root URL of the selected region or self-hosted instance. The plugin appends `/api/public/otel/v1/traces` and uses OTLP/HTTP protobuf with Basic Auth. Version 4 adds the ingestion header; select 3 for a compatible v3 instance. `SAGE_SERVER_LANGFUSE_PUBLIC_URL` can point the browser entry to a specific project. Project keys are read only from the environment; the manifest stores environment variable names. Override those names with `SAGE_SERVER_LANGFUSE_PUBLIC_KEY_ENV` and `SAGE_SERVER_LANGFUSE_SECRET_KEY_ENV`.
 
+Phoenix (selected independently from Langfuse):
+
+```dotenv
+SAGE_SERVER_TRACE_BACKEND=phoenix
+SAGE_SERVER_PHOENIX_ENDPOINT=http://127.0.0.1:6006/v1/traces
+SAGE_SERVER_PHOENIX_PROJECT_NAME=sage
+SAGE_SERVER_PHOENIX_PUBLIC_URL=http://127.0.0.1:6006
+# Only needed for authenticated instances; omit for local unauthenticated instances.
+PHOENIX_API_KEY=your-api-key
+```
+
+The endpoint is the complete OTLP/HTTP protobuf traces URL, including `/v1/traces`. For cloud instances, preserve the provided path prefix. Authentication uses a Bearer API key; `SAGE_SERVER_PHOENIX_API_KEY_ENV` overrides the environment variable name. Manifests store only that reference. The optional `SAGE_SERVER_PHOENIX_PUBLIC_URL` configures the browser entry separately.
+
+The SDK plugin is `sage.trace.phoenix`, with `endpoint`, `project_name`, `api_key_env`, `service_name`, and shared trace options. Select Phoenix independently in the Server trace plugin settings; saved selections take effect after restarting the Server.
+
+Project routing uses the `openinference.project.name` resource attribute. Agent, model, and tool spans map to `AGENT`, `LLM`, and `TOOL`. Root Sessions group child Agents through `session.id`; original Sage identities remain available. Cache and reasoning tokens are subsets of prompt/completion; total is input + output. Content policies, redaction, and first-token/first-text events use the shared transport. This plugin exports runtime data for evaluation; it does not initiate evaluations or submit scores.
+
 Generic OTLP:
 
 ```dotenv
@@ -98,7 +115,7 @@ SAGE_SERVER_TRACE_OTLP_ENDPOINT=http://127.0.0.1:4318/v1/traces
 SAGE_SERVER_TRACE_OTLP_PROTOCOL=http
 ```
 
-For gRPC, select `grpc` and use the collector's gRPC address. Set `SAGE_SERVER_TRACE_OTLP_INSECURE=true` only for plaintext gRPC. Without an explicit TRACE_BACKEND, the legacy `SAGE_SERVER_JAEGER_URL` setting continues to select OTLP. Explicit `noop` disables tracing. Both backends support content limits, environment, sampling, and export timeouts. Generic collector authentication can use OTel exporter-header environment settings.
+For gRPC, select `grpc` and use the collector's gRPC address. Set `SAGE_SERVER_TRACE_OTLP_INSECURE=true` only for plaintext gRPC. Without an explicit TRACE_BACKEND, the legacy `SAGE_SERVER_JAEGER_URL` setting continues to select OTLP. Explicit `noop` disables tracing. All backends support content limits, environment, sampling, and export timeouts. Generic collector authentication can use OTel exporter-header environment settings.
 
 Non-Server hosts select the same plugins through `observability.trace-sink`; configuration schemas are in the official plugin registry. The queue defaults to 2048 and active spans to 4096, adjustable with max_queue_size/max_active_spans. Plugins are process-scoped resources; hosts call stop/close on shutdown. The capability currently selects one backend. Use an external OTel Collector to fan out to multiple backends.
 
@@ -113,3 +130,5 @@ Automated tests cover identities and parent relationships, concurrent isolation,
 Deployment acceptance also requires running a conversation with a tool against the target Langfuse instance, checking the Agent/Generation/Tool tree, Session grouping, model usage, and first-token timing. Then make the exporter unreachable and confirm that the conversation still completes. A successful test receiver does not replace integration with the target instance's UI and ingestion endpoint.
 
 Reference: [Langfuse OTLP integration and attribute mappings](https://langfuse.com/integrations/native/opentelemetry).
+
+Phoenix references: [OTLP setup](https://arize.com/docs/phoenix/tracing/how-to-tracing/setup-tracing/setup-using-phoenix-otel), [OpenInference semantic conventions](https://github.com/Arize-ai/openinference/blob/main/spec/semantic_conventions.md).
