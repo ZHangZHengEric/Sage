@@ -76,6 +76,20 @@ agent_v2 = await app.load_agent("./agents/assistant")
 
 模型更新后重新 load 同一 Package 才会得到引用新模型配置的 handle；旧 handle 和已受理 Run 继续使用原快照。Package 自身改变时仍须 `update_agent`。未被 Agent 引用的模型更新不改变它的装配身份。恢复使用已受理版本，不能把“读取最新模型配置”当作恢复步骤。密钥材料仍由凭据服务提供，不写入 Package 或模型快照。
 
+宿主并发受理不同配置时，可以把独立配置直接传给加载操作：
+
+```python
+agent = await app.load_agent(package, runtime=selected_runtime, models=selected_models)
+updated = await app.update_agent(
+    agent=agent, package=changed_package,
+    runtime=selected_runtime, models=selected_models,
+)
+```
+
+这两个参数会复制、校验后一起参与装配，不修改 `app.runtime_configuration` 或 `app.models`。不同版本可以并行构建，相同版本的并发请求共用一次构建；`update_agent` 仍检查传入的版本是否为当前版本，竞争更新失败后须重新读取当前 handle。会话存储、调度器与安全配置属于 App 身份，不能通过单次加载切换。
+
+执行中、受理中和流式投影使用的版本保持资源引用。其余空闲版本（包括当前配置）最多缓存 64 个，空闲 300 秒后由每 30 秒运行的回收任务释放；当前配置只保留不可变句柄和计划元信息。首个版本承载 App 的通用服务，因此保留至关闭。回收不会删除原有版本快照；通过 `entrypoint()` 使用旧 handle、同步 `app.agent()` 返回的稳定门面或恢复旧 Run 时，SDK 会重新装配并核对原 composition hash。同步门面的 `runtime.start_run/stream` 同样恢复原版本来冻结执行配置，其余 RuntimePort 读操作和控制操作使用 App 的共享运行内核。事件订阅和协议投影在迭代期间持有版本引用，使用结束应关闭迭代器或 detach。租户工作区属于已受理 Run 的 execution snapshot，Server 在受理时根据已验证身份冻结路径，外部租户数量不会导致同一 Agent 重复装配。
+
 ### credentials
 
 ```yaml

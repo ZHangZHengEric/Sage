@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import PageToolbar from '../components/PageToolbar.vue'
 import FormDrawer from '../components/FormDrawer.vue'
 import AppIcon from '../components/AppIcon.vue'
@@ -11,15 +11,15 @@ import { conversationAgent, newestThreads } from '../conversations.js'
 const threads = ref([]), agents = ref([]), search = ref(''), agentFilter = ref('')
 const error = ref(''), loading = ref(true), downloading = ref(new Set())
 const deleteTarget = ref(null), deleting = ref(false), deleteError = ref('')
-const root = ref(null)
+const root = ref(null), nextCursor = ref(null)
+let loadRevision = 0, filterTimer
 const userId = getUser()?.user_id
 const agentName = item => conversationAgent(item, agents.value, userId)
-const agentOptions = computed(() => [...new Set(threads.value.map(item => item.agent_id).filter(Boolean))]
-  .map(id => ({ id, name: [...new Set(threads.value.filter(item => item.agent_id === id).map(agentName))].join(' / ') })))
-const visible = computed(() => newestThreads(threads.value.filter(item => {
-  if (agentFilter.value && item.agent_id !== agentFilter.value) return false
-  return `${item.title || ''} ${agentName(item)}`.toLowerCase().includes(search.value.trim().toLowerCase())
-})))
+const agentOptions = computed(() => {
+  const ids = [...new Set([...agents.value.map(item => item.id), ...threads.value.map(item => item.agent_id)].filter(Boolean))]
+  return ids.map(id => ({ id, name: [...new Set(agents.value.filter(item => item.id === id).map(item => item.name || id))].join(' / ') || id }))
+})
+const visible = computed(() => newestThreads(threads.value))
 const filtered = computed(() => Boolean(search.value || agentFilter.value))
 function clearFilters() { search.value = ''; agentFilter.value = '' }
 function date(value) {
@@ -30,13 +30,26 @@ function date(value) {
     ? parsed.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
     : parsed.toLocaleDateString('zh-CN', { month: 'numeric', day: 'numeric', ...(parsed.getFullYear() !== today.getFullYear() ? { year: 'numeric' } : {}) })
 }
-async function load() {
-  if (loading.value && threads.value.length) return
+async function load(more = false) {
+  if (more && (loading.value || !nextCursor.value)) return
+  const revision = ++loadRevision
   loading.value = true; error.value = ''
-  try { threads.value = await api.listThreads() }
-  catch (exc) { error.value = exc.message }
-  finally { loading.value = false }
+  try {
+    const page = await api.listThreads({ limit: 50, cursor: more ? nextCursor.value : undefined,
+      search: search.value.trim(), agent_id: agentFilter.value })
+    if (revision !== loadRevision) return
+    const rows = more ? [...threads.value, ...page.items] : page.items
+    threads.value = [...new Map(rows.map(item => [item.thread_id, item])).values()]
+    nextCursor.value = page.next_cursor
+  } catch (exc) { if (revision === loadRevision) error.value = exc.message }
+  finally { if (revision === loadRevision) loading.value = false }
 }
+watch([search, agentFilter], () => {
+  clearTimeout(filterTimer)
+  // Invalidate an in-flight response as soon as the filter changes.
+  ++loadRevision
+  filterTimer = setTimeout(() => { void load() }, 200)
+})
 async function download(item) {
   if (!isAdmin() || downloading.value.has(item.thread_id)) return
   closeMenus(true)
@@ -78,7 +91,7 @@ onMounted(() => {
   document.addEventListener('pointerdown', outside)
   document.addEventListener('keydown', escape)
 })
-onUnmounted(() => { document.removeEventListener('pointerdown', outside); document.removeEventListener('keydown', escape) })
+onUnmounted(() => { clearTimeout(filterTimer); ++loadRevision; document.removeEventListener('pointerdown', outside); document.removeEventListener('keydown', escape) })
 </script>
 <template>
   <section ref="root" class="conversation-history" aria-label="历史会话">
@@ -87,7 +100,7 @@ onUnmounted(() => { document.removeEventListener('pointerdown', outside); docume
       <select v-model="agentFilter" aria-label="筛选智能体"><option value="">全部智能体</option><option v-for="item in agentOptions" :key="item.id" :value="item.id">{{ item.name }}</option></select>
       <template #actions><router-link class="btn history-new" :to="{ path: '/', query: { new: '1' } }"><AppIcon name="plus" />新建对话</router-link></template>
     </PageToolbar>
-    <div v-if="error" class="history-feedback" role="alert"><span class="error">{{ error }}</span><button class="btn ghost" :disabled="loading" @click="load">重试</button></div>
+    <div v-if="error" class="history-feedback" role="alert"><span class="error">{{ error }}</span><button class="btn ghost" :disabled="loading" @click="load()">重试</button></div>
     <div v-if="loading && !threads.length" class="history-skeleton" role="status" aria-label="正在加载会话"><div v-for="n in 5" :key="n"><i></i><span></span></div></div>
     <div v-else-if="!visible.length && !error" class="history-empty">
       <AppIcon :name="filtered ? 'search' : 'chat'" /><h2>{{ filtered ? '没有匹配的会话' : '还没有会话' }}</h2>
@@ -112,6 +125,7 @@ onUnmounted(() => { document.removeEventListener('pointerdown', outside); docume
           </details>
         </article>
     </div>
+    <button v-if="nextCursor" class="btn secondary" :disabled="loading" @click="load(true)">{{ loading ? '加载中…' : '加载更多' }}</button>
     <FormDrawer :model-value="Boolean(deleteTarget)" title="删除会话" centered :busy="deleting" @update:model-value="value => { if (!value && !deleting) deleteTarget = null }">
       <p class="history-delete-copy">确定删除「{{ deleteTarget?.title || '未命名会话' }}」？删除后无法恢复。</p>
       <p v-if="deleteError" class="error" role="alert">{{ deleteError }}</p>

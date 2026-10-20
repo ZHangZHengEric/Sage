@@ -29,7 +29,9 @@ def test_public_run_analyzes_image_with_mysql_and_reads_it_after_restart(tmp_pat
         pytest.skip("set SAGE_V2_TEST_MYSQL_DSN to run live MySQL tests")
     model = ScriptedModelProvider(
         (
-            _step(1, "", "analyze_image", {"image_path": "/workspace/frame.png"}),
+            # Relative tool paths resolve inside the admitted workspace on
+            # both Linux's /workspace mount and native host test runtimes.
+            _step(1, "", "analyze_image", {"image_path": "frame.png"}),
             _step(2, "Image received."),
         )
     )
@@ -76,7 +78,7 @@ def test_public_run_analyzes_image_with_mysql_and_reads_it_after_restart(tmp_pat
             for b in m.content
             if isinstance(b, ImageBlock)
         ]
-        assert len(images) == 1
+        assert len(images) == 1, [m.model_dump(mode="json") for m in model.requests[-1].messages if m.role == "tool"]
         assert images[0].uri.startswith("data:image/jpeg;base64,")
         digest = hashlib.sha256(
             base64.b64decode(images[0].uri.split(",", 1)[1])

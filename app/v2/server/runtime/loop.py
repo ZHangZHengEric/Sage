@@ -102,16 +102,24 @@ async def load_catalog_agent(host, command, user_id):
             choices[key] = runtime.capabilities[key]
     choices["execution.binding"] = execution_selection(host, owner=user_id, agent_id=frozen.agent.id,
                                                        command=command, sandbox=frozen.agent.sandbox)
-    await service.application.update_runtime(runtime.model_copy(update={"capabilities": choices}))
-    await service.application.update_models(command.config.metadata.get("server_v2.models") or app_models(catalog))
+    selected_runtime = runtime.model_copy(update={"capabilities": choices})
+    selected_models = command.config.metadata.get("server_v2.models") or app_models(catalog)
     # Dependency packages are pinned independently; publish updates explicitly.
     async def load(member):
         children = {name: await load(child) for name, child in member.dependencies.items()}
         package = manifest if member is bundle else member.resolved_manifest()
         current = next((value for value in service.application.loaded_agents if value.package_id == package.metadata.id), None)
-        if current is None:
-            return await service.application.load_agent(package, subagents=children)
-        return await service.application.update_agent(agent=current, package=package, subagents=children)
+        while True:
+            try:
+                if current is None:
+                    return await service.application.load_agent(package, subagents=children,
+                        runtime=selected_runtime, models=selected_models)
+                return await service.application.update_agent(agent=current, package=package, subagents=children,
+                    runtime=selected_runtime, models=selected_models)
+            except ValueError as exc:
+                if "Agent was updated" not in str(exc) and "Package changed; use update_agent" not in str(exc):
+                    raise
+                current = next((value for value in service.application.loaded_agents if value.package_id == package.metadata.id), None)
     return await load(bundle)
 
 

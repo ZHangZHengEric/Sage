@@ -44,7 +44,12 @@ class InterfaceRunStream:
         return self.native.handle
 
     async def detach(self) -> None:
-        await self.native.detach()
+        try:
+            closer = getattr(self.results, "aclose", None)
+            if closer is not None:
+                await closer()
+        finally:
+            await self.native.detach()
 
     async def wait(self) -> RunSnapshot:
         return await self.native.wait()
@@ -241,13 +246,20 @@ class SAgentApplication:
         config_text: str | None = None,
         base_path: str | Path | None = None,
         subagents: dict[str, LoadedAgent] | None = None,
+        runtime=None,
+        models=None,
     ) -> LoadedAgent:
-        """Load one Package once; subsequent identical loads reuse its handle."""
+        """Load a Package with an optional detached runtime/model snapshot.
+
+        Per-load selections never mutate App defaults. Process store, scheduler
+        and security identities remain fixed for the lifetime of the App.
+        """
         if self._loaded_agents is None:
             raise RuntimeError("load_agent requires build() without a Package")
         async with self._assembly_operation():
             agent = await self._loaded_agents.load(
-                package, config_text=config_text, base_path=base_path, subagents=subagents
+                package, config_text=config_text, base_path=base_path, subagents=subagents,
+                runtime=runtime, models=models,
             )
             await self._loaded_agents.restore_pending()
             return agent
@@ -260,8 +272,14 @@ class SAgentApplication:
         config_text: str | None = None,
         base_path: str | Path | None = None,
         subagents: dict[str, LoadedAgent] | None = None,
+        runtime=None,
+        models=None,
     ) -> LoadedAgent:
-        """Atomically publish a new revision without changing existing handles."""
+        """Publish a revision from independent selections using compare-and-swap.
+
+        Existing handles keep their admitted configuration, including after idle
+        resources are released and rebuilt from their immutable revision archive.
+        """
         if self._loaded_agents is None:
             raise RuntimeError("update_agent requires build() without a Package")
         return await self._loaded_agents.load(
@@ -270,6 +288,7 @@ class SAgentApplication:
             base_path=base_path,
             previous=agent,
             subagents=subagents,
+            runtime=runtime, models=models,
         )
 
     async def agent_for_run(self, run_id, context):
@@ -339,7 +358,7 @@ class SAgentApplication:
         if self._loaded_agents is not None:
             for handle in self.loaded_agents:
                 if handle.id == agent_id:
-                    return self._loaded_agents.implementation(handle)
+                    return self._loaded_agents.exported(handle)
             if self._loaded_agents.root is not None:
                 return self._loaded_agents.root.agent(agent_id)
         try:
@@ -384,14 +403,24 @@ class SAgentApplication:
         if self._loaded_agents is None:
             adapter = self._adapter(interface)
         else:
+            agent = await self._loaded_agents.restored(agent)
             self._loaded_agents.implementation(agent)  # Validate this App owns the handle.
             adapter = agent._application._adapters.get(interface) or self._adapters.get(interface)
             if adapter is None:
                 raise KeyError(f"interface {interface!r} is not declared for this Agent or App")
         native = await self.entrypoint().run_stream(command, context, agent=agent)
+        if self._loaded_agents is not None:
+            async def project_revision():
+                async with self._loaded_agents.pin(agent) as current:
+                    selected = current._application._adapters.get(interface) or self._adapters.get(interface)
+                    async for result in self._project(native.events, selected):
+                        yield result
+            results = project_revision()
+        else:
+            results = self._project(native.events, adapter)
         return InterfaceRunStream(
             native=native,
-            results=self._project(native.events, adapter),
+            results=results,
         )
 
     def subscribe_interface(
@@ -411,12 +440,13 @@ class SAgentApplication:
 
         async def replay():
             agent = await self.agent_for_run(cursor.run_id, context)
-            implementation = self._loaded_agents.implementation(agent)
-            adapter = agent._application._adapters.get(interface) or self._adapters.get(interface)
-            if adapter is None:
-                raise KeyError(f"interface {interface!r} is not declared for this Run's Agent or App")
-            async for event in self._project(implementation.subscribe_events(cursor, context), adapter):
-                yield event
+            async with self._loaded_agents.pin(agent) as agent:
+                implementation = self._loaded_agents.implementation(agent)
+                adapter = agent._application._adapters.get(interface) or self._adapters.get(interface)
+                if adapter is None:
+                    raise KeyError(f"interface {interface!r} is not declared for this Run's Agent or App")
+                async for event in self._project(implementation.subscribe_events(cursor, context), adapter):
+                    yield event
         return replay()
 
     async def close(self) -> None:

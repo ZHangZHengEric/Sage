@@ -5,7 +5,11 @@ from __future__ import annotations
 import asyncio
 from copy import copy
 from dataclasses import dataclass, field
+from time import monotonic
+from functools import wraps
+from contextlib import asynccontextmanager
 from typing import Any
+from weakref import WeakValueDictionary
 
 from sagents.v2.contracts.commands import StartRun
 from sagents.v2.contracts.principals import RequestContext
@@ -55,6 +59,25 @@ class LoadedAgent:
         return self._application.resource_readiness
 
 
+@dataclass(frozen=True)
+class ReleasedRevision:
+    """Keep handle inspection available without retaining closed providers."""
+
+    resolved_plan: Any
+    resource_readiness: Any
+    _closed: bool = True
+
+
+def revision_operation(method):
+    """Pin a revision through admission/control; driver tasks pin execution."""
+    @wraps(method)
+    async def invoke(self, *args, agent, **kwargs):
+        catalog = self._catalog
+        async with catalog.pin(agent) as agent:
+            return await method(self, *args, agent=agent, **kwargs)
+    return invoke
+
+
 class ApplicationEntrypoint:
     def __init__(self, catalog: LoadedAgents):
         self._catalog = catalog
@@ -63,6 +86,7 @@ class ApplicationEntrypoint:
     def runtime(self):
         return self._catalog.application.runtime
 
+    @revision_operation
     async def run_stream(
         self, command: StartRun, context: RequestContext, *, agent: LoadedAgent
     ) -> SAgentRunStream:
@@ -74,6 +98,7 @@ class ApplicationEntrypoint:
             raise ValueError("command Agent identity must match the loaded revision")
         return await implementation.run_stream(command, context)
 
+    @revision_operation
     async def start_run(self, command, context, *, agent: LoadedAgent):
         implementation = self._catalog.implementation(agent)
         if (
@@ -83,6 +108,7 @@ class ApplicationEntrypoint:
             raise ValueError("command Agent identity must match the loaded revision")
         return await implementation.start_run(command, context)
 
+    @revision_operation
     async def schedule_accepted_run(
         self, handle, context, *, agent: LoadedAgent, resume=False
     ):
@@ -94,6 +120,7 @@ class ApplicationEntrypoint:
             handle, context, resume=resume
         )
 
+    @revision_operation
     async def continue_run(self, run_id, context, *, agent: LoadedAgent):
         implementation = self._catalog.implementation(agent)
         await self._validate_run(run_id, context, agent)
@@ -104,7 +131,8 @@ class ApplicationEntrypoint:
     ) -> SessionCommitProposal:
         """Propose publication using the source Run's admitted Agent revision."""
         agent = await self._catalog.application.agent_for_run(command.run_id, context)
-        return await self._catalog.implementation(agent).propose_session_commit(command, context)
+        async with self._catalog.pin(agent) as agent:
+            return await self._catalog.implementation(agent).propose_session_commit(command, context)
 
     async def publish_session_commit(
         self, command: PublishSessionCommit, context: RequestContext,
@@ -113,7 +141,8 @@ class ApplicationEntrypoint:
         access = self._catalog.application.service("session.access")
         proposal = await access.get_session_commit_proposal(command.proposal_id, context)
         agent = await self._catalog.application.agent_for_run(proposal.source_run_id, context)
-        return await self._catalog.implementation(agent).publish_session_commit(command, context)
+        async with self._catalog.pin(agent) as agent:
+            return await self._catalog.implementation(agent).publish_session_commit(command, context)
 
     async def reject_session_commit(
         self, command: RejectSessionCommit, context: RequestContext,
@@ -122,7 +151,8 @@ class ApplicationEntrypoint:
         access = self._catalog.application.service("session.access")
         proposal = await access.get_session_commit_proposal(command.proposal_id, context)
         agent = await self._catalog.application.agent_for_run(proposal.source_run_id, context)
-        return await self._catalog.implementation(agent).reject_session_commit(command, context)
+        async with self._catalog.pin(agent) as agent:
+            return await self._catalog.implementation(agent).reject_session_commit(command, context)
 
     async def _validate_run(self, run_id, context, agent):
         access = self._catalog.application.service("session.access")
@@ -130,6 +160,7 @@ class ApplicationEntrypoint:
         if run.resolved_spec_hash != agent.composition_hash:
             raise ValueError("Run must use its admitted Agent revision")
 
+    @revision_operation
     async def drive_admitted_run(
         self, run_id, context, *, agent: LoadedAgent, resume=False
     ):
@@ -139,7 +170,7 @@ class ApplicationEntrypoint:
 
 
 class LoadedAgents:
-    """Serialize publication; retain revisions until App shutdown.
+    """Build revisions independently and retain bounded idle revision resources.
 
     A failed update never replaces the current revision. Each revision owns its
     execution scopes, while subsequent revisions borrow durable process stores.
@@ -158,6 +189,15 @@ class LoadedAgents:
         self.current = {}
         self.revisions = {}
         self.lock = asyncio.Lock()
+        self._load_locks = {}
+        self._last_used = {}
+        self._users = {}
+        self._prune_lock = asyncio.Lock()
+        self._retiring = {}
+        self._reaper = None
+        self._exported_agents = WeakValueDictionary()
+        self.max_idle_revisions = 64
+        self.revision_idle_seconds = 300.0
         self.entrypoint = ApplicationEntrypoint(self)
         from sagents.v2.composition.revision_store import AgentRevisionStore
 
@@ -175,39 +215,55 @@ class LoadedAgents:
         self.process_handles = ()
         self.process_dispatcher = None
 
+    def exported(self, agent):
+        from sagents.v2.composition.application_agent import ApplicationAgent
+        facade = self._exported_agents.get(agent)
+        if facade is None:
+            facade = ApplicationAgent(self, agent)
+            self._exported_agents[agent] = facade
+        return facade
+
     def implementation(self, agent):
         self.application._ensure_open()
         if not isinstance(agent, LoadedAgent) or agent._owner is not self:
             raise ValueError("Agent belongs to a different application")
+        agent = self.revisions.get((agent.package_id, agent.version), agent)
+        if isinstance(agent._application, ReleasedRevision):
+            raise RuntimeError("Agent resources are idle; use the async entrypoint or load_agent to restore them")
         return agent._application.agent(
             agent._application.resolved_plan.entrypoint_agent_id
         )
 
-    async def load(self, *args, **kwargs):
-        self.application._ensure_open()
-        async with self.lock:
-            self.application._ensure_open()
-            handle = await self._load(*args, **kwargs)
-            expected_hash = kwargs.get("expected_hash")
-            if expected_hash is not None and handle.composition_hash != expected_hash:
-                raise ValueError("saved Agent revision no longer matches the runtime composition")
-            return handle
+    def selected_runtime(self, runtime=None):
+        from sagents.v2.composition.inputs import runtime_input
+        from sagents.v2.composition.defaults import effective_runtime
+        selected = self.runtime.model_copy(deep=True) if runtime is None else effective_runtime(runtime_input(runtime))
+        self.builder._registry.validate_runtime(selected)
+        if selected.state_root != self.runtime.state_root:
+            raise ValueError("state_root is an App identity; create a new App to change it")
+        for capability in ("session.store", "derived-state.store", "execution.scheduler", "execution.job-runtime"):
+            if selected.selections(capability) != self.runtime.selections(capability):
+                raise ValueError(f"{capability} is an App identity; create a new App to change it")
+        if (selected.plugin_trust_policy != self.runtime.plugin_trust_policy
+                or selected.deployment_profile != self.runtime.deployment_profile):
+            raise ValueError("security profile is an App identity; create a new App to change it")
+        return selected
 
-    async def _load(
-        self,
-        package=None,
-        *,
-        config_text=None,
-        base_path=None,
-        previous=None,
-        subagents=None,
-        historical=False,
-        expected_hash=None,
-    ):
+    async def load(self, *args, **kwargs):
+        async with self.application._assembly_operation():
+            return await self._load(*args, **kwargs)
+
+    async def _load(self, package=None, *, config_text=None, base_path=None,
+                   previous=None, subagents=None, historical=False, expected_hash=None,
+                   runtime=None, models=None):
+        self.application._ensure_open()
+        from sagents.v2.model.catalog import model_catalog_input
+        selected_runtime = self.selected_runtime(runtime)
+        selected_models = self.models.model_copy(deep=True) if models is None else model_catalog_input(models)
         source = None
         if historical:
-            # Private archive restoration: this is a compiled graph, not a Package input.
             resolved = package.model_copy(deep=True)
+            selected_models = model_catalog_input({"models": resolved.model_routes, "credentials": resolved.credentials})
             if (resolved.runtime.plugin_trust_policy != self.runtime.plugin_trust_policy
                     or resolved.runtime.deployment_profile != self.runtime.deployment_profile):
                 raise ValueError("saved Agent security profile differs from this App")
@@ -215,16 +271,31 @@ class LoadedAgents:
             package = package_input(package, config_text=config_text, base_path=base_path)
             source = package.model_dump(mode="json")
             for child in (subagents or {}).values():
-                self.implementation(child)
-            resolved = resolve_agent_graph(
-                package,
-                self.runtime,
-                {
-                    name: child._resolved
-                    for name, child in (subagents or {}).items()
-                },
-                models=self.models,
-            )
+                if child._owner is not self:
+                    raise ValueError("Agent belongs to a different application")
+            resolved = resolve_agent_graph(package, selected_runtime,
+                {name: child._resolved for name, child in (subagents or {}).items()},
+                models=selected_models)
+        key = (resolved.package_id, resolved.manifest_hash)
+        if key in self._retiring:
+            await asyncio.shield(self._retiring[key])
+        lock_state = self._load_locks.setdefault(key, [asyncio.Lock(), 0])
+        lock_state[1] += 1
+        try:
+            async with lock_state[0]:
+                handle = await self._load_resolved(resolved, source=source, previous=previous,
+                    historical=historical, expected_hash=expected_hash)
+                if expected_hash is not None and handle.composition_hash != expected_hash:
+                    raise ValueError("saved Agent revision no longer matches the runtime composition")
+                self._last_used[key] = monotonic()
+                await self.prune_revisions(protected=handle)
+                return handle
+        finally:
+            lock_state[1] -= 1
+            if not lock_state[1]:
+                self._load_locks.pop(key, None)
+
+    async def _load_resolved(self, resolved, *, source, previous, historical, expected_hash):
         agent_id = resolved.entrypoint_agent
         if agent_id not in resolved.agents:
             raise ValueError("Package entrypoint must be its single Agent")
@@ -233,7 +304,8 @@ class LoadedAgents:
         async with self.application._assembly_operation():
             current = self.current.get(resolved.package_id)
             if previous is not None:
-                self.implementation(previous)
+                if not isinstance(previous, LoadedAgent) or previous._owner is not self:
+                    raise ValueError("Agent belongs to a different application")
                 if (
                     previous.package_id != resolved.package_id
                     or previous._application.resolved_plan.entrypoint_agent_id
@@ -257,6 +329,8 @@ class LoadedAgents:
             builder = copy(self.builder)
             builder._scope_pool = self.scope_pool
             builder._shared_process_handles = self.process_handles
+            # The package graph already freezes its routes. Package registry
+            # drafts, however, must resolve against subsequent App catalog edits.
             builder._model_resolver = self.model_resolver
             builder._state = copy(self.builder._state)
             builder._state.defer_dispatcher_start = True
@@ -280,11 +354,24 @@ class LoadedAgents:
                     raise ValueError(
                         "saved Agent revision no longer matches the runtime composition"
                     )
-                self.store.save(resolved, assembled.composition_hash)
+                await asyncio.to_thread(self.store.save, resolved, assembled.composition_hash)
             except BaseException:
                 await assembled.close()
                 raise
+            # Different revisions may build concurrently; compare-and-swap
+            # publication after construction so a stale update cannot win.
+            if previous is not None and self.current.get(resolved.package_id) is not previous:
+                await assembled.close()
+                raise ValueError("Agent was updated; use its current revision")
+            if (previous is None and not historical
+                    and resolved.package_id in self.current
+                    and self.sources.get(resolved.package_id) != source):
+                await assembled.close()
+                raise ValueError("Package changed; use update_agent explicitly")
             # No awaits between successful construction and ownership/publication.
+            if self._reaper is None:
+                self._reaper = RevisionReaper(self)
+                self.application._owned_resources.append(self._reaper)
             self.application._owned_resources.append(assembled)
             if self.root is None:
                 self.root = assembled
@@ -302,14 +389,78 @@ class LoadedAgents:
                 self.application._owned_resources.remove(dispatcher)
             self.application._owned_resources.append(dispatcher)
             dispatcher.attach_recovery_agent(RevisionRecovery(self), replace=True)
-            dispatcher.recovery_filter = lambda run: any(
-                value.composition_hash == run.resolved_spec_hash
-                for value in self.revisions.values()
-            )
+            dispatcher.recovery_filter = lambda run: (self.store.contains(run.resolved_spec_hash)
+                and all(issue.resolved_spec_hash != run.resolved_spec_hash for issue in self.recovery_issues))
             if not self.builder._state.manual_dispatcher_start:
                 await dispatcher.start()
                 await dispatcher.refresh_recovery()
             return handle
+
+    async def prune_revisions(self, *, protected=None):
+        """Release obsolete idle resources; immutable recovery files stay intact."""
+        async with self._prune_lock:
+            await self._prune_revisions(protected=protected)
+
+    async def _prune_revisions(self, *, protected=None):
+        now = monotonic()
+        candidates = sorted(tuple(self.revisions.items()), key=lambda item: self._last_used.get(item[0], now))
+        idle = []
+        for key, handle in candidates:
+            if handle is protected or handle._application is self.root or self._users.get(handle, 0):
+                continue
+            agents = handle._application._agents.values()
+            if any(any(not task.done() for task in agent._tasks.values()) or agent._observers for agent in agents):
+                continue
+            idle.append((key, handle))
+        for key, handle in tuple(idle):
+            if self.revisions.get(key) is not handle or self._users.get(handle, 0):
+                continue
+            agents = handle._application._agents.values()
+            if any(any(not task.done() for task in agent._tasks.values()) or agent._observers for agent in agents):
+                continue
+            if len(idle) <= self.max_idle_revisions and now - self._last_used.get(key, now) < self.revision_idle_seconds:
+                continue
+            # Retire synchronously before awaiting teardown: entrypoint calls
+            # can restore from the archive but cannot reuse closing resources.
+            retired = asyncio.get_running_loop().create_future()
+            self._retiring[key] = retired
+            self.revisions.pop(key, None)
+            try:
+                await handle._application.close()
+                self.application._owned_resources.remove(handle._application)
+                released = ReleasedRevision(handle.resolved_plan, handle.resource_readiness)
+                object.__setattr__(handle, "_application", released)
+                self._last_used.pop(key, None)
+                idle.remove((key, handle))
+            except BaseException:
+                self.revisions[key] = handle
+                raise
+            finally:
+                self._retiring.pop(key, None)
+                retired.set_result(None)
+
+    @asynccontextmanager
+    async def pin(self, agent):
+        agent = await self.restored(agent)
+        self._users[agent] = self._users.get(agent, 0) + 1
+        try:
+            yield agent
+        finally:
+            count = self._users[agent] - 1
+            if count:
+                self._users[agent] = count
+            else:
+                self._users.pop(agent, None)
+            self._last_used[(agent.package_id, agent.version)] = monotonic()
+
+    async def restored(self, agent):
+        if not isinstance(agent, LoadedAgent) or agent._owner is not self:
+            raise ValueError("Agent belongs to a different application")
+        key = (agent.package_id, agent.version)
+        if key in self.revisions:
+            self._last_used[key] = monotonic()
+            return self.revisions[key]
+        return await self.load(agent._resolved, historical=True, expected_hash=agent.composition_hash)
 
     async def for_run(self, run_id, context):
         run = await self.application.service("session.access").get_run(run_id, context)
@@ -370,6 +521,27 @@ class LoadedAgents:
             self.recovery_issues = tuple(issues)
 
 
+class RevisionReaper:
+    def __init__(self, catalog):
+        self.catalog = catalog
+        self.task = asyncio.create_task(self._run(), name="sagent-revision-cache")
+
+    async def _run(self):
+        while True:
+            await asyncio.sleep(30)
+            if self.catalog.application._closing:
+                return
+            try:
+                async with self.catalog.application._assembly_operation():
+                    await self.catalog.prune_revisions()
+            except Exception as exc:
+                _LOGGER.exception("agent.revision_cache_cleanup_failed", "Idle revision cleanup failed", exc)
+
+    async def close(self):
+        self.task.cancel()
+        await asyncio.gather(self.task, return_exceptions=True)
+
+
 class RevisionRecovery:
     """Resolve durable Runs by their admitted identity, never by latest Agent."""
 
@@ -381,22 +553,24 @@ class RevisionRecovery:
         run = await self.runtime.get_run(run_id)
         for handle in self.catalog.revisions.values():
             if handle.composition_hash == run.resolved_spec_hash:
-                return handle._application.agent(
-                    handle._application.resolved_plan.entrypoint_agent_id
-                )
-        raise RuntimeError("the admitted Agent revision must be loaded before recovery")
+                return handle
+        resolved = self.catalog.store.read(run.resolved_spec_hash)
+        if resolved is None:
+            raise RuntimeError("the admitted Agent revision is unavailable")
+        handle = await self.catalog.load(resolved, historical=True, expected_hash=run.resolved_spec_hash)
+        return handle
 
     def ensure_execution(self, run_id, context, *, resume):
         async def execute():
-            agent = await self._agent(run_id)
-            return await agent.ensure_execution(run_id, context, resume=resume)
+            async with self.catalog.pin(await self._agent(run_id)) as agent:
+                return await self.catalog.implementation(agent).ensure_execution(run_id, context, resume=resume)
 
         return asyncio.create_task(execute())
 
     async def fail_driver_crash(self, run_id, exc, context):
-        return await (await self._agent(run_id)).fail_driver_crash(run_id, exc, context)
+        async with self.catalog.pin(await self._agent(run_id)) as agent:
+            return await self.catalog.implementation(agent).fail_driver_crash(run_id, exc, context)
 
     async def recover_interrupted_run(self, run_id, context):
-        return await (await self._agent(run_id)).recover_interrupted_run(
-            run_id, context
-        )
+        async with self.catalog.pin(await self._agent(run_id)) as agent:
+            return await self.catalog.implementation(agent).recover_interrupted_run(run_id, context)

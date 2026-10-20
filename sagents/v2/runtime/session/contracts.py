@@ -50,6 +50,15 @@ from sagents.v2.contracts.session_commit import (
 from sagents.v2.runtime.execution.resources import ExecutionResourceRecord
 
 
+@dataclass(frozen=True, slots=True)
+class SessionEventPage:
+    """A bounded canonical page and its consistent Session sequence head."""
+
+    events: tuple[RuntimeEvent, ...]
+    total: int
+    after_sequence: int
+
+
 @dataclass(frozen=True)
 class EventDraft:
     """Unsequenced event submitted atomically through a :class:`SessionStore`.

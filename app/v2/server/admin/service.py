@@ -13,16 +13,26 @@ class AdminService:
     async def list_users(self) -> list[dict]:
         return [user.public_dict() for user in await self.users.list_users()]
 
-    async def list_threads(self) -> list[dict]:
-        threads = await self.threads.list_all()
-        names = {user.user_id: user.username for user in await self.users.list_users()}
-        return [
-            {
-                **item.model_dump(mode="json"),
-                "username": names.get(item.user_id, item.user_id),
-            }
-            for item in threads
-        ]
+    async def list_threads(self, *, limit=50, cursor=None, search="", agent_id="") -> dict:
+        users = await self.users.list_users()
+        matches = ()
+        if search.strip():
+            summaries = await self.catalog.list_agent_summaries([user.user_id for user in users])
+            matches = tuple(item["id"] for item in summaries if search.strip().lower() in item.get("name", "").lower())
+        page = await self.threads.page(limit=limit, cursor=cursor, search=search, agent_id=agent_id, matching_agent_ids=matches)
+        names = {user.user_id: user.username for user in users}
+        return {"items": [{**item.model_dump(mode="json"),
+            "username": names.get(item.user_id, item.user_id)} for item in page.items],
+            "next_cursor": page.next_cursor}
+
+    async def get_thread(self, thread_id):
+        from sagents.v2.contracts.errors import ErrorCategory, RuntimeErrorInfo, SageV2Error
+        record = await self.threads.find(thread_id)
+        if record is None:
+            raise SageV2Error(RuntimeErrorInfo(code="server.admin.thread.not_found",
+                category=ErrorCategory.VALIDATION, message="thread not found"))
+        user = await self.users.get_by_id(record.user_id)
+        return {**record.model_dump(mode="json"), "username": user.username if user else record.user_id}
 
     async def list_models(self) -> list[dict]:
         users = await self.users.list_users()

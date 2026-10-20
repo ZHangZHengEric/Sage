@@ -122,9 +122,9 @@ async def workspace_delete(user: CurrentUser, host: HostDep,
     except ValueError:
         raise HTTPException(422, "invalid workspace path") from None
     service = host.conversations
-    async with service.runs.workspace_mutation_lock:
-        owner_id, agent_id = await workspace_identity(
-            host, user, user, thread_id, agent_id, writable=True)
+    owner_id, agent_id = await workspace_identity(
+        host, user, user, thread_id, agent_id, writable=True)
+    async with service.runs.workspace_lock(owner_id, agent_id):
         await require_idle(service, owner_id, agent_id)
         try:
             deleted = await finish_file_operation(

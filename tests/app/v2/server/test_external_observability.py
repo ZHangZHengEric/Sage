@@ -89,6 +89,17 @@ def phoenix_span(span):
     }
 
 
+def projected_response(rows):
+    data = []
+    for span in rows:
+        data.append({"index_context.span_id":span["context"]["span_id"],
+                     "column_name":span["name"], "column_start_time":span["start_time"],
+                     "column_context.trace_id":span["context"]["trace_id"],
+                     **{"column_" + key:value for key, value in span["attributes"].items()}})
+    body = '--test\r\nContent-Type: application/json\r\n\r\n' + json.dumps({"schema":{}, "data":data}) + '\r\n--test--\r\n'
+    return httpx.Response(200, text=body, headers={"Content-Type":"multipart/mixed; boundary=test"})
+
+
 @pytest.mark.asyncio
 async def test_external_timing_roundtrip_without_local_files(tmp_path):
     capture = TraceCapture()
@@ -104,14 +115,9 @@ async def test_external_timing_roundtrip_without_local_files(tmp_path):
 
     def handle(request):
         requests.append(request)
-        assert request.url.path == "/v1/projects/sage/spans"
-        return httpx.Response(
-            200,
-            json={
-                "data": [phoenix_span(s) for s in capture.spans],
-                "next_cursor": None,
-            },
-        )
+        assert request.url.path == "/v1/spans"
+        assert request.method == "POST"
+        return projected_response([phoenix_span(s) for s in capture.spans])
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(handle)) as client:
         result = await sink.report(start=BASE, end=BASE + 100, client=client)
@@ -120,7 +126,7 @@ async def test_external_timing_roundtrip_without_local_files(tmp_path):
     assert result["summary"]["framework_ms"]["p50"] == 4000
     assert result["source"] == "phoenix"
     assert not list(tmp_path.iterdir())
-    assert any(any(v.startswith("run_id:") for v in r.url.params.get_list("attribute")) for r in requests)
+    assert any("run_id" in json.loads(r.content)["queries"][0]["filter"]["condition"] for r in requests)
 
 
 @pytest.mark.asyncio
@@ -223,24 +229,17 @@ async def test_phoenix_paginates_and_fetches_completion_outside_selected_window(
     calls = []
 
     def handle(request):
-        params = request.url.params
-        calls.append(params)
-        if "start_time" in params:
-            return httpx.Response(200, json={"data": rows[:1], "next_cursor": None})
-        assert "end_time" not in params
-        page = rows[3:] if params.get("cursor") else rows[:3]
-        return httpx.Response(
-            200,
-            json={
-                "data": page,
-                "next_cursor": None if params.get("cursor") else "page-2",
-            },
-        )
+        body = json.loads(request.content)
+        calls.append(body)
+        condition = body["queries"][0]["filter"]["condition"]
+        assert "end_time" not in body
+        return projected_response(rows[:1] if "started_at" in condition else rows)
+
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(handle)) as client:
         result = await sink.report(start=BASE, end=BASE + 5, client=client)
     assert result["summary"]["total_ms"]["p50"] == 10000
-    assert len(calls) == 3
+    assert len(calls) == 2
 
 
 @pytest.mark.asyncio
@@ -361,6 +360,7 @@ def test_real_run_exports_remote_performance_and_download_without_local_capture(
                     await asyncio.sleep(0.01)
 
         client.portal.call(settle)
+        client.portal.call(host.diagnostics.flush_raw)
         spans = exporter.get_finished_spans()
         assert any(s.name == "model.request" for s in spans)
         summaries = [s for s in spans if s.name == "agent.run" and "sage.performance.data" in s.attributes]
@@ -534,14 +534,14 @@ async def test_resume_segments_are_loaded_across_execution_traces(monkeypatch):
     summaries = [phoenix_span(s) for s in trace.spans if s.name == "agent.run"]
     assert len(summaries) == 2 and summaries[0]["context"]["trace_id"] != summaries[1]["context"]["trace_id"]
     calls = []
-    async def query(client, params):
-        calls.append(params)
-        if any(key == "start_time" for key, value in params):
-            return summaries[:1], False
-        assert ("attribute", 'run_id:"r"') in params
-        return summaries, False
-    monkeypatch.setattr(sink, "_phoenix", query)
-    async with httpx.AsyncClient() as client:
+    def handle(request):
+        condition = json.loads(request.content)["queries"][0]["filter"]["condition"]
+        calls.append(condition)
+        if "started_at" in condition:
+            return projected_response(summaries[:1])
+        assert 'attributes["run_id"] in ["r"]' in condition
+        return projected_response(summaries)
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handle)) as client:
         spans, cut = await sink._query(client, start=BASE, end=BASE + 10)
     assert len(calls) == 2 and not cut
     events, _ = timing_rows(spans)
@@ -590,7 +590,8 @@ async def test_download_projects_model_spans_when_raw_diagnostics_were_not_captu
         assert manifest["evidence_availability"]["raw_model_streams"]["status"] == "not_captured"
 
 
-def test_agent_export_waits_for_host_cleanup_and_preserves_native_duration():
+@pytest.mark.asyncio
+async def test_agent_export_waits_for_host_cleanup_and_preserves_native_duration():
     from sagents.v2.runtime.observability.traces import StructuredTracer
     from sagents.v2.runtime.observability.contracts import TraceStatus
     from sagents.v2.runtime.observability.plugins.phoenix import PhoenixTraceSink
@@ -610,19 +611,24 @@ def test_agent_export_waits_for_host_cleanup_and_preserves_native_duration():
         log("agent.run.completed", 9)
         parent.end(status=TraceStatus.OK)
         native_end = source._performance[("s", "r")]["ended_span"].end_time
-        assert exporter.get_finished_spans() == ()
+        assert not any(s.name == "agent.run" for s in exporter.get_finished_spans())
         log("server.run.performance.finished", 10, run_state="completed")
+        await source.flush_raw()
         spans = exporter.get_finished_spans()
-        assert len(spans) == 1
-        exported = spans[0]
+        exported = next(s for s in spans if s.name == "agent.run")
+        assert sum(s.name == "agent.run" for s in spans) == 1
         assert format(exported.context.span_id, "016x") == parent.span.span_id
         assert exported.start_time == int(parent.span.start_time.timestamp() * 1e9)
         assert exported.end_time == int(native_end.timestamp() * 1e9)
         assert exported.status.status_code.name == "OK"
         assert exported.attributes["sage.performance.total_ms"] == 10000
-        logs = [json.loads(e.attributes["sage.diagnostic.data"]) for e in exported.events if e.name == "sage.diagnostic.log"]
+        from sagents.v2.runtime.observability.raw import reconstruct
+        records, gaps = reconstruct([{"name":s.name, "attributes":dict(s.attributes), "start_time":s.start_time / 1e9} for s in spans])
+        assert not gaps
+        logs = [json.loads(attrs["sage.diagnostic.data"]) for _, attrs in records if attrs["sage.diagnostic.kind"] == "log"]
         assert any(row["event"] == "server.run.performance.finished" for row in logs)
     finally:
+        await source.close()
         trace.close()
 
 

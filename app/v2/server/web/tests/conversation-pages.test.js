@@ -34,40 +34,56 @@ async function setup(t, name, target) {
   return { api, mount, router, Component }
 }
 
-test('history filters real metadata, retains rows on reload failure, and keeps failed deletion open', async t => {
+test('history loads cursor pages, filters on the server, retains rows on failure, and keeps failed deletion open', async t => {
   const { api, mount } = await setup(t, 'History', '/history')
   const own = { thread_id: 'own', title: '项目规划', agent_id: 'a' }
   const foreign = { thread_id: 'foreign', title: '研究资料', agent_id: 'a', _owner: { user_id: 'alice', username: 'Alice' } }
-  t.mock.method(api, 'listThreads', async () => [own, foreign])
-  t.mock.method(api, 'agentSummaries', async () => [{ id: 'a', name: '写作助手' }, { id: 'a', name: '研究助手', _owner: foreign._owner }])
+  t.mock.method(api, 'listThreads', async params => ({ items: params.cursor ? [foreign] : [own], next_cursor: params.cursor ? null : 'page-2' }))
+  t.mock.method(api, 'agentSummaries', async () => [{ id: 'a', name: '写作助手' }, { id: 'b', name: '研究助手', _owner: foreign._owner }])
   t.mock.method(api, 'deleteThread', async () => { throw Error('删除失败') })
   const state = await mount()
-  state.search = '研究助手'
-  assert.deepEqual(state.visible.map(item => item.thread_id), ['foreign'])
-  state.search = 'Alice'
-  assert.equal(state.visible.length, 0)
-  state.clearFilters()
+  assert.deepEqual(state.visible.map(item => item.thread_id), ['own'])
+  assert.equal(state.nextCursor, 'page-2')
+  await state.load(true)
   assert.deepEqual(state.visible.map(item => item.thread_id), ['own', 'foreign'])
-  state.agentFilter = 'missing'
-  assert.equal(state.visible.length, 0)
-  state.clearFilters()
+  assert.equal(api.listThreads.mock.calls[1].arguments[0].cursor, 'page-2')
+  assert.equal(state.nextCursor, null)
+  t.mock.method(api, 'listThreads', async params => {
+    assert.equal(params.search, '研究助手'); assert.equal(params.agent_id, 'b'); assert.equal(params.cursor, undefined)
+    return { items: [foreign], next_cursor: null }
+  })
+  state.search = '研究助手'; state.agentFilter = 'b'
+  await nextTick(); await new Promise(resolve => setTimeout(resolve, 230)); await nextTick()
+  assert.deepEqual(state.visible.map(item => item.thread_id), ['foreign'])
   state.requestDelete(foreign); assert.equal(state.deleteTarget, null)
   state.requestDelete(own); await state.remove()
-  assert.equal(state.deleteTarget.thread_id, 'own')
-  assert.equal(state.deleteError, '删除失败')
-  assert.equal(state.threads.length, 2)
+  assert.equal(state.deleteTarget.thread_id, 'own'); assert.equal(state.deleteError, '删除失败')
   t.mock.method(api, 'listThreads', async () => { throw Error('读取失败') })
   await state.load()
-  assert.equal(state.error, '读取失败'); assert.equal(state.threads.length, 2)
+  assert.equal(state.error, '读取失败'); assert.deepEqual(state.threads.map(item => item.thread_id), ['foreign'])
   t.mock.method(api, 'deleteThread', async () => {})
   await state.remove()
   assert.equal(state.deleteTarget, null)
-  assert.deepEqual(state.threads.map(item => item.thread_id), ['foreign'])
+})
+
+test('chat opens an older direct link with its owner and pinned agent even outside the first thread page', async t => {
+  const { api, mount } = await setup(t, 'Chat', '/?thread=older')
+  t.mock.method(api, 'listThreads', async () => ({ items: [], next_cursor: 'more' }))
+  t.mock.method(api, 'thread', async id => ({ thread_id: id, title: '旧会话', agent_id: 'b', _owner: { user_id: 'alice', username: 'Alice' } }))
+  t.mock.method(api, 'listAgents', async () => [{ id: 'a' }])
+  t.mock.method(api, 'listModels', async () => [{ id: 'm' }])
+  t.mock.method(api, 'threadEvents', async (id, limit, owner) => {
+    assert.equal(id, 'older'); assert.equal(owner.user_id, 'alice')
+    return { events: [], total: 0, offset: 0, limit: 500 }
+  })
+  const state = await mount()
+  assert.equal(state.selectedAgentId, 'b'); assert.equal(state.readOnly, true)
+  assert.equal(state.threadTitle, '旧会话'); assert.equal(state.agentLocked, true)
 })
 
 test('new chat preserves drafts when configuration fails, disables sends without models, and sends through AG-UI', async t => {
   const { api, mount } = await setup(t, 'Chat')
-  t.mock.method(api, 'listThreads', async () => [])
+  t.mock.method(api, 'listThreads', async () => ({ items: [], next_cursor: null }))
   t.mock.method(api, 'listAgents', async () => [{ id: 'a', name: '助手' }])
   t.mock.method(api, 'listModels', async () => [])
   t.mock.method(globalThis, 'fetch', async (url, init) => {
@@ -108,7 +124,7 @@ test('new chat preserves drafts when configuration fails, disables sends without
 
 test('approval remains visible during submission, preserves a failed answer, and does not resurrect after a list refresh failure', async t => {
   const { api, mount } = await setup(t, 'Chat')
-  t.mock.method(api, 'listThreads', async () => [])
+  t.mock.method(api, 'listThreads', async () => ({ items: [], next_cursor: null }))
   t.mock.method(api, 'listAgents', async () => [{ id: 'a' }])
   t.mock.method(api, 'listModels', async () => [{ id: 'm' }])
   let finish, fail = true
@@ -142,7 +158,7 @@ test('approval remains visible during submission, preserves a failed answer, and
 
 test('live chat accepts supplemental input once, preserves failures, and cancels the backend without reconnecting', async t => {
   const { api, mount } = await setup(t, 'Chat')
-  t.mock.method(api, 'listThreads', async () => [])
+  t.mock.method(api, 'listThreads', async () => ({ items: [], next_cursor: null }))
   t.mock.method(api, 'listAgents', async () => [{ id: 'a' }])
   t.mock.method(api, 'listModels', async () => [{ id: 'm' }])
   let stream, request, failSteer = true, failStop = true
@@ -209,7 +225,7 @@ test('live chat accepts supplemental input once, preserves failures, and cancels
 
 test('unreceived supplemental text returns to the draft when the run finishes', async t => {
   const { api, mount } = await setup(t, 'Chat')
-  t.mock.method(api, 'listThreads', async () => [])
+  t.mock.method(api, 'listThreads', async () => ({ items: [], next_cursor: null }))
   t.mock.method(api, 'listAgents', async () => [{ id: 'a' }])
   t.mock.method(api, 'listModels', async () => [{ id: 'm' }])
   t.mock.method(api, 'steerThreadRun', async () => ({ steer_id: 'unclaimed', state: 'pending' }))
@@ -240,7 +256,7 @@ test('new chat loads quietly without exposing a cached agent id or shifting the 
   const cachedId = 'agent_cached_internal_id'
   localStorage.setItem('sage.server_v2.agent', cachedId)
   let finishAgents, finishModels
-  t.mock.method(api, 'listThreads', async () => [])
+  t.mock.method(api, 'listThreads', async () => ({ items: [], next_cursor: null }))
   t.mock.method(api, 'listAgents', () => new Promise(resolve => { finishAgents = resolve }))
   t.mock.method(api, 'listModels', () => new Promise(resolve => { finishModels = resolve }))
   const state = await mount()

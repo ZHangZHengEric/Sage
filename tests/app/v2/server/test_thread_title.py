@@ -62,7 +62,7 @@ def test_agui_history_keeps_first_title_after_followup_and_restart(tmp_path):
             assert '"type":"RUN_FINISHED"' in response.text
             history = client.get("/api/threads", headers=headers)
             assert history.status_code == 200
-            thread = history.json()["data"][0]
+            thread = history.json()["data"]["items"][0]
             assert thread["title"] == first_message[:80]
             timestamps.append(thread["updated_at"])
         assert timestamps[1] > timestamps[0]
@@ -70,4 +70,4 @@ def test_agui_history_keeps_first_title_after_followup_and_restart(tmp_path):
     with TestClient(create_app(host())) as restarted:
         history = restarted.get("/api/threads", headers=headers)
         assert history.status_code == 200
-        assert history.json()["data"][0]["title"] == first_message[:80]
+        assert history.json()["data"]["items"][0]["title"] == first_message[:80]

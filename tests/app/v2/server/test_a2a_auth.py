@@ -123,10 +123,10 @@ def test_a_tenant_forged_in_the_request_body_is_ignored(tmp_path):
 
         victim_threads = client.get(
             "/api/threads", headers={"Authorization": f"Bearer {victim_token}"}
-        ).json()["data"]
+        ).json()["data"]["items"]
         attacker_threads = client.get(
             "/api/threads", headers={"Authorization": f"Bearer {attacker_token}"}
-        ).json()["data"]
+        ).json()["data"]["items"]
 
     assert [item["thread_id"] for item in victim_threads] == []
     assert task["contextId"] in [item["thread_id"] for item in attacker_threads]
@@ -165,7 +165,7 @@ def test_a_key_cannot_reach_another_agent_of_the_same_owner(tmp_path):
         assert other_agent_id != bound_agent_id
 
         task = send(client, api_key, "hi")["result"]["task"]
-        threads = client.get("/api/threads", headers=headers).json()["data"]
+        threads = client.get("/api/threads", headers=headers).json()["data"]["items"]
 
     thread = next(
         item for item in threads if item["thread_id"] == task["contextId"]

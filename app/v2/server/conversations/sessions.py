@@ -15,6 +15,10 @@ class SessionPage:
 async def page_session_events(access, session_id: str, context, *, limit: int, after_sequence: int | None):
     """Read the newest page or continue after a delivered Session sequence."""
 
+    query = getattr(access, "read_session_event_page", None)
+    if callable(query):
+        page = await query(session_id, context, limit=limit, after_sequence=after_sequence)
+        return SessionPage(page.events, page.total, page.after_sequence)
     session = await access.get_session(session_id, context)
     total = int(session.last_sequence)
     start = (

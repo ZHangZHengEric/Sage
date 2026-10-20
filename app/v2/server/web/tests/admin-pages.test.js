@@ -146,7 +146,7 @@ test('model cards show verified output capabilities separately while retaining t
 test('admin opens foreign chat pages read-only and new conversations use own agent', async t => {
   const { api, mount } = await setup(t, 'Chat')
   const owner = { user_id: 'alice', username: 'alice' }
-  t.mock.method(api, 'listThreads', async () => [{ thread_id: 'foreign', agent_id: 'alice-agent', _owner: owner }])
+  t.mock.method(api, 'listThreads', async () => ({ items: [{ thread_id: 'foreign', agent_id: 'alice-agent', _owner: owner }], next_cursor: null }))
   t.mock.method(api, 'listAgents', async all => { assert.equal(all, false); return [{ id: 'own-agent' }] })
   t.mock.method(api, 'listModels', async () => [])
   t.mock.method(api, 'threadEvents', async (id, limit, actualOwner, offset) => {

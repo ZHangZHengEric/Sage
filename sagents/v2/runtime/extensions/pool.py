@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from contextlib import asynccontextmanager
 from .contracts import StopReason
 
 
@@ -25,10 +26,22 @@ class ApplicationScopePool:
     """Share handles, never bypass ExtensionHost construction or teardown."""
     def __init__(self):
         self._handles = {}
-        self._lock = asyncio.Lock()
+        self._locks = {}
+
+    @asynccontextmanager
+    async def _key_lock(self, key):
+        state = self._locks.setdefault(key, [asyncio.Lock(), 0])
+        state[1] += 1
+        try:
+            async with state[0]:
+                yield
+        finally:
+            state[1] -= 1
+            if not state[1] and key not in self._handles:
+                self._locks.pop(key, None)
 
     async def acquire(self, key, factory):
-        async with self._lock:
+        async with self._key_lock(key):
             if key not in self._handles:
                 handle = await factory()
                 self._handles[key] = [handle, 0]
@@ -37,7 +50,7 @@ class ApplicationScopePool:
             return ScopeLease(self, key, item[0])
 
     async def release(self, key, reason=StopReason.SCOPE_CLOSED):
-        async with self._lock:
+        async with self._key_lock(key):
             item = self._handles[key]
             if item[1] == 1:
                 await item[0].close(reason)

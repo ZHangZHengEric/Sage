@@ -20,6 +20,7 @@ from sagents.v2.runtime.observability.contracts import (
     TraceStatus,
     TraceSpanObserver,
 )
+from sagents.v2.runtime.observability.raw import retained_size, json_working_size, raw_trace_value
 from sagents.v2.runtime.observability.content import safe_trace_value, trace_content
 
 _LOG = logging.getLogger(__name__)
@@ -67,6 +68,7 @@ class OtlpTraceTransport:
         sample_rate: float = 1.0,
         max_queue_size: int = 2048,
         max_active_spans: int = 4096,
+        max_retained_bytes: int = 32 * 1024 * 1024,
         timeout_seconds: float = 3.0,
         resource_attributes: Mapping[str, str] | None = None,
     ) -> None:
@@ -88,6 +90,11 @@ class OtlpTraceTransport:
         self.resource_attributes = dict(resource_attributes or {})
         self.content_mode, self.max_content_chars = content_mode, max_content_chars
         self.max_active_spans, self.timeout_seconds = max_active_spans, timeout_seconds
+        if max_retained_bytes < 4096:
+            raise ValueError("trace byte limit must be at least 4096")
+        self.max_retained_bytes = max_retained_bytes
+        self._retained_bytes = 0
+        self._span_bytes: dict[str, int] = {}
         self._lock = threading.RLock()
         self._spans: dict[str, Any] = {}
         self._closed = False
@@ -132,6 +139,10 @@ class OtlpTraceTransport:
                 if self._closed or len(self._spans) >= self.max_active_spans:
                     self._warn("active_span_limit", count=1)
                     return
+                attributes = self._encode_values(span.span_id, span.attributes, lambda: self._attributes(span))
+                if attributes is None:
+                    self._warn("active_byte_limit", count=1)
+                    return
                 # Explicit empty context produces a real root, independent of
                 # other libraries' ambient OTel context. Remote parents need no
                 # in-process handle and keep their exact W3C span identity.
@@ -159,24 +170,33 @@ class OtlpTraceTransport:
                 finally:
                     _IDENTITIES.reset(token)
                 if otel_span.is_recording():
-                    _set_attributes(otel_span, self._attributes(span))
+                    _set_attributes(otel_span, attributes)
                     self._spans[span.span_id] = otel_span
+                else:
+                    self._release_bytes(span.span_id)
             # Never call host enrichment while holding the transport lock.
             if self._span_observer is not None:
                 self._span_observer.span_started(self, span)
         except Exception:
+            self._release_bytes(span.span_id)
             self._warn("start_span", count=1)
 
     def add_event(self, span_id: str, event: TraceEvent) -> None:
         try:
+            # Admission, encoding and attachment form one state transition.
+            # End/export cannot release the reservation while an event is
+            # still being encoded, or attach it to an already ended span.
             with self._lock:
                 otel_span = self._spans.get(span_id)
-            if otel_span is not None:
-                otel_span.add_event(
-                    event.name,
-                    attributes=_otel_attributes(self._trace_value(event.attributes)),
-                    timestamp=_time_nanos(event.timestamp),
-                )
+                if otel_span is None:
+                    return
+                values = self._encode_values(span_id, event.attributes,
+                                             lambda: self._trace_value(event.attributes))
+                if values is None:
+                    self._mark_incomplete(otel_span, "event_byte_limit")
+                    return
+                otel_span.add_event(event.name, attributes=_otel_attributes(values),
+                                    timestamp=_time_nanos(event.timestamp))
         except Exception:
             self._warn("add_event")
 
@@ -190,45 +210,79 @@ class OtlpTraceTransport:
 
     def export_span(self, span: TraceSpan) -> None:
         """Finish a span after optional host enrichment, without re-entering it."""
+        otel_span = None
         try:
             from opentelemetry.trace import Status, StatusCode
 
             with self._lock:
                 otel_span = self._spans.pop(span.span_id, None)
-            if otel_span is None:
-                return
-            try:
-                _set_attributes(otel_span, self._attributes(span))
+                if otel_span is None:
+                    return
+                attributes = self._encode_values(span.span_id, span.attributes, lambda: self._attributes(span))
+                if attributes is None:
+                    self._mark_incomplete(otel_span, "completion_byte_limit")
+                else:
+                    _set_attributes(otel_span, attributes)
                 if span.status is TraceStatus.ERROR:
-                    message = (
-                        span.error.message
-                        if span.error
-                        else span.attributes.get("status_message", span.name)
-                    )
-                    otel_span.set_status(
-                        Status(StatusCode.ERROR, self._trace_value(message))
-                    )
-                    if span.error:
-                        otel_span.add_event(
-                            "exception",
-                            attributes=_otel_attributes(
-                                self._trace_value(
-                                    {
-                                        "exception.type": span.error.type,
-                                        "exception.message": span.error.message,
-                                        "exception.stacktrace": span.error.stack_trace,
-                                    }
-                                )
-                            ),
-                        )
+                    error = ({"exception.type": span.error.type,
+                              "exception.message": span.error.message,
+                              "exception.stacktrace": span.error.stack_trace}
+                             if span.error else {"exception.message":span.attributes.get("status_message", span.name)})
+                    error_values = self._encode_values(span.span_id, error, lambda: self._trace_value(error))
+                    if error_values is None:
+                        self._mark_incomplete(otel_span, "exception_byte_limit")
+                        otel_span.set_status(Status(StatusCode.ERROR))
+                    else:
+                        otel_span.set_status(Status(StatusCode.ERROR, error_values["exception.message"]))
+                        if span.error:
+                            otel_span.add_event("exception", attributes=_otel_attributes(error_values))
                 elif span.status is TraceStatus.OK:
                     otel_span.set_status(Status(StatusCode.OK))
-            finally:
-                otel_span.end(
-                    end_time=_time_nanos(span.end_time) if span.end_time else None
-                )
         except Exception:
             self._warn("end_span")
+        finally:
+            if otel_span is not None:
+                # Exporter callbacks may acquire the transport lock. All active
+                # span mutations are complete before ending/exporting it.
+                otel_span.end(end_time=_time_nanos(span.end_time) if span.end_time else None)
+
+    def _mark_incomplete(self, span, operation):
+        span.set_attribute("sage.content.incomplete", True)
+        self._warn(operation)
+
+    def _encode_values(self, span_id, source, encode):
+        """Reserve source content before any copies or JSON encoding.
+
+        Called with the transport lock held; an end/export transition cannot
+        race the reservation. Adjust to projected size before storing it.
+        """
+        reserved = self._reserve_bytes(span_id, source)
+        if not reserved:
+            return None
+        try:
+            # Flatten nested attributes while the temporary reservation is
+            # still held. All subsequent setters receive scalar OTLP values.
+            values = _otel_attributes(encode())
+            available = self.max_retained_bytes - self._retained_bytes + reserved
+            projected = retained_size(values, available // 2) * 2 + 512
+            if projected > available:
+                self._refund_bytes(span_id, reserved)
+                return None
+            difference = projected - reserved
+            self._retained_bytes += difference
+            self._span_bytes[span_id] += difference
+            return values
+        except BaseException:
+            self._refund_bytes(span_id, reserved)
+            raise
+
+    def _refund_bytes(self, span_id, size):
+        self._retained_bytes -= size
+        remaining = self._span_bytes[span_id] - size
+        if remaining:
+            self._span_bytes[span_id] = remaining
+        else:
+            self._span_bytes.pop(span_id)
 
     def _attributes(self, span: TraceSpan) -> dict[str, Any]:
         values = {
@@ -254,7 +308,8 @@ class OtlpTraceTransport:
         )
         for key in ("input", "output", "user_input", "arguments", "result"):
             if key in values:
-                values[key] = trace_content(self, values[key])
+                values[key] = (raw_trace_value(values[key]) if self.content_mode == "raw"
+                               else trace_content(self, values[key]))
         if span.name == "model.request":
             values.update(
                 {
@@ -297,7 +352,7 @@ class OtlpTraceTransport:
 
     def _trace_value(self, value: Any) -> Any:
         if self.content_mode == "raw":
-            return trace_content(self, value)
+            return raw_trace_value(value)
         return safe_trace_value(value, limit=self.max_content_chars)
 
     def _build_tracer(self, exporter, headers, sample_rate, max_queue_size):
@@ -356,8 +411,9 @@ class OtlpTraceTransport:
                     with sink._lock:
                         sink.failed_exports += 1
                     sink._warn("export", count=len(spans))
-                if not injected:
-                    for _ in spans:
+                for span in spans:
+                    sink._release_bytes(format(span.context.span_id, "016x"))
+                    if not injected:
                         pending.release()
                 return result
 
@@ -372,12 +428,14 @@ class OtlpTraceTransport:
                 # holding permits until export also lets us count every drop
                 # without inspecting private SDK queues.
                 if not pending.acquire(blocking=False):
+                    sink._release_bytes(format(span.context.span_id, "016x"))
                     sink._warn("queue_full", count=1)
                     return
                 try:
                     super().on_end(span)
                 except Exception:
                     pending.release()
+                    sink._release_bytes(format(span.context.span_id, "016x"))
                     sink._warn("enqueue", count=1)
 
         processor = (
@@ -408,12 +466,39 @@ class OtlpTraceTransport:
         provider.add_span_processor(processor)
         return provider, provider.get_tracer("sagents.v2")
 
+    def _reserve_bytes(self, span_id, values):
+        with self._lock:
+            available = self.max_retained_bytes - self._retained_bytes
+            # Reserve both Python object and its encoded OTLP representation.
+            # Holds through active, queued and in-flight phases until export.
+            size = retained_size(values, available // 2) * 2 + 512
+            if size > available:
+                return 0
+            if self.content_mode == "raw":
+                # JSON strings may grow sixfold for control characters. The
+                # projections can keep three independent encoded aliases plus
+                # encoder temporaries; reserve their worst case before calling
+                # any raw normalizer, backend projection or JSON serializer.
+                temporary = json_working_size(values, (available - size) // 6)
+                size += temporary * 6
+                if size > available:
+                    return 0
+            self._retained_bytes += size
+            self._span_bytes[span_id] = self._span_bytes.get(span_id, 0) + size
+            return size
+
+    def _release_bytes(self, span_id):
+        with self._lock:
+            self._retained_bytes -= self._span_bytes.pop(span_id, 0)
+
     def statistics(self) -> dict[str, int]:
         with self._lock:
             return {
                 "failed_exports": self.failed_exports,
                 "dropped_spans": self.dropped_spans,
                 "active_spans": len(self._spans),
+                "retained_bytes": self._retained_bytes,
+                "max_retained_bytes": self.max_retained_bytes,
             }
 
     def close(self) -> None:

@@ -152,7 +152,7 @@ function resizeInput() {
 }
 
 async function loadThreads() {
-  threads.value = await api.listThreads()
+  threads.value = (await api.listThreads()).items
 }
 
 async function loadModels() {
@@ -194,6 +194,12 @@ async function loadHistory() {
   const revision = historyRevision, id = threadId.value
   historyLoading.value = true
   try {
+    if (!threads.value.some(item => item.thread_id === id)) {
+      const item = await api.thread(id)
+      if (revision !== historyRevision) return
+      threads.value = [...threads.value, item]
+      applyThreadAgent(id)
+    }
     const page = await api.threadEvents(id, 500, currentThread.value?._owner, historyOffset.value)
     if (revision !== historyRevision) return
     if (firstPage && page.has_package) {

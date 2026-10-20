@@ -187,7 +187,15 @@ export const api = {
       method: 'PUT',
       body: JSON.stringify({ content }),
     }),
-  listThreads: async () => isAdmin() ? (await request('/api/admin/threads')).map(item => ({ ...item, _owner: { user_id: item.user_id, username: item.username } })) : request('/api/threads'),
+  listThreads: async (params = {}) => {
+    const query = new URLSearchParams(Object.entries(params).filter(([, value]) => value !== undefined && value !== null && value !== ''))
+    const page = await request(`${isAdmin() ? '/api/admin/threads' : '/api/threads'}?${query}`)
+    return { ...page, items: isAdmin() ? page.items.map(item => ({ ...item, _owner: { user_id: item.user_id, username: item.username } })) : page.items }
+  },
+  thread: async id => {
+    const item = await request(`${isAdmin() ? '/api/admin/threads' : '/api/threads'}/${encodeURIComponent(id)}`)
+    return isAdmin() ? { ...item, _owner: { user_id: item.user_id, username: item.username } } : item
+  },
   threadEvents: (id, limit = 500, owner, offset) => read(`/api/threads/${encodeURIComponent(id)}/events?limit=${limit}${offset === undefined ? "" : `&offset=${offset}`}`, owner),
   deleteThread: (id) => request(`/api/threads/${id}`, { method: 'DELETE' }),
   adminUsers: () => request('/api/admin/users'),

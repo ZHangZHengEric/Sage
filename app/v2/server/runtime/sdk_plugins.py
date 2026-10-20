@@ -184,8 +184,18 @@ def server_registrations(host):
     management = service_registration("agent.management", None)
     management = ExtensionRegistration(descriptor=management.descriptor,
         factory=lambda context, deps: host.agent_management, ownership="borrowed")
+    from app.v2.server.runtime.workspace_binding import ServerExecutionBindingConfig, ServerWorkspaceBindingProvider
+    binding = ExtensionRegistration(
+        descriptor=ExtensionDescriptor(plugin_id="com.sage.server.execution-binding", name="Server workspace binding", version="2.0.0",
+            provides=(CapabilityOffer(capability="execution.binding", api_version="2"),),
+            supported_scopes=frozenset({ExtensionScope.PROCESS}),
+            config_schema=ServerExecutionBindingConfig.model_json_schema(),
+            dependencies=(ExtensionDependency(capability="session.store"),)),
+        factory=lambda context, deps: ServerWorkspaceBindingProvider(host, context.config, deps.require("session.store")),
+        config_model=ServerExecutionBindingConfig,
+    )
     return (
-        management,
+        management, binding,
         run_registration("model.provider", model, dependencies=dependency),
         run_registration("skill.catalog", skills, extra=("skill.source",), dependencies=dependency),
         run_registration("tool.catalog", tools, extra=("tool.executor",), dependencies=dependency),
@@ -222,7 +232,6 @@ SERVER_PROCESS_DEFAULTS = {
 
 def execution_selection(host, *, owner, agent_id, command, sandbox, settings=None):
     from app.v2.server.runtime.official import agent_network_policy
-    from app.v2.server.storage.workspaces import workspace_user
     from sagents.v2.runtime.execution.configuration import LocalExecutionPolicy
     from sagents.v2.runtime.execution.sandbox import FileOperation
     settings = settings or host.settings
@@ -236,10 +245,10 @@ def execution_selection(host, *, owner, agent_id, command, sandbox, settings=Non
     if command is not None and command.invocation_mode == "plan":
         policy = policy.narrow({"filesystem": {"allowed_operations": [FileOperation.READ, FileOperation.LIST]},
                                 "process": {"read_only": True}})
-    workspace_owner = workspace_user(command, owner) if command is not None else owner
-    return CapabilitySelection(plugin="sage.execution.binding.local-workspace", config={
-        "workspace": str(host.paths.workspace_dir(workspace_owner, agent_id)),
-        "private_workspace_root": str(host.paths.workspace_dir(workspace_owner, agent_id).parent / ".sage-private-workspaces"),
+    return CapabilitySelection(plugin="com.sage.server.execution-binding", config={
+        "owner": owner, "agent_id": agent_id,
+        "workspace": str(host.paths.workspace_dir(owner, agent_id)),
+        "private_workspace_root": str(host.paths.workspace_dir(owner, agent_id).parent / ".sage-private-workspaces"),
         "policy": policy.model_dump(mode="json"),
         "linux_execution_uid": settings.linux_execution_uid,
         "linux_execution_gid": settings.linux_execution_gid,

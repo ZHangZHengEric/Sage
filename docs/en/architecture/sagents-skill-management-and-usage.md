@@ -36,6 +36,8 @@ the groups to standard capability selections. Management provides
 `skill.workspace` and `skill.loading`. Conflicting grouped and explicit selections
 are rejected. Only canonical selections are serialized.
 
+## Management
+
 | Management plugin | Behavior |
 | --- | --- |
 | `sage.skill.filesystem` (default) | Read directories from `roots`; files are managed outside Sage, for example through Git; no historical version guarantee |
@@ -68,6 +70,25 @@ signed grants. The default is assembled only inside an existing Run sandbox.
 packages; explicit loading, preloads and user selection materialize within the
 active context budget.
 
+## Auto-sync directories and update rules
+
+For `CurrentSkillSource`, auto-sync calls `fetch_latest` on every explicit load,
+retaining the Run's admitted-name boundary. Built-in filesystem, repositories and
+Server catalog support this port. Custom sources with only `fetch` retain their
+own version selection.
+
+```text
+workspace/skills/
+  demo/
+    SKILL.md
+    references/guide.md
+  .catalog/demo/
+    state.json
+    agent-edits/<content-hash>/
+      files/...
+      record.json
+```
+
 Auto-sync keeps only current source metadata and file hashes at
 `skills/.catalog/<name>/state.json`. Manager-only updates replace current bytes
 and delete obsolete files and empty directories, without archiving old manager
@@ -80,17 +101,14 @@ archived. If archiving fails, current files are preserved. Pending file hashes
 allow interrupted synchronization to resume without misclassifying a partial
 manager update as an Agent edit. This is not a multi-file transaction.
 
-For `CurrentSkillSource`, auto-sync calls `fetch_latest` on every explicit load,
-retaining the Run's admitted-name boundary. Built-in filesystem, repositories and
-Server catalog support this port. Custom sources with only `fetch` retain their
-own version selection.
-
 Writer attribution uses a separate manager source and last-delivered hashes,
 not an OS writer audit. Auto-sync rejects an identical source and working
 directory because a rewritten sole original cannot be restored. Agent editing
 uses the visible stable directory. Optional `edit_skill` requires tool declaration
 plus `skill.load` and `skill.edit` scopes. Auto-sync archives edits on the next
 load; fixed-copy retains them. Archives are not automatically promoted to sources.
+
+## Concurrency, recovery and mount boundaries
 
 Within a process, handles expose a stable `workspace_identity` for backing files.
 Same-version readers can coexist; replacing a directory while another Run is

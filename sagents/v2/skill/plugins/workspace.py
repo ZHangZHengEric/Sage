@@ -16,9 +16,9 @@ from weakref import WeakValueDictionary
 
 from sagents.v2.contracts.errors import ErrorCategory
 from sagents.v2.runtime.execution.sandbox import FileOperation, OperationIntent
+from sagents.v2.skill.bundles import files_digest, skill_error
 from sagents.v2.skill.contracts import SkillBundle, SkillDescriptor
-from sagents.v2.skill.plugins.repository import files_digest, skill_error
-from sagents.v2.skill.plugins.sandbox import SandboxSkillWorkspace
+from sagents.v2.skill.workspace import SandboxSkillWorkspaceBase
 
 
 _locks: WeakValueDictionary = WeakValueDictionary()
@@ -31,7 +31,7 @@ def _hashes(files):
     }
 
 
-class _StableSkillWorkspace(SandboxSkillWorkspace):
+class _StableSkillWorkspace(SandboxSkillWorkspaceBase):
     refresh_on_load = True
 
     def __init__(

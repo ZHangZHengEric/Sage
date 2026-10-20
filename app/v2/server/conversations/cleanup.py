@@ -68,7 +68,7 @@ async def finish_file_operation(function, *args, **kwargs):
 
 
 async def delete_external_session(service, tenant_id, agent_id, session_id):
-    async with service.runs.workspace_mutation_lock:
+    async with service.runs.workspace_lock(tenant_id, agent_id):
         owner, internal_id = await service._scope(tenant_id, agent_id, session_id)
         # Also protects callbacks that can upsert a deleted thread on completion.
         await require_idle(service, tenant_id, agent_id)

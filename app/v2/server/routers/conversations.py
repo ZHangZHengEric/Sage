@@ -29,7 +29,7 @@ from app.v2.server.routers.schemas.common import AUTH_ERRORS, VALIDATION_ERRORS,
 from app.v2.server.routers.schemas.conversations import (
     AgentRunBody,
     ThreadEventPage,
-    ThreadPublic,
+    ThreadPublic, ThreadListPage,
     ThreadResumeBody,
     ThreadCancelBody,
     ThreadSteerBody,
@@ -121,11 +121,19 @@ async def run_agent_package(body: PackageRunBody, request: Request,
     })
 
 
-@thread_router.get("", response_model=ApiResponse[list[ThreadPublic]])
-async def list_threads(user: ReadUser, service: ConversationDep):
-    return success(
-        [item.model_dump(mode="json") for item in await service.list_threads(user.user_id)]
-    )
+@thread_router.get("", response_model=ApiResponse[ThreadListPage])
+async def list_threads(user: ReadUser, service: ConversationDep,
+                       limit: int = Query(50, ge=1, le=200), cursor: str | None = Query(None, max_length=2048),
+                       search: str = Query("", max_length=512), agent_id: str = Query("", max_length=191)):
+    page = await service.list_threads(user.user_id, limit=limit, cursor=cursor, search=search, agent_id=agent_id)
+    return success(page.model_dump(mode="json"))
+
+
+@thread_router.get("/{thread_id}", response_model=ApiResponse[ThreadPublic])
+async def get_thread(thread_id: str, user: ReadUser, host: HostDep):
+    from app.v2.server.conversations.records import require_owned_thread
+    record = require_owned_thread(await host.threads.find(thread_id), user.user_id)
+    return success(record.model_dump(mode="json"))
 
 
 @thread_router.get("/{thread_id}/package")
@@ -298,7 +306,7 @@ class PendingApproval(BaseModel):
 
 class ApprovalPage(BaseModel):
     items: list[PendingApproval]
-    next_offset: int | None
+    next_cursor: str | None
 
 
 class ApprovalAccepted(BaseModel):
@@ -312,9 +320,9 @@ async def list_approvals(
     user: ReadUser,
     service: ConversationDep,
     limit: int = Query(50, ge=1, le=100),
-    offset: int = Query(0, ge=0),
+    cursor: str | None = Query(None, max_length=2048),
 ):
-    return success(await service.pending_approvals(user.user_id, limit=limit, offset=offset))
+    return success(await service.pending_approvals(user.user_id, limit=limit, cursor=cursor))
 
 
 @approval_router.post("/{run_id}/decisions", response_model=ApiResponse[ApprovalAccepted])
@@ -380,7 +388,7 @@ class InteractionReply(BaseModel):
 @external_router.put("/workspace/files")
 async def put_workspace_files(body: WorkspaceImport, caller: CallerDep, host: HostDep):
     try:
-        async with host.conversations.runs.workspace_mutation_lock:
+        async with host.conversations.runs.workspace_lock(caller.tenant_id, caller.agent_id):
             count = await finish_file_operation(import_workspace_files, host.paths,
                                                 caller.tenant_id, caller.agent_id,
                                                 body.directory, body.files)
@@ -403,7 +411,7 @@ async def delete_workspace_files(caller: CallerDep, host: HostDep,
     except ValueError:
         return error_response(status_code=422, message="invalid workspace path",
                               detail="invalid_workspace_path")
-    async with service.runs.workspace_mutation_lock:
+    async with service.runs.workspace_lock(caller.tenant_id, caller.agent_id):
         await require_idle(service, caller.tenant_id, caller.agent_id)
         try:
             deleted = await finish_file_operation(
