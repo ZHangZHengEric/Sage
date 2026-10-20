@@ -62,7 +62,7 @@ Windows 使用对应环境的 `Scripts\Activate.ps1` 激活。
 它不会自动执行 Web、Flutter、Rust 或 `docs/scripts/` 的测试。
 真实模型、外部数据库、原生沙箱等测试是否执行，还取决于各测试的启用条件及环境依赖。
 
-根目录 [conftest.py](../conftest.py) 将仓库根目录加入 `sys.path`。
+[pytest.ini](../pytest.ini) 的 `pythonpath = .` 将仓库根目录加入测试导入路径。
 pytest 默认给每个测试设置 30 秒的超时保护，这是防止挂起的上限，不是性能指标。
 需要更长时间的用例使用 `@pytest.mark.timeout(seconds)`；性能要求应另写明确的耗时断言。
 

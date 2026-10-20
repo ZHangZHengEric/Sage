@@ -100,13 +100,24 @@ legacy imports in v2 applications. It also forbids Sage imports inside AnyTool. 
 computed dynamic imports and actual runtime behavior still need integration tests.
 Historical manual demos are syntax-checked but excluded from import validation.
 
-`pyrightconfig.json` includes both v2 Python hosts and uses `.venv`. Python
-architecture checks do not replace Flutter, TypeScript, Rust, packaging, or HTTP
-smoke checks; their current results are in [the runtime report](V1_V2_RUNTIME_CHECK.md).
+`pyrightconfig.json` includes both v2 Python hosts and targets Python 3.12. It
+does not pin a local environment directory: select an installed Python 3.12+
+environment in the editor, or activate it before running Pyright from the shell.
+Python architecture checks do not replace Flutter, TypeScript, Rust, packaging,
+or HTTP smoke checks; their current results are in
+[the runtime report](V1_V2_RUNTIME_CHECK.md).
 
 Ignored `build/`, `dist/`, `node_modules/`, caches, logs, and local workspace data
 are generated state, not additional source layers. Do not move or delete user
 workspace data as part of source organization.
+
+## Documentation ownership
+
+`docs/` is the current bilingual product and developer reference, published by
+the documentation workflow. `knowledge/` contains ecosystem articles and worked
+examples linked from the project README; it is not a second product manual.
+`app/wiki/` is the legacy product manual still consumed by v1 Desktop packaging.
+Keep current v2 instructions in `docs/` rather than duplicating them in the wiki.
 
 ## Local workspace leftovers
 
