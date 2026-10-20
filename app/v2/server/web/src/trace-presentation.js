@@ -9,6 +9,13 @@ export function attribute(span, key) {
   if (Object.hasOwn(attributes, key)) return attributes[key]
   return key.split('.').reduce((value, part) => value?.[part], attributes)
 }
+export function diagnosticRecords(span) {
+  return (span?.events || []).filter(event => event.name?.startsWith('sage.diagnostic.')).map(event => {
+    const value = attribute(event, 'sage.diagnostic.data')
+    try { return { kind: attribute(event, 'sage.diagnostic.kind'), timestamp: event.timestamp, data: JSON.parse(value) } }
+    catch { return { kind: attribute(event, 'sage.diagnostic.kind'), timestamp: event.timestamp, data: value } }
+  })
+}
 export function pretty(value) {
   if (value == null) return '未采集'
   if (typeof value === 'string') {

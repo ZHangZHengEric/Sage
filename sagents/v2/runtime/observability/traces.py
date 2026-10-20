@@ -33,6 +33,9 @@ _active_span: contextvars.ContextVar[tuple[str, str] | None] = contextvars.Conte
     "sage_trace_active_span",
     default=None,
 )
+_active_sink: contextvars.ContextVar[TraceSink | None] = contextvars.ContextVar(
+    "sage_trace_sink", default=None,
+)
 
 
 _active_metadata: contextvars.ContextVar[dict[str, Any]] = contextvars.ContextVar(
@@ -44,6 +47,12 @@ def current_trace_context() -> tuple[str, str] | None:
     """Return the active ``(trace_id, span_id)`` pair, if any."""
 
     return _active_span.get()
+
+
+def current_trace_sink() -> TraceSink | None:
+    """Return the exporter that owns the active span, including managed apps."""
+
+    return _active_sink.get()
 
 
 def session_trace_id(session_id: str) -> str:
@@ -98,6 +107,7 @@ class SpanHandle:
         self.span = span
         self._ended = False
         self._token = _active_span.set((span.trace_id, span.span_id))
+        self._sink_token = _active_sink.set(sink)
         self._metadata_token = _active_metadata.set(
             {
                 **_active_metadata.get(),
@@ -171,6 +181,7 @@ class SpanHandle:
         finally:
             try:
                 _active_span.reset(self._token)
+                _active_sink.reset(self._sink_token)
                 _active_metadata.reset(self._metadata_token)
             except Exception:
                 return

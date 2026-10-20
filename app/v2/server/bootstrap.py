@@ -355,6 +355,9 @@ class ServerHost:
         self.conversations = None
         self.admin = None
         self.a2a = None
+        # Flush grouped observation evidence while the trace exporter is alive.
+        if self.diagnostics is not None:
+            await self.diagnostics.close()
         if self._application is not None:
             await self._application.close()
         self._application = None
@@ -364,8 +367,6 @@ class ServerHost:
         self.a2a_plugins.clear()
         self.execution.model_pool = None
         self.execution.model_budget = None
-        if self.diagnostics is not None:
-            await self.diagnostics.close()
 
     async def _expire_approvals(self, runs):
         while True:

@@ -61,7 +61,7 @@ class ServerSettings:
     trace_otlp_insecure: bool = False
     trace_service_name: str = "sage-server"
     trace_environment: str = "production"
-    trace_content_mode: str = "redacted"
+    trace_content_mode: str | None = None
     trace_max_content_chars: int = 16384
     trace_sample_rate: float = 1.0
     trace_timeout_seconds: float = 3.0
@@ -111,7 +111,7 @@ class ServerSettings:
             raise ValueError("trace_backend must be noop, otlp, langfuse or phoenix")
         if self.trace_otlp_protocol not in {"grpc", "http"}:
             raise ValueError("trace_otlp_protocol must be grpc or http")
-        if self.trace_content_mode not in {"metadata", "redacted", "raw"}:
+        if self.trace_content_mode not in {None, "metadata", "redacted", "raw"}:
             raise ValueError("trace_content_mode must be metadata, redacted or raw")
         if not 0 <= self.trace_sample_rate <= 1:
             raise ValueError("trace_sample_rate must be between 0 and 1")
@@ -211,7 +211,7 @@ class ServerSettings:
             trace_otlp_insecure=_env("SAGE_SERVER_TRACE_OTLP_INSECURE", "false").lower() == "true",
             trace_service_name=_env("SAGE_SERVER_TRACE_SERVICE_NAME", "sage-server"),
             trace_environment=_env("SAGE_SERVER_TRACE_ENVIRONMENT", "production"),
-            trace_content_mode=_env("SAGE_SERVER_TRACE_CONTENT_MODE", "redacted"),
+            trace_content_mode=_env("SAGE_SERVER_TRACE_CONTENT_MODE") or None,
             trace_max_content_chars=int(_env("SAGE_SERVER_TRACE_MAX_CONTENT_CHARS", "16384")),
             trace_sample_rate=float(_env("SAGE_SERVER_TRACE_SAMPLE_RATE", "1")),
             trace_timeout_seconds=float(_env("SAGE_SERVER_TRACE_TIMEOUT_SECONDS", "3")),

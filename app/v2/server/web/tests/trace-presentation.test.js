@@ -25,3 +25,17 @@ test('waterfall uses the trace time range', () => {
     {start_time:'2026-10-20T00:00:02Z',end_time:'2026-10-20T00:00:05Z'}]
   assert.deepEqual(waterfall(rows,rows[1]),{left:'20%',width:'30%'})
 })
+
+test('raw inspector reads complete diagnostic events from the selected span', async () => {
+  const { diagnosticRecords } = await import('../src/trace-presentation.js')
+  const original = 'password=keep-' + 'x'.repeat(100000)
+  const span = {events:[
+    {name:'first_token',attributes:{duration_ms:100}},
+    {name:'sage.diagnostic.response',timestamp:'2026-10-20T00:00:00Z',attributes:{
+      'sage.diagnostic.kind':'response','sage.diagnostic.data':JSON.stringify({response:{text:original}})}},
+  ]}
+  const records = diagnosticRecords(span)
+  assert.equal(records.length,1)
+  assert.equal(records[0].data.response.text,original)
+  assert.equal(records[0].kind,'response')
+})

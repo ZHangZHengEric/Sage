@@ -528,3 +528,15 @@ def test_repeated_embedded_json_still_redacts_secrets_in_sibling_text():
     assert result["wire"] == result["normalized"]
     assert "embedded-value" not in json.dumps(result)
     assert result["message"] == REDACTED
+
+
+def test_availability_marks_truncated_and_dropped_evidence_as_partial():
+    stream, _ = prepare_session_export("s", {"r"}, {
+        "models":[{"run_id":"r", "request_id":"m", "truncated":True,
+                   "stream":{"wire_capture_available":True, "dropped_wire_events":2}}],
+        "logs":[{"run_id":"r", "event":"example", "truncated":True}],
+        "dropped_logs":1,
+    })
+    with stream, ZipFile(stream) as archive:
+        availability = json.loads(archive.read("s/manifest.json"))["evidence_availability"]
+    assert all(availability[key]["status"] == "partial" for key in ("models", "logs", "raw_model_streams"))

@@ -379,9 +379,12 @@ class RunService:
                 "run.background.failed",
                 "background run crashed",
                 exc,
+                session_id=session_id,
                 run_id=run_id,
                 label=label,
             )
+            LOGGER.info("server.run.performance.finished", "运行性能计时结束",
+                session_id=session_id, run_id=run_id, attributes={"run_state": "failed"})
         finally:
             try:
                 await stream.detach()
@@ -401,9 +404,12 @@ class RunService:
                 "run.background_resume.failed",
                 "background run resume crashed",
                 exc,
+                session_id=session_id,
                 run_id=run_id,
                 label=label,
             )
+            LOGGER.info("server.run.performance.finished", "运行性能计时结束",
+                session_id=session_id, run_id=run_id, attributes={"run_state": "failed"})
         finally:
             self.execution.release(run_id)
 

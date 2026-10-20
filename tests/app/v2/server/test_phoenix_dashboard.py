@@ -22,10 +22,11 @@ async def test_dashboard_aggregates_without_fetching_model_payloads():
             return httpx.Response(200, json={'data': {'id': 'project-id'}})
         body = json.loads(request.content)
         assert 'attributes' not in body['query']
+        assert 'attributes["deployment"]["environment"]["name"] == "production"' in body['variables']['roots']
         assert 'original' not in body['query']
         assert 'original\\"' in body['variables']['roots']
-        assert 'attributes["session.id"] == "session:one"' in body['variables']['roots']
-        assert 'attributes["session.id"] == "session:one"' in body['variables']['models']
+        assert 'attributes["session"]["id"] == "session:one"' in body['variables']['roots']
+        assert 'attributes["session"]["id"] == "session:one"' in body['variables']['models']
         return httpx.Response(200, json={'data': {'node': {
             'requests': 2, 'errors': 1, 'tokens': 300, 'input_tokens': 200,
             'output_tokens': 100, 'cost': {'total': {'cost': .004}},
@@ -93,7 +94,7 @@ async def test_metadata_pagination_and_raw_span_are_separate_queries():
             return httpx.Response(200,json={'data':[raw]})
         body = json.loads(request.content)
         assert body['variables']['cursor'] == 'page-2'
-        assert 'attributes["session.id"] == "session:one"' in body['variables']['condition']
+        assert 'attributes["session"]["id"] == "session:one"' in body['variables']['condition']
         assert 'input' not in body['query'] and 'attributes' not in body['query']
         row = dict(span_id='a'*16, name='model.request', span_kind='LLM', status_code='OK',
                    start_time='2026-10-20T00:00:00Z',

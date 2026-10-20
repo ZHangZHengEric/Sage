@@ -231,6 +231,7 @@ class OtlpTraceTransport:
                 "sage.trace_id": span.trace_id,
                 "sage.span_id": span.span_id,
                 "deployment.environment.name": self.environment,
+                "sage.content.mode": self.content_mode,
                 **span.attributes,
             }
         )
@@ -264,7 +265,18 @@ class OtlpTraceTransport:
                     "gen_ai.tool.call.result": values.get("output"),
                 }
             )
-        return self._trace_value(values)
+        projected = self._trace_value(values)
+        # Content-free timing rows are control data. Truncating their JSON makes
+        # the performance projection unreadable, independently of content mode.
+        if span.name == "sage.performance" and "sage.performance.data" in values:
+            payload = values["sage.performance.data"]
+            # Each string element respects the SDK's attribute length limit;
+            # an OTLP string array preserves the complete control payload.
+            projected["sage.performance.data"] = tuple(
+                payload[offset:offset + self.max_content_chars]
+                for offset in range(0, len(payload), self.max_content_chars)
+            )
+        return projected
 
     def _trace_value(self, value: Any) -> Any:
         if self.content_mode == "raw":
@@ -427,7 +439,9 @@ def _set_attributes(span: Any, values: Mapping[str, Any]) -> None:
 def _otel_attributes(values: Mapping[str, Any] | None) -> dict[str, Any]:
     return {
         str(key): value
-        if isinstance(value, (bool, int, float, str))
+        if isinstance(value, (bool, int, float, str)) or (
+            key == "sage.performance.data" and isinstance(value, (list, tuple))
+        )
         else json.dumps(value, ensure_ascii=False, default=str)
         for key, value in dict(values or {}).items()
         if value is not None
