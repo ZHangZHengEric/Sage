@@ -3,8 +3,8 @@ import { ref } from 'vue'
 import { api } from '../api.js'
 import AppIcon from './AppIcon.vue'
 defineOptions({ name: 'WorkspaceFileTree' })
-const props = defineProps({ item: Object, owner: Object, threadId: String, agentId: String, level: { type: Number, default: 0 }, downloading: String })
-const emit = defineEmits(['download', 'preview'])
+const props = defineProps({ item: Object, owner: Object, threadId: String, agentId: String, level: { type: Number, default: 0 }, downloading: String, canDelete: Boolean, deleting: Boolean })
+const emit = defineEmits(['download', 'preview', 'delete'])
 const expanded = ref(false), children = ref(null), busy = ref(false), error = ref('')
 function size(bytes) { return bytes < 1024 ? `${bytes} B` : bytes < 1024 ** 2 ? `${(bytes / 1024).toFixed(1)} KB` : `${(bytes / 1024 ** 2).toFixed(1)} MB` }
 async function toggle() {
@@ -22,10 +22,11 @@ async function toggle() {
     <div class="file-tree-row" :style="{ paddingLeft: `${level * 16 + 8}px` }">
       <button class="file-name" :title="item.path" :aria-expanded="item.is_directory ? expanded : undefined" @click="toggle"><AppIcon :name="item.is_directory ? 'chevron' : 'file'" :class="{ expanded }" /><span>{{ item.name }}</span></button>
       <small v-if="!item.is_directory">{{ size(item.size) }}</small>
-      <button class="icon-button" :aria-label="`下载 ${item.name}`" :disabled="Boolean(downloading)" @click="emit('download', item)"><AppIcon name="download" /></button>
+      <button class="icon-button" :aria-label="`下载 ${item.name}`" :disabled="Boolean(downloading) || deleting" @click="emit('download', item)"><AppIcon name="download" /></button>
+      <button v-if="canDelete" class="icon-button danger" :aria-label="`删除 ${item.name}`" :disabled="Boolean(downloading) || deleting" @click="emit('delete', item)"><AppIcon name="trash" /></button>
     </div>
     <p v-if="error" class="file-error error" role="alert">{{ error }}</p>
-    <template v-if="expanded"><p v-if="busy" class="file-error" role="status">加载中…</p><WorkspaceFileTree v-for="child in children || []" :key="child.path" :item="child" :owner="owner" :thread-id="threadId" :agent-id="agentId" :level="level + 1" :downloading="downloading" @download="emit('download', $event)" @preview="emit('preview', $event)" /></template>
+    <template v-if="expanded"><p v-if="busy" class="file-error" role="status">加载中…</p><WorkspaceFileTree v-for="child in children || []" :key="child.path" :item="child" :owner="owner" :thread-id="threadId" :agent-id="agentId" :level="level + 1" :downloading="downloading" :can-delete="canDelete" :deleting="deleting" @download="emit('download', $event)" @preview="emit('preview', $event)" @delete="emit('delete', $event)" /></template>
   </div>
 </template>
 <style scoped>

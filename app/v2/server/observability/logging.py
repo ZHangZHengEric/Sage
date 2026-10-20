@@ -18,6 +18,16 @@ from sagents.v2.runtime.observability.logs import (
 )
 
 
+_ROUTINE_TIMING_EVENTS = frozenset({
+    "agent.state.commit",
+    "session.redis.commit",
+    "agent.preparation.completed",
+    "server.admission.phase",
+    "session.mysql.archived",
+})
+_SLOW_OPERATION_MS = 100
+
+
 @dataclass(frozen=True, slots=True)
 class LoggingSettings:
     level: str = "info"
@@ -45,6 +55,17 @@ class ServerLogSink:
         )
 
     def write(self, record: LogRecord) -> None:
+        # Keep slow/failing operations and all model/tool/Run lifecycle events.
+        # Drop routine timings before serialization and diagnostic queue writes.
+        if (
+            record.level == LogLevel.DEBUG
+            and record.event in _ROUTINE_TIMING_EVENTS
+            and record.error is None
+            and record.attributes.get("outcome", "completed") == "completed"
+        ):
+            duration = record.attributes.get("duration_ms")
+            if isinstance(duration, (int, float)) and 0 <= duration < _SLOW_OPERATION_MS:
+                return
         if self.diagnostics is not None:
             self.diagnostics.write(record)
         self.stdout.write(record)
@@ -129,8 +150,13 @@ def init_logging(settings: LoggingSettings, *, service_name: str, diagnostics=No
         standard.handlers = [uvicorn_handler]
         standard.setLevel(level)
         standard.propagate = False
-    logging.getLogger("httpx").setLevel(logging.WARNING)
-    logging.getLogger("httpcore").setLevel(logging.WARNING)
+    for name in (
+        "httpx", "httpcore", "httpx2", "httpcore2", "openai", "mcp.client",
+        "a2a.utils.telemetry",
+    ):
+        logging.getLogger(name).setLevel(logging.WARNING)
+    for name in ("aiomysql", "redis"):
+        logging.getLogger(name).setLevel(logging.INFO)
     logging.getLogger("websockets").setLevel(logging.INFO)
     return sink
 

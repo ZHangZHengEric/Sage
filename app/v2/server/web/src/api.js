@@ -69,6 +69,7 @@ export const api = {
   saveServerPlugins: body => request('/api/plugins/server', { method: 'PUT', body: JSON.stringify(body) }),
   workspaceFiles: (path = '', owner, threadId = '', agentId = '') => read(`/api/workspace/files?path=${encodeURIComponent(path)}${threadId ? `&thread_id=${encodeURIComponent(threadId)}` : `&agent_id=${encodeURIComponent(agentId)}`}`, threadId ? undefined : owner),
   workspaceDownload: (path = '', owner, threadId = '', agentId = '') => request(`/api/workspace/download?path=${encodeURIComponent(path)}${threadId ? `&thread_id=${encodeURIComponent(threadId)}` : `&agent_id=${encodeURIComponent(agentId)}`}`, !threadId && owner ? { headers: { 'X-Sage-View-User': owner.user_id } } : {}, true),
+  workspaceDelete: (path, recursive = false, threadId = '', agentId = '') => request(`/api/workspace/files?path=${encodeURIComponent(path)}&recursive=${recursive}${threadId ? `&thread_id=${encodeURIComponent(threadId)}` : `&agent_id=${encodeURIComponent(agentId)}`}`, { method: 'DELETE' }),
   downloadSession: id => request(`/api/threads/${encodeURIComponent(id)}/download`, {}, true),
   cancelThreadRun: (id, runId) => request(`/api/threads/${encodeURIComponent(id)}/cancel`, { method: 'POST', body: JSON.stringify({ runId }) }),
   steerThreadRun: (id, body) => request(`/api/threads/${encodeURIComponent(id)}/steer`, { method: 'POST', body: JSON.stringify(body) }),
