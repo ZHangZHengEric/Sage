@@ -86,7 +86,7 @@ function turnPage(value) { page.value = value; scrollCatalog() }
       <span v-if="!pending && unavailableCount" class="agent-resource-warning">{{ unavailableCount }} 项不可用</span>
       <slot name="status" />
       <FieldHelp :label="`${noun}选择`" :text="kind === 'agents' ? '选择允许委派任务的当前用户智能体。新运行使用成员的最新配置，已开始的运行保留其配置快照。' : kind === 'tools' ? '仅授权所选的具体工具。批量选择针对当前目录，不会自动授权以后新增的工具。实际调用仍受工具审批和执行权限限制。' : '选择允许智能体使用的技能。技能绑定在保存智能体后更新，不会自动授权技能涉及的工具。'" />
-      <button v-if="!readonly && selectedItems.length" type="button" class="agent-action" :disabled="disabled" @click="show()"><AppIcon name="plus" />添加{{ noun }}</button>
+      <div class="agent-resource-actions"><slot name="actions" /><button v-if="!readonly && selectedItems.length" type="button" class="agent-action" :disabled="disabled" @click="show()"><AppIcon name="plus" />添加{{ noun }}</button></div>
     </header>
     <div v-if="selectedItems.length && kind === 'tools'" class="agent-resource-summary">{{ summary }}</div>
     <div v-if="selectedItems.length" class="agent-resource-chosen-list">

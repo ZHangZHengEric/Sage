@@ -5,13 +5,41 @@ from __future__ import annotations
 import asyncio
 from pathlib import Path
 
-from app.v2.server.skills.files import inspect_skill_zip
+from app.v2.server.skills.files import inspect_skill_directory, inspect_skill_zip
 from app.v2.server.skills.records import normalize_skill_name
 from app.v2.server.skills.workspaces import sync_workspaces
 from sagents.v2.contracts.errors import SageV2Error
 
 _LOCK = asyncio.Lock()
 _MAX_PROMPT_BYTES = 128 * 1024
+
+
+async def sync_bound_agent_skills(host, *, owner_id: str, agent_id: str) -> dict:
+    """Sync current catalog versions of saved bindings without changing the Agent."""
+    async with _LOCK:
+        await host.catalog.get_agent(owner_id, agent_id)
+        records = await host.skill_catalog.bound_skills(owner_user_id=owner_id, agent_id=agent_id)
+        results = []
+        for record in records:
+            try:
+                package = await asyncio.to_thread(inspect_skill_directory,
+                                                   record.absolute_path(host.paths.data_root))
+                if package.package_sha256 != record.package_sha256:
+                    raise ValueError("Skill artifact no longer matches its catalog version")
+                workspace = await asyncio.to_thread(sync_workspaces, Path(host.paths.data_root),
+                                                     agent_id, {record.name: package.files})
+                results.append({"name": record.name, "success": True,
+                                "changed": workspace["changed_workspaces"] > 0,
+                                "workspaces": workspace["workspaces"]})
+            except SageV2Error as exc:
+                results.append({"name": record.name, "success": False, "message": exc.info.message})
+            except (ValueError, OSError, RuntimeError) as exc:
+                results.append({"name": record.name, "success": False, "message": str(exc)[:200]})
+            except Exception:
+                results.append({"name": record.name, "success": False, "message": "Skill synchronization failed"})
+        return {"prompt_changed": False, "results": results,
+                "success_count": sum(item["success"] for item in results),
+                "failed_count": sum(not item["success"] for item in results)}
 
 
 async def sync_agent_guidance(host, *, owner_id: str, agent_id: str, prompt: str,

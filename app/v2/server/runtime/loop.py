@@ -37,13 +37,6 @@ if TYPE_CHECKING:
 
 
 @dataclass(frozen=True, slots=True)
-class TenantBinding:
-    provider: object
-    workspace: object
-    external: tuple
-
-
-@dataclass(frozen=True, slots=True)
 class CatalogRunDependencies:
     settings: ServerSettings
     paths: ServerPaths
@@ -58,40 +51,6 @@ class CatalogRunDependencies:
     users: object
     keys: object = None
     threads: object = None
-
-
-def prepare_tenant_binding(
-    paths,
-    mcp_plugins,
-    a2a_plugins,
-    user_id: str,
-    records,
-    mcp_servers,
-    a2a_agents,
-    *,
-    agent_id: str,
-    workspace_user_id: str | None = None,
-    workspace_for_run=None,
-    call_depth: int = 0,
-):
-    """Skill ports plus this tenant's MCP and A2A plugins, in catalog order."""
-
-    from app.v2.server.skills.runtime import (
-        CatalogSkillProvider,
-        ReadThroughSkillWorkspace,
-    )
-
-    provider = CatalogSkillProvider(records, paths.data_root)
-    workspace = ReadThroughSkillWorkspace(paths.data_root, workspace_user_id or user_id, records, agent_id=agent_id, workspace_for_run=workspace_for_run)
-    external = tuple(
-        plugin
-        for plugin in (
-            mcp_plugins.get(user_id, mcp_servers),
-            a2a_plugins.get(user_id, a2a_agents, call_depth=call_depth),
-        )
-        if plugin is not None
-    )
-    return TenantBinding(provider=provider, workspace=workspace, external=external)
 
 
 def package_model_record(catalog, selected: str):

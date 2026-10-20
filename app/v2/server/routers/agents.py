@@ -4,7 +4,7 @@ from fastapi import APIRouter, File, Form, UploadFile, HTTPException
 from pydantic import BaseModel, ConfigDict
 from sagents.v2.package.manifest.runtime import CapabilitySelection
 
-from app.v2.server.routers.deps import ReadUser, CatalogDep, CurrentUser, AdminUser, HostDep, PackageDep, SkillDep
+from app.v2.server.routers.deps import ReadUser, CatalogDep, CurrentUser, OptionalUser, AdminUser, HostDep, PackageDep, SkillDep
 from app.v2.server.runtime.official import official_tool_catalog, tool_catalog_item
 from app.v2.server.routers.render import success
 from app.v2.server.routers.schemas.common import AUTH_ERRORS, VALIDATION_ERRORS, ApiResponse
@@ -12,7 +12,7 @@ from app.v2.server.routers.schemas.catalog import (
     AgentBody, AgentPublic, AgentSummary, ToolPublic, AgentToolOption, AgentEditorResources,
 )
 from app.v2.server.routers.schemas.skills import SkillBindBody, SkillPublic
-from app.v2.server.skills.agent_guidance import sync_agent_guidance
+from app.v2.server.skills.agent_guidance import sync_agent_guidance, sync_bound_agent_skills
 from sagents.v2.contracts.errors import ErrorCategory, RuntimeErrorInfo, SageV2Error
 
 agent_router = APIRouter(tags=["agents"], responses={**AUTH_ERRORS, **VALIDATION_ERRORS})
@@ -197,16 +197,29 @@ async def remove_agent(agent_id: str, user: CurrentUser, service: CatalogDep):
 async def put_agent_guidance(
     agent_id: str,
     host: HostDep,
-    prompt: Annotated[str, Form(min_length=1)],
-    files: Annotated[list[UploadFile], File()],
+    user: OptionalUser,
+    prompt: Annotated[str | None, Form(min_length=1)] = None,
+    files: Annotated[list[UploadFile] | None, File()] = None,
+    sync_bound: Annotated[bool, Form()] = False,
 ):
     owner_id = await host.catalog.agent_owner(agent_id)
     if owner_id is None:
         raise SageV2Error(RuntimeErrorInfo(code="server.agent_guidance.agent_not_found",
             category=ErrorCategory.VALIDATION, message="Agent not found"))
-    if len(files) > 32:
+    if sync_bound:
+        if user is None:
+            raise SageV2Error(RuntimeErrorInfo(code="server.agent_guidance.unauthorized",
+                category=ErrorCategory.AUTHENTICATION, message="authentication required"))
+        if user.user_id != owner_id:
+            raise SageV2Error(RuntimeErrorInfo(code="server.agent_guidance.forbidden",
+                category=ErrorCategory.AUTHORIZATION, message="Agent belongs to another user"))
+        if prompt is not None or files:
+            raise SageV2Error(RuntimeErrorInfo(code="server.agent_guidance.validation",
+                category=ErrorCategory.VALIDATION, message="bound Skill sync cannot include a prompt or ZIP files"))
+        return success(await sync_bound_agent_skills(host, owner_id=owner_id, agent_id=agent_id))
+    if prompt is None or not files or len(files) > 32:
         raise SageV2Error(RuntimeErrorInfo(code="server.agent_guidance.validation",
-            category=ErrorCategory.VALIDATION, message="too many Skill ZIP files"))
+            category=ErrorCategory.VALIDATION, message="prompt and between 1 and 32 Skill ZIP files are required"))
     uploads = [(item.filename or "unknown.zip", await item.read((32 << 20) + 1)) for item in files]
     try:
         result = await sync_agent_guidance(host, owner_id=owner_id,

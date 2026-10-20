@@ -7,6 +7,44 @@ import { createServer } from 'vite'
 
 const editorResources = (overrides = {}) => ({ models: [], skills: [], tools: [], external_tools: [], plugins: { configurable: [] }, ...overrides })
 
+test('agent skill sync uses saved bindings and prevents duplicate requests', async t => {
+  const { api, mount } = await setup(t, 'Agents')
+  const agent = { id: 'writer', name: 'Writer', instructions: 'Saved prompt', skills: ['guide'] }
+  t.mock.method(api, 'agentSummaries', async () => [agent])
+  t.mock.method(api, 'agentEditorResources', async () => editorResources())
+  t.mock.method(api, 'getAgent', async () => agent)
+  let finish
+  t.mock.method(api, 'syncAgentSkills', () => new Promise(resolve => { finish = resolve }))
+  const state = await mount()
+  await state.openAgent(agent, false)
+  await new Promise(done => setImmediate(done))
+  state.form.instructions = 'Unsaved prompt'
+  await state.syncSkills()
+  assert.equal(api.syncAgentSkills.mock.callCount(), 0)
+  state.form.instructions = 'Saved prompt'
+  const pending = state.syncSkills()
+  await state.syncSkills()
+  assert.equal(api.syncAgentSkills.mock.callCount(), 1)
+  assert.deepEqual(api.syncAgentSkills.mock.calls[0].arguments, ['writer'])
+  assert.equal(state.syncingSkills, true)
+  finish({ success_count: 1, failed_count: 0, results: [{ name: 'guide', success: true, workspaces: 1 }] })
+  await pending
+  assert.equal(state.syncingSkills, false)
+  assert.match(state.savedMessage, /同步完成/)
+  assert.equal(state.form.instructions, 'Saved prompt')
+  assert.deepEqual(state.selectedSkills, ['guide'])
+})
+
+test('agent skill sync button reflects saved, dirty, loading and readonly states', async t => {
+  const { Component } = await setup(t, 'AgentEditor', 'components')
+  const props = { form: { name: 'Writer' }, savedForm: { name: 'Writer' }, agentId: 'writer', selectedSkills: ['guide'], savedSkills: ['guide'] }
+  const render = overrides => renderToString(createSSRApp(Component, { ...props, ...overrides }))
+  assert.match(await render({}), /<button[^>]*>Agent 技能同步<\/button>/)
+  assert.match(await render({ form: { name: 'Changed' } }), /<button[^>]*disabled[^>]*>Agent 技能同步<\/button>/)
+  assert.match(await render({ syncingSkills: true }), /同步中…/)
+  assert.doesNotMatch(await render({ readonly: true }), /Agent 技能同步/)
+})
+
 test('ordinary agent settings roundtrip mode and members and scope choices to the owner', async t => {
   const { api, mount } = await setup(t, 'Agents')
   const agent = { id: 'director', name: 'Director', agent_mode: 'team', available_sub_agent_ids: ['writer'] }

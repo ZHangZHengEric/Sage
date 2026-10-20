@@ -1,5 +1,5 @@
 .agent-resource-heading { flex-wrap: wrap; gap: 9px; }
-.agent-resource-heading > .agent-action { margin-left: auto; }
+.agent-resource-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-left: auto; }
 .agent-resource-summary { margin: -2px 0 15px; font-size: 11px; color: var(--muted-foreground); overflow-wrap: anywhere; }
 .agent-resource-warning { color: var(--status-warning); font-size: 10px; }
 .agent-resource-chosen-list { border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }

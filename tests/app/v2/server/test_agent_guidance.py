@@ -61,3 +61,50 @@ def test_agent_guidance_rejects_unknown_agent_without_creating_owner(client):
     response = _upload(client, "/api/agents/agent_missing/guidance", {},
                        "x", ("guide.zip", _skill_zip("guide")))
     assert response.status_code == 404
+
+
+def test_sync_bound_skills_uses_latest_versions_and_preserves_prompt(client, service):
+    token = register_and_login(client)
+    headers = {"Authorization": f"Bearer {token}"}
+    agent = client.get("/api/agents", headers=headers).json()["data"][0]
+    skill = client.post("/api/skills", headers=headers, json={
+        "name": "guide", "content": "---\nname: guide\ndescription: Guide\n---\nOld\n",
+    }).json()["data"]
+    client.put(f"/api/agents/{agent['id']}/skills", headers=headers, json={"names": ["guide"]})
+    workspaces = [service.paths.workspace_dir(tenant, agent["id"]) for tenant in ("tenant-1", "tenant-2")]
+    for workspace in workspaces:
+        directory = workspace / "skills/guide"
+        directory.mkdir(parents=True)
+        (directory / "SKILL.md").write_text("Old\n")
+        (directory / "obsolete.txt").write_text("obsolete")
+    new_content = "---\nname: guide\ndescription: Guide\n---\nLatest\n"
+    updated = client.put(f"/api/skills/{skill['skill_id']}", headers=headers,
+                         json={"content": new_content}).json()["data"]
+    response = client.put(f"/api/agents/{agent['id']}/guidance", headers=headers,
+                          data={"sync_bound": "true"})
+    assert response.status_code == 200, response.text
+    result = response.json()["data"]
+    assert result["success_count"] == 1 and result["failed_count"] == 0
+    assert result["prompt_changed"] is False
+    assert result["results"][0]["workspaces"] == 2
+    assert result["results"][0]["changed"] is True
+    for workspace in workspaces:
+        assert (workspace / "skills/guide/SKILL.md").read_text() == new_content
+        assert not (workspace / "skills/guide/obsolete.txt").exists()
+    detail = client.get(f"/api/agents/{agent['id']}", headers=headers).json()["data"]
+    assert detail["instructions"] == agent["instructions"]
+    assert client.get(f"/api/skills/{skill['skill_id']}", headers=headers).json()["data"]["version_id"] == updated["version_id"]
+    again = client.put(f"/api/agents/{agent['id']}/guidance", headers=headers, data={"sync_bound": "true"})
+    assert again.json()["data"]["results"][0]["changed"] is False
+    assert list((service.paths.runtime_root).glob("agent-skill-sync-*/tenant-1/guide/obsolete.txt"))
+
+
+def test_sync_bound_skills_requires_owner_and_rejects_mixed_modes(client):
+    owner = {"Authorization": f"Bearer {register_and_login(client)}"}
+    agent = client.get("/api/agents", headers=owner).json()["data"][0]
+    path = f"/api/agents/{agent['id']}/guidance"
+    client.cookies.clear()
+    assert client.put(path, data={"sync_bound": "true"}).status_code == 401
+    other = {"Authorization": f"Bearer {register_and_login(client, 'other-sync-user')}"}
+    assert client.put(path, headers=other, data={"sync_bound": "true"}).status_code == 403
+    assert client.put(path, headers=owner, data={"sync_bound": "true", "prompt": "changed"}).status_code == 422

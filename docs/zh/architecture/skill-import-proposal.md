@@ -41,7 +41,7 @@ skills.sh 可用于发现技能，实际获取应解析到具体仓库和路径�
 - 原有 Web 的 `Skills.vue` 提供 ZIP 选择、拖入和批量上传；后端入口是 `POST /api/skills/upload`。后端另有 `POST /api/skills`，可直接发布 Markdown 内容，但页面没有对应的新建入口。新增远程入口复用这些已有包处理与目录发布能力。
 - `SkillCatalogService` 已支持 ZIP、目录和 Markdown 转为 `SkillPackage`，统一发布到现有 `skills`、`skill_versions`，文件放在版本目录下。相同内容复用已有版本；同一用户下同名但不同内容会发布新修订。
 - 当前 ZIP 校验器接收一个技能包，在全部文件属于同一个技能根目录时允许去除包装目录；整个多技能仓库的压缩包不能直接当成一个技能导入，需要先发现各个技能根目录。
-- Agent 通过已有绑定选择技能，运行时使用 `CatalogSkillProvider` 和 `ReadThroughSkillWorkspace` 按需读取、物化；工作区中已有的编辑版本会优先使用。
+- Agent 通过已有绑定选择技能，运行时使用 `CatalogSkillProvider` 按需读取技能包，由 SDK 的 `SandboxSkillWorkspace` 物化到工作区；已有文件内容不同时拒绝覆盖，版本更新通过 Agent guidance 同步接口处理。
 - V1 的 `import_skill_by_url` 已实现下载 ZIP 后导入。V2 可参考入口体验，实际发布继续走 V2；V1 的自动重定向下载逻辑需要补齐远程访问限制后才能用于新入口。
 - `app/skills/claw-skill-shub/SKILL.md` 提供调用 ClawHub CLI 的指引。这不代表 V2 的技能页面、目录发布和版本记录已经支持 ClawHub。
 
