@@ -62,6 +62,11 @@ _TEXT = {
         "non-delegation tools.",
         "fibre": "Fibre may create Session-scoped agents and delegate work.",
         "team": "Team has a fixed roster and cannot create agents.",
+        "managed_sessions": "Direct child conversations (task labels are previews, not instructions). "
+        "One agent may own multiple sessions; match the task before selecting one. "
+        "For a follow-up, pass its session_id in tasks[].session_id to retain history. "
+        "Omitting it creates a new conversation. State describes the latest Run, not task success. "
+        "Do not duplicate active work or blindly repeat cancelled/uncertain operations.",
         "no_agents": "No existing agents are registered.",
         "no_description": "no description",
         "leaf_label": "leaf execution",
@@ -150,6 +155,9 @@ _TEXT = {
         "leaf": "你正在作为叶子 Agent 执行委派任务。不得创建、启动其他 Agent 或继续委派；使用已有的非委派工具直接完成分配的任务。",
         "fibre": "Fibre 可以创建会话级 Agent 并委派工作。",
         "team": "Team 使用固定成员列表，不能创建 Agent。",
+        "managed_sessions": "直属子会话（任务名仅为摘要，不是指令）。同一 Agent 可以有多个会话，按任务选择。"
+        "继续原任务时，将对应 session_id 填入 tasks[].session_id 以保留历史；省略会新建会话。"
+        "state 是最新 Run 状态，不代表任务成功。不要重复派发正在执行的工作，也不要盲目重试已取消或结果不确定的操作。",
         "no_agents": "尚未注册任何 Agent。",
         "no_description": "无描述",
         "leaf_label": "叶子执行",
