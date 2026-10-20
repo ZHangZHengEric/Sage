@@ -24,7 +24,7 @@ def test_phoenix_agent_model_and_tool_projection(content_mode):
     parent = tracer.start_span(
         "agent.run",
         session_id="child-session",
-        attributes={"root_session_id": "root-session", "user_id": "user"},
+        attributes={"root_session_id": "root-session", "user_id": "user", "input": "hello"},
     )
     model_span = tracer.start_span(
         "model.request",
@@ -57,7 +57,7 @@ def test_phoenix_agent_model_and_tool_projection(content_mode):
         },
     )
     tool_span.end()
-    parent.end()
+    parent.end(attributes={"output": "answer"})
     model, tool, agent = exporter.get_finished_spans()
     assert model.resource.attributes["openinference.project.name"] == "sage-test"
     assert model.attributes["openinference.span.kind"] == "LLM"
@@ -75,16 +75,25 @@ def test_phoenix_agent_model_and_tool_projection(content_mode):
     assert model.attributes["llm.token_count.completion_details.reasoning"] == 10
     assert model.attributes["llm.cost.total"] == 0.01
     if content_mode == "metadata":
+        assert "input.value" not in agent.attributes
+        assert "output.value" not in agent.attributes
         assert "input.value" not in model.attributes
         assert "output.value" not in model.attributes
         assert "tool.parameters" not in tool.attributes
     else:
+        assert json.loads(agent.attributes["input.value"]) == "hello"
+        assert json.loads(agent.attributes["output.value"]) == "answer"
         assert json.loads(model.attributes["output.value"]) == {"text": "answer"}
         assert model.attributes["input.mime_type"] == "application/json"
         assert (
             json.loads(tool.attributes["tool.parameters"])["secret_key"] == "[REDACTED]"
         )
     assert "never-export-me" not in str(exporter.get_finished_spans())
+    # Phoenix unflattens dotted attributes. A scalar `input`/`output` blocks
+    # the corresponding OpenInference namespace, hiding content in its UI.
+    for span in (model, tool, agent):
+        assert "input" not in span.attributes
+        assert "output" not in span.attributes
     sink.close()
 
 

@@ -4,6 +4,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { api } from './api.js'
 import { clearSession, getUser, isAdmin } from './auth.js'
 import AppIcon from './components/AppIcon.vue'
+import ObservabilityNav from './components/ObservabilityNav.vue'
 import { createThemeController, readThemePreference, themeOptions } from './theme.js'
 
 const route = useRoute()
@@ -68,10 +69,10 @@ async function logout() {
         <router-link class="nav-item" to="/studio" title="Studio"><AppIcon name="code" /><span>Studio</span></router-link>
         <hr class="nav-divider" />
         <router-link class="nav-item" to="/settings" title="个人设置"><AppIcon name="settings" /><span>个人设置</span></router-link>
+        <ObservabilityNav v-if="admin" />
         <details v-if="admin" class="nav-group" open>
           <summary class="nav-item" title="系统设置"><AppIcon name="settings" /><span>系统设置</span><AppIcon class="nav-chevron" name="chevron" /></summary>
           <div class="nav-children">
-            <router-link class="nav-item" to="/performance" title="运行性能"><AppIcon name="clock" /><span>运行性能</span></router-link>
             <router-link class="nav-item" to="/plugins" title="插件管理"><AppIcon name="settings" /><span>插件管理</span></router-link>
             <router-link class="nav-item" to="/users" title="用户管理"><AppIcon name="user" /><span>用户管理</span></router-link>
           </div>
