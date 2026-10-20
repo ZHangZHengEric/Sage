@@ -13,7 +13,12 @@ from sagents.v2.skill.contracts import (
     SkillCatalog,
     SkillDescriptor,
     SkillSource,
+    CurrentSkillSource,
     SkillWorkspace,
+    SkillManagement,
+    EditableSkillWorkspace,
+    RestorableSkillWorkspace,
+    SkillReadonlyMountProvider,
 )
 from sagents.v2.skill.provider import (
     FilteredSkillCatalog,
@@ -23,6 +28,11 @@ from sagents.v2.skill.provider import (
 from sagents.v2.skill.tool import SkillLoadTool
 
 _LAZY_EXPORTS = {
+    "SqliteSkillRepository": ("sagents.v2.skill.plugins.repository", "SqliteSkillRepository"),
+    "MemorySkillRepository": ("sagents.v2.skill.plugins.repository", "MemorySkillRepository"),
+    "AutoSyncSkillWorkspace": ("sagents.v2.skill.plugins.workspace", "AutoSyncSkillWorkspace"),
+    "FixedCopySkillWorkspace": ("sagents.v2.skill.plugins.workspace", "FixedCopySkillWorkspace"),
+    "ReadonlyMountSkillWorkspace": ("sagents.v2.skill.plugins.workspace", "ReadonlyMountSkillWorkspace"),
     "FilesystemSkillProvider": (
         "sagents.v2.skill.plugins.filesystem",
         "FilesystemSkillProvider",
@@ -46,6 +56,15 @@ _LAZY_EXPORTS = {
 }
 
 __all__ = [
+    "SqliteSkillRepository",
+    "MemorySkillRepository",
+    "AutoSyncSkillWorkspace",
+    "FixedCopySkillWorkspace",
+    "ReadonlyMountSkillWorkspace",
+    "SkillManagement",
+    "EditableSkillWorkspace",
+    "RestorableSkillWorkspace",
+    "SkillReadonlyMountProvider",
     "ActiveSkillsContextProvider",
     "AvailableSkillsContextProvider",
     "FilteredSkillCatalog",
@@ -62,6 +81,7 @@ __all__ = [
     "SkillLoadTool",
     "SkillLoader",
     "SkillSource",
+    "CurrentSkillSource",
     "SkillWorkspace",
     "SessionDerivedSkillActivationRepository",
 ]

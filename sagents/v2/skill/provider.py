@@ -9,6 +9,7 @@ from collections.abc import Awaitable, Callable, Iterable
 
 from sagents.v2.skill.contracts import (
     LoadedSkill,
+    SkillBundle,
     SkillActivationRepository,
     SkillCatalog,
     SkillDescriptor,
@@ -120,6 +121,12 @@ class SkillLoader:
         self._locks_guard = asyncio.Lock()
         self._load_locks: WeakValueDictionary = WeakValueDictionary()
 
+    async def _fetch_bundle(self, name: str, run_id: str) -> SkillBundle:
+        fetch = self.source.fetch
+        if getattr(self.workspace, "manager_authoritative", False):
+            fetch = getattr(self.source, "fetch_latest", fetch)
+        return await fetch(name, run_id=run_id)
+
     async def snapshot_run(self, run_id: str) -> dict:
         lock = await self._load_lock(run_id, "")
         async with lock:
@@ -138,6 +145,17 @@ class SkillLoader:
             state = SkillRunState.model_validate(snapshot)
             if any(value.run_id != run_id for value in state.active):
                 raise self._error("skill.state_invalid", "skill state belongs to another Run")
+            reattach = getattr(self.workspace, "reattach", None)
+            if reattach is not None:
+                restored = []
+                for value in state.active:
+                    await self.catalog.get_skill(value.descriptor.name, run_id=run_id)
+                    bundle = await self._fetch_bundle(value.descriptor.name, run_id)
+                    restored.append(await reattach(
+                        value, bundle, run_id=run_id,
+                        destination=f"{self.workspace_root}/skills/{value.descriptor.name}",
+                    ))
+                state = state.model_copy(update={"active": tuple(restored)})
             await self.activations.replace_loaded(run_id=run_id, values=state.active)
             self._preload_states[run_id] = state
             if state.history_initialized:
@@ -184,6 +202,27 @@ class SkillLoader:
         async with lock:
             return await self._load_once(name, run_id=run_id)
 
+    async def begin_edit(self, name: str, *, run_id: str) -> LoadedSkill:
+        """Prepare the visible editing directory without changing the source.
+
+        Hosts expose this method through an explicitly authorized editing tool.
+        The selected workspace policy determines how the next load treats edits.
+        """
+        lock = await self._load_lock(run_id, name)
+        async with lock:
+            edit = getattr(self.workspace, "begin_edit", None)
+            if edit is None:
+                raise self._error("skill.edit_unsupported", "Selected workspace does not support editing copies")
+            await self._load_once(name, run_id=run_id)
+            bundle = await self._fetch_bundle(name, run_id)
+            destination = f"{self.workspace_root}/skills/{name}"
+            await edit(bundle, run_id=run_id, destination=destination)
+            values = await self.activations.list_loaded(run_id=run_id)
+            await self.activations.replace_loaded(run_id=run_id, values=tuple(
+                value for value in values if value.descriptor.name != name
+            ))
+            return await self._load_once(name, run_id=run_id)
+
     async def activate_requested(self, names: tuple[str, ...], *, run_id: str) -> None:
         """Load user selectors once per Run, through the existing grant and budget.
 
@@ -222,7 +261,7 @@ class SkillLoader:
         }.get(name)
         # A resumed run with a durable activation record does not fetch or copy
         # the bundle again. The workspace provider owns durability/reattachment.
-        if existing is not None:
+        if existing is not None and not getattr(self.workspace, "refresh_on_load", False):
             values = await self.activations.list_loaded(run_id=run_id)
             await self.activations.replace_loaded(
                 run_id=run_id,
@@ -232,12 +271,15 @@ class SkillLoader:
 
         with errors_before_side_effect("skill.load_preflight_failed"):
             # This is the first operation that is allowed to read the Level-2 bundle.
-            bundle = await self.source.fetch(name, run_id=run_id)
+            bundle = await self._fetch_bundle(name, run_id)
             if bundle.descriptor.name != descriptor.name:
                 raise self._error(
                     "skill.identity_mismatch", "skill source identity changed"
                 )
             destination = f"{self.workspace_root}/skills/{name}"
+            resolve_bundle = getattr(self.workspace, "resolve_bundle", None)
+            if resolve_bundle is not None:
+                bundle = await resolve_bundle(bundle, run_id=run_id, destination=destination)
             try:
                 instructions = bundle.files["SKILL.md"].decode("utf-8")
             except UnicodeDecodeError as exc:
@@ -246,7 +288,7 @@ class SkillLoader:
                 ) from exc
             loaded = LoadedSkill(
                 run_id=run_id,
-                descriptor=descriptor,
+                descriptor=bundle.descriptor,
                 workspace_path=destination,
                 content_hash=bundle.content_hash,
                 instructions=instructions,

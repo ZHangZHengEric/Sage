@@ -6,6 +6,7 @@ from sagents.v2.skill import (
 )
 from sagents.v2.contracts.commands import InputItem, StartRun
 from sagents.v2.contracts.items import TextBlock
+from sagents.v2.contracts.errors import SageV2Error
 
 from app.v2.server.skills.records import workspace_skill_path
 from app.v2.server.skills.repository import MemorySkillStore
@@ -83,3 +84,30 @@ async def test_workspace_edit_is_copy_on_write(tmp_path: Path):
     )
 
     assert await catalog.workspace_status(user_id="user_1", agent_id="agent_1", name="demo") == "modified"
+
+
+@pytest.mark.asyncio
+async def test_auto_sync_can_fetch_current_version_without_expanding_admitted_identity(
+    tmp_path,
+):
+    catalog, first, _ = await _bound_provider(tmp_path)
+
+    async def latest(record):
+        return await catalog.get(record.skill_id, user_id="user_1", role="user")
+
+    provider = CatalogSkillProvider((first,), tmp_path, latest_record=latest)
+    updated = await catalog.publish_markdown(
+        name="demo",
+        content="---\nname: demo\ndescription: Demo\n---\n\nUpdated",
+        user_id="user_1",
+        role="user",
+    )
+    assert updated.skill_id == first.skill_id
+    assert (
+        await provider.fetch("demo", run_id="same")
+    ).content_hash == first.package_sha256
+    assert (
+        await provider.fetch_latest("demo", run_id="same")
+    ).content_hash == updated.package_sha256
+    with pytest.raises(SageV2Error):
+        await provider.fetch_latest("unadmitted", run_id="same")
