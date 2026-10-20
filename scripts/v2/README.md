@@ -36,7 +36,6 @@ OpenUI 真实模型探针依赖当前仓库的测试辅助代码和 Desktop 模�
 | [release/package_desktop.py](release/package_desktop.py) | 根据已构建的 Flutter 产物和 wheel 构建平台安装包，并调用下方嵌入及冒烟脚本 |
 | [release/bundle_desktop.py](release/bundle_desktop.py) | 将托管 CPython、wheel、Node 运行时等写入构建目录，安装依赖；需 uv 及发布环境 |
 | [release/smoke_desktop.py](release/smoke_desktop.py) | 在仓库外启动嵌入后端，检查打包资源和运行时行为；需已生成的嵌入运行时 |
-| [release/desktop-constraints.txt](release/desktop-constraints.txt) | 嵌入环境的依赖约束 |
 
 ```bash
 python scripts/v2/release/check_release.py

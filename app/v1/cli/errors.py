@@ -36,7 +36,7 @@ def _build_cli_error_payload(exc: Exception, *, verbose: bool) -> Dict[str, Any]
             "type": "cli_error",
             "message": f"Missing dependency: {exc.name}",
             "next_steps": [
-                "Install project dependencies first, for example: `pip install -r requirements.txt`.",
+                "Install project dependencies first, for example: `pip install -r app/v1/requirements.txt`.",
                 "If only `rank_bm25` is missing, install it directly with: `pip install rank-bm25`.",
             ],
             "debug_detail": None,

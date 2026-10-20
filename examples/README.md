@@ -8,7 +8,7 @@ Examples are grouped by runtime version. Run commands from the repository root.
 | [v2](v2/README.md) | SDK quickstart, host integration, tools/MCP, agent management, concurrency and optimization | [Offline host](v2/host/) |
 
 Use Python 3.12+ for the current checkout. Install the project dependencies with
-`python -m pip install -e .`; the v1 Streamlit demo also needs `streamlit`.
+`python -m pip install -e .`; v1 examples use `python -m pip install -r app/v1/requirements.txt`.
 The `examples` tree is checkout content, so run these modules from the repository
 root rather than expecting them in an installed wheel.
 

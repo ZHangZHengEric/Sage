@@ -10,7 +10,7 @@
 
 `deploy/compose_v2.sh` 使用 `deploy/standalone/docker-compose.yml`，仅启动 `sage-server-v2`、`sage-web-v2`。后端通过 Python 3.12 执行 `python -m app.v2.server`；Web 构建自 `app/v2/server/web`，Nginx 代理 `/api`、`/a2a` 等 v2 路由并支持 SSE。
 
-V2 后端镜像使用独立的 `deploy/images/requirements.server_v2.txt`，仅安装 V2 运行及构建依赖，保留 MySQL、MCP、A2A 和链路追踪能力。随后通过 `--no-deps` 安装项目，避免重新引入公共依赖。`pyproject.toml`、根目录 `requirements.txt` 及其他端的构建方式保持不变；源码执行 `pip install '.[server-v2,otel]'` 仍安装原有公共依赖。
+V2 后端镜像与源码安装统一使用根目录 `pyproject.toml` 的核心依赖及 `server-v2,otel` extras。镜像先读取元数据安装依赖以保留缓存，再通过 `--no-deps` 安装源码。Desktop 使用 `desktop-v2` extra；v1 独立使用 `app/v1/requirements.txt`。
 
 该镜像不预装旧版抓取和文档处理工具包；在容器内执行需要这些包的 Skill 或自定义 MCP 子进程时，需在自定义镜像中按其要求安装依赖。修改业务源码仍可复用依赖层，修改 V2 专用依赖文件才会使该层重新安装（前置构建层不变时）。
 

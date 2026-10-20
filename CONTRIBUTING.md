@@ -30,12 +30,12 @@ Also preview changed Markdown and verify links. This script checks the current d
 **Python** (in your Python 3.12+ environment):
 
 ```bash
-python -m pip install -r requirements.txt
+python -m pip install -e '.[server-v2,desktop-v2,otel,test]'
 python scripts/shared/checks/check_architecture.py
 python -m pytest tests/sagents/v2 -v
 ```
 
-The last command targets the v2 runtime; select the affected tests under [`tests/`](tests/) for other components. Linux sandbox tests need a compatible bubblewrap installation and host support. See the [CI workflow](.github/workflows/ci-tests.yml) for the full suite matrix and environment setup, including the app suite's A2A dependency. Live model tests may incur costs; do not enable them without your own credentials and intent.
+The last command targets the v2 runtime; select the affected tests under [`tests/`](tests/) for other components. Linux sandbox tests need a compatible bubblewrap installation and host support. See the [CI workflow](.github/workflows/ci-tests.yml) for the full suite matrix and environment setup, including separate v1, v2 and cross-version environments. Live model tests may incur costs; do not enable them without your own credentials and intent.
 
 **Desktop v2** (Flutter 3.44.2 is used in CI):
 

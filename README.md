@@ -93,7 +93,7 @@ git clone https://github.com/ZHangZHengEric/Sage.git
 cd Sage
 python3.12 -m venv .venv
 source .venv/bin/activate
-python -m pip install -e .
+python -m pip install -e '.[desktop-v2]'
 cd app/v2/desktop
 flutter pub get
 flutter run -d macos

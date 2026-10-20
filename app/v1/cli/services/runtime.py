@@ -718,7 +718,7 @@ def collect_runtime_issues(cfg: config.StartupConfig) -> Dict[str, List[str]]:
     if missing_deps:
         errors.append(f"Missing Python dependencies: {', '.join(missing_deps)}")
         next_steps.append(
-            "Install project dependencies first, for example: pip install -r requirements.txt"
+            "Install project dependencies first, for example: pip install -r app/v1/requirements.txt"
         )
         next_steps.append(
             "If only rank_bm25 is missing, install it directly with: pip install rank-bm25"

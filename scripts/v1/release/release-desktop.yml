@@ -101,8 +101,8 @@ jobs:
             ~/.cache/pip
             ~/Library/Caches/pip
             ~\AppData\Local\pip\Cache
-          # 与 build.sh / build_windows.ps1 一致：根目录 requirements.txt
-          key: ${{ runner.os }}-pip-${{ hashFiles('requirements.txt') }}
+          # 与 build.sh / build_windows.ps1 一致：app/v1/requirements*.txt
+          key: ${{ runner.os }}-pip-${{ hashFiles('app/v1/requirements*.txt') }}
           restore-keys: |
             ${{ runner.os }}-pip-
 

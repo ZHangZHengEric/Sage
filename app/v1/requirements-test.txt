@@ -1,0 +1,6 @@
+# Legacy runtime, services and MCP integration tests.
+-r requirements.txt
+pytest>=8.0
+pytest-shutil>=1.8.1
+pytest-asyncio>=0.24.0
+pytest-timeout>=2.3.0

@@ -26,7 +26,7 @@ ref: v2-DEVELOPMENT
 Use the Python 3.12+ environment from [Getting Started](applications/GETTING_STARTED.md). Install server extras for server tests:
 
 ```bash
-python -m pip install -e '.[server-v2]' pytest pytest-asyncio pytest-timeout
+python -m pip install -e '.[server-v2,desktop-v2,otel,test]'
 python -m pytest tests/sagents/v2 tests/app/v2/desktop tests/app/v2/server -q
 ```
 

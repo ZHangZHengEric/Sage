@@ -452,6 +452,31 @@ async def run_read_only(tmp_path: Path, argv: tuple[str, ...], **provision_kwarg
 
 @pytest.mark.asyncio
 @_SKIP_SANDBOX_PROCESS_IN_CI
+async def test_read_only_process_accepts_official_pipefail_wrapper(tmp_path):
+    (tmp_path / "note.txt").write_text("needle\n")
+    result = await run_read_only(
+        tmp_path, ("bash", "-o", "pipefail", "-c", "cat note.txt | head -n 1")
+    )
+    assert result.exit_code == 0
+    assert result.stdout == b"needle\n"
+    failed = await run_read_only(
+        tmp_path, ("bash", "-o", "pipefail", "-c", "cat missing.txt | head -n 1")
+    )
+    assert failed.exit_code != 0
+    assert b"missing.txt" in failed.stderr
+
+
+@pytest.mark.asyncio
+async def test_read_only_pipefail_wrapper_keeps_grammar_restrictions(tmp_path):
+    with pytest.raises(PermissionError, match="read-only"):
+        await run_read_only(
+            tmp_path, ("bash", "-o", "pipefail", "-c", "cat note.txt > out.txt")
+        )
+    assert not (tmp_path / "out.txt").exists()
+
+
+@pytest.mark.asyncio
+@_SKIP_SANDBOX_PROCESS_IN_CI
 async def test_read_only_process_runs_validated_pipelines_inside_os_sandbox(
     tmp_path: Path,
 ):

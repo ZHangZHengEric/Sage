@@ -32,14 +32,24 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - suite: app
-            path: tests/app --ignore=tests/app/v1/common
-          - suite: common
-            path: tests/app/v1/common
-          - suite: sagents
-            path: tests/sagents
+          - suite: app-v1
+            path: tests/app/v1
+            environment: v1
+          - suite: sagents-v1
+            path: tests/sagents/v1
+            environment: v1
+          - suite: app-v2
+            path: tests/app/v2
+            environment: v2
+          - suite: sagents-v2
+            path: tests/sagents/v2
+            environment: v2
           - suite: mcp
             path: tests/mcp_servers
+            environment: v1
+          - suite: cross-version
+            path: tests/app/clients tests/sagents --ignore=tests/sagents/v1 --ignore=tests/sagents/v2
+            environment: combined
 
     steps:
       - name: Checkout
@@ -50,14 +60,15 @@ jobs:
         with:
           python-version: "3.12"
           cache: "pip"
-          cache-dependency-path: requirements.txt
+          cache-dependency-path: |
+            pyproject.toml
+            app/v1/requirements*.txt
 
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
 
       - name: Install Linux Sandbox Dependency
-        if: matrix.suite != 'common'
         run: |
           sudo apt-get update
           sudo apt-get install -y bubblewrap
@@ -81,17 +92,20 @@ jobs:
       - name: Install Python Dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
-          # Both suites load the Server host, whose A2A service needs this extra.
-          if [ "${{ matrix.suite }}" = "app" ] || [ "${{ matrix.suite }}" = "sagents" ]; then
-            pip install 'a2a-sdk[fastapi]>=1.1.4,<2'
+          if [ "${{ matrix.environment }}" = "v1" ]; then
+            python -m pip install -r app/v1/requirements-test.txt
+          elif [ "${{ matrix.environment }}" = "v2" ]; then
+            python -m pip install -e '.[server-v2,desktop-v2,otel,test]'
+          else
+            python -m pip install -r app/v1/requirements-test.txt -e '.[server-v2,desktop-v2,otel,test]'
           fi
+          python -m pip check
 
       - name: Run Pytest Suite
         # The Linux sandbox binds the workspace at its own workspace_root, and
         # /tmp is where the sandbox mounts its scratch. A default pytest tmp_path
         # therefore cannot be a host-path workspace; put temporaries elsewhere.
-        run: python -m pytest ${{ matrix.path }} -v --basetemp="${{ runner.temp }}/pytest"
+        run: python -m pytest ${{ matrix.path }} -m 'not live' -v --basetemp="${{ runner.temp }}/pytest"
 
   web-tests:
     name: Web Vitest

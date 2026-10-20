@@ -1,0 +1,4 @@
+# Legacy Desktop PyInstaller sidecar and native release builds.
+-r requirements.txt
+pyinstaller>=6.0.0
+python-magic-bin; sys_platform == "win32"

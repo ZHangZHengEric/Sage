@@ -173,11 +173,11 @@ echo ""
 echo "🔍 Checking Python dependencies..."
 if [ "$USE_UV" = "1" ] || [ "$USE_UV" = "true" ] || [ "$USE_UV" = "yes" ]; then
     FASTAPI_CHECK_CMD=(uv run --python "$PYTHON_CMD" python -c "import fastapi")
-    INSTALL_CMD=(uv pip install --python "$PYTHON_CMD" -r requirements.txt --index-url https://mirrors.aliyun.com/pypi/simple/)
+    INSTALL_CMD=(uv pip install --python "$PYTHON_CMD" -r app/v1/requirements.txt --index-url https://mirrors.aliyun.com/pypi/simple/)
     SERVER_CMD=(uv run --python "$PYTHON_CMD" python -m app.v1.server.main)
 else
     FASTAPI_CHECK_CMD=("$PYTHON_CMD" -c "import fastapi")
-    INSTALL_CMD=("$PYTHON_CMD" -m pip install -r requirements.txt -i https://mirrors.aliyun.com/pypi/simple/ --trusted-host mirrors.aliyun.com)
+    INSTALL_CMD=("$PYTHON_CMD" -m pip install -r app/v1/requirements.txt -i https://mirrors.aliyun.com/pypi/simple/ --trusted-host mirrors.aliyun.com)
     SERVER_CMD=("$PYTHON_CMD" -m app.v1.server.main)
 fi
 

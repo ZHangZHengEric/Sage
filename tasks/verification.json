@@ -1,0 +1,162 @@
+{
+  "status": "in_progress",
+  "logs_root": "/private/tmp/sage-dependency-split",
+  "checks": {
+    "v1_app": {
+      "result": "passed",
+      "tests": 326,
+      "log": "v1-app-tests.log",
+      "environment": "fresh v1 requirements before combined install"
+    },
+    "mcp": {
+      "result": "passed",
+      "tests": 26,
+      "log": "mcp-tests.log"
+    },
+    "v1_server_web": {
+      "result": "passed",
+      "tests": 78,
+      "log": "v1-web-node24-tests.log",
+      "build": "v1-web-build.log"
+    },
+    "v1_desktop_ui": {
+      "result": "passed",
+      "tests": 58,
+      "log": "v1-desktop-ui-node24-tests.log",
+      "build": "v1-desktop-ui-build.log"
+    },
+    "v2_server_web": {
+      "result": "passed",
+      "tests": 139,
+      "log": "v2-web-tests.log",
+      "build": "v2-web-build.log"
+    },
+    "openui": {
+      "result": "passed",
+      "tests": 6,
+      "log": "openui-tests.log"
+    },
+    "rust_terminal": {
+      "result": "passed",
+      "tests": 332,
+      "log": "terminal-tests.log",
+      "build": "terminal-build.log"
+    },
+    "flutter_locked": {
+      "result": "passed",
+      "tests": 355,
+      "skipped": 6,
+      "log": "flutter-locked-tests.log",
+      "build": "flutter-locked-macos-build.log"
+    },
+    "v2_native_package": {
+      "result": "passed",
+      "log": "v2-native-package-final.log",
+      "artifact": "/private/tmp/sage-dependency-split/artifacts/Sage-2.1.1-macos-arm64.dmg",
+      "smoke": "relocated installed wheel, resources, authenticated sidecar readiness/shutdown"
+    },
+    "v2_docker": {
+      "result": "passed",
+      "log": "v2-docker-build-final.log",
+      "image": "sage-dependency-check:v2-final",
+      "mysql_http": "v2-mysql-http-results.json"
+    },
+    "wiki": {
+      "result": "passed",
+      "log": "wiki-build.log"
+    },
+    "v1_subprocess_fix": {
+      "result": "passed",
+      "tests": 35,
+      "log": "v1-command-fixed.log"
+    },
+    "v2_core_wheel": {
+      "result": "passed",
+      "environment": "/private/tmp/sage-dependency-split/core",
+      "packages": 40,
+      "checks": [
+        "pip check",
+        "SDK and AnyTool imports outside checkout",
+        "sage --help",
+        "sage v2 --help",
+        "Real CLI and native TUI tasks outside checkout with no source PYTHONPATH; core-task-smoke.log"
+      ]
+    },
+    "v1_engine": {
+      "result": "passed",
+      "tests": 1515,
+      "skipped": 7,
+      "subtests": 41,
+      "log": "v1-engine-final.log"
+    },
+    "v2_engine": {
+      "result": "passed",
+      "tests": 3391,
+      "skipped": 32,
+      "deselected_live": 27,
+      "log": "v2-engine-release.log"
+    },
+    "v2_app": {
+      "result": "passed",
+      "tests": 943,
+      "skipped": 1,
+      "log": "v2-app-final.log"
+    },
+    "shared_cli": {
+      "result": "passed",
+      "tests": 225,
+      "log": "cross-cli-final.log"
+    },
+    "local_sandbox": {
+      "result": "passed",
+      "tests": 45,
+      "log": "readonly-pipefail-green.log"
+    },
+    "cli_tui_tasks": {
+      "result": "passed",
+      "log": "cli-tui-smoke.log",
+      "cases": "four v1/v2 CLI/TUI paths plus four app-catalog/model-protocol paths"
+    },
+    "architecture": {
+      "result": "passed",
+      "python_files": 1560,
+      "log": "architecture-check.log"
+    },
+    "python_distributions": {
+      "result": "passed",
+      "log": "package-check.log",
+      "build": "python-build-release.log"
+    },
+    "docs": {
+      "result": "pre-existing failure, same at HEAD",
+      "current": "docs-check-final.log",
+      "baseline": "docs-check-baseline.log",
+      "details": "English/Chinese route inventories and four Phoenix environment variable references drift at baseline too"
+    },
+    "v1_builds": {
+      "result": "stopped at user request",
+      "logs": [
+        "v1-docker-build.log",
+        "v1-tauri-build.log"
+      ]
+    },
+    "v2_desktop_acceptance": {
+      "result": "accepted by user",
+      "message": "v2 desktop\u53ef\u4ee5\u4e86",
+      "native_package": "v2-native-package-final.log",
+      "native_gui_log": "v2-native-gui/process.log",
+      "visual_automation": "Not authorized; no screenshot or UI actions taken"
+    },
+    "v2_web_browser": {
+      "result": "passed",
+      "log": "v2-web-browser-final.log",
+      "report": "v2-web-browser-results.json",
+      "checks": "Login and Agents/Models/Skills/MCP/History pages on final Docker image with real MySQL; no page errors or HTTP errors"
+    }
+  },
+  "pending": [
+    "final Server HTTP/metadata checks",
+    "final review and temporary resource cleanup"
+  ],
+  "scope_update": "User deferred v1 Server image and v1 Desktop work, and then explicitly accepted v2 Desktop validation. No further desktop UI operation is required."
+}

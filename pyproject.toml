@@ -18,47 +18,20 @@ classifiers = [
   "License :: OSI Approved :: MIT License",
   "Operating System :: OS Independent",
 ]
+# V2 runtime, CLI and independent AnyTool MCP server.
+# Legacy applications install app/v1/requirements.txt explicitly.
 dependencies = [
-  "ag-ui-protocol==0.1.19",
-  "gradio>=4.0.0",
   "openai>=1.0.0",
-  "requests>=2.31.0",
-  "python-dotenv>=1.0.0",
-  "pyyaml>=6.0",
-  "aiofiles>=0.8.0",
-  "fastapi>=0.115.2",
-  "uvicorn[standard]>=0.24.0",
-  "uvloop>=0.21.0; sys_platform != 'win32'",
-  "pydantic>=2.5.0",
-  "jsonschema>=4.20.0",
-  "Authlib>=1.6.0",
-  "argon2-cffi>=23.1.0",
-  "alibabacloud_dm20151123",
-  "alibabacloud_credentials",
-  "alibabacloud_tea_openapi",
-  "alibabacloud_tea_util",
-  "mcp==1.28.1",
-  "fastmcp==3.4.2",
-  "docstring_parser>=0.16",
-  "chardet>=5.0.0",
   "httpx>=0.24.0",
-  "pdfplumber",
-  "html2text",
-  "beautifulsoup4>=4.12.0",
-  "scrapling[all]>=0.2.0",
-  "pandas>=2.2.0",
-  "openpyxl",
-  "pypandoc",
-  "python-docx",
-  "markdown",
-  "python-pptx",
-  "PyMuPDF",
-  "tqdm",
-  "unstructured",
-  "loguru>=0.7.0",
+  "pydantic>=2.5.0",
+  "pyyaml>=6.0",
+  "jsonschema>=4.20.0",
+  "mcp==1.28.1",
+  "anyio>=4.0.0",
+  "Pillow>=10.0.0",
   "psutil>=5.9.0",
-  "rank-bm25>=0.2.2",
-  "exceptiongroup>=1.2.0; python_version < '3.11'",
+  "python-dotenv>=1.0.0",
+  "loguru>=0.7.0",
 ]
 
 [project.optional-dependencies]
@@ -72,16 +45,35 @@ otel = [
   "opentelemetry-exporter-otlp>=1.20.0",
 ]
 server-v2 = [
+  "ag-ui-protocol==0.1.19",
+  "fastapi>=0.115.2",
+  "uvicorn[standard]>=0.24.0",
+  "uvloop>=0.21.0; sys_platform != 'win32'",
+  "starlette>=0.40.0",
+  "PyJWT>=2.8.0,<3",
   "redis>=5.0.0",
   "aiomysql>=0.2.0",
   "SQLAlchemy[asyncio]>=2.0,<2.2",
   "prometheus-client>=0.20.0",
   "a2a-sdk[fastapi]>=1.1.4,<2",
 ]
-# A2A pulls in protobuf, which conflicts with other protobuf consumers in a
-# shared environment. It stays an extra so a deployment that does not speak A2A
-# never inherits that dependency chain.
+desktop-v2 = [
+  "fastapi>=0.115.2",
+  "uvicorn[standard]>=0.24.0",
+  "uvloop>=0.21.0; sys_platform != 'win32'",
+  "starlette>=0.40.0",
+  "python-pptx>=0.6.22",
+]
+# A2A remains optional for standalone runtime and Desktop installations.
 a2a = ["a2a-sdk[fastapi]>=1.1.4,<2"]
+test = [
+  "pytest>=8.0",
+  "pytest-asyncio>=0.24.0",
+  "pytest-timeout>=2.3.0",
+  "fakeredis>=2.38.0,<3",
+  "aiosqlite>=0.21.0",
+]
+dev = ["build>=1.0", "ruff==0.15.14"]
 
 [project.urls]
 Homepage = "https://github.com/ZHangZHengEric/Sage"
@@ -101,6 +93,7 @@ exclude = ["tests*", "app.v1.desktop*", "app.skills*", "app.wiki*", "assets*", "
 "share/sage/docs/zh" = ["docs/zh/*.md"]
 
 [tool.setuptools.package-data]
+"app.v1" = ["requirements*.txt"]
 "app.clients.terminal" = [
   "bin/*/run-sage-terminal.sh",
   "bin/*/run-sage-terminal.cmd",

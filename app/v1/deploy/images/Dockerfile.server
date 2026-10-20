@@ -76,7 +76,7 @@ RUN pip install --no-cache-dir \
 # -------------------------
 # 安装 Python 依赖（缓存优化）
 # -------------------------
-COPY requirements.txt .
+COPY app/v1/requirements.txt .
 
 RUN grep -Eiv '^[[:space:]]*(requests|tqdm|markdownify|lxml|pymupdf|markdown|unstructured|pytest-shutil|pytest-asyncio|pytest-timeout|nest-asyncio|undetected-playwright|streamlit|weasyprint|pyinstaller|lark-oapi|dingtalk-stream|python-socks)([[:space:]]|[][<>=!~]|$)' requirements.txt > requirements.server.txt \
     && pip install --no-cache-dir -r requirements.server.txt \

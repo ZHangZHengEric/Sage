@@ -48,6 +48,7 @@ from sagents.v2.runtime.execution.sandbox.contracts import (
     TerminateMode,
 )
 from sagents.v2.runtime.execution.sandbox.read_only_shell import (
+    read_only_process_command,
     validate_read_only_shell_command,
 )
 from sagents.v2.contracts.common import new_id, utc_now
@@ -245,17 +246,8 @@ class _MemoryProcessRuntime:
             self._sandbox_id, request, intent, grant
         )
         if row.spec.process.read_only:
-            if (
-                request.argv[:2] not in {("bash", "-c"), ("sh", "-c")}
-                or len(request.argv) != 3
-            ):
-                raise self._provider._error(
-                    "sandbox.permission_denied",
-                    ErrorCategory.POLICY_DENIED,
-                    "read-only process mode accepts only a validated shell command",
-                )
             try:
-                validate_read_only_shell_command(request.argv[2])
+                validate_read_only_shell_command(read_only_process_command(request.argv))
             except PermissionError as exc:
                 raise self._provider._error(
                     "sandbox.permission_denied",
