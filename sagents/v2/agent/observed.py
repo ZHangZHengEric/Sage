@@ -23,7 +23,6 @@ from sagents.v2.runtime.observability.logs import (
 )
 from sagents.v2.runtime.observability.traces import (
     StructuredTracer,
-    preview_trace_value,
     resolve_root_session_id,
     new_trace_id,
     current_trace_context,
@@ -286,8 +285,8 @@ class ObservedRunDriver(AgentLoopEngine):
                     self._observed_trace_sink, result.final_items
                 )
                 if result.error is not None:
-                    final_attributes["status_message"] = preview_trace_value(
-                        result.error.message
+                    final_attributes["status_message"] = trace_content(
+                        self._observed_trace_sink, result.error.message
                     )
         except Exception:
             pass
@@ -352,6 +351,7 @@ class ObservedRunDriver(AgentLoopEngine):
             tool_call_id=call.tool_call_id,
             attributes={
                 "tool_name": call.tool_name,
+                "operation_id": call.operation_id,
                 "arguments": trace_content(self._observed_trace_sink, call.arguments),
                 "input": trace_content(self._observed_trace_sink, call.arguments),
             },
@@ -410,9 +410,18 @@ class ObservedRunDriver(AgentLoopEngine):
                 "output": trace_content(
                     self._observed_trace_sink, getattr(result, "content", ())
                 ),
-                "status_message": preview_trace_value(str(result.error))
+                "execution_result": trace_content(
+                    self._observed_trace_sink,
+                    result.model_dump(mode="json") if result is not None else None,
+                ),
+                "error": trace_content(
+                    self._observed_trace_sink,
+                    result.error.model_dump(mode="json") if getattr(result, "error", None) else None,
+                ),
+                "status_message": trace_content(self._observed_trace_sink, str(result.error))
                 if getattr(result, "error", None)
                 else None,
+                "outcome": "interrupted" if result is None else "failed" if result.error else "completed",
             },
         )
         failed = getattr(result, "error", None) is not None

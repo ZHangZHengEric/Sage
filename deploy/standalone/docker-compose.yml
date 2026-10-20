@@ -20,7 +20,6 @@ services:
       SAGE_SERVER_HOST: 0.0.0.0
       SAGE_SERVER_PORT: 8090
       SAGE_SERVER_DATA: /app/data
-      SAGE_SERVER_LOG_DIRECTORY: /app/logs
     cap_add:
       - SYS_ADMIN
     security_opt:

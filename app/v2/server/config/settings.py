@@ -49,7 +49,7 @@ class ServerSettings:
     admin_password: str
     log_level: str = "debug"
     log_format: str = "json"
-    log_directory: str = "./logs"
+    log_directory: str = ""
     mysql_url: str | None = None
     redis_url: str | None = None
     jaeger_url: str | None = None
@@ -65,6 +65,8 @@ class ServerSettings:
     trace_max_content_chars: int = 16384
     trace_sample_rate: float = 1.0
     trace_timeout_seconds: float = 3.0
+    trace_query_url: str = ""
+    trace_query_headers_env: str = "OTEL_EXPORTER_OTLP_TRACES_HEADERS"
     langfuse_base_url: str = ""
     langfuse_public_url: str = ""
     langfuse_public_key_env: str = "LANGFUSE_PUBLIC_KEY"
@@ -109,8 +111,8 @@ class ServerSettings:
             raise ValueError("trace_backend must be noop, otlp, langfuse or phoenix")
         if self.trace_otlp_protocol not in {"grpc", "http"}:
             raise ValueError("trace_otlp_protocol must be grpc or http")
-        if self.trace_content_mode not in {"metadata", "redacted"}:
-            raise ValueError("trace_content_mode must be metadata or redacted")
+        if self.trace_content_mode not in {"metadata", "redacted", "raw"}:
+            raise ValueError("trace_content_mode must be metadata, redacted or raw")
         if not 0 <= self.trace_sample_rate <= 1:
             raise ValueError("trace_sample_rate must be between 0 and 1")
         if not 256 <= self.trace_max_content_chars <= 65536 or not 0 < self.trace_timeout_seconds <= 30:
@@ -188,7 +190,7 @@ class ServerSettings:
                 "json",
                 frozenset({"json", "text"}),
             ),
-            log_directory=_env("SAGE_SERVER_LOG_DIRECTORY", "./logs"),
+            log_directory=_env("SAGE_SERVER_LOG_DIRECTORY", ""),
             max_concurrent_runs=int(_env("SAGE_SERVER_MAX_CONCURRENT_RUNS", "8")),
             max_concurrent_runs_per_user=int(
                 _env("SAGE_SERVER_MAX_CONCURRENT_RUNS_PER_USER", "2")
@@ -213,6 +215,8 @@ class ServerSettings:
             trace_max_content_chars=int(_env("SAGE_SERVER_TRACE_MAX_CONTENT_CHARS", "16384")),
             trace_sample_rate=float(_env("SAGE_SERVER_TRACE_SAMPLE_RATE", "1")),
             trace_timeout_seconds=float(_env("SAGE_SERVER_TRACE_TIMEOUT_SECONDS", "3")),
+            trace_query_url=_env("SAGE_SERVER_TRACE_QUERY_URL"),
+            trace_query_headers_env=_env("SAGE_SERVER_TRACE_QUERY_HEADERS_ENV", "OTEL_EXPORTER_OTLP_TRACES_HEADERS"),
             langfuse_base_url=_env("SAGE_SERVER_LANGFUSE_BASE_URL"),
             langfuse_public_url=_env("SAGE_SERVER_LANGFUSE_PUBLIC_URL"),
             langfuse_public_key_env=_env("SAGE_SERVER_LANGFUSE_PUBLIC_KEY_ENV", "LANGFUSE_PUBLIC_KEY"),

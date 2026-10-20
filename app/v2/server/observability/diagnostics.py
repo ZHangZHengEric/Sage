@@ -347,10 +347,15 @@ class SessionDiagnostics:
         except Exception:
             self.capture_failures += 1
 
+    async def export_evidence(self, session_id: str, run_ids: set[str]):
+        return await asyncio.to_thread(self.snapshot, session_id, run_ids)
+
     def snapshot(self, session_id: str, run_ids: set[str]):
         try:
             flushed = self._flush()
             snapshot = self._snapshot(session_id, run_ids)
+            from sagents.v2.runtime.observability.tool_evidence import tool_evidence
+            snapshot.update(tool_evidence([], snapshot["logs"]))
             if not flushed:
                 snapshot["pending_writes"] = True
             return snapshot

@@ -15,6 +15,12 @@ if TYPE_CHECKING:
     from sagents.v2.model.contracts import ModelRequest, ModelResponse
 
 
+class DiagnosticEvidenceSource(Protocol):
+    """Query observation evidence within a host-authorized Run allowlist."""
+
+    async def export_evidence(self, session_id: str, run_ids: set[str]) -> dict[str, Any]: ...
+
+
 class DiagnosticSink(Protocol):
     """Record model diagnostics independently from authoritative Session data."""
 

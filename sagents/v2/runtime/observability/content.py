@@ -1,4 +1,4 @@
-"""Bounded, redacted content shared by all trace backends."""
+"""Raw or bounded, redacted content policies shared by trace backends."""
 
 from __future__ import annotations
 
@@ -59,9 +59,17 @@ def trace_content(sink: Any, value: Any) -> Any:
     """Content policy applies at collection time, before exporter buffering."""
     if sink is None or getattr(sink, "content_mode", "redacted") == "metadata":
         return None
+    if getattr(sink, "content_mode", "redacted") == "raw":
+        return json.loads(json.dumps(value, ensure_ascii=False, default=_raw_json))
     limit = getattr(sink, "max_content_chars", 16384)
     safe = safe_trace_value(value, limit=limit)
     encoded = json.dumps(safe, ensure_ascii=False, default=str)
     if len(encoded) > limit:
         return {"truncated": True, "preview": encoded[: max(0, limit - 64)]}
     return safe
+
+
+def _raw_json(value: Any) -> Any:
+    if hasattr(value, "model_dump"):
+        return value.model_dump(mode="json")
+    return str(value)

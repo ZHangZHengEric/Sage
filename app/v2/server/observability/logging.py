@@ -40,6 +40,10 @@ class ServerLogSink:
 
     format_version = "sage.log/v1"
 
+    @property
+    def raw_capture(self) -> bool:
+        return self.diagnostics is not None and getattr(self.diagnostics, "raw_capture", False)
+
     def __init__(self, settings: LoggingSettings, *, service_name: str, diagnostics=None) -> None:
         self.diagnostics = diagnostics
         self.stdout = StdoutLogSink(min_level=settings.level, format=settings.format)
@@ -55,6 +59,9 @@ class ServerLogSink:
         )
 
     def write(self, record: LogRecord) -> None:
+        raw_diagnostics = self.raw_capture
+        if raw_diagnostics:
+            self.diagnostics.write(record)
         # Keep slow/failing operations and all model/tool/Run lifecycle events.
         # Drop routine timings before serialization and diagnostic queue writes.
         if (
@@ -66,7 +73,7 @@ class ServerLogSink:
             duration = record.attributes.get("duration_ms")
             if isinstance(duration, (int, float)) and 0 <= duration < _SLOW_OPERATION_MS:
                 return
-        if self.diagnostics is not None:
+        if self.diagnostics is not None and not raw_diagnostics:
             self.diagnostics.write(record)
         self.stdout.write(record)
         if self.file is not None:

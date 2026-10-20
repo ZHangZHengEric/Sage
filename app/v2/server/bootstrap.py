@@ -158,8 +158,12 @@ class ServerHost:
         )
         if self.diagnostics is None or self.diagnostics.closed:
             from app.v2.server.observability.diagnostics import SessionDiagnostics
+            from app.v2.server.observability.external import external_diagnostics
 
-            self.diagnostics = SessionDiagnostics(self.paths.runtime_root / "diagnostics")
+            selection = server_v2_manifest(self.settings).runtime.capabilities["observability.trace-sink"]
+            self.diagnostics = external_diagnostics(self.settings, selection)
+            if self.diagnostics is None:
+                self.diagnostics = SessionDiagnostics(self.paths.runtime_root / "diagnostics")
         if self.log_sink is None:
             from app.v2.server.observability.logging import LoggingSettings, init_logging
 
@@ -235,6 +239,10 @@ class ServerHost:
                 "state_root": str(self.paths.sessions_root), "start_workers": False,
             })
             self._application = await builder.build(runtime=runtime)
+            from app.v2.server.observability.external import ExternalDiagnostics
+
+            if isinstance(self.diagnostics, ExternalDiagnostics):
+                self.diagnostics.trace_sink = self._application.service("observability.trace-sink")
             await install_sandbox(self.execution, self._application, self.settings)
             session_access = self._application.service("session.access")
             admission = RunAdmission(

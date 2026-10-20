@@ -55,7 +55,7 @@ def test_trace_env_settings_and_explicit_noop_override(tmp_path, monkeypatch):
         {"trace_backend": "langfuse"},
         {"trace_backend": "phoenix"},
         {"trace_sample_rate": 2},
-        {"trace_content_mode": "raw"},
+        {"trace_content_mode": "unknown"},
         {"trace_max_content_chars": 1},
     ],
 )
@@ -116,7 +116,7 @@ def test_trace_health_and_admin_console(tmp_path: Path, monkeypatch, backend):
         assert response.status_code == 307
         assert response.headers["location"] == (
             "https://lf.example/project/p" if backend == "langfuse"
-            else "https://phoenix.example/projects/p"
+            else "/performance"
         )
 
 
@@ -151,7 +151,7 @@ def test_phoenix_environment_manifest_and_admin_selection(tmp_path, monkeypatch)
     [
         ({"trace_backend": "noop"}, None),
         ({"trace_backend": "phoenix", "phoenix_endpoint": "http://internal/v1/traces",
-          "phoenix_public_url": "https://phoenix.example"}, ("phoenix", "Phoenix", "https://phoenix.example")),
+          "phoenix_public_url": "https://phoenix.example"}, None),
         ({"trace_backend": "phoenix", "phoenix_endpoint": "http://internal/v1/traces"}, None),
         ({"trace_backend": "langfuse", "langfuse_base_url": "https://lf.example"},
          ("langfuse", "Langfuse", "https://lf.example")),
@@ -172,12 +172,18 @@ def test_observability_services_follow_active_backend(tmp_path, monkeypatch, opt
         assert response.status_code == 200
         links = response.json()["data"]
         assert links == [
-            {"id": "performance", "label": "运行性能", "href": "/performance", "external": False},
+            *([{"id": "performance", "label": "运行性能", "href": "/performance", "external": False}]
+              if service.diagnostics.available else []),
             *([{"id": console[0], "label": console[1], "href": console[2], "external": True}]
               if console else []),
         ]
         if console is None:
-            assert client.get("/api/observability/console", follow_redirects=False).status_code == 404
+            redirect = client.get("/api/observability/console", follow_redirects=False)
+            if options.get("trace_backend") == "phoenix":
+                assert redirect.status_code == 307
+                assert redirect.headers["location"] == "/performance"
+            else:
+                assert redirect.status_code == 404
         # Availability is live; failed diagnostic capture must not be advertised.
         service.diagnostics.available = False
         assert all(link["id"] != "performance" for link in client.get("/api/observability/services").json()["data"])

@@ -105,7 +105,7 @@ async def test_large_model_stream_preserves_request_and_export_after_restart(tmp
     assert not record.get("truncated")
     state = {"sessions": [{"session_id": "large"}],
              "runs": [{"session_id": "large", "run_id": "run-large"}]}
-    output, _ = prepare_session_export("large", state, evidence)
+    output, _ = prepare_session_export("large", {"run-large"}, evidence)
     with output, ZipFile(output) as archive:
         index = json.loads(archive.read("large/requests/index.json"))
         exported = json.loads(archive.read("large/" + index[0]["path"]))
@@ -211,74 +211,18 @@ async def test_capture_survives_restart_is_scoped_and_reports_limits(tmp_path):
     assert truncated["run_id"] == "run-a"
 
 
-def test_bundle_contains_actual_tool_proposal_and_result_and_legacy_gaps():
-    events = [
-        {
-            "type": "tool.call.proposed",
-            "data": {
-                "tool_name": "todo_write",
-                "tool_call_id": "t",
-                "arguments": {"session_id": "external_old", "password": "hidden"},
-            },
-        },
-        {
-            "type": "tool.call.succeeded",
-            "data": {"tool_name": "todo_write", "tool_call_id": "t"},
-        },
-        {
-            "type": "item.completed",
-            "data": {
-                "item": {"data": {"tool_call_id": "t", "content": [{"text": "done"}]}}
-            },
-        },
-        {
-            "type": "tool.call.proposed",
-            "data": {
-                "tool_name": "mcp__remote",
-                "tool_call_id": "m",
-                "arguments": {"session_id": "external_old"},
-            },
-        },
-        {
-            "type": "tool.call.failed",
-            "data": {"tool_call_id": "m", "error": {"message": "Bearer hidden"}},
-        },
-    ]
-    state = {
-        "sessions": [{"session_id": "external_old"}],
-        "runs": [{"session_id": "external_old", "run_id": "r"}],
-        "run_events": {"r": events},
-    }
-    stream, name = prepare_session_export("external_old", state)
-    try:
+def test_bundle_has_explicit_legacy_gaps_without_business_reconstruction():
+    stream, name = prepare_session_export("external_old", {"r"})
+    with stream, ZipFile(stream) as archive:
         assert name.endswith("-diagnostics.zip")
-        with ZipFile(stream) as archive:
-            tools = json.loads(archive.read("external_old/tools.json"))
-            assert len(tools) == 5
-            assert (
-                tools[0]["event"]["data"]["arguments"]["session_id"] == "external_old"
-            )
-            assert (
-                tools[2]["event"]["data"]["item"]["data"]["content"][0]["text"]
-                == "done"
-            )
-            assert b"hidden" not in b"".join(
-                archive.read(n) for n in archive.namelist()
-            )
-            manifest = json.loads(archive.read("external_old/manifest.json"))
-            assert manifest["models_missing_for_runs"] == ["r"]
-            assert manifest["restorable_backup"] is False
-            assert manifest["tool_failures"] == 1
-            assert manifest["tool_failures_without_stack_trace"] == [
-                {"run_id": "r", "tool_call_id": "m"}
-            ]
-            failures = json.loads(archive.read("external_old/failures.json"))
-            assert failures[0]["stack_trace_available"] is False
-            assert failures[0]["exceptions"] == []
-    finally:
-        stream.close()
-    with pytest.raises(ValueError, match="identity mismatch"):
-        prepare_session_export("other", state)
+        assert json.loads(archive.read("external_old/tools.json")) == []
+        assert json.loads(archive.read("external_old/failures.json")) == []
+        manifest = json.loads(archive.read("external_old/manifest.json"))
+        assert manifest["models_missing_for_runs"] == ["r"]
+        assert manifest["restorable_backup"] is False
+        assert manifest["diagnostic_storage_available"] is False
+        assert manifest["tool_results_available"] is False
+        assert "external_old/state.json" not in archive.namelist()
 
 
 def admin_headers(client):
@@ -310,9 +254,7 @@ def test_direct_package_uses_server_model_diagnostics(client, service):
     assert all(record["request"] and record["status"] == "completed" for record in records)
     assert {record["purpose"] for record in records} >= {"agent", "continuation_judge"}
     session_id = run["session_id"]
-    output, _ = prepare_session_export(session_id, {
-        "sessions": [{"session_id": session_id}], "runs": [run],
-    }, evidence)
+    output, _ = prepare_session_export(session_id, {run["run_id"]}, evidence)
     with output, ZipFile(output) as archive:
         manifest = json.loads(archive.read(f"{session_id}/manifest.json"))
         assert manifest["model_records"] == len(records)
@@ -416,9 +358,7 @@ def test_web_export_captures_image_tool_exception_stack(tmp_path, monkeypatch, t
             manifest = json.loads(archive.read("thread-1/manifest.json"))
             assert not manifest["tool_failures_without_stack_trace"]
             assert not manifest["logs_missing_for_runs"]
-            state = archive.read("thread-1/state.json")
-            assert b"broken_image_encoder" not in state
-            assert b"stack_trace" not in state
+            assert "thread-1/state.json" not in archive.namelist()
             assert b"diagnostic-secret" not in b"".join(
                 archive.read(name) for name in archive.namelist()
             )
@@ -542,12 +482,14 @@ def test_legacy_binding_without_run_tenant_metadata_remains_downloadable(
         ).status_code
         == 200
     )
-    store = service.application.entrypoint().runtime.session_store
-    state = client.portal.call(store.export_session_state, legacy_id)
-    for run in state["runs"]:
-        run["start_command"]["config"]["metadata"].pop(
-            "server_v2.workspace_user_id", None
-        )
+    access = service.conversations.session_access
+    context = service.conversations.context_for(owner)
+    runs = client.portal.call(access.list_session_runs, legacy_id, context)
+    command = client.portal.call(access.get_start_command, runs[0].run_id, context)
+    metadata = dict(command.config.metadata)
+    metadata.pop("server_v2.workspace_user_id", None)
+    monkeypatch.setattr(access, "get_start_command", AsyncMock(return_value=command.model_copy(
+        update={"config": command.config.model_copy(update={"metadata": metadata})})))
     record = client.portal.call(service.threads.find, legacy_id)
     monkeypatch.setattr(
         service.threads,
@@ -558,7 +500,6 @@ def test_legacy_binding_without_run_tenant_metadata_remains_downloadable(
             )
         ),
     )
-    monkeypatch.setattr(store, "export_session_state", AsyncMock(return_value=state))
     response = client.get(
         f"/api/threads/{legacy_id}/download", headers=admin_headers(client)
     )

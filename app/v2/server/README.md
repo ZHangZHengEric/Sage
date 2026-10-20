@@ -62,7 +62,7 @@ Web 开发时可单独启动：在 `app/v2/server/web` 执行 `npm install && np
 
 对话：首次 run 把 `agent_id` 钉在会话上（之后忽略下拉/`forwardedProps`）；读 catalog Agent → Official 文件/沙箱工具 + MCP + A2A peer + skill 组成 Composite，通过 Package Builder 的统一 `build(package, runtime=...)` 装配，并借用进程 Application 的共享服务；循环走统一 `create_loop(...)`。进程 Application 只 build 一次。
 
-`/health` 返回就绪状态与 `trace_enabled`；配置 `SAGE_SERVER_JAEGER_URL` 时管理页显示 Jaeger 入口。Server V2 与 sagents/v2 运行时直接通过 `StructuredLogger` 调用统一日志接口；Uvicorn 和第三方标准日志经适配器转换成 `sage.log/v1` 记录。所有记录由同一 LogSink 写入 stdout 和 `SAGE_SERVER_LOG_DIRECTORY` 指定的轮转文件。`SAGE_SERVER_LOG_LEVEL` 控制最低级别，`SAGE_SERVER_LOG_FORMAT` 控制两处输出的 `json` 或 `text` 格式。stdout 也可由容器日志驱动或 Alloy/Loki 持久化，不写审计业务表。
+`/health` 返回就绪状态与 `trace_enabled`；配置 `SAGE_SERVER_JAEGER_URL` 时管理页显示 Jaeger 入口。Server V2 与 sagents/v2 运行时直接通过 `StructuredLogger` 调用统一日志接口；Uvicorn 和第三方标准日志经适配器转换成 `sage.log/v1` 记录。所有记录由同一 LogSink 写入 stdout；默认不写文件，显式配置非空的 `SAGE_SERVER_LOG_DIRECTORY` 才额外写入轮转文件。`SAGE_SERVER_LOG_LEVEL` 控制最低级别，`SAGE_SERVER_LOG_FORMAT` 控制两处输出的 `json` 或 `text` 格式。stdout 也可由容器日志驱动或 Alloy/Loki 持久化，不写审计业务表。
 
 DEBUG 模式下，HTTP/OpenAI/MCP/A2A 客户端仅保留 WARNING 及以上日志，MySQL/Redis 客户端仅保留 INFO 及以上日志。状态提交、入口准备、Agent 准备和会话归档的成功 DEBUG 计时仅在耗时达到 100ms 时输出；失败、异常和缺少耗时的记录继续保留。该过滤同时用于 stdout、轮转文件和现有诊断日志，模型/工具/Run 生命周期及首段正文计时完整保留，不改变对话执行与会话持久化。
 
@@ -267,6 +267,16 @@ Web 工作目录树、单文件和目录 ZIP 下载按已授权的租户及 Agen
 ### 运行性能
 
 管理员从 Web「系统设置 → 运行性能」（`/performance`）查看全局或单个 Agent 的最近 1/6/24 小时、7 天、指定日期或自定义范围。`GET /api/observability/performance` 同样仅向管理员开放；接受带时区的 `start`、`end`（最多 31 天）、`agent_id`、`bucket=hour|day` 和 `timezone_name`，默认上海时区。指标按请求开始时间归入时间桶，不按完成时间漂移。
+
+启用 Phoenix 后，同一性能页内增加 Token、模型成本、错误请求、请求错误率和调用链工作台，不再单列外部 Phoenix 跳转。调用列表支持类型、状态及 `session_id` 精确筛选，点击 Session ID 可快速筛选；该筛选同步作用于 Phoenix 区域的汇总指标。Session ID 使用 Phoenix 的会话分组标识 `session.id`（由 trace 的 `session.sessionId` 返回），fork 的子会话仍遵循现有 root Session 分组。点击调用记录可在页内查看瀑布图及输入、输出、原始记录、事件、属性。列表分页加载轻量元数据，完整内容只在选择具体 span 时读取，原始内容按 Phoenix 中保存的数据展示。
+
+这些查询均经 server 的管理员鉴权：`GET /api/observability/traces/summary`、`GET /api/observability/trace-spans`、`GET /api/observability/traces/{trace_id}/spans`、`GET /api/observability/trace-spans/{span_id}`。前两者接受统一时间范围和 `agent_id`、`session_id`；列表额外接受 `kind`、`status`、`cursor`。server 使用配置好的项目与凭据访问 Phoenix 的只读 GraphQL / REST API，不接受浏览器指定上游地址或查询语句，也不把上游凭据交给浏览器；不新增业务持久化。原有 console 链接在 Phoenix 模式下指向本地 `/performance`。
+
+未启用 trace 后端（noop）时，计时与诊断证据写入本地 `runtime/diagnostics/evidence.sqlite3`。选择任一外部 trace 后端后，不创建、不写入该库。Langfuse 和通用 OTLP 暂不提供诊断查询，下载接口返回 409，性能入口不显示；不会回退本地采集。Phoenix 或 Jaeger 模式下，相同的轻量计时字段随 `sage.performance` spans 发往当前 trace 后端，页面按需查询外部 API，复用下述统计口径。Phoenix 默认使用 OTLP endpoint 去掉 `/v1/traces` 后的地址查询项目 spans；Jaeger 使用 Query v3 HTTP API，默认地址为 `SAGE_SERVER_JAEGER_PUBLIC_URL`。可用 `SAGE_SERVER_TRACE_QUERY_URL` 单独指定 server 可达的查询地址，用 `SAGE_SERVER_TRACE_QUERY_HEADERS_ENV` 指定查询凭据所在的环境变量名（默认 `OTEL_EXPORTER_OTLP_TRACES_HEADERS`，格式同 OTLP headers）。远程查询失败返回 503，不回退写入或混入旧本地历史。旧数据不自动迁移；部署本变更之前的 trace 不具有完整计时记录，统计受采样、导出失败和后端保留期影响。
+
+“下载诊断包”使用观测层的异步 `export_evidence(session_id, run_ids)` 能力，服务端仅鉴权、核对 Run 的 Agent/tenant 归属并临时打包，不再调用业务存储的全量导出。ZIP 格式为 `sage.session-diagnostic-bundle/v2`，保留 `manifest.json`、`models.json`、`requests/`、`logs.json`、`tools.json`、`failures.json`，外部查询还包含 `traces.json`。移除 `state.json`、`session.json`、`runs/`、`events/`；不复制业务快照。工具结果和失败由观测 span/日志生成，缺失的历史结果不从业务事件反查，manifest 明确记录可用性。外部查询只包含该 Session 和权威 Run 白名单内的 trace。完整原始模型流是否可用由当前采集模式决定，不会从本地旧库补齐。MySQL 的会话、事件和恢复数据不受影响。
+
+Phoenix 设置 `SAGE_SERVER_TRACE_CONTENT_MODE=raw`、`SAGE_SERVER_TRACE_SAMPLE_RATE=1.0` 时，Sage 不对上报内容脱敏或裁剪；模型输入输出、provider 请求体、SDK 暴露的流事件、规范化流事件、工具完整结构化结果（含 operation ID、metadata、error）及关联 Run 的结构化日志会发送到 Phoenix。原始诊断内容通过 `sage.diagnostic` spans 保存，不在业务数据库追加审计存储。raw 模式忽略 `SAGE_SERVER_TRACE_MAX_CONTENT_CHARS`，同时取消 Sage 的 8 MiB 流采集上限和 OTel 属性长度上限。流事件是 provider SDK 暴露的对象，不是 HTTP/TLS 网络字节。队列满、导出失败或进程退出仍可能丢失未送达的数据；这不是可靠归档。诊断 ZIP 的脱敏下载策略独立于 Phoenix 中保存的原始内容。
 
 统计单位是一次用户请求的 Run，合并内部步骤；恢复执行仍属于原请求。起点在每次 AG-UI/A2A 运行入口、进入受理准备和 Agent 加载之前，沿调用链传入 SAgents；终点在 SDK 执行等待返回后、产品回调之前。每次发生的 Agent 加载、配置更新、受理、调度、工作区与上下文初始化以及 SDK 收尾均计入；进程启动时的一次性初始化、HTTP 请求传输和浏览器渲染不在这个范围内。暂停至用户答复之间的等待单列，恢复时的重复加载重新计时。
 
