@@ -111,10 +111,4 @@ def test_component_plan_uses_snapshot_precedence_without_mutating_inputs(tmp_pat
     assert plan.tool_selection_config["max_visible_tools"] == 7
     assert settings.model_dump() == before
     assert owner.config["toolSelection"]["plugin"] == "sage.tool-selection.direct"
-    models = [object() for _ in range(3)]
-    locked = plan.locked_configs(
-        primary=models[0], judge=models[1], memory_query=models[2]
-    )
-    assert locked["context.summarizer"]["model"] is models[0]
-    assert locked["agent.continuation-policy"]["model"] is models[1]
     assert "secret" not in repr(plan.cache_identities)

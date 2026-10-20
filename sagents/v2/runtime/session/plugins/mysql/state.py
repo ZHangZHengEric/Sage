@@ -1009,8 +1009,15 @@ class _MysqlSessionState(MysqlManagedSessionHeads, MysqlRunMetadataQueries, Mysq
 
     @cached_session_operation
     async def find_start_run(self, session_id, idempotency_key, context):
-        await self._ensure_session_loaded(session_id, missing_ok=True)
-        return await super().find_start_run(session_id, idempotency_key, context)
+        try:
+            await self._ensure_session_loaded(session_id, missing_ok=True)
+            return await super().find_start_run(session_id, idempotency_key, context)
+        except SageV2Error as exc:
+            # A deleted Session has no matching start, including when Redis
+            # detects its tombstone while preparing the guarded read.
+            if exc.info.code == "session.not_found":
+                return None
+            raise
 
     @cached_session_operation
     async def get_start_command(self, run_id):
