@@ -58,6 +58,24 @@ class CapabilitySelection(StrictModel):
 CapabilityBinding = CapabilitySelection | tuple[CapabilitySelection, ...]
 
 
+class SkillUsageConfig(StrictModel):
+    """Workspace and activation policy, grouped separately from the repository."""
+
+    workspace: CapabilitySelection = Field(default_factory=lambda: CapabilitySelection(
+        plugin="sage.skill.workspace.auto-sync", scope="run",
+    ))
+    loading: CapabilitySelection = Field(default_factory=lambda: CapabilitySelection(
+        plugin="sage.skill.loading.lazy",
+    ))
+
+
+class SkillModulesConfig(StrictModel):
+    """Convenient input syntax; normalized to ordinary capability selections."""
+
+    management: CapabilitySelection | None = None
+    usage: SkillUsageConfig = Field(default_factory=SkillUsageConfig)
+
+
 class RuntimeConfig(StrictModel):
     preset: Identifier = "standard"
     deployment_profile: Literal["controlled_host", "distributed"] = "controlled_host"
@@ -68,15 +86,38 @@ class RuntimeConfig(StrictModel):
     check_readiness: bool = False
     state_root: str | None = None
     capabilities: dict[Identifier, CapabilityBinding] = Field(default_factory=dict)
+    skills: SkillModulesConfig | None = None
     # Operational guarantees are requirements, not documentation.  The
     # builder fails closed when the selected provider cannot prove each value.
     required_guarantees: dict[Identifier, dict[Identifier, Any]] = Field(
         default_factory=dict
     )
 
+    @model_validator(mode="before")
+    @classmethod
+    def expand_skill_modules(cls, value):
+        if not isinstance(value, dict) or value.get("skills") is None:
+            return value
+        modules = SkillModulesConfig.model_validate(value["skills"])
+        choices = dict(value.get("capabilities") or {})
+        grouped = {
+            "skill.workspace": modules.usage.workspace,
+            "skill.loading": modules.usage.loading,
+        }
+        if modules.management is not None:
+            grouped["skill.catalog"] = modules.management
+            grouped["skill.management"] = modules.management
+        for key, selection in grouped.items():
+            if key in choices and choices[key] != selection and choices[key] != selection.model_dump(mode="python"):
+                raise ValueError(f"skills and capabilities both configure {key!r}")
+            choices[key] = selection
+        return {**value, "skills": None, "capabilities": choices}
+
     @model_serializer(mode="wrap")
     def serialize_runtime(self, handler):
         data = handler(self)
+        if self.skills is None:
+            data.pop("skills", None)
         # Newly introduced defaults must not invalidate stored package refs.
         for name, default in (("start_workers", True), ("check_readiness", False), ("state_root", None)):
             if getattr(self, name) == default:

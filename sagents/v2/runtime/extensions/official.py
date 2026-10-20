@@ -1556,6 +1556,9 @@ def _register_session_and_memory(registry: ExtensionRegistry) -> None:
 
 
 def _register_tools_skills_and_flow(registry: ExtensionRegistry) -> None:
+    from sagents.v2.skill.registrations import skill_registrations
+    for registration in skill_registrations():
+        registry.register(registration)
     registry.register(
         ExtensionRegistration(
             descriptor=SkillLoadingPlugin.descriptor,
@@ -1591,7 +1594,8 @@ def _register_tools_skills_and_flow(registry: ExtensionRegistry) -> None:
         ExtensionRegistration(
             descriptor=SkillToolPlugin.descriptor,
             factory=lambda context, dependencies: SkillToolPlugin(
-                context.config["loader"], language=context.config.get("language")
+                context.config["loader"], language=context.config.get("language"),
+                allow_editing=context.config.get("allow_editing", False),
             ),
             start=lambda plugin, context, dependencies: {
                 "tool.catalog:skill": plugin.catalog,
@@ -1624,6 +1628,7 @@ def _register_tools_skills_and_flow(registry: ExtensionRegistry) -> None:
                     CapabilityOffer(
                         capability="skill.source", api_version="2", name="filesystem"
                     ),
+                    CapabilityOffer(capability="skill.management", api_version="2", name="filesystem"),
                 ),
                 supported_scopes=frozenset(
                     {ExtensionScope.PROCESS, ExtensionScope.AGENT}
@@ -1654,6 +1659,7 @@ def _register_tools_skills_and_flow(registry: ExtensionRegistry) -> None:
             start=lambda provider, context, dependencies: {
                 "skill.catalog:filesystem": provider,
                 "skill.source:filesystem": provider,
+                "skill.management:filesystem": provider,
             },
         )
     )

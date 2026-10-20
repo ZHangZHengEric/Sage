@@ -370,6 +370,7 @@ class _MemoryHandle:
     def __init__(self, provider: "InMemorySandboxProvider", ref: SandboxRef) -> None:
         self._provider = provider
         self.ref = ref
+        self.workspace_identity = "memory:" + ref.sandbox_id
         self.filesystem = _MemoryFileSystem(provider, ref.sandbox_id)
         self.process = _MemoryProcessRuntime(provider, ref.sandbox_id)
         self.network = _MemoryNetworkRuntime(provider, ref.sandbox_id)
