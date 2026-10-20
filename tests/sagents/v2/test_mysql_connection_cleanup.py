@@ -52,9 +52,12 @@ async def test_cancelled_query_releases_closed_connection_without_rollback(reade
     lease.__aexit__.assert_awaited_once()
     # A new reader can be admitted: neither physical nor read capacity leaked.
     replacement, _, ready_replacement = connection_pool()
+    _, _, ready_writer = connection_pool()
     async with asyncio.timeout(1):
         async with budget.connection(ready_replacement, reader=True) as acquired:
             assert acquired is replacement
+            async with budget.connection(ready_writer, reader=False):
+                pass
 
 
 @pytest.mark.parametrize("stage", ["rollback", "release"])

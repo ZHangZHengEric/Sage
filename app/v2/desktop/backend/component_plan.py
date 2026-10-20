@@ -19,12 +19,10 @@ from app.v2.desktop.backend.catalog import (
 from app.v2.desktop.backend.schemas import DesktopV2Settings
 from app.v2.desktop.backend.package import (
     DESKTOP_COMPONENT_DEFAULTS as _DESKTOP_COMPONENT_DEFAULTS,
-    DESKTOP_COMPONENT_CONFIG_LOCKS,
     stable_component_id as _stable_component_id,
     desktop_v2_manifest,
 )
 from app.v2.desktop.backend.runtime_config import _tool_selection_component_config
-from sagents.v2.model import ModelProvider
 from sagents.v2.package.manifest.root import SageManifest
 
 
@@ -147,33 +145,3 @@ class DesktopComponentPlan:
             tool_selection_config=tool_selection_config,
             language=settings.language,
         )
-
-    def continuation_config(self, model: ModelProvider) -> dict[str, Any]:
-        return {
-            "agent.continuation-policy": {
-                "model": model,
-                **DESKTOP_COMPONENT_CONFIG_LOCKS["agent.continuation-policy"],
-            }
-        }
-
-    def locked_configs(
-        self,
-        *,
-        primary: ModelProvider,
-        judge: ModelProvider,
-        memory_query: ModelProvider,
-    ) -> dict[str, Any]:
-        return {
-            "context.summarizer": {
-                "model": primary,
-                **DESKTOP_COMPONENT_CONFIG_LOCKS["context.summarizer"],
-            },
-            "memory.recall-query": (
-                {"model": memory_query, "language": self.language}
-                if self.memory_query_plugin_id == "sage.memory.recall-query.llm"
-                else {}
-            ),
-            "tool.selection-policy": self.tool_selection_config,
-            **self.continuation_config(judge),
-            "workspace.initializer": {"language": self.language},
-        }

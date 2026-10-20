@@ -246,19 +246,15 @@ DESKTOP_COMPONENT_CONFIG_LOCKS = {
     "agent.continuation-policy": {"model_binding": "fast"},
 }
 
-_DESKTOP_INJECTED_FIELDS = {
-    "context.summarizer": {"model"},
-    "context.reducer": {"store", "summarizer", "estimator", "unit_compactor"},
-    "context.summary-store": {"derived_state"},
-    "memory.recall-query": {"model", "language"},
+_DESKTOP_HOST_CONFIG_FIELDS = {
+    "memory.recall-query": {"language"},
     "workspace.initializer": {"language"},
-    "agent.continuation-policy": {"model"},
     "memory.provider": {"root"},
     "session-memory.provider": {"root"},
     "session.store": {"root", "dsn"},
     "observability.log-sink": {"root"},
     "observability.diagnostic-sink": {"root", "legacy_root"},
-    "execution.sandbox": {"verification_key", "process_handlers", "network_handlers"},
+    "execution.sandbox": {"verification_key"},
 }
 
 
@@ -273,7 +269,7 @@ def desktop_component_config_schema(
     properties = {
         key: dict(value) for key, value in result.get("properties", {}).items()
     }
-    for key in _DESKTOP_INJECTED_FIELDS.get(capability, set()):
+    for key in _DESKTOP_HOST_CONFIG_FIELDS.get(capability, set()):
         if key in properties:
             properties[key]["readOnly"] = True
             if key == "language" and language is not None:
