@@ -15,7 +15,7 @@ Please use English for issues, pull requests, and general repository documentati
 
 1. Fork the repository, clone your fork, and create a focused branch from `main`.
 2. Follow the [README source setup](README.md) for the component you are changing. Python code requires Python 3.12+. Match nearby code and keep unrelated changes out of the PR.
-3. Add or update tests for behavior changes and update affected documentation. Keep English and Chinese documentation aligned when both versions exist.
+3. Follow the [testing guide](docs/en/TESTING.md): extend existing behavior coverage at the smallest useful boundary, justify integration matrices, and update affected documentation. Keep English and Chinese documentation aligned when both versions exist.
 4. Run the relevant checks below from the repository root, unless a different directory is shown. Report the commands and results in your PR, including checks you could not run.
 
 **Documentation** (install PyYAML in your Python environment first):

@@ -12,7 +12,7 @@ from starlette.background import BackgroundTask
 
 from app.v2.server.routers.deps import HostDep, ReadUser, CurrentUser
 from app.v2.server.routers.render import error_response, success
-from app.v2.server.conversations.cleanup import finish_file_operation, require_idle
+from app.v2.server.conversations.cleanup import finish_file_operation, require_idle, reject_local_workspace_drive
 from app.v2.server.storage.downloads import SnapshotChangedError, list_directory, prepare_download
 from app.v2.server.storage.external_workspaces import delete_workspace_path, workspace_parts
 
@@ -61,20 +61,15 @@ async def workspace_identity(host, caller, read_user, thread_id, agent_id, *, wr
             raise HTTPException(404, "thread not found")
         if writable and record.user_id != caller.user_id:
             raise HTTPException(403, "admin data viewing is read-only")
-        await host.conversations.session_access.get_session(
-            thread_id, host.conversations.context_for(record.user_id)
-        )
         owner_id = record.user_id
         context = host.conversations.context_for(owner_id)
         access = host.conversations.session_access
-        runs = await access.list_session_runs(thread_id, context)
-        if runs:
-            latest = max(runs, key=lambda run: (run.accepted_session_revision, run.created_at, run.run_id))
-            command = await access.get_start_command(latest.run_id, context)
-            from app.v2.server.storage.workspaces import workspace_user, with_workspace_binding
+        command = await access.latest_session_start_command(thread_id, context)
+        if command is not None:
+            from app.v2.server.storage.workspaces import workspace_user, with_workspace_binding, workspace_agent_id
             command = await with_workspace_binding(command, owner_id, host.threads)
             owner_id = workspace_user(command, owner_id)
-            agent_id = command.agent_id
+            agent_id = workspace_agent_id(command)
         else:
             agent_id = record.agent_id
     elif agent_id:
@@ -124,8 +119,9 @@ async def workspace_delete(user: CurrentUser, host: HostDep,
     service = host.conversations
     owner_id, agent_id = await workspace_identity(
         host, user, user, thread_id, agent_id, writable=True)
-    async with service.runs.workspace_lock(owner_id, agent_id):
-        await require_idle(service, owner_id, agent_id)
+    reject_local_workspace_drive(service, owner_id, agent_id)
+    async with service.runs.workspace_guard(owner_id, agent_id):
+        await require_idle(service, owner_id, agent_id, owner_id=user.user_id)
         try:
             deleted = await finish_file_operation(
                 delete_workspace_path, host.paths, owner_id, agent_id, path, recursive=recursive)

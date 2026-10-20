@@ -13,6 +13,7 @@ from email import policy
 from email.parser import BytesParser
 import json
 import time
+import httpx
 
 
 @dataclass
@@ -56,10 +57,14 @@ async def query_budget(*, seconds=25, max_bytes=64 * 1024 * 1024, requests=128):
 async def request(source, client, path, params, *, method='GET', body=None, headers=None):
     budget = _budget.get()
     timeout = min(source.timeout, budget.request()) if budget else source.timeout
+    request_headers = httpx.Headers({**source.headers, **(headers or {})})
+    request_headers['Accept-Encoding'] = 'identity'
     async with client.stream(method, source.query_url + path, params=params,
-                             headers={**source.headers, **(headers or {})}, json=body,
+                             headers=request_headers, json=body,
                              timeout=timeout, follow_redirects=False) as response:
         response.raise_for_status()
+        if response.headers.get('content-encoding', '').strip().lower() not in {'', 'identity'}:
+            raise ValueError('trace query response uses an unsupported content encoding')
         content = bytearray()
         async for chunk in response.aiter_bytes():
             if budget:
@@ -90,7 +95,8 @@ def table_rows(content, content_type):
 
 async def performance_spans(source, client, *, start, end, agent_id=''):
     fields = ['name', 'start_time', 'context.trace_id', 'context.span_id']
-    attributes = ['session_id', 'run_id', 'agent_id', 'sage.performance.format', 'sage.performance.data']
+    attributes = ['session_id', 'run_id', 'agent_id', 'sage.performance.format', 'sage.performance.data',
+                  'sage.performance.incomplete']
     projection = {key: {'key': key} for key in fields}
     projection.update({key: {'key': attribute(key)} for key in attributes})
     base = ['name == "agent.run"',

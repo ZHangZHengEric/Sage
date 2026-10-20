@@ -2589,6 +2589,19 @@ class SessionStoreCoordinator(SessionAttachmentMixin):
             )
             return tuple(self._run_snapshot(row) for row in rows)
 
+    async def has_nonterminal_session_trees(self, session_ids) -> bool:
+        """Trusted Host probe over supplied roots and their descendant Sessions."""
+        async with self._lock:
+            selected = set(session_ids)
+            frontier = set(selected)
+            while frontier:
+                children = {row.session_id for row in self._sessions.values()
+                            if row.parent_session_id in frontier and row.session_id not in selected}
+                selected.update(children)
+                frontier = children
+            return any(row.session_id in selected and row.state not in TERMINAL_RUN_STATES
+                       for row in self._runs.values())
+
     async def has_nonterminal_runs(self) -> bool:
         """Optional host reclamation probe, including suspended and child Runs."""
         async with self._lock:

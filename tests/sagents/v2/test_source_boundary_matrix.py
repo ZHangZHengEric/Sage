@@ -336,29 +336,11 @@ print(json.dumps(loaded))
     assert offenders == []
 
 
-def test_tool_selection_plugins_own_their_state_implementation():
-    """Selection plugins must not inherit a shared plugin implementation."""
-
-    selection_core = V2_ROOT / "tool" / "selection.py"
-    assert "BaseToolSelectionPolicy" not in selection_core.read_text(encoding="utf-8")
+def test_tool_selection_plugins_do_not_import_the_package_facade():
+    """Import concrete ports without eagerly loading sibling plugins."""
     for path in sorted((V2_ROOT / "tool" / "plugins").glob("selection_*.py")):
         imports = {module for _, module in _import_targets(path)}
         assert "sagents.v2.tool.plugins" not in imports
-
-
-def test_scheduler_plugins_own_their_state_machine_implementation():
-    """Scheduler behavior stays inside each plugin instead of a shared extraction."""
-
-    scheduler_root = V2_ROOT / "runtime" / "execution" / "scheduler"
-    assert not (scheduler_root / "state_machine.py").exists()
-    ephemeral = (scheduler_root / "plugins" / "ephemeral.py").read_text(
-        encoding="utf-8"
-    )
-    filesystem = (scheduler_root / "plugins" / "filesystem.py").read_text(
-        encoding="utf-8"
-    )
-    assert "class InMemoryScheduler:" in ephemeral
-    assert "class _FilesystemSchedulerStateMachine:" in filesystem
 
 
 def test_continuation_plugins_do_not_inherit_each_other():

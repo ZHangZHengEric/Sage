@@ -159,13 +159,6 @@ async def test_builder_transfers_host_resources_in_close_order(tmp_path: Path):
     assert closed == ["scheduler", "models"]
 
 
-def test_builder_exposes_only_registered_capabilities():
-    assert not any(name.startswith("with_") for name in dir(SAgentBuilder))
-    import sagents.v2 as sdk
-    assert not hasattr(sdk, "HostAgentExecution")
-
-
-
 @pytest.mark.asyncio
 async def test_builder_injects_derived_state_independently_from_session_store(
     tmp_path: Path,

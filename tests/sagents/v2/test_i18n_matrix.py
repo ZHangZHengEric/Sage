@@ -59,9 +59,8 @@ def test_recovery_questionnaire_is_complete_in_every_supported_language(language
 
 
 @pytest.mark.parametrize("language", SUPPORTED_LANGUAGES)
-@pytest.mark.parametrize(
-    "key",
-    [
+def test_every_fixed_error_and_validation_key_resolves_for_every_locale(language):
+    keys = [
         "error.validation",
         "error.conflict",
         "error.policy_denied",
@@ -110,14 +109,15 @@ def test_recovery_questionnaire_is_complete_in_every_supported_language(language
         "plan.submitted_reason",
         "plan.required",
         "tool_selection.index_instruction",
-    ],
-)
-def test_every_fixed_error_and_validation_key_resolves_for_every_locale(language, key):
-    value = tr(key, language, index=1, tool="write_file")
-    assert value
-    assert value != key
-    if language != "en":
-        assert value != tr(key, "en", index=1, tool="write_file")
+    ]
+    failures = {}
+    for key in keys:
+        value = tr(key, language, index=1, tool="write_file")
+        if not value or value == key:
+            failures[key] = "missing translation"
+        elif language != "en" and value == tr(key, "en", index=1, tool="write_file"):
+            failures[key] = "fell back to English"
+    assert not failures, f"{language}: {failures}"
 
 
 @pytest.mark.parametrize("language", SUPPORTED_LANGUAGES)

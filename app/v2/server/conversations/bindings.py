@@ -19,3 +19,12 @@ def require_binding(actual, expected):
             message="session_id is already bound to another tenant or Agent",
             metadata={"side_effect_state": "not_applied"},
         ))
+
+
+@dataclass(frozen=True)
+class WorkspaceSessionPage:
+    """Ownership roots plus legacy roots whose tenant still needs validation."""
+
+    session_ids: list[str]
+    legacy_session_ids: list[str]
+    next_cursor: str | None

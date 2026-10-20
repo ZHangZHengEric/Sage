@@ -6,6 +6,14 @@ from sagents.v2.contracts.errors import ErrorCategory, RuntimeErrorInfo, SageV2E
 WORKSPACE_USER_KEY = "server_v2.workspace_user_id"
 
 
+def workspace_agent_id(command) -> str:
+    """The admitted workspace owner Agent may differ from the compiled graph ID."""
+    metadata = command.config.metadata
+    return (metadata.get("server_v2.execution", {}).get("agent_id")
+            or metadata.get("server_v2.composition", {}).get("agent", {}).get("id")
+            or command.agent_id)
+
+
 def workspace_user(command, owner_id: str) -> str:
     user_id = command.config.metadata.get(WORKSPACE_USER_KEY)
     if isinstance(user_id, str) and user_id:
@@ -27,7 +35,7 @@ async def with_workspace_binding(command, owner_id: str, threads):
     binding = await threads.binding(command.session_id)
     if binding is None:
         return command
-    if binding.owner_id != owner_id or binding.agent_id != command.agent_id:
+    if binding.owner_id != owner_id or binding.agent_id != workspace_agent_id(command):
         raise SageV2Error(RuntimeErrorInfo(
             code="server.workspace.binding_mismatch", category=ErrorCategory.AUTHORIZATION,
             message="Session workspace binding does not match the Run",

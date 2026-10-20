@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from tests.sagents.v2.model_fixture import FULL_MODEL_CAPABILITIES as CAPABILITIES
+
 import json
 from types import SimpleNamespace
 
@@ -16,7 +18,6 @@ from sagents.v2.model import (
     AnthropicMessagesConfig,
     AnthropicMessagesModelProvider,
     BuiltinModelProtocol,
-    ModelCapabilities,
     ModelEventKind,
     ModelMessage,
     ModelRequest,
@@ -33,18 +34,6 @@ from sagents.v2.contracts.errors import SageV2Error
 from sagents.v2.runtime.extensions import ExtensionScope, ExtensionScopeContext
 from sagents.v2.runtime.extensions.official import builtin_extension_registry
 from sagents.v2.runtime.credentials import CredentialMaterial
-
-
-CAPABILITIES = ModelCapabilities(
-    supports_streaming=True,
-    supports_tools=True,
-    supports_parallel_tool_calls=True,
-    supports_reasoning=True,
-    supports_multimodal_input=True,
-    supports_structured_output=True,
-    max_input_tokens=128_000,
-    max_output_tokens=8_192,
-)
 
 
 def request(**changes):

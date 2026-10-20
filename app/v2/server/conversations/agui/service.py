@@ -376,62 +376,63 @@ class ConversationService:
                     raise _error("idempotency_conflict", "runId is already bound to a different request", ErrorCategory.CONFLICT)
                 command = stored
                 break
-        # Validate and claim ownership before Run creation or workspace writes.
-        with log_duration(logger, "server.admission.phase", "会话归属绑定结束",
-                          session_id=thread_id, attributes={"phase": "thread_bind"}):
-            await self.threads.bind(SessionBinding(
-                thread_id, user_id, workspace_user_id, admitted.agent_id,
-            ))
-        title = ""
-        if command.input and command.input[0].content:
-            title = getattr(command.input[0].content[0], "text", "")[:80]
-        with log_duration(logger, "server.admission.phase", "会话索引保存结束",
-                          session_id=thread_id, attributes={"phase": "thread_upsert"}):
-            await self.threads.upsert(
-                thread_id, user_id, title=title, agent_id=admitted.agent_id
-            )
-        if not admitted.model_ready:
-            return single_error_sse(
-                (
-                    "请先在「模型」页配置模型后再发送"
-                    if self.language.lower().startswith("zh")
-                    else "Configure a model on the Models page before sending"
-                ),
-                code="server.model_not_configured", session_id=thread_id,
-            )
+        async with self.runs.workspace_guard(workspace_user_id, admitted.agent_id):
+            # Validate and claim ownership before Run creation or workspace writes.
+            with log_duration(logger, "server.admission.phase", "会话归属绑定结束",
+                              session_id=thread_id, attributes={"phase": "thread_bind"}):
+                await self.threads.bind(SessionBinding(
+                    thread_id, user_id, workspace_user_id, admitted.agent_id,
+                ))
+            title = ""
+            if command.input and command.input[0].content:
+                title = getattr(command.input[0].content[0], "text", "")[:80]
+            with log_duration(logger, "server.admission.phase", "会话索引保存结束",
+                              session_id=thread_id, attributes={"phase": "thread_upsert"}):
+                await self.threads.upsert(
+                    thread_id, user_id, title=title, agent_id=admitted.agent_id
+                )
+            if not admitted.model_ready:
+                return single_error_sse(
+                    (
+                        "请先在「模型」页配置模型后再发送"
+                        if self.language.lower().startswith("zh")
+                        else "Configure a model on the Models page before sending"
+                    ),
+                    code="server.model_not_configured", session_id=thread_id,
+                )
 
-        correlation_id = get_request_id()
-        context = self.context_for(user_id, correlation_id=correlation_id)
-        with structured_log_context(correlation_id=correlation_id):
-            native_run_id = await self.runs.start_detached_run(
-                "ag-ui",
-                command,
-                context,
-                user_id=user_id,
-                session_id=thread_id,
-                label="agui",
-                performance_started_at=performance_started_at,
-                on_finished=self._agui_finished(
+            correlation_id = get_request_id()
+            context = self.context_for(user_id, correlation_id=correlation_id)
+            with structured_log_context(correlation_id=correlation_id):
+                native_run_id = await self.runs.start_detached_run(
+                    "ag-ui",
                     command,
-                    thread_id=thread_id,
-                    client_run_id=run_id,
+                    context,
                     user_id=user_id,
-                    agent_id=agent_id,
+                    session_id=thread_id,
+                    label="agui",
+                    performance_started_at=performance_started_at,
+                    on_finished=self._agui_finished(
+                        command,
+                        thread_id=thread_id,
+                        client_run_id=run_id,
+                        user_id=user_id,
+                        agent_id=agent_id,
+                        started_at=started_at,
+                    ),
+                )
+                events = self.session_access.subscribe_events(
+                    EventCursor(run_id=native_run_id, run_sequence=0),
+                    context,
+                )
+                return canonical_agui_sse(
+                    events,
+                    thread_id=thread_id,
+                    run_id=stream_run_id or run_id,
+                    last_event_id=last_event_id,
+                    logger=StructuredLogger(self.log_sink, "server_v2.agui").bind(correlation_id=correlation_id),
                     started_at=started_at,
-                ),
-            )
-            events = self.session_access.subscribe_events(
-                EventCursor(run_id=native_run_id, run_sequence=0),
-                context,
-            )
-            return canonical_agui_sse(
-                events,
-                thread_id=thread_id,
-                run_id=stream_run_id or run_id,
-                last_event_id=last_event_id,
-                logger=StructuredLogger(self.log_sink, "server_v2.agui").bind(correlation_id=correlation_id),
-                started_at=started_at,
-            )
+                )
 
     async def resume(
         self,
@@ -548,26 +549,35 @@ class ConversationService:
             )
         return {"session_id": thread_id, "runId": run_id, "cancelled": cancelled}
 
-    async def delete(
-        self, thread_id: str, user_id: str, *, admin: bool = False
-    ) -> None:
+    async def delete(self, thread_id: str, user_id: str, *, admin: bool = False) -> None:
+        from app.v2.server.conversations.cleanup import require_idle, reject_local_workspace_drive
+        from app.v2.server.storage.workspaces import with_workspace_binding, workspace_user
         record = await self.threads.find(thread_id)
         if record is None or (not admin and record.user_id != user_id):
-            raise SageV2Error(
-                RuntimeErrorInfo(
-                    code="server.conversations.agui.service.not_found",
-                    category=ErrorCategory.VALIDATION,
-                    message="thread not found",
-                )
-            )
+            raise _error("not_found", "thread not found")
+        context = self.context_for(record.user_id)
         try:
-            await self.session_access.delete_session(
-                thread_id, self.context_for(record.user_id)
-            )
+            command = await self.session_access.latest_session_start_command(thread_id, context)
         except SageV2Error as exc:
             if not exc.info.code.endswith("not_found"):
                 raise
-        await self.threads.remove(thread_id, record.user_id)
+            command = None
+        tenant, agent_id = record.user_id, record.agent_id
+        if command is not None:
+            command = await with_workspace_binding(command, record.user_id, self.threads)
+            tenant = workspace_user(command, record.user_id)
+        reject_local_workspace_drive(self, tenant, agent_id)
+        async with self.runs.workspace_guard(tenant, agent_id):
+            await require_idle(self, tenant, agent_id, owner_id=record.user_id)
+            current = await self.threads.find(thread_id)
+            if current is None or current.user_id != record.user_id:
+                raise _error("not_found", "thread not found")
+            try:
+                await self.session_access.delete_session(thread_id, context)
+            except SageV2Error as exc:
+                if not exc.info.code.endswith("not_found"):
+                    raise
+            await self.threads.remove(thread_id, record.user_id)
 
     def _agui_finished(
         self,
@@ -590,9 +600,9 @@ class ConversationService:
         )
 
         async def _finished(snapshot) -> None:
-            await self.threads.upsert(
-                thread_id, user_id, agent_id=agent_id
-            )
+            from app.v2.server.storage.workspaces import workspace_user
+            async with self.runs.workspace_guard(workspace_user(command, user_id), agent_id):
+                await self.threads.upsert(thread_id, user_id, agent_id=agent_id)
             status = snapshot.state.value
             log_terminal = logger.warning if status == "failed" else logger.info
             log_terminal(f"agui.run.{status}", f"AG-UI run {status}",

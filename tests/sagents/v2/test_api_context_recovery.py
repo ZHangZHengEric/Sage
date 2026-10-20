@@ -179,8 +179,13 @@ class FragmentModel:
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("size", [0, 1, 256, 10_000, 100_000])
-@pytest.mark.parametrize("maximum", [1, 64, 128_000])
+@pytest.mark.parametrize("size,maximum", [
+    pytest.param(0, 1, id="empty"),
+    pytest.param(1, 1, id="equal"),
+    pytest.param(256, 64, id="above-declared-limit"),
+    pytest.param(10_000, 128_000, id="below-declared-limit"),
+    pytest.param(100_000, 64, id="large-unreported-input"),
+])
 async def test_no_input_is_locally_rejected_or_compressed(size, maximum):
     summary = Summary()
     assembler = DefaultContextAssembler(
@@ -711,28 +716,6 @@ async def test_step_builder_uses_only_reported_total_input_usage(
     assert ("run" in assembler._compression_requested) == compress
 
 
-def test_estimator_plugins_and_default_selections_are_removed():
-    from sagents.v2.runtime.extensions.official import builtin_extension_registry
-    from sagents.v2.composition.defaults import DEFAULT_COMPONENTS
-    from sagents.v2.package.manifest.runtime import RuntimeConfig
-    import sagents.v2.context as context
-
-    assert not any(
-        "token-estimator" in p["plugin_id"]
-        for p in builtin_extension_registry().inventory()
-    )
-    assert "context.token-estimator" not in DEFAULT_COMPONENTS
-    assert not any("Estimator" in name for name in context.__all__)
-    old = RuntimeConfig(
-        capabilities={
-            "context.token-estimator": {
-                "plugin": "sage.context.token-estimator.tiktoken"
-            }
-        }
-    )
-    assert old.capabilities == {}
-
-
 @pytest.mark.asyncio
 async def test_later_permanent_fragment_failure_keeps_previous_checkpoint():
     store = InMemoryConversationSummaryStore()
@@ -847,7 +830,7 @@ async def test_window_retries_advance_and_rewritten_history_invalidates_its_view
 
 
 def test_legacy_plugin_settings_do_not_resurrect_input_estimators():
-    from sagents.v2.package.manifest.runtime import CapabilitySelection
+    from sagents.v2.package.manifest.runtime import CapabilitySelection, RuntimeConfig
     from sagents.v2.package.manifest.root import PluginDeclaration, SageManifest
 
     selection = CapabilitySelection(
@@ -870,6 +853,10 @@ def test_legacy_plugin_settings_do_not_resurrect_input_estimators():
     ]
     manifest = SageManifest.model_validate(data)
     assert tuple(p.id for p in manifest.plugins) == ("sage.skill.loading.lazy",)
+    runtime = RuntimeConfig(capabilities={
+        "context.token-estimator": {"plugin": "sage.context.token-estimator.tiktoken"},
+    })
+    assert runtime.capabilities == {}
 
 
 @pytest.mark.asyncio

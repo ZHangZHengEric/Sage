@@ -289,7 +289,7 @@ def build_run(events, models):
         elif e["event"].startswith("agent.run.") and pending is not None:
             spans.append((pending, e["at"]))
             pending = None
-    if end is None or pending is not None:
+    if end is None or pending is not None or any(e.get('_observation_incomplete') for e in events):
         return dict(
             run_id=starts[0]["run_id"],
             session_id=starts[0]["session_id"],

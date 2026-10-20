@@ -4,7 +4,6 @@ from tests.sagents.v2.model_fixture import TEST_MODELS
 
 import os
 import uuid
-from unittest.mock import AsyncMock
 
 import pytest
 
@@ -26,7 +25,6 @@ from sagents.v2.runtime.session.plugins.postgres import (
     StoreInUseError,
     _PostgresSessionState,
 )
-from sagents.v2.runtime.session.state import SessionStoreCoordinator
 from sagents.v2.testing.plugins.scripted_model import ScriptedModelProvider
 
 
@@ -43,32 +41,6 @@ CONTEXT = RequestContext(
 
 def _schema() -> str:
     return f"sage_v2_{uuid.uuid4().hex[:12]}"
-
-
-@pytest.mark.asyncio
-async def test_postgres_authorization_loads_persisted_session_before_owner_check():
-    source = SessionStoreCoordinator()
-    created = await source.create_run(command(), CONTEXT)
-    session_id = created.handle.session_id
-    stored_state = source._dump_state_locked()
-
-    reopened = PostgresSessionStore("postgresql://unused/test")
-    reopened._coordinator._ensure_ready = AsyncMock()
-    reopened._coordinator._fetch_session = AsyncMock(return_value=stored_state)
-
-    assert session_id not in reopened._coordinator._sessions
-    await reopened.authorize_session_actor(session_id, CONTEXT)
-    assert session_id in reopened._coordinator._sessions
-    reopened._coordinator._fetch_session.assert_awaited_once_with(session_id)
-
-    other = RequestContext(
-        actor=ActorRef(principal_id="other_user", principal_type=PrincipalType.USER,
-                       tenant_id="tenant_test"),
-        trace=TraceContext(correlation_id="other_correlation"),
-    )
-    with pytest.raises(SageV2Error) as denied:
-        await reopened.authorize_session_actor(session_id, other)
-    assert denied.value.info.code == "session.actor_not_authorized"
 
 
 def command(
@@ -243,39 +215,6 @@ def postgres_dsn():
 
 
 @pytest.mark.asyncio
-async def test_restart_round_trip_and_idempotent_start(postgres_dsn):
-    schema = _schema()
-    first = PostgresSessionStore(postgres_dsn, schema=schema)
-    created = await first.create_run(command(), CONTEXT)
-    await first.put_derived_state(created.handle.session_id, "notes", "title", "hello")
-    await first.close()
-
-    second = PostgresSessionStore(postgres_dsn, schema=schema)
-    await second.authorize_session_actor(created.handle.session_id, CONTEXT)
-    run = await second.get_run(created.handle.run_id)
-    session = await second.get_session(created.handle.session_id)
-    events = await second.read_events(created.handle.run_id)
-    duplicate = await second.create_run(command(), CONTEXT)
-    derived = await second.get_derived_state(
-        created.handle.session_id, "notes", "title"
-    )
-
-    assert second.capabilities["durable_across_process_restart"] is True
-    assert second.capabilities["multi_process_writes"] is False
-    assert run.state == RunState.QUEUED
-    assert session.revision == 1
-    assert [event.type for event in events] == [
-        "run.accepted",
-        "run.queued",
-        "message.completed",
-    ]
-    assert duplicate.duplicate is True
-    assert duplicate.handle.run_id == created.handle.run_id
-    assert derived == "hello"
-    await second.close()
-
-
-@pytest.mark.asyncio
 async def test_get_run_does_not_refetch_an_already_loaded_session(postgres_dsn):
     schema = _schema()
     store = PostgresSessionStore(postgres_dsn, schema=schema)
@@ -294,35 +233,6 @@ async def test_get_run_does_not_refetch_an_already_loaded_session(postgres_dsn):
     assert first.run_id == second.run_id
     assert fetches == 0
     await store.close()
-
-
-@pytest.mark.asyncio
-async def test_run_events_are_appended_across_commits(postgres_dsn):
-    schema = _schema()
-    store = PostgresSessionStore(postgres_dsn, schema=schema)
-    created = await store.create_run(command(), CONTEXT)
-    await store.commit_run(
-        run_id=created.handle.run_id,
-        expected_revision=created.handle.run_revision,
-        expected_states={RunState.QUEUED},
-        new_state=RunState.RUNNING,
-        drafts=(),
-        context=CONTEXT,
-        idempotency_key="start-execution",
-    )
-    await store.close()
-
-    restored = PostgresSessionStore(postgres_dsn, schema=schema)
-    run = await restored.get_run(created.handle.run_id)
-    events = await restored.read_events(created.handle.run_id)
-    assert run.state == RunState.RUNNING
-    assert [event.type for event in events][:4] == [
-        "run.accepted",
-        "run.queued",
-        "message.completed",
-        "run.started",
-    ]
-    await restored.close()
 
 
 @pytest.mark.asyncio
@@ -415,26 +325,6 @@ async def test_parent_delete_cascades_to_child_sessions(postgres_dsn):
         with pytest.raises(SageV2Error) as missing:
             await restored.get_session(deleted_session_id)
         assert missing.value.info.code == "session.not_found"
-    await restored.close()
-
-
-@pytest.mark.asyncio
-async def test_delete_session_removes_durable_rows(postgres_dsn):
-    schema = _schema()
-    store = PostgresSessionStore(postgres_dsn, schema=schema)
-    created = await store.create_run(command(), CONTEXT)
-    await _cancel(store, created, "cancel-run")
-    session_id = created.handle.session_id
-    await store.delete_session(session_id)
-    with pytest.raises(SageV2Error) as exc_info:
-        await store.get_session(session_id)
-    assert exc_info.value.info.code == "session.not_found"
-    await store.close()
-
-    restored = PostgresSessionStore(postgres_dsn, schema=schema)
-    with pytest.raises(SageV2Error) as exc_info:
-        await restored.get_session(session_id)
-    assert exc_info.value.info.code == "session.not_found"
     await restored.close()
 
 

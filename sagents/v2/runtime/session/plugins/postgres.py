@@ -721,6 +721,15 @@ class _PostgresSessionState(SessionStoreCoordinator):
             await self._ensure_session_loaded(session_id)
             return await super().list_session_runs(session_id)
 
+    async def has_nonterminal_session_trees(self, session_ids):
+        # This adapter has no journal projection yet. Load only the supplied
+        # roots and their children; unrelated Sessions never participate.
+        for sid in dict.fromkeys(session_ids):
+            async with self._session_scope(sid):
+                await self._ensure_session_loaded(sid, missing_ok=True)
+                await self._ensure_descendants_loaded(sid)
+        return await super().has_nonterminal_session_trees(session_ids)
+
     async def list_dispatchable_runs(self):
         """Discover durable root intents before the dispatcher rebuilds its queue."""
 

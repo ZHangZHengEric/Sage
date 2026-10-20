@@ -280,22 +280,23 @@ class A2AService:
             max_steps=admitted.max_steps,
             metadata={**admitted.metadata, **await self._execution_metadata(message, key, admitted)},
         )
-        from app.v2.server.conversations.bindings import SessionBinding
-        await self._threads.bind(SessionBinding(session_id, user_id, user_id, admitted.agent_id))
-        await self._threads.upsert(
-            session_id, user_id, title=_title_of(command), agent_id=admitted.agent_id
-        )
+        async with self._runs.workspace_guard(user_id, admitted.agent_id):
+            from app.v2.server.conversations.bindings import SessionBinding
+            await self._threads.bind(SessionBinding(session_id, user_id, user_id, admitted.agent_id))
+            await self._threads.upsert(
+                session_id, user_id, title=_title_of(command), agent_id=admitted.agent_id
+            )
 
-        context = self._context_for(key, correlation_id=get_request_id())
-        run_id = await self._runs.start_detached_run(
-            "a2a",
-            command,
-            context,
-            user_id=user_id,
-            session_id=session_id,
-            label="a2a",
-            performance_started_at=performance_started_at,
-        )
+            context = self._context_for(key, correlation_id=get_request_id())
+            run_id = await self._runs.start_detached_run(
+                "a2a",
+                command,
+                context,
+                user_id=user_id,
+                session_id=session_id,
+                label="a2a",
+                performance_started_at=performance_started_at,
+            )
         return _Started(
             run_id=run_id,
             session_id=session_id,

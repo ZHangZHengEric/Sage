@@ -8,6 +8,7 @@ from time import perf_counter
 from datetime import datetime, timedelta
 from inspect import iscoroutinefunction
 from weakref import WeakValueDictionary
+from contextlib import asynccontextmanager
 
 from app.v2.server.observability.logging import get_logger
 from sagents.v2.contracts.commands import CancelRun, ReplyInteraction, ResumeRun, SteerRun, InputItem
@@ -26,6 +27,7 @@ class RunService:
     def __init__(self, *, application, session_access, execution, users=None, keys=None, catalog=None, settings=None, host=None) -> None:
         # Only operations on the same physical workspace exclude one another.
         self._workspace_locks: WeakValueDictionary[tuple[str, str], asyncio.Lock] = WeakValueDictionary()
+        self._workspace_owners = {}
         self.application = application
         self.session_access = session_access
         self.execution = execution
@@ -34,9 +36,27 @@ class RunService:
         self.catalog = catalog
         self.settings = settings
         self.host = host
+        self._approval_scan_cursor = None
+        self._approval_scan_end = None
+        self._approval_scan_remaining = 0
+        self.approval_scan_seconds = 5.0
 
     def workspace_lock(self, tenant_id: str, agent_id: str) -> asyncio.Lock:
         return self._workspace_locks.setdefault((tenant_id, agent_id), asyncio.Lock())
+
+    @asynccontextmanager
+    async def workspace_guard(self, tenant_id: str, agent_id: str):
+        """One task may nest admission inside its ownership/index transaction."""
+        key, task = (tenant_id, agent_id), asyncio.current_task()
+        if self._workspace_owners.get(key) is task:
+            yield
+            return
+        async with self.workspace_lock(*key):
+            self._workspace_owners[key] = task
+            try:
+                yield
+            finally:
+                self._workspace_owners.pop(key, None)
 
     async def _load_run_agent(self, command, user_id):
         from app.v2.server.runtime.loop import load_catalog_agent
@@ -226,15 +246,42 @@ class RunService:
         if self.keys is not None and decision not in {"deny", "cancel"}:
             command = await self.application.runtime.session_store.get_start_command(run.run_id)
             live = await live_execution_policy(command, users=self.users, keys=self.keys, catalog=self.catalog,
-                settings=self.settings, user_id=context.actor.principal_id)
+                settings=self.settings, user_id=context.actor.principal_id,
+                package_authorizer=self.host.agent_management.authorize_package if self.host is not None else None,
+                context=context)
             if live is None:
                 raise SageV2Error(RuntimeErrorInfo(code="server.execution_grant.forbidden",
                     category=ErrorCategory.AUTHORIZATION, message="The originating execution grant is no longer valid"))
 
     async def expire_approvals(self, threads, context_for):
-        """One host maintenance pass, no waiting task per approval."""
-        page = await threads.scan(limit=200, cursor=getattr(self, "_approval_scan_cursor", None))
-        records = page.items
+        """Advance a finite round; tail arrivals cannot starve older approvals.
+
+        Return True when the same round still has pages. The host immediately
+        schedules the next slice instead of sleeping a minute after every page.
+        """
+        if self._approval_scan_end is None:
+            self._approval_scan_end, self._approval_scan_remaining = await threads.scan_snapshot()
+            self._approval_scan_cursor = None
+            if self._approval_scan_end is None or self._approval_scan_remaining <= 0:
+                return False
+        deadline = perf_counter() + max(0, self.approval_scan_seconds)
+        while True:
+            page = await threads.scan(limit=min(200, self._approval_scan_remaining), cursor=self._approval_scan_cursor,
+                                      through=self._approval_scan_end)
+            await self._expire_thread_approvals(page.items, context_for)
+            self._approval_scan_remaining -= len(page.items)
+            if page.next_cursor is None or self._approval_scan_remaining <= 0:
+                self._approval_scan_cursor = self._approval_scan_end = None
+                self._approval_scan_remaining = 0
+                return False
+            if page.next_cursor == self._approval_scan_cursor:
+                raise RuntimeError("Approval scan cursor did not advance")
+            self._approval_scan_cursor = page.next_cursor
+            if perf_counter() >= deadline:
+                return True
+            await asyncio.sleep(0)
+
+    async def _expire_thread_approvals(self, records, context_for):
         filter_waiting = getattr(self.application.runtime.session_store, "filter_suspended_session_ids", None)
         if iscoroutinefunction(filter_waiting):
             waiting = await filter_waiting([thread.thread_id for thread in records])
@@ -256,8 +303,6 @@ class RunService:
             except SageV2Error as exc:
                 LOGGER.warning("approval.expiration.skipped", "approval changed during cleanup",
                                thread_id=thread.thread_id, error_code=exc.info.code)
-
-        self._approval_scan_cursor = page.next_cursor
 
     async def continue_detached_run(
         self,
@@ -282,19 +327,30 @@ class RunService:
         """
 
         resume_started_at = performance_started_at or utc_now()
-        run = await self.application.runtime.get_run(run_id)
-        if run.state != RunState.RESUMING or self.execution.driving(run_id):
-            return
-        LOGGER.info("server.run.performance.resuming", "恢复运行性能计时起点",
-            session_id=session_id, run_id=run_id,
-            attributes={"started_at": resume_started_at.isoformat()})
-        loaded = await self.application.agent_for_run(run_id, context)
-        execution = await self.application.entrypoint().continue_run(run_id, context, agent=loaded)
-        task = asyncio.create_task(
-            self._continue_drive(execution, run_id=run_id, session_id=session_id, label=label),
-            name=f"server-v2-{label}-resume-{run_id}",
-        )
-        self.execution.adopt(run_id, task)
+        from app.v2.server.storage.workspaces import workspace_user, workspace_agent_id, with_workspace_binding
+        command = await self.session_access.get_start_command(run_id, context)
+        command = await with_workspace_binding(command, user_id, self.host.threads if self.host is not None else None)
+        workspace = (workspace_user(command, user_id), workspace_agent_id(command))
+        async with self.workspace_guard(*workspace):
+            run = await self.application.runtime.get_run(run_id)
+            if run.state != RunState.RESUMING or self.execution.driving(run_id):
+                return
+            LOGGER.info("server.run.performance.resuming", "恢复运行性能计时起点",
+                session_id=session_id, run_id=run_id,
+                attributes={"started_at": resume_started_at.isoformat()})
+            try:
+                loaded = await self.application.agent_for_run(run_id, context)
+                execution = await self.application.entrypoint().continue_run(run_id, context, agent=loaded)
+            except BaseException as exc:
+                LOGGER.info("server.run.performance.finished", "运行性能计时结束",
+                    session_id=session_id, run_id=run_id,
+                    attributes={"run_state": "cancelled" if isinstance(exc, asyncio.CancelledError) else "failed"})
+                raise
+            task = asyncio.create_task(
+                self._continue_drive(execution, run_id=run_id, session_id=session_id, label=label),
+                name=f"server-v2-{label}-resume-{run_id}",
+            )
+            self.execution.adopt(run_id, task, workspace=workspace)
 
     async def start_detached_run(
         self,
@@ -319,16 +375,17 @@ class RunService:
         its future and applies product completion callbacks after it settles.
         """
 
-        from app.v2.server.storage.workspaces import workspace_user
+        from app.v2.server.storage.workspaces import workspace_user, workspace_agent_id
         from sagents.v2.contracts.principals import MemoryIdentity
         # The per-request SDK entry boundary precedes load/update/admission;
         # process startup and its one-time initialization happen elsewhere.
         request_started_at = performance_started_at or utc_now()
         context = context.model_copy(update={"memory_identity": MemoryIdentity(
-            user_id=workspace_user(command, user_id), workspace_id=command.agent_id,
+            user_id=workspace_user(command, user_id), workspace_id=workspace_agent_id(command),
         )})
         started = perf_counter()
-        async with self.workspace_lock(workspace_user(command, user_id), command.agent_id):
+        workspace = (workspace_user(command, user_id), workspace_agent_id(command))
+        async with self.workspace_guard(*workspace):
             LOGGER.debug("server.run.preparation.started", "开始准备运行",
                 session_id=session_id, agent_id=command.agent_id,
                 lock_wait_ms=round((perf_counter() - started) * 1000, 3))
@@ -344,9 +401,6 @@ class RunService:
                     agent=loaded,
                 )
             run_id = stream.handle.run_id
-            LOGGER.info("server.run.performance.accepted", "运行性能计时起点",
-                session_id=session_id, run_id=run_id,
-                attributes={"agent_id": command.agent_id, "started_at": request_started_at.isoformat()})
             if (
                 self.execution.driving(run_id)
                 or stream.handle.state in TERMINAL_RUN_STATES
@@ -354,6 +408,9 @@ class RunService:
             ):
                 await stream.detach()
                 return run_id
+            LOGGER.info("server.run.performance.accepted", "运行性能计时起点",
+                session_id=session_id, run_id=run_id,
+                attributes={"agent_id": command.agent_id, "started_at": request_started_at.isoformat()})
             task = asyncio.create_task(
                 self._drive(
                     stream,
@@ -363,7 +420,7 @@ class RunService:
                 ),
                 name=f"server-v2-{label}-{run_id}",
             )
-            self.execution.adopt(run_id, task)
+            self.execution.adopt(run_id, task, workspace=workspace)
             return run_id
 
     async def _drive(self, stream, *, session_id: str, label: str, on_finished) -> None:
