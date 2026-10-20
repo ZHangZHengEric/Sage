@@ -18,7 +18,7 @@ test('chat approval rewinds messages and reaches resume without cloning Vue prox
         headers: { 'Content-Type': 'text/event-stream' },
       })
     }
-    return Response.json({ data: [] })
+    return Response.json({ data: String(url).startsWith('/api/threads?') ? { items: [], next_cursor: null } : [] })
   })
   const previousStorage = Object.getOwnPropertyDescriptor(globalThis, 'localStorage')
   Object.defineProperty(globalThis, 'localStorage', {

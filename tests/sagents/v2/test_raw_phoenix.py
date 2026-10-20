@@ -9,9 +9,11 @@ from sagents.v2.runtime.observability.plugins.phoenix import PhoenixTraceSink
 
 
 def diagnostic_payloads(spans):
-    return [json.loads(event.attributes['sage.diagnostic.data'])
-            for span in spans for event in span.events
-            if 'sage.diagnostic.data' in event.attributes]
+    from sagents.v2.runtime.observability.raw import reconstruct
+    records, gaps = reconstruct([{'name':span.name, 'start_time':span.start_time / 1e9,
+                                  'attributes':dict(span.attributes)} for span in spans])
+    assert not gaps
+    return [json.loads(attrs['sage.diagnostic.data']) for _, attrs in records]
 
 
 def test_raw_phoenix_preserves_content_and_events(monkeypatch):
@@ -92,7 +94,8 @@ async def test_recording_roundtrip_preserves_large_wire_and_normalized_events(mo
     exporter = InMemorySpanExporter()
     trace = PhoenixTraceSink(endpoint='http://localhost:6006/v1/traces',
                              content_mode='raw', exporter=exporter)
-    diagnostics = ExternalDiagnostics(backend='phoenix', query_url='http://localhost:6006')
+    diagnostics = ExternalDiagnostics(backend='phoenix', query_url='http://localhost:6006',
+                                      raw_max_bytes=128 * 1024 * 1024)
     diagnostics.trace_sink = trace
 
     class Provider(ScriptedModelProvider):
@@ -117,10 +120,8 @@ async def test_recording_roundtrip_preserves_large_wire_and_normalized_events(mo
     assert diagnostics.capture_failures == 0
     evidence = diagnostic_payloads(spans)
     assert any(row.get('response', {}).get('text') == body for row in evidence)
-    stream = next(row['stream'] for row in evidence if 'stream' in row)
-    assert stream['wire_events'] == [{'delta': body}]
-    assert stream['normalized_events'][0]['delta'] == body
-    assert stream['dropped_wire_events'] == stream['dropped_normalized_events'] == 0
+    assert any(row.get('request', {}).get('messages') == body for row in evidence)
+    assert any(row.get('event', {}).get('delta') == body for row in evidence)
 
     async def query(client, **kwargs):
         return [{'name': s.name, 'start_time': s.start_time / 1e9,
@@ -132,6 +133,10 @@ async def test_recording_roundtrip_preserves_large_wire_and_normalized_events(mo
     assert result['raw_model_streams_available']
     assert result['models'][0]['response']['text'] == body
     assert result['models'][0]['stream']['wire_events'] == [{'delta': body}]
+    assert result['models'][0]['stream']['normalized_events'][0]['delta'] == body
+    assert result['models'][0]['stream']['dropped_wire_events'] == result['models'][0]['stream']['dropped_normalized_events'] == 0
+    assert result['models'][0]['raw_capture_complete']
+    assert not result['models'][0]['truncated']
     trace.close()
 
 
@@ -231,7 +236,10 @@ async def test_raw_events_follow_the_active_managed_application_exporter():
     await diagnostics.close()
     payloads = diagnostic_payloads(managed_exporter.get_finished_spans())
     assert payloads[0]['request']['password'] == 'keep'
-    assert len(managed_exporter.get_finished_spans()) == 1
-    assert all(s.name != 'sage.diagnostic' for s in host_exporter.get_finished_spans())
+    managed_spans = managed_exporter.get_finished_spans()
+    model = next(row for row in managed_spans if row.name == 'model.request')
+    chunks = [row for row in managed_spans if row.name.startswith('sage.diagnostic.')]
+    assert chunks and all(row.context.trace_id == model.context.trace_id and row.parent.span_id == model.context.span_id for row in chunks)
+    assert not host_exporter.get_finished_spans()
     host.close()
     managed.close()

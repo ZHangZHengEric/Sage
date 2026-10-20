@@ -4001,6 +4001,13 @@ class SessionStoreCoordinator(SessionAttachmentMixin):
             owner = self._derive_session_owner(
                 session_id, runs=self._runs, session_events=self._session_events
             )
+        self._authorize_session_owner(owner, context)
+
+    @staticmethod
+    def _authorize_session_owner(owner: ActorRef | None, context: RequestContext) -> None:
+        actor = context.actor
+        if "session.admin" in actor.scopes:
+            return
         if owner is None:
             raise SageV2Error(
                 RuntimeErrorInfo(

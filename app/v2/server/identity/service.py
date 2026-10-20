@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 from dataclasses import replace
+from app.v2.server.identity.passwords import PasswordExecutor
 from app.v2.server.runtime.policy import ExecutionPolicy
 
 from app.v2.server.identity.jwt import (
@@ -25,6 +26,15 @@ class IdentityService:
         self.users = users
         self._jwt_secret = jwt_secret
         self._jwt_expire_hours = jwt_expire_hours
+        self._passwords = PasswordExecutor()
+
+    async def start(self) -> None:
+        if self._passwords.closed:
+            await self._passwords.close()
+            self._passwords = PasswordExecutor()
+
+    async def close(self) -> None:
+        await self._passwords.close()
 
     async def get_by_id(self, user_id: str) -> UserRecord | None:
         return await self.users.get_by_id(user_id)
@@ -56,7 +66,7 @@ class IdentityService:
 
     async def authenticate(self, username: str, password: str) -> UserRecord:
         user = await self.users.get_by_username(username)
-        if user is None or not verify_password(password, user.password_hash):
+        if user is None or not await self._passwords.run(verify_password, password, user.password_hash):
             raise SageV2Error(
                 RuntimeErrorInfo(
                     code="server.identity.service.unauthenticated",
@@ -92,7 +102,7 @@ class IdentityService:
                     message="password is too short",
                 )
             )
-        record = build_user_record(username, hash_password(password), role=role)
+        record = build_user_record(username, await self._passwords.run(hash_password, password), role=role)
         reject_duplicate_username(await self.users.get_by_username(record.username))
         reject_second_admin(role, await self.users.admin())
         await self.users.save(record)

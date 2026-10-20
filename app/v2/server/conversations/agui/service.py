@@ -168,27 +168,35 @@ class ConversationService:
                             break
         return payload, selected.run_id
 
-    async def list_threads(self, user_id: str):
-        return await self.threads.list_for(user_id)
+    async def list_threads(self, user_id: str, *, limit=50, cursor=None, search="", agent_id=""):
+        matches = ()
+        if search.strip():
+            summaries = await self.runs.catalog.list_agent_summaries([user_id])
+            matches = tuple(item["id"] for item in summaries if search.strip().lower() in item.get("name", "").lower())
+        return await self.threads.page(user_id=user_id, limit=limit, cursor=cursor,
+            search=search, agent_id=agent_id, matching_agent_ids=matches)
 
     async def package_for_thread(self, thread_id, user_id):
         from app.v2.server.conversations.records import require_owned_thread
         require_owned_thread(await self.threads.find(thread_id), user_id)
         context = self.context_for(user_id)
-        runs = await self.session_access.list_session_runs(thread_id, context)
-        if not runs:
+        command = await self.session_access.latest_session_start_command(thread_id, context)
+        if command is None:
             return None
-        command = await self.session_access.get_start_command(runs[-1].run_id, context)
         return command.config.metadata.get("server_v2.composition", {}).get("package")
 
-    async def pending_approvals(self, user_id, *, limit=50, offset=0):
+    async def pending_approvals(self, user_id, *, limit=50, cursor=None):
         from datetime import timedelta
         from app.v2.server.runtime.policy import frozen_execution
         context = self.context_for(user_id)
-        threads = await self.threads.list_for(user_id)
-        # Cursor pages scan a bounded set of threads, including empty pages.
+        page = await self.threads.scan(user_id=user_id, limit=limit, cursor=cursor)
+        threads = page.items
+        filter_waiting = getattr(self.application.runtime.session_store, "filter_suspended_session_ids", None)
+        if filter_waiting is not None:
+            waiting = await filter_waiting([thread.thread_id for thread in threads])
+            threads = [thread for thread in threads if thread.thread_id in waiting]
         items = []
-        for thread in threads[offset:offset + limit]:
+        for thread in threads:
             try:
                 runs = await self.session_access.list_session_runs(thread.thread_id, context)
             except SageV2Error:
@@ -212,7 +220,7 @@ class ConversationService:
                     "expected": {"interaction_id": interaction.interaction_id,
                         "revision": run.revision, "suspension_revision": suspension.expected_revision,
                         "interaction_revision": interaction.expected_revision}})
-        return {"items": items, "next_offset": offset + limit if len(threads) > offset + limit else None}
+        return {"items": items, "next_cursor": page.next_cursor}
 
     async def decide_approval(self, run_id, *, user_id, decision, payload, expected):
         context = self.context_for(user_id)

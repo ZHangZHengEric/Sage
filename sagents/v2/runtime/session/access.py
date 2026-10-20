@@ -14,7 +14,7 @@ from typing import Protocol
 
 from sagents.v2.contracts.principals import RequestContext
 from sagents.v2.contracts.run_state import EventCursor
-from sagents.v2.runtime.session.contracts import DerivedStateStore, SessionStore
+from sagents.v2.runtime.session.contracts import DerivedStateStore, SessionStore, SessionEventPage
 from sagents.v2.runtime.observability.logs import get_logger
 
 
@@ -139,6 +139,24 @@ class AuthorizedSessionAccess:
         return await self._session_store.read_session_events(
             session_id, after_sequence=after_sequence, limit=limit
         )
+
+    async def read_session_event_page(self, session_id, context, *, after_sequence=None, limit=500):
+        if not 1 <= limit <= 2000 or (after_sequence is not None and after_sequence < 0):
+            raise ValueError("invalid Session event page")
+        query = getattr(self._session_store, "read_authorized_session_page", None)
+        if callable(query):
+            return await query(session_id, context, after_sequence=after_sequence, limit=limit)
+        session = await self.get_session(session_id, context)
+        start = max(0, session.last_sequence - limit) if after_sequence is None else after_sequence
+        events = await self.read_session_events(session_id, context, after_sequence=start, limit=limit)
+        return SessionEventPage(tuple(events), session.last_sequence, start)
+
+    async def latest_session_start_command(self, session_id, context):
+        query = getattr(self._session_store, "latest_authorized_session_command", None)
+        if callable(query):
+            return await query(session_id, context)
+        runs = await self.list_session_runs(session_id, context)
+        return await self.get_start_command(runs[-1].run_id, context) if runs else None
 
     async def read_stream_previews(self, run_id: str, context: RequestContext):
         run = await self._session_store.get_run(run_id)

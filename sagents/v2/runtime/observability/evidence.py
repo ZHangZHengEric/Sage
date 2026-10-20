@@ -5,16 +5,16 @@ Only the host supplies the authorized Session and Run allowlist.
 """
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime, timezone
 import hashlib
 import json
 import traceback
 from urllib.parse import quote, urlsplit
-from uuid import uuid4
-from threading import RLock
 import httpx
+from sagents.v2.runtime.observability.raw import RawEvidencePipeline, reconstruct
+from sagents.v2.runtime.observability.query import query_budget, request as query_request, performance_spans
 from sagents.v2.contracts.common import utc_now
-from sagents.v2.runtime.observability.contracts import TraceEvent, TraceSpan
 from sagents.v2.runtime.observability.plugins.diagnostic_noop import NoopDiagnosticSink
 from sagents.v2.runtime.observability.traces import current_trace_context, current_trace_sink
 from sagents.v2.runtime.observability.tool_evidence import tool_evidence
@@ -49,6 +49,7 @@ class ExternalEvidenceSink(NoopDiagnosticSink):
         environment="production",
         headers=None,
         timeout=10,
+        raw_max_bytes=16 * 1024 * 1024,
     ):
         self.backend, self.query_url = backend, query_url.rstrip("/")
         parsed = urlsplit(self.query_url)
@@ -68,8 +69,8 @@ class ExternalEvidenceSink(NoopDiagnosticSink):
         self.closed = False
         self.capture_failures = 0
         self.max_spans = 100000
-        self._orphan_evidence = {}
-        self._evidence_lock = RLock()
+        self.max_response_bytes = 32 * 1024 * 1024
+        self._raw_pipeline = RawEvidencePipeline(max_bytes=raw_max_bytes)
 
     @property
     def raw_capture(self):
@@ -78,32 +79,37 @@ class ExternalEvidenceSink(NoopDiagnosticSink):
             and getattr(self.trace_sink, "content_mode", None) == "raw"
         )
 
-    def _evidence(self, kind, *, session_id, run_id, **payload):
+    def _evidence(self, kind, *, session_id, run_id, _trace_context=None, _target_sink=None, **payload):
         if not self.raw_capture or self.closed or not session_id or not run_id:
-            return
+            return False
         try:
-            active = current_trace_context()
-            now = utc_now()
-            event = TraceEvent(name="sage.diagnostic." + kind, timestamp=now,
-                attributes={"sage.diagnostic.kind": kind,
-                            "sage.diagnostic.data": json.dumps(payload, ensure_ascii=False, default=str),
-                            "session_id": session_id, "run_id": run_id})
-            log_target = self._log_target(session_id, run_id) if kind == "log" else None
-            if log_target is not None:
-                log_target[0].add_event(log_target[1], event)
-            elif active and kind != "log":
-                # Managed applications can have a different exporter instance
-                # from the host; only the owning exporter has this live span.
-                target = current_trace_sink() or self.trace_sink
-                target.add_event(active[1], event)
-            else:
-                with self._evidence_lock:
-                    self._orphan_evidence.setdefault((session_id, run_id), []).append(event)
+            active = _trace_context or current_trace_context()
+            target = _target_sink or current_trace_sink() or self.trace_sink
+            trace_id = active[0] if active else hashlib.sha256(
+                f"diagnostic:{self.project}:{self.service}:{self.environment}:{run_id}".encode()).hexdigest()[:32]
+            accepted = self._raw_pipeline.submit(target, trace_id, active[1] if active else None,
+                                                 session_id, run_id, kind, payload, utc_now())
+            if not accepted:
+                self.capture_failures += 1
+            self._raw_record_admitted(kind, session_id, run_id, accepted)
+            return accepted
         except Exception:
             self.capture_failures += 1
+            return False
 
-    def _log_target(self, session_id, run_id):
-        return None
+    def _raw_record_admitted(self, kind, session_id, run_id, accepted):
+        """Optional host projection; only counts, never raw content."""
+
+    def record_model_stream_chunk(self, *, session_id, request, field, sequence, event, trace_context=None):
+        return self._evidence("stream_" + field, session_id=session_id, run_id=request.run_id,
+                              request_id=request.request_id, sequence=sequence, event=event,
+                              _trace_context=trace_context)
+
+    def raw_statistics(self):
+        return self._raw_pipeline.statistics()
+
+    async def flush_raw(self):
+        return await asyncio.to_thread(self._raw_pipeline.flush)
 
     async def begin_model_request(self, *, session_id, request, **kwargs):
         self._evidence(
@@ -157,57 +163,24 @@ class ExternalEvidenceSink(NoopDiagnosticSink):
     async def record_model_first_token(self, *, session_id, request, observed_at):
         self._model(session_id, request, first_token_at=observed_at.isoformat())
 
-    async def record_model_stream(self, *, session_id, request, evidence):
+    async def record_model_stream(self, *, session_id, request, evidence, trace_context=None):
         self._evidence(
             "stream",
             session_id=session_id,
             run_id=request.run_id,
             request_id=request.request_id,
             stream=evidence,
+            _trace_context=trace_context,
         )
-
-    def _take_evidence(self, key):
-        with self._evidence_lock:
-            return self._orphan_evidence.pop(key, [])
 
     async def close(self):
         self.closed = True
-        # Standalone SDK use may have no host lifecycle or active Agent span.
-        # Export one grouped observation per Run, rather than per log/model event.
-        with self._evidence_lock:
-            keys = list(self._orphan_evidence)
-        for key in keys:
-            events = self._take_evidence(key)
-            try:
-                span = TraceSpan(trace_id=hashlib.sha256(
-                    f"diagnostic:{self.service}:{self.environment}:{key[1]}".encode()).hexdigest()[:32],
-                    span_id=uuid4().hex[:16], name="sage.diagnostic",
-                    session_id=key[0], run_id=key[1], events=events,
-                    start_time=events[0].timestamp, end_time=events[-1].timestamp)
-                self.trace_sink.start_span(span)
-                for event in events:
-                    self.trace_sink.add_event(span.span_id, event)
-                self.trace_sink.end_span(span)
-            except Exception:
-                self.capture_failures += 1
+        if not await asyncio.to_thread(self._raw_pipeline.close):
+            self.capture_failures += 1
 
     async def _request(self, client, path, params):
-        # Do not follow a redirect with server credentials to a different host.
-        async with client.stream(
-            "GET",
-            self.query_url + path,
-            params=params,
-            headers=self.headers,
-            timeout=self.timeout,
-            follow_redirects=False,
-        ) as response:
-            response.raise_for_status()
-            body = bytearray()
-            async for chunk in response.aiter_bytes():
-                body.extend(chunk)
-                if not self.raw_capture and len(body) > 32 * 1024 * 1024:
-                    raise ValueError("trace query response exceeds limit")
-        return body.decode()
+        content, _ = await query_request(self, client, path, params)
+        return content.decode()
 
     async def _phoenix(self, client, params):
         rows, cursor, seen = [], None, set()
@@ -227,7 +200,13 @@ class ExternalEvidenceSink(NoopDiagnosticSink):
                 raise ValueError("trace query repeated a pagination cursor")
             seen.add(cursor)
 
-    async def _query(self, client, *, start, end, session_id=None, run_id=None):
+    async def _query(self, client, *, start, end, session_id=None, run_id=None, agent_id=""):
+        async with query_budget():
+            if self.backend == "phoenix" and session_id is None and run_id is None:
+                return await performance_spans(self, client, start=start, end=end, agent_id=agent_id)
+            return await self._query_segments(client, start=start, end=end, session_id=session_id, run_id=run_id)
+
+    async def _query_segments(self, client, *, start, end, session_id=None, run_id=None):
         # Agent execution can begin after the selected SDK-entry interval ends.
         # Discover completed Agent spans through now; timing_report applies the
         # exact original entry-time cohort from their performance attributes.
@@ -237,41 +216,16 @@ class ExternalEvidenceSink(NoopDiagnosticSink):
             "end_time": datetime.fromtimestamp(discovery_end, timezone.utc).isoformat(),
         }
         if self.backend == "phoenix":
-            filters = [
-                ("attribute", f"sage.performance.service:{json.dumps(self.service)}"),
-                (
-                    "attribute",
-                    f"sage.performance.environment:{json.dumps(self.environment)}",
-                ),
-            ]
+            # Every native and chunk span carries its exact Session/Run scope.
+            # Reading by scope already includes every resumed execution trace;
+            # fetching those traces again doubles full-content transfer.
+            filters = []
             if session_id is not None:
-                filters = [("attribute", f"session_id:{json.dumps(session_id)}")]
-            params = [*dates.items(), *filters]
-            if session_id is None:
-                params.extend([("name", SPAN_NAME),
-                               ("attribute", 'sage.performance.format:"events/v3"')])
-            rows, truncated = await self._phoenix(client, params)
-            complete = []
-            if session_id is None:
-                # Resumption can use a fresh execution trace. Select the cohort
-                # by start time, then read every segment for the authorized Run.
-                for run_id in sorted({s["attributes"]["run_id"] for s in rows}):
-                    batch, cut = await self._phoenix(client, [*filters, ("name", SPAN_NAME),
-                        ("attribute", f"run_id:{json.dumps(run_id)}"),
-                        ("attribute", 'sage.performance.format:"events/v3"')])
-                    complete.extend(batch)
-                    truncated |= cut
-                    if len(complete) >= self.max_spans:
-                        return complete[:self.max_spans], True
-            else:
-                ids = sorted({s["context"]["trace_id"] for s in rows})
-                for offset in range(0, len(ids), 100):
-                    batch, cut = await self._phoenix(client, [("trace_id", t) for t in ids[offset:offset + 100]])
-                    complete.extend(batch)
-                    truncated |= cut
-                    if len(complete) >= self.max_spans:
-                        return complete[:self.max_spans], True
-            return complete, truncated
+                filters.append(("attribute", f"session_id:{json.dumps(session_id)}"))
+            if run_id is not None:
+                filters.append(("attribute", f"run_id:{json.dumps(run_id)}"))
+            filters.append(("attribute", f"deployment.environment.name:{json.dumps(self.environment)}"))
+            return await self._phoenix(client, [*dates.items(), *filters])
         params = {
             "query.service_name": self.service,
             "query.start_time_min": dates["start_time"],
@@ -327,17 +281,20 @@ class ExternalEvidenceSink(NoopDiagnosticSink):
         truncated = len(traces) >= 10001
         if session_id is None and run_id is None:
             complete = []
-            for identity in sorted({s["attributes"]["run_id"] for s in rows
-                                    if s["name"] == SPAN_NAME}):
-                batch, cut = await self._query(client, start=0, end=utc_now().timestamp(), run_id=identity)
-                complete.extend(batch)
-                truncated |= cut
-                if len(complete) >= self.max_spans:
-                    return complete[:self.max_spans], True
+            identities = sorted({s["attributes"]["run_id"] for s in rows if s["name"] == SPAN_NAME})
+            for offset in range(0, len(identities), 4):
+                batches = await asyncio.gather(*(self._query(client, start=0, end=utc_now().timestamp(), run_id=identity)
+                                                for identity in identities[offset:offset + 4]))
+                for batch, cut in batches:
+                    complete.extend(batch)
+                    truncated |= cut
+                    if len(complete) >= self.max_spans:
+                        return complete[:self.max_spans], True
             return complete, truncated
         return rows, truncated
 
     async def snapshot(self, session_id, run_ids):
+        await self.flush_raw()
         async with httpx.AsyncClient() as client:
             spans, truncated = await self._query(
                 client, start=0, end=utc_now().timestamp(), session_id=session_id
@@ -350,7 +307,9 @@ class ExternalEvidenceSink(NoopDiagnosticSink):
             and s["attributes"].get("run_id") in run_ids
         ]
         models, logs = {}, []
-        records = []
+        restored, gaps = await asyncio.to_thread(reconstruct, spans)
+        records = [(timestamp(at), attrs) for at, attrs in restored]
+        stream_parts = {}
         for span in spans:
             for event in span.get("events", []):
                 attrs = event.get("attributes", {})
@@ -372,10 +331,13 @@ class ExternalEvidenceSink(NoopDiagnosticSink):
             else:
                 identity = (attrs["run_id"], payload["request_id"])
                 row = models.setdefault(
-                    identity, dict(session_id=session_id, run_id=attrs["run_id"])
+                    identity, dict(session_id=session_id, run_id=attrs["run_id"], request_id=payload["request_id"])
                 )
-                row.update(payload)
                 kind = attrs["sage.diagnostic.kind"]
+                if kind in {"stream_wire", "stream_normalized"}:
+                    stream_parts.setdefault(identity, {}).setdefault(kind, {})[payload["sequence"]] = payload["event"]
+                    continue
+                row.update(payload)
                 observed_at = datetime.fromtimestamp(observed, timezone.utc).isoformat()
                 if kind == "request":
                     row.update(status="started", started_at=observed_at)
@@ -384,7 +346,55 @@ class ExternalEvidenceSink(NoopDiagnosticSink):
                         status="completed" if kind == "response" else "failed",
                         completed_at=observed_at,
                     )
+        for span in spans:
+            attrs = span.get("attributes", {})
+            if span.get("name") != "model.request" or not attrs.get("sage.diagnostic.stream_finalized"):
+                continue
+            identity = attrs["run_id"], attrs["request_id"]
+            row = models.setdefault(identity, dict(session_id=session_id, run_id=identity[0], request_id=identity[1]))
+            stream = row.setdefault("stream", {})
+            stream.setdefault("chunk_format", "chunks/v1")
+            for field in ("wire_event_count", "normalized_event_count", "dropped_wire_events", "dropped_normalized_events"):
+                stream.setdefault(field, attrs.get("sage.diagnostic." + field, 0))
+        for identity, row in models.items():
+            if "stream" in row or identity in stream_parts:
+                stream = row.setdefault("stream", {})
+                parts = stream_parts.get(identity, {})
+                if "chunk_format" in stream or parts:
+                    for kind, field, count, dropped in (
+                        ("stream_wire", "wire_events", "wire_event_count", "dropped_wire_events"),
+                        ("stream_normalized", "normalized_events", "normalized_event_count", "dropped_normalized_events"),
+                    ):
+                        values = parts.get(kind, {})
+                        stream[field] = [values[seq] for seq in sorted(values)]
+                        missing = max(0, stream.get(count, len(values)) - len(values))
+                        stream[dropped] = max(stream.get(dropped, 0), missing)
+                    stream["complete"] = ("chunk_format" in stream and not stream.get("dropped_wire_events")
+                                          and not stream.get("dropped_normalized_events"))
+                    stream["wire_capture_available"] = bool(stream.get("wire_events"))
+                    row["truncated"] = not stream["complete"]
+        for gap in gaps:
+            if gap["kind"] == "log":
+                continue
+            identity = gap["run_id"], gap["request_id"]
+            row = models.setdefault(identity, dict(session_id=session_id, run_id=gap["run_id"], request_id=gap["request_id"]))
+            row["truncated"] = True
+            row.setdefault("evidence_gaps", []).append(gap)
+            row.setdefault("stream", {})["complete"] = False
         projected_models = model_evidence(spans, models.values())
+        if self.raw_capture or any(s["attributes"].get("sage.diagnostic.format") == "chunks/v1" for s in spans):
+            for row in projected_models:
+                fields = row.get("field_sources", {})
+                complete = bool(fields.get("request") == "diagnostic_events" and
+                                (fields.get("response") == "diagnostic_events" or fields.get("error") == "diagnostic_events") and
+                                row.get("stream", {}).get("complete") and not row.get("evidence_gaps"))
+                row["raw_capture_complete"] = complete
+                row["truncated"] = bool(row.get("truncated") or not complete)
+        log_counts = [s["attributes"]["sage.diagnostic.log_count"] for s in spans
+                      if s.get("name") == "agent.run" and "sage.diagnostic.log_count" in s["attributes"]]
+        expected_logs = sum(log_counts)
+        dropped_logs = max(sum(gap["kind"] == "log" for gap in gaps), expected_logs - len(logs), 0)
+        logs_complete = bool(log_counts and expected_logs == len(logs) and not dropped_logs)
         return {
             **tool_evidence(spans, logs),
             "models": projected_models,
@@ -395,6 +405,12 @@ class ExternalEvidenceSink(NoopDiagnosticSink):
             "source": self.backend,
             "unavailable": False,
             "truncated": truncated,
+            "evidence_gaps": gaps,
+            "dropped_logs": dropped_logs,
+            "logs_complete": logs_complete if self.raw_capture or log_counts else None,
+            "expected_log_records": expected_logs if log_counts else None,
+            "capture_failures_since_start": self.capture_failures,
+            "raw_capture_statistics": self.raw_statistics(),
             "raw_model_streams_available": any(
                 row.get("stream", {}).get("wire_capture_available", False) for row in projected_models
             ),

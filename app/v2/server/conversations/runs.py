@@ -7,6 +7,7 @@ import hashlib
 from time import perf_counter
 from datetime import datetime, timedelta
 from inspect import iscoroutinefunction
+from weakref import WeakValueDictionary
 
 from app.v2.server.observability.logging import get_logger
 from sagents.v2.contracts.commands import CancelRun, ReplyInteraction, ResumeRun, SteerRun, InputItem
@@ -23,8 +24,8 @@ LOGGER = get_logger(__name__)
 
 class RunService:
     def __init__(self, *, application, session_access, execution, users=None, keys=None, catalog=None, settings=None, host=None) -> None:
-        # Serializes Run creation with destructive workspace/session operations.
-        self.workspace_mutation_lock = asyncio.Lock()
+        # Only operations on the same physical workspace exclude one another.
+        self._workspace_locks: WeakValueDictionary[tuple[str, str], asyncio.Lock] = WeakValueDictionary()
         self.application = application
         self.session_access = session_access
         self.execution = execution
@@ -32,8 +33,10 @@ class RunService:
         self.keys = keys
         self.catalog = catalog
         self.settings = settings
-        self._agent_load_lock = asyncio.Lock()
         self.host = host
+
+    def workspace_lock(self, tenant_id: str, agent_id: str) -> asyncio.Lock:
+        return self._workspace_locks.setdefault((tenant_id, agent_id), asyncio.Lock())
 
     async def _load_run_agent(self, command, user_id):
         from app.v2.server.runtime.loop import load_catalog_agent
@@ -41,12 +44,7 @@ class RunService:
             raise RuntimeError("Server capabilities have not been registered")
         with log_duration(LOGGER, "server.run.agent_load", "运行 Agent 加载结束",
                           session_id=command.session_id, attributes={"agent_id": command.agent_id}):
-            started = perf_counter()
-            async with self._agent_load_lock:
-                LOGGER.debug("server.run.agent_load.started", "开始加载运行 Agent",
-                    session_id=command.session_id, agent_id=command.agent_id,
-                    lock_wait_ms=round((perf_counter() - started) * 1000, 3))
-                return await load_catalog_agent(self.host, command, user_id)
+            return await load_catalog_agent(self.host, command, user_id)
 
     async def cancel_run(
         self,
@@ -235,7 +233,8 @@ class RunService:
 
     async def expire_approvals(self, threads, context_for):
         """One host maintenance pass, no waiting task per approval."""
-        records = await threads.list_all()
+        page = await threads.scan(limit=200, cursor=getattr(self, "_approval_scan_cursor", None))
+        records = page.items
         filter_waiting = getattr(self.application.runtime.session_store, "filter_suspended_session_ids", None)
         if iscoroutinefunction(filter_waiting):
             waiting = await filter_waiting([thread.thread_id for thread in records])
@@ -257,6 +256,8 @@ class RunService:
             except SageV2Error as exc:
                 LOGGER.warning("approval.expiration.skipped", "approval changed during cleanup",
                                thread_id=thread.thread_id, error_code=exc.info.code)
+
+        self._approval_scan_cursor = page.next_cursor
 
     async def continue_detached_run(
         self,
@@ -327,7 +328,7 @@ class RunService:
             user_id=workspace_user(command, user_id), workspace_id=command.agent_id,
         )})
         started = perf_counter()
-        async with self.workspace_mutation_lock:
+        async with self.workspace_lock(workspace_user(command, user_id), command.agent_id):
             LOGGER.debug("server.run.preparation.started", "开始准备运行",
                 session_id=session_id, agent_id=command.agent_id,
                 lock_wait_ms=round((perf_counter() - started) * 1000, 3))

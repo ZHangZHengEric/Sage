@@ -183,6 +183,7 @@ class ServerHost:
         from app.v2.server.database.schema import create_host_schema
 
         await create_host_schema(self.database)
+        await self.identity.start()
         await self.identity.ensure_admin(
             self.settings.admin_username, self.settings.admin_password
         )
@@ -341,6 +342,7 @@ class ServerHost:
             raise
 
     async def close(self) -> None:
+        await self.identity.close()
         await self.execution.close()
         for task in tuple(self._tasks):
             task.cancel()

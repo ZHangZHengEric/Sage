@@ -85,7 +85,7 @@ workspace/skills/
     references/guide.md
   .catalog/demo/
     state.json
-    agent-edits/<修改内容哈希>/
+    agent-edits/<content-hash>/
       files/...
       record.json
 ```

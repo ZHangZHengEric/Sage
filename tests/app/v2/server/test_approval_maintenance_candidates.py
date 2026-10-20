@@ -20,8 +20,8 @@ async def test_approval_maintenance_only_loads_suspended_candidates_as_their_own
     )) for thread in threads}
     filtered, loaded, cancelled, authorized = [], [], [], []
 
-    async def list_all():
-        return threads
+    async def scan(**kwargs):
+        return SimpleNamespace(items=threads, next_cursor=None)
 
     async def filter_suspended_session_ids(session_ids):
         filtered.extend(session_ids)
@@ -63,10 +63,23 @@ async def test_approval_maintenance_only_loads_suspended_candidates_as_their_own
     service.approval_expired = approval_expired
     service.cancel_run = cancel_run
 
-    await service.expire_approvals(SimpleNamespace(list_all=list_all), contexts.__getitem__)
+    await service.expire_approvals(SimpleNamespace(scan=scan), contexts.__getitem__)
 
     assert loaded == list(waiting), "Maintenance loaded sessions without suspended runs"
     assert set(filtered) == {thread.thread_id for thread in threads}
     assert cancelled == [(f"run:{session_id}", 3, "approval_timeout") for session_id in waiting]
     owners = {thread.thread_id: thread.user_id for thread in threads}
     assert all(context is contexts[owners[session_id]] for session_id, context in authorized)
+
+
+@pytest.mark.asyncio
+async def test_approval_maintenance_rotates_bounded_primary_key_pages():
+    scans = []
+    async def scan(*, limit, cursor):
+        scans.append((limit, cursor))
+        return SimpleNamespace(items=[], next_cursor='next' if cursor is None else None)
+    service = RunService(application=SimpleNamespace(runtime=SimpleNamespace(session_store=SimpleNamespace())),
+        session_access=None, execution=None)
+    for _ in range(3):
+        await service.expire_approvals(SimpleNamespace(scan=scan), lambda _: None)
+    assert scans == [(200, None), (200, 'next'), (200, None)]

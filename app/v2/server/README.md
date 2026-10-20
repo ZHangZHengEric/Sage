@@ -25,9 +25,15 @@ web/            前端
 
 业务代码按能力放入对应目录，记录、规则、服务和仓储就近组织；共享的数据库连接和运行时能力分别放在 `database/`、`runtime/`。对外接口统一放在 `routers/`，配置放在 `config/`。HTTP 接口注入所属业务服务，由服务访问仓储；简单列表从服务读取目录，不暴露仓储给路由。AG-UI 与 A2A 协议实现在 `conversations/agui/`、`conversations/a2a/`，共用 `conversations/admission.py` 受理 Run。Agent 独立保存在 `agents` 表，以服务端生成的 `agent_<UUID>` 为全局主键，`owner_user_id` 限定归属。`catalogs.default_agent_id` 保存默认 Agent 引用；模型、MCP、A2A peer 仍按目录分列保存。Agent 新建接口不接受 `id`，修改使用路径中的 ID，外部调用按 Agent 主键查找归属。
 
+会话列表 `GET /api/threads` 与管理员列表返回 `{items, next_cursor}`，支持游标、搜索与 Agent 筛选，Web 按页加载；历史深链接通过单条元数据接口解析身份。[接口与既有数据库索引迁移](../../../docs/server-v2-thread-pagination.md)说明前后端一起发布的要求。
+
 生产启动只强制 MySQL：`SAGE_SERVER_MYSQL_URL`。AG-UI 回放读取 Sage Session 的 canonical RuntimeEvent；模型流式 delta 是进程内预览，断线重连通过预览序号续接，进程重启后以持久事件恢复。
 
 单进程并发可用 `SAGE_SERVER_MAX_CONCURRENT_RUNS`（默认 8）、`SAGE_SERVER_MAX_CONCURRENT_RUNS_PER_USER`（默认 2）和 `SAGE_SERVER_MAX_PENDING_RUNS`（默认 1024）配置。参数必须为正数，分别约束总执行、每用户执行及等待队列，见[单机并发说明](../../../docs/zh/architecture/sagents-v2-single-host-concurrency.md)。
+
+Run 装配使用独立的 runtime/models 快照，不再修改进程 App 的默认配置；相同 revision 合并构建，不同配置可并行构建。租户工作区在 Run 受理时冻结到标准 execution snapshot；工作区删除、导入与受理按 `(tenant_id, agent_id)` 互斥。空闲 Agent revision 可释放资源，已有句柄和暂停 Run 通过原始归档恢复，不切换到最新版本。
+
+MySQL 冷加载只解析、安装目标 Session，保留其他运行中的内存对象。已建立 owner 的历史分页直接查询既有事件表，在同一只读事务内核对身份、序号 head 与页面；最新启动命令也只返回一个 Run 的配置。旧 owner 缺失的数据沿用完整身份推导。MySQL/Redis-MySQL 的 Session 内存缓存默认最多 256 个、按序列化大小保守估算 256 MiB、空闲 300 秒，在操作结束时回收；插件配置 `max_cached_sessions`、`max_cached_bytes`、`cache_idle_seconds` 可调整。活动 Run、操作、订阅及未释放的 compute 受保护，必要时可超过缓存目标；这些值不是进程内存硬限制。回收只释放内存，保留业务、附件和派生数据。Redis 模式从权威热状态读取历史，不读取可能滞后的 MySQL 归档。
 
 Server 只支持单 worker：SessionStore 只接受一个 writer（`multi_process_writes: False`），订阅者留在进程内，Scheduler 与 JobRuntime 是内存实现。第二个进程会在获取独占 writer 锁时启动失败。MySQL 让 Session 状态跨重启存活，但不提供横向扩容。manifest 的 `required_guarantees` 在装配阶段校验 SessionStore 的事务性、持久性与 actor 授权能力。
 
@@ -276,7 +282,9 @@ Web 工作目录树、单文件和目录 ZIP 下载按已授权的租户及 Agen
 
 “下载诊断包”使用观测层的异步 `export_evidence(session_id, run_ids)` 能力，服务端仅鉴权、核对 Run 的 Agent/tenant 归属并临时打包，不再调用业务存储的全量导出。ZIP 格式为 `sage.session-diagnostic-bundle/v2`，保留 `manifest.json`、`models.json`、`requests/`、`logs.json`、`tools.json`、`failures.json`，外部查询还包含 `traces.json`。移除 `state.json`、`session.json`、`runs/`、`events/`；不复制业务快照。工具结果和失败由观测 span/日志生成，缺失的历史结果不从业务事件反查，manifest 明确记录可用性。外部查询只包含该 Session 和权威 Run 白名单内的 trace。完整原始模型流是否可用由当前采集模式决定，不会从本地旧库补齐。 若未采集专用原始诊断，下载仍从普通模型 span 导出已保存的规范化输入/输出，标记 `evidence_source=trace_projection`、`request_format=normalized_trace` 和截断情况，不冒充 provider 原始请求或流。清单 `evidence_availability` 区分可用、部分可用、未采集及未观察到失败；空日志和原始流不会从计时记录伪造。MySQL 的会话、事件和恢复数据不受影响。
 
-服务器 Phoenix 默认使用 `raw`，其他 trace 后端默认 `redacted`；显式 `SAGE_SERVER_TRACE_CONTENT_MODE` 或已保存插件配置可覆盖。Phoenix 使用 `raw`、`SAGE_SERVER_TRACE_SAMPLE_RATE=1.0` 时，Sage 不对上报内容脱敏或裁剪；模型输入输出、provider 请求体、SDK 暴露的流事件、规范化流事件、工具完整结构化结果（含 operation ID、metadata、error）及关联 Run 的结构化日志会发送到 Phoenix。原始诊断内容通过既有 Agent/模型/工具 span 的 `sage.diagnostic.*` events 保存，入口和收尾等无活动 span 的关联日志随性能汇总一起发送，不在业务数据库追加审计存储。raw 模式忽略 `SAGE_SERVER_TRACE_MAX_CONTENT_CHARS`，同时取消 Sage 的 8 MiB 流采集上限和 OTel 属性长度上限。流事件是 provider SDK 暴露的对象，不是 HTTP/TLS 网络字节。队列满、导出失败或进程退出仍可能丢失未送达的数据；这不是可靠归档。诊断 ZIP 的脱敏下载策略独立于 Phoenix 中保存的原始内容。
+服务器 Phoenix 默认使用 `raw`，其他 trace 后端默认 `redacted`；显式 `SAGE_SERVER_TRACE_CONTENT_MODE` 或已保存插件配置可覆盖。raw 内容在后台编码为关联原调用链的 `sage.diagnostic.chunk` 和结束清单 span，流事件逐项提交、分块独立结束导出，不在业务数据库追加审计存储。完整内容不按字符数裁剪；进程内采集管线默认 16 MiB，OTLP 活动、排队和导出中 span 使用 32 MiB 的保守字节预算。超限、出口故障和退出可能丢失记录，下载通过分块序号、哈希、模型事件计数及日志计数识别缺失并标记不完整，不将 best-effort 采集视为可靠归档。流事件来自 provider SDK，不是 HTTP/TLS 网络字节；诊断 ZIP 的脱敏下载策略独立于 Phoenix 中保存的原始内容。
+
+Phoenix 性能查询按 SDK 入口时间和 Agent 在上游筛选，仅投影计时字段，每批查询至多 100 个 Run 的全部执行段。查询默认总预算 25 秒、128 个请求、64 MiB，单响应最多 32 MiB；超时和查询失败返回 503。相同统计请求合并，结果缓存 5 秒，最多 32 项/8 MiB；关闭服务时取消并等待未结束查询。完整调用内容仍按详情请求读取，不混入性能统计查询。
 
 统计单位是一次用户请求的 Run，合并内部步骤；恢复执行仍属于原请求。起点在每次 AG-UI/A2A 运行入口、进入受理准备和 Agent 加载之前，沿调用链传入 SAgents；终点在 SDK 执行等待返回后、产品回调之前。每次发生的 Agent 加载、配置更新、受理、调度、工作区与上下文初始化以及 SDK 收尾均计入；进程启动时的一次性初始化、HTTP 请求传输和浏览器渲染不在这个范围内。暂停至用户答复之间的等待单列，恢复时的重复加载重新计时。
 

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import base64
+import json
 
 from pydantic import BaseModel, Field
 
@@ -58,3 +60,28 @@ def apply_thread_upsert(
         title=(existing.title if existing is not None else "") or title,
         agent_id=pinned,
     )
+
+
+class ThreadPage(BaseModel):
+    items: list[ThreadRecord]
+    next_cursor: str | None = None
+
+
+def thread_cursor(row: ThreadRecord, *, scan: bool = False) -> str:
+    values = [row.thread_id] if scan else [row.updated_at, row.thread_id]
+    return base64.urlsafe_b64encode(json.dumps(values).encode()).decode()
+
+
+def parse_thread_cursor(cursor: str | None, *, scan: bool = False) -> list[str] | None:
+    if cursor is None:
+        return None
+    try:
+        if len(cursor) > 2048:
+            raise ValueError('cursor too large')
+        values = json.loads(base64.b64decode(cursor.encode(), altchars=b'-_', validate=True))
+        if not isinstance(values, list) or len(values) != (1 if scan else 2) or not all(isinstance(v, str) for v in values):
+            raise ValueError('invalid cursor')
+        return values
+    except (ValueError, UnicodeError) as exc:
+        raise SageV2Error(RuntimeErrorInfo(code='server.threads.invalid_cursor',
+            category=ErrorCategory.VALIDATION, message='Invalid thread cursor')) from exc

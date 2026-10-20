@@ -216,7 +216,7 @@ async def performance(
         else:
             result = await asyncio.to_thread(report, diagnostics.path, **options)
             result["source"] = "local"
-    except (OSError, sqlite3.Error, httpx.HTTPError, ValueError, KeyError, TypeError) as exc:
+    except (OSError, sqlite3.Error, httpx.HTTPError, ValueError, KeyError, TypeError, TimeoutError) as exc:
         raise HTTPException(503, "性能记录暂不可用") from exc
     result["capture_failures"] = diagnostics.capture_failures
     return success(result)

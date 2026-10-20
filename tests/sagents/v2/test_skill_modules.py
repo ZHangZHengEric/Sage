@@ -27,10 +27,10 @@ from sagents.v2.skill import (
     SkillDescriptor,
     SkillLoader,
 )
+from sagents.v2.skill.bundles import files_digest
 from sagents.v2.skill.plugins.repository import (
     MemorySkillRepository,
     SqliteSkillRepository,
-    files_digest,
 )
 from sagents.v2.skill.plugins.workspace import (
     AutoSyncSkillWorkspace,

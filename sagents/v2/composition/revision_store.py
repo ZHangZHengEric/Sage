@@ -35,6 +35,9 @@ class AgentRevisionStore:
             if temporary is not None:
                 temporary.unlink(missing_ok=True)
 
+    def contains(self, spec_hash):
+        return self._path(spec_hash).is_file()
+
     def read(self, spec_hash):
         path = self._path(spec_hash)
         if not path.is_file():

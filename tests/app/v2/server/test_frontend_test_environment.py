@@ -3,7 +3,7 @@ from types import SimpleNamespace
 
 from app.v2.server.runtime.sdk_plugins import execution_selection
 from sagents.v2.package.manifest.agents import AgentSandboxConfig
-from sagents.v2.runtime.execution.registration import LocalExecutionBindingConfig
+from app.v2.server.runtime.workspace_binding import ServerExecutionBindingConfig as LocalExecutionBindingConfig
 from tests.app.v2.server.conftest import make_settings
 
 

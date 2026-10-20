@@ -52,7 +52,7 @@ def test_agui_run_pins_thread_agent_and_ignores_later_picker(tmp_path):
         assert client.post("/api/agent", json=first, headers=headers).status_code == 200
         threads = client.get("/api/threads", headers=headers)
         assert threads.status_code == 200
-        assert threads.json()["data"][0]["agent_id"] == writer
+        assert threads.json()["data"]["items"][0]["agent_id"] == writer
         second = _run_input("thread-pin", "run-pin-2")
         second["forwardedProps"] = {"agentId": coder}
         assert client.post("/api/agent", json=second, headers=headers).status_code == 200

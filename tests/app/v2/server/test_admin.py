@@ -47,7 +47,7 @@ def test_admin_can_see_all_users_threads_and_models(client: TestClient):
     users = client.get("/api/admin/users", headers=headers)
     assert {item["username"] for item in users.json()["data"]} >= {"admin", "alice"}
     threads = client.get("/api/admin/threads", headers=headers)
-    assert any(item["thread_id"] == "thread-alice" for item in threads.json()["data"])
+    assert any(item["thread_id"] == "thread-alice" for item in threads.json()["data"]["items"])
     models = client.get("/api/admin/models", headers=headers)
     assert any(item["model"] == "demo-model" for item in models.json()["data"])
     hidden = client.get("/api/admin/users", headers={"Authorization": f"Bearer {alice}"})

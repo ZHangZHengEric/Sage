@@ -82,6 +82,20 @@ update_model accepts a complete ModelRoute or equivalent dictionary, not a parti
 
 After model updates, reload the same Package to obtain a new handle. Old handles and admitted Runs retain their snapshots. Package changes still require update_agent. Updating unused models does not change an Agent's composition identity. Recovery uses the admitted revision rather than current model settings. Credential services supply secret material without embedding it in Package or model snapshots.
 
+Hosts admitting different configurations concurrently can pass isolated configuration directly to each load:
+
+```python
+agent = await app.load_agent(package, runtime=selected_runtime, models=selected_models)
+updated = await app.update_agent(
+    agent=agent, package=changed_package,
+    runtime=selected_runtime, models=selected_models,
+)
+```
+
+Both arguments are copied, validated and included in composition without changing `app.runtime_configuration` or `app.models`. Different revisions can build concurrently; concurrent requests for the same revision share one build. `update_agent` still checks that the supplied revision is current; after a competing update wins, reload the current handle before retrying. Session storage, scheduling and security settings belong to the App identity and cannot be switched by an individual load.
+
+Active execution, admission and streaming projection retain revision resources. Other idle revisions, including the current configuration, are cached up to 64 entries and released after 300 idle seconds by a task running every 30 seconds; only the immutable handle and plan metadata remain for the current configuration. The first revision provides shared App services and remains until shutdown. Reclamation preserves revision snapshots: using an old handle through `entrypoint()`, the stable facade returned by synchronous `app.agent()`, or recovery reassembles that revision and verifies its original composition hash. The synchronous facade's `runtime.start_run/stream` also restores the original revision to freeze execution configuration; other RuntimePort reads and controls use the shared App runtime. Event subscriptions and protocol projections hold revision references while iterating; close their iterator or detach when finished. Tenant workspace paths belong to the admitted Run's execution snapshot. Server freezes the path from verified identity during admission, so additional tenants do not cause the same Agent to be composed repeatedly.
+
 ### credentials
 
 ```yaml

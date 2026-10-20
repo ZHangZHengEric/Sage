@@ -195,15 +195,17 @@ def prepare_session_export(session_id: str, run_ids: set[str], evidence: dict | 
             missing_streams = [row.get("request_id") for row in models if not row.get("stream", {}).get("wire_capture_available")]
             logs = evidence.get("logs", [])
             partial_models = projected or missing_requests or any(row.get("truncated") for row in models)
-            partial_logs = evidence.get("dropped_logs", 0) or pending_writes or any(row.get("truncated") for row in logs)
-            dropped_streams = sum(row.get("stream", {}).get("dropped_wire_events", 0) for row in models)
+            partial_logs = evidence.get("dropped_logs", 0) or evidence.get("logs_complete") is False or pending_writes or any(row.get("truncated") for row in logs)
+            dropped_streams = sum(row.get("stream", {}).get("dropped_wire_events", 0) +
+                                  row.get("stream", {}).get("dropped_normalized_events", 0) for row in models)
+            incomplete_streams = [row.get("request_id") for row in models if row.get("stream", {}).get("complete") is False]
             availability = {
                 "models": {"status":"not_captured" if not models else "partial" if partial_models else "available",
                            "trace_projected_request_ids":projected,
                            "reason":"Normalized trace content is exported when dedicated diagnostics were not captured; it is not a raw provider request." if projected else None},
                 "logs": {"status":"not_captured" if not logs else "partial" if partial_logs else "available",
                          "reason":None if logs else "No full diagnostic log records were captured for this Session; timing spans are not full logs."},
-                "raw_model_streams": {"status":"not_captured" if not models or len(missing_streams) == len(models) else "partial" if missing_streams or dropped_streams else "available",
+                "raw_model_streams": {"status":"not_captured" if not models or len(missing_streams) == len(models) else "partial" if missing_streams or dropped_streams or incomplete_streams else "available",
                                       "reason":"SDK wire events cannot be reconstructed from model responses or timing records." if missing_streams or not models else None},
                 "failures": {"status":"available" if failures else "none_observed",
                              "reason":None if failures else "No tool failures were observed in the exported evidence."},
@@ -238,6 +240,9 @@ def prepare_session_export(session_id: str, run_ids: set[str], evidence: dict | 
                     "model_request_coverage": "external_traces_only" if "traces" in evidence else ("incomplete" if missing_requests or evidence.get("dropped_logs", 0) or evidence.get("unavailable") else "matched_captured_start_logs"),
                     "unfinished_model_request_ids": [row.get("request_id") for row in models if row.get("status") == "started"],
                     "stream_evidence_missing_for_requests": [row.get("request_id") for row in models if not row.get("stream", {}).get("wire_capture_available")],
+                    "stream_evidence_incomplete_for_requests": incomplete_streams,
+                    "diagnostic_evidence_gaps": evidence.get("evidence_gaps", []),
+                    "raw_capture_statistics": evidence.get("raw_capture_statistics", {}),
                     "stream_events_dropped": sum(row.get("stream", {}).get("dropped_wire_events", 0) + row.get("stream", {}).get("dropped_normalized_events", 0) for row in models),
                     "log_records": len(evidence.get("logs", [])),
                     "tool_records": len(tools),
@@ -258,6 +263,8 @@ def prepare_session_export(session_id: str, run_ids: set[str], evidence: dict | 
                         bool(row.get("truncated")) for row in evidence.get("logs", [])
                     ),
                     "dropped_logs": evidence.get("dropped_logs", 0),
+                    "logs_complete": evidence.get("logs_complete"),
+                    "expected_log_records": evidence.get("expected_log_records"),
                     "diagnostic_writes_pending": pending_writes,
                     "capture_failures_since_start": evidence.get(
                         "capture_failures_since_start", 0

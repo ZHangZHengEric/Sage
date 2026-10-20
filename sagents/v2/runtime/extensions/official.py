@@ -1355,6 +1355,9 @@ def _register_session_and_memory(registry: ExtensionRegistry) -> None:
                     "properties": {
                         "dsn": {"type": "string", "minLength": 1},
                         "table_prefix": {"type": "string"},
+                        "max_cached_sessions": {"type": "integer", "minimum": 1},
+                        "max_cached_bytes": {"type": "integer", "minimum": 1},
+                        "cache_idle_seconds": {"type": "number", "minimum": 0},
                     },
                     "required": ["dsn"],
                     "additionalProperties": False,
@@ -1381,6 +1384,8 @@ def _register_session_and_memory(registry: ExtensionRegistry) -> None:
             ),
             factory=lambda context, dependencies: MysqlSessionStore(
                 str(context.config["dsn"]),
+                **{key: context.config[key] for key in
+                   ("max_cached_sessions", "max_cached_bytes", "cache_idle_seconds") if key in context.config},
                 table_prefix=(
                     None
                     if "table_prefix" not in context.config
@@ -1401,6 +1406,9 @@ def _register_session_and_memory(registry: ExtensionRegistry) -> None:
                     "properties": {
                         "dsn": {"type": "string", "minLength": 1},
                         "redis_url": {"type": "string", "minLength": 1},
+                        "max_cached_sessions": {"type": "integer", "minimum": 1},
+                        "max_cached_bytes": {"type": "integer", "minimum": 1},
+                        "cache_idle_seconds": {"type": "number", "minimum": 0},
                         "table_prefix": {"type": "string"},
                         "key_prefix": {"type": "string", "minLength": 1},
                         "archive_interval_seconds": {"type": "number", "exclusiveMinimum": 0},

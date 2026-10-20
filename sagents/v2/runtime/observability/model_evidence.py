@@ -65,7 +65,7 @@ def model_evidence(spans, captured=()):
             row["request"] = {"model":attrs.get("model"), "model_parameters":_decode(attrs.get("model_parameters"))[0],
                               **(value if isinstance(value, dict) else {"input":value})}
             row["request_format"] = "normalized_trace"
-            row["request_content_available"] = value is not None
+            row["request_content_available"] = value is not None and not (isinstance(value, dict) and "diagnostic_request_id" in value)
             row["request_truncated"] = invalid or _truncated(value)
             row["field_sources"]["request"] = "trace_projection"
         if row.get("response") is None:
@@ -73,11 +73,12 @@ def model_evidence(spans, captured=()):
             if value is not None:
                 row["response"] = value if isinstance(value, dict) else {"output":value}
                 row["field_sources"]["response"] = "trace_projection"
-            row["response_content_available"] = value is not None
+            row["response_content_available"] = value is not None and not (isinstance(value, dict) and "diagnostic_request_id" in value)
             row["response_truncated"] = invalid or _truncated(value)
         row.setdefault("usage", _decode(attrs.get("usage"))[0])
         row.setdefault("content_mode", attrs.get("sage.content.mode", "unknown"))
-        row["truncated"] = bool(row.get("truncated") or row.get("request_truncated") or row.get("response_truncated"))
+        row["truncated"] = bool(row.get("truncated") or row.get("request_truncated") or row.get("response_truncated")
+                                or attrs.get("sage.content.incomplete"))
         if row.get("error") is None and span.get("status_code") == "ERROR":
             row["error"] = {"message":span.get("status_message")}
             row["field_sources"]["error"] = "trace_projection"

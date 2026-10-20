@@ -64,6 +64,7 @@ parent: API
 | `GET` | `/api/admin/models` | `admin` |
 | `GET` | `/api/admin/skills` | `admin` |
 | `GET` | `/api/admin/threads` | `admin` |
+| `GET` | `/api/admin/threads/{thread_id}` | `admin` |
 | `GET` | `/api/admin/threads/{thread_id}/events` | `admin` |
 | `GET` | `/api/admin/users` | `admin` |
 | `GET` | `/api/agents` | `agents` |
@@ -104,6 +105,7 @@ parent: API
 | `POST` | `/api/approvals/{run_id}/decisions` | `conversations` |
 | `GET` | `/api/threads` | `conversations` |
 | `DELETE` | `/api/threads/{thread_id}` | `conversations` |
+| `GET` | `/api/threads/{thread_id}` | `conversations` |
 | `POST` | `/api/threads/{thread_id}/cancel` | `conversations` |
 | `GET` | `/api/threads/{thread_id}/download` | `conversations` |
 | `GET` | `/api/threads/{thread_id}/events` | `conversations` |
@@ -112,6 +114,7 @@ parent: API
 | `POST` | `/api/threads/{thread_id}/resume` | `conversations` |
 | `POST` | `/api/threads/{thread_id}/steer` | `conversations` |
 | `GET` | `/api/workspace/download` | `files` |
+| `DELETE` | `/api/workspace/files` | `files` |
 | `GET` | `/api/workspace/files` | `files` |
 | `GET` | `/active` | `health` |
 | `GET` | `/health` | `health` |
@@ -131,6 +134,11 @@ parent: API
 | `GET` | `/api/observability/jaeger/login` | `observability` |
 | `GET/POST/PUT/PATCH/DELETE/OPTIONS/HEAD` | `/api/observability/jaeger/{full_path:path}` | `observability` |
 | `GET` | `/api/observability/performance` | `observability` |
+| `GET` | `/api/observability/services` | `observability` |
+| `GET` | `/api/observability/trace-spans` | `observability` |
+| `GET` | `/api/observability/trace-spans/{span_id}` | `observability` |
+| `GET` | `/api/observability/traces/summary` | `observability` |
+| `GET` | `/api/observability/traces/{trace_id}/spans` | `observability` |
 | `GET` | `/api/agent-packages` | `packages` |
 | `POST` | `/api/agent-packages` | `packages` |
 | `GET` | `/api/agent-packages/capacity` | `packages` |

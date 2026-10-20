@@ -1,5 +1,6 @@
 """Server timing projection and observation-backend configuration."""
 from __future__ import annotations
+import asyncio
 from collections import defaultdict
 from datetime import datetime, timezone
 import json
@@ -8,8 +9,9 @@ from urllib.parse import unquote
 from threading import RLock
 import httpx
 from sagents.v2.contracts.common import utc_now
-from sagents.v2.runtime.observability.contracts import TraceEvent, TraceSpan, TraceStatus
+from sagents.v2.runtime.observability.contracts import TraceEvent, TraceStatus
 from sagents.v2.runtime.observability.evidence import ExternalEvidenceSink
+from sagents.v2.runtime.observability.query import QueryCache
 from sagents.v2.runtime.observability.plugins.diagnostic_noop import NoopDiagnosticSink
 from .performance import EVENTS, build_run, timing_report, timestamp
 
@@ -50,6 +52,7 @@ class ExternalDiagnostics(ExternalEvidenceSink):
         super().__init__(**options)
         self._performance = {}
         self._performance_lock = RLock()
+        self._query_cache = QueryCache()
 
     def bind_trace_sink(self, sink):
         if self.trace_sink is None:
@@ -62,7 +65,15 @@ class ExternalDiagnostics(ExternalEvidenceSink):
         return self._performance.setdefault(key, {
             "rows": [], "span": None, "sink": None, "ended_span": None,
             "host_managed": False, "finished_requested": False,
+            "raw_logs": 0, "raw_logs_dropped": 0,
         })
+
+    def _raw_record_admitted(self, kind, session_id, run_id, accepted):
+        if kind == "log":
+            with self._performance_lock:
+                pending = self._pending((session_id, run_id))
+                pending["raw_logs"] += 1
+                pending["raw_logs_dropped"] += not accepted
 
     def span_started(self, sink, span):
         if self.closed or span.name != SPAN_NAME or not span.session_id or not span.run_id:
@@ -91,13 +102,6 @@ class ExternalDiagnostics(ExternalEvidenceSink):
             for key in list(self._performance):
                 if self._performance[key]["sink"] is sink:
                     self._finish_performance(key, incomplete=True)
-
-    def _log_target(self, session_id, run_id):
-        with self._performance_lock:
-            pending = self._performance.get((session_id, run_id))
-            if pending is not None and pending["span"] is not None:
-                return pending["sink"], pending["span"].span_id
-        return None
 
     def emit(self, kind, row, *, at=None):
         if self.closed or not row.get("session_id") or not row.get("run_id"):
@@ -147,8 +151,14 @@ class ExternalDiagnostics(ExternalEvidenceSink):
                  "sage.performance.service": self.service,
                  "sage.performance.environment": self.environment,
                  "sage.performance.incomplete": incomplete}
+        if self.raw_capture:
+            attrs["sage.diagnostic.log_count"] = pending["raw_logs"]
+            attrs["sage.diagnostic.dropped_log_records"] = pending["raw_logs_dropped"]
         if incomplete:
             attrs["sage.interrupted"] = True
+        agent_ids = [r["data"].get("attributes", {}).get("agent_id") for r in rows if r["kind"] == "log"]
+        if any(agent_ids):
+            attrs["agent_id"] = next(value for value in agent_ids if value)
         if rows:
             starts = [r["at"] for r in rows]
             starts.extend(timestamp(r["data"]["attributes"]["started_at"])
@@ -171,7 +181,6 @@ class ExternalDiagnostics(ExternalEvidenceSink):
                                timestamp=datetime.fromtimestamp(r["at"], timezone.utc),
                                attributes={"kind": r["kind"], PAYLOAD: json.dumps(r["data"], default=str)})
                      for r in rows]
-        additions.extend(self._take_evidence(key))
         enriched = span.model_copy(update={"attributes": attrs, "events": [*span.events, *additions]})
         sink = pending["sink"]
         for event in additions:
@@ -180,6 +189,7 @@ class ExternalDiagnostics(ExternalEvidenceSink):
 
     async def close(self):
         self.closed = True
+        await self._query_cache.close()
         with self._performance_lock:
             for key in list(self._performance):
                 try:
@@ -209,28 +219,22 @@ class ExternalDiagnostics(ExternalEvidenceSink):
         timezone_name="Asia/Shanghai",
         client=None,
     ):
-        if client is None:
-            async with httpx.AsyncClient() as owned:
-                return await self.report(
-                    start=start,
-                    end=end,
-                    agent_id=agent_id,
-                    bucket=bucket,
-                    timezone_name=timezone_name,
-                    client=owned,
-                )
-        spans, truncated = await self._query(client, start=start, end=end)
-        events, models = timing_rows(spans)
-        result = timing_report(
-            events,
-            models,
-            start=start,
-            end=end,
-            agent_id=agent_id,
-            bucket=bucket,
-            timezone_name=timezone_name,
-            truncated=truncated,
-        )
+        async def build():
+            if client is None:
+                async with httpx.AsyncClient() as owned:
+                    return await self._report(owned, start=start, end=end, agent_id=agent_id,
+                                              bucket=bucket, timezone_name=timezone_name)
+            return await self._report(client, start=start, end=end, agent_id=agent_id,
+                                      bucket=bucket, timezone_name=timezone_name)
+        return await self._query_cache.get((start, end, agent_id, bucket, timezone_name), build)
+
+    async def _report(self, client, *, start, end, agent_id, bucket, timezone_name):
+        spans, truncated = await self._query(client, start=start, end=end, agent_id=agent_id)
+        def aggregate():
+            events, models = timing_rows(spans)
+            return timing_report(events, models, start=start, end=end, agent_id=agent_id,
+                                 bucket=bucket, timezone_name=timezone_name, truncated=truncated)
+        result = await asyncio.to_thread(aggregate)
         result.update(source=self.backend, capture_failures=self.capture_failures)
         return result
 

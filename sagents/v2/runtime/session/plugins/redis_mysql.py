@@ -28,6 +28,7 @@ _STOPPED = TERMINAL_RUN_STATES | {RunState.SUSPENDED}
 
 class _RedisMysqlSessionState(_MysqlSessionState):
     format_version = "sage.session.redis-mysql/v2"
+    durable_history_pages = False
     archive_batch_rows = 32
     archive_batch_bytes = 256 * 1024
     snapshot_chunk_chars = 16 * 1024
@@ -255,6 +256,7 @@ class _RedisMysqlSessionState(_MysqlSessionState):
         self._remember_persisted_session(sid, revision,
             {rid: len(self._run_events[rid]) for rid in self._session_run_ids_locked(sid)},
             rows, starts, 0 if compact else self._persisted_mutation_counts.get(sid, 0) + 1)
+        self._session_cache.touch(sid, charge=4 * len(encoded.encode()))
         self._forget_attachment_bytes(sid)
         if stopped or quiescent or revision % self.archive_batch_rows == 0:
             self._wake.set()

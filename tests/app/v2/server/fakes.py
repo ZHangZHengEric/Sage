@@ -181,6 +181,24 @@ class MemoryThreadIndex:
         existing = self._bindings.setdefault(binding.session_id, binding)
         require_binding(existing, binding)
 
+    async def page(self, *, user_id=None, limit=50, cursor=None, search="", agent_id="", matching_agent_ids=()):
+        from app.v2.server.conversations.records import ThreadPage, thread_cursor, parse_thread_cursor
+        rows = [row for row in self._threads.values() if (user_id is None or row.user_id == user_id)
+            and (not agent_id or row.agent_id == agent_id)
+            and (not search.strip() or search.strip().lower() in f"{row.title} {row.agent_id}".lower() or row.agent_id in matching_agent_ids)]
+        rows.sort(key=lambda row: (row.updated_at, row.thread_id), reverse=True)
+        values = parse_thread_cursor(cursor)
+        if values:
+            rows = [row for row in rows if (row.updated_at, row.thread_id) < tuple(values)]
+        return ThreadPage(items=rows[:limit], next_cursor=thread_cursor(rows[limit - 1]) if len(rows) > limit else None)
+
+    async def scan(self, *, limit=100, cursor=None, user_id=None):
+        from app.v2.server.conversations.records import ThreadPage, thread_cursor, parse_thread_cursor
+        values = parse_thread_cursor(cursor, scan=True)
+        rows = sorted((row for row in self._threads.values() if (user_id is None or row.user_id == user_id)
+            and (not values or row.thread_id > values[0])), key=lambda row: row.thread_id)
+        return ThreadPage(items=rows[:limit], next_cursor=thread_cursor(rows[limit - 1], scan=True) if len(rows) > limit else None)
+
     async def list_all(self) -> list[ThreadRecord]:
         return sorted(
             self._threads.values(), key=lambda item: item.updated_at, reverse=True

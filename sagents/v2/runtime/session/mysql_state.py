@@ -12,10 +12,11 @@ import hashlib
 import json
 import re
 import time
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, aclosing
 from copy import deepcopy
 from typing import Any
 from urllib.parse import unquote, urlparse
+from weakref import WeakValueDictionary
 
 from sagents.v2.contracts.errors import (
     ErrorCategory,
@@ -29,6 +30,8 @@ from sagents.v2.runtime.session.journal import (
     SessionStateDeltaMutation,
 )
 from sagents.v2.runtime.session.state import SessionStoreCoordinator
+from sagents.v2.runtime.session.mysql_history import MysqlHistoryQueries
+from sagents.v2.runtime.session.mysql_cache import IdleSessionCache, cached_session_operation
 from sagents.v2.runtime.observability.logs import get_logger
 
 
@@ -125,7 +128,7 @@ def parse_mysql_dsn(dsn: str) -> dict[str, Any]:
     }
 
 
-class _MysqlSessionState(SessionStoreCoordinator):
+class _MysqlSessionState(MysqlHistoryQueries, SessionStoreCoordinator):
     """Single-process MySQL adapter around the shared state coordinator."""
 
     format_version = "sage.session.mysql/v2"
@@ -136,6 +139,9 @@ class _MysqlSessionState(SessionStoreCoordinator):
         dsn: str,
         *,
         table_prefix: str | None = None,
+        max_cached_sessions: int = 256,
+        max_cached_bytes: int = 256 * 1024**2,
+        cache_idle_seconds: float = 300,
         **kwargs: Any,
     ) -> None:
         resolved = dsn.strip()
@@ -154,7 +160,7 @@ class _MysqlSessionState(SessionStoreCoordinator):
         self._connect_kwargs = parse_mysql_dsn(resolved)
         self._pool = None
         self._init_lock = asyncio.Lock()
-        self._load_lock = asyncio.Lock()
+        self._load_locks: WeakValueDictionary[str, asyncio.Lock] = WeakValueDictionary()
         self._loaded_session_ids: set[str] = set()
         self._persisted_run_sequences: dict[str, int] = {}
         self._persisted_session_runs: dict[str, set[str]] = {}
@@ -164,6 +170,8 @@ class _MysqlSessionState(SessionStoreCoordinator):
         self._persisted_start_keys: dict[str, set[tuple[str, ...]]] = {}
         self._closed = False
         super().__init__(**kwargs)
+        self._session_cache = IdleSessionCache(self, max_sessions=max_cached_sessions,
+            max_bytes=max_cached_bytes, idle_seconds=cache_idle_seconds)
 
     @property
     def capabilities(self) -> dict[str, bool | str]:
@@ -567,6 +575,11 @@ class _MysqlSessionState(SessionStoreCoordinator):
             if should_snapshot
             else self._persisted_mutation_counts.get(session_id, 0) + 1,
         )
+        # Conservatively account for retained Python objects using serialized
+        # bytes. Repeated mutations overestimate rather than hide memory growth.
+        self._session_cache.touch(session_id, charge=4 * (
+            len((encoded_compact or encoded_mutation or "").encode())
+            + sum(len(_json(event).encode()) for rows in events.values() for event in rows)))
         LOGGER.debug(
             "session.mysql.commit",
             "MySQL 会话提交完成",
@@ -780,6 +793,7 @@ class _MysqlSessionState(SessionStoreCoordinator):
             )
         return bytes(row[0])
 
+    @cached_session_operation
     async def get_derived_state(
         self, session_id: str, namespace: str, key: str
     ) -> Any | None:
@@ -800,6 +814,7 @@ class _MysqlSessionState(SessionStoreCoordinator):
             return None
         return _decode_json(row[0])
 
+    @cached_session_operation
     async def put_derived_state(
         self, session_id: str, namespace: str, key: str, value: Any
     ) -> None:
@@ -830,6 +845,7 @@ class _MysqlSessionState(SessionStoreCoordinator):
                     )
                 raise
 
+    @cached_session_operation
     async def delete_derived_state(
         self, session_id: str, namespace: str, key: str
     ) -> None:
@@ -880,8 +896,11 @@ class _MysqlSessionState(SessionStoreCoordinator):
                     )
                 raise
 
+    @cached_session_operation
     async def create_run(self, command, context):
         await self._ensure_ready()
+        if command.parent_run_id:
+            await self._ensure_resource_loaded("runs", "run_id", command.parent_run_id)
         if command.session_id is not None:
             await self._ensure_session_loaded(command.session_id, missing_ok=True)
         else:
@@ -890,66 +909,119 @@ class _MysqlSessionState(SessionStoreCoordinator):
                 await self._ensure_session_loaded(lookup)
         return await super().create_run(command, context)
 
+    @cached_session_operation
     async def get_session(self, session_id):
         await self._ensure_session_loaded(session_id)
         return await super().get_session(session_id)
 
+    @cached_session_operation
     async def authorize_session_actor(self, session_id, context):
         await self._ensure_session_loaded(session_id)
         await super().authorize_session_actor(session_id, context)
 
+    @cached_session_operation
     async def delete_session(self, session_id):
         await self._ensure_session_loaded(session_id)
         await self._ensure_descendants_loaded(session_id)
         result = await super().delete_session(session_id)
         self._loaded_session_ids.intersection_update(self._sessions)
+        self._session_cache.evicted_suspended.discard(session_id)
         return result
 
+    async def has_nonterminal_runs(self):
+        return bool(self._session_cache.evicted_suspended) or await super().has_nonterminal_runs()
+
+    @cached_session_operation
+    async def get_execution_resource(self, run_id):
+        await self._ensure_resource_loaded("runs", "run_id", run_id)
+        return await super().get_execution_resource(run_id)
+
+    @cached_session_operation
+    async def commit_execution_resource(self, *, record, **kwargs):
+        await self._ensure_resource_loaded("runs", "run_id", record.run_id)
+        return await super().commit_execution_resource(record=record, **kwargs)
+
+    @cached_session_operation
+    async def get_run_context(self, run_id):
+        return await super().get_run_context(run_id)
+
+    @cached_session_operation
+    async def put_attachment(self, session_id, **kwargs):
+        return await super().put_attachment(session_id, **kwargs)
+
+    @cached_session_operation
+    async def get_attachment(self, session_id, artifact_id, **kwargs):
+        return await super().get_attachment(session_id, artifact_id, **kwargs)
+
+    @cached_session_operation
+    async def copy_attachment(self, source_session_id, target_session_id, artifact_id, **kwargs):
+        return await super().copy_attachment(source_session_id, target_session_id, artifact_id, **kwargs)
+
+    @cached_session_operation
+    async def export_session_backup(self, session_id, **kwargs):
+        return await super().export_session_backup(session_id, **kwargs)
+
+    @cached_session_operation
+    async def restore_session_backup(self, backup, **kwargs):
+        return await super().restore_session_backup(backup, **kwargs)
+
+    @cached_session_operation
     async def list_session_runs(self, session_id):
         await self._ensure_session_loaded(session_id)
         return await super().list_session_runs(session_id)
 
+    @cached_session_operation
     async def list_descendant_sessions(self, session_id):
         await self._ensure_session_loaded(session_id)
         await self._ensure_descendants_loaded(session_id)
         return await super().list_descendant_sessions(session_id)
 
+    @cached_session_operation
     async def read_session_events(self, session_id, **kwargs):
         await self._ensure_session_loaded(session_id)
         return await super().read_session_events(session_id, **kwargs)
 
+    @cached_session_operation
     async def list_session_commit_proposals(self, session_id):
         await self._ensure_session_loaded(session_id)
         return await super().list_session_commit_proposals(session_id)
 
+    @cached_session_operation
     async def get_run(self, run_id):
         await self._ensure_resource_loaded("runs", "run_id", run_id)
         return await super().get_run(run_id)
 
+    @cached_session_operation
     async def get_run_result(self, run_id):
         await self._ensure_resource_loaded("runs", "run_id", run_id)
         return await super().get_run_result(run_id)
 
+    @cached_session_operation
     async def get_start_command(self, run_id):
         await self._ensure_resource_loaded("runs", "run_id", run_id)
         return await super().get_start_command(run_id)
 
+    @cached_session_operation
     async def get_latest_checkpoint(self, run_id):
         await self._ensure_resource_loaded("runs", "run_id", run_id)
         return await super().get_latest_checkpoint(run_id)
 
+    @cached_session_operation
     async def read_events(self, run_id, **kwargs):
         await self._ensure_resource_loaded("runs", "run_id", run_id)
         return await super().read_events(run_id, **kwargs)
 
+    @cached_session_operation
     async def read_stream_previews(self, run_id, **kwargs):
         await self._ensure_resource_loaded("runs", "run_id", run_id)
         return await super().read_stream_previews(run_id, **kwargs)
 
+    @cached_session_operation
     async def publish_stream_preview(self, *, run_id, **kwargs):
         await self._ensure_resource_loaded("runs", "run_id", run_id)
         return await super().publish_stream_preview(run_id=run_id, **kwargs)
 
+    @cached_session_operation
     async def commit_model_stream_batch(self, *, run, drafts, context, idempotency_key):
         """Persist item starts; send model deltas from the in-process buffer."""
 
@@ -960,92 +1032,122 @@ class _MysqlSessionState(SessionStoreCoordinator):
             idempotency_key=idempotency_key,
         )
 
+    @cached_session_operation
     async def read_fork_base_events(self, run_id):
         await self._ensure_resource_loaded("runs", "run_id", run_id)
         return await super().read_fork_base_events(run_id)
 
+    @cached_session_operation
     async def commit_run(self, *, run_id, **kwargs):
         await self._ensure_resource_loaded("runs", "run_id", run_id)
         return await super().commit_run(run_id=run_id, **kwargs)
 
+    @cached_session_operation
     async def propose_session_commit(self, command, context):
         await self._ensure_resource_loaded("runs", "run_id", command.run_id)
         return await super().propose_session_commit(command, context)
 
+    @cached_session_operation
     async def publish_session_commit(self, command, context):
         await self._ensure_resource_loaded(
             "session_commit_proposals", "proposal_id", command.proposal_id
         )
         return await super().publish_session_commit(command, context)
 
+    @cached_session_operation
     async def reject_session_commit(self, command, context):
         await self._ensure_resource_loaded(
             "session_commit_proposals", "proposal_id", command.proposal_id
         )
         return await super().reject_session_commit(command, context)
 
+    @cached_session_operation
     async def get_session_commit_proposal(self, proposal_id):
         await self._ensure_resource_loaded(
             "session_commit_proposals", "proposal_id", proposal_id
         )
         return await super().get_session_commit_proposal(proposal_id)
 
+    @cached_session_operation
     async def get_checkpoint(self, checkpoint_id):
         await self._ensure_resource_loaded(
             "checkpoints", "checkpoint_id", checkpoint_id
         )
         return await super().get_checkpoint(checkpoint_id)
 
+    @cached_session_operation
     async def get_suspension(self, suspension_id):
         await self._ensure_resource_loaded(
             "suspensions", "suspension_id", suspension_id
         )
         return await super().get_suspension(suspension_id)
 
+    @cached_session_operation
     async def get_interaction(self, interaction_id):
         await self._ensure_resource_loaded(
             "interactions", "interaction_id", interaction_id
         )
         return await super().get_interaction(interaction_id)
 
+    @cached_session_operation
     async def get_interaction_resolution(self, interaction_id):
         await self._ensure_resource_loaded(
             "interactions", "interaction_id", interaction_id
         )
         return await super().get_interaction_resolution(interaction_id)
 
+    @cached_session_operation
     async def enqueue_steer(self, command, context):
         await self._ensure_resource_loaded("runs", "run_id", command.run_id)
         return await super().enqueue_steer(command, context)
 
+    @cached_session_operation
     async def claim_steers(self, *, run_id, **kwargs):
         await self._ensure_resource_loaded("runs", "run_id", run_id)
         return await super().claim_steers(run_id=run_id, **kwargs)
 
+    @cached_session_operation
     async def list_steers(self, run_id):
         await self._ensure_resource_loaded("runs", "run_id", run_id)
         return await super().list_steers(run_id)
 
+    @cached_session_operation
     async def resolve_interaction(self, command, context):
         await self._ensure_resource_loaded("runs", "run_id", command.run_id)
         return await super().resolve_interaction(command, context)
 
+    @cached_session_operation
     async def request_resume(self, command, context):
         await self._ensure_resource_loaded("runs", "run_id", command.run_id)
         return await super().request_resume(command, context)
 
     async def subscribe_events(self, cursor):
-        await self._ensure_resource_loaded("runs", "run_id", cursor.run_id)
-        async for event in super().subscribe_events(cursor):
-            yield event
+        retained = None
+        try:
+            async with self._session_cache.operation():
+                await self._ensure_resource_loaded("runs", "run_id", cursor.run_id)
+                sid = self._runs[cursor.run_id].session_id
+                self._session_cache.retain(sid)
+                retained = sid
+            # Close the coordinator iterator before dropping its cache pin, even
+            # when the transport closes this generator from a different Task.
+            async with aclosing(super().subscribe_events(cursor)) as events:
+                async for event in events:
+                    yield event
+        finally:
+            if retained is not None:
+                self._session_cache.release(retained)
+                await self._session_cache.prune()
 
     async def _ensure_session_loaded(
         self, session_id: str, *, missing_ok: bool = False
     ) -> None:
+        self._session_cache.pin(session_id)
         if session_id in self._loaded_session_ids:
             return
         await self._ensure_ready()
-        async with self._load_lock:
+        lock = self._load_locks.setdefault(session_id, asyncio.Lock())
+        async with lock:
             if session_id in self._loaded_session_ids:
                 return
             payload = await self._fetch_session(session_id)
@@ -1053,9 +1155,10 @@ class _MysqlSessionState(SessionStoreCoordinator):
                 if missing_ok:
                     return
                 raise self._not_found("session.not_found", session_id)
+            prepared = await asyncio.to_thread(self._prepare_session, payload)
             async with self._lock:
                 if session_id not in self._loaded_session_ids:
-                    self._install_session_locked(payload)
+                    self._install_session_locked(payload, prepared=prepared)
 
     async def _ensure_descendants_loaded(self, session_id: str) -> None:
         await self._ensure_ready()
@@ -1090,20 +1193,17 @@ class _MysqlSessionState(SessionStoreCoordinator):
         self, collection: str, identity_key: str, identity: str
     ) -> None:
         if self._resource_is_loaded(collection, identity):
+            row = getattr(self, "_" + collection)[identity]
+            sid = getattr(row, "session_id", None) or self._runs[row.run_id].session_id
+            self._session_cache.pin(sid)
             return
         await self._ensure_ready()
-        async with self._load_lock:
-            if self._resource_is_loaded(collection, identity):
-                return
-            session_id = await self._locate_session(identity_key, identity)
-            if session_id is None:
-                raise self._not_found(f"{identity_key}.not_found", identity)
-            payload = await self._fetch_session(session_id)
-            if payload is None:
-                raise self._not_found(f"{identity_key}.not_found", identity)
-            async with self._lock:
-                if session_id not in self._loaded_session_ids:
-                    self._install_session_locked(payload)
+        session_id = await self._locate_session(identity_key, identity)
+        if session_id is None:
+            raise self._not_found(f"{identity_key}.not_found", identity)
+        await self._ensure_session_loaded(session_id)
+        if not self._resource_is_loaded(collection, identity):
+            raise self._not_found(f"{identity_key}.not_found", identity)
 
     def _resource_is_loaded(self, collection: str, identity: str) -> bool:
         mappings = {
@@ -1297,22 +1397,30 @@ class _MysqlSessionState(SessionStoreCoordinator):
         # The caller holds the Session operation lock; replacement of the shared
         # state must also be atomic with respect to other Session loaders.
         payload = await self._fetch_session(session_id)
+        prepared = await asyncio.to_thread(self._prepare_session, payload) if payload is not None else None
         async with self._lock:
             if session_id in self._sessions:
                 self._evict_session_locked(session_id)
             if payload is not None:
-                self._install_session_locked(payload)
+                self._install_session_locked(payload, prepared=prepared)
 
     def _evict_session_locked(self, session_id: str) -> None:
-        combined = self._filter_session_state(self._dump_state_locked(), session_id)
-        subscribers = self._subscribers
-        derived = self._derived_state
-        self._load_state_locked(combined)
-        self._subscribers.update(subscribers)
-        self._derived_state.update(derived)
+        run_ids = self._session_run_ids_locked(session_id)
+        self._drop_session_objects_locked(session_id)
         self._forget_persisted_session(session_id)
+        # MySQL owns the durable projection. Releasing its redundant process
+        # copy must not call forget_session(), which deletes the durable row.
+        self._derived_state = {key: value for key, value in self._derived_state.items()
+                               if key[0] != session_id}
+        lock = self._session_locks.get(session_id)
+        if not self._session_cache.users.get(session_id) and lock is not None and not lock.locked():
+            self._session_locks.pop(session_id, None)
+        for run_id in run_ids:
+            if not self._subscribers.get(run_id):
+                self._subscribers.pop(run_id, None)
 
     def _forget_persisted_session(self, session_id: str) -> None:
+        self._session_cache.forget(session_id)
         self._loaded_session_ids.discard(session_id)
         self._persisted_session_revisions.pop(session_id, None)
         self._persisted_mutation_counts.pop(session_id, None)
@@ -1340,8 +1448,12 @@ class _MysqlSessionState(SessionStoreCoordinator):
         self._persisted_run_sequences.update(run_sequences)
         self._persisted_locations[session_id] = location_rows
         self._persisted_start_keys[session_id] = start_rows
+        self._session_cache.pin(session_id)
+        self._session_cache.evicted_suspended.discard(session_id)
 
-    def _install_session_locked(self, payload: dict[str, Any]) -> None:
+    @staticmethod
+    def _prepare_session(payload: dict[str, Any]) -> tuple[SessionStoreCoordinator, int]:
+        """Validate one isolated aggregate without touching live coordinator rows."""
         session_rows = payload.get("sessions", ())
         if len(session_rows) != 1:
             raise SessionStoreCorruptionError(
@@ -1352,24 +1464,38 @@ class _MysqlSessionState(SessionStoreCoordinator):
                     safe_to_resume=False,
                 )
             )
-        session_id = session_rows[0]["session_id"]
-        combined = self._dump_state_locked()
-        try:
-            self._merge_state(combined, payload)
-        except ValueError as exc:
-            raise SessionStoreCorruptionError(
-                RuntimeErrorInfo(
-                    code="session_store.aggregate_duplicate",
-                    category=ErrorCategory.CORRUPT_STATE,
-                    message=str(exc),
-                    safe_to_resume=False,
+        prepared = SessionStoreCoordinator()
+        prepared._load_state_locked(payload)
+        return prepared, 4 * len(_json(payload).encode())
+
+    def _install_session_locked(self, payload: dict[str, Any], *, prepared=None) -> None:
+        prepared, cache_bytes = prepared if prepared is not None else self._prepare_session(payload)
+        session_id = payload["sessions"][0]["session_id"]
+        # Publish only this Session. Replacing the complete coordinator would
+        # invalidate unrelated writers' row references across their DB awaits.
+        names = (
+            "_sessions", "_runs", "_run_events", "_session_events", "_fork_base_events",
+            "_start_idempotency", "_start_idempotency_digests", "_command_results",
+            "_command_digests", "_execution_resources", "_execution_resource_command_results",
+            "_execution_resource_command_digests", "_checkpoints", "_suspensions",
+            "_interactions", "_interaction_resolutions", "_steer_inbox",
+            "_session_commit_proposals", "_session_commit_command_results",
+            "_session_commit_command_digests",
+        )
+        for name in names:
+            if getattr(self, name).keys() & getattr(prepared, name).keys():
+                # All collision checks precede publication, leaving live state
+                # intact if a stored identity belongs to another Session.
+                raise SessionStoreCorruptionError(
+                    RuntimeErrorInfo(
+                        code="session_store.aggregate_duplicate",
+                        category=ErrorCategory.CORRUPT_STATE,
+                        message=f"duplicate aggregate identities in {name}",
+                        safe_to_resume=False,
+                    )
                 )
-            ) from exc
-        subscribers = self._subscribers
-        derived = self._derived_state
-        self._load_state_locked(combined)
-        self._subscribers.update(subscribers)
-        self._derived_state.update(derived)
+        for name in names:
+            getattr(self, name).update(getattr(prepared, name))
         self._remember_persisted_session(
             session_id,
             int(payload["sessions"][0]["revision"]),
@@ -1381,6 +1507,7 @@ class _MysqlSessionState(SessionStoreCoordinator):
             self._start_key_rows(session_id, payload),
             int(payload.get("_mutation_count", 0)),
         )
+        self._session_cache.touch(session_id, size=cache_bytes)
 
     @staticmethod
     def _compact_state(state: dict[str, Any]) -> dict[str, Any]:
@@ -1390,111 +1517,4 @@ class _MysqlSessionState(SessionStoreCoordinator):
         for key in _COMPACT_MAPS:
             compact[key] = deepcopy(state.get(key, {}))
         return compact
-
-    @staticmethod
-    def _filter_session_state(state: dict[str, Any], session_id: str) -> dict[str, Any]:
-        run_ids = {
-            row["run_id"]
-            for row in state.get("runs", ())
-            if row.get("session_id") == session_id
-        }
-        filtered = {
-            "session_format_version": state["session_format_version"],
-            "sessions": [
-                row
-                for row in state.get("sessions", ())
-                if row.get("session_id") != session_id
-            ],
-            "runs": [
-                row
-                for row in state.get("runs", ())
-                if row.get("session_id") != session_id
-            ],
-            "run_events": {
-                run_id: events
-                for run_id, events in state.get("run_events", {}).items()
-                if run_id not in run_ids
-            },
-            "fork_base_events": {
-                run_id: events
-                for run_id, events in state.get("fork_base_events", {}).items()
-                if run_id not in run_ids
-            },
-            "steer_inbox": {
-                run_id: events
-                for run_id, events in state.get("steer_inbox", {}).items()
-                if run_id not in run_ids
-            },
-            "start_idempotency": [
-                row
-                for row in state.get("start_idempotency", ())
-                if row.get("run_id") not in run_ids
-            ],
-            "command_results": [
-                row
-                for row in state.get("command_results", ())
-                if row.get("run_id") not in run_ids
-            ],
-            "execution_resources": [
-                row
-                for row in state.get("execution_resources", ())
-                if row.get("run_id") not in run_ids
-            ],
-            "execution_resource_command_results": [
-                row
-                for row in state.get("execution_resource_command_results", ())
-                if row.get("run_id") not in run_ids
-            ],
-            "checkpoints": [
-                row
-                for row in state.get("checkpoints", ())
-                if row.get("run_id") not in run_ids
-            ],
-            "suspensions": [
-                row
-                for row in state.get("suspensions", ())
-                if row.get("run_id") not in run_ids
-            ],
-            "interactions": [
-                row
-                for row in state.get("interactions", ())
-                if row.get("run_id") not in run_ids
-            ],
-            "session_commit_proposals": [
-                row
-                for row in state.get("session_commit_proposals", ())
-                if row.get("session_id") != session_id
-            ],
-        }
-        evicted_proposal_ids = {
-            row.get("proposal_id")
-            for row in state.get("session_commit_proposals", ())
-            if row.get("session_id") == session_id
-        }
-        interaction_ids = {
-            row.get("interaction_id") for row in filtered["interactions"]
-        }
-        filtered["interaction_resolutions"] = [
-            row
-            for row in state.get("interaction_resolutions", ())
-            if row.get("interaction_id") in interaction_ids
-        ]
-        filtered["session_commit_command_results"] = [
-            row
-            for row in state.get("session_commit_command_results", ())
-            if row.get("target_id") not in run_ids
-            and row.get("proposal", {}).get("proposal_id") not in evicted_proposal_ids
-        ]
-        return filtered
-
-    @staticmethod
-    def _merge_state(target: dict[str, Any], source: dict[str, Any]) -> None:
-        for key in _COMPACT_LISTS:
-            target[key].extend(source.get(key, ()))
-        for key in ("run_events", *_COMPACT_MAPS):
-            overlap = set(target[key]) & set(source.get(key, {}))
-            if overlap:
-                raise ValueError(f"duplicate aggregate identities: {sorted(overlap)}")
-            target[key].update(source.get(key, {}))
-
 

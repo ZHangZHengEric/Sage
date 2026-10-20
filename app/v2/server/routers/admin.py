@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Query
+from pydantic import BaseModel
 
 from app.v2.server.routers.deps import AdminDep, ConversationDep, AdminUser
 from app.v2.server.routers.schemas.common import ADMIN_ERRORS, ApiResponse
@@ -18,9 +19,21 @@ async def admin_users(_: AdminUser, service: AdminDep):
     return success(await service.list_users())
 
 
-@router.get("/threads", response_model=ApiResponse[list[AdminThreadPublic]])
-async def admin_threads(_: AdminUser, service: AdminDep):
-    return success(await service.list_threads())
+class AdminThreadPage(BaseModel):
+    items: list[AdminThreadPublic]
+    next_cursor: str | None = None
+
+
+@router.get("/threads", response_model=ApiResponse[AdminThreadPage])
+async def admin_threads(_: AdminUser, service: AdminDep,
+                        limit: int = Query(50, ge=1, le=200), cursor: str | None = Query(None, max_length=2048),
+                        search: str = Query("", max_length=512), agent_id: str = Query("", max_length=191)):
+    return success(await service.list_threads(limit=limit, cursor=cursor, search=search, agent_id=agent_id))
+
+
+@router.get("/threads/{thread_id}", response_model=ApiResponse[AdminThreadPublic])
+async def admin_thread(thread_id: str, _: AdminUser, service: AdminDep):
+    return success(await service.get_thread(thread_id))
 
 
 @router.get("/models", response_model=ApiResponse[list[AdminModelPublic]])

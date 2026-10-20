@@ -61,6 +61,11 @@ class ThreadPublic(BaseModel):
     agent_id: str = ""
     updated_at: str
 
+class ThreadListPage(BaseModel):
+    items: list[ThreadPublic]
+    next_cursor: str | None = None
+
+
 class ThreadEventPage(BaseModel):
     """One bounded window of AG-UI frames plus the source event count."""
 

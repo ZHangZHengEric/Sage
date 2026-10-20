@@ -119,7 +119,7 @@ def test_agui_chat_emits_standard_lifecycle(client: TestClient):
         headers={"Authorization": f"Bearer {token}"},
     )
     assert threads.status_code == 200
-    assert threads.json()["data"][0]["thread_id"] == "thread-1"
+    assert threads.json()["data"]["items"][0]["thread_id"] == "thread-1"
 
 
 @pytest.mark.timeout(30)
@@ -164,7 +164,7 @@ def test_other_user_cannot_see_thread(client: TestClient):
         "/api/threads",
         headers={"Authorization": f"Bearer {bob}"},
     )
-    assert threads.json()["data"] == []
+    assert threads.json()["data"]["items"] == []
 
 
 @pytest.mark.timeout(30)

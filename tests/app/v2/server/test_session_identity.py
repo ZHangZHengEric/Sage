@@ -97,8 +97,14 @@ def test_todo_write_uses_durable_id_instead_of_model_argument(tmp_path):
         events = client.portal.call(store.read_events, runs[0].run_id)
         assert all(event.session_id == "Todo-ID" for event in events)
         assert not any(event.type == "tool.call.unknown" for event in events)
-        # The Web diagnostic bundle includes the dispatched override and result
-        # after suspension/resume, while the model request keeps its original proposal.
+        proposals = [event.model_dump(mode="json")["data"] for event in events
+                     if event.type == "tool.call.proposed"]
+        assert proposals[0]["arguments"]["session_id"] == "Todo-ID"
+        assert any(event.type == "tool.call.succeeded" for event in events)
+        assert any(event.type == "item.completed" for event in events)
+        # Diagnostic v2 exports only captured observation evidence. Local mode
+        # reports tool metadata and its availability rather than copying the
+        # authoritative business events into a second audit projection.
         from io import BytesIO
         from zipfile import ZipFile
         from tests.app.v2.server.test_session_diagnostics import admin_headers
@@ -107,11 +113,10 @@ def test_todo_write_uses_durable_id_instead_of_model_argument(tmp_path):
         assert download.status_code == 200, download.text
         with ZipFile(BytesIO(download.content)) as archive:
             tools = json.loads(archive.read("Todo-ID/tools.json"))
-            proposals = [row["event"]["data"] for row in tools
-                         if row["event"]["type"] == "tool.call.proposed"]
-            assert proposals[0]["arguments"]["session_id"] == "Todo-ID"
-            assert any(row["event"]["type"] == "tool.call.succeeded" for row in tools)
-            assert any(row["event"]["type"] == "item.completed" for row in tools)
+            assert any(row["tool_name"] == "todo_write" and row["outcome"] == "completed" for row in tools)
+            assert all(not row["result_available"] for row in tools)
+            manifest = json.loads(archive.read("Todo-ID/manifest.json"))
+            assert manifest["format_version"] == "sage.session-diagnostic-bundle/v2"
             assert json.loads(archive.read("Todo-ID/models.json"))
             assert json.loads(archive.read("Todo-ID/logs.json"))
 

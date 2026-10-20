@@ -603,3 +603,300 @@ def test_public_sdk_types_cannot_accept_host_execution_assembly():
         SAgentApplication(agents={"host": object()}, entrypoint_agent_id="host", services={}, adapters={},
             scope_handles=(), composition_hash="host")
     assert "driver_factory" not in inspect.signature(SAgent).parameters
+
+
+async def test_atomic_load_configuration_does_not_mutate_application(tmp_path):
+    from sagents.v2.package.manifest.runtime import CapabilitySelection
+    app = await build_registered_app(tmp_path, models=TEST_MODELS, model=model())
+    baseline = app.runtime_configuration
+    selected = baseline.model_copy(deep=True)
+    selected.capabilities["agent.continuation-policy"] = CapabilitySelection(plugin="sage.agent.continuation.deterministic")
+    try:
+        loaded = await app.load_agent(package(), runtime=selected, models=TEST_MODELS)
+        assert loaded._resolved.runtime.capabilities["agent.continuation-policy"].plugin == "sage.agent.continuation.deterministic"
+        assert app.runtime_configuration == baseline
+        selected.capabilities.clear()
+        assert loaded._resolved.runtime.capabilities
+    finally:
+        await app.close()
+
+
+async def test_distinct_agent_builds_overlap_and_identical_loads_coalesce(tmp_path, monkeypatch):
+    from sagents.v2.builder import SAgentBuilder
+    app = await build_registered_app(tmp_path, models=TEST_MODELS, model=model())
+    original = SAgentBuilder._build_package
+    entered = set()
+    both = asyncio.Event()
+    builds = []
+    async def observed(builder, resolved, **kwargs):
+        builds.append(resolved.package_id)
+        entered.add(resolved.package_id)
+        if len(entered) == 2:
+            both.set()
+        await asyncio.wait_for(both.wait(), 3)
+        return await original(builder, resolved, **kwargs)
+    monkeypatch.setattr(SAgentBuilder, "_build_package", observed)
+    other = package().model_copy(update={"metadata": package().metadata.model_copy(update={"id": "other"})})
+    try:
+        one, same, two = await asyncio.gather(app.load_agent(package()), app.load_agent(package()), app.load_agent(other))
+        assert one is same
+        assert set(builds) == {one.id, two.id}
+        assert len(builds) == 2
+    finally:
+        await app.close()
+
+
+async def test_evicted_revision_restores_exact_run_configuration(tmp_path):
+    app = await build_registered_app(tmp_path, models=TEST_MODELS, model=model())
+    try:
+        first = await app.load_agent(package())
+        middle_package = package().model_copy(update={"metadata": package().metadata.model_copy(update={"version": "2"})})
+        middle = await app.update_agent(agent=first, package=middle_package)
+        latest_package = package().model_copy(update={"metadata": package().metadata.model_copy(update={"version": "3"})})
+        latest = await app.update_agent(agent=middle, package=latest_package)
+        app._loaded_agents.max_idle_revisions = 0
+        await app._loaded_agents.prune_revisions()
+        assert middle._application._closed
+        assert latest._application._closed
+        run = await app.entrypoint().run_stream(command(middle, "restored"), context(), agent=middle)
+        assert (await run.wait()).resolved_spec_hash == middle.composition_hash
+        assert app.loaded_agents == (latest,)
+    finally:
+        await app.close()
+
+
+async def test_revision_cache_keeps_control_and_execution_references(tmp_path):
+    app = await build_registered_app(tmp_path, models=TEST_MODELS, model=model())
+    blocked = asyncio.Event()
+    task = None
+    try:
+        first = await app.load_agent(package())
+        second = await app.update_agent(agent=first, package=package().model_copy(
+            update={"metadata": package().metadata.model_copy(update={"version": "2"})}))
+        await app.update_agent(agent=second, package=package().model_copy(
+            update={"metadata": package().metadata.model_copy(update={"version": "3"})}))
+        catalog = app._loaded_agents
+        catalog.max_idle_revisions = 0
+        async with catalog.pin(second):
+            await catalog.prune_revisions()
+            assert not second._application._closed
+        agent = catalog.implementation(second)
+        task = asyncio.create_task(blocked.wait())
+        agent._tasks["active"] = task
+        await catalog.prune_revisions()
+        assert not second._application._closed
+        blocked.set()
+        await task
+        agent._tasks.pop("active")
+        await catalog.prune_revisions()
+        assert second._application._closed
+    finally:
+        if task is not None and not task.done():
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+        await app.close()
+
+
+async def test_same_package_builds_distinct_models_in_parallel(tmp_path, monkeypatch):
+    from copy import deepcopy
+    from sagents.v2.builder import SAgentBuilder
+    app = await build_registered_app(tmp_path, models=TEST_MODELS, model=model())
+    original = SAgentBuilder._build_package
+    hashes = set()
+    both = asyncio.Event()
+    async def observed(builder, resolved, **kwargs):
+        hashes.add(resolved.manifest_hash)
+        if len(hashes) == 2:
+            both.set()
+        await asyncio.wait_for(both.wait(), 3)
+        return await original(builder, resolved, **kwargs)
+    monkeypatch.setattr(SAgentBuilder, "_build_package", observed)
+    first_models, second_models = deepcopy(TEST_MODELS), deepcopy(TEST_MODELS)
+    first_models["models"]["primary"]["model"] = "first-model"
+    second_models["models"]["primary"]["model"] = "second-model"
+    try:
+        first, second = await asyncio.gather(
+            app.load_agent(package(), models=first_models),
+            app.load_agent(package(), models=second_models),
+        )
+        assert first._resolved.model_routes["primary"]["model"] == "first-model"
+        assert second._resolved.model_routes["primary"]["model"] == "second-model"
+        assert app.models.models["primary"].model == "test-model"
+        assert first.composition_hash != second.composition_hash
+    finally:
+        await app.close()
+
+
+async def test_concurrent_first_loads_cannot_publish_different_package_sources(tmp_path, monkeypatch):
+    from sagents.v2.builder import SAgentBuilder
+    app = await build_registered_app(tmp_path, models=TEST_MODELS, model=model())
+    original = SAgentBuilder._build_package
+    entered = 0
+    both = asyncio.Event()
+
+    async def observed(builder, resolved, **kwargs):
+        nonlocal entered
+        entered += 1
+        if entered == 2:
+            both.set()
+        await asyncio.wait_for(both.wait(), 3)
+        return await original(builder, resolved, **kwargs)
+
+    monkeypatch.setattr(SAgentBuilder, "_build_package", observed)
+    changed = package().model_copy(update={"metadata": package().metadata.model_copy(update={"version": "2"})})
+    try:
+        results = await asyncio.gather(app.load_agent(package()), app.load_agent(changed), return_exceptions=True)
+        successes = [item for item in results if not isinstance(item, BaseException)]
+        failures = [item for item in results if isinstance(item, BaseException)]
+        assert len(successes) == 1
+        assert len(failures) == 1
+        assert isinstance(failures[0], ValueError)
+        assert "update_agent" in str(failures[0])
+        assert app.loaded_agents == (successes[0],)
+    finally:
+        await app.close()
+
+
+async def test_idle_current_packages_release_resources_and_restore_old_handles(tmp_path):
+    app = await build_registered_app(tmp_path, models=TEST_MODELS, model=model())
+    try:
+        root = await app.load_agent(package())
+        other = package().model_copy(update={"metadata": package().metadata.model_copy(update={"id": "test.idle-current"})})
+        current = await app.load_agent(other)
+        catalog = app._loaded_agents
+        catalog.max_idle_revisions = 0
+        await catalog.prune_revisions()
+        assert current._application._closed
+        assert not root._application._closed
+        assert len(catalog.revisions) == 1
+        assert app.loaded_agents == (root, current)
+        stream = await app.entrypoint().run_stream(command(current, "idle-current-restored"), context(), agent=current)
+        assert (await stream.wait()).state.value == "completed"
+        await stream.detach()
+        assert app.loaded_agents == (root, current)
+        changed = other.model_copy(update={"metadata": other.metadata.model_copy(update={"version": "2"})})
+        latest = await app.update_agent(agent=current, package=changed)
+        assert latest.version != current.version
+    finally:
+        await app.close()
+
+
+async def test_interface_projection_pins_revision_until_detach(tmp_path):
+    app = await build_registered_app(tmp_path, models=TEST_MODELS, model=model())
+    stream = None
+    try:
+        await app.load_agent(package())
+        other = package().model_copy(update={"metadata": package().metadata.model_copy(update={"id": "test.interface-pin"})})
+        agent = await app.load_agent(other)
+        stream = await app.run_interface("native", command(agent, "projection-pin"), context(), agent=agent)
+        assert (await stream.wait()).state.value == "completed"
+        await anext(stream.results)
+        catalog = app._loaded_agents
+        catalog.max_idle_revisions = 0
+        await catalog.prune_revisions()
+        assert not agent._application._closed
+        await stream.detach()
+        assert not catalog._users
+        await catalog.prune_revisions()
+        assert agent._application._closed
+    finally:
+        if stream is not None:
+            await stream.detach()
+        await app.close()
+
+
+async def test_synchronous_agent_lookup_restores_an_idle_current_revision(tmp_path):
+    from sagents.v2 import SAgent
+    app = await build_registered_app(tmp_path, models=TEST_MODELS, model=model())
+    try:
+        await app.load_agent(package())
+        other = package().model_copy(update={"metadata": package().metadata.model_copy(update={"id": "test.sync-cold"})})
+        loaded = await app.load_agent(other)
+        catalog = app._loaded_agents
+        catalog.max_idle_revisions = 0
+        await catalog.prune_revisions()
+        assert loaded._application._closed
+        exported = app.agent(loaded.id)
+        assert isinstance(exported, SAgent)
+        assert app.agent(loaded.id) is exported
+        stream = await exported.run_stream(command(loaded, "sync-cold"), context())
+        assert (await stream.wait()).state.value == "completed"
+        await stream.detach()
+        await catalog.prune_revisions()
+        stream = await exported.run_stream(command(loaded, "sync-cold-again"), context())
+        assert (await stream.wait()).state.value == "completed"
+        await stream.detach()
+    finally:
+        await app.close()
+
+
+async def test_exported_agent_synchronous_drive_and_subscription_release_leases(tmp_path):
+    from sagents.v2.contracts.run_state import EventCursor
+    app = await build_registered_app(tmp_path, models=TEST_MODELS, model=model())
+    try:
+        await app.load_agent(package())
+        other = package().model_copy(update={"metadata": package().metadata.model_copy(update={"id": "test.sync-drive"})})
+        loaded = await app.load_agent(other)
+        catalog = app._loaded_agents
+        catalog.max_idle_revisions = 0
+        await catalog.prune_revisions()
+        exported = app.agent(loaded.id)
+        initial = await exported.run_stream(command(loaded, "sync-drive"), context())
+        assert (await initial.wait()).state.value == "completed"
+        pending = initial.handle
+        await initial.detach()
+        await catalog.prune_revisions()
+        stream = exported.drive_accepted_run(pending, context())
+        assert isinstance(stream.execution, asyncio.Task)
+        assert (await stream.wait()).state.value == "completed"
+        await stream.detach()
+        await catalog.prune_revisions()
+        events = exported.subscribe_events(EventCursor(run_id=pending.run_id, run_sequence=0), context())
+        await anext(events)
+        assert catalog._users
+        await catalog.prune_revisions()
+        assert (loaded.package_id, loaded.version) in catalog.revisions
+        await events.aclose()
+        assert not catalog._users
+        await catalog.prune_revisions()
+        assert (loaded.package_id, loaded.version) not in catalog.revisions
+    finally:
+        await app.close()
+
+
+async def test_cold_exported_runtime_admits_with_its_original_workspace(tmp_path):
+    import sys
+    from copy import deepcopy
+    from sagents.v2.package.manifest.runtime import CapabilitySelection
+    app = await build_registered_app(tmp_path, models=TEST_MODELS, model=model())
+    streams = []
+    try:
+        await app.load_agent(package())
+        selected = app.runtime_configuration
+        workspace = tmp_path / "isolated-workspace"
+        selected.capabilities["execution.binding"] = CapabilitySelection(
+            plugin="sage.execution.binding.local-workspace",
+            config={"workspace": str(workspace), "isolation_python": sys.executable})
+        models = deepcopy(TEST_MODELS)
+        models["models"]["primary"]["model"] = "frozen-original-model"
+        other = package().model_copy(update={"metadata": package().metadata.model_copy(update={"id": "test.runtime-cold"})})
+        loaded = await app.load_agent(other, runtime=selected, models=models)
+        catalog = app._loaded_agents
+        catalog.max_idle_revisions = 0
+        await catalog.prune_revisions()
+        assert loaded._application._closed
+        exported = app.agent(loaded.id)
+        for method, key in (("start_run", "cold-runtime-start"), ("stream", "cold-runtime-stream")):
+            result = await getattr(exported.runtime, method)(command(loaded, key), context())
+            handle = result.handle if method == "stream" else result
+            if method == "stream":
+                streams.append(result)
+            stored = await exported.runtime.session_store.get_start_command(handle.run_id)
+            assert stored.config.execution_snapshot.workspace_root == str(workspace)
+            assert stored.resolved_spec_hash == loaded.composition_hash
+            live = catalog.revisions[(loaded.package_id, loaded.version)]
+            assert live._resolved.model_routes["primary"]["model"] == "frozen-original-model"
+    finally:
+        for stream in streams:
+            await stream.detach()
+        await app.close()
