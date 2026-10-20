@@ -17,31 +17,20 @@ from sagents.v2.contracts.run_state import RunState
     (RunState.CANCELLED, True), (RunState.COMPLETED, True),
 ])
 async def test_idle_check_includes_suspended_and_unwinding_runs(state, driving):
-    async def owner(_):
-        return "owner"
-    async def threads(_):
-        return [SimpleNamespace(thread_id="session")]
-    async def descendants(*_):
-        return []
-    async def runs(*_):
-        return [SimpleNamespace(run_id="run")]
-    async def dispatchable():
-        return []
-    async def get_run(_):
-        return SimpleNamespace(state=state)
-    async def command(_):
-        return SimpleNamespace(agent_id="agent", config=SimpleNamespace(
-            metadata={"server_v2.workspace_user_id": "tenant"}))
-    store = SimpleNamespace(list_dispatchable_runs=dispatchable, get_run=get_run, get_start_command=command)
+    async def bindings(*args, **kwargs):
+        from app.v2.server.conversations.bindings import WorkspaceSessionPage
+        return WorkspaceSessionPage(["session"], [], None)
+    async def nonterminal(session_ids):
+        assert session_ids == ["session"]
+        return state not in {RunState.CANCELLED, RunState.COMPLETED}
+    store = SimpleNamespace(has_nonterminal_session_trees=nonterminal)
     service = SimpleNamespace(
-        threads=SimpleNamespace(list_for=threads), context_for=lambda _: None,
+        threads=SimpleNamespace(workspace_session_page=bindings),
         application=SimpleNamespace(runtime=SimpleNamespace(session_store=store)),
-        session_access=SimpleNamespace(list_descendant_sessions=descendants, list_session_runs=runs),
-        runs=SimpleNamespace(catalog=SimpleNamespace(agent_owner=owner),
-                             execution=SimpleNamespace(driving=lambda _: driving)),
+        runs=SimpleNamespace(execution=SimpleNamespace(workspace_driving=lambda *_: driving)),
     )
     with pytest.raises(SageV2Error, match="unfinished"):
-        await require_idle(service, "tenant", "agent")
+        await require_idle(service, "tenant", "agent", owner_id="owner")
 
 
 @pytest.mark.asyncio

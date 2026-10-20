@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from tests.sagents.v2.event_fixture import event_data
+
 from datetime import datetime, timezone
 
 import pytest
@@ -7,31 +9,15 @@ from pydantic import ValidationError
 
 from sagents.v2.contracts.events import (
     EVENT_CATALOG,
-    ArtifactEventData,
-    CheckpointEventData,
-    ContinuationEventData,
     EventDurability,
     EventSource,
     EventSourceType,
-    FlowEventData,
     InteractionEventData,
     ItemEventData,
-    JobEventData,
-    PolicyEventData,
-    ProtocolEventData,
     RunEventData,
     RuntimeEvent,
-    SandboxEventData,
-    SessionCommitEventData,
-    SkillStateEventData,
-    SteeringEventData,
-    StepEventData,
-    ToolEventData,
-    TurnEventData,
-    UsageEventData,
 )
 from sagents.v2.contracts.items import (
-    ArtifactRef,
     ItemSnapshot,
     ItemStatus,
     JsonBlock,
@@ -40,7 +26,6 @@ from sagents.v2.contracts.items import (
     TextBlock,
     ToolCallItemData,
     ToolResultItemData,
-    UsageSummary,
 )
 from sagents.v2.contracts.errors import ErrorCategory, RuntimeErrorInfo
 from sagents.v2.contracts.principals import ActorRef, PrincipalType
@@ -57,76 +42,9 @@ ACTOR = ActorRef(principal_id="agent_1", principal_type=PrincipalType.AGENT)
 SOURCE = EventSource(source_type=EventSourceType.AGENT)
 
 
-def data_for(kind):
-    if kind == "skill_state":
-        return SkillStateEventData(state={})
-    if kind == "run":
-        return RunEventData(state="running")
-    if kind == "turn":
-        return TurnEventData(state="started")
-    if kind == "step":
-        return StepEventData(state="started")
-    if kind == "item":
-        return ItemEventData(operation="started")
-    if kind == "tool":
-        return ToolEventData(tool_call_id="call_1", tool_name="tool", state="started")
-    if kind == "job":
-        return JobEventData(job_id="job_1", state="running")
-    if kind == "interaction":
-        return InteractionEventData(
-            interaction_id="interaction_1",
-            interaction_type="approval",
-            state="requested",
-        )
-    if kind == "checkpoint":
-        return CheckpointEventData(
-            checkpoint_id="checkpoint_1",
-            checkpoint_codec_version="1",
-            run_sequence=1,
-            session_revision=1,
-        )
-    if kind == "steering":
-        return SteeringEventData(steer_id="steer_1", state="accepted")
-    if kind == "continuation":
-        return ContinuationEventData(
-            action="complete_run",
-            reason_code="done",
-            reason="done",
-            decision_hash="sha256:decision",
-        )
-    if kind == "flow":
-        return FlowEventData(state="started", flow_id="flow_1")
-    if kind == "artifact":
-        return ArtifactEventData(
-            state="created",
-            artifact=ArtifactRef(
-                artifact_id="artifact_1", uri="artifact://1", name="file.txt"
-            ),
-        )
-    if kind == "sandbox":
-        return SandboxEventData(sandbox_id="sandbox_1", state="ready")
-    if kind == "policy":
-        return PolicyEventData(
-            decision_id="decision_1", decision="allow", policy_version="1"
-        )
-    if kind == "usage":
-        return UsageEventData(usage=UsageSummary(input_tokens=1))
-    if kind == "protocol":
-        return ProtocolEventData(state="snapshot")
-    if kind == "session_commit":
-        return SessionCommitEventData(
-            proposal_id="proposal_1",
-            source_run_id="run_1",
-            state="proposed",
-            base_session_revision=0,
-            base_session_sequence=0,
-        )
-    raise AssertionError(kind)
-
-
 def event(event_type, *, data=None, sequence=1, item_id=None):
     definition = EVENT_CATALOG[event_type]
-    value = data or data_for(definition.data_kind)
+    value = data or event_data(definition.data_kind)
     return RuntimeEvent(
         event_id=f"event_{sequence}",
         type=event_type,
@@ -149,18 +67,110 @@ def event(event_type, *, data=None, sequence=1, item_id=None):
     )
 
 
+# Minimal catalog payloads deliberately omit Item snapshots. The lifecycle tests
+# below exercise completed text, reasoning, tool calls, and structured results.
+AG_UI_EXTENSION = (("CUSTOM",), ("ag_ui.sage_extension",))
+EXPECTED_FAMILY_PROJECTIONS = {
+    "ag-ui": {
+        **dict.fromkeys((
+            "run", "item", "usage", "interaction", "flow", "sandbox", "policy",
+            "steering", "job", "protocol", "session_commit", "checkpoint",
+        ), AG_UI_EXTENSION),
+        **dict.fromkeys(("continuation", "skill_state", "step", "turn"),
+                        ((), ("ag_ui.unsupported",))),
+        "artifact": (("ACTIVITY_SNAPSHOT",), ()),
+        "tool": (("CUSTOM",), ("ag_ui.tool_state_extension",)),
+    },
+    "acp": {
+        **dict.fromkeys((
+            "run", "usage", "interaction", "flow", "sandbox", "policy", "steering",
+            "job", "protocol", "session_commit", "checkpoint", "continuation",
+            "skill_state", "step", "turn",
+        ), ((), ("acp.unsupported",))),
+        "item": ((), ("acp.item_incomplete",)),
+        "artifact": (("session/update",), ()),
+        "tool": (("session/update",), ()),
+    },
+    "mcp": {
+        **dict.fromkeys((
+            "run", "item", "usage", "interaction", "flow", "sandbox", "policy",
+            "steering", "protocol", "session_commit", "checkpoint", "continuation",
+            "skill_state", "step", "turn", "artifact",
+        ), ((), ("mcp.not_run_protocol",))),
+        "tool": (("notifications/progress",), ("mcp.progress_only",)),
+        "job": (("notifications/progress",), ("mcp.progress_only",)),
+    },
+    "a2a": {
+        **dict.fromkeys((
+            "run", "item", "usage", "interaction", "flow", "sandbox", "policy",
+            "steering", "job", "protocol", "session_commit", "checkpoint",
+            "continuation", "skill_state", "step", "turn", "tool",
+        ), ((), ("a2a.unsupported",))),
+        "artifact": (("task/artifact-update",), ()),
+    },
+}
+EXPECTED_EVENT_PROJECTIONS = {
+    "ag-ui": {
+        "run.started": (("RUN_STARTED",), ()),
+        "run.completed": (("RUN_FINISHED",), ()),
+        "run.failed": (("RUN_ERROR",), ()),
+        "message.started": (("TEXT_MESSAGE_START",), ()),
+        "message.delta": (("TEXT_MESSAGE_START", "TEXT_MESSAGE_CONTENT"), ()),
+        "reasoning.started": (("REASONING_START", "REASONING_MESSAGE_START"), ()),
+        "reasoning.delta": (("REASONING_START", "REASONING_MESSAGE_START",
+                             "REASONING_MESSAGE_CONTENT"), ()),
+    },
+    "acp": {
+        **dict.fromkeys(("run.started", "run.completed", "run.failed", "run.cancelled"),
+                        (("session/update",), ())),
+        "interaction.requested": (("session/request_permission",), ()),
+    },
+    "mcp": {"interaction.requested": (("elicitation/create",), ())},
+    "a2a": {
+        **dict.fromkeys((
+            "run.queued", "run.accepted", "run.started", "run.resumed",
+            "run.completed", "run.failed", "run.cancelled", "run.suspended",
+            "interaction.requested", "message.delta",
+        ), (("task/status-update",), ())),
+        "artifact.deleted": ((), ("a2a.artifact_delete",)),
+    },
+}
+EXPECTED_LOSS_FIDELITY = {
+    "ag_ui.sage_extension": ("extension", True),
+    "ag_ui.tool_state_extension": ("extension", True),
+    "ag_ui.unsupported": ("unsupported", False),
+    "acp.unsupported": ("unsupported", False),
+    "acp.item_incomplete": ("unsupported", False),
+    "mcp.not_run_protocol": ("unsupported", False),
+    "mcp.progress_only": ("lossy", False),
+    "a2a.unsupported": ("unsupported", False),
+    "a2a.artifact_delete": ("unsupported", False),
+}
+
+
 @pytest.mark.parametrize(
     "adapter_factory",
     [AgUiProtocolAdapter, AcpProtocolAdapter, McpProtocolAdapter, A2AProtocolAdapter],
 )
 @pytest.mark.parametrize("event_type", sorted(EVENT_CATALOG))
-def test_every_catalog_event_is_mapped_or_explicitly_loss_reported(
+def test_every_catalog_event_keeps_its_expected_mapping_and_loss_fidelity(
     adapter_factory, event_type
 ):
-    result = adapter_factory().translate(event(event_type))
-    assert result.frames or result.losses
+    adapter = adapter_factory()
+    result = adapter.translate(event(event_type))
+    expected_frames, expected_losses = EXPECTED_EVENT_PROJECTIONS[adapter.protocol].get(
+        event_type,
+        EXPECTED_FAMILY_PROJECTIONS[adapter.protocol][EVENT_CATALOG[event_type].data_kind],
+    )
+    assert tuple(frame.name for frame in result.frames) == expected_frames
+    assert tuple(loss.code for loss in result.losses) == expected_losses
+    assert tuple((loss.fidelity.value, loss.preserved_by_extension) for loss in result.losses) == tuple(
+        EXPECTED_LOSS_FIDELITY[code] for code in expected_losses
+    )
     assert all(frame.source_event_id == "event_1" for frame in result.frames)
     assert all(loss.source_event_id == "event_1" for loss in result.losses)
+    assert all(frame.source_run_sequence == 1 for frame in result.frames)
+    assert all(loss.source_event_type == event_type for loss in result.losses)
 
 
 def test_adapter_result_contract_rejects_silent_drop():

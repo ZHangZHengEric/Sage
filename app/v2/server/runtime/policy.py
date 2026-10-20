@@ -47,7 +47,13 @@ def frozen_execution(command, *, catalog_agent_id: str | None = None) -> tuple[s
     if raw is None:
         return None, ExecutionPolicy()
     policy = ExecutionPolicy.model_validate(raw["policy"])
-    if raw["policy_hash"] != policy.fingerprint or raw["agent_id"] != (catalog_agent_id or command.agent_id):
+    expected = catalog_agent_id or command.agent_id
+    if raw["agent_id"] != expected and catalog_agent_id is None:
+        from app.v2.server.conversations.composition import load_composition
+        composition = load_composition(command, user_id=raw["user_id"])
+        if composition is not None:
+            expected = composition.agent.id
+    if raw["policy_hash"] != policy.fingerprint or raw["agent_id"] != expected:
         raise ValueError("execution grant does not match the admitted Run")
     return raw["key_id"], policy
 
@@ -57,12 +63,31 @@ def server_ceiling(settings) -> ExecutionPolicy:
                            approval_timeout_seconds=settings.approval_timeout_seconds)
 
 
-async def live_execution_policy(command, *, users, keys, catalog, settings, user_id, catalog_agent_id=None):
-    source_agent_id = catalog_agent_id or command.agent_id
-    key_id, frozen = frozen_execution(command, catalog_agent_id=source_agent_id)
+async def live_execution_policy(command, *, users, keys, catalog, settings, user_id, catalog_agent_id=None,
+                                package_authorizer=None, context=None):
+    key_id, frozen = frozen_execution(command, catalog_agent_id=catalog_agent_id)
     raw = command.config.metadata.get(EXECUTION_METADATA_KEY)
+    source_agent_id = catalog_agent_id or (raw["agent_id"] if raw is not None else command.agent_id)
     if raw is not None and raw.get("user_id") != user_id:
         return None
+    from app.v2.server.conversations.composition import load_composition
+    composition = load_composition(command, user_id=user_id)
+    package = composition.package if composition is not None else None
+    if package is not None:
+        # Direct Packages carry an authorized immutable bundle, not a Catalog
+        # Agent row. Recheck the same host Package policy used at HTTP admission
+        # on every capability decision; a missing/revoked grant fails closed.
+        if package_authorizer is None or context is None or key_id is not None:
+            return None
+        if (context.actor.principal_id != user_id or context.actor.tenant_id != user_id
+                or composition.agent.id != source_agent_id):
+            return None
+        try:
+            await package_authorizer("run", package, context)
+        except PermissionError:
+            return None
+        user = await users.get_by_id(user_id)
+        return intersect_policies(frozen, user.execution_policy, server_ceiling(settings)) if user is not None else None
     reads = [users.get_by_id(user_id), catalog.get_execution_policy(user_id, source_agent_id)]
     if key_id is not None:
         reads.append(keys.get(key_id))

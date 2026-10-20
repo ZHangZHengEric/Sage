@@ -23,6 +23,8 @@ ref: v2-DEVELOPMENT
 
 ## Validate a change
 
+Follow the [testing guide](TESTING.md) for case selection, fixture sharing, asynchronous synchronization, and evidence limits. Agent instructions for test changes live in `tests/AGENTS.md`.
+
 Use the Python 3.12+ environment from [Getting Started](applications/GETTING_STARTED.md). Install server extras for server tests:
 
 ```bash

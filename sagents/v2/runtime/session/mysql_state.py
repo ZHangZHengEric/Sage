@@ -31,6 +31,7 @@ from sagents.v2.runtime.session.journal import (
 )
 from sagents.v2.runtime.session.state import SessionStoreCoordinator
 from sagents.v2.runtime.session.mysql_history import MysqlHistoryQueries
+from sagents.v2.runtime.session.mysql_workspace import MysqlWorkspaceQueries
 from sagents.v2.runtime.session.mysql_cache import IdleSessionCache, cached_session_operation
 from sagents.v2.runtime.observability.logs import get_logger
 
@@ -128,7 +129,7 @@ def parse_mysql_dsn(dsn: str) -> dict[str, Any]:
     }
 
 
-class _MysqlSessionState(MysqlHistoryQueries, SessionStoreCoordinator):
+class _MysqlSessionState(MysqlWorkspaceQueries, MysqlHistoryQueries, SessionStoreCoordinator):
     """Single-process MySQL adapter around the shared state coordinator."""
 
     format_version = "sage.session.mysql/v2"
@@ -285,7 +286,8 @@ class _MysqlSessionState(MysqlHistoryQueries, SessionStoreCoordinator):
                 created_at DATETIME(6) NOT NULL,
                 updated_at DATETIME(6) NOT NULL,
                 compact_state JSON NOT NULL,
-                PRIMARY KEY (session_id)
+                PRIMARY KEY (session_id),
+                KEY sessions_parent_id (parent_session_id)
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
             """,
             ),
@@ -819,7 +821,9 @@ class _MysqlSessionState(MysqlHistoryQueries, SessionStoreCoordinator):
         self, session_id: str, namespace: str, key: str, value: Any
     ) -> None:
         await self._ensure_session_loaded(session_id)
-        await super().put_derived_state(session_id, namespace, key, value)
+        # SQL is authoritative for derived state. Keeping the coordinator's
+        # unused copy would bypass the Session cache byte budget.
+        await super().get_session(session_id)
         await self._ensure_ready()
         async with self._writer_connection() as connection:
             try:
@@ -850,7 +854,7 @@ class _MysqlSessionState(MysqlHistoryQueries, SessionStoreCoordinator):
         self, session_id: str, namespace: str, key: str
     ) -> None:
         await self._ensure_session_loaded(session_id)
-        await super().delete_derived_state(session_id, namespace, key)
+        await super().get_session(session_id)
         await self._ensure_ready()
         async with self._writer_connection() as connection:
             try:

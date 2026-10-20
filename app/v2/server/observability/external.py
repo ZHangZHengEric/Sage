@@ -1,10 +1,11 @@
 """Server timing projection and observation-backend configuration."""
 from __future__ import annotations
 import asyncio
-from collections import defaultdict
+from collections import defaultdict, OrderedDict
 from datetime import datetime, timezone
 import json
 import os
+import time
 from urllib.parse import unquote
 from threading import RLock
 import httpx
@@ -48,9 +49,15 @@ LOG_ATTRIBUTES = frozenset(
 class ExternalDiagnostics(ExternalEvidenceSink):
     """Host timing projection over the observation evidence capability."""
 
-    def __init__(self, **options):
+    def __init__(self, *, performance_max_entries=1024, performance_max_rows=4096,
+                 performance_idle_seconds=300, **options):
+        if min(performance_max_entries, performance_max_rows, performance_idle_seconds) <= 0:
+            raise ValueError('invalid performance retention limits')
         super().__init__(**options)
-        self._performance = {}
+        self._performance = OrderedDict()
+        self._performance_max_entries = performance_max_entries
+        self._performance_max_rows = performance_max_rows
+        self._performance_idle_seconds = performance_idle_seconds
         self._performance_lock = RLock()
         self._query_cache = QueryCache()
 
@@ -62,16 +69,61 @@ class ExternalDiagnostics(ExternalEvidenceSink):
             setter(self)
 
     def _pending(self, key):
-        return self._performance.setdefault(key, {
+        now = time.monotonic()
+        while self._performance:
+            first = next(iter(self._performance))
+            if now - self._performance[first]['last_seen'] < self._performance_idle_seconds:
+                break
+            _, expired = self._performance.popitem(last=False)
+            self._discard_performance(expired, 'expired')
+        pending = self._performance.pop(key, None)
+        if pending is None:
+            while len(self._performance) >= self._performance_max_entries:
+                _, overflow = self._performance.popitem(last=False)
+                self._discard_performance(overflow, 'entry_limit')
+            pending = {
             "rows": [], "span": None, "sink": None, "ended_span": None,
             "host_managed": False, "finished_requested": False,
             "raw_logs": 0, "raw_logs_dropped": 0,
-        })
+            "dropped_rows": 0,
+            }
+        pending['last_seen'] = now
+        self._performance[key] = pending
+        return pending
+
+    def _discard_performance(self, pending, reason):
+        self.capture_failures += 1
+        # Keep only observed cohort/start facts on the native span. Otherwise a
+        # later resume could look complete after its earlier segment vanished.
+        anchors = []
+        seen = set()
+        for row in pending['rows']:
+            event = row['data'].get('event')
+            if event in {'server.run.performance.accepted', 'server.run.performance.resuming', 'agent.run.started'} and event not in seen:
+                seen.add(event)
+                anchors.append(row)
+        loss = {'sage.performance.incomplete': True, 'sage.performance.loss_reason': reason,
+                'sage.performance.format': 'events/v3', PAYLOAD: json.dumps(anchors, default=str),
+                'sage.performance.service': self.service, 'sage.performance.environment': self.environment}
+        if anchors:
+            starts = [row['at'] for row in anchors]
+            starts.extend(timestamp(row['data']['attributes']['started_at']) for row in anchors
+                          if row['data'].get('attributes', {}).get('started_at'))
+            loss['sage.performance.started_at'] = datetime.fromtimestamp(min(starts), timezone.utc).isoformat()
+        if pending['span'] is not None:
+            # The live handle carries this marker to its eventual native end.
+            # Only observation state is discarded; execution continues normally.
+            pending['span'].attributes.update(loss)
+        if pending['ended_span'] is not None:
+            ended = pending['ended_span']
+            pending['sink'].export_span(ended.model_copy(update={'attributes': {**ended.attributes, **loss}}))
 
     def _raw_record_admitted(self, kind, session_id, run_id, accepted):
         if kind == "log":
             with self._performance_lock:
-                pending = self._pending((session_id, run_id))
+                pending = self._performance.get((session_id, run_id))
+                if pending is None:
+                    return
                 pending["raw_logs"] += 1
                 pending["raw_logs_dropped"] += not accepted
 
@@ -117,7 +169,11 @@ class ExternalDiagnostics(ExternalEvidenceSink):
             key = row["session_id"], row["run_id"]
             with self._performance_lock:
                 pending = self._pending(key)
-                pending["rows"].append({"kind": kind, "data": data, "at": observed})
+                if len(pending['rows']) < self._performance_max_rows:
+                    pending["rows"].append({"kind": kind, "data": data, "at": observed})
+                else:
+                    pending['dropped_rows'] += 1
+                    self.capture_failures += 1
                 event = data.get("event", "")
                 if event in {"server.run.performance.accepted", "server.run.performance.resuming"}:
                     pending["host_managed"] = True
@@ -133,15 +189,16 @@ class ExternalDiagnostics(ExternalEvidenceSink):
         if pending is None:
             return
         if pending["span"] is None:
-            if incomplete:
-                self._performance.pop(key)
-            else:
-                pending["finished_requested"] = True
+            # Completion cannot acquire a new execution span later. In
+            # particular, the transport may have refused its root at admission.
+            self._performance.pop(key)
             return
         if pending["ended_span"] is None and not incomplete:
             pending["finished_requested"] = True
             return
         self._performance.pop(key)
+        interrupted = incomplete
+        incomplete = incomplete or bool(pending['dropped_rows'])
         rows = pending["rows"]
         span = pending["ended_span"] or pending["span"].model_copy(update={
             "end_time": utc_now(), "status": TraceStatus.UNSET,
@@ -150,11 +207,12 @@ class ExternalDiagnostics(ExternalEvidenceSink):
                  "sage.performance.format": "events/v3",
                  "sage.performance.service": self.service,
                  "sage.performance.environment": self.environment,
-                 "sage.performance.incomplete": incomplete}
+                 "sage.performance.incomplete": incomplete,
+                 "sage.performance.dropped_rows": pending['dropped_rows']}
         if self.raw_capture:
             attrs["sage.diagnostic.log_count"] = pending["raw_logs"]
             attrs["sage.diagnostic.dropped_log_records"] = pending["raw_logs_dropped"]
-        if incomplete:
+        if interrupted:
             attrs["sage.interrupted"] = True
         agent_ids = [r["data"].get("attributes", {}).get("agent_id") for r in rows if r["kind"] == "log"]
         if any(agent_ids):
@@ -239,9 +297,17 @@ class ExternalDiagnostics(ExternalEvidenceSink):
         return result
 
     def write(self, record):
+        if (not self.closed and record.session_id and record.run_id and record.event in {
+            'server.run.performance.accepted', 'server.run.performance.resuming', 'agent.run.started',
+        }):
+            # Count the first raw log of a segment, but late replay/download
+            # logs must not resurrect an already exported performance buffer.
+            with self._performance_lock:
+                self._pending((record.session_id, record.run_id))
         super().write(record)
         if record.event in EVENTS:
-            self.emit("log", record.model_dump(mode="python"), at=record.timestamp)
+            self.emit("log", {**{key: getattr(record, key) for key in LOG_FIELDS},
+                              "attributes": record.attributes}, at=record.timestamp)
 
 def timing_rows(spans):
     events, models = defaultdict(list), defaultdict(dict)
@@ -256,7 +322,8 @@ def timing_rows(spans):
             continue
         seen.add(identity)
         payload = attrs[PAYLOAD]
-        rows.extend(json.loads("".join(payload) if isinstance(payload, (list, tuple)) else payload))
+        rows.extend({**row, '_observation_incomplete': bool(attrs.get('sage.performance.incomplete'))}
+                    for row in json.loads("".join(payload) if isinstance(payload, (list, tuple)) else payload))
     for observation in sorted(rows, key=lambda r: r["at"]):
         row = observation["data"]
         rid = row["run_id"]
@@ -277,6 +344,7 @@ def timing_rows(spans):
             turn_id=row.get("turn_id"),
             started_at=timestamp(values.get("started_at")),
             state=values.get("run_state"),
+            _observation_incomplete=observation.get('_observation_incomplete', False),
         )
         events[rid].append(event)
         if (

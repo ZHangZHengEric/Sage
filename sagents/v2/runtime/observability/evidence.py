@@ -79,7 +79,7 @@ class ExternalEvidenceSink(NoopDiagnosticSink):
             and getattr(self.trace_sink, "content_mode", None) == "raw"
         )
 
-    def _evidence(self, kind, *, session_id, run_id, _trace_context=None, _target_sink=None, **payload):
+    def _evidence(self, kind, *, session_id, run_id, _trace_context=None, _target_sink=None, _payload=None, **payload):
         if not self.raw_capture or self.closed or not session_id or not run_id:
             return False
         try:
@@ -88,7 +88,7 @@ class ExternalEvidenceSink(NoopDiagnosticSink):
             trace_id = active[0] if active else hashlib.sha256(
                 f"diagnostic:{self.project}:{self.service}:{self.environment}:{run_id}".encode()).hexdigest()[:32]
             accepted = self._raw_pipeline.submit(target, trace_id, active[1] if active else None,
-                                                 session_id, run_id, kind, payload, utc_now())
+                                                 session_id, run_id, kind, _payload if _payload is not None else payload, utc_now())
             if not accepted:
                 self.capture_failures += 1
             self._raw_record_admitted(kind, session_id, run_id, accepted)
@@ -119,8 +119,8 @@ class ExternalEvidenceSink(NoopDiagnosticSink):
             request_id=request.request_id,
             request=kwargs.get("wire_request")
             if kwargs.get("wire_request") is not None
-            else request.model_dump(mode="json"),
-            normalized_request=request.model_dump(mode="json"),
+            else request,
+            normalized_request=request,
             provider=kwargs.get("provider"),
             request_format="provider_wire" if kwargs.get("wire_request") is not None else "normalized",
         )
@@ -139,7 +139,7 @@ class ExternalEvidenceSink(NoopDiagnosticSink):
             session_id=session_id,
             run_id=request.run_id,
             request_id=request.request_id,
-            response=response.model_dump(mode="json") if response is not None else None,
+            response=response,
         )
         self._model(session_id, request, completed_at=utc_now().isoformat())
 
@@ -294,7 +294,7 @@ class ExternalEvidenceSink(NoopDiagnosticSink):
         return rows, truncated
 
     async def snapshot(self, session_id, run_ids):
-        await self.flush_raw()
+        raw_flushed = await self.flush_raw()
         async with httpx.AsyncClient() as client:
             spans, truncated = await self._query(
                 client, start=0, end=utc_now().timestamp(), session_id=session_id
@@ -394,7 +394,12 @@ class ExternalEvidenceSink(NoopDiagnosticSink):
                       if s.get("name") == "agent.run" and "sage.diagnostic.log_count" in s["attributes"]]
         expected_logs = sum(log_counts)
         dropped_logs = max(sum(gap["kind"] == "log" for gap in gaps), expected_logs - len(logs), 0)
-        logs_complete = bool(log_counts and expected_logs == len(logs) and not dropped_logs)
+        raw_statistics = self.raw_statistics()
+        transport_statistics = getattr(self.trace_sink, 'statistics', None)
+        export_statistics = transport_statistics() if callable(transport_statistics) else {}
+        pending_writes = (not raw_flushed or raw_statistics['retained_bytes'] > 0
+                          or export_statistics.get('retained_bytes', 0) > 0)
+        logs_complete = bool(log_counts and expected_logs == len(logs) and not dropped_logs and not pending_writes)
         return {
             **tool_evidence(spans, logs),
             "models": projected_models,
@@ -410,7 +415,10 @@ class ExternalEvidenceSink(NoopDiagnosticSink):
             "logs_complete": logs_complete if self.raw_capture or log_counts else None,
             "expected_log_records": expected_logs if log_counts else None,
             "capture_failures_since_start": self.capture_failures,
-            "raw_capture_statistics": self.raw_statistics(),
+            "raw_capture_statistics": raw_statistics,
+            "trace_export_statistics": export_statistics,
+            "pending_writes": pending_writes,
+            "raw_flush_completed": raw_flushed,
             "raw_model_streams_available": any(
                 row.get("stream", {}).get("wire_capture_available", False) for row in projected_models
             ),
@@ -418,7 +426,7 @@ class ExternalEvidenceSink(NoopDiagnosticSink):
 
     def write(self, record):
         if self.raw_capture:
-            self._evidence("log", **record.model_dump(mode="json"))
+            self._evidence("log", session_id=record.session_id, run_id=record.run_id, _payload=record)
 
     def _model(self, session_id, request, **fields):
         """Optional timing projection supplied by the host."""

@@ -68,6 +68,14 @@ class ReleasedRevision:
     _closed: bool = True
 
 
+@dataclass
+class RetiringRevision:
+    """Quarantine closing resources until teardown has actually completed."""
+
+    handle: LoadedAgent
+    task: asyncio.Task | None = None
+
+
 def revision_operation(method):
     """Pin a revision through admission/control; driver tasks pin execution."""
     @wraps(method)
@@ -278,7 +286,7 @@ class LoadedAgents:
                 models=selected_models)
         key = (resolved.package_id, resolved.manifest_hash)
         if key in self._retiring:
-            await asyncio.shield(self._retiring[key])
+            await self._finish_retirement(key)
         lock_state = self._load_locks.setdefault(key, [asyncio.Lock(), 0])
         lock_state[1] += 1
         try:
@@ -402,6 +410,11 @@ class LoadedAgents:
             await self._prune_revisions(protected=protected)
 
     async def _prune_revisions(self, *, protected=None):
+        # A failed teardown stays isolated. Retry it on later maintenance, never
+        # republish an Application whose close() has already started.
+        for key, retiring in tuple(self._retiring.items()):
+            if retiring.task is None or retiring.task.done():
+                await self._finish_retirement(key)
         now = monotonic()
         candidates = sorted(tuple(self.revisions.items()), key=lambda item: self._last_used.get(item[0], now))
         idle = []
@@ -422,22 +435,36 @@ class LoadedAgents:
                 continue
             # Retire synchronously before awaiting teardown: entrypoint calls
             # can restore from the archive but cannot reuse closing resources.
-            retired = asyncio.get_running_loop().create_future()
-            self._retiring[key] = retired
+            self._retiring[key] = RetiringRevision(handle)
             self.revisions.pop(key, None)
-            try:
-                await handle._application.close()
-                self.application._owned_resources.remove(handle._application)
-                released = ReleasedRevision(handle.resolved_plan, handle.resource_readiness)
-                object.__setattr__(handle, "_application", released)
-                self._last_used.pop(key, None)
-                idle.remove((key, handle))
-            except BaseException:
-                self.revisions[key] = handle
-                raise
-            finally:
-                self._retiring.pop(key, None)
-                retired.set_result(None)
+            await self._finish_retirement(key)
+            idle.remove((key, handle))
+
+    async def _finish_retirement(self, key):
+        retiring = self._retiring.get(key)
+        if retiring is None:
+            return
+        if retiring.task is None or retiring.task.done():
+            retiring.task = asyncio.create_task(
+                self._close_revision(key, retiring), name="sagent-revision-retirement"
+            )
+            # The initiating request may disappear while teardown runs. Retrieve
+            # its exception without losing the failed record needed for retry.
+            retiring.task.add_done_callback(
+                lambda task: None if task.cancelled() else task.exception()
+            )
+        await asyncio.shield(retiring.task)
+
+    async def _close_revision(self, key, retiring):
+        handle = retiring.handle
+        application = handle._application
+        await application.close()
+        if application in self.application._owned_resources:
+            self.application._owned_resources.remove(application)
+        released = ReleasedRevision(handle.resolved_plan, handle.resource_readiness)
+        object.__setattr__(handle, "_application", released)
+        self._last_used.pop(key, None)
+        self._retiring.pop(key, None)
 
     @asynccontextmanager
     async def pin(self, agent):
@@ -540,6 +567,8 @@ class RevisionReaper:
     async def close(self):
         self.task.cancel()
         await asyncio.gather(self.task, return_exceptions=True)
+        for key in tuple(self.catalog._retiring):
+            await self.catalog._finish_retirement(key)
 
 
 class RevisionRecovery:

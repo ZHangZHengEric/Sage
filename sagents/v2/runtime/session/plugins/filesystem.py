@@ -439,6 +439,43 @@ class _FilesystemSessionState(SessionStoreCoordinator):
         await self._ensure_session_loaded(session_id)
         return await super().list_session_runs(session_id)
 
+    async def has_nonterminal_session_trees(self, session_ids):
+        roots = set(session_ids)
+        async with self._lock:
+            live_parents = {sid: row.parent_session_id for sid, row in self._sessions.items()}
+        with self._index_lock:
+            summaries = dict(self._session_index)
+            uncertain = set(self._index_uncertain)
+            unreadable = tuple(self._unreadable_snapshots)
+            paths = dict(self._index_paths)
+        parents = {sid: row.get("parent_session_id") for sid, row in summaries.items()}
+        parents.update(live_parents)
+        selected, frontier = set(roots), set(roots)
+        while frontier:
+            children = {sid for sid, parent in parents.items() if parent in frontier and sid not in selected}
+            selected.update(children)
+            frontier = children
+        async with self._lock:
+            if any(row.session_id in selected and row.state not in TERMINAL_RUN_STATES for row in self._runs.values()):
+                return True
+            loaded = frozenset(self._loaded_session_ids)
+        if any(sid not in loaded and summaries.get(sid, {}).get("nonterminal_runs") for sid in selected):
+            return True
+        # Legacy/uncertain summaries are checked only within the target physical
+        # tree. Parse those snapshots without installing event history in RAM.
+        root_paths = tuple(self._session_dir(sid) for sid in roots)
+        snapshots = {paths.get(sid, self._session_dir(sid)) / "state.json" for sid in uncertain - loaded
+                     if sid in selected or any(paths.get(sid, self._session_dir(sid)).is_relative_to(root) for root in root_paths)}
+        snapshots.update(path for path in unreadable if any(path.is_relative_to(root) for root in root_paths))
+        def inspect():
+            for snapshot in snapshots:
+                if snapshot.is_file():
+                    payload, _ = self._read_session_aggregate(snapshot)
+                    if any(row.get("state") not in _TERMINAL_RUN_STATE_VALUES for row in payload.get("runs", ())):
+                        return True
+            return False
+        return await asyncio.to_thread(inspect)
+
     async def has_nonterminal_runs(self) -> bool:
         # The host must stop admission before using this reclamation probe.
         # Read unloaded Sessions too; a suspended Run is not dispatchable.

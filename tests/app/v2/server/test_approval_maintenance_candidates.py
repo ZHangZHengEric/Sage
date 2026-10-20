@@ -23,6 +23,9 @@ async def test_approval_maintenance_only_loads_suspended_candidates_as_their_own
     async def scan(**kwargs):
         return SimpleNamespace(items=threads, next_cursor=None)
 
+    async def scan_snapshot():
+        return "waiting_b", len(threads)
+
     async def filter_suspended_session_ids(session_ids):
         filtered.extend(session_ids)
         return set(waiting)
@@ -63,7 +66,7 @@ async def test_approval_maintenance_only_loads_suspended_candidates_as_their_own
     service.approval_expired = approval_expired
     service.cancel_run = cancel_run
 
-    await service.expire_approvals(SimpleNamespace(scan=scan), contexts.__getitem__)
+    await service.expire_approvals(SimpleNamespace(scan=scan, scan_snapshot=scan_snapshot), contexts.__getitem__)
 
     assert loaded == list(waiting), "Maintenance loaded sessions without suspended runs"
     assert set(filtered) == {thread.thread_id for thread in threads}
@@ -75,11 +78,15 @@ async def test_approval_maintenance_only_loads_suspended_candidates_as_their_own
 @pytest.mark.asyncio
 async def test_approval_maintenance_rotates_bounded_primary_key_pages():
     scans = []
-    async def scan(*, limit, cursor):
+    async def scan(*, limit, cursor, through):
+        assert through == "z"
         scans.append((limit, cursor))
         return SimpleNamespace(items=[], next_cursor='next' if cursor is None else None)
+    async def scan_snapshot():
+        return "z", 400
     service = RunService(application=SimpleNamespace(runtime=SimpleNamespace(session_store=SimpleNamespace())),
         session_access=None, execution=None)
+    service.approval_scan_seconds = 0
     for _ in range(3):
-        await service.expire_approvals(SimpleNamespace(scan=scan), lambda _: None)
+        await service.expire_approvals(SimpleNamespace(scan=scan, scan_snapshot=scan_snapshot), lambda _: None)
     assert scans == [(200, None), (200, 'next'), (200, None)]

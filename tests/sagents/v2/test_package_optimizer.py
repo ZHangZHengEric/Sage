@@ -296,6 +296,7 @@ async def test_timeout_and_cancellation_reach_runner():
         )
     assert closed.is_set()
     closed.clear()
+    started.clear()
     task = asyncio.create_task(
         optimizer(Blocking()).optimize(
             bundle(),
@@ -305,7 +306,7 @@ async def test_timeout_and_cancellation_reach_runner():
             final_max_cases=0,
         )
     )
-    await asyncio.sleep(0.01)
+    await asyncio.wait_for(started.wait(), timeout=1)
     task.cancel()
     with pytest.raises(asyncio.CancelledError):
         await task

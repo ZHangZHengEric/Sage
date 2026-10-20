@@ -192,12 +192,40 @@ class MemoryThreadIndex:
             rows = [row for row in rows if (row.updated_at, row.thread_id) < tuple(values)]
         return ThreadPage(items=rows[:limit], next_cursor=thread_cursor(rows[limit - 1]) if len(rows) > limit else None)
 
-    async def scan(self, *, limit=100, cursor=None, user_id=None):
+    async def scan_snapshot(self):
+        return max(self._threads, default=None), len(self._threads)
+
+    async def scan(self, *, limit=100, cursor=None, user_id=None, through=None):
         from app.v2.server.conversations.records import ThreadPage, thread_cursor, parse_thread_cursor
         values = parse_thread_cursor(cursor, scan=True)
         rows = sorted((row for row in self._threads.values() if (user_id is None or row.user_id == user_id)
-            and (not values or row.thread_id > values[0])), key=lambda row: row.thread_id)
+            and (not values or row.thread_id > values[0])
+            and (through is None or row.thread_id <= through)), key=lambda row: row.thread_id)
         return ThreadPage(items=rows[:limit], next_cursor=thread_cursor(rows[limit - 1], scan=True) if len(rows) > limit else None)
+
+    async def workspace_session_page(self, tenant_id, agent_id, *, owner_id, cursor=None, limit=200):
+        from app.v2.server.conversations.bindings import WorkspaceSessionPage
+        limit = max(1, min(int(limit), 200))
+        phase, _, after = (cursor or 'claims:').partition(':')
+        if phase not in {'claims', 'legacy'}:
+            raise ValueError('invalid workspace cursor')
+        claimed = []
+        if phase == 'claims':
+            rows = sorted(binding.session_id for binding in self._bindings.values()
+                if binding.owner_id == owner_id and binding.tenant_id == tenant_id
+                and binding.agent_id == agent_id and binding.session_id > after)
+            claimed = rows[:limit]
+            if len(rows) > limit:
+                return WorkspaceSessionPage(claimed, [], 'claims:' + claimed[-1])
+            after = ''
+            if len(claimed) == limit:
+                return WorkspaceSessionPage(claimed, [], 'legacy:')
+        remaining = limit - len(claimed)
+        rows = sorted(row.thread_id for row in self._threads.values()
+            if row.user_id == owner_id and row.agent_id == agent_id and row.thread_id > after)
+        candidates = rows[:remaining]
+        return WorkspaceSessionPage(claimed, [sid for sid in candidates if sid not in self._bindings],
+            'legacy:' + candidates[-1] if len(rows) > remaining else None)
 
     async def list_all(self) -> list[ThreadRecord]:
         return sorted(

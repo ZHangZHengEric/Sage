@@ -23,6 +23,8 @@ ref: v2-DEVELOPMENT
 
 ## 验证修改
 
+用例选择、fixture 共用、异步同步和证据边界遵循[测试方法](TESTING.md)。Agent 修改测试时还应阅读 `tests/AGENTS.md`。
+
 使用[快速开始](applications/GETTING_STARTED.md)中的 Python 3.12+ 环境，服务端测试需要安装对应 extras：
 
 ```bash

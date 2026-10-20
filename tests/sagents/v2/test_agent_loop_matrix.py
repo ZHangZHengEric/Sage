@@ -3814,10 +3814,12 @@ async def test_reported_usage_does_not_estimate_next_tool_step():
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("language", ["zh", "en", "pt"])
-@pytest.mark.parametrize(
-    "failure", ["missing", "permission", "validation", "empty", "structured"]
-)
+# Error transport and locale selection are independent. Cover every failure
+# shape, plus localized diagnostics and structured content on the real loop.
+@pytest.mark.parametrize("language,failure", [
+    ("en", "missing"), ("en", "permission"), ("en", "validation"),
+    ("en", "empty"), ("en", "structured"), ("zh", "missing"), ("pt", "structured"),
+])
 async def test_tool_failure_details_reach_model_and_durable_history(language, failure):
     from sagents.v2.context.session_history import SessionEventModelProjector
     from sagents.v2.i18n import localize_error
@@ -3963,7 +3965,10 @@ async def test_output_self_check_numeric_repair_reaches_author_and_completes():
     "phase", ["tool_selection", "memory_recall", "request_preparation"]
 )
 @pytest.mark.parametrize("typed", [True, False])
-async def test_pre_model_failure_requests_recovery_and_retry_completes(phase, typed):
+async def test_pre_model_failure_requests_recovery_and_retry_completes(phase, typed, monkeypatch):
+    # Retry scheduling/cancellation has its own timing tests. Keep every retry
+    # here, but avoid real provider backoff in a recovery-questionnaire test.
+    monkeypatch.setattr(AgentLoopEngine, "_PROVIDER_RETRY_BASE_SECONDS", 0)
     failure = RuntimeErrorInfo(
         code="model.provider_transient",
         category=ErrorCategory.PROVIDER_TRANSIENT,

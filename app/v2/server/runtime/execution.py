@@ -21,6 +21,7 @@ class ProcessExecution:
     ) -> None:
         self._drives: dict[str, asyncio.Task[None]] = {}
         self._tasks: set[asyncio.Task[None]] = set()
+        self._drive_workspaces: dict[str, tuple[str, str]] = {}
         self.model_pool = None
         self.model_budget: ModelConcurrencyBudget | None = None
         self.fallback_model = fallback_model
@@ -30,14 +31,20 @@ class ProcessExecution:
     def driving(self, run_id: str) -> bool:
         return run_id in self._drives
 
-    def adopt(self, run_id: str, task: asyncio.Task[None]) -> None:
+    def workspace_driving(self, tenant_id: str, agent_id: str) -> bool:
+        return any(workspace == (tenant_id, agent_id) and run_id in self._drives
+                   for run_id, workspace in self._drive_workspaces.items())
+
+    def adopt(self, run_id: str, task: asyncio.Task[None], *, workspace=None) -> None:
         self._drives[run_id] = task
+        if workspace is not None:
+            self._drive_workspaces[run_id] = workspace
         self._tasks.add(task)
 
         def _done(completed: asyncio.Task[None]) -> None:
             self._tasks.discard(completed)
             if self._drives.get(run_id) is completed:
-                self._drives.pop(run_id, None)
+                self.release(run_id)
             if completed.cancelled():
                 return
             error = completed.exception()
@@ -53,6 +60,7 @@ class ProcessExecution:
 
     def release(self, run_id: str) -> None:
         self._drives.pop(run_id, None)
+        self._drive_workspaces.pop(run_id, None)
 
     async def close(self) -> None:
         for task in tuple(self._tasks):
@@ -61,6 +69,7 @@ class ProcessExecution:
             await asyncio.gather(*tuple(self._tasks), return_exceptions=True)
         self._tasks.clear()
         self._drives.clear()
+        self._drive_workspaces.clear()
 
     def has_model(self, catalog) -> bool:
         if self.fallback_model is not None:

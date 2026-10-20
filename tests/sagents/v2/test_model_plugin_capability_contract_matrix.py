@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from tests.sagents.v2.model_fixture import FULL_MODEL_CAPABILITIES as CAPABILITIES
+
 import pytest
 
 from sagents.v2.contracts.errors import (
@@ -13,7 +15,6 @@ from sagents.v2.model import (
     AnthropicMessagesModelProvider,
     GeminiGenerateContentConfig,
     GeminiGenerateContentModelProvider,
-    ModelCapabilities,
     ModelCapabilityProbeOutcome,
     ModelCapabilityProbeRequest,
     ModelCapabilityProbeStatus,
@@ -34,18 +35,6 @@ from sagents.v2.model.protocols import (
     model_protocol_descriptors,
 )
 from sagents.v2.package.manifest.models import ModelRequestDefaults, ModelRoute
-
-
-CAPABILITIES = ModelCapabilities(
-    supports_streaming=True,
-    supports_tools=True,
-    supports_parallel_tool_calls=True,
-    supports_reasoning=True,
-    supports_multimodal_input=True,
-    supports_structured_output=True,
-    max_input_tokens=128_000,
-    max_output_tokens=8_192,
-)
 
 
 def _supported_outcomes():

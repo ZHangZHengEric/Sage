@@ -13,7 +13,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from app.v2.server.conversations import external_runs as access
 from app.v2.server.conversations.cleanup import (
-    delete_external_session, finish_file_operation, require_idle,
+    delete_external_session, finish_file_operation, require_idle, reject_local_workspace_drive,
 )
 from app.v2.server.routers.deps import (
     AdminUser,
@@ -388,7 +388,7 @@ class InteractionReply(BaseModel):
 @external_router.put("/workspace/files")
 async def put_workspace_files(body: WorkspaceImport, caller: CallerDep, host: HostDep):
     try:
-        async with host.conversations.runs.workspace_lock(caller.tenant_id, caller.agent_id):
+        async with host.conversations.runs.workspace_guard(caller.tenant_id, caller.agent_id):
             count = await finish_file_operation(import_workspace_files, host.paths,
                                                 caller.tenant_id, caller.agent_id,
                                                 body.directory, body.files)
@@ -411,8 +411,9 @@ async def delete_workspace_files(caller: CallerDep, host: HostDep,
     except ValueError:
         return error_response(status_code=422, message="invalid workspace path",
                               detail="invalid_workspace_path")
-    async with service.runs.workspace_lock(caller.tenant_id, caller.agent_id):
-        await require_idle(service, caller.tenant_id, caller.agent_id)
+    reject_local_workspace_drive(service, caller.tenant_id, caller.agent_id)
+    async with service.runs.workspace_guard(caller.tenant_id, caller.agent_id):
+        await require_idle(service, caller.tenant_id, caller.agent_id, owner_id=caller.api_key.owner_user_id)
         try:
             deleted = await finish_file_operation(
                 delete_workspace_path, host.paths, caller.tenant_id,

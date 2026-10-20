@@ -418,6 +418,46 @@ class _RedisMysqlSessionState(_MysqlSessionState):
         await self.list_dispatchable_runs()
         return await SessionStoreCoordinator.has_nonterminal_runs(self)
 
+    async def has_nonterminal_session_trees(self, session_ids):
+        """Redis owns hot state; an asynchronous MySQL archive cannot overrule it."""
+        await self._ensure_ready()
+        selected = set(session_ids)
+        children = {}
+        for child, parent in (await self._redis.hgetall(self._key("parents"))).items():
+            children.setdefault(parent, []).append(child)
+        frontier = set(selected)
+        while frontier:
+            archived = set(await self._archive.list_workspace_descendant_ids(sorted(frontier)))
+            traversal = list(frontier | (archived - selected))
+            selected.update(archived)
+            frontier = set()
+            while traversal:
+                for child in children.get(traversal.pop(), ()):
+                    if child not in selected:
+                        selected.add(child)
+                        frontier.add(child)
+                        traversal.append(child)
+        ids = sorted(selected)
+        cold = []
+        for offset in range(0, len(ids), 128):
+            batch = ids[offset:offset + 128]
+            resident = await self._redis.smismember(self._key("resident"), batch)
+            suspended = await self._redis.smismember(self._key("suspended"), batch)
+            if any(suspended):
+                return True
+            async with self._session_cache.operation():
+                for sid, hot in zip(batch, resident):
+                    if hot:
+                        await self._ensure_session_loaded(sid)
+                        if any(self._runs[rid].state not in TERMINAL_RUN_STATES
+                               for rid in self._session_run_ids_locked(sid)):
+                            return True
+                    else:
+                        cold.append(sid)
+        # Topology was resolved above. A recursive archive query here would
+        # revisit resident descendants and let stale MySQL state overrule Redis.
+        return await self._archive.has_nonterminal_sessions(cold) if cold else False
+
     async def filter_suspended_session_ids(self, session_ids):
         await self._ensure_ready()
         selected = set()

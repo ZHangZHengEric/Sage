@@ -372,11 +372,12 @@ class ServerHost:
 
     async def _expire_approvals(self, runs):
         while True:
+            more = False
             try:
-                await runs.expire_approvals(self.threads, self.contexts.for_user)
+                more = await runs.expire_approvals(self.threads, self.contexts.for_user)
             except Exception as exc:
                 LOGGER.exception("approval.expiration.failed", "approval expiration pass failed", exc)
-            await asyncio.sleep(60)
+            await asyncio.sleep(0 if more else 60)
 
     def _track(self, task: asyncio.Task[None]) -> None:
         self._tasks.add(task)

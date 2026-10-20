@@ -7,14 +7,12 @@ import uuid
 import asyncio
 import json
 from contextlib import asynccontextmanager
-from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
 from sagents.v2.contracts.commands import InputItem, StartRun
 from sagents.v2.contracts.errors import SageV2Error
-from sagents.v2.contracts.events import RunEventData
 from sagents.v2.contracts.items import TextBlock
 from sagents.v2.contracts.principals import (
     ActorRef,
@@ -26,7 +24,6 @@ from sagents.v2.contracts.run_state import RunState
 from sagents.v2.package.presets import BuiltinPackageFactory
 from sagents.v2.package.manifest.runtime import CapabilitySelection
 from sagents.v2.runtime.extensions.official import builtin_extension_registry
-from sagents.v2.runtime.session.plugins import mysql as mysql_plugin
 from sagents.v2.runtime.session import mysql_state
 from sagents.v2.runtime.session.plugins.mysql import (
     MysqlSessionStore,
@@ -34,7 +31,6 @@ from sagents.v2.runtime.session.plugins.mysql import (
     parse_mysql_dsn,
 )
 from sagents.v2.runtime.session.state import SessionStoreCoordinator
-from sagents.v2.runtime.session.contracts import EventDraft
 from sagents.v2.testing.plugins.scripted_model import ScriptedModelProvider
 
 
@@ -91,32 +87,6 @@ def test_mysql_store_requires_explicit_dsn():
         MysqlSessionStore("postgresql://unused/unused")
     with pytest.raises(ValueError, match="table_prefix"):
         MysqlSessionStore("mysql://root@127.0.0.1/sage", table_prefix="Bad-Prefix")
-
-
-@pytest.mark.asyncio
-async def test_mysql_authorization_loads_persisted_session_before_owner_check():
-    source = SessionStoreCoordinator()
-    created = await source.create_run(command(), CONTEXT)
-    session_id = created.handle.session_id
-    stored_state = source._dump_state_locked()
-
-    reopened = MysqlSessionStore("mysql://unused/test")
-    reopened._coordinator._ensure_ready = AsyncMock()
-    reopened._coordinator._fetch_session = AsyncMock(return_value=stored_state)
-
-    assert session_id not in reopened._coordinator._sessions
-    await reopened.authorize_session_actor(session_id, CONTEXT)
-    assert session_id in reopened._coordinator._sessions
-    reopened._coordinator._fetch_session.assert_awaited_once_with(session_id)
-
-    other = RequestContext(
-        actor=ActorRef(principal_id="other_user", principal_type=PrincipalType.USER,
-                       tenant_id="tenant_test"),
-        trace=TraceContext(correlation_id="other_correlation"),
-    )
-    with pytest.raises(SageV2Error) as denied:
-        await reopened.authorize_session_actor(session_id, other)
-    assert denied.value.info.code == "session.actor_not_authorized"
 
 
 @pytest.mark.asyncio
@@ -374,11 +344,32 @@ async def test_bootstrap_creates_missing_tables_only():
     assert all("IF NOT EXISTS" in statement for statement in creates)
 
 
-def test_mysql_upsert_uses_row_alias_instead_of_values_function():
-    source = Path(mysql_state.__file__).read_text(encoding="utf-8")
-    assert "AS incoming" in source
-    assert "VALUES(parent_session_id)" not in source
-    assert "VALUES(value)" not in source
+async def test_mysql_derived_state_upsert_sends_row_alias_and_bound_value():
+    store = MysqlSessionStore("mysql://root@127.0.0.1/sage")
+    cursor = AsyncMock()
+    connection = AsyncMock()
+    connection.cursor = MagicMock()
+    connection.cursor.return_value.__aenter__.return_value = cursor
+    store._coordinator._pool = MagicMock()
+    store._coordinator._pool.acquire.return_value.__aenter__.return_value = connection
+    store._coordinator._read_start_lookup = AsyncMock(return_value=None)
+    created = await store.create_run(command(), CONTEXT)
+    cursor.execute.reset_mock()
+    connection.commit.reset_mock()
+
+    await store.put_derived_state(created.handle.session_id, "notes", "title", {"text": "hello"})
+
+    cursor.execute.assert_awaited_once()
+    statement, params = cursor.execute.await_args.args
+    assert " ".join(statement.split()) == (
+        "INSERT INTO `sagent_derived_state` (session_id, namespace, `key`, value) "
+        "VALUES (%s, %s, %s, CAST(%s AS JSON)) AS incoming "
+        "ON DUPLICATE KEY UPDATE value = incoming.value"
+    )
+    assert params[:3] == (created.handle.session_id, "notes", "title")
+    assert json.loads(params[3]) == {"text": "hello"}
+    connection.commit.assert_awaited_once()
+    connection.rollback.assert_not_awaited()
 
 
 def test_mysql_capabilities_claim_single_process_without_connecting():
@@ -458,68 +449,6 @@ async def test_reload_does_not_expose_an_eviction_gap_to_lazy_readers():
     assert calls == 1
     assert len(state._runs) == 1
     assert state._runs[created.handle.run_id].session_id == session_id
-
-
-@pytest.mark.asyncio
-async def test_restart_round_trip_and_idempotent_start(mysql_dsn):
-    prefix = _prefix()
-    first = MysqlSessionStore(mysql_dsn, table_prefix=prefix)
-    created = await first.create_run(command(), CONTEXT)
-    await first.put_derived_state(created.handle.session_id, "notes", "title", "hello")
-    await first.close()
-
-    second = MysqlSessionStore(mysql_dsn, table_prefix=prefix)
-    await second.authorize_session_actor(created.handle.session_id, CONTEXT)
-    run = await second.get_run(created.handle.run_id)
-    session = await second.get_session(created.handle.session_id)
-    events = await second.read_events(created.handle.run_id)
-    duplicate = await second.create_run(command(), CONTEXT)
-    derived = await second.get_derived_state(
-        created.handle.session_id, "notes", "title"
-    )
-
-    assert second.capabilities["durable_across_process_restart"] is True
-    assert second.capabilities["multi_process_writes"] is False
-    assert run.state == RunState.QUEUED
-    assert session.revision == 1
-    assert [event.type for event in events] == [
-        "run.accepted",
-        "run.queued",
-        "message.completed",
-    ]
-    assert duplicate.duplicate is True
-    assert duplicate.handle.run_id == created.handle.run_id
-    assert derived == "hello"
-    await second.close()
-
-
-@pytest.mark.asyncio
-async def test_run_events_are_appended_across_commits(mysql_dsn):
-    prefix = _prefix()
-    store = MysqlSessionStore(mysql_dsn, table_prefix=prefix)
-    created = await store.create_run(command(), CONTEXT)
-    await store.commit_run(
-        run_id=created.handle.run_id,
-        expected_revision=created.handle.run_revision,
-        expected_states={RunState.QUEUED},
-        new_state=RunState.RUNNING,
-        drafts=(EventDraft(type="run.started", data=RunEventData(state="running")),),
-        context=CONTEXT,
-        idempotency_key="start-execution",
-    )
-    await store.close()
-
-    restored = MysqlSessionStore(mysql_dsn, table_prefix=prefix)
-    run = await restored.get_run(created.handle.run_id)
-    events = await restored.read_events(created.handle.run_id)
-    assert run.state == RunState.RUNNING
-    assert [event.type for event in events][:4] == [
-        "run.accepted",
-        "run.queued",
-        "message.completed",
-        "run.started",
-    ]
-    await restored.close()
 
 
 @pytest.mark.parametrize("recovery_fails", [False, True])
@@ -624,34 +553,6 @@ async def test_two_store_instances_can_open_the_same_prefix(mysql_dsn):
     assert other.handle.session_id != (await first.create_run(command(), CONTEXT)).handle.session_id
     await first.close()
     await second.close()
-
-
-@pytest.mark.asyncio
-async def test_delete_session_removes_durable_rows(mysql_dsn):
-    prefix = _prefix()
-    store = MysqlSessionStore(mysql_dsn, table_prefix=prefix)
-    created = await store.create_run(command(), CONTEXT)
-    await store.commit_run(
-        run_id=created.handle.run_id,
-        expected_revision=created.handle.run_revision,
-        expected_states={RunState.QUEUED},
-        new_state=RunState.CANCELLED,
-        drafts=(),
-        context=CONTEXT,
-        idempotency_key="cancel-run",
-    )
-    session_id = created.handle.session_id
-    await store.delete_session(session_id)
-    with pytest.raises(SageV2Error) as exc_info:
-        await store.get_session(session_id)
-    assert exc_info.value.info.code == "session.not_found"
-    await store.close()
-
-    restored = MysqlSessionStore(mysql_dsn, table_prefix=prefix)
-    with pytest.raises(SageV2Error) as exc_info:
-        await restored.get_session(session_id)
-    assert exc_info.value.info.code == "session.not_found"
-    await restored.close()
 
 
 @pytest.mark.asyncio

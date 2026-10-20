@@ -8,6 +8,7 @@ from sagents.v2.agent.policy.approval_config import ToolApprovalConfig
 from sagents.v2.contracts.commands import InputItem, ReplyInteraction, RunConfig, StartRun
 from sagents.v2.contracts.items import TextBlock
 from sagents.v2.contracts.run_state import RunState
+from sagents.v2.context.system_context import with_session_context
 from sagents.v2.testing.plugins.scripted_model import ScriptedModelProvider, ScriptedModelStep
 from sagents.v2.testing.runtime import ephemeral_runtime
 from sagents.v2.tool.arguments import apply_system_context_overrides
@@ -241,31 +242,48 @@ async def test_official_memory_tool_and_automatic_recall_bind_context(automatic)
 
 def test_every_builtin_tool_declares_session_id_in_schema_and_signature():
     import inspect
-    from sagents.v2.agent.self_configuration.service import _Tools
-    from sagents.v2.skill.tool import SkillLoadTool
-    from sagents.v2.tool.plugins.agent_management import AgentManagementTools
-    from sagents.v2.tool.plugins.delegation import _FibreToolMethods, _TeamToolMethods
-    from sagents.v2.tool.plugins.official import _OFFICIAL_TOOL_CLASSES
-    from sagents.v2.tool.decorators import decorated_tool_definition
+    from sagents.v2.tool import builtin_tool_definitions
+    from tests.sagents.v2.tool_fixture import builtin_tool_methods
 
     definitions = {}
-    for owner in (*_OFFICIAL_TOOL_CLASSES, AgentManagementTools, SkillLoadTool,
-                  _Tools, _FibreToolMethods, _TeamToolMethods):
-        for _, method in inspect.getmembers(owner, callable):
-            definition = decorated_tool_definition(method)
-            if definition is None:
-                continue
-            assert "session_id" in inspect.signature(method).parameters, definition.name
-            assert "session_id" in definition.input_schema["properties"], definition.name
-            definitions[definition.name] = definition
-    assert len(definitions) == 39
+    for definition, method in builtin_tool_methods():
+        assert "session_id" in inspect.signature(method).parameters, definition.name
+        assert "session_id" in definition.input_schema["properties"], definition.name
+        definitions[definition.name] = definition
+    assert {tool.name for tool in builtin_tool_definitions()} <= definitions.keys()
+    assert "agent_self_configure" in definitions
     assert "target_session_id" in definitions["agent_package_run"].input_schema["properties"]
 
 
 @pytest.mark.parametrize("configured", [None, {}, {"session_id": None}, {"session_id": ""},
-                                         {"session_id": " "}, {"session_id": "host-session"}])
-@pytest.mark.parametrize("fork", [False, True])
-@pytest.mark.parametrize("adapter", ["official", "mcp"])
+                                         {"session_id": " "}, {"session_id": "host-session", "query": "keep"}])
+def test_session_context_uses_run_identity_without_mutating_admitted_command(configured):
+    metadata = {"other": "keep"}
+    if configured is not None:
+        metadata["system_context"] = configured.copy()
+    command = StartRun(
+        agent_id="test", input=(InputItem(role="user", content=(TextBlock(text="read"),)),),
+        config=RunConfig(metadata=metadata),
+        resolved_spec_hash="sha256:test", idempotency_key="start",
+    )
+    admitted = command.model_dump(mode="json")
+
+    effective = with_session_context(command, "actual-session")
+
+    assert effective.config.metadata == {
+        **metadata, "system_context": {**(configured or {}), "session_id": "actual-session"},
+    }
+    assert command.model_dump(mode="json") == admitted
+
+
+# Exercise each adapter with both a new and a forked Session. Configuration
+# normalization is covered above, without repeating the entire Agent loop.
+@pytest.mark.parametrize("configured,fork,adapter", [
+    pytest.param(None, False, "official", id="official-new-missing"),
+    pytest.param({"session_id": "host-session"}, True, "official", id="official-fork-override"),
+    pytest.param({"session_id": "host-session"}, False, "mcp", id="mcp-new-override"),
+    pytest.param(None, True, "mcp", id="mcp-fork-missing"),
+])
 async def test_missing_session_context_uses_real_run_session_in_prompt_and_tool(configured, fork, adapter):
     from sagents.v2.context import DefaultContextAssembler
     from sagents.v2.context.runtime_metadata import RunMetadataContextProvider

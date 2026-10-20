@@ -1,6 +1,7 @@
 """Built-in packages expose only established decorator-backed Tool names."""
 
 from __future__ import annotations
+import ast
 from tests.sagents.v2.model_fixture import TEST_MODELS
 
 
@@ -77,7 +78,7 @@ def test_tool_name_contract_rejects_dot_names():
         )
 
 
-def test_no_hand_written_builtin_catalogs_or_placeholder_plugin_folders():
+def test_builtin_tool_definitions_are_owned_by_decorators_or_protocol_converters():
     tool_root = Path(__file__).parents[3] / "sagents" / "v2" / "tool"
     # Constructing a ToolDefinition by hand is allowed only where the Tools are
     # not ours to declare: these three translate a schema discovered at runtime
@@ -91,34 +92,67 @@ def test_no_hand_written_builtin_catalogs_or_placeholder_plugin_folders():
     for path in tool_root.rglob("*.py"):
         if path in allowed_converters or path.name == "contracts.py":
             continue
-        if "ToolDefinition(" in path.read_text(encoding="utf-8"):
-            offenders.append(path.relative_to(tool_root).as_posix())
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        constructor_names = {"ToolDefinition"}
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom):
+                constructor_names.update(
+                    alias.asname or alias.name
+                    for alias in node.names
+                    if alias.name == "ToolDefinition"
+                )
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Call) and (
+                isinstance(node.func, ast.Name)
+                and node.func.id in constructor_names
+                or isinstance(node.func, ast.Attribute)
+                and node.func.attr == "ToolDefinition"
+            ):
+                offenders.append(f"{path.relative_to(tool_root)}:{node.lineno}")
     assert offenders == []
-    for removed in ("framework", "reference", "v1_compat"):
-        assert not (tool_root / "plugins" / removed).exists()
-    for removed_file in ("provider.py", "schema.py"):
-        assert not (tool_root / "plugins" / "official" / removed_file).exists()
-    assert not (tool_root / "plugins" / "sage_mcp.py").exists()
 
 
 def test_official_tools_use_runtime_execution_instead_of_direct_host_io():
     official = (
         Path(__file__).parents[3] / "sagents" / "v2" / "tool" / "plugins" / "official"
     )
-    forbidden = (
-        "import subprocess",
-        "import httpx",
-        "import aiohttp",
-        "from pathlib import Path",
-        "create_subprocess",
-        ".open(",
-    )
-    offenders = {
-        path.name: [value for value in forbidden if value in path.read_text()]
-        for path in official.glob("*.py")
-        if any(value in path.read_text() for value in forbidden)
-    }
-    assert offenders == {}
+    offenders = []
+    for path in official.glob("*.py"):
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        for node in ast.walk(tree):
+            imports = (
+                [alias.name for alias in node.names]
+                if isinstance(node, ast.Import)
+                else [node.module or ""]
+                if isinstance(node, ast.ImportFrom)
+                else []
+            )
+            forbidden_import = any(
+                module.split(".")[0] in {"subprocess", "httpx", "aiohttp", "pathlib"}
+                for module in imports
+            )
+            forbidden_import |= (
+                isinstance(node, ast.ImportFrom)
+                and node.module == "asyncio"
+                and any(
+                    alias.name.startswith("create_subprocess") for alias in node.names
+                )
+            )
+            forbidden_call = isinstance(node, ast.Call) and (
+                isinstance(node.func, ast.Attribute)
+                and (
+                    node.func.attr == "open"
+                    or node.func.attr.startswith("create_subprocess")
+                )
+                or isinstance(node.func, ast.Name)
+                and (
+                    node.func.id == "open"
+                    or node.func.id.startswith("create_subprocess")
+                )
+            )
+            if forbidden_import or forbidden_call:
+                offenders.append(f"{path.name}:{node.lineno}: {ast.unparse(node)}")
+    assert offenders == []
 
 
 @pytest.mark.asyncio

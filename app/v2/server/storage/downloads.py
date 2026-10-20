@@ -194,7 +194,7 @@ def prepare_session_export(session_id: str, run_ids: set[str], evidence: dict | 
             projected = [row["request_id"] for row in models if row.get("evidence_source") in {"trace_projection", "mixed"}]
             missing_streams = [row.get("request_id") for row in models if not row.get("stream", {}).get("wire_capture_available")]
             logs = evidence.get("logs", [])
-            partial_models = projected or missing_requests or any(row.get("truncated") for row in models)
+            partial_models = projected or missing_requests or pending_writes or any(row.get("truncated") for row in models)
             partial_logs = evidence.get("dropped_logs", 0) or evidence.get("logs_complete") is False or pending_writes or any(row.get("truncated") for row in logs)
             dropped_streams = sum(row.get("stream", {}).get("dropped_wire_events", 0) +
                                   row.get("stream", {}).get("dropped_normalized_events", 0) for row in models)
@@ -205,7 +205,7 @@ def prepare_session_export(session_id: str, run_ids: set[str], evidence: dict | 
                            "reason":"Normalized trace content is exported when dedicated diagnostics were not captured; it is not a raw provider request." if projected else None},
                 "logs": {"status":"not_captured" if not logs else "partial" if partial_logs else "available",
                          "reason":None if logs else "No full diagnostic log records were captured for this Session; timing spans are not full logs."},
-                "raw_model_streams": {"status":"not_captured" if not models or len(missing_streams) == len(models) else "partial" if missing_streams or dropped_streams or incomplete_streams else "available",
+                "raw_model_streams": {"status":"not_captured" if not models or len(missing_streams) == len(models) else "partial" if missing_streams or dropped_streams or incomplete_streams or pending_writes else "available",
                                       "reason":"SDK wire events cannot be reconstructed from model responses or timing records." if missing_streams or not models else None},
                 "failures": {"status":"available" if failures else "none_observed",
                              "reason":None if failures else "No tool failures were observed in the exported evidence."},
@@ -243,6 +243,7 @@ def prepare_session_export(session_id: str, run_ids: set[str], evidence: dict | 
                     "stream_evidence_incomplete_for_requests": incomplete_streams,
                     "diagnostic_evidence_gaps": evidence.get("evidence_gaps", []),
                     "raw_capture_statistics": evidence.get("raw_capture_statistics", {}),
+                    "trace_export_statistics": evidence.get("trace_export_statistics", {}),
                     "stream_events_dropped": sum(row.get("stream", {}).get("dropped_wire_events", 0) + row.get("stream", {}).get("dropped_normalized_events", 0) for row in models),
                     "log_records": len(evidence.get("logs", [])),
                     "tool_records": len(tools),

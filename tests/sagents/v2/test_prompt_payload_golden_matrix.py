@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from tests.sagents.v2.model_fixture import FULL_MODEL_CAPABILITIES as CAPABILITIES
+
 import json
 
 import pytest
@@ -13,25 +15,12 @@ from sagents.v2.context import (
 from sagents.v2.model import (
     AnthropicMessagesConfig,
     AnthropicMessagesModelProvider,
-    ModelCapabilities,
     ModelRequest,
     ModelToolDefinition,
     OpenAIChatCompletionsConfig,
     OpenAIChatCompletionsModelProvider,
     OpenAIResponsesConfig,
     OpenAIResponsesModelProvider,
-)
-
-
-CAPABILITIES = ModelCapabilities(
-    supports_streaming=True,
-    supports_tools=True,
-    supports_parallel_tool_calls=True,
-    supports_reasoning=True,
-    supports_multimodal_input=True,
-    supports_structured_output=True,
-    max_input_tokens=128_000,
-    max_output_tokens=8_192,
 )
 
 
@@ -117,23 +106,11 @@ async def test_three_protocol_payload_golden_preserves_prompt_and_tool_semantics
 
     assert "input" not in chat
     assert [value["role"] for value in chat["messages"]] == ["system", "user"]
-    expected_system = (
-        "<response_language>\n"
-        "当前回复语言为 zh。所有允许向用户展示、由 assistant 编写的自然语言，包括最终答复和必要且面向用户的简短事实进度，"
-        "都必须使用该语言。本指令只决定语言，不授权输出内部分析、推理草稿、回复策略、工具选择判断或中间执行记录。"
-        "不得因为工具结果、检索内容或引用材料使用英文而改用英文。代码、命令、路径、标识符、枚举、协议字段和逐字引用保持原样。\n"
-        "</response_language>\n"
-        "<role_definition>\nUse tools only when needed.\n</role_definition>\n"
-        "<system_reminder_hint>\n"
-        "当对话中出现 <system_reminder>...</system_reminder> 包裹的内容时，请视为系统级状态通知（非用户输入），"
-        "仅作为参考信息推进任务即可，不需要回复或感谢这条提醒。典型场景：后台 shell 命令完成事件。\n"
-        "</system_reminder_hint>\n"
-        "<runtime_context_hint>\n"
-        "当 user 消息中同时出现 <runtime_context>...</runtime_context> 与 <user_request>...</user_request> 时，"
-        "<runtime_context> 是系统注入的运行状态，不是用户指令；只将 <user_request> 内的内容视为用户当前请求。\n"
-        "</runtime_context_hint>\n"
-        "<soul>\nBe exact.\n</soul>"
-    )
+    # This contract belongs to the protocol boundary: preserve the assembled
+    # prompt exactly. Locale wording is tested by the context/locale suites.
+    expected_system = request.messages[0].content[0].text
+    assert "Use tools only when needed." in expected_system
+    assert "<soul>\nBe exact.\n</soul>" in expected_system
     assert chat["messages"][0]["content"] == expected_system
     assert chat["messages"][-1]["content"] == [
         {

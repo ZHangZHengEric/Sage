@@ -134,7 +134,8 @@ def server_registrations(host):
         key_id, admitted = frozen_execution(command, catalog_agent_id=frozen.agent.id)
         async def current():
             return await live_execution_policy(command, users=host.users, keys=host.credentials.keys,
-                catalog=host.catalog_store, settings=host.settings, user_id=user, catalog_agent_id=frozen.agent.id)
+                catalog=host.catalog_store, settings=host.settings, user_id=user, catalog_agent_id=frozen.agent.id,
+                package_authorizer=host.agent_management.authorize_package, context=run.context)
         member_grants = command.config.metadata[EXECUTION_METADATA_KEY].get("agents", {})
 
         async def member_policy(run_id):
@@ -170,7 +171,8 @@ def server_registrations(host):
                     or request_context.actor.delegated_by):
                 raise PermissionError("Only the authenticated owner can configure this Agent")
             current = await live_execution_policy(command, users=host.users, keys=host.credentials.keys,
-                catalog=host.catalog_store, settings=host.settings, user_id=user, catalog_agent_id=frozen.agent.id)
+                catalog=host.catalog_store, settings=host.settings, user_id=user, catalog_agent_id=frozen.agent.id,
+                package_authorizer=host.agent_management.authorize_package, context=request_context)
             if current is None or current.shell == "deny":
                 raise PermissionError("The live execution grant does not permit capability changes")
         return SelfConfigurationService(

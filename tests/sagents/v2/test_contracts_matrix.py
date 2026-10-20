@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from tests.sagents.v2.event_fixture import event_data
+
 from datetime import datetime, timezone
 
 import pytest
@@ -15,35 +17,21 @@ from sagents.v2.contracts.commands import (
 from sagents.v2.contracts.errors import ErrorCategory, RuntimeErrorInfo
 from sagents.v2.contracts.events import (
     EVENT_CATALOG,
-    ArtifactEventData,
-    CheckpointEventData,
-    ContinuationEventData,
     EventDurability,
     EventSource,
     EventSourceType,
     FlowEventData,
-    InteractionEventData,
     ItemEventData,
     JobEventData,
-    PolicyEventData,
     ProtocolEventData,
     RunEventData,
     RuntimeEvent,
-    SandboxEventData,
-    SessionCommitEventData,
-    SkillStateEventData,
-    SteeringEventData,
-    StepEventData,
-    ToolEventData,
     TurnEventData,
-    UsageEventData,
 )
 from sagents.v2.contracts.items import (
-    ArtifactRef,
     ContentBlock,
     MessageItemData,
     TextBlock,
-    UsageSummary,
 )
 from sagents.v2.contracts.principals import ActorRef, PrincipalType
 from sagents.v2.contracts.run_state import (
@@ -123,75 +111,6 @@ def _error() -> RuntimeErrorInfo:
     )
 
 
-def _data_for(kind: str):
-    if kind == "skill_state":
-        return SkillStateEventData(state={})
-    if kind == "run":
-        return RunEventData(state="running")
-    if kind == "turn":
-        return TurnEventData(state="started")
-    if kind == "step":
-        return StepEventData(state="started")
-    if kind == "item":
-        return ItemEventData(operation="started")
-    if kind == "tool":
-        return ToolEventData(
-            tool_call_id="tool_call_1", tool_name="file_read", state="started"
-        )
-    if kind == "job":
-        return JobEventData(job_id="job_1", state="running")
-    if kind == "interaction":
-        return InteractionEventData(
-            interaction_id="interaction_1",
-            interaction_type="approval",
-            state="requested",
-        )
-    if kind == "checkpoint":
-        return CheckpointEventData(
-            checkpoint_id="checkpoint_1",
-            checkpoint_codec_version="1",
-            run_sequence=1,
-            session_revision=1,
-        )
-    if kind == "steering":
-        return SteeringEventData(steer_id="steer_1", state="accepted")
-    if kind == "continuation":
-        return ContinuationEventData(
-            action="complete_run",
-            reason_code="text.complete",
-            reason="final text",
-            decision_hash="sha256:decision",
-        )
-    if kind == "flow":
-        return FlowEventData(state="started", flow_id="flow_1")
-    if kind == "artifact":
-        return ArtifactEventData(
-            state="created",
-            artifact=ArtifactRef(
-                artifact_id="artifact_1", uri="artifact://1", name="result.txt"
-            ),
-        )
-    if kind == "sandbox":
-        return SandboxEventData(sandbox_id="sandbox_1", state="ready")
-    if kind == "policy":
-        return PolicyEventData(
-            decision_id="decision_1", decision="allow", policy_version="1"
-        )
-    if kind == "usage":
-        return UsageEventData(usage=UsageSummary(input_tokens=10, output_tokens=2))
-    if kind == "protocol":
-        return ProtocolEventData(state="snapshot")
-    if kind == "session_commit":
-        return SessionCommitEventData(
-            proposal_id="proposal_1",
-            source_run_id="run_1",
-            state="proposed",
-            base_session_revision=0,
-            base_session_sequence=0,
-        )
-    raise AssertionError(f"unhandled event data kind: {kind}")
-
-
 @pytest.mark.parametrize("event_type", sorted(EVENT_CATALOG))
 def test_every_catalog_event_accepts_its_declared_kind_and_durability(event_type):
     definition = EVENT_CATALOG[event_type]
@@ -208,7 +127,7 @@ def test_every_catalog_event_accepts_its_declared_kind_and_durability(event_type
         run_sequence=1,
         actor=ACTOR,
         source=SOURCE,
-        data=_data_for(definition.data_kind),
+        data=event_data(definition.data_kind),
     )
 
     restored = RuntimeEvent.model_validate_json(event.model_dump_json())
@@ -310,7 +229,7 @@ def test_session_sequence_matrix(durability, session_sequence, valid):
             RuntimeEvent(**kwargs)
 
 
-def test_content_block_discriminator_round_trip_and_extra_rejection():
+def test_content_block_discriminator_nested_round_trip_and_extra_rejection():
     adapter = TypeAdapter(ContentBlock)
     block = adapter.validate_python({"kind": "text", "text": "hello"})
     assert block == TextBlock(text="hello")
@@ -318,8 +237,6 @@ def test_content_block_discriminator_round_trip_and_extra_rejection():
     with pytest.raises(ValidationError):
         adapter.validate_python({"kind": "text", "text": "hello", "extra": 1})
 
-
-def test_message_item_uses_typed_content_blocks():
     item = MessageItemData(role="assistant", content=(TextBlock(text="done"),))
     restored = MessageItemData.model_validate_json(item.model_dump_json())
     assert restored.content[0].text == "done"

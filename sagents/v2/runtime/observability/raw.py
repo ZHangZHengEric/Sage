@@ -13,12 +13,18 @@ import hashlib
 import json
 import sys
 import threading
-from uuid import uuid4
+from datetime import datetime, date, time, timedelta
+from decimal import Decimal
+from enum import Enum
+from uuid import UUID, uuid4
 
 from pydantic import BaseModel
+from pydantic_core import to_jsonable_python
 
 from sagents.v2.contracts.common import utc_now
 from sagents.v2.runtime.observability.contracts import TraceSpan
+
+_JSON_SCALARS = (datetime, date, time, timedelta, Decimal, UUID)
 
 
 def retained_size(value, limit, seen=None):
@@ -65,6 +71,12 @@ def json_working_size(value, limit, ancestors=None):
         return chars * (1 if value.isascii() else 4) + 2
     if value is None or isinstance(value, (bool, int, float)):
         return sys.getsizeof(value) * 3
+    if isinstance(value, _JSON_SCALARS):
+        # Only known scalar types are admitted here. Their JSON conversion runs
+        # in the worker, after both heap and encoding reservations succeed.
+        return sys.getsizeof(value) * 8 + 128
+    if isinstance(value, Enum):
+        return json_working_size(value.value, limit, ancestors)
     ancestors = ancestors if ancestors is not None else set()
     if id(value) in ancestors or len(ancestors) >= 64:
         return limit + 1
@@ -108,6 +120,10 @@ def raw_trace_value(value):
         return [raw_trace_value(item) for item in value]
     if value is None or isinstance(value, (str, bool, int, float)):
         return value
+    if isinstance(value, _JSON_SCALARS):
+        return to_jsonable_python(value)
+    if isinstance(value, Enum):
+        return raw_trace_value(value.value)
     # This branch is normally refused by json_working_size before admission.
     raise TypeError("raw trace content must contain JSON values")
 
@@ -147,6 +163,10 @@ def _json_fragments(value, chunk_chars):
         yield ']'
     elif value is None or isinstance(value, (int, float, bool)):
         yield json.dumps(value)
+    elif isinstance(value, _JSON_SCALARS):
+        yield from _json_fragments(to_jsonable_python(value), chunk_chars)
+    elif isinstance(value, Enum):
+        yield from _json_fragments(value.value, chunk_chars)
     else:
         raise TypeError("raw evidence must contain JSON values")
 
@@ -211,13 +231,15 @@ class RawEvidencePipeline:
     def _export(self, sink, trace_id, parent_id, session_id, run_id, kind, payload, at):
         record_id, digest = uuid4().hex, hashlib.sha256()
         count = 0
+        request_id = (payload.__dict__.get('request_id') if isinstance(payload, BaseModel)
+                      else payload.get('request_id'))
         def emit(name, values):
-            attrs = {'session_id':session_id, 'run_id':run_id, 'request_id':payload.get('request_id'),
+            attrs = {'session_id':session_id, 'run_id':run_id, 'request_id':request_id,
                      'sage.diagnostic.format':'chunks/v1', 'sage.diagnostic.kind':kind,
                      'sage.diagnostic.record_id':record_id, **values}
             span = TraceSpan(trace_id=trace_id, span_id=uuid4().hex[:16], parent_span_id=parent_id,
                              name=name, session_id=session_id, run_id=run_id,
-                             request_id=payload.get('request_id'), start_time=at, end_time=utc_now(),
+                             request_id=request_id, start_time=at, end_time=utc_now(),
                              attributes=attrs)
             sink.start_span(span)
             sink.end_span(span)

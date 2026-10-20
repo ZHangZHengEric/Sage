@@ -83,11 +83,23 @@ def model_with(*texts):
     )
 
 
-@pytest.mark.parametrize("language,expected", LOCALES)
+def test_prompt_language_normalizes_all_aliases_and_fallbacks():
+    mismatches = []
+    for language, expected in LOCALES:
+        actual = prompt_language(language)
+        if actual != expected:
+            mismatches.append((language, expected, actual))
+    assert not mismatches, mismatches
+
+
+# Test consumer wiring for missing, regional, and fallback locales. All spelling
+# aliases are checked above without repeating Judge and Memory model requests.
+@pytest.mark.parametrize("language,expected", [
+    (None, "en"), ("en-US", "en"), ("zh-CN", "zh"), ("pt-BR", "en"),
+])
 async def test_runtime_and_auxiliary_requests_share_locale_and_fallback(
     language, expected
 ):
-    assert prompt_language(language) == expected
     segments = await RunMetadataContextProvider().segments(command(language))
     text = "\n".join(segment.content for segment in segments)
     assert (

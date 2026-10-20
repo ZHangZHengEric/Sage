@@ -57,26 +57,11 @@ def test_current_event_round_trip_is_deterministic():
     assert codec.decode(first) == event
 
 
-def test_n_minus_one_upcaster_chain_produces_current_contract():
-    registry = EventUpcasterRegistry()
-
-    def v0_to_v1(payload):
-        payload["data"] = {
-            "kind": "run",
-            "state": payload.pop("legacy_state"),
-        }
-        return payload
-
-    registry.register("run.started", "0", "1", v0_to_v1)
-    payload = runtime_event().model_dump(mode="json")
-    payload["event_schema_version"] = "0"
-    payload["legacy_state"] = payload.pop("data")["state"]
-    restored = EventCodec(registry).decode(envelope_for(payload))
-    assert restored.event_schema_version == "1"
-    assert restored.data.state == "running"
-
-
-def test_n_minus_two_requires_complete_upcaster_chain():
+@pytest.mark.parametrize("schema_version,state_field", [
+    pytest.param("0", "legacy_state", id="one-hop"),
+    pytest.param("-1", "old_state", id="two-hops"),
+])
+def test_upcaster_chain_restores_the_current_contract(schema_version, state_field):
     registry = EventUpcasterRegistry()
 
     def v_minus_one_to_v0(payload):
@@ -103,9 +88,11 @@ def test_n_minus_two_requires_complete_upcaster_chain():
         v0_to_v1,
     )
     payload = runtime_event().model_dump(mode="json")
-    payload["event_schema_version"] = "-1"
-    payload["old_state"] = payload.pop("data")["state"]
-    assert EventCodec(registry).decode(envelope_for(payload)).data.state == "running"
+    payload["event_schema_version"] = schema_version
+    payload[state_field] = payload.pop("data")["state"]
+    restored = EventCodec(registry).decode(envelope_for(payload))
+    assert restored.event_schema_version == "1"
+    assert restored.data.state == "running"
 
 
 @pytest.mark.parametrize(
