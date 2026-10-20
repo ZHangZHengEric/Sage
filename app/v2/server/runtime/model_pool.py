@@ -15,6 +15,9 @@ except ImportError:  # Python 3.10
     from exceptiongroup import ExceptionGroup
 
 from sagents.v2.contracts.errors import ErrorCategory, RuntimeErrorInfo, SageV2Error
+from app.v2.server.observability.logging import get_logger
+
+LOGGER = get_logger(__name__)
 
 
 async def _settle(operation):
@@ -74,6 +77,7 @@ class ModelClientPool:
         self._closed = False
         self._close_task = None
         self._close_errors: list[Exception] = []
+        self._failed_closes: list[_Entry] = []
         self._created = 0
 
     @staticmethod
@@ -99,10 +103,6 @@ class ModelClientPool:
             async with self._condition:
                 if self._closed:
                     raise RuntimeError("model client pool is closed")
-                if self._close_errors:
-                    raise RuntimeError(
-                        "model client pool cleanup failed"
-                    ) from self._close_errors[0]
                 entry = self._entries.get(key)
                 if (
                     entry is not None
@@ -116,7 +116,7 @@ class ModelClientPool:
                     self._entries.pop(key)
                     entry = None
                 if entry is None:
-                    if len(self._entries) + len(self._retiring) >= self._maximum:
+                    if len(self._entries) + len(self._retiring) + len(self._failed_closes) >= self._maximum:
                         idle = next(
                             ((k, e) for k, e in self._entries.items() if e.users == 0),
                             None,
@@ -126,7 +126,7 @@ class ModelClientPool:
                                 RuntimeErrorInfo(
                                     code="server.model_pool_full",
                                     category=ErrorCategory.RATE_LIMITED,
-                                    message="all model client slots are in use",
+                                    message="model client capacity is exhausted",
                                     retryable=True,
                                     safe_to_resume=True,
                                 )
@@ -175,7 +175,10 @@ class ModelClientPool:
                 await self._closer(provider)
             except Exception as exc:
                 self._close_errors.append(exc)
-                raise
+                # Keep the failed resource charged to the physical budget,
+                # while allowing unrelated healthy clients to keep serving.
+                self._failed_closes.append(entry)
+                LOGGER.exception("model.client.close.failed", "Model client cleanup failed; capacity reserved", exc)
         finally:
             async with self._condition:
                 self._retiring.discard(asyncio.current_task())
@@ -186,6 +189,7 @@ class ModelClientPool:
             return {
                 "clients": len(self._entries),
                 "closing_clients": len(self._retiring),
+                "failed_clients": len(self._failed_closes),
                 "active_leases": sum(entry.users for entry in self._entries.values()),
                 "max_clients": self._maximum,
                 "constructions": self._created,

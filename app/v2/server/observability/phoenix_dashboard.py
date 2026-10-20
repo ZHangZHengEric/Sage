@@ -7,6 +7,7 @@ from urllib.parse import quote
 
 import httpx
 from pydantic import BaseModel, ConfigDict, Field
+from sagents.v2.runtime.observability.query import request
 
 from .external import ExternalDiagnostics
 
@@ -93,12 +94,11 @@ class PhoenixDashboard:
         self.source = diagnostics
 
     async def _graphql(self, client, query, variables):
-        response = await client.post(
-            self.source.query_url + "/graphql", json={"query": query, "variables": variables},
-            headers=self.source.headers, timeout=self.source.timeout, follow_redirects=False,
+        content, _ = await request(
+            self.source, client, "/graphql", [], method="POST",
+            body={"query": query, "variables": variables},
         )
-        response.raise_for_status()
-        result = response.json()
+        result = json.loads(content)
         if result.get("errors"):
             # Never expose upstream errors or connection credentials to the browser.
             raise ValueError("Phoenix query failed")

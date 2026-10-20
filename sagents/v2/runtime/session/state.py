@@ -19,6 +19,8 @@ from datetime import datetime
 from typing import Any
 
 from sagents.v2.runtime.session.attachments import SessionAttachmentMixin
+from sagents.v2.runtime.session.run_metadata import RunMetadataQueries
+from sagents.v2.runtime.session.child_heads import ManagedSessionHeadQueries
 from sagents.v2.runtime.artifact.contracts import ArtifactRef as StoredAttachmentRef
 
 from sagents.v2.contracts.checkpoint import (
@@ -198,7 +200,7 @@ class _SessionOperation:
     cancellation: asyncio.CancelledError | None = None
 
 
-class SessionStoreCoordinator(SessionAttachmentMixin):
+class SessionStoreCoordinator(ManagedSessionHeadQueries, RunMetadataQueries, SessionAttachmentMixin):
     """Atomic reference state machine for the SessionStore contract.
 
     The default persistence hooks retain process-local state. Concrete adapters
@@ -2392,6 +2394,17 @@ class SessionStoreCoordinator(SessionAttachmentMixin):
                     run_id=row.run_id, run_sequence=row.last_run_sequence
                 ),
             )
+
+    async def find_start_run(self, session_id: str, idempotency_key: str, context: RequestContext):
+        scope = (context.actor.tenant_id, context.actor.principal_type,
+                 context.actor.principal_id, idempotency_key)
+        async with self._session_read(session_id):
+            run_id = self._start_idempotency.get(scope)
+            row = self._runs.get(run_id)
+            if row is None or row.session_id != session_id or row.start_command is None:
+                return None
+            self._authorize_session_actor_locked(session_id, context)
+            return self._run_snapshot(row), row.start_command
 
     async def get_start_command(self, run_id: str) -> StartRun:
         async with self._run_session_read(run_id):

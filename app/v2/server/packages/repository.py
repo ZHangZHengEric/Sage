@@ -46,7 +46,7 @@ class DatabasePackageStore:
         await db.flush()
 
     async def version_ref(self, owner, package, version):
-        async with self.transaction() as db:
+        async with self.database.session() as db:
             row = await self._get(db, owner, "version", package, version)
             return row.payload["ref"] if row else None
 
@@ -66,7 +66,7 @@ class DatabasePackageStore:
         return ref
 
     async def get(self, owner, ref):
-        async with self.transaction() as db:
+        async with self.database.session() as db:
             row = await self._get(db, owner, "bundle", ref)
             if row is None:
                 raise ValueError("agent package not found in caller scope")
@@ -75,7 +75,7 @@ class DatabasePackageStore:
     async def list(self, owner, *, limit=50, offset=0):
         if not 1 <= limit <= 100 or offset < 0:
             raise ValueError("invalid inventory pagination")
-        async with self.transaction() as db:
+        async with self.database.session() as db:
             rows = (
                 await db.scalars(
                     select(Row)
@@ -85,17 +85,23 @@ class DatabasePackageStore:
                     .offset(offset)
                 )
             ).all()
+            packages = {row.payload["manifest"]["metadata"]["id"] for row in rows}
+            active_rows = (await db.scalars(select(Row).where(
+                Row.key.in_([key(owner, "active", package) for package in packages]),
+                Row.owner == owner, Row.kind == "active",
+            ))).all() if packages else ()
+            active_by_key = {row.key: row.payload["ref"] for row in active_rows}
             result = []
             for row in rows:
                 meta = row.payload["manifest"]["metadata"]
-                active = await self._get(db, owner, "active", meta["id"])
+                active_ref = active_by_key.get(key(owner, "active", meta["id"]))
                 result.append(
                     dict(
                         ref=row.ref,
                         package=meta["id"],
                         version=meta["version"],
-                        active=bool(active and active.payload["ref"] == row.ref),
-                        active_ref=active.payload["ref"] if active else None,
+                        active=active_ref == row.ref,
+                        active_ref=active_ref,
                     )
                 )
             return result
@@ -118,7 +124,7 @@ class DatabasePackageStore:
     async def invocation(
         self, owner, operation, ref=None, agent=None, request=None, handle=None
     ):
-        async with self.transaction() as db:
+        async with (self.transaction() if request is not None or handle is not None else self.database.session()) as db:
             row = await self._get(db, owner, "invocation", operation)
             value = dict(row.payload) if row else None
             if (
@@ -160,7 +166,7 @@ class DatabasePackageStore:
             return value
 
     async def reply_command(self, owner, operation, interaction, request, command=None):
-        async with self.transaction() as db:
+        async with (self.transaction() if command is not None else self.database.session()) as db:
             parts = [operation, interaction, request]
             row = await self._get(db, owner, "reply", *parts)
             if row:
@@ -178,7 +184,7 @@ class DatabasePackageStore:
                 await db.delete(row)
 
     async def owns_session(self, owner, ref, agent, session_id):
-        async with self.transaction() as db:
+        async with self.database.session() as db:
             statement = (
                 select(Row.key)
                 .where(
@@ -193,7 +199,7 @@ class DatabasePackageStore:
             return (await db.scalar(statement)) is not None
 
     async def terminal_status(self, owner, operation, *, value=None):
-        async with self.transaction() as db:
+        async with (self.transaction() if value is not None else self.database.session()) as db:
             if value is not None:
                 row = await self._get(db, owner, "invocation", operation)
                 record = row.payload if row else {}
@@ -218,7 +224,7 @@ class DatabasePackageStore:
         from sqlalchemy.orm import aliased
 
         terminal = aliased(Row)
-        async with self.transaction() as db:
+        async with self.database.session() as db:
             archived = (
                 select(terminal.key)
                 .where(
@@ -245,7 +251,7 @@ class DatabasePackageStore:
             return [row.payload for row in (await db.scalars(statement)).all()]
 
     async def history_location(self, owner, ref, agent, *, root=None):
-        async with self.transaction() as db:
+        async with (self.transaction() if root is not None else self.database.session()) as db:
             if root is not None:
                 await self._put(db, owner, "history", [ref, agent], {"root": str(root)})
             row = await self._get(db, owner, "history", ref, agent)
@@ -254,7 +260,7 @@ class DatabasePackageStore:
     async def list_invocations(self, owner, *, limit=50, offset=0):
         if not 1 <= limit <= 100 or offset < 0:
             raise ValueError("invalid invocation pagination")
-        async with self.transaction() as db:
+        async with self.database.session() as db:
             rows = (
                 await db.scalars(
                     select(Row)

@@ -14,6 +14,7 @@ import json
 import re
 from contextlib import asynccontextmanager
 from copy import deepcopy
+from datetime import datetime
 from typing import Any
 
 from sagents.v2.contracts.errors import (
@@ -22,6 +23,7 @@ from sagents.v2.contracts.errors import (
     SageV2Error,
 )
 from sagents.v2.runtime.session.state import SessionStoreCoordinator
+from sagents.v2.runtime.session.child_heads import PostgresManagedSessionHeads
 from sagents.v2.runtime.observability.logs import get_logger
 
 LOGGER = get_logger(__name__)
@@ -91,7 +93,7 @@ def _decode_json(value: Any) -> Any:
     return value
 
 
-class _PostgresSessionState(SessionStoreCoordinator):
+class _PostgresSessionState(PostgresManagedSessionHeads, SessionStoreCoordinator):
     """Row-CAS PostgreSQL adapter around the shared state coordinator."""
 
     format_version = "sage.session.postgres/v3"
@@ -404,8 +406,8 @@ class _PostgresSessionState(SessionStoreCoordinator):
                             session_row.get("parent_session_id"),
                             new_revision,
                             int(session_row["last_sequence"]),
-                            session_row["created_at"],
-                            session_row["updated_at"],
+                            datetime.fromisoformat(session_row["created_at"]),
+                            datetime.fromisoformat(session_row["updated_at"]),
                             _json(compact),
                         )
                     else:
@@ -431,7 +433,7 @@ class _PostgresSessionState(SessionStoreCoordinator):
                             session_row.get("parent_session_id"),
                             new_revision,
                             int(session_row["last_sequence"]),
-                            session_row["updated_at"],
+                            datetime.fromisoformat(session_row["updated_at"]),
                             _json(compact),
                             expected,
                         )
@@ -779,6 +781,11 @@ class _PostgresSessionState(SessionStoreCoordinator):
         await self._ensure_resource_loaded("run_id", run_id)
         return await super().get_run_result(run_id)
 
+    async def find_start_run(self, session_id, idempotency_key, context):
+        async with self._session_scope(session_id):
+            await self._ensure_session_loaded(session_id, missing_ok=True)
+            return await super().find_start_run(session_id, idempotency_key, context)
+
     async def get_start_command(self, run_id):
         await self._ensure_resource_loaded("run_id", run_id)
         return await super().get_start_command(run_id)
@@ -1003,6 +1010,43 @@ class _PostgresSessionState(SessionStoreCoordinator):
                 ],
                 command.idempotency_key,
             )
+
+    async def _run_metadata_batch(self, session_ids):
+        from sagents.v2.runtime.session.run_metadata import metadata_from_payload
+        if not session_ids:
+            return (), {}
+        await self._ensure_ready()
+        async with self._pool.acquire() as connection:
+            values = await connection.fetch(f"""
+                SELECT jsonb_build_object('sessions', jsonb_build_array(jsonb_build_object(
+                    'session_id',compact_state->'sessions'->0->'session_id',
+                    'created_at',compact_state->'sessions'->0->'created_at',
+                    'parent_session_id',compact_state->'sessions'->0->'parent_session_id',
+                    'owner',COALESCE(NULLIF(compact_state->'sessions'->0->'owner','null'::jsonb),
+                        (SELECT r->'request_context'->'actor' FROM jsonb_array_elements(compact_state->'runs') r
+                         WHERE r->'request_context'->'actor' IS NOT NULL AND r->'request_context'->'actor' <> 'null'::jsonb
+                         ORDER BY r->>'created_at',r->>'run_id' LIMIT 1),
+                        (SELECT e.event->'actor' FROM {self._table('run_events')} e
+                         WHERE e.session_id=s.session_id AND e.event->>'type'='run.accepted'
+                         ORDER BY e.session_sequence LIMIT 1),'null'::jsonb))), 'runs',
+                    COALESCE((SELECT jsonb_agg(jsonb_build_object(
+                        'session_id',r->'session_id','run_id',r->'run_id','created_at',r->'created_at','state',r->'state',
+                        'request_context',jsonb_build_object('actor',r->'request_context'->'actor'),
+                        'start_command',jsonb_build_object('agent_id',r->'start_command'->'agent_id',
+                            'parent_run_id',r->'start_command'->'parent_run_id',
+                            'invocation_mode',r->'start_command'->'invocation_mode',
+                            'config',jsonb_build_object('metadata',jsonb_build_object(
+                                'task_name',r->'start_command'->'config'->'metadata'->'task_name',
+                                'server_v2.execution',jsonb_build_object('agent_id',r->'start_command'->'config'->'metadata'->'server_v2.execution'->'agent_id'))))))
+                        FROM jsonb_array_elements(compact_state->'runs') r), '[]'::jsonb)) payload
+                FROM {self._table('sessions')} s WHERE session_id = ANY($1::text[])
+            """, list(session_ids))
+        rows, owners = [], {}
+        for value in values:
+            current, heads = metadata_from_payload(_decode_json(value['payload']))
+            rows.extend(current)
+            owners.update(heads)
+        return tuple(rows), owners
 
     async def _fetch_session(self, session_id: str) -> dict[str, Any] | None:
         assert self._pool is not None

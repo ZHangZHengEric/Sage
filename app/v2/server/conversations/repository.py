@@ -19,7 +19,7 @@ from app.v2.server.conversations.records import (
 class ThreadIndex(Protocol):
     async def binding(self, session_id: str) -> SessionBinding | None: ...
     async def bind(self, binding: SessionBinding) -> None: ...
-    async def page(self, *, user_id: str | None = None, limit: int = 50, cursor: str | None = None, search: str = "", agent_id: str = "", matching_agent_ids: tuple[str, ...] = ()) -> ThreadPage: ...
+    async def page(self, *, user_id: str | None = None, limit: int = 50, cursor: str | None = None, search: str = "", agent_id: str = "", matching_agent_ids: tuple[str, ...] = (), include_unassigned: bool = False) -> ThreadPage: ...
     async def scan_snapshot(self) -> tuple[str | None, int]: ...
     async def scan(self, *, limit: int = 100, cursor: str | None = None, user_id: str | None = None, through: str | None = None) -> ThreadPage: ...
     async def workspace_session_page(self, tenant_id: str, agent_id: str, *, owner_id: str, cursor: str | None = None, limit: int = 200) -> WorkspaceSessionPage: ...
@@ -63,13 +63,13 @@ class DatabaseThreadIndex:
                 raise
             require_binding(existing, binding)
 
-    async def page(self, *, user_id=None, limit=50, cursor=None, search="", agent_id="", matching_agent_ids=()):
+    async def page(self, *, user_id=None, limit=50, cursor=None, search="", agent_id="", matching_agent_ids=(), include_unassigned=False):
         limit = max(1, min(int(limit), 200))
         statement = select(ThreadRow)
         if user_id is not None:
             statement = statement.where(ThreadRow.user_id == user_id)
         if agent_id:
-            statement = statement.where(ThreadRow.agent_id == agent_id)
+            statement = statement.where(or_(ThreadRow.agent_id == agent_id, ThreadRow.agent_id == '') if include_unassigned else ThreadRow.agent_id == agent_id)
         if search.strip():
             needle = search.strip().lower().replace("/", "//").replace("%", "/%").replace("_", "/_")
             statement = statement.where(or_(

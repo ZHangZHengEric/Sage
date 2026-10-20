@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+from functools import partial
 import hashlib
 import io
 import os
@@ -10,11 +12,39 @@ import zipfile
 from pathlib import Path
 
 import yaml
+from anyio import CancelScope
 
+from sagents.v2.concurrency import bounded_to_thread
 from sagents.v2.package.strict_yaml import load_unique_yaml
 
 from app.v2.server.skills.records import SkillPackage, normalize_skill_name
 from sagents.v2.contracts.errors import ErrorCategory, RuntimeErrorInfo, SageV2Error
+
+
+async def skill_io(function, *args, **kwargs):
+    """Run Skill parsing and file work within the shared auxiliary capacity."""
+    return await bounded_to_thread("skill-io", partial(function, *args, **kwargs))
+
+
+async def finish_skill_write(function, *args, **kwargs):
+    """Keep mutation locks held until cancelled file workers stop."""
+    task = asyncio.create_task(skill_io(function, *args, **kwargs))
+    try:
+        return await asyncio.shield(task)
+    except asyncio.CancelledError as cancellation:
+        with CancelScope(shield=True):
+            while not task.done():
+                try:
+                    await asyncio.shield(task)
+                except asyncio.CancelledError:
+                    continue
+                except Exception:
+                    break
+        if not task.cancelled():
+            error = task.exception()
+            if error is not None:
+                cancellation.add_note(f"Skill file worker also failed: {error!r}")
+        raise cancellation
 
 
 def inspect_skill_directory(source: Path) -> SkillPackage:

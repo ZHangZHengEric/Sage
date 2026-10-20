@@ -217,6 +217,43 @@ async def test_cleanup_failure_still_attempts_other_clients():
 
 
 @pytest.mark.asyncio
+async def test_failed_idle_close_preserves_healthy_clients_and_reserves_capacity():
+    made = []
+
+    async def factory(record):
+        client = Client()
+        made.append(client)
+        return client
+
+    async def failing_close(client):
+        if client is made[0]:
+            raise OSError("idle client could not close")
+        await client.close()
+
+    pool = ModelClientPool(factory, failing_close, max_clients=2)
+    idle = await pool.acquire("alice", record("a"))
+    healthy = await pool.acquire("bob", record("b"))
+    await idle.close()
+    try:
+        with pytest.raises(SageV2Error) as full:
+            await pool.acquire("carol", record("c"))
+        assert full.value.info.code == "server.model_pool_full"
+        assert len(made) == 2, "failed cleanup must not release physical capacity"
+        reused = await pool.acquire("bob", record("b"))
+        assert reused.provider is healthy.provider
+        await reused.close()
+        await healthy.close()
+        replacement = await pool.acquire("carol", record("c"))
+        assert healthy.provider.closed
+        assert len(made) == 3
+        await replacement.close()
+    finally:
+        await healthy.close()
+        with pytest.raises(ExceptionGroup):
+            await pool.close()
+
+
+@pytest.mark.asyncio
 async def test_mixed_concurrent_runs_release_every_lease_and_bound_clients():
     made = []
 

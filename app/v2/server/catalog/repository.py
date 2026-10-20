@@ -29,9 +29,6 @@ from app.v2.server.catalog.records import (
     empty_catalog,
 )
 
-_SECTIONS = ("models", "mcp_servers", "a2a_agents")
-
-
 class CatalogStore(Protocol):
     async def get_for_run(self, user_id: str, agent_id: str | None = None) -> UserCatalog: ...
     async def get_execution_policy(self, user_id: str, agent_id: str) -> ExecutionPolicy | None: ...
@@ -46,9 +43,11 @@ class CatalogStore(Protocol):
     async def create_agent(self, user_id: str, record: AgentRecord) -> None: ...
     async def update_agent(self, user_id: str, record: AgentRecord) -> None: ...
     async def delete_agent(self, user_id: str, agent_id: str) -> None: ...
-    async def replace_section(
-        self, user_id: str, section: str, catalog: UserCatalog
+    async def replace_models(
+        self, user_id: str, catalog: UserCatalog
     ) -> UserCatalog: ...
+    async def save_resource(self, user_id: str, section: str, record: McpServerRecord | A2AAgentRecord) -> None: ...
+    async def delete_resource(self, user_id: str, section: str, name: str) -> None: ...
     async def list_all_models(
         self, user_ids: list[str]
     ) -> list[tuple[str, ModelRecord]]: ...
@@ -316,16 +315,43 @@ class DatabaseCatalogStore:
             )
             await session.delete(row)
 
-    async def replace_section(
-        self, user_id: str, section: str, catalog: UserCatalog
+    async def replace_models(
+        self, user_id: str, catalog: UserCatalog
     ) -> UserCatalog:
-        if section not in _SECTIONS:
-            raise ValueError(f"unknown catalog section: {section}")
         documents = catalog_payload(catalog)
         async with self.database.transaction() as session:
             row = await self._catalog(session, user_id)
-            setattr(row, section, documents[section])
+            row.models = documents["models"]
         return catalog
+
+    async def save_resource(self, user_id, section, record):
+        document = record.model_dump(mode="json")
+        document["api_key"] = record.api_key.get_secret_value() if record.api_key is not None else None
+        await self._write_resource(user_id, section, record.name, document)
+
+    async def delete_resource(self, user_id, section, name):
+        await self._write_resource(user_id, section, name, None)
+
+    async def _write_resource(self, user_id, section, name, document):
+        if section not in {"mcp_servers", "a2a_agents"}:
+            raise ValueError(f"unknown resource section: {section}")
+        # Runtime catalog projections may omit unusable records. Mutate only
+        # the named raw document, never write that filtered projection back.
+        async with self.database.transaction() as session:
+            row = await self._catalog(session, user_id)
+            original = getattr(row, section)
+            updated = []
+            found = False
+            for item in original:
+                if isinstance(item, dict) and item.get("name") == name:
+                    found = True
+                    if document is not None:
+                        updated.append(document)
+                else:
+                    updated.append(item)
+            if not found and document is not None:
+                updated.append(document)
+            setattr(row, section, updated)
 
     async def list_all_models(
         self, user_ids: list[str]
@@ -363,12 +389,12 @@ class DatabaseCatalogStore:
         self, user_id: str, payload: dict[str, object]
     ) -> ModelRecord:
         record, catalog = apply_upsert(await self.get(user_id), payload)
-        await self.replace_section(user_id, "models", catalog)
+        await self.replace_models(user_id, catalog)
         return record
 
     async def delete_model(self, user_id: str, model_id: str) -> None:
         catalog = apply_delete(await self.get(user_id), model_id)
-        await self.replace_section(user_id, "models", catalog)
+        await self.replace_models(user_id, catalog)
 
 
 def _agent_values(record: AgentRecord) -> dict:

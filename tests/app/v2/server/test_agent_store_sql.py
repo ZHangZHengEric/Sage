@@ -1,9 +1,12 @@
+from types import SimpleNamespace
+
 import pytest
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
 from app.v2.server.catalog.records import AgentRecord
 from app.v2.server.catalog.repository import DatabaseCatalogStore
+from app.v2.server.catalog.service import CatalogService
 from app.v2.server.database import Database, DatabaseSettings
 from app.v2.server.database.schema import create_host_schema
 from app.v2.server.identity.orm import UserRow
@@ -110,3 +113,71 @@ async def test_agent_summaries_initialize_defaults_and_batch_existing_catalogs(s
                            model_id=model.id, model_name='Alice model', tool_count=1, skill_count=1)
     assert [item['user_id'] for item in await store.list_agent_summaries(['bob'])] == ['bob']
     assert await store.list_agent_summaries([]) == []
+
+
+@pytest.mark.parametrize("section", ["mcp_servers", "a2a_agents"])
+@pytest.mark.parametrize("operation", ["create", "update", "refresh", "delete"])
+async def test_catalog_resource_mutation_preserves_unusable_raw_records(
+    store, monkeypatch, capsys, section, operation,
+):
+    from app.v2.server.catalog.orm import CatalogRow
+
+    await store.get("alice")
+    broken = {
+        "name": "broken", "url": "ftp://legacy.example/resource",
+        "api_key": "broken-private-credential", "description": "Keep original data",
+    }
+    if section == "mcp_servers":
+        broken["protocol"] = "stdio"
+    good = {
+        "name": "good", "url": "https://example.com/resource",
+        "api_key": "good-private-credential",
+    }
+    async with store.database.transaction() as session:
+        row = await session.get(CatalogRow, "alice")
+        setattr(row, section, [broken, good])
+
+    async def discover(_config):
+        return ["discovered"]
+
+    is_mcp = section == "mcp_servers"
+    monkeypatch.setattr(
+        "app.v2.server.catalog.service."
+        + ("discover_mcp_tools" if is_mcp else "discover_a2a_skills"),
+        discover,
+    )
+    plugins = SimpleNamespace(invalidate=lambda _user_id: None)
+    service = CatalogService(store, mcp_plugins=plugins, a2a_plugins=plugins, skills=None)
+    method = getattr(service, f"{operation}_{'mcp' if is_mcp else 'a2a_agent'}")
+    result = None
+    if operation == "create":
+        result = await method("alice", {**good, "name": "another"})
+    elif operation == "update":
+        result = await method("alice", "good", {**good, "description": "Updated"})
+    else:
+        result = await method("alice", "good")
+
+    catalog = await store.get("alice")
+    public = [item.public_dict() for item in getattr(catalog, section)]
+    if result is not None:
+        public.append(result.public_dict())
+    captured = capsys.readouterr()
+    for credential in (broken["api_key"], good["api_key"]):
+        assert credential not in str(public)
+        assert credential not in captured.out + captured.err
+    assert all(item["name"] != "broken" for item in public)
+    async with store.database.session() as session:
+        row = await session.get(CatalogRow, "alice")
+        raw = getattr(row, section)
+    assert next((item for item in raw if item["name"] == "broken"), None) == broken
+    expected_names = {"broken"} if operation == "delete" else {"broken", "good"}
+    if operation == "create":
+        expected_names.add("another")
+    assert {item["name"] for item in raw} == expected_names
+    if operation != "delete":
+        saved = next(item for item in raw if item["name"] == "good")
+        assert saved["api_key"] == good["api_key"]
+        if operation == "update":
+            assert saved["description"] == "Updated"
+        if operation == "refresh":
+            assert saved["tools" if is_mcp else "skills"] == ["discovered"]

@@ -19,6 +19,7 @@ from sagents.v2.contracts.run_state import RunState, TERMINAL_RUN_STATES
 from sagents.v2.runtime.session.mysql_state import _MysqlSessionState, _json, parse_mysql_dsn
 from sagents.v2.runtime.session.mysql_archive import MysqlSessionArchive
 from sagents.v2.runtime.session.state import SessionStoreCoordinator
+from sagents.v2.runtime.session.child_heads import RedisManagedSessionHeads
 from sagents.v2.runtime.observability.logs import get_logger
 
 
@@ -26,7 +27,7 @@ LOGGER = get_logger(__name__)
 _STOPPED = TERMINAL_RUN_STATES | {RunState.SUSPENDED}
 
 
-class _RedisMysqlSessionState(_MysqlSessionState):
+class _RedisMysqlSessionState(RedisManagedSessionHeads, _MysqlSessionState):
     format_version = "sage.session.redis-mysql/v2"
     durable_history_pages = False
     archive_batch_rows = 32
@@ -418,6 +419,51 @@ class _RedisMysqlSessionState(_MysqlSessionState):
         await self.list_dispatchable_runs()
         return await SessionStoreCoordinator.has_nonterminal_runs(self)
 
+    async def _run_metadata_batch(self, session_ids):
+        from sagents.v2.runtime.session.run_metadata import metadata_from_payload
+        from sagents.v2.runtime.session.metadata_replay import decode_redis_metadata, read_redis_metadata_batch
+        await self._ensure_ready()
+        rows, owners = await SessionStoreCoordinator._run_metadata_batch(self, session_ids)
+        # An EXEC may have committed before its confirmation was lost. The
+        # coordinator then rolls back memory; read Redis until typed recovery
+        # replaces that cache, without hydrating execution history here.
+        uncertain = self._recovery_required.intersection(session_ids)
+        if uncertain:
+            rows = tuple(row for row in rows if row.session_id not in uncertain)
+            owners = {sid: owner for sid, owner in owners.items() if sid not in uncertain}
+        missing = [sid for sid in session_ids if sid not in owners]
+        if not missing:
+            return rows, owners
+        snapshots = await read_redis_metadata_batch(self, missing)
+        absent = [sid for sid, fields in snapshots.items() if not fields]
+        if absent:
+            resident = await self._redis.smismember(self._key('resident'), absent)
+            for sid, hot in zip(absent, resident):
+                if hot:
+                    raise self._storage_error(f'Unarchived Redis Session data is missing: {sid}')
+        cold = []
+        result = list(rows)
+        for sid, fields in snapshots.items():
+            if fields.get('deleted') == '1':
+                continue
+            if fields:
+                payload = await asyncio.to_thread(decode_redis_metadata, fields)
+                if payload is not None:
+                    current, heads = await asyncio.to_thread(metadata_from_payload, payload)
+                    result.extend(current)
+                    owners.update(heads)
+            else:
+                cold.append(sid)
+        if cold:
+            current, heads = await self._archive._run_metadata_batch(cold)
+            result.extend(current)
+            owners.update(heads)
+        return tuple(result), owners
+
+    async def authorized_run_metadata_page(self, session_ids, context, **options):
+        from sagents.v2.runtime.session.run_metadata import RunMetadataQueries
+        return await RunMetadataQueries.authorized_run_metadata_page(self, session_ids, context, **options)
+
     async def has_nonterminal_session_trees(self, session_ids):
         """Redis owns hot state; an asynchronous MySQL archive cannot overrule it."""
         await self._ensure_ready()
@@ -441,6 +487,15 @@ class _RedisMysqlSessionState(_MysqlSessionState):
         cold = []
         for offset in range(0, len(ids), 128):
             batch = ids[offset:offset + 128]
+            # Acknowledged Redis deletion wins over both the resident queue and
+            # a stale SQL archive. Keep traversing its descendants, however.
+            async with self._redis.pipeline(transaction=False) as pipe:
+                for sid in batch:
+                    pipe.hget(self._session_key(sid), 'deleted')
+                deleted = await pipe.execute()
+            batch = [sid for sid, marker in zip(batch, deleted) if marker != '1']
+            if not batch:
+                continue
             resident = await self._redis.smismember(self._key("resident"), batch)
             suspended = await self._redis.smismember(self._key("suspended"), batch)
             if any(suspended):
@@ -448,7 +503,8 @@ class _RedisMysqlSessionState(_MysqlSessionState):
             async with self._session_cache.operation():
                 for sid, hot in zip(batch, resident):
                     if hot:
-                        await self._ensure_session_loaded(sid)
+                        # Deletion may have committed after the metadata read.
+                        await self._ensure_session_loaded(sid, missing_ok=True)
                         if any(self._runs[rid].state not in TERMINAL_RUN_STATES
                                for rid in self._session_run_ids_locked(sid)):
                             return True
@@ -513,6 +569,7 @@ class _RedisMysqlSessionState(_MysqlSessionState):
                     pipe.persist(self._session_key(deleted))
                     pipe.sadd(self._key("pending"), deleted)
                     pipe.sadd(self._key("resident"), deleted)
+                    pipe.srem(self._key("suspended"), deleted)
                     for kind, identity, _ in self._persisted_locations.get(deleted, ()):
                         pipe.hdel(self._key("locations"), self._lookup_key((kind, identity)))
                     for row in self._persisted_start_keys.get(deleted, ()):

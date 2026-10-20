@@ -168,24 +168,23 @@ class CatalogService:
     async def create_mcp(self, user_id: str, payload: dict):
         async with self._lock(user_id, "mcp_servers"):
             catalog = await self.store.get(user_id)
-            record, catalog = upsert_mcp(catalog, payload)
-            await self.store.replace_section(user_id, "mcp_servers", catalog)
+            record, _ = upsert_mcp(catalog, payload)
+            await self.store.save_resource(user_id, "mcp_servers", record)
             return record
 
     async def update_mcp(self, user_id: str, name: str, payload: dict):
         async with self._lock(user_id, "mcp_servers"):
             catalog = await self.store.get(user_id)
             payload = {**payload, "name": name}
-            record, catalog = upsert_mcp(catalog, payload)
-            await self.store.replace_section(user_id, "mcp_servers", catalog)
+            record, _ = upsert_mcp(catalog, payload)
+            await self.store.save_resource(user_id, "mcp_servers", record)
             return record
 
     async def delete_mcp(self, user_id: str, name: str) -> None:
         async with self._lock(user_id, "mcp_servers"):
             catalog = await self.store.get(user_id)
-            await self.store.replace_section(
-                user_id, "mcp_servers", delete_mcp(catalog, name)
-            )
+            delete_mcp(catalog, name)
+            await self.store.delete_resource(user_id, "mcp_servers", name)
 
     async def refresh_mcp(self, user_id: str, name: str):
         async with self._lock(user_id, "mcp_servers"):
@@ -203,35 +202,31 @@ class CatalogService:
                 )
             tools = await discover_mcp_tools(to_mcp_config(current))
             record = current.model_copy(update={"tools": list(dict.fromkeys(tools))})
-            catalog.mcp_servers = [
-                record if item.name == name else item for item in catalog.mcp_servers
-            ]
-            await self.store.replace_section(user_id, "mcp_servers", catalog)
+            await self.store.save_resource(user_id, "mcp_servers", record)
         self.mcp_plugins.invalidate(user_id)
         return record
 
     async def create_a2a_agent(self, user_id: str, payload: dict):
         async with self._lock(user_id, "a2a_agents"):
             catalog = await self.store.get(user_id)
-            record, catalog = upsert_a2a_agent(catalog, payload)
-            await self.store.replace_section(user_id, "a2a_agents", catalog)
+            record, _ = upsert_a2a_agent(catalog, payload)
+            await self.store.save_resource(user_id, "a2a_agents", record)
             return record
 
     async def update_a2a_agent(self, user_id: str, name: str, payload: dict):
         async with self._lock(user_id, "a2a_agents"):
             catalog = await self.store.get(user_id)
             payload = {**payload, "name": name}
-            record, catalog = upsert_a2a_agent(catalog, payload)
-            await self.store.replace_section(user_id, "a2a_agents", catalog)
+            record, _ = upsert_a2a_agent(catalog, payload)
+            await self.store.save_resource(user_id, "a2a_agents", record)
         self.a2a_plugins.invalidate(user_id)
         return record
 
     async def delete_a2a_agent(self, user_id: str, name: str) -> None:
         async with self._lock(user_id, "a2a_agents"):
             catalog = await self.store.get(user_id)
-            await self.store.replace_section(
-                user_id, "a2a_agents", delete_a2a_agent(catalog, name)
-            )
+            delete_a2a_agent(catalog, name)
+            await self.store.delete_resource(user_id, "a2a_agents", name)
         self.a2a_plugins.invalidate(user_id)
 
     async def refresh_a2a_agent(self, user_id: str, name: str):
@@ -250,10 +245,7 @@ class CatalogService:
                 )
             skills = await discover_a2a_skills(to_a2a_config(current))
             record = current.model_copy(update={"skills": list(dict.fromkeys(skills))})
-            catalog.a2a_agents = [
-                record if item.name == name else item for item in catalog.a2a_agents
-            ]
-            await self.store.replace_section(user_id, "a2a_agents", catalog)
+            await self.store.save_resource(user_id, "a2a_agents", record)
         self.a2a_plugins.invalidate(user_id)
         return record
 

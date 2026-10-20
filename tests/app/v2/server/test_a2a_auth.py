@@ -84,7 +84,7 @@ def test_a_tenant_forged_in_the_request_body_is_ignored(tmp_path):
         victim_user_id = client.get(
             "/api/auth/session", headers={"Authorization": f"Bearer {victim_token}"}
         ).json()["data"]["user_id"]
-        _, attacker_key = mint_key(client, attacker_token)
+        attacker_agent, attacker_key = mint_key(client, attacker_token)
 
         forged = client.post(
             "/a2a/v1",
@@ -114,7 +114,10 @@ def test_a_tenant_forged_in_the_request_body_is_ignored(tmp_path):
         # just in the host thread index: the attacker can read it back and the
         # victim, holding their own key, cannot.
         _, victim_key = mint_key(client, victim_token)
-        _, attacker_read_key = mint_key(client, attacker_token, scopes=["a2a:read"])
+        issued = client.post('/api/keys', json={'name':'read same Agent', 'agent_id':attacker_agent, 'scopes':['a2a:read']},
+            headers={'Authorization':f'Bearer {attacker_token}'})
+        assert issued.status_code == 200, issued.text
+        attacker_read_key = issued.json()['data']['api_key']
         assert rpc(client, attacker_read_key, "GetTask", {"id": task["id"]})["result"]
         assert (
             rpc(client, victim_key, "GetTask", {"id": task["id"]})["error"]["code"]

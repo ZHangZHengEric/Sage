@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+from anyio import CancelScope
 
 from sagents.v2.contracts.errors import ErrorCategory, RuntimeErrorInfo, SageV2Error
 
@@ -53,11 +54,23 @@ async def finish_file_operation(function, *args, **kwargs):
     task = asyncio.create_task(asyncio.to_thread(function, *args, **kwargs))
     try:
         return await asyncio.shield(task)
-    except asyncio.CancelledError:
-        try:
-            await task
-        finally:
-            raise
+    except asyncio.CancelledError as cancellation:
+        # AnyIO cancellation is level-triggered; a plain second await would
+        # cancel the to_thread Future while its filesystem worker keeps running.
+        # Also resist repeated asyncio.Task.cancel() until the worker settles.
+        with CancelScope(shield=True):
+            while not task.done():
+                try:
+                    await asyncio.shield(task)
+                except asyncio.CancelledError:
+                    continue
+                except Exception:
+                    break
+        if not task.cancelled():
+            error = task.exception()
+            if error is not None:
+                cancellation.add_note(f"Filesystem worker also failed: {error!r}")
+        raise cancellation
 
 
 async def delete_external_session(service, tenant_id, agent_id, session_id):

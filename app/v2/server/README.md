@@ -180,7 +180,7 @@ Web 侧对应 `POST /api/threads/{thread_id}/resume`（body 给 `runId` / `decis
 
 对话页从 `sage.interaction.requested` 这一条 CUSTOM 事件渲染审批卡片：问的是什么、允许哪几个决策，都由服务端给，客户端不自己编一套词汇。这条事件也落在 thread 事件里，所以关掉标签页再打开，等待中的问题还在，不用指望当时那条流。含 `submit` 的问题是自由问答，回答落进 `payload.text`。回答前会先把记录回退到本轮 Run 开始处——续跑的流是从 Run 的第一条事件重放的，不回退就会把已经在屏幕上的内容再叠一遍。用户自己那条消息排在 `RUN_STARTED` 之前，所以回退不会把它一起抹掉。
 
-`CancelTask` 用调用方读到的 revision 做 compare-and-set，已经结束的 Run 报 `TaskNotCancelable`（-32002）而不是 `TaskNotFound`（-32001）——它存在，只是不能取消了。Sage 的 Run 索引挂在 Session 上而非租户上，所以 `ListTasks` 是按 owner 的 thread 再逐个 Session 走 Run，page token 是不透明的 `v1:<session_index>:<run_index>`，一页的成本只与这一页有关。
+`CancelTask` 用调用方读到的 revision 做 compare-and-set，已经结束的 Run 报 `TaskNotCancelable`（-32002）而不是 `TaskNotFound`（-32001）——它存在，只是不能取消了。`ListTasks` 先按 owner 和凭证绑定的 Agent 在 ThreadIndex 中分页，再批量读取候选 Session 的轻量 Run 元数据；仅返回页内的 Task 读取完整事件并按原 reducer 重建，保留历史长度、状态与 context 筛选。顺序仍为 thread 最近更新优先、同 thread 内 Run 创建时间升序。不透明的 v2 page token 保存线程排序锚点及最后返回的 Run 排序键，前排新线程不会使数字 offset 移位而重复已有 Task。采用与原生列表相同的弱一致 keyset 语义：遍历期间其他线程更新可能改变其位置，需要刷新首页获取当前结果；不提供事务快照，也不以扫描限额静默截断筛选结果。
 
 鉴权失败不出现在 JSON-RPC 错误表里：A2A 没有对应错误码，所以 scope 在 HTTP 层结算（403），跨租户读不到的 Task 报 `TaskNotFound`。流式请求若在第一个事件之前就被拒（例如订阅别人的 Task），SDK 返回的是普通 JSON-RPC 错误响应而非 SSE——此时还没有流可以放错误帧。
 
@@ -215,7 +215,21 @@ Server API 用 `external_tools` 配置外部工具，页面与内置 `tools` 分
 
 页面、`POST /api/agent`、`POST /api/agents/{agent_id}/runs` 共享以上契约。A2A 的 `contextId` 同样原样作为 session ID，缺省生成后通过 Task.contextId 返回。工具参数及模型上下文中的 `session_id` 由实际 Run 统一绑定，调用方和模型不能指定其他会话。`runtimeContext.session_id` 如有传入必须匹配请求会话。请求头中的 SAGE-AGENT-ID 优先于 forwardedProps.agentId。
 
-当前 SessionStore 的 session ID 是全局主键，因此同一个 ID 不能被另一个 tenant 或 Agent 复用。`session_bindings` 以数据库唯一约束持久化 owner、tenant、Agent 归属；冲突启动返回 409，越权读取返回 404，不再通过改写 ID 实现隔离。绑定不会随会话删除转让给其他归属。部署时自动创建绑定表并将 MySQL threads.thread_id 扩为 VARCHAR(192)。
+当前 SessionStore 的 session ID 是全局主键，因此同一个 ID 不能被另一个 tenant 或 Agent 复用。`session_bindings` 以数据库唯一约束持久化 owner、tenant、Agent 归属；冲突启动返回 409，越权读取返回 404，不再通过改写 ID 实现隔离。绑定不会随会话删除转让给其他归属。启动只创建缺失表，不自动修改已有表的列或索引；新建 `threads.thread_id` 为 VARCHAR(192)，既有库需要显式迁移并核对该列。
+
+已有 MySQL 库发布前还应检查下列索引，仅显式创建缺失项，并对工作区候选分页和 Session 后代查询执行 `EXPLAIN`。Server 的 SessionStore 显式使用空表前缀，表名为 `sessions`；独立 SDK 或覆盖前缀的部署应使用实际物理表名。本次修复复用既有业务表，不增加审计存储，也不在启动时执行这些 DDL：
+
+```sql
+SHOW INDEX FROM threads;
+SHOW INDEX FROM session_bindings;
+SHOW INDEX FROM sessions;
+-- 仅在相应索引缺失时执行：
+CREATE INDEX ix_threads_user_agent_thread_id ON threads (user_id, agent_id, thread_id);
+CREATE INDEX ix_session_bindings_workspace_session ON session_bindings (tenant_id, agent_id, session_id);
+CREATE INDEX sessions_parent_id ON sessions (parent_session_id);
+```
+
+回滚只删除本次实际新增且确认无其他依赖的索引；保留原有查询索引，不自动清理或改写历史业务数据。
 
 旧 `external_<hash>` 会话采用原位兼容，升级前应备份业务数据库、SessionStore 和 tenants 工作空间：携带原 tenant、Agent 和业务 ID 请求时，只探测已有旧哈希记录，不创建新的哈希会话；命中后返回旧的实际 `session_id`，后续应复用这个返回值。历史 Run、检查点、问卷、审批、事件及 `.sage/todos/<旧ID>.json` 都留在原位，workspace 仍使用原 `server_v2.workspace_user_id`。这是兼容读取和继续执行方案，不重写活动会话或 Todo 文件。若历史数据缺少 workspace 身份元数据，使用原 tenant/Agent/业务 ID 可验证已有旧哈希并建立可信绑定；恢复和工作空间浏览从该绑定补全身份，不修改旧命令。仅知道哈希时无法反推出 tenant，必须先核对原始身份，禁止猜测或把文件移到别的租户目录。旧 runId 重试复用持久化启动命令，输入、workspace 或运行上下文不同则明确拒绝，避免升级后幂等摘要改变。
 

@@ -5,14 +5,17 @@ import hashlib
 import shutil
 from pathlib import Path
 from pathlib import PurePosixPath
+from weakref import WeakValueDictionary
 
 from app.v2.server.catalog.records import AgentRecord, UserCatalog
 from app.v2.server.skills.files import (
     copy_skill_tree,
+    finish_skill_write,
     inspect_skill_directory,
     inspect_skill_markdown,
     inspect_skill_zip,
     package_sha256_of,
+    skill_io,
     write_skill_package,
 )
 from app.v2.server.skills.records import (
@@ -39,6 +42,8 @@ class SkillCatalogService:
     def __init__(self, store: SkillStore, data_root: Path) -> None:
         self.store = store
         self.data_root = Path(data_root)
+        self.guidance_locks: WeakValueDictionary[tuple[str, str], asyncio.Lock] = WeakValueDictionary()
+        self.guidance_skill_locks: WeakValueDictionary[tuple[str, str], asyncio.Lock] = WeakValueDictionary()
 
     async def list_visible(self, *, user_id: str, role: str):
         return await self.store.list_visible(user_id=user_id, role=role)
@@ -63,7 +68,7 @@ class SkillCatalogService:
         user_id: str,
         role: str,
     ) -> SkillRecord:
-        package = inspect_skill_markdown(name=name, content=content)
+        package = await skill_io(inspect_skill_markdown, name=name, content=content)
         return await self.publish_package(
             package,
             owner_user_id=user_id,
@@ -77,7 +82,7 @@ class SkillCatalogService:
         user_id: str,
         role: str,
     ) -> SkillRecord:
-        package = inspect_skill_zip(payload, filename=filename)
+        package = await skill_io(inspect_skill_zip, payload, filename=filename)
         return await self.publish_package(
             package,
             owner_user_id=user_id,
@@ -140,7 +145,7 @@ class SkillCatalogService:
         user_id: str,
         role: str,
     ) -> SkillRecord:
-        package = inspect_skill_directory(source)
+        package = await skill_io(inspect_skill_directory, source)
         return await self.publish_package(
             package,
             owner_user_id=user_id,
@@ -158,7 +163,7 @@ class SkillCatalogService:
                     message="skill not found",
                 )
             )
-        package = inspect_skill_markdown(name=current.name, content=content)
+        package = await skill_io(inspect_skill_markdown, name=current.name, content=content)
         if package.name != current.name:
             raise SageV2Error(
                 RuntimeErrorInfo(
@@ -167,15 +172,15 @@ class SkillCatalogService:
                     message="skill name cannot be changed",
                 )
             )
-        source = current.absolute_path(self.data_root)
-        if source.is_dir():
+        def updated_package():
+            source = current.absolute_path(self.data_root)
+            if not source.is_dir():
+                return package
             files = dict(inspect_skill_directory(source).files)
             files["SKILL.md"] = package.files["SKILL.md"]
-            package = _package_from_files(
-                name=current.name,
-                description=package.description,
-                files=files,
-            )
+            return _package_from_files(name=current.name, description=package.description, files=files)
+
+        package = await skill_io(updated_package)
         return await self.publish_package(
             package,
             owner_user_id=current.owner_user_id,
@@ -253,38 +258,43 @@ class SkillCatalogService:
 
     async def read_content(self, skill_id: str, *, user_id: str, role: str) -> str:
         record = await self.get(skill_id, user_id=user_id, role=role)
-        skill_md = record.absolute_path(self.data_root) / "SKILL.md"
-        if not skill_md.is_file():
-            raise SageV2Error(
-                RuntimeErrorInfo(
-                    code="server.skills.service.not_found",
-                    category=ErrorCategory.VALIDATION,
-                    message="skill artifact is missing",
+        def read():
+            skill_md = record.absolute_path(self.data_root) / "SKILL.md"
+            if not skill_md.is_file():
+                raise SageV2Error(
+                    RuntimeErrorInfo(
+                        code="server.skills.service.not_found",
+                        category=ErrorCategory.VALIDATION,
+                        message="skill artifact is missing",
+                    )
                 )
-            )
-        return skill_md.read_text(encoding="utf-8")
+            return skill_md.read_text(encoding="utf-8")
+
+        return await skill_io(read)
 
     async def list_files(self, skill_id: str, *, user_id: str, role: str) -> list[dict]:
         record = await self.get(skill_id, user_id=user_id, role=role)
-        root = record.absolute_path(self.data_root)
-        if not root.is_dir():
-            raise _missing_skill_file()
-        files = []
-        for candidate in sorted(root.rglob("*")):
-            if candidate.is_symlink():
+        def scan():
+            root = record.absolute_path(self.data_root)
+            if not root.is_dir():
                 raise _missing_skill_file()
-            if candidate.is_file():
-                files.append({
-                    "path": candidate.relative_to(root).as_posix(),
-                    "size": candidate.stat().st_size,
-                })
-        return files
+            files = []
+            for candidate in sorted(root.rglob("*")):
+                if candidate.is_symlink():
+                    raise _missing_skill_file()
+                if candidate.is_file():
+                    files.append({
+                        "path": candidate.relative_to(root).as_posix(),
+                        "size": candidate.stat().st_size,
+                    })
+            return files
+
+        return await skill_io(scan)
 
     async def read_file(
         self, skill_id: str, path: str, *, user_id: str, role: str
     ) -> bytes:
         record = await self.get(skill_id, user_id=user_id, role=role)
-        root = record.absolute_path(self.data_root)
         parts = PurePosixPath(path).parts
         if (
             not path or path.startswith("/") or "\\" in path
@@ -292,16 +302,20 @@ class SkillCatalogService:
             or not parts
         ):
             raise _missing_skill_file()
-        candidate = root
-        if root.is_symlink():
-            raise _missing_skill_file()
-        for part in parts:
-            candidate = candidate / part
-            if candidate.is_symlink():
+        def read():
+            root = record.absolute_path(self.data_root)
+            candidate = root
+            if root.is_symlink():
                 raise _missing_skill_file()
-        if not candidate.is_file() or not candidate.resolve().is_relative_to(root.resolve()):
-            raise _missing_skill_file()
-        return await asyncio.to_thread(candidate.read_bytes)
+            for part in parts:
+                candidate = candidate / part
+                if candidate.is_symlink():
+                    raise _missing_skill_file()
+            if not candidate.is_file() or not candidate.resolve().is_relative_to(root.resolve()):
+                raise _missing_skill_file()
+            return candidate.read_bytes()
+
+        return await skill_io(read)
 
     async def write_workspace_skill(
         self, *, user_id: str, agent_id: str, name: str, content: str
@@ -309,46 +323,58 @@ class SkillCatalogService:
         """Copy-on-write into the tenant workspace. Catalog artifacts stay intact."""
 
         skill_name = normalize_skill_name(name)
-        target = workspace_skill_path(self.data_root, user_id, agent_id, skill_name)
-        if not target.is_dir():
+        target = await skill_io(workspace_skill_path, self.data_root, user_id, agent_id, skill_name)
+        source = None
+        if not await skill_io(target.is_dir):
             source = await self._catalog_source(user_id, skill_name)
-            if source is None:
-                raise SageV2Error(
-                    RuntimeErrorInfo(
-                        code="server.skills.service.not_found",
-                        category=ErrorCategory.VALIDATION,
-                        message=f"skill {skill_name!r} is not bound",
+
+        def write():
+            if not target.is_dir():
+                if source is None:
+                    raise SageV2Error(
+                        RuntimeErrorInfo(
+                            code="server.skills.service.not_found",
+                            category=ErrorCategory.VALIDATION,
+                            message=f"skill {skill_name!r} is not bound",
+                        )
                     )
-                )
-            copy_skill_tree(source, target)
-        skill_md = target / "SKILL.md"
-        inspect_skill_markdown(name=skill_name, content=content)
-        skill_md.write_text(
-            content if content.endswith("\n") else f"{content}\n", encoding="utf-8"
-        )
+                copy_skill_tree(source, target)
+            skill_md = target / "SKILL.md"
+            inspect_skill_markdown(name=skill_name, content=content)
+            skill_md.write_text(
+                content if content.endswith("\n") else f"{content}\n", encoding="utf-8"
+            )
+
+        await finish_skill_write(write)
         return target
 
     async def workspace_status(self, *, user_id: str, agent_id: str, name: str) -> str:
-        target = workspace_skill_path(self.data_root, user_id, agent_id, name)
-        if not target.is_dir():
+        target = await skill_io(workspace_skill_path, self.data_root, user_id, agent_id, name)
+        if not await skill_io(target.is_dir):
             return "missing"
         source = await self._catalog_source(user_id, name)
         if source is None:
             return "local"
-        try:
-            current = package_sha256_of(target)
-            expected = package_sha256_of(source)
-        except SageV2Error:
-            return "local"
-        return "current" if current == expected else "modified"
+        def status():
+            try:
+                current = package_sha256_of(target)
+                expected = package_sha256_of(source)
+            except SageV2Error:
+                return "local"
+            return "current" if current == expected else "modified"
+
+        return await skill_io(status)
 
     async def _catalog_source(self, user_id: str, name: str) -> Path | None:
         visible = await self.store.list_visible(user_id=user_id, role="user")
         match = pick_visible_skill(visible, name=name, user_id=user_id)
         if match is None:
             return None
-        path = match.absolute_path(self.data_root)
-        return path if path.is_dir() else None
+        def source():
+            path = match.absolute_path(self.data_root)
+            return path if path.is_dir() else None
+
+        return await skill_io(source)
 
     async def publish_package(
         self,
@@ -384,8 +410,12 @@ class SkillCatalogService:
             name=package.name,
             version_id=version_id,
         )
-        destination = resolve_artifact_path(self.data_root, relative)
-        await asyncio.to_thread(write_skill_package, destination, package)
+        def write():
+            destination = resolve_artifact_path(self.data_root, relative)
+            write_skill_package(destination, package)
+            return destination
+
+        destination = await finish_skill_write(write)
         record = SkillRecord(
             skill_id=skill_id
             or (existing.skill_id if existing is not None else new_skill_id()),
@@ -405,7 +435,7 @@ class SkillCatalogService:
                 return await self.store.publish(record, expected_version_id=expected_version_id)
             return await self.store.publish(record)
         except SageV2Error:
-            await asyncio.to_thread(shutil.rmtree, destination, ignore_errors=True)
+            await finish_skill_write(shutil.rmtree, destination, ignore_errors=True)
             raise
 
 
