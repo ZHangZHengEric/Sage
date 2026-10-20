@@ -507,6 +507,8 @@ class ApplicationAssembler:
             }
         scheduler = services["execution.scheduler"]
         scheduler_capabilities = await scheduler.capabilities()
+        from sagents.v2.runtime.session.fencing import validate_distributed_pair
+        validate_distributed_pair(session_store, scheduler, scheduler_capabilities)
         if (
             not scheduler_capabilities.supports_fencing
             or not scheduler_capabilities.supports_atomic_fenced_mutations
@@ -1268,7 +1270,8 @@ class ApplicationAssembler:
             scheduler,
             max_concurrent_runs=int(dispatcher_values.get("max_concurrent_runs", 8)),
             max_concurrent_runs_per_tenant=tenant_limit,
-            lease_seconds=float(dispatcher_values.get("lease_seconds", DEFAULT_LEASE_SECONDS)),
+            lease_seconds=float(dispatcher_values.get("lease_seconds", getattr(scheduler, "default_lease_seconds", DEFAULT_LEASE_SECONDS))),
+            distributed_claims=scheduler_capabilities.supports_distributed_claims,
             lease_scope_factory=driver_session_store.lease_scope,
             preserve_runs_on_shutdown=bool(dispatcher_values.get("preserve_runs_on_shutdown", True)),
         )

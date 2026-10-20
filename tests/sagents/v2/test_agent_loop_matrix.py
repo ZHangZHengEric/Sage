@@ -41,12 +41,10 @@ from sagents.v2.agent.policy.continuation import (
     ContinuationSignals,
     InteractionDraft,
 )
-from sagents.v2.agent.policy.approval_memory import SessionApprovalMemory
-from sagents.v2.agent.policy.tool_policy import (
-    ApprovalStrategy,
-    DefaultToolPolicy,
-)
-from sagents.v2.agent.policy.judge import (
+from sagents.v2.agent.policy.plugins.approval_memory import SessionApprovalMemory
+from sagents.v2.agent.policy.tool_policy import ApprovalStrategy
+from sagents.v2.agent.policy.plugins.tool_policy import DefaultToolPolicy
+from sagents.v2.agent.policy.plugins.judge import (
     LLMContinuationJudge,
     LLMJudgeContinuationPolicy,
 )
@@ -2644,11 +2642,8 @@ def _session_memory(runtime):
 @pytest.mark.asyncio
 @pytest.mark.parametrize("updated_policy", ["deny", "always", "changed-matcher"])
 async def test_pending_approval_cannot_override_tightened_host_policy(updated_policy):
-    from sagents.v2.agent.policy.tool_policy import (
-        ToolOperationAssessment,
-        ToolPolicyAction,
-        exact_arguments_matcher,
-    )
+    from sagents.v2.agent.policy.tool_policy import ToolOperationAssessment, ToolPolicyAction
+    from sagents.v2.agent.policy.plugins.tool_policy import exact_arguments_matcher
 
     model = ScriptedModelProvider(
         (

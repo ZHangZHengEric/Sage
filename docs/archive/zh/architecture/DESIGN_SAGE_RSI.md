@@ -81,7 +81,7 @@
 | 历史检索 | 已有 | [Session Memory](../../../../sagents/v2/session_memory/service.py)及 [SQLite BM25](../../../../sagents/v2/session_memory/plugins/sqlite_bm25.py) | 加入与实际任务收益关联的经验选择机制 |
 | 技能发现、加载与内容标识 | 已有 | [Skill 契约](../../../../sagents/v2/skill/contracts.py)含版本、不可变 bundle、content hash 与激活记录 | 增加候选技能生成、评测、晋升和退役 |
 | Agent 可配置行为 | 已有 | [AgentDefinition](../../../../sagents/v2/package/manifest/agents.py)可配置指令、工具、技能、执行模式和预算 | 定义允许演化的字段与资源边界 |
-| 包版本验证与发布门槛 | 部分 | [InMemoryAgentPackageRegistry](../../../../sagents/v2/package/registry/registry.py)有 draft / validate / test / publish / retire，已发布版本不可变；只在进程内保存 | 持久化学习版本、稳定版本指针、原子晋升与回滚；覆盖外部技能和工具内容哈希 |
+| 包版本验证与发布门槛 | 部分 | [InMemoryAgentPackageRegistry](../../../../sagents/v2/package/registry/plugins/ephemeral.py)有 draft / validate / test / publish / retire，已发布版本不可变；只在进程内保存 | 持久化学习版本、稳定版本指针、原子晋升与回滚；覆盖外部技能和工具内容哈希 |
 | 场景测试 | 部分 | [Scenario 契约](../../../../sagents/v2/testing/contracts.py)支持终态、事件、文本、工具、步数与交互响应检查 | 补充真实任务质量、多轮变更、保持能力与泛化评测 |
 | 运行追踪 | 已有基础 | [Trace](../../../../sagents/v2/runtime/observability/traces.py)等可观测性模块 | 关联目标、反馈、候选版本、成本和验收证据 |
 | 反馈 → 候选修改 → 评测 → 晋升 | 待实现 | 本次检查未发现专门串联上述过程的服务 | 建设独立学习协调层 |

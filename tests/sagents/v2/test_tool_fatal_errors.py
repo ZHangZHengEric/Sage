@@ -2,7 +2,8 @@
 
 import pytest
 
-from sagents.v2.agent.policy.tool_policy import ApprovalStrategy, DefaultToolPolicy
+from sagents.v2.agent.policy.tool_policy import ApprovalStrategy
+from sagents.v2.agent.policy.plugins.tool_policy import DefaultToolPolicy
 from sagents.v2.contracts.errors import ErrorCategory, RuntimeErrorInfo, SageV2Error
 from sagents.v2.contracts.run_state import RunState
 from sagents.v2.testing.plugins.scripted_model import (

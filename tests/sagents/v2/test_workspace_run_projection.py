@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, MagicMock
 import fakeredis.aioredis
 import pytest
 
-from sagents.v2.runtime.session.mysql_state import _MysqlSessionState
+from sagents.v2.runtime.session.plugins.mysql.state import _MysqlSessionState
 from sagents.v2.runtime.session.state import SessionStoreCoordinator
 from sagents.v2.runtime.session.plugins.filesystem import FilesystemSessionStore
 from tests.sagents.v2.test_mysql_session_store_matrix import command, CONTEXT
@@ -52,6 +52,24 @@ async def test_mysql_probe_reads_only_latest_state_projection(busy):
     assert not state._sessions
 
 
+async def test_mysql_descendant_enumeration_uses_one_recursive_query():
+    state = _MysqlSessionState("mysql://unused/test")
+    state._pool = object()
+    cursor, connection = AsyncMock(), AsyncMock()
+    cursor.fetchall.side_effect = [[("grandchild",), ("child",), ("root",)], [], []]
+    connection.cursor = MagicMock()
+    connection.cursor.return_value.__aenter__.return_value = cursor
+    @asynccontextmanager
+    async def reader():
+        yield connection
+    state._reader_connection = reader
+    assert set(await state._list_descendant_ids("root")) == {"child", "grandchild"}
+    cursor.execute.assert_awaited_once()
+    statement, parameters = cursor.execute.await_args.args
+    assert "WITH RECURSIVE" in statement
+    assert parameters == ("root",)
+
+
 async def test_redis_probe_checks_unarchived_hot_run_before_archive():
     redis = fakeredis.aioredis.FakeRedis(decode_responses=True)
     archive = Archive()
@@ -73,7 +91,7 @@ async def test_redis_probe_does_not_revisit_hot_terminal_child_in_stale_archive(
     from uuid import uuid4
     from redis.asyncio import Redis
     from sagents.v2.contracts.run_state import RunState
-    from sagents.v2.runtime.session.plugins.redis_mysql import RedisMysqlSessionStore
+    from sagents.v2.runtime.session.plugins.mysql.redis import RedisMysqlSessionStore
     from tests.sagents.v2.test_redis_mysql_session_store import transition
     url = os.environ.get("SAGE_V2_TEST_REDIS_URL")
     if live and not url:
@@ -146,7 +164,7 @@ async def test_live_mysql_workspace_probe_uses_current_journal_and_child_index()
     import os
     from uuid import uuid4
     from sagents.v2.contracts.run_state import RunState
-    from sagents.v2.runtime.session.mysql_state import _SCHEMA_TABLES
+    from sagents.v2.runtime.session.plugins.mysql.state import _SCHEMA_TABLES
     dsn = os.environ.get("SAGE_V2_TEST_MYSQL_DSN")
     if not dsn:
         pytest.skip("set SAGE_V2_TEST_MYSQL_DSN for live workspace projection")

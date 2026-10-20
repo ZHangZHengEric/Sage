@@ -20,6 +20,7 @@ from typing import Any
 
 from sagents.v2.runtime.session.attachments import SessionAttachmentMixin
 from sagents.v2.runtime.session.run_metadata import RunMetadataQueries
+from sagents.v2.runtime.session.read_views import SessionReadQueries
 from sagents.v2.runtime.session.child_heads import ManagedSessionHeadQueries
 from sagents.v2.runtime.artifact.contracts import ArtifactRef as StoredAttachmentRef
 
@@ -200,7 +201,7 @@ class _SessionOperation:
     cancellation: asyncio.CancelledError | None = None
 
 
-class SessionStoreCoordinator(ManagedSessionHeadQueries, RunMetadataQueries, SessionAttachmentMixin):
+class SessionStoreCoordinator(ManagedSessionHeadQueries, RunMetadataQueries, SessionReadQueries, SessionAttachmentMixin):
     """Atomic reference state machine for the SessionStore contract.
 
     The default persistence hooks retain process-local state. Concrete adapters
@@ -313,6 +314,8 @@ class SessionStoreCoordinator(ManagedSessionHeadQueries, RunMetadataQueries, Ses
             for lock in locks:
                 await lock.acquire()
                 acquired.append(lock)
+            for session_id in ordered:
+                await self._prepare_session_access(session_id)
             undos = (
                 {
                     session_id: self._capture_session_undo_locked(session_id)
@@ -366,9 +369,13 @@ class SessionStoreCoordinator(ManagedSessionHeadQueries, RunMetadataQueries, Ses
             lock = self._session_locks.setdefault(session_id, asyncio.Lock())
         await lock.acquire()
         try:
+            await self._prepare_session_access(session_id)
             yield
         finally:
             lock.release()
+
+    async def _prepare_session_access(self, session_id: str) -> None:
+        """Storage adapters may refresh an aggregate under its local lock."""
 
     @asynccontextmanager
     async def _run_session_read(self, run_id: str):
@@ -2139,7 +2146,7 @@ class SessionStoreCoordinator(ManagedSessionHeadQueries, RunMetadataQueries, Ses
                         run_id=run_id,
                         run_sequence=row.last_run_sequence,
                         preview_sequence=sequence,
-                        preview_epoch=self._preview_epoch,
+                        preview_epoch=self._preview_epoch_for_run(run_id),
                         turn_id=draft.turn_id,
                         step_id=draft.step_id,
                         item_id=draft.item_id,
@@ -2155,6 +2162,9 @@ class SessionStoreCoordinator(ManagedSessionHeadQueries, RunMetadataQueries, Ses
             retained.extend(events)
             self._fanout_locked(run_id, tuple(events))
             return self._run_snapshot(row)
+
+    def _preview_epoch_for_run(self, run_id: str) -> str:
+        return self._preview_epoch
 
     async def get_run(self, run_id: str) -> RunSnapshot:
         async with self._run_session_read(run_id):

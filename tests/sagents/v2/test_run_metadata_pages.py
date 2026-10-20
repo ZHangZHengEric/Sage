@@ -10,7 +10,7 @@ from sagents.v2.contracts.run_state import RunState, SessionConcurrencyMode
 from sagents.v2.runtime.session.state import SessionStoreCoordinator
 from sagents.v2.runtime.session.plugins.filesystem import FilesystemSessionStore
 from sagents.v2.runtime.session.plugins.postgres import PostgresSessionStore
-from sagents.v2.runtime.session.mysql_state import _MysqlSessionState, _SCHEMA_TABLES
+from sagents.v2.runtime.session.plugins.mysql.state import _MysqlSessionState, _SCHEMA_TABLES
 from sagents.v2.contracts.principals import RequestContext, ActorRef
 
 

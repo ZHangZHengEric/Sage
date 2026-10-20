@@ -49,6 +49,7 @@ from sagents.v2.contracts.session_commit import (
 )
 from sagents.v2.runtime.execution.resources import ExecutionResourceRecord
 from sagents.v2.runtime.session.child_heads import ChildSessionHeads
+from sagents.v2.runtime.session.read_views import SessionReadView
 
 
 @dataclass(frozen=True, slots=True)
@@ -174,6 +175,13 @@ class SessionStore(Protocol):
     ) -> RunCreationResult: ...
 
     async def get_run(self, run_id: str) -> RunSnapshot: ...
+    async def read_session_views(
+        self, session_ids: Collection[str], *, include_events: bool = False,
+        run_ids: Collection[str] | None = None, suspended_only: bool = False,
+    ) -> dict[str, SessionReadView]:
+        """Read up to 200 known Sessions without loading their execution aggregates."""
+        ...
+
     async def managed_session_heads(self, run_id: str) -> tuple[ChildSessionHeads, ...]:
         """Trusted context projection of every direct child's first/latest Run."""
         ...

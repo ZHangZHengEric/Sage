@@ -35,8 +35,8 @@ from sagents.v2.tool.localization import (
     localize_tool_definition,
     normalize_tool_language,
 )
+from sagents.v2.tool.plugins._shared.selection import DEFAULT_ALWAYS_VISIBLE_TOOLS
 from sagents.v2.tool.selection import (
-    DEFAULT_ALWAYS_VISIBLE_TOOLS,
     ToolSelectionConfig,
     ToolSelectionPolicy,
     ToolSelectionPrepareContext,

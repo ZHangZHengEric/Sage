@@ -327,7 +327,7 @@ class DefaultContextAssembler:
         view = self._apply_inference_view(projection.messages, volatile)
         artifact_store = self.artifact_store
         if artifact_store is None and run_id is not None and self.history is not None:
-            from sagents.v2.runtime.artifact.session import SessionArtifactStore
+            from sagents.v2.runtime.artifact.plugins.session import SessionArtifactStore
 
             artifact_store = SessionArtifactStore(self.history.reader, run_id)
         view = await hydrate_image_blocks(view, artifact_store)

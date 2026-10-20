@@ -29,8 +29,7 @@ from sagents.v2.contracts.errors import (
 )
 from sagents.v2.contracts.run_state import TERMINAL_RUN_STATES
 from sagents.v2.runtime.session.state import SessionStoreCoordinator
-from sagents.v2.runtime.session.child_heads import FilesystemManagedSessionHeads
-from sagents.v2.runtime.session.filesystem_layout import (
+from sagents.v2.runtime.session.plugins._shared.filesystem_layout import (
     SESSION_LAYOUT_FORMAT,
     resolve_session_directory,
 )
@@ -80,6 +79,24 @@ class StoreInUseError(SageV2Error):
 
 class SessionStoreCorruptionError(SageV2Error):
     """Raised when authoritative Session state integrity cannot be established."""
+
+
+class FilesystemManagedSessionHeads:
+    async def _direct_child_ids_for_run(self, run_id):
+        # The existing canonical topology index includes unloaded Sessions.
+        async with self._lock:
+            row = self._runs.get(run_id)
+            sid = row.session_id if row else None
+            live = {key: value.parent_session_id for key, value in self._sessions.items()}
+        with self._index_lock:
+            if sid is None:
+                sid = next((key for key, value in self._session_index.items() if run_id in value['run_ids']), None)
+            parents = {key: value.get('parent_session_id') for key, value in self._session_index.items()}
+        if sid is None:
+            raise self._not_found('run.not_found', run_id)
+        parents.update(live)
+        return [key for key, parent in parents.items() if parent == sid]
+
 
 
 class _FilesystemSessionState(FilesystemManagedSessionHeads, SessionStoreCoordinator):
@@ -439,6 +456,30 @@ class _FilesystemSessionState(FilesystemManagedSessionHeads, SessionStoreCoordin
     async def list_session_runs(self, session_id):
         await self._ensure_session_loaded(session_id)
         return await super().list_session_runs(session_id)
+
+    async def read_session_views(self, session_ids, **options):
+        from functools import partial
+        from sagents.v2.runtime.session.read_views import (
+            validate_view_ids,
+            project_view_state,
+            apply_view_delta,
+            views_from_payload,
+        )
+        from sagents.v2.runtime.session.metadata_replay import read_filesystem_metadata
+        ids = validate_view_ids(session_ids, options.get('run_ids'))
+        result = await super().read_session_views(ids, **options)
+        replay_options = {key: options[key] for key in ('include_events','run_ids') if key in options}
+        def read():
+            for sid in ids:
+                if sid in result:
+                    continue
+                path = self._session_dir(sid) / 'state.json'
+                if path.is_file():
+                    payload = read_filesystem_metadata(self,path,
+                        project=partial(project_view_state,**replay_options), apply=partial(apply_view_delta,**replay_options))
+                    result.update(views_from_payload(payload,**options))
+            return result
+        return await asyncio.to_thread(read)
 
     async def _run_metadata_batch(self, session_ids):
         from sagents.v2.runtime.session.run_metadata import metadata_from_payload

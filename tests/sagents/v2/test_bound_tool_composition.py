@@ -6,10 +6,15 @@ from sagents.v2.package.manifest.runtime import CapabilitySelection
 from sagents.v2.runtime.extensions import (
     CapabilityKey, CapabilityOffer, ExtensionDependency, ExtensionDescriptor, ExtensionRegistration, ExtensionScope,
 )
-from sagents.v2.runtime.execution.local_binding import LocalWorkspaceExecutionBindingProvider
+from sagents.v2.runtime.execution.plugins.local_binding import LocalWorkspaceExecutionBindingProvider
 from sagents.v2.tool import InMemoryToolCatalog, InMemoryToolExecutor
 from sagents.v2.testing.plugins import ScriptedModelProvider
-from tests.sagents.v2.test_standard_execution_configuration import package, response, run, runtime
+from tests.sagents.v2.test_standard_execution_configuration import (
+    package,
+    response,
+    run,
+    runtime,
+)
 from sagents.v2 import SAgentBuilder
 from tests.sagents.v2.model_fixture import TEST_MODELS
 from tests.sagents.v2.test_standard_execution_configuration import registration, CONTEXT

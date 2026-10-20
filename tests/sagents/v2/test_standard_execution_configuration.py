@@ -14,7 +14,12 @@ from sagents.v2.contracts.principals import ActorRef, RequestContext
 from sagents.v2.model.contracts import ModelResponse, ModelStreamEvent, ModelToolCall
 from sagents.v2.package.manifest import SageManifest
 from sagents.v2.package.manifest.runtime import CapabilitySelection, RuntimeConfig
-from sagents.v2.runtime.extensions import CapabilityOffer, ExtensionDescriptor, ExtensionRegistration, ExtensionScope
+from sagents.v2.runtime.extensions import (
+    CapabilityOffer,
+    ExtensionDescriptor,
+    ExtensionRegistration,
+    ExtensionScope,
+)
 from sagents.v2.testing.plugins import ScriptedModelProvider
 from sagents.v2.testing.plugins.scripted_model import ScriptedModelStep
 from tests.sagents.v2.model_fixture import TEST_MODELS
@@ -30,7 +35,7 @@ CONTEXT = RequestContext(actor=ActorRef(principal_id="owner", principal_type="us
     (1024, 2048 * 1024**2, 1024),
 ])
 def test_effective_file_capacity_inherits_explicit_disk_quota(disk_mb, filesystem_limit, expected_mb):
-    from sagents.v2.runtime.execution.registration import LocalExecutionBindingConfig
+    from sagents.v2.runtime.execution.plugins.local_binding.registration import LocalExecutionBindingConfig
 
     values = {"workspace": "/workspace", "policy": {}}
     if disk_mb is not None:
@@ -347,7 +352,7 @@ async def test_registered_object_creation_failure_rolls_back_only_owned_resource
 
 
 def test_writable_workspace_interpreter_is_rejected_before_launch(tmp_path):
-    from sagents.v2.runtime.execution.sandbox.local_support.interpreter import inspect_isolation_python
+    from sagents.v2.runtime.execution.sandbox.plugins.local.support.interpreter import inspect_isolation_python
     marker = tmp_path / "untrusted-ran"
     executable = tmp_path / "workspace" / "python"
     executable.parent.mkdir()

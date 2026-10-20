@@ -15,9 +15,7 @@ from sagents.v2.agent.policy import (
     LLMContinuationJudge,
     LLMJudgeContinuationPolicy,
 )
-from sagents.v2.agent.policy.legacy_v1_judge_prompt import (
-    LEGACY_V1_TASK_COMPLETE_TEMPLATE,
-)
+from sagents.v2.agent.policy.plugins.judge.prompts import LEGACY_V1_TASK_COMPLETE_TEMPLATE
 from sagents.v2.contracts.items import JsonBlock, TextBlock, UsageSummary
 from sagents.v2.contracts.errors import ErrorCategory, RuntimeErrorInfo, SageV2Error
 from sagents.v2.model import (
@@ -525,7 +523,7 @@ async def test_explicit_status_only_requests_guidance_at_step_limit():
 async def test_truncated_text_continues_without_spending_a_judge_call(
     finish_reason, policy_name
 ):
-    from sagents.v2.agent.policy.continuation import CompositeContinuationPolicy
+    from sagents.v2.agent.policy.plugins.continuation import CompositeContinuationPolicy
 
     class UnexpectedJudge:
         async def decide(self, context):

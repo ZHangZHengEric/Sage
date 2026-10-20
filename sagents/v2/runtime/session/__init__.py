@@ -4,8 +4,11 @@ from sagents.v2._lazy import exported_names, resolve_export
 
 
 _EXPORTS = {
+    "DistributedRedisMysqlSessionStore": (
+        "sagents.v2.runtime.session.plugins.mysql.redis_distributed", "DistributedRedisMysqlSessionStore",
+    ),
     "RedisMysqlSessionStore": (
-        "sagents.v2.runtime.session.plugins.redis_mysql", "RedisMysqlSessionStore",
+        "sagents.v2.runtime.session.plugins.mysql.redis", "RedisMysqlSessionStore",
     ),
     "AuthorizedSessionAccess": (
         "sagents.v2.runtime.session.access",
@@ -30,7 +33,7 @@ _EXPORTS = {
         "FilesystemSessionStore",
     ),
     "InMemoryDerivedStateStore": (
-        "sagents.v2.runtime.session.derived_state",
+        "sagents.v2.runtime.session.plugins.derived_ephemeral",
         "InMemoryDerivedStateStore",
     ),
     "LeaseFencedSessionStore": (

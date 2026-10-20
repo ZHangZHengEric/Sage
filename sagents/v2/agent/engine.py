@@ -49,8 +49,8 @@ from sagents.v2.memory import (
     MemoryRecallQueryGenerator,
 )
 from sagents.v2.model.provider import ModelProvider
+from sagents.v2.agent.policy.plugins.continuation import CompositeContinuationPolicy
 from sagents.v2.agent.policy.continuation import (
-    CompositeContinuationPolicy,
     ContinuationAction,
     ContinuationContext,
     ContinuationPolicy,
@@ -64,11 +64,8 @@ from sagents.v2.agent.policy.approval_memory import (
     ApprovalMemory,
     RememberedApproval,
 )
-from sagents.v2.agent.policy.tool_policy import (
-    DefaultToolPolicy,
-    ToolPolicyAction,
-    ToolPolicyContext,
-)
+from sagents.v2.agent.policy.plugins.tool_policy import DefaultToolPolicy
+from sagents.v2.agent.policy.tool_policy import ToolPolicyAction, ToolPolicyContext
 from sagents.v2.tool.contracts import (
     CancelSemantics,
     ReconcileResult,

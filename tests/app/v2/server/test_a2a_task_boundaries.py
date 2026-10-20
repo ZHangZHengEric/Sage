@@ -7,8 +7,9 @@ import pytest
 from app.v2.server.conversations.a2a.service import A2AService
 from app.v2.server.identity.keys import ApiKeyRecord
 from app.v2.server.identity.context import RequestContexts
-from sagents.v2.contracts.commands import StartRun
+from sagents.v2.contracts.commands import InputItem, StartRun
 from sagents.v2.contracts.errors import SageV2Error
+from sagents.v2.contracts.items import TextBlock
 from sagents.v2.runtime.session.access import AuthorizedSessionAccess
 from sagents.v2.runtime.session.state import SessionStoreCoordinator
 from tests.app.v2.server.fakes import MemoryThreadIndex
@@ -23,10 +24,10 @@ def service(store, threads):
         language='en', public_base_url='')
 
 
-async def create(store, threads, session_id, agent_id, key):
+async def create(store, threads, session_id, agent_id, key, *, input_items=()):
     context = RequestContexts('en').for_user('owner')
     result = await store.create_run(StartRun(agent_id=agent_id, session_id=session_id,
-        input=(), resolved_spec_hash='sha256:test', idempotency_key=key), context)
+        input=input_items, resolved_spec_hash='sha256:test', idempotency_key=key), context)
     await threads.upsert(session_id, 'owner', agent_id=agent_id)
     return result.handle.run_id
 
@@ -57,6 +58,23 @@ async def test_list_is_agent_scoped_and_does_not_materialize_unrelated_history()
     tasks, token = await api.list_tasks(ApiKeyRecord(key_id='key-a', owner_user_id='owner', agent_id='agent-a'))
     assert [task.id for task in tasks] == [own]
     assert not token
+
+
+@pytest.mark.parametrize('history_length', [0, 1])
+async def test_task_page_matches_individual_tasks_without_per_task_event_reads(history_length):
+    store, threads = SessionStoreCoordinator(), MemoryThreadIndex()
+    run_ids = [await create(store, threads, f'session-{i}', 'agent-a', f'key-{i}',
+                           input_items=tuple(InputItem(role='user', content=(TextBlock(text=f'{i}:{j}'),))
+                                             for j in range(2)))
+               for i in range(12)]
+    api = service(store, threads)
+    key = ApiKeyRecord(key_id='key-a', owner_user_id='owner', agent_id='agent-a')
+    expected = {rid: (await api.get_task(rid, key, history_length=history_length)).SerializeToString()
+                for rid in run_ids}
+    store.read_events = AsyncMock(side_effect=AssertionError('Task page fetched events per Run'))
+    page, token = await api.list_tasks(key, history_length=history_length)
+    assert not token
+    assert {task.id: task.SerializeToString() for task in page} == expected
 
 
 async def test_list_cursor_does_not_repeat_tasks_when_a_new_thread_arrives():

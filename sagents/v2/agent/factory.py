@@ -5,13 +5,10 @@ from __future__ import annotations
 from sagents.v2.agent.engine import AgentLoopEngine
 from sagents.v2.agent.observed import ObservedRunDriver
 from sagents.v2.agent.step_request import AgentStepRequestBuilder
-from sagents.v2.agent.policy.continuation import (
-    CompositeContinuationPolicy,
-    ContinuationPolicy,
-    ContinuationSignalProvider,
-)
+from sagents.v2.agent.policy.plugins.continuation import CompositeContinuationPolicy
+from sagents.v2.agent.policy.continuation import ContinuationPolicy, ContinuationSignalProvider
 from sagents.v2.agent.policy.approval_memory import ApprovalMemory
-from sagents.v2.agent.policy.tool_policy import DefaultToolPolicy
+from sagents.v2.agent.policy.plugins.tool_policy import DefaultToolPolicy
 from sagents.v2.context.assembler import ContextAssembler, DefaultContextAssembler
 from sagents.v2.context.components import ContextComponentBundle
 from sagents.v2.context.contracts import ContextBudget, ContextSegmentProvider

@@ -8,6 +8,7 @@ import os
 import shutil
 import subprocess
 import sys
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import pytest
@@ -165,11 +166,15 @@ def test_session_backends_share_state_machine_without_inheriting_each_other():
 
     filesystem = V2_ROOT / "runtime" / "session" / "plugins" / "filesystem.py"
     postgres = V2_ROOT / "runtime" / "session" / "plugins" / "postgres.py"
-    mysql = V2_ROOT / "runtime" / "session" / "plugins" / "mysql.py"
+    mysql = V2_ROOT / "runtime" / "session" / "plugins" / "mysql"
     state = V2_ROOT / "runtime" / "session" / "state.py"
     filesystem_imports = {module for _, module in _import_targets(filesystem)}
     postgres_imports = {module for _, module in _import_targets(postgres)}
-    mysql_imports = {module for _, module in _import_targets(mysql)}
+    mysql_imports = {
+        module
+        for path in mysql.rglob("*.py")
+        for _, module in _import_targets(path)
+    }
     state_imports = {module for _, module in _import_targets(state)}
 
     assert "sagents.v2.runtime.session.plugins.ephemeral" not in filesystem_imports
@@ -243,9 +248,8 @@ def test_observability_port_does_not_depend_on_sink_implementations():
 
     contracts = V2_ROOT / "runtime" / "observability" / "contracts.py"
     implementation_modules = {
-        f"sagents.v2.runtime.observability.plugins.{path.stem}"
-        for path in (V2_ROOT / "runtime" / "observability" / "plugins").glob("*.py")
-        if path.name != "__init__.py"
+        _module_name(path)
+        for path in _plugin_entries(V2_ROOT / "runtime" / "observability" / "plugins")
     }
     offenders = [
         f"{contracts.relative_to(V2_ROOT)}:{line}: {module}"
@@ -259,17 +263,26 @@ def test_observability_sinks_do_not_import_each_other():
     """Each sink plugin shares contracts, not other sink implementations."""
 
     plugin_dir = V2_ROOT / "runtime" / "observability" / "plugins"
-    plugin_files = sorted(
-        path for path in plugin_dir.glob("*.py") if path.name != "__init__.py"
-    )
-    plugin_modules = {
-        path: f"sagents.v2.runtime.observability.plugins.{path.stem}"
-        for path in plugin_files
-    }
-    for path, module in plugin_modules.items():
-        imported = {target for _, target in _import_targets(path)}
-        offenders = sorted((set(plugin_modules.values()) - {module}) & imported)
-        assert offenders == [], f"{path.name} imports {offenders}"
+    plugin_modules = {path: _module_name(path) for path in _plugin_entries(plugin_dir)}
+    for entry, module in plugin_modules.items():
+        paths = entry.parent.rglob("*.py") if entry.name == "__init__.py" else (entry,)
+        imported = {target for path in paths for _, target in _import_targets(path)}
+        siblings = set(plugin_modules.values()) - {module}
+        offenders = sorted(
+            target for target in imported
+            if any(target == sibling or target.startswith(sibling + ".") for sibling in siblings)
+        )
+        assert offenders == [], f"{module} imports {offenders}"
+
+
+def _plugin_entries(plugin_dir: Path):
+    for path in sorted(plugin_dir.iterdir()):
+        if path.name in {"__init__.py", "__pycache__", "_shared"}:
+            continue
+        if path.is_file() and path.suffix == ".py" and path.name != "__init__.py":
+            yield path
+        elif path.is_dir() and (path / "__init__.py").is_file():
+            yield path / "__init__.py"
 
 
 def test_plugin_implementations_do_not_import_siblings():
@@ -280,12 +293,23 @@ def test_plugin_implementations_do_not_import_siblings():
         if not plugin_dir.is_dir():
             continue
         prefix = f"{_module_name(plugin_dir / '__init__.py')}."
-        for path in sorted(plugin_dir.glob("*.py")):
-            if path.name == "__init__.py":
-                continue
-            own_module = _module_name(path)
+        for entry in _plugin_entries(plugin_dir):
+            own_module = _module_name(entry)
+            paths = (
+                sorted(entry.parent.rglob("*.py"))
+                if entry.name == "__init__.py" else (entry,)
+            )
+            for path in paths:
+                for line, module in _import_targets(path):
+                    own_implementation = module == own_module or module.startswith(own_module + ".")
+                    shared_support = module == prefix + "_shared" or module.startswith(prefix + "_shared.")
+                    if module.startswith(prefix) and not own_implementation and not shared_support:
+                        offenders.append(f"{path.relative_to(V2_ROOT)}:{line}: {module}")
+
+        shared_dir = plugin_dir / "_shared"
+        for path in sorted(shared_dir.rglob("*.py")):
             for line, module in _import_targets(path):
-                if module.startswith(prefix) and module != own_module:
+                if module.startswith(prefix) and not module.startswith(prefix + "_shared."):
                     offenders.append(f"{path.relative_to(V2_ROOT)}:{line}: {module}")
 
     assert offenders == []
@@ -299,8 +323,7 @@ def test_importing_one_plugin_does_not_eager_load_siblings():
         _module_name(path)
         for plugin_dir in V2_ROOT.rglob("plugins")
         if plugin_dir.is_dir()
-        for path in plugin_dir.glob("*.py")
-        if path.name != "__init__.py"
+        for path in _plugin_entries(plugin_dir)
     )
     script = r"""
 import importlib
@@ -320,18 +343,25 @@ print(json.dumps(loaded))
 """
     offenders: list[str] = []
     encoded_modules = json.dumps(modules)
-    for module in modules:
-        result = subprocess.run(
+
+    def inspect_import(module):
+        return subprocess.run(
             [sys.executable, "-c", script, module, encoded_modules],
             cwd=REPOSITORY_ROOT,
             capture_output=True,
             text=True,
             check=False,
+            timeout=10,
         )
-        assert result.returncode == 0, f"{module}: {result.stderr}"
-        loaded = json.loads(result.stdout)
-        if loaded:
-            offenders.append(f"{module}: {loaded}")
+
+    # Each import still gets a fresh interpreter; bound startup concurrency so
+    # growing the plugin inventory does not consume the whole test deadline.
+    with ThreadPoolExecutor(max_workers=4) as executor:
+        for module, result in zip(modules, executor.map(inspect_import, modules)):
+            assert result.returncode == 0, f"{module}: {result.stderr}"
+            loaded = json.loads(result.stdout)
+            if loaded:
+                offenders.append(f"{module}: {loaded}")
 
     assert offenders == []
 
@@ -453,6 +483,11 @@ def test_domain_ports_do_not_import_their_plugin_implementations():
     """Ports stay backend-neutral so a new implementation is only a new file."""
 
     ports = (
+        (V2_ROOT / "agent" / "policy" / "continuation.py", "sagents.v2.agent.policy.plugins"),
+        (V2_ROOT / "agent" / "policy" / "tool_policy.py", "sagents.v2.agent.policy.plugins"),
+        (V2_ROOT / "agent" / "policy" / "approval_memory.py", "sagents.v2.agent.policy.plugins"),
+        (V2_ROOT / "runtime" / "session" / "child_heads.py", "sagents.v2.runtime.session.plugins"),
+        (V2_ROOT / "package" / "registry" / "contracts.py", "sagents.v2.package.registry.plugins"),
         (V2_ROOT / "context" / "summary.py", "sagents.v2.context.plugins"),
         (V2_ROOT / "tool" / "selection.py", "sagents.v2.tool.plugins"),
         (V2_ROOT / "memory" / "query.py", "sagents.v2.memory.plugins"),

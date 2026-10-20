@@ -125,9 +125,13 @@ async def test_external_grant_denial_does_not_fall_through_to_another_executor()
 
 
 async def test_external_write_denied_before_execution_does_not_request_reconciliation():
-    from sagents.v2.agent.policy.tool_policy import ApprovalStrategy, DefaultToolPolicy
+    from sagents.v2.agent.policy.tool_policy import ApprovalStrategy
+    from sagents.v2.agent.policy.plugins.tool_policy import DefaultToolPolicy
     from sagents.v2.contracts.run_state import RunState
-    from sagents.v2.testing.plugins.scripted_model import ScriptedModelProvider, ScriptedModelStep
+    from sagents.v2.testing.plugins.scripted_model import (
+        ScriptedModelProvider,
+        ScriptedModelStep,
+    )
     from tests.sagents.v2.test_agent_loop_matrix import (
         CONTEXT as LOOP_CONTEXT, WRITE_TOOL, completed, setup_loop, tool_call,
     )
@@ -160,7 +164,11 @@ def test_dependency_receives_its_own_external_tools(tmp_path, monkeypatch):
     from copy import deepcopy
     from fastapi.testclient import TestClient
     from app.v2.server.main import create_app
-    from tests.app.v2.server.conftest import make_test_service, register_and_login, scripted_hello
+    from tests.app.v2.server.conftest import (
+        make_test_service,
+        register_and_login,
+        scripted_hello,
+    )
 
     model = scripted_hello()
     service = make_test_service(tmp_path, model_provider=model)

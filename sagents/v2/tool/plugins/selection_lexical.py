@@ -3,12 +3,8 @@
 from __future__ import annotations
 
 from sagents.v2.tool.contracts import ToolDefinition
-from sagents.v2.tool.selection import (
+from sagents.v2.tool.plugins._shared.selection import (
     DEFAULT_ALWAYS_VISIBLE_TOOLS,
-    ToolSelectionConfig,
-    ToolSelectionPrepareContext,
-    ToolSelectionRequest,
-    ToolSelectionResult,
     _bm25_ranked_names,
     _recent_text,
     _EXPANSION_BATCH_LIMIT,
@@ -16,6 +12,12 @@ from sagents.v2.tool.selection import (
     _INDEX_ENTRY_LIMIT,
     _INDEX_CHAR_LIMIT,
     _schema_characters,
+)
+from sagents.v2.tool.selection import (
+    ToolSelectionConfig,
+    ToolSelectionPrepareContext,
+    ToolSelectionRequest,
+    ToolSelectionResult,
 )
 
 

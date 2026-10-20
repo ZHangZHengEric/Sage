@@ -13,19 +13,16 @@ async def recover_pending_packages(management, users, contexts):
     """Re-open unarchived operations in bounded pages; never replay a StartRun."""
     for user in await users.list_users():
         context = contexts.for_user(user.user_id)
-        offset = 0
+        owner = owner_key(context)
+        after = ""
         while True:
-            rows = await management.list_runs(context, limit=100, offset=offset)
+            # Filter archived and incomplete admissions in the same SQL query.
+            # A terminal status can remove a row from this result while scanning,
+            # so advancing by operation key must not depend on its old offset.
+            rows = await management.store.unarchived_invocations(
+                owner, after=after, limit=100
+            )
             for row in rows:
-                if not row.get("handle"):
-                    continue  # Caller must retry incomplete admission with original input.
-                if (
-                    await management.store.terminal_status(
-                        owner_key(context), row["operation"]
-                    )
-                    is not None
-                ):
-                    continue
                 try:
                     await management.status(row["operation"], context)
                 except Exception as exc:
@@ -37,4 +34,4 @@ async def recover_pending_packages(management, users, contexts):
                     )
             if len(rows) < 100:
                 break
-            offset += len(rows)
+            after = rows[-1]["operation"]

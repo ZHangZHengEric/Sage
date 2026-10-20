@@ -23,7 +23,6 @@ from sagents.v2.contracts.errors import (
     SageV2Error,
 )
 from sagents.v2.runtime.session.state import SessionStoreCoordinator
-from sagents.v2.runtime.session.child_heads import PostgresManagedSessionHeads
 from sagents.v2.runtime.observability.logs import get_logger
 
 LOGGER = get_logger(__name__)
@@ -91,6 +90,17 @@ def _decode_json(value: Any) -> Any:
     if isinstance(value, str):
         return json.loads(value)
     return value
+
+
+class PostgresManagedSessionHeads:
+    async def _direct_child_ids_for_run(self, run_id):
+        sid = await self._locate_session('run_id', run_id)
+        if sid is None:
+            raise self._not_found('run.not_found', run_id)
+        async with self._pool.acquire() as connection:
+            return [row[0] for row in await connection.fetch(
+                f"SELECT session_id FROM {self._table('sessions')} WHERE parent_session_id = $1", sid)]
+
 
 
 class _PostgresSessionState(PostgresManagedSessionHeads, SessionStoreCoordinator):
@@ -1011,6 +1021,45 @@ class _PostgresSessionState(PostgresManagedSessionHeads, SessionStoreCoordinator
                 command.idempotency_key,
             )
 
+    async def read_session_views(self, session_ids, **options):
+        from sagents.v2.runtime.session.read_views import (
+            validate_view_ids,
+            project_view_state,
+            views_from_payload,
+        )
+        from sagents.v2.runtime.session.read_views import legacy_owner_sessions
+        ids = validate_view_ids(session_ids,options.get('run_ids'))
+        if not ids:
+            return {}
+        await self._ensure_ready()
+        states = {}
+        async with self._pool.acquire() as connection:
+            async with connection.transaction(isolation='repeatable_read', readonly=True):
+                values = await connection.fetch(f"""
+                    SELECT session_id,jsonb_build_object('sessions',compact_state->'sessions',
+                        'runs',compact_state->'runs','suspensions',compact_state->'suspensions',
+                        'interactions',compact_state->'interactions') payload
+                    FROM {self._table('sessions')} WHERE session_id=ANY($1::text[])
+                """,list(ids))
+                for value in values:
+                    states[value['session_id']] = project_view_state(_decode_json(value['payload']))
+                legacy = legacy_owner_sessions(states)
+                selected = list(options['run_ids']) if options.get('run_ids') is not None else None
+                events = await connection.fetch(f"""
+                    SELECT session_id,run_id,event FROM {self._table('run_events')}
+                    WHERE (session_id=ANY($1::text[]) AND $2::boolean AND ($3::text[] IS NULL OR run_id=ANY($3::text[])))
+                       OR (session_id=ANY($4::text[]) AND event->>'type'='run.accepted')
+                    ORDER BY session_sequence,run_sequence
+                """,list(ids),bool(options.get('include_events')),selected,legacy) if options.get('include_events') or legacy else ()
+                for row in events:
+                    states[row['session_id']]['run_events'].setdefault(row['run_id'],[]).append(_decode_json(row['event']))
+        def decode():
+            result = {}
+            for state in states.values():
+                result.update(views_from_payload(state,**options))
+            return result
+        return await asyncio.to_thread(decode)
+
     async def _run_metadata_batch(self, session_ids):
         from sagents.v2.runtime.session.run_metadata import metadata_from_payload
         if not session_ids:
@@ -1037,7 +1086,8 @@ class _PostgresSessionState(PostgresManagedSessionHeads, SessionStoreCoordinator
                             'invocation_mode',r->'start_command'->'invocation_mode',
                             'config',jsonb_build_object('metadata',jsonb_build_object(
                                 'task_name',r->'start_command'->'config'->'metadata'->'task_name',
-                                'server_v2.execution',jsonb_build_object('agent_id',r->'start_command'->'config'->'metadata'->'server_v2.execution'->'agent_id'))))))
+                                'server_v2.execution',jsonb_build_object('agent_id',r->'start_command'->'config'->'metadata'->'server_v2.execution'->'agent_id'),
+                                'server_v2.composition',jsonb_build_object('agent',jsonb_build_object('id',r->'start_command'->'config'->'metadata'->'server_v2.composition'->'agent'->'id')))))))
                         FROM jsonb_array_elements(compact_state->'runs') r), '[]'::jsonb)) payload
                 FROM {self._table('sessions')} s WHERE session_id = ANY($1::text[])
             """, list(session_ids))

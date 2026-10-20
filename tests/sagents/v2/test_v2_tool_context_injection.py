@@ -3,7 +3,7 @@ from contextlib import asynccontextmanager
 import pytest
 
 from sagents.v2.agent.engine import AgentLoopEngine
-from sagents.v2.agent.policy.tool_policy import DefaultToolPolicy
+from sagents.v2.agent.policy.plugins.tool_policy import DefaultToolPolicy
 from sagents.v2.agent.policy.approval_config import ToolApprovalConfig
 from sagents.v2.contracts.commands import InputItem, ReplyInteraction, RunConfig, StartRun
 from sagents.v2.contracts.items import TextBlock

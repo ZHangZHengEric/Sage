@@ -52,6 +52,7 @@ class ServerSettings:
     log_directory: str = ""
     mysql_url: str | None = None
     redis_url: str | None = None
+    session_store_plugin: str | None = None
     jaeger_url: str | None = None
     jaeger_service_name: str = "sage-server"
     jaeger_public_url: str = "http://127.0.0.1:16686/jaeger"
@@ -98,6 +99,13 @@ class ServerSettings:
     plugin_overrides: dict = field(default_factory=dict, repr=False)
 
     def __post_init__(self) -> None:
+        if self.session_store_plugin not in {None, "sage.session.mysql", "sage.session.redis-mysql",
+                                            "sage.session.redis-mysql-distributed"}:
+            raise ValueError("Unsupported Server session_store_plugin")
+        if self.session_store_plugin is not None and not self.mysql_url:
+            raise ValueError("session_store_plugin requires mysql_url")
+        if self.session_store_plugin in {"sage.session.redis-mysql", "sage.session.redis-mysql-distributed"} and not self.redis_url:
+            raise ValueError("Redis SessionStore plugin requires redis_url")
         if self.redis_url and not self.mysql_url:
             raise ValueError("redis_url requires mysql_url for Session archival")
         if self.sandbox_network_mode not in {"none", "unrestricted"}:
@@ -205,6 +213,7 @@ class ServerSettings:
             linux_execution_gid=int(value) if (value := _env("SAGE_SERVER_LINUX_EXECUTION_GID")) else None,
             mysql_url=mysql_url,
             redis_url=_env("SAGE_SERVER_REDIS_URL") or None,
+            session_store_plugin=_env("SAGE_SERVER_SESSION_STORE_PLUGIN") or None,
             trace_backend=_env("SAGE_SERVER_TRACE_BACKEND") or None,
             trace_otlp_endpoint=_env("SAGE_SERVER_TRACE_OTLP_ENDPOINT"),
             trace_otlp_protocol=_env("SAGE_SERVER_TRACE_OTLP_PROTOCOL", "grpc"),

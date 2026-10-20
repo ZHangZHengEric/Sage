@@ -9,7 +9,7 @@ import pytest
 
 from sagents.v2.context.sandbox_environment import SandboxEnvironmentContextProvider
 from sagents.v2.contracts.errors import SageV2Error
-from sagents.v2.runtime.execution.sandbox.local_support.paths import LocalSandboxPaths
+from sagents.v2.runtime.execution.sandbox.plugins.local.support.paths import LocalSandboxPaths
 from tests.sagents.v2.test_official_tool_provider_matrix import (
     plugin_for,
     call,

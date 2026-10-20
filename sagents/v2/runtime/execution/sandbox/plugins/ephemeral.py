@@ -47,7 +47,7 @@ from sagents.v2.runtime.execution.sandbox.contracts import (
     SandboxState,
     TerminateMode,
 )
-from sagents.v2.runtime.execution.sandbox.read_only_shell import (
+from sagents.v2.runtime.execution.sandbox.plugins._shared.read_only_shell import (
     read_only_process_command,
     validate_read_only_shell_command,
 )
@@ -468,7 +468,7 @@ class InMemorySandboxProvider:
     ) -> _MemoryHandle:
         self._sweep_terminated()
         caps = await self.capabilities()
-        from ..admission import validate_resource_support
+        from sagents.v2.runtime.execution.sandbox.plugins._shared.admission import validate_resource_support
 
         validate_resource_support(spec, caps)
         if spec.architecture not in caps.architectures:
@@ -516,7 +516,7 @@ class InMemorySandboxProvider:
         return _MemoryHandle(self, ref)
 
     async def attach(self, ref: SandboxRef, context: RequestContext) -> _MemoryHandle:
-        from ..admission import validate_resource_support
+        from sagents.v2.runtime.execution.sandbox.plugins._shared.admission import validate_resource_support
 
         validate_resource_support(
             self._row(ref.sandbox_id).spec, await self.capabilities()

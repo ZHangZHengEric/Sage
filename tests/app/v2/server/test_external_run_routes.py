@@ -129,7 +129,7 @@ def test_external_run_uses_effective_package_step_budget(
 ):
     from app.v2.server.conversations.external_runs import selected_run
     from sagents.v2.agent.management import AgentPackageBundle
-    from sagents.v2.agent.policy.continuation import BudgetRule
+    from sagents.v2.agent.policy.plugins._shared.continuation_rules import BudgetRule
 
     host = make_host(tmp_path)
     observed_limits = []

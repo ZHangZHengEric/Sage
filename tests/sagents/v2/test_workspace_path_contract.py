@@ -8,8 +8,8 @@ import pytest
 from sagents.v2.contracts.commands import StartRun
 from sagents.v2.contracts.errors import SageV2Error
 from sagents.v2.runtime.execution import ExecutionBindingRequest
-from sagents.v2.runtime.execution import local_binding
-from sagents.v2.runtime.execution.local_binding import LocalWorkspaceExecutionBindingProvider
+from sagents.v2.runtime.execution.plugins import local_binding
+from sagents.v2.runtime.execution.plugins.local_binding import LocalWorkspaceExecutionBindingProvider
 from sagents.v2.runtime.execution.sandbox import SandboxGrantIssuer
 from tests.sagents.v2.test_local_workspace_sandbox_matrix import CONTEXT
 
@@ -79,7 +79,11 @@ async def test_mapping_is_frozen_and_children_use_host_directory(tmp_path, monke
 
 
 async def test_shell_pipeline_failure_is_not_hidden_by_tail(tmp_path):
-    from tests.sagents.v2.test_official_tool_provider_matrix import plugin_for, call, CONTEXT as TOOL_CONTEXT
+    from tests.sagents.v2.test_official_tool_provider_matrix import (
+        plugin_for,
+        call,
+        CONTEXT as TOOL_CONTEXT,
+    )
 
     plugin = await plugin_for(tmp_path)
     try:

@@ -20,6 +20,8 @@ from sagents.v2.package.strict_yaml import load_unique_yaml
 from app.v2.server.skills.records import SkillPackage, normalize_skill_name
 from sagents.v2.contracts.errors import ErrorCategory, RuntimeErrorInfo, SageV2Error
 
+MAX_SKILL_ZIP_BYTES = 32 * 1024 * 1024
+
 
 async def skill_io(function, *args, **kwargs):
     """Run Skill parsing and file work within the shared auxiliary capacity."""
@@ -109,7 +111,7 @@ def inspect_skill_zip(payload: bytes, *, filename: str = "") -> SkillPackage:
                 message="zip is empty",
             )
         )
-    if len(payload) > 32 * 1024 * 1024:
+    if len(payload) > MAX_SKILL_ZIP_BYTES:
         raise SageV2Error(
             RuntimeErrorInfo(
                 code="server.skills.files.validation",

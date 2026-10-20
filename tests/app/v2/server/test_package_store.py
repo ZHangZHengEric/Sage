@@ -1,4 +1,6 @@
 import asyncio
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 from sqlalchemy import event
@@ -6,6 +8,9 @@ from sqlalchemy import event
 from app.v2.server.database import Database, DatabaseSettings
 from app.v2.server.database.schema import create_host_schema
 from app.v2.server.packages.repository import DatabasePackageStore
+from app.v2.server.packages.recovery import recover_pending_packages
+from app.v2.server.identity.context import RequestContexts
+from sagents.v2.agent.management.service import owner_key
 from sagents.v2.agent.management import AgentPackageBundle
 from sagents.v2.package.presets import BuiltinPackageFactory
 
@@ -82,6 +87,69 @@ async def package_store(tmp_path):
         yield DatabasePackageStore(db)
     finally:
         await db.stop()
+
+
+async def test_owner_recovery_page_excludes_archived_and_incomplete_in_one_select(package_store):
+    store = package_store
+    for owner, operation, ref, agent, admitted in (
+        ("owner", "a", "ref-a", "assistant", True),
+        ("owner", "b", "ref-b", "other-agent", True),
+        ("owner", "c", "ref-a", "assistant", False),
+        ("owner", "d", "ref-a", "assistant", True),
+        ("other", "e", "ref-a", "assistant", True),
+    ):
+        await store.invocation(owner, operation, ref, agent, "hello",
+            {"run_id": operation, "session_id": operation} if admitted else None)
+    await store.terminal_status("owner", "d", value={
+        "operation": "d", "ref": "ref-a", "terminal": True, "run": {"run_id": "d"},
+    })
+    async with store.database.session() as session:
+        engine = session.bind.sync_engine
+    statements = []
+    def capture(_connection, _cursor, statement, _parameters, _context, _many):
+        if statement.lstrip().upper().startswith("SELECT"):
+            statements.append(statement)
+    event.listen(engine, "before_cursor_execute", capture)
+    try:
+        rows = await store.unarchived_invocations("owner")
+    finally:
+        event.remove(engine, "before_cursor_execute", capture)
+    assert [row["operation"] for row in rows] == ["a", "b"]
+    assert len(statements) == 1
+    assert [row["operation"] for row in await store.unarchived_invocations("owner", after="a")] == ["b"]
+    assert [row["operation"] for row in await store.unarchived_invocations("owner", "ref-a", "assistant")] == ["a"]
+
+
+async def test_startup_recovery_does_not_skip_operations_archived_between_pages(package_store):
+    store = package_store
+    contexts = RequestContexts("en")
+    context = contexts.for_user("user")
+    owner = owner_key(context)
+    expected = [f"operation-{index:03d}" for index in range(101)]
+    for operation in ["already-archived", *expected]:
+        await store.invocation(owner, operation, "ref", "assistant", "hello",
+            {"run_id": operation, "session_id": operation})
+    await store.invocation(owner, "incomplete", "ref", "assistant", "original-input")
+    await store.terminal_status(owner, "already-archived", value={
+        "operation": "already-archived", "ref": "ref", "terminal": True,
+        "run": {"run_id": "already-archived"},
+    })
+    async def status(operation, request_context):
+        assert request_context.actor == context.actor
+        await store.terminal_status(owner, operation, value={
+            "operation": operation, "ref": "ref", "terminal": True,
+            "run": {"run_id": operation},
+        })
+    store.terminal_status = AsyncMock(wraps=store.terminal_status)
+    async def list_runs(_context, **pagination):
+        return await store.list_invocations(owner, **pagination)
+    management = SimpleNamespace(store=store, status=AsyncMock(side_effect=status),
+        list_runs=AsyncMock(side_effect=list_runs))
+    users = SimpleNamespace(list_users=AsyncMock(return_value=[SimpleNamespace(user_id="user")]))
+    await recover_pending_packages(management, users, contexts)
+    assert sorted(call.args[0] for call in management.status.await_args_list) == expected
+    assert all("value" in call.kwargs for call in store.terminal_status.await_args_list)
+    assert (await store.invocation(owner, "incomplete"))["handle"] is None
 
 
 async def test_package_inventory_batches_active_versions_in_two_selects(package_store):

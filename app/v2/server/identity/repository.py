@@ -40,7 +40,9 @@ class DatabaseUserStore:
         return None if row is None else _user_from_row(row)
 
     async def admin(self) -> UserRecord | None:
-        return next((user for user in await self.list_users() if user.role == "admin"), None)
+        async with self.database.session() as session:
+            row = await session.scalar(select(UserRow).where(UserRow.role == "admin").limit(1))
+        return None if row is None else _user_from_row(row)
 
     async def save(self, user: UserRecord) -> None:
         async with self.database.transaction() as session:

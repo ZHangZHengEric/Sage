@@ -7,7 +7,8 @@ import pytest
 
 from sagents.v2.agent import AgentLoopEngine
 from sagents.v2.agent.state import AgentLoopCheckpointCodec
-from sagents.v2.agent.policy.tool_policy import ApprovalStrategy, DefaultToolPolicy
+from sagents.v2.agent.policy.tool_policy import ApprovalStrategy
+from sagents.v2.agent.policy.plugins.tool_policy import DefaultToolPolicy
 from sagents.v2.contracts.commands import CancelRun, InputItem, RunConfig, StartRun
 from sagents.v2.contracts.errors import ErrorCategory, RuntimeErrorInfo
 from sagents.v2.contracts.items import TextBlock
@@ -20,7 +21,13 @@ from sagents.v2.runtime.execution.scheduler import FilesystemScheduler, InMemory
 from sagents.v2.runtime.session import EphemeralSessionStore, FilesystemSessionStore
 from sagents.v2.sagent import SAgent
 from sagents.v2.testing.plugins.scripted_model import ScriptedModelProvider, ScriptedModelStep
-from sagents.v2.tool import InMemoryToolCatalog, InMemoryToolExecutor, SideEffectLevel, ToolDefinition, ToolExecutionResult
+from sagents.v2.tool import (
+    InMemoryToolCatalog,
+    InMemoryToolExecutor,
+    SideEffectLevel,
+    ToolDefinition,
+    ToolExecutionResult,
+)
 
 CONTEXT = RequestContext(actor=ActorRef(
     principal_id="autonomous", principal_type=PrincipalType.USER, tenant_id="one-tenant",

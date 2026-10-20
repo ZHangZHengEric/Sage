@@ -4,8 +4,8 @@ from __future__ import annotations
 import asyncio
 from pathlib import Path
 
-from sagents.v2.runtime.execution.registration import LocalExecutionBindingConfig
-from sagents.v2.runtime.execution.local_binding import LocalWorkspaceExecutionBindingProvider
+from sagents.v2.runtime.execution.plugins.local_binding.registration import LocalExecutionBindingConfig
+from sagents.v2.runtime.execution.plugins.local_binding import LocalWorkspaceExecutionBindingProvider
 
 
 class ServerExecutionBindingConfig(LocalExecutionBindingConfig):
@@ -30,7 +30,7 @@ class ServerWorkspaceBindingProvider:
             raise PermissionError("Server execution resources belong to another owner")
 
     def _provider(self, workspace):
-        from sagents.v2.runtime.execution.registration import local_execution_binding_registration
+        from sagents.v2.runtime.execution.plugins.local_binding.registration import local_execution_binding_registration
         from types import SimpleNamespace
         values = self.config.model_dump(mode="python", exclude={"owner", "agent_id"})
         values.update(workspace=str(workspace), private_workspace_root=str(workspace.parent / ".sage-private-workspaces"))

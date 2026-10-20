@@ -110,7 +110,7 @@ async def test_managed_context_keeps_every_direct_child_across_metadata_batches(
 async def test_real_mysql_managed_heads_return_only_direct_first_latest_metadata(monkeypatch):
     from aiomysql.cursors import Cursor
     from sagents.v2.runtime.session.plugins.mysql import MysqlSessionStore
-    from sagents.v2.runtime.session.mysql_state import _SCHEMA_TABLES
+    from sagents.v2.runtime.session.plugins.mysql.state import _SCHEMA_TABLES
     dsn = os.environ.get('SAGE_V2_TEST_MYSQL_DSN')
     if not dsn:
         pytest.skip('set SAGE_V2_TEST_MYSQL_DSN for real metadata projection')
@@ -157,7 +157,7 @@ async def test_real_mysql_managed_heads_return_only_direct_first_latest_metadata
 async def test_unarchived_redis_managed_heads_do_not_install_cold_aggregates(live):
     import fakeredis.aioredis
     from redis.asyncio import Redis
-    from sagents.v2.runtime.session.plugins.redis_mysql import RedisMysqlSessionStore
+    from sagents.v2.runtime.session.plugins.mysql.redis import RedisMysqlSessionStore
     from tests.sagents.v2.test_redis_mysql_session_store import Archive, store as redis_store
     url = os.environ.get('SAGE_V2_TEST_REDIS_URL')
     if live and not url:

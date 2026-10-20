@@ -219,6 +219,10 @@ class ServerHost:
                 ("server.model-clients", host_models, "owned"),
             ):
                 scheduler_port = capability == "execution.scheduler"
+                if scheduler_port and manifest.runtime.capabilities[capability].plugin == "sage.scheduler.redis-distributed":
+                    # Let the registered plugin own shared scheduling and its
+                    # lifecycle, rather than replacing it with a local object.
+                    continue
                 builder.register(service_registration(capability, value, ownership=ownership,
                     dependencies=("server.model-clients",) if scheduler_port else (),
                     config_schema=SCHEDULER_CONFIG_SCHEMA if scheduler_port else None))

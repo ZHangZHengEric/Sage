@@ -5,7 +5,8 @@ from contextlib import asynccontextmanager
 import pytest
 
 from sagents.v2.agent.engine import AgentLoopEngine
-from sagents.v2.agent.policy.tool_policy import ApprovalStrategy, DefaultToolPolicy
+from sagents.v2.agent.policy.tool_policy import ApprovalStrategy
+from sagents.v2.agent.policy.plugins.tool_policy import DefaultToolPolicy
 from sagents.v2.agent.self_configuration import (
     SelfConfigurationRequest,
     SelfConfigurationService,
@@ -424,7 +425,13 @@ async def test_public_builder_exposes_self_configuration_without_initial_skills(
     package = BuiltinPackageFactory.create(
         "assistant", package_id="test.self-configuration",
     )
-    from sagents.v2.runtime.extensions import CapabilityOffer, ExtensionDependency, ExtensionDescriptor, ExtensionRegistration, ExtensionScope
+    from sagents.v2.runtime.extensions import (
+        CapabilityOffer,
+        ExtensionDependency,
+        ExtensionDescriptor,
+        ExtensionRegistration,
+        ExtensionScope,
+    )
     from sagents.v2.package.manifest.runtime import CapabilitySelection
     def create(context, dependencies):
         environment = dependencies.require("execution.environment")
