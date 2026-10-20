@@ -54,14 +54,12 @@ class QuestionnaireFence:
 
 
 ARTIFACT_TAGS = (
-    "yiii-artifacts",
     "movo-artifacts",
     "ling-artifacts",
     "sage-artifacts",
     "artifacts",
 )
 QUESTIONNAIRE_TAGS = (
-    "yiii-questionnaire",
     "movo-questionnaire",
     "ling-questionnaire",
     "sage-questionnaire",
@@ -1122,11 +1120,6 @@ class SelfCheckAgent(AgentBase):
     def _validate_questionnaire_payload(
         self, tag_name: str, payload: Dict[str, Any]
     ) -> List[str]:
-        strict_yiii = tag_name == "yiii-questionnaire"
-        if strict_yiii:
-            title = payload.get("title")
-            if not isinstance(title, str) or not title.strip():
-                return [f"<{tag_name}> 缺少合法的 title 字段"]
         questions = payload.get("questions")
         if not isinstance(questions, list):
             return [f"<{tag_name}> 缺少合法的 questions 数组"]
@@ -1139,15 +1132,6 @@ class SelfCheckAgent(AgentBase):
             if not isinstance(text, str) or not text.strip():
                 return [f"<{tag_name}> questions[{index}] 缺少合法的 text 字段"]
             question_type = str(question.get("type") or "").strip().lower()
-            if strict_yiii and question_type not in {
-                "single_choice",
-                "multi_choice",
-                "free_text",
-            }:
-                return [
-                    f"<{tag_name}> questions[{index}] 的 type 不受支持: "
-                    f"{question_type or '空'}"
-                ]
             if question_type in {"single_choice", "multi_choice", "multiple_choice"}:
                 options = question.get("options")
                 if (
@@ -1160,28 +1144,6 @@ class SelfCheckAgent(AgentBase):
                 ):
                     return [
                         f"<{tag_name}> questions[{index}] 的选择题必须提供非空 options"
-                    ]
-            if strict_yiii:
-                if "default" not in question:
-                    return [
-                        f"<{tag_name}> questions[{index}] 缺少 default 字段"
-                    ]
-                default = question.get("default")
-                if question_type == "multi_choice":
-                    if not isinstance(default, list) or any(
-                        not isinstance(value, str) for value in default
-                    ):
-                        return [
-                            f"<{tag_name}> questions[{index}] 的 default 必须是字符串数组"
-                        ]
-                elif not isinstance(default, str):
-                    return [
-                        f"<{tag_name}> questions[{index}] 的 default 必须是字符串"
-                    ]
-                allow_other = question.get("allow_other")
-                if allow_other is not None and not isinstance(allow_other, bool):
-                    return [
-                        f"<{tag_name}> questions[{index}] 的 allow_other 必须是布尔值"
                     ]
         return []
 

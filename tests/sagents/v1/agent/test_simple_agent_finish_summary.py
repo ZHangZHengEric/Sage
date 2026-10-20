@@ -576,7 +576,7 @@ def test_screenshot_style_create_file_promise_is_classified_as_continue(monkeypa
 def test_inline_questionnaire_protocol_detection_excludes_responses():
     agent = _agent()
     request_blocks = [
-        '<yiii-questionnaire>{"questions":[]}</yiii-questionnaire>',
+        '<questionnaire>{"questions":[]}</questionnaire>',
         '<foo-questionnaire>{"questions":[]}</foo-questionnaire>',
         "```sage-questionnaire\nquestions: []\n```",
         "'''ling-questionnaire\nquestions: []\n'''",
@@ -588,7 +588,7 @@ def test_inline_questionnaire_protocol_detection_excludes_responses():
         assert agent._content_has_inline_questionnaire(content) is True
 
     response_blocks = [
-        '<yiii-questionnaire-response>{"answers":[]}</yiii-questionnaire-response>',
+        '<questionnaire-response>{"answers":[]}</questionnaire-response>',
         "```questionnaire-response\nanswers: []\n```",
         "The docs mention movo-questionnaire but do not ask anything.",
     ]

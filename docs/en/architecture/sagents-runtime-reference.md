@@ -382,7 +382,7 @@ Use the same registration and configuration path as built-ins; register before b
 
 ```python
 from sagents.v2 import SAgentBuilder
-from examples.sagents_v2_host.plugins import compactor_registration
+from examples.v2.host.plugins import compactor_registration
 
 builder = SAgentBuilder()
 builder.register(compactor_registration())
@@ -400,7 +400,7 @@ finally:
     await app.close()
 ```
 
-See independent [plugins.py](../../../examples/sagents_v2_host/plugins.py). Registration supplies descriptor, schema/config model, factory and optional start/stop. Depend on SDK contracts rather than other implementations; inheritance from a shared base is unnecessary.
+See independent [plugins.py](../../../examples/v2/host/plugins.py). Registration supplies descriptor, schema/config model, factory and optional start/stop. Depend on SDK contracts rather than other implementations; inheritance from a shared base is unnecessary.
 
 build fixes registry/configuration and Agent loading performs composition/validation. Unknown options, missing dependencies, unavailable plugins, incompatible scope/API and unsupported guarantees must fail there. Accepted parameters alone do not prove activation. Plugin declarations do not install dependencies, and YAML does not perform arbitrary Python imports.
 

@@ -11,8 +11,8 @@ from pathlib import Path
 
 import pytest
 
-from examples.sagents_v2_host.__main__ import offline_model
-from examples.sagents_v2_host.plugins import compactor_registration
+from examples.v2.host.__main__ import offline_model
+from examples.v2.host.plugins import compactor_registration
 from sagents.v2.contracts.errors import SageV2Error
 from sagents.v2.package.manifest import SageManifestLoader
 from sagents.v2.package.manifest.resolver import CompositionResolver
@@ -27,7 +27,7 @@ from sagents.v2.runtime.extensions import (
 
 
 def package():
-    return SageManifestLoader().load(Path("examples/sagents_v2_host/sage.yaml"))
+    return SageManifestLoader().load(Path("examples/v2/host/sage.yaml"))
 
 
 def builder(tmp_path, registration=None):

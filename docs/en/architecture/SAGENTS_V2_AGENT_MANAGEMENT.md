@@ -96,8 +96,8 @@ Execution management is single-process. SQLite or MySQL transactions do not esta
 Run in the project's Python 3.12+ environment:
 
 ```bash
-python -m examples.sagents_v2_agent_management
-python -m examples.sagents_v2_source_plugin
+python -m examples.v2.agent_management
+python -m examples.v2.source_plugin
 python -m pytest tests/sagents/v2/test_agent_management_matrix.py
 ```
 

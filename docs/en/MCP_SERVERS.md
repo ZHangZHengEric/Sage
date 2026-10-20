@@ -63,7 +63,7 @@ than secret values. `${REMOTE_MCP_API_KEY}` in an API-key field is a literal
 value, not automatic environment expansion. Do not commit tokens to configuration
 or include them in screenshots or logs.
 
-The runnable [standard host reference](../../examples/sagents_v2_standard_host/README.md)
+The runnable [standard host reference](../../examples/v2/standard_host/README.md)
 exercises MCP alongside files, Shell, Skills, nested Teams and restart recovery.
 See the [host integration manual](architecture/sagents-host-development.md) for
 the registration, configuration and lifecycle contracts.
@@ -81,7 +81,7 @@ This bounds one remote MCP call, not generic tool execution or the lifetime of a
 
 ## Keyless Parallel search example
 
-The [runnable SAgents v2 example](../../examples/PARALLEL_SEARCH.md) uses
+The [runnable SAgents v2 example](../../examples/v2/PARALLEL_SEARCH.md) uses
 Parallel Search MCP over Streamable HTTP to discover and execute web search and
 page fetch through the v2 bridge without a Parallel API key. It demonstrates
 explicit host-side calls; see the authorization steps above when wiring an Agent.

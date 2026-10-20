@@ -11,7 +11,7 @@ ref: v2-detail-sagents-v2-host-controls
 
 # Desktop 与 Server 标准控制接口核对
 
-2026-10-19 对 Sage v2 的实际宿主入口和 SDK 调用链进行核对。Yiii 不在本次修改范围内。
+2026-10-19 对 Sage v2 的实际宿主入口和 SDK 调用链进行核对。
 
 | 操作 | Desktop | Server | Sage 标准契约 |
 | --- | --- | --- | --- |

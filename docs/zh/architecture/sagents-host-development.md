@@ -184,13 +184,13 @@ Skill 使用标准 catalog/source、可选 workspace、预加载和激活恢复�
 
 ## 参考项目和测试
 
-[标准媒体宿主](../../../examples/sagents_v2_standard_host/README.md) 演示实际文件、Shell、
+[标准媒体宿主](../../../examples/v2/standard_host/README.md) 演示实际文件、Shell、
 FFmpeg、Pillow、MCP、Skill、嵌套 Team 和恢复，并包含 PyInstaller 验证命令。
-`examples/sagents_v2_host` 演示较小的自定义上下文插件宿主。
+`examples/v2/host` 演示较小的自定义上下文插件宿主。
 Desktop、Server 将产品差异放在对应能力插件中，Agent 执行由 SDK 负责。
 
 SDK 测试位于 `tests/sagents/v2`，应用测试位于 `tests/app/v2`。原生隔离需要平台能力
-及进程计量权限；冻结版验证结果必须来自当前源码。Yiii 的迁移和应用验收由 Yiii 自身负责。
+及进程计量权限；冻结版验证结果必须来自当前源码。
 
 ## 设置页查询内置工具元数据
 
@@ -217,11 +217,11 @@ catalog = [
 
 静态目录用于设置与能力说明，不代表特定 Run 已获授权。宿主仍按自身 Agent 授权事实展示可用角色，运行时继续执行原有 Agent、调用边界和工具授权；普通委派叶子不会因目录中列出 Team/Fibre 工具而获得委派能力。MCP、自定义工具及可选宿主管理能力的元数据由对应提供者负责。`official_tool_definitions()` 继续保持仅返回基础工具的原有含义。
 
-Yiii 的 `/api/mcp/tools?agent_mode=all` 可用此结果替换基础工具加 Skill/Team 私有反射得到的列表，再合并原 MCP 元数据；保留现有 `agents` 授权展示筛选，不按静态目录重新授予权限。SDK 模式名称为 `simple`，产品的 Single 等名称应由宿主显式映射。
+宿主的工具目录可用此结果替换基础工具加 Skill/Team 私有反射得到的列表，再合并原 MCP 元数据；保留现有 `agents` 授权展示筛选，不按静态目录重新授予权限。SDK 模式名称为 `simple`，产品的 Single 等名称应由宿主显式映射。
 
-可直接运行 `python -m examples.sagents_v2_tool_catalog --agent-mode all --language zh`。验证入口为 `tests/sagents/v2/test_builtin_tool_metadata.py`，涵盖执行提供者 schema 一致性、标准 Simple/Team/Fibre Run 授权、元数据副本隔离和导入/查询无资源分配。
+可直接运行 `python -m examples.v2.tool_catalog --agent-mode all --language zh`。验证入口为 `tests/sagents/v2/test_builtin_tool_metadata.py`，涵盖执行提供者 schema 一致性、标准 Simple/Team/Fibre Run 授权、元数据副本隔离和导入/查询无资源分配。
 
-本轮验证：Sage 元数据、官方工具、模式、Skill 与导入边界集合 **175 passed**；Yiii 现有 `tool_list_route` 目录/授权展示集合 **8 passed**。只读比较 `/api/mcp/tools?agent_mode=all` 返回中的 **15 条**内置工具（包含 Team 和 Skill），名称、描述、input schema 与新公开接口一致，原 Agent 授权关联保留。Yiii 源码未修改，因此仍需 Yiii 将调用切换到公开接口后复测，不能据此宣称其私有导入已消除。
+已有 Sage 验证记录：元数据、官方工具、模式、Skill 与导入边界集合 **175 passed**。
 
 ## 审批、暂停、取消与提交
 

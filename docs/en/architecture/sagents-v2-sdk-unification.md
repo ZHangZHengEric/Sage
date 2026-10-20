@@ -182,18 +182,18 @@ on internal delegation, Team tasks or the lifetime of a Run.
 
 ## Runnable host and validation
 
-The [standard media host](../../../examples/sagents_v2_standard_host/README.md) exercises media tools, Skills, Teams and recovery.
+The [standard media host](../../../examples/v2/standard_host/README.md) exercises media tools, Skills, Teams and recovery.
 
-Run `examples.sagents_v2_standard_host` for actual media dependencies, FFmpeg,
+Run `examples.v2.standard_host` for actual media dependencies, FFmpeg,
 MCP, Skill, nested Team and reopening persisted Runs. Its README documents native
-and PyInstaller commands. `examples.sagents_v2_host` demonstrates a smaller host
+and packaging requirements. `examples.v2.host` demonstrates a smaller host
 and custom context plugin. Desktop and Server product adapters register their
 corresponding capabilities; no host-defined Driver is required.
 
 SDK integration tests live in `tests/sagents/v2`; host tests live under
 `tests/app/v2`. Native isolation tests need platform sandbox support and process
 accounting permissions. Frozen-build evidence must be produced from the current
-sources. Yiii migration and its own acceptance tests are maintained by Yiii.
+sources.
 
 ## Plugin identity and validation scope
 

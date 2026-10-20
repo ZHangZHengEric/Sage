@@ -49,7 +49,7 @@ from tests.sagents.v2.model_fixture import TEST_MODELS
 from tests.sagents.v2.test_local_workspace_sandbox_matrix import CONTEXT
 
 
-MARKER = "yiii_autonomous_replan"
+MARKER = "host_autonomous_replan"
 GUIDANCE = "Change the failed approach and verify the saved result. Recovery attempt "
 POLICY_USAGE = UsageSummary(input_tokens=11, output_tokens=2, cost=0.001)
 

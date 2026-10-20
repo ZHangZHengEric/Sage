@@ -82,7 +82,7 @@ describe('inlineQuestionnaire', () => {
       expect(parts[0].payload.questions[0].defaultValues).toEqual(['A'])
     }
 
-    for (const tag of ['yiii-questionnaire', 'movo-questionnaire', 'ling-questionnaire']) {
+    for (const tag of ['custom-questionnaire', 'movo-questionnaire', 'ling-questionnaire']) {
       const source = `<${tag}>{"questions":[{"type":"free_text","text":"补充？","default":""}]}</${tag}>`
       expect(splitInlineQuestionnaireContent(source, tag)).toEqual([
         expect.objectContaining({ type: 'markdown', content: source }),

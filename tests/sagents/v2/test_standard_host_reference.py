@@ -19,7 +19,7 @@ def test_reference_media_mcp_skill_nested_team_and_reopen(tmp_path, host_mode):
     assert ffmpeg, "FFmpeg must be installed for media acceptance"
     repository = Path(__file__).resolve().parents[3]
     command_path = os.pathsep.join((str(Path(ffmpeg).parent), os.defpath))
-    entrypoint = [sys.executable, "-m", "examples.sagents_v2_standard_host"]
+    entrypoint = [sys.executable, "-m", "examples.v2.standard_host"]
     if host_mode == "frozen":
         binary = os.environ.get("SAGE_V2_FROZEN_HOST")
         if not binary:
@@ -83,7 +83,7 @@ async def test_standard_media_policy_exceeds_old_file_limit_and_enforces_new_lim
 @pytest.mark.asyncio
 @pytest.mark.skipif(os.environ.get("SAGE_V2_NATIVE_HOST_ACCEPTANCE") != "1", reason="explicit native sandbox acceptance")
 async def test_standard_parallel_children_share_skill_materialization_and_keep_parent_lease(tmp_path):
-    from examples.sagents_v2_standard_host.host import package
+    from examples.v2.standard_host.host import package
     from sagents.v2.model.contracts import ModelToolCall
     from sagents.v2.package.manifest.runtime import CapabilitySelection
     from sagents.v2.testing.plugins import ScriptedModelProvider

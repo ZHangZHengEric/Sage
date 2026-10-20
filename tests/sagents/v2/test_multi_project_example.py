@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from examples.sagents_v2_multi_project import run_example
+from examples.v2.multi_project import run_example
 
 
 @pytest.mark.asyncio

@@ -106,8 +106,8 @@ The project requires Python 3.12+. Use current tests and benchmarks rather than 
 
 ```bash
 python -m pytest tests/app/v2/server/test_model_pool.py
-python scripts/v2/benchmark_v2_session_projection.py --events 10000 --repeats 10
-python scripts/v2/benchmark_v2_session_commit.py --commits 200 --input-bytes 60000
+python scripts/v2/benchmark_session_projection.py --events 10000 --repeats 10
+python scripts/v2/benchmark_session_commit.py --commits 200 --input-bytes 60000
 python -m pytest tests/sagents/v2/test_redis_mysql_session_store.py tests/sagents/v2/test_mysql_session_archive.py
 ```
 

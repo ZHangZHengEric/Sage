@@ -66,5 +66,3 @@ Recovery does not dispatch completed children or replay completed tools. Uncerta
 ## Validation record
 
 On 2026-10-19, macOS / Python 3.13: SDK 3268 passed, 55 skipped; Desktop + Server 870 passed, 1 skipped for external MySQL; standard reference media hosts in development and frozen builds 4 passed. Ruff and diff checks passed. Fault injection verifies rollback on corrupt child snapshots and that old receipts/handles cannot affect restored leases.
-
-After merging the remote reducer schema update, Yiii's unchanged `video-asset-agent` same-App and host-restart pause/resume acceptance cases both passed (2 passed), using its real Skills and three nested built-in Teams. Yiii source was not changed, and no host Driver or execution replacement was added. The remote schema update resolved the earlier loading blocker.

@@ -21,7 +21,7 @@ class ContributorGuideLinks(unittest.TestCase):
             "README.md": quickstart,
             "README_CN.md": quickstart,
             "sagents/v2/README.md": quickstart,
-            "examples/sagents_v2_quickstart.py": source,
+            "examples/v2/quickstart.py": source,
             "CONTRIBUTING.md": "[Setup](README.md)\n",
             "docs/_config.yml": "exclude: [archive/]\nlogo: logo.svg\n",
             "docs/logo.svg": "<svg/>\n",

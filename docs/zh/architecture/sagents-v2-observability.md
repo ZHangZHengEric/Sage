@@ -52,7 +52,7 @@ Server 实时执行权限只查询当前 Agent 的策略字段，用户、Agent 
 会话归属绑定与索引保存仍在运行接纳前完成。团队成员按本次读取冻结版本，下一次运行可见成员更新。
 
 可复现的本地目录读取基准：
-`python -m scripts.v2.benchmark_v2_admission --agents 100 --samples 7`。
+`python -m scripts.v2.benchmark_admission --agents 100 --samples 7`。
 2026-10-19，同一份 SQLite 数据（100 个测试 Agent 和 1 个默认 Agent），
 全量路径为 5 条 SQL、101 个包，中位 24.870 ms；限定路径为 2 条 SQL、1 个包，中位 1.419 ms。
 这验证了查询和解析范围的缩小，不代表生产冷启动或入口 11 秒等待已被消除；应通过阶段日志复测。

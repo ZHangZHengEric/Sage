@@ -154,13 +154,13 @@ Skill 使用标准 catalog/source、可选 workspace、预加载和激活恢复�
 
 ## 参考项目和测试
 
-[标准媒体宿主](../../../examples/sagents_v2_standard_host/README.md) 演示实际文件、Shell、
+[标准媒体宿主](../../../examples/v2/standard_host/README.md) 演示实际文件、Shell、
 FFmpeg、Pillow、MCP、Skill、嵌套 Team 和恢复，并包含 PyInstaller 验证命令。
-`examples/sagents_v2_host` 演示较小的自定义上下文插件宿主。
+`examples/v2/host` 演示较小的自定义上下文插件宿主。
 Desktop、Server 将产品差异放在对应能力插件中，Agent 执行由 SDK 负责。
 
 SDK 测试位于 `tests/sagents/v2`，应用测试位于 `tests/app/v2`。原生隔离需要平台能力
-及进程计量权限；冻结版验证结果必须来自当前源码。Yiii 的迁移和应用验收由 Yiii 自身负责。
+及进程计量权限；冻结版验证结果必须来自当前源码。
 
 ## 插件身份与验证范围
 

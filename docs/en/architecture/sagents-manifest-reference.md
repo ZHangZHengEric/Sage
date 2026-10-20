@@ -73,10 +73,10 @@ finally:
     await app.close()
 ```
 
-See the [runnable starter](../../../examples/sagents_v2_host/) for commands, identity and event consumption. Offline verification needs no model API key:
+See the [runnable starter](../../../examples/v2/host/) for commands, identity and event consumption. Offline verification needs no model API key:
 
 ```bash
-.venv/bin/python -m examples.sagents_v2_host --offline
+.venv/bin/python -m examples.v2.host --offline
 ```
 
 `main` is an internal key referenced by entrypoint.agent; metadata.id identifies the Package. The SDK loaded agent.id comes from the Package ID. Use that loaded ID in StartRun, rather than main. Desktop/Server can retain their persisted product Agent IDs; always use actual loading/admission results.

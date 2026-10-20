@@ -16,7 +16,7 @@ from app.v2.desktop.backend.schemas import (
     RunMessage,
 )
 from app.v2.desktop.backend.service import DesktopV2Service
-from examples.sagents_v2_multi_project import ConcurrentModel
+from examples.v2.multi_project import ConcurrentModel
 from sagents.v2.contracts.commands import InputItem, RunConfig, StartRun
 from sagents.v2.contracts.items import TextBlock
 from sagents.v2.runtime.session import FilesystemSessionStore

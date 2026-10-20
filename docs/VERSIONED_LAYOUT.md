@@ -12,8 +12,8 @@ Application implementations are grouped symmetrically under `app/v1/` and
 | Browser bridge | `app/v1/chrome-extension/` | — |
 | Runtime tests | `tests/sagents/v1/` | `tests/sagents/v2/` |
 | Application tests | `tests/app/v1/` | `tests/app/v2/desktop/`, `tests/app/v2/server/` |
-| Legacy examples | `examples/v1/` | `examples/sagents_v2_*.py` |
-| Legacy benchmarks | `scripts/v1/` | `scripts/v2/benchmark_v2_*.py` |
+| Examples | `examples/v1/` | `examples/v2/` |
+| Version-owned scripts | `scripts/v1/` | `scripts/v2/` |
 
 The `sagents/v1` and `sagents/v2` runtime packages own their implementations
 independently; there is no cross-version runtime helper package. AnyTool is an independent MCP integration, not a runtime helper package. The old model probes, image/request helpers, logger,
@@ -92,7 +92,7 @@ See [AnyTool configuration](../mcp_servers/anytool/README.md).
 
 ### Automated checks
 
-Run `python scripts/checks/check_architecture.py` from the repository (or invoke it by
+Run `python scripts/shared/checks/check_architecture.py` from the repository (or invoke it by
 absolute path from another directory). CI runs it before the Python test jobs. It parses
 all tracked and non-ignored new Python sources, checks internal module paths,
 resolves relative imports, and rejects cross-version runtime imports and
@@ -135,5 +135,6 @@ was a local workspace with conflicting files and a sandbox, not a second source
 package; it is preserved under `.sage/organization-backup/root-skills`. User
 skill stores and packaged copies are runtime data, not additional source trees.
 
-Repository scripts are grouped under `scripts/checks`, `dev`, `maintenance`,
-`release`, `v1` and `v2`. See [script usage and side effects](../scripts/README.md).
+Version-owned scripts live under `scripts/v1/` and `scripts/v2/`, including their
+release and maintenance resources. Repository-wide checks and setup scripts live
+under `scripts/shared/`. See [script usage and side effects](../scripts/README.md).

@@ -104,23 +104,23 @@ if [ ! -f .env ]; then
     echo ""
     echo "📝 Choose backend configuration mode:"
     echo "  1) Minimal (SQLite, recommended for beginners)"
-    echo "     Template: .env.example.minimal"
+    echo "     Template: app/v1/.env.example.minimal"
     echo "     - No external dependencies"
     echo "     - Uses SQLite file database"
     echo "     - Best for local quick development"
     echo ""
     echo "  2) Full (MySQL + RustFS)"
-    echo "     Template: .env.example"
+    echo "     Template: app/v1/.env.example"
     echo "     - Requires MySQL and RustFS"
     echo "     - Best for production-like environment"
     echo ""
     read -p "Choose [1/2, default 1]: " mode
 
     if [ "$mode" = "2" ]; then
-        cp .env.example .env
+        cp app/v1/.env.example .env
         echo -e "${GREEN}✅ Created .env (full mode)${NC}"
     else
-        cp .env.example.minimal .env
+        cp app/v1/.env.example.minimal .env
         echo -e "${GREEN}✅ Created .env (minimal mode)${NC}"
     fi
 

@@ -34,7 +34,7 @@ flutter pub get
 flutter run -d macos
 ```
 
-Flutter 默认启动随应用托管的本机 Python sidecar，并与 Yiii 一样使用 `--port 0` 让操作系统分配临时端口。Python 通过 stdout readiness envelope 把实际地址和每次启动随机生成的 capability token 交给 Flutter；注册文件通过权限为 `0600` 的随机临时文件原子发布，客户端对包括健康检查在内的每个请求发送 bearer token。端口同时只绑定 `127.0.0.1`，用户无需配置。多个 Desktop 实例复用同一 sidecar 时各自持有带心跳的客户端租约，最后一个实例退出或崩溃租约过期后 sidecar 才会优雅关闭；若宿主在首次挂接前崩溃，未认领的 sidecar 也会在租约窗口后自清理。构建升级只会请求空闲 sidecar 退出，不会中断仍有活跃客户端的旧构建。也可从命令行直接启动开发服务：
+Flutter 默认启动随应用托管的本机 Python sidecar，并使用 `--port 0` 让操作系统分配临时端口。Python 通过 stdout readiness envelope 把实际地址和每次启动随机生成的 capability token 交给 Flutter；注册文件通过权限为 `0600` 的随机临时文件原子发布，客户端对包括健康检查在内的每个请求发送 bearer token。端口同时只绑定 `127.0.0.1`，用户无需配置。多个 Desktop 实例复用同一 sidecar 时各自持有带心跳的客户端租约，最后一个实例退出或崩溃租约过期后 sidecar 才会优雅关闭；若宿主在首次挂接前崩溃，未认领的 sidecar 也会在租约窗口后自清理。构建升级只会请求空闲 sidecar 退出，不会中断仍有活跃客户端的旧构建。也可从命令行直接启动开发服务：
 
 ```bash
 .venv/bin/python -m app.v2.desktop.backend.main
@@ -149,7 +149,7 @@ PYTHONDONTWRITEBYTECODE=1 .venv/bin/python -m pytest tests/app/v2/desktop -q
 
 ## 品牌图标
 
-Desktop v2 复制并沿用旧 Desktop 的 Sage 标识，独立源文件是 `assets/brand/sage_logo.png`。修改后运行 `python scripts/generate_icons.py`，同步生成 macOS AppIcon 与 Windows ICO；旧 Desktop 的图标资源不会被修改。macOS 输出使用与 Yiii 相同的原生图标外形比例，平台遮罩独立保存在 `assets/brand/macos_icon_mask.png`；黑色主体约占画布 89%，四角透明，S 标识位于中央安全区。macOS 版本的 S 使用肉眼不可见的冷白色差，避免 macOS 26 把纯黑白扁平图标误判为单色前景并添加浅色系统底板。
+Desktop v2 复制并沿用旧 Desktop 的 Sage 标识，独立源文件是 `assets/brand/sage_logo.png`。修改后运行 `python scripts/generate_icons.py`，同步生成 macOS AppIcon 与 Windows ICO；旧 Desktop 的图标资源不会被修改。macOS 输出使用原生图标外形比例，平台遮罩独立保存在 `assets/brand/macos_icon_mask.png`；黑色主体约占画布 89%，四角透明，S 标识位于中央安全区。macOS 版本的 S 使用肉眼不可见的冷白色差，避免 macOS 26 把纯黑白扁平图标误判为单色前景并添加浅色系统底板。
 
 ## 设置写入协议
 

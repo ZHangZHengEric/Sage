@@ -212,18 +212,18 @@ on internal delegation, Team tasks or the lifetime of a Run.
 
 ## Runnable host and validation
 
-The [standard media host](../../../examples/sagents_v2_standard_host/README.md) exercises media tools, Skills, Teams and recovery.
+The [standard media host](../../../examples/v2/standard_host/README.md) exercises media tools, Skills, Teams and recovery.
 
-Run `examples.sagents_v2_standard_host` for actual media dependencies, FFmpeg,
+Run `examples.v2.standard_host` for actual media dependencies, FFmpeg,
 MCP, Skill, nested Team and reopening persisted Runs. Its README documents native
-and PyInstaller commands. `examples.sagents_v2_host` demonstrates a smaller host
+and packaging requirements. `examples.v2.host` demonstrates a smaller host
 and custom context plugin. Desktop and Server product adapters register their
 corresponding capabilities; no host-defined Driver is required.
 
 SDK integration tests live in `tests/sagents/v2`; host tests live under
 `tests/app/v2`. Native isolation tests need platform sandbox support and process
 accounting permissions. Frozen-build evidence must be produced from the current
-sources. Yiii migration and its own acceptance tests are maintained by Yiii.
+sources.
 
 ## Settings metadata without execution resources
 
@@ -254,21 +254,16 @@ mapping to SDK mode names.
 Static metadata is not a Run's authorization. Preserve the host's existing Agent
 grants when displaying tool/Agent associations; viewing the catalog does not
 enable tools or grant delegation to ordinary leaves. MCP, custom tools and
-optional host management tools retain their own provider metadata. For Yiii's
-`/api/mcp/tools?agent_mode=all`, replace private reflection with this query, then
-retain the existing MCP merge and Agent authorization display filtering.
+optional host management tools retain their own provider metadata. Hosts can
+use this query to replace private reflection while retaining MCP metadata and
+Agent authorization display filtering.
 
-Run `python -m examples.sagents_v2_tool_catalog --agent-mode all` for JSON output.
+Run `python -m examples.v2.tool_catalog --agent-mode all` for JSON output.
 `tests/sagents/v2/test_builtin_tool_metadata.py` verifies execution-provider
 schema parity, actual standard Run grants, detached metadata and resource-free
 import/query behavior.
 
-Validation: **175 passed** across metadata, official tools, modes, Skill and
-import boundaries; Yiii's existing settings tool-route suite **8 passed**. A
-read-only comparison matched 15 current built-in settings rows, including Team
-and Skill, on name, description and input schema while retaining their Agent
-associations. Yiii source was not modified: the host still needs to switch its
-call site and rerun acceptance before claiming its private imports are gone.
+Recorded Sage validation: **175 passed** across metadata, official tools, modes, Skill and import boundaries.
 
 ## Approval, pause, cancellation and publication
 

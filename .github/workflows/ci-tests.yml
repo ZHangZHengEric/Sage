@@ -22,7 +22,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - run: python scripts/checks/check_architecture.py
+      - run: python scripts/shared/checks/check_architecture.py
 
   python-tests:
     needs: architecture

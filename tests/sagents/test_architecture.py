@@ -6,7 +6,7 @@ import pytest
 
 
 spec = importlib.util.spec_from_file_location(
-    "check_architecture", Path(__file__).resolve().parents[2] / "scripts/checks/check_architecture.py"
+    "check_architecture", Path(__file__).resolve().parents[2] / "scripts/shared/checks/check_architecture.py"
 )
 architecture = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(architecture)

@@ -3,7 +3,7 @@ from pathlib import Path
 
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
-SCRIPT_PATH = REPO_ROOT / "scripts/release/generate_tauri_updater_manifest.py"
+SCRIPT_PATH = REPO_ROOT / "scripts/v1/release/generate_tauri_updater_manifest.py"
 
 
 def load_manifest_module():
@@ -74,14 +74,14 @@ def test_build_manifest_rejects_missing_signature(tmp_path):
 
 def test_archived_release_workflow_preserves_legacy_manifest_contract():
     assert not (REPO_ROOT / ".github/workflows/release-desktop.yml").exists()
-    workflow = (REPO_ROOT / "scripts/release/legacy-release-desktop.yml").read_text()
+    workflow = (REPO_ROOT / "scripts/v1/release/release-desktop.yml").read_text()
     windows_build = (
         REPO_ROOT / "app/v1/desktop/scripts/build_windows.ps1"
     ).read_text()
 
     assert "publish-updater-manifest:" in workflow
     assert "needs: build-and-release" in workflow
-    assert "scripts/release/generate_tauri_updater_manifest.py" in workflow
+    assert "scripts/v1/release/generate_tauri_updater_manifest.py" in workflow
     assert "gh release upload \"$TAG\" latest.json --clobber" in workflow
     assert "*.exe.sig" in workflow
     assert "if (-not $env:TAURI_SIGNING_PRIVATE_KEY)" in windows_build

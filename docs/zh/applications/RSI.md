@@ -46,6 +46,6 @@ Desktop 当前支持 simple Agent、原生工具、临时工作区和宿主沙�
 
 ## 真实模型实验
 
-显式启用的[垂类实验脚本](https://github.com/ZHangZHengEric/Sage/blob/main/examples/sagents_v2_optimizer_domains.py) 使用 Yiii 本地配置的 GPT-6.1 Sol Responses 路由，产生真实模型费用。它导出原始 package、每轮 package、测试集、模型调用与 Session 证据、评测、审查和对比摘要。凭据只在内存中解析，输出目录必须是新目录，不会激活生产 Agent。
+显式启用的[垂类实验脚本](https://github.com/ZHangZHengEric/Sage/blob/main/examples/v2/optimizer_domains.py) 通过 `--catalog` 显式读取 JSON 模型目录中的 `openai-responses` 提供者，产生真实模型费用。它导出原始 package、每轮 package、测试集、模型调用与 Session 证据、评测、审查和对比摘要。凭据只在内存中解析，输出目录必须是新目录，不会激活生产 Agent。
 
 2026-10-12 的只优化 Skill 与工具选择实验分别达到最终测试 3/3。联合范围也达到 3/3，但只修改了 Skill，尚未验证指令与 Skill 同时修改。三组均执行四轮提案，第一轮接受后，后续轮次没有新修改。Skill/工具组复用了以前实验的最终题目，只能作为回归验证；明确精度约定后的联合组使用新封存题目。评估结果时应保留失败记录和审查拒绝，不能将这些小样本结果作为 RSI 普遍可靠性的证明。

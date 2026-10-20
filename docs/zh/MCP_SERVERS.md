@@ -57,7 +57,7 @@ Server 的 `/api/mcp` 请求使用 `url`，Desktop 的连接载荷使用 `stream
 凭据通过声明的 `credentials.provider` 依赖，使用 Run 请求上下文解析 `CredentialRef`。
 密钥保存在凭据提供者中，配置和持久化元数据只保存引用。
 `${REMOTE_MCP_API_KEY}` 是字面值，不会自动展开环境变量。
-完整注册、配置及标准执行示例见[标准宿主参考项目](../../examples/sagents_v2_standard_host/README.md)。
+完整注册、配置及标准执行示例见[标准宿主参考项目](../../examples/v2/standard_host/README.md)。
 
 ### 发现、授权、调用与清理
 
@@ -74,6 +74,6 @@ MCP 调用默认时限为 7200 秒（2 小时），可通过每个服务的 `cal
 
 ## 免 Key 的 Parallel 搜索示例
 
-[可运行的 SAgents v2 示例](../../examples/PARALLEL_SEARCH.md)通过 Streamable HTTP
+[可运行的 SAgents v2 示例](../../examples/v2/PARALLEL_SEARCH.md)通过 Streamable HTTP
 使用 Parallel Search MCP，在不提供 Parallel API Key 的情况下，经 v2 桥接发现并调用
 网页搜索和页面抓取工具。示例由宿主显式调用；接入 Agent 时，请按上面的授权步骤配置。

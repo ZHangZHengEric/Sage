@@ -66,5 +66,3 @@ if receipt.decision.value == "accepted":
 ## 本轮验证记录
 
 2026-10-19，macOS / Python 3.13：SDK 全量 3268 passed、55 skipped；Desktop 与 Server 联合 870 passed、1 skipped（外部 MySQL 未配置）；开发与冻结标准参考宿主媒体验收 4 passed。Ruff 和差异检查通过。租约故障注入另验证子快照损坏时回滚已获取祖先依赖，以及旧释放回执和旧 handle 不影响恢复后的租约。
-
-合并远端的 reducer 参数 schema 更新后，已原样执行 Yiii 提供的两个 `video-asset-agent` 暂停恢复验收：同 App 暂停恢复和关闭重建 App 后恢复均通过（2 passed）。用例使用 Yiii 原有真实 Skill 检查和三层内置 Team；本轮未修改 Yiii 源码，也未增加宿主 Driver 或执行组件替换。此前的加载参数阻塞已由远端 schema 更新解除。

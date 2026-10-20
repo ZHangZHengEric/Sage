@@ -6953,7 +6953,7 @@ void main() {
   }
 
   testWidgets(
-    'thread user jump rail matches yiii navigation and jumps between prompts',
+    'thread user jump rail supports navigation and jumps between prompts',
     (tester) async {
       tester.view.physicalSize = const Size(1200, 800);
       tester.view.devicePixelRatio = 1;
@@ -7189,7 +7189,7 @@ void main() {
 
   for (final brightness in Brightness.values) {
     testWidgets(
-      'questionnaire renders inline with Yiii controls and submits answers '
+      'questionnaire renders inline with inline controls and submits answers '
       'in ${brightness.name} appearance',
       (tester) async {
         tester.view.physicalSize = const Size(1200, 800);
@@ -8253,7 +8253,7 @@ void main() {
     );
   }
 
-  testWidgets('settings uses the Yiii two-pane shell', (tester) async {
+  testWidgets('settings uses the two-pane shell', (tester) async {
     tester.view.physicalSize = const Size(1200, 800);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.resetPhysicalSize);
