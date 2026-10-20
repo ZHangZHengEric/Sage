@@ -104,8 +104,8 @@ Historical manual demos are syntax-checked but excluded from import validation.
 does not pin a local environment directory: select an installed Python 3.12+
 environment in the editor, or activate it before running Pyright from the shell.
 Python architecture checks do not replace Flutter, TypeScript, Rust, packaging,
-or HTTP smoke checks; their current results are in
-[the runtime report](V1_V2_RUNTIME_CHECK.md).
+or HTTP smoke checks. See [test suite ownership and commands](../tests/README.md)
+for the relevant checks.
 
 Ignored `build/`, `dist/`, `node_modules/`, caches, logs, and local workspace data
 are generated state, not additional source layers. Do not move or delete user

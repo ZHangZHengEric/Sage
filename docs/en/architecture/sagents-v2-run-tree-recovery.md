@@ -62,7 +62,3 @@ Recovery does not dispatch completed children or replay completed tools. Uncerta
 `tests/sagents/v2/test_direct_child_recovery.py` uses standard registration, loading and execution to recover a leaf after all three layers pause, both within one App and after rebuilding App. It verifies original identities, actual role instructions and Skills, paused ancestors, dependency ownership, dispatch counts and final release.
 
 `test_shared_sandbox_leases.py` checks that an active parent remains usable while a released child is restored, without weakening ordinary duplicate-sharing rejection.
-
-## Validation record
-
-On 2026-10-19, macOS / Python 3.13: SDK 3268 passed, 55 skipped; Desktop + Server 870 passed, 1 skipped for external MySQL; standard reference media hosts in development and frozen builds 4 passed. Ruff and diff checks passed. Fault injection verifies rollback on corrupt child snapshots and that old receipts/handles cannot affect restored leases.

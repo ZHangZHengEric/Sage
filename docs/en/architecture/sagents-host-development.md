@@ -263,8 +263,6 @@ Run `python -m examples.v2.tool_catalog --agent-mode all` for JSON output.
 schema parity, actual standard Run grants, detached metadata and resource-free
 import/query behavior.
 
-Recorded Sage validation: **175 passed** across metadata, official tools, modes, Skill and import boundaries.
-
 ## Approval, pause, cancellation and publication
 
 Use explicit public `app.runtime` commands: `reply_interaction`, `pause_run`, `cancel_run`, and `resume_run`. Accept `ResumeRun` for a plain suspension or `ReplyInteraction` for an interaction before restoring the original Agent and calling `continue_run`. A duplicate continuation observes existing execution; a terminal Run returns its existing result.
@@ -272,3 +270,27 @@ Use explicit public `app.runtime` commands: `reply_interaction`, `pause_run`, `c
 Use `app.entrypoint().propose_session_commit`, `publish_session_commit`, and `reject_session_commit` for snapshot publication. These select the source Run's admitted Agent and retain post-publication memory processing. Server currently has no standalone manual-pause or Session-commit HTTP endpoint; Desktop exposes both. SDK support does not imply every host exposes an HTTP/UI control.
 
 See the [Desktop / Server audit](sagents-v2-host-controls.md) for routes, ownership and validation boundaries.
+
+## Plugin identity and validation scope
+
+`ExtensionScopeContext.agent_id` is the complete source-package Agent identity. `execution_agent_id` is the member alias in the frozen graph; `package_id` and definition source fields retain provenance. Dynamically created members have independent scope identities. Different execution aliases or frozen configurations cannot borrow an Agent configured for another identity. Tenant instances reuse App, tenant and configuration; process scope carries no arbitrary task identity.
+
+For child Runs, `run_configuration()` reports execution alias, source package, source Agent, version and parent Run. Its composition hash identifies the complete accepted graph. Replay and protocol selection retain that graph's original Agent version even when another Agent is loaded concurrently.
+
+`tests/sagents/v2/test_standard_capability_scopes.py` covers actual Runs across scopes, Skill restrictions, factory rollback and custom continuation settings. These replace materializer-only tests. Native media and frozen-host validation run separately.
+
+## Desktop integration boundaries
+
+Desktop models, MCP/Studio tools, Skills, context, self-configuration and continuation are registered capabilities selected by runtime configuration. Agent `preload_skills` passes `sage-openui` to the standard loader, respecting authorization, budgets and activation recovery. Hosts do not inject Skill source directly.
+
+Studio calls validate accepted Agent, Session and user identities. A Studio Session missing its Studio identity fails preflight without a replacement Run. Workspace initialization uses the currently selected registered capability.
+
+`sage.execution.binding.ephemeral` provides an independent in-memory filesystem, without host Python, FFmpeg or network. It uses `workspace_root` and independent child workspaces. Paused content survives only within the same App; restart reports `execution.configuration_incompatible`. Long tasks and media use `sage.execution.binding.local-workspace`. Diagnostics expose `recovery: same_process`, isolation and actual capabilities.
+
+Tests include `tests/app/v2/desktop`, `test_standard_execution_configuration.py`, `test_standard_capability_scopes.py`, `test_builder_nested_teams.py`, `test_ephemeral_execution_binding.py` and the development/frozen media reference `test_standard_host_reference.py`.
+
+## Server integration boundaries
+
+Server uses the same App, Agent loading and execution entrypoints. Capabilities obtain identity, tool authorization and resources from `execution.environment` and accepted product configuration. Product catalog and execution identities are checked separately. Child tool scope follows declarations and cannot expand through dependency packages.
+
+Scheduler registrations declare model-pool dependencies and retain concurrency/queue settings. App stops execution and scheduling before closing dependencies. Runtime configuration selects public protocols such as `ag-ui` and `a2a`. `tests/app/v2/server` covers both entrypoints, recovery, concurrency, authorization, media and cleanup.

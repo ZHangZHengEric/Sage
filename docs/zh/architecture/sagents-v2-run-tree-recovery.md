@@ -62,7 +62,3 @@ if receipt.decision.value == "accepted":
 `tests/sagents/v2/test_direct_child_recovery.py` 使用完整标准注册、加载和执行流程，覆盖三层全部暂停后从叶子开始恢复，以及关闭重建 App 后同样恢复。测试验证原 Run/Session/配置身份、实际角色指令与 Skill、祖先仍暂停、逐层资源依赖归属、原工具派发次数与最终释放。
 
 `test_shared_sandbox_leases.py` 另覆盖恢复一个已释放子成员时仍活动的父成员继续读写；普通重复共享不放宽。
-
-## 本轮验证记录
-
-2026-10-19，macOS / Python 3.13：SDK 全量 3268 passed、55 skipped；Desktop 与 Server 联合 870 passed、1 skipped（外部 MySQL 未配置）；开发与冻结标准参考宿主媒体验收 4 passed。Ruff 和差异检查通过。租约故障注入另验证子快照损坏时回滚已获取祖先依赖，以及旧释放回执和旧 handle 不影响恢复后的租约。

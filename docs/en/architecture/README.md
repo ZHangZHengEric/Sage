@@ -27,6 +27,7 @@ Hosts own authentication, credentials, UI, global conversation indexes, and tool
 
 ## Read by topic
 
+- [Host development guide](sagents-host-development.md): standard SDK integration, plugin identity and application boundaries.
 - [Plugin architecture](PLUGINS.md): registration, configuration, scopes, and host injection.
 - [Memory](../memory/README.md): context projection versus durable history.
 - [Tools and MCP](../MCP_SERVERS.md): capabilities and authorization.
@@ -35,6 +36,7 @@ Hosts own authentication, credentials, UI, global conversation indexes, and tool
 - [Resource management](SAGENTS_V2_RESOURCE_MANAGEMENT.md) · [Single-host concurrency](sagents-v2-single-host-concurrency.md).
 - [Context budgets](sagents-v2-context-budget.md) · [Model pool and persistence](sagents-v2-model-pool-and-persistence.md).
 - [Local sandbox constraints](sagents-v2-local-sandbox-security.md).
+- [Pending work and validation](pending-work.md): remaining capabilities, proposals and validation scope.
 - [Full runtime architecture](https://github.com/ZHangZHengEric/Sage/blob/main/sagents/v2/ARCHITECTURE.md): dependency rules and contracts.
 
 ## Deployment boundary
