@@ -11,7 +11,7 @@ ref: v2-detail-sagents-runtime-reference
 
 <a id="sagents-v2-runtime-配置参考"></a>
 
-# SAgents v2 Runtime reference
+# SAgents Runtime reference
 
 Skills can be configured as two groups, management and usage. See
 [Skill plugins and version behavior](sagents-skill-management-and-usage.md).

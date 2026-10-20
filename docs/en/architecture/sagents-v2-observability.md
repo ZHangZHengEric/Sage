@@ -72,7 +72,7 @@ OTLP preserves Sage's 128-bit trace ID and 64-bit span ID. Root spans have no pa
 Install the existing optional dependencies:
 
 ```bash
-python -m pip install -e '.[server-v2,otel]'
+python -m pip install -e '.[server,otel]'
 ```
 
 Langfuse:

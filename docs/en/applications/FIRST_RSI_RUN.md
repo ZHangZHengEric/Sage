@@ -13,7 +13,7 @@ ref: v2-applications-FIRST_RSI_RUN
 
 RSI means Recursive Self-Improvement. See how Sage compares Agent-package candidates, rejects a worse proposal, and returns a selected version without activating it. This walkthrough uses the existing Python example, not the Desktop app.
 
-**The model responses and scores are scripted.** The real SAgents v2 runtime executes the workflow, but this example does not demonstrate learned unit conversion or measure real-model improvement. No model API key is needed for this scripted example.
+**The model responses and scores are scripted.** The real SAgents runtime executes the workflow, but this example does not demonstrate learned unit conversion or measure real-model improvement. No model API key is needed for this scripted example.
 
 ## 1. Prepare the Python environment
 

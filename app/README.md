@@ -1,5 +1,8 @@
 # Applications
 
+Unversioned product names and installation extras select the current v2 applications.
+Legacy installation and entry points are listed in the [Sage v1 guide](v1/README.md).
+
 ```text
 app/
   clients/

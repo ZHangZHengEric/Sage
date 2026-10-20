@@ -36,7 +36,7 @@ Web、Flutter、Rust 和文档检查测试使用各自的运行工具，部分�
 # v2：不安装 v1 依赖。
 python3.12 -m venv .venv-v2
 source .venv-v2/bin/activate
-python -m pip install -e '.[server-v2,desktop-v2,otel,test]'
+python -m pip install -e '.[server,desktop,otel,test]'
 python -m pip check
 python -m pytest tests/sagents/v2 tests/app/v2 -m 'not live' -q
 # 只收集测试也会导入测试模块及其依赖。
@@ -51,7 +51,7 @@ python -m pip check
 python -m pytest tests/sagents/v1 tests/app/v1 tests/mcp_servers -m 'not live' -q
 
 # 跨版本入口检查：显式组合两个版本的依赖。
-python -m pip install -e '.[server-v2,desktop-v2,otel,test]'
+python -m pip install -e '.[server,desktop,otel,test]'
 python -m pytest tests/app/clients tests/sagents --ignore=tests/sagents/v1 --ignore=tests/sagents/v2 -m 'not live' -q
 python scripts/shared/checks/check_architecture.py
 ```

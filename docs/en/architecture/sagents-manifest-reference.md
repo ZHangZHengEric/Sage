@@ -11,7 +11,7 @@ ref: v2-detail-sagents-manifest-reference
 
 <a id="sagents-v2-sageyaml-配置参考"></a>
 
-# SAgents v2 sage.yaml reference
+# SAgents sage.yaml reference
 
 [Host development](sagents-host-development.md) · [Runtime reference](sagents-runtime-reference.md) · [Code reading guide](code-reading-guide.md)
 
@@ -325,7 +325,7 @@ interfaces:
 | `scope` | process/tenant/agent/run/null | null | Use composition default; explicit scopes must be supported |
 | `config` | object | `{}` | Plugin config |
 
-Built-in adapters include native, ag-ui, acp, a2a and mcp, named sage.protocol.<name>. Declarations do not start HTTP listeners, login services or routes. Those remain host-owned, including Server v2 routes.
+Built-in adapters include native, ag-ui, acp, a2a and mcp, named sage.protocol.<name>. Declarations do not start HTTP listeners, login services or routes. Those remain host-owned, including Server routes.
 
 <a id="tests-与-environments"></a>
 

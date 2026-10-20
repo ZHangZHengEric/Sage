@@ -17,6 +17,6 @@ parent: API
 - Optional Jaeger integration uses `SAGE_SERVER_JAEGER_*`; it is not required to run chat.
 - Session state is authoritative. Diagnostic files and log retention must not be used to reconstruct a second message ledger.
 
-Server v2 uses MySQL for application inventory and Session persistence, and Session events for AG-UI replay. Desktop uses its own local data root and catalog. Neither host uses the legacy desktop-update API.
+Server uses MySQL for application inventory and Session persistence, and Session events for AG-UI replay. Desktop uses its own local data root and catalog. Neither host uses the legacy desktop-update API.
 
 [Environment variables](../ENV_VARS.md) · [Server component](https://github.com/ZHangZHengEric/Sage/blob/main/app/v2/server/README.md)

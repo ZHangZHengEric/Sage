@@ -7,7 +7,7 @@
 [![English](https://img.shields.io/badge/Language-English-blue.svg)](README.md)
 [![Chinese](https://img.shields.io/badge/Language-Chinese-red.svg)](README_CN.md)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?logo=opensourceinitiative)](LICENSE)
-[![Python 3.12+ (v2)](https://img.shields.io/badge/Python-3.12%2B%20(v2)-blue.svg?logo=python)](https://python.org)
+[![Python 3.12+](https://img.shields.io/badge/Python-3.12%2B-blue.svg?logo=python)](https://python.org)
 [![Version](https://img.shields.io/badge/Version-2.1.1-green.svg)](https://github.com/ZHangZHengEric/Sage)
 [![DeepWiki](https://img.shields.io/badge/DeepWiki-Learn%20More-purple.svg)](https://deepwiki.com/ZHangZHengEric/Sage)
 [![Slack](https://img.shields.io/badge/Slack-Join%20Community-4A154B?logo=slack)](https://join.slack.com/t/sage-b021145/shared_invite/zt-3t8nabs6c-qCEDzNUYtMblPshQTKSWOA)
@@ -25,7 +25,7 @@
 New to RSI? [Inspect your first run](docs/en/applications/FIRST_RSI_RUN.md): a scripted Python walkthrough with no model API key.
 
 
-New to the code? [Start with the v2 code reading guide](docs/en/architecture/code-reading-guide.md): runtime, host call chains, ownership and tests.
+New to the code? [Start with the code reading guide](docs/en/architecture/code-reading-guide.md): runtime, host call chains, ownership and tests.
 
 Build your own host: [SAgents configuration and debugging guide](docs/en/architecture/sagents-host-development.md) with a runnable offline starter.
 
@@ -38,7 +38,7 @@ Build your own host: [SAgents configuration and debugging guide](docs/en/archite
 - 🔄 **Stateful, interactive execution** — Durable Session history, streamed events, and pause/resume with human input and approvals.
 - 🤝 **Multi-agent orchestration** — Coordinate Studio members through directed messages, or compose Agent Flows in the runtime.
 - 🔌 **An extensible tool ecosystem** — Bring built-in tools, reusable Skills, and [MCP](https://modelcontextprotocol.io/) services into the same agent workflow.
-- 🏗️ **One runtime, multiple hosts** — Use SAgents v2 through Desktop and Server, or embed it in your own Python application.
+- 🏗️ **One runtime, multiple hosts** — Use SAgents through Desktop and Server, or embed it in your own Python application.
 
 ---
 
@@ -70,11 +70,13 @@ See the [RSI workflow guide](docs/en/applications/RSI.md). Use `AgentPackageOpti
 
 ## 🚀 **Get Started**
 
+Sage, Desktop, Server, and SAgents refer to the current v2 implementation by default. For the legacy version, use the separate [Sage v1 guide](app/v1/README.md).
+
 | Choose your path | Start here |
 | --- | --- |
-| 💻 **Desktop v2** — Configure agents, run RSI, and choose versions | [Desktop guide](app/v2/desktop/README.md) |
-| 🌐 **Server v2** — Multi-user web access and Agent Studio | [Server guide](app/v2/server/README.md) |
-| 🧠 **SAgents v2** — Build and optimize agents through Python | [Runtime quick start](sagents/v2/README.md#quick-start) |
+| 💻 **Desktop** — Configure agents, run RSI, and choose versions | [Desktop guide](app/v2/desktop/README.md) |
+| 🌐 **Server** — Multi-user web access and Agent Studio | [Server guide](app/v2/server/README.md) |
+| 🧠 **SAgents** — Build and optimize agents through Python | [Runtime quick start](sagents/v2/README.md#quick-start) |
 | 📦 **Desktop installers** — Available release builds | [Downloads & release instructions](https://github.com/ZHangZHengEric/Sage/releases/tag/v2.1.1) |
 
 ### 📦 Desktop installer
@@ -93,7 +95,7 @@ git clone https://github.com/ZHangZHengEric/Sage.git
 cd Sage
 python3.12 -m venv .venv
 source .venv/bin/activate
-python -m pip install -e '.[desktop-v2]'
+python -m pip install -e '.[desktop]'
 cd app/v2/desktop
 flutter pub get
 flutter run -d macos
@@ -110,7 +112,7 @@ For Windows and Linux setup, see the [Desktop guide](app/v2/desktop/README.md). 
 Requires **Python 3.12+**, **MySQL**, and **Node.js 22.12+**. From the checkout root, with the Python environment active:
 
 ```bash
-python -m pip install -e '.[server-v2]'
+python -m pip install -e '.[server]'
 cp app/v2/server/.env.example app/v2/server/.env
 ```
 
@@ -126,9 +128,9 @@ python -m app.v2.server
 
 Open **[localhost:8090](http://localhost:8090)**. Add a model and an Agent to start chatting, or open **`/studio`** to manage Agent packages.
 
-See the [Server guide](app/v2/server/README.md) for configuration. Server v2 currently supports **one worker**; MySQL persistence does not enable horizontal scaling.
+See the [Server guide](app/v2/server/README.md) for configuration. Server currently supports **one worker**; MySQL persistence does not enable horizontal scaling.
 
-### 🧑‍💻 Run your first SAgents v2 agent
+### 🧑‍💻 Run your first SAgents agent
 
 **One Python file; no `sage.yaml` required.** After the Python setup above, save as `quickstart.py` and replace `your-model` with an available model:
 
@@ -206,15 +208,15 @@ python quickstart.py
 
 ---
 
-## 🧠 **Built on SAgents v2**
+## 🧠 **Built on SAgents**
 
 ```mermaid
 flowchart TB
-    desktop["Desktop v2<br/>Flutter workspace"]
-    server["Server v2<br/>Web & Agent Studio"]
+    desktop["Desktop<br/>Flutter workspace"]
+    server["Server<br/>Web & Agent Studio"]
     custom["Your application<br/>Python integration"]
 
-    runtime["SAgents v2<br/>Agent packages · Sessions · Runs"]
+    runtime["SAgents<br/>Agent packages · Sessions · Runs"]
 
     desktop --> runtime
     server --> runtime
@@ -240,8 +242,8 @@ Your application owns the UI, authentication, and credentials. Built-in runtime 
 | Learn | Build |
 | --- | --- |
 | [Documentation index](docs/en/README.md) | [Runtime integration manual](sagents/v2/使用手册.md) |
-| [Desktop v2](app/v2/desktop/README.md) | [Server Agent platform](docs/zh/architecture/SERVER_V2_AGENT_PLATFORM.md) |
-| [Server v2](app/v2/server/README.md) | [Deployment](deploy/README.md) |
+| [Desktop](app/v2/desktop/README.md) | [Server Agent platform](docs/zh/architecture/SERVER_V2_AGENT_PLATFORM.md) |
+| [Server](app/v2/server/README.md) | [Deployment](deploy/README.md) |
 | [Versioned source layout](docs/VERSIONED_LAYOUT.md) | v1 directories and import migration |
 | [Release notes](release_notes/) | [Development changelog](change_log.md) |
 

@@ -14,9 +14,9 @@ ref: v2-CONFIGURATION
 
 | Host | Configuration source |
 | --- | --- |
-| Embedded SAgents v2 | `SageManifest`: YAML text, validated Python dictionary, or `sage.yaml`. |
-| Desktop v2 | Persisted application settings and catalog; configure models and Agents in the UI. |
-| Server v2 | `SAGE_SERVER_*` variables plus per-user model, Agent, Skill, and MCP catalogs. |
+| Embedded SAgents | `SageManifest`: YAML text, validated Python dictionary, or `sage.yaml`. |
+| Desktop | Persisted application settings and catalog; configure models and Agents in the UI. |
+| Server | `SAGE_SERVER_*` variables plus per-user model, Agent, Skill, and MCP catalogs. |
 
 ## Loading a manifest
 
@@ -35,7 +35,7 @@ manifest = SageManifestLoader().loads(yaml_text)
 ## OrcaRouter models
 
 `orcarouter` is an optional provider preset using the existing OpenAI-compatible
-Chat Completions implementation. In Server v2, select `orcarouter` in the model
+Chat Completions implementation. In Server, select `orcarouter` in the model
 form and enter your model ID and API key. The default endpoint is
 `https://api.orcarouter.ai/v1`; a custom Base URL is preserved.
 

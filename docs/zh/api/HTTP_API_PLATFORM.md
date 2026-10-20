@@ -17,6 +17,6 @@ parent: API
 - 可选 Jaeger 集成使用 `SAGE_SERVER_JAEGER_*`，不是对话启动的必要依赖。
 - Session 状态是权威来源，诊断文件和日志不能另建一套消息账本。
 
-Server v2 使用 MySQL 保存应用库存和 Session，AG-UI 回放读取 Session 事件。Desktop 使用独立的本地数据根目录和 catalog。两者不依赖旧版桌面更新 API。
+Server 使用 MySQL 保存应用库存和 Session，AG-UI 回放读取 Session 事件。Desktop 使用独立的本地数据根目录和 catalog。两者不依赖旧版桌面更新 API。
 
 [环境变量](../ENV_VARS.md) · [服务端组件](https://github.com/ZHangZHengEric/Sage/blob/main/app/v2/server/README.md)

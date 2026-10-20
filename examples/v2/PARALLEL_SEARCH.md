@@ -1,4 +1,4 @@
-# Keyless Parallel Search MCP with SAgents v2
+# Keyless Parallel Search MCP with SAgents
 
 [Parallel Search MCP](https://docs.parallel.ai/integrations/mcp/search-mcp)
 provides `web_search` and `web_fetch` at `https://search.parallel.ai/mcp`.

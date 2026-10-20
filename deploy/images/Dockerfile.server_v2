@@ -55,7 +55,7 @@ extras = project['optional-dependencies']
 subprocess.run([
     sys.executable, '-m', 'pip', 'install', '--no-cache-dir',
     'setuptools>=68', 'wheel', *project['dependencies'],
-    *extras['server-v2'], *extras['otel'],
+    *extras['server'], *extras['otel'],
 ], check=True)
 PYTHON
 
@@ -68,7 +68,7 @@ ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 \
 
 COPY . .
 # Dependencies from the same project metadata are already cached above.
-RUN python -m pip install --no-cache-dir --no-deps --no-build-isolation '.[server-v2,otel]'
+RUN python -m pip install --no-cache-dir --no-deps --no-build-isolation '.[server,otel]'
 
 EXPOSE 8090
 ENTRYPOINT ["python", "-m", "app.v2.server"]

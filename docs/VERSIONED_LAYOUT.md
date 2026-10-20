@@ -31,6 +31,17 @@ several still depend on v1. Legacy integrations remain outside the agent engine;
 consume the legacy adapters. Deployment files keep their existing locations while
 referencing the new v1 source paths. Runtime data directories are unchanged.
 
+## Default public names
+
+Sage, SAgents, Desktop, and Server refer to the current v2 implementation.
+Install the current applications with `.[server]` or `.[desktop]`; these replace
+`.[server-v2]` and `.[desktop-v2]`. The old extra names are no longer defined.
+Source directories, Python imports, protocol/schema identifiers, and persisted
+data paths keep their explicit versions.
+
+Legacy v1 installation, commands, and deployment are documented separately in
+[app/v1/README.md](../app/v1/README.md).
+
 ## Imports and commands
 
 The public `from sagents import SAgent` export remains lazy and refers to the

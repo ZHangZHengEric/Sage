@@ -9,7 +9,7 @@ ref: v2-detail-sagents-host-development
 
 {% include lang_switcher.html %}
 
-# Sage v2 SDK integration
+# Sage SDK integration
 
 The application owns execution assembly. Hosts register implementations, select
 capabilities in serializable runtime configuration, and use the same public Run

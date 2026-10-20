@@ -1,6 +1,6 @@
-# Sage Desktop v2
+# Sage Desktop
 
-[v2 code reading guide](../../../docs/en/architecture/code-reading-guide.md) · [中文阅读指南](../../../docs/zh/architecture/code-reading-guide.md)
+[code reading guide](../../../docs/en/architecture/code-reading-guide.md) · [中文阅读指南](../../../docs/zh/architecture/code-reading-guide.md)
 
 
 Sage Desktop 2.0 是使用 `sagents/v2` 的独立 Flutter 客户端。旧 `app/v1/desktop` 保留为历史实现。
@@ -23,13 +23,13 @@ app/v2/desktop/
 
 ## 开发运行
 
-**环境要求：Python 3.12+。** Desktop v2 sidecar 与 `sagents.v2` 共用这一下限；
+**环境要求：Python 3.12+。** Desktop sidecar 与 `sagents.v2` 共用这一下限；
 Sage 2.0 发布包统一要求 Python 3.12+；旧发布版的 Python 要求以其版本说明为准。低于 3.12 时 Flutter 不会启动 sidecar。
 
 从仓库根目录启动：
 
 ```bash
-python -m pip install -e '.[desktop-v2]'
+python -m pip install -e '.[desktop]'
 cd app/v2/desktop
 flutter pub get
 flutter run -d macos
@@ -45,18 +45,18 @@ Agent、模型、运行组件、Memory 和完成判定都从 Desktop 自己的�
 不使用环境变量覆盖。Sidecar 的数据目录固定为 `~/sage`；源码调试若需独立目录，
 可显式传入 `--data-root /absolute/path`。
 
-Desktop v2 只创建自己的数据布局：`~/sage/runtime/sessions` 为每个 Session
+Desktop 只创建自己的数据布局：`~/sage/runtime/sessions` 为每个 Session
 保存一个独立、原子更新且带校验的 `state.json`，并按标准接口生成可读的
 `session.json`、`events.jsonl`、`runs/<run_id>/`、`commits/` 和 `sub_sessions/`；SessionStore 的锁、幂等索引和
 事务恢复数据收纳在 `~/sage/runtime/.session-store`。`~/sage/runtime/session-index.json` 是 Desktop 自己的
 全局会话索引，`diagnostics/` 保存非权威模型诊断；Desktop catalog 与设置也位于
 `~/sage/runtime`。`~/sage/skills` 保存导入的 Skills，
-`~/sage/agent_workspace` 是共享工作区。Desktop v2 不读取或导入 Desktop v1
+`~/sage/agent_workspace` 是共享工作区。Desktop 不读取或导入 Desktop v1
 的数据、设置与工作区内容，模型 route、MCP 连接和 Agent Workspace 均从 v2
 自己的数据根目录独立初始化。
 
 默认 `sage.session.filesystem` 插件由扩展工厂装配。第一次使用紧凑存储格式启动
-时，它只迁移当前 Desktop v2 早期版本写入的 `runtime/session-store`：从每个带
+时，它只迁移当前 Desktop 早期版本写入的 `runtime/session-store`：从每个带
 校验 journal 读取最后一次完整状态，写入并校验新的 `runtime/sessions/<id>/state.json`，
 全部成功后再移除旧目录以回收重复快照占用的空间；这不是 Desktop v1 数据导入。
 目录表达参考了早期文件存储的可读性，但不读取其文件或数据。子 Session 递归保存在
@@ -120,7 +120,7 @@ flutter test test/unified_sidecar_test.dart
   可读取 commit proposal，Run/Proposal API 提供 propose、publish 和 reject。
 - 侧栏顶部“新对话”创建 Agent Workspace 会话；项目区只显示注册 Project。Agent Workspace 是 Desktop 的默认共享工作区，不作为 Project 节点展示。
 - 所有 Agent Workspace 会话和所有 Agent 共享同一个目录；切换 Agent 只改变模型、Tools、Skills 与上下文组合，不改变文件根目录。注册 Project 仍各自使用自己的项目目录。
-- Desktop v2 不使用 `~/.sage` 隐藏目录。默认将共享文件放在 `~/sage/agent_workspace`，将数据库、设置和会话状态放在 `~/sage/runtime`；二者均可在 Finder 中直接看到。
+- Desktop 不使用 `~/.sage` 隐藏目录。默认将共享文件放在 `~/sage/agent_workspace`，将数据库、设置和会话状态放在 `~/sage/runtime`；二者均可在 Finder 中直接看到。
 - 应用启动时通过可替换的 `workspace.initializer` 插件初始化当前 Agent Workspace；默认的 Claw Mode 会按 `desktop-v1.1.8` 发布版模板非破坏性地预置 `AGENT.md`、`IDENTITY.md`、`SOUL.md`、`USER.md`、`MEMORY.md`，以及 `memory`、`data`、`projects`、`temp`、`logs` 目录，但不读取或导入任何 V1 数据。也可切换为空白工作区，未来可继续注册其他初始化插件。默认路径是 `~/sage/agent_workspace`。设置中心的“工作区”页面可以修改路径，路径字段自动保存并立即初始化目标目录；修改后 Agent Workspace 会话的新文件操作使用新目录，已绑定 Project 不受影响。
 - 非项目对话始终展示当前 Agent Workspace 的完整文件树；Agent 完成工具调用或 Run 后，界面会自动刷新文件树。初始化器只补充缺失项，不覆盖用户或 Agent 已有文件。
 - 共享 Agent Workspace 与注册 Project 都执行文件根目录约束。传给 sagents 的 `sandbox_agent_workspace` 始终是共享 Agent Workspace；Project Session 只通过运行变量（兼容字段 `system_context`）中的 `working_directory` 和额外允许路径告知当前项目目录。Agent 身份文件、公共运行目录、Skill 副本和沙箱运行数据继续保留在 Agent Workspace，不进入项目文件树。
@@ -150,7 +150,7 @@ PYTHONDONTWRITEBYTECODE=1 .venv/bin/python -m pytest tests/app/v2/desktop -q
 
 ## 品牌图标
 
-Desktop v2 复制并沿用旧 Desktop 的 Sage 标识，独立源文件是 `assets/brand/sage_logo.png`。修改后运行 `python scripts/generate_icons.py`，同步生成 macOS AppIcon 与 Windows ICO；旧 Desktop 的图标资源不会被修改。macOS 输出使用原生图标外形比例，平台遮罩独立保存在 `assets/brand/macos_icon_mask.png`；黑色主体约占画布 89%，四角透明，S 标识位于中央安全区。macOS 版本的 S 使用肉眼不可见的冷白色差，避免 macOS 26 把纯黑白扁平图标误判为单色前景并添加浅色系统底板。
+Desktop 复制并沿用旧 Desktop 的 Sage 标识，独立源文件是 `assets/brand/sage_logo.png`。修改后运行 `python scripts/generate_icons.py`，同步生成 macOS AppIcon 与 Windows ICO；旧 Desktop 的图标资源不会被修改。macOS 输出使用原生图标外形比例，平台遮罩独立保存在 `assets/brand/macos_icon_mask.png`；黑色主体约占画布 89%，四角透明，S 标识位于中央安全区。macOS 版本的 S 使用肉眼不可见的冷白色差，避免 macOS 26 把纯黑白扁平图标误判为单色前景并添加浅色系统底板。
 
 ## 设置写入协议
 

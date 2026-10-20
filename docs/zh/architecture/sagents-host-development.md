@@ -9,7 +9,7 @@ ref: v2-detail-sagents-host-development
 
 {% include lang_switcher.html %}
 
-# Sage v2 标准宿主接入
+# Sage 标准宿主接入
 
 宿主通过 `builder.register(registration)` 注册实现，通过可序列化的 runtime
 配置选择插件、scope 和参数。内置与自定义实现使用同一条执行流程：

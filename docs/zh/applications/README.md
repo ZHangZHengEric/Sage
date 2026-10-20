@@ -13,8 +13,8 @@ has_children: true
 
 | 入口 | 环境要求 | 指南 |
 | --- | --- | --- |
-| Desktop v2 | Python 3.12+、Flutter、原生桌面构建工具链 | [桌面端](DESKTOP.md) |
-| Server v2 | Python 3.12+、MySQL、Node.js 22.12+ | [服务端](WEB.md) |
+| Desktop | Python 3.12+、Flutter、原生桌面构建工具链 | [桌面端](DESKTOP.md) |
+| Server | Python 3.12+、MySQL、Node.js 22.12+ | [服务端](WEB.md) |
 | 嵌入式运行时 | Python 3.12+ 和模型服务 | [Python 快速开始](GETTING_STARTED.md) |
 
-Desktop 与 Server 共用 SAgents v2，但分别管理身份、凭据、设置和会话索引。Desktop v2 不导入 v1 数据。旧脚本 `scripts/v1/dev-up.sh` 不会启动 Server v2。
+Desktop 与 Server 共用 SAgents，但分别管理身份、凭据、设置和会话索引。Desktop 不导入 v1 数据。旧脚本 `scripts/v1/dev-up.sh` 不会启动 Server。

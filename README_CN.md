@@ -7,7 +7,7 @@
 [![English](https://img.shields.io/badge/Language-English-blue.svg)](README.md)
 [![简体中文](https://img.shields.io/badge/语言-简体中文-red.svg)](README_CN.md)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?logo=opensourceinitiative)](LICENSE)
-[![Python 3.12+ (v2)](https://img.shields.io/badge/Python-3.12%2B%20(v2)-blue.svg?logo=python)](https://python.org)
+[![Python 3.12+](https://img.shields.io/badge/Python-3.12%2B-blue.svg?logo=python)](https://python.org)
 [![Version](https://img.shields.io/badge/Version-2.1.1-green.svg)](https://github.com/ZHangZHengEric/Sage)
 [![DeepWiki](https://img.shields.io/badge/DeepWiki-查看文档-purple.svg)](https://deepwiki.com/ZHangZHengEric/Sage)
 [![Slack](https://img.shields.io/badge/Slack-加入社区-4A154B?logo=slack)](https://join.slack.com/t/sage-b021145/shared_invite/zt-3t8nabs6c-qCEDzNUYtMblPshQTKSWOA)
@@ -20,7 +20,7 @@
 
 </div>
 
-首次阅读代码？从 [v2 代码阅读指南](docs/zh/architecture/code-reading-guide.md) 开始，按运行链路定位 sagents、desktop、server 和相关测试。
+首次阅读代码？从 [代码阅读指南](docs/zh/architecture/code-reading-guide.md) 开始，按运行链路定位 sagents、desktop、server 和相关测试。
 
 基于 sagents 开发新项目：[统一开发入口、配置与调试规范](docs/zh/architecture/sagents-host-development.md)，附可离线运行的参考项目。
 
@@ -35,7 +35,7 @@
 - 🔄 **有状态、可交互的执行** — 持久化 Session 历史，流式输出事件，支持暂停、恢复、人工输入与审批。
 - 🤝 **多智能体编排** — 通过定向消息协调 Studio 成员，或在运行时中组合 Agent Flow。
 - 🔌 **可扩展的工具生态** — 将内置工具、可复用 Skills 与 [MCP](https://modelcontextprotocol.io/) 服务接入同一智能体工作流程。
-- 🏗️ **统一内核，多端接入** — 通过 Desktop 和 Server 使用 SAgents v2，也可以嵌入自己的 Python 应用。
+- 🏗️ **统一内核，多端接入** — 通过 Desktop 和 Server 使用 SAgents，也可以嵌入自己的 Python 应用。
 
 ---
 
@@ -60,11 +60,13 @@
 
 ## 🚀 **快速开始**
 
+Sage、Desktop、Server 和 SAgents 默认指当前 v2 实现。旧版单独见 [Sage v1 指南](app/v1/README.md)。
+
 | 选择你的入口 | 从这里开始 |
 | --- | --- |
-| 💻 **Desktop v2** — 配置智能体、运行 RSI、选择版本 | [桌面端指南](app/v2/desktop/README.md) |
-| 🌐 **Server v2** — 多用户 Web 应用与 Agent Studio | [服务端指南](app/v2/server/README.md) |
-| 🧠 **SAgents v2** — 通过 Python 构建与调优智能体 | [运行时快速开始](sagents/v2/README.md#quick-start) |
+| 💻 **Desktop** — 配置智能体、运行 RSI、选择版本 | [桌面端指南](app/v2/desktop/README.md) |
+| 🌐 **Server** — 多用户 Web 应用与 Agent Studio | [服务端指南](app/v2/server/README.md) |
+| 🧠 **SAgents** — 通过 Python 构建与调优智能体 | [运行时快速开始](sagents/v2/README.md#quick-start) |
 | 📦 **桌面安装包** — 已发布版本 | [下载与版本说明](https://github.com/ZHangZHengEric/Sage/releases/tag/v2.1.1) |
 
 ### 📦 安装桌面端
@@ -83,7 +85,7 @@ git clone https://github.com/ZHangZHengEric/Sage.git
 cd Sage
 python3.12 -m venv .venv
 source .venv/bin/activate
-python -m pip install -e '.[desktop-v2]'
+python -m pip install -e '.[desktop]'
 cd app/v2/desktop
 flutter pub get
 flutter run -d macos
@@ -100,7 +102,7 @@ Windows、Linux 配置见 [桌面端指南](app/v2/desktop/README.md)。2.1 发�
 需要 **Python 3.12+**、**MySQL** 和 **Node.js 22.12+**。在仓库根目录、已激活 Python 环境的终端中执行：
 
 ```bash
-python -m pip install -e '.[server-v2]'
+python -m pip install -e '.[server]'
 cp app/v2/server/.env.example app/v2/server/.env
 ```
 
@@ -116,9 +118,9 @@ python -m app.v2.server
 
 打开 **[localhost:8090](http://localhost:8090)**，添加模型和 Agent 后开始对话；进入 **`/studio`** 管理 Agent 包。
 
-详细配置见 [服务端指南](app/v2/server/README.md)。Server v2 当前支持**单 worker**，MySQL 持久化不代表已支持横向扩容。
+详细配置见 [服务端指南](app/v2/server/README.md)。Server 当前支持**单 worker**，MySQL 持久化不代表已支持横向扩容。
 
-### 🧑‍💻 用 SAgents v2 运行第一个 Agent
+### 🧑‍💻 用 SAgents 运行第一个 Agent
 
 **一个 Python 文件即可，无需创建 `sage.yaml`。** 完成上面的 Python 安装后，保存为 `quickstart.py`，将 `your-model` 替换为可用模型：
 
@@ -196,15 +198,15 @@ python quickstart.py
 
 ---
 
-## 🧠 **SAgents v2 内核**
+## 🧠 **SAgents 内核**
 
 ```mermaid
 flowchart TB
-    desktop["Desktop v2<br/>Flutter 工作区"]
-    server["Server v2<br/>Web 与 Agent Studio"]
+    desktop["Desktop<br/>Flutter 工作区"]
+    server["Server<br/>Web 与 Agent Studio"]
     custom["你的应用<br/>Python 集成"]
 
-    runtime["SAgents v2<br/>Agent 包 · Session · Run"]
+    runtime["SAgents<br/>Agent 包 · Session · Run"]
 
     desktop --> runtime
     server --> runtime
@@ -230,8 +232,8 @@ flowchart TB
 | 了解 Sage | 构建与扩展 |
 | --- | --- |
 | [文档索引](docs/zh/README.md) | [运行时集成手册](sagents/v2/使用手册.md) |
-| [Desktop v2](app/v2/desktop/README.md) | [Server Agent 平台](docs/zh/architecture/SERVER_V2_AGENT_PLATFORM.md) |
-| [Server v2](app/v2/server/README.md) | [部署指南](deploy/README.md) |
+| [Desktop](app/v2/desktop/README.md) | [Server Agent 平台](docs/zh/architecture/SERVER_V2_AGENT_PLATFORM.md) |
+| [Server](app/v2/server/README.md) | [部署指南](deploy/README.md) |
 | [版本目录说明](docs/VERSIONED_LAYOUT.md) | v1 代码位置与导入迁移 |
 | [版本说明](release_notes/) | [开发变更日志](change_log.md) |
 

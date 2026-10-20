@@ -1,6 +1,6 @@
-# Sage Server v2 部署
+# Sage Server 部署
 
-本目录维护 Server v2 与 Web 的独立部署。v2 配置详见 [服务指南](../app/v2/server/README.md)，仅支持单 worker。v1 的部署文件与说明位于 [app/v1/deploy](../app/v1/deploy/README.md)。
+本目录维护 Server 与 Web 的独立部署。v2 配置详见 [服务指南](../app/v2/server/README.md)，仅支持单 worker。v1 的部署文件与说明位于 [app/v1/deploy](../app/v1/deploy/README.md)。
 
 - `deploy/compose_v2.sh`：v2 部署入口
 - `deploy/standalone/`：v2 Compose、nginx 和环境变量模板
@@ -10,7 +10,7 @@
 
 `deploy/compose_v2.sh` 使用 `deploy/standalone/docker-compose.yml`，仅启动 `sage-server-v2`、`sage-web-v2`。后端通过 Python 3.12 执行 `python -m app.v2.server`；Web 构建自 `app/v2/server/web`，Nginx 代理 `/api`、`/a2a` 等 v2 路由并支持 SSE。
 
-V2 后端镜像与源码安装统一使用根目录 `pyproject.toml` 的核心依赖及 `server-v2,otel` extras。镜像先读取元数据安装依赖以保留缓存，再通过 `--no-deps` 安装源码。Desktop 使用 `desktop-v2` extra；v1 独立使用 `app/v1/requirements.txt`。
+V2 后端镜像与源码安装统一使用根目录 `pyproject.toml` 的核心依赖及 `server,otel` extras。镜像先读取元数据安装依赖以保留缓存，再通过 `--no-deps` 安装源码。Desktop 使用 `desktop` extra；v1 独立使用 `app/v1/requirements.txt`。
 
 该镜像不预装旧版抓取和文档处理工具包；在容器内执行需要这些包的 Skill 或自定义 MCP 子进程时，需在自定义镜像中按其要求安装依赖。修改业务源码仍可复用依赖层，修改 V2 专用依赖文件才会使该层重新安装（前置构建层不变时）。
 
@@ -44,5 +44,5 @@ V2 镜像自动创建 `sage-sandbox` 用户（UID/GID `10001:10001`），服务�
 
 脚本默认读取 `deploy/standalone/.env`，可用 `ENV_FILE=/path/to/.env` 指定其他配置。项目名默认为 `sage_standalone`，可用 `SAGE_COMPOSE_PROJECT_NAME` 覆盖。支持 `deploy/compose_v2.sh down`、`deploy/compose_v2.sh logs -f sage-server` 等 Compose 命令，可从任意工作目录调用。
 
-Server v2 本地沙箱的预装前端测试环境、离线调用及隔离限制见
+Server 本地沙箱的预装前端测试环境、离线调用及隔离限制见
 [前端测试环境说明](images/frontend-test/README.md)。

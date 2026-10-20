@@ -9,13 +9,13 @@ ref: v2-detail-SERVER_V2_AGENT_PLATFORM
 
 {% include lang_switcher.html %}
 
-# Server v2 Agent Platform
+# Server Agent Platform
 
 Use ordinary chat to send messages to an existing Agent. Use Agent package management in `/studio` when you need to save complete configurations, compare versions, and test a version before activating it. Both use the v2 runtime, but have separate entry points and task workflows.
 
 ## Responsibilities and entrypoints
 
-SAgents v2 provides definitions, composition, Flow, execution, persistence, and interactions. Server owns identity, authorization, user catalogs, host configuration, and HTTP/Web entrypoints. HTTP and model management tools use the same AgentManagementService.
+SAgents provides definitions, composition, Flow, execution, persistence, and interactions. Server owns identity, authorization, user catalogs, host configuration, and HTTP/Web entrypoints. HTTP and model management tools use the same AgentManagementService.
 
 Ordinary chat uses AG-UI through `/api/agent`. Full package workflows live at `/api/agent-packages` and `/studio`. Import a catalog Agent as a draft retaining prompts, models, tools, and Skill selection; import does not modify the original Agent, and later edits do not propagate automatically to saved packages.
 

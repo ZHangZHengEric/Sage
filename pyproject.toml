@@ -18,8 +18,9 @@ classifiers = [
   "License :: OSI Approved :: MIT License",
   "Operating System :: OS Independent",
 ]
-# V2 runtime, CLI and independent AnyTool MCP server.
-# Legacy applications install app/v1/requirements.txt explicitly.
+# Default Sage runtime (v2), CLI and independent AnyTool MCP server.
+# Unversioned extras below select the current applications.
+# Legacy v1 applications install app/v1/requirements.txt explicitly; see app/v1/README.md.
 dependencies = [
   "openai>=1.0.0",
   "httpx>=0.24.0",
@@ -44,7 +45,7 @@ otel = [
   "opentelemetry-sdk>=1.20.0",
   "opentelemetry-exporter-otlp>=1.20.0",
 ]
-server-v2 = [
+server = [
   "ag-ui-protocol==0.1.19",
   "fastapi>=0.115.2",
   "uvicorn[standard]>=0.24.0",
@@ -57,7 +58,7 @@ server-v2 = [
   "prometheus-client>=0.20.0",
   "a2a-sdk[fastapi]>=1.1.4,<2",
 ]
-desktop-v2 = [
+desktop = [
   "fastapi>=0.115.2",
   "uvicorn[standard]>=0.24.0",
   "uvloop>=0.21.0; sys_platform != 'win32'",

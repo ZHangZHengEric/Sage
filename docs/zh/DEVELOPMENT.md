@@ -26,7 +26,7 @@ ref: v2-DEVELOPMENT
 使用[快速开始](applications/GETTING_STARTED.md)中的 Python 3.12+ 环境，服务端测试需要安装对应 extras：
 
 ```bash
-python -m pip install -e '.[server-v2,desktop-v2,otel,test]'
+python -m pip install -e '.[server,desktop,otel,test]'
 python -m pytest tests/sagents/v2 tests/app/v2/desktop tests/app/v2/server -q
 ```
 
@@ -55,4 +55,4 @@ python3 docs/scripts/check_language_nav.py
 
 Jekyll 构建需要 Ruby 和 `docs/Gemfile` 中的依赖。正式页面应有正确的语言元数据、有效本地链接和 v2 源码依据。历史文件放入不参与发布的 `docs/archive/`。不能用旧审查的通过数作为当前可用性保证。
 
-检查会对比中英文页面集合、导航元数据、标题层级、代码示例和链接目标，并将路由及环境变量清单与当前 Server v2 源码核对。构建后逐页检查侧栏是否完整一致，以及语言切换是否指向对应译文。
+检查会对比中英文页面集合、导航元数据、标题层级、代码示例和链接目标，并将路由及环境变量清单与当前 Server 源码核对。构建后逐页检查侧栏是否完整一致，以及语言切换是否指向对应译文。

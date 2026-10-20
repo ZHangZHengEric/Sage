@@ -9,7 +9,7 @@ ref: v2-detail-sagents-manifest-reference
 
 {% include lang_switcher.html %}
 
-# SAgents v2 sage.yaml 配置参考
+# SAgents sage.yaml 配置参考
 
 [接入开发指南](sagents-host-development.md) · [Runtime 配置参考](sagents-runtime-reference.md) · [代码阅读指南](code-reading-guide.md)
 
@@ -313,7 +313,7 @@ interfaces:
 | `scope` | process/tenant/agent/run/null | null | 使用装配默认；显式值需插件支持 |
 | `config` | 对象 | `{}` | 插件参数 |
 
-内置适配器包括 native、ag-ui、acp、a2a、mcp，ID 为 `sage.protocol.<名称>`。声明适配器不会自动创建 HTTP 监听端口、登录接口或路由；这些由宿主负责。Server v2 的现有 HTTP 接口也不是通过任意 Package 改写的。
+内置适配器包括 native、ag-ui、acp、a2a、mcp，ID 为 `sage.protocol.<名称>`。声明适配器不会自动创建 HTTP 监听端口、登录接口或路由；这些由宿主负责。Server 的现有 HTTP 接口也不是通过任意 Package 改写的。
 
 ## tests 与 environments
 

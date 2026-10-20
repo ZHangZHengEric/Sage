@@ -6,7 +6,7 @@ Thanks for helping build Sage! First-time contributors are welcome. A clearer se
 
 Please use English for issues, pull requests, and general repository documentation. Keep translations in their dedicated language files.
 
-- Read the [English README](README.md) and the guide for your component: [runtime](sagents/v2/README.md), [Desktop v2](app/v2/desktop/README.md), or [Server v2](app/v2/server/README.md).
+- Read the [English README](README.md) and the guide for your component: [runtime](sagents/v2/README.md), [Desktop](app/v2/desktop/README.md), or [Server](app/v2/server/README.md).
 - Browse [open issues](https://github.com/ZHangZHengEric/Sage/issues) and [pull requests](https://github.com/ZHangZHengEric/Sage/pulls) to avoid duplicate work. Ask in an issue if the expected behavior or scope is unclear.
 - Small documentation fixes can go straight to a PR. Discuss larger features, new integrations, or architecture changes in an issue first.
 - For a bug, include the component/version, operating system, reproduction steps, and expected versus actual behavior. Remove credentials and private data from logs and screenshots.
@@ -30,14 +30,14 @@ Also preview changed Markdown and verify links. This script checks the current d
 **Python** (in your Python 3.12+ environment):
 
 ```bash
-python -m pip install -e '.[server-v2,desktop-v2,otel,test]'
+python -m pip install -e '.[server,desktop,otel,test]'
 python scripts/shared/checks/check_architecture.py
 python -m pytest tests/sagents/v2 -v
 ```
 
 The last command targets the v2 runtime; select the affected tests under [`tests/`](tests/) for other components. Linux sandbox tests need a compatible bubblewrap installation and host support. See the [CI workflow](.github/workflows/ci-tests.yml) for the full suite matrix and environment setup, including separate v1, v2 and cross-version environments. Live model tests may incur costs; do not enable them without your own credentials and intent.
 
-**Desktop v2** (Flutter 3.44.2 is used in CI):
+**Desktop** (Flutter 3.44.2 is used in CI):
 
 ```bash
 cd app/v2/desktop
@@ -48,7 +48,7 @@ flutter test
 
 For backend changes, also run the affected Python tests under `tests/app/v2/desktop`.
 
-**Server v2 web** (Node.js 22.12+):
+**Server web** (Node.js 22.12+):
 
 ```bash
 cd app/v2/server/web
