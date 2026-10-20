@@ -16,7 +16,7 @@ app/
     desktop/          Flutter client and Python host
     server/           Server API and web UI
   skills/             Packaged skill content
-  wiki/               Packaged documentation content
+  wiki/               Legacy product manual used by v1 Desktop
 ```
 
 Agent engines are in `sagents/v1` and `sagents/v2`. Independent MCP services are

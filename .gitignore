@@ -1,13 +1,9 @@
 mcp_servers/run_all_mcp_server.sh
-mcp_server/hub/*
-mcp_servers/standard_search/*
 */workspace/*
 node_modules/
 /package-lock.json
 sage_demo_workspace/
-app/fastapi_react_demo/backend/config.yaml
 mcp_servers/mcp_setting.json
-app/fastapi_react_demo/frontend/node_modules/
 app/v1/desktop/tauri/resources/node/bin/node
 .DS_Store
 # Byte-compiled / optimized / DLL files
@@ -23,6 +19,8 @@ workspace/
 !sagents/v2/workspace/
 !sagents/v2/workspace/**
 agent_sessions
+# Local SDK runtime data.
+.runtime/
 # Legacy runtime roots created when local storage resolves against the checkout.
 /agents/
 /sessions/
@@ -268,4 +266,3 @@ app/v1/desktop/scripts/certs
 /app/desktop_v2/linux/flutter/ephemeral/
 /app/desktop_v2/macos/Flutter/ephemeral/
 /app/desktop_v2/windows/flutter/ephemeral/
-.runtime

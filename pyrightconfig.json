@@ -1,41 +1,5 @@
 {
-  "pythonVersion": "3.11",
-  "executionEnvironments": [
-    {
-      "root": "sagents/v2",
-      "pythonVersion": "3.12"
-    },
-    {
-      "root": "app/v2/desktop",
-      "pythonVersion": "3.12"
-    },
-    {
-      "root": "tests/sagents/v2",
-      "pythonVersion": "3.12"
-    },
-    {
-      "root": "tests/app/v2/desktop",
-      "pythonVersion": "3.12"
-    },
-    {
-      "root": "app/v2/server",
-      "pythonVersion": "3.12"
-    },
-    {
-      "root": "tests/app/v2/server",
-      "pythonVersion": "3.12"
-    },
-    {
-      "root": "app/v2/cli",
-      "pythonVersion": "3.12"
-    },
-    {
-      "root": "tests/app/clients/cli",
-      "pythonVersion": "3.12"
-    }
-  ],
-  "venvPath": ".",
-  "venv": ".venv",
+  "pythonVersion": "3.12",
   "typeCheckingMode": "basic",
   "include": [
     "app/__init__.py",
@@ -48,7 +12,6 @@
     "app/v1/server",
     "app/skills",
     "app/v1/common",
-    "conftest.py",
     "docs/scripts",
     "examples",
     "mcp_servers",
