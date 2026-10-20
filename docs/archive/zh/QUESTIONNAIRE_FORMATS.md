@@ -115,14 +115,13 @@ Sage Desktop 与 Server Web 只渲染以下两个请求名称及对应的 `-resp
 | `questionnaire` | 标准名称 |
 | `sage-questionnaire` | Sage 命名空间兼容读取 |
 
-`yiii-questionnaire`、`movo-questionnaire` 和 `ling-questionnaire` 在 Sage 前端中按普通 Markdown 显示，不作为可交互问卷解析。
+`movo-questionnaire` 和 `ling-questionnaire` 在 Sage 前端中按普通 Markdown 显示，不作为可交互问卷解析。
 
-Sage Self-check 仍读取以下五个注册名称：
+Sage Self-check 仍读取以下四个注册名称：
 
 | 名称 | 状态 |
 | --- | --- |
 | `questionnaire` | 新消息的标准名称 |
-| `yiii-questionnaire` | 后端注册名称，供 Yiii 自身客户端使用 |
 | `movo-questionnaire` | 后端注册名称，供 Movo 自身客户端使用 |
 | `ling-questionnaire` | 后端注册名称，供 Ling 自身客户端使用 |
 | `sage-questionnaire` | Sage 命名空间兼容读取 |

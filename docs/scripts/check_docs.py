@@ -91,7 +91,7 @@ def main() -> None:
                 and not target.startswith(REPO_URL)
             ):
                 errors.append(f"{path}: local link into unpublished archive: {target}")
-    source = (ROOT / "examples/sagents_v2_quickstart.py").read_text()
+    source = (ROOT / "examples/v2/quickstart.py").read_text()
     ast.parse(source)
     for path in quickstart_pages + [
         DOCS / lang / "applications/GETTING_STARTED.md" for lang in ("en", "zh")

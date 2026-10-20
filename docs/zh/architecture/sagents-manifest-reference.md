@@ -67,10 +67,10 @@ finally:
     await app.close()
 ```
 
-完整命令、身份、事件消费见[可运行参考项目](../../../examples/sagents_v2_host/)；无需真实模型的验收命令：
+完整命令、身份、事件消费见[可运行参考项目](../../../examples/v2/host/)；无需真实模型的验收命令：
 
 ```bash
-.venv/bin/python -m examples.sagents_v2_host --offline
+.venv/bin/python -m examples.v2.host --offline
 ```
 
 `main` 是 Package 内部引用键，供 `entrypoint.agent` 使用；`metadata.id` 是 Package 身份。普通 SDK 的加载结果 `agent.id` 来自 Package ID，不要用内部 `main` 代替它创建 StartRun。Desktop/Server 可以保留它们自己的持久化 Agent ID；调用方始终使用实际加载/受理结果。

@@ -98,8 +98,9 @@ job takeover and automatic checkpoint resume are not provided. See the
 
 ## Real-model experiments
 
-The opt-in [domain benchmark](https://github.com/ZHangZHengEric/Sage/blob/main/examples/sagents_v2_optimizer_domains.py)
-uses Yiii's locally configured GPT-6.1 Sol Responses route and makes billable calls.
+The opt-in [domain benchmark](https://github.com/ZHangZHengEric/Sage/blob/main/examples/v2/optimizer_domains.py)
+uses an explicitly supplied JSON model catalog (`--catalog`) with an
+`openai-responses` provider and makes billable calls.
 It exports the original package, every iteration package, suites, model-call and
 Session evidence, evaluations, reviews, and a comparison summary. Credentials are
 resolved in memory; output folders must be new. No production Agent is activated.

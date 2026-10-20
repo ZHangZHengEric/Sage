@@ -468,7 +468,7 @@ async def test_entrypoint_requires_owned_agent_and_matching_command(tmp_path):
 
 @pytest.mark.asyncio
 async def test_plugin_validation_failure_keeps_loaded_revision(tmp_path):
-    from examples.sagents_v2_host.plugins import compactor_registration
+    from examples.v2.host.plugins import compactor_registration
     from sagents.v2.package.manifest.root import PluginDeclaration
     from sagents.v2.package.manifest.runtime import CapabilitySelection
 

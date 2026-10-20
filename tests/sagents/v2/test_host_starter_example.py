@@ -6,8 +6,8 @@ from pathlib import Path
 
 import pytest
 
-from examples.sagents_v2_host import __main__ as starter
-from examples.sagents_v2_host.bootstrap import HostSettings, build_application
+from examples.v2.host import __main__ as starter
+from examples.v2.host.bootstrap import HostSettings, build_application
 
 
 def args(tmp_path, *, inspect=False):

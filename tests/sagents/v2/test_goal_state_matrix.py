@@ -252,7 +252,7 @@ async def test_completion_gate_preserves_host_decisions_and_only_blocks_completi
         action=action,
         reason_code="host.recovery",
         reason="Change the failed approach; attempt 2 of 3.",
-        metadata={"yiii_autonomous_replan": True, "recovery_attempt": 2},
+        metadata={"host_autonomous_replan": True, "recovery_attempt": 2},
         usage=UsageSummary(input_tokens=13, output_tokens=5, cost=0.01),
         interaction=InteractionDraft(
             interaction_type="recovery", allowed_decisions=("submit",)

@@ -31,7 +31,7 @@ Also preview changed Markdown and verify links. This script checks the current d
 
 ```bash
 python -m pip install -r requirements.txt
-python scripts/checks/check_architecture.py
+python scripts/shared/checks/check_architecture.py
 python -m pytest tests/sagents/v2 -v
 ```
 

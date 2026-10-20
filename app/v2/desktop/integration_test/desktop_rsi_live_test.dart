@@ -134,7 +134,7 @@ Map<String, dynamic> catalogAgent(String id) {
 void main() {
   IntegrationTestWidgetsFlutterBinding.ensureInitialized();
   testWidgets(
-    'Native Desktop: Yiii GPT-6.1 Sol 3 rounds, durable history and explicit version confirmation',
+    'Native Desktop: configured model 3 rounds, durable history and explicit version confirmation',
     (tester) async {
       final out = Directory(outputPath);
       final setup =
@@ -279,7 +279,7 @@ void main() {
               controller.agentConfiguration?.id == agentId &&
               !controller.settingsCatalogLoading &&
               controller.settingsAgentLoadingId.isEmpty,
-          'Yiii target selected',
+          'RSI target selected',
         );
         expect(
           controller.agentConfiguration!.llmProviderId,

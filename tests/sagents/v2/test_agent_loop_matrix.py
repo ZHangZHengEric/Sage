@@ -3822,7 +3822,7 @@ async def test_tool_failure_details_reach_model_and_durable_history(language, fa
     from sagents.v2.context.session_history import SessionEventModelProjector
     from sagents.v2.i18n import localize_error
 
-    path = "/workspace/yiii-motion-studio/assets/index.json"
+    path = "/workspace/motion-studio/assets/index.json"
     detail = f"File not found: {path}"
     structured = (
         JsonBlock(value={"path": path, "reason": "missing"}),
@@ -4982,7 +4982,7 @@ async def test_mcp_unknown_returns_error_and_keeps_parallel_results(cold_restart
         yield Session()
 
     bridge = McpToolPlugin(
-        (McpServerConfig(name="yiii", protocol="stdio", command="fake"),),
+        (McpServerConfig(name="sample", protocol="stdio", command="fake"),),
         session_factory=factory,
     )
     definitions = await bridge.list_tools(run_id="discovery")

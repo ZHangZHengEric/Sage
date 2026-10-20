@@ -55,7 +55,7 @@ report = result.report
 Run the offline runtime example:
 
 ```sh
-.venv/bin/python -m examples.sagents_v2_package_optimizer
+.venv/bin/python -m examples.v2.package_optimizer
 ```
 
 ## Tests and selection
@@ -460,7 +460,7 @@ optimize(..., on_event=callback) accepts a synchronous progress observer. It run
 
 ## Opt-in live domain specialization benchmark
 
-`examples/sagents_v2_optimizer_domains.py` starts three independent specializations
+`examples/v2/optimizer_domains.py` starts three independent specializations
 from the same general-purpose package: subscription support triage, purchase-order
 normalization, and production incident triage. Domain policies are supplied as
 host-authorized optimization goals. The original package does not yet contain those
@@ -480,14 +480,15 @@ model evaluators, tuners, reviewers, and dialogue drivers in separate Sessions.
 No scripted patches, cached baseline answers, or code-based semantic grades are
 used. A no-change round or rejected proposal is retained as a real outcome.
 
-The command reads Yiii's local Agent model configuration in memory and requires
-`gpt-6.1-sol` with the Responses protocol. It makes billable model calls. Credentials
+The command reads an explicitly supplied JSON model catalog (`--catalog`) in memory
+and requires an `openai-responses` provider. Select a provider by `--provider` name
+or mark it `is_default` in the catalog. See [catalog format](../../../examples/v2/README.md#model-catalog-for-live-experiments). It makes billable model calls. Credentials
 are not copied to packages or reports. Output directories must not already exist,
 and no production Agent configuration is registered or activated.
 
 ```sh
-.venv/bin/python -m examples.sagents_v2_optimizer_domains \
-  --domain support --rounds 4 --repeats 2 \
+.venv/bin/python -m examples.v2.optimizer_domains \
+  --catalog /path/to/models.json --domain support --rounds 4 --repeats 2 \
   --output artifacts/optimizer/domain-run/support
 # Repeat with --domain procurement or --domain incident and a new output path.
 ```

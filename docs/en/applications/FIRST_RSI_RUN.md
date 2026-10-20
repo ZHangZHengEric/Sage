@@ -28,16 +28,16 @@ Already have a configured checkout? Open a terminal in the repository root and u
 From the repository root, on macOS/Linux:
 
 ```bash
-.venv/bin/python -m examples.sagents_v2_package_optimizer
+.venv/bin/python -m examples.v2.package_optimizer
 ```
 
 On Windows, after creating the environment described in Getting Started:
 
 ```powershell
-.venv\Scripts\python.exe -m examples.sagents_v2_package_optimizer
+.venv\Scripts\python.exe -m examples.v2.package_optimizer
 ```
 
-The [example source](https://github.com/ZHangZHengEric/Sage/blob/main/examples/sagents_v2_package_optimizer.py) supplies a `ScriptedModelProvider` for the target, tuner, and evaluator. Its agents have no enabled tools. It writes temporary Session data and removes the temporary directory when the program exits normally; it prints a JSON summary rather than saving a permanent report or activating an Agent.
+The [example source](https://github.com/ZHangZHengEric/Sage/blob/main/examples/v2/package_optimizer.py) supplies a `ScriptedModelProvider` for the target, tuner, and evaluator. Its agents have no enabled tools. It writes temporary Session data and removes the temporary directory when the program exits normally; it prints a JSON summary rather than saving a permanent report or activating an Agent.
 
 ## 3. Read the comparison
 

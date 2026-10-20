@@ -44,15 +44,13 @@ Server 同样使用标准 App、Agent 加载及执行入口。运行能力从实
 
 联合回归包含 `tests/app/v2/desktop`、`tests/app/v2/server`、`tests/app/clients/cli/test_v2_run.py`，与 CLI 全目录结果有重叠，不应相加。Server 的跳过项为未配置外部 MySQL 的实库用例。SDK 另有可选服务、平台及显式启用验收的跳过项；媒体参考宿主的四项测试已另外显式启用并通过。
 
-本轮验证不包含 Yiii 修改或打包，不代表已完成 Yiii 产品迁移、Linux 冻结发行版或真实连续数天的运行验收。标准参考项目位于 `examples/sagents_v2_standard_host`。
+本轮验证不代表已完成 Linux 冻结发行版或真实连续数天的运行验收。标准参考项目位于 `examples/v2/standard_host`。
 
 ## 多层暂停任务直接恢复子 Run
 
 标准恢复允许祖先仍暂停时直接继续子 Run。Sage 在 loop 装配前恢复必要祖先的资源租约，并从原执行图选择实际子 Agent；不执行祖先模型、不重建任务、不套用最新配置。祖先资源未就绪与配置无法恢复分别报告可恢复状态和配置不兼容。
 
 接口示例、租约归属、释放顺序及验证范围见[多层子 Run 标准恢复](sagents-v2-run-tree-recovery.md)。
-
-合并远端更新后，Yiii 提供的 `video-asset-agent-pause-resume` 与 `video-asset-agent-host-restart` 原始验收命令均通过（2 passed），未修改 Yiii。两项验证祖先仍暂停时直接恢复叶子，随后按原 Run 逐层继续，并检查实际 Skill 上下文和产物。
 
 ## 宿主控制接口核对
 

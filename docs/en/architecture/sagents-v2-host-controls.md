@@ -11,7 +11,7 @@ ref: v2-detail-sagents-v2-host-controls
 
 # Desktop and Server standard control interfaces
 
-This audit records Sage v2 host entry points and SDK calls on 2026-10-19. Yiii source changes are outside its scope.
+This audit records Sage v2 host entry points and SDK calls on 2026-10-19.
 
 | Operation | Desktop | Server | Standard contract |
 | --- | --- | --- | --- |

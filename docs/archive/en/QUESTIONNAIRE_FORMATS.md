@@ -115,14 +115,13 @@ Sage Desktop and Server Web render only these request names and their matching `
 | `questionnaire` | Canonical name |
 | `sage-questionnaire` | Sage namespace read compatibility |
 
-`yiii-questionnaire`, `movo-questionnaire`, and `ling-questionnaire` remain ordinary Markdown in Sage clients and are not parsed as interactive questionnaires.
+`movo-questionnaire` and `ling-questionnaire` remain ordinary Markdown in Sage clients and are not parsed as interactive questionnaires.
 
-Sage Self-check still reads five registered names:
+Sage Self-check still reads four registered names:
 
 | Name | Status |
 | --- | --- |
 | `questionnaire` | Canonical name for new messages |
-| `yiii-questionnaire` | Backend registration for Yiii's own client |
 | `movo-questionnaire` | Backend registration for Movo's own client |
 | `ling-questionnaire` | Backend registration for Ling's own client |
 | `sage-questionnaire` | Sage namespace read compatibility |

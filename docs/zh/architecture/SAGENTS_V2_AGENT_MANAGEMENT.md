@@ -96,8 +96,8 @@ Flow agent 节点使用 Native 子 Run，前序输出作为后续任务数据；
 在 Python 3.12+ 项目环境运行：
 
 ```bash
-python -m examples.sagents_v2_agent_management
-python -m examples.sagents_v2_source_plugin
+python -m examples.v2.agent_management
+python -m examples.v2.source_plugin
 python -m pytest tests/sagents/v2/test_agent_management_matrix.py
 ```
 

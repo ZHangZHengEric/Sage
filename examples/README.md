@@ -1,104 +1,24 @@
 # Sage Examples
 
-This directory contains the standalone examples for the Sage project.
+Examples are grouped by runtime version. Run commands from the repository root.
 
-For a new **SAgents v2 host**, start with [sagents_v2_host](sagents_v2_host/)
-and the [configuration/debugging guide](../docs/en/architecture/sagents-host-development.md)
-([中文](../docs/zh/architecture/sagents-host-development.md)). Run
-`python -m examples.sagents_v2_host --offline` from the repository root (Python 3.12+).
+| Directory | Contents | Start here |
+| --- | --- | --- |
+| [v1](v1/README.md) | Legacy CLI, Streamlit demo, HTTP server, JSON presets and server build script | [v1 usage](v1/README.md) |
+| [v2](v2/README.md) | SDK quickstart, host integration, tools/MCP, agent management, concurrency and optimization | [Offline host](v2/host/) |
 
-For the v2 public-API, offline multi-project concurrency example, see
-[MULTI_PROJECT.md](MULTI_PROJECT.md) and `sagents_v2_multi_project.py`.
+Use Python 3.12+ for the current checkout. Install the project dependencies with
+`python -m pip install -e .`; the v1 Streamlit demo also needs `streamlit`.
+The `examples` tree is checkout content, so run these modules from the repository
+root rather than expecting them in an installed wheel.
 
-For inherited and explicit team/fibre child-run model selections, see
-[CHILD_RUN_BINDINGS.md](CHILD_RUN_BINDINGS.md).
-
-For the keyless v2 MCP catalog/executor search and fetch example, see
-[PARALLEL_SEARCH.md](PARALLEL_SEARCH.md). It requires Python 3.12+.
-
-## Prerequisites
-
-- Python 3.10 or newer
-- Project dependencies installed from the repository root with `python3 -m pip install -r requirements.txt`
-
-The default config files are already included:
-
-- `mcp_setting.json`
-- `preset_running_agent_config.json`
-- `coding_agent_config.json`
-- `preset_running_config.json`
-
-Edit them in place if you want to enable MCP servers or customize agent behavior.
-
-`coding_agent_config.json` is the bundled coding preset for repository work, shell-driven debugging, targeted edits, code review, and iterative verification in Sage Terminal TUI.
-Because this preset is repo-oriented, use it with an explicit workspace so Sage scopes file and shell tools to the intended project.
-The preset enables `workspaceGuidance`, so root-level `AGENT.md` and `AGENTS.md` files are injected only when this config is active.
-
-Custom configs can opt into the same generic guidance mechanism:
-
-```json
-{
-  "workspaceGuidance": {
-    "enabled": true,
-    "files": ["AGENT.md", "AGENTS.md"],
-    "maxBytes": 32768
-  }
-}
-```
-
-Configs that omit `workspaceGuidance` do not load workspace guidance files.
-`maxBytes` is the total byte budget shared by all loaded guidance files.
-
-For Sage Terminal TUI, pass the bundled preset through the unified CLI entrypoint:
+For a new integration, start with:
 
 ```bash
-sage tui coding --workspace /path/to/repo
-sage tui --agent-config coding --workspace /path/to/repo
+python -m examples.v2.host --offline
 ```
 
-For non-TUI CLI runs, the same preset can be used with:
-
-```bash
-sage chat --agent-config coding --workspace /path/to/repo
-sage run --agent-config coding --workspace /path/to/repo "inspect this repo"
-```
-
-Use `--agent-config examples/v1/coding_agent_config.json` when you want to run the JSON file directly.
-
-For the standalone example CLI script, point it at the file with `--preset_running_agent_config_path`.
-
-## CLI
-
-```bash
-python3 examples/v1/sage_cli.py \
-  --default_llm_api_key YOUR_API_KEY \
-  --default_llm_api_base_url https://api.deepseek.com/v1 \
-  --default_llm_model_name deepseek-chat
-```
-
-## Streamlit Demo
-
-```bash
-streamlit run examples/v1/sage_demo.py -- \
-  --default_llm_api_key YOUR_API_KEY \
-  --default_llm_api_base_url https://api.deepseek.com/v1 \
-  --default_llm_model_name deepseek-chat
-```
-
-## HTTP Server
-
-```bash
-python3 examples/v1/sage_server.py \
-  --default_llm_api_key YOUR_API_KEY \
-  --default_llm_api_base_url https://api.deepseek.com/v1 \
-  --default_llm_model_name deepseek-chat
-```
-
-## Build Script
-
-```bash
-python3 examples/v1/build_exec/build_simple.py --dry-run
-python3 examples/v1/build_exec/build_simple.py
-```
-
-The build script packages `examples/v1/sage_server.py` and writes artifacts to `examples/v1/build_exec/build/`.
+The [v2 index](v2/README.md) distinguishes offline examples, network/model calls,
+and native media requirements. Configuration and debugging guides:
+[English](../docs/en/architecture/sagents-host-development.md),
+[中文](../docs/zh/architecture/sagents-host-development.md).

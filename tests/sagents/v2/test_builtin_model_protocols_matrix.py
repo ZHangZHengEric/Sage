@@ -424,7 +424,7 @@ def test_openai_responses_omits_output_schema_when_tool_result_is_plain_text():
                         ModelToolCall(
                             tool_call_id="call_skill",
                             name="load_skill",
-                            arguments={"skill_name": "yiii-short-video-production"},
+                            arguments={"skill_name": "short-video-production"},
                         ),
                     ),
                 ),
@@ -434,16 +434,16 @@ def test_openai_responses_omits_output_schema_when_tool_result_is_plain_text():
                     content=(
                         TextBlock(
                             text=(
-                                "Skill yiii-short-video-production loaded. "
-                                "Active skills: yiii-short-video-production."
+                                "Skill short-video-production loaded. "
+                                "Active skills: short-video-production."
                             )
                         ),
                     ),
                     metadata={
-                        "skill_name": "yiii-short-video-production",
+                        "skill_name": "short-video-production",
                         "workspace_path": "/tmp/skill",
                         "content_hash": "sha256:abc",
-                        "active_skills": ["yiii-short-video-production"],
+                        "active_skills": ["short-video-production"],
                     },
                 ),
             ),
@@ -455,8 +455,8 @@ def test_openai_responses_omits_output_schema_when_tool_result_is_plain_text():
         "type": "function_call_output",
         "call_id": "call_skill",
         "output": (
-            "Skill yiii-short-video-production loaded. "
-            "Active skills: yiii-short-video-production."
+            "Skill short-video-production loaded. "
+            "Active skills: short-video-production."
         ),
     }
 

@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import pytest
 
-from examples import sagents_v2_quickstart as example
+from examples.v2 import quickstart as example
 from sagents.v2.model.contracts import ModelEventKind, ModelResponse, ModelStreamEvent
 from sagents.v2.testing.plugins.scripted_model import ScriptedModelProvider, ScriptedModelStep
 
@@ -18,7 +18,7 @@ async def test_yaml_string_quickstart_completes_without_manifest_file(tmp_path, 
         response=ModelResponse(response_id="judge", text='{"decision":"completed"}', finish_reason="stop"),
     ),)),))
     monkeypatch.chdir(tmp_path)
-    from examples.sagents_v2_host.registrations import provided
+    from examples.v2.host.registrations import provided
     from sagents.v2.composition.defaults import default_runtime
     from sagents.v2.package.manifest.runtime import CapabilitySelection
     registration = provided("test.quickstart.model", lambda context, deps: provider, "model.provider")

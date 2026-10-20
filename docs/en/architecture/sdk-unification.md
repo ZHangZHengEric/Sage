@@ -42,15 +42,13 @@ macOS / Python 3.13 validation included custom factories, standard Runs, frozen 
 | Development and freshly rebuilt frozen reference media host | 4 passed |
 | Ruff and `git diff --check` | Passed |
 
-Host and CLI suites overlap and must not be added. Server skipped unconfigured external MySQL. SDK skips include optional services, platforms and opt-in acceptance; the four media reference cases ran explicitly. This record does not establish Yiii migration/packaging, Linux frozen-build acceptance or multi-day endurance. The reference is `examples/sagents_v2_standard_host`.
+Host and CLI suites overlap and must not be added. Server skipped unconfigured external MySQL. SDK skips include optional services, platforms and opt-in acceptance; the four media reference cases ran explicitly. This record does not establish Linux frozen-build acceptance or multi-day endurance. The reference is `examples/v2/standard_host`.
 
 ## Direct recovery of nested paused children
 
 A child can resume while ancestors remain paused. Sage restores ancestor leases before loop assembly and selects the original graph's child Agent without running ancestor models, replacing tasks or applying current settings. Missing dependencies and unrecoverable configuration have distinct outcomes.
 
 See [nested Run recovery](sagents-v2-run-tree-recovery.md) for calls, ownership, release order and validation scope.
-
-After merging remote changes, Yiii's original `video-asset-agent-pause-resume` and `video-asset-agent-host-restart` commands both passed (2 passed), without Yiii modifications. They recover the leaf while ancestors remain paused, continue original Runs layer by layer, and check Skills and artifacts.
 
 ## Host control interface audit
 

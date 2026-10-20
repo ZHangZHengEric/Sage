@@ -7,7 +7,7 @@ import httpx
 import pytest
 from mcp.client.streamable_http import streamablehttp_client
 
-from examples import sagents_v2_parallel_search as example
+from examples.v2 import parallel_search as example
 
 
 @pytest.mark.asyncio

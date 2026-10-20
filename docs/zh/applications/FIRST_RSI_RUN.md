@@ -28,16 +28,16 @@ RSI 是 Recursive Self-Improvement（递归自我改进）的缩写。本教程�
 在仓库根目录，macOS/Linux 使用：
 
 ```bash
-.venv/bin/python -m examples.sagents_v2_package_optimizer
+.venv/bin/python -m examples.v2.package_optimizer
 ```
 
 Windows 用户按照快速开始创建环境后，运行：
 
 ```powershell
-.venv\Scripts\python.exe -m examples.sagents_v2_package_optimizer
+.venv\Scripts\python.exe -m examples.v2.package_optimizer
 ```
 
-[示例源码](https://github.com/ZHangZHengEric/Sage/blob/main/examples/sagents_v2_package_optimizer.py)为目标 Agent、调优 Agent 和评测 Agent 提供 `ScriptedModelProvider`。这些 Agent 没有启用工具。示例写入临时 Session 数据，并在程序正常退出时移除临时目录；它打印 JSON 摘要，不保存永久报告，也不激活 Agent。
+[示例源码](https://github.com/ZHangZHengEric/Sage/blob/main/examples/v2/package_optimizer.py)为目标 Agent、调优 Agent 和评测 Agent 提供 `ScriptedModelProvider`。这些 Agent 没有启用工具。示例写入临时 Session 数据，并在程序正常退出时移除临时目录；它打印 JSON 摘要，不保存永久报告，也不激活 Agent。
 
 ## 3. 阅读比较结果
 

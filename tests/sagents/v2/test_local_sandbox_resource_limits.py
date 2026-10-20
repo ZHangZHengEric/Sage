@@ -408,7 +408,7 @@ def test_host_read_paths_skip_workspace_and_root(tmp_path):
     workspace = tmp_path / "workspace"
     workspace.mkdir()
     (workspace / "inside").mkdir()
-    runtime = tmp_path / "Yiii.app" / "Contents" / "Resources" / "yiii-runtime"
+    runtime = tmp_path / "Sample.app" / "Contents" / "Resources" / "sample-runtime"
     runtime.mkdir(parents=True)
     boundary = LocalResourceBoundary(
         SimpleNamespace(root=workspace),

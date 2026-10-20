@@ -359,7 +359,7 @@ capabilities:
 
 ```python
 from sagents.v2 import SAgentBuilder
-from examples.sagents_v2_host.plugins import compactor_registration
+from examples.v2.host.plugins import compactor_registration
 
 builder = SAgentBuilder()
 builder.register(compactor_registration())
@@ -377,7 +377,7 @@ finally:
     await app.close()
 ```
 
-完整独立插件见 [plugins.py](../../../examples/sagents_v2_host/plugins.py)。注册提供 descriptor、config_schema/config_model、factory，以及需要时的 start/stop。插件可以依赖 SDK 公共契约，不要依赖另一个插件实现；不要求为了复用抽取共同基类。
+完整独立插件见 [plugins.py](../../../examples/v2/host/plugins.py)。注册提供 descriptor、config_schema/config_model、factory，以及需要时的 start/stop。插件可以依赖 SDK 公共契约，不要依赖另一个插件实现；不要求为了复用抽取共同基类。
 
 `build` 固定注册表与配置；加载 Agent 时实际装配和校验。未知参数、缺少依赖、不可用插件、scope/API 不匹配、能力保障不满足，都应在装配阶段处理，不能靠“参数被接受”判断组件已生效。`plugins` 声明不等于安装依赖包，YAML 也不等于任意 Python 动态 import。
 

@@ -34,9 +34,9 @@ jobs:
         run: |
           if [ "$GITHUB_REF_TYPE" = "tag" ]; then test "$GITHUB_REF_NAME" = "v2.1.1"; fi
           python -m pip install build pyyaml
-          python scripts/release/check_v2_release.py
+          python scripts/v2/release/check_release.py
           python docs/scripts/check_docs.py
-          python scripts/checks/check_architecture.py
+          python scripts/shared/checks/check_architecture.py
       - name: Build and test official OpenUI parser bundle
         working-directory: app/v2/desktop/backend/openui_runtime
         run: |
@@ -46,7 +46,7 @@ jobs:
       - name: Build Python distributions
         run: python -m build --outdir release-assets
       - name: Verify distribution contents
-        run: python scripts/release/check_v2_release.py --assets release-assets
+        run: python scripts/v2/release/check_release.py --assets release-assets
       - name: Build Server v2 Web
         working-directory: app/v2/server/web
         run: |
@@ -132,7 +132,7 @@ jobs:
         working-directory: app/v2/desktop
         run: flutter build ${{ matrix.platform }} --release --build-name=2.1.1 --build-number=1
       - name: Bundle, relocate and verify Desktop v2
-        run: python scripts/release/package_desktop_v2.py --platform '${{ matrix.platform }}' --arch '${{ matrix.arch }}' --commit '${{ github.sha }}' --wheel python-packages/sage-2.1.1-py3-none-any.whl --out release-assets
+        run: python scripts/v2/release/package_desktop.py --platform '${{ matrix.platform }}' --arch '${{ matrix.arch }}' --commit '${{ github.sha }}' --wheel python-packages/sage-2.1.1-py3-none-any.whl --out release-assets
       - uses: actions/upload-artifact@v4
         with:
           name: sage-v2-desktop-${{ matrix.platform }}-${{ matrix.arch }}
@@ -157,7 +157,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         run: |
-          python scripts/release/check_v2_release.py --assets release-assets --complete
+          python scripts/v2/release/check_release.py --assets release-assets --complete
           cd release-assets
           sha256sum * > SHA256SUMS
           cd ..

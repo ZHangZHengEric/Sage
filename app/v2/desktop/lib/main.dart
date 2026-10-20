@@ -5,7 +5,7 @@ import 'package:liquid_glass_widgets/liquid_glass_widgets.dart';
 
 import 'src/app.dart';
 
-// Keep the same conservative glass quality ceiling as Yiii on macOS.
+// Keep a conservative glass quality ceiling on macOS.
 // ignore: experimental_member_use
 const sageGlassConfig = GlassAdaptiveScopeConfig(
   initialQuality: GlassQuality.standard,

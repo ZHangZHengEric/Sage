@@ -103,7 +103,7 @@ python quickstart.py
 
 This prints runtime events and the final Run state. It makes a real model request and writes Session data under `runtime/`. The example enables no file or shell tools. In PowerShell, set the key with `$env:MODEL_API_KEY="your-api-key"`.
 
-The checked-in [executable example](https://github.com/ZHangZHengEric/Sage/blob/main/examples/sagents_v2_quickstart.py) can also be run from the repository root as `python -m examples.sagents_v2_quickstart`.
+The checked-in [executable example](https://github.com/ZHangZHengEric/Sage/blob/main/examples/v2/quickstart.py) can also be run from the repository root as `python -m examples.v2.quickstart`.
 
 ## Choose a configuration input
 

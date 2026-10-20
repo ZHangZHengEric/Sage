@@ -10,7 +10,6 @@ import pytest
 
 
 QUESTIONNAIRE_TAGS = (
-    "yiii-questionnaire",
     "movo-questionnaire",
     "ling-questionnaire",
     "sage-questionnaire",
@@ -122,7 +121,7 @@ def _assert_hidden_self_check_message(chunk):
     assert chunk.metadata["runtime_diagnostic_source"] == "sage_self_check"
 
 
-def _valid_fenced_questionnaire(tag_name="yiii-questionnaire"):
+def _valid_fenced_questionnaire(tag_name="questionnaire"):
     return (
         "当前事实已经整理完毕，请在问卷中提供下一步所需信息。\n\n"
         f"```{tag_name}\n"
@@ -603,7 +602,7 @@ def test_malformed_questionnaire_model_payload_triggers_execution_error(
     _assert_hidden_self_check_message(chunks[0])
 
 
-def test_malformed_yiii_questionnaire_from_session_triggers_execution_error(
+def test_malformed_generic_questionnaire_from_session_triggers_execution_error(
     monkeypatch, tmp_path
 ):
     self_check_agent = _load_self_check_agent(monkeypatch)
@@ -617,10 +616,10 @@ def test_malformed_yiii_questionnaire_from_session_triggers_execution_error(
             return True
 
     malformed_payload = (
-        '<yiii-questionnaire>{"title":"视频Brief确认","questions":'
+        '<questionnaire>{"title":"视频Brief确认","questions":'
         '[{"type":"single_choice","text":"执行？",'
         '"options":["执行生成视频计划","调整视频计划"],'
-        '"default":"执行生成视频计划"}]}></yiii-questionnaire>'
+        '"default":"执行生成视频计划"}]}></questionnaire>'
     )
     session_context = SimpleNamespace(
         audit_status={},
@@ -644,22 +643,22 @@ def test_malformed_yiii_questionnaire_from_session_triggers_execution_error(
     chunks = asyncio.run(collect())
 
     assert session_context.audit_status["self_check_passed"] is False
-    assert "<yiii-questionnaire> 标签内容不是合法 JSON" in chunks[0].content
+    assert "<questionnaire> 标签内容不是合法 JSON" in chunks[0].content
     _assert_hidden_self_check_message(chunks[0])
 
 
-def test_valid_yiii_structured_aliases_are_accepted(monkeypatch):
+def test_valid_generic_structured_tags_are_accepted(monkeypatch):
     self_check_agent = _load_self_check_agent(monkeypatch)
     agent = self_check_agent(model=None, model_config={})
 
     content = (
-        '<yiii-artifacts>{"items":[{"path":"result.md"}]}</yiii-artifacts>'
-        '<yiii-questionnaire>{"title":"确认","questions":['
+        '<artifacts>{"items":[{"path":"result.md"}]}</artifacts>'
+        '<questionnaire>{"title":"确认","questions":['
         '{"type":"single_choice","text":"继续？","options":["是","否"],'
         '"default":"是"}]}'
-        '</yiii-questionnaire>'
-        '<yiii-questionnaire-response>{"answers":[{"value":"是"}]}'
-        '</yiii-questionnaire-response>'
+        '</questionnaire>'
+        '<questionnaire-response>{"answers":[{"value":"是"}]}'
+        '</questionnaire-response>'
     )
 
     assert agent._content_has_structured_tags(content) is True
@@ -684,20 +683,20 @@ def test_movo_questionnaire_accepts_value_label_option_objects(monkeypatch):
     assert agent._validate_structured_tag_payloads(content) == []
 
 
-def test_invalid_yiii_questionnaire_field_structure_is_rejected(monkeypatch):
+def test_invalid_generic_questionnaire_field_structure_is_rejected(monkeypatch):
     self_check_agent = _load_self_check_agent(monkeypatch)
     agent = self_check_agent(model=None, model_config={})
 
     content = (
-        '<yiii-questionnaire>{"title":"确认","questions":['
-        '{"type":"single_choice","text":"继续？","options":["是","否"]}]}'
-        '</yiii-questionnaire>'
+        '<questionnaire>{"title":"确认","questions":['
+        '{"type":"single_choice","text":"继续？","options":[]}]}'
+        '</questionnaire>'
     )
 
     issues = agent._validate_structured_tag_payloads(content)
 
     assert issues == [
-        "<yiii-questionnaire> questions[1] 缺少 default 字段"
+        "<questionnaire> questions[1] 的选择题必须提供非空 options"
     ]
 
 
@@ -722,7 +721,7 @@ def test_valid_questionnaire_without_files_passes_self_check(monkeypatch, tmp_pa
                 _make_message("user", "请确认"),
                 _make_message(
                     "assistant",
-                    '<yiii-questionnaire>{"title":"确认","questions":[{"type":"single_choice","text":"画幅？","options":["9:16","16:9"],"default":"16:9"}]}</yiii-questionnaire>',
+                    '<questionnaire>{"title":"确认","questions":[{"type":"single_choice","text":"画幅？","options":["9:16","16:9"],"default":"16:9"}]}</questionnaire>',
                 ),
             ]
         ),
@@ -755,9 +754,9 @@ def test_invalid_questionnaire_must_be_reoutput_before_requirement_clears(
             return True
 
     invalid_questionnaire = (
-        '<yiii-questionnaire>{"title":"确认","questions":['
+        '<questionnaire>{"title":"确认","questions":['
         '{"type":"single_choice","text":"继续？","options":["是","否"],'
-        '"default":"是"}]}></yiii-questionnaire>'
+        '"default":"是"}]}></questionnaire>'
     )
     valid_questionnaire = invalid_questionnaire.replace(
         "]}>", "]}"
@@ -784,7 +783,7 @@ def test_invalid_questionnaire_must_be_reoutput_before_requirement_clears(
     assert first_chunks
     assert session_context.audit_status[
         "self_check_required_structured_tags"
-    ] == ["yiii-questionnaire"]
+    ] == ["questionnaire"]
 
     second_chunks = asyncio.run(run_with_reply("我会继续处理。"))
     assert second_chunks
@@ -830,7 +829,7 @@ def test_registered_xml_json_questionnaire_aliases_remain_accepted(
     ("content", "expected_issue"),
     [
         (
-            "说明。\n\n```yiii-questionnaire\n"
+            "说明。\n\n```questionnaire\n"
             '{"title":"确认","questions":[]}\n```',
             "不能放入 JSON 载荷",
         ),
@@ -840,7 +839,7 @@ def test_registered_xml_json_questionnaire_aliases_remain_accepted(
             "不是受支持的问卷别名",
         ),
         (
-            "```yiii-questionnaire\n"
+            "```questionnaire\n"
             'title: "确认"\nquestions:\n'
             "  - type: free_text\n"
             '    text: "补充？"\n'
@@ -848,7 +847,7 @@ def test_registered_xml_json_questionnaire_aliases_remain_accepted(
             "问卷前必须包含非空的普通说明文字",
         ),
         (
-            "说明。\n\n```yiii-questionnaire\n"
+            "说明。\n\n```questionnaire\n"
             'title: "确认"\nquestions:\n'
             "  - type: free_text\n"
             '    text: "补充？"\n'
@@ -856,12 +855,12 @@ def test_registered_xml_json_questionnaire_aliases_remain_accepted(
             "缺少独占一行的结束围栏",
         ),
         (
-            "说明。\n\n``yiii-questionnaire\n"
+            "说明。\n\n``questionnaire\n"
             'title: "确认"\nquestions: []\n``',
             "起始围栏至少需要三个反引号",
         ),
         (
-            "说明。\n\n```yiii-questionnaire\n"
+            "说明。\n\n```questionnaire\n"
             'title: "确认"\nquestions:\n'
             "  - type: single_choice\n"
             '    text: "继续？"\n'
@@ -872,12 +871,12 @@ def test_registered_xml_json_questionnaire_aliases_remain_accepted(
             "default 必须等于一个 options 选项",
         ),
         (
-            "说明。\n\n```yiii-questionnaire\n"
+            "说明。\n\n```questionnaire\n"
             'title: "确认"\nsubtitle: "不允许"\nquestions: []\n```',
             "顶层包含不允许的字段: subtitle",
         ),
         (
-            "说明。\n\n```yiii-questionnaire\n"
+            "说明。\n\n```questionnaire\n"
             'title: "确认"\nquestions:\n'
             "  - type: free_text\n"
             '    text: "补充？"\n'
@@ -906,7 +905,7 @@ def test_questionnaire_fence_shown_inside_larger_code_block_is_not_executed(
     content = (
         "下面只是格式示例。\n\n"
         "````markdown\n"
-        "```yiii-questionnaire\n"
+        "```questionnaire\n"
         'title: "示例"\nquestions: []\n'
         "```\n"
         "````"
@@ -948,7 +947,7 @@ def test_invalid_fenced_questionnaire_can_be_repaired_with_xml_json(
         return chunks
 
     invalid_yaml = (
-        "说明。\n\n```yiii-questionnaire\n"
+        "说明。\n\n```questionnaire\n"
         'title: "确认"\nquestions:\n'
         "  - type: single_choice\n"
         '    text: "继续？"\n'
@@ -958,17 +957,17 @@ def test_invalid_fenced_questionnaire_can_be_repaired_with_xml_json(
         '    default: "稍后"\n```'
     )
     valid_xml_json = (
-        '<yiii-questionnaire>{"title":"确认","questions":['
+        '<questionnaire>{"title":"确认","questions":['
         '{"type":"single_choice","text":"继续？",'
         '"options":["是","否"],"default":"是"}]}'
-        "</yiii-questionnaire>"
+        "</questionnaire>"
     )
 
     first_chunks = asyncio.run(run_with_reply(invalid_yaml))
     assert first_chunks
     assert session_context.audit_status[
         "self_check_required_structured_tags"
-    ] == ["yiii-questionnaire"]
+    ] == ["questionnaire"]
 
     final_chunks = asyncio.run(run_with_reply(valid_xml_json))
     assert final_chunks == []
@@ -1037,7 +1036,7 @@ def test_documented_questionnaire_examples_pass_self_check(
     document = (repo_root / relative_doc_path).read_text(encoding="utf-8")
 
     yaml_example = re.search(
-        r"```(?P<tag>(?:yiii|movo|ling|sage)-questionnaire|questionnaire)\n"
+        r"```(?P<tag>(?:movo|ling|sage)-questionnaire|questionnaire)\n"
         r"(?P<payload>[\s\S]*?)\n```",
         document,
     )
@@ -1050,7 +1049,7 @@ def test_documented_questionnaire_examples_pass_self_check(
     assert agent._validate_structured_tag_payloads(fenced_content) == []
 
     xml_json_example = re.search(
-        r"<(?P<tag>(?:yiii|movo|ling|sage)-questionnaire|questionnaire)>"
+        r"<(?P<tag>(?:movo|ling|sage)-questionnaire|questionnaire)>"
         r"(?P<payload>\{[\s\S]*?\})</(?P=tag)>",
         document,
     )

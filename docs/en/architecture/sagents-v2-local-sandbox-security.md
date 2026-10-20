@@ -175,7 +175,7 @@ File tools accept workspace-relative paths, in-workspace host absolute paths, `~
 
 Canonical paths returned by file tools are usable by the current platform's Shell: mounted paths on Linux and actual host workspace paths on macOS. macOS file tools accept the old `workspace_root` alias as input, but Shell does not remap absolute paths. Use canonical outputs or environment variables rather than host `/tmp` or `/private/tmp` aliases. Linux workspace_root cannot overlap `/home/agent` or `/var/tmp`.
 
-`describe_environment()` exposes OS, isolation, workspace, directory variables, network mode, quotas and path rules. Shared composition projects this optional description into `<sandbox_environment>` without interpreting plugin layout. Plugins without this method retain existing behavior. Hosts composing loops manually can use `SandboxEnvironmentContextProvider`; see [yiii integration](sagents-v2-yiii-sandbox-directories-integration.md).
+`describe_environment()` exposes OS, isolation, workspace, directory variables, network mode, quotas and path rules. Shared composition projects this optional description into `<sandbox_environment>` without interpreting plugin layout. Plugins without this method retain existing behavior. Hosts composing loops manually can use `SandboxEnvironmentContextProvider`; see [host sandbox integration](sagents-v2-host-sandbox-directories-integration.md).
 
 ## Team instances and Run leases
 

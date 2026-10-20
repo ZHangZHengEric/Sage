@@ -175,7 +175,7 @@ SAGE_TEST_EXECUTION_GID
 
 文件工具返回的规范路径与当前平台 Shell 可见的路径一致：Linux 返回挂载后的虚拟路径；原生 macOS 返回真实工作区绝对路径。macOS 文件工具仍接受原 `workspace_root` 别名作为兼容输入，但 Shell 不提供绝对路径重映射；应使用规范输出或环境变量，而非把 `/tmp`、`/private/tmp` 当成工作区别名。Linux 的 `workspace_root` 不能与 `/home/agent`、`/var/tmp` 的挂载路径重叠。
 
-本地 handle 的 `describe_environment()` 返回操作系统、隔离方式、工作区、目录环境变量、网络模式、资源额度和路径规则。通用组合层只把可选描述投影为 `<sandbox_environment>` 上下文，不解释本地目录布局。其他插件不提供此方法时保持原行为。宿主通过注册和配置选择执行绑定，不自行组合 Agent loop，见 [yiii 接入说明](sagents-v2-yiii-sandbox-directories-integration.md)。
+本地 handle 的 `describe_environment()` 返回操作系统、隔离方式、工作区、目录环境变量、网络模式、资源额度和路径规则。通用组合层只把可选描述投影为 `<sandbox_environment>` 上下文，不解释本地目录布局。其他插件不提供此方法时保持原行为。宿主通过注册和配置选择执行绑定，不自行组合 Agent loop，见 [宿主沙箱接入说明](sagents-v2-host-sandbox-directories-integration.md)。
 
 ## Team 共享实例与 Run 租约
 

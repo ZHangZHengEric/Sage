@@ -103,7 +103,7 @@ python quickstart.py
 
 程序输出运行事件和最终 Run 状态，会真实调用模型，并在 `runtime/` 中保存 Session 数据。示例未启用文件或 Shell 工具。PowerShell 使用 `$env:MODEL_API_KEY="your-api-key"` 设置密钥。
 
-也可以从仓库根目录运行[可执行示例](https://github.com/ZHangZHengEric/Sage/blob/main/examples/sagents_v2_quickstart.py)：`python -m examples.sagents_v2_quickstart`。
+也可以从仓库根目录运行[可执行示例](https://github.com/ZHangZHengEric/Sage/blob/main/examples/v2/quickstart.py)：`python -m examples.v2.quickstart`。
 
 ## 选择配置输入
 

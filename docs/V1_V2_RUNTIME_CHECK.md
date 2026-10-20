@@ -9,7 +9,7 @@
 - 使用临时 APP 格式模型目录中的已配置真实 `deepseek-v4-flash`：默认 CLI 与 TUI 都正确计算 19 × 23，并完成任务，TUI 正常退出。未修改 APP 默认设置。
 - 原 APP 默认 `DeepSeek-V4-Flash-Vision-Exp`（Responses）两次真实任务请求均遇到 HTTP 502；绕过 CLI 直接请求其 Responses 接口的非流式与流式请求也返回 502。
 - 经用户确认，已将本地 APP 当前用户的默认模型切换为已配置的 `DeepSeek / deepseek-v4-flash`（Chat Completions）。原模型仍保留在配置中；本地模型目录不进入 Git。
-- 切换后运行 `.venv/bin/python scripts/checks/smoke_cli_tui.py --app-model`，不传入模型名称、地址或密钥覆盖，默认 CLI 与 TUI 自动读取实际 APP 目录，均返回 `SAGE_LIVE_437` 并完成任务；TUI 正常退出。默认 v2 的真实模型验收通过。
+- 切换后运行 `.venv/bin/python scripts/shared/checks/smoke_cli_tui.py --app-model`，不传入模型名称、地址或密钥覆盖，默认 CLI 与 TUI 自动读取实际 APP 目录，均返回 `SAGE_LIVE_437` 并完成任务；TUI 正常退出。默认 v2 的真实模型验收通过。
 
 ## 2026-10-11 已配置真实模型验证
 
@@ -36,7 +36,7 @@
 - 修复 v1 CLI 丢失环境变量模型密钥、Python 包缺少 `argon2-cffi`、TUI 忽略用户配置，启动任务被遗留重启标志中断，以及源码启动器未查找 Cargo 构建产物的问题。
 - `.venv/bin/python -m pytest tests/app/clients/cli -q`：212 通过。
 - `cargo test --offline --manifest-path app/clients/terminal/Cargo.toml`：331 通过。
-- `.venv/bin/python scripts/checks/smoke_cli_tui.py`：CLI→v1、CLI→v2、TUI→v1、TUI→v2 均完成实际任务；TUI 使用 PTY，完成后正常退出。
+- `.venv/bin/python scripts/shared/checks/smoke_cli_tui.py`：CLI→v1、CLI→v2、TUI→v1、TUI→v2 均完成实际任务；TUI 使用 PTY，完成后正常退出。
 - 实际任务使用本地确定性模型与临时存储，不调用外部模型。原生沙箱测试需允许 macOS Seatbelt 创建进程；外层限制中的嵌套沙箱会导致进程执行假失败。
 - Python 导入检查通过；完整架构脚本仍报告五个本地已有旧目录残留。本次未重新验证桌面端或其他平台。
 

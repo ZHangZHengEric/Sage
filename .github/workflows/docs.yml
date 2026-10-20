@@ -3,10 +3,10 @@ name: Deploy Documentation
 on:
   push:
     branches: [ main ]
-    paths: [ 'docs/**', 'README.md', 'README_CN.md', 'sagents/v2/README.md', 'examples/sagents_v2_quickstart.py', '.github/workflows/docs.yml' ]
+    paths: [ 'docs/**', 'README.md', 'README_CN.md', 'sagents/v2/README.md', 'examples/v2/quickstart.py', '.github/workflows/docs.yml' ]
   pull_request:
     branches: [ main ]
-    paths: [ 'docs/**', 'README.md', 'README_CN.md', 'sagents/v2/README.md', 'examples/sagents_v2_quickstart.py', '.github/workflows/docs.yml' ]
+    paths: [ 'docs/**', 'README.md', 'README_CN.md', 'sagents/v2/README.md', 'examples/v2/quickstart.py', '.github/workflows/docs.yml' ]
   workflow_dispatch:
 
 permissions:
