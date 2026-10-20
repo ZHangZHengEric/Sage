@@ -11,12 +11,14 @@ import json
 import traceback
 from urllib.parse import quote, urlsplit
 from uuid import uuid4
+from threading import RLock
 import httpx
 from sagents.v2.contracts.common import utc_now
-from sagents.v2.runtime.observability.contracts import TraceSpan
+from sagents.v2.runtime.observability.contracts import TraceEvent, TraceSpan
 from sagents.v2.runtime.observability.plugins.diagnostic_noop import NoopDiagnosticSink
-from sagents.v2.runtime.observability.traces import current_trace_context
+from sagents.v2.runtime.observability.traces import current_trace_context, current_trace_sink
 from sagents.v2.runtime.observability.tool_evidence import tool_evidence
+from sagents.v2.runtime.observability.model_evidence import model_evidence
 
 SPAN_NAME = "sage.performance"
 
@@ -26,6 +28,12 @@ def timestamp(value):
     if isinstance(value, str):
         value = datetime.fromisoformat(value.replace("Z", "+00:00"))
     return value.timestamp()
+
+
+def _otlp_value(value):
+    if "arrayValue" in value:
+        return [_otlp_value(item) for item in value["arrayValue"].get("values", [])]
+    return next(iter(value.values()), None)
 
 class ExternalEvidenceSink(NoopDiagnosticSink):
     """Trace-backed diagnostic capability; never reads or writes Session storage."""
@@ -60,6 +68,8 @@ class ExternalEvidenceSink(NoopDiagnosticSink):
         self.closed = False
         self.capture_failures = 0
         self.max_spans = 100000
+        self._orphan_evidence = {}
+        self._evidence_lock = RLock()
 
     @property
     def raw_capture(self):
@@ -74,29 +84,18 @@ class ExternalEvidenceSink(NoopDiagnosticSink):
         try:
             active = current_trace_context()
             now = utc_now()
-            span = TraceSpan(
-                trace_id=active[0]
-                if active
-                else hashlib.sha256(
-                    f"performance:{self.service}:{self.environment}:{run_id}".encode()
-                ).hexdigest()[:32],
-                parent_span_id=active[1] if active else None,
-                span_id=uuid4().hex[:16],
-                name="sage.diagnostic",
-                start_time=now,
-                end_time=now,
-                session_id=session_id,
-                run_id=run_id,
-                request_id=payload.get("request_id"),
-                attributes={
-                    "sage.diagnostic.kind": kind,
-                    "sage.diagnostic.data": json.dumps(
-                        payload, ensure_ascii=False, default=str
-                    ),
-                },
-            )
-            self.trace_sink.start_span(span)
-            self.trace_sink.end_span(span)
+            event = TraceEvent(name="sage.diagnostic." + kind, timestamp=now,
+                attributes={"sage.diagnostic.kind": kind,
+                            "sage.diagnostic.data": json.dumps(payload, ensure_ascii=False, default=str),
+                            "session_id": session_id, "run_id": run_id})
+            if active:
+                # Managed applications can have a different exporter instance
+                # from the host; only the owning exporter has this live span.
+                target = current_trace_sink() or self.trace_sink
+                target.add_event(active[1], event)
+            else:
+                with self._evidence_lock:
+                    self._orphan_evidence.setdefault((session_id, run_id), []).append(event)
         except Exception:
             self.capture_failures += 1
 
@@ -111,6 +110,7 @@ class ExternalEvidenceSink(NoopDiagnosticSink):
             else request.model_dump(mode="json"),
             normalized_request=request.model_dump(mode="json"),
             provider=kwargs.get("provider"),
+            request_format="provider_wire" if kwargs.get("wire_request") is not None else "normalized",
         )
         self._model(
             session_id,
@@ -160,8 +160,30 @@ class ExternalEvidenceSink(NoopDiagnosticSink):
             stream=evidence,
         )
 
+    def _take_evidence(self, key):
+        with self._evidence_lock:
+            return self._orphan_evidence.pop(key, [])
+
     async def close(self):
-        self.closed = True  # The application owns and flushes the trace exporter.
+        self.closed = True
+        # Standalone SDK use may have no host lifecycle or active Agent span.
+        # Export one grouped observation per Run, rather than per log/model event.
+        with self._evidence_lock:
+            keys = list(self._orphan_evidence)
+        for key in keys:
+            events = self._take_evidence(key)
+            try:
+                span = TraceSpan(trace_id=hashlib.sha256(
+                    f"diagnostic:{self.service}:{self.environment}:{key[1]}".encode()).hexdigest()[:32],
+                    span_id=uuid4().hex[:16], name="sage.diagnostic",
+                    session_id=key[0], run_id=key[1], events=events,
+                    start_time=events[0].timestamp, end_time=events[-1].timestamp)
+                self.trace_sink.start_span(span)
+                for event in events:
+                    self.trace_sink.add_event(span.span_id, event)
+                self.trace_sink.end_span(span)
+            except Exception:
+                self.capture_failures += 1
 
     async def _request(self, client, path, params):
         # Do not follow a redirect with server credentials to a different host.
@@ -199,7 +221,7 @@ class ExternalEvidenceSink(NoopDiagnosticSink):
                 raise ValueError("trace query repeated a pagination cursor")
             seen.add(cursor)
 
-    async def _query(self, client, *, start, end, session_id=None):
+    async def _query(self, client, *, start, end, session_id=None, run_id=None):
         dates = {
             "start_time": datetime.fromtimestamp(start, timezone.utc).isoformat(),
             "end_time": datetime.fromtimestamp(end, timezone.utc).isoformat(),
@@ -216,26 +238,29 @@ class ExternalEvidenceSink(NoopDiagnosticSink):
                 filters = [("attribute", f"session_id:{json.dumps(session_id)}")]
             params = [*dates.items(), *filters]
             if session_id is None:
-                params.append(("name", SPAN_NAME))
-                params.append(
-                    (
-                        "attribute",
-                        "sage.performance.event:server.run.performance.accepted",
-                    )
-                )
+                params.extend([("name", SPAN_NAME),
+                               ("attribute", 'sage.performance.format:"events/v2"')])
             rows, truncated = await self._phoenix(client, params)
-            # Time bounds select cohorts; fetch the whole timeline, including
-            # completions/resumptions after the selected range's upper bound.
-            ids = sorted({s["context"]["trace_id"] for s in rows})
             complete = []
-            for offset in range(0, len(ids), 100):
-                batch, cut = await self._phoenix(
-                    client, [("trace_id", t) for t in ids[offset : offset + 100]]
-                )
-                complete.extend(batch)
-                truncated |= cut
-                if len(complete) >= self.max_spans:
-                    return complete[: self.max_spans], True
+            if session_id is None:
+                # Resumption can use a fresh execution trace. Select the cohort
+                # by start time, then read every segment for the authorized Run.
+                for run_id in sorted({s["attributes"]["run_id"] for s in rows}):
+                    batch, cut = await self._phoenix(client, [*filters, ("name", SPAN_NAME),
+                        ("attribute", f"run_id:{json.dumps(run_id)}"),
+                        ("attribute", 'sage.performance.format:"events/v2"')])
+                    complete.extend(batch)
+                    truncated |= cut
+                    if len(complete) >= self.max_spans:
+                        return complete[:self.max_spans], True
+            else:
+                ids = sorted({s["context"]["trace_id"] for s in rows})
+                for offset in range(0, len(ids), 100):
+                    batch, cut = await self._phoenix(client, [("trace_id", t) for t in ids[offset:offset + 100]])
+                    complete.extend(batch)
+                    truncated |= cut
+                    if len(complete) >= self.max_spans:
+                        return complete[:self.max_spans], True
             return complete, truncated
         params = {
             "query.service_name": self.service,
@@ -248,7 +273,8 @@ class ExternalEvidenceSink(NoopDiagnosticSink):
                 if session_id
                 else {
                     "sage.performance.environment": self.environment,
-                    "sage.performance.event": "server.run.performance.accepted",
+                    "sage.performance.format": "events/v2",
+                    **({"run_id": run_id} if run_id is not None else {}),
                 }
             ),
         }
@@ -272,17 +298,34 @@ class ExternalEvidenceSink(NoopDiagnosticSink):
                                     "span_id": span["spanId"],
                                 },
                                 "start_time": int(span["startTimeUnixNano"]) / 1e9,
+                                "end_time": int(span["endTimeUnixNano"]) / 1e9 if span.get("endTimeUnixNano") else None,
+                                "status_code": {1:"OK", 2:"ERROR"}.get((span.get("status") or {}).get("code"), "UNSET"),
+                                "status_message": (span.get("status") or {}).get("message"),
                                 "otlp": span,
+                                "events": [{"name": e["name"], "timestamp": int(e["timeUnixNano"]) / 1e9,
+                                            "attributes": {a["key"]: _otlp_value(a["value"]) for a in e.get("attributes", [])}}
+                                           for e in span.get("events", [])],
                                 "resource": resource.get("resource", {}),
                                 "attributes": {
-                                    a["key"]: next(iter(a["value"].values()))
+                                    a["key"]: _otlp_value(a["value"])
                                     for a in span.get("attributes", [])
                                 },
                             }
                         )
                         if len(rows) >= self.max_spans:
                             return rows, True
-        return rows, len(traces) >= 10001
+        truncated = len(traces) >= 10001
+        if session_id is None and run_id is None:
+            complete = []
+            for identity in sorted({s["attributes"]["run_id"] for s in rows
+                                    if s["name"] == SPAN_NAME}):
+                batch, cut = await self._query(client, start=0, end=utc_now().timestamp(), run_id=identity)
+                complete.extend(batch)
+                truncated |= cut
+                if len(complete) >= self.max_spans:
+                    return complete[:self.max_spans], True
+            return complete, truncated
+        return rows, truncated
 
     async def snapshot(self, session_id, run_ids):
         async with httpx.AsyncClient() as client:
@@ -297,18 +340,23 @@ class ExternalEvidenceSink(NoopDiagnosticSink):
             and s["attributes"].get("run_id") in run_ids
         ]
         models, logs = {}, []
-        diagnostic_spans = [s for s in spans if s["name"] == "sage.diagnostic"]
-        for span in sorted(diagnostic_spans, key=lambda s: timestamp(s["start_time"])):
-            attrs = span["attributes"]
-            if span["name"] != "sage.diagnostic" or "sage.diagnostic.data" not in attrs:
-                continue
+        records = []
+        for span in spans:
+            for event in span.get("events", []):
+                attrs = event.get("attributes", {})
+                if "sage.diagnostic.data" in attrs:
+                    # Scope is validated on both the containing span and event.
+                    if attrs.get("session_id") != session_id or attrs.get("run_id") not in run_ids:
+                        continue
+                    records.append((timestamp(event["timestamp"]), attrs))
+        for observed, attrs in sorted(records, key=lambda r: r[0]):
             payload = json.loads(attrs["sage.diagnostic.data"])
             if attrs["sage.diagnostic.kind"] == "log":
                 logs.append(
                     dict(
                         payload,
-                        session_id=span["attributes"]["session_id"],
-                        run_id=span["attributes"]["run_id"],
+                        session_id=attrs["session_id"],
+                        run_id=attrs["run_id"],
                     )
                 )
             else:
@@ -318,7 +366,7 @@ class ExternalEvidenceSink(NoopDiagnosticSink):
                 )
                 row.update(payload)
                 kind = attrs["sage.diagnostic.kind"]
-                observed_at = datetime.fromtimestamp(timestamp(span["start_time"]), timezone.utc).isoformat()
+                observed_at = datetime.fromtimestamp(observed, timezone.utc).isoformat()
                 if kind == "request":
                     row.update(status="started", started_at=observed_at)
                 elif kind in {"response", "failure"}:
@@ -326,16 +374,19 @@ class ExternalEvidenceSink(NoopDiagnosticSink):
                         status="completed" if kind == "response" else "failed",
                         completed_at=observed_at,
                     )
+        projected_models = model_evidence(spans, models.values())
         return {
             **tool_evidence(spans, logs),
-            "models": list(models.values()),
+            "models": projected_models,
+            "model_request_ids": sorted({r["request_id"] for r in projected_models}),
+            "capture_modes": sorted({s["attributes"].get("sage.content.mode", "unknown") for s in spans}),
             "logs": logs,
             "traces": spans,
             "source": self.backend,
             "unavailable": False,
             "truncated": truncated,
             "raw_model_streams_available": any(
-                "stream" in row for row in models.values()
+                row.get("stream", {}).get("wire_capture_available", False) for row in projected_models
             ),
         }
 

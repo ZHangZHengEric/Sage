@@ -212,7 +212,9 @@ def _runtime_capabilities(
     if settings is not None and settings.effective_trace_backend != "noop":
         config = {
             "environment": settings.trace_environment,
-            "content_mode": settings.trace_content_mode,
+            "content_mode": settings.trace_content_mode or (
+                "raw" if settings.effective_trace_backend == "phoenix" else "redacted"
+            ),
             "max_content_chars": settings.trace_max_content_chars,
             "sample_rate": settings.trace_sample_rate,
             "timeout_seconds": settings.trace_timeout_seconds,
@@ -248,4 +250,9 @@ def _runtime_capabilities(
             key: CapabilitySelection.model_validate(value)
             for key, value in settings.plugin_overrides.items()
         })
+        trace = capabilities["observability.trace-sink"]
+        if trace.plugin == "sage.trace.phoenix" and "content_mode" not in trace.config:
+            capabilities["observability.trace-sink"] = trace.model_copy(update={
+                "config": {**trace.config, "content_mode": settings.trace_content_mode or "raw"},
+            })
     return capabilities

@@ -113,11 +113,11 @@ class PhoenixDashboard:
         return identifier
 
     def _filter(self, agent_id="", session_id=""):
-        conditions = [f'attributes["deployment.environment.name"] == {json.dumps(self.source.environment)}']
+        conditions = [f'attributes["deployment"]["environment"]["name"] == {json.dumps(self.source.environment)}']
         if agent_id:
             conditions.append(f'attributes["agent_id"] == {json.dumps(agent_id)}')
         if session_id:
-            conditions.append(f'attributes["session.id"] == {json.dumps(session_id)}')
+            conditions.append(f'attributes["session"]["id"] == {json.dumps(session_id)}')
         return " and ".join(conditions)
 
     async def summary(self, *, start, end, agent_id="", session_id="", client=None):

@@ -19,12 +19,18 @@ class TraceCapture:
     def start_span(self, span):
         pass
 
+    def add_event(self, span_id, event):
+        pass
+
     def end_span(self, span):
         self.spans.append(span)
 
 
 def capture_sample(sink):
     events, models = sample()
+    sink.emit(
+        "model", {**models[0], "completed_at": models[0]["ended_at"]}, at=BASE + 6
+    )
     for row in events:
         sink.write(
             LogRecord(
@@ -46,16 +52,15 @@ def capture_sample(sink):
                 },
             )
         )
-    sink.emit(
-        "model", {**models[0], "completed_at": models[0]["ended_at"]}, at=BASE + 6
-    )
+
 
 
 def phoenix_span(span):
     return {
         "name": span.name,
         "context": {"trace_id": span.trace_id, "span_id": span.span_id},
-        "attributes": span.attributes,
+        "attributes": {**span.attributes, "session_id": span.session_id, "run_id": span.run_id},
+        "events": [e.model_dump(mode="json") for e in span.events],
         "start_time": span.start_time.isoformat(),
     }
 
@@ -91,7 +96,7 @@ async def test_external_timing_roundtrip_without_local_files(tmp_path):
     assert result["summary"]["framework_ms"]["p50"] == 4000
     assert result["source"] == "phoenix"
     assert not list(tmp_path.iterdir())
-    assert any("trace_id" in r.url.params for r in requests)
+    assert any(any(v.startswith("run_id:") for v in r.url.params.get_list("attribute")) for r in requests)
 
 
 @pytest.mark.asyncio
@@ -144,7 +149,10 @@ async def test_jaeger_v3_stream_and_partial_model_updates_keep_timing_parity():
     def handle(request):
         assert request.url.path == "/api/v3/traces"
         assert request.url.params["query.service_name"] == "sage-server"
-        assert request.url.params["query.start_time_min"].startswith("2026-10-19")
+        if "run_id" not in json.loads(request.url.params["query.attributes"]):
+            assert request.url.params["query.start_time_min"].startswith("2026-10-19")
+        else:
+            assert request.url.params["query.start_time_min"].startswith("1970-01-01")
         spans = [
             {
                 "traceId": s.trace_id,
@@ -153,7 +161,7 @@ async def test_jaeger_v3_stream_and_partial_model_updates_keep_timing_parity():
                 "startTimeUnixNano": str(int(s.start_time.timestamp() * 1e9)),
                 "attributes": [
                     {"key": k, "value": {"stringValue": v}}
-                    for k, v in s.attributes.items()
+                    for k, v in {**s.attributes, "run_id": s.run_id, "session_id": s.session_id}.items()
                 ],
             }
             for s in capture.spans
@@ -290,8 +298,9 @@ def test_external_performance_api_and_failure_do_not_read_local_db(
     )
 
 
+@pytest.mark.parametrize("content_mode", ["redacted", "raw"])
 def test_real_run_exports_remote_performance_and_download_without_local_capture(
-    tmp_path, monkeypatch
+    tmp_path, monkeypatch, content_mode
 ):
     from fastapi.testclient import TestClient
     from io import BytesIO
@@ -314,7 +323,7 @@ def test_real_run_exports_remote_performance_and_download_without_local_capture(
 
     monkeypatch.setattr(PhoenixTraceSink, "__init__", initialize)
     host = make_test_service(
-        tmp_path, trace_backend="phoenix", phoenix_endpoint="http://unused/v1/traces"
+        tmp_path, trace_backend="phoenix", phoenix_endpoint="http://unused/v1/traces", trace_content_mode=content_mode
     )
     with TestClient(create_app(service=host)) as client:
         user, _ = identity(client, "external-user")
@@ -330,7 +339,12 @@ def test_real_run_exports_remote_performance_and_download_without_local_capture(
         client.portal.call(settle)
         spans = exporter.get_finished_spans()
         assert any(s.name == "model.request" for s in spans)
-        assert any(s.name == "sage.performance" for s in spans)
+        summaries = [s for s in spans if s.name == "sage.performance"]
+        assert len(summaries) == 1
+        agent = next(s for s in spans if s.name == "agent.run")
+        assert summaries[0].context.trace_id == agent.context.trace_id
+        assert summaries[0].parent.span_id == agent.context.span_id
+        assert all(s.name != "sage.diagnostic" for s in spans)
 
         async def query(client, **kwargs):
             return [
@@ -338,6 +352,7 @@ def test_real_run_exports_remote_performance_and_download_without_local_capture(
                     "name": s.name,
                     "start_time": s.start_time / 1e9,
                     "attributes": dict(s.attributes),
+                    "events": [{"name": e.name, "timestamp": e.timestamp / 1e9, "attributes": dict(e.attributes)} for e in s.events],
                     "context": {
                         "trace_id": format(s.context.trace_id, "032x"),
                         "span_id": format(s.context.span_id, "016x"),
@@ -362,6 +377,10 @@ def test_real_run_exports_remote_performance_and_download_without_local_capture(
             assert manifest["diagnostic_source"] == "phoenix"
             assert manifest["model_request_coverage"] == "external_traces_only"
             assert json.loads(archive.read("thread-1/traces.json"))
+            if content_mode == "raw":
+                models = json.loads(archive.read("thread-1/models.json"))
+                assert models and any(row.get("response", {}).get("text") == "hello" for row in models)
+                assert any("normalized_events" in row.get("stream", {}) for row in models)
         assert not (host.paths.runtime_root / "diagnostics").exists()
         assert (
             client.get("/api/threads/thread-1/download", headers=user).status_code
@@ -426,3 +445,114 @@ def test_download_queries_observation_capability_after_authorization(client, ser
             assert manifest["diagnostic_source"] == "phoenix"
             assert manifest["external_traces_truncated"] is True
             assert "thread-1/state.json" not in archive.namelist()
+
+
+def test_performance_events_collapse_to_one_linked_summary_per_execution():
+    from sagents.v2.runtime.observability.traces import StructuredTracer
+    trace = TraceCapture()
+    sink = ExternalDiagnostics(backend="phoenix", query_url="http://phoenix")
+    sink.trace_sink = trace
+    parent = StructuredTracer(trace, "test").start_span("agent.run", session_id="s", run_id="r")
+    capture_sample(sink)
+    parent.end()
+    summaries = [s for s in trace.spans if s.name == "sage.performance"]
+    assert len(summaries) == 1
+    summary = summaries[0]
+    assert summary.trace_id == parent.span.trace_id
+    assert summary.parent_span_id == parent.span.span_id
+    assert summary.attributes["sage.performance.total_ms"] == 10000
+    assert summary.attributes["sage.performance.first_text_ms"] == 4000
+    assert summary.attributes["sage.performance.framework_ms"] == 4000
+    assert len(summary.events) == 8
+    assert not sink._performance
+
+
+@pytest.mark.asyncio
+async def test_shutdown_flushes_unfinished_performance_as_incomplete():
+    trace = TraceCapture()
+    sink = ExternalDiagnostics(backend="phoenix", query_url="http://phoenix")
+    sink.trace_sink = trace
+    sink.emit("log", {"session_id":"s", "run_id":"r", "event":"agent.run.started", "timestamp":BASE}, at=BASE)
+    assert trace.spans == []
+    await sink.close()
+    assert len(trace.spans) == 1
+    assert trace.spans[0].attributes["sage.performance.incomplete"]
+    assert "sage.performance.total_ms" not in trace.spans[0].attributes
+
+
+@pytest.mark.asyncio
+async def test_resume_segments_are_loaded_across_execution_traces(monkeypatch):
+    from sagents.v2.runtime.observability.traces import StructuredTracer
+    from app.v2.server.observability.external import timing_rows
+    trace = TraceCapture()
+    sink = ExternalDiagnostics(backend="phoenix", query_url="http://phoenix")
+    sink.trace_sink = trace
+    parent = StructuredTracer(trace, "test").start_span("agent.run", session_id="s", run_id="r")
+    capture_sample(sink)
+    parent.end()
+    second = StructuredTracer(trace, "test").start_span("agent.run", session_id="s", run_id="r")
+    for at, event, attrs in [
+        (100, "server.run.performance.resuming", {"started_at": BASE + 100}),
+        (102, "agent.run.started", {}), (109, "agent.run.completed", {}),
+        (110, "server.run.performance.finished", {"run_state": "completed"}),
+    ]:
+        sink.emit("log", {"session_id":"s", "run_id":"r", "event":event,
+                          "timestamp":BASE + at, "attributes":attrs}, at=BASE + at)
+    second.end()
+    summaries = [phoenix_span(s) for s in trace.spans if s.name == "sage.performance"]
+    assert len(summaries) == 2 and summaries[0]["context"]["trace_id"] != summaries[1]["context"]["trace_id"]
+    calls = []
+    async def query(client, params):
+        calls.append(params)
+        if any(key == "start_time" for key, value in params):
+            return summaries[:1], False
+        assert ("attribute", 'run_id:"r"') in params
+        return summaries, False
+    monkeypatch.setattr(sink, "_phoenix", query)
+    async with httpx.AsyncClient() as client:
+        spans, cut = await sink._query(client, start=BASE, end=BASE + 10)
+    assert len(calls) == 2 and not cut
+    events, _ = timing_rows(spans)
+    assert len([e for e in events["r"] if e["event"] == "agent.run.started"]) == 2
+    assert any(e["event"] == "server.run.performance.resuming" for e in events["r"])
+
+
+@pytest.mark.asyncio
+async def test_diagnostic_events_cannot_escape_the_authorized_run(monkeypatch):
+    sink = ExternalDiagnostics(backend="phoenix", query_url="http://phoenix")
+    async def query(client, **options):
+        return [{"name":"agent.run", "start_time":BASE,
+                 "attributes":{"session_id":"s", "run_id":"r"},
+                 "events":[{"timestamp":BASE, "attributes":{
+                     "session_id":"other", "run_id":"r", "sage.diagnostic.kind":"log",
+                     "sage.diagnostic.data":json.dumps({"message":"private"})}}]}], False
+    monkeypatch.setattr(sink, "_query", query)
+    evidence = await sink.snapshot("s", {"r"})
+    assert evidence["logs"] == [] and evidence["models"] == []
+
+
+@pytest.mark.asyncio
+async def test_download_projects_model_spans_when_raw_diagnostics_were_not_captured(monkeypatch):
+    from io import BytesIO
+    from zipfile import ZipFile
+    from app.v2.server.storage.downloads import prepare_session_export
+    from tests.sagents.v2.test_model_evidence import span
+    sink = ExternalDiagnostics(backend="phoenix", query_url="http://phoenix")
+    async def query(client, **options):
+        return [span()], False
+    monkeypatch.setattr(sink, "_query", query)
+    evidence = await sink.snapshot("s", {"r"})
+    assert len(evidence["models"]) == 1 and evidence["logs"] == []
+    stream, _ = prepare_session_export("s", {"r"}, evidence)
+    with stream, ZipFile(BytesIO(stream.read())) as archive:
+        models = json.loads(archive.read("s/models.json"))
+        index = json.loads(archive.read("s/requests/index.json"))
+        manifest = json.loads(archive.read("s/manifest.json"))
+        assert models[0]["response"]["text"] == "answer"
+        assert index[0]["evidence_source"] == "trace_projection"
+        assert len(index) == 1 and index[0]["path"] in {n.removeprefix("s/") for n in archive.namelist()}
+        assert not manifest["model_request_ids_missing"]
+        assert manifest["stream_evidence_missing_for_requests"] == ["m"]
+        assert manifest["evidence_availability"]["models"]["status"] == "partial"
+        assert manifest["evidence_availability"]["logs"]["status"] == "not_captured"
+        assert manifest["evidence_availability"]["raw_model_streams"]["status"] == "not_captured"

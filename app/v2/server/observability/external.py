@@ -7,12 +7,14 @@ import json
 import os
 from urllib.parse import unquote
 from uuid import uuid4
+from threading import RLock
 import httpx
 from sagents.v2.contracts.common import utc_now
-from sagents.v2.runtime.observability.contracts import TraceSpan
+from sagents.v2.runtime.observability.contracts import TraceEvent, TraceSpan, TraceStatus
+from sagents.v2.runtime.observability.traces import current_trace_context
 from sagents.v2.runtime.observability.evidence import ExternalEvidenceSink
 from sagents.v2.runtime.observability.plugins.diagnostic_noop import NoopDiagnosticSink
-from .performance import EVENTS, timing_report, timestamp
+from .performance import EVENTS, build_run, timing_report, timestamp
 
 SPAN_NAME = "sage.performance"
 PAYLOAD = "sage.performance.data"
@@ -47,6 +49,11 @@ LOG_ATTRIBUTES = frozenset(
 class ExternalDiagnostics(ExternalEvidenceSink):
     """Host timing projection over the observation evidence capability."""
 
+    def __init__(self, **options):
+        super().__init__(**options)
+        self._performance = {}
+        self._performance_lock = RLock()
+
     def emit(self, kind, row, *, at=None):
         if self.closed or not row.get("session_id") or not row.get("run_id"):
             return
@@ -54,45 +61,80 @@ class ExternalDiagnostics(ExternalEvidenceSink):
         data = {k: v for k, v in row.items() if k in allowed}
         if kind == "log":
             data["attributes"] = {
-                k: v
-                for k, v in row.get("attributes", {}).items()
-                if k in LOG_ATTRIBUTES
+                k: v for k, v in row.get("attributes", {}).items() if k in LOG_ATTRIBUTES
             }
         try:
             observed = timestamp(at) if at is not None else utc_now().timestamp()
-            # The accepted boundary carries the SDK entry time, before admission.
-            start = (
-                timestamp(data["attributes"].get("started_at"))
-                if kind == "log"
-                and data.get("event") == "server.run.performance.accepted"
-                else None
-            )
-            span = TraceSpan(
-                trace_id=hashlib.sha256(
-                    f"performance:{self.service}:{self.environment}:{row['run_id']}".encode()
-                ).hexdigest()[:32],
-                span_id=uuid4().hex[:16],
-                name=SPAN_NAME,
-                start_time=datetime.fromtimestamp(start or observed, timezone.utc),
-                end_time=datetime.fromtimestamp(observed, timezone.utc),
-                session_id=row["session_id"],
-                run_id=row["run_id"],
-                attributes={
-                    PAYLOAD: json.dumps(data, default=str),
-                    "sage.performance.kind": kind,
-                    "sage.performance.event": data.get("event", "model"),
-                    "sage.performance.service": self.service,
-                    "sage.performance.environment": self.environment,
-                },
-            )
-            if self.trace_sink is None:
-                self.capture_failures += 1
-                return
-            self.trace_sink.start_span(span)
-            self.trace_sink.end_span(span)
+            key = row["session_id"], row["run_id"]
+            with self._performance_lock:
+                pending = self._performance.setdefault(key, {"rows": [], "parent": None})
+                pending["rows"].append({"kind": kind, "data": data, "at": observed})
+                # model.request.started is emitted while the Agent span is active.
+                if pending["parent"] is None:
+                    pending["parent"] = current_trace_context()
+                if data.get("event") == "server.run.performance.finished":
+                    self._finish_performance(key)
         except Exception:
-            # A best-effort projection must not fail a model or recurse into logs.
             self.capture_failures += 1
+
+    def _finish_performance(self, key, *, incomplete=False):
+        pending = self._performance.pop(key, None)
+        if pending is None:
+            return
+        if self.trace_sink is None:
+            self.capture_failures += 1
+            return
+        rows = pending["rows"]
+        starts = [r["at"] for r in rows]
+        starts.extend(timestamp(r["data"]["attributes"]["started_at"])
+                      for r in rows if r["kind"] == "log"
+                      and r["data"].get("event") in {
+                          "server.run.performance.accepted", "server.run.performance.resuming"}
+                      and r["data"].get("attributes", {}).get("started_at"))
+        parent = pending["parent"]
+        span = TraceSpan(
+            trace_id=parent[0] if parent else hashlib.sha256(
+                f"performance:{self.service}:{self.environment}:{key[1]}".encode()).hexdigest()[:32],
+            parent_span_id=parent[1] if parent else None,
+            span_id=uuid4().hex[:16], name=SPAN_NAME,
+            start_time=datetime.fromtimestamp(min(starts), timezone.utc),
+            end_time=datetime.fromtimestamp(max(r["at"] for r in rows), timezone.utc),
+            session_id=key[0], run_id=key[1],
+            status=TraceStatus.UNSET if incomplete else TraceStatus.OK,
+            attributes={PAYLOAD: json.dumps(rows, default=str),
+                        "sage.performance.format": "events/v2",
+                        "sage.performance.service": self.service,
+                        "sage.performance.environment": self.environment,
+                        "sage.performance.incomplete": incomplete},
+            events=[TraceEvent(name="sage.performance." + r["kind"],
+                               timestamp=datetime.fromtimestamp(r["at"], timezone.utc),
+                               attributes={"kind": r["kind"], PAYLOAD: json.dumps(r["data"], default=str)})
+                    for r in rows],
+        )
+        events, models = timing_rows([{
+            "name": span.name, "start_time": span.start_time,
+            "attributes": span.attributes,
+            "context": {"trace_id": span.trace_id, "span_id": span.span_id},
+        }])
+        summary = build_run(events[key[1]], models[key[1]])
+        if summary is not None:
+            span.attributes.update({"sage.performance." + field: summary[field]
+                for field in ("total_ms", "first_token_ms", "first_text_ms", "model_ms", "tool_ms", "framework_ms", "coverage")
+                if summary.get(field) is not None})
+        span.events.extend(self._take_evidence(key))
+        self.trace_sink.start_span(span)
+        for event in span.events:
+            self.trace_sink.add_event(span.span_id, event)
+        self.trace_sink.end_span(span)
+
+    async def close(self):
+        with self._performance_lock:
+            for key in list(self._performance):
+                try:
+                    self._finish_performance(key, incomplete=True)
+                except Exception:
+                    self.capture_failures += 1
+        await super().close()
 
     def _model(self, session_id, request, **fields):
         self.emit(
@@ -148,17 +190,21 @@ class ExternalDiagnostics(ExternalEvidenceSink):
 def timing_rows(spans):
     events, models = defaultdict(list), defaultdict(dict)
     seen = set()
+    rows = []
     for span in sorted(spans, key=lambda s: timestamp(s["start_time"])):
         attrs = span["attributes"]
-        if span["name"] != SPAN_NAME or PAYLOAD not in attrs:
+        if span["name"] != SPAN_NAME or attrs.get("sage.performance.format") != "events/v2":
             continue
         identity = (span["context"]["trace_id"], span["context"]["span_id"])
         if identity in seen:
             continue
         seen.add(identity)
-        row = json.loads(attrs[PAYLOAD])
+        payload = attrs[PAYLOAD]
+        rows.extend(json.loads("".join(payload) if isinstance(payload, (list, tuple)) else payload))
+    for observation in sorted(rows, key=lambda r: r["at"]):
+        row = observation["data"]
         rid = row["run_id"]
-        if attrs["sage.performance.kind"] == "model":
+        if observation["kind"] == "model":
             models[rid].setdefault(row["request_id"], {}).update(row)
             continue
         values = row.get("attributes", {})

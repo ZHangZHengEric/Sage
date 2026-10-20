@@ -182,13 +182,32 @@ def prepare_session_export(session_id: str, run_ids: set[str], evidence: dict | 
                 path = f"requests/{sequence:06d}-{quote(str(row.get('request_id', 'unknown')), safe='')}.json"
                 write_json(path, row)
                 requests_index.append({key: row.get(key) for key in (
-                    "sequence", "run_id", "request_id", "step_id", "purpose", "started_at", "completed_at", "status"
+                    "sequence", "run_id", "request_id", "step_id", "purpose", "started_at", "completed_at", "status",
+                    "evidence_source", "request_format", "truncated"
                 )} | {"path": path})
             write_json("requests/index.json", requests_index)
             captured_ids = {row.get("request_id") for row in models}
             expected_ids = {row.get("request_id") for row in evidence.get("logs", [])
                             if row.get("event") == "model.request.started" and row.get("request_id")}
+            expected_ids.update(evidence.get("model_request_ids", []))
             missing_requests = sorted(expected_ids - captured_ids)
+            projected = [row["request_id"] for row in models if row.get("evidence_source") in {"trace_projection", "mixed"}]
+            missing_streams = [row.get("request_id") for row in models if not row.get("stream", {}).get("wire_capture_available")]
+            logs = evidence.get("logs", [])
+            partial_models = projected or missing_requests or any(row.get("truncated") for row in models)
+            partial_logs = evidence.get("dropped_logs", 0) or pending_writes or any(row.get("truncated") for row in logs)
+            dropped_streams = sum(row.get("stream", {}).get("dropped_wire_events", 0) for row in models)
+            availability = {
+                "models": {"status":"not_captured" if not models else "partial" if partial_models else "available",
+                           "trace_projected_request_ids":projected,
+                           "reason":"Normalized trace content is exported when dedicated diagnostics were not captured; it is not a raw provider request." if projected else None},
+                "logs": {"status":"not_captured" if not logs else "partial" if partial_logs else "available",
+                         "reason":None if logs else "No full diagnostic log records were captured for this Session; timing spans are not full logs."},
+                "raw_model_streams": {"status":"not_captured" if not models or len(missing_streams) == len(models) else "partial" if missing_streams or dropped_streams else "available",
+                                      "reason":"SDK wire events cannot be reconstructed from model responses or timing records." if missing_streams or not models else None},
+                "failures": {"status":"available" if failures else "none_observed",
+                             "reason":None if failures else "No tool failures were observed in the exported evidence."},
+            }
             write_json("models.json", models)
             write_json("logs.json", evidence.get("logs", []))
             if "traces" in evidence:
@@ -203,6 +222,8 @@ def prepare_session_export(session_id: str, run_ids: set[str], evidence: dict | 
                     "generated_at": datetime.now(timezone.utc).isoformat(),
                     "redacted": True,
                     "diagnostic_source": evidence.get("source", "local"),
+                    "capture_modes": evidence.get("capture_modes", ["unknown"]),
+                    "evidence_availability": availability,
                     "external_traces_truncated": evidence.get("truncated", False),
                     "raw_model_streams_available": evidence.get("raw_model_streams_available", any(
                         row.get("stream", {}).get("wire_capture_available") for row in models

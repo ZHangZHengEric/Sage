@@ -2,7 +2,7 @@
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { api } from '../api.js'
 import { duration, percentage } from '../performance.js'
-import { attribute, cost, number, pretty, spanTree, waterfall } from '../trace-presentation.js'
+import { attribute, cost, diagnosticRecords, number, pretty, spanTree, waterfall } from '../trace-presentation.js'
 import GlassPanel from './GlassPanel.vue'
 
 const props = defineProps({ params: { type: Object, required: true } })
@@ -17,7 +17,7 @@ const tabs = [{id:'input',name:'输入'}, {id:'output',name:'输出'}, {id:'raw'
 const payload = computed(() => {
   if (!detail.value) return ''
   if (tab.value === 'input' || tab.value === 'output') return pretty(attribute(detail.value, `${tab.value}.value`))
-  if (tab.value === 'raw') return pretty(attribute(detail.value, 'sage.diagnostic.data'))
+  if (tab.value === 'raw') return pretty(diagnosticRecords(detail.value))
   return pretty(detail.value[tab.value])
 })
 let pageRevision = 0, summaryRevision = 0, treeRevision = 0, detailRevision = 0

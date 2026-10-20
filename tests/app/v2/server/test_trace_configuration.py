@@ -208,3 +208,21 @@ def test_observability_uses_started_plugin_and_rejects_non_admin(tmp_path):
         client.post("/api/auth/login", json={"username": "viewer", "password": "viewer12345"})
         assert client.get("/api/observability/services").status_code == 403
         assert client.get("/api/observability/console", follow_redirects=False).status_code == 403
+
+
+@pytest.mark.parametrize("explicit,expected", [(None,"raw"),("redacted","redacted"),("metadata","metadata"),("raw","raw")])
+def test_server_phoenix_defaults_to_full_raw_capture_with_explicit_override(tmp_path, explicit, expected):
+    settings = make_settings(tmp_path, trace_backend="phoenix", phoenix_endpoint="http://phoenix/v1/traces",
+                             trace_content_mode=explicit)
+    assert server_v2_manifest(settings).runtime.capabilities["observability.trace-sink"].config["content_mode"] == expected
+
+
+def test_server_saved_phoenix_selection_without_content_mode_inherits_raw_default(tmp_path):
+    settings = make_settings(tmp_path, plugin_overrides={"observability.trace-sink":{
+        "plugin":"sage.trace.phoenix", "config":{"endpoint":"http://phoenix/v1/traces"}}})
+    assert server_v2_manifest(settings).runtime.capabilities["observability.trace-sink"].config["content_mode"] == "raw"
+
+
+def test_server_other_trace_backends_keep_redacted_default(tmp_path):
+    settings = make_settings(tmp_path, trace_backend="otlp", trace_otlp_endpoint="http://collector:4317")
+    assert server_v2_manifest(settings).runtime.capabilities["observability.trace-sink"].config["content_mode"] == "redacted"
