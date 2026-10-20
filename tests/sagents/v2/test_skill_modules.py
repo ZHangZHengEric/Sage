@@ -550,6 +550,36 @@ async def test_auto_sync_refuses_source_and_working_directory_overlap(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("kind", [AutoSyncSkillWorkspace, FixedCopySkillWorkspace])
+async def test_skill_restore_normalizes_instructions_but_preserves_bundle_hash(targets, kind):
+    manager = MemorySkillRepository()
+    try:
+        original = bundle("\n  Read references/guide.md\n")
+        await manager.publish(original)
+        target = await targets(kind)
+        active = loader(manager, target)
+        loaded = await active.load("demo", run_id="run1")
+        assert loaded.instructions == "Read references/guide.md"
+        checkpoint = json.loads(json.dumps(await active.snapshot_run("run1")))
+
+        # A newly composed loader must recover after a deferred model retry
+        # even though the source SKILL.md has a conventional trailing newline.
+        restored = loader(manager, target)
+        await restored.restore_run("run1", checkpoint)
+        assert await restored.snapshot_run("run1") == checkpoint
+        assert await target._read("/workspace/skills/demo/SKILL.md", "run1") == original.files["SKILL.md"]
+
+        # Whitespace-only source changes still invalidate the exact hash.
+        if kind is AutoSyncSkillWorkspace:
+            await manager.publish(bundle("\n  Read references/guide.md\n\n"))
+            with pytest.raises(SageV2Error) as caught:
+                await restored.restore_run("run1", checkpoint)
+            assert caught.value.info.code == "skill.restore_version_changed"
+    finally:
+        await manager.close()
+
+
+@pytest.mark.asyncio
 async def test_auto_sync_recovery_does_not_reinstall_old_manager_version(targets):
     manager = MemorySkillRepository()
     try:
