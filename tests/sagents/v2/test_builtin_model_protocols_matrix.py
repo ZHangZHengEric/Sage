@@ -1048,7 +1048,7 @@ def test_transport_errors_are_transient_without_http_status(kind):
 
 
 @pytest.mark.asyncio
-async def test_builtin_factory_resolves_credentials_through_declared_provider():
+async def test_builtin_factory_resolves_credentials_through_declared_provider(monkeypatch):
     from sagents.v2.runtime.credentials import MappingCredentialProvider
 
     route = ModelRoute(provider="openai-responses", model="model-test", credential="primary-key")
@@ -1056,10 +1056,18 @@ async def test_builtin_factory_resolves_credentials_through_declared_provider():
         scope=ExtensionScope.AGENT, scope_id="agent", tenant_id="tenant",
         config={"route": route.model_dump(mode="json")},
     )
+    client = object()
+    constructor_arguments = {}
+
+    def create_client(**kwargs):
+        constructor_arguments.update(kwargs)
+        return client
+
+    monkeypatch.setattr("sagents.v2.model.plugins.openai_responses.AsyncOpenAI", create_client)
     providers = ProviderSet({
         CapabilityKey(capability="credentials.provider"): MappingCredentialProvider({"primary-key": "dependency-secret"}),
-        CapabilityKey(capability="model.client"): object(),
     })
     provider = await builtin_extension_registry().get("sage.model.openai-responses").factory(context, providers)
-    assert provider.config.api_key.get_secret_value() == "dependency-secret"
+    assert constructor_arguments["api_key"] == "dependency-secret"
+    assert provider.raw_client is client
     assert context.config == {"route": route.model_dump(mode="json")}
