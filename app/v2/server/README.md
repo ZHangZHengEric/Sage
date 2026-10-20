@@ -64,6 +64,8 @@ Web 开发时可单独启动：在 `app/v2/server/web` 执行 `npm install && np
 
 `/health` 返回就绪状态与 `trace_enabled`；配置 `SAGE_SERVER_JAEGER_URL` 时管理页显示 Jaeger 入口。Server V2 与 sagents/v2 运行时直接通过 `StructuredLogger` 调用统一日志接口；Uvicorn 和第三方标准日志经适配器转换成 `sage.log/v1` 记录。所有记录由同一 LogSink 写入 stdout 和 `SAGE_SERVER_LOG_DIRECTORY` 指定的轮转文件。`SAGE_SERVER_LOG_LEVEL` 控制最低级别，`SAGE_SERVER_LOG_FORMAT` 控制两处输出的 `json` 或 `text` 格式。stdout 也可由容器日志驱动或 Alloy/Loki 持久化，不写审计业务表。
 
+DEBUG 模式下，HTTP/OpenAI/MCP/A2A 客户端仅保留 WARNING 及以上日志，MySQL/Redis 客户端仅保留 INFO 及以上日志。状态提交、入口准备、Agent 准备和会话归档的成功 DEBUG 计时仅在耗时达到 100ms 时输出；失败、异常和缺少耗时的记录继续保留。该过滤同时用于 stdout、轮转文件和现有诊断日志，模型/工具/Run 生命周期及首段正文计时完整保留，不改变对话执行与会话持久化。
+
 模型客户端池使用 `SAGE_SERVER_MAX_MODEL_CLIENTS`（默认 64）限制容量。同一用户的相同配置跨 Run 复用连接，凭据变化使用新客户端；池满且所有客户端占用时返回可重试的限流错误。详见[模型池与增量持久化](../../../docs/zh/architecture/sagents-v2-model-pool-and-persistence.md)。
 
 ## Server 插件配置
