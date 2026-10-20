@@ -95,3 +95,32 @@ class SkillLoadTool:
                 "active_skills": active_names,
             },
         )
+
+
+class SkillEditTool:
+    """Opt-in editing operation. Requires its own tool grant and scope."""
+
+    def __init__(self, loader: SkillLoader):
+        self.loader = loader
+
+    @tool(
+        name="edit_skill",
+        description=("Prepare the visible Skill working directory for editing. "
+                     "With auto-sync, the next load_skill archives local edits and restores manager contents; "
+                     "with fixed-copy, local edits remain. Published versions are never changed."),
+        input_schema={"type": "object", "properties": {"skill_name": {"type": "string", "minLength": 1}},
+                      "required": ["skill_name"], "additionalProperties": False},
+        strict=True, side_effect_level=SideEffectLevel.WRITE,
+        idempotency_strategy=IdempotencyStrategy.FINGERPRINT,
+        cancel_semantics=CancelSemantics.NOT_STARTED_ONLY,
+        resume_strategy=ResumeStrategy.REPLAY_RESULT,
+        required_scopes=("skill.load", "skill.edit"),
+    )
+    async def execute(self, skill_name: str, invocation: ToolInvocation) -> ToolExecutionResult:
+        loaded = await self.loader.begin_edit(skill_name, run_id=invocation.call.owner_run_id)
+        return ToolExecutionResult(
+            tool_call_id=invocation.call.tool_call_id, operation_id=invocation.call.operation_id,
+            content=(TextBlock(text=f"Skill editing directory: {loaded.workspace_path}"),),
+            metadata={"skill_name": skill_name, "workspace_path": loaded.workspace_path,
+                      "base_hash": loaded.content_hash},
+        )

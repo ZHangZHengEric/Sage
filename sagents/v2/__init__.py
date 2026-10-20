@@ -12,6 +12,8 @@ from sagents.v2._lazy import exported_names, resolve_export
 
 _EXPORTS = {
     "RuntimeConfig": ("sagents.v2.package.manifest.runtime", "RuntimeConfig"),
+    "SkillModulesConfig": ("sagents.v2.package.manifest.runtime", "SkillModulesConfig"),
+    "SkillUsageConfig": ("sagents.v2.package.manifest.runtime", "SkillUsageConfig"),
     "default_runtime": ("sagents.v2.composition.defaults", "default_runtime"),
     "LoadedAgent": ("sagents.v2.composition.loaded_agents", "LoadedAgent"),
     "StartupRecoveryIssue": ("sagents.v2.composition.loaded_agents", "StartupRecoveryIssue"),

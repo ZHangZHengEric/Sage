@@ -103,8 +103,10 @@ try:
                 result = info(parent, name, "/".join(parts))
             elif operation == "delete":
                 item = info(parent, name, "/".join(parts))
-                if not item["is_file"]: raise IsADirectoryError(name)
-                os.unlink(name, dir_fd=parent)
+                if item["is_directory"]:
+                    os.rmdir(name, dir_fd=parent)
+                else:
+                    os.unlink(name, dir_fd=parent)
                 result = {}
             else: raise ValueError("unsupported operation")
         finally: os.close(parent)

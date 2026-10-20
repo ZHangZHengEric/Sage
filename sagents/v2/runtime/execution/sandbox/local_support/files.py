@@ -66,6 +66,11 @@ def write(root, relative, content, *, create, uid=None, gid=None):
 def delete(root, relative):
     with parent_fd(root, relative) as (parent, name):
         info = os.stat(name, dir_fd=parent, follow_symlinks=False)
+        if stat.S_ISDIR(info.st_mode):
+            # Only an empty directory may be removed. This is descriptor-
+            # relative and never follows symlinks or recursively deletes data.
+            os.rmdir(name, dir_fd=parent)
+            return
         if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
             raise PermissionError(
                 "only regular files without hard links can be deleted"

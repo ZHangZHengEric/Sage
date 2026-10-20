@@ -8,7 +8,7 @@ from sagents.v2.runtime.extensions import (
     ExtensionScope,
 )
 from sagents.v2.skill.provider import SkillLoader
-from sagents.v2.skill.tool import SkillLoadTool
+from sagents.v2.skill.tool import SkillEditTool, SkillLoadTool
 from sagents.v2.tool.decorated import DecoratedToolProvider
 
 
@@ -30,7 +30,7 @@ class SkillToolPlugin:
         supported_scopes=frozenset({ExtensionScope.AGENT, ExtensionScope.RUN}),
         config_schema={
             "type": "object",
-            "properties": {"loader": {}, "language": {"type": "string"}},
+            "properties": {"loader": {}, "language": {"type": "string"}, "allow_editing": {"type": "boolean"}},
             "required": ["loader"],
             "additionalProperties": False,
         },
@@ -38,8 +38,13 @@ class SkillToolPlugin:
         built_in=True,
     )
 
-    def __init__(self, loader: SkillLoader, *, language: str | None = None) -> None:
-        provider = DecoratedToolProvider(SkillLoadTool(loader, language=language))
+    def __init__(self, loader: SkillLoader, *, language: str | None = None, allow_editing: bool = False) -> None:
+        owners = [SkillLoadTool(loader, language=language)]
+        if allow_editing:
+            if not callable(getattr(loader.workspace, "begin_edit", None)):
+                raise ValueError("Selected Skill workspace does not support editing")
+            owners.append(SkillEditTool(loader))
+        provider = DecoratedToolProvider(*owners)
         self.catalog = provider
         self.executor = provider
         self.definitions = provider.definitions

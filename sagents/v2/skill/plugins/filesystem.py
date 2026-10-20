@@ -69,6 +69,7 @@ class FilesystemSkillProvider:
                         name=candidate.name,
                         description=description,
                         source_id=self.source_id,
+                        metadata={"source_directory": str(candidate)},
                     ),
                 )
         return values
@@ -86,10 +87,20 @@ class FilesystemSkillProvider:
             name=name,
             description=self._cached_description(root / "SKILL.md"),
             source_id=self.source_id,
+            metadata={"source_directory": str(root)},
         )
 
     async def fetch(self, name: str, *, run_id: str) -> SkillBundle:
         return await bounded_to_thread("skill-io", lambda: self._fetch(name))
+
+    async def fetch_latest(self, name: str, *, run_id: str) -> SkillBundle:
+        return await self.fetch(name, run_id=run_id)
+
+    async def publish(self, bundle: SkillBundle, *, expected_version: str | None = None):
+        raise self._error("skill.read_only", "Filesystem Skill sources are managed outside Sage; use a versioned repository to publish")
+
+    async def list_versions(self, name: str) -> tuple[SkillDescriptor, ...]:
+        return (await bounded_to_thread("skill-io", lambda: self._descriptor(name)),)
 
     def _fetch(self, name: str) -> SkillBundle:
         descriptor = self._descriptor(name)

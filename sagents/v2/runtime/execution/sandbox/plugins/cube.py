@@ -100,6 +100,7 @@ class _CubeRow:
     sandbox: object
     created_at: datetime
     updated_at: datetime
+    workspace_identity: str = ""
     state: SandboxState = SandboxState.READY
     revision: int = 0
     attached_clients: int = 1
@@ -227,6 +228,7 @@ class _CubeNoNetwork:
 class _CubeHandle:
     def __init__(self, provider, row):
         self.provider, self.ref = provider, row.ref
+        self.workspace_identity = row.workspace_identity or row.ref.sandbox_id
         self.filesystem = _CubeFiles(provider, row)
         self.process = _CubeProcess(provider, row)
         self.network = _CubeNoNetwork()
@@ -324,7 +326,7 @@ class CubeVolumeSandboxProvider:
             provider_version=self.provider_version, tenant_id=context.actor.tenant_id,
             owner_run_id=run_id, spec_hash=spec.spec_hash, policy_hash=spec.policy_hash,
         )
-        row = _CubeRow(ref, spec, sandbox, now, now,
+        row = _CubeRow(ref, spec, sandbox, now, now, workspace_identity="cube:" + name,
                        process_slots=asyncio.Semaphore(spec.process.max_processes))
         self._rows[ref.sandbox_id] = row
         return _CubeHandle(self, row)
