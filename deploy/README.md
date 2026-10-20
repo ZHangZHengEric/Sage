@@ -3,7 +3,7 @@
 本目录维护 Server 与 Web 的独立部署。v2 配置详见 [服务指南](../app/v2/server/README.md)，仅支持单 worker。v1 的部署文件与说明位于 [app/v1/deploy](../app/v1/deploy/README.md)。
 
 - `deploy/compose_v2.sh`：v2 部署入口
-- `deploy/standalone/`：v2 Compose、nginx 和环境变量模板
+- `deploy/standalone/`：v2 Compose 和 nginx 配置
 - `deploy/images/`：v2 镜像及沙箱前端测试工具构建资源
 
 ## Docker Compose
@@ -17,8 +17,8 @@ V2 后端镜像与源码安装统一使用根目录 `pyproject.toml` 的核心�
 在仓库根目录执行：
 
 ```bash
-cp deploy/standalone/.env.example deploy/standalone/.env
-# 编辑 .env，填写 MySQL URL、随机 JWT 密钥和管理员密码
+cp .env.example deploy/standalone/.env
+# 编辑 deploy/standalone/.env，填写 MySQL URL、随机 JWT 密钥和管理员密码
 # JWT 密钥可用 openssl rand -hex 32 生成
 deploy/compose_v2.sh up -d --build
 ```
@@ -42,7 +42,7 @@ V2 镜像自动创建 `sage-sandbox` 用户（UID/GID `10001:10001`），服务�
 
 后端 Compose 的 `systempaths=unconfined` 允许内层 bubblewrap 在独立 PID/user namespace 中挂载 `/proc`，否则 Docker 默认遮蔽的 proc 子挂载会触发 `bwrap: Can't mount proc on /proc: Operation not permitted`。该设置取消外层容器的默认系统路径遮蔽/只读限制；内层沙箱仍保留非 root 身份、独立命名空间、能力清除和 seccomp，不使用 privileged 或宿主机 PID namespace。修改后需要 `deploy/compose_v2.sh up -d --force-recreate sage-server` 重建容器，仅 restart 不会应用新的权限设置。
 
-脚本默认读取 `deploy/standalone/.env`，可用 `ENV_FILE=/path/to/.env` 指定其他配置。项目名默认为 `sage_standalone`，可用 `SAGE_COMPOSE_PROJECT_NAME` 覆盖。支持 `deploy/compose_v2.sh down`、`deploy/compose_v2.sh logs -f sage-server` 等 Compose 命令，可从任意工作目录调用。
+根目录 [`.env.example`](../.env.example) 是 Server 与 Compose 共用的唯一环境变量模板。脚本默认读取 `deploy/standalone/.env`，不受调用时工作目录影响；可用 `ENV_FILE=/path/to/.env` 指定其他配置，显式传入的相对路径以当前工作目录为基准。数据与日志的相对路径仍以 `deploy/standalone/` 为基准。项目名默认为 `sage_standalone`，可用 `SAGE_COMPOSE_PROJECT_NAME` 覆盖。支持 `deploy/compose_v2.sh down`、`deploy/compose_v2.sh logs -f sage-server` 等 Compose 命令，可从任意工作目录调用。
 
 Server 本地沙箱的预装前端测试环境、离线调用及隔离限制见
 [前端测试环境说明](images/frontend-test/README.md)。

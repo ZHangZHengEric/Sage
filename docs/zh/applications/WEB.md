@@ -21,7 +21,7 @@ Python 3.12+、MySQL 和 Node.js 22.12+。先完成[源码环境安装](GETTING_
 
 ```bash
 python -m pip install -e '.[server]'
-cp app/v2/server/.env.example app/v2/server/.env
+cp .env.example app/v2/server/.env
 ```
 
 在 `app/v2/server/.env` 中配置 `SAGE_SERVER_MYSQL_URL`、自己的 `SAGE_SERVER_JWT_SECRET`（至少 32 字节），以及初始管理员账号。

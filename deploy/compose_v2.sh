@@ -2,6 +2,7 @@
 set -euo pipefail
 
 DEPLOY_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT_DIR="$(cd "$DEPLOY_DIR/.." && pwd)"
 
 if [ "$#" -eq 0 ] || [ "${1:-}" = "--help" ] || [ "${1:-}" = "-h" ]; then
   cat <<'EOF'
@@ -15,7 +16,7 @@ Examples:
   deploy/compose_v2.sh logs -f sage-server
   deploy/compose_v2.sh config --services
 
-Default env file: deploy/standalone/.env
+Default env file: deploy/standalone/.env (independent of working directory)
 Override with ENV_FILE=/path/to/.env.
 Default project: sage_standalone
 Override with SAGE_COMPOSE_PROJECT_NAME.
@@ -31,7 +32,7 @@ esac
 
 if [ ! -f "$ENV_FILE" ]; then
   echo "Env file not found: $ENV_FILE" >&2
-  echo "Create it from: $DEPLOY_DIR/standalone/.env.example" >&2
+  echo "Create it from: $ROOT_DIR/.env.example" >&2
   exit 1
 fi
 
