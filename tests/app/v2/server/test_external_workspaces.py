@@ -91,6 +91,57 @@ def test_download_rejects_file_modified_during_snapshot(tmp_path, monkeypatch):
         prepare_download(tmp_path, "projects/site")
 
 
+@pytest.mark.parametrize('mutation', ['unchanged', 'truncate', 'grow', 'rewrite'])
+def test_single_file_download_returns_complete_bytes_or_rejects_mutation(tmp_path, monkeypatch, mutation):
+    page = tmp_path / 'live.bin'
+    original = b'x' * (2 * 1024 * 1024)
+    page.write_bytes(original)
+    original_open = downloads.os.fdopen
+
+    class Reader:
+        def __init__(self, fd, *args, **kwargs):
+            self.inner = original_open(fd, *args, **kwargs)
+            self.first = True
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return self.inner.__exit__(*args)
+
+        def read(self, size):
+            data = self.inner.read(size)
+            if self.first:
+                self.first = False
+                if mutation == 'truncate':
+                    page.write_bytes(b'')
+                elif mutation == 'grow':
+                    with page.open('ab') as output:
+                        output.write(b'new')
+                elif mutation == 'rewrite':
+                    with page.open('r+b') as output:
+                        output.seek(len(data))
+                        output.write(b'y' * len(data))
+                    info = page.stat()
+                    downloads.os.utime(page, ns=(info.st_atime_ns, info.st_mtime_ns + 1_000_000_000))
+            return data
+
+    monkeypatch.setattr(downloads.os, 'fdopen', Reader)
+    if mutation == 'unchanged':
+        stream, filename = prepare_download(tmp_path, 'live.bin')
+        with stream:
+            assert stream.read() == original
+        assert filename == 'live.bin'
+    else:
+        result = None
+        try:
+            with pytest.raises(SnapshotChangedError):
+                result = prepare_download(tmp_path, 'live.bin')
+        finally:
+            if result is not None:
+                result[0].close()
+
+
 def test_workspace_delete_is_recursive_idempotent_and_isolated(tmp_path):
     from app.v2.server.storage.external_workspaces import delete_workspace_path
     paths = prepare_server_v2_storage(tmp_path)

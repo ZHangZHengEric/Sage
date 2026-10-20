@@ -48,6 +48,7 @@ from sagents.v2.contracts.session_commit import (
     SessionCommitProposal,
 )
 from sagents.v2.runtime.execution.resources import ExecutionResourceRecord
+from sagents.v2.runtime.session.child_heads import ChildSessionHeads
 
 
 @dataclass(frozen=True, slots=True)
@@ -173,6 +174,9 @@ class SessionStore(Protocol):
     ) -> RunCreationResult: ...
 
     async def get_run(self, run_id: str) -> RunSnapshot: ...
+    async def managed_session_heads(self, run_id: str) -> tuple[ChildSessionHeads, ...]:
+        """Trusted context projection of every direct child's first/latest Run."""
+        ...
     async def list_dispatchable_runs(self) -> tuple[DispatchableRun, ...]: ...
     async def has_nonterminal_session_trees(self, session_ids: tuple[str, ...] | list[str]) -> bool:
         """Trusted Host reclamation probe, including suspended/descendant Runs."""
@@ -181,6 +185,14 @@ class SessionStore(Protocol):
     async def get_run_result(self, run_id: str) -> RunResult: ...
     async def get_session(self, session_id: str) -> SessionSnapshot: ...
     async def get_start_command(self, run_id: str) -> StartRun: ...
+    async def find_start_run(
+        self, session_id: str, idempotency_key: str, context: RequestContext
+    ) -> tuple[RunSnapshot, StartRun] | None:
+        """Find one admitted Run in the caller's start-idempotency scope.
+
+        A key bound to a different Session or principal returns no match.
+        """
+        ...
     async def get_run_context(self, run_id: str) -> RequestContext: ...
 
     async def put_attachment(
@@ -253,6 +265,8 @@ class SessionStore(Protocol):
         ...
 
     async def list_session_runs(self, session_id: str) -> tuple[RunSnapshot, ...]: ...
+
+    async def authorized_run_metadata_page(self, session_ids, context, *, after=None, limit=101, agent_id='', states=()): ...
 
     async def propose_session_commit(
         self, command: ProposeSessionCommit, context: RequestContext

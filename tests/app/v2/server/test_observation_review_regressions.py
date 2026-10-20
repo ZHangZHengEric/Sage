@@ -28,6 +28,59 @@ from tests.app.v2.server.conftest import make_test_service, register_and_login
 from tests.app.v2.server.test_agui_chat import _run_input
 
 
+@pytest.mark.asyncio
+async def test_cancelled_catalog_diagnostic_preparation_releases_model_span():
+    from types import SimpleNamespace
+    from app.v2.server.catalog.records import UserCatalog
+    from app.v2.server.packages.builder import CatalogPackageModel
+    from sagents.v2.model.middleware.recording import RecordingModelProvider
+    from sagents.v2.runtime.observability.plugins.diagnostic_noop import NoopDiagnosticSink
+    from tests.app.v2.server.conftest import scripted_hello
+
+    entered, release = asyncio.Event(), asyncio.Event()
+
+    async def catalog(user):
+        assert user == 'owner'
+        entered.set()
+        await release.wait()
+        return UserCatalog()
+
+    adapter = CatalogPackageModel(SimpleNamespace(editor_catalog=catalog),
+        SimpleNamespace(fallback_model=scripted_hello(1)), 'owner', {})
+    exporter = InMemorySpanExporter()
+    trace = PhoenixTraceSink(endpoint='http://unused/v1/traces', exporter=exporter, max_active_spans=2)
+
+    async def session(_):
+        return 'session'
+
+    recording = RecordingModelProvider(adapter, sink=NoopDiagnosticSink(),
+                                       session_id_resolver=session, trace_sink=trace)
+
+    async def consume(identifier):
+        return [event async for event in recording.stream(ModelRequest(
+            request_id=identifier, run_id='run', model_binding='primary', messages=()))]
+
+    try:
+        for index in range(3):
+            entered.clear()
+            task = asyncio.create_task(consume(f'cancel-{index}'))
+            await asyncio.wait_for(entered.wait(), 2)
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+            assert trace.statistics()['active_spans'] == 0
+        release.set()
+        events = await consume('success')
+        assert events[-1].response.text == 'hello'
+        assert trace.statistics()['dropped_spans'] == 0
+        spans = exporter.get_finished_spans()
+        assert len(spans) == 4
+        assert [span.status.status_code.name for span in spans] == ['ERROR'] * 3 + ['OK']
+    finally:
+        release.set()
+        trace.close()
+
+
 def test_terminal_http_replay_does_not_start_a_new_performance_segment(tmp_path, monkeypatch):
     exporter = InMemorySpanExporter()
     original = PhoenixTraceSink.__init__

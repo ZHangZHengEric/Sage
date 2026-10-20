@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import base64
+import json
+from datetime import datetime
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from sagents.v2.contracts.common import utc_now
@@ -154,7 +156,7 @@ class A2AService:
 
         require_scope(key, SCOPE_READ)
         context = self._context_for(key)
-        run = await self._run(task_id, context)
+        run = await self._run(task_id, context, key)
         return self._events(
             task_id,
             run.session_id,
@@ -168,7 +170,7 @@ class A2AService:
 
         require_scope(key, SCOPE_INVOKE)
         context = self._context_for(key)
-        run = await self._run(task_id, context)
+        run = await self._run(task_id, context, key)
         if run.state in TERMINAL_RUN_STATES:
             # A2A distinguishes "cannot be cancelled" from "does not exist", and
             # a Run that already finished is the former.
@@ -208,35 +210,61 @@ class A2AService:
         require_scope(key, SCOPE_READ)
         context = self._context_for(key)
         size = page_size if 0 < page_size <= _MAX_PAGE else _DEFAULT_PAGE
-        sessions = await self._session_ids(key, context_id=context_id)
         cursor = _Page.parse(page_token)
-        tasks: list[Task] = []
-        for index, session_id in enumerate(sessions):
-            if index < cursor.session_index:
-                continue
-            runs = await self._list_runs(session_id, context)
-            start = cursor.run_index if index == cursor.session_index else 0
-            for offset, run in enumerate(runs[start:], start=start):
-                if state and _state_of(run) != state:
-                    continue
-                if len(tasks) == size:
-                    return tasks, _Page(index, offset).encode()
-                tasks.append(
-                    await self._task(
-                        run.run_id,
-                        session_id,
-                        context,
-                        history_length=history_length,
-                    )
-                )
-        return tasks, ""
+        from app.v2.server.conversations.records import thread_cursor
+        selected = []
+        last_anchor = None
+        current = None
+        if cursor.session_id:
+            current = await self._threads.find(cursor.session_id)
+            if current is not None and current.user_id == key.owner_user_id:
+                current = current.model_copy(update={"updated_at": cursor.updated_at})
+            else:
+                current = None
+        after_thread = cursor.thread_cursor
+        after_run = (cursor.session_id, cursor.created_at, cursor.run_id) if cursor.run_id else None
+        states = tuple(run_state for run_state, task_state in _TASK_STATE.items() if task_state == state) if state else ()
+        if state and not states:
+            return [], ""
+        while True:
+            if context_id:
+                record = current or await self._threads.find(context_id)
+                candidates = [record] if record is not None and record.thread_id == context_id and record.user_id == key.owner_user_id else []
+                next_thread = None
+            else:
+                page = await self._threads.page(user_id=key.owner_user_id, agent_id=key.agent_id,
+                    include_unassigned=True, limit=199 if current else 200, cursor=after_thread or None)
+                candidates = ([current] if current else []) + page.items
+                next_thread = page.next_cursor
+            candidates = [row for row in candidates if not key.agent_id or row.agent_id in {'', key.agent_id}]
+            if candidates:
+                ids = [row.thread_id for row in candidates]
+                active_after = after_run if after_run is not None and after_run[0] in ids else None
+                rows = await self._session_access.run_metadata_page(ids, context, after=active_after,
+                    limit=size - len(selected) + 1, agent_id=key.agent_id, states=states)
+                remaining = size - len(selected)
+                selected.extend(rows[:remaining])
+                if rows[:remaining]:
+                    last_anchor = next(row for row in candidates if row.thread_id == selected[-1].session_id)
+                if len(rows) > remaining:
+                    last = selected[-1]
+                    anchor = last_anchor
+                    token = _Page(thread_cursor(anchor), anchor.thread_id, anchor.updated_at,
+                                  last.created_at.isoformat(), last.run_id).encode()
+                    break
+            if not next_thread:
+                token = ""
+                break
+            after_thread, current, after_run = next_thread, None, None
+        tasks = [await self._task(row.run_id, row.session_id, context, history_length=history_length) for row in selected]
+        return tasks, token
 
     async def get_task(
         self, task_id: str, key: ApiKeyRecord, *, history_length: int = 0
     ) -> Task:
         require_scope(key, SCOPE_READ)
         context = self._context_for(key)
-        run = await self._run(task_id, context)
+        run = await self._run(task_id, context, key)
         return await self._task(
             task_id, run.session_id, context, history_length=history_length
         )
@@ -319,11 +347,7 @@ class A2AService:
         require_scope(key, SCOPE_INVOKE)
         context = self._context_for(key, correlation_id=get_request_id())
         task_id = message.task_id
-        run = await self._run(task_id, context)
-        command = await self._application.runtime.session_store.get_start_command(task_id)
-        if key.agent_id and key.agent_id != command.agent_id:
-            raise SageV2Error(RuntimeErrorInfo(code="server.conversations.a2a.service.not_found",
-                category=ErrorCategory.VALIDATION, message="task not found"))
+        run = await self._run(task_id, context, key)
         if run.state != RunState.SUSPENDED:
             # Continuing a finished conversation is a new Task in the same
             # context, not a message to the old one, so this is the client
@@ -405,27 +429,18 @@ class A2AService:
         ):
             yield event
 
-    async def _run(self, task_id: str, context):
+    async def _run(self, task_id: str, context, key):
         try:
-            return await self._session_access.get_run(task_id, context)
+            run = await self._session_access.get_run(task_id, context)
+            command = await self._session_access.get_start_command(task_id, context)
+            from app.v2.server.storage.workspaces import workspace_agent_id
+            admitted_agent_id = command.agent_id if command.parent_run_id else workspace_agent_id(command)
+            if key.agent_id and key.agent_id != admitted_agent_id:
+                raise SageV2Error(RuntimeErrorInfo(code="server.conversations.a2a.service.not_found",
+                    category=ErrorCategory.VALIDATION, message="task not found"))
+            return run
         except SageV2Error as exc:
             raise _absent(exc) from exc
-
-    async def _session_ids(self, key: ApiKeyRecord, *, context_id: str) -> list[str]:
-        threads = await self._threads.list_for(key.owner_user_id)
-        ids = [thread.thread_id for thread in threads]
-        if not context_id:
-            return ids
-        # A context the key cannot see is empty, not forbidden, for the same
-        # reason an unreadable Task is reported as missing.
-        return [item for item in ids if item == context_id]
-
-    async def _list_runs(self, session_id: str, context) -> list:
-        try:
-            runs = await self._session_access.list_session_runs(session_id, context)
-        except SageV2Error:
-            return []
-        return sorted(runs, key=lambda run: (run.created_at, run.run_id))
 
     async def _task(
         self, run_id: str, session_id: str, context, *, history_length: int
@@ -487,53 +502,34 @@ class _Started:
 
 @dataclass(frozen=True, slots=True)
 class _Page:
-    """Where a ``ListTasks`` walk stopped: a thread, and a Run inside it.
+    """Opaque keyset: original thread order and last emitted Run identity."""
+    thread_cursor: str = ""
+    session_id: str = ""
+    updated_at: str = ""
+    created_at: str = ""
+    run_id: str = ""
 
-    Indices rather than ids because the walk is ordered and resumable from a
-    position; an id would need a second lookup to find the position again. The
-    token is opaque to the client so the shape can change without breaking one.
-    """
-
-    session_index: int = 0
-    run_index: int = 0
-
-    def encode(self) -> str:
-        raw = f"v1:{self.session_index}:{self.run_index}".encode()
-        return base64.urlsafe_b64encode(raw).decode()
+    def encode(self):
+        return base64.urlsafe_b64encode(json.dumps(["v2", self.thread_cursor, self.session_id,
+            self.updated_at, self.created_at, self.run_id], separators=(",", ":")).encode()).decode()
 
     @classmethod
-    def parse(cls, value: str) -> "_Page":
+    def parse(cls, value):
         if not value:
             return cls()
         try:
-            decoded = base64.urlsafe_b64decode(value.encode()).decode()
-            marker, session_index, run_index = decoded.split(":")
-        except (ValueError, UnicodeDecodeError):
-            raise SageV2Error(
-                RuntimeErrorInfo(
-                    code="server.conversations.a2a.service.validation",
-                    category=ErrorCategory.VALIDATION,
-                    message="malformed page token",
-                )
-            ) from None
-        if marker != "v1":
-            raise SageV2Error(
-                RuntimeErrorInfo(
-                    code="server.conversations.a2a.service.validation",
-                    category=ErrorCategory.VALIDATION,
-                    message="unsupported page token",
-                )
-            )
-        try:
-            return cls(int(session_index), int(run_index))
-        except ValueError:
-            raise SageV2Error(
-                RuntimeErrorInfo(
-                    code="server.conversations.a2a.service.validation",
-                    category=ErrorCategory.VALIDATION,
-                    message="malformed page token",
-                )
-            ) from None
+            values = json.loads(base64.b64decode(value.encode(), altchars=b"-_", validate=True))
+            if not isinstance(values, list) or len(values) != 6 or values[0] != "v2" or not all(isinstance(item, str) for item in values):
+                raise ValueError("invalid keyset")
+            datetime.fromisoformat(values[3])
+            datetime.fromisoformat(values[4])
+            from app.v2.server.conversations.records import ThreadRecord, thread_cursor
+            if thread_cursor(ThreadRecord(thread_id=values[2], user_id="", updated_at=values[3])) != values[1]:
+                raise ValueError("invalid thread anchor")
+            return cls(*values[1:])
+        except (ValueError, TypeError, UnicodeDecodeError):
+            raise SageV2Error(RuntimeErrorInfo(code="server.conversations.a2a.service.validation",
+                category=ErrorCategory.VALIDATION, message="malformed page token")) from None
 
 
 def _state_of(run) -> int:

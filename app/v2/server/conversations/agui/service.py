@@ -34,6 +34,10 @@ def _error(code, message, category=ErrorCategory.VALIDATION):
     )
 
 
+def _external_run_key(session_id, client_run_id):
+    return "external_" + hashlib.sha256((session_id + ":" + client_run_id).encode()).hexdigest()
+
+
 class ConversationService:
     def __init__(
         self,
@@ -55,6 +59,37 @@ class ConversationService:
         self.session_access = session_access
         self.log_sink = log_sink
         self.context_for = context_for
+
+    async def _legacy_scope_matches(self, session_id, legacy_id, owner_id, user_id, agent_id):
+        context = self.context_for(owner_id)
+        # Metadata pages omit inaccessible Sessions; an empty page alone does
+        # not establish that this legacy Session is empty and may be claimed.
+        await self.session_access.get_session(session_id, context)
+        after, found = None, False
+        while True:
+            rows = await self.session_access.run_metadata_page([session_id], context,
+                after=after, limit=200)
+            for run in rows:
+                found = True
+                command = await self.session_access.get_start_command(run.run_id, context)
+                tenant = command.config.metadata.get("server_v2.workspace_user_id")
+                if (command.agent_id != agent_id or tenant not in {None, user_id}
+                        or (tenant is None and session_id != legacy_id)):
+                    return False
+            if len(rows) < 200:
+                return found or session_id == legacy_id
+            last = rows[-1]
+            after = (last.session_id, last.created_at.isoformat(), last.run_id)
+
+    async def _find_client_run(self, session_id, client_run_id, context, *, external):
+        keys = (_external_run_key(session_id, client_run_id), client_run_id) if external else (client_run_id,)
+        for key in keys:
+            found = await self.session_access.find_start_run(session_id, key, context)
+            if found is not None:
+                _, command = found
+                if command.config.metadata.get("server_v2.external.run_id", command.idempotency_key) == client_run_id:
+                    return found
+        return None
 
     async def _scope(self, user_id, agent_id, session_id, *, for_start=False):
         if not user_id.strip() or not agent_id.strip():
@@ -85,16 +120,7 @@ class ConversationService:
             elif valid:
                 # Upgrade old bindings from durable Run metadata. A native
                 # thread owned by the Agent owner is not an external tenant's.
-                runs = await self.session_access.list_session_runs(candidate, self.context_for(owner_id))
-                for run in runs:
-                    command = await self.session_access.get_start_command(run.run_id, self.context_for(owner_id))
-                    tenant = command.config.metadata.get("server_v2.workspace_user_id")
-                    if (command.agent_id != agent_id or tenant not in {None, user_id}
-                            or (tenant is None and candidate != legacy_id)):
-                        valid = False
-                        break
-                if not runs and candidate != legacy_id:
-                    valid = False
+                valid = await self._legacy_scope_matches(candidate, legacy_id, owner_id, user_id, agent_id)
             if not valid:
                 if for_start:
                     require_binding(binding, expected)
@@ -122,23 +148,15 @@ class ConversationService:
                 raise _error("result_not_found", "run not found")
         access = self.session_access
         context = self.context_for(owner)
-        runs = await access.list_session_runs(internal_id, context)
-        selected = None
-        selected_run_id = None
-        for run in sorted(
-            runs,
-            key=lambda item: (item.accepted_session_revision, item.created_at, item.run_id),
-            reverse=True,
-        ):
-            command = await access.get_start_command(run.run_id, context)
-            client_run_id = command.config.metadata.get(
-                "server_v2.external.run_id", command.idempotency_key
-            )
-            if run_id is None or client_run_id == run_id:
-                selected, selected_run_id = run, client_run_id
-                break
-        if selected is None:
+        if run_id is None:
+            command = await access.latest_session_start_command(internal_id, context)
+            found = await access.find_start_run(internal_id, command.idempotency_key, context) if command else None
+        else:
+            found = await self._find_client_run(internal_id, run_id, context, external=agent_id is not None)
+        if found is None:
             raise _error("result_not_found", "run not found")
+        selected, command = found
+        selected_run_id = command.config.metadata.get("server_v2.external.run_id", command.idempotency_key)
         payload = {
             "session_id": internal_id,
             "threadId": internal_id,
@@ -302,7 +320,7 @@ class ConversationService:
             with log_duration(logger, "server.admission.phase", "外部会话归属解析结束",
                               session_id=stream_thread_id, attributes={"phase": "external_scope"}):
                 user_id, internal_id = await self._scope(user_id, agent_id, stream_thread_id, for_start=True)
-            internal_run_id = "external_" + hashlib.sha256((internal_id + ":" + stream_run_id).encode()).hexdigest()
+            internal_run_id = _external_run_key(internal_id, stream_run_id)
             request = request.model_copy(update={
                 "thread_id": internal_id, "run_id": internal_run_id,
                 "forwarded_props": {**(request.forwarded_props or {}), "agentId": agent_id},
@@ -355,17 +373,10 @@ class ConversationService:
         if stream_run_id is not None:
             # Freeze retries to their original admitted command. Upgrades must
             # not change its idempotency digest or silently accept new input.
-            try:
-                previous_runs = await self.session_access.list_session_runs(
-                    thread_id, self.context_for(user_id))
-            except SageV2Error as exc:
-                if not exc.info.code.endswith("not_found"):
-                    raise
-                previous_runs = ()
-            for previous in previous_runs:
-                stored = await self.session_access.get_start_command(previous.run_id, self.context_for(user_id))
-                if stored.config.metadata.get("server_v2.external.run_id") != stream_run_id:
-                    continue
+            previous = await self._find_client_run(thread_id, stream_run_id,
+                self.context_for(user_id), external=True)
+            if previous is not None:
+                _, stored = previous
                 old_context = dict(stored.config.metadata.get("system_context") or {})
                 new_context = dict(runtime_context or {})
                 old_context.pop("session_id", None)
@@ -375,7 +386,6 @@ class ConversationService:
                         or old_context != new_context):
                     raise _error("idempotency_conflict", "runId is already bound to a different request", ErrorCategory.CONFLICT)
                 command = stored
-                break
         async with self.runs.workspace_guard(workspace_user_id, admitted.agent_id):
             # Validate and claim ownership before Run creation or workspace writes.
             with log_duration(logger, "server.admission.phase", "会话归属绑定结束",

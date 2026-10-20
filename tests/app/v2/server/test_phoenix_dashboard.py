@@ -1,3 +1,4 @@
+import gzip
 import json
 
 import httpx
@@ -48,6 +49,47 @@ async def test_graphql_error_is_not_presented_as_empty_data():
     async with httpx.AsyncClient(transport=httpx.MockTransport(handle)) as client:
         with pytest.raises(ValueError, match='Phoenix query failed'):
             await PhoenixDashboard(source).spans(start='a', end='b', client=client)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('limit', ['encoding', 'response', 'bytes', 'requests'])
+async def test_graphql_enforces_the_shared_query_budget_before_parsing(limit):
+    from sagents.v2.runtime.observability.query import query_budget
+
+    source = ExternalDiagnostics(backend='phoenix', query_url='http://phoenix',
+                                 headers={'Accept-Encoding': 'gzip'})
+    source.max_response_bytes = 128 if limit == 'response' else 1024
+    body = json.dumps({'data': {'value': 'x' * (256 if limit == 'response' else 64)}}).encode()
+    reads, dispatched = [], []
+
+    class Wire(httpx.AsyncByteStream):
+        async def __aiter__(self):
+            reads.append(True)
+            yield gzip.compress(body) if limit == 'encoding' else body
+
+    def handle(request):
+        dispatched.append(request)
+        return httpx.Response(200, stream=Wire(), headers={
+            'Content-Encoding': 'gzip' if limit == 'encoding' else 'identity',
+        })
+
+    try:
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handle)) as client:
+            async with query_budget(max_bytes=128 if limit == 'bytes' else 4096,
+                                    requests=1 if limit == 'requests' else 4):
+                with pytest.raises(ValueError, match={
+                    'encoding': 'encoding', 'response': 'response exceeds',
+                    'bytes': 'byte budget', 'requests': 'request budget',
+                }[limit]):
+                    for _ in range(2 if limit in {'bytes', 'requests'} else 1):
+                        await PhoenixDashboard(source)._graphql(client, 'query { node { id } }', {})
+        assert all(request.headers['Accept-Encoding'] == 'identity' for request in dispatched)
+        if limit == 'encoding':
+            assert reads == []
+        if limit == 'requests':
+            assert len(dispatched) == 1
+    finally:
+        await source.close()
 
 
 def test_embedded_endpoints_require_admin_and_share_time_filter(tmp_path, monkeypatch):

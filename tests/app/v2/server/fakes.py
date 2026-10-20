@@ -111,17 +111,32 @@ class MemoryCatalogStore:
         self._catalogs[user_id] = catalog.model_copy(deep=True)
         return catalog
 
-    async def replace_section(
-        self, user_id: str, section: str, catalog: UserCatalog
+    async def replace_models(
+        self, user_id: str, catalog: UserCatalog
     ) -> UserCatalog:
         current = self._catalogs.get(user_id) or empty_catalog()
-        updated = current.model_copy(update={section: getattr(catalog, section)})
+        updated = current.model_copy(update={"models": catalog.models})
         self._catalogs[user_id] = updated
         return updated
 
     async def create_agent(self, user_id, record):
         catalog = await self.get(user_id)
         catalog.agents.append(record)
+        await self.save(user_id, catalog)
+
+    async def save_resource(self, user_id, section, record):
+        catalog = await self.get(user_id)
+        records = getattr(catalog, section)
+        if any(item.name == record.name for item in records):
+            records = [record if item.name == record.name else item for item in records]
+        else:
+            records.append(record)
+        setattr(catalog, section, records)
+        await self.save(user_id, catalog)
+
+    async def delete_resource(self, user_id, section, name):
+        catalog = await self.get(user_id)
+        setattr(catalog, section, [item for item in getattr(catalog, section) if item.name != name])
         await self.save(user_id, catalog)
 
     async def update_agent(self, user_id, record):
@@ -159,12 +174,12 @@ class MemoryCatalogStore:
         self, user_id: str, payload: dict[str, object]
     ) -> ModelRecord:
         record, catalog = apply_upsert(await self.get(user_id), payload)
-        await self.replace_section(user_id, "models", catalog)
+        await self.replace_models(user_id, catalog)
         return record
 
     async def delete_model(self, user_id: str, model_id: str) -> None:
         catalog = apply_delete(await self.get(user_id), model_id)
-        await self.replace_section(user_id, "models", catalog)
+        await self.replace_models(user_id, catalog)
 
 
 
@@ -181,10 +196,10 @@ class MemoryThreadIndex:
         existing = self._bindings.setdefault(binding.session_id, binding)
         require_binding(existing, binding)
 
-    async def page(self, *, user_id=None, limit=50, cursor=None, search="", agent_id="", matching_agent_ids=()):
+    async def page(self, *, user_id=None, limit=50, cursor=None, search="", agent_id="", matching_agent_ids=(), include_unassigned=False):
         from app.v2.server.conversations.records import ThreadPage, thread_cursor, parse_thread_cursor
         rows = [row for row in self._threads.values() if (user_id is None or row.user_id == user_id)
-            and (not agent_id or row.agent_id == agent_id)
+            and (not agent_id or row.agent_id == agent_id or (include_unassigned and not row.agent_id))
             and (not search.strip() or search.strip().lower() in f"{row.title} {row.agent_id}".lower() or row.agent_id in matching_agent_ids)]
         rows.sort(key=lambda row: (row.updated_at, row.thread_id), reverse=True)
         values = parse_thread_cursor(cursor)

@@ -67,6 +67,9 @@ class AuthorizedSessionAccess:
         await self._authorize(run.session_id, context)
         return await self._session_store.get_start_command(run_id)
 
+    async def find_start_run(self, session_id: str, idempotency_key: str, context: RequestContext):
+        return await self._session_store.find_start_run(session_id, idempotency_key, context)
+
     async def get_checkpoint(self, checkpoint_id: str, context: RequestContext):
         checkpoint = await self._session_store.get_checkpoint(checkpoint_id)
         await self._authorize(checkpoint.session_id, context)
@@ -99,6 +102,9 @@ class AuthorizedSessionAccess:
     async def list_session_runs(self, session_id: str, context: RequestContext):
         await self._authorize(session_id, context)
         return await self._session_store.list_session_runs(session_id)
+
+    async def run_metadata_page(self, session_ids, context, **options):
+        return await self._session_store.authorized_run_metadata_page(session_ids, context, **options)
 
     async def list_session_commit_proposals(
         self, session_id: str, context: RequestContext

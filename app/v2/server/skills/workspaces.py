@@ -5,6 +5,7 @@ runtime/agent-skill-sync-* so a failed update can be recovered.
 """
 
 from datetime import datetime, timezone
+from contextlib import closing
 import os
 from pathlib import Path
 import stat
@@ -98,9 +99,9 @@ def _remove_tree(parent: int, name: str) -> None:
 
 
 def sync_workspaces(data_root: Path, agent_id: str,
-                    packages: dict[str, dict[str, bytes]]) -> dict:
+                    packages: dict[str, dict[str, bytes]], *,
+                    tenants: tuple[str, ...] | None = None) -> dict:
     """Sync complete packages; keep other Skills and immutable .catalog caches."""
-    segment = identity_segment(agent_id)
     if not packages or len(packages) > 32:
         raise ValueError("Skill packages are required")
     for name, files in packages.items():
@@ -111,15 +112,43 @@ def sync_workspaces(data_root: Path, agent_id: str,
     backup = root / "runtime" / ("agent-skill-sync-" + datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ"))
     workspaces = 0
     changed = 0
-    rootfd = os.open(root, _FLAGS)
+    with closing(_existing_workspaces(root, agent_id, tenants)) as existing:
+        for tenant, workspace in existing:
+            info = os.fstat(workspace)
+            owner = (info.st_uid, info.st_gid)
+            skills = _child(workspace, "skills", create=True, owner=owner)
+            try:
+                workspaces += 1
+                for name, files in sorted(packages.items()):
+                    changed += int(_replace_package(skills, name, files, owner, backup / tenant / name))
+            finally:
+                os.close(skills)
+    return {"workspaces": workspaces, "changed_workspaces": changed,
+            "backup": str(backup) if backup.exists() else None}
+
+
+def discover_agent_workspaces(data_root: Path, agent_id: str) -> tuple[str, ...]:
+    """Snapshot existing tenant names without retaining packages or open FDs.
+
+    Synchronization reopens every component with NOFOLLOW; names in this snapshot
+    never authorize following a workspace that was replaced with a symlink.
+    """
+    with closing(_existing_workspaces(data_root, agent_id)) as existing:
+        return tuple(tenant for tenant, _ in existing)
+
+
+def _existing_workspaces(data_root: Path, agent_id: str, tenants: tuple[str, ...] | None = None):
+    segment = identity_segment(agent_id)
+    rootfd = os.open(data_root, _FLAGS)
     try:
         try:
-            tenants = _child(rootfd, "tenants")
+            tenantsfd = _child(rootfd, "tenants")
         except FileNotFoundError:
-            return {"workspaces": 0, "changed_workspaces": 0, "backup": None}
+            return
         try:
-            for tenant in sorted(os.listdir(tenants)):
-                tenantfd = _child(tenants, tenant)
+            names = sorted(os.listdir(tenantsfd)) if tenants is None else tenants
+            for tenant in names:
+                tenantfd = _child(tenantsfd, tenant)
                 try:
                     try:
                         agentfd = _child(tenantfd, segment)
@@ -131,47 +160,7 @@ def sync_workspaces(data_root: Path, agent_id: str,
                         except FileNotFoundError:
                             continue
                         try:
-                            info = os.fstat(workspace)
-                            owner = (info.st_uid, info.st_gid)
-                            skills = _child(workspace, "skills", create=True, owner=owner)
-                            try:
-                                workspaces += 1
-                                for name, files in sorted(packages.items()):
-                                    try:
-                                        existing = _child(skills, name)
-                                    except FileNotFoundError:
-                                        old_files = None
-                                    else:
-                                        try:
-                                            old_files = _read_tree(existing)
-                                        finally:
-                                            os.close(existing)
-                                    if old_files == files:
-                                        continue
-                                    temporary = ".skill-sync-" + uuid.uuid4().hex
-                                    staging = _child(skills, temporary, create=True, owner=owner)
-                                    try:
-                                        try:
-                                            _write_package(staging, files, owner)
-                                        finally:
-                                            os.close(staging)
-                                        saved = None
-                                        if old_files is not None:
-                                            saved = backup / tenant / name
-                                            saved.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-                                            os.rename(name, saved, src_dir_fd=skills)
-                                        try:
-                                            os.rename(temporary, name, src_dir_fd=skills, dst_dir_fd=skills)
-                                        except Exception:
-                                            if saved is not None:
-                                                os.rename(saved, name, dst_dir_fd=skills)
-                                            raise
-                                        os.fsync(skills)
-                                        changed += 1
-                                    finally:
-                                        _remove_tree(skills, temporary)
-                            finally:
-                                os.close(skills)
+                            yield tenant, workspace
                         finally:
                             os.close(workspace)
                     finally:
@@ -179,8 +168,43 @@ def sync_workspaces(data_root: Path, agent_id: str,
                 finally:
                     os.close(tenantfd)
         finally:
-            os.close(tenants)
+            os.close(tenantsfd)
     finally:
         os.close(rootfd)
-    return {"workspaces": workspaces, "changed_workspaces": changed,
-            "backup": str(backup) if backup.exists() else None}
+
+
+def _replace_package(skills: int, name: str, files: dict[str, bytes],
+                     owner: tuple[int, int], backup: Path) -> bool:
+    try:
+        existing = _child(skills, name)
+    except FileNotFoundError:
+        old_files = None
+    else:
+        try:
+            old_files = _read_tree(existing)
+        finally:
+            os.close(existing)
+    if old_files == files:
+        return False
+    temporary = ".skill-sync-" + uuid.uuid4().hex
+    staging = _child(skills, temporary, create=True, owner=owner)
+    try:
+        try:
+            _write_package(staging, files, owner)
+        finally:
+            os.close(staging)
+        saved = None
+        if old_files is not None:
+            saved = backup
+            saved.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+            os.rename(name, saved, src_dir_fd=skills)
+        try:
+            os.rename(temporary, name, src_dir_fd=skills, dst_dir_fd=skills)
+        except Exception:
+            if saved is not None:
+                os.rename(saved, name, dst_dir_fd=skills)
+            raise
+        os.fsync(skills)
+        return True
+    finally:
+        _remove_tree(skills, temporary)

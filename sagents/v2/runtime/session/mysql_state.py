@@ -32,6 +32,8 @@ from sagents.v2.runtime.session.journal import (
 from sagents.v2.runtime.session.state import SessionStoreCoordinator
 from sagents.v2.runtime.session.mysql_history import MysqlHistoryQueries
 from sagents.v2.runtime.session.mysql_workspace import MysqlWorkspaceQueries
+from sagents.v2.runtime.session.mysql_child_heads import MysqlManagedSessionHeads
+from sagents.v2.runtime.session.mysql_run_metadata import MysqlRunMetadataQueries
 from sagents.v2.runtime.session.mysql_cache import IdleSessionCache, cached_session_operation
 from sagents.v2.runtime.observability.logs import get_logger
 
@@ -129,7 +131,7 @@ def parse_mysql_dsn(dsn: str) -> dict[str, Any]:
     }
 
 
-class _MysqlSessionState(MysqlWorkspaceQueries, MysqlHistoryQueries, SessionStoreCoordinator):
+class _MysqlSessionState(MysqlManagedSessionHeads, MysqlRunMetadataQueries, MysqlWorkspaceQueries, MysqlHistoryQueries, SessionStoreCoordinator):
     """Single-process MySQL adapter around the shared state coordinator."""
 
     format_version = "sage.session.mysql/v2"
@@ -999,6 +1001,11 @@ class _MysqlSessionState(MysqlWorkspaceQueries, MysqlHistoryQueries, SessionStor
     async def get_run_result(self, run_id):
         await self._ensure_resource_loaded("runs", "run_id", run_id)
         return await super().get_run_result(run_id)
+
+    @cached_session_operation
+    async def find_start_run(self, session_id, idempotency_key, context):
+        await self._ensure_session_loaded(session_id, missing_ok=True)
+        return await super().find_start_run(session_id, idempotency_key, context)
 
     @cached_session_operation
     async def get_start_command(self, run_id):

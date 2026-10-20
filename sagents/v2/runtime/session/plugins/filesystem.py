@@ -29,6 +29,7 @@ from sagents.v2.contracts.errors import (
 )
 from sagents.v2.contracts.run_state import TERMINAL_RUN_STATES
 from sagents.v2.runtime.session.state import SessionStoreCoordinator
+from sagents.v2.runtime.session.child_heads import FilesystemManagedSessionHeads
 from sagents.v2.runtime.session.filesystem_layout import (
     SESSION_LAYOUT_FORMAT,
     resolve_session_directory,
@@ -81,7 +82,7 @@ class SessionStoreCorruptionError(SageV2Error):
     """Raised when authoritative Session state integrity cannot be established."""
 
 
-class _FilesystemSessionState(SessionStoreCoordinator):
+class _FilesystemSessionState(FilesystemManagedSessionHeads, SessionStoreCoordinator):
     """Single-host persistence adapter around the state coordinator.
 
     Runtime semantics live in :class:`SessionStoreCoordinator`; this subclass
@@ -439,6 +440,26 @@ class _FilesystemSessionState(SessionStoreCoordinator):
         await self._ensure_session_loaded(session_id)
         return await super().list_session_runs(session_id)
 
+    async def _run_metadata_batch(self, session_ids):
+        from sagents.v2.runtime.session.run_metadata import metadata_from_payload
+        from sagents.v2.runtime.session.metadata_replay import read_filesystem_metadata
+        rows, owners = await super()._run_metadata_batch(session_ids)
+        loaded = set(owners)
+        def read():
+            result, heads = list(rows), dict(owners)
+            for sid in session_ids:
+                if sid in loaded:
+                    continue
+                path = self._session_dir(sid) / 'state.json'
+                if not path.is_file():
+                    continue
+                payload = read_filesystem_metadata(self, path)
+                current, owner = metadata_from_payload(payload)
+                result.extend(current)
+                heads.update(owner)
+            return tuple(result), heads
+        return await asyncio.to_thread(read)
+
     async def has_nonterminal_session_trees(self, session_ids):
         roots = set(session_ids)
         async with self._lock:
@@ -563,6 +584,10 @@ class _FilesystemSessionState(SessionStoreCoordinator):
     async def get_run_result(self, run_id):
         await self._ensure_resource_loaded("runs", "run_id", run_id)
         return await super().get_run_result(run_id)
+
+    async def find_start_run(self, session_id, idempotency_key, context):
+        await self._ensure_session_loaded(session_id, missing_ok=True)
+        return await super().find_start_run(session_id, idempotency_key, context)
 
     async def get_start_command(self, run_id):
         await self._ensure_resource_loaded("runs", "run_id", run_id)

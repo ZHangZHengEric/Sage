@@ -161,7 +161,7 @@ class RecordingModelProvider:
             )
             if inspect.isawaitable(wire_request):
                 wire_request = await wire_request
-        except Exception as exc:
+        except BaseException as exc:
             try:
                 await self._diagnose(
                     "begin_model_request",

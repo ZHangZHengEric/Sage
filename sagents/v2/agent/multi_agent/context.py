@@ -64,29 +64,21 @@ class AgentRosterContextProvider:
         # Resolve through the admitted Run: StartRun.session_id can be absent
         # on the first turn. All relationships below are canonical store facts,
         # available as soon as child creation commits, before a tool returns.
-        parent = await self.session_store.get_run(run_id)
-        children = await self.session_store.list_descendant_sessions(parent.session_id)
+        children = await self.session_store.managed_session_heads(run_id)
         rows = []
         for child in children:
-            if child.parent_session_id != parent.session_id:
-                continue
-            runs = await self.session_store.list_session_runs(child.session_id)
-            if not runs:
-                continue
-            first = min(runs, key=lambda run: (run.created_at, run.run_id))
-            origin = await self.session_store.get_start_command(first.run_id)
+            origin = child.first
             # Forks and Flow children are not delegated member conversations.
             if origin.invocation_mode != "delegation":
                 continue
-            latest = max(runs, key=lambda run: (run.created_at, run.run_id))
-            command = await self.session_store.get_start_command(latest.run_id)
+            latest = child.latest
             title = " ".join(
-                str(command.config.metadata.get("task_name") or "").split()
+                str(latest.task_name or "").split()
             )[:20]
             rows.append(
                 {
-                    "agent_id": self.registry.display_id(origin.agent_id),
-                    "session_id": child.session_id,
+                    "agent_id": self.registry.display_id(origin.admitted_agent_id),
+                    "session_id": origin.session_id,
                     "state": latest.state.value,
                     "task": title,
                 }

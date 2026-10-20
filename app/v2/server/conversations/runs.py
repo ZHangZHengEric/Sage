@@ -170,15 +170,13 @@ class RunService:
         suspension = await access.get_suspension(run.suspension_id, context)
         runtime = self.application.runtime
         if suspension.interaction_id is None:
-            receipt = await runtime.resume_run(
-                ResumeRun(
-                    run_id=run_id,
-                    suspension_id=suspension.suspension_id,
-                    expected_revision=run.revision,
-                    expected_suspension_revision=suspension.expected_revision,
-                    idempotency_key=f"resume:{run_id}:{run.revision}",
-                ),
-                context,
+            accept = runtime.resume_run
+            resume_command = ResumeRun(
+                run_id=run_id,
+                suspension_id=suspension.suspension_id,
+                expected_revision=run.revision,
+                expected_suspension_revision=suspension.expected_revision,
+                idempotency_key=f"resume:{run_id}:{run.revision}",
             )
         else:
             interaction = await access.get_interaction(
@@ -204,29 +202,36 @@ class RunService:
                 )
             decision, payload = answer
             await self._check_execution_grant(run, interaction, context, decision)
-            receipt = await runtime.reply_interaction(
-                ReplyInteraction(
-                    run_id=run_id,
-                    suspension_id=suspension.suspension_id,
-                    interaction_id=interaction.interaction_id,
-                    expected_revision=run.revision,
-                    expected_suspension_revision=suspension.expected_revision,
-                    expected_interaction_revision=interaction.expected_revision,
-                    decision=decision,
-                    payload=payload,
-                    idempotency_key=f"reply:{interaction.interaction_id}:{run.revision}",
-                ),
-                context,
+            accept = runtime.reply_interaction
+            resume_command = ReplyInteraction(
+                run_id=run_id,
+                suspension_id=suspension.suspension_id,
+                interaction_id=interaction.interaction_id,
+                expected_revision=run.revision,
+                expected_suspension_revision=suspension.expected_revision,
+                expected_interaction_revision=interaction.expected_revision,
+                decision=decision,
+                payload=payload,
+                idempotency_key=f"reply:{interaction.interaction_id}:{run.revision}",
             )
-        _accepted(receipt)
-        await self.continue_detached_run(
-            run_id,
-            context,
-            user_id=user_id,
-            session_id=session_id,
-            label=label,
-            performance_started_at=performance_started_at,
-        )
+
+        async def accept_and_continue():
+            # The durable acceptance may commit even if its awaiting request is
+            # cancelled. Own acceptance and the SDK handoff in the same task.
+            receipt = await accept(resume_command, context)
+            _accepted(receipt)
+            await self.continue_detached_run(
+                run_id, context, user_id=user_id, session_id=session_id,
+                label=label, performance_started_at=performance_started_at,
+            )
+
+        handoff = asyncio.create_task(accept_and_continue(), name=f"server-v2-{label}-handoff-{run_id}")
+        if self.host is not None:
+            self.host._track(handoff)
+        else:
+            # Standalone service users have no Host background registry.
+            handoff.add_done_callback(lambda task: None if task.cancelled() else task.exception())
+        await asyncio.shield(handoff)
 
     async def approval_expired(self, run, interaction) -> bool:
         command = await self.application.runtime.session_store.get_start_command(run.run_id)

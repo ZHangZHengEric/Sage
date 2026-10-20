@@ -296,7 +296,7 @@ class LoadedAgents:
                 if expected_hash is not None and handle.composition_hash != expected_hash:
                     raise ValueError("saved Agent revision no longer matches the runtime composition")
                 self._last_used[key] = monotonic()
-                await self.prune_revisions(protected=handle)
+                await self.prune_revisions(protected=handle, suppress_errors=True)
                 return handle
         finally:
             lock_state[1] -= 1
@@ -404,17 +404,30 @@ class LoadedAgents:
                 await dispatcher.refresh_recovery()
             return handle
 
-    async def prune_revisions(self, *, protected=None):
+    async def prune_revisions(self, *, protected=None, suppress_errors=False):
         """Release obsolete idle resources; immutable recovery files stay intact."""
         async with self._prune_lock:
-            await self._prune_revisions(protected=protected)
+            errors = await self._prune_revisions(protected=protected, retry_failed=not suppress_errors)
+            if errors and not suppress_errors:
+                raise errors[0]
 
-    async def _prune_revisions(self, *, protected=None):
+    async def _prune_revisions(self, *, protected=None, retry_failed=True):
+        errors = []
+
+        async def finish(key):
+            try:
+                await self._finish_retirement(key)
+            except Exception as exc:
+                errors.append(exc)
+                _LOGGER.exception("agent.revision_cache_cleanup_failed", "Idle revision remains quarantined", exc,
+                                  package_id=key[0], revision=key[1])
+
         # A failed teardown stays isolated. Retry it on later maintenance, never
         # republish an Application whose close() has already started.
-        for key, retiring in tuple(self._retiring.items()):
-            if retiring.task is None or retiring.task.done():
-                await self._finish_retirement(key)
+        if retry_failed:
+            for key, retiring in tuple(self._retiring.items()):
+                if retiring.task is None or retiring.task.done():
+                    await finish(key)
         now = monotonic()
         candidates = sorted(tuple(self.revisions.items()), key=lambda item: self._last_used.get(item[0], now))
         idle = []
@@ -437,8 +450,9 @@ class LoadedAgents:
             # can restore from the archive but cannot reuse closing resources.
             self._retiring[key] = RetiringRevision(handle)
             self.revisions.pop(key, None)
-            await self._finish_retirement(key)
+            await finish(key)
             idle.remove((key, handle))
+        return errors
 
     async def _finish_retirement(self, key):
         retiring = self._retiring.get(key)

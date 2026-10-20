@@ -164,12 +164,15 @@ async def test_cancelled_old_handle_waiter_does_not_cancel_retirement(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_persistent_retirement_failure_is_owned_until_shutdown_retry(tmp_path):
+@pytest.mark.parametrize('retire_via', ['prune', 'new-load'])
+async def test_persistent_retirement_failure_is_owned_until_shutdown_retry(tmp_path, retire_via):
     class FailingResource:
         fail = True
         closed = False
+        attempts = 0
 
         async def close(self):
+            self.attempts += 1
             if self.fail:
                 raise OSError('teardown unavailable')
             self.closed = True
@@ -180,8 +183,20 @@ async def test_persistent_retirement_failure_is_owned_until_shutdown_retry(tmp_p
         agent = await expiring_agent(app, resource)
         original_application = agent._application
         key = agent.package_id, agent.version
-        with pytest.raises(RuntimeError, match='failed to close'):
-            await app._loaded_agents.prune_revisions()
+        if retire_via == 'prune':
+            with pytest.raises(RuntimeError, match='failed to close'):
+                await app._loaded_agents.prune_revisions()
+        else:
+            await app.load_agent(another_package('test.healthy-trigger'))
+        # The failing old revision stays owned, but unrelated new work must
+        # still load and run through its own healthy resources.
+        healthy = await app.load_agent(another_package('test.healthy-after-close-error'))
+        assert resource.attempts == 1, 'unrelated admission retried quarantined teardown'
+        stream = await app.entrypoint().run_stream(command(healthy, 'healthy'), context(), agent=healthy)
+        try:
+            assert (await stream.wait()).state.value == 'completed'
+        finally:
+            await stream.detach()
         with pytest.raises(RuntimeError, match='failed to close'):
             await app._loaded_agents.restored(agent)
         assert key not in app._loaded_agents.revisions

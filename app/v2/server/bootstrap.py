@@ -113,6 +113,7 @@ class ServerHost:
         self.execution = ProcessExecution(fallback_model=model_provider)
         self._application: SAgentApplication | None = None
         self._tasks: set[asyncio.Task[None]] = set()
+        self._background_closing = False
         self.conversations: ConversationService | None = None
         self.admin: AdminService | None = None
         self.a2a: A2AService | None = None
@@ -149,6 +150,7 @@ class ServerHost:
     async def start(self) -> None:
         if self._application is not None:
             return
+        self._background_closing = False
         self.__dict__.pop("agent_plugin_catalog", None)
         from app.v2.server.config.plugins import ServerPluginConfig
 
@@ -342,13 +344,16 @@ class ServerHost:
             raise
 
     async def close(self) -> None:
+        self._background_closing = True
         await self.identity.close()
+        while self._tasks:
+            pending = tuple(self._tasks)
+            for task in pending:
+                task.cancel()
+            await asyncio.gather(*pending, return_exceptions=True)
+            self._tasks.difference_update(pending)
+        # Stop acceptance/handoff before taking the product observer snapshot.
         await self.execution.close()
-        for task in tuple(self._tasks):
-            task.cancel()
-        if self._tasks:
-            await asyncio.gather(*self._tasks, return_exceptions=True)
-            self._tasks.clear()
         # Managed applications share host Jobs and model pool: close them first.
         if self.agent_management is not None:
             await self.agent_management.close()
@@ -381,6 +386,8 @@ class ServerHost:
 
     def _track(self, task: asyncio.Task[None]) -> None:
         self._tasks.add(task)
+        if self._background_closing:
+            task.cancel()
 
         def _done(completed: asyncio.Task[None]) -> None:
             self._tasks.discard(completed)

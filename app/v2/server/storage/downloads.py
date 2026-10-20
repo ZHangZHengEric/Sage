@@ -78,17 +78,23 @@ def prepare_download(root: Path, value: str, *, archive_name: str = "workspace",
     output = SpooledTemporaryFile(max_size=8 * 1024 * 1024, mode="w+b")
     try:
         with open_entry(root, path) as fd:
-            if stat.S_ISREG(os.fstat(fd).st_mode):
-                if os.fstat(fd).st_size > max_bytes:
+            opened = os.fstat(fd)
+            if stat.S_ISREG(opened.st_mode):
+                if opened.st_size > max_bytes:
                     raise OverflowError("file is too large to download")
                 with os.fdopen(os.dup(fd), "rb") as source:
-                    remaining = os.fstat(fd).st_size
+                    remaining = opened.st_size
                     while remaining:
                         chunk = source.read(min(remaining, 1024 * 1024))
                         if not chunk:
                             break
                         output.write(chunk)
                         remaining -= len(chunk)
+                after = os.fstat(fd)
+                if (remaining or opened.st_size != after.st_size
+                        or opened.st_mtime_ns != after.st_mtime_ns
+                        or opened.st_ctime_ns != after.st_ctime_ns):
+                    raise SnapshotChangedError("file changed while creating workspace snapshot")
                 filename = path.name
             else:
                 filename = f"{path.name or archive_name}.zip"
