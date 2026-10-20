@@ -173,8 +173,8 @@ celerybeat.pid
 env/
 venv/
 ENV/
-!deploy/k8s/env/
-!deploy/k8s/env/*.env.example
+!app/v1/deploy/k8s/env/
+!app/v1/deploy/k8s/env/*.env.example
 env.bak/
 venv.bak/
 

@@ -225,6 +225,13 @@ def _runtime_capabilities(
                 "secret_key_env": settings.langfuse_secret_key_env,
                 "ingestion_version": settings.langfuse_ingestion_version,
             })
+        elif settings.effective_trace_backend == "phoenix":
+            config.update({
+                "endpoint": settings.phoenix_endpoint,
+                "service_name": settings.trace_service_name,
+                "project_name": settings.phoenix_project_name,
+                "api_key_env": settings.phoenix_api_key_env,
+            })
         else:
             legacy_jaeger = not settings.trace_otlp_endpoint and bool(settings.jaeger_url)
             config.update({

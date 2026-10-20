@@ -35,6 +35,8 @@ const parameterHints = {
   protocol: '追踪数据的传输协议，需与接收端支持的 gRPC 或 HTTP 接口一致；配置不匹配会导致导出失败。',
   insecure: '启用后允许使用不加密的传输连接。关闭时使用安全连接，接收端需配置对应的证书与协议。',
   service_name: '追踪平台中显示的服务名称。用于区分数据来源，不会更改智能体名称或执行行为。',
+  project_name: 'Phoenix 中接收追踪数据的项目名称。',
+  api_key_env: '从服务端哪个环境变量读取 Phoenix API Key。填写环境变量名；无需认证的本地实例可以不设置对应变量。',
   environment: '追踪平台中的环境标记，用于区分生产、测试等来源；此标记不会切换实际运行环境。',
   public_key_env: '从服务端哪个环境变量读取 Langfuse 公钥。填写环境变量名，服务端启动时必须能读取该变量。',
   secret_key_env: '从服务端哪个环境变量读取 Langfuse 密钥。填写环境变量名，不在这里填写密钥内容。',
@@ -47,6 +49,7 @@ const parameterHints = {
 }
 const parameterLabels = {
   endpoint: '追踪接收地址', base_url: '服务地址', protocol: '传输协议', insecure: '允许未加密连接',
+  project_name: '项目名称', api_key_env: 'API Key 环境变量',
   service_name: '服务名称', environment: '环境标记', public_key_env: '公钥环境变量', secret_key_env: '密钥环境变量',
   ingestion_version: '接收接口版本', content_mode: '记录内容范围', max_content_chars: '记录内容字符上限',
   sample_rate: '追踪采样比例', max_queue_size: '导出队列上限', max_active_spans: '活动追踪片段上限',

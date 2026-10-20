@@ -70,6 +70,10 @@ class ServerSettings:
     langfuse_public_key_env: str = "LANGFUSE_PUBLIC_KEY"
     langfuse_secret_key_env: str = "LANGFUSE_SECRET_KEY"
     langfuse_ingestion_version: int = 4
+    phoenix_endpoint: str = ""
+    phoenix_public_url: str = ""
+    phoenix_project_name: str = "sage"
+    phoenix_api_key_env: str = "PHOENIX_API_KEY"
     # The address clients reach this server at. Only A2A needs it: an Agent
     # Card must publish an absolute URL, and behind a proxy the request's own
     # host header is the proxy's, not the one a peer agent can call back on.
@@ -101,8 +105,8 @@ class ServerSettings:
             type(value) is int and 0 < value < 2**32 - 1 for value in ids
         ):
             raise ValueError("linux_execution_uid and linux_execution_gid must both be positive non-root IDs")
-        if self.trace_backend not in {None, "noop", "otlp", "langfuse"}:
-            raise ValueError("trace_backend must be noop, otlp or langfuse")
+        if self.trace_backend not in {None, "noop", "otlp", "langfuse", "phoenix"}:
+            raise ValueError("trace_backend must be noop, otlp, langfuse or phoenix")
         if self.trace_otlp_protocol not in {"grpc", "http"}:
             raise ValueError("trace_otlp_protocol must be grpc or http")
         if self.trace_content_mode not in {"metadata", "redacted"}:
@@ -115,6 +119,8 @@ class ServerSettings:
             raise ValueError("OTLP tracing requires an endpoint")
         if self.effective_trace_backend == "langfuse" and not self.langfuse_base_url:
             raise ValueError("Langfuse tracing requires a base URL")
+        if self.effective_trace_backend == "phoenix" and not self.phoenix_endpoint:
+            raise ValueError("Phoenix tracing requires an endpoint")
         if self.langfuse_ingestion_version not in {3, 4}:
             raise ValueError("langfuse_ingestion_version must be 3 or 4")
         if self.execution_shell_mode not in {"ask", "sandboxed", "deny"}:
@@ -141,6 +147,8 @@ class ServerSettings:
 
     @property
     def trace_console_url(self) -> str:
+        if self.effective_trace_backend == "phoenix":
+            return self.phoenix_public_url
         if self.effective_trace_backend == "langfuse":
             return self.langfuse_public_url or self.langfuse_base_url
         if self.effective_trace_backend == "otlp" and self.jaeger_url:
@@ -210,6 +218,10 @@ class ServerSettings:
             langfuse_public_key_env=_env("SAGE_SERVER_LANGFUSE_PUBLIC_KEY_ENV", "LANGFUSE_PUBLIC_KEY"),
             langfuse_secret_key_env=_env("SAGE_SERVER_LANGFUSE_SECRET_KEY_ENV", "LANGFUSE_SECRET_KEY"),
             langfuse_ingestion_version=int(_env("SAGE_SERVER_LANGFUSE_INGESTION_VERSION", "4")),
+            phoenix_endpoint=_env("SAGE_SERVER_PHOENIX_ENDPOINT"),
+            phoenix_public_url=_env("SAGE_SERVER_PHOENIX_PUBLIC_URL"),
+            phoenix_project_name=_env("SAGE_SERVER_PHOENIX_PROJECT_NAME", "sage"),
+            phoenix_api_key_env=_env("SAGE_SERVER_PHOENIX_API_KEY_ENV", "PHOENIX_API_KEY"),
             jaeger_url=_env("SAGE_SERVER_JAEGER_URL") or None,
             jaeger_service_name=_env("SAGE_SERVER_JAEGER_SERVICE_NAME", "sage-server"),
             jaeger_public_url=_env(
