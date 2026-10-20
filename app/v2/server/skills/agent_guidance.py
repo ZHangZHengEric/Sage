@@ -1,4 +1,4 @@
-"""Agent-scoped prompt and Skill ZIP synchronization."""
+"""Agent-scoped prompt and bound/ZIP Skill synchronization."""
 
 from __future__ import annotations
 
