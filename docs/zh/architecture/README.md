@@ -27,6 +27,7 @@ flowchart TB
 
 ## 按主题阅读
 
+- [宿主开发指南](sagents-host-development.md)：标准 SDK 接入、插件身份与应用边界。
 - [插件架构](PLUGINS.md)：注册、配置、作用域与宿主注入。
 - [记忆](../memory/README.md)：上下文投影与持久历史的区别。
 - [工具与 MCP](../MCP_SERVERS.md)：能力与授权。
@@ -35,6 +36,7 @@ flowchart TB
 - [资源管理](SAGENTS_V2_RESOURCE_MANAGEMENT.md) · [单机并发](sagents-v2-single-host-concurrency.md)。
 - [上下文预算](sagents-v2-context-budget.md) · [模型池与持久化](sagents-v2-model-pool-and-persistence.md)。
 - [本机沙箱约束](sagents-v2-local-sandbox-security.md)。
+- [待实现与待验收](pending-work.md)：保留的能力缺口、提案和验证范围。
 - [完整运行时架构](https://github.com/ZHangZHengEric/Sage/blob/main/sagents/v2/ARCHITECTURE.md)：依赖规则与契约。
 
 ## 部署边界

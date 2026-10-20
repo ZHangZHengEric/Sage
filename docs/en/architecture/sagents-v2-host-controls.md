@@ -11,8 +11,6 @@ ref: v2-detail-sagents-v2-host-controls
 
 # Desktop and Server standard control interfaces
 
-This audit records Sage v2 host entry points and SDK calls on 2026-10-19.
-
 | Operation | Desktop | Server | Standard contract |
 | --- | --- | --- | --- |
 | Start | `/api/v2/runs/stream` | `/api/agent`, package runs, external Runs, A2A | `load_agent`, then `entrypoint().run_stream` or public `run_interface` adapters |
@@ -32,21 +30,8 @@ Accepted `continue_run` schedules the original Run. Repeated continuation observ
 
 Candidate publication uses the original Agent version and triggers enabled long-term memory writes only after success. Rejection does not write candidate memory. Hosts use the standard entrypoint to retain this behavior rather than raw `runtime.publish_session_commit` alone.
 
-Desktop preflight failures now return structured HTTP errors without placeholder Runs or fabricated Agent hashes. Accepted failures are recorded by the SDK with their original classification, quota data and localized diagnostics. Server removed unused model binding and manual sandbox lifecycle paths. Auxiliary concurrency uses public `sagents.v2.concurrency`, which does not control Agent execution. Frontend command and environment allowlists now use registered execution policy parameters, with explicit user fields taking precedence.
+Desktop preflight failures return structured HTTP errors without placeholder Runs or fabricated Agent hashes. Accepted failures are recorded by the SDK with their original classification, quota data and localized diagnostics. Auxiliary concurrency uses public `sagents.v2.concurrency`, which does not control Agent execution. Command and environment allowlists use registered execution policy parameters, with explicit user fields taking precedence.
 
 Hosts retain authentication, catalogs, settings, protocols, event display, product callbacks and file management through public contracts. They do not reconstruct loops, official tool runtimes or Team executors. Trusted raw SessionStore access does not replace caller-authorized `session.access`.
 
-Regression tests cover standard publication/rejection, memory writes, original versions, repeated continuation, pause, authorization, Desktop preflight and restart. Source checks prevent private SDK imports, executor assembly, component replacement and direct `provision()` calls. Local tests do not establish multi-day endurance or Linux browser-image acceptance; the prior Chromium failure still needs a fresh candidate-image run.
-
-## Validation record
-
-macOS / Python 3.13; native sandbox tests ran with process-monitoring permission.
-
-| Scope | Result |
-| --- | --- |
-| Initial SDK + Desktop + Server | 4186 passed, 56 skipped; one native PATH test exceeded its three-second deadline |
-| Final Desktop + Server, controls and unchanged PATH retest | 900 passed, 1 skipped |
-| Final SDK controls, facade and dispatcher lifecycle | 38 passed |
-| Ruff, compilation and `git diff --check` | Passed |
-
-These suites overlap and must not be added. The original timeout passed unchanged on retest. Skips include optional services, platforms and opt-in acceptance; the final host skip required external MySQL.
+Regression tests cover standard publication/rejection, memory writes, original versions, repeated continuation, pause, authorization, Desktop preflight and restart. Source checks prevent private SDK imports, executor assembly, component replacement and direct `provision()` calls. Local tests do not establish multi-day endurance or Linux browser-image acceptance; Chromium requires separate validation in the candidate Linux image.

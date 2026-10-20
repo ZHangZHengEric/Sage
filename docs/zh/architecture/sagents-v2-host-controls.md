@@ -9,9 +9,7 @@ ref: v2-detail-sagents-v2-host-controls
 
 {% include lang_switcher.html %}
 
-# Desktop 与 Server 标准控制接口核对
-
-2026-10-19 对 Sage v2 的实际宿主入口和 SDK 调用链进行核对。
+# Desktop 与 Server 标准控制接口
 
 | 操作 | Desktop | Server | Sage 标准契约 |
 | --- | --- | --- | --- |
@@ -32,27 +30,12 @@ ref: v2-detail-sagents-v2-host-controls
 
 候选会话发布通过原 Run 的 Agent 版本执行。发布成功后才触发该版本启用的长期记忆写入；拒绝不会写入候选结果。原始 `runtime.publish_session_commit` 是底层状态协议，产品宿主使用标准 entrypoint 保留这些后续处理。
 
-本次清除了 Desktop 预检失败创建占位 Run 的路径：受理前失败返回结构化 HTTP 错误，不伪造 Agent hash；已经受理的执行失败由标准 SDK 记录。保留原始错误分类、配额数据及本地化诊断。
+Desktop 在受理前预检失败时返回结构化 HTTP 错误，不创建占位 Run 或伪造 Agent hash；已经受理的执行失败由标准 SDK 记录。保留原始错误分类、配额数据及本地化诊断。
 
-Server 删除了旧模型身份绑定空实现、未使用的手动沙箱创建/释放链路；私有并发工具导入迁到公开 `sagents.v2.concurrency`。该模块只限制辅助 I/O/计算并发，不控制 Agent 执行。原 Server 前端命令与环境变量白名单迁为标准绑定的进程策略参数，用户显式字段覆盖产品默认值。前端镜像验收脚本也使用标准注册与执行流程。
+Server 的辅助 I/O/计算并发使用公开 `sagents.v2.concurrency`，不控制 Agent 执行。命令与环境变量白名单使用标准绑定的进程策略参数，用户显式字段覆盖产品默认值。前端镜像验收脚本使用标准注册与执行流程。
 
 宿主仍负责认证、目录与设置、协议和事件展示、产品完成回调，以及独立文件管理服务。这些通过公开能力协议和存储接口工作，不重建 Agent loop、官方工具运行时或 Team 执行器。受信任的原始 SessionStore 端口不替代面向调用方的 `session.access` 授权查询。
 
-自动化验证包括 SDK 标准注册运行的提案发布/拒绝、记忆写入、原版本选择、重复恢复、暂停及权限隔离；Desktop HTTP 预检无占位 Run；两个宿主现有控制与重启回归。新增源码边界检查阻止宿主私有 SDK 导入、执行器装配、组件替换及直接 `provision()` 回流。
+自动化验证包括 SDK 标准注册运行的提案发布/拒绝、记忆写入、原版本选择、重复恢复、暂停及权限隔离；Desktop HTTP 预检无占位 Run；两个宿主现有控制与重启回归。源码边界检查阻止宿主私有 SDK 导入、执行器装配、组件替换及直接 `provision()` 回流。
 
-本机回归不等于真实连续数天运行或 Linux 镜像浏览器验收。前端镜像的 Chromium 既有失败记录仍保留，标准流程改写后需在候选 Linux 镜像重跑，不能用旧结果声明通过。
-
-## 本轮验证记录
-
-macOS、Python 3.13，原生沙箱测试在允许进程资源监控的环境执行。
-
-| 范围 | 结果 |
-| --- | --- |
-| 首轮 SDK + Desktop + Server 联合回归 | 4186 passed、56 skipped；1 个原生 PATH 测试命中其 3 秒时限 |
-| 最终 Desktop + Server、标准控制与上述 PATH 原样复核 | 900 passed、1 skipped |
-| 最后 SDK 标准控制、Facade、dispatcher 生命周期专项 | 38 passed |
-| Ruff、Python 编译检查、`git diff --check` | 通过 |
-
-最终宿主回归命令包含 `tests/app/v2/desktop`、`tests/app/v2/server`、`test_standard_host_controls.py` 及 PATH 单项，结果存在重叠，不相加。首次时限失败在复核中通过，未放宽生产限制或测试时限。跳过项包含可选服务、平台及显式启用验收；最终宿主回归的 1 项为外部 MySQL 验证。
-
-镜像验收脚本的本机测试实际走标准 Run、原生文件与 Shell，验证工具结果采集和越界拒绝；其 Linux 网络及浏览器命令替换为本机离线探针，只验证脚本链路。该测试不代表 Linux Chromium 已通过。
+本机回归不等于真实连续数天运行或 Linux 镜像浏览器验收。Chromium 需在候选 Linux 镜像中单独验收。
