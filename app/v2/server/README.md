@@ -250,7 +250,9 @@ Server API 用 `external_tools` 配置外部工具，页面与内置 `tools` 分
 - 在线 ZIP 接受公开 HTTPS 443 地址，最大压缩体积 32 MiB、展开 64 MiB、2000 个条目，一次最多 32 个技能；重定向逐次校验，DNS 解析和连接固定到公开地址。使用 fake IP 的本机代理需要为服务端配置正常 DNS，私网和保留地址不会放行。
 - Skills CLI 当前支持公开 GitHub 仓库简写、仓库或 tree 目录地址，支持 `--skill` / `-s`、`--list` / `-l` 和 `--yes` / `-y`。`--global`、指定其他 Agent 和 Shell 表达式不接受。服务器需 Node.js 22.20 以上、npx，并能访问 GitHub 与 npm registry；调用固定 `skills@1.7.2`，在隔离的临时目录中进行项目级复制安装，不执行技能脚本或 npm 安装脚本，不继承服务端凭据。
 
-导入记录和内容仍使用已有的 Skill 版本及制品目录，不新增数据库表。npm 缓存位于 `{data_root}/runtime/skill-import-npm-cache`。已有工作区中的编辑版本保持优先级；更多设计见[远程导入方案](../../../docs/zh/architecture/skill-import-proposal.md)。
+导入记录和内容仍使用已有的 Skill 版本及制品目录，不新增数据库表。npm 缓存位于 `{data_root}/runtime/skill-import-npm-cache`。运行时由 SDK 将技能包物化到工作区，已有文件内容不同时拒绝覆盖；更多设计见[远程导入方案](../../../docs/zh/architecture/skill-import-proposal.md)。
+
+智能体配置页「可用技能」中的「Agent 技能同步」调用 `PUT /api/agents/{agent_id}/guidance`，以表单字段 `sync_bound=true` 同步已保存绑定的最新技能包。此模式仅允许 Agent 所有者调用，不提交或修改提示词，不发布新技能版本；旧工作区文件按现有同步逻辑备份后完整替换，各技能独立返回成功或失败结果。未创建的工作区由首次运行按需生成。原有 `prompt` + ZIP 上传模式继续使用同一接口。
 
 ## 标准运行控制边界
 

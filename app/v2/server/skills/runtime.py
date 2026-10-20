@@ -1,14 +1,8 @@
-"""sagents/v2 Skill ports backed by the Server catalog.
-
-Listing never copies. ``load_skill`` prefers an edited tenant Skill and otherwise
-materializes one content-addressed bundle inside the sandbox-visible workspace.
-"""
+"""Skill catalog/source over immutable artifacts; the SDK owns materialization."""
 
 from __future__ import annotations
 
-import hashlib
-import json
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 
 from sagents.v2.concurrency import bounded_to_thread
 from sagents.v2.contracts.errors import ErrorCategory, RuntimeErrorInfo, SageV2Error
@@ -18,15 +12,11 @@ from sagents.v2.skill import (
 )
 
 from app.v2.server.skills.records import (
-    SkillPackage,
     SkillRecord,
     resolve_artifact_path,
-    workspace_skill_path,
 )
 from app.v2.server.skills.files import (
     inspect_skill_directory,
-    package_sha256_of,
-    write_skill_package,
 )
 
 
@@ -79,99 +69,6 @@ class CatalogSkillProvider:
             files=package.files,
             content_hash=package.package_sha256,
         )
-
-
-class ReadThroughSkillWorkspace:
-    """Expose edited Skills or lazily materialize immutable versions in /workspace."""
-
-    def __init__(
-        self, data_root: Path, user_id: str, records: tuple[SkillRecord, ...], *, agent_id: str, workspace_for_run=None
-    ) -> None:
-        self.data_root = Path(data_root)
-        self.user_id = user_id
-        self.agent_id = agent_id
-        self.workspace_for_run = workspace_for_run
-        self._records = {item.name: item for item in records}
-
-    async def materialize(
-        self, bundle: SkillBundle, *, run_id: str, destination: str
-    ) -> str:
-        name = bundle.descriptor.name
-        workspace = workspace_skill_path(self.data_root, self.user_id, self.agent_id, name)
-        if self.workspace_for_run is not None:
-            workspace = self.workspace_for_run(run_id) / "skills" / name
-        if workspace.is_dir():
-            return destination
-        record = self._records.get(name)
-        if record is None:
-            raise SageV2Error(
-                RuntimeErrorInfo(
-                    code="skill.not_found",
-                    category=ErrorCategory.PROVIDER_PERMANENT,
-                    message=f"skill {name!r} was not admitted for this run",
-                    safe_to_resume=False,
-                )
-            )
-        cache_key = hashlib.sha256(bundle.content_hash.encode()).hexdigest()
-        host_cache = workspace.parent / ".catalog" / name / cache_key
-        wire_cache = (
-            PurePosixPath(destination).parent / ".catalog" / name / cache_key
-        ).as_posix()
-        if host_cache.is_dir():
-            current_hash = await bounded_to_thread(
-                "skill-io", lambda: package_sha256_of(host_cache)
-            )
-            if current_hash != bundle.content_hash:
-                raise SageV2Error(
-                    RuntimeErrorInfo(
-                        code="skill.workspace_cache_changed",
-                        category=ErrorCategory.CONFLICT,
-                        message=f"materialized cache for skill {name!r} was modified",
-                        safe_to_resume=True,
-                    )
-                )
-            return wire_cache
-        files = dict(bundle.files)
-        files[".materialized-skill.json"] = json.dumps(
-            {
-                "name": name,
-                "version": bundle.descriptor.version,
-                "content_hash": bundle.content_hash,
-            },
-            sort_keys=True,
-            separators=(",", ":"),
-        ).encode()
-        package = SkillPackage(
-            name=name,
-            description=bundle.descriptor.description,
-            files=files,
-            skill_md_sha256=(
-                f"sha256:{hashlib.sha256(bundle.files['SKILL.md']).hexdigest()}"
-            ),
-            package_sha256=bundle.content_hash,
-            file_count=len(bundle.files),
-            total_bytes=sum(len(value) for value in bundle.files.values()),
-        )
-        try:
-            await bounded_to_thread(
-                "skill-io", lambda: write_skill_package(host_cache, package)
-            )
-        except SageV2Error as exc:
-            if exc.info.category != ErrorCategory.CONFLICT or not host_cache.is_dir():
-                raise
-        current_hash = await bounded_to_thread(
-            "skill-io", lambda: package_sha256_of(host_cache)
-        )
-        if current_hash != bundle.content_hash:
-            raise SageV2Error(
-                RuntimeErrorInfo(
-                    code="skill.workspace_cache_changed",
-                    category=ErrorCategory.CONFLICT,
-                    message=f"materialized cache for skill {name!r} is invalid",
-                    safe_to_resume=True,
-                )
-            )
-        return wire_cache
 
 
 def _descriptor(record: SkillRecord) -> SkillDescriptor:

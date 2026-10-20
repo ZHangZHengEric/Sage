@@ -6,7 +6,7 @@ import { api, isForeign } from '../api.js'
 import AgentEditor from '../components/AgentEditor.vue'
 import AppIcon from '../components/AppIcon.vue'
 import FormDrawer from '../components/FormDrawer.vue'
-import { cloneConfiguration } from '../agent-presentation.js'
+import { cloneConfiguration, sameConfiguration } from '../agent-presentation.js'
 
 const drawerOpen = ref(false)
 const viewOnly = ref(false), selectedAgent = ref(null), selectedSkills = ref([]), savedMessage = ref('')
@@ -32,6 +32,7 @@ const skills = ref([])
 const officialTools = ref([])
 const error = ref('')
 const pending = ref(false)
+const syncingSkills = ref(false)
 const editing = ref('')
 const form = ref(emptyForm())
 const savedPlugins = ref({}), savedForm = ref(null), savedSkills = ref([])
@@ -122,8 +123,29 @@ async function loadApprovalTools() {
 }
 function closeEditor() { editorSequence++; drawerOpen.value = false; resourcesLoading.value = false; error.value = ''; clearSavedMessage() }
 
+async function syncSkills() {
+  if (!editing.value || viewOnly.value || isForeign(selectedAgent.value) || pending.value || syncingSkills.value) return
+  if (!sameConfiguration(form.value, savedForm.value) || !sameConfiguration(selectedSkills.value, savedSkills.value)) return
+  const sequence = editorSequence
+  syncingSkills.value = true; error.value = ''; clearSavedMessage()
+  try {
+    const result = await api.syncAgentSkills(editing.value)
+    if (sequence !== editorSequence) return
+    if (result.failed_count) {
+      const failures = result.results.filter(item => !item.success).map(item => `${item.name}：${item.message}`).join('；')
+      error.value = `技能同步成功 ${result.success_count} 个，失败 ${result.failed_count} 个：${failures}`
+    } else if (result.results.length && !result.results.some(item => item.workspaces)) {
+      notifySuccess('当前暂无已创建的工作区，技能将在首次加载时写入')
+    } else {
+      notifySuccess(`Agent 技能同步完成：${result.success_count} 个技能`)
+    }
+  } catch (exc) {
+    if (sequence === editorSequence) error.value = exc.message
+  } finally { syncingSkills.value = false }
+}
+
 async function save(exit = true) {
-  if (viewOnly.value || isForeign(selectedAgent.value) || pending.value || resourcesLoading.value || resourcesError.value) return
+  if (viewOnly.value || isForeign(selectedAgent.value) || pending.value || syncingSkills.value || resourcesLoading.value || resourcesError.value) return
   error.value = ''
   clearSavedMessage()
   pending.value = true
@@ -252,12 +274,12 @@ onMounted(load)
       </div>
     </template>
     <AgentEditor v-else v-model:form="form" v-model:selected-skills="selectedSkills"
-      :agent-id="editing" :readonly="viewOnly" :can-edit="!isForeign(selectedAgent)" :busy="pending"
+      :agent-id="editing" :readonly="viewOnly" :can-edit="!isForeign(selectedAgent)" :busy="pending" :syncing-skills="syncingSkills"
       :error="error" :message="savedMessage" :models="models" :tools="officialTools.filter(tool => tool.source !== 'mcp')" :approval-tools="officialTools"
       :skills="skills" :member-agents="memberAgents" :external-tools="externalTools" :external-tool-groups="externalToolGroups" :saved-plugins="savedPlugins" :plugin-catalog="pluginCatalog"
       :resources-loading="resourcesLoading" :resources-error="resourcesError" :approval-loading="approvalLoading" :approval-error="approvalError"
       :saved-form="savedForm" :saved-skills="savedSkills" :budget-defaults="budgetDefaults" :can-delete="Boolean(editing && !isForeign(selectedAgent))"
-      @save="save" @edit="enableEdit" @close="closeEditor" @reload-resources="retryResources" @load-approval-tools="loadApprovalTools" @delete="requestDelete(selectedAgent)" />
+      @save="save" @sync-skills="syncSkills" @edit="enableEdit" @close="closeEditor" @reload-resources="retryResources" @load-approval-tools="loadApprovalTools" @delete="requestDelete(selectedAgent)" />
     <FormDrawer v-model="deleteOpen" centered panel-class="agent-confirm-dialog" title="删除智能体" :busy="pending">
       <p class="agent-confirm-copy">确认删除「{{ deleteTarget?.name }}」？此操作无法在页面中撤销。</p><p v-if="deleteError" class="error" role="alert">{{ deleteError }}</p><div class="agent-confirm-actions"><button class="agent-action" type="button" :disabled="pending" @click="deleteOpen = false">取消</button><button class="agent-action danger" type="button" :disabled="pending" @click="remove(deleteTarget)">{{ pending ? '正在删除…' : '确认删除' }}</button></div>
     </FormDrawer>

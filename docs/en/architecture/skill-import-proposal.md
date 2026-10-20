@@ -49,7 +49,7 @@ skills.sh helps discover Skills; downloads resolve to concrete repositories and 
 - Skills.vue already supports ZIP selection, drag/drop and bulk upload through POST /api/skills/upload. POST /api/skills publishes Markdown but has no create-page entry. Remote import reuses package/catalog services.
 - SkillCatalogService converts ZIP/directories/Markdown to SkillPackage, publishing existing skills/skill_versions and version directories. Identical content reuses versions; different same-name content publishes a revision for the same user.
 - ZIP validation accepts one Skill root and can strip a wrapper directory. Multi-Skill repositories require discovery of individual roots.
-- Agents select existing bindings; CatalogSkillProvider and ReadThroughSkillWorkspace load/materialize on demand. Workspace edits take precedence.
+- Agents select existing bindings; CatalogSkillProvider fetches bundles on demand and the SDK SandboxSkillWorkspace materializes them. Existing files with different contents are rejected; use the Agent guidance endpoint to synchronize updated packages.
 - V1 import_skill_by_url provides a ZIP-download entry pattern; V2 publication stays in V2. Its automatic redirects require remote-access safeguards before reuse.
 - app/skills/claw-skill-shub/SKILL.md explains ClawHub CLI, but does not establish marketplace support in V2 UI/catalog/version storage.
 

@@ -124,6 +124,11 @@ export const api = {
     request('/api/agents', { method: 'POST', body: JSON.stringify(body) }),
   updateAgent: (id, body) =>
     request(`/api/agents/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
+  syncAgentSkills: id => {
+    const body = new FormData()
+    body.append('sync_bound', 'true')
+    return request(`/api/agents/${encodeURIComponent(id)}/guidance`, { method: 'PUT', body })
+  },
   deleteAgent: (id) => request(`/api/agents/${id}`, { method: 'DELETE' }),
   listMcp: (all = true) => catalog('/api/mcp', '/api/admin/mcp', all),
   createMcp: (body) =>
