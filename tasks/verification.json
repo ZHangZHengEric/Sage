@@ -1,5 +1,5 @@
 {
-  "status": "in_progress",
+  "status": "complete_with_documented_scope",
   "logs_root": "/private/tmp/sage-dependency-split",
   "checks": {
     "v1_app": {
@@ -59,7 +59,7 @@
       "result": "passed",
       "log": "v2-docker-build-final.log",
       "image": "sage-dependency-check:v2-final",
-      "mysql_http": "v2-mysql-http-results.json"
+      "mysql_http": "v2-mysql-http-results-final.json"
     },
     "wiki": {
       "result": "passed",
@@ -142,21 +142,59 @@
     },
     "v2_desktop_acceptance": {
       "result": "accepted by user",
-      "message": "v2 desktop\u53ef\u4ee5\u4e86",
+      "message": "v2 desktop可以了",
       "native_package": "v2-native-package-final.log",
       "native_gui_log": "v2-native-gui/process.log",
-      "visual_automation": "Not authorized; no screenshot or UI actions taken"
+      "visual_automation": "Not authorized; no screenshot or UI actions taken",
+      "native_gui_harness": "Extra GUI helper was inconclusive because it requested /api/v2/health instead of /health; official packaged readiness/shutdown smoke passed. No further Desktop validation after user acceptance."
     },
     "v2_web_browser": {
       "result": "passed",
       "log": "v2-web-browser-final.log",
       "report": "v2-web-browser-results.json",
       "checks": "Login and Agents/Models/Skills/MCP/History pages on final Docker image with real MySQL; no page errors or HTTP errors"
+    },
+    "final_review": {
+      "result": "passed",
+      "checks": [
+        "No active installer references a removed root requirements.txt",
+        "Final dependency metadata, Docker, CI and sandbox fixes reviewed",
+        "Final wheel matched 560 current v2/shared Python modules and v1 requirement resources",
+        "git diff --check passed"
+      ]
     }
   },
-  "pending": [
-    "final Server HTTP/metadata checks",
-    "final review and temporary resource cleanup"
-  ],
-  "scope_update": "User deferred v1 Server image and v1 Desktop work, and then explicitly accepted v2 Desktop validation. No further desktop UI operation is required."
+  "pending": [],
+  "scope_update": "User deferred v1 Server image and v1 Desktop work, and then explicitly accepted v2 Desktop validation. No further desktop UI operation is required.",
+  "platform_scope": {
+    "executed": [
+      "macOS arm64 native applications and packages",
+      "Linux arm64 Server Docker image with temporary MySQL"
+    ],
+    "not_executed": [
+      "Windows native builds",
+      "Linux Desktop native build",
+      "macOS Intel native build",
+      "remote CI",
+      "external-provider live tests"
+    ],
+    "deferred_by_user": [
+      "v1 Server image build",
+      "v1 Desktop native packaging"
+    ]
+  },
+  "cleanup": {
+    "result": "complete",
+    "containers_stopped": [
+      "sage-dependency-check-v2",
+      "sage-dependency-check-mysql"
+    ],
+    "network_removed": "sage-dependency-check",
+    "temporary_dmg": "unmounted; read-only icon-cache handles required forced detach",
+    "native_validation_process": "no remaining process matched temporary runtime path",
+    "retained": [
+      "test logs and package artifacts under logs_root",
+      "final local Docker image"
+    ]
+  }
 }
