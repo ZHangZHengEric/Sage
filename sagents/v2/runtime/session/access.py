@@ -103,6 +103,22 @@ class AuthorizedSessionAccess:
         await self._authorize(session_id, context)
         return await self._session_store.list_session_runs(session_id)
 
+    async def read_session_views(self, session_contexts, *, skip_inaccessible=False, **options):
+        """Read bounded list projections and check every durable owner in memory."""
+        from sagents.v2.contracts.errors import ErrorCategory, SageV2Error
+        from sagents.v2.runtime.session.state import SessionStoreCoordinator
+        views = await self._session_store.read_session_views(tuple(session_contexts), **options)
+        result = {}
+        for sid, view in views.items():
+            try:
+                SessionStoreCoordinator._authorize_session_owner(view.owner, session_contexts[sid])
+            except SageV2Error as exc:
+                if skip_inaccessible and exc.info.category == ErrorCategory.AUTHORIZATION:
+                    continue
+                raise
+            result[sid] = view.runs
+        return result
+
     async def run_metadata_page(self, session_ids, context, **options):
         return await self._session_store.authorized_run_metadata_page(session_ids, context, **options)
 

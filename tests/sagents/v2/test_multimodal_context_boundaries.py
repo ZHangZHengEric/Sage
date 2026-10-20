@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 
-from sagents.v2.agent.policy.judge import LLMContinuationJudge
+from sagents.v2.agent.policy.plugins.judge import LLMContinuationJudge
 from sagents.v2.context.assembler import DefaultContextAssembler
 from sagents.v2.context.contracts import ContextSegment, ContextStability
 from sagents.v2.context.partition import conversation_units, current_turn_boundary

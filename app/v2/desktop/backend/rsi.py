@@ -31,11 +31,8 @@ from sagents.v2.optimization import (
 from sagents.v2.optimization.contracts import OptimizationPart
 from sagents.v2.package.manifest.agents import Instructions
 from sagents.v2.skill import FilesystemSkillProvider
-from sagents.v2.agent.policy.tool_policy import (
-    DefaultToolPolicy,
-    ToolOperationAssessment,
-    ToolPolicyAction,
-)
+from sagents.v2.agent.policy.plugins.tool_policy import DefaultToolPolicy
+from sagents.v2.agent.policy.tool_policy import ToolOperationAssessment, ToolPolicyAction
 from sagents.v2.tool import SideEffectLevel
 from sagents.v2.tool.plugins.official import (
     OfficialToolPlugin,
@@ -601,7 +598,13 @@ class DesktopRsiMixin:
 
                 from sagents.v2 import ApplicationConfiguration
                 from sagents.v2.package.manifest.runtime import CapabilitySelection
-                from sagents.v2.runtime.extensions import CapabilityKey, CapabilityOffer, ExtensionDescriptor, ExtensionRegistration, ExtensionScope
+                from sagents.v2.runtime.extensions import (
+                    CapabilityKey,
+                    CapabilityOffer,
+                    ExtensionDescriptor,
+                    ExtensionRegistration,
+                    ExtensionScope,
+                )
                 registrations = []
                 choices = dict(bundle.manifest.runtime.capabilities)
                 policy = DefaultToolPolicy(operation_assessor=assess,

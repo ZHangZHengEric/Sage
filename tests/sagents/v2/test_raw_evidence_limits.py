@@ -249,7 +249,7 @@ def test_raw_json_escape_expansion_is_bounded_before_encoding(backend, operation
     import tracemalloc
     from uuid import uuid4
     from sagents.v2.runtime.observability.contracts import TraceSpan, TraceEvent
-    from sagents.v2.runtime.observability.otlp_transport import OtlpTraceTransport
+    from sagents.v2.runtime.observability.plugins._shared.otlp_transport import OtlpTraceTransport
     exporter = InMemorySpanExporter()
     options = dict(exporter=exporter, content_mode='raw', max_retained_bytes=8 * 1024 * 1024)
     trace = (PhoenixTraceSink(endpoint='http://unused/v1/traces', **options) if backend == 'phoenix'
@@ -308,7 +308,11 @@ def test_unknown_raw_values_are_refused_before_custom_conversion():
 
 def test_raw_pydantic_extensions_survive_without_custom_serializers():
     from pydantic import BaseModel, ConfigDict
-    from sagents.v2.runtime.observability.raw import _json_fragments, raw_trace_value, json_working_size
+    from sagents.v2.runtime.observability.raw import (
+        _json_fragments,
+        raw_trace_value,
+        json_working_size,
+    )
     class WireEvent(BaseModel):
         model_config = ConfigDict(extra='allow')
         kind: str

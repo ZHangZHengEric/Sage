@@ -20,7 +20,8 @@ from sagents.v2.agent.multi_agent import (
     AgentRegistry,
 )
 from sagents.v2.agent.multi_agent.executors import LoopChildRunExecutor
-from sagents.v2.agent.policy.tool_policy import ApprovalStrategy, DefaultToolPolicy
+from sagents.v2.agent.policy.tool_policy import ApprovalStrategy
+from sagents.v2.agent.policy.plugins.tool_policy import DefaultToolPolicy
 from sagents.v2.contracts.commands import InputItem, ReplyInteraction, StartRun
 from sagents.v2.contracts.errors import ErrorCategory, RuntimeErrorInfo, SageV2Error
 from sagents.v2.contracts.items import TextBlock

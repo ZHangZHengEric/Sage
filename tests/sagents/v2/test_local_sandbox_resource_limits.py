@@ -26,9 +26,7 @@ from sagents.v2.runtime.execution.sandbox import (
     SandboxGrantIssuer,
     SandboxState,
 )
-from sagents.v2.runtime.execution.sandbox.local_support.resources import (
-    LocalResourceBoundary,
-)
+from sagents.v2.runtime.execution.sandbox.plugins.local.support.resources import LocalResourceBoundary
 
 CONTEXT = RequestContext(
     actor=ActorRef(principal_id="test", principal_type=PrincipalType.USER)
@@ -251,7 +249,7 @@ async def test_timeout_covers_blocked_stdin_and_terminate_rejects_queued_jobs(tm
 def test_descriptor_io_rejects_symlinks_and_hardlinks_without_modifying_target(
     tmp_path,
 ):
-    from sagents.v2.runtime.execution.sandbox.local_support import files as local_files
+    from sagents.v2.runtime.execution.sandbox.plugins.local.support import files as local_files
 
     root = tmp_path / "work"
     root.mkdir()
@@ -283,7 +281,7 @@ def test_resource_changes_are_bound_to_desktop_policy_hash(tmp_path):
 
 
 def test_workspace_cannot_supply_an_unsandboxed_launch_utility(tmp_path, monkeypatch):
-    from sagents.v2.runtime.execution.sandbox.local_support import resources
+    from sagents.v2.runtime.execution.sandbox.plugins.local.support import resources
 
     impostor = tmp_path / "bwrap"
     impostor.write_text("untrusted")
@@ -364,9 +362,7 @@ async def test_plugin_command_path_reaches_lookup_and_isolated_environment(
 
 
 def test_macos_seatbelt_reads_xcode_developer_roots(tmp_path):
-    from sagents.v2.runtime.execution.sandbox.local_support.resources import (
-        _macos_developer_read_roots,
-    )
+    from sagents.v2.runtime.execution.sandbox.plugins.local.support.resources import _macos_developer_read_roots
 
     missing = tmp_path / "missing-xcode-select"
     selected = tmp_path / "xcode_select_link"
@@ -516,7 +512,7 @@ async def test_sandbox_cannot_signal_an_unrelated_host_process(tmp_path):
 def test_linux_launch_pins_mounts_cgroups_and_loader_environment(
     tmp_path, monkeypatch, network_enabled
 ):
-    import sagents.v2.runtime.execution.sandbox.local_support.resources as module
+    import sagents.v2.runtime.execution.sandbox.plugins.local.support.resources as module
 
     monkeypatch.setattr(module.sys, "platform", "linux")
     monkeypatch.setattr(module, "_trusted_utility", lambda name, root: "/usr/bin/bwrap")
@@ -574,10 +570,8 @@ def test_linux_proxy_launch_retains_network_namespace_and_delays_loader_environm
 ):
     import base64
     import json
-    import sagents.v2.runtime.execution.sandbox.local_support.resources as module
-    from sagents.v2.runtime.execution.sandbox.local_support.network import (
-        LINUX_PROXY_LAUNCH,
-    )
+    import sagents.v2.runtime.execution.sandbox.plugins.local.support.resources as module
+    from sagents.v2.runtime.execution.sandbox.plugins.local.support.network import LINUX_PROXY_LAUNCH
 
     monkeypatch.setattr(module.sys, "platform", "linux")
     monkeypatch.setattr(module, "_trusted_utility", lambda name, root: "/usr/bin/bwrap")

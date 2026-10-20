@@ -24,9 +24,7 @@ from sagents.v2.runtime.execution.sandbox import (
     ProcessPolicy,
     ResourceLimits,
 )
-from sagents.v2.runtime.execution.sandbox.read_only_shell import (
-    READ_ONLY_SHELL_EXECUTABLES,
-)
+from sagents.v2.runtime.execution.sandbox.plugins._shared.read_only_shell import READ_ONLY_SHELL_EXECUTABLES
 
 from app.v2.cli.approvals import WorkspaceApprovalMemory
 
@@ -136,9 +134,7 @@ class LocalWorkspaceBindingProvider(LocalWorkspaceExecutionBindingProvider):
         elif mode == NetworkMode.UNRESTRICTED:
             options["deny_private_networks"] = False
         network = NetworkPolicy.model_validate(options)
-        from sagents.v2.runtime.execution.sandbox.local_support.network import (
-            validate_shell_network,
-        )
+        from sagents.v2.runtime.execution.sandbox.plugins.local.support.network import validate_shell_network
 
         validate_shell_network(network)
         super().__init__(workspace, issuer=issuer, sandbox_provider=sandbox_provider,
@@ -169,7 +165,10 @@ async def build_cli_application(
 
     from sagents.v2.agent.policy import SessionApprovalMemory
     from sagents.v2.composition.defaults import default_runtime
-    from sagents.v2.package.manifest.runtime import CapabilitySelection, merge_capability_selections
+    from sagents.v2.package.manifest.runtime import (
+        CapabilitySelection,
+        merge_capability_selections,
+    )
     from sagents.v2.runtime.extensions import (
         CapabilityOffer, ExtensionDependency, ExtensionDescriptor, ExtensionRegistration, ExtensionScope,
     )

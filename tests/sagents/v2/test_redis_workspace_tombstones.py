@@ -56,3 +56,59 @@ async def test_deleted_root_does_not_hide_a_live_descendant_through_cold_topolog
             assert 'deleted-root' not in archive.has_nonterminal_sessions.await_args.args[0]
     finally:
         await state.close()
+
+
+@pytest.mark.parametrize('evicted', [False, True], ids=['cached', 'evicted'])
+async def test_hot_probes_read_legacy_run_metadata_without_hydration_or_index_writes(evicted):
+    redis, archive = fakeredis.aioredis.FakeRedis(decode_responses=True), Archive()
+    archive.filter_suspended_session_ids = AsyncMock(return_value={'cold'})
+    archive.list_workspace_descendant_ids = AsyncMock(return_value=[])
+    archive.has_nonterminal_sessions = AsyncMock(return_value=False)
+    state = store(redis, archive)
+    try:
+        suspended = await state.create_run(command('suspended'), CONTEXT)
+        terminal = await state.create_run(command('terminal'), CONTEXT)
+        await transition(state, suspended, RunState.SUSPENDED, 'suspend')
+        await transition(state, terminal, RunState.CANCELLED, 'cancel')
+        ids = [suspended.handle.session_id, terminal.handle.session_id]
+        # Legacy resident data has no suspended index entry; detection must
+        # read its journal without installing the full execution aggregate.
+        await redis.srem(state._key('suspended'), *ids)
+        if evicted:
+            for sid in ids:
+                state._evict_session_locked(sid)
+        state._ensure_session_loaded = AsyncMock(side_effect=AssertionError('hot probe hydrated execution'))
+        assert await state.filter_suspended_session_ids([*ids, 'cold']) == {ids[0], 'cold'}
+        archive.filter_suspended_session_ids.assert_awaited_once_with(['cold'])
+        assert await state.has_nonterminal_session_trees(ids)
+        assert not await state.has_nonterminal_session_trees([ids[1]])
+        archive.has_nonterminal_sessions.assert_not_awaited()
+        assert await redis.smembers(state._key('suspended')) == set()
+        if evicted:
+            assert not state._sessions and not state._runs
+    finally:
+        await state.close()
+
+
+async def test_pending_tombstone_overrules_cached_run_and_stale_suspended_membership():
+    redis, archive = fakeredis.aioredis.FakeRedis(decode_responses=True), Archive()
+    archive.filter_suspended_session_ids = AsyncMock(return_value={'deleted'})
+    archive.list_workspace_descendant_ids = AsyncMock(return_value=[])
+    archive.has_nonterminal_sessions = AsyncMock(return_value=True)
+    state = store(redis, archive)
+    try:
+        created = await state.create_run(command('deleted').model_copy(update={'session_id': 'deleted'}), CONTEXT)
+        await transition(state, created, RunState.SUSPENDED, 'suspend')
+        await redis.hset(state._session_key('deleted'), mapping={'deleted': '1'})
+        state._recovery_required.add('deleted')
+        state._ensure_session_loaded = AsyncMock(side_effect=AssertionError('tombstone hydrated execution'))
+        assert await state.filter_suspended_session_ids(['deleted']) == set()
+        assert not await state.has_nonterminal_session_trees(['deleted'])
+        archive.filter_suspended_session_ids.assert_not_awaited()
+        archive.has_nonterminal_sessions.assert_not_awaited()
+        async with state._session_cache.operation():
+            await state._ensure_sessions_loaded(['deleted'])
+            assert 'deleted' not in state._sessions
+            assert created.handle.run_id not in state._runs
+    finally:
+        await state.close()

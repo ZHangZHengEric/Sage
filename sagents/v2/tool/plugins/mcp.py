@@ -41,8 +41,8 @@ from sagents.v2.tool.contracts import (
     ToolExecutionResult,
 )
 from sagents.v2.tool._idempotency import call_fingerprint
-from sagents.v2.tool._mcp_session import McpClientSession as McpClientSession
-from sagents.v2.tool._mcp_session import sdk_session as _sdk_session
+from sagents.v2.tool.plugins._shared.mcp_session import McpClientSession as McpClientSession
+from sagents.v2.tool.plugins._shared.mcp_session import sdk_session as _sdk_session
 from sagents.v2.runtime.observability.logs import get_logger
 
 LOGGER = get_logger(__name__)

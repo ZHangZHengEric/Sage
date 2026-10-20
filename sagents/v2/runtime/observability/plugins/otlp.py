@@ -1,6 +1,6 @@
 """Official generic OTLP trace projection."""
 
-from sagents.v2.runtime.observability.otlp_transport import (
+from sagents.v2.runtime.observability.plugins._shared.otlp_transport import (
     OtlpTraceTransport,
     otel_available as otel_available,
 )

@@ -430,7 +430,7 @@ async def test_binding_suspension_releases_safe_compute_through_real_coordinator
 @pytest.mark.asyncio
 async def test_local_provider_retains_failed_close_without_replaying_effects(tmp_path):
     from types import SimpleNamespace
-    from sagents.v2.runtime.execution.local_binding import LocalWorkspaceExecutionBindingProvider
+    from sagents.v2.runtime.execution.plugins.local_binding import LocalWorkspaceExecutionBindingProvider
     attempts = []
     class Lease:
         def __init__(self, name):

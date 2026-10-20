@@ -63,6 +63,8 @@ async def initialize_process(catalog):
     access = AuthorizedSessionAccess(store, runtime=control, derived_state=derived if derived is not store else None)
     scheduler = services["execution.scheduler"]
     capabilities = await scheduler.capabilities()
+    from sagents.v2.runtime.session.fencing import validate_distributed_pair
+    validate_distributed_pair(store, scheduler, capabilities)
     if not capabilities.supports_fencing or not capabilities.supports_atomic_fenced_mutations:
         raise ValueError("execution.scheduler must support atomic fenced mutations")
     values = (_selection(runtime, "execution.scheduler").config
@@ -70,7 +72,8 @@ async def initialize_process(catalog):
     dispatcher = LocalWorkerDispatcher(scheduler,
         max_concurrent_runs=int(values.get("max_concurrent_runs", 8)),
         max_concurrent_runs_per_tenant=int(values.get("max_concurrent_runs_per_tenant", 2)),
-        lease_seconds=float(values.get("lease_seconds", DEFAULT_LEASE_SECONDS)),
+        lease_seconds=float(values.get("lease_seconds", getattr(scheduler, "default_lease_seconds", DEFAULT_LEASE_SECONDS))),
+        distributed_claims=capabilities.supports_distributed_claims,
         lease_scope_factory=LeaseFencedSessionStore(store, scheduler).lease_scope,
         preserve_runs_on_shutdown=bool(values.get("preserve_runs_on_shutdown", True)))
     services.update({"runtime.kernel": control, "session.access": access, "execution.dispatcher": dispatcher})

@@ -213,23 +213,19 @@ class ConversationService:
         if filter_waiting is not None:
             waiting = await filter_waiting([thread.thread_id for thread in threads])
             threads = [thread for thread in threads if thread.thread_id in waiting]
+        views = await self.session_access.read_session_views(
+            {thread.thread_id: context for thread in threads},
+            suspended_only=True, skip_inaccessible=True,
+        ) if threads else {}
         items = []
         for thread in threads:
-            try:
-                runs = await self.session_access.list_session_runs(thread.thread_id, context)
-            except SageV2Error:
-                continue
-            for run in runs:
-                if run.state != RunState.SUSPENDED or not run.suspension_id:
+            for view in views.get(thread.thread_id, ()):
+                run, suspension, interaction = view.run, view.suspension, view.interaction
+                if suspension is None or interaction is None:
                     continue
-                suspension = await self.session_access.get_suspension(run.suspension_id, context)
-                if not suspension.interaction_id:
-                    continue
-                interaction = await self.session_access.get_interaction(suspension.interaction_id, context)
                 if interaction.interaction_type.value != "approval":
                     continue
-                command = await self.application.runtime.session_store.get_start_command(run.run_id)
-                _, policy = frozen_execution(command)
+                _, policy = frozen_execution(view.command)
                 timeout = min(policy.approval_timeout_seconds, self.runs.settings.approval_timeout_seconds)
                 items.append({"run_id": run.run_id, "thread_id": thread.thread_id,
                     "title": thread.title or thread.thread_id,
@@ -532,11 +528,8 @@ class ConversationService:
         runs = await self.session_access.list_session_runs(thread_id, context)
         selected = next((run for run in runs if run.run_id == run_id), None)
         if selected is None:
-            for run in runs:
-                command = await self.session_access.get_start_command(run.run_id, context)
-                if command.idempotency_key == run_id:
-                    selected = run
-                    break
+            found = await self.session_access.find_start_run(thread_id, run_id, context)
+            selected = found[0] if found is not None else None
         if selected is None:
             raise _error("not_found", "run not found")
         return selected, context

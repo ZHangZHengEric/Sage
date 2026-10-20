@@ -311,7 +311,8 @@ from pathlib import Path
 from sagents.v2.agent import AgentLoopEngine
 from sagents.v2.agent.multi_agent import AgentDescriptor
 from sagents.v2.agent.multi_agent.executors import LoopChildRunExecutor
-from sagents.v2.agent.policy.tool_policy import ApprovalStrategy, DefaultToolPolicy
+from sagents.v2.agent.policy.tool_policy import ApprovalStrategy
+from sagents.v2.agent.policy.plugins.tool_policy import DefaultToolPolicy
 from sagents.v2.flow import FlowRuntime
 from sagents.v2.flow.plugins.agent import NativeAgentFlowNode
 from sagents.v2.model import ModelCapabilities, ModelResponse, ModelStreamEvent, ModelToolCall

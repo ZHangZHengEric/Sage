@@ -8,7 +8,7 @@ _EXPORTS = {
     "LocalExecutionPolicy": ("sagents.v2.runtime.execution.configuration", "LocalExecutionPolicy"),
     "ExecutionConfigurationSnapshot": ("sagents.v2.contracts.execution", "ExecutionConfigurationSnapshot"),
     "LocalWorkspaceExecutionBindingProvider": (
-        "sagents.v2.runtime.execution.local_binding",
+        "sagents.v2.runtime.execution.plugins.local_binding",
         "LocalWorkspaceExecutionBindingProvider",
     ),
     "ExecutionBindingLifecycleCoordinator": (

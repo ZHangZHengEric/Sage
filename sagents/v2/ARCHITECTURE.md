@@ -64,7 +64,7 @@ Desktop/server code.
 | `contracts/` | Commands, events, items, Run/Session state | Versioned native models |
 | `runtime/kernel.py` | Legal lifecycle commands and state transitions | `SessionStore`, `JobRuntime` |
 | `runtime/session/` | One known Session, Runs, journal, CAS, resume | Session storage provider |
-| `agent/` | Model/tool loop, safe points, delegation, policies | Injected policies and domain ports |
+| `agent/` | Model/tool loop, safe points, delegation, policies | Policy contracts in `agent/policy/`; implementations in `agent/policy/plugins/` |
 | `context/` | Canonical request projection, budgets, reduction, summaries | One file per estimator/store/summarizer/reducer in `context/plugins/` |
 | `model/` | Model request/stream contract | Model provider |
 | `tool/` | Catalog, executor, selection and authorization | One file per selection policy and Tool provider in `tool/plugins/`; official implementations in `tool/official/` |
@@ -73,16 +73,29 @@ Desktop/server code.
 | `session_memory/` | Retrieval over omitted Session history | Session-memory provider |
 | `goal/`, `plan/` | Typed goal/plan state and completion gates | State providers and policies |
 | `flow/` | Graph execution over the same Run lifecycle | Flow-node provider |
-| `runtime/execution/` | Jobs, scheduling, bindings, workspace and sandbox | Backends in `scheduler/plugins/`, `sandbox/plugins/`, `jobs/plugins/` |
+| `runtime/execution/` | Jobs, scheduling, bindings, workspace and sandbox | Bindings in `execution/plugins/`; backends in `scheduler/plugins/`, `sandbox/plugins/`, `jobs/plugins/` |
 | `runtime/observability/` | Non-authoritative diagnostics and traces | One file per sink in `observability/plugins/` |
 | `runtime/extensions/` | Registration, resolution, scopes and lifecycle | Extension microkernel only |
-| `package/` | Manifest validation, policy ceilings and resolved composition input | Package source/registry |
+| `package/` | Manifest validation, policy ceilings and resolved composition input | Package registry contracts in `package/registry/`; implementations in `package/registry/plugins/` |
 | `interfaces/protocols/` | Native, AG-UI, ACP, MCP and A2A projections | Protocol adapter |
 | `testing/` | Scripted providers and conformance harnesses | Test-only implementations |
 
 `runtime/extensions/` never contains a domain implementation. For example,
 OpenAI Responses belongs in `model/plugins/`, while its
 `ExtensionRegistration` is exposed to the extension registry.
+
+Concrete backend queries, SDK transports, algorithms and templates stay with
+their plugin implementation. A plugin with several private files owns a package
+(for example `runtime/session/plugins/mysql/`, `sandbox/plugins/local/`, or
+`workspace/plugins/claw/`). Implementation shared by several plugins lives in
+their `plugins/_shared/` package; cross-domain runtime backend support lives in
+`runtime/plugins/_shared/`. Shared support must not import selectable sibling
+plugins. Contracts and backend-neutral runtime logic remain outside `plugins/`.
+Public package facades may lazily export concrete implementations, but contract
+modules must not forward implementation imports.
+
+`interfaces/protocols/` and `tool/official/` remain explicit implementation
+directories for protocol projections and official tools, respectively.
 
 ## Semantic core, plugins, and host bridges
 

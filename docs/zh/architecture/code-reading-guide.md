@@ -19,7 +19,7 @@ The public path is `SAgentBuilder.register` → `build(runtime=..., models=...)`
 - Desktop: `app/v2/desktop/backend/composition.py`, `sdk_plugins.py`, `run_service.py`.
 - Server: `app/v2/server/bootstrap.py`, `runtime/sdk_plugins.py`, `runtime/loop.py`.
 - Managed packages: `app/v2/server/packages/builder.py` returns `ApplicationConfiguration`.
-- Native isolation: `sagents/v2/runtime/execution/local_binding.py` and `sandbox/local_support/interpreter.py`.
+- Native isolation: `sagents/v2/runtime/execution/plugins/local_binding/__init__.py` and `sandbox/plugins/local/support/interpreter.py`.
 - [Runnable standard host](../../../examples/v2/standard_host/README.md): actual media, MCP, Skill and nested Team validation.
 
 Host capability plugins implement their protocols; the SDK owns Agent loops,

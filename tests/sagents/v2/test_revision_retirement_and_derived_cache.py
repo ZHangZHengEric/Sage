@@ -9,7 +9,7 @@ from unittest.mock import AsyncMock, MagicMock
 import fakeredis.aioredis
 import pytest
 
-from sagents.v2.runtime.session.mysql_state import _MysqlSessionState
+from sagents.v2.runtime.session.plugins.mysql.state import _MysqlSessionState
 from tests.sagents.v2.model_fixture import TEST_MODELS
 from tests.sagents.v2.sdk_fixture import build_registered_app
 from tests.sagents.v2.test_loaded_agents import command, context, model, package

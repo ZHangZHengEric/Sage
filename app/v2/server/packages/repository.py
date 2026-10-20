@@ -218,7 +218,8 @@ class DatabasePackageStore:
             row = await self._get(db, owner, "terminal", operation)
             return row.payload if row else None
 
-    async def unarchived_invocations(self, owner, ref, agent, *, after="", limit=100):
+    async def unarchived_invocations(self, owner, ref=None, agent=None, *, after="", limit=100):
+        """Page admitted operations, optionally restricted to one package/agent."""
         if not 1 <= limit <= 100:
             raise ValueError("invalid invocation page size")
         from sqlalchemy.orm import aliased
@@ -239,8 +240,6 @@ class DatabasePackageStore:
                 .where(
                     Row.owner == owner,
                     Row.kind == "invocation",
-                    Row.ref == ref,
-                    Row.agent == agent,
                     Row.name > after,
                     Row.session_key != "",
                     ~archived,
@@ -248,6 +247,10 @@ class DatabasePackageStore:
                 .order_by(Row.name)
                 .limit(limit)
             )
+            if ref is not None:
+                statement = statement.where(Row.ref == ref)
+            if agent is not None:
+                statement = statement.where(Row.agent == agent)
             return [row.payload for row in (await db.scalars(statement)).all()]
 
     async def history_location(self, owner, ref, agent, *, root=None):

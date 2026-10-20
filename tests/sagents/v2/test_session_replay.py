@@ -10,7 +10,7 @@ from sagents.v2.runtime.session.journal import (
     SessionRowSnapshot,
     SessionStateDeltaMutation,
 )
-from sagents.v2.runtime.session.mysql_state import (
+from sagents.v2.runtime.session.plugins.mysql.state import (
     SessionStoreCorruptionError,
     _MysqlSessionState,
 )

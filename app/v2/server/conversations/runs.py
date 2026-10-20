@@ -233,8 +233,9 @@ class RunService:
             handoff.add_done_callback(lambda task: None if task.cancelled() else task.exception())
         await asyncio.shield(handoff)
 
-    async def approval_expired(self, run, interaction) -> bool:
-        command = await self.application.runtime.session_store.get_start_command(run.run_id)
+    async def approval_expired(self, run, interaction, *, command=None) -> bool:
+        if command is None:
+            command = await self.application.runtime.session_store.get_start_command(run.run_id)
         _, policy = frozen_execution(command)
         timeout = policy.approval_timeout_seconds
         if self.settings is not None:
@@ -291,18 +292,35 @@ class RunService:
         if iscoroutinefunction(filter_waiting):
             waiting = await filter_waiting([thread.thread_id for thread in records])
             records = [thread for thread in records if thread.thread_id in waiting]
+        if not records:
+            return
+        contexts = {thread.thread_id: context_for(thread.user_id) for thread in records}
+        try:
+            views = await self.session_access.read_session_views(
+                contexts, suspended_only=True, skip_inaccessible=True,
+            )
+        except SageV2Error as exc:
+            if not exc.info.code.endswith("not_found"):
+                raise
+            # Isolate a dangling approval reference without starving the other
+            # owners in this page. Healthy pages retain the single batch read.
+            views = {}
+            for sid, context in contexts.items():
+                try:
+                    views.update(await self.session_access.read_session_views(
+                        {sid: context}, suspended_only=True, skip_inaccessible=True,
+                    ))
+                except SageV2Error as skipped:
+                    LOGGER.warning("approval.expiration.skipped", "approval changed during cleanup",
+                                   thread_id=sid, error_code=skipped.info.code)
         for thread in records:
-            context = context_for(thread.user_id)
+            context = contexts[thread.thread_id]
             try:
-                runs = await self.session_access.list_session_runs(thread.thread_id, context)
-                for run in runs:
-                    if run.state != RunState.SUSPENDED or not run.suspension_id:
+                for view in views.get(thread.thread_id, ()):
+                    run, suspension, interaction = view.run, view.suspension, view.interaction
+                    if suspension is None or interaction is None:
                         continue
-                    suspension = await self.session_access.get_suspension(run.suspension_id, context)
-                    if not suspension.interaction_id:
-                        continue
-                    interaction = await self.session_access.get_interaction(suspension.interaction_id, context)
-                    if await self.approval_expired(run, interaction):
+                    if await self.approval_expired(run, interaction, command=view.command):
                         await self.cancel_run(run.run_id, context, expected_revision=run.revision,
                                               reason="approval_timeout")
             except SageV2Error as exc:

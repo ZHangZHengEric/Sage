@@ -118,6 +118,8 @@ class ServerPackageBuilderFactory:
             ("observability.diagnostic-sink", self.diagnostic_sink, "borrowed"),
         ):
             scheduler_port = capability == "execution.scheduler"
+            if scheduler_port and self.settings.session_store_plugin == "sage.session.redis-mysql-distributed" and not root.name.startswith("validate-"):
+                continue
             registrations.append(service_registration(capability, value, ownership=ownership,
                 dependencies=("server.model-clients",) if scheduler_port else (),
                 config_schema=SCHEDULER_CONFIG_SCHEMA if scheduler_port else None))
@@ -126,7 +128,7 @@ class ServerPackageBuilderFactory:
                 "max_concurrent_runs_per_tenant": self.settings.max_concurrent_runs_per_user,
                 "max_pending_items": self.settings.max_pending_runs,
             } if scheduler_port else None)
-        settings = replace(self.settings, mysql_url=None, redis_url=None) if root.name.startswith("validate-") else self.settings
+        settings = replace(self.settings, mysql_url=None, redis_url=None, session_store_plugin=None) if root.name.startswith("validate-") else self.settings
         runtime = server_v2_manifest(settings).runtime
         capabilities = select_run_capabilities(runtime.capabilities, bundle.manifest.runtime, choices)
         if capabilities.get("session.store") and settings.mysql_url:
@@ -135,6 +137,12 @@ class ServerPackageBuilderFactory:
             capabilities["session.store"] = selection.model_copy(update={"config": {
                 **selection.config, "table_prefix": f"managed_{suffix}",
             }})
+            scheduler_selection = capabilities.get("execution.scheduler")
+            if scheduler_selection and scheduler_selection.plugin == "sage.scheduler.redis-distributed":
+                # Separate executable queues, shared fleet-wide quota state.
+                # Storage roots must have the same identity on every node.
+                capabilities["execution.scheduler"] = scheduler_selection.model_copy(update={"config": {
+                    **scheduler_selection.config, "queue_id": f"managed_{suffix}"}})
         else:
             capabilities["session.store"] = CapabilitySelection(plugin="sage.session.filesystem", config={"root": str(root)})
         runtime = runtime.model_copy(update={"capabilities": capabilities, "state_root": str(root),

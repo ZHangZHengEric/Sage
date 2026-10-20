@@ -2,7 +2,8 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.v2.server.main import create_app
-from sagents.v2.agent.policy.tool_policy import ApprovalStrategy, DefaultToolPolicy
+from sagents.v2.agent.policy.tool_policy import ApprovalStrategy
+from sagents.v2.agent.policy.plugins.tool_policy import DefaultToolPolicy
 from sagents.v2.model.contracts import (
     ModelEventKind,
     ModelResponse,

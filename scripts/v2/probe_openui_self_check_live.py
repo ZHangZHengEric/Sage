@@ -25,7 +25,7 @@ from app.v2.desktop.backend.catalog import (
 from app.v2.desktop.backend.openui import OpenUiParser, openui_blocks
 from app.v2.desktop.backend.openui_completion import OpenUiOutputChecker
 from sagents.v2.agent.policy.output_self_check import OutputSelfCheckPolicy
-from sagents.v2.agent.policy.judge import (
+from sagents.v2.agent.policy.plugins.judge import (
     LLMContinuationJudge,
     LLMJudgeContinuationPolicy,
 )

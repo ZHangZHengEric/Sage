@@ -256,7 +256,23 @@ class A2AService:
                 token = ""
                 break
             after_thread, current, after_run = next_thread, None, None
-        tasks = [await self._task(row.run_id, row.session_id, context, history_length=history_length) for row in selected]
+        try:
+            views = await self._session_access.read_session_views(
+                {row.session_id: context for row in selected},
+                run_ids=[row.run_id for row in selected], include_events=True,
+            ) if selected else {}
+        except SageV2Error as exc:
+            raise _absent(exc) from exc
+        by_run = {view.run.run_id: view for runs in views.values() for view in runs}
+        tasks = []
+        for row in selected:
+            view = by_run.get(row.run_id)
+            if view is None:
+                raise _absent(SageV2Error(RuntimeErrorInfo(
+                    code="run.not_found", category=ErrorCategory.VALIDATION, message="task not found",
+                )))
+            tasks.append(self._task_from_events(row.run_id, row.session_id, view.events,
+                                               history_length=history_length))
         return tasks, token
 
     async def get_task(
@@ -449,6 +465,9 @@ class A2AService:
             events = await self._session_access.read_events(run_id, context)
         except SageV2Error as exc:
             raise _absent(exc) from exc
+        return self._task_from_events(run_id, session_id, events, history_length=history_length)
+
+    def _task_from_events(self, run_id, session_id, events, *, history_length):
         reducer = TaskReducer(run_id, session_id)
         for event in events:
             for frame in self._adapter.translate(event).frames:

@@ -9,6 +9,7 @@ from app.v2.server.main import create_app
 from app.v2.server.database import Database, DatabaseSettings
 from app.v2.server.database.schema import create_host_schema
 from app.v2.server.identity.repository import DatabaseUserStore
+from app.v2.server.identity.orm import UserRow
 from app.v2.server.identity.users import UserRecord
 from app.v2.server.runtime.policy import ExecutionPolicy
 from tests.app.v2.server.conftest import make_test_service, register_and_login
@@ -138,6 +139,23 @@ async def test_execution_grant_persists_in_database(tmp_path):
         await store.save(original)
         reloaded = await DatabaseUserStore(database).get_by_id("user")
         assert reloaded.execution_policy == original.execution_policy
+    finally:
+        await database.stop()
+
+
+async def test_admin_lookup_does_not_decode_unrelated_user_policies(tmp_path):
+    database = Database(DatabaseSettings(url=f"sqlite+aiosqlite:///{tmp_path}/users.db"))
+    await database.start()
+    try:
+        await create_host_schema(database)
+        async with database.transaction() as session:
+            session.add(UserRow(user_id="other", username="other", password_hash="hash",
+                role="user", execution_policy="invalid-policy"))
+        store = DatabaseUserStore(database)
+        assert await store.admin() is None
+        admin = UserRecord(user_id="admin", username="admin", password_hash="hash", role="admin")
+        await store.save(admin)
+        assert await store.admin() == admin
     finally:
         await database.stop()
 

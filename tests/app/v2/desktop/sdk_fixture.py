@@ -88,9 +88,7 @@ async def execute(service, *, user="user_1", agent_id="sage", request=None):
 
 
 def tracked_binding(root):
-    from sagents.v2.runtime.execution.local_binding import (
-        LocalWorkspaceExecutionBindingProvider,
-    )
+    from sagents.v2.runtime.execution.plugins.local_binding import LocalWorkspaceExecutionBindingProvider
 
     acquired = []
 

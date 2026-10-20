@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from sagents.v2.runtime.session.mysql_archive import MysqlSessionArchive
+from sagents.v2.runtime.session.plugins.mysql.archive import MysqlSessionArchive
 from sagents.v2.runtime.session.state import SessionStoreCoordinator
 from sagents.v2.contracts.run_state import RunState
 from tests.sagents.v2.test_mysql_session_store_matrix import command, CONTEXT
@@ -33,6 +33,20 @@ def archive(previous=None, offsets=()):
     value = MysqlSessionArchive("mysql://unused/test")
     value._pool = Pool()
     return value, connection, cursor
+
+
+@pytest.mark.asyncio
+async def test_archive_revision_prefetch_uses_bounded_sql_batches():
+    value, connection, cursor = archive()
+    cursor.fetchall.side_effect = [(("a", 1),), (("b", 2),)]
+    session_ids = ["a", *(f"session-{i}" for i in range(value.batch_rows - 1)), "b"]
+    assert await value.revisions(session_ids) == {"a": 1, "b": 2}
+    assert cursor.execute.await_count == 2
+    for call in cursor.execute.await_args_list:
+        assert "session_id IN (" in call.args[0]
+        assert len(call.args[1]) <= value.batch_rows
+    assert tuple(value for call in cursor.execute.await_args_list for value in call.args[1]) == tuple(session_ids)
+    connection.commit.assert_not_awaited()
 
 
 @pytest.mark.asyncio

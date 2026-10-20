@@ -20,6 +20,7 @@ from app.v2.server.routers.schemas.skills import (
 )
 from sagents.v2.contracts.errors import ErrorCategory, RuntimeErrorInfo, SageV2Error
 from app.v2.server.skills.imports import SkillImportService
+from app.v2.server.skills.files import MAX_SKILL_ZIP_BYTES
 
 router = APIRouter(tags=["skills"], responses={**AUTH_ERRORS, **VALIDATION_ERRORS})
 
@@ -56,18 +57,25 @@ async def upload_skills(
                 message="select at least one zip",
             )
         )
-    payloads: list[tuple[str, bytes]] = []
+    results = []
+    skills = []
+    success_count = failed_count = 0
     for item in files:
         filename = item.filename or "unknown.zip"
-        if not filename.lower().endswith(".zip"):
-            payloads.append((filename, b""))
-            continue
-        payloads.append((filename, await item.read()))
-    return success(
-        await service.publish_zips(
-            payloads, user_id=user.user_id, role=user.role
+        payload = (
+            await item.read(MAX_SKILL_ZIP_BYTES + 1)
+            if filename.lower().endswith(".zip") else b""
         )
-    )
+        outcome = await service.publish_zips(
+            [(filename, payload)], user_id=user.user_id, role=user.role
+        )
+        del payload
+        results.extend(outcome["results"])
+        skills.extend(outcome["skills"])
+        success_count += outcome["success_count"]
+        failed_count += outcome["failed_count"]
+    return success({"results": results, "skills": skills,
+                    "success_count": success_count, "failed_count": failed_count})
 
 
 @router.post("/api/skills", response_model=ApiResponse[SkillPublic])

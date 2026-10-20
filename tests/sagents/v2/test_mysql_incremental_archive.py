@@ -11,9 +11,9 @@ from sagents.v2.contracts.commands import InputItem
 from sagents.v2.contracts.items import TextBlock
 from sagents.v2.contracts.run_state import RunState
 from sagents.v2.runtime.session.contracts import EventDraft
-from sagents.v2.runtime.session.mysql_archive import MysqlSessionArchive
-from sagents.v2.runtime.session.mysql_state import _SCHEMA_TABLES, parse_mysql_dsn
-from sagents.v2.runtime.session.plugins.redis_mysql import RedisMysqlSessionStore
+from sagents.v2.runtime.session.plugins.mysql.archive import MysqlSessionArchive
+from sagents.v2.runtime.session.plugins.mysql.state import _SCHEMA_TABLES, parse_mysql_dsn
+from sagents.v2.runtime.session.plugins.mysql.redis import RedisMysqlSessionStore
 from tests.sagents.v2.test_mysql_session_store_matrix import CONTEXT, command, mysql_dsn as mysql_dsn
 from tests.sagents.v2.test_redis_mysql_session_store import store, transition
 

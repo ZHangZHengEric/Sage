@@ -9,7 +9,8 @@ import pytest
 from sagents.v2.agent import AgentLoopEngine
 from sagents.v2.agent.modes import ModeAwareAgentLoopFactory
 from sagents.v2.agent.multi_agent import AgentDescriptor, AgentMode, AgentRegistry
-from sagents.v2.agent.policy.tool_policy import ApprovalStrategy, DefaultToolPolicy
+from sagents.v2.agent.policy.tool_policy import ApprovalStrategy
+from sagents.v2.agent.policy.plugins.tool_policy import DefaultToolPolicy
 from sagents.v2.contracts.commands import InputItem, RunConfig, StartRun
 from sagents.v2.contracts.items import TextBlock
 from sagents.v2.contracts.principals import ActorRef, PrincipalType, RequestContext

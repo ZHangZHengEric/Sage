@@ -17,6 +17,7 @@ ref: v2-ENV_VARS
 | Variable | Default / role |
 | --- | --- |
 | `SAGE_SERVER_REDIS_URL` | Optional Redis URL for Session archival; requires MySQL. |
+| `SAGE_SERVER_SESSION_STORE_PLUGIN` | Unset: select MySQL or single-writer Redis/MySQL from configured URLs. Set `sage.session.redis-mysql-distributed` to select distributed sessions and the matching Redis Scheduler; requires both URLs. |
 | `SAGE_SERVER_MYSQL_URL` | Required MySQL connection URL |
 | `SAGE_SERVER_HOST` | `127.0.0.1` |
 | `SAGE_SERVER_PORT` | `8090` |

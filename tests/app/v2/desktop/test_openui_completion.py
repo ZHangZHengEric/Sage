@@ -12,7 +12,7 @@ from sagents.v2.agent.policy.continuation import (
 )
 from sagents.v2.model import ModelResponse, ModelMessage
 from sagents.v2.contracts.items import TextBlock
-from sagents.v2.agent.policy.judge import LLMJudgeContinuationPolicy
+from sagents.v2.agent.policy.plugins.judge import LLMJudgeContinuationPolicy
 
 
 @pytest.mark.asyncio

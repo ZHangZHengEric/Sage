@@ -178,9 +178,7 @@ def _sandbox_network_policy(
     if values.get("mode") in {NetworkMode.ALLOWLIST.value, NetworkMode.PROXY.value}:
         values.setdefault("allowed_schemes", ["http", "https"])
     policy = NetworkPolicy.model_validate(values)
-    from sagents.v2.runtime.execution.sandbox.local_support.network import (
-        validate_shell_network,
-    )
+    from sagents.v2.runtime.execution.sandbox.plugins.local.support.network import validate_shell_network
 
     if local_shell:
         validate_shell_network(policy)

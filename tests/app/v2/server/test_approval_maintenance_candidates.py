@@ -30,25 +30,21 @@ async def test_approval_maintenance_only_loads_suspended_candidates_as_their_own
         filtered.extend(session_ids)
         return set(waiting)
 
-    async def list_session_runs(session_id, context):
-        loaded.append(session_id)
-        authorized.append((session_id, context))
-        if session_id == "completed_history":
-            return [SimpleNamespace(state=RunState.COMPLETED)]
-        return [SimpleNamespace(run_id=f"run:{session_id}", state=RunState.SUSPENDED,
-                                suspension_id=f"suspension:{session_id}", revision=3)]
+    batches = []
+    async def read_session_views(session_contexts, *, suspended_only, skip_inaccessible):
+        assert suspended_only and skip_inaccessible
+        batches.append(session_contexts)
+        loaded.extend(session_contexts)
+        authorized.extend(session_contexts.items())
+        return {sid: (SimpleNamespace(
+            run=SimpleNamespace(run_id=f"run:{sid}", state=RunState.SUSPENDED,
+                                suspension_id=f"suspension:{sid}", revision=3),
+            suspension=SimpleNamespace(interaction_id=f"interaction:{sid}"),
+            interaction=SimpleNamespace(interaction_id=f"interaction:{sid}"), command=sid,
+        ),) for sid in session_contexts}
 
-    async def get_suspension(suspension_id, context):
-        session_id = suspension_id.split(":", 1)[1]
-        authorized.append((session_id, context))
-        return SimpleNamespace(interaction_id=f"interaction:{session_id}")
-
-    async def get_interaction(interaction_id, context):
-        session_id = interaction_id.split(":", 1)[1]
-        authorized.append((session_id, context))
-        return SimpleNamespace(interaction_id=interaction_id)
-
-    async def approval_expired(run, interaction):
+    async def approval_expired(run, interaction, *, command):
+        assert command == run.run_id.split(":", 1)[1]
         return True
 
     async def cancel_run(run_id, context, *, expected_revision, reason):
@@ -59,8 +55,7 @@ async def test_approval_maintenance_only_loads_suspended_candidates_as_their_own
     service = RunService(
         application=SimpleNamespace(runtime=SimpleNamespace(session_store=SimpleNamespace(
             filter_suspended_session_ids=filter_suspended_session_ids))),
-        session_access=SimpleNamespace(list_session_runs=list_session_runs,
-            get_suspension=get_suspension, get_interaction=get_interaction),
+        session_access=SimpleNamespace(read_session_views=read_session_views),
         execution=None,
     )
     service.approval_expired = approval_expired
@@ -69,10 +64,71 @@ async def test_approval_maintenance_only_loads_suspended_candidates_as_their_own
     await service.expire_approvals(SimpleNamespace(scan=scan, scan_snapshot=scan_snapshot), contexts.__getitem__)
 
     assert loaded == list(waiting), "Maintenance loaded sessions without suspended runs"
+    assert len(batches) == bool(waiting), "Maintenance queried each owner separately"
     assert set(filtered) == {thread.thread_id for thread in threads}
     assert cancelled == [(f"run:{session_id}", 3, "approval_timeout") for session_id in waiting]
     owners = {thread.thread_id: thread.user_id for thread in threads}
     assert all(context is contexts[owners[session_id]] for session_id, context in authorized)
+
+
+@pytest.mark.parametrize("count", [1, 50])
+async def test_pending_approvals_read_one_batch_and_preserve_reply_revisions(count):
+    from unittest.mock import AsyncMock
+    from datetime import timedelta
+    from app.v2.server.conversations.agui.service import ConversationService
+    from sagents.v2.contracts.commands import StartRun
+    from sagents.v2.contracts.common import utc_now
+    from sagents.v2.contracts.interactions import InteractionRequest
+
+    requested_at = utc_now()
+    context = RequestContext(actor=ActorRef(principal_id="owner", principal_type=PrincipalType.USER))
+    threads = [SimpleNamespace(thread_id=f"t{i}", title=f"Title {i}") for i in range(count)]
+    views = {}
+    for thread in threads:
+        sid = thread.thread_id
+        interaction = InteractionRequest(interaction_id=f"i:{sid}", run_id=f"r:{sid}",
+            interaction_type="approval", allowed_decisions=("approve", "deny"),
+            payload={"tool": "shell"}, expected_revision=4, requested_at=requested_at)
+        views[sid] = (SimpleNamespace(
+            run=SimpleNamespace(run_id=f"r:{sid}", state=RunState.SUSPENDED, revision=7),
+            suspension=SimpleNamespace(expected_revision=3), interaction=interaction,
+            command=StartRun(agent_id="a", input=(), resolved_spec_hash="sha256:test", idempotency_key=sid),
+        ),)
+    read = AsyncMock(return_value=views)
+    api = ConversationService(threads=SimpleNamespace(scan=AsyncMock(
+        return_value=SimpleNamespace(items=threads, next_cursor="next-page"))),
+        admission=None, runs=SimpleNamespace(settings=SimpleNamespace(approval_timeout_seconds=60)),
+        application=SimpleNamespace(runtime=SimpleNamespace(session_store=SimpleNamespace(
+            filter_suspended_session_ids=AsyncMock(return_value=set(views))))),
+        session_access=SimpleNamespace(read_session_views=read),
+        log_sink=None, context_for=lambda _: context, language="en")
+    page = await api.pending_approvals("owner")
+    read.assert_awaited_once_with({thread.thread_id: context for thread in threads},
+                                 suspended_only=True, skip_inaccessible=True)
+    assert page["next_cursor"] == "next-page"
+    assert len(page["items"]) == count
+    assert page["items"][0]["expected"] == {"interaction_id": "i:t0", "revision": 7,
+        "suspension_revision": 3, "interaction_revision": 4}
+    assert page["items"][0]["expires_at"] == (requested_at + timedelta(seconds=60)).isoformat()
+
+
+async def test_broken_approval_does_not_prevent_other_owners_from_expiring():
+    from unittest.mock import AsyncMock
+    from sagents.v2.contracts.errors import ErrorCategory, RuntimeErrorInfo, SageV2Error
+    records = [SimpleNamespace(thread_id=sid, user_id=sid) for sid in ("broken", "healthy")]
+    view = SimpleNamespace(run=SimpleNamespace(run_id="run", revision=2),
+        suspension=object(), interaction=object(), command=object())
+    async def read_session_views(contexts, **options):
+        if "broken" in contexts:
+            raise SageV2Error(RuntimeErrorInfo(code="suspension.not_found",
+                category=ErrorCategory.VALIDATION, message="missing suspension"))
+        return {"healthy": (view,)}
+    service = RunService(application=SimpleNamespace(runtime=SimpleNamespace(session_store=SimpleNamespace())),
+        session_access=SimpleNamespace(read_session_views=read_session_views), execution=None)
+    service.approval_expired = AsyncMock(return_value=True)
+    service.cancel_run = AsyncMock()
+    await service._expire_thread_approvals(records, lambda uid: uid)
+    service.cancel_run.assert_awaited_once_with("run", "healthy", expected_revision=2, reason="approval_timeout")
 
 
 @pytest.mark.asyncio

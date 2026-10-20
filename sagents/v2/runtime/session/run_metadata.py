@@ -22,12 +22,24 @@ class RunMetadata:
 
 
 def metadata_from_run(row, command):
-    grant = command.config.metadata.get('server_v2.execution', {}) if command else {}
-    grant = grant if isinstance(grant, Mapping) else {}
     return RunMetadata(row.session_id, row.run_id, row.created_at, RunState(row.state),
-        (grant.get('agent_id') if command and not command.parent_run_id else None) or (command.agent_id if command else ''),
+        _workspace_agent_id(command.config.metadata, command.agent_id, command.parent_run_id) if command else '',
         (command.invocation_mode or '') if command else '',
         command.config.metadata.get('task_name', '') if command else '', command.agent_id if command else '')
+
+
+def _workspace_agent_id(metadata, admitted_agent_id, parent_run_id):
+    # Root workspace identity predates execution grants. Child Runs retain the
+    # admitted package identity, even when they inherit root metadata.
+    if parent_run_id:
+        return admitted_agent_id
+    grant = metadata.get('server_v2.execution', {})
+    grant = grant if isinstance(grant, Mapping) else {}
+    composition = metadata.get('server_v2.composition', {})
+    composition = composition if isinstance(composition, Mapping) else {}
+    agent = composition.get('agent', {})
+    agent = agent if isinstance(agent, Mapping) else {}
+    return grant.get('agent_id') or agent.get('id') or admitted_agent_id
 
 
 def metadata_page(rows, session_ids, *, after=None, limit=101, agent_id='', states=()):
@@ -51,9 +63,7 @@ def metadata_from_payload(payload):
         command = row.get('start_command') or {}
         config = command.get('config', {}).get('metadata', {})
         head = heads[row['session_id']]
-        grant = config.get('server_v2.execution', {})
-        grant = grant if isinstance(grant, Mapping) else {}
-        agent_id = (grant.get('agent_id') if not command.get('parent_run_id') else None) or command.get('agent_id', '')
+        agent_id = _workspace_agent_id(config, command.get('agent_id', ''), command.get('parent_run_id'))
         rows.append(RunMetadata(row['session_id'], row['run_id'], datetime.fromisoformat(row['created_at']),
             RunState(row['state']), agent_id,
             command.get('invocation_mode') or '', config.get('task_name', ''), command.get('agent_id', ''),

@@ -10,7 +10,7 @@ from sagents.v2.runtime.execution.sandbox.contracts import (
     OperationIntent,
     ProcessRequest,
 )
-from sagents.v2.tool._mcp_session import sdk_session
+from sagents.v2.tool.plugins._shared.mcp_session import sdk_session
 
 
 class SandboxMcpSessionFactory:

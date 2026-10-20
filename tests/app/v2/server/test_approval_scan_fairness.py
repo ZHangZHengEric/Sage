@@ -48,12 +48,13 @@ async def test_old_approval_is_revisited_while_new_larger_thread_ids_keep_arrivi
     async def suspended(ids):
         return expired.intersection(ids)
 
-    access = SimpleNamespace(
-        list_session_runs=AsyncMock(return_value=[SimpleNamespace(
-            run_id="waiting", state=RunState.SUSPENDED, suspension_id="s", revision=3)]),
-        get_suspension=AsyncMock(return_value=SimpleNamespace(interaction_id="i")),
-        get_interaction=AsyncMock(return_value=SimpleNamespace()),
-    )
+    async def read_session_views(contexts, **options):
+        return {sid: (SimpleNamespace(
+            run=SimpleNamespace(run_id="waiting", state=RunState.SUSPENDED, revision=3),
+            suspension=SimpleNamespace(interaction_id="i"), interaction=SimpleNamespace(),
+            command=object(),
+        ),) for sid in contexts}
+    access = SimpleNamespace(read_session_views=read_session_views)
     service = RunService(application=SimpleNamespace(runtime=SimpleNamespace(
         session_store=SimpleNamespace(filter_suspended_session_ids=suspended))),
         session_access=access, execution=None)

@@ -7,7 +7,7 @@ import os
 
 import pytest
 
-from sagents.v2.runtime.session.mysql_state import _MysqlSessionState
+from sagents.v2.runtime.session.plugins.mysql.state import _MysqlSessionState
 from sagents.v2.runtime.session.state import SessionStoreCoordinator
 from tests.sagents.v2.test_mysql_session_store_matrix import command, CONTEXT
 from sagents.v2.runtime.session.access import AuthorizedSessionAccess
@@ -71,6 +71,109 @@ async def test_different_cold_sessions_fetch_concurrently_and_same_session_fetch
     ), 1)
     assert counts == {first.session_id: 1, second.session_id: 1}
     assert len(state._runs) == 2
+
+
+async def test_cold_descendant_hydration_batches_canonical_state_and_journal():
+    source = SessionStoreCoordinator()
+    root = await source.create_run(command("bulk-root"), CONTEXT)
+    payloads, bases, deltas = {}, {}, {}
+    for index in range(129):
+        child = await source.create_run(command(f"bulk-child-{index}").model_copy(
+            update={"parent_run_id": root.handle.run_id}), CONTEXT)
+        sid, rid = child.handle.session_id, child.handle.run_id
+        bases[sid] = _MysqlSessionState._compact_state(await source.export_session_state(sid))
+        await source.commit_run(run_id=rid, expected_revision=child.handle.run_revision,
+            expected_states={RunState.QUEUED}, new_state=RunState.CANCELLED, drafts=(),
+            context=CONTEXT, idempotency_key=f"cancel-{index}")
+        payloads[sid] = await source.export_session_state(sid)
+        deltas[sid] = {"upserts": {name: rows for name, rows in payloads[sid].items()
+            if isinstance(rows, list)}}
+    state = _MysqlSessionState("mysql://unused/test")
+    state._ensure_ready = AsyncMock()
+    state._fetch_session = AsyncMock(side_effect=AssertionError("per-child aggregate fetch"))
+    state._list_descendant_ids = AsyncMock(return_value=[*payloads, "deleted-child"])
+    state._install_session_locked(await source.export_session_state(root.handle.session_id))
+    cursor, connection = AsyncMock(), MagicMock()
+    connection.begin = AsyncMock()
+    connection.cursor.return_value.__aenter__.return_value = cursor
+    async def execute(statement, parameters=()):
+        selected = [sid for sid in parameters if sid in payloads]
+        if "SELECT session_id, compact_state" in statement:
+            cursor.fetchall.return_value = [(sid, json.dumps(bases[sid]),
+                payloads[sid]["sessions"][0]["revision"],
+                payloads[sid]["sessions"][0]["last_sequence"]) for sid in selected]
+        elif "SELECT session_id, revision, mutation" in statement:
+            cursor.fetchall.return_value = [(sid, payloads[sid]["sessions"][0]["revision"],
+                json.dumps(deltas[sid])) for sid in selected]
+        elif "SELECT session_id, run_id, event" in statement:
+            cursor.fetchall.return_value = [(sid, rid, json.dumps(event)) for sid in selected
+                for rid, events in payloads[sid]["run_events"].items() for event in events]
+    cursor.execute.side_effect = execute
+    @asynccontextmanager
+    async def reader():
+        yield connection
+    state._reader_connection = reader
+    async with state._session_cache.operation():
+        await state._ensure_descendants_loaded(root.handle.session_id)
+        for sid, expected in payloads.items():
+            assert await SessionStoreCoordinator.export_session_state(state, sid) == expected
+        assert "deleted-child" not in state._sessions
+        assert set(payloads) <= state._session_cache.users.keys()
+    queries = [call for call in cursor.execute.await_args_list if call.args[0].lstrip().startswith("SELECT")]
+    assert len(queries) == 6
+    assert all(len(call.args[1]) <= 128 for call in queries)
+    connection.begin.assert_awaited_once()
+
+
+async def test_bulk_loading_shares_existing_single_session_load_lock():
+    first, a = await snapshot("bulk-first")
+    second, b = await snapshot("bulk-second")
+    state = _MysqlSessionState("mysql://unused/test")
+    state._ensure_ready = AsyncMock()
+    entered, release = asyncio.Event(), asyncio.Event()
+    async def fetch_many(ids):
+        entered.set()
+        await release.wait()
+        return {sid: {first.session_id: a, second.session_id: b}[sid] for sid in ids}
+    state._fetch_sessions = AsyncMock(side_effect=fetch_many)
+    state._fetch_session = AsyncMock(side_effect=AssertionError("duplicate single fetch"))
+    bulk = asyncio.create_task(state._ensure_sessions_loaded([first.session_id, second.session_id]))
+    await asyncio.wait_for(entered.wait(), 1)
+    single_entered = asyncio.Event()
+    async def load_single():
+        single_entered.set()
+        await state._ensure_session_loaded(first.session_id)
+    single = asyncio.create_task(load_single())
+    await asyncio.wait_for(single_entered.wait(), 1)
+    release.set()
+    await asyncio.wait_for(asyncio.gather(bulk, single), 1)
+    state._fetch_sessions.assert_awaited_once()
+    assert len(state._sessions) == 2
+    assert all(not lock.locked() for lock in state._load_locks.values())
+
+
+async def test_cancelled_bulk_load_releases_locks_and_cache_pins_for_retry():
+    handle, payload = await snapshot("bulk-cancel")
+    state = _MysqlSessionState("mysql://unused/test")
+    state._ensure_ready = AsyncMock()
+    entered = asyncio.Event()
+    async def blocked_fetch(_ids):
+        entered.set()
+        await asyncio.Event().wait()
+    state._fetch_sessions = blocked_fetch
+    async def load():
+        async with state._session_cache.operation():
+            await state._ensure_sessions_loaded([handle.session_id])
+    pending = asyncio.create_task(load())
+    await asyncio.wait_for(entered.wait(), 1)
+    pending.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await pending
+    assert not state._session_cache.users
+    state._fetch_sessions = AsyncMock(return_value={handle.session_id: payload})
+    await asyncio.wait_for(load(), 1)
+    assert handle.session_id in state._sessions
+    assert not state._session_cache.users
 
 
 async def test_authorized_history_page_reads_only_the_page_without_installing_session():

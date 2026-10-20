@@ -72,8 +72,11 @@ data and retry intent in Redis. Cold reads and initial idempotency lookups still
 require MySQL availability. On restart, resident Sessions rebuild dispatchable Runs
 and pending Sessions are archived. Shutdown waits up to five seconds; unfinished
 archival remains recoverable on the next startup. One writer owns each namespace
-with a 30-second lease renewed independently every five seconds. Cross-process live
-subscriptions and distributed execution are not introduced.
+with a 30-second lease renewed independently every five seconds. Startup retries once
+per second for up to 35 seconds while a previous writer's lease expires or is released.
+A live writer's lease is never taken over; the new process fails startup on timeout.
+Runtime writes still fail immediately after lease loss. Cross-process live subscriptions
+and distributed execution are not introduced.
 
 Deletion atomically writes Redis tombstones and removes lookup indexes before
 background SQL deletion. Unique commit tokens resolve ambiguous transaction responses;
@@ -99,6 +102,43 @@ requests. All readers must support these journal patches before rollout.
 For 200 synthetic commits with a fixed 60 KB input, median payload fell from 63650.5
 to 2736.5 bytes and median serialization from 0.1984 to 0.0629 ms. These numbers exclude
 Redis/MySQL networking, model calls and end-to-end latency.
+
+## Distributed SessionStore and Scheduler plugins
+
+`sage.session.redis-mysql-distributed` and `sage.scheduler.redis-distributed` are
+separate plugins from the existing single-process implementations. Server opts in
+with `SAGE_SERVER_SESSION_STORE_PLUGIN=sage.session.redis-mysql-distributed`, plus
+its MySQL and Redis URLs. It selects the matching scheduler with a 30-second Run
+lease, shared global/user quotas, and separate executable queues for managed Apps.
+Every node must use identical database, Redis and quota configuration; managed
+storage roots must have the same identity on every node. Default selection is unchanged.
+
+The SessionStore has no process-wide owner. Renewable guards serialize individual
+Session operations and actor-scoped admission keys. Child admission and tree
+deletion additionally coordinate topology changes. Redis transactions check the
+operation guard and the worker mutation fence at the actual commit. Cached
+aggregates refresh under their local lock; metadata projections read shared state.
+Subscriptions poll canonical events every 100 ms by default. Shared preview buffers
+retain up to 2048 events for 300 seconds, with explicit epoch/retention gaps.
+Archival reuses the existing MySQL tables and revision transactions; it adds no
+audit tables. Deleted Session tombstones remain authoritative in Redis.
+
+The Scheduler atomically updates a bounded shared queue snapshot with Redis CAS.
+Queues route work to the correct application while sharing quota accounting.
+Run mutation guards prevent takeover during a commit; the storage transaction
+rejects an expired/replaced guard. Dispatchers reconcile remote completion and
+periodically repair accepted Runs missing from the queue. This implementation
+prioritizes correctness for bounded queues; a single coordination snapshot is not
+a claim of unlimited scheduling throughput. Distributed storage and scheduling
+must be selected together, against the same Redis URL; incompatible pairs fail startup.
+
+Drain the old writer and pending archives before switching plugins. The distributed
+plugin has a separate default Redis prefix and reuses the existing MySQL tables.
+Never run the old writer concurrently against those tables. These plugins coordinate
+Run/session state; the existing process-local JobRuntime, local memory databases,
+workspace files and sandbox processes still need an appropriate shared-resource or
+owner-routing deployment strategy. A failed process does not migrate its live OS
+processes, and lease recovery does not make external tool side effects exactly-once.
 
 ## Validation
 

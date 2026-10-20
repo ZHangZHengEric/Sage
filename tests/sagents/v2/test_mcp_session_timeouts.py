@@ -5,7 +5,7 @@ from contextlib import asynccontextmanager
 
 import pytest
 
-from sagents.v2.tool._mcp_session import sdk_session
+from sagents.v2.tool.plugins._shared.mcp_session import sdk_session
 from sagents.v2.tool.plugins.mcp import McpServerConfig
 
 

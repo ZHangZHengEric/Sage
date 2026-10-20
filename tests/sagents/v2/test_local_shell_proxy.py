@@ -11,7 +11,7 @@ from datetime import datetime, timedelta, timezone
 import pytest
 
 from sagents.v2.runtime.execution.sandbox import NetworkMode, NetworkPolicy
-from sagents.v2.runtime.execution.sandbox.local_support.network import (
+from sagents.v2.runtime.execution.sandbox.plugins.local.support.network import (
     ShellNetworkBroker,
     _client_hello_host,
     _tls_prefix,

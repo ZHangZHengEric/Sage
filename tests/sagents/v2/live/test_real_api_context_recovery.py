@@ -295,7 +295,7 @@ async def test_real_tool_selection_still_selects_required_tool_after_compression
 async def test_real_completion_judge_retains_decision_contract_after_compression(
     pressure,
 ):
-    from sagents.v2.agent.policy.judge import LLMContinuationJudge
+    from sagents.v2.agent.policy.plugins.judge import LLMContinuationJudge
     from sagents.v2.agent.policy.continuation import (
         ContinuationContext,
         ContinuationAction,
@@ -430,7 +430,7 @@ async def test_real_stream_cancellation_preserves_previous_complete_checkpoint()
 
 @pytest.mark.asyncio
 async def test_real_too_small_mandatory_judge_limit_stops_finitely_without_api_schema_error():
-    from sagents.v2.agent.policy.judge import LLMContinuationJudge
+    from sagents.v2.agent.policy.plugins.judge import LLMContinuationJudge
     from sagents.v2.agent.policy.continuation import ContinuationContext
 
     api = ObservedAPI(real_provider(), fast_limit=2000)

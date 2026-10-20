@@ -9,10 +9,15 @@ import pytest
 from pydantic import ValidationError
 
 from sagents.v2.agent.engine import AgentLoopEngine
-from sagents.v2.agent.policy.tool_policy import DefaultToolPolicy, ApprovalStrategy
+from sagents.v2.agent.policy.plugins.tool_policy import DefaultToolPolicy
+from sagents.v2.agent.policy.tool_policy import ApprovalStrategy
 from sagents.v2.agent.factory import AgentCompositionFactory
 from sagents.v2.agent.state import AgentLoopCheckpointState
-from sagents.v2.agent.multi_agent import AgentDescriptor, DelegationTask, WorkspaceSharingPolicy
+from sagents.v2.agent.multi_agent import (
+    AgentDescriptor,
+    DelegationTask,
+    WorkspaceSharingPolicy,
+)
 from sagents.v2.agent.multi_agent.executors import LoopChildRunExecutor
 from sagents.v2.context import DefaultContextAssembler
 from sagents.v2.contracts.commands import InputItem, PauseRun, ResumeRun, RunConfig, StartRun

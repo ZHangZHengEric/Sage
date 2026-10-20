@@ -29,6 +29,23 @@ _ACTIVE_LEASE: ContextVar[WorkerLease | None] = ContextVar(
 )
 
 
+def validate_distributed_pair(store, scheduler, scheduler_capabilities):
+    """Reject a fleet scheduler/storage pair without commit-time fencing."""
+    store_capabilities = store.capabilities
+    distributed_store = bool(store_capabilities.get("multi_process_writes"))
+    distributed_scheduler = scheduler_capabilities.supports_distributed_claims
+    if distributed_store != distributed_scheduler or (distributed_scheduler and not store_capabilities.get("atomic_worker_fence")):
+        raise SageV2Error(RuntimeErrorInfo(code="runtime.distributed_fence_unsupported",
+            category=ErrorCategory.VALIDATION,
+            message="Distributed scheduling and SessionStore must support shared commit-time fencing",
+            safe_to_resume=False))
+    if distributed_scheduler and getattr(store, "redis_url", None) != getattr(scheduler, "redis_url", None):
+        raise SageV2Error(RuntimeErrorInfo(code="runtime.distributed_redis_mismatch",
+            category=ErrorCategory.VALIDATION,
+            message="Distributed Scheduler and SessionStore must use the same Redis URL",
+            safe_to_resume=False))
+
+
 class LeaseFencedSessionStore:
     """SessionStore decorator that rejects writes from stale executor leases."""
 

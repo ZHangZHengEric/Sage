@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from collections.abc import Awaitable, Callable
@@ -78,6 +79,7 @@ class LocalWorkerDispatcher:
         lease_seconds: float = DEFAULT_LEASE_SECONDS,
         lease_scope_factory=None,
         preserve_runs_on_shutdown: bool = True,
+        distributed_claims: bool = False,
     ) -> None:
         if max_concurrent_runs < 1 or max_concurrent_runs_per_tenant < 1:
             raise ValueError("dispatcher concurrency limits must be positive")
@@ -89,6 +91,7 @@ class LocalWorkerDispatcher:
         self.lease_duration = timedelta(seconds=lease_seconds)
         self.lease_scope_factory = lease_scope_factory
         self.preserve_runs_on_shutdown = preserve_runs_on_shutdown
+        self.distributed_claims = distributed_claims
         self._supports_deferred_work = "available_at" in inspect.signature(scheduler.release).parameters
         self._requests: dict[str, _DispatchRequest] = {}
         self._run_gates: dict[str, tuple[asyncio.Lock, int]] = {}
@@ -319,8 +322,14 @@ class LocalWorkerDispatcher:
     async def _worker(self, index: int) -> None:
         worker_id = f"local-{index}"
         retry_delay = 0.1
+        next_recovery_scan = 0.0
         while self._claim_error is None:
             try:
+                if self.distributed_claims and index == 0 and time.monotonic() >= next_recovery_scan:
+                    # Repair acceptance-before-enqueue crashes without needing
+                    # a whole-fleet restart. submit remains globally idempotent.
+                    next_recovery_scan = time.monotonic() + 1.0
+                    await self._restore_dispatchable_work()
                 lease = await self.scheduler.claim(
                     worker_id,
                     lease_duration=self.lease_duration,
@@ -675,7 +684,7 @@ class LocalWorkerDispatcher:
 
     async def _settle_deferred_controls(self):
         for run_id, request in tuple(self._requests.items()):
-            if request.claimed or not request.recovered or request.result.done():
+            if request.claimed or (not request.recovered and not self.distributed_claims) or request.result.done():
                 continue
             snapshot = await request.agent.runtime.get_run(run_id)
             if snapshot.state == RunState.SUSPEND_REQUESTED:

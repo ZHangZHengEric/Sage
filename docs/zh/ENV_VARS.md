@@ -17,6 +17,7 @@ ref: v2-ENV_VARS
 | 变量 | 默认值 / 用途 |
 | --- | --- |
 | `SAGE_SERVER_REDIS_URL` | 可选的 Session 归档 Redis 地址；需要同时配置 MySQL。 |
+| `SAGE_SERVER_SESSION_STORE_PLUGIN` | 默认未设置，按连接地址选择 MySQL 或单写者 Redis/MySQL。设为 `sage.session.redis-mysql-distributed` 时选择分布式会话及配套 Redis 调度器，须同时配置两个连接地址。 |
 | `SAGE_SERVER_MYSQL_URL` | 必须配置的 MySQL 连接地址 |
 | `SAGE_SERVER_HOST` | `127.0.0.1` |
 | `SAGE_SERVER_PORT` | `8090` |

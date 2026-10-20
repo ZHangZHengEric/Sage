@@ -135,17 +135,21 @@ def register_official_plugins(registry: ExtensionRegistry) -> None:
     """Register every first-party host-selectable plugin."""
 
     existing = {value.descriptor.plugin_id for value in registry.registrations()}
-    from sagents.v2.runtime.execution.registration import local_execution_binding_registration
+    from sagents.v2.runtime.execution.plugins.local_binding.registration import local_execution_binding_registration
     registry.register(local_execution_binding_registration())
-    from sagents.v2.runtime.execution.ephemeral_binding import ephemeral_execution_binding_registration
+    from sagents.v2.runtime.execution.plugins.ephemeral_binding import ephemeral_execution_binding_registration
     registry.register(ephemeral_execution_binding_registration())
-    from sagents.v2.runtime.execution.environment import run_environment_registration, tool_runtime_registration
+    from sagents.v2.runtime.execution.environment import (
+        run_environment_registration,
+        tool_runtime_registration,
+    )
     registry.register(run_environment_registration())
     registry.register(tool_runtime_registration())
     from sagents.v2.runtime.extensions.core import core_registrations
     for registration in core_registrations():
         registry.register(registration)
     _register_session_and_memory(registry)
+    _register_distributed_runtime(registry)
     _register_tools_skills_and_flow(registry)
     _register_infrastructure(registry)
     _register_model_protocols(registry)
@@ -153,6 +157,46 @@ def register_official_plugins(registry: ExtensionRegistry) -> None:
         value.descriptor.plugin_id for value in registry.registrations()
     }.difference(existing)
     registry.trust_builtins(added)
+
+
+def _register_distributed_runtime(registry):
+    from copy import deepcopy
+    from sagents.v2.runtime.session import DistributedRedisMysqlSessionStore
+    from sagents.v2.runtime.execution.scheduler import RedisDistributedScheduler
+
+    original = registry.get(RedisMysqlSessionStore.plugin_id).descriptor
+    schema = deepcopy(original.config_schema)
+    schema["properties"].update({
+        "coordination_ttl_seconds": {"type": "number", "exclusiveMinimum": 0},
+        "coordination_wait_seconds": {"type": "number", "exclusiveMinimum": 0},
+        "event_poll_seconds": {"type": "number", "exclusiveMinimum": 0},
+        "max_preview_events": {"type": "integer", "minimum": 1},
+        "preview_retention_seconds": {"type": "integer", "minimum": 1},
+    })
+    registry.register(ExtensionRegistration(
+        descriptor=original.model_copy(update={**_identity(DistributedRedisMysqlSessionStore),
+            "config_schema": schema, "capabilities": {**original.capabilities,
+                "multi_process_writes": True, "cross_process_subscribe": True, "atomic_worker_fence": True}}),
+        factory=lambda context, dependencies: DistributedRedisMysqlSessionStore(**context.config)))
+    scheduler_schema = _scheduler_config_schema(durable=False)
+    scheduler_schema["properties"].update({
+        "redis_url": {"type": "string", "minLength": 1},
+        "key_prefix": {"type": "string", "minLength": 1},
+        "queue_id": {"type": "string", "minLength": 1},
+        "coordination_ttl_seconds": {"type": "number", "exclusiveMinimum": 0},
+        "poll_seconds": {"type": "number", "exclusiveMinimum": 0},
+    })
+    scheduler_schema["properties"]["lease_seconds"]["default"] = 30
+    scheduler_schema["required"] = ["redis_url"]
+    _one(registry, RedisDistributedScheduler, "execution.scheduler",
+        lambda context, dependencies: RedisDistributedScheduler(**{key: value for key, value in context.config.items()
+            if key not in {"lease_seconds", "preserve_runs_on_shutdown"}}),
+        scopes={ExtensionScope.PROCESS}, config_schema=scheduler_schema,
+        availability=ExtensionAvailability(available=importlib.util.find_spec("redis") is not None,
+            reason=None if importlib.util.find_spec("redis") is not None else "optional redis package is required"),
+        capabilities={"durable_across_process_restart": True, "multi_process_writes": True,
+            "supports_distributed_claims": True, "supports_leases": True, "supports_fencing": True,
+            "supports_atomic_tenant_quota": True, "supports_atomic_fenced_mutations": True})
 
 
 def _register_infrastructure(registry: ExtensionRegistry) -> None:
@@ -1358,6 +1402,9 @@ def _register_session_and_memory(registry: ExtensionRegistry) -> None:
                         "max_cached_sessions": {"type": "integer", "minimum": 1},
                         "max_cached_bytes": {"type": "integer", "minimum": 1},
                         "cache_idle_seconds": {"type": "number", "minimum": 0},
+                        "max_connections": {"type": "integer", "minimum": 2},
+                        "max_pending_connections": {"type": "integer", "minimum": 1},
+                        "connection_acquire_timeout_seconds": {"type": "number", "exclusiveMinimum": 0},
                     },
                     "required": ["dsn"],
                     "additionalProperties": False,
@@ -1385,7 +1432,8 @@ def _register_session_and_memory(registry: ExtensionRegistry) -> None:
             factory=lambda context, dependencies: MysqlSessionStore(
                 str(context.config["dsn"]),
                 **{key: context.config[key] for key in
-                   ("max_cached_sessions", "max_cached_bytes", "cache_idle_seconds") if key in context.config},
+                   ("max_cached_sessions", "max_cached_bytes", "cache_idle_seconds",
+                    "max_connections", "max_pending_connections", "connection_acquire_timeout_seconds") if key in context.config},
                 table_prefix=(
                     None
                     if "table_prefix" not in context.config
@@ -1409,6 +1457,9 @@ def _register_session_and_memory(registry: ExtensionRegistry) -> None:
                         "max_cached_sessions": {"type": "integer", "minimum": 1},
                         "max_cached_bytes": {"type": "integer", "minimum": 1},
                         "cache_idle_seconds": {"type": "number", "minimum": 0},
+                        "max_connections": {"type": "integer", "minimum": 2},
+                        "max_pending_connections": {"type": "integer", "minimum": 1},
+                        "connection_acquire_timeout_seconds": {"type": "number", "exclusiveMinimum": 0},
                         "table_prefix": {"type": "string"},
                         "key_prefix": {"type": "string", "minLength": 1},
                         "archive_interval_seconds": {"type": "number", "exclusiveMinimum": 0},

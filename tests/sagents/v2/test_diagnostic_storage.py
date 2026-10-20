@@ -11,9 +11,9 @@ from sagents.v2.contracts.common import utc_now
 from sagents.v2.model import ModelRequest, ModelResponse
 from sagents.v2.runtime import HarnessRuntime
 from sagents.v2.runtime.observability import FilesystemDiagnosticSink
-from sagents.v2.runtime.observability.diagnostic_media import DiagnosticMediaStore
+from sagents.v2.runtime.observability.plugins.filesystem.media import DiagnosticMediaStore
 from sagents.v2.runtime.session import FilesystemSessionStore
-from sagents.v2.runtime.session.filesystem_layout import resolve_session_directory
+from sagents.v2.runtime.session.plugins._shared.filesystem_layout import resolve_session_directory
 from tests.sagents.v2.test_delegated_task_session import child_command
 from tests.sagents.v2.test_session_history_context_matrix import CONTEXT, command
 

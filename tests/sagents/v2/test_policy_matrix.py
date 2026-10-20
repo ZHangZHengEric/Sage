@@ -3,17 +3,16 @@ from __future__ import annotations
 import pytest
 
 from sagents.v2.model.contracts import ModelResponse, ModelToolCall
-from sagents.v2.agent.policy.continuation import (
-    CompositeContinuationPolicy,
-    ContinuationAction,
-    ContinuationContext,
-    ToolOrTextRule,
+from sagents.v2.agent.policy.plugins.continuation import CompositeContinuationPolicy
+from sagents.v2.agent.policy.continuation import ContinuationAction, ContinuationContext
+from sagents.v2.agent.policy.plugins._shared.continuation_rules import ToolOrTextRule
+from sagents.v2.agent.policy.plugins.tool_policy import (
+    EXACT_ARGUMENTS_MATCHER_ID,
+    DefaultToolPolicy,
 )
 from sagents.v2.agent.policy.tool_policy import (
-    EXACT_ARGUMENTS_MATCHER_ID,
     ApprovalMatcher,
     ApprovalStrategy,
-    DefaultToolPolicy,
     ToolOperationAssessment,
     ToolPolicyAction,
     ToolPolicyContext,
@@ -642,7 +641,7 @@ async def test_custom_matcher_can_opt_a_call_out_and_is_part_of_policy_hash():
 async def test_loop_recovery_explains_round_count_without_claiming_no_progress(
     with_tools,
 ):
-    from sagents.v2.agent.policy.continuation import LoopRecoveryRule
+    from sagents.v2.agent.policy.plugins._shared.continuation_rules import LoopRecoveryRule
 
     tools = (
         (ModelToolCall(tool_call_id="call_1", name="read", arguments={}),)

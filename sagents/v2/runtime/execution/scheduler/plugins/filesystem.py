@@ -19,7 +19,7 @@ from sagents.v2.contracts.errors import (
     RuntimeErrorInfo,
     SageV2Error,
 )
-from sagents.v2.runtime.execution.scheduler._fencing import finish_fence
+from sagents.v2.runtime.execution.scheduler.plugins._shared.fencing import finish_fence
 from sagents.v2.runtime.execution.scheduler.contracts import (
     LeaseReleaseReason,
     SchedulerClaimPolicy,

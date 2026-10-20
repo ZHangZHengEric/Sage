@@ -66,6 +66,12 @@ Web 开发时可单独启动：在 `app/v2/server/web` 执行 `npm install && np
 | Agent / MCP / A2A peer | `agents.package_ref` 引用 `managed_agent_records` 中的标准包；`catalogs` 保存模型、MCP 和 A2A peer | 同左 |
 | A2A API Key | MySQL `api_keys`（只存哈希） | Memory mock |
 
+MySQL SessionStore 默认最多 16 个连接，同时最多 15 个读取，为写入保留容量；最多排队 64 个连接请求，获取连接最长等待 10 秒。插件参数 `max_connections`（至少 2）、`max_pending_connections` 和 `connection_acquire_timeout_seconds` 可调整这些资源预算，Redis/MySQL 的归档连接同样生效。队列已满或获取超时返回可重试的 `session_store.mysql_busy`，不对已获取连接的业务事务设置执行超时；取消请求会等待连接清理完成后再释放容量。
+
+A2A 任务列表与审批列表通过 `AuthorizedSessionAccess.read_session_views()` 批量读取现有 Session 状态，每批最多 200 个 Session / Run ID，并逐会话验证持久化 owner。审批读取只投影 Run、启动命令、挂起和交互；A2A 列表按所选 Run 批量读取规范事件，保留详情接口相同的 Task 内容，不安装完整执行聚合，也不新增业务表。MySQL 的投影和事件共享一致性快照；Redis 以未归档状态和删除标记为准，冷数据才读取 MySQL 归档。
+
+启动恢复按 operation 游标直接查询未归档且已接受的包任务，恢复过程中新增终态不会使后续任务被分页跳过。Redis 快照分片、增量、归档附件与归档 revision 使用有界批量读取，归档写入和最终 revision 校验仍按会话执行。
+
 对话：首次 run 把 `agent_id` 钉在会话上（之后忽略下拉/`forwardedProps`）；读 catalog Agent → Official 文件/沙箱工具 + MCP + A2A peer + skill 组成 Composite，通过 Package Builder 的统一 `build(package, runtime=...)` 装配，并借用进程 Application 的共享服务；循环走统一 `create_loop(...)`。进程 Application 只 build 一次。
 
 `/health` 返回就绪状态与 `trace_enabled`；配置 `SAGE_SERVER_JAEGER_URL` 时管理页显示 Jaeger 入口。Server V2 与 sagents/v2 运行时直接通过 `StructuredLogger` 调用统一日志接口；Uvicorn 和第三方标准日志经适配器转换成 `sage.log/v1` 记录。所有记录由同一 LogSink 写入 stdout；默认不写文件，显式配置非空的 `SAGE_SERVER_LOG_DIRECTORY` 才额外写入轮转文件。`SAGE_SERVER_LOG_LEVEL` 控制最低级别，`SAGE_SERVER_LOG_FORMAT` 控制两处输出的 `json` 或 `text` 格式。stdout 也可由容器日志驱动或 Alloy/Loki 持久化，不写审计业务表。

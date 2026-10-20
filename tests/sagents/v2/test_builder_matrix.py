@@ -621,7 +621,7 @@ async def test_official_tools_are_selected_with_standard_execution_binding(tmp_p
 
 @pytest.mark.asyncio
 async def test_registered_binding_receives_accepted_actual_run_and_releases_lease(tmp_path):
-    from sagents.v2.runtime.execution.local_binding import LocalWorkspaceExecutionBindingProvider
+    from sagents.v2.runtime.execution.plugins.local_binding import LocalWorkspaceExecutionBindingProvider
     from tests.sagents.v2.test_standard_execution_configuration import response, run, CONTEXT
     class Binding(LocalWorkspaceExecutionBindingProvider):
         def __init__(self):
@@ -655,7 +655,7 @@ async def test_registered_binding_receives_accepted_actual_run_and_releases_leas
 
 @pytest.mark.asyncio
 async def test_standard_run_rejects_invalid_registered_binding_and_closes_it(tmp_path):
-    from sagents.v2.runtime.execution.local_binding import LocalWorkspaceExecutionBindingProvider
+    from sagents.v2.runtime.execution.plugins.local_binding import LocalWorkspaceExecutionBindingProvider
     from tests.sagents.v2.test_standard_execution_configuration import response, run
     class InvalidBinding(LocalWorkspaceExecutionBindingProvider):
         async def acquire(self, request):

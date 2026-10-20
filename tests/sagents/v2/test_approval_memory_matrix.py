@@ -4,10 +4,8 @@ from datetime import datetime, timezone
 
 import pytest
 
-from sagents.v2.agent.policy.approval_memory import (
-    RememberedApproval,
-    SessionApprovalMemory,
-)
+from sagents.v2.agent.policy.approval_memory import RememberedApproval
+from sagents.v2.agent.policy.plugins.approval_memory import SessionApprovalMemory
 from sagents.v2.agent.policy.tool_policy import ApprovalMatcher
 from sagents.v2.runtime.session import InMemoryDerivedStateStore
 

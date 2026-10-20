@@ -1,6 +1,7 @@
 from copy import deepcopy
 import asyncio
 import threading
+import time
 from unittest.mock import AsyncMock
 
 import fakeredis.aioredis
@@ -8,7 +9,7 @@ import pytest
 
 from sagents.v2.contracts.run_state import RunState
 from sagents.v2.contracts.errors import SageV2Error
-from sagents.v2.runtime.session.plugins.redis_mysql import RedisMysqlSessionStore
+from sagents.v2.runtime.session.plugins.mysql.redis import RedisMysqlSessionStore
 from tests.sagents.v2.test_mysql_session_store_matrix import command, CONTEXT
 
 
@@ -22,12 +23,19 @@ class Archive:
     async def _fetch_session(self, sid):
         return deepcopy(self.states.get(sid))
 
+    async def _fetch_sessions(self, session_ids):
+        return {sid: deepcopy(self.states[sid]) for sid in session_ids if sid in self.states}
+
     async def revision(self, sid):
         state = self.states.get(sid)
         return None if state is None else state["sessions"][0]["revision"]
 
+    async def revisions(self, session_ids):
+        return {sid: self.states[sid]["sessions"][0]["revision"]
+                for sid in session_ids if sid in self.states}
+
     async def archive_batch(self, sid, mutations):
-        from sagents.v2.runtime.session.mysql_state import _MysqlSessionState
+        from sagents.v2.runtime.session.plugins.mysql.state import _MysqlSessionState
         if self.fail:
             raise OSError("mysql unavailable")
         rows = [(revision, encoded) for revision, encoded in mutations
@@ -109,6 +117,57 @@ async def test_running_writes_only_redis_and_terminal_run_archives_once():
     await value.archive_pending()
     assert archive.writes == 1
     await value.close()
+
+
+@pytest.mark.asyncio
+async def test_pending_archive_prefetches_session_reads_and_revisions_in_one_batch():
+    redis = fakeredis.aioredis.FakeRedis(decode_responses=True)
+    archive = Archive()
+    value = store(redis, archive)
+    expected = {}
+    for i in range(3):
+        created = await value.create_run(command(f"start-{i}"), CONTEXT)
+        await transition(value, created, RunState.CANCELLED, f"cancel-{i}")
+        expected[created.handle.session_id] = await value.export_session_state(created.handle.session_id)
+    archive.revision = AsyncMock(wraps=archive.revision)
+    archive.revisions = AsyncMock(wraps=archive.revisions)
+    original = redis.execute_command
+    individual_reads = []
+
+    async def command_call(*args, **kwargs):
+        if args[0] in {"HMGET", "HGETALL"}:
+            individual_reads.append(args)
+        return await original(*args, **kwargs)
+
+    redis.execute_command = command_call
+    try:
+        await value.archive_pending()
+        assert archive.states == expected
+        archive.revision.assert_not_awaited()
+        archive.revisions.assert_awaited_once()
+        assert set(archive.revisions.await_args.args[0]) == set(expected)
+        assert individual_reads == []
+    finally:
+        redis.execute_command = original
+        await value.close()
+
+
+@pytest.mark.asyncio
+async def test_corrupt_pending_session_does_not_block_other_sessions_archiving():
+    redis = fakeredis.aioredis.FakeRedis(decode_responses=True)
+    archive = Archive()
+    value = store(redis, archive)
+    broken = await value.create_run(command("broken"), CONTEXT)
+    good = await value.create_run(command("good"), CONTEXT)
+    for created in (broken, good):
+        await transition(value, created, RunState.CANCELLED, "cancel")
+    await redis.hdel(value._session_key(broken.handle.session_id), "base")
+    try:
+        await value.archive_pending()
+        assert set(archive.states) == {good.handle.session_id}
+        assert await redis.smembers(value._key("pending")) == {broken.handle.session_id}
+    finally:
+        await value.close()
 
 
 @pytest.mark.asyncio
@@ -213,7 +272,46 @@ async def test_missing_unarchived_redis_state_never_falls_back_to_old_mysql():
     await redis.delete(value._session_key(sid))
     with pytest.raises(SageV2Error, match="Unarchived"):
         await value.export_session_state(sid)
+    with pytest.raises(SageV2Error, match="Unarchived"):
+        await value._fetch_sessions([sid])
     await value.close()
+
+
+@pytest.mark.asyncio
+async def test_batch_session_fetch_keeps_hot_authority_and_seeds_cold_before_next_commit():
+    redis = fakeredis.aioredis.FakeRedis(decode_responses=True)
+    archive = Archive()
+    value = store(redis, archive)
+    try:
+        hot = await value.create_run(command('hot'), CONTEXT)
+        cold = await value.create_run(command('cold'), CONTEXT)
+        deleted = await value.create_run(command('deleted'), CONTEXT)
+        await transition(value, cold, RunState.CANCELLED, 'cold-cancel')
+        await transition(value, deleted, RunState.CANCELLED, 'deleted-cancel')
+        await value.archive_pending()
+        expected = {created.handle.session_id: await value.export_session_state(created.handle.session_id)
+                    for created in (hot, cold)}
+        await redis.delete(value._session_key(cold.handle.session_id))
+        await redis.hset(value._session_key(deleted.handle.session_id), mapping={'deleted': '1'})
+        for created in (hot, cold, deleted):
+            value._evict_session_locked(created.handle.session_id)
+        original = value._fetch_session
+        value._fetch_session = AsyncMock(side_effect=AssertionError('batch called single-session fetch'))
+        archive._fetch_session = AsyncMock(side_effect=AssertionError('batch issued single-session SQL'))
+        archive._fetch_sessions = AsyncMock(wraps=archive._fetch_sessions)
+        assert await value._fetch_sessions([*expected, deleted.handle.session_id, 'missing']) == expected
+        archive._fetch_sessions.assert_awaited_once()
+        assert set(archive._fetch_sessions.await_args.args[0]) == {cold.handle.session_id, 'missing'}
+        async with value._session_cache.operation():
+            await value._ensure_sessions_loaded([*expected, deleted.handle.session_id])
+            assert set(value._sessions) == set(expected)
+            assert len(value._runs) == 2
+        value._fetch_session = original
+        following = await value.create_run(command('next').model_copy(update={'session_id': cold.handle.session_id}), CONTEXT)
+        assert (await value.get_run(following.handle.run_id)).state == RunState.QUEUED
+        assert len(await value.list_session_runs(cold.handle.session_id)) == 2
+    finally:
+        await value.close()
 
 
 @pytest.mark.asyncio
@@ -275,6 +373,86 @@ async def test_namespace_allows_only_one_live_writer():
         await second.create_run(command("other"), CONTEXT)
     await first.close()
     await second.close()
+
+
+@pytest.mark.asyncio
+async def test_start_waits_for_crashed_writer_lease_to_expire():
+    redis = fakeredis.aioredis.FakeRedis(decode_responses=True)
+    value = store(redis, Archive())
+    owner_key = value._key("owner")
+    await redis.set(owner_key, "crashed-process", px=100)
+    try:
+        services = await asyncio.wait_for(value.start(None, ()), timeout=2)
+        assert services["session.store"] is value
+        assert await redis.get(owner_key) == value._owner
+        created = await value.create_run(command(), CONTEXT)
+        assert (await value.get_run(created.handle.run_id)).state == RunState.QUEUED
+    finally:
+        await value.close()
+
+
+@pytest.mark.asyncio
+async def test_start_times_out_without_stealing_live_writer_lease(monkeypatch):
+    from sagents.v2.runtime.session.plugins.mysql import redis as redis_mysql
+
+    monkeypatch.setattr(redis_mysql, "_OWNER_STARTUP_WAIT_SECONDS", 0.1)
+    server = fakeredis.FakeServer()
+    archive = Archive()
+    first = store(fakeredis.aioredis.FakeRedis(server=server, decode_responses=True), archive)
+    second = store(fakeredis.aioredis.FakeRedis(server=server, decode_responses=True), archive)
+    await first.create_run(command(), CONTEXT)
+    try:
+        started = time.monotonic()
+        with pytest.raises(SageV2Error, match="already owned"):
+            await asyncio.wait_for(second.start(None, ()), timeout=1)
+        assert time.monotonic() - started >= 0.1
+        assert await first._redis.get(first._key("owner")) == first._owner
+        assert not second._redis_ready
+        assert second._worker is None
+        assert second._lease_worker is None
+        await first.create_run(command("still-owned"), CONTEXT)
+    finally:
+        await second.close()
+        await first.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("cancel", [False, True], ids=["released", "cancelled"])
+async def test_start_wait_can_finish_on_release_or_be_cancelled(cancel):
+    redis = fakeredis.aioredis.FakeRedis(decode_responses=True)
+    value = store(redis, Archive())
+    owner_key = value._key("owner")
+    await redis.set(owner_key, "previous-process", ex=30)
+    attempted = asyncio.Event()
+    original = redis.set
+
+    async def observed_set(*args, **kwargs):
+        result = await original(*args, **kwargs)
+        attempted.set()
+        return result
+
+    redis.set = observed_set
+    task = asyncio.create_task(value.start(None, ()))
+    try:
+        await asyncio.wait_for(attempted.wait(), timeout=1)
+        assert not task.done()
+        assert not value._redis_ready
+        if cancel:
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+            assert await redis.get(owner_key) == "previous-process"
+            assert value._worker is None
+            assert value._lease_worker is None
+        else:
+            await redis.delete(owner_key)
+            services = await asyncio.wait_for(task, timeout=2)
+            assert services["session.store"] is value
+            assert await redis.get(owner_key) == value._owner
+    finally:
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+        await value.close()
 
 
 @pytest.mark.asyncio
@@ -515,6 +693,48 @@ async def test_running_commits_append_deltas_without_rewriting_session_snapshot(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(("part_count", "delta_count", "max_round_trips"), [(64, 128, 4), (1024, 1024, 10)])
+async def test_hot_snapshot_and_delta_reads_batch_round_trips_without_losing_fields(part_count, delta_count, max_round_trips):
+    redis = fakeredis.aioredis.FakeRedis(decode_responses=True)
+    value = store(redis, Archive())
+    key = value._session_key("batched-read")
+    parts = [f"part-{i};" for i in range(part_count)]
+    fields = {"revision": str(delta_count + 1), "last_sequence": str(delta_count), "base_revision": "1",
+              "base_snapshot": "batched", "base_parts": str(part_count)}
+    deltas = {f"d:{i}": f"mutation-{i}" for i in range(2, delta_count + 2)}
+    await redis.hset(key, mapping={**fields, **deltas})
+    await redis.hset(value._key("snapshot:batched"), mapping=dict(enumerate(parts)))
+    original_command, original_pipeline = redis.execute_command, redis.pipeline
+    round_trips = 0
+
+    async def command(*args, **kwargs):
+        nonlocal round_trips
+        round_trips += 1
+        return await original_command(*args, **kwargs)
+
+    def pipeline(*args, **kwargs):
+        pipe = original_pipeline(*args, **kwargs)
+        execute = pipe.execute
+
+        async def counted_execute(*args, **kwargs):
+            nonlocal round_trips
+            round_trips += 1
+            assert len(pipe.command_stack) <= 32
+            return await execute(*args, **kwargs)
+
+        pipe.execute = counted_execute
+        return pipe
+
+    redis.execute_command, redis.pipeline = command, pipeline
+    try:
+        assert await value._read_hot(key) == {**fields, **deltas, "base": "".join(parts)}
+        assert round_trips <= max_round_trips
+    finally:
+        redis.execute_command, redis.pipeline = original_command, original_pipeline
+        await value.close()
+
+
+@pytest.mark.asyncio
 async def test_background_snapshot_chunks_survive_resume_and_reader_compaction_race():
     redis = fakeredis.aioredis.FakeRedis(decode_responses=True)
     value = store(redis, Archive())
@@ -526,17 +746,26 @@ async def test_background_snapshot_chunks_survive_resume_and_reader_compaction_r
     sid = created.handle.session_id
     expected = await value.export_session_state(sid)
     old_fields = await value._read_hot(value._session_key(sid))
-    original = redis.hmget
+    original = redis.pipeline
     compacted = False
 
-    async def compact_during_read(key, keys, *args):
-        nonlocal compacted
-        if key == value._session_key(sid) and any(str(name).startswith("d:") for name in keys) and not compacted:
-            compacted = True
-            await value._compact_hot(sid, old_fields)
-        return await original(key, keys, *args)
+    def compact_during_read(*args, **kwargs):
+        pipe = original(*args, **kwargs)
+        execute = pipe.execute
 
-    redis.hmget = compact_during_read
+        async def compact_before_execute(*args, **kwargs):
+            nonlocal compacted
+            if not compacted and any(command[0] == "HMGET" and command[1] == value._session_key(sid)
+                    and any(str(name).startswith("d:") for name in command[2:])
+                    for command, _ in pipe.command_stack):
+                compacted = True
+                await value._compact_hot(sid, old_fields)
+            return await execute(*args, **kwargs)
+
+        pipe.execute = compact_before_execute
+        return pipe
+
+    redis.pipeline = compact_during_read
     try:
         assert await value._fetch_session(sid) == expected
         assert compacted
@@ -551,7 +780,7 @@ async def test_background_snapshot_chunks_survive_resume_and_reader_compaction_r
         assert await redis.ttl(snapshot_key) == -1
         assert len((await value._fetch_session(sid))["runs"]) == 2
     finally:
-        redis.hmget = original
+        redis.pipeline = original
         await value.close()
 
 
@@ -577,7 +806,44 @@ async def test_large_initial_session_is_uploaded_as_bounded_chunks():
 
 
 @pytest.mark.asyncio
-async def test_cold_read_racing_with_completed_deletion_preserves_tombstone():
+@pytest.mark.parametrize(("chunk_chars", "max_batches"), [(16 * 1024, 2), (128, 30)])
+async def test_snapshot_upload_batches_small_chunks_with_bounded_pipeline_bytes(chunk_chars, max_batches):
+    redis = fakeredis.aioredis.FakeRedis(decode_responses=True)
+    value = store(redis, Archive())
+    value.snapshot_chunk_chars = chunk_chars
+    encoded = "大输入" * 40000
+    original = redis.pipeline
+    pipeline_sizes = []
+
+    def pipeline(*args, **kwargs):
+        pipe = original(*args, **kwargs)
+        execute = pipe.execute
+
+        async def counted_execute(*args, **kwargs):
+            commands = [command for command, _ in pipe.command_stack if command[0] == "HSET"]
+            assert len(commands) <= 32
+            pipeline_sizes.append(sum(len(command[-1].encode("utf-8")) for command in commands))
+            return await execute(*args, **kwargs)
+
+        pipe.execute = counted_execute
+        return pipe
+
+    redis.pipeline = pipeline
+    try:
+        token, count = await value._stage_snapshot(encoded)
+        parts = await redis.hmget(value._key(f"snapshot:{token}"), [str(i) for i in range(count)])
+        assert "".join(parts) == encoded
+        assert await redis.ttl(value._key(f"snapshot:{token}")) > 0
+        assert all(size <= value.archive_batch_bytes for size in pipeline_sizes)
+        assert len(pipeline_sizes) <= max_batches
+    finally:
+        redis.pipeline = original
+        await value.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("bulk", [False, True], ids=["single", "batch"])
+async def test_cold_read_racing_with_completed_deletion_preserves_tombstone(bulk):
     redis = fakeredis.aioredis.FakeRedis(decode_responses=True)
     archive = Archive()
     value = store(redis, archive)
@@ -587,7 +853,8 @@ async def test_cold_read_racing_with_completed_deletion_preserves_tombstone():
     await value.archive_pending()
     key = value._session_key(sid)
     await redis.delete(key)
-    original = archive._fetch_session
+    method = "_fetch_sessions" if bulk else "_fetch_session"
+    original = getattr(archive, method)
 
     async def deleted_after_sql_read(session_id):
         old_payload = await original(session_id)
@@ -595,10 +862,13 @@ async def test_cold_read_racing_with_completed_deletion_preserves_tombstone():
         await redis.hset(key, mapping={"deleted": "1"})
         return old_payload
 
-    archive._fetch_session = deleted_after_sql_read
+    setattr(archive, method, deleted_after_sql_read)
     try:
-        assert await value._fetch_session(sid) is None
+        if bulk:
+            assert await value._fetch_sessions([sid]) == {}
+        else:
+            assert await value._fetch_session(sid) is None
         assert await redis.hgetall(key) == {"deleted": "1"}
     finally:
-        archive._fetch_session = original
+        setattr(archive, method, original)
         await value.close()

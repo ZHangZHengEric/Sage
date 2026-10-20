@@ -4,6 +4,9 @@ from sagents.v2._lazy import exported_names, resolve_export
 
 
 _EXPORTS = {
+    "RedisDistributedScheduler": (
+        "sagents.v2.runtime.execution.scheduler.plugins.redis_distributed", "RedisDistributedScheduler",
+    ),
     "FilesystemScheduler": (
         "sagents.v2.runtime.execution.scheduler.plugins.filesystem",
         "FilesystemScheduler",
