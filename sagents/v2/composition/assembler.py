@@ -993,6 +993,7 @@ class ApplicationAssembler:
                                 registry,
                                 descriptor.mode,
                                 allow_delegation=descriptor.allow_delegation,
+                                session_store=driver_runtime.session_store,
                             ),
                         ),
                         trace_sink=services["observability.trace-sink"],

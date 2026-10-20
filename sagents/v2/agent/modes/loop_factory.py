@@ -19,6 +19,7 @@ from sagents.v2.tool import (
 from sagents.v2.runtime.contracts import RuntimePort
 from sagents.v2.agent.multi_agent import (
     AgentDescriptor,
+    AgentRosterContextProvider,
     DelegationConcurrencyLimiter,
     AgentMode,
     AgentRegistry,
@@ -159,6 +160,12 @@ class ModeAwareAgentLoopFactory:
             context_assembler=DefaultContextAssembler(
                 developer_instructions=descriptor.instructions,
                 history_reader=self.runtime.session_store,
+                providers=(AgentRosterContextProvider(
+                    self.registry,
+                    descriptor.mode,
+                    allow_delegation=descriptor.allow_delegation,
+                    session_store=self.runtime.session_store,
+                ),),
             ),
             delegated_run_controller=self.child_executor,
             expected_resolved_spec_hash=self.resolved_spec_hash,
