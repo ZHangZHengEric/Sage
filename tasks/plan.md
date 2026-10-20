@@ -28,3 +28,6 @@ The user explicitly deferred v1 Server image building and v1 Desktop work. Stop 
 - Wheel/sdist and host-native application artifacts build and launch successfully; tests cover the real application entries.
 - Current macOS native and Linux Server-container verification is reported separately from Windows/Linux Desktop/macOS Intel targets, which are not executable on this host and are not claimed as tested.
 - Keep the durable goal active until all explicit requirements have authoritative evidence.
+
+## Final outcome
+Dependency split and current-host verification are complete within the revised scope. V2 Desktop was explicitly accepted by the user; v1 image and Desktop native builds remain deferred. Detailed results, baseline documentation drift, platform limits, retained artifacts and temporary-resource cleanup are recorded in verification.json.
