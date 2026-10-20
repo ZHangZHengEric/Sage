@@ -21,7 +21,7 @@ Run from the checkout root with the Python environment active:
 
 ```bash
 python -m pip install -e '.[server]'
-cp app/v2/server/.env.example app/v2/server/.env
+cp .env.example app/v2/server/.env
 ```
 
 Set `SAGE_SERVER_MYSQL_URL`, your own `SAGE_SERVER_JWT_SECRET` (at least 32 bytes), and initial administrator credentials in `app/v2/server/.env`.

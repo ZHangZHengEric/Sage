@@ -103,7 +103,7 @@ Windows、Linux 配置见 [桌面端指南](app/v2/desktop/README.md)。2.1 发�
 
 ```bash
 python -m pip install -e '.[server]'
-cp app/v2/server/.env.example app/v2/server/.env
+cp .env.example app/v2/server/.env
 ```
 
 在 `.env` 中配置 MySQL 连接、JWT 密钥和初始管理员账号，然后运行：

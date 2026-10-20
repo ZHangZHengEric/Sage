@@ -113,7 +113,7 @@ Requires **Python 3.12+**, **MySQL**, and **Node.js 22.12+**. From the checkout 
 
 ```bash
 python -m pip install -e '.[server]'
-cp app/v2/server/.env.example app/v2/server/.env
+cp .env.example app/v2/server/.env
 ```
 
 Set the MySQL connection, JWT secret, and initial administrator credentials in `.env`, then run:

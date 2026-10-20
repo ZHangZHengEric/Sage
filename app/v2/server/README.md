@@ -44,7 +44,7 @@ Web 开发时可单独启动：在 `app/v2/server/web` 执行 `npm install && np
 
 启动按当前 ORM 元数据创建缺失表，不执行历史表结构升级或 Agent 数据回填。Agent 配置统一通过 `agents.package_ref` 读取标准包。Skill 描述列使用 `LONGTEXT`，列表描述不截断，加载内容受 Skill 文件大小限制。
 
-读 `app/v2/server/.env`（进程环境变量优先）。生产必须设置 `SAGE_SERVER_JWT_SECRET`（至少 32 字节）。默认管理员：`admin` / `admin12345`。OpenAPI 在 `/docs`。
+环境变量模板统一维护在根目录 [`.env.example`](../../../.env.example)。源码启动前执行 `cp .env.example app/v2/server/.env` 并填写配置，进程环境变量优先。生产必须设置 `SAGE_SERVER_JWT_SECRET`（至少 32 字节）。未配置时的默认管理员：`admin` / `admin12345`；模板要求替换管理员密码。OpenAPI 在 `/docs`。
 
 成功/失败 JSON 都带 `request_id`，并回写 `X-Request-ID`。可传入该请求头以透传。
 
@@ -198,7 +198,7 @@ Server API 用 `external_tools` 配置外部工具，页面与内置 `tools` 分
 
 ## 模型观测
 
-支持独立选择 `sage.trace.otlp`、`sage.trace.langfuse` 或 `sage.trace.phoenix`，共用运行、工具、模型输入输出、token 与首 token 观测。配置见 [V2 观测说明](../../../docs/zh/architecture/sagents-v2-observability.md) 和 `.env.example`。这些导出插件需要安装 `.[otel]`；配置公开访问地址后，管理页显示对应平台入口。
+支持独立选择 `sage.trace.otlp`、`sage.trace.langfuse` 或 `sage.trace.phoenix`，共用运行、工具、模型输入输出、token 与首 token 观测。配置见 [V2 观测说明](../../../docs/zh/architecture/sagents-v2-observability.md) 和根目录 [`.env.example`](../../../.env.example)。这些导出插件需要安装 `.[otel]`；配置公开访问地址后，管理页显示对应平台入口。
 
 
 ### 内网业务调用 V2 chat
