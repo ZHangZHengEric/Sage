@@ -50,7 +50,7 @@ for _distribution in ("fastmcp-slim", "fastmcp"):
 
 # `sagents.v1.tool.impl.__init__` uses lazy `__getattr__` for tool modules,
 # so the static tracer never reaches the @tool decorators. Collect the
-# whole `sagents` tree so every tool/skill module ends up in the PYZ.
+# v1 tree so every legacy tool/skill module ends up in the PYZ.
 hiddenimports = [
     "aiosqlite",
     "greenlet",
@@ -63,7 +63,7 @@ hiddenimports = [
     "browserforge",
     "undetected_playwright",
 ]
-hiddenimports += collect_submodules("sagents")
+hiddenimports += collect_submodules("sagents.v1")
 hiddenimports += collect_submodules("sagents.v1.tool.impl")
 hiddenimports += collect_submodules("sagents.v1.skill")
 hiddenimports += collect_submodules("app.v1.common.models")

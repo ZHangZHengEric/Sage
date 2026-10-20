@@ -26,7 +26,7 @@ ref: v2-DEVELOPMENT
 使用[快速开始](applications/GETTING_STARTED.md)中的 Python 3.12+ 环境，服务端测试需要安装对应 extras：
 
 ```bash
-python -m pip install -e '.[server-v2]' pytest pytest-asyncio pytest-timeout
+python -m pip install -e '.[server-v2,desktop-v2,otel,test]'
 python -m pytest tests/sagents/v2 tests/app/v2/desktop tests/app/v2/server -q
 ```
 

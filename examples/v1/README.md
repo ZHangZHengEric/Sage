@@ -5,7 +5,7 @@ These examples use `sagents.v1`. New integrations should start with [v2](../v2/R
 ## Prerequisites
 
 - Python 3.12 or newer for the current repository dependency set
-- Project dependencies installed from the repository root with `python3 -m pip install -r requirements.txt`
+- Project dependencies installed from the repository root with `python3 -m pip install -r app/v1/requirements.txt`
 - Streamlit demo: also install `streamlit`; binary build: also install `pyinstaller`
 
 The default config files are already included:

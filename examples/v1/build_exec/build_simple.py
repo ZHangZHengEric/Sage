@@ -391,7 +391,7 @@ class SimpleBuilder:
 
             if importlib.util.find_spec("PyInstaller") is None:
                 print(
-                    "❌ 未安装 PyInstaller，请先执行: python3 -m pip install -r requirements.txt"
+                    "❌ 未安装 PyInstaller，请先执行: python3 -m pip install -r app/v1/requirements-build.txt"
                 )
                 return False
 

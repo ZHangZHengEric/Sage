@@ -59,6 +59,17 @@ READ_ONLY_SHELL_EXECUTABLES: frozenset[str] = frozenset(
 )
 
 
+def read_only_process_command(argv: tuple[str, ...]) -> str:
+    """Unwrap only the shell forms emitted by official inspection tools."""
+    if len(argv) == 3 and argv[:2] in {("bash", "-c"), ("sh", "-c")}:
+        return argv[2]
+    if len(argv) == 5 and argv[:4] == ("bash", "-o", "pipefail", "-c"):
+        return argv[4]
+    raise PermissionError(
+        "read-only process mode accepts only a validated shell command"
+    )
+
+
 def validate_read_only_shell_command(command: str) -> None:
     """Allow common inspection pipelines and reject everything else.
 
@@ -151,6 +162,7 @@ def _validate_git(arguments: list[str]) -> None:
 
 __all__ = [
     "READ_ONLY_SHELL_EXECUTABLES",
+    "read_only_process_command",
     "parse_read_only_shell_command",
     "validate_read_only_shell_command",
 ]

@@ -3,6 +3,9 @@
 ## Accepted objective
 Complete the v1/v2 dependency split, update every install/CI/package consumer, and verify all applications under app can run and package. Preserve existing unrelated working-tree changes. No business storage or frontend subtitle changes.
 
+## User scope update
+The user explicitly deferred v1 Server image building and v1 Desktop work. Stop those verification builds; preserve completed evidence. Continue the dependency split, v1 install/runtime checks already in scope, v2 Server/Desktop, and shared CLI/TUI verification. Do not require v1 native or Docker artifacts for completion under the revised scope.
+
 ## Dependency boundaries
 - app/v1 owns legacy requirements, including separate test/build requirements where needed.
 - Root pyproject.toml defines v2 core and explicit Server/Desktop/test extras. Preserve the public v1 CLI dispatch; v1 dependencies are installed explicitly.
@@ -23,5 +26,5 @@ Complete the v1/v2 dependency split, update every install/CI/package consumer, a
 - v2 installs and tests independently of v1 requirements; declared extras contain all required direct dependencies.
 - v1 workflows remain functional using app/v1 requirements.
 - Wheel/sdist and host-native application artifacts build and launch successfully; tests cover the real application entries.
-- Windows/Linux/macOS verification is reported separately; unavailable platform evidence is not claimed as passed.
+- Current macOS native and Linux Server-container verification is reported separately from Windows/Linux Desktop/macOS Intel targets, which are not executable on this host and are not claimed as tested.
 - Keep the durable goal active until all explicit requirements have authoritative evidence.

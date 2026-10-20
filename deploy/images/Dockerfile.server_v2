@@ -43,9 +43,21 @@ ENV SAGE_SERVER_LINUX_EXECUTION_UID=10001 \
     SAGE_SERVER_LINUX_EXECUTION_GID=10001
 
 # Cache runtime and build dependencies independently of application source.
-COPY deploy/images/requirements.server_v2.txt /tmp/sage-server-requirements.txt
-RUN python -m pip install --no-cache-dir -r /tmp/sage-server-requirements.txt \
-    && rm /tmp/sage-server-requirements.txt
+COPY pyproject.toml /tmp/sage-pyproject.toml
+RUN python - <<'PYTHON'
+import subprocess
+import sys
+import tomllib
+
+with open('/tmp/sage-pyproject.toml', 'rb') as source:
+    project = tomllib.load(source)['project']
+extras = project['optional-dependencies']
+subprocess.run([
+    sys.executable, '-m', 'pip', 'install', '--no-cache-dir',
+    'setuptools>=68', 'wheel', *project['dependencies'],
+    *extras['server-v2'], *extras['otel'],
+], check=True)
+PYTHON
 
 COPY deploy/images/frontend-test/runner.cjs /usr/local/lib/sage-frontend-test/runner.cjs
 COPY deploy/images/frontend-test/fonts.conf /usr/share/sage-frontend-test/fonts.conf
@@ -55,7 +67,7 @@ ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 \
     npm_config_update_notifier=false
 
 COPY . .
-# Use the image-specific dependencies above; do not install the shared dependency set.
+# Dependencies from the same project metadata are already cached above.
 RUN python -m pip install --no-cache-dir --no-deps --no-build-isolation '.[server-v2,otel]'
 
 EXPOSE 8090

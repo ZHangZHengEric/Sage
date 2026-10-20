@@ -27,6 +27,7 @@ from sagents.v2.contracts.common import new_id, utc_now
 from sagents.v2.contracts.errors import ErrorCategory, RuntimeErrorInfo, SageV2Error
 from sagents.v2.runtime.execution.sandbox.read_only_shell import (
     parse_read_only_shell_command,
+    read_only_process_command,
 )
 from sagents.v2.runtime.execution.sandbox.contracts import (
     MUTATING_FILE_OPERATIONS,
@@ -88,11 +89,7 @@ _READ_ONLY_GIT_ENV = {
 
 
 def _read_only_stages(argv: tuple[str, ...]) -> tuple[tuple[str, ...], ...]:
-    if argv[:2] not in {("bash", "-c"), ("sh", "-c")} or len(argv) != 3:
-        raise PermissionError(
-            "read-only process mode accepts only a validated shell command"
-        )
-    return parse_read_only_shell_command(argv[2])
+    return parse_read_only_shell_command(read_only_process_command(argv))
 
 
 def _harden_read_only_stage(stage: tuple[str, ...]) -> tuple[str, ...]:
@@ -377,8 +374,10 @@ class _LocalProcessRuntime:
         if policy.read_only:
             # Only fully parsed argv stages enter this pipeline; quote every
             # argument and run the pipeline inside the OS read-only boundary.
-            resolved_executable = "/bin/sh"
-            arguments = ("-c", " | ".join(shlex.join(stage) for stage in resolved))
+            pipefail = request.argv[:4] == ("bash", "-o", "pipefail", "-c")
+            resolved_executable = "/bin/bash" if pipefail else "/bin/sh"
+            options = ("-o", "pipefail", "-c") if pipefail else ("-c",)
+            arguments = (*options, " | ".join(shlex.join(stage) for stage in resolved))
         else:
             resolved_executable, *arguments = resolved[0]
         return resolved_executable, arguments, cwd, environment, timeout

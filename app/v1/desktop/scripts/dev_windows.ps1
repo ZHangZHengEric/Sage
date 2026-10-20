@@ -130,7 +130,7 @@ if (Test-Path $UserScriptsDir) {
 }
 
 Write-Host "Installing Python dependencies..." -ForegroundColor Cyan
-& $SagePython -m pip install --user -r "$RootDir\requirements.txt" --index-url https://pypi.org/simple
+& $SagePython -m pip install --user -r "$RootDir\app\v1\requirements.txt" --index-url https://pypi.org/simple
 if ($LASTEXITCODE -ne 0) {
     Write-Host "[ERROR] Failed to install Python dependencies" -ForegroundColor Red
     exit 1

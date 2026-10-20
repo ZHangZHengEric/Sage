@@ -247,9 +247,9 @@ Write-Host "Pip: $(& $SagePython -m pip --version)" -ForegroundColor Cyan
 function Install-PythonDeps {
     param($RootDirParam, $CacheDirParam, $SagePythonParam)
 
-    $ReqFile = Join-Path $RootDirParam "requirements.txt"
+    $ReqFile = Join-Path $RootDirParam "app/v1/requirements-build.txt"
     $HashFile = Join-Path $CacheDirParam ".requirements.hash"
-    $NewHash = Get-FileHash256 -FilePath $ReqFile
+    $NewHash = (Get-FileHash256 -FilePath $ReqFile) + "-" + (Get-FileHash256 -FilePath (Join-Path $RootDirParam "app/v1/requirements.txt"))
     if (Test-Path $HashFile) {
         $OldHash = Get-Content $HashFile
     } else {

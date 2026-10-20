@@ -29,6 +29,7 @@ Sage 2.0 发布包统一要求 Python 3.12+；旧发布版的 Python 要求以�
 从仓库根目录启动：
 
 ```bash
+python -m pip install -e '.[desktop-v2]'
 cd app/v2/desktop
 flutter pub get
 flutter run -d macos

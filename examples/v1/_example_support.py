@@ -44,7 +44,7 @@ def ensure_python_version(script_file: str, minimum=MIN_PYTHON) -> None:
     raise SystemExit(
         f"Sage examples require Python {minimum[0]}.{minimum[1]}+; current interpreter is "
         f"{version}. Switch to Python 3.10+ and install dependencies with "
-        f"`python3 -m pip install -r {root / 'requirements.txt'}`."
+        f"`python3 -m pip install -r {root / 'app/v1/requirements.txt'}`."
     )
 
 
@@ -53,5 +53,5 @@ def exit_for_missing_dependency(script_file: str, exc: ModuleNotFoundError) -> N
     module_name = (exc.name or "unknown").split(".")[0]
     raise SystemExit(
         f"Missing dependency `{module_name}`. Install the example requirements with "
-        f"`python3 -m pip install -r {root / 'requirements.txt'}` after switching to Python 3.10+."
+        f"`python3 -m pip install -r {root / 'app/v1/requirements.txt'}` after switching to Python 3.10+."
     ) from exc

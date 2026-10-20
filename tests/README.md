@@ -28,29 +28,35 @@ Web、Flutter、Rust 和文档检查测试使用各自的运行工具，部分�
 
 ## 本地运行 Python 测试
 
-使用 Python 3.12+，从仓库根目录执行。依赖以
-[requirements.txt](../requirements.txt) 和 [CI 配置](../.github/workflows/ci-tests.yml) 为准。
-CI 的 `app`、`sagents` 套件还安装 A2A 依赖；Linux 沙箱测试需要工作正常的 bubblewrap。
+使用 Python 3.12+，从仓库根目录执行。v1、v2 使用独立虚拟环境，依赖分别由
+[app/v1/requirements-test.txt](../app/v1/requirements-test.txt) 和
+[pyproject.toml](../pyproject.toml) 定义。Linux 沙箱测试需要工作正常的 bubblewrap。
 
 ```bash
-python -m pip install -r requirements.txt
-python -m pip install 'a2a-sdk[fastapi]>=1.1.4,<2'
-
-# 按版本运行引擎测试；排除标记为 live 的真实模型验收。
-python -m pytest tests/sagents/v1 -q
-python -m pytest tests/sagents/v2 -m 'not live' -q
-
-# 按版本运行应用后端测试。
-python -m pytest tests/app/v1 -q
-python -m pytest tests/app/v2 -q
-
-# 跨版本入口和架构检查。
-python -m pytest tests/sagents/test_architecture.py tests/sagents/test_versioned_layout.py -q
-python scripts/shared/checks/check_architecture.py
-
-# 只收集测试，不执行用例；收集仍会导入测试模块及其依赖。
+# v2：不安装 v1 依赖。
+python3.12 -m venv .venv-v2
+source .venv-v2/bin/activate
+python -m pip install -e '.[server-v2,desktop-v2,otel,test]'
+python -m pip check
+python -m pytest tests/sagents/v2 tests/app/v2 -m 'not live' -q
+# 只收集测试也会导入测试模块及其依赖。
 python -m pytest --collect-only -q tests/sagents/v2
+deactivate
+
+# v1：独立使用旧版依赖清单。
+python3.12 -m venv .venv-v1
+source .venv-v1/bin/activate
+python -m pip install -r app/v1/requirements-test.txt
+python -m pip check
+python -m pytest tests/sagents/v1 tests/app/v1 tests/mcp_servers -m 'not live' -q
+
+# 跨版本入口检查：显式组合两个版本的依赖。
+python -m pip install -e '.[server-v2,desktop-v2,otel,test]'
+python -m pytest tests/app/clients tests/sagents --ignore=tests/sagents/v1 --ignore=tests/sagents/v2 -m 'not live' -q
+python scripts/shared/checks/check_architecture.py
 ```
+
+Windows 使用对应环境的 `Scripts\Activate.ps1` 激活。
 
 直接运行 `python -m pytest` 时，[pytest.ini](../pytest.ini) 默认收集 `tests/`；
 它不会自动执行 Web、Flutter、Rust 或 `docs/scripts/` 的测试。
@@ -62,14 +68,18 @@ pytest 默认给每个测试设置 30 秒的超时保护，这是防止挂起的
 
 ## CI 覆盖范围
 
-[ci-tests.yml](../.github/workflows/ci-tests.yml) 先检查源码架构，再执行四个 Python 套件：
+[ci-tests.yml](../.github/workflows/ci-tests.yml) 先检查源码架构，再执行六个 Python 套件：
 
-| 套件 | 仓库根目录下的命令 |
-| --- | --- |
-| app | `python -m pytest tests/app --ignore=tests/app/v1/common` |
-| common | `python -m pytest tests/app/v1/common` |
-| sagents | `python -m pytest tests/sagents` |
-| mcp | `python -m pytest tests/mcp_servers` |
+| 套件 | 测试路径 | 安装环境 |
+| --- | --- | --- |
+| app-v1 | `tests/app/v1` | v1 requirements-test |
+| sagents-v1 | `tests/sagents/v1` | v1 requirements-test |
+| app-v2 | `tests/app/v2` | v2 Server/Desktop/OTel/test extras |
+| sagents-v2 | `tests/sagents/v2` | v2 Server/Desktop/OTel/test extras |
+| mcp | `tests/mcp_servers` | v1 requirements-test，包含旧版 MCP 集成依赖 |
+| cross-version | `tests/app/clients`、`tests/sagents` 根级测试 | 显式组合 v1 和 v2 依赖，排除版本内测试 |
+
+每个套件独立安装后运行 `pip check`，并排除标记为 `live` 的真实模型用例。
 
 该工作流还运行 v1 Server Web 的 Vitest 和国际化检查、v1 Desktop UI 的国际化检查、
 v2 Server Web 的构建，以及 v2 Desktop 的 `flutter analyze` 和 `flutter test`。

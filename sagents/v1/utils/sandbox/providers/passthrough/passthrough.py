@@ -493,8 +493,10 @@ class PassthroughSandboxProvider(ISandboxHandle):
                             )
 
                         if not stdout_chunk and not stderr_chunk:
-                            if process.returncode is not None:
-                                break
+                            # EOF can arrive before the child watcher sets returncode.
+                            # Waiting yields to that callback instead of spinning on EOF.
+                            await process.wait()
+                            break
                     except asyncio.TimeoutError:
                         # 继续读取，检查进程是否还在运行
                         if process.returncode is not None:

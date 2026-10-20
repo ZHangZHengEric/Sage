@@ -184,11 +184,11 @@ fi
 
 requirements_hash() {
   if command -v shasum >/dev/null 2>&1; then
-    shasum -a 256 "$ROOT_DIR/requirements.txt" | awk '{print $1}'
+    shasum -a 256 "$ROOT_DIR/app/v1/requirements.txt" | awk '{print $1}'
   elif command -v sha256sum >/dev/null 2>&1; then
-    sha256sum "$ROOT_DIR/requirements.txt" | awk '{print $1}'
+    sha256sum "$ROOT_DIR/app/v1/requirements.txt" | awk '{print $1}'
   else
-    cksum "$ROOT_DIR/requirements.txt" | awk '{print $1}'
+    cksum "$ROOT_DIR/app/v1/requirements.txt" | awk '{print $1}'
   fi
 }
 
@@ -207,7 +207,7 @@ elif [ "${SAGE_FORCE_PIP_INSTALL:-0}" != "1" ] && [ "$ENV_CREATED" != "1" ] && [
   echo "如需安装/修复 Python 依赖，请运行: SAGE_FORCE_PIP_INSTALL=1 ./app/v1/desktop/scripts/dev.sh"
 else
   echo "正在安装 Python 依赖..."
-  pip install -r "$ROOT_DIR/requirements.txt" --index-url https://mirrors.aliyun.com/pypi/simple
+  pip install -r "$ROOT_DIR/app/v1/requirements.txt" --index-url https://mirrors.aliyun.com/pypi/simple
 
   if ! command -v pyinstaller >/dev/null; then
     pip install pyinstaller --index-url https://mirrors.aliyun.com/pypi/simple
