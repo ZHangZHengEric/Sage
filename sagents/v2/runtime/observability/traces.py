@@ -20,9 +20,13 @@ from sagents.v2.runtime.observability.contracts import (
 )
 from sagents.v2.runtime.observability.logs import _log_error, redact_log_value
 from sagents.v2.runtime.observability.timing import elapsed_ms
-from sagents.v2.runtime.observability.content import safe_trace_value
+from sagents.v2.runtime.observability.content import safe_trace_value, trace_content
 
 _TRACE_PREVIEW_LIMIT = 2048
+
+
+def _span_value(sink: TraceSink | None, value: Any) -> Any:
+    return trace_content(sink, value) if getattr(sink, "content_mode", None) == "raw" else redact_log_value(value)
 
 
 _active_span: contextvars.ContextVar[tuple[str, str] | None] = contextvars.ContextVar(
@@ -116,7 +120,7 @@ class SpanHandle:
         event = TraceEvent(
             name=name,
             timestamp=timestamp or utc_now(),
-            attributes=redact_log_value(dict(attributes or {})),
+            attributes=_span_value(self.sink, dict(attributes or {})),
         )
         self.span.events.append(event)
         if self.sink is None:
@@ -138,9 +142,10 @@ class SpanHandle:
         merged = dict(self.span.attributes)
         if duration is not None:
             merged.setdefault("duration_ms", duration)
-        merged.update(redact_log_value(dict(attributes or {})))
-        error_record = _log_error(error)
-        if error_record is not None:
+        merged.update(_span_value(self.sink, dict(attributes or {})))
+        raw = getattr(self.sink, "content_mode", None) == "raw"
+        error_record = _log_error(error, raw=raw)
+        if error_record is not None and not raw:
             error_record = error_record.model_copy(
                 update={
                     "message": safe_trace_value(error_record.message),
@@ -233,7 +238,7 @@ class StructuredTracer:
             or (active[1] if active else None),
             name=name,
             kind=TraceKind(kind),
-            attributes=redact_log_value(
+            attributes=_span_value(self.sink,
                 {"component": self.component, **values, **dict(attributes or {})}
             ),
             **known,

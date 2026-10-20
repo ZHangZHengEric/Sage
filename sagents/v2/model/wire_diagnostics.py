@@ -20,7 +20,7 @@ class WireCapture:
                 value = value.model_dump(mode='json')
             encoded = json.dumps(value, ensure_ascii=False)
             size = len(encoded.encode())
-            if self.bytes + size > self.max_bytes:
+            if self.max_bytes is not None and self.bytes + size > self.max_bytes:
                 self.dropped += 1
                 return
             self.bytes += size

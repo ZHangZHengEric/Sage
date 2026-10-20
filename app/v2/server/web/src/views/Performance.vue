@@ -5,6 +5,7 @@ import { api } from '../api.js'
 import { duration, percentage, timeRange, chartSegments, purposeLabels } from '../performance.js'
 import GlassPanel from '../components/GlassPanel.vue'
 import AppIcon from '../components/AppIcon.vue'
+import TraceWorkbench from '../components/TraceWorkbench.vue'
 const route = useRoute(), router = useRouter()
 const period = ref(['1','6','24','168','day','custom'].includes(route.query.period) ? route.query.period : '24')
 const day = ref(route.query.day || new Date().toLocaleDateString('en-CA'))
@@ -12,6 +13,7 @@ const agent = ref(route.query.agent_id || ''), granularity = ref(route.query.buc
 const start = ref(route.query.start || ''), end = ref(route.query.end || '')
 const agents = ref([]), result = ref(null), error = ref(''), loading = ref(false), expanded = ref('')
 const metric = ref('first_token_ms'), quantile = ref('p95')
+const traceParams = ref({})
 const metrics = [{ id: 'first_token_ms', name: '端到端首 token' }, { id: 'framework_ms', name: '框架耗时' }, { id: 'total_ms', name: '总耗时' }, { id: 'first_text_ms', name: '首段正文' }]
 const summary = computed(() => result.value?.summary)
 const chart = computed(() => chartSegments(result.value?.buckets || [], metric.value, quantile.value))
@@ -39,6 +41,7 @@ async function load() {
     const response = await api.performance(params)
     if (current !== revision) return
     result.value = response
+    traceParams.value = params
     await router.replace({ query:{ period:period.value, day:period.value === 'day' ? day.value : undefined, agent_id:agent.value || undefined, bucket:granularity.value, ...(period.value === 'custom' ? { start:start.value,end:end.value } : {}) } })
   } catch (exc) { if (current === revision) error.value = exc.message }
   finally { if (current === revision) loading.value = false }
@@ -71,6 +74,7 @@ onMounted(async () => {
         <div class="plot"><p v-if="!chart.points.length" class="empty">暂无完整采样</p><span v-else class="plot-maximum">{{ duration(chart.maximum) }}</span><svg viewBox="0 0 900 180" role="img" :aria-label="`${metrics.find(m => m.id === metric)?.name} ${quantile}趋势`"><path d="M16 160H884M16 90H884M16 20H884" class="plot-grid" /><polyline v-for="(segment,i) in chart.segments" :key="i" :points="segment" class="plot-line" /><circle v-for="(point,i) in chart.points" :key="`p${i}`" :cx="point[0]" :cy="point[1]" r="3" class="plot-dot" /></svg><div class="plot-range"><span>{{ result.buckets[0] ? date(result.buckets[0].time) : '' }}</span><span>{{ result.buckets.length ? date(result.buckets.at(-1).time) : '' }}</span></div></div>
         <div class="table-scroll bucket-table"><table><thead><tr><th>时间</th><th>完整采样</th><th>首 token P95</th><th>总耗时 P95</th><th>框架 P95</th><th>框架占比</th></tr></thead><tbody><tr v-for="b in result.buckets" :key="b.time"><td>{{ bucketLabel(b.time) }}</td><td>{{ b.measured }}</td><td>{{ duration(b.first_token_ms.p95) }}</td><td>{{ duration(b.total_ms.p95) }}</td><td>{{ duration(b.framework_ms.p95) }}</td><td>{{ percentage(b.framework_ratio) }}</td></tr></tbody></table></div>
       </GlassPanel>
+      <TraceWorkbench v-if="result.source === 'phoenix'" :params="traceParams" />
       <GlassPanel class="performance-runs"><h2>请求回合</h2><p v-if="!rows.length" class="empty">此时间范围暂无记录</p><div v-else class="table-scroll"><table><thead><tr><th>开始时间 / Agent</th><th>首 token</th><th>首段正文</th><th>总耗时</th><th>LLM</th><th>工具</th><th>框架</th><th>记录</th></tr></thead><tbody><template v-for="row in rows" :key="row.run_id"><tr><td><button class="run-toggle" :aria-expanded="expanded === row.run_id" @click="expanded = expanded === row.run_id ? '' : row.run_id"><span>{{ date(row.started_at) }}</span><span>{{ name(row) }}</span></button></td><td>{{ duration(row.first_token_ms) }}</td><td>{{ duration(row.first_text_ms) }}</td><td>{{ duration(row.total_ms) }}</td><td>{{ duration(row.model_ms) }}</td><td>{{ duration(row.tool_ms) }}</td><td>{{ duration(row.framework_ms) }}</td><td><span :class="{ 'quality-warning': row.coverage !== 'complete' }">{{ status(row) }}</span></td></tr><tr v-if="expanded === row.run_id"><td colspan="8"><div class="run-details"><span>{{ row.run_id }}</span><span>{{ row.session_id }}</span><span>模型首 token {{ duration(row.model_ttft_ms) }}</span><span>模型调用 {{ row.model_calls }} 次</span><span>工具执行 {{ row.tool_calls }} 次</span><span>模型与工具并行 {{ duration(row.overlap_ms) }}</span><span>暂停等待 {{ duration(row.waiting_ms) }}</span><span v-for="(value,key) in row.purposes" :key="key">{{ purposeLabels[key] || key }} {{ value.calls }} 次 · {{ duration(value.ms) }}</span></div></td></tr></template></tbody></table></div><p v-if="result.run_list_truncated" class="quality-warning">显示最近 200 次，汇总包含 {{ result.total_runs }} 次。</p></GlassPanel>
     </template>
   </div>

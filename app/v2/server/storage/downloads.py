@@ -146,18 +146,12 @@ def _archive_directory(fd: int, archive: ZipFile, prefix: str, total: list[int],
                 os.close(child)
 
 
-def prepare_session_export(session_id: str, state: dict, evidence: dict | None = None):
-    """Package a redacted diagnostic snapshot independent of storage backend."""
+def prepare_session_export(session_id: str, run_ids: set[str], evidence: dict | None = None):
+    """Package observation evidence; the Run allowlist contains no business state."""
     from app.v2.server.observability.diagnostics import redact
 
-    evidence = evidence or {"models": [], "logs": [], "unavailable": True}
+    evidence = redact(evidence or {"models": [], "logs": [], "unavailable": True})
     pending_writes = bool(evidence.get("pending_writes"))
-    if [row["session_id"] for row in state.get("sessions", [])] != [session_id]:
-        raise ValueError("diagnostic Session identity mismatch")
-    if any(run["session_id"] != session_id for run in state.get("runs", [])):
-        raise ValueError("diagnostic Run ownership mismatch")
-    sanitized = redact({"state": state, "evidence": evidence})
-    state, evidence = sanitized["state"], sanitized["evidence"]
     name = quote(session_id, safe="")
     if name in {"", ".", ".."}:
         raise ValueError("invalid Session id")
@@ -179,22 +173,8 @@ def prepare_session_export(session_id: str, state: dict, evidence: dict | None =
                     raise OverflowError("Session is too large to archive")
                 archive.writestr(f"{name}/{path}", encoded)
 
-            run_ids = {run["run_id"] for run in state.get("runs", [])}
-            tools = []
-            for run_id in sorted(run_ids):
-                events = state.get("run_events", {}).get(run_id, [])
-                tools.extend(
-                    {"run_id": run_id, "event": event}
-                    for event in events
-                    if event.get("type", "").startswith("tool.call.")
-                    or (
-                        event.get("type") == "item.completed"
-                        and event.get("data", {})
-                        .get("item", {})
-                        .get("data", {})
-                        .get("tool_call_id")
-                    )
-                )
+            tools = evidence.get("tools", [])
+            failures = evidence.get("failures", [])
             models = sorted(evidence.get("models", []), key=lambda row: (row.get("started_at", ""), row.get("request_id", "")))
             requests_index = []
             for sequence, row in enumerate(models, 1):
@@ -211,48 +191,22 @@ def prepare_session_export(session_id: str, state: dict, evidence: dict | None =
             missing_requests = sorted(expected_ids - captured_ids)
             write_json("models.json", models)
             write_json("logs.json", evidence.get("logs", []))
+            if "traces" in evidence:
+                write_json("traces.json", evidence["traces"])
             write_json("tools.json", tools)
-            # Join private exception records to authoritative failed calls. Old
-            # Runs retain an explicit gap rather than implying an empty log is OK.
-            exception_logs = {}
-            for record in evidence.get("logs", []):
-                if (
-                    record.get("session_id") == session_id
-                    and record.get("run_id") in run_ids
-                    and record.get("event") == "tool.execution.exception"
-                    and (record.get("error") or {}).get("stack_trace")
-                ):
-                    exception_logs.setdefault(
-                        (record["run_id"], record.get("tool_call_id")), []
-                    ).append(record["error"])
-            failures = []
-            for row in tools:
-                event = row["event"]
-                if event.get("type") not in {"tool.call.failed", "tool.call.unknown"}:
-                    continue
-                data = event.get("data", {})
-                exceptions = exception_logs.get(
-                    (row["run_id"], data.get("tool_call_id")), []
-                )
-                failures.append({
-                    "run_id": row["run_id"],
-                    "tool_call_id": data.get("tool_call_id"),
-                    "tool_name": data.get("tool_name"),
-                    "operation_id": data.get("operation_id"),
-                    "event_type": event["type"],
-                    "occurred_at": event.get("occurred_at"),
-                    "error": data.get("error"),
-                    "exceptions": exceptions,
-                    "stack_trace_available": bool(exceptions),
-                })
             write_json("failures.json", failures)
             write_json(
                 "manifest.json",
                 {
-                    "format_version": "sage.session-diagnostic-bundle/v1",
+                    "format_version": "sage.session-diagnostic-bundle/v2",
                     "session_id": session_id,
                     "generated_at": datetime.now(timezone.utc).isoformat(),
                     "redacted": True,
+                    "diagnostic_source": evidence.get("source", "local"),
+                    "external_traces_truncated": evidence.get("truncated", False),
+                    "raw_model_streams_available": evidence.get("raw_model_streams_available", any(
+                        row.get("stream", {}).get("wire_capture_available") for row in models
+                    )),
                     "restorable_backup": False,
                     "diagnostic_storage_available": not evidence.get(
                         "unavailable", False
@@ -260,12 +214,17 @@ def prepare_session_export(session_id: str, state: dict, evidence: dict | None =
                     "run_ids": sorted(run_ids),
                     "model_records": len(models),
                     "model_request_ids_missing": missing_requests,
-                    "model_request_coverage": "incomplete" if missing_requests or evidence.get("dropped_logs", 0) or evidence.get("unavailable") else "matched_captured_start_logs",
+                    "model_request_coverage": "external_traces_only" if "traces" in evidence else ("incomplete" if missing_requests or evidence.get("dropped_logs", 0) or evidence.get("unavailable") else "matched_captured_start_logs"),
                     "unfinished_model_request_ids": [row.get("request_id") for row in models if row.get("status") == "started"],
                     "stream_evidence_missing_for_requests": [row.get("request_id") for row in models if not row.get("stream", {}).get("wire_capture_available")],
                     "stream_events_dropped": sum(row.get("stream", {}).get("dropped_wire_events", 0) + row.get("stream", {}).get("dropped_normalized_events", 0) for row in models),
                     "log_records": len(evidence.get("logs", [])),
-                    "tool_events": len(tools),
+                    "tool_records": len(tools),
+                    "tool_results_available": evidence.get("tool_results_available", False),
+                    "tool_results_missing": [
+                        {"run_id": row["run_id"], "tool_call_id": row["tool_call_id"]}
+                        for row in tools if not row.get("result_available")
+                    ],
                     "tool_failures": len(failures),
                     "tool_failures_without_stack_trace": [
                         {"run_id": row["run_id"], "tool_call_id": row["tool_call_id"]}
@@ -295,20 +254,10 @@ def prepare_session_export(session_id: str, state: dict, evidence: dict | None =
                         "Model responses are normalized; stream.wire_events contains SDK-decoded provider events when capture is available, not HTTP bytes. requests/index.json lists chronological attempts.",
                         "Only logs with an exact Session and Run association are included.",
                         "Credential fields and recognizable inline secrets are redacted; review unlabelled prose before sharing.",
-                        "Live Runs may advance after this state snapshot; records are bounded by this Run allowlist.",
+                        "Observation delivery is asynchronous and best effort; missing records are not reconstructed from business state.",
                     ],
                 },
             )
-            # Sanitized canonical aggregate retains checkpoints/interactions and Todo events.
-            write_json("state.json", state)
-            write_json("session.json", state["sessions"][0])
-            for run in state.get("runs", []):
-                run_id = quote(run["run_id"], safe="")
-                write_json(f"runs/{run_id}.json", run)
-                write_json(
-                    f"events/{run_id}.json",
-                    state.get("run_events", {}).get(run["run_id"], []),
-                )
         output.seek(0)
         return output, f"{name}-diagnostics.zip"
     except BaseException:

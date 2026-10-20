@@ -1,8 +1,11 @@
 """HTTP endpoints for conversation runs, threads, and pending approvals."""
 
 import errno
+import asyncio
+import sqlite3
 from typing import Annotated, Literal
 
+import httpx
 from ag_ui.core import RunAgentInput
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
@@ -39,9 +42,7 @@ from app.v2.server.storage.external_workspaces import (
 )
 from sagents.v2.agent.management import AgentPackageBundle
 from sagents.v2.contracts.errors import ErrorCategory, RuntimeErrorInfo, SageV2Error
-from sagents.v2.runtime.session.plugins.filesystem import FilesystemSessionStore
-from sagents.v2.runtime.session.plugins.mysql import MysqlSessionStore
-from sagents.v2.runtime.session.plugins.redis_mysql import RedisMysqlSessionStore
+from sagents.v2.runtime.observability.contracts import DiagnosticEvidenceSource
 
 agent_router = APIRouter(prefix="/api", tags=["agent"], responses=AUTH_ERRORS)
 thread_router = APIRouter(
@@ -247,29 +248,28 @@ async def session_download(thread_id: str, user: AdminUser, host: HostDep):
         binding.owner_id != record.user_id or binding.agent_id != record.agent_id
     ):
         raise HTTPException(404, "thread not found")
-    store = service.application.runtime.session_store
-    if not isinstance(store, (MysqlSessionStore, RedisMysqlSessionStore, FilesystemSessionStore)):
-        raise HTTPException(
-            409, "this Session store does not support diagnostic export"
-        )
-    state = await store.export_session_state(thread_id)
-    for run in state.get("runs", []):
-        command = run.get("start_command")
-        if not command:
-            continue
-        tenant = (
-            command.get("config", {})
-            .get("metadata", {})
-            .get("server_v2.workspace_user_id")
-        )
-        if command.get("agent_id") != record.agent_id or (
+    context = service.context_for(record.user_id)
+    runs = await service.session_access.list_session_runs(thread_id, context)
+    for run in runs:
+        command = await service.session_access.get_start_command(run.run_id, context)
+        tenant = command.config.metadata.get("server_v2.workspace_user_id")
+        if run.session_id != thread_id or command.agent_id != record.agent_id or (
             binding is not None and tenant is not None and tenant != binding.tenant_id
         ):
             raise HTTPException(404, "thread not found")
-    run_ids = {run["run_id"] for run in state.get("runs", [])}
-    evidence = await file_operation(host.diagnostics.snapshot, thread_id, run_ids)
+    run_ids = {run.run_id for run in runs}
+    if host.diagnostics is None:
+        raise HTTPException(409, "当前观测插件不支持诊断查询")
+    source: DiagnosticEvidenceSource = host.diagnostics
+    try:
+        async with asyncio.timeout(30):
+            evidence = await source.export_evidence(thread_id, run_ids)
+    except NotImplementedError as exc:
+        raise HTTPException(409, "当前观测插件不支持诊断查询") from exc
+    except (httpx.HTTPError, OSError, ValueError, KeyError, TypeError, sqlite3.Error, TimeoutError) as exc:
+        raise HTTPException(503, "诊断数据暂不可用") from exc
     return download_response(
-        await file_operation(prepare_session_export, thread_id, state, evidence)
+        await file_operation(prepare_session_export, thread_id, run_ids, evidence)
     )
 
 

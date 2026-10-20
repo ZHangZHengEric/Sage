@@ -1758,7 +1758,7 @@ _TRACE_PROPERTIES = {
     "environment": {"type": "string", "default": "production"},
     "content_mode": {
         "type": "string",
-        "enum": ["metadata", "redacted"],
+        "enum": ["metadata", "redacted", "raw"],
         "default": "redacted",
     },
     "max_content_chars": {

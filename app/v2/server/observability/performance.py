@@ -450,7 +450,6 @@ def report(
     max_runs=10000,
     max_timing_rows=100000,
 ):
-    zone = ZoneInfo(timezone_name)
     with closing(sqlite3.connect(f"file:{path}?mode=ro", uri=True, timeout=2)) as db:
         db.row_factory = sqlite3.Row
         candidates = list(
@@ -492,6 +491,16 @@ def report(
                 batch,
             ):
                 models[r["run_id"]].append(dict(r))
+    return timing_report(
+        events, models, start=start, end=end, agent_id=agent_id,
+        bucket=bucket, timezone_name=timezone_name, truncated=truncated,
+    )
+
+
+def timing_report(events, models, *, start, end, agent_id="", bucket="hour",
+                  timezone_name="Asia/Shanghai", truncated=False):
+    """Use the same timing and coverage rules for local and external records."""
+    zone = ZoneInfo(timezone_name)
     rows = []
     for rid, values in events.items():
         row = build_run(values, models[rid])

@@ -72,8 +72,8 @@ class OtlpTraceTransport:
         protocol = protocol.strip().lower()
         if protocol not in {"grpc", "http"}:
             raise ValueError("protocol must be grpc or http")
-        if content_mode not in {"metadata", "redacted"}:
-            raise ValueError("content_mode must be metadata or redacted")
+        if content_mode not in {"metadata", "redacted", "raw"}:
+            raise ValueError("content_mode must be metadata, redacted or raw")
         if not 0 <= sample_rate <= 1 or min(max_queue_size, max_active_spans) < 1:
             raise ValueError("invalid trace sampling or queue limits")
         if not 256 <= max_content_chars <= 65536 or not 0 < timeout_seconds <= 30:
@@ -166,7 +166,7 @@ class OtlpTraceTransport:
             if otel_span is not None:
                 otel_span.add_event(
                     event.name,
-                    attributes=_otel_attributes(safe_trace_value(event.attributes)),
+                    attributes=_otel_attributes(self._trace_value(event.attributes)),
                     timestamp=_time_nanos(event.timestamp),
                 )
         except Exception:
@@ -189,13 +189,13 @@ class OtlpTraceTransport:
                         else span.attributes.get("status_message", span.name)
                     )
                     otel_span.set_status(
-                        Status(StatusCode.ERROR, safe_trace_value(message))
+                        Status(StatusCode.ERROR, self._trace_value(message))
                     )
                     if span.error:
                         otel_span.add_event(
                             "exception",
                             attributes=_otel_attributes(
-                                safe_trace_value(
+                                self._trace_value(
                                     {
                                         "exception.type": span.error.type,
                                         "exception.message": span.error.message,
@@ -264,7 +264,12 @@ class OtlpTraceTransport:
                     "gen_ai.tool.call.result": values.get("output"),
                 }
             )
-        return safe_trace_value(values, limit=self.max_content_chars)
+        return self._trace_value(values)
+
+    def _trace_value(self, value: Any) -> Any:
+        if self.content_mode == "raw":
+            return trace_content(self, value)
+        return safe_trace_value(value, limit=self.max_content_chars)
 
     def _build_tracer(self, exporter, headers, sample_rate, max_queue_size):
         from opentelemetry.sdk.resources import SERVICE_NAME, Resource
@@ -361,7 +366,14 @@ class OtlpTraceTransport:
             resource=Resource.create({**self.resource_attributes, SERVICE_NAME: self.service_name}),
             sampler=TraceIdRatioBased(sample_rate),
             id_generator=SageIdGenerator(),
-            span_limits=SpanLimits(max_attribute_length=self.max_content_chars + 128),
+            span_limits=SpanLimits(
+                max_attributes=-1 if self.content_mode == "raw" else None,
+                max_span_attributes=-1 if self.content_mode == "raw" else None,
+                max_events=-1 if self.content_mode == "raw" else None,
+                max_event_attributes=-1 if self.content_mode == "raw" else None,
+                max_attribute_length=-1 if self.content_mode == "raw" else self.max_content_chars + 128,
+                max_span_attribute_length=-1 if self.content_mode == "raw" else self.max_content_chars + 128,
+            ),
             shutdown_on_exit=False,
         )
         provider.add_span_processor(processor)

@@ -95,7 +95,7 @@ class StructuredLogger:
                     message=message,
                     component=self.component,
                     process_id=os.getpid(),
-                    error=_log_error(error),
+                    error=_log_error(error, raw=getattr(self.sink, "raw_capture", False)),
                     attributes={**values, **dict(attributes or {})},
                     **known,
                 )
@@ -131,6 +131,10 @@ class _ProcessLogSink:
     def __init__(self) -> None:
         self.target: LogSink | None = None
 
+    @property
+    def raw_capture(self) -> bool:
+        return getattr(self.target, "raw_capture", False)
+
     def write(self, record: LogRecord) -> None:
         if self.target is None:
             from sagents.v2.runtime.observability.plugins.logging_stdout import (
@@ -155,25 +159,24 @@ def set_process_log_sink(sink: LogSink) -> None:
     _PROCESS_LOG_SINK.target = sink
 
 
-def _log_error(error: BaseException | None) -> LogError | None:
+def _log_error(error: BaseException | None, *, raw: bool = False) -> LogError | None:
     if error is None:
         return None
+    stack = "".join(traceback.format_exception(type(error), error, error.__traceback__))
+    if not raw:
+        stack = stack[-16_000:]
     if isinstance(error, SageV2Error):
         return LogError(
             type=type(error).__name__,
             message=error.info.message,
             code=error.info.code,
             category=error.info.category.value,
-            stack_trace="".join(
-                traceback.format_exception(type(error), error, error.__traceback__)
-            )[-16_000:],
+            stack_trace=stack,
         )
     return LogError(
         type=type(error).__name__,
         message=str(error),
-        stack_trace="".join(
-            traceback.format_exception(type(error), error, error.__traceback__)
-        )[-16_000:],
+        stack_trace=stack,
     )
 
 

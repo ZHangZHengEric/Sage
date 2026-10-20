@@ -85,8 +85,8 @@ Session 使用核心 MySQL SessionStore。managed Application 以宿主持久路
 
 ## Session 诊断包
 
-管理员通过历史页“下载诊断包”或 `GET /api/threads/{thread_id}/download` 获取 `<session>-diagnostics.zip`。MySQL 与文件 SessionStore 使用相同格式：`manifest.json`、脱敏后的 `state.json` / `session.json`、`runs/`、`events/`、`models.json`、`tools.json` 和 `logs.json`。状态包含检查点、暂停与交互，工具事件包含参数替换后的实际参数及结果项（包括原生和 MCP 工具）。此包供诊断使用，不是可导入恢复的备份；不修改实际会话、workspace 或 Todo。
+管理员通过历史页“下载诊断包”或 `GET /api/threads/{thread_id}/download` 获取 `<session>-diagnostics.zip`。服务端通过观测层的 `export_evidence(session_id, run_ids)` 查询证据，只从业务存储读取已授权的 Run 列表并核对 Agent/tenant 归属，不再导出业务状态和事件。`sage.session-diagnostic-bundle/v2` 包含 `manifest.json`、`models.json`、`requests/`、`tools.json`、`failures.json`、`logs.json`，外部查询还包含 `traces.json`；移除 `state.json`、`session.json`、`runs/`、`events/`。工具结果与失败从观测 span/日志生成，历史缺口明确记录，不从业务事件重建。业务会话、检查点、暂停、交互、恢复数据及记忆索引仍由原持久化机制维护。
 
-Server 默认在数据目录 `runtime/diagnostics/evidence.sqlite3` 持久化模型诊断和具有 Session、Run 关联的结构化日志。目录权限 0700、数据库 0600，位于 Agent workspace 外，重启后仍可导出；单机数据目录需要随服务保存。模型请求优先记录提供方 wire payload，否则标记为 normalized；响应是提供方适配器归一化后的响应。采集失败不会中断执行。历史未采集的请求和日志无法补回，清单列出缺失的 Run、截断记录和本进程采集失败次数。每条诊断最多 8 MiB，每 Run 日志保留最近 10000 条，淘汰数量写入清单；模型诊断随数据目录保留。ZIP 沿用下载大小与条目上限，超限返回 413。
+仅在 trace 后端为 noop 时，Server 使用本地 `runtime/diagnostics/evidence.sqlite3` 保存诊断。选择外部观测后端后不创建、不写该库；Phoenix 和 Jaeger 实时查询外部证据，外部故障返回 503。Langfuse 与通用 OTLP 尚无诊断查询能力，下载返回 409，不回退本地采集。stdout 保留，文件日志默认关闭，非空 `SAGE_SERVER_LOG_DIRECTORY` 可显式启用。模型请求优先记录 provider wire payload，响应为 SDK 归一化响应，流证据为 SDK 暴露的事件而非 HTTP 字节。Phoenix raw 模式不脱敏、不按内容长度截断，并保存完整工具结果、operation ID、metadata 和结构化错误；采集仍受异步队列、采样、导出失败及保留期影响。清单列出来源、缺失 Run、截断和未送达信息。ZIP 保留下载大小与条目上限，超限返回 413。
 
-采集与导出均脱敏凭证字段、嵌套 JSON、常见 Bearer / API token、URL 用户信息和标记过的内联凭证；无标签的自然语言秘密仍需分享前检查。下载保持管理员权限，并先校验持久化 Session owner、Agent 绑定；仅导出该 Session 的状态及其 Run 白名单对应的诊断，不读取共享日志全文、其他租户的会话或 workspace 文件。运行中导出是状态快照与诊断快照，期间可能继续产生事件，不能视为事务一致的恢复备份。
+ZIP 下载继续脱敏凭证字段、嵌套 JSON、常见 Bearer / API token、URL 用户信息和标记过的内联凭证，此策略独立于 Phoenix 的 raw 保存模式。下载保持管理员权限，先校验持久化 Session owner、Agent 和 tenant 绑定，只导出该 Session 及权威 Run 白名单内的观测证据。运行中和未送达的记录可能缺失，此包不能作为恢复备份。

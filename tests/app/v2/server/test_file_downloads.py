@@ -64,7 +64,7 @@ def test_workspace_listing_and_download_are_scoped_and_skip_symlinks(client, ser
 
 
 @pytest.mark.timeout(30)
-def test_session_zip_exports_real_session_folder_for_admin(client, service):
+def test_session_zip_exports_only_observation_evidence_for_admin(client, service):
     alice, _ = identity(client, "alice")
     assert client.post("/api/agent", json=_run_input(), headers=alice).status_code == 200
     assert client.get("/api/threads/thread-1/download", headers=alice).status_code == 403
@@ -74,9 +74,9 @@ def test_session_zip_exports_real_session_folder_for_admin(client, service):
     assert response.status_code == 200
     with ZipFile(BytesIO(response.content)) as archive:
         names = archive.namelist()
-        assert "thread-1/state.json" in names
-        assert "thread-1/session.json" in names
-        assert any(name.startswith("thread-1/runs/") and name.endswith(".json") for name in names)
+        assert "thread-1/models.json" in names
+        assert "thread-1/manifest.json" in names
+        assert not any(name.startswith(("thread-1/state", "thread-1/session", "thread-1/runs/", "thread-1/events/")) for name in names)
         assert all(name.startswith("thread-1/") for name in names)
     assert client.get("/api/threads/missing/download", headers=headers).status_code == 404
 
@@ -103,29 +103,21 @@ def test_workspace_uses_session_owner_for_admin_and_rejects_other_users(client, 
         assert client.get(f"/api/workspace/{endpoint}", params={"thread_id": "missing"}, headers=admin).status_code == 404
 
 
-def test_mysql_session_download_contains_canonical_state_and_events(client, service, monkeypatch):
-    import json
+def test_session_download_never_exports_business_aggregate(client, service, monkeypatch):
     from unittest.mock import AsyncMock
-    from sagents.v2.runtime.session.plugins.mysql import MysqlSessionStore
-
     alice, _ = identity(client, "alice")
     assert client.post("/api/agent", json=_run_input(), headers=alice).status_code == 200
-    runtime = service.conversations.application.entrypoint().runtime
-    state = client.portal.call(runtime.session_store.export_state)
-    store = MysqlSessionStore("mysql://unused/test")
-    monkeypatch.setattr(store, "export_session_state", AsyncMock(return_value=state))
-    monkeypatch.setattr(runtime, "session_store", store)
+    store = service.conversations.application.entrypoint().runtime.session_store
+    export = AsyncMock(side_effect=AssertionError("business aggregate must not be exported"))
+    monkeypatch.setattr(store, "export_session_state", export)
+    monkeypatch.setattr(store, "read_events", AsyncMock(side_effect=AssertionError("business events must not be read")))
     admin_token = client.post("/api/auth/login", json={"username": "admin", "password": "admin12345"}).json()["data"]["access_token"]
     response = client.get("/api/threads/thread-1/download", headers={"Authorization": f"Bearer {admin_token}"})
     assert response.status_code == 200
     with ZipFile(BytesIO(response.content)) as archive:
-        exported = json.loads(archive.read("thread-1/state.json"))
-        from app.v2.server.observability.diagnostics import redact
-        assert exported == redact(state)
-        assert exported["run_events"]
-        for run_id, events in state["run_events"].items():
-            assert json.loads(archive.read(f"thread-1/events/{run_id}.json")) == redact(events)
-    store.export_session_state.assert_awaited_once_with("thread-1")
+        assert "thread-1/models.json" in archive.namelist()
+        assert "thread-1/state.json" not in archive.namelist()
+    export.assert_not_called()
 
 
 def test_workspace_honors_persisted_external_project_binding(client, service, monkeypatch):

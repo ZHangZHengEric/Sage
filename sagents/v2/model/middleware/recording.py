@@ -227,7 +227,11 @@ class RecordingModelProvider:
             first_token_persisted = True
 
         provider_stream = None
-        capture = WireCapture() if callable(getattr(self.sink, "record_model_stream", None)) else None
+        capture = None
+        if (callable(getattr(self.sink, "record_model_stream", None))
+                and getattr(self.sink, "raw_capture", True)):
+            limit = None if getattr(self.sink, "raw_capture", False) else 8 * 1024 * 1024
+            capture = WireCapture(max_bytes=limit)
         normalized_events = []
         normalized_bytes = 0
         normalized_dropped = 0
@@ -246,7 +250,7 @@ class RecordingModelProvider:
                 if capture is not None and event.kind != ModelEventKind.COMPLETED:
                     value = event.model_dump(mode="json")
                     size = len(json.dumps(value, ensure_ascii=False).encode())
-                    if normalized_bytes + size <= capture.max_bytes:
+                    if capture.max_bytes is None or normalized_bytes + size <= capture.max_bytes:
                         normalized_events.append(value)
                         normalized_bytes += size
                     else:

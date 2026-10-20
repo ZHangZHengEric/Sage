@@ -148,8 +148,9 @@ async def test_complete_generation_contains_content_usage_and_first_token(kind):
     assert attrs["gen_ai.request.model"] == "actual-model"
     assert attrs["gen_ai.usage.input_tokens"] == 100
     assert attrs["gen_ai.usage.cached_input_tokens"] == 40
-    assert json.loads(attrs["input"])["messages"][0]["content"][0]["text"] == "hello"
-    assert json.loads(attrs["output"])["text"] == "answer"
+    content_suffix = ".value" if kind == "phoenix" else ""
+    assert json.loads(attrs[f"input{content_suffix}"])["messages"][0]["content"][0]["text"] == "hello"
+    assert json.loads(attrs[f"output{content_suffix}"])["text"] == "answer"
     assert attrs["completion_start_time"]
     assert attrs["correlation_id"] == "req-http"
     if kind == "langfuse":
