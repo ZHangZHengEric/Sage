@@ -18,14 +18,19 @@ export function timeRange(period, day, now = new Date()) {
 }
 export function chartSegments(buckets, metric, quantile, width = 900, height = 180) {
   const values = buckets.map(b => b[metric]?.[quantile] ?? null)
-  const finite = values.filter(v => v != null)
+  const finite = values.filter(Number.isFinite)
   const maximum = Math.max(1, ...finite)
-  const points = values.map((v, i) => v == null ? null : [16 + (width - 32) * i / Math.max(1, values.length - 1), height - 20 - (height - 40) * v / maximum])
+  const points = values.map((v, i) => !Number.isFinite(v) ? null : [16 + (width - 32) * i / Math.max(1, values.length - 1), height - 20 - (height - 40) * v / maximum])
   const segments = []; let current = []
   for (const p of points) {
     if (p) current.push(p)
     else if (current.length) { segments.push(current); current = [] }
   }
   if (current.length) segments.push(current)
-  return { maximum, points: points.filter(Boolean), segments: segments.map(s => s.map(p => p.join(',')).join(' ')) }
+  const observations = points.flatMap((point, i) => point ? [{ point, bucket: buckets[i], value: values[i] }] : [])
+  return { maximum, observations, points: points.filter(Boolean), segments: segments.map(s => s.map(p => p.join(',')).join(' ')) }
+}
+
+export function populatedBuckets(buckets) {
+  return buckets.filter(b => b.requests > 0 || b.measured > 0).slice().sort((a, b) => new Date(b.time) - new Date(a.time))
 }

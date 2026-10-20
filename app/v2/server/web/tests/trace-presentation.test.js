@@ -39,3 +39,29 @@ test('raw inspector reads complete diagnostic events from the selected span', as
   assert.equal(records[0].data.response.text,original)
   assert.equal(records[0].kind,'response')
 })
+
+test('detail tabs show payloads once and preserve distinct wire data and events', async () => {
+  const { detailTabs } = await import('../src/trace-presentation.js')
+  const input = {messages:[{role:'user',content:'hello'}]}, output = {text:'done'}
+  const span = {attributes:{'input.value':JSON.stringify(input),'output.value':JSON.stringify(output), 'sage.performance.data':'transport copy', 'sage.performance.total_ms':100, model:'test', request_id:'r'},events:[
+    {name:'sage.diagnostic.request',attributes:{'sage.diagnostic.kind':'request','sage.diagnostic.data':JSON.stringify({request_id:'r',request:{messages:input.messages,temperature:.5},normalized_request:input})}},
+    {name:'sage.diagnostic.response',attributes:{'sage.diagnostic.kind':'response','sage.diagnostic.data':JSON.stringify({request_id:'r',response:output})}},
+    {name:'first_token',timestamp:'2026-10-20T00:00:00Z',attributes:{duration_ms:50}},
+  ]}
+  const before = JSON.stringify(span), tabs = detailTabs(span)
+  assert.deepEqual(tabs.map(t => t.id), ['input','output','raw','events','attributes'])
+  const raw = tabs.find(t => t.id === 'raw').value
+  assert.equal(raw.length, 1)
+  assert.equal(raw[0].data.request.temperature, .5)
+  assert.equal(raw[0].data.normalized_request, undefined)
+  assert.deepEqual(tabs.find(t => t.id === 'events').value.map(e => e.name), ['first_token'])
+  assert.deepEqual(tabs.find(t => t.id === 'attributes').value, {'sage.performance.total_ms':100,model:'test',request_id:'r'})
+  assert.equal(JSON.stringify(span), before)
+})
+
+test('empty and fully duplicated sections are hidden for nested attributes', async () => {
+  const { detailTabs } = await import('../src/trace-presentation.js')
+  const tabs = detailTabs({attributes:{input:{value:'{"a":1,"b":2}'},sage:{diagnostic:{data:JSON.stringify({request:{b:2,a:1}})}}},events:[]})
+  assert.deepEqual(tabs.map(t => t.id), ['input'])
+  assert.deepEqual(detailTabs({attributes:{},events:[]}), [])
+})

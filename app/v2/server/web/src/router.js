@@ -24,6 +24,7 @@ export const router = createRouter({
     { path: '/tools', component: Tools },
     { path: '/plugins', component: () => import('./views/Plugins.vue'), meta: { admin: true } },
     { path: '/users', component: Users, meta: { admin: true } },
+    { path: '/traces', component: () => import('./views/Traces.vue'), meta: { admin: true } },
     { path: '/performance', component: () => import('./views/Performance.vue'), meta: { admin: true } },
     { path: '/agents', component: Agents },
     { path: '/studio', component: Studio },

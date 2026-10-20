@@ -203,7 +203,7 @@ def test_redacted_performance_summary_keeps_timing_json_beyond_content_limit():
     capture_sample(diagnostics)
     spans = exporter.get_finished_spans()
     assert len(spans) == 1
-    assert spans[0].name == 'sage.performance'
+    assert spans[0].name == 'agent.run'
     payload = ''.join(spans[0].attributes['sage.performance.data'])
     assert len(payload) > 256
     rows = json.loads(payload)

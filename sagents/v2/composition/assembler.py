@@ -427,6 +427,9 @@ class ApplicationAssembler:
         diagnostic_sink = services["observability.diagnostic-sink"]
         log_sink = services["observability.log-sink"]
         trace_sink = services["observability.trace-sink"]
+        bind_trace_sink = getattr(diagnostic_sink, "bind_trace_sink", None)
+        if callable(bind_trace_sink):
+            bind_trace_sink(trace_sink)
         models_by_agent = {
             member_id: (
                 provider

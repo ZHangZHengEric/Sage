@@ -5,6 +5,7 @@ import { renderToString } from 'vue/server-renderer'
 import { createServer } from 'vite'
 
 const performance = { id: 'performance', label: '运行性能', href: '/performance', external: false }
+const traces = { id: 'traces', label: '调用链', href: '/traces', external: false }
 const phoenix = { id: 'phoenix', label: 'Phoenix', href: 'https://phoenix.example', external: true }
 const settle = async () => { await new Promise(resolve => setImmediate(resolve)); await nextTick() }
 
@@ -56,4 +57,15 @@ test('observability renders only advertised links and opens consoles in a separa
   assert.doesNotMatch(html, /Jaeger|Langfuse/)
   assert.doesNotMatch(await render([]), /观测|运行性能|Phoenix/)
   assert.doesNotMatch(await render([performance]), /Phoenix|target="_blank"/)
+})
+
+test('traces is a sibling of performance under the observability menu', async t => {
+  const { Component, AppIcon } = await setup(t)
+  const app = createSSRApp({ ...Component, setup: () => ({services:[performance,traces],loading:false,error:false,AppIcon}) })
+  app.component('router-link', {props:['to'],template:'<a :href="to"><slot /></a>'})
+  const html = await renderToString(app)
+  assert.match(html, /href="\/performance"/)
+  assert.match(html, /href="\/traces"/)
+  assert.match(html, /调用链/)
+  assert.equal((html.match(/<details/g) || []).length, 1)
 })

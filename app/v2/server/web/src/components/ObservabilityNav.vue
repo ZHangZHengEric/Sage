@@ -29,7 +29,7 @@ onUnmounted(() => { active = false })
     <div class="nav-children">
       <template v-for="service in services" :key="service.id">
         <a v-if="service.external" class="nav-item" :href="service.href" target="_blank" rel="noopener noreferrer" :title="`${service.label}（新窗口）`"><AppIcon name="link" /><span>{{ service.label }}</span></a>
-        <router-link v-else class="nav-item" :to="service.href" :title="service.label"><AppIcon name="clock" /><span>{{ service.label }}</span></router-link>
+        <router-link v-else class="nav-item" :to="service.href" :title="service.label"><AppIcon :name="service.id === 'traces' ? 'trace' : 'clock'" /><span>{{ service.label }}</span></router-link>
       </template>
       <button v-if="error" class="nav-item" type="button" @click="load"><AppIcon name="refresh" /><span>重试加载</span></button>
     </div>

@@ -18,6 +18,7 @@ from sagents.v2.runtime.observability.contracts import (
     TraceKind,
     TraceSpan,
     TraceStatus,
+    TraceSpanObserver,
 )
 from sagents.v2.runtime.observability.content import safe_trace_value, trace_content
 
@@ -93,6 +94,7 @@ class OtlpTraceTransport:
         self.failed_exports = 0
         self.dropped_spans = 0
         self._last_warning = float("-inf")
+        self._span_observer: TraceSpanObserver | None = None
         self._provider, self._tracer = self._build_tracer(
             exporter, headers, sample_rate, max_queue_size
         )
@@ -111,6 +113,9 @@ class OtlpTraceTransport:
             self.failed_exports,
             self.dropped_spans,
         )
+
+    def set_span_observer(self, observer: TraceSpanObserver) -> None:
+        self._span_observer = observer
 
     def start_span(self, span: TraceSpan) -> None:
         try:
@@ -156,6 +161,9 @@ class OtlpTraceTransport:
                 if otel_span.is_recording():
                     _set_attributes(otel_span, self._attributes(span))
                     self._spans[span.span_id] = otel_span
+            # Never call host enrichment while holding the transport lock.
+            if self._span_observer is not None:
+                self._span_observer.span_started(self, span)
         except Exception:
             self._warn("start_span", count=1)
 
@@ -173,6 +181,15 @@ class OtlpTraceTransport:
             self._warn("add_event")
 
     def end_span(self, span: TraceSpan) -> None:
+        try:
+            if self._span_observer is not None and self._span_observer.defer_span_end(self, span):
+                return
+        except Exception:
+            self._warn("span_enrichment")
+        self.export_span(span)
+
+    def export_span(self, span: TraceSpan) -> None:
+        """Finish a span after optional host enrichment, without re-entering it."""
         try:
             from opentelemetry.trace import Status, StatusCode
 
@@ -268,7 +285,7 @@ class OtlpTraceTransport:
         projected = self._trace_value(values)
         # Content-free timing rows are control data. Truncating their JSON makes
         # the performance projection unreadable, independently of content mode.
-        if span.name == "sage.performance" and "sage.performance.data" in values:
+        if span.name == "agent.run" and "sage.performance.data" in values:
             payload = values["sage.performance.data"]
             # Each string element respects the SDK's attribute length limit;
             # an OTLP string array preserves the complete control payload.
@@ -400,6 +417,11 @@ class OtlpTraceTransport:
             }
 
     def close(self) -> None:
+        try:
+            if self._span_observer is not None:
+                self._span_observer.flush_trace_sink(self)
+        except Exception:
+            self._warn("span_enrichment_shutdown")
         with self._lock:
             if self._closed:
                 return
