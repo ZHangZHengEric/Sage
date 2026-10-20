@@ -222,3 +222,40 @@ async def test_scoped_configs_remain_independent_json_snapshots_after_model_vali
         await handle.close()
     assert seen == ["original", "original"]
     assert original["policy"]["name"] == "caller mutation"
+
+
+def test_native_flow_factory_uses_dependency_ports_and_json_definition():
+    from sagents.v2.agent.multi_agent.contracts import WorkspaceSharingPolicy
+    from sagents.v2.runtime.extensions import CapabilityKey, ProviderSet
+
+    runtime, executor = object(), object()
+    node = (
+        builtin_extension_registry()
+        .get("sage.flow.agent")
+        .factory(
+            ExtensionScopeContext(
+                scope=ExtensionScope.RUN,
+                scope_id="run",
+                run_id="run",
+                config={
+                    "descriptor": {
+                        "agent_id": "child",
+                        "name": "Child",
+                        "description": "",
+                        "instructions": "Run",
+                    },
+                    "workspace_policy": "read_only_parent",
+                },
+            ),
+            ProviderSet(
+                {
+                    CapabilityKey(capability="runtime.kernel"): runtime,
+                    CapabilityKey(capability="agent.child-executor"): executor,
+                }
+            ),
+        )
+    )
+    assert node.runtime is runtime
+    assert node.child_executor is executor
+    assert node.descriptor.agent_id == "child"
+    assert node.workspace_policy is WorkspaceSharingPolicy.READ_ONLY_PARENT

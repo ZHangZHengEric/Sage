@@ -122,7 +122,7 @@ from sagents.v2.tool.plugins.ephemeral import EphemeralToolPlugin
 from sagents.v2.tool.plugins.official import OfficialToolPlugin
 from sagents.v2.tool.plugins.skill import SkillToolPlugin
 from sagents.v2.flow.plugins.agent import NativeAgentFlowNode
-from sagents.v2.agent.multi_agent.contracts import AgentDescriptor
+from sagents.v2.agent.multi_agent.contracts import AgentDescriptor, WorkspaceSharingPolicy
 
 
 def builtin_extension_registry() -> ExtensionRegistry:
@@ -1716,7 +1716,7 @@ def _register_tools_skills_and_flow(registry: ExtensionRegistry) -> None:
                 runtime=dependencies.require_unique("runtime.kernel"),
                 descriptor=AgentDescriptor.model_validate(context.config["descriptor"]),
                 child_executor=dependencies.require_unique("agent.child-executor"),
-                **{key: value for key, value in context.config.items() if key == "workspace_policy"},
+                workspace_policy=WorkspaceSharingPolicy(context.config.get("workspace_policy", "shared_parent")),
             ),
         )
     )
