@@ -202,7 +202,10 @@ class _StableSkillWorkspace(SandboxSkillWorkspaceBase):
         )
         if (
             resolved.content_hash != loaded.content_hash
-            or resolved.files["SKILL.md"].decode("utf-8") != loaded.instructions
+            # LoadedSkill inherits StrictModel's whitespace normalization.
+            # Compare the same representation on recovery; the bundle hash
+            # above still verifies every original byte, including whitespace.
+            or resolved.files["SKILL.md"].decode("utf-8").strip() != loaded.instructions.strip()
         ):
             raise skill_error(
                 "skill.restore_version_changed",
