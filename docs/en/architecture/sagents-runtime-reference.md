@@ -13,6 +13,9 @@ ref: v2-detail-sagents-runtime-reference
 
 # SAgents v2 Runtime reference
 
+Skills can be configured as two groups, management and usage. See
+[Skill plugins and version behavior](sagents-skill-management-and-usage.md).
+
 [Host development](sagents-host-development.md) · [sage.yaml reference](sagents-manifest-reference.md) · [Code reading guide](code-reading-guide.md)
 
 This reference describes configuration supported by SAgentBuilder.build() and app.load_agent(). Runtime chooses App components; the App catalog owns model routes and credentials; Agent Packages define instructions, model IDs, tool scope and budgets. Desktop/Server database addresses, login, listeners and workspace choices are host settings rather than RuntimeConfig fields.
@@ -1283,6 +1286,26 @@ Provides: `skill.loading:default` (API `2`)。
 | Parameter | Type | Required | Schema Default | Constraints |
 | --- | --- | --- | --- | --- |
 | `max_active_characters` | `integer` | No | `24000` | `{"minimum":1}` |
+
+### sage.skill.repository.sqlite / sage.skill.repository.memory
+
+Version `2.0.0`; process scope. Provides `skill.management`, `skill.catalog` and `skill.source`.
+SQLite stores immutable packages, current versions and durable Run pins; memory
+retains them only for the process lifetime. SQLite requires `path`. Both accept
+`max_files` (default 2000) and `max_total_bytes` (default 67108864). Publishing
+supports `expected_version` compare-and-swap in the package transaction.
+
+### sage.skill.workspace.readonly-mount / sage.skill.workspace.auto-sync / sage.skill.workspace.fixed-copy
+
+Version `2.0.0`; Run scope. Provides `skill.workspace` and depends on the accepted
+Run's `execution.environment`. All expose `skills/<name>/`. Auto-sync is the
+default: archive local Agent modifications in hidden `.catalog`, then synchronize
+manager contents without retaining manager-only history. Fixed-copy never updates
+its initial working copy. Readonly-mount requires real sandbox support and fails
+clearly on the current built-in backends. Parameters are `max_files` (default 2000)
+and `max_total_bytes` (default 67108864). See
+[Skill management and usage](sagents-skill-management-and-usage.md) for configuration
+and recovery behavior.
 
 ### sage.tool-selection.direct
 

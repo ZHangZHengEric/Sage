@@ -687,10 +687,10 @@ class ApplicationAssembler:
         ):
             owned = []
             try:
-                async def open_active_capability(**kwargs):
+                async def open_active_capability(default_scope=ExtensionScope.AGENT, **kwargs):
                     value, handle = await self._create_capability(
                         extension_host, process_root, scope_handles, runtime_config,
-                        plugin_declarations, default_scope=ExtensionScope.AGENT,
+                        plugin_declarations, default_scope=default_scope,
                         tenant_id=active_tenant, run_id=run_id, return_handle=True, available=(*available_scopes, *owned),
                         **kwargs,
                     )
@@ -785,6 +785,11 @@ class ApplicationAssembler:
                         skill_workspace = await open_active_capability(
                             capability="skill.workspace", default_plugin=selection.plugin,
                             agent_id=entry_descriptor.agent_id,
+                        )
+                    elif continuation_runtime is not None:
+                        skill_workspace = await open_active_capability(
+                            capability="skill.workspace", default_plugin="sage.skill.workspace.auto-sync",
+                            default_scope=ExtensionScope.RUN, agent_id=entry_descriptor.agent_id,
                         )
                     active_skills = (skill_catalog, skill_scope.providers.require_unique("skill.source"), skill_workspace)
                 active_continuation = active_components.continuation_policy
@@ -914,9 +919,9 @@ class ApplicationAssembler:
                             skill_catalog, skill_source, skill_workspace = active_skills
                             if skill_workspace is None and active_runtime is None:
                                 raise ValueError("standard Skills require an execution.binding sandbox")
-                            from sagents.v2.skill.plugins.sandbox import SandboxSkillWorkspace
+                            from sagents.v2.skill.plugins.workspace import AutoSyncSkillWorkspace
                             if skill_workspace is None:
-                                skill_workspace = SandboxSkillWorkspace(active_runtime.sandbox, active_runtime.grant_issuer)
+                                skill_workspace = AutoSyncSkillWorkspace(active_runtime.sandbox, active_runtime.grant_issuer)
                         skill_loader = member_components.factory.create_skill_loader(
                             effective_resolved,
                             definition_id,
@@ -931,7 +936,7 @@ class ApplicationAssembler:
                             **({"workspace_root": active_runtime.sandbox.filesystem.normalize_path(".")}
                                if active_skills is not None and active_runtime is not None else {}),
                         )
-                        skill_tools = SkillToolPlugin(skill_loader)
+                        skill_tools = SkillToolPlugin(skill_loader, allow_editing="edit_skill" in definition.tools)
                         catalog = CompositeToolCatalog((catalog, skill_tools.catalog))
                         executor = CompositeToolExecutor((executor, skill_tools.executor))
                         runtime_tools = (*runtime_tools, "load_skill")

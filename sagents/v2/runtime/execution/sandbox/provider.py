@@ -50,7 +50,9 @@ class SandboxFileSystem(Protocol):
 
     async def delete(
         self, path: str, *, intent: OperationIntent, grant: SandboxGrant
-    ) -> None: ...
+    ) -> None:
+        """Delete one file or an empty directory; never recursively remove data."""
+        ...
 
     async def stat(
         self, path: str, *, intent: OperationIntent, grant: SandboxGrant
@@ -105,6 +107,9 @@ class SandboxHandle(Protocol):
     """
 
     ref: SandboxRef
+    workspace_identity: str
+    # Equal for handles sharing backing files, even with different Run IDs or
+    # virtual path aliases. Providers must include their storage namespace.
     filesystem: SandboxFileSystem
     process: SandboxProcessRuntime
     network: SandboxNetworkRuntime

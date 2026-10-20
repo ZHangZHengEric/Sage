@@ -11,6 +11,9 @@ ref: v2-detail-sagents-runtime-reference
 
 # SAgents v2 Runtime 配置参考
 
+Skill 可按“保存管理”和“加载使用”两组配置，详见
+[Skill 插件配置与版本行为](sagents-skill-management-and-usage.md)。
+
 [接入开发指南](sagents-host-development.md) · [sage.yaml 配置参考](sagents-manifest-reference.md) · [代码阅读指南](code-reading-guide.md)
 
 本文面向使用 `SAgentBuilder.build()`、`app.load_agent()` 的项目，解释当前代码实际支持的配置。Runtime 决定 App 使用哪些组件；App 的模型目录管理模型路由与凭据；Agent Package 决定指令、模型 ID 引用、工具范围和预算。Desktop、Server 的数据库地址、登录配置、监听端口、工作区选择属于宿主设置，不是这里的 RuntimeConfig 字段。
@@ -1235,7 +1238,7 @@ Lazy, bounded, symlink-safe Skill catalog and source.
 
 版本：`2.0.0`；scope：agent, process；所有权：`owned`。
 
-提供能力：`skill.catalog:filesystem` (API `2`)、`skill.source:filesystem` (API `2`)。
+提供能力：`skill.catalog:filesystem` (API `2`)、`skill.source:filesystem` (API `2`)、`skill.management:filesystem` (API `2`，只读)。
 
 | 参数 | 类型 | 必填 | Schema 默认值 | 约束 |
 | --- | --- | --- | --- | --- |
@@ -1254,6 +1257,26 @@ Loads Skill material only when it is asked for, within a character storage limit
 | 参数 | 类型 | 必填 | Schema 默认值 | 约束 |
 | --- | --- | --- | --- | --- |
 | `max_active_characters` | `integer` | 否 | `24000` | `{"minimum":1}` |
+
+### sage.skill.repository.sqlite / sage.skill.repository.memory
+
+版本：`2.0.0`；scope：process。提供 `skill.management`、`skill.catalog`、`skill.source`。
+
+SQLite 实现保存不可变版本、当前版本和持久化 Run 版本选择；memory 实现仅在进程内保留。
+SQLite 必填 `path`；两者支持 `max_files`（默认 2000）和 `max_total_bytes`（默认 67108864）。
+发布支持 `expected_version` 乐观并发检查，原件和版本元信息在一个事务中提交。
+
+### sage.skill.workspace.readonly-mount / sage.skill.workspace.auto-sync / sage.skill.workspace.fixed-copy
+
+版本：`2.0.0`；scope：run。提供 `skill.workspace`，依赖实际 Run 的 `execution.environment`。
+
+三者均使用 `skills/<名称>/`。默认 `auto-sync` 先将 Agent 侧修改归档到隐藏的
+`.catalog`，然后完整同步管理器版本；管理器旧副本不归档。
+`fixed-copy` 首次复制后不跟随来源更新；`readonly-mount` 要求沙箱提供真正的只读挂载，
+当前内置沙箱不支持时明确报错。支持 `max_files`（默认 2000）和
+`max_total_bytes`（默认 67108864）。
+
+完整分组配置、发布和恢复语义见 [Skill 保存管理与加载使用](sagents-skill-management-and-usage.md)。
 
 ### sage.tool-selection.direct
 

@@ -4,6 +4,8 @@ from pathlib import Path
 from sagents.v2.package.manifest.runtime import CapabilitySelection, RuntimeConfig
 
 DEFAULT_COMPONENTS = {
+    "skill.management": "sage.skill.filesystem",
+    "skill.catalog": "sage.skill.filesystem",
     "skill.loading": "sage.skill.loading.lazy",
     "agent.continuation-policy": "sage.agent.continuation.llm-judge",
     "context.unit-compactor": "sage.context.unit-compactor.reference",
@@ -26,6 +28,8 @@ DEFAULT_COMPONENTS = {
 def default_runtime(session_root: str | Path = ".runtime/sagents") -> RuntimeConfig:
     root = Path(session_root).expanduser().resolve()
     paths = {
+        "skill.management": {"roots": [str(root / "skills")]},
+        "skill.catalog": {"roots": [str(root / "skills")]},
         "session.store": {"root": str(root)},
         "memory.provider": {"root": str(root / "memory")},
         "session-memory.provider": {"root": str(root / "session-memory")},

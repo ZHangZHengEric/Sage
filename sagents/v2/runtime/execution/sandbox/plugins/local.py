@@ -221,8 +221,6 @@ class _LocalFileSystem:
         candidate = self.provider._authorize(
             self.row, FileOperation.DELETE, path, intent, grant
         )
-        if candidate.is_dir():
-            raise IsADirectoryError(path)
         async with self.row.mutation_lock:
             self.provider._require_ready(self.row, operation=FileOperation.DELETE.value)
             from ..local_support import files as local_files
@@ -650,6 +648,7 @@ class _LocalHandle:
     def __init__(self, provider: "LocalWorkspaceSandboxProvider", row: _LocalRow):
         self.provider = provider
         self.ref = row.ref
+        self.workspace_identity = "local:" + str(row.root)
         self.filesystem = _LocalFileSystem(provider, row)
         self.process = _LocalProcessRuntime(provider, row)
         self.network = _NoNetwork()

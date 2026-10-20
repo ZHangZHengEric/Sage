@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Literal, Protocol
+from typing import Any, Literal, Protocol
 
 from pydantic import Field, field_validator
 
@@ -75,9 +75,54 @@ class SkillSource(Protocol):
     async def fetch(self, name: str, *, run_id: str) -> SkillBundle: ...
 
 
+class CurrentSkillSource(SkillSource, Protocol):
+    """Current manager contents for an already admitted Skill name."""
+
+    async def fetch_latest(self, name: str, *, run_id: str) -> SkillBundle: ...
+
+
+class SkillManagement(SkillCatalog, SkillSource, Protocol):
+    """Host-owned publishing port. Never implicitly granted as an Agent tool."""
+
+    async def publish(
+        self, bundle: SkillBundle, *, expected_version: str | None = None
+    ) -> SkillDescriptor: ...
+
+    async def list_versions(self, name: str) -> tuple[SkillDescriptor, ...]: ...
+
+
 class SkillWorkspace(Protocol):
     async def materialize(
         self, bundle: SkillBundle, *, run_id: str, destination: str
+    ) -> str: ...
+
+
+class EditableSkillWorkspace(SkillWorkspace, Protocol):
+    """Explicit editing preparation; synchronization policy owns edit retention."""
+
+    async def begin_edit(self, bundle: SkillBundle, *, run_id: str, destination: str) -> str: ...
+
+    async def resolve_bundle(
+        self, bundle: SkillBundle, *, run_id: str, destination: str
+    ) -> SkillBundle: ...
+
+
+class RestorableSkillWorkspace(SkillWorkspace, Protocol):
+    async def reattach(
+        self, loaded: LoadedSkill, bundle: SkillBundle, *, run_id: str, destination: str
+    ) -> LoadedSkill: ...
+
+
+class SkillReadonlyMountProvider(Protocol):
+    """Optional sandbox.skill_mounts port for real backend-enforced mounts.
+
+    The backend verifies the signed intent and both hashes against the supplied
+    bundle, enforces read-only access for files AND processes, and manages mount
+    lifetimes with the Run sandbox. A normal directory or symlink is insufficient.
+    """
+
+    async def mount_readonly(
+        self, bundle: SkillBundle, *, destination: str, run_id: str, intent: Any, grant: Any
     ) -> str: ...
 
 

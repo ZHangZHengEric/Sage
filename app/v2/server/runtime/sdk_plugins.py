@@ -86,8 +86,10 @@ def server_registrations(host):
 
     async def skills(context, deps):
         from app.v2.server.skills.runtime import CatalogSkillProvider
-        _, _, frozen, _ = await run_inputs(host, context, deps)
-        return CatalogSkillProvider(frozen.skills, host.paths.data_root)
+        _, _, frozen, user = await run_inputs(host, context, deps)
+        async def latest_record(record):
+            return await host.skill_catalog.get(record.skill_id, user_id=user, role="user")
+        return CatalogSkillProvider(frozen.skills, host.paths.data_root, latest_record=latest_record)
 
     async def tools(context, deps):
         import hashlib
