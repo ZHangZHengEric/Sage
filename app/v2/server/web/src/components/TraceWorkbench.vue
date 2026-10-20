@@ -2,7 +2,7 @@
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { api } from '../api.js'
 import { duration, percentage } from '../performance.js'
-import { attribute, cost, diagnosticRecords, number, pretty, spanTree, waterfall } from '../trace-presentation.js'
+import { cost, detailTabs, number, pretty, spanTree, waterfall } from '../trace-presentation.js'
 import GlassPanel from './GlassPanel.vue'
 
 const props = defineProps({ params: { type: Object, required: true } })
@@ -13,23 +13,19 @@ const dialog = ref(null), traceId = ref(''), spans = ref([]), treeCursor = ref(n
 const treeLoading = ref(false), treeError = ref(''), detailError = ref(''), detailLoading = ref(false)
 const selected = ref(''), detail = ref(null), tab = ref('input')
 const tree = computed(() => spanTree(spans.value))
-const tabs = [{id:'input',name:'输入'}, {id:'output',name:'输出'}, {id:'raw',name:'原始记录'}, {id:'events',name:'事件'}, {id:'attributes',name:'属性'}]
-const payload = computed(() => {
-  if (!detail.value) return ''
-  if (tab.value === 'input' || tab.value === 'output') return pretty(attribute(detail.value, `${tab.value}.value`))
-  if (tab.value === 'raw') return pretty(diagnosticRecords(detail.value))
-  return pretty(detail.value[tab.value])
-})
+const tabs = computed(() => detailTabs(detail.value))
+const payload = computed(() => pretty(tabs.value.find(item => item.id === tab.value)?.value))
+
 let pageRevision = 0, summaryRevision = 0, treeRevision = 0, detailRevision = 0
 function date(value) { return new Date(value).toLocaleString('zh-CN') }
 function tabKey(event, index) {
   let next
-  if (event.key === 'ArrowRight') next = (index + 1) % tabs.length
-  else if (event.key === 'ArrowLeft') next = (index + tabs.length - 1) % tabs.length
+  if (event.key === 'ArrowRight') next = (index + 1) % tabs.value.length
+  else if (event.key === 'ArrowLeft') next = (index + tabs.value.length - 1) % tabs.value.length
   else if (event.key === 'Home') next = 0
-  else if (event.key === 'End') next = tabs.length - 1
+  else if (event.key === 'End') next = tabs.value.length - 1
   else return
-  event.preventDefault(); tab.value = tabs[next].id
+  event.preventDefault(); tab.value = tabs.value[next].id
   event.currentTarget.parentElement.querySelectorAll('[role=tab]')[next].focus()
 }
 function query() { return { start: props.params.start, end: props.params.end, agent_id: props.params.agent_id || '', ...(sessionId.value ? {session_id:sessionId.value} : {}) } }
@@ -68,7 +64,7 @@ async function select(span) {
   tab.value = span.name === 'sage.diagnostic' ? 'raw' : 'input'
   try {
     const data = await api.traceSpan(span.span_id)
-    if (revision === detailRevision) detail.value = data
+    if (revision === detailRevision) { detail.value = data; tab.value = tabs.value.some(item => item.id === tab.value) ? tab.value : (tabs.value[0]?.id || '') }
   } catch (exc) { if (revision === detailRevision) detailError.value = exc.message }
   finally { if (revision === detailRevision) detailLoading.value = false }
 }
@@ -132,8 +128,8 @@ onBeforeUnmount(() => { ++pageRevision; ++summaryRevision; close() })
           <template v-else-if="detail">
             <h3>{{ detail.name }} <span :class="{'trace-failed': detail.status_code === 'ERROR'}">{{ detail.status_code }}</span></h3>
             <p v-if="detail.status_message" class="span-status">{{ detail.status_message }}</p>
-            <div class="trace-tabs" role="tablist" aria-label="记录内容"><button v-for="(item,index) in tabs" :id="`trace-tab-${item.id}`" :key="item.id" role="tab" :aria-selected="tab === item.id" :tabindex="tab === item.id ? 0 : -1" aria-controls="trace-payload" @click="tab = item.id" @keydown="tabKey($event,index)">{{ item.name }}</button></div>
-            <pre id="trace-payload" role="tabpanel" :aria-labelledby="`trace-tab-${tab}`" tabindex="0">{{ payload }}</pre>
+            <div v-if="tabs.length" class="trace-tabs" role="tablist" aria-label="记录内容"><button v-for="(item,index) in tabs" :id="`trace-tab-${item.id}`" :key="item.id" role="tab" :aria-selected="tab === item.id" :tabindex="tab === item.id ? 0 : -1" aria-controls="trace-payload" @click="tab = item.id" @keydown="tabKey($event,index)">{{ item.name }}</button></div>
+            <p v-if="!tabs.length" class="empty">未采集</p><pre v-else id="trace-payload" role="tabpanel" :aria-labelledby="`trace-tab-${tab}`" tabindex="0">{{ payload }}</pre>
           </template>
         </section>
       </div>

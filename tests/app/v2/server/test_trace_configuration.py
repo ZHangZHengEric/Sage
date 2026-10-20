@@ -116,7 +116,7 @@ def test_trace_health_and_admin_console(tmp_path: Path, monkeypatch, backend):
         assert response.status_code == 307
         assert response.headers["location"] == (
             "https://lf.example/project/p" if backend == "langfuse"
-            else "/performance"
+            else "/traces"
         )
 
 
@@ -174,6 +174,8 @@ def test_observability_services_follow_active_backend(tmp_path, monkeypatch, opt
         assert links == [
             *([{"id": "performance", "label": "运行性能", "href": "/performance", "external": False}]
               if service.diagnostics.available else []),
+            *([{"id": "traces", "label": "调用链", "href": "/traces", "external": False}]
+              if options.get("trace_backend") == "phoenix" else []),
             *([{"id": console[0], "label": console[1], "href": console[2], "external": True}]
               if console else []),
         ]
@@ -181,7 +183,7 @@ def test_observability_services_follow_active_backend(tmp_path, monkeypatch, opt
             redirect = client.get("/api/observability/console", follow_redirects=False)
             if options.get("trace_backend") == "phoenix":
                 assert redirect.status_code == 307
-                assert redirect.headers["location"] == "/performance"
+                assert redirect.headers["location"] == "/traces"
             else:
                 assert redirect.status_code == 404
         # Availability is live; failed diagnostic capture must not be advertised.

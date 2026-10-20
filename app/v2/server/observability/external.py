@@ -2,21 +2,18 @@
 from __future__ import annotations
 from collections import defaultdict
 from datetime import datetime, timezone
-import hashlib
 import json
 import os
 from urllib.parse import unquote
-from uuid import uuid4
 from threading import RLock
 import httpx
 from sagents.v2.contracts.common import utc_now
 from sagents.v2.runtime.observability.contracts import TraceEvent, TraceSpan, TraceStatus
-from sagents.v2.runtime.observability.traces import current_trace_context
 from sagents.v2.runtime.observability.evidence import ExternalEvidenceSink
 from sagents.v2.runtime.observability.plugins.diagnostic_noop import NoopDiagnosticSink
 from .performance import EVENTS, build_run, timing_report, timestamp
 
-SPAN_NAME = "sage.performance"
+SPAN_NAME = "agent.run"
 PAYLOAD = "sage.performance.data"
 MODEL_FIELDS = frozenset(
     {
@@ -54,6 +51,54 @@ class ExternalDiagnostics(ExternalEvidenceSink):
         self._performance = {}
         self._performance_lock = RLock()
 
+    def bind_trace_sink(self, sink):
+        if self.trace_sink is None:
+            self.trace_sink = sink
+        setter = getattr(sink, "set_span_observer", None)
+        if callable(setter):
+            setter(self)
+
+    def _pending(self, key):
+        return self._performance.setdefault(key, {
+            "rows": [], "span": None, "sink": None, "ended_span": None,
+            "host_managed": False, "finished_requested": False,
+        })
+
+    def span_started(self, sink, span):
+        if self.closed or span.name != SPAN_NAME or not span.session_id or not span.run_id:
+            return
+        with self._performance_lock:
+            pending = self._pending((span.session_id, span.run_id))
+            pending.update(span=span, sink=sink)
+
+    def defer_span_end(self, sink, span):
+        if span.name != SPAN_NAME:
+            return False
+        key = span.session_id, span.run_id
+        with self._performance_lock:
+            pending = self._performance.get(key)
+            if pending is None or pending["span"] is None or pending["span"].span_id != span.span_id:
+                return False
+            pending["ended_span"] = span
+            if pending["finished_requested"]:
+                self._finish_performance(key)
+            # Keep the Agent's own end timestamp, but allow host cleanup timing
+            # and final Run logs to be added before the existing span is exported.
+            return True
+
+    def flush_trace_sink(self, sink):
+        with self._performance_lock:
+            for key in list(self._performance):
+                if self._performance[key]["sink"] is sink:
+                    self._finish_performance(key, incomplete=True)
+
+    def _log_target(self, session_id, run_id):
+        with self._performance_lock:
+            pending = self._performance.get((session_id, run_id))
+            if pending is not None and pending["span"] is not None:
+                return pending["sink"], pending["span"].span_id
+        return None
+
     def emit(self, kind, row, *, at=None):
         if self.closed or not row.get("session_id") or not row.get("run_id"):
             return
@@ -67,67 +112,74 @@ class ExternalDiagnostics(ExternalEvidenceSink):
             observed = timestamp(at) if at is not None else utc_now().timestamp()
             key = row["session_id"], row["run_id"]
             with self._performance_lock:
-                pending = self._performance.setdefault(key, {"rows": [], "parent": None})
+                pending = self._pending(key)
                 pending["rows"].append({"kind": kind, "data": data, "at": observed})
-                # model.request.started is emitted while the Agent span is active.
-                if pending["parent"] is None:
-                    pending["parent"] = current_trace_context()
-                if data.get("event") == "server.run.performance.finished":
+                event = data.get("event", "")
+                if event in {"server.run.performance.accepted", "server.run.performance.resuming"}:
+                    pending["host_managed"] = True
+                if event == "server.run.performance.finished" or (
+                    event.startswith("agent.run.") and event != "agent.run.started" and not pending["host_managed"]
+                ):
                     self._finish_performance(key)
         except Exception:
             self.capture_failures += 1
 
     def _finish_performance(self, key, *, incomplete=False):
-        pending = self._performance.pop(key, None)
+        pending = self._performance.get(key)
         if pending is None:
             return
-        if self.trace_sink is None:
-            self.capture_failures += 1
+        if pending["span"] is None:
+            if incomplete:
+                self._performance.pop(key)
+            else:
+                pending["finished_requested"] = True
             return
+        if pending["ended_span"] is None and not incomplete:
+            pending["finished_requested"] = True
+            return
+        self._performance.pop(key)
         rows = pending["rows"]
-        starts = [r["at"] for r in rows]
-        starts.extend(timestamp(r["data"]["attributes"]["started_at"])
-                      for r in rows if r["kind"] == "log"
-                      and r["data"].get("event") in {
-                          "server.run.performance.accepted", "server.run.performance.resuming"}
-                      and r["data"].get("attributes", {}).get("started_at"))
-        parent = pending["parent"]
-        span = TraceSpan(
-            trace_id=parent[0] if parent else hashlib.sha256(
-                f"performance:{self.service}:{self.environment}:{key[1]}".encode()).hexdigest()[:32],
-            parent_span_id=parent[1] if parent else None,
-            span_id=uuid4().hex[:16], name=SPAN_NAME,
-            start_time=datetime.fromtimestamp(min(starts), timezone.utc),
-            end_time=datetime.fromtimestamp(max(r["at"] for r in rows), timezone.utc),
-            session_id=key[0], run_id=key[1],
-            status=TraceStatus.UNSET if incomplete else TraceStatus.OK,
-            attributes={PAYLOAD: json.dumps(rows, default=str),
-                        "sage.performance.format": "events/v2",
-                        "sage.performance.service": self.service,
-                        "sage.performance.environment": self.environment,
-                        "sage.performance.incomplete": incomplete},
-            events=[TraceEvent(name="sage.performance." + r["kind"],
-                               timestamp=datetime.fromtimestamp(r["at"], timezone.utc),
-                               attributes={"kind": r["kind"], PAYLOAD: json.dumps(r["data"], default=str)})
-                    for r in rows],
-        )
+        span = pending["ended_span"] or pending["span"].model_copy(update={
+            "end_time": utc_now(), "status": TraceStatus.UNSET,
+        })
+        attrs = {**span.attributes, PAYLOAD: json.dumps(rows, default=str),
+                 "sage.performance.format": "events/v3",
+                 "sage.performance.service": self.service,
+                 "sage.performance.environment": self.environment,
+                 "sage.performance.incomplete": incomplete}
+        if incomplete:
+            attrs["sage.interrupted"] = True
+        if rows:
+            starts = [r["at"] for r in rows]
+            starts.extend(timestamp(r["data"]["attributes"]["started_at"])
+                          for r in rows if r["kind"] == "log"
+                          and r["data"].get("event") in {
+                              "server.run.performance.accepted", "server.run.performance.resuming"}
+                          and r["data"].get("attributes", {}).get("started_at"))
+            attrs.update({"sage.performance.started_at": datetime.fromtimestamp(min(starts), timezone.utc).isoformat(),
+                          "sage.performance.finished_at": datetime.fromtimestamp(max(r["at"] for r in rows), timezone.utc).isoformat()})
         events, models = timing_rows([{
-            "name": span.name, "start_time": span.start_time,
-            "attributes": span.attributes,
+            "name": span.name, "start_time": span.start_time, "attributes": attrs,
             "context": {"trace_id": span.trace_id, "span_id": span.span_id},
         }])
         summary = build_run(events[key[1]], models[key[1]])
         if summary is not None:
-            span.attributes.update({"sage.performance." + field: summary[field]
+            attrs.update({"sage.performance." + field: summary[field]
                 for field in ("total_ms", "first_token_ms", "first_text_ms", "model_ms", "tool_ms", "framework_ms", "coverage")
                 if summary.get(field) is not None})
-        span.events.extend(self._take_evidence(key))
-        self.trace_sink.start_span(span)
-        for event in span.events:
-            self.trace_sink.add_event(span.span_id, event)
-        self.trace_sink.end_span(span)
+        additions = [TraceEvent(name="sage.performance." + r["kind"],
+                               timestamp=datetime.fromtimestamp(r["at"], timezone.utc),
+                               attributes={"kind": r["kind"], PAYLOAD: json.dumps(r["data"], default=str)})
+                     for r in rows]
+        additions.extend(self._take_evidence(key))
+        enriched = span.model_copy(update={"attributes": attrs, "events": [*span.events, *additions]})
+        sink = pending["sink"]
+        for event in additions:
+            sink.add_event(span.span_id, event)
+        sink.export_span(enriched)
 
     async def close(self):
+        self.closed = True
         with self._performance_lock:
             for key in list(self._performance):
                 try:
@@ -193,7 +245,7 @@ def timing_rows(spans):
     rows = []
     for span in sorted(spans, key=lambda s: timestamp(s["start_time"])):
         attrs = span["attributes"]
-        if span["name"] != SPAN_NAME or attrs.get("sage.performance.format") != "events/v2":
+        if span["name"] != SPAN_NAME or attrs.get("sage.performance.format") != "events/v3":
             continue
         identity = (span["context"]["trace_id"], span["context"]["span_id"])
         if identity in seen:

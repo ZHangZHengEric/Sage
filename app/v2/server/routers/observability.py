@@ -87,7 +87,7 @@ def _trace_console(host):
     settings = host.settings
     plugin = getattr(sink, "plugin_id", "")
     if plugin == "sage.trace.phoenix":
-        return {"id": "phoenix", "label": "运行性能", "href": "/performance", "external": False}
+        return {"id": "traces", "label": "调用链", "href": "/traces", "external": False}
     elif plugin == "sage.trace.langfuse":
         entry = ("langfuse", "Langfuse", settings.langfuse_public_url or settings.langfuse_base_url)
     elif plugin == "sage.trace.otlp" and settings.jaeger_url and not settings.trace_otlp_endpoint:
@@ -106,7 +106,7 @@ async def observability_services(_: AdminUser, host: HostDep):
     links = []
     if host.diagnostics is not None and host.diagnostics.available:
         links.append({"id": "performance", "label": "运行性能", "href": "/performance", "external": False})
-    if (console := _trace_console(host)) and console["external"]:
+    if console := _trace_console(host):
         links.append(console)
     return success(links)
 

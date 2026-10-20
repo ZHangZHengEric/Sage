@@ -20,7 +20,7 @@ from sagents.v2.runtime.observability.traces import current_trace_context, curre
 from sagents.v2.runtime.observability.tool_evidence import tool_evidence
 from sagents.v2.runtime.observability.model_evidence import model_evidence
 
-SPAN_NAME = "sage.performance"
+SPAN_NAME = "agent.run"
 
 def timestamp(value):
     if isinstance(value, (int, float)):
@@ -88,7 +88,10 @@ class ExternalEvidenceSink(NoopDiagnosticSink):
                 attributes={"sage.diagnostic.kind": kind,
                             "sage.diagnostic.data": json.dumps(payload, ensure_ascii=False, default=str),
                             "session_id": session_id, "run_id": run_id})
-            if active:
+            log_target = self._log_target(session_id, run_id) if kind == "log" else None
+            if log_target is not None:
+                log_target[0].add_event(log_target[1], event)
+            elif active and kind != "log":
                 # Managed applications can have a different exporter instance
                 # from the host; only the owning exporter has this live span.
                 target = current_trace_sink() or self.trace_sink
@@ -98,6 +101,9 @@ class ExternalEvidenceSink(NoopDiagnosticSink):
                     self._orphan_evidence.setdefault((session_id, run_id), []).append(event)
         except Exception:
             self.capture_failures += 1
+
+    def _log_target(self, session_id, run_id):
+        return None
 
     async def begin_model_request(self, *, session_id, request, **kwargs):
         self._evidence(
@@ -222,9 +228,13 @@ class ExternalEvidenceSink(NoopDiagnosticSink):
             seen.add(cursor)
 
     async def _query(self, client, *, start, end, session_id=None, run_id=None):
+        # Agent execution can begin after the selected SDK-entry interval ends.
+        # Discover completed Agent spans through now; timing_report applies the
+        # exact original entry-time cohort from their performance attributes.
+        discovery_end = max(end, utc_now().timestamp()) if session_id is None and run_id is None else end
         dates = {
             "start_time": datetime.fromtimestamp(start, timezone.utc).isoformat(),
-            "end_time": datetime.fromtimestamp(end, timezone.utc).isoformat(),
+            "end_time": datetime.fromtimestamp(discovery_end, timezone.utc).isoformat(),
         }
         if self.backend == "phoenix":
             filters = [
@@ -239,7 +249,7 @@ class ExternalEvidenceSink(NoopDiagnosticSink):
             params = [*dates.items(), *filters]
             if session_id is None:
                 params.extend([("name", SPAN_NAME),
-                               ("attribute", 'sage.performance.format:"events/v2"')])
+                               ("attribute", 'sage.performance.format:"events/v3"')])
             rows, truncated = await self._phoenix(client, params)
             complete = []
             if session_id is None:
@@ -248,7 +258,7 @@ class ExternalEvidenceSink(NoopDiagnosticSink):
                 for run_id in sorted({s["attributes"]["run_id"] for s in rows}):
                     batch, cut = await self._phoenix(client, [*filters, ("name", SPAN_NAME),
                         ("attribute", f"run_id:{json.dumps(run_id)}"),
-                        ("attribute", 'sage.performance.format:"events/v2"')])
+                        ("attribute", 'sage.performance.format:"events/v3"')])
                     complete.extend(batch)
                     truncated |= cut
                     if len(complete) >= self.max_spans:
@@ -273,7 +283,7 @@ class ExternalEvidenceSink(NoopDiagnosticSink):
                 if session_id
                 else {
                     "sage.performance.environment": self.environment,
-                    "sage.performance.format": "events/v2",
+                    "sage.performance.format": "events/v3",
                     **({"run_id": run_id} if run_id is not None else {}),
                 }
             ),
