@@ -60,6 +60,10 @@ class EphemeralExecutionBindingProvider:
     own workspace; sharing requires a binding with Run-owned sharing support.
     """
 
+    plugin_id = "sage.execution.binding.ephemeral"
+    name = "Process-local memory binding"
+    description = "Independent virtual files with explicit process-local recovery limits."
+
     def __init__(self, config, store):
         self.config, self.store = config, store
         self.issuer = SandboxGrantIssuer()
@@ -254,7 +258,7 @@ class EphemeralExecutionBindingProvider:
 def ephemeral_execution_binding_registration():
     return ExtensionRegistration(
         descriptor=ExtensionDescriptor(
-            plugin_id="sage.execution.binding.ephemeral",
+            plugin_id=EphemeralExecutionBindingProvider.plugin_id,
             name="Process-local memory binding",
             description="Independent virtual files with explicit process-local recovery limits.",
             version="1.0.0",

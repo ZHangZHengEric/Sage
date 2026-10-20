@@ -4,9 +4,6 @@ from sagents.v2._lazy import exported_names, resolve_export
 
 
 _EXPORTS = {
-    "DistributedRedisMysqlSessionStore": (
-        "sagents.v2.runtime.session.plugins.mysql.redis_distributed", "DistributedRedisMysqlSessionStore",
-    ),
     "RedisMysqlSessionStore": (
         "sagents.v2.runtime.session.plugins.mysql.redis", "RedisMysqlSessionStore",
     ),
@@ -47,10 +44,6 @@ _EXPORTS = {
     "MysqlSessionStore": (
         "sagents.v2.runtime.session.plugins.mysql",
         "MysqlSessionStore",
-    ),
-    "PostgresSessionStore": (
-        "sagents.v2.runtime.session.plugins.postgres",
-        "PostgresSessionStore",
     ),
     "RunCreationResult": (
         "sagents.v2.runtime.session.contracts",

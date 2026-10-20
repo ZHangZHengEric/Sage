@@ -376,26 +376,17 @@ async def test_read_only_history_contains_attachment_bytes_without_changing_sour
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("backend", ["mysql", "postgres"])
-@pytest.mark.parametrize("fail_commit", [False, True])
-async def test_sql_attachment_blob_and_manifest_share_transaction(
-    backend, fail_commit, monkeypatch
-):
+@pytest.mark.parametrize('fail_commit', [False, True])
+async def test_sql_attachment_blob_and_manifest_share_transaction(fail_commit, monkeypatch):
     from contextlib import asynccontextmanager
     from unittest.mock import AsyncMock
     from sagents.v2.runtime.session.plugins.mysql import _MysqlSessionState
-    from sagents.v2.runtime.session.plugins.postgres import _PostgresSessionState
-
     source = EphemeralSessionStore()
-    created = await create(source, "sql")
+    created = await create(source, 'sql')
     sid = created.handle.session_id
-    store = (
-        _MysqlSessionState("mysql://unused/unused")
-        if backend == "mysql"
-        else _PostgresSessionState("postgresql://unused/unused")
-    )
+    store = _MysqlSessionState('mysql://unused/unused')
     await store.load_state(await source.export_state())
-    pending, durable, statements = {}, {}, []
+    pending, durable, statements = ({}, {}, [])
 
     class Connection:
         rowcount = 1
@@ -411,144 +402,80 @@ async def test_sql_attachment_blob_and_manifest_share_transaction(
 
         async def execute(self, query, *values):
             statements.append(query)
-            params = values[0] if backend == "mysql" else values
-            if "INSERT INTO" in query and "attachments" in query:
-                if backend == "mysql":
-                    assert "UNHEX(%s)" in query
-                    assert isinstance(params[2], str)
-                    pending[params[1]] = bytes.fromhex(params[2])
-                else:
-                    pending[params[1]] = params[2]
-            return "UPDATE 1"
+            params = values[0]
+            if 'INSERT INTO' in query and 'attachments' in query:
+                assert 'UNHEX(%s)' in query
+                assert isinstance(params[2], str)
+                pending[params[1]] = bytes.fromhex(params[2])
+            return 'UPDATE 1'
 
-        async def fetchval(self, query, *values):
-            return None
 
         async def commit(self):
-            assert "image" in store._sessions[sid].attachments
-            assert pending == {"image": b"image snapshot"}
+            assert 'image' in store._sessions[sid].attachments
+            assert pending == {'image': b'image snapshot'}
             if fail_commit:
-                raise OSError("transaction commit failed")
+                raise OSError('transaction commit failed')
             durable.update(pending)
             pending.clear()
 
         async def rollback(self):
             pending.clear()
 
-        @asynccontextmanager
-        async def transaction(self):
-            try:
-                yield
-                await self.commit()
-            except BaseException:
-                await self.rollback()
-                raise
-
     connection = Connection()
 
     @asynccontextmanager
     async def writer():
         yield connection
-
-    monkeypatch.setattr(store, "_ensure_ready", AsyncMock())
-    monkeypatch.setattr(store, "_ensure_session_loaded", AsyncMock())
-    if backend == "postgres":
-        from types import SimpleNamespace
-
-        monkeypatch.setattr(
-            "sagents.v2.runtime.session.plugins.postgres._require_asyncpg",
-            lambda: SimpleNamespace(
-                UniqueViolationError=type("UniqueViolationError", (Exception,), {})
-            ),
-        )
-    monkeypatch.setattr(store, "_writer_connection", writer)
-    monkeypatch.setattr(store, "_persist_events", AsyncMock(return_value={}))
-    monkeypatch.setattr(store, "_reload_session_from_storage_locked", AsyncMock())
-    if backend == "mysql":
-        monkeypatch.setattr(store, "_sync_locations", AsyncMock())
-        monkeypatch.setattr(store, "_sync_start_idempotency", AsyncMock())
-    else:
-        monkeypatch.setattr(store, "_replace_locations", AsyncMock())
-        monkeypatch.setattr(store, "_replace_start_idempotency", AsyncMock())
+    monkeypatch.setattr(store, '_ensure_ready', AsyncMock())
+    monkeypatch.setattr(store, '_ensure_session_loaded', AsyncMock())
+    monkeypatch.setattr(store, '_writer_connection', writer)
+    monkeypatch.setattr(store, '_persist_events', AsyncMock(return_value={}))
+    monkeypatch.setattr(store, '_reload_session_from_storage_locked', AsyncMock())
+    monkeypatch.setattr(store, '_sync_locations', AsyncMock())
+    monkeypatch.setattr(store, '_sync_start_idempotency', AsyncMock())
     if fail_commit:
-        with pytest.raises(OSError, match="transaction commit failed"):
-            await store.put_attachment(
-                sid,
-                artifact_id="image",
-                media_type="image/jpeg",
-                content=content(),
-                context=CONTEXT,
-            )
+        with pytest.raises(OSError, match='transaction commit failed'):
+            await store.put_attachment(sid, artifact_id='image', media_type='image/jpeg', content=content(), context=CONTEXT)
         assert durable == {} and pending == {}
-        assert "image" not in store._sessions[sid].attachments
+        assert 'image' not in store._sessions[sid].attachments
     else:
-        await store.put_attachment(
-            sid,
-            artifact_id="image",
-            media_type="image/jpeg",
-            content=content(),
-            context=CONTEXT,
-        )
-        assert durable == {"image": b"image snapshot"}
+        await store.put_attachment(sid, artifact_id='image', media_type='image/jpeg', content=content(), context=CONTEXT)
+        assert durable == {'image': b'image snapshot'}
         assert not store._attachment_payloads
-        assert any(
-            "sessions" in query and "INSERT INTO" in query for query in statements
-        )
+        assert any(('sessions' in query and 'INSERT INTO' in query for query in statements))
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("backend", ["mysql", "postgres"])
-async def test_live_sql_attachment_restart_copy_backup_and_delete(backend):
+async def test_live_sql_attachment_restart_copy_backup_and_delete():
     import os
     import uuid
     from sagents.v2.runtime.session.plugins.mysql import MysqlSessionStore
-    from sagents.v2.runtime.session.plugins.postgres import PostgresSessionStore
-
-    dsn = os.environ.get(f"SAGE_V2_TEST_{backend.upper()}_DSN", "").strip()
+    dsn = os.environ.get("SAGE_V2_TEST_MYSQL_DSN", '').strip()
     if not dsn:
-        pytest.skip("Live database DSN is not configured")
-    prefix = "attachments_" + uuid.uuid4().hex[:12]
+        pytest.skip('Live database DSN is not configured')
+    prefix = 'attachments_' + uuid.uuid4().hex[:12]
 
     def opened():
-        return (
-            MysqlSessionStore(dsn, table_prefix=prefix)
-            if backend == "mysql"
-            else PostgresSessionStore(dsn, schema=prefix)
-        )
-
+        return MysqlSessionStore(dsn, table_prefix=prefix)
     source = opened()
     try:
-        a, b = await create(source, "live-a"), await create(source, "live-b")
-        await source.put_attachment(
-            a.handle.session_id,
-            artifact_id="image",
-            media_type="image/jpeg",
-            content=content(),
-            context=CONTEXT,
-        )
-        await source.copy_attachment(
-            a.handle.session_id, b.handle.session_id, "image", context=CONTEXT
-        )
+        a, b = (await create(source, 'live-a'), await create(source, 'live-b'))
+        await source.put_attachment(a.handle.session_id, artifact_id='image', media_type='image/jpeg', content=content(), context=CONTEXT)
+        await source.copy_attachment(a.handle.session_id, b.handle.session_id, 'image', context=CONTEXT)
         await cancel(source, a)
         await cancel(source, b)
         await source.close()
         source = opened()
         await source.delete_session(a.handle.session_id)
-        _, stream = await source.get_attachment(
-            b.handle.session_id, "image", context=CONTEXT
-        )
-        assert b"".join([chunk async for chunk in stream]) == b"image snapshot"
-        backup = await source.export_session_backup(
-            b.handle.session_id, context=CONTEXT
-        )
+        _, stream = await source.get_attachment(b.handle.session_id, 'image', context=CONTEXT)
+        assert b''.join([chunk async for chunk in stream]) == b'image snapshot'
+        backup = await source.export_session_backup(b.handle.session_id, context=CONTEXT)
         await source.delete_session(b.handle.session_id)
         await source.restore_session_backup(backup, context=CONTEXT)
         await source.close()
         source = opened()
-        _, stream = await source.get_attachment(
-            b.handle.session_id, "image", context=CONTEXT
-        )
-        assert b"".join([chunk async for chunk in stream]) == b"image snapshot"
+        _, stream = await source.get_attachment(b.handle.session_id, 'image', context=CONTEXT)
+        assert b''.join([chunk async for chunk in stream]) == b'image snapshot'
         await source.delete_session(b.handle.session_id)
     finally:
         await source.close()

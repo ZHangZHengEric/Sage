@@ -34,7 +34,7 @@ def validate_distributed_pair(store, scheduler, scheduler_capabilities):
     store_capabilities = store.capabilities
     distributed_store = bool(store_capabilities.get("multi_process_writes"))
     distributed_scheduler = scheduler_capabilities.supports_distributed_claims
-    if distributed_store != distributed_scheduler or (distributed_scheduler and not store_capabilities.get("atomic_worker_fence")):
+    if distributed_scheduler and (not distributed_store or not store_capabilities.get("atomic_worker_fence")):
         raise SageV2Error(RuntimeErrorInfo(code="runtime.distributed_fence_unsupported",
             category=ErrorCategory.VALIDATION,
             message="Distributed scheduling and SessionStore must support shared commit-time fencing",

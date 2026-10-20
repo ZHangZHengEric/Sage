@@ -16,7 +16,7 @@ ref: v2-detail-SAGENTS_V2_SESSION_ATTACHMENTS
 
 - Ephemeral stores retain bytes in memory only.
 - Filesystem stores keep immutable binary files under the owning session's `attachments/` directory. Files become durable before the manifest commits. Unreferenced files left by an interrupted write are reclaimed with the session. A complete directory backup includes descendants and attachments.
-- MySQL and PostgreSQL store bytes in an attachment table under the same database/prefix/schema. Bytes and the session manifest commit in one transaction; session deletion cascades through foreign keys. No new SQLite storage is introduced.
+- MySQL stores bytes in an attachment table under the same database and table prefix. Bytes and the session manifest commit in one transaction; session deletion cascades through foreign keys. No new SQLite storage is introduced.
 
 Runs within a session share its attachments. Forks inherit snapshots. Before using a reference in another session, call `copy_attachment(source_session_id, target_session_id, artifact_id, context=...)`. Both owners are authorized and the destination receives its own snapshot, which survives source deletion. Individual attachments cannot be deleted while their session exists, preserving historical replay.
 

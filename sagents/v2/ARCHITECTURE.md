@@ -94,6 +94,12 @@ plugins. Contracts and backend-neutral runtime logic remain outside `plugins/`.
 Public package facades may lazily export concrete implementations, but contract
 modules must not forward implementation imports.
 
+Backend metadata reads belong to the filesystem/MySQL plugin packages; shared
+metadata projection only transforms canonical records. External trace queries
+belong to the external diagnostic plugin, while generic query budgets and
+caching remain backend-neutral. Model wire conversion, usage normalization,
+and concurrency-budget implementations live under `model/plugins/`.
+
 `interfaces/protocols/` and `tool/official/` remain explicit implementation
 directories for protocol projections and official tools, respectively.
 
@@ -145,6 +151,14 @@ executor from another plugin unless an explicit adapter owns that mapping.
 Host-owned objects use the same registration factory contract with explicit
 borrowed ownership. Runtime parameters remain serializable. There is no parallel
 object-injection or host-defined execution-driver entry point.
+
+Each concrete plugin class declares its own stable `plugin_id` and exposes a
+non-empty `name` and `description`, including implementations injected directly
+by a host. A subclass
+must declare its identity explicitly rather than inherit another plugin's ID.
+Registration descriptors use that declared identity. A borrowed capability alias
+retains the underlying object's identity; private helpers, data models, and
+shared implementation bases are not separate plugins and need no plugin ID.
 
 ## Composition roots
 
@@ -320,17 +334,23 @@ and a sorted per-Session lock table. Different Session writes may persist in
 parallel, one Session remains strictly serialized, tree deletion revalidates
 its locked topology, and failed persistence restores only the target aggregate.
 
-Optional SQL backends live in `runtime/session/plugins/`, matching other
-replaceable providers. `sage.session.postgres` follows the same
-open-by-`session_id` rule and does not `SELECT *` every Session at startup.
-Compact metadata and appended Run events live in `sagent_`-prefixed tables. A
-process-held advisory lock rejects a second writer. Subscribers stay
-in-process. A PostgreSQL store still does not provide a global Session index
-or a distributed Scheduler.
-
-`sage.session.mysql` is the same open-by-`session_id` store on InnoDB, with
+`sage.session.mysql` opens individual Sessions by `session_id` on InnoDB, with
 `sagent_`-prefixed tables, appended Run events, and a process-held `GET_LOCK`.
 It does not claim multi-process writes or cross-process subscribe.
+
+`sage.session.redis-mysql` is the Redis/MySQL implementation for both one and
+multiple Sage instances. Redis holds active state and renewable per-operation
+guards; MySQL archives canonical history and attachment bytes. Cross-process
+subscriptions replay shared events and previews. There is no process-wide writer
+lease. Redis requires AOF persistence and noeviction. This store does not depend
+on a shared filesystem. Workspaces, Skill files and filesystem/SQLite memory
+providers remain separate host concerns.
+
+Storage and scheduling are selected independently. An in-process Scheduler can
+use the shared store on one Sage instance. Fleet execution requires
+`sage.scheduler.redis-distributed`, commit-time worker fencing and the same Redis
+URL. Server selects this scheduler with `SAGE_SERVER_SCHEDULER_PLUGIN`; selecting
+Redis storage alone does not enable fleet execution.
 
 ## Authoritative versus derived data
 

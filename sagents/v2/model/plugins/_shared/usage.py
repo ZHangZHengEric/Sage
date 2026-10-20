@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Literal
 
-from sagents.v2.model.wire import wire_value
+from sagents.v2.model.plugins._shared.wire import wire_value
 
 
 InputTokenMode = Literal["auto", "inclusive", "disjoint"]

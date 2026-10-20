@@ -19,6 +19,11 @@ from sagents.v2.contracts.errors import (
 class InMemorySkillProvider:
     """Deterministic catalog/source. ``fetches`` proves lazy Level-2 access."""
 
+    plugin_id = "sage.skill.ephemeral"
+    name = "In-memory Skill provider"
+    description = "Provides Skill catalog entries and bundles from process-local memory."
+
+
     def __init__(self, bundles: tuple[SkillBundle, ...]) -> None:
         self._bundles = {value.descriptor.name: value for value in bundles}
         self.fetches: list[tuple[str, str]] = []
@@ -43,6 +48,11 @@ class InMemorySkillProvider:
 
 class InMemorySkillWorkspace:
     """Atomic, no-overwrite workspace used by tests and embedded runtimes."""
+
+    plugin_id = "sage.skill.workspace.ephemeral"
+    name = "In-memory Skill workspace"
+    description = "Materializes immutable Skill bundles in process-local memory."
+
 
     def __init__(self) -> None:
         self._lock = asyncio.Lock()
@@ -76,6 +86,11 @@ class InMemorySkillWorkspace:
 
 
 class InMemorySkillActivationRepository:
+
+    plugin_id = "sage.skill.activation.ephemeral"
+    name = "In-memory Skill activation"
+    description = "Keeps loaded Skill state in process-local memory."
+
     def __init__(self) -> None:
         self._lock = asyncio.Lock()
         self._values: dict[str, dict[str, LoadedSkill]] = {}

@@ -1,5 +1,5 @@
 """Deterministic task-state fallback for rolling context summaries."""
-from sagents.v2.context.progress_summary import bounded_snapshot
+from sagents.v2.context.plugins._shared.progress_summary import bounded_snapshot
 from sagents.v2.context.summary import SummarizationRequest
 
 

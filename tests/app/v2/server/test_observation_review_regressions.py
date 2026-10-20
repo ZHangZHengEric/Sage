@@ -19,7 +19,7 @@ from app.v2.server.storage.downloads import prepare_session_export
 from sagents.v2.model.contracts import ModelMessage, ModelRequest, ModelResponse
 from sagents.v2.contracts.items import TextBlock
 from sagents.v2.runtime.observability.contracts import TraceSpan, LogRecord
-from sagents.v2.runtime.observability.evidence import ExternalEvidenceSink
+from sagents.v2.runtime.observability.plugins.external import ExternalEvidenceSink
 from sagents.v2.runtime.observability.plugins.phoenix import PhoenixTraceSink
 from sagents.v2.runtime.observability.query import query_budget
 from sagents.v2.runtime.observability.raw import reconstruct

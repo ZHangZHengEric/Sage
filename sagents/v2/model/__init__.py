@@ -8,6 +8,18 @@ _CAPABILITIES = "sagents.v2.model.capability_contracts"
 _PROBES = "sagents.v2.model.capability_probe"
 _PROTOCOLS = "sagents.v2.model.protocols"
 _EXPORTS = {
+    "CanonicalTokenUsage": (
+        "sagents.v2.model.plugins._shared.usage",
+        "CanonicalTokenUsage",
+    ),
+    "canonical_token_usage": (
+        "sagents.v2.model.plugins._shared.usage",
+        "canonical_token_usage",
+    ),
+    "has_token_usage": (
+        "sagents.v2.model.plugins._shared.usage",
+        "has_token_usage",
+    ),
     "GeminiGenerateContentConfig": (
         "sagents.v2.model.plugins.gemini_generate_content",
         "GeminiGenerateContentConfig",
@@ -66,7 +78,7 @@ _EXPORTS = {
         "OpenAIResponsesModelProvider",
     ),
     "ModelConcurrencyBudget": (
-        "sagents.v2.model.middleware.concurrency",
+        "sagents.v2.model.plugins.concurrency_budget",
         "ModelConcurrencyBudget",
     ),
     "RecordingModelProvider": (

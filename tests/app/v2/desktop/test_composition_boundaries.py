@@ -12,7 +12,7 @@ from app.v2.desktop.backend.catalog import (
 from app.v2.desktop.backend.component_plan import DesktopComponentPlan
 from app.v2.desktop.backend.model_providers import DesktopModelProviders
 from app.v2.desktop.backend.schemas import DesktopV2Settings
-from sagents.v2.model.middleware.concurrency import ModelConcurrencyBudget
+from sagents.v2.model.plugins.concurrency_budget import ModelConcurrencyBudget
 
 
 def agent(**config):

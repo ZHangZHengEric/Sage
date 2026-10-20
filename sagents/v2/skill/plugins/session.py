@@ -17,6 +17,11 @@ class SessionDerivedSkillActivationRepository:
     :class:`DerivedStateStore` rather than authoritative Run state.
     """
 
+    plugin_id = "sage.skill.activation.session-derived"
+    name = "Session-derived Skill activation"
+    description = "Keeps loaded Skill state in the Run derived-state namespace."
+
+
     namespace = "skill-activation"
 
     def __init__(

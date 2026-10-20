@@ -22,7 +22,7 @@ from sagents.v2.contracts.items import (
 )
 from sagents.v2.contracts.provider_state import make_provider_state, read_provider_state
 from sagents.v2.runtime.credentials.contracts import CredentialMaterial
-from sagents.v2.model.wire import (
+from sagents.v2.model.plugins._shared.wire import (
     compact_json,
     minimum_reasoning_control,
     parse_tool_arguments,
@@ -33,7 +33,7 @@ from sagents.v2.model.wire import (
     wire_json_value,
     wire_value,
 )
-from sagents.v2.model.usage import canonical_token_usage
+from sagents.v2.model.plugins._shared.usage import canonical_token_usage
 from sagents.v2.model.contracts import (
     ModelCapabilities,
     ModelEventKind,

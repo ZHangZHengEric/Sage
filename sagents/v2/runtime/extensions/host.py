@@ -95,20 +95,18 @@ class ExtensionHost:
             descriptor = registration.descriptor
             raw_config = dict(supplied_configs.get(plugin_id, {}))
             try:
+                self.registry.validate_parameters(plugin_id, raw_config)
+                raw_config = json.loads(json.dumps(raw_config, allow_nan=False))
                 schema = descriptor.config_schema or {
                     "type": "object",
                     "additionalProperties": True,
                 }
                 Draft202012Validator(schema).validate(raw_config)
                 if registration.config_model is not None:
-                    model = registration.config_model.model_validate(raw_config)
-                    validated = {
-                        key: value
-                        for key, value in model
-                        if key in model.model_fields_set
-                    }
-                else:
-                    validated = raw_config
+                    registration.config_model.model_validate(raw_config)
+                # Models validate parameter data; parsed objects and defaults
+                # are not another runtime-object injection channel.
+                validated = raw_config
             except Exception as exc:
                 raise _error(
                     "extension.config_invalid",
@@ -203,7 +201,7 @@ class ExtensionHost:
                 registration = self.registry.get(plugin_id)
                 descriptor = registration.descriptor
                 plugin_context = context.model_copy(
-                    update={"config": dict(plan.configs[plugin_id]),
+                    update={"config": json.loads(json.dumps(dict(plan.configs[plugin_id]))),
                             "agent_configuration": json.loads(json.dumps(context.agent_configuration))
                             if context.agent_configuration is not None else None}
                 )
@@ -424,7 +422,7 @@ class ExtensionHost:
                 registration = self.registry.get(plugin_id)
                 descriptor = registration.descriptor
                 plugin_context = context.model_copy(
-                    update={"config": dict(plan.configs[plugin_id])}
+                    update={"config": json.loads(json.dumps(dict(plan.configs[plugin_id])))}
                 )
                 dependencies = ProviderSet(
                     {

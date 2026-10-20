@@ -15,6 +15,10 @@ from sagents.v2.runtime.extensions.discovery import validate_extension_version
 
 
 class SourcePluginScope:
+    plugin_id = "sage.package.source-modules"
+    name = "Package source modules"
+    description = "Owns trusted source-extension module lifetimes for one package application."
+
     def __init__(self):
         self.modules = []
 

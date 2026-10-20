@@ -17,6 +17,11 @@ class SessionApprovalMemory:
     会话删除时随 ``forget_session`` 一起清理。
     """
 
+    plugin_id = "sage.agent.approval-memory.session"
+    name = "agent.approval-memory"
+    description = "Standard agent.approval-memory implementation with declared dependencies and lifecycle."
+
+
     NAMESPACE = "approval-memory"
     KEY = "remembered"
     VERSION = 1

@@ -144,6 +144,11 @@ class OfficialToolRuntime:
     prevents a Tool plugin from silently replacing policy with direct host I/O.
     """
 
+    plugin_id = "sage.execution.tool-runtime"
+    name = "Run tool environment"
+    description = "Official tools bound to the accepted Run sandbox and shared services."
+
+
     def __init__(
         self,
         sandbox: SandboxHandle,
@@ -411,6 +416,7 @@ class OfficialToolRuntime:
         block_until_ms: int,
         pattern: str | None = None,
     ) -> dict[str, Any]:
+        await self._authorize_job(task_id)
         timeout = max(0, block_until_ms) / 1000
         try:
             snapshot = await asyncio.wait_for(
@@ -455,6 +461,7 @@ class OfficialToolRuntime:
         )
 
     async def kill_shell(self, task_id: str) -> dict[str, Any]:
+        await self._authorize_job(task_id)
         snapshot = await self.job_runtime.cancel(task_id, force=True)
         return {
             "success": True,
@@ -463,6 +470,13 @@ class OfficialToolRuntime:
             "exit_code": snapshot.exit_code,
             "stdout": await self._job_output(task_id),
         }
+
+    async def _authorize_job(self, job_id):
+        snapshot = await self.job_runtime.inspect(job_id)
+        if snapshot.owner_run_id != self.sandbox.ref.owner_run_id:
+            raise SageV2Error(RuntimeErrorInfo(code="job.owner_conflict", category=ErrorCategory.AUTHORIZATION,
+                message="The background Job belongs to another Run",
+                metadata={"side_effect_state": "not_applied"}))
 
     async def network_request(
         self,

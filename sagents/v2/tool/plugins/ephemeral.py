@@ -11,6 +11,7 @@ from jsonschema import validate
 from sagents.v2.runtime.extensions import (
     CapabilityOffer,
     ExtensionDescriptor,
+    ExtensionDependency,
     ExtensionScope,
 )
 from sagents.v2.tool.contracts import (
@@ -56,9 +57,10 @@ class EphemeralToolPlugin:
         supported_scopes=frozenset(
             {ExtensionScope.PROCESS, ExtensionScope.AGENT, ExtensionScope.RUN}
         ),
+        dependencies=(ExtensionDependency(capability="tool.handlers", name="default", optional=True),),
         config_schema={
             "type": "object",
-            "properties": {"tools": {}, "handlers": {}},
+            "properties": {"tools": {"type": "array", "items": {"type": "object"}}},
             "additionalProperties": False,
         },
         capabilities={"durable": False, "testing": True},

@@ -17,7 +17,9 @@ ref: v2-ENV_VARS
 | Variable | Default / role |
 | --- | --- |
 | `SAGE_SERVER_REDIS_URL` | Optional Redis URL for Session archival; requires MySQL. |
-| `SAGE_SERVER_SESSION_STORE_PLUGIN` | Unset: select MySQL or single-writer Redis/MySQL from configured URLs. Set `sage.session.redis-mysql-distributed` to select distributed sessions and the matching Redis Scheduler; requires both URLs. |
+| `SAGE_SERVER_SESSION_STORE_PLUGIN` | Unset: select MySQL or Redis/MySQL from configured URLs. `sage.session.redis-mysql` supports shared state across instances. |
+| `SAGE_SERVER_SCHEDULER_PLUGIN` | `sage.scheduler.ephemeral`; select `sage.scheduler.redis-distributed` explicitly for shared Run scheduling and `sage.job.redis-distributed`. Requires MySQL and Redis. Workspace files remain node-local. |
+| `SAGE_SERVER_SESSION_STORE_KEY_PREFIX` | Optional explicit Redis Session namespace; all instances sharing sessions must use the same prefix. |
 | `SAGE_SERVER_MYSQL_URL` | Required MySQL connection URL |
 | `SAGE_SERVER_HOST` | `127.0.0.1` |
 | `SAGE_SERVER_PORT` | `8090` |
@@ -66,7 +68,7 @@ ref: v2-ENV_VARS
 | `SAGE_SERVER_PHOENIX_API_KEY_ENV` | `PHOENIX_API_KEY`; environment variable containing the Phoenix API key |
 | `SAGE_SERVER_PUBLIC_URL` | Empty: use the incoming request origin; set the public origin for A2A behind a proxy |
 
-Concurrency and capacity values must be positive. They are per-process limits, not distributed quotas. Redis is no longer a startup dependency or AG-UI replay store.
+Concurrency and capacity values must be positive. Run limits are per process with the default Scheduler and shared across instances with the distributed Scheduler. The distributed Job plugin has its own shared admission, execution and output bounds. Redis is required when selecting the Redis runtime plugins; local workspaces and memory databases are not made cross-node by that selection.
 
 ## Desktop and embedded runtime
 

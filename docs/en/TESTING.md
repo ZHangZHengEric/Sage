@@ -74,7 +74,7 @@ python -m pytest tests/sagents/v2 -m 'not live' -q --durations=10
 python docs/scripts/check_docs.py
 ```
 
-The [CI workflow](https://github.com/ZHangZHengEric/Sage/blob/main/.github/workflows/ci-tests.yml) defines version-specific environments and native sandbox dependencies. SQL contracts require `SAGE_V2_TEST_MYSQL_DSN` or `SAGE_V2_TEST_POSTGRES_DSN`; use dedicated test databases. Live-provider tests remain opt-in. Do not claim those paths passed when they were skipped or deselected.
+The [CI workflow](https://github.com/ZHangZHengEric/Sage/blob/main/.github/workflows/ci-tests.yml) defines version-specific environments and native sandbox dependencies. SQL contracts require `SAGE_V2_TEST_MYSQL_DSN`; use dedicated test databases. Live-provider tests remain opt-in. Do not claim those paths passed when they were skipped or deselected.
 
 Report the change in covered behavior/setup, focused and full results, relevant durations, and any limits. Distinguish test functions, collected parameterized nodes, executed cases, skips, and live cases. A static inventory or focused review is not a complete semantic review or a production proof.
 
@@ -87,4 +87,4 @@ Report the change in covered behavior/setup, focused and full results, relevant 
 5. Review removed coverage explicitly; retain independent safety and fault boundaries.
 6. Run affected suites and documentation checks, then report exact results and unverified paths.
 
-The scoped entry point for future agents is [tests/AGENTS.md](https://github.com/ZHangZHengEric/Sage/blob/main/tests/AGENTS.md). This process does not authorize unrelated production changes, deployment, live-provider costs, or extra business storage for audit purposes.
+This process does not authorize unrelated production changes, deployment, live-provider costs, or extra business storage for audit purposes.

@@ -55,6 +55,10 @@ class DefaultToolPolicy:
     持有的 `ApprovalMemory` 读写；没有记忆端口时这两个字段没有任何效果。
     """
 
+    plugin_id = "sage.agent.tool-policy.default"
+    name = "agent.tool-policy"
+    description = "Standard agent.tool-policy implementation with declared dependencies and lifecycle."
+
     def __init__(
         self,
         *,

@@ -9,18 +9,16 @@ from sagents.v2.contracts.commands import StartRun
 from sagents.v2.contracts.run_state import RunState, SessionConcurrencyMode
 from sagents.v2.runtime.session.state import SessionStoreCoordinator
 from sagents.v2.runtime.session.plugins.filesystem import FilesystemSessionStore
-from sagents.v2.runtime.session.plugins.postgres import PostgresSessionStore
 from sagents.v2.runtime.session.plugins.mysql.state import _MysqlSessionState, _SCHEMA_TABLES
 from sagents.v2.contracts.principals import RequestContext, ActorRef
 
 
-@pytest.mark.parametrize('backend', ['memory', 'filesystem', 'mysql', 'postgres'])
+@pytest.mark.parametrize('backend', ['memory', 'filesystem', 'mysql'])
 async def test_metadata_pages_preserve_order_filter_owner_and_no_history_install(tmp_path, backend):
-    dsn = os.environ.get('SAGE_V2_TEST_' + ('POSTGRES' if backend == 'postgres' else 'MYSQL') + '_DSN')
-    if backend in {'mysql','postgres'} and not dsn:
+    dsn = os.environ.get('SAGE_V2_TEST_MYSQL_DSN')
+    if backend in {'mysql'} and not dsn:
         pytest.skip('set SQL DSN for live metadata SQL')
     store = (_MysqlSessionState(dsn, table_prefix='metadata_'+uuid4().hex[:10]) if backend == 'mysql' else
-             PostgresSessionStore(dsn, schema='metadata_'+uuid4().hex[:10]) if backend == 'postgres' else
              FilesystemSessionStore(tmp_path) if backend == 'filesystem' else SessionStoreCoordinator())
     owner = RequestContext(actor=ActorRef(principal_id='owner',principal_type='user',tenant_id='owner'))
     other = RequestContext(actor=ActorRef(principal_id='other',principal_type='user',tenant_id='other'))
@@ -41,7 +39,7 @@ async def test_metadata_pages_preserve_order_filter_owner_and_no_history_install
             store = FilesystemSessionStore(tmp_path)
             store._read_session_aggregate = lambda *_: (_ for _ in ()).throw(AssertionError('typed entire history decoded'))
             store._ensure_session_loaded = AsyncMock(side_effect=AssertionError('aggregate installed'))
-        if backend in {'mysql','postgres'}:
+        if backend in {'mysql'}:
             store._fetch_session = AsyncMock(side_effect=AssertionError('aggregate installed'))
         ids = ['first','second','private','foreign-agent']
         page = await store.authorized_run_metadata_page(ids,owner,agent_id='a',limit=4,states=(RunState.QUEUED,))
@@ -60,9 +58,6 @@ async def test_metadata_pages_preserve_order_filter_owner_and_no_history_install
                     for table in reversed(_SCHEMA_TABLES):
                         await cursor.execute(f'DROP TABLE IF EXISTS {store._table(table)}')
                 await connection.commit()
-        if backend == 'postgres' and store._pool is not None:
-            async with store._pool.acquire() as connection:
-                await connection.execute(f'DROP SCHEMA {store.schema_name} CASCADE')
         if backend != 'memory':
             await store.close()
 

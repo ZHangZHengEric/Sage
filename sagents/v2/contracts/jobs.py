@@ -68,6 +68,8 @@ class JobRuntimeCapabilities(StrictModel):
     supports_adoption: bool
     supports_suspend: bool
     supports_output_cursor: bool
+    multi_process_writes: bool = False
+    supports_remote_cancel: bool = False
     supports_terminal_purge: bool = False
     supports_automatic_terminal_retention: bool = False
     max_concurrent_jobs: int | None = Field(default=None, gt=0)

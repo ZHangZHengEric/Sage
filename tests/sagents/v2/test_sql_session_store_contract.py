@@ -19,7 +19,6 @@ from sagents.v2.contracts.principals import (
 from sagents.v2.contracts.run_state import RunState
 from sagents.v2.runtime.session.contracts import EventDraft
 from sagents.v2.runtime.session.plugins.mysql import MysqlSessionStore
-from sagents.v2.runtime.session.plugins.postgres import PostgresSessionStore
 from sagents.v2.runtime.session.state import SessionStoreCoordinator
 
 
@@ -42,28 +41,21 @@ def command():
     )
 
 
-@pytest.fixture(
-    params=(MysqlSessionStore, PostgresSessionStore), ids=("mysql", "postgres")
-)
-def sql_backend(request):
-    return request.param
 
 
 @pytest.fixture
-async def durable_store_factory(sql_backend):
-    backend = "MYSQL" if sql_backend is MysqlSessionStore else "POSTGRES"
+async def durable_store_factory():
+    backend = "MYSQL"
     variable = f"SAGE_V2_TEST_{backend}_DSN"
     dsn = os.environ.get(variable, "").strip()
     if not dsn:
         pytest.skip(f"set {variable} to run live {backend} tests")
     namespace = f"sage_v2_{uuid.uuid4().hex[:12]}"
-    options = {
-        "table_prefix" if sql_backend is MysqlSessionStore else "schema": namespace
-    }
+    options = {"table_prefix": namespace}
     stores = []
 
     def open_store():
-        store = sql_backend(dsn, **options)
+        store = MysqlSessionStore(dsn, **options)
         stores.append(store)
         return store
 
@@ -74,16 +66,12 @@ async def durable_store_factory(sql_backend):
             await store.close()
 
 
-async def test_authorization_loads_persisted_session_before_owner_check(sql_backend):
+async def test_authorization_loads_persisted_session_before_owner_check():
     source = SessionStoreCoordinator()
     created = await source.create_run(command(), CONTEXT)
     session_id = created.handle.session_id
-    dsn = (
-        "mysql://unused/test"
-        if sql_backend is MysqlSessionStore
-        else "postgresql://unused/test"
-    )
-    reopened = sql_backend(dsn)
+    dsn = "mysql://unused/test"
+    reopened = MysqlSessionStore(dsn)
     reopened._coordinator._ensure_ready = AsyncMock()
     reopened._coordinator._fetch_session = AsyncMock(
         return_value=source._dump_state_locked()

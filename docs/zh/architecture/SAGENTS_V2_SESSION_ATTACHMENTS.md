@@ -16,7 +16,7 @@ ref: v2-detail-SAGENTS_V2_SESSION_ATTACHMENTS
 
 - Ephemeral 插件把字节保存在内存，关闭进程后不保留。
 - Filesystem 插件在所属 session 目录的 `attachments/` 下保存不可变二进制文件；先持久化文件，再提交附件清单。失败不会把不存在的附件写进清单；提交前留下的孤立文件随 session 删除回收。完整目录备份包含子 session 和附件。
-- MySQL、PostgreSQL 插件使用相同数据库、表前缀或 schema 下的附件表；附件字节和 session 清单在同一事务中提交，外键随 session 删除级联回收。不新增 SQLite。
+- MySQL 插件使用相同数据库和表前缀下的附件表；附件字节和 session 清单在同一事务中提交，外键随 session 删除级联回收。不新增 SQLite。
 
 同一 session 的多个 Run 可以读取已有附件。Fork 自动复制父 session 的附件。其他 session 使用引用前应调用 `copy_attachment(source_session_id, target_session_id, artifact_id, context=...)`，该操作同时检查两个 session 的归属，并把不可变快照复制到目标 session。之后删除源 session 不影响目标 session。附件不会单独删除，直到所属 session 被删除，避免破坏历史回放。
 

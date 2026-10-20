@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
@@ -81,22 +80,6 @@ def _merge_plugin_config(
         {},
     )
     return {**defaults, **selection_config}
-
-
-def _supported_locked_config(
-    extensions: ExtensionRegistry,
-    plugin_id: str,
-    locked_config: Mapping[str, Any],
-) -> dict[str, Any]:
-    """Inject host-owned values only when the selected plugin declares them."""
-
-    if not extensions.is_trusted_builtin(plugin_id):
-        return {}
-    schema = extensions.get(plugin_id).descriptor.config_schema or {}
-    if schema.get("additionalProperties", True) is not False:
-        return dict(locked_config)
-    properties = set((schema.get("properties") or {}).keys())
-    return {key: value for key, value in locked_config.items() if key in properties}
 
 
 def _selection(runtime: RuntimeConfig, capability: str) -> CapabilitySelection | None:

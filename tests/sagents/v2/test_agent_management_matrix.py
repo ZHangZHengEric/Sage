@@ -1572,7 +1572,7 @@ async def test_flow_build_only_initializes_reachable_agents(tmp_path, monkeypatc
 
 @pytest.mark.asyncio
 async def test_managed_applications_share_host_model_budget(tmp_path):
-    from sagents.v2.model.middleware.concurrency import ModelConcurrencyBudget
+    from sagents.v2.model.plugins.concurrency_budget import ModelConcurrencyBudget
 
     budget = ModelConcurrencyBudget(1)
     release = asyncio.Event()

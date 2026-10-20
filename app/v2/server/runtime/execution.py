@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 
 from sagents.v2.model.provider import ModelProvider
-from sagents.v2.model.middleware.concurrency import ModelConcurrencyBudget
+from sagents.v2.model.plugins.concurrency_budget import ModelConcurrencyBudget
 from app.v2.server.observability.logging import get_logger
 
 LOGGER = get_logger(__name__)

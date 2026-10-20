@@ -132,7 +132,7 @@ class DesktopV2Service(
             self.extensions.register(registration)
         self._workspace_initializations: dict[tuple[str, str, str], Path] = {}
         self._workspace_initialization_lock = asyncio.Lock()
-        from sagents.v2.model.middleware.concurrency import ModelConcurrencyBudget
+        from sagents.v2.model.plugins.concurrency_budget import ModelConcurrencyBudget
 
         self.model_budget = ModelConcurrencyBudget(
             max_concurrent_model_calls, max_waiting=max_waiting_model_calls,

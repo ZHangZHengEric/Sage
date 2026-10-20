@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Any, ClassVar, Generic, Literal, Protocol, TypeVar
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from sagents.v2.contracts.common import Identifier, StrictModel
 
@@ -23,7 +23,7 @@ class PluginIdentity(Protocol):
 def plugin_identity(implementation: type[Any]) -> tuple[str, str, str]:
     """Read required identity attributes from one implementation class."""
 
-    plugin_id = getattr(implementation, "plugin_id", None)
+    plugin_id = vars(implementation).get("plugin_id")
     name = getattr(implementation, "name", None)
     description = getattr(implementation, "description", None)
     missing = [
@@ -199,6 +199,16 @@ class ExtensionScopeContext(StrictModel):
     # routes and credential references, never a host execution assembly callback.
     agent_configuration: dict[str, Any] | None = None
     config: dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator("config")
+    @classmethod
+    def serializable_config(cls, value):
+        import json
+        try:
+            json.dumps(value, allow_nan=False)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("plugin config must be finite JSON; declare runtime objects as dependencies") from exc
+        return value
 
 
 class ExtensionInstance(Protocol):

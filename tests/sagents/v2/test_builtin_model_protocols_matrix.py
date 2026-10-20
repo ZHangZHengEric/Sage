@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from sagents.v2.runtime.extensions import CapabilityKey, ProviderSet
+
 from tests.sagents.v2.model_fixture import FULL_MODEL_CAPABILITIES as CAPABILITIES
 
 import json
@@ -823,7 +825,8 @@ def test_anthropic_thinking_uses_native_adaptive_effort_parameters():
         ),
     ],
 )
-def test_builtin_factory_uses_model_route_as_authoritative_protocol_selection(
+@pytest.mark.asyncio
+async def test_builtin_factory_uses_model_route_as_authoritative_protocol_selection(
     provider_id, provider_type, protocol
 ):
     route = ModelRoute(
@@ -843,13 +846,13 @@ def test_builtin_factory_uses_model_route_as_authoritative_protocol_selection(
     registration = builtin_extension_registry().get(
         f"sage.model.{resolved_protocol.value}"
     )
-    provider = registration.factory(
+    provider = await registration.factory(
         ExtensionScopeContext(
             scope=ExtensionScope.AGENT,
             scope_id="agent_test",
-            config={"route": route.model_dump(mode="json"), "client": object()},
+            config={"route": route.model_dump(mode="json")},
         ),
-        {},
+        ProviderSet({CapabilityKey(capability="model.client"): object()}),
     )
 
     assert isinstance(provider, provider_type)
@@ -872,7 +875,8 @@ def test_registry_selection_rejects_unknown_protocol_instead_of_guessing_from_mo
         ("third-party-model", "max_tokens"),
     ],
 )
-def test_chat_completions_factory_auto_selects_initial_token_field(
+@pytest.mark.asyncio
+async def test_chat_completions_factory_auto_selects_initial_token_field(
     model, expected_field
 ):
     route = ModelRoute(
@@ -884,13 +888,13 @@ def test_chat_completions_factory_auto_selects_initial_token_field(
         "sage.model.openai-chat-completions"
     )
 
-    provider = registration.factory(
+    provider = await registration.factory(
         ExtensionScopeContext(
             scope=ExtensionScope.AGENT,
             scope_id="agent_test",
-            config={"route": route.model_dump(mode="json"), "client": object()},
+            config={"route": route.model_dump(mode="json")},
         ),
-        {},
+        ProviderSet({CapabilityKey(capability="model.client"): object()}),
     )
 
     assert provider.config.max_output_tokens_field == "auto"
@@ -1036,8 +1040,26 @@ async def test_responses_stream_errors_keep_codes_for_recovery(
 
 @pytest.mark.parametrize("kind", [TimeoutError, ConnectionError])
 def test_transport_errors_are_transient_without_http_status(kind):
-    from sagents.v2.model.wire import provider_error
+    from sagents.v2.model.plugins._shared.wire import provider_error
 
     error = provider_error(kind("connection interrupted"))
     assert error.info.code == "model.provider_transient"
     assert error.info.retryable
+
+
+@pytest.mark.asyncio
+async def test_builtin_factory_resolves_credentials_through_declared_provider():
+    from sagents.v2.runtime.credentials import MappingCredentialProvider
+
+    route = ModelRoute(provider="openai-responses", model="model-test", credential="primary-key")
+    context = ExtensionScopeContext(
+        scope=ExtensionScope.AGENT, scope_id="agent", tenant_id="tenant",
+        config={"route": route.model_dump(mode="json")},
+    )
+    providers = ProviderSet({
+        CapabilityKey(capability="credentials.provider"): MappingCredentialProvider({"primary-key": "dependency-secret"}),
+        CapabilityKey(capability="model.client"): object(),
+    })
+    provider = await builtin_extension_registry().get("sage.model.openai-responses").factory(context, providers)
+    assert provider.config.api_key.get_secret_value() == "dependency-secret"
+    assert context.config == {"route": route.model_dump(mode="json")}

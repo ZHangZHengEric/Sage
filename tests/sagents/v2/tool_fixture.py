@@ -3,7 +3,7 @@
 import inspect
 
 from sagents.v2.agent.self_configuration.service import _Tools
-from sagents.v2.skill.tool import SkillLoadTool
+from sagents.v2.tool.plugins.skill.operations import SkillLoadTool
 from sagents.v2.tool.decorators import decorated_tool_definition
 from sagents.v2.tool.plugins.agent_management import AgentManagementTools
 from sagents.v2.tool.plugins.delegation import _FibreToolMethods, _TeamToolMethods

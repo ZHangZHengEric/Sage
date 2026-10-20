@@ -74,7 +74,7 @@ python -m pytest tests/sagents/v2 -m 'not live' -q --durations=10
 python docs/scripts/check_docs.py
 ```
 
-[CI 工作流](https://github.com/ZHangZHengEric/Sage/blob/main/.github/workflows/ci-tests.yml)定义分版本环境和原生沙箱依赖。SQL 契约需要 `SAGE_V2_TEST_MYSQL_DSN` 或 `SAGE_V2_TEST_POSTGRES_DSN`，并应使用专用测试数据库。真实 Provider 测试保持显式启用。被跳过或未选中的路径不能报告为通过。
+[CI 工作流](https://github.com/ZHangZHengEric/Sage/blob/main/.github/workflows/ci-tests.yml)定义分版本环境和原生沙箱依赖。SQL 契约需要 `SAGE_V2_TEST_MYSQL_DSN`，并应使用专用测试数据库。真实 Provider 测试保持显式启用。被跳过或未选中的路径不能报告为通过。
 
 报告应说明行为覆盖或构造的变化、专项与全量结果、相关耗时及证据限制。区分测试函数、参数化收集节点、实际执行用例、跳过项和真实模型用例。静态盘点或专项审查不能当作完整语义审查或生产证明。
 
@@ -87,4 +87,4 @@ python docs/scripts/check_docs.py
 5. 明确审查移除的覆盖，保留独立的安全与故障边界。
 6. 运行受影响套件和文档检查，报告准确结果及未验证路径。
 
-后续 Agent 的作用域入口是 [tests/AGENTS.md](https://github.com/ZHangZHengEric/Sage/blob/main/tests/AGENTS.md)。该流程不授权无关生产修改、部署、真实 Provider 费用，也不允许为了审计额外扩展业务存储。
+该流程不授权无关生产修改、部署、真实 Provider 费用，也不允许为了审计额外扩展业务存储。

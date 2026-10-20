@@ -36,7 +36,6 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-postgres = ["asyncpg>=0.29.0"]
 mysql = ["aiomysql>=0.2.0", "SQLAlchemy[asyncio]>=2.0,<2.2"]
 redis = ["redis>=5.0.0"]
 cube = ["cubesandbox>=0.6.0,<1"]

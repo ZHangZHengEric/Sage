@@ -1,7 +1,6 @@
 """Multi-instance contracts at the Redis/MySQL external-client boundary.
 
-The single-writer suite protects namespace exclusivity. These cases protect
-the separate distributed plugin: fresh reads, shared admission, durable event
+These cases protect the unified Redis/MySQL plugin: fresh reads, shared admission, durable event
 delivery, and authoritative deletion when two coordinators share storage.
 """
 
@@ -32,7 +31,7 @@ from sagents.v2.runtime.plugins._shared.redis_coordination import (
     active_worker_fence,
 )
 from sagents.v2.runtime.session.contracts import EventDraft
-from sagents.v2.runtime.session.plugins.mysql.redis_distributed import DistributedRedisMysqlSessionStore
+from sagents.v2.runtime.session.plugins.mysql.redis import RedisMysqlSessionStore
 
 
 CONTEXT = RequestContext(
@@ -144,7 +143,7 @@ async def stores():
     for _ in range(2):
         redis = fakeredis.aioredis.FakeRedis(server=server, decode_responses=True)
         redis.info = AsyncMock(return_value={"maxmemory_policy": "noeviction", "aof_enabled": 1})
-        value = DistributedRedisMysqlSessionStore(
+        value = RedisMysqlSessionStore(
             "mysql://unused/test", redis_url="redis://unused/0", archive_interval_seconds=3600)
         value._redis = redis
         value._archive = archive

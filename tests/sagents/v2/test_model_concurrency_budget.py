@@ -2,7 +2,7 @@ import asyncio
 
 import pytest
 
-from sagents.v2.model.middleware.concurrency import ModelConcurrencyBudget
+from sagents.v2.model.plugins.concurrency_budget import ModelConcurrencyBudget
 
 
 @pytest.mark.asyncio

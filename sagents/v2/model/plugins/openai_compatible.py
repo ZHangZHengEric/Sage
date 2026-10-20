@@ -21,7 +21,7 @@ from sagents.v2.model.contracts import (
     ModelStreamEvent,
     ModelToolCall,
 )
-from sagents.v2.model.usage import canonical_token_usage
+from sagents.v2.model.plugins._shared.usage import canonical_token_usage
 from sagents.v2.contracts.common import StrictModel, new_id
 from sagents.v2.contracts.errors import (
     ErrorCategory,
@@ -38,7 +38,7 @@ from sagents.v2.contracts.items import (
     UsageSummary,
 )
 from sagents.v2.contracts.provider_state import make_provider_state, read_provider_state
-from sagents.v2.model.wire import (
+from sagents.v2.model.plugins._shared.wire import (
     parse_tool_arguments,
     provider_error,
     ProviderStreamFailure,
@@ -102,6 +102,8 @@ class OpenAICompatibleModelProvider:
 
     plugin_id = "sage.model.openai-chat-completions"
     plugin_version = "3.0.0"
+    name = "OpenAI Chat Completions"
+    description = "Streams chat messages and function calls through /chat/completions."
 
     def __init__(
         self,

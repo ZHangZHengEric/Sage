@@ -17,6 +17,16 @@ from app.v2.server.catalog.records import AgentRecord
 from app.v2.server.runtime.official import default_agent_tools
 
 
+def distributed_runtime_prefix(settings, component):
+    import hashlib
+    import json
+    from sagents.v2.runtime.session.plugins.mysql import parse_mysql_dsn
+    identity = parse_mysql_dsn(settings.mysql_url)
+    identity.pop("password")
+    digest = hashlib.sha256(json.dumps(identity, sort_keys=True).encode()).hexdigest()[:24]
+    return f"sage:{component}:{{{digest}}}:distributed"
+
+
 def server_v2_run_manifest(
     settings: ServerSettings | None = None,
     *,
@@ -140,10 +150,12 @@ def _required_guarantees(
     }
     if settings is not None and settings.mysql_url:
         store["durable_across_process_restart"] = True
-    if settings is not None and settings.session_store_plugin == "sage.session.redis-mysql-distributed":
+    if settings is not None and settings.redis_url and settings.session_store_plugin != "sage.session.mysql":
         store.update(multi_process_writes=True, cross_process_subscribe=True, atomic_worker_fence=True)
+    if settings is not None and settings.scheduler_plugin == "sage.scheduler.redis-distributed":
         return {"session.store": store, "execution.scheduler": {
-            "supports_distributed_claims": True, "supports_atomic_fenced_mutations": True}}
+            "supports_distributed_claims": True, "supports_atomic_fenced_mutations": True},
+            "execution.job-runtime": {"multi_process_writes": True, "supports_remote_cancel": True}}
     return {"session.store": store}
 
 
@@ -211,19 +223,17 @@ def _runtime_capabilities(
                 "dsn": settings.mysql_url,
                 "table_prefix": "",
                 **({"redis_url": settings.redis_url} if settings.redis_url and settings.session_store_plugin != "sage.session.mysql" else {}),
+                **({"key_prefix": settings.session_store_key_prefix} if settings.session_store_key_prefix else {}),
             },
         )
-        if settings.session_store_plugin == "sage.session.redis-mysql-distributed":
-            import hashlib
-            import json
-            from sagents.v2.runtime.session.plugins.mysql import parse_mysql_dsn
-            identity = parse_mysql_dsn(settings.mysql_url)
-            identity.pop("password")
-            digest = hashlib.sha256(json.dumps(identity, sort_keys=True).encode()).hexdigest()[:24]
+        if settings.scheduler_plugin == "sage.scheduler.redis-distributed":
+            capabilities["execution.job-runtime"] = CapabilitySelection(
+                plugin="sage.job.redis-distributed", config={"redis_url": settings.redis_url,
+                    "key_prefix": distributed_runtime_prefix(settings, "jobs")})
             capabilities["execution.scheduler"] = CapabilitySelection(
                 plugin="sage.scheduler.redis-distributed", config={
                     "redis_url": settings.redis_url,
-                    "key_prefix": f"sage:scheduler:{{{digest}}}:distributed",
+                    "key_prefix": distributed_runtime_prefix(settings, "scheduler"),
                     "queue_id": "server", "lease_seconds": 30,
                     "max_concurrent_runs": settings.max_concurrent_runs,
                     "max_concurrent_runs_per_tenant": settings.max_concurrent_runs_per_user,

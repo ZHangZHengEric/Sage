@@ -1,4 +1,4 @@
-"""Decorator-backed ``load_skill`` implementation owned by the Skill domain."""
+"""Decorator-backed Skill operations owned by the ``sage.tool.skill`` plugin."""
 
 from __future__ import annotations
 

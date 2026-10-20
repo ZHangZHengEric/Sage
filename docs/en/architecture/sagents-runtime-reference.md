@@ -382,14 +382,13 @@ This config adds a tool source. Agent tools still require explicit authorization
 ```yaml
 capabilities:
   session.store:
-    plugin: sage.session.postgres
+    plugin: sage.session.mysql
     config:
-      dsn: postgresql://user:password@localhost/sage
-      schema_name: sage_v2
+      dsn: mysql://user:password@localhost/sage
       table_prefix: sagent
 ```
 
-DSNs illustrate syntax; never commit passwords. Runtime text has no universal ${ENV} interpolation. Hosts should read secrets and build config or inject SessionStore. Postgres requires asyncpg and MySQL aiomysql. SQL storage does not make in-memory Jobs or schedulers durable/distributed.
+DSNs illustrate syntax; never commit passwords. Runtime text has no universal ${ENV} interpolation. Hosts should read secrets and build config or inject SessionStore. MySQL requires aiomysql. SQL storage does not make in-memory Jobs or schedulers durable/distributed.
 
 <a id="自定义插件校验和生命周期"></a>
 
@@ -421,6 +420,8 @@ See independent [plugins.py](../../../examples/v2/host/plugins.py). Registration
 
 build fixes registry/configuration and Agent loading performs composition/validation. Unknown options, missing dependencies, unavailable plugins, incompatible scope/API and unsupported guarantees must fail there. Accepted parameters alone do not prove activation. Plugin declarations do not install dependencies, and YAML does not perform arbitrary Python imports.
 
+`config` accepts finite JSON values at configuration, planning and plugin-context boundaries. Models, stores, clients and callbacks are dependencies rather than parameters. Built-ins and custom plugins declare required capabilities in `ExtensionDescriptor.dependencies` and retrieve instances in factories with methods such as `dependencies.require_unique("model.provider")`; named dependencies use `require(capability, name)`. The same graph checks versions, startup order, lifetimes and cleanup ownership. Missing or invalid-lifetime dependencies fail composition; object configuration has no fallback.
+
 Register host-created objects through factories with `ownership="borrowed"`; the host closes these objects. The default `ownership="owned"` transfers resource cleanup to the plugin lifecycle. App-owned plugins follow scoped startup, rollback and shutdown. Close App with try/finally, reuse it across requests and do not manually close App-owned providers.
 
 <a id="排查配置与恢复问题"></a>
@@ -438,9 +439,9 @@ Register host-created objects through factories with `ownership="borrowed"`; the
 
 ## Complete built-in plugin parameters
 
-The tables cover every registered plugin, including parameterless ones. Schema-required fields are construction requirements, **not necessarily user YAML**: host objects are injected. Defaults come from registered schema and verified factories/schedulers. No fixed value means context-dependent, rather than null or disabled.
+The tables cover every registered plugin, including parameterless ones. Schema-required fields describe JSON parameters; runtime objects are declared capability dependencies. Defaults come from registered schema and verified factories/schedulers. No fixed value means context-dependent, rather than null or disabled.
 
-Ranges are validation constraints. Bytes and seconds are literal units. Tokens mean API output budgets or measured provider usage thresholds, without local input estimates. Strings cannot replace Python dependency objects. Registration does not mean any capability entry creates a plugin: tool/model/Flow/interface composition has dedicated paths. Check offered capabilities and consumption points.
+Ranges are validation constraints. Bytes and seconds are literal units. Tokens mean API output budgets or measured provider usage thresholds, without local input estimates. Dependency objects are resolved through providers rather than configuration fields. Registration does not mean any capability entry creates a plugin: tool/model/Flow/interface composition has dedicated paths. Check offered capabilities and consumption points.
 
 <a id="插件索引"></a>
 
@@ -488,10 +489,11 @@ Version: `2.0.0`; scope: agent, run; ownership: `owned`。
 
 Provides: `agent.continuation-policy:default` (API `2`)。
 
+Dependencies: `model.provider`.
+
 | Parameter | Type | Required | Schema Default | Constraints |
 | --- | --- | --- | --- | --- |
 | `repeat_threshold` | `integer` | No | `3` | `{"minimum":1}` |
-| `model` | `object` | Yes | Not declared | `{}` |
 | `model_binding` | `string` | No | `"fast"` | `{"minLength":1}` |
 | `timeout_seconds` | `number` | No | `60.0` | `{"exclusiveMinimum":0}` |
 
@@ -503,10 +505,11 @@ Version: `2.0.0`; scope: agent, run; ownership: `owned`。
 
 Provides: `agent.continuation-policy:default` (API `2`)。
 
+Dependencies: `model.provider`.
+
 | Parameter | Type | Required | Schema Default | Constraints |
 | --- | --- | --- | --- | --- |
 | `repeat_threshold` | `integer` | No | `3` | `{"minimum":1}` |
-| `model` | `object` | Yes | Not declared | `{}` |
 | `model_binding` | `string` | No | `"fast"` | `{"minLength":1}` |
 | `timeout_seconds` | `number` | No | `60.0` | `{"exclusiveMinimum":0}` |
 
@@ -552,9 +555,9 @@ Version: `2.0.0`; scope: process; ownership: `owned`。
 
 Provides: `artifact.store:default` (API `2`)。
 
-| Parameter | Type | Required | Schema Default | Constraints |
-| --- | --- | --- | --- | --- |
-| `session_store` | `object` | Yes | Not declared | `{}` |
+Dependencies: `session.store`.
+
+No fixed configuration fields; the public schema determines whether extra parameters are allowed.
 
 ### sage.context.reducer.persistent-summary
 
@@ -564,15 +567,14 @@ Version: `2.0.0`; scope: agent, run; ownership: `owned`。
 
 Provides: `context.reducer:default` (API `2`)。
 
+Dependencies: `context.summary-store`, `context.summarizer`, `context.unit-compactor`.
+
 | Parameter | Type | Required | Schema Default | Constraints |
 | --- | --- | --- | --- | --- |
-| `store` | `object` | Yes | Not declared | `{}` |
-| `summarizer` | `object` | No | Not declared | `{}` |
 | `summary_target_tokens` | `integer` | No | `1024` | `{"minimum":1}` |
 | `protected_recent_units` | `integer` | No | `4` | `{"minimum":1}` |
 | `max_summary_calls` | `integer` | No | `64` | `{"minimum":1}` |
 | `max_summary_source_tokens` | `integer` | No | `24000` | `{"minimum":1}` |
-| `unit_compactor` | `object` | No | Not declared | `{}` |
 
 `max_summary_source_tokens` 作为已有配置字段被 schema 接受；当前内置 reducer 工厂不以它控制输入长度。需要配置摘要源预算时，使用所选 summarizer 能力的正式Parameter。
 
@@ -604,9 +606,10 @@ Version: `2.0.0`; scope: agent, run; ownership: `owned`。
 
 Provides: `context.summarizer:default` (API `2`)。
 
+Dependencies: `model.provider`.
+
 | Parameter | Type | Required | Schema Default | Constraints |
 | --- | --- | --- | --- | --- |
-| `model` | `object` | Yes | Not declared | `{}` |
 | `model_binding` | `string` | No | `"primary"` | `{"const":"primary"}` |
 | `max_source_tokens` | `integer` | No | `24000` | `{"minimum":1}` |
 | `timeout_seconds` | `number` | No | `300.0` | `{"exclusiveMinimum":0}` |
@@ -630,9 +633,9 @@ Version: `2.0.0`; scope: agent, process; ownership: `owned`。
 
 Provides: `context.summary-store:default` (API `2`)。
 
-| Parameter | Type | Required | Schema Default | Constraints |
-| --- | --- | --- | --- | --- |
-| `derived_state` | `object` | Yes | Not declared | `{}` |
+Dependencies: `derived-state.store`.
+
+No fixed configuration fields; the public schema determines whether extra parameters are allowed.
 
 ### sage.context.unit-compactor.reference
 
@@ -833,11 +836,11 @@ Version: `2.0.0`; scope: run; ownership: `owned`。
 
 Provides: `flow.node:agent` (API `2`)。
 
+Dependencies: `runtime.kernel`, `agent.child-executor`.
+
 | Parameter | Type | Required | Schema Default | Constraints |
 | --- | --- | --- | --- | --- |
-| `runtime` | `object` | Yes | Not declared | `{}` |
 | `descriptor` | `object` | Yes | Not declared | `{}` |
-| `child_executor` | `object` | Yes | Not declared | `{}` |
 | `workspace_policy` | `string` | No | Not declared | `{"enum":["private_child","shared_parent","read_only_parent"]}` |
 
 ### sage.job.ephemeral
@@ -942,9 +945,10 @@ Version: `2.0.0`; scope: agent, run; ownership: `owned`。
 
 Provides: `memory.recall-query:default` (API `2`)。
 
+Dependencies: `model.provider`.
+
 | Parameter | Type | Required | Schema Default | Constraints |
 | --- | --- | --- | --- | --- |
-| `model` | `object` | Yes | Not declared | `{}` |
 | `language` | `string` | No | Not declared | `{}` |
 | `timeout_seconds` | `number` | No | `60.0` | `{"exclusiveMinimum":0}` |
 
@@ -956,11 +960,11 @@ Version: `3.0.0`; scope: agent, run; ownership: `owned`。
 
 Provides: `model.provider:anthropic-messages` (API `2`)。
 
+Dependencies: `credentials.provider`, `model.client:default` (optional).
+
 | Parameter | Type | Required | Schema Default | Constraints |
 | --- | --- | --- | --- | --- |
 | `route` | `object` | Yes | Not declared | `{}` |
-| `credential` | `object` | No | Not declared | `{}` |
-| `client` | `object` | No | Not declared | `{}` |
 | `provider_instance_id` | `string` | No | Not declared | `{}` |
 
 ### sage.model.concurrency-budget
@@ -985,11 +989,11 @@ Version: `1.0.0`; scope: agent, run; ownership: `owned`。
 
 Provides: `model.provider:gemini-generate-content` (API `2`)。
 
+Dependencies: `credentials.provider`, `model.client:default` (optional).
+
 | Parameter | Type | Required | Schema Default | Constraints |
 | --- | --- | --- | --- | --- |
 | `route` | `object` | Yes | Not declared | `{}` |
-| `credential` | `object` | No | Not declared | `{}` |
-| `client` | `object` | No | Not declared | `{}` |
 | `provider_instance_id` | `string` | No | Not declared | `{}` |
 
 ### sage.model.openai-chat-completions
@@ -1000,11 +1004,11 @@ Version: `3.0.0`; scope: agent, run; ownership: `owned`。
 
 Provides: `model.provider:openai-chat-completions` (API `2`)。
 
+Dependencies: `credentials.provider`, `model.client:default` (optional).
+
 | Parameter | Type | Required | Schema Default | Constraints |
 | --- | --- | --- | --- | --- |
 | `route` | `object` | Yes | Not declared | `{}` |
-| `credential` | `object` | No | Not declared | `{}` |
-| `client` | `object` | No | Not declared | `{}` |
 | `provider_instance_id` | `string` | No | Not declared | `{}` |
 
 ### sage.model.openai-responses
@@ -1015,11 +1019,11 @@ Version: `3.0.0`; scope: agent, run; ownership: `owned`。
 
 Provides: `model.provider:openai-responses` (API `2`)。
 
+Dependencies: `credentials.provider`, `model.client:default` (optional).
+
 | Parameter | Type | Required | Schema Default | Constraints |
 | --- | --- | --- | --- | --- |
 | `route` | `object` | Yes | Not declared | `{}` |
-| `credential` | `object` | No | Not declared | `{}` |
-| `client` | `object` | No | Not declared | `{}` |
 | `provider_instance_id` | `string` | No | Not declared | `{}` |
 
 ### sage.observability.filesystem
@@ -1053,9 +1057,9 @@ Version: `2.0.0`; scope: process; ownership: `owned`。
 
 Provides: `package.registry:default` (API `2`)。
 
-| Parameter | Type | Required | Schema Default | Constraints |
-| --- | --- | --- | --- | --- |
-| `resolver` | `object` | No | Not declared | `{}` |
+Dependencies: `package.resolver`.
+
+No fixed configuration fields; the public schema determines whether extra parameters are allowed.
 
 ### sage.protocol.a2a
 
@@ -1134,13 +1138,13 @@ Version: `3.0.0`; scope: process; ownership: `owned`。
 
 Provides: `execution.sandbox:default` (API `3`)。
 
+Dependencies: `execution.sandbox.process-handlers:default` (optional), `execution.sandbox.network-handlers:default` (optional).
+
 | Parameter | Type | Required | Schema Default | Constraints |
 | --- | --- | --- | --- | --- |
 | `verification_key` | `object` | Yes | Not declared | `{}` |
 | `terminal_ttl_seconds` | `integer` | No | `86400` | `{"minimum":1}` |
 | `max_retained_terminal_items` | `integer` | No | `1024` | `{"minimum":0}` |
-| `process_handlers` | `object` | No | Not declared | `{}` |
-| `network_handlers` | `object` | No | Not declared | `{}` |
 
 ### sage.sandbox.local-workspace
 
@@ -1261,19 +1265,27 @@ Provides: `session.store:default` (API `2`)。
 | `dsn` | `string` | Yes | Not declared | `{"minLength":1}` |
 | `table_prefix` | `string` | No | Not declared | `{}` |
 
-### sage.session.postgres
+### sage.session.redis-mysql
 
-Durable per-Session PostgreSQL store with appended Run events. Single-process writers; no global Session index.
+Redis execution state shared by Sage instances, with canonical history and attachment bytes archived to MySQL. Supports multi-process writes, cross-process subscriptions and atomic worker fencing. Redis requires AOF and noeviction. Scheduling is selected independently.
 
-Version: `2.2.0`; scope: process; ownership: `owned`。
+Version: `3.0.0`; scope: process; ownership: `owned`。
 
 Provides: `session.store:default` (API `2`)。
 
 | Parameter | Type | Required | Schema Default | Constraints |
 | --- | --- | --- | --- | --- |
-| `dsn` | `string` | Yes | Not declared | `{"minLength":1}` |
-| `schema_name` | `string` | No | Not declared | `{"minLength":1}` |
-| `table_prefix` | `string` | No | Not declared | `{"minLength":1}` |
+| `dsn` | `string` | Yes | Not declared | MySQL DSN |
+| `redis_url` | `string` | Yes | Not declared | Redis URL |
+| `table_prefix` | `string` | No | Not declared | MySQL table namespace |
+| `key_prefix` | `string` | No | Derived from MySQL identity with `:distributed` suffix | Redis namespace |
+| `archive_interval_seconds` | `number` | No | `1` | Positive |
+| `retention_seconds` | `integer` | No | `3600` | At least 1 |
+| `coordination_ttl_seconds` | `number` | No | `30` | Positive |
+| `coordination_wait_seconds` | `number` | No | `10` | Positive |
+| `event_poll_seconds` | `number` | No | `0.1` | Positive |
+| `max_preview_events` | `integer` | No | `2048` | At least 1 |
+| `preview_retention_seconds` | `integer` | No | `300` | At least 1 |
 
 ### sage.skill.filesystem
 
@@ -1378,10 +1390,11 @@ Version: `2.0.0`; scope: agent, process, run; ownership: `owned`。
 
 Provides: `tool.catalog:ephemeral` (API `2`)、`tool.executor:ephemeral` (API `2`)。
 
+Dependencies: `tool.handlers:default` (optional).
+
 | Parameter | Type | Required | Schema Default | Constraints |
 | --- | --- | --- | --- | --- |
 | `tools` | `object` | No | Not declared | `{}` |
-| `handlers` | `object` | No | Not declared | `{}` |
 
 ### sage.tool.mcp
 
@@ -1390,6 +1403,8 @@ Bridges configured MCP servers into the Sage Tool catalog and executor.
 Version: `2.0.0`; scope: agent, process, run; ownership: `owned`。
 
 Provides: `tool.catalog:mcp` (API `2`)、`tool.executor:mcp` (API `2`)。
+
+Dependencies: `mcp.session-factory:default` (optional).
 
 | Parameter | Type | Required | Schema Default | Constraints |
 | --- | --- | --- | --- | --- |
@@ -1408,7 +1423,6 @@ Provides: `tool.catalog:mcp` (API `2`)、`tool.executor:mcp` (API `2`)。
 | `servers[].max_pages` | `integer` | No | `64` | `{"maximum":1024,"exclusiveMinimum":0}` |
 | `servers[].max_schema_bytes` | `integer` | No | `262144` | `{"maximum":16777216,"exclusiveMinimum":0}` |
 | `servers[].max_result_bytes` | `integer` | No | `4194304` | `{"maximum":67108864,"exclusiveMinimum":0}` |
-| `session_factory` | `object` | No | Not declared | `{}` |
 
 ### sage.tool.multi-agent
 
@@ -1418,10 +1432,9 @@ Version: `2.0.0`; scope: agent, run; ownership: `owned`。
 
 Provides: `tool.catalog:multi-agent` (API `2`)、`tool.executor:multi-agent` (API `2`)。
 
-| Parameter | Type | Required | Schema Default | Constraints |
-| --- | --- | --- | --- | --- |
-| `coordinator` | `object` | Yes | Not declared | `{}` |
-| `runtime` | `object` | Yes | Not declared | `{}` |
+Dependencies: `agent.coordinator`, `runtime.kernel`.
+
+No fixed configuration fields; the public schema determines whether extra parameters are allowed.
 
 ### sage.tool.official
 
@@ -1443,9 +1456,10 @@ Version: `2.0.0`; scope: agent, run; ownership: `owned`。
 
 Provides: `tool.catalog:skill` (API `2`)、`tool.executor:skill` (API `2`)。
 
+Dependencies: `skill.loader`.
+
 | Parameter | Type | Required | Schema Default | Constraints |
 | --- | --- | --- | --- | --- |
-| `loader` | `object` | Yes | Not declared | `{}` |
 | `language` | `string` | No | Not declared | `{}` |
 
 ### sage.trace.langfuse

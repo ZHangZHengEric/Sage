@@ -73,21 +73,17 @@ def test_metadata_identity_preserves_root_precedence_and_child_admission(metadat
     assert [(value.agent_id, value.admitted_agent_id) for value in payload] == [(expected, "compiled.package")]
 
 
-@pytest.fixture(params=["memory", "filesystem", "mysql", "postgres", "redis"])
+@pytest.fixture(params=["memory", "filesystem", "mysql", "redis"])
 async def identity_store(request, tmp_path):
     backend = request.param
     prefix = "identity_" + uuid4().hex[:10]
     mysql_dsn = os.environ.get("SAGE_V2_TEST_MYSQL_DSN")
-    pg_dsn = os.environ.get("SAGE_V2_TEST_POSTGRES_DSN")
     redis_url = os.environ.get("SAGE_V2_TEST_REDIS_URL")
     if backend == "mysql" and not mysql_dsn:
         pytest.skip("set SAGE_V2_TEST_MYSQL_DSN for real MySQL metadata identity")
-    if backend == "postgres" and not pg_dsn:
-        pytest.skip("set SAGE_V2_TEST_POSTGRES_DSN for real PostgreSQL metadata identity")
     if backend == "redis" and not (mysql_dsn and redis_url):
         pytest.skip("set MySQL and Redis test URLs for unarchived cold Redis metadata identity")
     from sagents.v2.runtime.session.plugins.mysql.state import _MysqlSessionState, _SCHEMA_TABLES
-    from sagents.v2.runtime.session.plugins.postgres import PostgresSessionStore
     from sagents.v2.runtime.session.plugins.mysql.redis import RedisMysqlSessionStore
 
     if backend == "memory":
@@ -96,8 +92,6 @@ async def identity_store(request, tmp_path):
         store = FilesystemSessionStore(tmp_path / "state")
     elif backend == "mysql":
         store = _MysqlSessionState(mysql_dsn, table_prefix=prefix)
-    elif backend == "postgres":
-        store = PostgresSessionStore(pg_dsn, schema=prefix)
     else:
         store = RedisMysqlSessionStore(mysql_dsn, table_prefix=prefix, redis_url=redis_url,
             key_prefix=prefix, archive_interval_seconds=3600)
@@ -109,9 +103,6 @@ async def identity_store(request, tmp_path):
     try:
         yield backend, store, tmp_path / "state"
     finally:
-        if backend == "postgres" and store._pool is not None:
-            async with store._pool.acquire() as connection:
-                await connection.execute(f"DROP SCHEMA {store.schema_name} CASCADE")
         if backend != "memory":
             await store.close()
         if backend in {"mysql", "redis"}:
@@ -146,7 +137,7 @@ async def test_legacy_composition_agent_remains_visible_in_cold_metadata_pages(i
         reader._ensure_session_loaded = AsyncMock(side_effect=AssertionError("aggregate installed"))
     else:
         reader = store
-        if backend in {"mysql", "postgres", "redis"}:
+        if backend in {"mysql", "redis"}:
             store._evict_session_locked("legacy")
             store._fetch_session = AsyncMock(side_effect=AssertionError("full Session history fetched"))
         if backend == "redis":

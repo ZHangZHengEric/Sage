@@ -1,5 +1,23 @@
-"""Official JobRuntime backends."""
+"""Job runtime contracts and lazily exported plugin implementations."""
 
-from sagents.v2.runtime.execution.jobs.plugins.ephemeral import InMemoryJobRuntime
+from sagents.v2._lazy import exported_names, resolve_export
 
-__all__ = ["InMemoryJobRuntime"]
+_EXPORTS = {
+    "InMemoryJobRuntime": (
+        "sagents.v2.runtime.execution.jobs.plugins.ephemeral",
+        "InMemoryJobRuntime",
+    ),
+    "RedisDistributedJobRuntime": (
+        "sagents.v2.runtime.execution.jobs.plugins.redis_distributed",
+        "RedisDistributedJobRuntime",
+    ),
+}
+__all__ = list(_EXPORTS)
+
+
+def __getattr__(name):
+    return resolve_export(name, _EXPORTS, globals())
+
+
+def __dir__():
+    return exported_names(_EXPORTS, globals())

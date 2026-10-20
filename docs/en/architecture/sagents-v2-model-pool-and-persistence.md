@@ -29,7 +29,7 @@ Size capacity for active users and model configurations. More execution slots wi
 
 ## Incremental SQL event serialization
 
-For MySQL / PostgreSQL commits, the coordinator serializes only events after the persisted prefix before passing them to the existing transaction. Full snapshot exports still include complete history by default.
+For MySQL commits, the coordinator serializes only events after the persisted prefix before passing them to the existing transaction. Full snapshot exports still include complete history by default.
 
 If in-memory history is shorter than the persisted prefix, the coordinator exports the complete current history and the SQL transaction replaces old records. Run deletion cleanup and post-commit count updates keep their ordering. The serial writer connection still executes SQL transactions sequentially to preserve locking and commit consistency.
 
@@ -71,12 +71,10 @@ after the retention interval and reload from MySQL. Failed archives retain their
 data and retry intent in Redis. Cold reads and initial idempotency lookups still
 require MySQL availability. On restart, resident Sessions rebuild dispatchable Runs
 and pending Sessions are archived. Shutdown waits up to five seconds; unfinished
-archival remains recoverable on the next startup. One writer owns each namespace
-with a 30-second lease renewed independently every five seconds. Startup retries once
-per second for up to 35 seconds while a previous writer's lease expires or is released.
-A live writer's lease is never taken over; the new process fails startup on timeout.
-Runtime writes still fail immediately after lease loss. Cross-process live subscriptions
-and distributed execution are not introduced.
+archival remains recoverable on the next startup. Multiple Sage instances share
+one namespace using renewable per-Session guards. Cross-process subscriptions
+replay canonical events and shared preview buffers. The Scheduler is selected
+independently; shared storage alone does not enable fleet execution.
 
 Deletion atomically writes Redis tombstones and removes lookup indexes before
 background SQL deletion. Unique commit tokens resolve ambiguous transaction responses;
@@ -105,10 +103,10 @@ Redis/MySQL networking, model calls and end-to-end latency.
 
 ## Distributed SessionStore and Scheduler plugins
 
-`sage.session.redis-mysql-distributed` and `sage.scheduler.redis-distributed` are
-separate plugins from the existing single-process implementations. Server opts in
-with `SAGE_SERVER_SESSION_STORE_PLUGIN=sage.session.redis-mysql-distributed`, plus
-its MySQL and Redis URLs. It selects the matching scheduler with a 30-second Run
+`sage.session.redis-mysql` provides shared Session state. With MySQL and Redis URLs
+configured, Server explicitly opts in with
+`SAGE_SERVER_SCHEDULER_PLUGIN=sage.scheduler.redis-distributed`.
+It selects the independently named `sage.job.redis-distributed` and the scheduler with a 30-second Run
 lease, shared global/user quotas, and separate executable queues for managed Apps.
 Every node must use identical database, Redis and quota configuration; managed
 storage roots must have the same identity on every node. Default selection is unchanged.
@@ -130,14 +128,33 @@ rejects an expired/replaced guard. Dispatchers reconcile remote completion and
 periodically repair accepted Runs missing from the queue. This implementation
 prioritizes correctness for bounded queues; a single coordination snapshot is not
 a claim of unlimited scheduling throughput. Distributed storage and scheduling
-must be selected together, against the same Redis URL; incompatible pairs fail startup.
+must use the same Redis URL. Distributed scheduling requires a shared store with
+commit-time worker fencing; incompatible pairs fail startup.
 
-Drain the old writer and pending archives before switching plugins. The distributed
-plugin has a separate default Redis prefix and reuses the existing MySQL tables.
-Never run the old writer concurrently against those tables. These plugins coordinate
-Run/session state; the existing process-local JobRuntime, local memory databases,
-workspace files and sandbox processes still need an appropriate shared-resource or
-owner-routing deployment strategy. A failed process does not migrate its live OS
+The unified plugin retains the former distributed implementation's default Redis
+prefix (`sage:session:{<identity hash>}:distributed`), journal format and MySQL
+tables. Stop all old writers before switching. Replace the former distributed
+plugin ID with `sage.session.redis-mysql` and explicitly select the distributed
+Scheduler to retain fleet execution. A deployment upgrading the old single-writer
+plugin must set `SAGE_SERVER_SESSION_STORE_KEY_PREFIX` (SDK: `key_prefix`) to its
+exact previous namespace on every instance, or drain in-flight Runs and pending
+archives before adopting the new default prefix. Preserve MySQL table prefixes,
+including managed App prefixes. Existing managed namespaces append
+`:managed_<app hash>` to an explicit Server prefix, so migrate each namespace
+separately or drain its pending state first. Do not overlap old and new writers;
+no automatic namespace copying, alias plugin or production migration is performed. The new Job plugin shares
+Job state, binary output cursors, request idempotency and global quotas through Redis CAS.
+Cancellation runs on the owning node and settles only after process cleanup. The default
+Job worker lease is 30 seconds; expiration produces `failed/job.worker_lost`, preserves
+existing output and never replays the command. Output and completion publication both
+check the owner token and live lease. Terminal TTL, reconnect windows and capacity limits
+bound retention. Node shutdown stops only that node's Jobs. Official Shell tools enforce
+Run ownership before remote reads or cancellation.
+
+Cross-node workspaces are deferred; there is no `shared_workspace_root` setting.
+Local memory databases, workspace files and sandbox processes still need an appropriate
+shared-resource or owner-routing deployment strategy. This is not yet a complete cross-node
+deployment. A failed process does not migrate its live OS
 processes, and lease recovery does not make external tool side effects exactly-once.
 
 ## Validation
@@ -151,7 +168,7 @@ python scripts/v2/benchmark_session_commit.py --commits 200 --input-bytes 60000
 python -m pytest tests/sagents/v2/test_redis_mysql_session_store.py tests/sagents/v2/test_mysql_session_archive.py
 ```
 
-Pool tests cover concurrent initialization, user and credential isolation, capacity, failure, cancellation, slow eviction, and shutdown failures. SQL projection tests cover incremental append, no new events, history truncation, Run deletion, and full export. Mock database connections do not constitute real MySQL / PostgreSQL acceptance.
+Pool tests cover concurrent initialization, user and credential isolation, capacity, failure, cancellation, slow eviction, and shutdown failures. SQL projection tests cover incremental append, no new events, history truncation, Run deletion, and full export. Mock database connections do not constitute real MySQL acceptance.
 
 The benchmark measures coordinator serialization of synthetic long event lists, excluding SQL, network, model calls, and task completion rates. It cannot be converted into production QPS. Long-running load against real endpoints requires separate validation.
 

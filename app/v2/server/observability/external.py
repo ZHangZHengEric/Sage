@@ -11,7 +11,7 @@ from threading import RLock
 import httpx
 from sagents.v2.contracts.common import utc_now
 from sagents.v2.runtime.observability.contracts import TraceEvent, TraceStatus
-from sagents.v2.runtime.observability.evidence import ExternalEvidenceSink
+from sagents.v2.runtime.observability.plugins.external import ExternalEvidenceSink
 from sagents.v2.runtime.observability.query import QueryCache
 from sagents.v2.runtime.observability.plugins.diagnostic_noop import NoopDiagnosticSink
 from .performance import EVENTS, build_run, timing_report, timestamp

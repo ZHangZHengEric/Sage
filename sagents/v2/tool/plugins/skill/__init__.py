@@ -5,10 +5,11 @@ from __future__ import annotations
 from sagents.v2.runtime.extensions import (
     CapabilityOffer,
     ExtensionDescriptor,
+    ExtensionDependency,
     ExtensionScope,
 )
 from sagents.v2.skill.provider import SkillLoader
-from sagents.v2.skill.tool import SkillEditTool, SkillLoadTool
+from sagents.v2.tool.plugins.skill.operations import SkillEditTool, SkillLoadTool
 from sagents.v2.tool.decorated import DecoratedToolProvider
 
 
@@ -28,10 +29,10 @@ class SkillToolPlugin:
             CapabilityOffer(capability="tool.executor", api_version="2", name="skill"),
         ),
         supported_scopes=frozenset({ExtensionScope.AGENT, ExtensionScope.RUN}),
+        dependencies=(ExtensionDependency(capability="skill.loader"),),
         config_schema={
             "type": "object",
-            "properties": {"loader": {}, "language": {"type": "string"}, "allow_editing": {"type": "boolean"}},
-            "required": ["loader"],
+            "properties": {"language": {"type": "string"}, "allow_editing": {"type": "boolean"}},
             "additionalProperties": False,
         },
         capabilities={"decorated_tools": True},

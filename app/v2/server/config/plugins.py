@@ -14,7 +14,7 @@ from pathlib import Path
 
 from jsonschema import ValidationError, validate
 
-from app.v2.server.catalog.plugins import AGENT_DEFAULTS, INJECTED, configuration_schema
+from app.v2.server.catalog.plugins import AGENT_DEFAULTS, configuration_schema
 from sagents.v2.package.manifest.runtime import CapabilitySelection
 from sagents.v2.contracts.errors import SageV2Error
 from sagents.v2.runtime.extensions.official import builtin_extension_registry
@@ -61,8 +61,6 @@ def validate_selections(selections: dict, *, registry=None) -> dict:
             raise ValueError("Server 插件只支持默认绑定")
         if selection.scope is not None:
             raise ValueError("Server 插件作用域由运行时管理")
-        if INJECTED.intersection(selection.config):
-            raise ValueError("不能覆盖 Server 注入的依赖")
         try:
             validate(selection.config, configuration_schema(descriptor))
         except ValidationError as exc:

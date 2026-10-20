@@ -352,7 +352,7 @@ class AgentManagementService:
         await collect_sources(bundle)
         scope = None
         if sources:
-            from sagents.v2.agent.management.source_plugins import SourcePluginScope
+            from sagents.v2.agent.management.plugins.source_modules import SourcePluginScope
             scope = SourcePluginScope()
         try:
             if scope is not None:
@@ -371,14 +371,15 @@ class AgentManagementService:
                 from sagents.v2.package.manifest.runtime import CapabilitySelection
                 capability = "package.source-modules"
                 builder.register(ExtensionRegistration(
-                    descriptor=ExtensionDescriptor(plugin_id="sage.package.source-modules", name="Package source modules", version="2",
+                    descriptor=ExtensionDescriptor(plugin_id=SourcePluginScope.plugin_id, name=SourcePluginScope.name,
+                        description=SourcePluginScope.description, version="2",
                         provides=(CapabilityOffer(capability=capability, api_version="2"),),
                         supported_scopes=frozenset({ExtensionScope.PROCESS}),
                         config_schema={"type": "object", "additionalProperties": False}),
                     factory=lambda context, deps: scope,
                 ))
                 runtime = runtime.model_copy(update={"capabilities": {
-                    **runtime.capabilities, capability: CapabilitySelection(plugin="sage.package.source-modules"),
+                    **runtime.capabilities, capability: CapabilitySelection(plugin=SourcePluginScope.plugin_id),
                 }})
             app = await builder.build(runtime=runtime, models=configuration.models, tenant_id=context.actor.tenant_id)
             try:

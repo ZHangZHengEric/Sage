@@ -33,7 +33,7 @@ from sagents.v2.model.recovery import (
     model_call_budget,
     consume_model_call,
 )
-from sagents.v2.context.auxiliary import stream_auxiliary_model
+from sagents.v2.context.plugins.summarizer_model.auxiliary import stream_auxiliary_model
 
 
 def message(text, role="assistant", **kwargs):

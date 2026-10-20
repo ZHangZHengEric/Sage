@@ -6,7 +6,7 @@ import inspect
 from typing import Literal
 
 from sagents.v2.agent.multi_agent.contracts import AgentMode
-from sagents.v2.skill.tool import SkillLoadTool
+from sagents.v2.tool.plugins.skill.operations import SkillLoadTool
 from sagents.v2.tool.contracts import ToolDefinition
 from sagents.v2.tool.decorators import decorated_tool_definition
 from sagents.v2.tool.localization import localize_tool_definition
