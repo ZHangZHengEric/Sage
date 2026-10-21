@@ -1,4 +1,10 @@
 """Direct child identities and first/latest Run metadata, without execution state."""
+
+from typing import TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    from sagents.v2.runtime.session.state import SessionStoreCoordinator
+
 from dataclasses import dataclass
 
 from sagents.v2.runtime.session.run_metadata import RunMetadata
@@ -26,15 +32,17 @@ def child_heads(rows):
 
 class ManagedSessionHeadQueries:
     async def _direct_child_ids_for_run(self, run_id):
-        async with self._lock:
-            parent = self._runs.get(run_id)
+        store = cast("SessionStoreCoordinator", self)
+        async with store._lock:
+            parent = store._runs.get(run_id)
             if parent is None:
-                raise self._not_found('run.not_found', run_id)
-            return [row.session_id for row in self._sessions.values() if row.parent_session_id == parent.session_id]
+                raise store._not_found('run.not_found', run_id)
+            return [row.session_id for row in store._sessions.values() if row.parent_session_id == parent.session_id]
 
     async def managed_session_heads(self, run_id):
-        ids = await self._direct_child_ids_for_run(run_id)
+        store = cast("SessionStoreCoordinator", self)
+        ids = await store._direct_child_ids_for_run(run_id)
         rows = []
         for offset in range(0, len(ids), 128):
-            rows.extend(await self._run_metadata_rows(ids[offset:offset + 128]))
+            rows.extend(await store._run_metadata_rows(ids[offset:offset + 128]))
         return child_heads(rows)

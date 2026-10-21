@@ -1,5 +1,14 @@
 """Sandbox contracts and lazily loaded implementations."""
 
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from sagents.v2.runtime.execution.sandbox.plugins.ephemeral import InMemorySandboxProvider as InMemorySandboxProvider
+    from sagents.v2.runtime.execution.sandbox.plugins.local import LocalWorkspaceSandboxProvider as LocalWorkspaceSandboxProvider
+    from sagents.v2.runtime.execution.sandbox.plugins.cube import CubeVolumeSandboxProvider as CubeVolumeSandboxProvider
+    from sagents.v2.runtime.execution.sandbox.grants import SandboxGrantIssuer as SandboxGrantIssuer
+
+
 from sagents.v2._lazy import exported_names, resolve_export
 
 from sagents.v2.runtime.execution.sandbox.contracts import (

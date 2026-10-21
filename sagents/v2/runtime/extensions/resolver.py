@@ -101,7 +101,7 @@ class ExtensionResolver:
                 else None
             )
             selected_id = selections.get(selection_key) if selection_key else None
-            if selected_id is not None:
+            if selected_id is not None and selection_key is not None:
                 used_selection_keys.add(selection_key)
                 candidates = [
                     value for value in candidates if value[0].plugin_id == selected_id

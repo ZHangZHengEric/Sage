@@ -9,11 +9,20 @@ import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from collections.abc import Awaitable, Callable
-from typing import Any
+from typing import Any, TYPE_CHECKING
+from contextlib import AbstractAsyncContextManager
+from types import TracebackType
+
+from sagents.v2.runtime.contracts import RuntimePort
+from sagents.v2.runtime.session.contracts import SessionStore
+
+if TYPE_CHECKING:
+    from sagents.v2.sagent import RecoveryAgent
 
 from sagents.v2.contracts.commands import CancelRun
 from sagents.v2.contracts.principals import RequestContext
 from sagents.v2.contracts.run_state import (
+    RunHandle,
     RunSnapshot,
     RunState,
     TERMINAL_RUN_STATES,
@@ -45,7 +54,7 @@ _LOGGER = get_logger(__name__)
 
 @dataclass
 class _DispatchRequest:
-    agent: object
+    agent: RecoveryAgent
     context: RequestContext
     resume: bool
     result: asyncio.Future[RunSnapshot]
@@ -60,7 +69,7 @@ class _CleanupRequest:
     claimed: bool = False
 
 
-def _agent_method(agent: Any, public: str, private: str):
+def _agent_method(agent: Any, public: str, private: str) -> Callable[..., Any]:
     method = getattr(agent, public, None)
     if method is None:
         method = getattr(agent, private)
@@ -77,7 +86,7 @@ class LocalWorkerDispatcher:
         max_concurrent_runs: int = 8,
         max_concurrent_runs_per_tenant: int = 2,
         lease_seconds: float = DEFAULT_LEASE_SECONDS,
-        lease_scope_factory=None,
+        lease_scope_factory: Callable[[WorkerLease], AbstractAsyncContextManager[object]] | None = None,
         preserve_runs_on_shutdown: bool = True,
         distributed_claims: bool = False,
     ) -> None:
@@ -100,14 +109,14 @@ class LocalWorkerDispatcher:
         self._claim_policy = SchedulerClaimPolicy(
             max_active_per_tenant=max_concurrent_runs_per_tenant
         )
-        self.recovery_filter = None
-        self._recovery_agent = None
+        self.recovery_filter: Callable[[RunSnapshot], bool] | None = None
+        self._recovery_agent: RecoveryAgent | None = None
         self._lifecycle = asyncio.Condition()
         self._submissions_inflight = 0
         self._closed = False
         self._claim_error: Exception | None = None
 
-    def attach_recovery_agent(self, agent, *, replace: bool = False) -> None:
+    def attach_recovery_agent(self, agent: RecoveryAgent, *, replace: bool = False) -> None:
         """Bind the Application Agent used for durable orphan WorkItems."""
 
         if (
@@ -173,8 +182,8 @@ class LocalWorkerDispatcher:
 
     async def submit(
         self,
-        agent,
-        handle,
+        agent: RecoveryAgent,
+        handle: RunHandle | RunSnapshot,
         context: RequestContext,
         *,
         resume: bool = False,
@@ -279,7 +288,7 @@ class LocalWorkerDispatcher:
         return result
 
     @staticmethod
-    def _work_item(handle, context, *, resume: bool, revision=None) -> WorkItem:
+    def _work_item(handle: RunHandle | RunSnapshot, context: RequestContext, *, resume: bool, revision: int | None = None) -> WorkItem:
         if revision is None:
             revision = getattr(handle, "revision", None)
         if revision is None:
@@ -664,7 +673,7 @@ class LocalWorkerDispatcher:
                 ACTIVE_OWNERSHIP.reset(ownership_token)
 
     @staticmethod
-    async def _automatic_resume_at(store, run_id):
+    async def _automatic_resume_at(store: SessionStore, run_id: str) -> datetime | None:
         try:
             checkpoint = await store.get_latest_checkpoint(run_id)
         except SageV2Error as exc:
@@ -682,7 +691,7 @@ class LocalWorkerDispatcher:
                 due = min(due, budget.deadline)
         return due
 
-    async def _settle_deferred_controls(self):
+    async def _settle_deferred_controls(self) -> None:
         for run_id, request in tuple(self._requests.items()):
             if request.claimed or (not request.recovered and not self.distributed_claims) or request.result.done():
                 continue
@@ -699,7 +708,7 @@ class LocalWorkerDispatcher:
             if not request.result.done():
                 request.result.set_result(snapshot)
 
-    async def _defer_recovery_error(self, lease, request, error):
+    async def _defer_recovery_error(self, lease: WorkerLease, request: _DispatchRequest, error: Exception) -> bool:
         if not (
             self._supports_deferred_work and isinstance(error, SageV2Error)
             and error.info.retryable and error.info.safe_to_resume
@@ -731,11 +740,15 @@ class LocalWorkerDispatcher:
         )
         return True
 
-    async def _release_lease(self, lease, reason, **kwargs):
+    async def _release_lease(self, lease: WorkerLease, reason: LeaseReleaseReason, *, requeue: bool = False, available_at: datetime | None = None) -> None:
         # A durable release may be in fsync when shutdown cancels its Worker.
         # Drain that atomic transition before handling cancellation; otherwise
         # the scheduler may be poisoned or the same lease released twice.
-        release = asyncio.create_task(self.scheduler.release(lease, reason, **kwargs))
+        release = asyncio.create_task(
+            self.scheduler.release(lease, reason, requeue=requeue, available_at=available_at)
+            if available_at is not None
+            else self.scheduler.release(lease, reason, requeue=requeue)
+        )
         cancelled = False
         while not release.done():
             try:
@@ -746,7 +759,7 @@ class LocalWorkerDispatcher:
         if cancelled:
             raise asyncio.CancelledError
 
-    async def _requeue_lost_lease(self, lease, request, error) -> bool:
+    async def _requeue_lost_lease(self, lease: WorkerLease, request: _DispatchRequest, error: BaseException) -> bool:
         """Keep the caller and Run tree alive until a fresh fenced claim recovers it."""
         if getattr(request.agent, "runtime", None) is None:
             # Compatibility drivers without durable Run state cannot be resumed.
@@ -789,7 +802,7 @@ class LocalWorkerDispatcher:
                 else _NullAsyncScope()
             )
             async with scope:
-                operation = asyncio.create_task(request.operation())
+                operation = asyncio.ensure_future(request.operation())
                 done, _ = await asyncio.wait(
                     {operation, renewer}, return_when=asyncio.FIRST_COMPLETED
                 )
@@ -827,7 +840,7 @@ class LocalWorkerDispatcher:
             self._cleanup_requests.pop(lease.work.work_id, None)
 
     async def _fail_recovered_execution_tree(
-        self, runtime, root, context: RequestContext, root_error: RuntimeErrorInfo
+        self, runtime: RuntimePort, root: RunSnapshot, context: RequestContext, root_error: RuntimeErrorInfo
     ) -> RunSnapshot:
         """Settle inline child Runs before failing an uncheckpointed root.
 
@@ -838,7 +851,7 @@ class LocalWorkerDispatcher:
 
         require_execution_ownership()
         sessions = await runtime.session_store.list_descendant_sessions(root.session_id)
-        candidates = []
+        candidates: list[RunSnapshot] = []
         for session in sessions:
             candidates.extend(
                 await runtime.session_store.list_session_runs(session.session_id)
@@ -875,8 +888,8 @@ class LocalWorkerDispatcher:
         )
 
     @staticmethod
-    async def _has_run_ancestor(session_store, run_id: str, ancestor: str) -> bool:
-        candidate = run_id
+    async def _has_run_ancestor(session_store: SessionStore, run_id: str, ancestor: str) -> bool:
+        candidate: str | None = run_id
         seen: set[str] = set()
         while candidate and candidate not in seen:
             seen.add(candidate)
@@ -975,7 +988,7 @@ class LocalWorkerDispatcher:
                     # must never strand the caller's Future on release failure.
                     pass
 
-    async def _cancel_shutdown_descendants(self, runtime, root, context):
+    async def _cancel_shutdown_descendants(self, runtime: RuntimePort, root: RunSnapshot, context: RequestContext) -> None:
         for session in await runtime.session_store.list_descendant_sessions(
             root.session_id
         ):
@@ -1093,14 +1106,14 @@ class LocalWorkerDispatcher:
             request.result.set_result(snapshot)
 
     @staticmethod
-    def _renewal_error(renewer):
+    def _renewal_error(renewer: asyncio.Task[None]) -> BaseException:
         # Task.exception() raises CancelledError for a cancelled heartbeat. It
         # must be treated as lost ownership, not as a user/shutdown cancellation.
         if renewer.cancelled():
             return RuntimeError("scheduler lease renewer was cancelled")
         return renewer.exception() or RuntimeError("scheduler lease renewer stopped")
 
-    async def _renew(self, lease) -> None:
+    async def _renew(self, lease: WorkerLease) -> None:
         delay = max(min(self.lease_duration.total_seconds() / 3, 10.0), 0.05)
         current = lease
         while True:
@@ -1148,8 +1161,8 @@ class LocalWorkerDispatcher:
 
 
 class _NullAsyncScope:
-    async def __aenter__(self):
+    async def __aenter__(self) -> _NullAsyncScope:
         return self
 
-    async def __aexit__(self, exc_type, exc, traceback):
+    async def __aexit__(self, exc_type: type[BaseException] | None, exc: BaseException | None, traceback: TracebackType | None) -> bool:
         return False

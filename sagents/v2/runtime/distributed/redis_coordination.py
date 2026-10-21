@@ -76,8 +76,9 @@ class RedisGuard:
 
     async def __aexit__(self, *exc):
         from redis.exceptions import RedisError
-        self._renewal.cancel()
-        await asyncio.gather(self._renewal, return_exceptions=True)
+        if self._renewal is not None:
+            self._renewal.cancel()
+            await asyncio.gather(self._renewal, return_exceptions=True)
         try:
             async with self.redis.pipeline() as pipe:
                 await pipe.watch(self.key)

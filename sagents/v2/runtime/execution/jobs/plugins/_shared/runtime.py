@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Literal, cast
+
 import asyncio
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
@@ -9,6 +11,7 @@ from datetime import datetime, timedelta
 
 from sagents.v2.runtime.execution.jobs.provider import JobRunner
 from sagents.v2.contracts.common import new_id, utc_now
+from sagents.v2.contracts.items import UsageSummary
 from sagents.v2.contracts.errors import (
     ErrorCategory,
     RuntimeErrorInfo,
@@ -38,7 +41,7 @@ class _JobRow:
     state: JobState = JobState.CREATED
     exit_code: int | None = None
     error: RuntimeErrorInfo | None = None
-    usage: object | None = None
+    usage: UsageSummary | None = None
     output: list[JobOutputChunk] = field(default_factory=list)
     output_size: int = 0
     output_truncated: bool = False
@@ -426,7 +429,7 @@ class JobRuntimeState:
                             row.output.append(
                                 JobOutputChunk(
                                     job_id=job_id,
-                                    stream=stream,
+                                    stream=cast(Literal["stdout", "stderr", "progress"], stream),
                                     offset=offset,
                                     next_offset=offset + len(accepted),
                                     data=accepted,

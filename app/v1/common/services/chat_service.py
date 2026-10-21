@@ -1,7 +1,7 @@
 import asyncio
 from app.v1.common.utils.stream_payload import should_filter_stream_payload, encode_stream_payload
 from sagents.v1.utils.stream_yield import StreamYieldBudget
-from sagents.v1.utils.request_latency import RequestLatency, stream_sync_stage
+from sagents.v1.utils.request_latency import RequestLatency
 from sagents.v1.utils.latency_diagnostics import (
     to_thread as diagnostic_to_thread,
     diagnose,
@@ -1531,7 +1531,6 @@ async def execute_chat_session(
     from app.v1.common.utils.stream_merge import interleave_message_and_progress
 
     session_id = stream_service.request.session_id
-    request = stream_service.request
     stream_counter = 0
     filter_budget = StreamYieldBudget()
     stream_end_emitted = False

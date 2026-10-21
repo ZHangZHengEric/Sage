@@ -1,4 +1,10 @@
 """Small Run read models, independent of execution/event payloads."""
+
+from typing import TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    from sagents.v2.runtime.session.state import SessionStoreCoordinator
+
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
@@ -86,41 +92,44 @@ def metadata_from_payload(payload):
 
 class RunMetadataQueries:
     async def _run_metadata_batch(self, session_ids):
+        store = cast("SessionStoreCoordinator", self)
         selected_ids = set(session_ids)
-        async with self._lock:
+        async with store._lock:
             from dataclasses import replace
             rows = tuple(replace(metadata_from_run(row, row.start_command),
-                         session_created_at=self._sessions[row.session_id].created_at,
-                         parent_session_id=self._sessions[row.session_id].parent_session_id) for row in self._runs.values()
+                         session_created_at=store._sessions[row.session_id].created_at,
+                         parent_session_id=store._sessions[row.session_id].parent_session_id) for row in store._runs.values()
                          if row.session_id in selected_ids)
             owners = {}
             for sid in session_ids:
-                session = self._sessions.get(sid)
+                session = store._sessions.get(sid)
                 if session is None:
                     continue
                 owner = session.owner
                 if owner is None:
-                    owner = self._derive_session_owner(sid, runs=self._runs, session_events=self._session_events)
+                    owner = store._derive_session_owner(sid, runs=store._runs, session_events=store._session_events)
                 owners[sid] = owner
             return rows, owners
 
     async def _run_metadata_rows(self, session_ids):
-        rows, _ = await self._run_metadata_batch(session_ids)
+        store = cast("SessionStoreCoordinator", self)
+        rows, _ = await store._run_metadata_batch(session_ids)
         return rows
 
     async def authorized_run_metadata_page(self, session_ids, context, *, after=None, limit=101, agent_id='', states=()):
+        store = cast("SessionStoreCoordinator", self)
         from sagents.v2.contracts.errors import ErrorCategory, SageV2Error
         from sagents.v2.contracts.principals import ActorRef
         if not 1 <= limit <= 201 or len(session_ids) > 200:
             raise ValueError('invalid Run metadata page')
-        rows, owners = await self._run_metadata_batch(session_ids)
+        rows, owners = await store._run_metadata_batch(session_ids)
         allowed = []
         for sid in session_ids:
             if sid not in owners:
                 continue
             owner = owners[sid]
             try:
-                self._authorize_session_owner(ActorRef.model_validate(owner) if isinstance(owner, dict) else owner, context)
+                store._authorize_session_owner(ActorRef.model_validate(owner) if isinstance(owner, dict) else owner, context)
             except SageV2Error as exc:
                 if exc.info.category == ErrorCategory.AUTHORIZATION:
                     continue

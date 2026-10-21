@@ -3,7 +3,10 @@
 Run from the repository root with PYTHONPATH=. No model/network requests.
 """
 
-import subprocess, time, statistics, json
+import subprocess
+import time
+import statistics
+import json
 from sagents.v1.context.messages import message, message_manager
 
 old_message = subprocess.check_output(

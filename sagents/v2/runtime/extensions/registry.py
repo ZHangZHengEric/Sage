@@ -8,7 +8,7 @@ from typing import Any, Generic, TypeVar, cast
 from pydantic import ConfigDict, create_model
 
 from sagents.v2.contracts.errors import ErrorCategory, RuntimeErrorInfo, SageV2Error
-from sagents.v2.runtime.extensions.contracts import ExtensionRegistration
+from sagents.v2.runtime.extensions.contracts import ExtensionRegistration, CapabilityOffer
 
 
 class ExtensionRegistry:
@@ -57,7 +57,7 @@ class ExtensionRegistry:
             }
             properties = dict(schema.get("properties") or {})
             required = set(schema.get("required") or ())
-            fields = {
+            fields: dict[str, Any] = {
                 name: (
                     _python_type(value),
                     ... if name in required else None,
@@ -78,6 +78,7 @@ class ExtensionRegistry:
             )
             registration = replace(registration, config_model=generated_model)
         if registration.descriptor.config_schema is None:
+            assert registration.config_model is not None
             registration = replace(
                 registration,
                 descriptor=registration.descriptor.model_copy(
@@ -111,7 +112,7 @@ class ExtensionRegistry:
         from sagents.v2.runtime.extensions.versions import version_satisfies
         descriptor = self.get(selection.plugin).descriptor
         self.validate_parameters(selection.plugin, selection.config)
-        offers = tuple(offer for offer in descriptor.provides if offer.capability == capability)
+        offers: tuple[CapabilityOffer, ...] = tuple(offer for offer in descriptor.provides if offer.capability == capability)
         if not offers or (selection.name != "default" and not any(
             offer.name == selection.name for offer in offers
         )) or (selection.name == "default" and len(offers) > 1 and not any(
@@ -121,7 +122,7 @@ class ExtensionRegistry:
                 code="extension.capability_missing", category=ErrorCategory.VALIDATION,
                 message=f"extension {selection.plugin!r} does not provide {capability!r} named {selection.name!r}",
             ))
-        selected = next((offer for offer in offers if offer.name == selection.name), offers[0])
+        selected = next((offer for offer in offers if offer.name == selection.name), next(iter(offers)))
         expected = "3" if capability == "execution.sandbox" else ">=2,<3"
         if not descriptor.availability.available or not version_satisfies(selected.api_version, expected):
             raise SageV2Error(RuntimeErrorInfo(
@@ -239,7 +240,7 @@ class ExtensionRegistry:
 T = TypeVar("T")
 
 
-def _python_type(schema: dict[str, Any]) -> type[Any]:
+def _python_type(schema: dict[str, Any]) -> Any:
     value = schema.get("type")
     types = {
         "string": str,
@@ -258,7 +259,7 @@ def _python_type(schema: dict[str, Any]) -> type[Any]:
         for member in members[1:]:
             resolved = resolved | member
         return resolved
-    return types.get(value, Any)
+    return types.get(value, Any) if isinstance(value, str) else Any
 
 
 @dataclass(frozen=True)

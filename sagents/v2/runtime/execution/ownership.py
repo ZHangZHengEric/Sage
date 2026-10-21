@@ -46,7 +46,7 @@ ACTIVE_OWNERSHIP: ContextVar[ExecutionOwnership | None] = ContextVar(
 )
 
 
-def is_lease_loss(error: Exception | RuntimeErrorInfo) -> bool:
+def is_lease_loss(error: BaseException | RuntimeErrorInfo) -> bool:
     info = error.info if isinstance(error, SageV2Error) else error
     return isinstance(info, RuntimeErrorInfo) and info.code in {
         "scheduler.fence_rejected",

@@ -21,6 +21,10 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .support.resources import LocalResourceBoundary
 
 from sagents.v2.contracts.common import new_id, utc_now
 from sagents.v2.contracts.errors import ErrorCategory, RuntimeErrorInfo, SageV2Error
@@ -121,8 +125,8 @@ class _LocalRow:
     spec: ResolvedSandboxSpec
     root: Path
     state: SandboxState
-    created_at: object
-    updated_at: object
+    created_at: datetime
+    updated_at: datetime
     failure: RuntimeErrorInfo | None = None
     recovery_attempts: int = 0
     terminating: bool = False
@@ -133,11 +137,11 @@ class _LocalRow:
     process_slots: asyncio.Semaphore = field(
         default_factory=lambda: asyncio.Semaphore(1)
     )
-    boundary: object = None
+    boundary: LocalResourceBoundary = field(init=False)
     active_tasks: set = field(default_factory=set)
     queued_tasks: set = field(default_factory=set)
     # One physical boundary, with a separately revocable signed lease per Run.
-    resource: object = None
+    resource: _LocalRow = field(init=False)
     members: dict = field(default_factory=dict)
     issued_runs: set = field(default_factory=set)
     lease_terminated: bool = False
@@ -440,6 +444,7 @@ class _LocalProcessRuntime:
             if policy.read_only:
                 environment.update(_READ_ONLY_GIT_ENV)
             process = None
+            job = None
             readers = ()
             launch_fds = []
             timed_out = False
@@ -515,10 +520,12 @@ class _LocalProcessRuntime:
         )
         stdout = stdout[:limit]
         stderr = stderr[: max(0, limit - len(stdout))]
+        assert process is not None and process.returncode is not None
+        returncode = process.returncode
         return ProcessResult(
             process_id=new_id("process"),
             argv=request.argv,
-            exit_code=process.returncode,
+            exit_code=returncode,
             stdout=stdout,
             stderr=stderr,
             timed_out=timed_out,
@@ -917,8 +924,9 @@ class LocalWorkspaceSandboxProvider:
                 spec=parent.spec, root=parent.root, state=SandboxState.READY,
                 created_at=self._clock(), updated_at=self._clock(), revision=revision,
                 mutation_lock=resource.mutation_lock, process_slots=resource.process_slots,
-                boundary=resource.boundary, resource=resource,
             )
+            child.boundary = resource.boundary
+            child.resource = resource
             resource.members[run_id] = child
             resource.issued_runs.add(run_id)
             return _LocalHandle(self, child)

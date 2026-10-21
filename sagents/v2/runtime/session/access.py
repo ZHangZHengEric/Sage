@@ -9,9 +9,10 @@ performing deletion.
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator, Iterable
-from typing import Protocol
+from collections.abc import AsyncIterator, Iterable, Callable, Awaitable
+from typing import Protocol, cast
 
+from sagents.v2.contracts.commands import StartRun
 from sagents.v2.contracts.principals import RequestContext
 from sagents.v2.contracts.run_state import EventCursor
 from sagents.v2.runtime.session.contracts import DerivedStateStore, SessionStore, SessionEventPage
@@ -167,7 +168,7 @@ class AuthorizedSessionAccess:
             raise ValueError("invalid Session event page")
         query = getattr(self._session_store, "read_authorized_session_page", None)
         if callable(query):
-            return await query(session_id, context, after_sequence=after_sequence, limit=limit)
+            return await cast(Callable[..., Awaitable[SessionEventPage]], query)(session_id, context, after_sequence=after_sequence, limit=limit)
         session = await self.get_session(session_id, context)
         start = max(0, session.last_sequence - limit) if after_sequence is None else after_sequence
         events = await self.read_session_events(session_id, context, after_sequence=start, limit=limit)
@@ -176,7 +177,7 @@ class AuthorizedSessionAccess:
     async def latest_session_start_command(self, session_id, context):
         query = getattr(self._session_store, "latest_authorized_session_command", None)
         if callable(query):
-            return await query(session_id, context)
+            return await cast(Callable[..., Awaitable[StartRun | None]], query)(session_id, context)
         runs = await self.list_session_runs(session_id, context)
         return await self.get_start_command(runs[-1].run_id, context) if runs else None
 
@@ -237,4 +238,4 @@ class AuthorizedSessionAccess:
             raise TypeError(
                 "the SessionStore plugin does not implement durable actor authorization"
             )
-        await authorize(session_id, context)
+        await self._session_store.authorize_session_actor(session_id, context)

@@ -7,6 +7,7 @@ from collections import OrderedDict
 from contextlib import asynccontextmanager
 from contextvars import ContextVar
 from functools import wraps
+from typing import Any
 
 from sagents.v2.contracts.run_state import RunState, TERMINAL_RUN_STATES
 
@@ -20,7 +21,7 @@ def cached_session_operation(function):
 
 
 class IdleSessionCache:
-    def __init__(self, state, *, max_sessions=256, max_bytes=256 * 1024**2, idle_seconds=300):
+    def __init__(self, state, *, max_sessions=256, max_bytes=256 * 1024**2, idle_seconds: float = 300):
         if max_sessions < 1 or max_bytes < 1 or idle_seconds < 0:
             raise ValueError("invalid Session cache limits")
         self.state, self.max_sessions, self.max_bytes = state, max_sessions, max_bytes
@@ -28,7 +29,7 @@ class IdleSessionCache:
         self.entries = OrderedDict()
         self.users = {}
         self.evicted_suspended = set()
-        self._current = ContextVar("mysql_session_cache_operation", default=None)
+        self._current: ContextVar[tuple[asyncio.Task[Any] | None, set[str]] | None] = ContextVar("mysql_session_cache_operation", default=None)
 
     @asynccontextmanager
     async def operation(self):

@@ -17,6 +17,8 @@ import time
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from datetime import datetime
+from typing import Any
+import importlib
 
 from sagents.v2.contracts.common import new_id, utc_now
 from sagents.v2.runtime.execution.sandbox.plugins._shared.admission import validate_resource_support
@@ -53,8 +55,9 @@ class CubeVolumeClient:
                  api_key: str | None = None, volume_driver: str | None = None):
         if not api_url or not template_id or not proxy_node_ip:
             raise ValueError("Cube API URL, template ID and proxy node IP are required")
-        from cubesandbox import Config, Sandbox, Volume
-        from cubesandbox._exceptions import VolumeNotFoundError
+        sdk = importlib.import_module("cubesandbox")
+        Config, Sandbox, Volume = sdk.Config, sdk.Sandbox, sdk.Volume
+        VolumeNotFoundError = importlib.import_module("cubesandbox._exceptions").VolumeNotFoundError
 
         self.config = Config(api_url=api_url, api_key=api_key, template_id=template_id,
                              proxy_node_ip=proxy_node_ip)
@@ -100,7 +103,7 @@ class CubeVolumeClient:
 class _CubeRow:
     ref: SandboxRef
     spec: object
-    sandbox: object
+    sandbox: Any
     created_at: datetime
     updated_at: datetime
     workspace_identity: str = ""

@@ -7,7 +7,7 @@
 
 
 from copy import deepcopy
-from typing import Any, Iterable
+from typing import Any, Iterable, List
 
 from openai.types.chat import (
     ChatCompletion,
@@ -16,6 +16,8 @@ from openai.types.chat import (
 )
 from openai.types.chat.chat_completion import Choice
 from openai.types.chat.chat_completion_message_tool_call import Function
+
+from sagents.v1.tool.impl.compress_history_tool import CompressHistoryTool, CompressHistoryError
 
 
 def merge_chat_completion_chunks(chunks: Iterable) -> ChatCompletion:
@@ -160,9 +162,6 @@ def merge_chat_completion_chunks(chunks: Iterable) -> ChatCompletion:
         usage=usage,
         **response_extras,
     )
-
-from sagents.v1.tool.impl.compress_history_tool import CompressHistoryTool, CompressHistoryError
-from typing import List
 
 def split_before(
         text: str, token_limit: int

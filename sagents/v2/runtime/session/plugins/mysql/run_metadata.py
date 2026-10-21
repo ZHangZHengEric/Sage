@@ -1,4 +1,10 @@
 """Small Run metadata projected from existing compact/journal JSON."""
+
+from typing import TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    from sagents.v2.runtime.session.plugins.mysql.state import _MysqlSessionState
+
 def mysql_metadata_cte(table, marks):
     fields = """run_id VARCHAR(128) PATH '$.run_id', created_at VARCHAR(64) PATH '$.created_at',
        state VARCHAR(32) PATH '$.state', agent_id VARCHAR(191) PATH '$.start_command.agent_id',
@@ -55,30 +61,32 @@ def decode_metadata(row):
 
 class MysqlRunMetadataQueries:
     async def _run_metadata_batch(self, session_ids):
+        store = cast("_MysqlSessionState", self)
         import json
         ids = tuple(dict.fromkeys(session_ids))
         if not ids:
             return (), {}
         marks = ','.join(['%s'] * len(ids))
-        async with self._reader_connection() as connection:
+        async with store._reader_connection() as connection:
             async with connection.cursor() as cursor:
                 await cursor.execute('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ')
             await connection.begin()
             async with connection.cursor() as cursor:
-                await cursor.execute(f"SELECT session_id,JSON_EXTRACT(compact_state,'$.sessions[0].owner') FROM {self._table('sessions')} WHERE session_id IN ({marks})", ids)
+                await cursor.execute(f"SELECT session_id,JSON_EXTRACT(compact_state,'$.sessions[0].owner') FROM {store._table('sessions')} WHERE session_id IN ({marks})", ids)
                 owners = {row[0]: json.loads(row[1]) if row[1] is not None else None for row in await cursor.fetchall()}
-                await cursor.execute(mysql_metadata_cte(self._table, marks) + 'SELECT * FROM metadata', ids * 4)
+                await cursor.execute(mysql_metadata_cte(store._table, marks) + 'SELECT * FROM metadata', ids * 4)
                 rows = tuple(decode_metadata(row) for row in await cursor.fetchall())
             # Legacy owners are derived from existing rows/events in this same
             # snapshot, without hydrating one execution aggregate per Session.
             legacy = tuple(sid for sid,owner in owners.items() if owner is None)
             if legacy:
-                views = await self._read_session_views_on_connection(connection,legacy,run_ids=())
+                views = await store._read_session_views_on_connection(connection,legacy,run_ids=())
                 for sid,view in views.items():
                     owners[sid] = view.owner
         return rows, owners
 
     async def authorized_run_metadata_page(self, session_ids, context, *, after=None, limit=101, agent_id='', states=()):
+        store = cast("_MysqlSessionState", self)
         import json
         from sagents.v2.contracts.errors import SageV2Error, ErrorCategory
         from sagents.v2.contracts.principals import ActorRef
@@ -88,12 +96,12 @@ class MysqlRunMetadataQueries:
         if not ids:
             return ()
         marks = ','.join(['%s'] * len(ids))
-        async with self._reader_connection() as connection:
+        async with store._reader_connection() as connection:
             async with connection.cursor() as cursor:
                 await cursor.execute('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ')
             await connection.begin()
             async with connection.cursor() as cursor:
-                await cursor.execute(f"SELECT session_id,JSON_EXTRACT(compact_state,'$.sessions[0].owner') FROM {self._table('sessions')} WHERE session_id IN ({marks})", ids)
+                await cursor.execute(f"SELECT session_id,JSON_EXTRACT(compact_state,'$.sessions[0].owner') FROM {store._table('sessions')} WHERE session_id IN ({marks})", ids)
                 allowed = set()
                 legacy = []
                 for sid, raw in await cursor.fetchall():
@@ -102,16 +110,16 @@ class MysqlRunMetadataQueries:
                         legacy.append(sid)
                         continue
                     try:
-                        self._authorize_session_owner(ActorRef.model_validate(decoded), context)
+                        store._authorize_session_owner(ActorRef.model_validate(decoded), context)
                     except SageV2Error as exc:
                         if exc.info.category != ErrorCategory.AUTHORIZATION:
                             raise
                     else:
                         allowed.add(sid)
-                legacy_views = await self._read_session_views_on_connection(connection,tuple(legacy),run_ids=()) if legacy else {}
+                legacy_views = await store._read_session_views_on_connection(connection,tuple(legacy),run_ids=()) if legacy else {}
                 for sid,view in legacy_views.items():
                     try:
-                        self._authorize_session_owner(view.owner, context)
+                        store._authorize_session_owner(view.owner, context)
                     except SageV2Error as exc:
                         if exc.info.category != ErrorCategory.AUTHORIZATION:
                             raise
@@ -141,5 +149,5 @@ class MysqlRunMetadataQueries:
                 ordering = 'CASE session_id ' + ' '.join('WHEN %s THEN ' + str(i) for i in range(len(selected))) + ' END'
                 params.extend(selected)
                 params.append(limit)
-                await cursor.execute(mysql_metadata_cte(self._table, marks) + 'SELECT * FROM metadata WHERE ' + ' AND '.join(filters) + ' ORDER BY ' + ordering + ',created_at,run_id LIMIT %s', params)
+                await cursor.execute(mysql_metadata_cte(store._table, marks) + 'SELECT * FROM metadata WHERE ' + ' AND '.join(filters) + ' ORDER BY ' + ordering + ',created_at,run_id LIMIT %s', params)
                 return tuple(decode_metadata(row) for row in await cursor.fetchall())

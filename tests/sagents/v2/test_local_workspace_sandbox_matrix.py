@@ -62,8 +62,12 @@ async def provision(
     read_paths: tuple[str, ...] = (),
 ):
     issuer = SandboxGrantIssuer(b"local-provider-test-key-32-bytes!!")
+    # Match command lookup to the Python environment allowed below; the host
+    # PATH may resolve "python" to a different installation.
     provider = LocalWorkspaceSandboxProvider(
-        issuer.verification_key, read_paths=(*read_paths, sys.prefix)
+        issuer.verification_key,
+        command_path=os.pathsep.join((str(Path(sys.executable).parent), os.defpath)),
+        read_paths=(*read_paths, sys.prefix),
     )
     handle = await provider.provision(
         ResolvedSandboxSpec(

@@ -1,5 +1,13 @@
 """Scheduler plugins exposed without eager sibling imports."""
 
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from sagents.v2.runtime.execution.scheduler.plugins.filesystem import FilesystemScheduler as FilesystemScheduler
+    from sagents.v2.runtime.execution.scheduler.plugins.ephemeral import InMemoryScheduler as InMemoryScheduler
+    from sagents.v2.runtime.execution.scheduler.plugins.filesystem import SchedulerInUseError as SchedulerInUseError
+
+
 from sagents.v2._lazy import exported_names, resolve_export
 
 
@@ -18,7 +26,11 @@ _EXPORTS = {
     ),
 }
 
-__all__ = list(_EXPORTS)
+__all__ = [
+    "FilesystemScheduler",
+    "InMemoryScheduler",
+    "SchedulerInUseError",
+]
 
 
 def __getattr__(name: str):

@@ -33,7 +33,7 @@ def main():
         def after():
             for _ in range(count):
                 assert not should_filter_stream_payload(payload, {"hidden"})
-                encoded = json.dumps(payload, ensure_ascii=False) + "\n"
+                _ = json.dumps(payload, ensure_ascii=False) + "\n"
 
         print(
             "ENCODE_FILTER",

@@ -32,8 +32,8 @@ class _RedisMysqlSessionState(_RedisMysqlPersistence):
         if min(max_preview_events, preview_retention_seconds) < 1:
             raise ValueError("Preview bounds must be positive")
         self.max_preview_events, self.preview_retention_seconds = max_preview_events, preview_retention_seconds
-        self._guards = ContextVar("distributed_session_guards", default=())
-        self._publication_epoch = ContextVar("distributed_preview_epoch", default=None)
+        self._guards: ContextVar[tuple[RedisGuard, ...]] = ContextVar("distributed_session_guards", default=())
+        self._publication_epoch: ContextVar[str | None] = ContextVar("distributed_preview_epoch", default=None)
 
     @property
     def capabilities(self):
@@ -126,7 +126,7 @@ class _RedisMysqlSessionState(_RedisMysqlPersistence):
             # deduplicate two independently generated Session identities.
             lookup = await self._read_start_lookup(command, context)
             previous = self._start_idempotency.get(scope)
-            cached = self._runs.get(previous)
+            cached = self._runs.get(previous) if previous is not None else None
             if cached is not None:
                 try:
                     async with self._session_read(cached.session_id):

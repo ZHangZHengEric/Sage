@@ -34,7 +34,8 @@ except ImportError:  # pragma: no cover - Windows uses msvcrt below.
     fcntl = None  # type: ignore[assignment]
 
 try:
-    import msvcrt
+    import importlib
+    msvcrt = importlib.import_module("msvcrt")
 except ImportError:  # pragma: no cover - POSIX uses fcntl above.
     msvcrt = None  # type: ignore[assignment]
 
@@ -748,6 +749,7 @@ class FilesystemScheduler(_FilesystemSchedulerStateMachine):
             else:
                 # Always lock the same byte, including in a newly created file.
                 self._writer_handle.seek(0)
+                assert msvcrt is not None
                 msvcrt.locking(self._writer_handle.fileno(), msvcrt.LK_NBLCK, 1)
         except OSError as exc:
             self._writer_handle.close()

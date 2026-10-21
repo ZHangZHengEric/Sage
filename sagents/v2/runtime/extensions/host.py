@@ -527,19 +527,21 @@ class ExtensionHost:
             for value in rollback:
                 if value.registration.ownership == "borrowed":
                     continue
-                stop = value.registration.stop or getattr(value.instance, "stop", None)
+                stop = getattr(value.instance, "stop", None)
                 close = getattr(value.instance, "close", None)
-                if stop is not None or close is not None:
+                if value.registration.stop is not None or stop is not None or close is not None:
                     try:
-                        result = (
-                            stop(value.instance, StopReason.START_FAILED)
-                            if value.registration.stop is not None
-                            else stop(StopReason.START_FAILED)
-                            if stop is not None
-                            else close()
-                        )
+                        if value.registration.stop is not None:
+                            result = value.registration.stop(value.instance, StopReason.START_FAILED)
+                        elif stop is not None:
+                            result = stop(StopReason.START_FAILED)
+                        else:
+                            assert close is not None
+                            result = close()
                         if inspect.isawaitable(result):
-                            result.close()
+                            closer = getattr(result, "close", None)
+                            if closer is not None:
+                                closer()
                     except Exception as stop_exc:
                         exc.add_note(
                             "extension rollback also failed for "

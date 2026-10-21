@@ -29,6 +29,7 @@ from sagents.v2.contracts.errors import ErrorCategory, RuntimeErrorInfo, SageV2E
 from sagents.v2.contracts.events import (
     CheckpointEventData,
     RunEventData,
+    SteeringEventData,
     RuntimeEvent,
 )
 from sagents.v2.contracts.interactions import InteractionRequest
@@ -572,6 +573,7 @@ class HarnessRuntime:
                 error=self._command_error(exc.info, context.language),
             )
         event = result.events[-1]
+        assert isinstance(event.data, SteeringEventData)
         return CommandReceipt(
             command_id=command_id,
             decision=(

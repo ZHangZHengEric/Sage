@@ -7,6 +7,10 @@ can report usage beyond a ceiling; it must settle rather than hide its cost.
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 
+from sagents.v2.runtime.session.contracts import SessionStore
+from sagents.v2.contracts.run_state import RunSnapshot
+from sagents.v2.contracts.events import UsageEventData
+
 from sagents.v2.contracts.errors import ErrorCategory, RuntimeErrorInfo
 
 
@@ -17,7 +21,7 @@ class RunBudget:
     error: RuntimeErrorInfo | None = None
 
 
-async def run_tree_runs(store, run):
+async def run_tree_runs(store: SessionStore, run: RunSnapshot) -> tuple[RunSnapshot, ...]:
     """Select exact execution ancestry, excluding unrelated Session turns."""
     sessions = (
         await store.get_session(run.session_id),
@@ -42,7 +46,7 @@ async def run_tree_runs(store, run):
     return tuple(row for row in rows if row.run_id in included)
 
 
-async def run_tree_tokens(store, run, *, usage_cache=None) -> int:
+async def run_tree_tokens(store: SessionStore, run: RunSnapshot, *, usage_cache: dict[str, tuple[int, int]] | None = None) -> int:
     """Count this execution's durable usage, including all descendants."""
     rows = await run_tree_runs(store, run)
     cache = {} if usage_cache is None else usage_cache
@@ -58,7 +62,7 @@ async def run_tree_tokens(store, run, *, usage_cache=None) -> int:
             tokens += sum(
                 event.data.usage.input_tokens + event.data.usage.output_tokens
                 for event in events
-                if event.type == "usage.recorded"
+                if event.type == "usage.recorded" and isinstance(event.data, UsageEventData)
             )
             sequence = events[-1].run_sequence if events else sequence
             cache[run_id] = sequence, tokens
@@ -104,7 +108,7 @@ async def stop_budget_descendants(runtime, run, context):
 
 
 async def evaluate_run_budget(
-    store, run, now: datetime, *, check_tokens=True, usage_cache=None
+    store: SessionStore, run: RunSnapshot, now: datetime, *, check_tokens: bool = True, usage_cache: dict[str, tuple[int, int]] | None = None
 ) -> RunBudget:
     """Apply every ancestor's absolute deadline and shared subtree token cap."""
     deadline = None

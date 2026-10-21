@@ -34,10 +34,20 @@ def _module_name(path: Path) -> str:
     return ".".join(parts)
 
 
-def _import_targets(path: Path) -> list[tuple[int, str]]:
+def _import_targets(
+    path: Path, *, include_type_checking: bool = True
+) -> list[tuple[int, str]]:
     """Return static and literal-dynamic imports from one V2 source file."""
 
     tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    if not include_type_checking:
+        class RuntimeImports(ast.NodeTransformer):
+            def visit_If(self, node: ast.If):
+                if isinstance(node.test, ast.Name) and node.test.id == "TYPE_CHECKING":
+                    return node.orelse
+                return self.generic_visit(node)
+
+        tree = RuntimeImports().visit(tree)
     targets: list[tuple[int, str]] = []
     package = _module_name(path)
     if path.name != "__init__.py":
@@ -116,7 +126,7 @@ def test_v2_internal_module_graph_is_acyclic():
     edges = {
         name: {
             target
-            for _, target in _import_targets(path)
+            for _, target in _import_targets(path, include_type_checking=False)
             if target in modules and target != name
         }
         for name, path in modules.items()

@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from typing import cast
+from sagents.v2.runtime.execution.sandbox.plugins.local import _LocalFileSystem
+
 import asyncio
 import hashlib
 import json
@@ -295,7 +298,7 @@ class LocalWorkspaceExecutionBindingProvider:
             if parent is not None and policy != WorkspaceSharingPolicy.PRIVATE_CHILD:
                 # Binding paths are sandbox-visible; never treat /workspace as
                 # a host directory when sharing or narrowing a parent's lease.
-                workspace = parent.sandbox.filesystem.row.root
+                workspace = cast(_LocalFileSystem, parent.sandbox.filesystem).row.root
             if request.parent_run_id and policy != WorkspaceSharingPolicy.PRIVATE_CHILD and parent is None:
                 raise SageV2Error(RuntimeErrorInfo(
                     code="execution.parent_binding_not_ready", category=ErrorCategory.RESOURCE_LOST,
@@ -303,6 +306,7 @@ class LocalWorkspaceExecutionBindingProvider:
                     retryable=True, safe_to_resume=True,
                 ))
             if (request.parent_run_id and policy == WorkspaceSharingPolicy.SHARED_PARENT
+                    and parent is not None
                     and parent.configuration is not None
                     and parent.configuration.policy == snapshot.policy
                     and parent.configuration.tool_environment == snapshot.tool_environment):

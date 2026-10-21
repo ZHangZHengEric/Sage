@@ -4,21 +4,30 @@
 from __future__ import annotations
 
 
+from collections.abc import Iterable
+from sagents.v2.runtime.contracts import RuntimePort
+from sagents.v2.runtime.session.contracts import EventDraft
+from sagents.v2.contracts.checkpoint import Checkpoint, Suspension
+from sagents.v2.contracts.interactions import InteractionRequest
+from sagents.v2.contracts.principals import RequestContext
+from sagents.v2.contracts.run_state import RunSnapshot, RunState
+
+
 class DurableRunLifecycle:
-    def __init__(self, runtime) -> None:
+    def __init__(self, runtime: RuntimePort) -> None:
         self.runtime = runtime
 
     async def commit(
         self,
-        run,
+        run: RunSnapshot,
         *,
-        new_state,
-        drafts,
-        context,
-        idempotency_key,
-        expected_states,
-        checkpoint=None,
-    ):
+        new_state: RunState,
+        drafts: Iterable[EventDraft],
+        context: RequestContext,
+        idempotency_key: str,
+        expected_states: frozenset[RunState],
+        checkpoint: Checkpoint | None = None,
+    ) -> RunSnapshot:
         result = await self.runtime.session_store.commit_run(
             run_id=run.run_id,
             expected_revision=run.revision,
@@ -33,14 +42,14 @@ class DurableRunLifecycle:
 
     async def suspend(
         self,
-        run,
+        run: RunSnapshot,
         *,
-        checkpoint,
-        suspension,
-        context,
-        idempotency_key,
-        interaction=None,
-    ):
+        checkpoint: Checkpoint,
+        suspension: Suspension,
+        context: RequestContext,
+        idempotency_key: str,
+        interaction: InteractionRequest | None = None,
+    ) -> RunSnapshot:
         return await self.runtime.commit_suspension(
             run_id=run.run_id,
             expected_revision=run.revision,

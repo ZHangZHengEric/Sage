@@ -31,7 +31,7 @@ async def finish_connection_cleanup(awaitable):
 
 class MysqlConnectionBudget:
     def __init__(self, *, max_connections=16, max_pending_connections=64,
-                 connection_acquire_timeout_seconds=10):
+                 connection_acquire_timeout_seconds: float = 10):
         if type(max_connections) is not int or max_connections < 2:
             raise ValueError("max_connections must be an integer of at least 2")
         if type(max_pending_connections) is not int or max_pending_connections < 1:
