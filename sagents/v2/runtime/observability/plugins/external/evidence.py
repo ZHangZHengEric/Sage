@@ -28,20 +28,11 @@ from sagents.v2.runtime.observability.traces import (
     current_trace_context,
     current_trace_sink,
 )
-from sagents.v2.runtime.observability.evidence.tools import tool_evidence
-from sagents.v2.runtime.observability.evidence.models import model_evidence
+from sagents.v2.runtime.observability.evidence.assembly import assemble_evidence
 from sagents.v2.runtime.observability.contracts import TraceSink
 
 SPAN_NAME = "agent.run"
 _STATUS_CODES: dict[int | None, str] = {1: "OK", 2: "ERROR"}
-
-
-def timestamp(value):
-    if isinstance(value, (int, float)):
-        return float(value)
-    if isinstance(value, str):
-        value = datetime.fromisoformat(value.replace("Z", "+00:00"))
-    return value.timestamp()
 
 
 def _otlp_value(value):
@@ -396,156 +387,26 @@ class ExternalEvidenceSink:
         raw_flushed = await self.flush_raw()
         async with httpx.AsyncClient() as client:
             spans, truncated = await self._query(
-                client, start=0, end=utc_now().timestamp(), session_id=session_id
+                client,
+                start=0,
+                end=utc_now().timestamp(),
+                session_id=session_id,
             )
-        # Authoritative Session ownership/Run allowlist is checked by the caller.
+        # Filter before reconstruction; foreign records must never be decoded.
         spans = [
-            s
-            for s in spans
-            if s["attributes"].get("session_id") == session_id
-            and s["attributes"].get("run_id") in run_ids
+            span
+            for span in spans
+            if span["attributes"].get("session_id") == session_id
+            and span["attributes"].get("run_id") in run_ids
         ]
-        models, logs = {}, []
         restored, gaps = await asyncio.to_thread(reconstruct, spans)
-        records = [(timestamp(at), attrs) for at, attrs in restored]
-        stream_parts = {}
-        for span in spans:
-            for event in span.get("events", []):
-                attrs = event.get("attributes", {})
-                if "sage.diagnostic.data" in attrs:
-                    # Scope is validated on both the containing span and event.
-                    if (
-                        attrs.get("session_id") != session_id
-                        or attrs.get("run_id") not in run_ids
-                    ):
-                        continue
-                    records.append((timestamp(event["timestamp"]), attrs))
-        for observed, attrs in sorted(records, key=lambda r: r[0]):
-            payload = json.loads(attrs["sage.diagnostic.data"])
-            if attrs["sage.diagnostic.kind"] == "log":
-                logs.append(
-                    dict(
-                        payload,
-                        session_id=attrs["session_id"],
-                        run_id=attrs["run_id"],
-                    )
-                )
-            else:
-                identity = (attrs["run_id"], payload["request_id"])
-                row = models.setdefault(
-                    identity,
-                    dict(
-                        session_id=session_id,
-                        run_id=attrs["run_id"],
-                        request_id=payload["request_id"],
-                    ),
-                )
-                kind = attrs["sage.diagnostic.kind"]
-                if kind in {"stream_wire", "stream_normalized"}:
-                    stream_parts.setdefault(identity, {}).setdefault(kind, {})[
-                        payload["sequence"]
-                    ] = payload["event"]
-                    continue
-                row.update(payload)
-                observed_at = datetime.fromtimestamp(observed, timezone.utc).isoformat()
-                if kind == "request":
-                    row.update(status="started", started_at=observed_at)
-                elif kind in {"response", "failure"}:
-                    row.update(
-                        status="completed" if kind == "response" else "failed",
-                        completed_at=observed_at,
-                    )
-        for span in spans:
-            attrs = span.get("attributes", {})
-            if span.get("name") != "model.request" or not attrs.get(
-                "sage.diagnostic.stream_finalized"
-            ):
-                continue
-            identity = attrs["run_id"], attrs["request_id"]
-            row = models.setdefault(
-                identity,
-                dict(session_id=session_id, run_id=identity[0], request_id=identity[1]),
-            )
-            stream = row.setdefault("stream", {})
-            stream.setdefault("chunk_format", "chunks/v1")
-            for field in (
-                "wire_event_count",
-                "normalized_event_count",
-                "dropped_wire_events",
-                "dropped_normalized_events",
-            ):
-                stream.setdefault(field, attrs.get("sage.diagnostic." + field, 0))
-        for identity, row in models.items():
-            if "stream" in row or identity in stream_parts:
-                stream = row.setdefault("stream", {})
-                parts = stream_parts.get(identity, {})
-                if "chunk_format" in stream or parts:
-                    for kind, field, count, dropped in (
-                        (
-                            "stream_wire",
-                            "wire_events",
-                            "wire_event_count",
-                            "dropped_wire_events",
-                        ),
-                        (
-                            "stream_normalized",
-                            "normalized_events",
-                            "normalized_event_count",
-                            "dropped_normalized_events",
-                        ),
-                    ):
-                        values = parts.get(kind, {})
-                        stream[field] = [values[seq] for seq in sorted(values)]
-                        missing = max(0, stream.get(count, len(values)) - len(values))
-                        stream[dropped] = max(stream.get(dropped, 0), missing)
-                    stream["complete"] = (
-                        "chunk_format" in stream
-                        and not stream.get("dropped_wire_events")
-                        and not stream.get("dropped_normalized_events")
-                    )
-                    stream["wire_capture_available"] = bool(stream.get("wire_events"))
-                    row["truncated"] = not stream["complete"]
-        for gap in gaps:
-            if gap["kind"] == "log":
-                continue
-            identity = gap["run_id"], gap["request_id"]
-            row = models.setdefault(
-                identity,
-                dict(
-                    session_id=session_id,
-                    run_id=gap["run_id"],
-                    request_id=gap["request_id"],
-                ),
-            )
-            row["truncated"] = True
-            row.setdefault("evidence_gaps", []).append(gap)
-            row.setdefault("stream", {})["complete"] = False
-        projected_models = model_evidence(spans, models.values())
-        if self.raw_capture or any(
-            s["attributes"].get("sage.diagnostic.format") == "chunks/v1" for s in spans
-        ):
-            for row in projected_models:
-                fields = row.get("field_sources", {})
-                complete = bool(
-                    fields.get("request") == "diagnostic_events"
-                    and (
-                        fields.get("response") == "diagnostic_events"
-                        or fields.get("error") == "diagnostic_events"
-                    )
-                    and row.get("stream", {}).get("complete")
-                    and not row.get("evidence_gaps")
-                )
-                row["raw_capture_complete"] = complete
-                row["truncated"] = bool(row.get("truncated") or not complete)
-        log_counts = [
-            s["attributes"]["sage.diagnostic.log_count"]
-            for s in spans
-            if s.get("name") == "agent.run"
-            and "sage.diagnostic.log_count" in s["attributes"]
-        ]
-        expected_logs = sum(log_counts)
-        dropped_logs = max(
-            sum(gap["kind"] == "log" for gap in gaps), expected_logs - len(logs), 0
+        evidence = assemble_evidence(
+            spans,
+            restored,
+            gaps,
+            session_id=session_id,
+            run_ids=run_ids,
+            raw_capture=self.raw_capture,
         )
         raw_statistics = self.raw_statistics()
         transport_statistics = getattr(self.trace_sink, "statistics", None)
@@ -559,37 +420,18 @@ class ExternalEvidenceSink:
             or raw_statistics["retained_bytes"] > 0
             or export_statistics.get("retained_bytes", 0) > 0
         )
-        logs_complete = bool(
-            log_counts
-            and expected_logs == len(logs)
-            and not dropped_logs
-            and not pending_writes
-        )
+        if pending_writes and evidence["logs_complete"] is not None:
+            evidence["logs_complete"] = False
         return {
-            **tool_evidence(spans, logs),
-            "models": projected_models,
-            "model_request_ids": sorted({r["request_id"] for r in projected_models}),
-            "capture_modes": sorted(
-                {s["attributes"].get("sage.content.mode", "unknown") for s in spans}
-            ),
-            "logs": logs,
-            "traces": spans,
+            **evidence,
             "source": self.backend,
             "unavailable": False,
             "truncated": truncated,
-            "evidence_gaps": gaps,
-            "dropped_logs": dropped_logs,
-            "logs_complete": logs_complete if self.raw_capture or log_counts else None,
-            "expected_log_records": expected_logs if log_counts else None,
             "capture_failures_since_start": self.capture_failures,
             "raw_capture_statistics": raw_statistics,
             "trace_export_statistics": export_statistics,
             "pending_writes": pending_writes,
             "raw_flush_completed": raw_flushed,
-            "raw_model_streams_available": any(
-                row.get("stream", {}).get("wire_capture_available", False)
-                for row in projected_models
-            ),
         }
 
     def write(self, record):

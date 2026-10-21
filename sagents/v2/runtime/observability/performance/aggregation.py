@@ -43,6 +43,61 @@ def timestamp(value):
     return value.timestamp()
 
 
+def normalize_timing_rows(rows, *, incomplete=False):
+    """Normalize captured timing rows without encoding them as Trace payloads."""
+    events, models = defaultdict(list), defaultdict(dict)
+    for observation in sorted(rows, key=lambda r: r["at"]):
+        row = observation["data"]
+        rid = row["run_id"]
+        if observation["kind"] == "model":
+            models[rid].setdefault(row["request_id"], {}).update(row)
+            continue
+        values = row.get("attributes", {})
+        event = dict(
+            session_id=row["session_id"],
+            run_id=rid,
+            event=row["event"],
+            at=timestamp(row["timestamp"]),
+            agent_id=values.get("agent_id"),
+            identity=row.get("tool_call_id")
+            if row["event"].startswith("tool.")
+            else row.get("request_id"),
+            purpose=values.get("purpose"),
+            turn_id=row.get("turn_id"),
+            started_at=timestamp(values.get("started_at")),
+            state=values.get("run_state"),
+            _observation_incomplete=incomplete
+            or observation.get("_observation_incomplete", False),
+        )
+        events[rid].append(event)
+        if (
+            row["event"] == "model.request.completed"
+            and values.get("first_text_ms") is not None
+            and values.get("duration_ms") is not None
+        ):
+            events[rid].append(
+                {
+                    **event,
+                    "event": "model.first_text",
+                    "at": event["at"]
+                    - (values["duration_ms"] - values["first_text_ms"]) / 1000,
+                }
+            )
+    normalized = defaultdict(list)
+    for rid, requests in models.items():
+        for row in requests.values():
+            normalized[rid].append(
+                {
+                    **row,
+                    "started_at": timestamp(row.get("started_at")),
+                    "ended_at": timestamp(row.get("completed_at")),
+                    "first_token_at": timestamp(row.get("first_token_at")),
+                    "purpose": row.get("purpose", "agent"),
+                }
+            )
+    return events, normalized
+
+
 def intervals(values):
     result = []
     for start, end in sorted(

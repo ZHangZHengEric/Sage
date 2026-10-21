@@ -125,6 +125,78 @@ class StructuredLogger:
         self.log(LogLevel.ERROR, event, message, error=error, **kwargs)
 
 
+_ROUTINE_TIMINGS = frozenset(
+    {
+        "agent.state.commit",
+        "session.redis.commit",
+        "agent.preparation.completed",
+        "server.admission.phase",
+        "session.mysql.archived",
+    }
+)
+_SLOW_OPERATION_MS = 100
+
+
+class ObservationLogs:
+    """Capture evidence independently of output severity, then fan out safely."""
+
+    format_version = "sage.log/v1"
+
+    def __init__(self, outputs, evidence):
+        self.outputs, self.evidence = tuple(outputs), evidence
+        self.failures = 0
+        self.closed = False
+
+    @property
+    def path(self):
+        return next(
+            (output.path for output in self.outputs if hasattr(output, "path")), ""
+        )
+
+    @property
+    def raw_capture(self):
+        return getattr(self.evidence, "raw_capture", False)
+
+    def write(self, record: LogRecord):
+        if self.closed:
+            return
+        routine = (
+            record.level == LogLevel.DEBUG
+            and record.event in _ROUTINE_TIMINGS
+            and record.error is None
+            and record.attributes.get("outcome", "completed") == "completed"
+            and isinstance(record.attributes.get("duration_ms"), (int, float))
+            and 0 <= record.attributes["duration_ms"] < _SLOW_OPERATION_MS
+        )
+        if self.raw_capture or not routine:
+            writer = getattr(self.evidence, "write", None)
+            if writer:
+                try:
+                    writer(record)
+                except Exception:
+                    self.failures += 1
+        if routine:
+            return
+        for output in self.outputs:
+            try:
+                output.write(record)
+            except Exception:
+                self.failures += 1
+
+    def close(self):
+        if self.closed:
+            return
+        self.closed = True
+        errors = []
+        for output in self.outputs:
+            try:
+                output.close()
+            except BaseException as exc:
+                errors.append(exc)
+        if errors:
+            raise BaseExceptionGroup("log output shutdown failed", errors)
+
+
 class _ProcessLogSink:
     """Resolve module-level runtime loggers to the host's current sink."""
 
