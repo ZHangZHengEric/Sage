@@ -7,7 +7,7 @@ import json
 
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
 from datetime import datetime
-from typing import Any, cast
+from typing import Any
 
 from sagents.v2.contracts.common import utc_now
 from sagents.v2.model.contracts import (
@@ -125,8 +125,6 @@ class RecordingModelProvider:
             },
         )
         active = current_trace_context()
-        chunk_recorder = getattr(self.sink, "record_model_stream_chunk", None)
-        chunked = getattr(self.sink, "raw_capture", False) and callable(chunk_recorder)
         span = self.tracer.start_span(
             "model.request",
             kind=TraceKind.CLIENT,
@@ -137,8 +135,7 @@ class RecordingModelProvider:
             attributes={
                 "model_binding": request.model_binding,
                 "purpose": purpose,
-                "sage.diagnostic.chunk_format": "chunks/v1" if chunked else None,
-                "input": {"diagnostic_request_id":request.request_id} if chunked else trace_content(
+                "input": trace_content(
                     self.trace_sink,
                     {"messages": request.messages, "tools": request.tools},
                 ),
@@ -234,26 +231,10 @@ class RecordingModelProvider:
         if (callable(getattr(self.sink, "record_model_stream", None))
                 and getattr(self.sink, "raw_capture", True)):
             limit = 8 * 1024 * 1024
-            capture_context = current_trace_context()
-            capture = WireCapture(max_bytes=limit, consumer=(
-                lambda event, sequence: cast(Callable[..., Any], chunk_recorder)(session_id=session_id, request=request, field="wire",
-                                                       sequence=sequence, event=event, trace_context=capture_context)
-            ) if chunked else None)
+            capture = WireCapture(max_bytes=limit)
         normalized_events = []
         normalized_bytes = 0
         normalized_dropped = 0
-        normalized_count = 0
-
-        def remember_stream_summary():
-            if chunked and capture is not None:
-                span.span.attributes.update({
-                    "sage.diagnostic.stream_finalized": True,
-                    "sage.diagnostic.wire_event_count": capture.observed,
-                    "sage.diagnostic.normalized_event_count": normalized_count,
-                    "sage.diagnostic.dropped_wire_events": capture.dropped,
-                    "sage.diagnostic.dropped_normalized_events": normalized_dropped,
-                })
-
         try:
             await self._diagnose(
                 "begin_model_request",
@@ -267,21 +248,13 @@ class RecordingModelProvider:
             async for event in events:
                 # Keep partial output even if normalization later rejects Tool JSON.
                 if capture is not None and event.kind != ModelEventKind.COMPLETED:
-                    if chunked:
-                        assert chunk_recorder is not None
-                        accepted = chunk_recorder(session_id=session_id, request=request, field="normalized",
-                                                  sequence=normalized_count, event=event, trace_context=capture_context)
-                        normalized_count += 1
-                        if not accepted:
-                            normalized_dropped += 1
+                    value = event.model_dump(mode="json")
+                    size = len(json.dumps(value, ensure_ascii=False).encode())
+                    if normalized_bytes + size <= capture.max_bytes:
+                        normalized_events.append(value)
+                        normalized_bytes += size
                     else:
-                        value = event.model_dump(mode="json")
-                        size = len(json.dumps(value, ensure_ascii=False).encode())
-                        if normalized_bytes + size <= capture.max_bytes:
-                            normalized_events.append(value)
-                            normalized_bytes += size
-                        else:
-                            normalized_dropped += 1
+                        normalized_dropped += 1
                 if (
                     first_token_at is None
                     and event.kind
@@ -312,7 +285,6 @@ class RecordingModelProvider:
                         request=request,
                         response=event.response,
                     )
-                    remember_stream_summary()
                     _end_model_span(
                         span, started_at, first_token_at, response=event.response
                     )
@@ -347,7 +319,6 @@ class RecordingModelProvider:
                 request=request,
                 error=exc,
             )
-            remember_stream_summary()
             _end_model_span(span, started_at, first_token_at, error=exc)
             self._log(
                 "model.request.failed",
@@ -363,8 +334,7 @@ class RecordingModelProvider:
             if capture is not None:
                 await self._diagnose(
                     "record_model_stream", session_id=session_id, request=request,
-                    **({"trace_context":capture_context} if chunked else {}),
-                    evidence={**({"chunk_format":"chunks/v1", "normalized_event_count":normalized_count} if chunked else {}),
+                    evidence={
                               "wire_events": capture.events, "wire_event_count": capture.observed,
                               "dropped_wire_events": capture.dropped,
                               "wire_capture_available": bool(capture.observed),
@@ -398,7 +368,6 @@ class RecordingModelProvider:
                             },
                         )
                     finally:
-                        remember_stream_summary()
                         _end_model_span(span, started_at, first_token_at, error=closed)
 
 
@@ -420,7 +389,7 @@ def _end_model_span(
     if response is not None:
         attributes.update(
             {
-                "output": {"diagnostic_request_id":span.span.request_id} if span.span.attributes.get("sage.diagnostic.chunk_format") else trace_content(
+                "output": trace_content(
                     span.sink,
                     {"text": response.text, "tool_calls": response.tool_calls},
                 ),

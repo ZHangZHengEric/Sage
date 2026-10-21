@@ -23,7 +23,6 @@ class ExternalDiagnostics(ExternalEvidenceSink):
         self._timings = PerformanceCapture(
             service=self.service,
             environment=self.environment,
-            raw_capture=self.raw_capture,
             on_failure=self._capture_failed,
             max_entries=performance_max_entries,
             max_rows=performance_max_rows,
@@ -40,9 +39,6 @@ class ExternalDiagnostics(ExternalEvidenceSink):
         setter = getattr(sink, "set_span_observer", None)
         if callable(setter):
             setter(self._timings)
-
-    def _raw_record_admitted(self, kind, session_id, run_id, accepted):
-        self._timings.raw_record_admitted(kind, session_id, run_id, accepted)
 
     async def close(self):
         self.closed = True
@@ -119,5 +115,4 @@ class ExternalDiagnostics(ExternalEvidenceSink):
 
     def write(self, record):
         self._timings.begin_log(record)
-        super().write(record)
         self._timings.write(record)

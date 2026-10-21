@@ -1,14 +1,10 @@
 
-from opentelemetry.util.types import AttributeValue
 
 from typing import TYPE_CHECKING, cast
 
 if TYPE_CHECKING:
-    from opentelemetry.trace import SpanContext
-    from sagents.v2.runtime.observability.contracts import LogLevel
     from typing import Iterable, Mapping, Sequence
 
-from sagents.v2.model.provider import ModelProvider
 import json
 
 import pytest
@@ -17,14 +13,6 @@ from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanE
 from sagents.v2.model.wire_diagnostics import WireCapture
 from sagents.v2.runtime.observability.contracts import TraceEvent, TraceSpan
 from sagents.v2.runtime.observability.plugins.phoenix import PhoenixTraceSink
-
-
-def diagnostic_payloads(spans):
-    from sagents.v2.runtime.observability.evidence.raw import reconstruct
-    records, gaps = reconstruct([{'name':span.name, 'start_time':span.start_time / 1e9,
-                                  'attributes':dict(span.attributes)} for span in spans])
-    assert not gaps
-    return [json.loads(attrs['sage.diagnostic.data']) for _, attrs in records]
 
 
 def test_raw_phoenix_preserves_content_and_events(monkeypatch):
@@ -61,94 +49,6 @@ def test_unbounded_wire_capture_preserves_large_event():
     capture.append(payload)
     assert capture.events == [payload]
     assert capture.dropped == 0
-
-
-@pytest.mark.asyncio
-async def test_phoenix_external_diagnostics_preserve_raw_records():
-    from sagents.v2.runtime.observability.plugins.external.diagnostics import ExternalDiagnostics
-    from sagents.v2.runtime.observability.contracts import LogRecord
-    from tests.sagents.v2.test_trace_exporters import request
-
-    exporter = InMemorySpanExporter()
-    trace = PhoenixTraceSink(endpoint='http://localhost:6006/v1/traces',
-                             content_mode='raw', exporter=exporter)
-    diagnostics = ExternalDiagnostics(capture_mode="raw", backend='phoenix', query_url='http://localhost:6006')
-    diagnostics.trace_sink = trace
-    model_request = request()
-    wire = {'messages': [{'content': '原始请求' * 10000}], 'password': 'keep'}
-    stream = {'wire_events': [{'delta': '原始流' * 10000}], 'normalized_events': []}
-    await diagnostics.begin_model_request(session_id='s', request=model_request,
-                                           provider={}, wire_request=wire)
-    await diagnostics.record_model_stream(session_id='s', request=model_request, evidence=stream)
-    diagnostics.write(LogRecord(level=cast('LogLevel', 'info'), component='test', event='custom.event', message='raw log',
-                                session_id='s', run_id=model_request.run_id,
-                                attributes={'password': 'keep'}))
-    await diagnostics.close()
-    evidence = diagnostic_payloads(exporter.get_finished_spans())
-    assert any(row.get('request') == wire for row in evidence)
-    assert any(row.get('stream') == stream for row in evidence)
-    assert any(row.get('message') == 'raw log' and row['attributes']['password'] == 'keep'
-               for row in evidence)
-    trace.close()
-
-
-@pytest.mark.asyncio
-async def test_recording_roundtrip_preserves_large_wire_and_normalized_events(monkeypatch):
-    from sagents.v2.runtime.observability.plugins.external.diagnostics import ExternalDiagnostics
-    from sagents.v2.model import RecordingModelProvider
-    from sagents.v2.model.contracts import ModelEventKind, ModelResponse, ModelStreamEvent
-    from sagents.v2.model.wire_diagnostics import record_wire_event
-    from sagents.v2.testing.plugins.scripted_model import ScriptedModelProvider
-    from tests.sagents.v2.test_trace_exporters import request
-
-    body = 'original-secret-' + 'x' * (8 * 1024 * 1024)
-    exporter = InMemorySpanExporter()
-    trace = PhoenixTraceSink(endpoint='http://localhost:6006/v1/traces',
-                             content_mode='raw', exporter=exporter)
-    diagnostics = ExternalDiagnostics(capture_mode="raw", backend='phoenix', query_url='http://localhost:6006',
-                                      raw_max_bytes=128 * 1024 * 1024)
-    diagnostics.trace_sink = trace
-
-    class Provider(ScriptedModelProvider):
-        def diagnostic_request(self, request):
-            return {'model': 'test', 'password': 'keep', 'messages': body}
-
-        async def _stream(self, request):
-            record_wire_event({'delta': body})
-            yield ModelStreamEvent(kind=ModelEventKind.TEXT_DELTA, delta=body)
-            yield ModelStreamEvent(kind=ModelEventKind.COMPLETED,
-                                   response=ModelResponse(response_id='response', finish_reason='stop', text=body))
-
-    async def session(_):
-        return 's'
-
-    model = RecordingModelProvider(cast(ModelProvider, Provider(())), sink=diagnostics,
-                                   trace_sink=trace, session_id_resolver=session)
-    async for _ in model.stream(request()):
-        pass
-    await diagnostics.close()
-    spans = list(exporter.get_finished_spans())
-    assert diagnostics.capture_failures == 0
-    evidence = diagnostic_payloads(spans)
-    assert any(row.get('response', {}).get('text') == body for row in evidence)
-    assert any(row.get('request', {}).get('messages') == body for row in evidence)
-    assert any(row.get('event', {}).get('delta') == body for row in evidence)
-
-    async def query(client, **kwargs):
-        return [{'name': s.name, 'start_time': cast('int', s.start_time) / 1e9,
-                 'attributes': dict(cast('Mapping[str, AttributeValue]', s.attributes)),
-                 'events': [{'name': e.name, 'timestamp': e.timestamp / 1e9, 'attributes': dict(cast('Mapping[str, AttributeValue]', e.attributes))} for e in s.events]} for s in spans], False
-
-    monkeypatch.setattr(diagnostics, '_query', query)
-    result = await diagnostics.snapshot('s', {'run_1'})
-    assert result['raw_model_streams_available']
-    assert result['models'][0]['response']['text'] == body
-    assert result['models'][0]['stream']['wire_events'] == [{'delta': body}]
-    assert result['models'][0]['stream']['normalized_events'][0]['delta'] == body
-    assert result['models'][0]['stream']['dropped_wire_events'] == result['models'][0]['stream']['dropped_normalized_events'] == 0
-    assert result['models'][0]['raw_capture_complete']
-    assert not result['models'][0]['truncated']
-    trace.close()
 
 
 @pytest.mark.asyncio
@@ -219,7 +119,6 @@ async def test_redacted_performance_summary_keeps_timing_json_beyond_content_lim
     diagnostics.trace_sink = trace
     try:
         capture_sample(diagnostics)
-        await diagnostics.flush_raw()
         spans = [span for span in exporter.get_finished_spans() if span.name == 'agent.run']
         assert len(spans) == 1
         payload = ''.join(cast('Iterable[str]', cast('Mapping[str, str | bool | int | float | Sequence[str] | Sequence[bool] | Sequence[int] | Sequence[float]]', spans[0].attributes)['sage.performance.data']))
@@ -230,31 +129,3 @@ async def test_redacted_performance_summary_keeps_timing_json_beyond_content_lim
     finally:
         await diagnostics.close()
         trace.close()
-
-
-@pytest.mark.asyncio
-async def test_raw_events_follow_the_active_managed_application_exporter():
-    from sagents.v2.runtime.observability.plugins.external.diagnostics import ExternalDiagnostics
-    from sagents.v2.runtime.observability.traces import StructuredTracer, current_trace_sink
-    from tests.sagents.v2.test_trace_exporters import request
-    host_exporter, managed_exporter = InMemorySpanExporter(), InMemorySpanExporter()
-    host = PhoenixTraceSink(endpoint='http://localhost:6006/v1/traces', content_mode='raw', exporter=host_exporter)
-    managed = PhoenixTraceSink(endpoint='http://localhost:6006/v1/traces', content_mode='raw', exporter=managed_exporter)
-    diagnostics = ExternalDiagnostics(capture_mode="raw", backend='phoenix', query_url='http://phoenix')
-    diagnostics.trace_sink = host
-    span = StructuredTracer(managed, 'test').start_span('model.request', session_id='s', run_id='run_1')
-    assert current_trace_sink() is managed
-    await diagnostics.begin_model_request(session_id='s', request=request(), provider={},
-                                         wire_request={'password':'keep', 'messages':'原始请求'})
-    span.end()
-    assert current_trace_sink() is None
-    await diagnostics.close()
-    payloads = diagnostic_payloads(managed_exporter.get_finished_spans())
-    assert payloads[0]['request']['password'] == 'keep'
-    managed_spans = managed_exporter.get_finished_spans()
-    model = next(row for row in managed_spans if row.name == 'model.request')
-    chunks = [row for row in managed_spans if row.name.startswith('sage.diagnostic.')]
-    assert chunks and all(cast('SpanContext', row.context).trace_id == cast('SpanContext', model.context).trace_id and cast('SpanContext', row.parent).span_id == cast('SpanContext', model.context).span_id for row in chunks)
-    assert not host_exporter.get_finished_spans()
-    host.close()
-    managed.close()

@@ -17,7 +17,7 @@ def register_observability_plugins(registry):
     common = {
         name for name in ObservabilityConfig.model_fields if name.startswith("log_")
     }
-    common |= {"diagnostic_content_mode", "raw_max_bytes"}
+    common |= {"diagnostic_content_mode"}
     trace = {
         "service_name",
         "environment",
@@ -65,6 +65,12 @@ def register_observability_plugins(registry):
         schema["properties"] = {
             key: value for key, value in schema["properties"].items() if key in fields
         }
+        if backend != "noop":
+            # Validate saved queue limits without advertising a queue setting in
+            # the editor. The provider discards it when saving a new snapshot.
+            schema["patternProperties"] = {
+                "^raw_max_bytes$": {"type": "integer", "minimum": 4096}
+            }
         if backend == "phoenix":
             schema["properties"]["endpoint"]["default"] = (
                 "http://127.0.0.1:6006/v1/traces"

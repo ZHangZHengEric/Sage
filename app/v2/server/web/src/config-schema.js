@@ -2,7 +2,7 @@ export const labels = {
   log_stream: '日志输出位置', log_stdout: '控制台日志', log_root: '日志目录', log_filename: '日志文件名', log_level: '日志级别', log_format: '日志格式',
   log_max_bytes: '日志文件大小上限（字节）', log_backup_count: '保留日志文件数',
   diagnostics_root: '模型诊断目录', diagnostics_storage: '本地诊断存储', diagnostic_content_mode: '诊断内容模式',
-  raw_max_bytes: '原始诊断队列上限（字节）', content_mode: '调用链内容模式', sample_rate: '调用链采样比例',
+  content_mode: '调用链内容模式', sample_rate: '调用链采样比例',
   query_url: '证据查询地址', query_backend: '证据查询后端', query_headers_env: '查询请求头环境变量',
   endpoint: '导出地址', service_name: '服务名', project_name: '项目名', environment: '环境',
   public_key_env: '公钥环境变量', secret_key_env: '私钥环境变量', api_key_env: 'API Key 环境变量',

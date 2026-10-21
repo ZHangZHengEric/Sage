@@ -39,7 +39,9 @@ class ObservabilityConfig(StrictModel):
     diagnostics_root: str | None = None
     diagnostics_storage: Literal["files", "sqlite", "none"] = "files"
     diagnostic_content_mode: Literal["off", "redacted", "raw"] = "redacted"
-    raw_max_bytes: int = Field(default=16 * 1024 * 1024, ge=4096)
+    # Accept previously saved plugin options, but never allocate a raw queue or
+    # write this retired option back into new configuration snapshots.
+    raw_max_bytes: int = Field(default=16 * 1024 * 1024, ge=4096, exclude=True)
     endpoint: str = "http://127.0.0.1:4317"
     base_url: str = ""
     service_name: str = "sage"
@@ -72,7 +74,6 @@ class ObservabilityProvider:
         outputs=(),
         traces=None,
         diagnostics=None,
-        capture_traces=None,
         config=None,
         performance_query: PerformanceQuery | None = None,
         trace_query: TraceQuery | None = None,
@@ -82,7 +83,6 @@ class ObservabilityProvider:
         self._performance_query = performance_query
         self.trace_query = trace_query
         self._model_history = model_history
-        self._capture_traces = capture_traces
         self.config = ObservabilityConfig.model_validate(config or {}).model_dump(
             mode="json"
         )
@@ -169,7 +169,6 @@ class ObservabilityProvider:
         # Evidence flush can enrich/export spans; the exporter must still be live.
         for resource in (
             self.diagnostics,
-            self._capture_traces,
             self.traces,
             self.logs,
         ):
@@ -193,7 +192,7 @@ def create_observability_provider(plugin_id: str, config=None) -> ObservabilityP
     backend = plugin_id.removeprefix("sage.observability.")
     if backend not in {"local", "otlp", "langfuse", "phoenix"}:
         raise ValueError(f"unknown observability provider: {plugin_id}")
-    traces, evidence, capture_traces, outputs = None, None, None, []
+    traces, evidence, outputs = None, None, []
     performance_query, trace_query, model_history = None, None, None
     try:
         if options.log_stdout:
@@ -217,15 +216,6 @@ def create_observability_provider(plugin_id: str, config=None) -> ObservabilityP
             )
         if backend != "local":
             traces = _trace_backend(backend, options)
-            if options.diagnostic_content_mode == "raw" and (
-                backend == "phoenix" or options.query_backend == "jaeger"
-            ):
-                capture_traces = _trace_backend(
-                    backend,
-                    options.model_copy(
-                        update={"sample_rate": 1.0, "content_mode": "raw"}
-                    ),
-                )
             evidence = _external_evidence(backend, options)
             if not isinstance(evidence, UnqueryableDiagnostics):
                 if evidence.available:
@@ -234,8 +224,6 @@ def create_observability_provider(plugin_id: str, config=None) -> ObservabilityP
                         from .plugins.external.phoenix import PhoenixTraceQuery
 
                         trace_query = PhoenixTraceQuery(evidence)
-                if capture_traces is not None:
-                    evidence.capture_sink = capture_traces
         elif (
             options.diagnostics_root
             and options.diagnostics_storage != "none"
@@ -261,14 +249,13 @@ def create_observability_provider(plugin_id: str, config=None) -> ObservabilityP
             outputs=outputs,
             traces=traces,
             diagnostics=evidence,
-            capture_traces=capture_traces,
             config=config,
             performance_query=performance_query,
             trace_query=trace_query,
             model_history=model_history,
         )
     except BaseException:
-        for resource in (capture_traces, traces, *outputs):
+        for resource in (traces, *outputs):
             if resource is not None:
                 resource.close()
         raise
@@ -344,7 +331,6 @@ def _external_evidence(backend, options):
         service=options.service_name,
         environment=options.environment,
         headers=headers,
-        raw_max_bytes=options.raw_max_bytes,
         capture_mode=options.diagnostic_content_mode,
     )
     return evidence
