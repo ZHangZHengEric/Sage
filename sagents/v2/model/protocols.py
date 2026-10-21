@@ -82,6 +82,7 @@ _DESCRIPTORS = (
             "chat-completions",
             "completions",
             "orcarouter",
+            "cheaperinference",
         ),
         capabilities=("streaming", "tools", "structured-output", "multimodal"),
     ),
@@ -158,6 +159,8 @@ def model_protocol_default_base_url(provider_id: str) -> str:
     """Return the default endpoint for a protocol id or provider alias."""
     if provider_id.strip().lower() == "orcarouter":
         return "https://api.orcarouter.ai/v1"
+    if provider_id.strip().lower() == "cheaperinference":
+        return "https://api.cheaperinference.com/v1"
     return model_protocol_descriptor(provider_id).default_base_url
 
 

@@ -51,6 +51,25 @@ models:
 省略 `base_url` 时，路由使用同一 OrcaRouter 地址。该预设支持现有聊天协议，
 不新增图像或视频生成 API。
 
+## Cheaper Inference 模型
+
+`cheaperinference` 是可选的 provider 预设，复用现有 OpenAI-compatible Chat Completions
+实现。在 Server 模型表单中选择 `cheaperinference`，填写模型 ID（例如 `gpt-5.4-mini`）和 API Key。
+默认地址为 `https://api.cheaperinference.com/v1`，手动设置的自定义 Base URL 会保留。
+
+嵌入式 manifest 可添加以下模型路由，并在完整 manifest 中配置引用的凭据：
+
+```yaml
+models:
+  primary:
+    provider: cheaperinference
+    model: gpt-5.4-mini
+    credential: cheaperinference_key
+```
+
+省略 `base_url` 时，路由使用同一 Cheaper Inference 地址。该预设支持现有聊天协议，
+不新增图像或视频生成 API。
+
 ## 选择运行组件
 
 通过 `runtime.capabilities` 绑定实现。例如，为延迟加载 Skill 的组件设置 token 预算：
