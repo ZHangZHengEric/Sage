@@ -9,17 +9,13 @@ if TYPE_CHECKING:
     from opentelemetry.trace import SpanContext
     from sagents.v2.contracts.principals import PrincipalType
     from sagents.v2.model.provider import ModelProvider
-    from sagents.v2.runtime.observability.contracts import LogLevel
-    from typing import Iterable, Mapping, Sequence
+    from typing import Mapping, Sequence
 
 import asyncio
 import gzip
 import json
-import threading
 import tracemalloc
-from io import BytesIO
 from uuid import uuid4
-from zipfile import ZipFile
 
 import httpx
 import pytest
@@ -28,14 +24,12 @@ from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanE
 
 from app.v2.server.main import create_app
 from sagents.v2.runtime.observability.plugins.external.diagnostics import ExternalDiagnostics
-from app.v2.server.storage.downloads import prepare_session_export
 from sagents.v2.model.contracts import ModelMessage, ModelRequest, ModelResponse
 from sagents.v2.contracts.items import TextBlock
-from sagents.v2.runtime.observability.contracts import TraceSpan, LogRecord
+from sagents.v2.runtime.observability.contracts import TraceSpan
 from sagents.v2.runtime.observability.plugins.external.evidence import ExternalEvidenceSink
 from sagents.v2.runtime.observability.plugins.phoenix import PhoenixTraceSink
 from sagents.v2.runtime.observability.plugins._shared.query import query_budget
-from sagents.v2.runtime.observability.evidence.raw import reconstruct
 from sagents.v2.runtime.observability.traces import StructuredTracer
 from tests.app.v2.server.conftest import make_test_service, register_and_login
 from tests.app.v2.server.test_agui_chat import _run_input
@@ -140,13 +134,13 @@ async def test_dropped_root_spans_do_not_retain_finished_performance_rows():
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize('mode', ['raw', 'metadata', 'redacted'])
-async def test_request_preflight_precedes_dump_and_keeps_rejected_input_memory_bounded(mode):
+async def test_external_timing_does_not_serialize_or_retain_model_input(mode):
     class Request(ModelRequest):
         def model_dump(self, **options):
             raise AssertionError('request serializer ran before admission')
     request = Request(request_id='request', run_id='run', model_binding='main', messages=tuple(
         ModelMessage(role='user', content=(TextBlock(text='history'),)) for _ in range(20_000)))
-    source = ExternalEvidenceSink(capture_mode=mode, backend='phoenix', query_url='http://unused', raw_max_bytes=4096)
+    source = ExternalEvidenceSink(capture_mode=mode, backend='phoenix', query_url='http://unused')
     setattr(source, 'trace_sink', type('Trace', (), {'content_mode':mode})())
     try:
         tracemalloc.start()
@@ -154,43 +148,11 @@ async def test_request_preflight_precedes_dump_and_keeps_rejected_input_memory_b
         _, peak = tracemalloc.get_traced_memory()
         tracemalloc.stop()
         assert peak < 256 * 1024
-        assert source.raw_statistics()['dropped_records'] == (1 if mode == 'raw' else 0)
+        assert source.raw_capture is False
     finally:
         if tracemalloc.is_tracing():
             tracemalloc.stop()
         await source.close()
-
-
-@pytest.mark.asyncio
-async def test_response_and_log_preserve_json_fields_without_pre_admission_serializers():
-    class Response(ModelResponse):
-        def model_dump(self, **options):
-            raise AssertionError('response serializer ran before admission')
-    class Record(LogRecord):
-        def model_dump(self, **options):
-            raise AssertionError('log serializer ran before admission')
-    exporter = InMemorySpanExporter()
-    trace = PhoenixTraceSink(endpoint='http://unused/v1/traces', exporter=exporter, content_mode='raw')
-    source = ExternalDiagnostics(capture_mode="raw", backend='phoenix', query_url='http://unused')
-    source.bind_trace_sink(trace)
-    request = ModelRequest(request_id='q', run_id='r', model_binding='main', messages=())
-    response = Response(response_id='response', finish_reason='stop', text='original\0中')
-    record = Record(level=cast('LogLevel', 'info'), component='review', event='custom.event', message='original log', session_id='s', run_id='r')
-    try:
-        await source.complete_model_request(session_id='s', request=request, response=response)
-        source.write(record)
-        assert await source.flush_raw()
-        rows = [{'name':span.name, 'start_time':cast('int', span.start_time)/1e9, 'attributes':dict(cast('Mapping[str, AttributeValue]', span.attributes))} for span in exporter.get_finished_spans()]
-        records, gaps = reconstruct(rows)
-        assert not gaps
-        payloads = [json.loads(attrs['sage.diagnostic.data']) for _, attrs in records]
-        assert next(row['response']['text'] for row in payloads if 'response' in row) == response.text
-        log = next(row for row in payloads if row.get('event') == 'custom.event')
-        assert log['timestamp'] == record.timestamp.isoformat().replace('+00:00', 'Z')
-        assert log['message'] == record.message and log['session_id'] == 's'
-    finally:
-        await source.close()
-        trace.close()
 
 
 @pytest.mark.asyncio
@@ -218,39 +180,6 @@ async def test_compressed_query_is_rejected_before_body_decompression():
     finally:
         if tracemalloc.is_tracing():
             tracemalloc.stop()
-        await source.close()
-
-
-@pytest.mark.asyncio
-async def test_raw_flush_timeout_reaches_download_manifest_and_partial_availability(monkeypatch):
-    entered, release = threading.Event(), threading.Event()
-    class BlockedSink:
-        content_mode = 'raw'
-        def start_span(self, span):
-            entered.set()
-            release.wait(5)
-        def end_span(self, span):
-            pass
-    source = ExternalEvidenceSink(capture_mode="raw", backend='phoenix', query_url='http://unused')
-    setattr(source, 'trace_sink', BlockedSink())
-    original_flush = source._raw_pipeline.flush
-    monkeypatch.setattr(source._raw_pipeline, 'flush', lambda timeout=5: original_flush(cast('int', .01)))
-    async def query(client, **options):
-        return [], False
-    monkeypatch.setattr(source, '_query', query)
-    try:
-        assert source._evidence('log', session_id='s', run_id='r', event='pending')
-        assert await asyncio.to_thread(entered.wait, 1)
-        evidence = await source.snapshot('s', {'r'})
-        assert evidence['raw_capture_statistics']['retained_bytes'] > 0
-        output, _ = prepare_session_export('s', {'r'}, evidence)
-        with output, ZipFile(BytesIO(output.read())) as archive:
-            manifest = json.loads(archive.read('s/manifest.json'))
-        assert evidence['pending_writes'] is True
-        assert manifest['diagnostic_writes_pending'] is True
-        assert evidence['logs_complete'] is False
-    finally:
-        release.set()
         await source.close()
 
 
@@ -359,7 +288,7 @@ async def test_query_identity_response_still_works_for_phoenix_and_jaeger():
 
 
 @pytest.mark.asyncio
-async def test_queued_transport_bytes_are_pending_even_after_raw_worker_drains(monkeypatch):
+async def test_queued_native_transport_bytes_are_pending(monkeypatch):
     source = ExternalEvidenceSink(backend='phoenix', query_url='http://unused')
     setattr(source, 'trace_sink', type('Trace', (), {'content_mode':'raw', 'statistics': lambda _: {'retained_bytes':128}})())
     async def query(client, **options):
@@ -367,8 +296,6 @@ async def test_queued_transport_bytes_are_pending_even_after_raw_worker_drains(m
     monkeypatch.setattr(source, '_query', query)
     try:
         result = await source.snapshot('s', {'r'})
-        assert result['raw_flush_completed'] is True
-        assert result['raw_capture_statistics']['retained_bytes'] == 0
         assert result['pending_writes'] is True
         assert result['trace_export_statistics']['retained_bytes'] == 128
     finally:

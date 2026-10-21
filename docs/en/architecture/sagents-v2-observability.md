@@ -11,7 +11,7 @@ ref: v2-detail-sagents-v2-observability
 
 # SAgents V2 Model Observability, Langfuse and Phoenix
 
-The only observation selection is `observability.provider`. Its provider owns log outputs, spans, model diagnostics, supported evidence queries and shutdown. Select `sage.observability.local`, `sage.observability.noop`, `sage.observability.otlp`, `sage.observability.langfuse` or `sage.observability.phoenix`. Previous separate observation capability selections are rejected without compatibility. Log severity, trace sampling/content and diagnostic content are independently configured; raw evidence uses a separate unsampled transport. Existing isolated observation storage is reused; no business audit tables are added.
+The only observation selection is `observability.provider`. Its provider owns log outputs, spans, model diagnostics, supported evidence queries and shutdown. Select `sage.observability.local`, `sage.observability.noop`, `sage.observability.otlp`, `sage.observability.langfuse` or `sage.observability.phoenix`. Previous separate observation capability selections are rejected without compatibility. Log severity, trace sampling/content and local diagnostic content are independently configured. External observations export native Agent, model and tool spans, with model input/output on the model span. Per-log and per-delta diagnostic chunk/record spans and their separate unsampled transport have been removed. Downloads project native spans; new raw token streams and log copies are not captured. Existing isolated observation storage is reused; no business audit tables are added.
 
 ## Responsibilities
 

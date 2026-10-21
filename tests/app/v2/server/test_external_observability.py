@@ -7,7 +7,7 @@ if TYPE_CHECKING:
     from anyio.from_thread import BlockingPortal
     from opentelemetry.trace import SpanContext
     from sagents.v2.runtime.observability.contracts import TraceSink
-    from typing import Iterable, Mapping, Sequence
+    from typing import Mapping, Sequence
 
 from sagents.v2.package.manifest.runtime import CapabilitySelection
 
@@ -377,7 +377,6 @@ def test_real_run_exports_remote_performance_and_download_without_local_capture(
                     await asyncio.sleep(0.01)
 
         cast('BlockingPortal', client.portal).call(settle)
-        cast('BlockingPortal', client.portal).call(cast('Any', host.diagnostics).flush_raw)
         spans = exporter.get_finished_spans()
         assert any(s.name == "model.request" for s in spans)
         summaries = [s for s in spans if s.name == "agent.run" and "sage.performance.data" in cast('dict[str, Any]', s.attributes)]
@@ -422,7 +421,7 @@ def test_real_run_exports_remote_performance_and_download_without_local_capture(
             if content_mode == "raw":
                 models = json.loads(archive.read("thread-1/models.json"))
                 assert models and any(row.get("response", {}).get("text") == "hello" for row in models)
-                assert any("normalized_events" in row.get("stream", {}) for row in models)
+                assert all("stream" not in row for row in models)
         assert not (host.paths.runtime_root / "diagnostics").exists()
         assert (
             client.get("/api/threads/thread-1/download", headers=user).status_code
@@ -630,7 +629,6 @@ async def test_agent_export_waits_for_host_cleanup_and_preserves_native_duration
         native_end = source._timings._performance[("s", "r")]["ended_span"].end_time
         assert not any(s.name == "agent.run" for s in exporter.get_finished_spans())
         log("server.run.performance.finished", 10, run_state="completed")
-        await source.flush_raw()
         spans = exporter.get_finished_spans()
         exported = next(s for s in spans if s.name == "agent.run")
         assert sum(s.name == "agent.run" for s in spans) == 1
@@ -639,11 +637,7 @@ async def test_agent_export_waits_for_host_cleanup_and_preserves_native_duration
         assert exported.end_time == int(native_end.timestamp() * 1e9)
         assert exported.status.status_code.name == "OK"
         assert cast('Mapping[str, str | bool | int | float | Sequence[str] | Sequence[bool] | Sequence[int] | Sequence[float]]', exported.attributes)["sage.performance.total_ms"] == 10000
-        from sagents.v2.runtime.observability.evidence.raw import reconstruct
-        records, gaps = reconstruct([{"name":s.name, "attributes":dict(cast('Mapping[str, AttributeValue]', s.attributes)), "start_time":cast('int', s.start_time) / 1e9} for s in spans])
-        assert not gaps
-        logs = [json.loads(attrs["sage.diagnostic.data"]) for _, attrs in records if attrs["sage.diagnostic.kind"] == "log"]
-        assert any(row["event"] == "server.run.performance.finished" for row in logs)
+        assert not any(s.name.startswith("sage.diagnostic.") for s in spans)
     finally:
         await source.close()
         trace.close()

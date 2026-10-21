@@ -18,6 +18,33 @@ from tests.app.v2.server.conftest import make_test_service
 
 
 @pytest.mark.asyncio
+async def test_historical_diagnostic_spans_are_hidden_without_losing_pagination():
+    source = ExternalDiagnostics(backend="phoenix", query_url="http://phoenix")
+    def handle(request):
+        if request.url.path == "/v1/projects/sage":
+            return httpx.Response(200, json={"data": {"id": "project"}})
+        body = json.loads(request.content)
+        assert body["variables"]["trace"] == "b" * 32
+        rows = [dict(span_id=str(i) * 16, name=name, span_kind=kind,
+                     status_code="OK", start_time="2026-10-20T00:00:00Z",
+                     trace={"trace_id": "b" * 32, "num_spans": 4, "error_count": 0})
+                for i, (name, kind) in enumerate([
+                    ("agent.run", "AGENT"), ("sage.diagnostic.chunk", "CHAIN"),
+                    ("sage.diagnostic.record", "CHAIN"), ("model.request", "LLM")], 1)]
+        return httpx.Response(200, json={"data": {"node": {"trace": {"spans": {
+            "edges": [{"node": row} for row in rows],
+            "pageInfo": {"hasNextPage": True, "endCursor": "next-page"},
+        }}}}})
+    try:
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handle)) as client:
+            page = await PhoenixTraceQuery(source).spans(trace_id="b" * 32, client=client)
+        assert [span["name"] for span in page["items"]] == ["agent.run", "model.request"]
+        assert page["next_cursor"] == "next-page"
+    finally:
+        await source.close()
+
+
+@pytest.mark.asyncio
 async def test_dashboard_aggregates_without_fetching_model_payloads():
     source = ExternalDiagnostics(backend='phoenix', query_url='http://phoenix',
                                  headers={'Authorization': 'secret'})

@@ -17,7 +17,7 @@ ref: v2-detail-sagents-v2-observability
 
 可选插件为 `sage.observability.local`、`sage.observability.noop`、`sage.observability.otlp`、`sage.observability.langfuse` 和 `sage.observability.phoenix`。本地插件支持控制台/轮转文件日志与文件或独立 SQLite 诊断；SQLite 使用原有观测存储，不扩展业务数据库。外部插件封装导出和受支持的证据查询，不支持的查询明确标记不可用。
 
-`log_level` 控制输出日志；`sample_rate` 和 `content_mode` 控制普通调用链；`diagnostic_content_mode` 独立控制诊断内容。外部原始诊断使用单独的采集传输，避免被普通 Trace 采样丢弃。关闭时先刷新诊断，再关闭导出器。观测写入失败不改变 Run 执行结果，查询仍需宿主先校验 Session 和 Run 归属。
+`log_level` 控制输出日志；`sample_rate` 和 `content_mode` 控制普通调用链；`diagnostic_content_mode` 控制本地诊断内容。外部观测只导出原生 Agent、模型和工具 span，模型输入输出直接保存在模型节点；不再生成逐条日志、流事件的 `sage.diagnostic.chunk/record`，也不再创建独立的未采样诊断传输。外部下载从这些原生 span 投影内容，不提供新的逐 token 原始流和日志副本。关闭时先刷新诊断，再关闭导出器。观测写入失败不改变 Run 执行结果，查询仍需宿主先校验 Session 和 Run 归属。
 
 ```yaml
 capabilities:

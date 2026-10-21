@@ -49,7 +49,6 @@ class PerformanceCapture:
         *,
         service,
         environment,
-        raw_capture,
         on_failure: Callable[[], None],
         max_entries=1024,
         max_rows=4096,
@@ -58,7 +57,7 @@ class PerformanceCapture:
         if min(max_entries, max_rows, idle_seconds) <= 0:
             raise ValueError("invalid performance retention limits")
         self.service, self.environment = service, environment
-        self.raw_capture, self._on_failure = raw_capture, on_failure
+        self._on_failure = on_failure
         self.closed = False
         self._performance = OrderedDict()
         self._performance_max_entries = max_entries
@@ -89,8 +88,6 @@ class PerformanceCapture:
                 "ended_span": None,
                 "host_managed": False,
                 "finished_requested": False,
-                "raw_logs": 0,
-                "raw_logs_dropped": 0,
                 "dropped_rows": 0,
             }
         pending["last_seen"] = now
@@ -143,15 +140,6 @@ class PerformanceCapture:
             pending["sink"].export_span(
                 ended.model_copy(update={"attributes": {**ended.attributes, **loss}})
             )
-
-    def raw_record_admitted(self, kind, session_id, run_id, accepted):
-        if kind == "log":
-            with self._performance_lock:
-                pending = self._performance.get((session_id, run_id))
-                if pending is None:
-                    return
-                pending["raw_logs"] += 1
-                pending["raw_logs_dropped"] += not accepted
 
     def span_started(self, sink: TraceExportSink, span: TraceSpan) -> None:
         if (
@@ -266,9 +254,6 @@ class PerformanceCapture:
             "sage.performance.incomplete": incomplete,
             "sage.performance.dropped_rows": pending["dropped_rows"],
         }
-        if self.raw_capture:
-            attrs["sage.diagnostic.log_count"] = pending["raw_logs"]
-            attrs["sage.diagnostic.dropped_log_records"] = pending["raw_logs_dropped"]
         if interrupted:
             attrs["sage.interrupted"] = True
         agent_ids = [

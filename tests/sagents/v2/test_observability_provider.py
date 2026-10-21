@@ -7,7 +7,6 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from sagents.v2.runtime.observability.contracts import LogLevel
-    from sagents.v2.runtime.observability.provider import ObservabilityProvider
     from typing import Any
 
 import json
@@ -55,6 +54,16 @@ def test_inventory_only_offers_unified_observation_plugins():
     )
 
 
+def test_saved_queue_option_is_accepted_but_not_offered_in_the_editor():
+    from jsonschema import Draft202012Validator
+
+    descriptor = builtin_extension_registry().get("sage.observability.phoenix").descriptor
+    assert "raw_max_bytes" not in descriptor.config_schema["properties"]
+    Draft202012Validator(descriptor.config_schema).validate({
+        "endpoint": "http://phoenix/v1/traces", "raw_max_bytes": 4096,
+    })
+
+
 @pytest.mark.asyncio
 async def test_provider_keeps_process_logs_without_trace_and_owns_shutdown(
     tmp_path, capsys
@@ -88,7 +97,7 @@ async def test_provider_keeps_process_logs_without_trace_and_owns_shutdown(
 
 
 @pytest.mark.asyncio
-async def test_raw_evidence_is_independent_of_trace_sampling_and_content(monkeypatch):
+async def test_external_diagnostics_do_not_create_a_separate_unsampled_exporter(monkeypatch):
     from sagents.v2.runtime.observability import provider as module
 
     transports = []
@@ -119,6 +128,7 @@ async def test_raw_evidence_is_independent_of_trace_sampling_and_content(monkeyp
             "sample_rate": 0,
             "content_mode": "metadata",
             "diagnostic_content_mode": "raw",
+            "raw_max_bytes": 4096,
             "log_stdout": False,
         },
     )
@@ -132,13 +142,13 @@ async def test_raw_evidence_is_independent_of_trace_sampling_and_content(monkeyp
             run_id="r",
         )
     )
-    await getattr(provider.diagnostics, 'flush_raw')()
     await provider.close()
-    assert len(transports) == 2
+    assert len(transports) == 1
     assert transports[0].options.sample_rate == 0
-    assert transports[1].options.sample_rate == 1
-    assert transports[1].options.content_mode == "raw"
-    assert any(span.name == "sage.diagnostic.record" for span in transports[1].spans)
+    assert transports[0].options.content_mode == "metadata"
+    assert not transports[0].spans
+    assert provider.diagnostics.raw_capture is False
+    assert "raw_max_bytes" not in provider.config
     assert all(value.closed for value in transports)
 
 

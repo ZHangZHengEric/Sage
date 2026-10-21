@@ -239,6 +239,7 @@ class PhoenixTraceQuery:
                     else None,
                 }
                 for e in page.edges
+                if not e.node.name.startswith("sage.diagnostic.")
             ],
             "next_cursor": page.pageInfo.endCursor
             if page.pageInfo.hasNextPage

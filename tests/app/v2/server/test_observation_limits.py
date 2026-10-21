@@ -165,36 +165,3 @@ async def test_close_cancels_shared_queries_and_rejects_new_builds(monkeypatch):
     with pytest.raises(ValueError, match='closed'):
         await source.report(start=BASE, end=BASE+1)
     assert not source._query_cache._pending
-
-
-@pytest.mark.asyncio
-async def test_whole_log_record_loss_is_detected_from_root_after_restart(monkeypatch):
-    from io import BytesIO
-    from zipfile import ZipFile
-    from app.v2.server.storage.downloads import prepare_session_export
-    source = ExternalDiagnostics(capture_mode="raw", backend='phoenix', query_url='http://phoenix')
-    trace = TraceCapture()
-    setattr(trace, 'content_mode', 'raw')
-    setattr(source, 'trace_sink', trace)
-    capture_sample(source)
-    await source.flush_raw()
-    rows = [phoenix_span(span) for span in trace.spans]
-    lost = next(row['attributes']['sage.diagnostic.record_id'] for row in rows
-                if row['attributes'].get('sage.diagnostic.kind') == 'log')
-    rows = [row for row in rows if row['attributes'].get('sage.diagnostic.record_id') != lost]
-    # A fresh reader has no process-local drop counters; the root observation's
-    # content-free log count must still reveal a wholly missing raw record.
-    reader = ExternalDiagnostics(capture_mode="raw", backend='phoenix', query_url='http://phoenix')
-    async def query(client, **options): return rows, False
-    monkeypatch.setattr(reader, '_query', query)
-    try:
-        evidence = await reader.snapshot('s', {'r'})
-        assert evidence['raw_capture_statistics']['dropped_records'] == 0
-        assert evidence['dropped_logs'] == 1 and evidence['logs_complete'] is False
-        output, _ = prepare_session_export('s', {'r'}, evidence)
-        with output, ZipFile(BytesIO(output.read())) as archive:
-            manifest = json.loads(archive.read('s/manifest.json'))
-        assert manifest['evidence_availability']['logs']['status'] == 'partial'
-    finally:
-        await source.close()
-        await reader.close()

@@ -1,12 +1,10 @@
 
-from opentelemetry.util.types import AttributeValue
 
 from typing import Any, TYPE_CHECKING, cast
 
 if TYPE_CHECKING:
-    from opentelemetry.trace import SpanContext
     from sagents.v2.model.contracts import ModelEventKind
-    from typing import Iterable, Mapping, Sequence
+    from typing import Mapping, Sequence
 
 from sagents.v2.model.provider import ModelProvider
 import asyncio
@@ -23,50 +21,33 @@ from sagents.v2.runtime.observability.plugins.phoenix import PhoenixTraceSink
 
 
 @pytest.mark.asyncio
-async def test_long_wire_stream_exports_independent_chunks_before_model_finishes(monkeypatch):
+async def test_long_wire_stream_only_exports_one_native_model_span():
     exporter = InMemorySpanExporter()
     trace = PhoenixTraceSink(endpoint='http://unused/v1/traces', exporter=exporter, content_mode='raw')
-    source = ExternalDiagnostics(capture_mode="raw", backend='phoenix', query_url='http://phoenix')
+    source = ExternalDiagnostics(capture_mode='raw', backend='phoenix', query_url='http://phoenix')
     source.bind_trace_sink(trace)
-    gate = asyncio.Event()
+    gate, streamed = asyncio.Event(), asyncio.Event()
     async def session(_): return 's'
     class Provider:
         async def stream(self, request):
             for i in range(80):
                 record_wire_event({'i': i, 'value': '中' * 2000})
                 yield ModelStreamEvent(kind=cast('ModelEventKind', 'text_delta'), delta=str(i))
+            streamed.set()
             await gate.wait()
             yield ModelStreamEvent(kind=cast('ModelEventKind', 'completed'), response=ModelResponse(response_id='response', text='done', finish_reason='stop'))
     provider = RecordingModelProvider(cast(ModelProvider, Provider()), sink=source, trace_sink=trace, session_id_resolver=session)
     task = asyncio.create_task(_consume(provider, ModelRequest(request_id='request', run_id='r', model_binding='main', messages=())))
     try:
-        async with asyncio.timeout(3):
-            while not any(s.name == 'sage.diagnostic.chunk' for s in exporter.get_finished_spans()):
-                await asyncio.sleep(.01)
+        await asyncio.wait_for(streamed.wait(), 3)
         assert not task.done()
-        assert source.raw_statistics()['retained_bytes'] <= source.raw_statistics()['max_bytes']
+        assert not exporter.get_finished_spans()
         gate.set()
-        await task
-        await source.flush_raw()
+        events = await task
+        assert len(events) == 81
         spans = exporter.get_finished_spans()
-        model = next(s for s in spans if s.name == "model.request")
-        assert all(cast('SpanContext', s.context).trace_id == cast('SpanContext', model.context).trace_id and cast('SpanContext', s.parent).span_id == cast('SpanContext', model.context).span_id
-                   for s in spans if cast('Mapping[str, str | bool | int | float | Sequence[str] | Sequence[bool] | Sequence[int] | Sequence[float]]', s.attributes).get("request_id") == "request" and s.name.startswith("sage.diagnostic."))
-        async def query(client, **options):
-            return [{'name': s.name, 'start_time': cast('int', s.start_time) / 1e9,
-                     'end_time': cast('int', s.end_time) / 1e9, 'attributes': dict(cast('Mapping[str, AttributeValue]', s.attributes)),
-                     'events': [{'name':e.name, 'timestamp':e.timestamp/1e9, 'attributes':dict(cast('Mapping[str, AttributeValue]', e.attributes))} for e in s.events],
-                     'context': {'trace_id':format(cast('SpanContext', s.context).trace_id,'032x'), 'span_id':format(cast('SpanContext', s.context).span_id,'016x')}} for s in spans], False
-        monkeypatch.setattr(source, '_query', query)
-        evidence = await source.snapshot('s', {'r'})
-        row = evidence['models'][0]
-        assert row['stream']['wire_events'] == [{'i': i, 'value': '中' * 2000} for i in range(80)]
-        assert row['stream']['complete'] is True
-        # Losing one exported chunk must never be presented as a complete request.
-        missing = next(s for s in spans if s.name == 'sage.diagnostic.chunk')
-        spans = tuple(s for s in spans if s is not missing)
-        evidence = await source.snapshot('s', {'r'})
-        assert evidence['models'][0]['truncated'] is True
+        assert [s.name for s in spans] == ['model.request']
+        assert json.loads(spans[0].attributes['output.value'])['text'] == 'done'
     finally:
         gate.set()
         await task
@@ -116,60 +97,6 @@ def test_transport_counts_active_queued_and_inflight_bytes():
     assert trace.statistics()['retained_bytes'] == 0
 
 
-@pytest.mark.asyncio
-async def test_blocked_raw_export_drops_explicitly_without_stalling_model(monkeypatch):
-    import threading
-    from sagents.v2.runtime.observability.evidence.raw import RawEvidencePipeline
-    class BlockedExporter(InMemorySpanExporter):
-        def __init__(self):
-            super().__init__()
-            self.entered, self.release = threading.Event(), threading.Event()
-        def export(self, spans):
-            self.entered.set()
-            self.release.wait(5)
-            return super().export(spans)
-    exporter = BlockedExporter()
-    trace = PhoenixTraceSink(endpoint='http://unused/v1/traces', exporter=exporter, content_mode='raw')
-    source = ExternalDiagnostics(capture_mode="raw", backend='phoenix', query_url='http://phoenix')
-    source.bind_trace_sink(trace)
-    source._raw_pipeline = RawEvidencePipeline(max_bytes=16 * 1024)
-    class Provider:
-        async def stream(self, request):
-            for index in range(100):
-                record_wire_event({'text':'x' * 2000, 'index':index})
-                yield ModelStreamEvent(kind=cast('ModelEventKind', 'text_delta'), delta=str(index))
-    async def session(_): return 's'
-    recording = RecordingModelProvider(cast(ModelProvider, Provider()), sink=source, session_id_resolver=session)
-    # The model emits a deliberately unfinished stream; diagnostics must not
-    # delay the output even while the observation exporter is stuck.
-    try:
-        async with asyncio.timeout(1):
-            events = [event async for event in recording.stream(ModelRequest(request_id='m', run_id='r', model_binding='main', messages=()))]
-        assert len(events) == 100
-        assert source.raw_statistics()['retained_bytes'] <= 16 * 1024
-        assert source.raw_statistics()['dropped_records'] > 0
-        exporter.release.set()
-        await source.flush_raw()
-        spans = exporter.get_finished_spans()
-        async def query(client, **options):
-            return [{'name':s.name, 'attributes':dict(cast('Mapping[str, AttributeValue]', s.attributes)), 'start_time':cast('int', s.start_time)/1e9} for s in spans], False
-        monkeypatch.setattr(source, '_query', query)
-        result = await source.snapshot('s', {'r'})
-        assert result['models'] and all(row['truncated'] for row in result['models'])
-    finally:
-        exporter.release.set()
-        await source.close()
-        trace.close()
-
-
-def test_raw_encoder_preserves_escaped_unicode_in_bounded_fragments():
-    from sagents.v2.runtime.observability.evidence.raw import _json_fragments
-    value = {'unicode':'中🧪' * 1000, 'escaped':'\0\n"\\' * 2000, 'nested':[True, None, 1.25]}
-    fragments = list(_json_fragments(value, 128))
-    assert json.loads(''.join(fragments)) == value
-    assert max(map(len, fragments)) <= 6 * 128
-
-
 def test_oversized_raw_input_is_rejected_before_encoding(monkeypatch):
     from sagents.v2.runtime.observability.contracts import TraceSpan
     from uuid import uuid4
@@ -193,8 +120,8 @@ def test_oversized_raw_input_is_rejected_before_encoding(monkeypatch):
 
 
 def test_error_content_obeys_byte_budget_and_marks_incomplete():
-    from sagents.v2.runtime.observability.contracts import TraceSpan, TraceStatus, LogError
     from sagents.v2.contracts.common import utc_now
+    from sagents.v2.runtime.observability.contracts import TraceSpan, TraceStatus, LogError
     from uuid import uuid4
     exporter = InMemorySpanExporter()
     trace = PhoenixTraceSink(endpoint='http://unused/v1/traces', exporter=exporter,
@@ -295,8 +222,6 @@ def test_raw_json_escape_expansion_is_bounded_before_encoding(backend, operation
 def test_unknown_raw_values_are_refused_before_custom_conversion():
     from uuid import uuid4
     from sagents.v2.runtime.observability.contracts import TraceSpan
-    from sagents.v2.runtime.observability.evidence.raw import RawEvidencePipeline
-    from sagents.v2.contracts.common import utc_now
     class ExpandingObject:
         def __str__(self):
             raise AssertionError('must not invoke unknown __str__')
@@ -305,22 +230,17 @@ def test_unknown_raw_values_are_refused_before_custom_conversion():
     value = ExpandingObject()
     exporter = InMemorySpanExporter()
     trace = PhoenixTraceSink(endpoint='http://unused/v1/traces', exporter=exporter, content_mode='raw')
-    pipeline = RawEvidencePipeline()
     try:
         span = TraceSpan(trace_id=uuid4().hex, span_id=uuid4().hex[:16], name='unknown', attributes={'value':value})
         trace.start_span(span)
         assert trace.statistics()['dropped_spans'] == 1 and not exporter.get_finished_spans()
-        assert not pipeline.submit(trace, uuid4().hex, None, 's', 'r', 'request', {'value':value}, utc_now())
-        assert pipeline.statistics()['dropped_records'] == 1
     finally:
-        pipeline.close()
         trace.close()
 
 
 def test_raw_pydantic_extensions_survive_without_custom_serializers():
     from pydantic import BaseModel, ConfigDict
     from sagents.v2.runtime.observability.evidence.raw import (
-        _json_fragments,
         raw_trace_value,
         json_working_size,
     )
@@ -333,45 +253,24 @@ def test_raw_pydantic_extensions_survive_without_custom_serializers():
     expected = {'kind':'delta', 'provider_extension':{'text':'原文\0'}}
     assert json_working_size(event, 4096) < 4096
     assert raw_trace_value(event) == expected
-    assert json.loads(''.join(_json_fragments(event, 128))) == expected
-
-
-def test_multiple_sdk_event_objects_share_one_raw_retention_budget():
-    from pydantic import BaseModel
-    from sagents.v2.runtime.observability.evidence.raw import RawEvidencePipeline
-    from sagents.v2.contracts.common import utc_now
-    class Event(BaseModel):
-        text: str
-    payload = {'events':[Event(text=letter * 4000) for letter in ('a', 'b', 'c')]}
-    pipeline = RawEvidencePipeline(max_bytes=16 * 1024)
-    try:
-        assert not pipeline.submit(None, '1'*32, None, 's', 'r', 'stream', payload, utc_now())
-        assert pipeline.statistics()['retained_bytes'] == 0
-    finally:
-        pipeline.close()
 
 
 def test_many_pydantic_extras_are_preflighted_without_merging(monkeypatch):
     import tracemalloc
     from pydantic import BaseModel, ConfigDict
     import sagents.v2.runtime.observability.evidence.raw as raw
-    from sagents.v2.contracts.common import utc_now
     class Event(BaseModel):
         model_config = ConfigDict(extra='allow')
     event = Event(**{f'field_{index}':'value' for index in range(50_000)})
     def forbidden_merge(_):
         raise AssertionError('must not merge fields before admission')
     monkeypatch.setattr(raw, '_model_fields', forbidden_merge)
-    pipeline = raw.RawEvidencePipeline(max_bytes=8192)
     try:
         tracemalloc.start()
         assert raw.json_working_size(event, 8192) > 8192
-        assert not pipeline.submit(None, '1'*32, None, 's', 'r', 'request', {'event':event}, utc_now())
         _, peak = tracemalloc.get_traced_memory()
         tracemalloc.stop()
         assert peak < 16 * 1024
-        assert pipeline.statistics()['dropped_records'] == 1
     finally:
         if tracemalloc.is_tracing():
             tracemalloc.stop()
-        pipeline.close()

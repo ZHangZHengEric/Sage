@@ -9,13 +9,10 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Mapping
 from datetime import datetime, timezone
-import hashlib
 import json
-import traceback
 from urllib.parse import quote, urlsplit
 import httpx
 from sagents.v2.runtime.observability.evidence.raw import (
-    RawEvidencePipeline,
     reconstruct,
 )
 from sagents.v2.runtime.observability.plugins._shared.query import (
@@ -24,10 +21,6 @@ from sagents.v2.runtime.observability.plugins._shared.query import (
 )
 from sagents.v2.runtime.observability.plugins.external.phoenix_query import performance_spans
 from sagents.v2.contracts.common import utc_now
-from sagents.v2.runtime.observability.traces import (
-    current_trace_context,
-    current_trace_sink,
-)
 from sagents.v2.runtime.observability.evidence.assembly import assemble_evidence
 from sagents.v2.runtime.observability.contracts import TraceSink
 
@@ -60,7 +53,6 @@ class ExternalEvidenceSink:
         environment="production",
         headers=None,
         timeout=10,
-        raw_max_bytes=16 * 1024 * 1024,
         capture_mode="redacted",
     ):
         self.backend, self.query_url = backend, query_url.rstrip("/")
@@ -78,101 +70,17 @@ class ExternalEvidenceSink:
         self.project, self.service, self.environment = project, service, environment
         self.headers, self.timeout = dict(headers or {}), timeout
         self.trace_sink: TraceSink | None = None
-        self.capture_sink: TraceSink | None = None
         self.capture_mode = capture_mode
         self.closed = False
         self.capture_failures = 0
         self.max_spans = 100000
         self.max_response_bytes = 32 * 1024 * 1024
-        self._raw_pipeline = RawEvidencePipeline(max_bytes=raw_max_bytes)
 
-    @property
-    def raw_capture(self):
-        return self.capture_mode == "raw" and self.backend in {"phoenix", "jaeger"}
-
-    def _evidence(
-        self,
-        kind,
-        *,
-        session_id,
-        run_id,
-        _trace_context=None,
-        _target_sink=None,
-        _payload=None,
-        **payload,
-    ):
-        if not self.raw_capture or self.closed or not session_id or not run_id:
-            return False
-        try:
-            active = _trace_context or current_trace_context()
-            target = (
-                self.capture_sink
-                or _target_sink
-                or current_trace_sink()
-                or self.trace_sink
-            )
-            trace_id = (
-                active[0]
-                if active
-                else hashlib.sha256(
-                    f"diagnostic:{self.project}:{self.service}:{self.environment}:{run_id}".encode()
-                ).hexdigest()[:32]
-            )
-            accepted = self._raw_pipeline.submit(
-                target,
-                trace_id,
-                active[1] if active else None,
-                session_id,
-                run_id,
-                kind,
-                _payload if _payload is not None else payload,
-                utc_now(),
-            )
-            if not accepted:
-                self.capture_failures += 1
-            self._raw_record_admitted(kind, session_id, run_id, accepted)
-            return accepted
-        except Exception:
-            self.capture_failures += 1
-            return False
-
-    def _raw_record_admitted(self, kind, session_id, run_id, accepted):
-        """Optional host projection; only counts, never raw content."""
-
-    def record_model_stream_chunk(
-        self, *, session_id, request, field, sequence, event, trace_context=None
-    ):
-        return self._evidence(
-            "stream_" + field,
-            session_id=session_id,
-            run_id=request.run_id,
-            request_id=request.request_id,
-            sequence=sequence,
-            event=event,
-            _trace_context=trace_context,
-        )
-
-    def raw_statistics(self):
-        return self._raw_pipeline.statistics()
-
-    async def flush_raw(self):
-        return await asyncio.to_thread(self._raw_pipeline.flush)
+    # Raw content belongs to the native model/tool spans. External backends do
+    # not capture per-log or per-delta diagnostic records.
+    raw_capture = False
 
     async def begin_model_request(self, *, session_id, request, **kwargs):
-        self._evidence(
-            "request",
-            session_id=session_id,
-            run_id=request.run_id,
-            request_id=request.request_id,
-            request=kwargs.get("wire_request")
-            if kwargs.get("wire_request") is not None
-            else request,
-            normalized_request=request,
-            provider=kwargs.get("provider"),
-            request_format="provider_wire"
-            if kwargs.get("wire_request") is not None
-            else "normalized",
-        )
         self._model(
             session_id,
             request,
@@ -182,52 +90,16 @@ class ExternalEvidenceSink:
         )
 
     async def complete_model_request(self, *, session_id, request, **kwargs):
-        response = kwargs.get("response")
-        self._evidence(
-            "response",
-            session_id=session_id,
-            run_id=request.run_id,
-            request_id=request.request_id,
-            response=response,
-        )
         self._model(session_id, request, completed_at=utc_now().isoformat())
 
     async def fail_model_request(self, *, session_id, request, **kwargs):
-        error = kwargs.get("error")
-        self._evidence(
-            "failure",
-            session_id=session_id,
-            run_id=request.run_id,
-            request_id=request.request_id,
-            error={
-                "type": type(error).__name__,
-                "message": str(error),
-                "stack_trace": "".join(traceback.format_exception(error)),
-            }
-            if error
-            else None,
-        )
         self._model(session_id, request, completed_at=utc_now().isoformat())
 
     async def record_model_first_token(self, *, session_id, request, observed_at):
         self._model(session_id, request, first_token_at=observed_at.isoformat())
 
-    async def record_model_stream(
-        self, *, session_id, request, evidence, trace_context=None
-    ):
-        self._evidence(
-            "stream",
-            session_id=session_id,
-            run_id=request.run_id,
-            request_id=request.request_id,
-            stream=evidence,
-            _trace_context=trace_context,
-        )
-
     async def close(self):
         self.closed = True
-        if not await asyncio.to_thread(self._raw_pipeline.close):
-            self.capture_failures += 1
 
     async def _request(self, client, path, params):
         content, _ = await query_request(self, client, path, params)
@@ -279,7 +151,7 @@ class ExternalEvidenceSink:
             "end_time": datetime.fromtimestamp(discovery_end, timezone.utc).isoformat(),
         }
         if self.backend == "phoenix":
-            # Every native and chunk span carries its exact Session/Run scope.
+            # Every native span carries its exact Session/Run scope.
             # Reading by scope already includes every resumed execution trace;
             # fetching those traces again doubles full-content transfer.
             filters = []
@@ -384,7 +256,6 @@ class ExternalEvidenceSink:
         return rows, truncated
 
     async def snapshot(self, session_id, run_ids):
-        raw_flushed = await self.flush_raw()
         async with httpx.AsyncClient() as client:
             spans, truncated = await self._query(
                 client,
@@ -408,7 +279,6 @@ class ExternalEvidenceSink:
             run_ids=run_ids,
             raw_capture=self.raw_capture,
         )
-        raw_statistics = self.raw_statistics()
         transport_statistics = getattr(self.trace_sink, "statistics", None)
         export_statistics = (
             transport_statistics() if callable(transport_statistics) else {}
@@ -416,9 +286,7 @@ class ExternalEvidenceSink:
         if not isinstance(export_statistics, Mapping):
             raise ValueError("trace exporter returned invalid statistics")
         pending_writes = (
-            not raw_flushed
-            or raw_statistics["retained_bytes"] > 0
-            or export_statistics.get("retained_bytes", 0) > 0
+            export_statistics.get("retained_bytes", 0) > 0
         )
         if pending_writes and evidence["logs_complete"] is not None:
             evidence["logs_complete"] = False
@@ -428,20 +296,9 @@ class ExternalEvidenceSink:
             "unavailable": False,
             "truncated": truncated,
             "capture_failures_since_start": self.capture_failures,
-            "raw_capture_statistics": raw_statistics,
             "trace_export_statistics": export_statistics,
             "pending_writes": pending_writes,
-            "raw_flush_completed": raw_flushed,
         }
-
-    def write(self, record):
-        if self.raw_capture:
-            self._evidence(
-                "log",
-                session_id=record.session_id,
-                run_id=record.run_id,
-                _payload=record,
-            )
 
     def _model(self, session_id, request, **fields):
         """Optional timing projection supplied by the host."""
