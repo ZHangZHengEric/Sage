@@ -215,7 +215,7 @@ class LoadedAgents:
             or builder._state.session_root
             or ".runtime/sagents"
         )
-        self.store = AgentRevisionStore(root)
+        self.store = builder._revision_store or AgentRevisionStore(root)
         self.restore_lock = asyncio.Lock()
         self.recovery_issues: tuple[StartupRecoveryIssue, ...] = ()
         from sagents.v2.runtime.extensions.pool import ApplicationScopePool
@@ -344,6 +344,11 @@ class LoadedAgents:
             builder._state.defer_dispatcher_start = True
             builder._state.revision_identity = True
             builder._state.dispatcher = self.process_dispatcher
+            from sagents.v2.composition.revision_store import MigratedAgentRevision
+            identity = resolved._recovery_identity if isinstance(resolved, MigratedAgentRevision) else None
+            if identity is not None and (not historical or identity.admitted_hash != expected_hash):
+                raise ValueError("migrated Agent revision must restore its admitted identity")
+            builder._state.recovery_identity = identity
             assembled = await builder._build_package(resolved, tenant_id=self.tenant_id)
             handle = LoadedAgent(
                 resolved.package_id,

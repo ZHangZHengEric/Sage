@@ -692,7 +692,7 @@ def _normalized_scope_context(
 
 def _available_extensions(sources, context, plan):
     """Borrow only exact registered instances within the caller's identity scope."""
-    from sagents.v2.composition.identity import _config_identity
+    from sagents.v2.runtime.extensions.identity import config_identity
 
     found = {}
     for source in sources:
@@ -711,7 +711,7 @@ def _available_extensions(sources, context, plan):
             plugin_id = started.registration.descriptor.plugin_id
             if plugin_id not in plan.graph.plugin_ids or plan.scopes[plugin_id] != identity.scope:
                 continue
-            if _config_identity(source.configurations.get(plugin_id, {})) != _config_identity(plan.configs[plugin_id]):
+            if config_identity(source.configurations.get(plugin_id, {})) != config_identity(plan.configs[plugin_id]):
                 continue
             if plugin_id in found and found[plugin_id] is not source:
                 if found[plugin_id]._started != source._started:

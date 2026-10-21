@@ -22,7 +22,7 @@ from sagents.v2.runtime.observability.plugins._shared.query import (
     query_budget,
     request as query_request,
 )
-from sagents.v2.runtime.observability.plugins.external.query import performance_spans
+from sagents.v2.runtime.observability.plugins.external.phoenix_query import performance_spans
 from sagents.v2.contracts.common import utc_now
 from sagents.v2.runtime.observability.traces import (
     current_trace_context,

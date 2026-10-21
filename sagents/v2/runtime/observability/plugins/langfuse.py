@@ -41,6 +41,21 @@ class LangfuseTraceSink(OtlpTraceTransport):
         ingestion_version: int = 4,
         **options: Any,
     ) -> None:
+        self.validate_configuration(base_url, public_key, secret_key, ingestion_version)
+        authorization = base64.b64encode(f"{public_key}:{secret_key}".encode()).decode()
+        headers = {"Authorization": f"Basic {authorization}"}
+        if ingestion_version == 4:
+            headers["x-langfuse-ingestion-version"] = "4"
+        super().__init__(
+            endpoint=f"{base_url.rstrip('/')}/api/public/otel/v1/traces",
+            protocol="http",
+            headers=headers,
+            **options,
+        )
+
+    @staticmethod
+    def validate_configuration(base_url: str, public_key: str, secret_key: str,
+                               ingestion_version: int = 4) -> None:
         url = urlsplit(base_url)
         if (
             url.scheme not in {"http", "https"}
@@ -58,16 +73,6 @@ class LangfuseTraceSink(OtlpTraceTransport):
             )
         if ingestion_version not in {3, 4}:
             raise ValueError("Langfuse ingestion_version must be 3 or 4")
-        authorization = base64.b64encode(f"{public_key}:{secret_key}".encode()).decode()
-        headers = {"Authorization": f"Basic {authorization}"}
-        if ingestion_version == 4:
-            headers["x-langfuse-ingestion-version"] = "4"
-        super().__init__(
-            endpoint=f"{base_url.rstrip('/')}/api/public/otel/v1/traces",
-            protocol="http",
-            headers=headers,
-            **options,
-        )
 
     def _attributes(self, span: TraceSpan) -> dict[str, Any]:
         values = super()._attributes(span)

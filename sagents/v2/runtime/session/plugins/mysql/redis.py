@@ -13,7 +13,7 @@ from sagents.v2.contracts.events import (
     EventDurability, EventSource, EventSourceType, ProtocolEventData, RuntimeEvent,
 )
 from sagents.v2.contracts.errors import SageV2Error
-from sagents.v2.runtime.plugins._shared.redis_coordination import (
+from sagents.v2.runtime.distributed.redis_coordination import (
     RedisGuard, active_worker_fence, coordination_error, watch_fence,
 )
 from .state import _MysqlSessionState, _json

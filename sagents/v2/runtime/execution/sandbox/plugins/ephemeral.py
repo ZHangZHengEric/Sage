@@ -12,7 +12,6 @@ import hmac
 import asyncio
 import ipaddress
 import posixpath
-import secrets
 import time
 import unicodedata
 from collections.abc import Awaitable, Callable, Mapping
@@ -21,6 +20,7 @@ from datetime import datetime, timedelta
 from typing import Any
 from urllib.parse import urlsplit
 
+from sagents.v2.runtime.execution.sandbox.grants import grant_payload
 from sagents.v2.runtime.execution.sandbox.contracts import (
     MUTATING_FILE_OPERATIONS,
     FileOperation,
@@ -30,7 +30,6 @@ from sagents.v2.runtime.execution.sandbox.contracts import (
     NetworkMode,
     NetworkRequest,
     NetworkResult,
-    OperationIntent,
     ProcessCapabilities,
     ProcessRequest,
     ProcessResult,
@@ -38,7 +37,6 @@ from sagents.v2.runtime.execution.sandbox.contracts import (
     ResourceLimitCapabilities,
     SandboxCapabilities,
     SandboxCheckpointRef,
-    SandboxGrant,
     SandboxRef,
     SandboxReleaseDisposition,
     SandboxReleaseReceipt,
@@ -58,63 +56,6 @@ from sagents.v2.contracts.errors import (
     SageV2Error,
 )
 from sagents.v2.contracts.principals import RequestContext
-
-
-def _grant_payload(grant: SandboxGrant) -> bytes:
-    data = grant.model_dump(mode="json", exclude={"signature"})
-    import json
-
-    return json.dumps(
-        data, sort_keys=True, separators=(",", ":"), ensure_ascii=False
-    ).encode("utf-8")
-
-
-class SandboxGrantIssuer:
-    """Runtime-side short-lived grant signer; the key is never serialized."""
-
-    def __init__(
-        self,
-        key: bytes | None = None,
-        *,
-        clock: Callable[[], datetime] = utc_now,
-    ) -> None:
-        self._key = key or secrets.token_bytes(32)
-        self._clock = clock
-
-    @property
-    def verification_key(self) -> bytes:
-        return self._key
-
-    def issue(
-        self,
-        *,
-        ref: SandboxRef,
-        intent: OperationIntent,
-        allowed_operations: frozenset[str],
-        ttl: timedelta = timedelta(minutes=1),
-        single_use: bool = True,
-    ) -> SandboxGrant:
-        now = self._clock()
-        unsigned = SandboxGrant(
-            grant_id=new_id("grant"),
-            run_id=intent.run_id,
-            tool_call_id=intent.tool_call_id,
-            sandbox_id=ref.sandbox_id,
-            tenant_id=ref.tenant_id,
-            policy_hash=ref.policy_hash,
-            spec_hash=ref.spec_hash,
-            operation_digest=intent.digest(),
-            allowed_operations=allowed_operations,
-            issued_at=now,
-            expires_at=now + ttl,
-            nonce=new_id("nonce"),
-            single_use=single_use,
-            signature="unsigned",
-        )
-        signature = hmac.new(
-            self._key, _grant_payload(unsigned), hashlib.sha256
-        ).hexdigest()
-        return unsigned.model_copy(update={"signature": signature})
 
 
 @dataclass
@@ -790,7 +731,7 @@ class InMemorySandboxProvider:
                 "grant has expired",
             )
         expected = hmac.new(
-            self._verification_key, _grant_payload(grant), hashlib.sha256
+            self._verification_key, grant_payload(grant), hashlib.sha256
         ).hexdigest()
         if not hmac.compare_digest(expected, grant.signature):
             raise self._error(
@@ -1037,7 +978,7 @@ class InMemorySandboxProvider:
                 "grant has expired",
             )
         expected = hmac.new(
-            self._verification_key, _grant_payload(grant), hashlib.sha256
+            self._verification_key, grant_payload(grant), hashlib.sha256
         ).hexdigest()
         if not hmac.compare_digest(expected, grant.signature):
             raise self._error(

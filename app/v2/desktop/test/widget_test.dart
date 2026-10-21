@@ -28,6 +28,42 @@ import 'package:sage_desktop_v2/src/ui/shared/desktop_notice.dart';
 import 'package:sage_desktop_v2/src/ui/tool_activity_presentation.dart';
 import 'package:sage_desktop_v2/src/ui/usage_overview.dart';
 
+class _ObservationComponentApi extends _FakeApi {
+  @override
+  Future<List<ComponentSummary>> listComponents() async => [
+    ComponentSummary(
+      id: 'observability.provider',
+      name: 'Observability',
+      selectionMode: 'user',
+      applyMode: 'restart',
+      scope: 'process',
+      activePluginId: 'sage.observability.local',
+      selectedPluginId:
+          lastSelectedComponentPlugin ?? 'sage.observability.local',
+      selectedConfig: lastSelectedComponentConfig ?? const {},
+      plugins: const [
+        ComponentPluginSummary(
+          id: 'sage.observability.local',
+          name: 'Local',
+          value: '',
+        ),
+        ComponentPluginSummary(
+          id: 'sage.observability.langfuse',
+          name: 'Langfuse',
+          value: '',
+          configSchema: {
+            'type': 'object',
+            'required': ['base_url'],
+            'properties': {
+              'base_url': {'type': 'string', 'default': ''},
+            },
+          },
+        ),
+      ],
+    ),
+  ];
+}
+
 class _SkillComponentApi extends _FakeApi {
   @override
   Future<List<ComponentSummary>> listComponents() async => [
@@ -2526,6 +2562,52 @@ Map<String, Object?> _persistedBranchableConversation() => {
 };
 
 void main() {
+  testWidgets(
+    'observation plugin selection waits for a complete configuration',
+    (tester) async {
+      final api = _ObservationComponentApi();
+      final controller = await _controller(api: api);
+      try {
+        await tester.pumpWidget(SageDesktopV2App(controller: controller));
+        await tester.pumpAndSettle();
+        await tester.tap(find.byKey(const ValueKey('settings-button')));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('运行组件'));
+        await tester.pumpAndSettle();
+        final picker = find.byKey(
+          const ValueKey('settings-component-picker-observability.provider'),
+        );
+        await tester.ensureVisible(picker);
+        await tester.tap(picker);
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('Langfuse').last);
+        await tester.pumpAndSettle();
+        expect(api.lastSelectedComponent, isNull);
+        final save = find.byKey(
+          const ValueKey('settings-plugin-save-observability.provider'),
+        );
+        expect(tester.widget<FilledButton>(save).onPressed, isNull);
+        await tester.enterText(
+          find.byKey(
+            const ValueKey('settings-plugin-observability.provider-base_url'),
+          ),
+          'https://example.invalid',
+        );
+        await tester.pumpAndSettle();
+        await tester.ensureVisible(save);
+        await tester.tap(save);
+        await tester.pumpAndSettle();
+        expect(api.lastSelectedComponentPlugin, 'sage.observability.langfuse');
+        expect(api.lastSelectedComponentConfig, {
+          'base_url': 'https://example.invalid',
+        });
+        expect(tester.takeException(), isNull);
+      } finally {
+        await tester.pumpWidget(const SizedBox.shrink());
+        _disposeController(controller);
+      }
+    },
+  );
   for (final terminal in ['completed', 'cancelled', 'failed']) {
     test('preview stream retains $terminal text exactly once', () async {
       final api = _PreviewApi();

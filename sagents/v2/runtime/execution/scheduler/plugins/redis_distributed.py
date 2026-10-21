@@ -12,7 +12,7 @@ import heapq
 import json
 import time
 
-from sagents.v2.runtime.plugins._shared.redis_coordination import (
+from sagents.v2.runtime.distributed.redis_coordination import (
     RedisGuard, RedisMutationFence, active_worker_fence, coordination_error,
     watch_fence,
 )

@@ -29,7 +29,7 @@ from sagents.v2.contracts.errors import (
 )
 from sagents.v2.contracts.run_state import TERMINAL_RUN_STATES
 from sagents.v2.runtime.session.state import SessionStoreCoordinator
-from sagents.v2.runtime.session.plugins._shared.filesystem_layout import (
+from sagents.v2.runtime.session.plugins.filesystem.layout import (
     SESSION_LAYOUT_FORMAT,
     resolve_session_directory,
 )

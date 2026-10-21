@@ -2196,7 +2196,7 @@ class _RuntimeComponentsPaneState extends State<_RuntimeComponentsPane> {
   );
 }
 
-class _ComponentSettingsCard extends StatelessWidget {
+class _ComponentSettingsCard extends StatefulWidget {
   const _ComponentSettingsCard({
     required this.component,
     required this.onSelect,
@@ -2204,6 +2204,45 @@ class _ComponentSettingsCard extends StatelessWidget {
 
   final ComponentSummary component;
   final void Function(String, Map<String, Object?>) onSelect;
+
+  @override
+  State<_ComponentSettingsCard> createState() => _ComponentSettingsCardState();
+}
+
+class _ComponentSettingsCardState extends State<_ComponentSettingsCard> {
+  String? _draftPlugin;
+
+  ComponentSummary get component {
+    final saved = widget.component;
+    if (_draftPlugin == null || _draftPlugin == saved.selectedPluginId)
+      return saved;
+    return ComponentSummary(
+      id: saved.id,
+      name: saved.name,
+      value: saved.value,
+      selectionMode: saved.selectionMode,
+      applyMode: saved.applyMode,
+      scope: saved.scope,
+      plugins: saved.plugins,
+      activePluginId: saved.activePluginId,
+      selectedPluginId: _draftPlugin,
+      activeSource: saved.activeSource,
+      activeConfig: saved.activeConfig,
+      selectedConfig: const {},
+      pendingRestart: saved.pendingRestart,
+    );
+  }
+
+  void _choosePlugin(String pluginId) {
+    final plugin = component.plugins.firstWhere((item) => item.id == pluginId);
+    if (component.id == 'observability.provider' &&
+        _editablePluginProperties(plugin.configSchema).isNotEmpty) {
+      setState(() => _draftPlugin = pluginId);
+    } else {
+      setState(() => _draftPlugin = null);
+      widget.onSelect(pluginId, const {});
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -2275,12 +2314,7 @@ class _ComponentSettingsCard extends StatelessWidget {
                               ),
                             ),
                         ],
-                        onChanged: (pluginId) => onSelect(
-                          pluginId,
-                          component.id == 'tool.selection-policy'
-                              ? const {}
-                              : const {},
-                        ),
+                        onChanged: _choosePlugin,
                       )
                     : _SettingsTag(
                         label: component.implementation.isEmpty
@@ -2338,7 +2372,7 @@ class _ComponentSettingsCard extends StatelessWidget {
               _SandboxResourceConfigEditor(
                 key: ValueKey('sandbox-resources-$selected'),
                 config: component.activeConfig,
-                onSave: (config) => onSelect(selected, config),
+                onSave: (config) => widget.onSelect(selected, config),
               ),
             if (component.id == 'execution.sandbox')
               Padding(
@@ -2501,7 +2535,8 @@ class _ComponentSettingsCard extends StatelessWidget {
                             child: _PluginConfigEditor(
                               key: ValueKey('${component.id}:${plugin.id}'),
                               component: component,
-                              onSave: (config) => onSelect(plugin.id, config),
+                              onSave: (config) =>
+                                  widget.onSelect(plugin.id, config),
                             ),
                           ),
                         if (!plugin.available && plugin.dependencies.isNotEmpty)
@@ -2815,6 +2850,12 @@ class _PluginConfigEditorState extends State<_PluginConfigEditor> {
         continue;
       }
       final raw = _controllers[entry.key]?.text.trim() ?? '';
+      if (raw.isEmpty &&
+          ((_plugin?.configSchema['required'] as List?) ?? const []).contains(
+            entry.key,
+          )) {
+        return null;
+      }
       Object? value;
       final choices = schema['enum'];
       if (choices is List) {

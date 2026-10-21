@@ -74,6 +74,8 @@ Desktop/server code.
 | `goal/`, `plan/` | Typed goal/plan state and completion gates | State providers and policies |
 | `flow/` | Graph execution over the same Run lifecycle | Flow-node provider |
 | `runtime/execution/` | Jobs, scheduling, bindings, workspace and sandbox | Bindings in `execution/plugins/`; backends in `scheduler/plugins/`, `sandbox/plugins/`, `jobs/plugins/` |
+| `runtime/distributed/` | Shared cross-domain distributed coordination | Redis mutation guards and worker fencing |
+| `runtime/artifact/` | Artifact contracts, Run scoping and image snapshots | Standalone and Session-backed stores in `artifact/plugins/` |
 | `runtime/observability/` | Non-authoritative diagnostics and traces | One file per sink in `observability/plugins/` |
 | `runtime/extensions/` | Registration, resolution, scopes and lifecycle | Extension microkernel only |
 | `package/` | Manifest validation, policy ceilings and resolved composition input | Package registry contracts in `package/registry/`; implementations in `package/registry/plugins/` |
@@ -84,15 +86,27 @@ Desktop/server code.
 OpenAI Responses belongs in `model/plugins/`, while its
 `ExtensionRegistration` is exposed to the extension registry.
 
+Each domain owns its plugin schemas and factories in `registrations.py`.
+`runtime/extensions/official.py` only aggregates those registrations; generic
+registration helpers and configuration identities belong to `runtime/extensions/`.
+Sandbox grant signing belongs to `runtime/execution/sandbox/grants.py`, independently
+of the selected sandbox plugin. Manifest upgrades belong to
+`package/manifest/migration.py`; Session storage upgrades stay in
+`runtime/session/migration.py`.
+
 Concrete backend queries, SDK transports, algorithms and templates stay with
 their plugin implementation. A plugin with several private files owns a package
 (for example `runtime/session/plugins/mysql/`, `sandbox/plugins/local/`, or
 `workspace/plugins/claw/`). Implementation shared by several plugins lives in
-their `plugins/_shared/` package; cross-domain runtime backend support lives in
-`runtime/plugins/_shared/`. Shared support must not import selectable sibling
+their `plugins/_shared/` package; cross-domain distributed coordination lives in
+`runtime/distributed/`. Shared support must not import selectable sibling
 plugins. Contracts and backend-neutral runtime logic remain outside `plugins/`.
 Public package facades may lazily export concrete implementations, but contract
 modules must not forward implementation imports.
+
+The filesystem Session plugin owns its read-only location resolver in
+`runtime/session/plugins/filesystem/layout.py`. Filesystem diagnostics use that
+explicit layout interface rather than a private cross-plugin helper.
 
 Backend metadata reads belong to the filesystem/MySQL plugin packages; shared
 metadata projection only transforms canonical records. External trace queries

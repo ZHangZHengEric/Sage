@@ -13,6 +13,7 @@
 | `performance/` | 与后端无关的性能缓冲、Trace 投影及耗时聚合 |
 | `plugins/` | 日志输出、文件/SQLite 诊断、外部观测协议与查询实现 |
 | `plugins/_shared/` | 后端共用的 OTLP 传输、查询预算与缓存 |
+| `plugins/external/phoenix_query.py` | Phoenix SpanQuery 协议、性能查询及响应解析 |
 
 ## 调用规则
 

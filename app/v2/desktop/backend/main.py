@@ -149,7 +149,7 @@ def main(argv: list[str] | None = None) -> int:
             "host": args.host,
             "port": actual_port,
             "build_id": args.build_id,
-            "log_plugin": log_plugin_id,
+            "log_plugin": observability.plugin_id,
         },
     )
     from app.v2.desktop.backend.app import create_app

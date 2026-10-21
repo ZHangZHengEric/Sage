@@ -1049,8 +1049,10 @@ class DesktopCatalogServiceMixin:
         choice = desktop_v2_manifest(session_root=self.runtime_root,
             component_selections=settings.component_selections,
             component_configs=settings.component_configs).runtime.capabilities["observability.provider"]
+        from .observability import normalize_observation_config
+        config = normalize_observation_config(choice.plugin, choice.config, registry=self.extensions)
         return (choice.plugin != self.observability_plugin_id or
-                ObservabilityConfig.model_validate(choice.config).model_dump(mode="json") != self.observability.config)
+                ObservabilityConfig.model_validate(config).model_dump(mode="json") != self.observability.config)
 
     async def select_component(
         self,
@@ -1080,6 +1082,11 @@ class DesktopCatalogServiceMixin:
         async with self._settings_update_lock:
             settings = await self.get_settings()
             normalized_config = dict(request.config)
+            if component_id == "observability.provider":
+                from .observability import normalize_observation_config
+                normalized_config = normalize_observation_config(
+                    request.plugin_id, normalized_config, registry=self.extensions,
+                )
             if component_id == "tool.selection-policy":
                 normalized_config = _tool_selection_component_config(
                     request.plugin_id, request.config

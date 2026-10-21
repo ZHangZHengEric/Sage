@@ -18,7 +18,7 @@ from sagents.v2.contracts.jobs import (
     JobCursor, JobHandle, JobOutputChunk, JobPauseBehavior, JobSnapshot, JobState,
 )
 from sagents.v2.runtime.execution.jobs.plugins._shared.runtime import JobRuntimeState, TERMINAL_JOB_STATES
-from sagents.v2.runtime.plugins._shared.redis_coordination import active_worker_fence, watch_fence
+from sagents.v2.runtime.distributed.redis_coordination import active_worker_fence, watch_fence
 
 
 class RedisDistributedJobRuntime(JobRuntimeState):

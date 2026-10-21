@@ -42,6 +42,7 @@ from app.v2.desktop.backend.runtime_config import (
 from app.v2.desktop.backend.usage_analytics import (
     _usage_percentile as _usage_percentile,
 )
+from app.v2.desktop.backend.settings_store import read_desktop_settings
 
 _TEXT_EXTENSIONS = {
     ".c",
@@ -80,12 +81,7 @@ class DesktopWorkspaceServiceMixin:
 
     async def get_settings(self) -> DesktopV2Settings:
         async with self._settings_lock:
-            if not self.settings_path.exists():
-                value = DesktopV2Settings()
-            else:
-                value = DesktopV2Settings.model_validate_json(
-                    self.settings_path.read_text(encoding="utf-8")
-                )
+            value = read_desktop_settings(self.settings_path)
         return value.model_copy(
             update={
                 "agent_workspace_path": str(
@@ -103,11 +99,9 @@ class DesktopWorkspaceServiceMixin:
         cached = getattr(self, "_settings_cache", None)
         if cached is not None and getattr(self, "_settings_cache_mtime", None) == mtime:
             return cached
-        settings = DesktopV2Settings.model_validate_json(
-            self.settings_path.read_text(encoding="utf-8")
-        )
+        settings = read_desktop_settings(self.settings_path)
         self._settings_cache = settings
-        self._settings_cache_mtime = mtime
+        self._settings_cache_mtime = self.settings_path.stat().st_mtime
         return settings
 
     async def save_settings(self, value: DesktopV2Settings) -> DesktopV2Settings:
@@ -125,6 +119,15 @@ class DesktopWorkspaceServiceMixin:
 
     async def _save_settings_unlocked(self, value: DesktopV2Settings) -> DesktopV2Settings:
         _resolved_sandbox_config(value)
+        if "observability.provider" in value.component_selections or "observability.provider" in value.component_configs:
+            from .observability import normalize_observation_config
+            config = normalize_observation_config(
+                value.component_selections.get("observability.provider", _DESKTOP_COMPONENT_DEFAULTS["observability.provider"]),
+                value.component_configs.get("observability.provider", {}), registry=self.extensions,
+            )
+            value = value.model_copy(update={"component_configs": {
+                **value.component_configs, "observability.provider": config,
+            }})
         workspace = await self._ensure_agent_workspace(
             value.agent_workspace_path,
             component_selections=value.component_selections,
