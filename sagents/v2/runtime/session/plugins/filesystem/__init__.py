@@ -8,7 +8,7 @@ Session. Product-level indexes belong to the embedding application.
 
 from __future__ import annotations
 
-from typing import cast
+from typing import cast, Any
 import asyncio
 import errno
 import hashlib
@@ -19,7 +19,6 @@ import shutil
 import threading
 from copy import deepcopy
 from pathlib import Path
-from typing import Any
 from urllib.parse import quote
 
 from sagents.v2.contracts.common import new_id
@@ -2383,7 +2382,7 @@ class _FilesystemSessionState(FilesystemManagedSessionHeads, SessionStoreCoordin
 
 
 class _FilesystemSessionStoreMeta(type):
-    def __getattr__(cls, name):
+    def __getattr__(cls, name: str) -> Any:
         return getattr(_FilesystemSessionState, name)
 
 
@@ -2417,7 +2416,7 @@ class FilesystemSessionStore(metaclass=_FilesystemSessionStoreMeta):
         from sagents.v2.runtime.session.plugins import session_storage_providers
         return session_storage_providers(self)
 
-    def __getattr__(self, name):
+    def __getattr__(self, name: str) -> Any:
         return getattr(self._coordinator, name)
 
     def __setattr__(self, name, value) -> None:

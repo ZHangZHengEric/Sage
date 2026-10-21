@@ -226,9 +226,10 @@ T = TypeVar("T")
 ExtensionFactory = Callable[
     [ExtensionScopeContext, ProviderSet], T | Awaitable[T]
 ]
+ProviderExports = Mapping[CapabilityKey, Any] | Mapping[str, Any]
 StartHook = Callable[
     [T, ExtensionScopeContext, ProviderSet],
-    Mapping[CapabilityKey, Any] | Awaitable[Mapping[CapabilityKey, Any]],
+    ProviderExports | Awaitable[ProviderExports],
 ]
 StopHook = Callable[[T, StopReason], None | Awaitable[None]]
 

@@ -1,6 +1,8 @@
 """Server-owned per-Run filtering for MCP and A2A providers."""
 
 import inspect
+from collections.abc import Awaitable, Callable
+from typing import cast
 
 from sagents.v2.tool import FilteredToolCatalog
 from sagents.v2.tool.contracts import (
@@ -60,14 +62,14 @@ class ScopedExternalTools:
         self._operations[call.operation_id] = call.owner_run_id
         reconcile_call = getattr(self.provider, "reconcile_call", None)
         if callable(reconcile_call):
-            return await reconcile_call(call, context)
+            return await cast(Callable[..., Awaitable[ReconcileResult]], reconcile_call)(call, context)
         return await self.provider.reconcile(call.operation_id, context)
 
     async def cancel(self, operation_id, context):
         cancel = getattr(self.provider, "cancel", None)
         if operation_id not in self._operations or not callable(cancel):
             return ToolCancellationResult(operation_id=operation_id, state=ToolCancellationState.NOT_SUPPORTED)
-        return await cancel(operation_id, context)
+        return await cast(Callable[..., Awaitable[ToolCancellationResult]], cancel)(operation_id, context)
 
     async def release_run(self, run_id):
         try:

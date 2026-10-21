@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 import hashlib
 import json
-from typing import Literal
+from typing import Any, Literal
 from urllib.parse import urlsplit
 
 from sagents.v2.agent.policy.approval_config import ToolApprovalConfig
@@ -130,22 +130,28 @@ class AgentRecord(BaseModel):
         return project_package(self)
 
     @property
+    def package_bundle(self) -> AgentPackageBundle:
+        """Return the canonical package established during validation."""
+        assert self.package is not None
+        return self.package
+
+    @property
     def fast_model_id(self):
-        definition = self.package.manifest.agents[self.id]
+        definition = self.package_bundle.manifest.agents[self.id]
         model_id = definition.models.get("fast", "")
         return model_id if model_id != "default" else ""
 
     @property
     def sandbox(self):
-        return self.package.manifest.agents[self.id].sandbox
+        return self.package_bundle.manifest.agents[self.id].sandbox
 
     @property
     def agent_mode(self):
-        return self.package.manifest.agents[self.id].mode
+        return self.package_bundle.manifest.agents[self.id].mode
 
     @property
     def available_sub_agent_ids(self):
-        return list(self.package.manifest.agents[self.id].subagents)
+        return list(self.package_bundle.manifest.agents[self.id].subagents)
 
     def with_configuration(self, **updates):
         from app.v2.server.catalog.packages import build_package
@@ -161,8 +167,8 @@ class AgentRecord(BaseModel):
         return {
             "id": self.id,
             "name": self.name,
-            "package": self.package.model_dump(mode="json"),
-            "package_ref": self.package.content_hash,
+            "package": self.package_bundle.model_dump(mode="json"),
+            "package_ref": self.package_bundle.content_hash,
             "sandbox": self.sandbox.model_dump(mode="json"),
             "description": self.description,
             "instructions": self.instructions,
@@ -340,7 +346,7 @@ def empty_catalog() -> UserCatalog:
     return UserCatalog(default_agent_id=agent.id, agents=[agent])
 
 
-def catalog_payload(catalog: UserCatalog) -> dict[str, object]:
+def catalog_payload(catalog: UserCatalog) -> dict[str, Any]:
     payload = catalog.model_dump(mode="json")
     for item, record in zip(payload.get("models", []), catalog.models):
         item["api_key"] = record.api_key.get_secret_value()
@@ -407,7 +413,8 @@ def upsert_agent(
         model_id=str(payload.get("model_id") or ""),
         tools=_unique_names(payload.get("tools", existing.tools if existing else _default_agent_tools())),
         external_tools=_unique_names(payload.get("external_tools", existing.external_tools if existing else [])),
-        tool_approval=payload.get("tool_approval", existing.tool_approval if existing else None),
+        tool_approval=(ToolApprovalConfig.model_validate(approval)
+            if (approval := payload.get("tool_approval", existing.tool_approval if existing else None)) is not None else None),
         execution_policy=ExecutionPolicy.model_validate(payload.get("execution_policy") or
             (existing.execution_policy.model_dump() if existing else {"shell": "sandboxed"})),
         skills=list(existing.skills)
@@ -424,7 +431,7 @@ def upsert_agent(
         if fast_id and not any(item.id == fast_id for item in catalog.models):
             raise SageV2Error(RuntimeErrorInfo(code="server.catalog.validation",
                 category=ErrorCategory.VALIDATION, message=f"unknown fast model {fast_id}"))
-        data = record.package.model_dump(mode="json")
+        data = record.package_bundle.model_dump(mode="json")
         definition = data["manifest"]["agents"][record.id]
         if fast_id:
             definition["models"]["fast"] = fast_id
@@ -435,7 +442,7 @@ def upsert_agent(
         key: payload[key] for key in ("budgets", "memory") if payload.get(key) is not None
     }
     if advanced:
-        data = record.package.model_dump(mode="json")
+        data = record.package_bundle.model_dump(mode="json")
         data["manifest"]["agents"][record.id].update(advanced)
         record = record.model_copy(
             update={"package": AgentPackageBundle.model_validate(data)}
@@ -445,17 +452,19 @@ def upsert_agent(
     if payload.get("plugins") is not None:
         from app.v2.server.catalog.plugins import validate_agent_plugins, AGENT_DEFAULTS
 
-        validate_agent_plugins(payload["plugins"], registry=registry)
-        data = record.package.model_dump(mode="json")
+        plugins = payload["plugins"]
+        validate_agent_plugins(plugins, registry=registry)
+        assert isinstance(plugins, dict)
+        data = record.package_bundle.model_dump(mode="json")
         current = data["manifest"]["runtime"].get("capabilities", {})
         data["manifest"]["runtime"]["capabilities"] = {
             k: v for k, v in current.items() if k not in AGENT_DEFAULTS
-        } | payload["plugins"]
+        } | plugins
         record = record.model_copy(
             update={"package": AgentPackageBundle.model_validate(data)}
         ).with_configuration()
     if "agent_mode" in payload or "available_sub_agent_ids" in payload:
-        data = record.package.model_dump(mode="json")
+        data = record.package_bundle.model_dump(mode="json")
         definition = data["manifest"]["agents"][record.id]
         if "agent_mode" in payload:
             definition["mode"] = payload["agent_mode"]
@@ -533,9 +542,9 @@ def upsert_mcp(
         secret = SecretStr(api_key)
     tools = payload.get("tools")
     try:
-        record = McpServerRecord(
+        record = McpServerRecord.model_validate(dict(
             name=name,
-            protocol=protocol,  # type: ignore[arg-type]
+            protocol=protocol,
             url=str(payload.get("url") or "").strip() or None,
             api_key=secret,
             disabled=bool(payload.get("disabled", False)),
@@ -550,7 +559,7 @@ def upsert_mcp(
                 if tools is not None
                 else (existing.tools if existing is not None else [])
             ),
-        )
+        ))
     except ValidationError as exc:
         raise SageV2Error(
             RuntimeErrorInfo(
@@ -683,7 +692,7 @@ def apply_upsert(
     protocol = str(payload.get("protocol") or "openai-chat-completions")
     resolve_model_protocol(protocol)
     existing = next((item for item in catalog.models if item.id == model_id), None)
-    record = ModelRecord(
+    record = ModelRecord.model_validate(dict(
         **{key: payload.get(key, getattr(existing, key) if existing else field.get_default(call_default_factory=True))
            for key, field in ModelConfiguration.model_fields.items()},
         id=model_id,
@@ -694,7 +703,7 @@ def apply_upsert(
         model=str(payload.get("model") or "").strip(),
         api_key=SecretStr(str(payload.get("api_key") or "")),
         is_default=bool(payload.get("is_default", False) or not catalog.models),
-    )
+    ))
     if not record.model:
         raise SageV2Error(
             RuntimeErrorInfo(

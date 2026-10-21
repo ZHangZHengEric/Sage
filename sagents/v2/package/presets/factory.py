@@ -47,7 +47,7 @@ class BuiltinPackageFactory:
                     FlowNode(id="start", type="interaction", interaction="user_input"),
                     FlowNode(id="done", type="end"),
                 ),
-                edges=(FlowEdge(**{"from": "start", "to": "done"}),),
+                edges=(FlowEdge.model_validate({"from": "start", "to": "done"}),),
             )
         return SageManifest(
             kind="agent-package",

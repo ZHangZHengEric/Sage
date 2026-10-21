@@ -12,6 +12,7 @@ def bind_memory_identity(command, context, *, parent_command=None):
     if parent_command is not None:
         if MEMORY_IDENTITY_KEY in parent_command.config.metadata:
             parent = command_memory_scope(parent_command)
+            assert parent.workspace_id is not None
             inherited = MemoryIdentity(user_id=parent.principal_id, workspace_id=parent.workspace_id)
         else:
             # Legacy parents have no trustworthy workspace attribution. New

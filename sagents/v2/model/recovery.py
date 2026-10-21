@@ -28,7 +28,7 @@ class ModelCallBudget:
         self.remaining -= 1
 
 
-_active_budget = ContextVar("model_context_recovery_budget", default=None)
+_active_budget: ContextVar[ModelCallBudget | None] = ContextVar("model_context_recovery_budget", default=None)
 
 
 @contextmanager

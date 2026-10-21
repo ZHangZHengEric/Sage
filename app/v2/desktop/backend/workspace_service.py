@@ -1,5 +1,10 @@
 from __future__ import annotations
 
+from typing import TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    from app.v2.desktop.backend.service import DesktopV2Service
+
 import asyncio
 import hashlib
 import re
@@ -79,7 +84,10 @@ _TEXT_EXTENSIONS = {
 class DesktopWorkspaceServiceMixin:
     """Desktop settings, projects, workspace paths, and file projections."""
 
+    _settings_cache_mtime: float | None
+
     async def get_settings(self) -> DesktopV2Settings:
+        self = cast("DesktopV2Service", self)
         async with self._settings_lock:
             value = read_desktop_settings(self.settings_path)
         return value.model_copy(
@@ -91,6 +99,7 @@ class DesktopWorkspaceServiceMixin:
         )
 
     def _read_settings_sync(self) -> DesktopV2Settings:
+        self = cast("DesktopV2Service", self)
         if not self.settings_path.exists():
             self._settings_cache = DesktopV2Settings()
             self._settings_cache_mtime = None
@@ -105,10 +114,12 @@ class DesktopWorkspaceServiceMixin:
         return settings
 
     async def save_settings(self, value: DesktopV2Settings) -> DesktopV2Settings:
+        self = cast("DesktopV2Service", self)
         async with self._settings_update_lock:
             return await self._save_settings_unlocked(value)
 
     async def patch_settings(self, patch: dict[str, Any]) -> DesktopV2Settings:
+        self = cast("DesktopV2Service", self)
         unknown = set(patch) - set(DesktopV2Settings.model_fields)
         if unknown:
             raise ValueError(f"unknown settings fields: {sorted(unknown)}")
@@ -118,6 +129,7 @@ class DesktopWorkspaceServiceMixin:
             return await self._save_settings_unlocked(value)
 
     async def _save_settings_unlocked(self, value: DesktopV2Settings) -> DesktopV2Settings:
+        self = cast("DesktopV2Service", self)
         _resolved_sandbox_config(value)
         if "observability.provider" in value.component_selections or "observability.provider" in value.component_configs:
             from .observability import normalize_observation_config
@@ -151,6 +163,7 @@ class DesktopWorkspaceServiceMixin:
         return normalized
 
     def _write_settings_sync(self, value: DesktopV2Settings) -> None:
+        self = cast("DesktopV2Service", self)
         temporary = self.settings_path.with_suffix(".tmp")
         temporary.write_text(value.model_dump_json(indent=2), encoding="utf-8")
         temporary.replace(self.settings_path)
@@ -158,6 +171,7 @@ class DesktopWorkspaceServiceMixin:
         self._settings_cache_mtime = self.settings_path.stat().st_mtime
 
     async def add_project(self, name: str, path: str) -> DesktopProject:
+        self = cast("DesktopV2Service", self)
         root = Path(path).expanduser().resolve(strict=True)
         if not root.is_dir():
             raise ValueError("project path must be a directory")
@@ -174,12 +188,14 @@ class DesktopWorkspaceServiceMixin:
         return project
 
     async def remove_project(self, project_id: str) -> None:
+        self = cast("DesktopV2Service", self)
         async with self._settings_update_lock:
             settings = await self.get_settings()
             projects = [value for value in settings.projects if value.id != project_id]
             await self._save_settings_unlocked(settings.model_copy(update={"projects": projects}))
 
     async def workspace_root(self, workspace_id: str | None, agent_id: str) -> Path:
+        self = cast("DesktopV2Service", self)
         if not _AGENT_ID.fullmatch(agent_id):
             raise ValueError("invalid agent id")
         if not workspace_id or workspace_id.startswith("agent:"):
@@ -201,6 +217,7 @@ class DesktopWorkspaceServiceMixin:
         return root
 
     def _agent_workspace_path(self, configured: str) -> Path:
+        self = cast("DesktopV2Service", self)
         raw = configured.strip()
         target = Path(raw).expanduser() if raw else self.agent_workspace
         if not target.is_absolute():
@@ -221,6 +238,7 @@ class DesktopWorkspaceServiceMixin:
         component_selections: dict[str, str] | None = None,
         language: str | None = None,
     ) -> Path:
+        self = cast("DesktopV2Service", self)
         workspace = self._agent_workspace_path(configured)
         try:
             await asyncio.to_thread(workspace.mkdir, parents=True, exist_ok=True)
@@ -242,6 +260,7 @@ class DesktopWorkspaceServiceMixin:
             if initialization_key in self._workspace_initializations:
                 return workspace
             await self.start()
+            assert self.application is not None
             from sagents.v2.package.manifest.runtime import CapabilitySelection, RuntimeConfig
             runtime = self.application.runtime_configuration
             supplied = RuntimeConfig.model_validate(self._host_runtime) if self._host_runtime is not None else None
@@ -260,6 +279,7 @@ class DesktopWorkspaceServiceMixin:
     async def workspace_tree(
         self, workspace_id: str | None, agent_id: str
     ) -> list[dict[str, Any]]:
+        self = cast("DesktopV2Service", self)
         root = await self.workspace_root(workspace_id, agent_id)
         settings = await self.get_settings()
         excluded: set[str] = set()
@@ -285,6 +305,7 @@ class DesktopWorkspaceServiceMixin:
     async def read_file(
         self, workspace_id: str | None, agent_id: str, relative_path: str
     ) -> tuple[bytes, str]:
+        self = cast("DesktopV2Service", self)
         root = await self.workspace_root(workspace_id, agent_id)
         path = self._resolve_child(root, relative_path)
         settings = await self.get_settings()
@@ -301,6 +322,7 @@ class DesktopWorkspaceServiceMixin:
         filename: str,
         content: bytes,
     ) -> dict[str, Any]:
+        self = cast("DesktopV2Service", self)
         root = await self.workspace_root(workspace_id, agent_id)
         settings = await self.get_settings()
         _, sandbox_config = _resolved_sandbox_config(settings)
@@ -325,11 +347,13 @@ class DesktopWorkspaceServiceMixin:
         }
 
     async def _initialize_user(self, user_id: str) -> None:
+        self = cast("DesktopV2Service", self)
         initialize = getattr(self.catalog, "initialize_user", None)
         if initialize is not None:
             await initialize(user_id)
 
     def _skill_provider(self, agent=None) -> FilesystemSkillProvider:
+        self = cast("DesktopV2Service", self)
         module_path = Path(__file__).resolve()
         source_skills = module_path.parents[3] / "skills"
         bundled_skills = module_path.parents[4] / "skills"
@@ -361,6 +385,7 @@ class DesktopWorkspaceServiceMixin:
         return FilesystemSkillProvider(roots)
 
     def _imported_skill_root(self, skill_name: str) -> Path | None:
+        self = cast("DesktopV2Service", self)
         if not _SKILL_NAME.fullmatch(skill_name):
             return None
         root = self.skill_root.resolve()
@@ -381,6 +406,7 @@ class DesktopWorkspaceServiceMixin:
         skill_name: str,
         descriptor: SkillDescriptor,
     ) -> dict[str, Any]:
+        self = cast("DesktopV2Service", self)
         return {
             **descriptor.model_dump(mode="json"),
             "can_delete": self._imported_skill_root(skill_name) is not None,
@@ -417,7 +443,9 @@ class DesktopWorkspaceServiceMixin:
         )
 
     async def _run_context(self, run_id: str, user_id: str) -> RequestContext:
+        self = cast("DesktopV2Service", self)
         await self.start()
+        assert self.session_access is not None
         context = self._context(user_id)
         command = await self.session_access.get_start_command(run_id, context)
         return self._context(

@@ -289,7 +289,7 @@ class _FibreToolMethods(_DelegationMethods):
         system_prompt: str,
         session_id: str = "",
         invocation: ToolInvocation | None = None,
-    ) -> dict[str, Any]:
+    ) -> dict[str, Any] | ToolExecutionResult:
         del session_id
         if invocation is None:  # pragma: no cover - provider invariant
             raise RuntimeError("Tool invocation was not injected")
@@ -326,7 +326,7 @@ class _FibreToolMethods(_DelegationMethods):
         tasks: list[dict[str, Any]],
         session_id: str = "",
         invocation: ToolInvocation | None = None,
-    ) -> dict[str, Any]:
+    ) -> dict[str, Any] | ToolExecutionResult:
         del session_id
         if invocation is None:  # pragma: no cover - provider invariant
             raise RuntimeError("Tool invocation was not injected")
@@ -350,7 +350,7 @@ class _TeamToolMethods(_DelegationMethods):
         tasks: list[dict[str, Any]],
         session_id: str = "",
         invocation: ToolInvocation | None = None,
-    ) -> dict[str, Any]:
+    ) -> dict[str, Any] | ToolExecutionResult:
         del session_id
         if invocation is None:  # pragma: no cover - provider invariant
             raise RuntimeError("Tool invocation was not injected")

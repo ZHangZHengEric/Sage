@@ -2,6 +2,11 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    from app.v2.desktop.backend.service import DesktopV2Service
+
 import asyncio
 import json
 
@@ -11,13 +16,17 @@ from sagents.v2.contracts.run_state import TERMINAL_RUN_STATES
 
 
 class StudioDeliveryMixin:
+    _studio_delivery_worker: asyncio.Task | None
+
     def _start_studio_delivery_worker(self):
+        self = cast("DesktopV2Service", self)
         if getattr(self, "_studio_delivery_worker", None) is not None:
             return
         self._studio_delivery_tasks = {}
         self._studio_delivery_worker = asyncio.create_task(self._studio_delivery_loop())
 
     async def _stop_studio_delivery_worker(self):
+        self = cast("DesktopV2Service", self)
         worker = getattr(self, "_studio_delivery_worker", None)
         if worker is not None:
             worker.cancel()
@@ -30,6 +39,7 @@ class StudioDeliveryMixin:
         self._studio_delivery_worker = None
 
     async def _studio_delivery_loop(self):
+        self = cast("DesktopV2Service", self)
         while True:
             try:
                 await self.dispatch_studio_deliveries()
@@ -42,6 +52,8 @@ class StudioDeliveryMixin:
             await asyncio.sleep(1)
 
     async def dispatch_studio_deliveries(self):
+        self = cast("DesktopV2Service", self)
+        assert self.session_access is not None
         tasks = self._studio_delivery_tasks
         for key, task in list(tasks.items()):
             if task.done():
@@ -82,6 +94,7 @@ class StudioDeliveryMixin:
             tasks[key] = asyncio.create_task(self._deliver_studio_message(row))
 
     async def _deliver_studio_message(self, row):
+        self = cast("DesktopV2Service", self)
         try:
             request = DesktopRunRequest(
                 studio_id=row["studio_id"],

@@ -195,7 +195,7 @@ def _resolved_sandbox_config(
             _DESKTOP_COMPONENT_DEFAULTS["execution.sandbox"],
         ),
     )
-    config = dict(_SANDBOX_DEFAULTS.get(plugin_id, {}))
+    config: dict[str, Any] = dict(_SANDBOX_DEFAULTS.get(plugin_id, {}))
     if frozen_path_mode is not None:
         config["workspace_path_mode"] = frozen_path_mode
     saved = settings.component_configs.get("execution.sandbox", {})

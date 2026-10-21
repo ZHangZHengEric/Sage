@@ -55,6 +55,7 @@ class RunAdmission:
                                         session_id, agent_id, pin_existing):
         if binding is not None or self.session_access is None or tenant_id is not None:
             return
+        assert self.context_for is not None
         context = self.context_for(user_id)
         try:
             runs = await self.session_access.list_session_runs(session_id, context)
@@ -151,7 +152,7 @@ class RunAdmission:
             # resolver intersects Agent budgets with the package policy ceiling.
             from app.v2.server.config.manifest import server_v2_run_manifest
             effective = package.resolved_manifest() if package else server_v2_run_manifest(self.settings, agent=agent, registry=getattr(self.catalog, "extensions", None))
-            bundle = package or agent.package.model_copy(update={"manifest": effective})
+            bundle = package or agent.package_bundle.model_copy(update={"manifest": effective})
             from sagents.v2.agent.management.loading import resolve_bundle, bundle_agent_definitions
             resolved = resolve_bundle(bundle, effective.runtime, models=model_config)
         if package is None and not bundle.dependencies:

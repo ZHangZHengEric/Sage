@@ -7,6 +7,7 @@ import asyncio
 from sagents.v2.model.provider import ModelProvider
 from sagents.v2.model.plugins.concurrency_budget import ModelConcurrencyBudget
 from app.v2.server.observability.logging import get_logger
+from app.v2.server.runtime.models import ServerModelClients
 
 LOGGER = get_logger(__name__)
 
@@ -22,7 +23,7 @@ class ProcessExecution:
         self._drives: dict[str, asyncio.Task[None]] = {}
         self._tasks: set[asyncio.Task[None]] = set()
         self._drive_workspaces: dict[str, tuple[str, str]] = {}
-        self.model_pool = None
+        self.model_pool: ServerModelClients | None = None
         self.model_budget: ModelConcurrencyBudget | None = None
         self.fallback_model = fallback_model
         self.sandbox_provider = None

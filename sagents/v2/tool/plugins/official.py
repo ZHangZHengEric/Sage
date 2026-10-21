@@ -14,6 +14,7 @@ from sagents.v2.runtime.extensions import (
     ExtensionDependency,
     ExtensionScope,
     ExtensionScopeContext,
+    ProviderSet,
 )
 from sagents.v2.tool.decorated import DecoratedToolProvider
 from sagents.v2.tool.decorators import decorated_tool_definition
@@ -114,7 +115,7 @@ class OfficialToolPlugin:
         self.definitions = provider.definitions
 
     async def start(
-        self, context: ExtensionScopeContext, dependencies: Mapping[str, Any]
+        self, context: ExtensionScopeContext, dependencies: ProviderSet
     ) -> Mapping[str, Any]:
         return {
             "tool.provider:official": ToolProvider(self.catalog, self.executor),

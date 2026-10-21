@@ -27,7 +27,7 @@ class SourcePluginScope:
         name = f"_sage_extension_{uuid.uuid4().hex}"
         module = types.ModuleType(name)
         module.__file__ = f"extensions/{declaration.id}.py"
-        module.__sage_source_sha256__ = hashlib.sha256(source.encode()).hexdigest()
+        setattr(module, "__sage_source_sha256__", hashlib.sha256(source.encode()).hexdigest())
         sys.modules[name] = module
         self.modules.append((name, module))
         exec(code, module.__dict__)

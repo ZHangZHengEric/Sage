@@ -6,6 +6,8 @@ owns execution, sandbox leases, tool assembly and all scope cleanup.
 from __future__ import annotations
 
 import json
+from types import SimpleNamespace
+from typing import Literal
 
 from sagents.v2.agent.policy import ApprovalStrategy, DefaultToolPolicy
 from sagents.v2.package.manifest.runtime import CapabilitySelection
@@ -70,7 +72,7 @@ async def desktop_run_inputs(service, context, dependencies):
 
 
 def desktop_registrations(service):
-    def registration(capability, factory, *, ownership="borrowed"):
+    def registration(capability, factory, *, ownership: Literal["owned", "borrowed"] = "borrowed"):
         return ExtensionRegistration(
             descriptor=ExtensionDescriptor(
                 plugin_id="com.sage.desktop.run." + capability.replace(".", "-"),
@@ -101,11 +103,11 @@ def desktop_registrations(service):
         if run.command.config.enabled_tools is not None:
             declared.intersection_update(run.command.config.enabled_tools)
         mcp_catalog = FilteredToolCatalog(environment.mcp, declared)
-        providers = [type("Ports", (), {"catalog": mcp_catalog, "executor": environment.mcp})()]
+        providers = [SimpleNamespace(catalog=mcp_catalog, executor=environment.mcp)]
         binding = await service.studio_run_binding(run.run_id, agent, run.command.session_id)
         if binding:
             studio = service.studio_tool_provider(run.run_id, agent.user_id, binding)
-            providers.append(type("Ports", (), {"catalog": studio, "executor": studio})())
+            providers.append(SimpleNamespace(catalog=studio, executor=studio))
         class Tools:
             catalog = CompositeToolCatalog(tuple(value.catalog for value in providers)) if providers else InMemoryToolCatalog(())
             executor = CompositeToolExecutor(tuple(value.executor for value in providers)) if providers else InMemoryToolExecutor({}, {})

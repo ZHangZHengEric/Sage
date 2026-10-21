@@ -218,7 +218,10 @@ async def _events_with_heartbeats(
     events: AsyncIterator[RuntimeEvent], *, heartbeat_seconds: float
 ) -> AsyncIterator[RuntimeEvent | None]:
     iterator = events.__aiter__()
-    pending = asyncio.create_task(anext(iterator))
+    async def next_event() -> RuntimeEvent:
+        return await anext(iterator)
+
+    pending = asyncio.create_task(next_event())
     try:
         while True:
             done, _ = await asyncio.wait((pending,), timeout=heartbeat_seconds)
@@ -230,7 +233,7 @@ async def _events_with_heartbeats(
             except StopAsyncIteration:
                 return
             yield event
-            pending = asyncio.create_task(anext(iterator))
+            pending = asyncio.create_task(next_event())
     finally:
         if not pending.done():
             pending.cancel()

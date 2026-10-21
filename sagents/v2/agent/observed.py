@@ -2,13 +2,15 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, cast
+from sagents.v2.contracts.events import ToolEventData
 
 from sagents.v2.agent.engine import AgentLoopEngine
 from sagents.v2.agent.step_request import DefaultAgentStepRequestBuilder
 from sagents.v2.runtime.observability.timing import log_duration
 from sagents.v2.runtime.observability.content import trace_content
 from sagents.v2.contracts.items import TextBlock
+from sagents.v2.contracts.commands import StartRun
 from sagents.v2.contracts.principals import RequestContext
 from sagents.v2.contracts.run_state import RunSnapshot, RunState
 from sagents.v2.runtime.observability.contracts import (
@@ -54,8 +56,11 @@ class _ObservedContextAssembler:
     def __init__(self, assembler, logger):
         self.assembler, self.logger = assembler, logger
 
-    def __getattr__(self, name):
+    def __getattr__(self, name: str) -> Any:
         return getattr(self.assembler, name)
+
+    async def prepare_projection(self, command, ledger, **kwargs):
+        return await self.assembler.prepare_projection(command, ledger, **kwargs)
 
     async def initial_ledger(self, command, *, run_id=None):
         with log_duration(self.logger, "agent.preparation.completed", "会话历史加载结束",
@@ -72,7 +77,7 @@ class _ObservedStepRequestBuilder:
     def __init__(self, builder, logger):
         self.builder, self.logger = builder, logger
 
-    def __getattr__(self, name):
+    def __getattr__(self, name: str) -> Any:
         return getattr(self.builder, name)
 
     async def prepare(self, **kwargs):
@@ -101,7 +106,7 @@ class ObservedRunDriver(AgentLoopEngine):
             )
             builder = self.step_request_builder
             if isinstance(builder, DefaultAgentStepRequestBuilder):
-                builder.context_assembler = self.context_assembler
+                cast(DefaultAgentStepRequestBuilder, builder).context_assembler = self.context_assembler
             self.step_request_builder = _ObservedStepRequestBuilder(
                 builder, self._structured_logger()
             )
@@ -146,12 +151,12 @@ class ObservedRunDriver(AgentLoopEngine):
         )
 
     @staticmethod
-    def _user_input_preview(command) -> str:
+    def _user_input_preview(command: StartRun) -> str:
         latest = next(
             (
                 item
-                for item in reversed(getattr(command, "input", ()) or ())
-                if getattr(item, "role", None) == "user"
+                for item in reversed(command.input)
+                if item.role == "user"
             ),
             None,
         )
@@ -394,8 +399,8 @@ class ObservedRunDriver(AgentLoopEngine):
             from sagents.v2.tool.contracts import ToolExecutionResult
             for event in reversed(await self.runtime.session_store.read_events(run.run_id)):
                 data = event.data
-                if (getattr(data, "tool_call_id", None) == call.tool_call_id
-                        and getattr(data, "error", None) is not None):
+                if (isinstance(data, ToolEventData) and data.tool_call_id == call.tool_call_id
+                        and data.error is not None):
                     result = ToolExecutionResult(tool_call_id=call.tool_call_id,
                         operation_id=call.operation_id, error=data.error)
                     break
@@ -416,10 +421,10 @@ class ObservedRunDriver(AgentLoopEngine):
                 ),
                 "error": trace_content(
                     self._observed_trace_sink,
-                    result.error.model_dump(mode="json") if getattr(result, "error", None) else None,
+                    result.error.model_dump(mode="json") if result is not None and result.error is not None else None,
                 ),
                 "status_message": trace_content(self._observed_trace_sink, str(result.error))
-                if getattr(result, "error", None)
+                if result is not None and result.error is not None
                 else None,
                 "outcome": "interrupted" if result is None else "failed" if result.error else "completed",
             },

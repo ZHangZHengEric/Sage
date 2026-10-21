@@ -66,7 +66,7 @@ class AgentPackageTestGenerator:
         timeout_seconds: float = 120,
         on_call: Callable[[OptimizationAgentCall], None] | None = None,
     ) -> OptimizationSuiteGeneration:
-        return await self._generate_with_record(
+        generation = await self._generate_with_record(
             package,
             context=context,
             agent_id=agent_id,
@@ -75,6 +75,8 @@ class AgentPackageTestGenerator:
             timeout_seconds=timeout_seconds,
             on_call=on_call,
         )
+        assert isinstance(generation, OptimizationSuiteGeneration)
+        return generation
 
     async def generate_final(
         self,
@@ -111,7 +113,7 @@ class AgentPackageTestGenerator:
         on_call: Callable[[OptimizationAgentCall], None] | None = None,
         excluded_cases: tuple[OptimizationCase, ...] = (),
     ) -> OptimizationFinalSuiteGeneration:
-        return await self._generate_with_record(
+        generation = await self._generate_with_record(
             package,
             context=context,
             agent_id=agent_id,
@@ -122,6 +124,8 @@ class AgentPackageTestGenerator:
             final=True,
             excluded_cases=excluded_cases,
         )
+        assert isinstance(generation, OptimizationFinalSuiteGeneration)
+        return generation
 
     async def _generate_with_record(
         self,
@@ -152,9 +156,6 @@ class AgentPackageTestGenerator:
         if target not in manifest.agents:
             raise ValueError("agent_id must identify an agent in the package")
         suite_type = OptimizationFinalSuite if final else OptimizationSuite
-        generation_type = (
-            OptimizationFinalSuiteGeneration if final else OptimizationSuiteGeneration
-        )
         package_view = bundle.model_dump(mode="json")
         if final:
             package_view["manifest"]["tests"] = {"scenarios": [], "gates": {}}
@@ -224,9 +225,12 @@ class AgentPackageTestGenerator:
             if len(suite.cases) > max_cases:
                 raise ValueError("generated suite exceeds max_cases")
             if final:
+                assert isinstance(suite, OptimizationFinalSuite)
                 suite.assert_disjoint(excluded_cases)
-        return generation_type(
-            suite=suite,
-            designer=self.designer.model_copy(deep=True),
-            call=call,
-        )
+        if final:
+            assert isinstance(suite, OptimizationFinalSuite)
+            return OptimizationFinalSuiteGeneration(suite=suite,
+                designer=self.designer.model_copy(deep=True), call=call)
+        assert isinstance(suite, OptimizationSuite)
+        return OptimizationSuiteGeneration(suite=suite,
+            designer=self.designer.model_copy(deep=True), call=call)

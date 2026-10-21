@@ -1,5 +1,21 @@
 """Skill contracts and lazily loaded implementations."""
 
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from sagents.v2.tool.plugins.skill.operations import SkillLoadTool as SkillLoadTool
+    from sagents.v2.skill.plugins.repository import SqliteSkillRepository as SqliteSkillRepository
+    from sagents.v2.skill.plugins.repository import MemorySkillRepository as MemorySkillRepository
+    from sagents.v2.skill.plugins.workspace import AutoSyncSkillWorkspace as AutoSyncSkillWorkspace
+    from sagents.v2.skill.plugins.workspace import FixedCopySkillWorkspace as FixedCopySkillWorkspace
+    from sagents.v2.skill.plugins.workspace import ReadonlyMountSkillWorkspace as ReadonlyMountSkillWorkspace
+    from sagents.v2.skill.plugins.filesystem import FilesystemSkillProvider as FilesystemSkillProvider
+    from sagents.v2.skill.plugins.ephemeral import InMemorySkillActivationRepository as InMemorySkillActivationRepository
+    from sagents.v2.skill.plugins.ephemeral import InMemorySkillProvider as InMemorySkillProvider
+    from sagents.v2.skill.plugins.ephemeral import InMemorySkillWorkspace as InMemorySkillWorkspace
+    from sagents.v2.skill.plugins.session import SessionDerivedSkillActivationRepository as SessionDerivedSkillActivationRepository
+
+
 from sagents.v2._lazy import exported_names, resolve_export
 
 from sagents.v2.skill.context import (

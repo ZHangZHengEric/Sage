@@ -1,5 +1,7 @@
 """Public definitions used by Agent editors, cached for a running host."""
 
+from sagents.v2.package.manifest.runtime import CapabilitySelection
+
 def build_plugin_catalog(host):
     from app.v2.server.catalog.plugins import (
         plugin_options,
@@ -27,6 +29,8 @@ def build_plugin_catalog(host):
     from app.v2.server.config.manifest import server_v2_manifest
     default_config = dict(DEFAULT_CONFIG)
     for key, selection in server_v2_manifest(host.settings).runtime.capabilities.items():
+        if not isinstance(selection, CapabilitySelection):
+            continue
         defaults[key] = selection.plugin
         if key in AGENT_DEFAULTS:
             default_config[key] = selection.config

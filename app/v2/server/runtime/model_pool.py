@@ -6,7 +6,8 @@ import asyncio
 import hashlib
 import json
 from collections import OrderedDict
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Coroutine
+from typing import Any
 from dataclasses import dataclass
 
 try:
@@ -61,7 +62,7 @@ class ModelLease:
 class ModelClientPool:
     def __init__(
         self,
-        factory: Callable[..., Awaitable],
+        factory: Callable[..., Coroutine[Any, Any, Any]],
         closer: Callable[..., Awaitable],
         *,
         max_clients=64,
@@ -142,12 +143,14 @@ class ModelClientPool:
                         self._entries[key] = entry
                         self._created += 1
                 if retiring is None:
+                    assert entry is not None
                     entry.users += 1
                     self._entries.move_to_end(key)
             if retiring is not None:
                 await asyncio.shield(retiring)
                 continue
             try:
+                assert entry is not None
                 provider = await asyncio.shield(entry.building)
                 return ModelLease(self, entry, provider)
             except BaseException:
@@ -181,7 +184,9 @@ class ModelClientPool:
                 LOGGER.exception("model.client.close.failed", "Model client cleanup failed; capacity reserved", exc)
         finally:
             async with self._condition:
-                self._retiring.discard(asyncio.current_task())
+                task = asyncio.current_task()
+                assert task is not None
+                self._retiring.discard(task)
                 self._condition.notify_all()
 
     async def snapshot(self):

@@ -82,7 +82,7 @@ class A2AProtocolAdapter:
         if state is None:
             return self._unsupported(event)
         failed = event.type == "run.failed" and data.error is not None
-        text = data.error.message if failed else data.reason
+        text = data.error.message if data.error is not None and failed else data.reason
         metadata: dict[str, object] = {}
         if failed and data.error is not None:
             # A2A has no error code on TaskStatus: the code survives as status

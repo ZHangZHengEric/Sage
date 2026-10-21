@@ -54,6 +54,6 @@ def create_desktop_observability(runtime_root: Path):
         session_root=runtime_root,
         component_selections=settings.component_selections,
         component_configs=settings.component_configs,
-    ).runtime.capabilities["observability.provider"]
+    ).runtime.selections("observability.provider")[0]
     config = normalize_observation_config(selection.plugin, selection.config)
     return create_observability_provider(selection.plugin, config)

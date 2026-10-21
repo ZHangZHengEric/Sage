@@ -221,7 +221,7 @@ class InspectionProgressRule:
             reason_code="loop.no_progress", reason=reason,
             interaction=InteractionDraft(interaction_type="loop_recovery", allowed_decisions=("submit", "cancel"),
                 payload=recovery_payload("recovery.loop_tools", context.language,
-                    reason_code="loop.no_progress", count=context.no_progress_steps)),
+                    reason_code="loop.no_progress", message_params={"count": context.no_progress_steps})),
         )
 
 

@@ -1,5 +1,17 @@
 """Agent-loop public facade with lazy implementation exports."""
 
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from sagents.v2.agent.factory import AgentCompositionFactory as AgentCompositionFactory
+    from sagents.v2.agent.state import AgentLoopCheckpointState as AgentLoopCheckpointState
+    from sagents.v2.agent.engine import AgentLoopEngine as AgentLoopEngine
+    from sagents.v2.agent.step_request import AgentStepRequestBuilder as AgentStepRequestBuilder
+    from sagents.v2.agent.step_request import DefaultAgentStepRequestBuilder as DefaultAgentStepRequestBuilder
+    from sagents.v2.agent.observed import ObservedRunDriver as ObservedRunDriver
+    from sagents.v2.agent.step_request import PreparedAgentStep as PreparedAgentStep
+
+
 from sagents.v2._lazy import exported_names, resolve_export
 
 
@@ -19,7 +31,15 @@ _EXPORTS = {
     "PreparedAgentStep": ("sagents.v2.agent.step_request", "PreparedAgentStep"),
 }
 
-__all__ = list(_EXPORTS)
+__all__ = [
+    "AgentCompositionFactory",
+    "AgentLoopCheckpointState",
+    "AgentLoopEngine",
+    "AgentStepRequestBuilder",
+    "DefaultAgentStepRequestBuilder",
+    "ObservedRunDriver",
+    "PreparedAgentStep",
+]
 
 
 def __getattr__(name: str):

@@ -1,5 +1,14 @@
 """Package lifecycle contracts and lazily exported registry plugins."""
 
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from sagents.v2.package.registry.contracts import AgentPackageRecord as AgentPackageRecord
+    from sagents.v2.package.registry.contracts import PackageStage as PackageStage
+    from sagents.v2.package.registry.contracts import PackageValidationReport as PackageValidationReport
+    from sagents.v2.package.registry.plugins.ephemeral import InMemoryAgentPackageRegistry as InMemoryAgentPackageRegistry
+
+
 from sagents.v2._lazy import exported_names, resolve_export
 
 
@@ -13,7 +22,12 @@ _EXPORTS = {
         "InMemoryAgentPackageRegistry",
     ),
 }
-__all__ = list(_EXPORTS)
+__all__ = [
+    "AgentPackageRecord",
+    "PackageStage",
+    "PackageValidationReport",
+    "InMemoryAgentPackageRegistry",
+]
 
 
 def __getattr__(name: str):

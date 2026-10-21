@@ -154,10 +154,13 @@ async def test_external_write_denied_before_execution_does_not_request_reconcili
     result = await loop.execute(handle.run_id, LOOP_CONTEXT)
     events = await runtime.session_store.read_events(handle.run_id)
     assert result.state == RunState.COMPLETED
-    assert not {"tool.call.unknown", "interaction.requested"}.intersection(event.type for event in events)
+    assert len(model.requests) == 2
+    assert not {"tool.call.unknown", "tool.call.reconciling", "interaction.requested"}.intersection(event.type for event in events)
     failure = next(event for event in events if event.type == "tool.call.failed")
     assert failure.data.error.code == "tool.not_enabled"
+    assert failure.data.error.metadata["side_effect_state"] == "not_applied"
     assert provider.executed == []
+    assert provider.reconciled == []
 
 
 def test_dependency_receives_its_own_external_tools(tmp_path, monkeypatch):

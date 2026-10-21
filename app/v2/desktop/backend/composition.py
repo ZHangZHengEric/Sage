@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from sagents.v2 import SAgentApplication, SAgentBuilder
 from sagents.v2.runtime.extensions import (
@@ -47,7 +47,7 @@ async def build_desktop_application(
     from app.v2.desktop.backend.revision_store import DesktopAgentRevisionStore
     builder = SAgentBuilder(revision_store=DesktopAgentRevisionStore(root))
     choices = {}
-    def register_service(capability, value, *, ownership="borrowed"):
+    def register_service(capability, value, *, ownership: Literal["owned", "borrowed"] = "borrowed"):
         plugin_id = "com.sage.desktop." + capability.replace(".", "-")
         ports = {capability: value}
         if capability == "session.store":

@@ -4,6 +4,8 @@ The transactional state machine lives in :mod:`sagents.v2.runtime.session.state`
 so durable backends can reuse it without depending on this concrete adapter.
 """
 
+from typing import Any
+
 from sagents.v2.runtime.session.state import (
     SESSION_AGGREGATE_FORMAT,
     SessionStoreCoordinator,
@@ -23,7 +25,7 @@ class EphemeralSessionStore:
             self, "_coordinator", SessionStoreCoordinator(*args, **kwargs)
         )
 
-    def __getattr__(self, name):
+    def __getattr__(self, name: str) -> Any:
         return getattr(self._coordinator, name)
 
     def __setattr__(self, name, value) -> None:

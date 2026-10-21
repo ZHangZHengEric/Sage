@@ -1,5 +1,10 @@
 from __future__ import annotations
 
+from typing import TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    from app.v2.desktop.backend.service import DesktopV2Service
+
 import asyncio
 import json
 import logging
@@ -20,6 +25,8 @@ from sagents.v2.contracts.commands import (
     SteerRun,
 )
 from sagents.v2.contracts.common import new_id, utc_now
+from sagents.v2.runtime.extensions import ExtensionScope
+from sagents.v2.composition.loaded_agents import ApplicationEntrypoint
 from sagents.v2.contracts.errors import ErrorCategory, RuntimeErrorInfo, SageV2Error
 from sagents.v2.contracts.run_state import (
     EventCursor,
@@ -58,8 +65,11 @@ class DesktopRunServiceMixin(DesktopRunCompositionMixin):
     async def run_events(
         self, request: DesktopRunRequest, user_id: str
     ) -> AsyncIterator[str]:
+        self = cast("DesktopV2Service", self)
         request = request.model_copy(deep=True)
         await self.start()
+        assert self.application is not None
+        assert self.session_access is not None
         action_surface = None
         if request.openui_action is not None:
             action_surface, request, replay_run = await self._prepare_openui_action(
@@ -174,7 +184,7 @@ class DesktopRunServiceMixin(DesktopRunCompositionMixin):
             command = command.model_copy(update={
                 "agent_id": loaded.id, "resolved_spec_hash": loaded.composition_hash,
             })
-            stream = await self.application.entrypoint().run_stream(command, context, agent=loaded)
+            stream = await cast(ApplicationEntrypoint, self.application.entrypoint()).run_stream(command, context, agent=loaded)
             accepted_handle = stream.handle
             if action_surface is not None:
                 self.openui_store.accepted(action_surface, accepted_handle.run_id)
@@ -229,6 +239,8 @@ class DesktopRunServiceMixin(DesktopRunCompositionMixin):
             await self._index_session(stream.handle.session_id)
 
     async def _prepare_openui_action(self, request, user_id):
+        self = cast("DesktopV2Service", self)
+        assert self.session_access is not None
         action = request.openui_action
         if (
             not request.session_id
@@ -282,7 +294,9 @@ class DesktopRunServiceMixin(DesktopRunCompositionMixin):
     async def _normalize_desktop_fork_request(
         self, request: DesktopRunRequest, user_id: str
     ) -> DesktopRunRequest:
+        self = cast("DesktopV2Service", self)
         await self.start()
+        assert self.session_access is not None
         if request.session_concurrency_mode != SessionConcurrencyMode.FORK:
             if request.fork_source_run_id is not None:
                 raise ValueError("fork_source_run_id requires fork concurrency mode")
@@ -309,7 +323,9 @@ class DesktopRunServiceMixin(DesktopRunCompositionMixin):
         return request.model_copy(update={"base_session_revision": base_revision})
 
     async def snapshot(self, run_id: str, user_id: str) -> dict[str, Any]:
+        self = cast("DesktopV2Service", self)
         await self.start()
+        assert self.session_access is not None
         context = self._context(user_id)
         run = await self.session_access.get_run(run_id, context)
         data: dict[str, Any] = {"run": run.model_dump(mode="json")}
@@ -327,6 +343,7 @@ class DesktopRunServiceMixin(DesktopRunCompositionMixin):
 
     async def _index_session(self, session_id: str) -> None:
         """Publish one known Session into the Desktop-owned global index."""
+        self = cast("DesktopV2Service", self)
 
         try:
             await self.session_index.upsert(
@@ -338,6 +355,7 @@ class DesktopRunServiceMixin(DesktopRunCompositionMixin):
             LOGGER.exception("Desktop Session index update failed for %s", session_id)
 
     async def _index_run(self, run_id: str) -> None:
+        self = cast("DesktopV2Service", self)
         try:
             run = await self.session_store.get_run(run_id)
             await self._index_session(run.session_id)
@@ -358,7 +376,9 @@ class DesktopRunServiceMixin(DesktopRunCompositionMixin):
         preview_sequence: int = 0,
         preview_epoch: str | None = None,
     ) -> AsyncIterator[str]:
+        self = cast("DesktopV2Service", self)
         await self.start()
+        assert self.session_access is not None
         context = self._context(user_id)
         projector = OpenUiProjector(self, user_id)
         cursor = 0
@@ -406,7 +426,9 @@ class DesktopRunServiceMixin(DesktopRunCompositionMixin):
                 return
 
     async def pause(self, run_id: str, user_id: str):
+        self = cast("DesktopV2Service", self)
         await self.start()
+        assert self.session_access is not None
         context = await self._run_context(run_id, user_id)
         run = await self.session_access.get_run(run_id, context)
         result = await self.runtime.pause_run(
@@ -421,7 +443,9 @@ class DesktopRunServiceMixin(DesktopRunCompositionMixin):
         return result
 
     async def cancel(self, run_id: str, user_id: str):
+        self = cast("DesktopV2Service", self)
         await self.start()
+        assert self.session_access is not None
         context = await self._run_context(run_id, user_id)
         run = await self.session_access.get_run(run_id, context)
         result = await self.runtime.cancel_run(
@@ -444,7 +468,9 @@ class DesktopRunServiceMixin(DesktopRunCompositionMixin):
         *,
         content: list[RunMessageContent] | None = None,
     ):
+        self = cast("DesktopV2Service", self)
         await self.start()
+        assert self.session_access is not None
         context = await self._run_context(run_id, user_id)
         run = await self.session_access.get_run(run_id, context)
         message = RunMessage(role="user", text=text, content=content or [])
@@ -468,7 +494,10 @@ class DesktopRunServiceMixin(DesktopRunCompositionMixin):
         return result
 
     async def resume(self, run_id: str, user_id: str):
+        self = cast("DesktopV2Service", self)
         await self.start()
+        assert self.application is not None
+        assert self.session_access is not None
         context = await self._run_context(run_id, user_id)
         run = await self.session_access.get_run(run_id, context)
         if run.suspension_id is None:
@@ -502,7 +531,10 @@ class DesktopRunServiceMixin(DesktopRunCompositionMixin):
         payload: dict[str, Any],
         user_id: str,
     ):
+        self = cast("DesktopV2Service", self)
         await self.start()
+        assert self.application is not None
+        assert self.session_access is not None
         context = await self._run_context(run_id, user_id)
         run = await self.session_access.get_run(run_id, context)
         if run.suspension_id is None:
@@ -548,6 +580,7 @@ class DesktopRunServiceMixin(DesktopRunCompositionMixin):
         interaction,
         user_id: str,
     ) -> str:
+        self = cast("DesktopV2Service", self)
         if "approve_and_remember" not in interaction.allowed_decisions:
             raise ValueError("this approval cannot be remembered")
         payload = interaction.payload
@@ -587,16 +620,20 @@ class DesktopRunServiceMixin(DesktopRunCompositionMixin):
         return command
 
     async def _continue(self, run_id: str, user_id: str) -> None:
+        self = cast("DesktopV2Service", self)
         await self.start()
+        assert self.application is not None
         self._ensure_run_observer(run_id)
         command = await self.session_store.get_start_command(run_id)
         context = self._context(user_id, language=str(command.config.metadata.get("response_language") or "en"))
         loaded = await self.application.agent_for_run(run_id, context)
-        task = await self.application.entrypoint().continue_run(run_id, context, agent=loaded)
+        task = await cast(ApplicationEntrypoint, self.application.entrypoint()).continue_run(run_id, context, agent=loaded)
         task.add_done_callback(lambda _completed: asyncio.create_task(self._index_run(run_id)))
 
     async def _load_run_agent(self, agent, manifest, command, *, models, environment):
         """Freeze product configuration; Sage owns all execution assembly."""
+        self = cast("DesktopV2Service", self)
+        assert self.application is not None
         from .sdk_plugins import desktop_run_selections
         from sagents.v2.package.manifest.runtime import CapabilitySelection
         from sagents.v2.runtime.execution.configuration import LocalExecutionPolicy
@@ -621,7 +658,7 @@ class DesktopRunServiceMixin(DesktopRunCompositionMixin):
                 key: value for key, value in configured.capabilities.items() if key not in identity_caps
             }, **selections}
             official = CapabilitySelection(plugin="sage.tool.official")
-            external = CapabilitySelection(plugin="com.sage.desktop.run.tool-provider", scope="run", grant_tools=True)
+            external = CapabilitySelection(plugin="com.sage.desktop.run.tool-provider", scope=ExtensionScope.RUN, grant_tools=True)
             capabilities["tool.provider"] = (official, external)
             from sagents.v2.package.manifest.runtime import RuntimeConfig
             supplied = RuntimeConfig.model_validate(self._host_runtime) if self._host_runtime is not None else None
@@ -677,7 +714,7 @@ class DesktopRunServiceMixin(DesktopRunCompositionMixin):
                     tuple(source.config.get("availableTools") or ()), tuple(source.config.get("availableSkills") or ()))
                 definition = candidate.agents[source_id]
                 from .runtime_config import _continuation_agent_instructions
-                completion = runtime.capabilities["agent.continuation-policy"].plugin
+                completion = runtime.selections("agent.continuation-policy")[0].plugin
                 instructions = definition.instructions.model_copy(update={
                     "inline": (definition.instructions.inline or "") + _continuation_agent_instructions(completion),
                 })
@@ -721,6 +758,7 @@ class DesktopRunServiceMixin(DesktopRunCompositionMixin):
                     source, provider, definitions[source_id].tools, definitions[source_id].skills)
                 package = package.model_copy(update={"agents": {source_id: definitions[source_id]}})
                 children = {name: await load(name, (*ancestors, source_id)) for name in definitions[source_id].subagents}
+                assert self.application is not None
                 current = next((value for value in self.application.loaded_agents if value.package_id == package.metadata.id), None)
                 if current is None:
                     return await self.application.load_agent(package, subagents=children)
@@ -728,6 +766,7 @@ class DesktopRunServiceMixin(DesktopRunCompositionMixin):
             return await load(agent.agent_id)
 
     def _ensure_run_observer(self, run_id: str) -> None:
+        self = cast("DesktopV2Service", self)
         current = self._run_observers.get(run_id)
         if current is not None and not current.done():
             return
@@ -745,6 +784,7 @@ class DesktopRunServiceMixin(DesktopRunCompositionMixin):
         )
 
     async def _observe_run(self, run_id: str) -> None:
+        self = cast("DesktopV2Service", self)
         try:
             async for event in self.runtime.subscribe_events(
                 EventCursor(run_id=run_id, run_sequence=0)
@@ -770,6 +810,7 @@ class DesktopRunServiceMixin(DesktopRunCompositionMixin):
             )
 
     def _write_runtime_event(self, event) -> None:
+        self = cast("DesktopV2Service", self)
         if event.data.kind in {"item", "usage", "protocol"}:
             return
         data = event.data.model_dump(mode="json", exclude_none=True)

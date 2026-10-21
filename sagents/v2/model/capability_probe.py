@@ -384,13 +384,13 @@ async def probe_model_capabilities(
             },
         ),
     )
-    successful = tuple(value.name for value in outcomes if value.supported)
-    skipped = tuple(
+    successful: tuple[ProbeName, ...] = tuple(value.name for value in outcomes if value.supported)
+    skipped: tuple[ProbeName, ...] = tuple(
         value.name
         for value in outcomes
         if value.status == ModelCapabilityProbeStatus.SKIPPED
     )
-    failed = tuple(
+    failed: tuple[ProbeName, ...] = tuple(
         value.name
         for value in outcomes
         if value.status

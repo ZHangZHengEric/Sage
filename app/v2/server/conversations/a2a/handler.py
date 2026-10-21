@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import AsyncGenerator
+from typing import Literal
 
 from a2a.server.context import ServerCallContext
 from a2a.server.events.event_queue import Event
@@ -177,7 +178,7 @@ class _translated:
     def __enter__(self) -> None:
         return None
 
-    def __exit__(self, exc_type, exc, traceback) -> bool:
+    def __exit__(self, exc_type, exc, traceback) -> Literal[False]:
         if not isinstance(exc, SageV2Error):
             return False
         if exc.info.code.endswith("not_found"):

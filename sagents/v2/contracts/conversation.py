@@ -1,7 +1,14 @@
 """Semantic user boundaries and transport ordering for tool-provided context."""
 
 
-def is_tool_context(message):
+from collections.abc import Sequence
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from sagents.v2.model.contracts import ModelMessage
+
+
+def is_tool_context(message: "ModelMessage") -> bool:
     # Recognize older persisted image followups as well as the explicit marker.
     return message.role == "user" and (
         message.metadata.get("tool_context") is True
@@ -9,7 +16,7 @@ def is_tool_context(message):
     )
 
 
-def is_user_request(message):
+def is_user_request(message: "ModelMessage") -> bool:
     return (
         message.role == "user"
         and not is_tool_context(message)
@@ -17,7 +24,7 @@ def is_user_request(message):
     )
 
 
-def order_tool_context(messages):
+def order_tool_context(messages: Sequence["ModelMessage"]) -> tuple["ModelMessage", ...]:
     """Move supplemental context after its contiguous tool batch, including replay.
 
     Never cross a real user/assistant boundary or move an unrelated tool result.

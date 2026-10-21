@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+from typing import cast
+from collections.abc import Callable, Awaitable
+
 import inspect
 import asyncio
-from collections.abc import Awaitable, Callable
 from datetime import timedelta
 
 from sagents.v2.contracts.commands import InputItem, StartRun
@@ -155,7 +157,7 @@ async def run_session_store_recovery_conformance(
     cursor = replay[-1].run_sequence
     close = getattr(store, "close", None)
     if callable(close):
-        await close()
+        await cast(Callable[[], Awaitable[None]], close)()
 
     reopened = await create_store()
     restored = await reopened.get_run(created.handle.run_id)
@@ -168,4 +170,4 @@ async def run_session_store_recovery_conformance(
         raise AssertionError("durable cursor could not resume after provider restart")
     close = getattr(reopened, "close", None)
     if callable(close):
-        await close()
+        await cast(Callable[[], Awaitable[None]], close)()

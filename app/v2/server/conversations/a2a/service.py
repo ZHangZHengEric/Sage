@@ -31,6 +31,8 @@ from sagents.v2.contracts.run_state import (
     RunState,
 )
 from sagents.v2.interfaces.protocols.a2a import A2AProtocolAdapter
+from sagents.v2.contracts.principals import RequestContext
+from sagents.v2.runtime.session import AuthorizedSessionAccess
 from sagents.v2.tool.plugins.a2a import CALL_DEPTH_KEY, MAX_CALL_DEPTH
 
 # A2A caps a page at what a caller asked for; these bound what the walk over a
@@ -249,6 +251,7 @@ class A2AService:
                 if len(rows) > remaining:
                     last = selected[-1]
                     anchor = last_anchor
+                    assert anchor is not None
                     token = _Page(thread_cursor(anchor), anchor.thread_id, anchor.updated_at,
                                   last.created_at.isoformat(), last.run_id).encode()
                     break
@@ -387,8 +390,6 @@ class A2AService:
             )
         except SageV2Error as exc:
             raise _absent(exc) from exc
-        except SageV2Error as exc:
-            raise _stale(exc) from exc
         return _Started(
             run_id=task_id,
             session_id=run.session_id,
@@ -492,8 +493,8 @@ class _Started:
 
     run_id: str
     session_id: str
-    context: object
-    session_access: object
+    context: RequestContext
+    session_access: AuthorizedSessionAccess
     after: int = 0
 
     async def finished(self) -> None:
@@ -624,6 +625,8 @@ def _call_depth(message: Message) -> int:
     metadata = message.metadata
     raw = metadata[CALL_DEPTH_KEY] if CALL_DEPTH_KEY in metadata else 0
     try:
+        if not isinstance(raw, (str, int, float)):
+            raise TypeError("call depth must be numeric")
         depth = int(float(raw))
     except (TypeError, ValueError):
         raise SageV2Error(

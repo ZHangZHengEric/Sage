@@ -4,6 +4,8 @@ SQL queries, aggregate caching and the archive shared with Redis stores live
 inside this package. Session contracts and shared state rules remain in session.
 """
 
+from typing import Any
+
 from .state import (
     _MysqlSessionState,
     SessionStoreCorruptionError,
@@ -12,7 +14,7 @@ from .state import (
 
 
 class _MysqlSessionStoreMeta(type):
-    def __getattr__(cls, name):
+    def __getattr__(cls, name: str) -> Any:
         return getattr(_MysqlSessionState, name)
 
 
@@ -31,7 +33,7 @@ class MysqlSessionStore(metaclass=_MysqlSessionStoreMeta):
         from sagents.v2.runtime.session.plugins import session_storage_providers
         return session_storage_providers(self)
 
-    def __getattr__(self, name):
+    def __getattr__(self, name: str) -> Any:
         return getattr(self._coordinator, name)
 
     def __setattr__(self, name, value):

@@ -42,7 +42,7 @@ from sagents.v2.flow.contracts import (
     RunnableNode,
 )
 from sagents.v2.runtime.contracts import RuntimePort
-from sagents.v2.package.manifest.flows import FlowDefinition
+from sagents.v2.package.manifest.flows import FlowDefinition, FlowNode
 from sagents.v2.runtime.session.contracts import EventDraft
 from sagents.v2.i18n import (
     error_recovery_payload,
@@ -359,7 +359,9 @@ class FlowRuntime:
             started = next(
                 (event for event in events if event.type == "flow.started"), None
             )
-            selected = flow_id or (started.data.flow_id if started else None)
+            started_data = started.data if started is not None else None
+            assert started_data is None or isinstance(started_data, FlowEventData)
+            selected = flow_id or (started_data.flow_id if started_data else None)
             if selected is None and len(self.flows) == 1:
                 selected = next(iter(self.flows))
             if selected is None:
@@ -373,7 +375,7 @@ class FlowRuntime:
             state = FlowExecutionState(
                 flow_id=selected,
                 flow_execution_id=started.flow_execution_id
-                if started
+                if started and started.flow_execution_id
                 else new_id("flow_execution"),
                 current_node_id=self._flow(selected).start,
             )
@@ -683,7 +685,7 @@ class FlowRuntime:
         *,
         node_execution_id=None,
         resumed=False,
-    ):
+    ) -> tuple[FlowNodeResult, str]:
         if node.type == "agent":
             runner = self.agent_nodes.get(node.agent or "")
         elif node.type == "tool":
@@ -712,6 +714,7 @@ class FlowRuntime:
                 None,
             )
             if receipt is not None:
+                assert isinstance(receipt.data, FlowEventData)
                 return FlowNodeResult(
                     output=receipt.data.output or {}
                 ), node_execution_id
@@ -865,10 +868,10 @@ class FlowRuntime:
             run, flow, root_state, state, node, context
         )
 
-    async def run_parallel_branches(self, run, flow, root_state, state, node, context):
+    async def run_parallel_branches(self, run, flow: FlowDefinition, root_state, state, node: FlowNode, context) -> tuple[RunSnapshot, FlowExecutionState]:
         """Run or resume a parallel batch without losing suspended branches."""
 
-        branch_ids = tuple(node.config.get("branches") or ())
+        branch_ids: tuple[str, ...] = tuple(node.config.get("branches") or ())
         if not branch_ids:
             raise self._error(
                 "flow.parallel_branches_missing",
@@ -1219,7 +1222,7 @@ class FlowRuntime:
     async def _enter_subflow(self, run, state, active, node, context):
         return await self.subflow_coordinator.enter(run, state, active, node, context)
 
-    async def enter_subflow(self, run, state, active, node, context):
+    async def enter_subflow(self, run, state, active, node, context) -> tuple[RunSnapshot, FlowExecutionState]:
         """Persist the new frame with its start events before executing its body."""
         subflow = self._flow(node.flow or "")
         if len(state.subflow_stack) >= self.max_node_visits:
@@ -1264,7 +1267,7 @@ class FlowRuntime:
     async def _exit_subflow(self, run, state, child, context):
         return await self.subflow_coordinator.exit(run, state, child, context)
 
-    async def exit_subflow(self, run, state, child, context):
+    async def exit_subflow(self, run, state, child, context) -> tuple[RunSnapshot, FlowExecutionState]:
         """Publish the result and pop the frame in the same durable commit."""
         parent_state = state.model_copy(
             update={"subflow_stack": state.subflow_stack[:-1]}

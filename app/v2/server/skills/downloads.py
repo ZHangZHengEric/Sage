@@ -46,19 +46,20 @@ def _public_address(host: str) -> str:
         mapped = getattr(address, "ipv4_mapped", None)
         if not address.is_global or (mapped is not None and not mapped.is_global):
             raise import_error("在线导入不允许访问本机或私网地址")
-    return addresses[0][4][0]
+    return str(addresses[0][4][0])
 
 
 class _PinnedHTTPSConnection(http.client.HTTPSConnection):
     def __init__(self, host: str, address: str, timeout: float):
-        super().__init__(host, timeout=timeout, context=ssl.create_default_context())
+        self._tls_context = ssl.create_default_context()
+        super().__init__(host, timeout=timeout, context=self._tls_context)
         self.address = address
 
     def connect(self):
         # Resolve exactly once; keep the original host for certificate validation/SNI.
         sock = socket.create_connection((self.address, 443), timeout=self.timeout)
         try:
-            self.sock = self._context.wrap_socket(sock, server_hostname=self.host)
+            self.sock = self._tls_context.wrap_socket(sock, server_hostname=self.host)
         except BaseException:
             sock.close()
             raise
@@ -69,11 +70,13 @@ def download_public_https(url: str, *, max_bytes: int = MAX_DOWNLOAD_BYTES) -> b
     try:
         for _ in range(6):
             parts = validate_https_url(url)
-            address = _public_address(parts.hostname)
+            host = parts.hostname
+            assert host is not None
+            address = _public_address(host)
             remaining = deadline - time.monotonic()
             if remaining <= 0:
                 raise import_error("下载超时，请重试")
-            connection = _PinnedHTTPSConnection(parts.hostname, address, min(15, remaining))
+            connection = _PinnedHTTPSConnection(host, address, min(15, remaining))
             try:
                 target = parts.path or "/"
                 if parts.query:

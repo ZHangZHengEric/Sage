@@ -39,7 +39,7 @@ class ModelCatalogConfig(StrictModel):
 ModelCatalogInput = ModelCatalogConfig | str | Path | dict[str, Any]
 
 
-def model_catalog_input(value=None, *, config_text=None) -> ModelCatalogConfig:
+def model_catalog_input(value: ModelCatalogInput | None = None, *, config_text: str | None = None) -> ModelCatalogConfig:
     if value is not None and config_text is not None:
         raise ValueError("models and models_config_text are mutually exclusive")
     if isinstance(value, (str, Path)):

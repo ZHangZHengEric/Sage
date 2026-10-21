@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from collections.abc import Awaitable, Callable
+from typing import cast
 
 
 @dataclass(frozen=True, slots=True)
@@ -17,7 +19,8 @@ async def page_session_events(access, session_id: str, context, *, limit: int, a
 
     query = getattr(access, "read_session_event_page", None)
     if callable(query):
-        page = await query(session_id, context, limit=limit, after_sequence=after_sequence)
+        page = await cast(Callable[..., Awaitable[SessionPage]], query)(
+            session_id, context, limit=limit, after_sequence=after_sequence)
         return SessionPage(page.events, page.total, page.after_sequence)
     session = await access.get_session(session_id, context)
     total = int(session.last_sequence)

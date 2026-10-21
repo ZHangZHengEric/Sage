@@ -16,7 +16,7 @@ class NumericEvaluation:
         self.remaining = 2048
         self.active = set()
 
-    def resolve(self, value, depth=0, *, selection=False):
+    def resolve(self, value, depth=0, *, selection=False) -> float | None:
         self.remaining -= 1
         if self.remaining < 0 or depth > 12:
             return None
@@ -51,12 +51,15 @@ class NumericEvaluation:
                 return self.resolve(props.get("name"), depth + 1)
         return None
 
-    def compute(self, operation, inputs, depth=0):
+    def compute(self, operation, inputs, depth=0) -> float | None:
         if depth > 12 or not 1 <= len(inputs) <= 16:
             return None
-        args = [self.resolve(v, depth, selection=operation == "count") for v in inputs]
-        if any(v is None for v in args):
-            return None
+        args: list[float] = []
+        for value in inputs:
+            resolved = self.resolve(value, depth, selection=operation == "count")
+            if resolved is None:
+                return None
+            args.append(resolved)
         try:
             if operation in {"count", "sum"}:
                 result = sum(args)

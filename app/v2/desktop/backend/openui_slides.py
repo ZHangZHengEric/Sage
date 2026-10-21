@@ -5,6 +5,7 @@ from __future__ import annotations
 from io import BytesIO
 import json
 from pathlib import Path
+from typing import cast
 
 LAYOUT = json.loads(
     (Path(__file__).parent / "openui_runtime/slide_layout.json").read_text()
@@ -92,7 +93,8 @@ def slide_slots(layout, count):
 
 def export_deck(tree, *, dark=False):
     from pptx import Presentation
-    from pptx.chart.data import CategoryChartData
+    from pptx.chart.data import ChartData
+    from pptx.shapes.graphfrm import GraphicFrame
     from pptx.dml.color import RGBColor
     from pptx.enum.chart import XL_CHART_TYPE
     from pptx.enum.shapes import MSO_SHAPE
@@ -289,11 +291,11 @@ def export_deck(tree, *, dark=False):
                                 else palette["foreground"]
                             )
             elif name == "Chart":
-                data = CategoryChartData()
+                data = ChartData()
                 data.categories = b["labels"]
                 for series in b["series"]:
                     data.add_series(series["name"], series["values"])
-                chart = slide.shapes.add_chart(
+                chart_frame = slide.shapes.add_chart(
                     {
                         "line": XL_CHART_TYPE.LINE,
                         "bar": XL_CHART_TYPE.COLUMN_CLUSTERED,
@@ -304,11 +306,14 @@ def export_deck(tree, *, dark=False):
                     unit(w),
                     unit(h),
                     data,
-                ).chart
+                )
+                # python-pptx annotates add_chart as Chart but returns GraphicFrame.
+                chart = cast(GraphicFrame, chart_frame).chart
                 chart.has_title = bool(b["title"])
                 if chart.has_title:
                     chart.chart_title.text_frame.text = b["title"]
                 chart.has_legend = True
+                assert chart.legend is not None
                 chart.legend.font.size = Pt(12)
                 chart.legend.font.color.rgb = RGBColor.from_string(
                     palette["foreground"]

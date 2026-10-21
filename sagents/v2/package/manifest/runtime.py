@@ -78,7 +78,7 @@ class SkillUsageConfig(StrictModel):
     workspace: CapabilitySelection = Field(
         default_factory=lambda: CapabilitySelection(
             plugin="sage.skill.workspace.auto-sync",
-            scope="run",
+            scope=ExtensionScope.RUN,
         )
     )
     loading: CapabilitySelection = Field(

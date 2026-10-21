@@ -114,7 +114,7 @@ def _annotation_schema(annotation: Any) -> dict[str, Any]:
         return {"anyOf": choices}
     if origin is Literal:
         values = list(arguments)
-        schema = _annotation_schema(type(values[0])) if values else {"type": "string"}
+        schema: dict[str, Any] = _annotation_schema(type(values[0])) if values else {"type": "string"}
         schema["enum"] = values
         return schema
     if origin in {list, tuple}:

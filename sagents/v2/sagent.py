@@ -78,9 +78,11 @@ class SAgentRunStream:
         self._execution = future
 
     def add_done_callback(self, callback) -> None:
+        assert self.execution is not None
         self.execution.add_done_callback(callback)
 
     def execution_done(self) -> bool:
+        assert self.execution is not None
         return self.execution.done()
 
     async def detach(self) -> None:
@@ -92,6 +94,7 @@ class SAgentRunStream:
     async def wait(self) -> RunSnapshot:
         """Wait for this process's driver without transferring cancellation."""
 
+        assert self.execution is not None
         return await asyncio.shield(self.execution)
 
 
@@ -306,6 +309,7 @@ class SAgent:
     async def _submit_or_fail(self, run, context, *, resume):
         """Make an accepted scheduling failure a durable typed Run fact."""
 
+        assert self._dispatcher is not None
         try:
             return await self._dispatcher.submit(
                 self, run, context, resume=resume

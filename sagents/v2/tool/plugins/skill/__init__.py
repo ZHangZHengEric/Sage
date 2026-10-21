@@ -39,7 +39,7 @@ class SkillToolPlugin:
     )
 
     def __init__(self, loader: SkillLoader, *, language: str | None = None, allow_editing: bool = False) -> None:
-        owners = [SkillLoadTool(loader, language=language)]
+        owners: list[SkillLoadTool | SkillEditTool] = [SkillLoadTool(loader, language=language)]
         if allow_editing:
             if not callable(getattr(loader.workspace, "begin_edit", None)):
                 raise ValueError("Selected Skill workspace does not support editing")

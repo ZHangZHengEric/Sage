@@ -423,7 +423,7 @@ class ConversationService:
                         thread_id=thread_id,
                         client_run_id=run_id,
                         user_id=user_id,
-                        agent_id=agent_id,
+                        agent_id=admitted.agent_id,
                         started_at=started_at,
                     ),
                 )

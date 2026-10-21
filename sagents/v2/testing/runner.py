@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import time
 from collections.abc import Awaitable, Callable
 from typing import Protocol
@@ -138,7 +139,7 @@ class ScenarioRunner:
         async def one(scenario):
             async with semaphore:
                 driver = driver_factory(scenario)
-                if hasattr(driver, "__await__"):
+                if inspect.isawaitable(driver):
                     driver = await driver
                 return await self.run(scenario, driver, context)
 

@@ -1,5 +1,22 @@
 """SAgents V2 module for tool/__init__.py."""
 
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from sagents.v2.tool.metadata import builtin_tool_definitions as builtin_tool_definitions
+    from sagents.v2.tool.plugins.selection_direct import DirectToolSelectionPolicy as DirectToolSelectionPolicy
+    from sagents.v2.tool.plugins.ephemeral import EphemeralToolPlugin as EphemeralToolPlugin
+    from sagents.v2.tool.plugins.ephemeral import InMemoryToolCatalog as InMemoryToolCatalog
+    from sagents.v2.tool.plugins.ephemeral import InMemoryToolExecutor as InMemoryToolExecutor
+    from sagents.v2.tool.plugins.selection_llm import LLMToolSelectionPolicy as LLMToolSelectionPolicy
+    from sagents.v2.tool.plugins.selection_lexical import LexicalToolSelectionPolicy as LexicalToolSelectionPolicy
+    from sagents.v2.tool.plugins.a2a import A2AAgentConfig as A2AAgentConfig
+    from sagents.v2.tool.plugins.a2a import A2AToolPlugin as A2AToolPlugin
+    from sagents.v2.tool.plugins.mcp import McpServerConfig as McpServerConfig
+    from sagents.v2.tool.plugins.mcp import McpToolPlugin as McpToolPlugin
+    from sagents.v2.tool.plugins.selection_recent import RecentToolSelectionPolicy as RecentToolSelectionPolicy
+
+
 from sagents.v2._lazy import exported_names, resolve_export
 
 from sagents.v2.tool.contracts import (

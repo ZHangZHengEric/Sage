@@ -1,5 +1,10 @@
 from __future__ import annotations
 
+from typing import TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    from app.v2.desktop.backend.service import DesktopV2Service
+
 from app.v2.desktop.backend.run_environment import catalog_agent_id
 
 import base64
@@ -40,7 +45,7 @@ from sagents.v2.package.manifest.agents import (
 from sagents.v2.package.manifest.credentials import CredentialDeclaration
 from sagents.v2.package.manifest.resolver import CompositionResolver
 from sagents.v2.package.manifest.root import ManifestMetadata, SageManifest
-from sagents.v2.package.manifest.runtime import PolicyConfig
+from sagents.v2.package.manifest.runtime import BudgetConfig, PolicyConfig
 from sagents.v2.i18n import normalize_language
 from app.v2.desktop.backend.studio import STUDIO_TOOLS
 from app.v2.desktop.backend.schemas import (
@@ -66,13 +71,17 @@ class DesktopRunCompositionMixin(DesktopRunEnvironmentMixin):
     """Compose immutable Run manifests, providers, tools, and sandboxes."""
 
     def _memory_service_for_agent(self, agent):
+        self = cast("DesktopV2Service", self)
+        assert self.memory_provider is not None
         from sagents.v2.memory import MemoryService
         return MemoryService(self.memory_provider, scope_mode=_agent_memory_behavior(agent).scope, session_store=self.session_store)
 
     async def _session_id_for_run(self, run_id: str) -> str:
+        self = cast("DesktopV2Service", self)
         return (await self.session_store.get_run(run_id)).session_id
 
     def _manifest(self, agent, provider, tools, skills):
+        self = cast("DesktopV2Service", self)
         tools = tuple(name for name in tools if name not in STUDIO_TOOLS)
         max_steps = max(1, min(int(agent.config.get("maxLoopCount") or 24), 10_000))
         memory_enabled = (
@@ -87,7 +96,7 @@ class DesktopRunCompositionMixin(DesktopRunEnvironmentMixin):
                 name=agent.name,
                 description=agent.config.get("description"),
             ),
-            policies=PolicyConfig(budgets={"max_steps": max_steps}),
+            policies=PolicyConfig(budgets=BudgetConfig(max_steps=max_steps)),
             agents={
                 agent.agent_id: AgentDefinition(
                     name=agent.name,
@@ -110,6 +119,7 @@ class DesktopRunCompositionMixin(DesktopRunEnvironmentMixin):
         )
 
     def _model_catalog(self, agent, provider):
+        self = cast("DesktopV2Service", self)
         from sagents.v2.model.catalog import ModelCatalogConfig
         route = DesktopModelProviders.route(
             provider, agent,
@@ -126,6 +136,7 @@ class DesktopRunCompositionMixin(DesktopRunEnvironmentMixin):
     async def _model_provider(
         self, provider, agent, *, enable_thinking: bool | None = None
     ):
+        self = cast("DesktopV2Service", self)
         return self.model_providers.get(
             provider, agent,
             compatibility_profile=self._verified_model_compatibility_profile(provider),
@@ -137,6 +148,7 @@ class DesktopRunCompositionMixin(DesktopRunEnvironmentMixin):
         cls,
         provider: DesktopModelProviderRecord,
     ) -> DesktopModelCompatibilityProfile | None:
+        cls = cast("type[DesktopV2Service]", cls)
         profile = provider.compatibility_profile
         if profile is None:
             return None
@@ -161,6 +173,7 @@ class DesktopRunCompositionMixin(DesktopRunEnvironmentMixin):
         agent: DesktopAgentRecord,
         fallback: DesktopModelProviderRecord,
     ) -> DesktopModelProviderRecord:
+        self = cast("DesktopV2Service", self)
         provider_id = str(agent.config.get("fast_llm_provider_id") or "").strip()
         if not provider_id:
             return fallback
@@ -268,6 +281,7 @@ class DesktopRunCompositionMixin(DesktopRunEnvironmentMixin):
         workspace: Path | None,
         workspace_root: str,
     ) -> tuple[TextBlock | ImageBlock, ...]:
+        self = cast("DesktopV2Service", self)
         if not message.content:
             return (TextBlock(text=message.text),) if message.text.strip() else ()
 
@@ -315,6 +329,7 @@ class DesktopRunCompositionMixin(DesktopRunEnvironmentMixin):
         workspace=None,
         environment=None,
     ):
+        self = cast("DesktopV2Service", self)
         settings = (
             DesktopV2Settings.model_validate(environment.snapshot["settings"])
             if environment is not None
@@ -482,6 +497,7 @@ class DesktopRunCompositionMixin(DesktopRunEnvironmentMixin):
         )
 
     def _desktop_spec_hash(self, manifest_hash: str, settings) -> str:
+        self = cast("DesktopV2Service", self)
         components = {
             capability: _stable_component_id(
                 capability,
@@ -515,6 +531,7 @@ class DesktopRunCompositionMixin(DesktopRunEnvironmentMixin):
         return f"sha256:{hashlib.sha256(encoded).hexdigest()}"
 
     def _identity_documents(self, root: Path | None = None) -> dict[str, str]:
+        self = cast("DesktopV2Service", self)
         values = {}
         workspace = (root or self.agent_workspace).resolve()
         from sagents.v2.context.runtime_metadata import (
@@ -581,6 +598,7 @@ class DesktopRunCompositionMixin(DesktopRunEnvironmentMixin):
         )
 
     async def _agent(self, agent_id: str, user_id: str) -> DesktopAgentRecord:
+        self = cast("DesktopV2Service", self)
         await self._initialize_user(user_id)
         agent = await self.catalog.get_agent(agent_id, user_id)
         if agent is None:
@@ -590,6 +608,7 @@ class DesktopRunCompositionMixin(DesktopRunEnvironmentMixin):
     async def _provider(
         self, agent: DesktopAgentRecord, user_id: str
     ) -> DesktopModelProviderRecord:
+        self = cast("DesktopV2Service", self)
         provider_id = agent.config.get("llm_provider_id")
         provider = (
             await self.catalog.get_model_provider(str(provider_id), agent.user_id)
@@ -611,6 +630,7 @@ class DesktopRunCompositionMixin(DesktopRunEnvironmentMixin):
         user_id: str,
     ) -> DesktopAgentRecord:
         """Restore the immutable Agent definition selected for this Run."""
+        self = cast("DesktopV2Service", self)
 
         raw_snapshot = command.config.metadata.get("agent_runtime")
         if not isinstance(raw_snapshot, dict):
@@ -638,6 +658,7 @@ class DesktopRunCompositionMixin(DesktopRunEnvironmentMixin):
         user_id: str,
     ) -> DesktopModelProviderRecord:
         """Restore the immutable model route selected when the Run started."""
+        self = cast("DesktopV2Service", self)
 
         raw_snapshot = command.config.metadata.get("model_route")
         if not isinstance(raw_snapshot, dict):

@@ -284,7 +284,7 @@ class SelfConfigurationService:
             )
         provider = self._mcp
         if provider is not None:
-            return await provider.reconcile_call(call, context)
+            return await provider.reconcile(call.operation_id, context)
         return ReconcileResult(
             operation_id=call.operation_id, state=ReconcileState.UNKNOWN
         )
@@ -335,6 +335,7 @@ class SelfConfigurationService:
         # admitted Run originally had no Skills. Its executor retains the loader.
         from sagents.v2.tool.plugins.skill import SkillToolPlugin
 
+        assert self._base_catalog is not None and self._loader is not None
         definitions = await self._base_catalog.list_tools(run_id=run_id)
         skill_tool = SkillToolPlugin(self._loader)
         # Override execution with the private overlay loader even when the
@@ -367,6 +368,7 @@ class SelfConfigurationService:
                     "system_prompt": snapshot.get("system_prompt", ""),
                 }
             skills = {}
+            assert self._loader is not None
             base_names = {
                 value.name
                 for value in await self._loader.catalog.list_skills(
@@ -496,6 +498,7 @@ class SelfConfigurationService:
         return plugin
 
     async def _check_tool_names(self, plugin, run_id):
+        assert self._base_catalog is not None
         names = {
             value.name for value in await self._base_catalog.list_tools(run_id=run_id)
         } | {"agent_self_configure", "load_skill"}

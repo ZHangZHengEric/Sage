@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import inspect
 import re
-from typing import Any
+from typing import Any, cast
 
 from pydantic import SecretStr
 
@@ -12,6 +12,7 @@ from app.v2.desktop.backend.catalog import (
 )
 from sagents.v2.contracts.errors import ErrorCategory, RuntimeErrorInfo, SageV2Error
 from sagents.v2.model import (
+    ModelProvider,
     ModelCapabilityProbeRequest,
     probe_model_capabilities,
     probe_model_connection,
@@ -111,7 +112,7 @@ async def probe_model_provider_capabilities(
             provider_instance_id=provider.id,
         )
         created_providers.append(model_provider)
-        return model_provider
+        return cast(ModelProvider, model_provider)
 
     def serialize_outcome(outcome) -> dict[str, Any]:
         value = {
@@ -168,7 +169,7 @@ async def probe_model_provider_capabilities(
         plugin_probe = getattr(negotiation_provider, "probe_capabilities", None)
         if callable(plugin_probe):
             route_fingerprint = compatibility_fingerprint(provider)
-            plugin_profile = await plugin_probe(
+            plugin_profile = await negotiation_provider.probe_capabilities(
                 ModelCapabilityProbeRequest(
                     model_binding=provider.id,
                     route_fingerprint=route_fingerprint,
@@ -202,7 +203,7 @@ async def probe_model_provider_capabilities(
                 if outcome.status.value == "skipped"
             ]
             strategy = plugin_profile.invocation_strategy
-            compatibility_profile = DesktopModelCompatibilityProfile(
+            compatibility_profile = DesktopModelCompatibilityProfile.model_validate(dict(
                 route_fingerprint=route_fingerprint,
                 max_output_tokens_field=strategy.get("max_output_tokens_field"),
                 effective_max_output_tokens=(
@@ -239,7 +240,7 @@ async def probe_model_provider_capabilities(
                     and outcome.get("status") != "supported"
                 },
                 plugin_profile=plugin_profile,
-            )
+            ))
             return {
                 "valid": plugin_profile.supports("connection"),
                 "successful_probes": successful_probes,
@@ -502,7 +503,7 @@ async def probe_model_provider_capabilities(
             successful_probes.append("reasoning_control")
         elif "reasoning_control" not in failed_probes:
             failed_probes.append("reasoning_control")
-        compatibility_profile = DesktopModelCompatibilityProfile(
+        compatibility_profile = DesktopModelCompatibilityProfile.model_validate(dict(
             route_fingerprint=compatibility_fingerprint(provider),
             max_output_tokens_field=resolved_maximum_field,
             effective_max_output_tokens=effective_max_output_tokens,
@@ -522,7 +523,7 @@ async def probe_model_provider_capabilities(
                 if outcome.get("supported") is not True
                 and outcome.get("status") != "supported"
             },
-        )
+        ))
         return {
             "valid": True,
             "successful_probes": successful_probes,

@@ -7,6 +7,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import replace
 
 from sagents.v2.contracts.run_state import RunSnapshot
+from sagents.v2.contracts.events import ItemEventData
 from sagents.v2.runtime.session.contracts import EventDraft
 
 
@@ -39,8 +40,12 @@ class StreamEventBatcher:
     async def add(self, draft: EventDraft) -> RunSnapshot:
         async with self._lock:
             self._raise_error()
+            assert isinstance(draft.data, ItemEventData)
+            assert draft.data.delta is None or isinstance(draft.data.delta, str)
             if self._drafts and self._can_merge(self._drafts[-1], draft):
                 previous = self._drafts[-1]
+                assert isinstance(previous.data, ItemEventData)
+                assert previous.data.delta is None or isinstance(previous.data.delta, str)
                 previous_delta = previous.data.delta or ""
                 next_delta = draft.data.delta or ""
                 self._drafts[-1] = replace(

@@ -1,5 +1,10 @@
 from __future__ import annotations
 
+from typing import TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    from app.v2.desktop.backend.service import DesktopV2Service
+
 import asyncio
 import hashlib
 import json
@@ -129,6 +134,7 @@ class DesktopCatalogServiceMixin:
     """Agent, Skill, Tool, model, MCP, and component administration."""
 
     async def list_agents(self, user_id: str) -> list[dict[str, Any]]:
+        self = cast("DesktopV2Service", self)
         await self._initialize_user(user_id)
         values = await self.catalog.list_agents(user_id)
         return [
@@ -145,6 +151,7 @@ class DesktopCatalogServiceMixin:
 
     async def create_agent(self, request: AgentCreate, user_id: str) -> dict[str, Any]:
         """Create a usable Agent with no inherited configuration or runtime state."""
+        self = cast("DesktopV2Service", self)
 
         await self._initialize_user(user_id)
         name = request.name.strip()
@@ -174,6 +181,7 @@ class DesktopCatalogServiceMixin:
         return await self.get_agent_settings(created.agent_id, user_id)
 
     async def list_skills(self, agent_id: str, user_id: str) -> list[dict[str, Any]]:
+        self = cast("DesktopV2Service", self)
         agent = await self._agent(agent_id, user_id)
         allowed = set(agent.config.get("availableSkills") or [])
         values = self._skill_provider().descriptors()
@@ -185,6 +193,7 @@ class DesktopCatalogServiceMixin:
         ]
 
     async def list_skill_catalog(self, user_id: str) -> list[dict[str, Any]]:
+        self = cast("DesktopV2Service", self)
         del user_id
         values = self._skill_provider().descriptors()
         return [
@@ -194,6 +203,7 @@ class DesktopCatalogServiceMixin:
         ]
 
     async def get_skill_content(self, skill_name: str, user_id: str) -> str:
+        self = cast("DesktopV2Service", self)
         del user_id
         if not _SKILL_NAME.fullmatch(skill_name):
             raise ValueError("invalid skill name")
@@ -215,6 +225,7 @@ class DesktopCatalogServiceMixin:
         folder_path: str,
         user_id: str,
     ) -> dict[str, Any]:
+        self = cast("DesktopV2Service", self)
         normalized = Path(folder_path).expanduser().resolve()
         if not normalized.is_dir():
             raise ValueError("Skill folder does not exist")
@@ -232,6 +243,7 @@ class DesktopCatalogServiceMixin:
         return {"success_count": 1, "imported_names": [skill_name]}
 
     async def delete_skill(self, skill_name: str, user_id: str) -> dict[str, Any]:
+        self = cast("DesktopV2Service", self)
         target = self._imported_skill_root(skill_name)
         if target is None:
             raise ValueError(f"Imported Skill not found: {skill_name}")
@@ -252,6 +264,7 @@ class DesktopCatalogServiceMixin:
     async def list_tools(
         self, user_id: str, language: str | None = None
     ) -> list[dict[str, Any]]:
+        self = cast("DesktopV2Service", self)
         categories = {
             **official_tool_categories(),
             "load_skill": "system",
@@ -290,6 +303,7 @@ class DesktopCatalogServiceMixin:
         return (*definitions, *((load_skill,) if load_skill is not None else ()))
 
     async def _mcp_plugin(self, user_id: str) -> McpToolPlugin:
+        self = cast("DesktopV2Service", self)
         await self._initialize_user(user_id)
         values = await self.catalog.list_mcp(user_id)
         servers = tuple(
@@ -324,6 +338,7 @@ class DesktopCatalogServiceMixin:
     def _mcp_config(
         self, value: DesktopMcpRecord, *, required: bool = True
     ) -> McpServerConfig:
+        self = cast("DesktopV2Service", self)
         streamable_url = value.streamable_http_url
         api_key = value.api_key
         if value.kind == "anytool":
@@ -334,7 +349,7 @@ class DesktopCatalogServiceMixin:
             # running process and must never be read from or persisted to the
             # user-editable MCP catalog.
             api_key = self.sidecar_auth_token
-        return McpServerConfig(
+        return McpServerConfig.model_validate(dict(
             name=value.name,
             protocol=value.protocol,
             url=(
@@ -347,9 +362,10 @@ class DesktopCatalogServiceMixin:
             timeout_seconds=value.timeout_seconds,
             call_timeout_seconds=value.call_timeout_seconds,
             required=required,
-        )
+        ))
 
     async def list_model_providers(self, user_id: str) -> list[dict[str, Any]]:
+        self = cast("DesktopV2Service", self)
         await self._initialize_user(user_id)
         values = await self.catalog.list_model_providers(user_id)
         return [
@@ -380,6 +396,7 @@ class DesktopCatalogServiceMixin:
     async def reveal_model_provider_api_key(
         self, provider_id: str, user_id: str
     ) -> dict[str, str]:
+        self = cast("DesktopV2Service", self)
         provider = await self.catalog.get_model_provider(provider_id, user_id)
         if provider is None:
             raise ValueError("model provider is not configured for this Desktop user")
@@ -390,6 +407,7 @@ class DesktopCatalogServiceMixin:
     async def delete_model_provider(
         self, provider_id: str, user_id: str
     ) -> list[dict[str, Any]]:
+        self = cast("DesktopV2Service", self)
         provider = await self.catalog.get_model_provider(provider_id, user_id)
         if provider is None:
             raise ValueError("Provider not found")
@@ -410,6 +428,7 @@ class DesktopCatalogServiceMixin:
     async def create_model_provider(
         self, request: ModelProviderCreate, user_id: str
     ) -> dict[str, Any]:
+        self = cast("DesktopV2Service", self)
         await self._initialize_user(user_id)
         keys = [value.strip() for value in request.api_keys if value.strip()]
         if len(keys) > 1:
@@ -454,6 +473,7 @@ class DesktopCatalogServiceMixin:
         provider_id: str | None = None,
     ) -> dict[str, Any]:
         """Probe a draft route without persisting it to the Desktop catalog."""
+        self = cast("DesktopV2Service", self)
 
         if provider_id is None:
             if not isinstance(request, ModelProviderCreate):
@@ -502,6 +522,7 @@ class DesktopCatalogServiceMixin:
     async def patch_model_provider(
         self, provider_id: str, patch: ModelProviderPatch, user_id: str
     ) -> dict[str, Any]:
+        self = cast("DesktopV2Service", self)
         provider = await self.catalog.get_model_provider(provider_id, user_id)
         if provider is None:
             raise ValueError("Provider not found")
@@ -656,6 +677,7 @@ class DesktopCatalogServiceMixin:
     async def _probe_model_provider_capabilities(
         self, provider: DesktopModelProviderRecord,
     ) -> dict[str, Any]:
+        self = cast("DesktopV2Service", self)
         return await probe_model_provider_capabilities(
             provider,
             provider_factory=create_registered_model_provider,
@@ -666,6 +688,7 @@ class DesktopCatalogServiceMixin:
         )
 
     async def get_agent_settings(self, agent_id: str, user_id: str) -> dict[str, Any]:
+        self = cast("DesktopV2Service", self)
         agent = await self._agent(agent_id, user_id)
         config = dict(agent.config or {})
         deep_thinking, thinking_level = self._thinking_config(agent)
@@ -720,6 +743,7 @@ class DesktopCatalogServiceMixin:
         patch: AgentSettingsPatch,
         user_id: str,
     ) -> dict[str, Any]:
+        self = cast("DesktopV2Service", self)
         async with self._agent_update_lock:
             agent = await self._agent(agent_id, user_id)
             updated = await self._apply_agent_settings(agent, patch, user_id)
@@ -729,6 +753,7 @@ class DesktopCatalogServiceMixin:
         return await self.get_agent_settings(agent_id, user_id)
 
     async def _apply_agent_settings(self, agent, patch, user_id):
+        self = cast("DesktopV2Service", self)
         agent_id = agent.agent_id
         config = dict(agent.config or {})
         fields = patch.model_fields_set
@@ -814,6 +839,7 @@ class DesktopCatalogServiceMixin:
         return agent.model_copy(update=updates)
 
     async def delete_agent(self, agent_id: str, user_id: str) -> list[dict[str, Any]]:
+        self = cast("DesktopV2Service", self)
         async with self._agent_update_lock:
             agent = await self._agent(agent_id, user_id)
             if any(run["status"] in {"queued", "running"} for run in self.rsi_store.list(user_id, agent_id, "run")):
@@ -839,6 +865,7 @@ class DesktopCatalogServiceMixin:
             return await self.list_agents(user_id)
 
     async def list_mcp_connections(self, user_id: str) -> list[dict[str, Any]]:
+        self = cast("DesktopV2Service", self)
         await self._initialize_user(user_id)
         values = await self.catalog.list_mcp(user_id)
         discovered_by_source: dict[str, int] = {}
@@ -874,6 +901,7 @@ class DesktopCatalogServiceMixin:
     async def add_mcp_connection(
         self, request: MCPConnectionRequest, user_id: str
     ) -> dict[str, Any]:
+        self = cast("DesktopV2Service", self)
         if request.protocol == "stdio" and not str(request.command or "").strip():
             raise ValueError("stdio connection requires command")
         if request.protocol == "sse" and not str(request.sse_url or "").strip():
@@ -905,6 +933,7 @@ class DesktopCatalogServiceMixin:
     async def set_mcp_connection_enabled(
         self, server_name: str, enabled: bool, user_id: str
     ) -> dict[str, Any]:
+        self = cast("DesktopV2Service", self)
         record = next(
             (
                 value
@@ -921,6 +950,7 @@ class DesktopCatalogServiceMixin:
         return next(value for value in values if value["name"] == server_name)
 
     async def component_inventory(self, user_id: str) -> list[dict[str, Any]]:
+        self = cast("DesktopV2Service", self)
         del user_id
         settings = await self.get_settings()
         result = []
@@ -1044,11 +1074,13 @@ class DesktopCatalogServiceMixin:
         return result
 
     def _observation_pending(self, settings):
+        self = cast("DesktopV2Service", self)
+        assert self.observability is not None
         from .package import desktop_v2_manifest
         from sagents.v2.runtime.observability.provider import ObservabilityConfig
         choice = desktop_v2_manifest(session_root=self.runtime_root,
             component_selections=settings.component_selections,
-            component_configs=settings.component_configs).runtime.capabilities["observability.provider"]
+            component_configs=settings.component_configs).runtime.selections("observability.provider")[0]
         from .observability import normalize_observation_config
         config = normalize_observation_config(choice.plugin, choice.config, registry=self.extensions)
         return (choice.plugin != self.observability_plugin_id or
@@ -1060,6 +1092,7 @@ class DesktopCatalogServiceMixin:
         request: ComponentSelectionRequest,
         user_id: str,
     ) -> dict[str, Any]:
+        self = cast("DesktopV2Service", self)
         del user_id
         component_spec = _DESKTOP_COMPONENTS.get(component_id)
         if component_spec is None or component_spec["selection_mode"] != "user":

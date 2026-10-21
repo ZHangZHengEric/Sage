@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Generic, TypeVar
+from typing import Any, Generic, TypeVar
 from pydantic import BaseModel
 
 T = TypeVar("T")
@@ -27,16 +27,16 @@ class HealthPayload(BaseModel):
     trace_backend: str = "noop"
     trace_console: bool = False
 
-AUTH_ERRORS = {
+AUTH_ERRORS: dict[int | str, dict[str, Any]] = {
     401: {"model": ErrorBody, "description": "authentication required"},
 }
 
-ADMIN_ERRORS = {
+ADMIN_ERRORS: dict[int | str, dict[str, Any]] = {
     **AUTH_ERRORS,
     403: {"model": ErrorBody, "description": "admin required"},
 }
 
-VALIDATION_ERRORS = {
+VALIDATION_ERRORS: dict[int | str, dict[str, Any]] = {
     422: {"model": ErrorBody, "description": "request validation failed"},
 }
 

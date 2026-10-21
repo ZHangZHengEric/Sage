@@ -7,7 +7,7 @@ import json
 
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
 from datetime import datetime
-from typing import Any
+from typing import Any, cast
 
 from sagents.v2.contracts.common import utc_now
 from sagents.v2.model.contracts import (
@@ -236,7 +236,7 @@ class RecordingModelProvider:
             limit = 8 * 1024 * 1024
             capture_context = current_trace_context()
             capture = WireCapture(max_bytes=limit, consumer=(
-                lambda event, sequence: chunk_recorder(session_id=session_id, request=request, field="wire",
+                lambda event, sequence: cast(Callable[..., Any], chunk_recorder)(session_id=session_id, request=request, field="wire",
                                                        sequence=sequence, event=event, trace_context=capture_context)
             ) if chunked else None)
         normalized_events = []
@@ -268,6 +268,7 @@ class RecordingModelProvider:
                 # Keep partial output even if normalization later rejects Tool JSON.
                 if capture is not None and event.kind != ModelEventKind.COMPLETED:
                     if chunked:
+                        assert chunk_recorder is not None
                         accepted = chunk_recorder(session_id=session_id, request=request, field="normalized",
                                                   sequence=normalized_count, event=event, trace_context=capture_context)
                         normalized_count += 1
@@ -410,7 +411,7 @@ def _end_model_span(
     response: ModelResponse | None = None,
 ) -> None:
     finished = utc_now()
-    attributes = {
+    attributes: dict[str, Any] = {
         "duration_ms": elapsed_ms(started_at, finished),
         "ttfb_ms": elapsed_ms(started_at, first_token_at),
     }

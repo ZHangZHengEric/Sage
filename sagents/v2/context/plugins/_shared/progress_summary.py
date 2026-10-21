@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import re
 import hashlib
+from typing import Any, cast
 from sagents.v2.contracts.conversation import is_user_request
 from sagents.v2.context.summary import (
     SummarizationRequest,
@@ -26,7 +27,9 @@ FIELDS = (
 def _tool_target(args: dict, payload: object) -> str:
     """Identify a resource/version before falling back to a bounded selector."""
     result = payload if isinstance(payload, dict) else {}
-    item = result.get("item") if isinstance(result.get("item"), dict) else {}
+    item = result.get("item")
+    if not isinstance(item, dict):
+        item = {}
     item_id = args.get("item_id") or result.get("item_id") or item.get("item_id")
     if item_id:
         selected = item.get("selected_run") or item.get("latest_run") or {}
@@ -70,7 +73,7 @@ def _tool_target(args: dict, payload: object) -> str:
 
 
 def task_snapshot(request: SummarizationRequest, narrative: dict | None = None) -> dict:
-    previous = {}
+    previous: dict[str, Any] = {}
     if request.previous_summary:
         try:
             previous = json.loads(request.previous_summary)
@@ -83,8 +86,8 @@ def task_snapshot(request: SummarizationRequest, narrative: dict | None = None) 
             )
             previous = {"summary": text[:600]}
     if not isinstance(previous, dict):
-        previous = {}
-    result = {
+        previous: dict[str, Any] = {}
+    result: dict[str, Any] = {
         key: list(previous.get(key, [])) if isinstance(previous.get(key), list) else []
         for key in FIELDS[1:]
     }
@@ -96,8 +99,8 @@ def task_snapshot(request: SummarizationRequest, narrative: dict | None = None) 
     if narrative:
         result.update(narrative)
     calls = {}
-    outcomes = (
-        dict(previous.get("tool_outcomes", {}))
+    outcomes: dict[str, Any] = (
+        dict(cast(dict[str, Any], previous.get("tool_outcomes", {})))
         if isinstance(previous.get("tool_outcomes"), dict)
         else {}
     )
@@ -205,7 +208,7 @@ def bounded_snapshot(
         return json.dumps(result, ensure_ascii=False, separators=(",", ":"))
 
     if narrative is None:
-        result = {k: v for k, v in result.items() if v and k != "summary"} | (
+        result: dict[str, Any] = {k: v for k, v in result.items() if v and k != "summary"} | (
             {"summary": result["summary"]} if request.previous_summary else {}
         )
         source_chars = sum(

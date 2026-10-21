@@ -547,7 +547,7 @@ _DELEGATION_TASK_FIELDS = {
         "ID opcional de uma sessão filha existente: acrescentar content e manter o histórico da filha. Omitir para uma nova sessão; nunca usar o ID da sessão pai.",
     ),
 }
-_TOOL_PATH_OVERRIDES = {
+_TOOL_PATH_OVERRIDES: dict[tuple[str, tuple[str, ...]], ToolText] = {
     (tool_name, ("tasks", "[]", field)): text
     for tool_name in ("sys_delegate_task", "sys_team_delegate_task")
     for field, text in _DELEGATION_TASK_FIELDS.items()

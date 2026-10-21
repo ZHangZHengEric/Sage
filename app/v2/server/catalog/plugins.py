@@ -1,6 +1,7 @@
 """Host-selected defaults and safe per-Agent capability configuration."""
 
 from copy import deepcopy
+from typing import Any, TypedDict
 from jsonschema import validate, ValidationError
 from sagents.v2.contracts.errors import ErrorCategory, RuntimeErrorInfo, SageV2Error
 from sagents.v2.runtime.extensions.official import builtin_extension_registry
@@ -22,10 +23,20 @@ def configuration_schema(descriptor):
     return deepcopy(descriptor.config_schema or {"type": "object", "properties": {}})
 
 
-def plugin_options(registry=None):
+class PluginOption(TypedDict):
+    id: str
+    name: str
+    capabilities: list[str]
+    schema: dict[str, Any]
+    scopes: list[str]
+    configurable_capabilities: list[str]
+    available: bool
+
+
+def plugin_options(registry=None) -> list[PluginOption]:
     registry = registry if registry is not None else builtin_extension_registry()
     return [
-        dict(
+        PluginOption(
             id=d.plugin_id,
             name=d.name,
             capabilities=[o.capability for o in d.provides],

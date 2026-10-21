@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 from contextlib import asynccontextmanager
 from dataclasses import replace
+from typing import Literal
 
 from app.v2.server.catalog.records import enabled_a2a_agents, enabled_mcp_servers
 from app.v2.server.config.manifest import server_v2_manifest
@@ -45,9 +46,11 @@ class CatalogPackageModel:
                 "model": route.model, "request": route.request, "limits": route.limits,
                 "capabilities": route.capabilities, "capability_profile": route.capability_profile,
             })
-        _provider, scope = await open_model_lease(self.execution, self.user_id, record)
+        provider, scope = await open_model_lease(self.execution, self.user_id, record)
+        assert scope is not None
+        assert provider is not None
         try:
-            yield scope.provider
+            yield provider
         finally:
             await scope.close()
 
@@ -73,7 +76,9 @@ class CatalogPackageModel:
                 async for event in stream:
                     yield event
             finally:
-                await stream.aclose()
+                closer = getattr(stream, "aclose", None)
+                if closer is not None:
+                    await closer()
 
 
 class ServerPackageBuilderFactory:
@@ -110,12 +115,13 @@ class ServerPackageBuilderFactory:
             command=None, sandbox=bundle.manifest.agents[root_id].sandbox, settings=self.settings)
         registrations = [*self.extensions, *server_registrations(self.host)]
         scheduler = InMemoryScheduler(quota_group=self.run_quota, max_pending_items=self.settings.max_pending_runs)
-        for capability, value, ownership in (
+        services: tuple[tuple[str, object, Literal["owned", "borrowed"]], ...] = (
             ("execution.scheduler", scheduler, "owned"),
             ("execution.model-budget", self.execution.model_budget, "borrowed"),
             ("server.model-clients", self.execution.model_pool, "borrowed"),
             ("observability.provider", self.observability, "borrowed"),
-        ):
+        )
+        for capability, value, ownership in services:
             scheduler_port = capability == "execution.scheduler"
             if scheduler_port and self.settings.scheduler_plugin == "sage.scheduler.redis-distributed" and not root.name.startswith("validate-"):
                 continue

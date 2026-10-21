@@ -99,7 +99,7 @@ class ServerPackageQueries:
             agent = require_agent(
                 await self.catalog.get(context.actor.principal_id), agent_id
             )
-            return agent.package.model_dump(mode="json")
+            return agent.package_bundle.model_dump(mode="json")
         return AgentPackageBundle.model_validate({"manifest": data}).model_dump(
             mode="json"
         )

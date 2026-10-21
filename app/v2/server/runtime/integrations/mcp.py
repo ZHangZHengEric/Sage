@@ -15,7 +15,7 @@ def to_mcp_config(
     record: McpServerRecord, *, required: bool = False
 ) -> McpServerConfig:
     try:
-        return McpServerConfig(
+        return McpServerConfig.model_validate(dict(
             name=record.name,
             protocol=record.protocol,
             url=record.url,
@@ -23,7 +23,7 @@ def to_mcp_config(
             required=required,
             timeout_seconds=record.timeout_seconds,
             call_timeout_seconds=record.call_timeout_seconds,
-        )
+        ))
     except Exception as exc:
         raise SageV2Error(
             RuntimeErrorInfo(

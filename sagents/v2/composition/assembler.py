@@ -8,8 +8,9 @@ import json
 from functools import partial
 from collections.abc import Mapping
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
+from sagents.v2.sagent import RunDriver
 from sagents.v2.agent.modes import ModeAwareAgentLoopFactory
 from sagents.v2.agent.multi_agent import (
     AgentDescriptor,
@@ -467,7 +468,8 @@ class ApplicationAssembler:
                     ),
                 )
             )
-        driver_session_store = LeaseFencedSessionStore(session_store, scheduler)
+        fenced_session_store = LeaseFencedSessionStore(session_store, scheduler)
+        driver_session_store = cast(SessionStore, fenced_session_store)
         goal_state_service = GoalStateService(driver_session_store)
         control_runtime = HarnessRuntime(
             session_store,
@@ -708,6 +710,7 @@ class ApplicationAssembler:
                 active_skills = None
                 if standard_skills:
                     selection = _selection(runtime_config, "skill.provider")
+                    assert selection is not None
                     skill_catalog, skill_scope = await self._create_capability(
                         extension_host, process_root, scope_handles, runtime_config,
                         plugin_declarations, capability="skill.provider", default_plugin=selection.plugin,
@@ -860,6 +863,7 @@ class ApplicationAssembler:
                                 raise ValueError("standard Skills require an execution.binding sandbox")
                             from sagents.v2.skill.plugins.workspace import AutoSyncSkillWorkspace
                             if skill_workspace is None:
+                                assert active_runtime is not None
                                 skill_workspace = AutoSyncSkillWorkspace(active_runtime.sandbox, active_runtime.grant_issuer)
                         skill_loader = member_components.factory.create_skill_loader(
                             effective_resolved,
@@ -872,8 +876,8 @@ class ApplicationAssembler:
                                 derived_state,
                                 resolve_session_id,
                             ),
-                            **({"workspace_root": active_runtime.sandbox.filesystem.normalize_path(".")}
-                               if active_skills is not None and active_runtime is not None else {}),
+                            workspace_root=(active_runtime.sandbox.filesystem.normalize_path(".")
+                                if active_skills is not None and active_runtime is not None else "/workspace"),
                         )
                         skill_tools = SkillToolPlugin(skill_loader, allow_editing="edit_skill" in definition.tools)
                         catalog = CompositeToolCatalog((catalog, skill_tools.catalog))
@@ -963,7 +967,7 @@ class ApplicationAssembler:
                             raise
                         return loop, _CompositeRunResource(tool_scope, scope)
 
-                async def compose_bound_child(descriptor, child_run_id, child_context):
+                async def compose_bound_child(descriptor, child_run_id, child_context) -> tuple[RunDriver, _CompositeRunResource]:
                     assert self.state.execution_binding_provider is not None
                     register_dynamic_configuration(descriptor)
                     command = await driver_runtime.session_store.get_start_command(
@@ -997,10 +1001,11 @@ class ApplicationAssembler:
                             try:
                                 child_loop, child_scope = await make_loop(
                                     child_run_id, child_tools.catalog, child_tools.executor,
-                                    child_tools.runtime, descriptor, available_scopes=child_tools.scope.provider_scopes,
+                                    child_tools.runtime, descriptor, available_scopes=child_tools.scope.provider_scopes if child_tools.scope else (),
                                 )
                             except BaseException:
-                                await child_tools.scope.close()
+                                if child_tools.scope is not None:
+                                    await child_tools.scope.close()
                                 raise
                             return child_loop, _CompositeRunResource(binding, child_tools.scope, child_scope)
                     except BaseException as exc:
@@ -1119,10 +1124,11 @@ class ApplicationAssembler:
                 )
                 try:
                     loop, scope = await make_loop(
-                        run_id, tools.catalog, tools.executor, tools.runtime, descriptor, available_scopes=tools.scope.provider_scopes,
+                        run_id, tools.catalog, tools.executor, tools.runtime, descriptor, available_scopes=tools.scope.provider_scopes if tools.scope else (),
                     )
                 except BaseException:
-                    await tools.scope.close()
+                    if tools.scope is not None:
+                        await tools.scope.close()
                     raise
                 return loop, _CompositeRunResource(tools.scope, scope)
 
@@ -1205,7 +1211,7 @@ class ApplicationAssembler:
             max_concurrent_runs_per_tenant=tenant_limit,
             lease_seconds=float(dispatcher_values.get("lease_seconds", getattr(scheduler, "default_lease_seconds", DEFAULT_LEASE_SECONDS))),
             distributed_claims=scheduler_capabilities.supports_distributed_claims,
-            lease_scope_factory=driver_session_store.lease_scope,
+            lease_scope_factory=fenced_session_store.lease_scope,
             preserve_runs_on_shutdown=bool(dispatcher_values.get("preserve_runs_on_shutdown", True)),
         )
         services["execution.dispatcher"] = dispatcher
@@ -1402,7 +1408,7 @@ class ApplicationAssembler:
         run_id: str | None = None,
         return_handle: bool = False,
         available=(),
-    ):
+    ) -> Any:
         agent = resolved.agents.get(agent_id, resolved.agents[resolved.entrypoint_agent])
         selection = _selection(resolved.runtime, "model.provider")
         if selection is not None:
@@ -1467,7 +1473,7 @@ class ApplicationAssembler:
                     host, parent, handles, selected, declarations, **kwargs,
                 )
                 pairs.append(pair)
-                if kwargs.get("return_handle") and pair[2] is not None:
+                if len(pair) == 3 and pair[2] is not None:
                     owned.append(pair[2])
         except BaseException:
             for handle in reversed(owned):
@@ -1516,7 +1522,8 @@ class ApplicationAssembler:
     ):
         selection = _selection(runtime, "tool.provider")
         if selection is None:
-            return InMemoryToolCatalog(()), InMemoryToolExecutor({}, {})
+            empty = (InMemoryToolCatalog(()), InMemoryToolExecutor({}, {}))
+            return (*empty, None) if return_handle else empty
         config = _merge_plugin_config(
             declarations, selection.plugin, dict(selection.config)
         )
@@ -1583,7 +1590,7 @@ class ApplicationAssembler:
         run_id: str | None = None,
         return_handle: bool = False,
         available=(),
-    ):
+    ) -> Any:
         selection = _selection(runtime, capability)
         plugin_id = selection.plugin if selection else default_plugin
         config = {
@@ -1666,9 +1673,9 @@ class ApplicationAssembler:
         return_handle: bool = False,
         offer_name: str | None = None,
         available=(),
-    ):
+    ) -> Any:
         from sagents.v2.runtime.extensions.identity import config_identity
-        agent_configuration = self._agent_configurations.get(agent_id)
+        agent_configuration = self._agent_configurations.get(agent_id) if agent_id else None
         if agent_configuration is not None:
             agent_id = agent_configuration["scope_agent_id"]
         cache_key = (plugin_id, scope, tenant_id if scope != ExtensionScope.PROCESS else None,
@@ -1968,8 +1975,9 @@ class ApplicationAssembler:
                     facts = capability_reader()
                     if inspect.isawaitable(facts):
                         facts = await facts
-                    if hasattr(facts, "model_dump"):
-                        facts = facts.model_dump(mode="json")
+                    dump = getattr(facts, "model_dump", None)
+                    if callable(dump):
+                        facts = dump(mode="json")
                     if isinstance(facts, Mapping):
                         observed = dict(facts)
             declared = descriptor_facts.get(capability, [])
@@ -2202,11 +2210,14 @@ class ApplicationAssembler:
         # Deferred providers have the same declared graph as started providers;
         # their actual instances are allocated only after Run admission.
         for consumer in bindings:
+            if consumer.plugin_id is None:
+                continue
             descriptor = self.extensions.get(consumer.plugin_id).descriptor
             for dependency in descriptor.dependencies:
                 for provider in bindings:
                     if (provider.capability == dependency.capability
                             and (dependency.name is None or provider.name == dependency.name)
+                            and provider.plugin_id is not None
                             and provider.plugin_id != consumer.plugin_id):
                         dependencies.add((consumer.plugin_id, provider.plugin_id))
         for capability in services:

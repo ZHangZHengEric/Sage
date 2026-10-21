@@ -11,6 +11,7 @@ from pathlib import Path
 from contextlib import AsyncExitStack, asynccontextmanager
 
 from pydantic import BaseModel
+from typing import TypeVar, Literal
 
 from sagents.v2.agent.management import AgentPackageBundle
 from sagents.v2.contracts.principals import RequestContext
@@ -48,6 +49,8 @@ from sagents.v2.optimization.principles import (
 )
 from sagents.v2.optimization.journal import OptimizationJournal
 from sagents.v2.optimization.feedback import training_feedback
+
+SchemaT = TypeVar("SchemaT", bound=BaseModel)
 
 
 @asynccontextmanager
@@ -249,7 +252,7 @@ class AgentPackageOptimizer:
         calls: list[OptimizationAgentCall] = []
         active_round = 0
         active_trial = 1
-        active_phase = "optimization"
+        active_phase: Literal["optimization", "final"] = "optimization"
         journal = OptimizationJournal(journal_path, on_event=on_event)
 
         async def run(bundle, key, content):
@@ -262,13 +265,13 @@ class AgentPackageOptimizer:
             )
 
         async def ask(
-            role: str,
+            role: Literal["test_design", "test_dialogue", "evaluation", "tuning", "semantic_review", "suite_review"],
             agent: OptimizationAgent,
             task: str,
             data: dict,
-            schema: type[BaseModel],
+            schema: type[SchemaT],
             case_id: str | None = None,
-        ):
+        ) -> SchemaT:
             content = json.dumps(
                 {
                     "task": task,
@@ -530,7 +533,7 @@ class AgentPackageOptimizer:
                         "output_tokens": sum(
                             item.observation.output_tokens for item in samples
                         ),
-                        "cost": sum(item.observation.cost for item in samples)
+                        "cost": sum(cost for item in samples if (cost := item.observation.cost) is not None)
                         if all(item.observation.cost is not None for item in samples)
                         else None,
                     }

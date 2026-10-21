@@ -6,6 +6,7 @@ import shutil
 from pathlib import Path
 from pathlib import PurePosixPath
 from weakref import WeakValueDictionary
+from typing import TypedDict
 
 from app.v2.server.catalog.records import AgentRecord, UserCatalog
 from app.v2.server.skills.files import (
@@ -34,6 +35,13 @@ from app.v2.server.skills.records import (
 )
 from app.v2.server.skills.repository import SkillStore
 from sagents.v2.contracts.errors import ErrorCategory, RuntimeErrorInfo, SageV2Error
+
+
+class SkillZipResult(TypedDict):
+    results: list[dict[str, object]]
+    skills: list[dict[str, object]]
+    success_count: int
+    failed_count: int
 
 
 class SkillCatalogService:
@@ -94,7 +102,7 @@ class SkillCatalogService:
         *,
         user_id: str,
         role: str,
-    ) -> dict[str, object]:
+    ) -> SkillZipResult:
         results: list[dict[str, object]] = []
         skills: list[SkillRecord] = []
         for filename, payload in items:

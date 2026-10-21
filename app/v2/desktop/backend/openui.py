@@ -165,8 +165,10 @@ class OpenUiParser:
                         if k not in {"NODE_OPTIONS", "NODE_PATH"}
                     },
                 )
+            stdin, stdout_reader = self.process.stdin, self.process.stdout
+            assert stdin is not None and stdout_reader is not None
             try:
-                self.process.stdin.write(
+                stdin.write(
                     (
                         json.dumps(
                             {"code": code, "complete": complete, "stream_id": stream_id}
@@ -174,8 +176,8 @@ class OpenUiParser:
                         + "\n"
                     ).encode()
                 )
-                await self.process.stdin.drain()
-                stdout = await asyncio.wait_for(self.process.stdout.readline(), 5)
+                await stdin.drain()
+                stdout = await asyncio.wait_for(stdout_reader.readline(), 5)
                 result = json.loads(stdout)
                 if "error" in result:
                     raise ValueError(str(result["error"])[:2000])

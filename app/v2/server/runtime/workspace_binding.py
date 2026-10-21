@@ -6,6 +6,8 @@ from pathlib import Path
 
 from sagents.v2.runtime.execution.plugins.local_binding.registration import LocalExecutionBindingConfig
 from sagents.v2.runtime.execution.plugins.local_binding import LocalWorkspaceExecutionBindingProvider
+from sagents.v2.runtime.execution.plugins._shared.binding import incompatible_configuration
+from sagents.v2.runtime.extensions import ExtensionScope, ExtensionScopeContext, ProviderSet
 
 
 class ServerExecutionBindingConfig(LocalExecutionBindingConfig):
@@ -31,10 +33,14 @@ class ServerWorkspaceBindingProvider:
 
     def _provider(self, workspace):
         from sagents.v2.runtime.execution.plugins.local_binding.registration import local_execution_binding_registration
-        from types import SimpleNamespace
-        values = self.config.model_dump(mode="python", exclude={"owner", "agent_id"})
+        values = self.config.model_dump(mode="json", exclude={"owner", "agent_id"})
         values.update(workspace=str(workspace), private_workspace_root=str(workspace.parent / ".sage-private-workspaces"))
-        return local_execution_binding_registration().factory(SimpleNamespace(config=values), None)
+        provider = local_execution_binding_registration().factory(
+            ExtensionScopeContext(scope=ExtensionScope.PROCESS, scope_id="server-workspace", config=values),
+            ProviderSet(),
+        )
+        assert isinstance(provider, LocalWorkspaceExecutionBindingProvider)
+        return provider
 
     async def accept_configuration(self, command, *, context, parent_command=None):
         from app.v2.server.storage.workspaces import workspace_user
@@ -53,12 +59,12 @@ class ServerWorkspaceBindingProvider:
     async def acquire(self, request):
         self._authorize(request.context)
         if request.configuration is None:
-            raise LocalWorkspaceExecutionBindingProvider._incompatible("Run has no accepted execution configuration")
+            raise incompatible_configuration("Run has no accepted execution configuration")
         # Only durable, authorized commands can establish the host path. The
         # caller's request snapshot alone cannot redirect execution resources.
         command = await self.access.get_start_command(request.run_id, request.context)
         if command.config.execution_snapshot != request.configuration:
-            raise LocalWorkspaceExecutionBindingProvider._incompatible("binding differs from the admitted execution configuration")
+            raise incompatible_configuration("binding differs from the admitted execution configuration")
         workspace = Path(request.configuration.workspace_root)
         async with self._lock:
             if self._closed:

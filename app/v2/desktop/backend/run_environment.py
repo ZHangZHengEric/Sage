@@ -8,12 +8,16 @@ a restart MCP recovery fails closed if the referenced configuration has changed.
 from copy import deepcopy
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING, cast
 
 from app.v2.desktop.backend.catalog import (
     DesktopAgentRecord,
     DesktopModelProviderRecord,
 )
 from sagents.v2.tool.plugins.mcp import McpToolPlugin
+
+if TYPE_CHECKING:
+    from app.v2.desktop.backend.service import DesktopV2Service
 
 
 @dataclass(frozen=True)
@@ -32,6 +36,7 @@ class DesktopRunEnvironment:
 
 class DesktopRunEnvironmentMixin:
     async def _agent_in_environment(self, command, environment, user_id):
+        self = cast("DesktopV2Service", self)
         agent = (
             environment.agents.get(catalog_agent_id(command))
             if environment is not None
@@ -59,6 +64,7 @@ class DesktopRunEnvironmentMixin:
 
     async def _capture_run_environment(self, request, user_id):
         # Materialize defaults before taking the catalog copies.
+        self = cast("DesktopV2Service", self)
         await self._agent(request.agent_id, user_id)
         agents = {
             value.agent_id: value.model_copy(deep=True)
@@ -78,7 +84,7 @@ class DesktopRunEnvironmentMixin:
                 config["fast_llm_provider_id"] = overrides.fast_model_provider_id
             if agent_id == request.agent_id and overrides.tools is not None:
                 allowed = config.get("availableTools")
-                allowed_names = set(allowed or ())
+                allowed_names: set[str] = set(allowed or ())
                 if config.get("availableSkills"):
                     allowed_names.add("load_skill")
                 if allowed is not None and not set(overrides.tools) <= allowed_names:
@@ -134,6 +140,7 @@ class DesktopRunEnvironmentMixin:
         return DesktopRunEnvironment(workspace, agents, providers, mcp, snapshot)
 
     async def _resolve_run_mcp(self, user_id, bindings):
+        self = cast("DesktopV2Service", self)
         from app.v2.desktop.backend.schemas import DesktopMcpBinding
 
         records = {
@@ -166,6 +173,7 @@ class DesktopRunEnvironmentMixin:
         ]
 
     async def _environment_for_command(self, command, user_id, run_id):
+        self = cast("DesktopV2Service", self)
         root_run_id = run_id
         while command.parent_run_id:
             root_run_id = command.parent_run_id
