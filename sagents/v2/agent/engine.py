@@ -12,7 +12,9 @@ import hashlib
 import inspect
 import json
 from datetime import timedelta
-from collections.abc import Callable
+from dataclasses import dataclass
+from collections.abc import Callable, AsyncGenerator, Awaitable
+from typing import Any, cast
 
 from sagents.v2.runtime.execution.ownership import (
     can_defer_run,
@@ -29,6 +31,7 @@ from sagents.v2.agent.model_recovery import (
 )
 from sagents.v2.model.contracts import (
     ModelEventKind,
+    ModelStreamEvent,
     ModelMessage,
     ModelResponse,
     ModelToolCall,
@@ -63,9 +66,10 @@ from sagents.v2.agent.policy.approval_memory import (
     REMEMBER_DECISION,
     ApprovalMemory,
     RememberedApproval,
+    ApprovalScope,
 )
 from sagents.v2.agent.policy.plugins.tool_policy import DefaultToolPolicy
-from sagents.v2.agent.policy.tool_policy import ToolPolicyAction, ToolPolicyContext
+from sagents.v2.agent.policy.tool_policy import ToolPolicyAction, ToolPolicyContext, ToolPolicyDecision
 from sagents.v2.tool.contracts import (
     CancelSemantics,
     ReconcileResult,
@@ -74,6 +78,7 @@ from sagents.v2.tool.contracts import (
     SideEffectLevel,
     ToolCall,
     ToolCancellationState,
+    ToolCancellationResult,
     ToolExecutionResult,
 )
 from sagents.v2.tool.arguments import apply_system_context_overrides
@@ -100,6 +105,8 @@ from sagents.v2.contracts.events import (
     CheckpointEventData,
     ContinuationEventData,
     ItemEventData,
+    InteractionEventData,
+    SkillStateEventData,
     PolicyEventData,
     RunEventData,
     StepEventData,
@@ -132,7 +139,7 @@ from sagents.v2.contracts.run_state import (
     RunState,
     TERMINAL_RUN_STATES,
 )
-from sagents.v2.contracts.commands import CancelRun, InputItem
+from sagents.v2.contracts.commands import CancelRun, InputItem, StartRun
 from sagents.v2.runtime.contracts import RuntimePort
 from sagents.v2.runtime.session.contracts import EventDraft
 from sagents.v2.prompt_i18n import run_prompt_language
@@ -150,6 +157,15 @@ from sagents.v2.tool.result_processing import ToolResultProcessor
 
 class _SkillInitializationPaused(Exception):
     """A completed preload is a safe boundary for a requested pause."""
+
+
+@dataclass(frozen=True)
+class _DriveIteration:
+    run: RunSnapshot
+    state: AgentLoopCheckpointState
+    empty_response_retries: int
+    context_overflow_retries: int
+    stop: bool = False
 
 
 class AgentLoopEngine:
@@ -226,6 +242,7 @@ class AgentLoopEngine:
                     (AvailableSkillsContextProvider, ActiveSkillsContextProvider),
                 )
             )
+            assert skill_loader is not None
             context_assembler.providers = (
                 *providers,
                 AvailableSkillsContextProvider(skill_loader.catalog),
@@ -274,7 +291,7 @@ class AgentLoopEngine:
         self.delegated_run_controller = delegated_run_controller
         self.expected_resolved_spec_hash = expected_resolved_spec_hash
         self.clock = clock
-        self._budget_usage_cache = {}
+        self._budget_usage_cache: dict[str, tuple[int, int]] = {}
         from sagents.v2.runtime.lifecycle import DurableRunLifecycle
 
         self.lifecycle = DurableRunLifecycle(runtime)
@@ -381,14 +398,14 @@ class AgentLoopEngine:
             raise
         return await self._drive(run, state, context)
 
-    async def _restore_skill_state(self, run_id, *, checkpoint_state=None, legacy=False):
+    async def _restore_skill_state(self, run_id, *, checkpoint_state=None, legacy=False) -> None:
         if not self.preload_skills or self.skill_loader is None:
             return
         snapshot = checkpoint_state
         if snapshot is None:
             events = await self.runtime.session_store.read_events(run_id)
             snapshot = next((event.data.state for event in reversed(events)
-                             if event.type == "skill.state"), None)
+                             if event.type == "skill.state" and isinstance(event.data, SkillStateEventData)), None)
         if snapshot is None and legacy:
             # Old suspended Runs never acquire newly configured defaults.
             snapshot = await self.skill_loader.snapshot_run(run_id)
@@ -397,7 +414,7 @@ class AgentLoopEngine:
             await self.skill_loader.restore_run(run_id, snapshot)
             self._last_skill_states[run_id] = snapshot
 
-    async def _initialize_skills(self, run, command, context):
+    async def _initialize_skills(self, run, command, context) -> RunSnapshot:
         if not self.preload_skills:
             return run
         if self.skill_loader is None:
@@ -430,7 +447,7 @@ class AgentLoopEngine:
         )
         return run
 
-    async def _fail_skill_initialization(self, run, state, command, exc, context):
+    async def _fail_skill_initialization(self, run, state, command, exc, context) -> RunSnapshot:
         cause = exc.info if isinstance(exc, SageV2Error) else None
         snapshot = (await self.skill_loader.snapshot_run(run.run_id)
                     if self.skill_loader is not None else {})
@@ -464,7 +481,7 @@ class AgentLoopEngine:
             return await self._suspend_at_safe_point(current, state, context)
         return await self._fail(current, state, step_id, error, context)
 
-    async def _prepare_self_configuration(self, run_id, context):
+    async def _prepare_self_configuration(self, run_id, context) -> None:
         if self.self_configuration is not None:
             changed = await self.self_configuration.prepare(run_id, context)
             if changed:
@@ -493,7 +510,7 @@ class AgentLoopEngine:
         )
         self._prepared_tool_selection_runs.add(run_id)
 
-    async def _run_automatic_memory_recall(self, run, state, command, context):
+    async def _run_automatic_memory_recall(self, run, state, command, context) -> tuple[RunSnapshot, AgentLoopCheckpointState]:
         """Run v1-compatible Memory recall as a real Tool input/output pair."""
 
         latest_user = next(
@@ -803,6 +820,7 @@ class AgentLoopEngine:
                         None,
                     )
                     if resolved is not None:
+                        assert isinstance(resolved.data, InteractionEventData)
                         interaction_id = resolved.data.interaction_id
                         resolution = (
                             await self.runtime.session_store.get_interaction_resolution(
@@ -852,7 +870,8 @@ class AgentLoopEngine:
         )
         if started is None:
             return None
-        tool_data = started.data
+        tool_data = cast(ToolEventData, started.data)
+        assert tool_data.operation_id is not None and tool_data.idempotency_key is not None
         proposal = next(
             (
                 event
@@ -863,13 +882,15 @@ class AgentLoopEngine:
             ),
             None,
         )
-        proposal_missing = proposal is None or proposal.data.arguments is None
+        proposal_data = cast(ToolEventData, proposal.data) if proposal is not None else None
+        proposal_arguments = proposal_data.arguments if proposal_data is not None else None
+        proposal_missing = proposal_arguments is None
         call = ToolCall(
             tool_call_id=tool_data.tool_call_id,
             tool_name=tool_data.tool_name,
             # Dispatch has already crossed the side-effect barrier. A damaged
             # pre-dispatch projection must never turn that into a safe replay.
-            arguments={} if proposal_missing else proposal.data.arguments,
+            arguments=proposal_arguments if proposal_arguments is not None else {},
             operation_id=tool_data.operation_id,
             idempotency_key=tool_data.idempotency_key,
             owner_run_id=run.run_id,
@@ -932,6 +953,7 @@ class AgentLoopEngine:
             ),
             None,
         )
+        unknown_data = cast(ToolEventData, unknown_event.data) if unknown_event is not None else None
         uncertainty = (
             RuntimeErrorInfo(
                 code="tool.recovery_ledger_incomplete",
@@ -947,8 +969,8 @@ class AgentLoopEngine:
                 },
             )
             if proposal_missing
-            else unknown_event.data.error
-            if unknown_event is not None and unknown_event.data.error is not None
+            else unknown_data.error
+            if unknown_data is not None and unknown_data.error is not None
             else RuntimeErrorInfo(
                 code="tool.outcome_unknown_after_worker_restart",
                 category=ErrorCategory.UNCERTAIN_SIDE_EFFECT,
@@ -1019,7 +1041,7 @@ class AgentLoopEngine:
             ),
         )
 
-    def _recovered_questionnaire_completed(self, run, state, events):
+    def _recovered_questionnaire_completed(self, run, state, events) -> bool:
         items = {
             event.item_id: event.data.item
             for event in events
@@ -1038,6 +1060,7 @@ class AgentLoopEngine:
             item = items.get(data.result_item_id)
             if item is None or not isinstance(item.data, ToolResultItemData):
                 continue
+            assert data.operation_id is not None and data.idempotency_key is not None
             call = ToolCall(
                 tool_call_id=data.tool_call_id,
                 tool_name=data.tool_name,
@@ -1174,7 +1197,7 @@ class AgentLoopEngine:
 
     async def _continue_resolved_checkpoint(
         self, run, state, resolution, interaction_id, command, context
-    ):
+    ) -> RunSnapshot:
         settled = bool(
             state.pending_tool_call is not None
             and any(
@@ -1287,7 +1310,7 @@ class AgentLoopEngine:
                             category=ErrorCategory.POLICY_DENIED,
                             message=(
                                 current_policy.reason
-                                if policy_denied
+                                if current_policy is not None and policy_denied
                                 else f"tool call declined with {resolution.decision}"
                             ),
                             message_key=None
@@ -1449,7 +1472,6 @@ class AgentLoopEngine:
         uncommitted output or repeat an external side effect after recovery.
         """
 
-        from sagents.v2.runtime.execution.budgets import evaluate_run_budget
 
         command = await self.runtime.session_store.get_start_command(run.run_id)
         command = with_session_context(command, run.session_id)
@@ -1458,457 +1480,378 @@ class AgentLoopEngine:
         empty_response_retries = 0
         context_overflow_retries = 0
         while run.state in {RunState.RUNNING, RunState.SUSPEND_REQUESTED}:
-            if run.state == RunState.SUSPEND_REQUESTED:
-                return await self._suspend_at_safe_point(run, state, context)
-            budget = await evaluate_run_budget(self.runtime.session_store, run, self.clock(), usage_cache=self._budget_usage_cache)
-            if budget.error is not None:
-                return await self._fail(run, state, None, budget.error, context, allow_recovery=False)
-            if state.provider_retry_at is not None:
-                delay = max(0, (state.provider_retry_at - self.clock()).total_seconds())
-                if budget.deadline is not None:
-                    delay = min(delay, max(0, (budget.deadline - self.clock()).total_seconds()))
-                if delay > 0 and can_defer_run(run.run_id):
-                    return run
-                if command.config.deadline_seconds is not None:
-                    remaining = command.config.deadline_seconds - max(
-                        0, (self.clock() - run.created_at).total_seconds()
-                    )
-                    delay = min(delay, max(0, remaining))
-                await self._wait_for_model_retry(run.run_id, delay)
-                current = await self.runtime.get_run(run.run_id)
-                if current.state == RunState.SUSPEND_REQUESTED:
-                    return await self._suspend_at_safe_point(current, state, context)
-                if current.state in TERMINAL_RUN_STATES:
-                    await self._release_run_resources(run.run_id)
-                    return current
-                run = current
-                budget = await evaluate_run_budget(self.runtime.session_store, run, self.clock(), usage_cache=self._budget_usage_cache)
-                if budget.error is not None:
-                    return await self._fail(run, state, None, budget.error, context, allow_recovery=False)
-                state = state.model_copy(update={
-                    "provider_retry_at": None, "automatic_resume_at": None,
-                    "automatic_resume_reason": None,
-                })
-            elif state.automatic_resume_at is not None:
-                state = state.model_copy(update={
-                    "automatic_resume_at": None, "automatic_resume_reason": None,
-                })
-            try:
-                run = await self._initialize_skills(run, command, context)
-            except _SkillInitializationPaused:
-                return await self._suspend_at_safe_point(
-                    await self.runtime.get_run(run.run_id), state, context
+            iteration = await self._drive_step(run, state, context, command, max_steps,
+                empty_response_retries, context_overflow_retries)
+            run, state = iteration.run, iteration.state
+            empty_response_retries = iteration.empty_response_retries
+            context_overflow_retries = iteration.context_overflow_retries
+            if iteration.stop:
+                return run
+        return run
+
+    async def _drive_step(
+        self, run: RunSnapshot, state: AgentLoopCheckpointState,
+        context: RequestContext, command: StartRun, max_steps: int,
+        empty_response_retries: int, context_overflow_retries: int,
+    ) -> _DriveIteration:
+        from sagents.v2.runtime.execution.budgets import evaluate_run_budget
+        if run.state == RunState.SUSPEND_REQUESTED:
+            return _DriveIteration(await self._suspend_at_safe_point(run, state, context), state, empty_response_retries, context_overflow_retries, stop=True)
+        budget = await evaluate_run_budget(self.runtime.session_store, run, self.clock(), usage_cache=self._budget_usage_cache)
+        if budget.error is not None:
+            return _DriveIteration(await self._fail(run, state, None, budget.error, context, allow_recovery=False), state, empty_response_retries, context_overflow_retries, stop=True)
+        if state.provider_retry_at is not None:
+            delay = max(0, (state.provider_retry_at - self.clock()).total_seconds())
+            if budget.deadline is not None:
+                delay = min(delay, max(0, (budget.deadline - self.clock()).total_seconds()))
+            if delay > 0 and can_defer_run(run.run_id):
+                return _DriveIteration(run, state, empty_response_retries, context_overflow_retries, stop=True)
+            if command.config.deadline_seconds is not None:
+                remaining = command.config.deadline_seconds - max(
+                    0, (self.clock() - run.created_at).total_seconds()
                 )
-            except Exception as exc:
-                return await self._fail_skill_initialization(run, state, command, exc, context)
-            await self._prepare_self_configuration(run.run_id, context)
-            if self.self_configuration is not None:
-                state = state.model_copy(
-                    update={
-                        "self_configuration_revision": self.self_configuration.revision
-                    }
-                )
-            state = state.model_copy(
-                update={"messages": order_tool_context(state.messages)}
-            )
-            # Phase 1: observe control-plane state only at a safe boundary. A
-            # pause never snapshots the middle of arbitrary Python mutation.
+                delay = min(delay, max(0, remaining))
+            await self._wait_for_model_retry(run.run_id, delay)
             current = await self.runtime.get_run(run.run_id)
             if current.state == RunState.SUSPEND_REQUESTED:
-                return await self._suspend_at_safe_point(current, state, context)
+                return _DriveIteration(await self._suspend_at_safe_point(current, state, context), state, empty_response_retries, context_overflow_retries, stop=True)
             if current.state in TERMINAL_RUN_STATES:
                 await self._release_run_resources(run.run_id)
-                return current
+                return _DriveIteration(current, state, empty_response_retries, context_overflow_retries, stop=True)
             run = current
-            if state.pending_response_step_id is not None:
-                step_id = state.pending_response_step_id
-                response = self._pending_response(state)
-                system_requirements = state.pending_response_system_requirements
-                available_tools = state.pending_response_tool_names or tuple(
-                    tool.name
-                    for tool in await self.tool_catalog.list_tools(run_id=run.run_id)
-                )
-            else:
-                claimed = await self.runtime.session_store.claim_steers(
-                    run_id=run.run_id,
-                    expected_revision=run.revision,
-                    turn_id=state.turn_id,
-                    context=context,
-                )
-                if claimed.entries:
-                    # Steering is appended to the model ledger in durable inbox
-                    # order. It is not an Interaction reply and does not resume a
-                    # suspended Run by itself.
-                    run = claimed.run
-                    steering_messages = tuple(
-                        ModelMessage(
-                            role=item.role,
-                            content=item.content,
-                            metadata=item.metadata,
-                        )
-                        for entry in claimed.entries
-                        for item in entry.input
+            budget = await evaluate_run_budget(self.runtime.session_store, run, self.clock(), usage_cache=self._budget_usage_cache)
+            if budget.error is not None:
+                return _DriveIteration(await self._fail(run, state, None, budget.error, context, allow_recovery=False), state, empty_response_retries, context_overflow_retries, stop=True)
+            state = state.model_copy(update={
+                "provider_retry_at": None, "automatic_resume_at": None,
+                "automatic_resume_reason": None,
+            })
+        elif state.automatic_resume_at is not None:
+            state = state.model_copy(update={
+                "automatic_resume_at": None, "automatic_resume_reason": None,
+            })
+        try:
+            run = await self._initialize_skills(run, command, context)
+        except _SkillInitializationPaused:
+            return _DriveIteration(await self._suspend_at_safe_point(await self.runtime.get_run(run.run_id), state, context), state, empty_response_retries, context_overflow_retries, stop=True)
+        except Exception as exc:
+            return _DriveIteration(await self._fail_skill_initialization(run, state, command, exc, context), state, empty_response_retries, context_overflow_retries, stop=True)
+        await self._prepare_self_configuration(run.run_id, context)
+        if self.self_configuration is not None:
+            state = state.model_copy(
+                update={
+                    "self_configuration_revision": self.self_configuration.revision
+                }
+            )
+        state = state.model_copy(
+            update={"messages": order_tool_context(state.messages)}
+        )
+        # Phase 1: observe control-plane state only at a safe boundary. A
+        # pause never snapshots the middle of arbitrary Python mutation.
+        current = await self.runtime.get_run(run.run_id)
+        if current.state == RunState.SUSPEND_REQUESTED:
+            return _DriveIteration(await self._suspend_at_safe_point(current, state, context), state, empty_response_retries, context_overflow_retries, stop=True)
+        if current.state in TERMINAL_RUN_STATES:
+            await self._release_run_resources(run.run_id)
+            return _DriveIteration(current, state, empty_response_retries, context_overflow_retries, stop=True)
+        run = current
+        if state.pending_response_step_id is not None:
+            step_id = state.pending_response_step_id
+            response = self._pending_response(state)
+            system_requirements = state.pending_response_system_requirements
+            available_tools = state.pending_response_tool_names or tuple(
+                tool.name
+                for tool in await self.tool_catalog.list_tools(run_id=run.run_id)
+            )
+        else:
+            claimed = await self.runtime.session_store.claim_steers(
+                run_id=run.run_id,
+                expected_revision=run.revision,
+                turn_id=state.turn_id,
+                context=context,
+            )
+            if claimed.entries:
+                # Steering is appended to the model ledger in durable inbox
+                # order. It is not an Interaction reply and does not resume a
+                # suspended Run by itself.
+                run = claimed.run
+                steering_messages = tuple(
+                    ModelMessage(
+                        role=item.role,
+                        content=item.content,
+                        metadata=item.metadata,
                     )
-                    state = state.model_copy(
-                        update={"messages": (*state.messages, *steering_messages)}
-                    )
-                step_id = new_id("step")
-                run = await self._commit_running(
-                    run,
-                    context,
-                    (
-                        EventDraft(
-                            type="step.started",
-                            turn_id=state.turn_id,
-                            step_id=step_id,
-                            data=StepEventData(
-                                state="started", attempt=state.step_number
-                            ),
-                        ),
-                    ),
-                    recovery_state=state,
+                    for entry in claimed.entries
+                    for item in entry.input
                 )
-                # Phase 2: ContextAssembler creates the provider-facing projection.
-                # The raw ledger and canonical RuntimeEvents are left unchanged.
-                # Resume/recovery can use a fresh engine whose selection plugin has
-                # no process-local preparation state. Expanded tools were restored
-                # from the checkpoint; prepare the current catalog before select().
-                try:
-                    await self._prepare_tool_selection(
-                        command=command,
-                        run_id=run.run_id,
-                        messages=state.messages,
-                        language=context.language,
-                    )
-                    prepared_step = await self.step_request_builder.prepare(
-                        command=command,
-                        run_id=run.run_id,
+                state = state.model_copy(
+                    update={"messages": (*state.messages, *steering_messages)}
+                )
+            step_id = new_id("step")
+            run = await self._commit_running(
+                run,
+                context,
+                (
+                    EventDraft(
+                        type="step.started",
                         turn_id=state.turn_id,
                         step_id=step_id,
-                        messages=state.messages,
-                        pending_continuation_reason=state.pending_continuation_reason,
-                        language=context.language,
+                        data=StepEventData(
+                            state="started", attempt=state.step_number
+                        ),
+                    ),
+                ),
+                recovery_state=state,
+            )
+            # Phase 2: ContextAssembler creates the provider-facing projection.
+            # The raw ledger and canonical RuntimeEvents are left unchanged.
+            # Resume/recovery can use a fresh engine whose selection plugin has
+            # no process-local preparation state. Expanded tools were restored
+            # from the checkpoint; prepare the current catalog before select().
+            try:
+                await self._prepare_tool_selection(
+                    command=command,
+                    run_id=run.run_id,
+                    messages=state.messages,
+                    language=context.language,
+                )
+                prepared_step = await self.step_request_builder.prepare(
+                    command=command,
+                    run_id=run.run_id,
+                    turn_id=state.turn_id,
+                    step_id=step_id,
+                    messages=state.messages,
+                    pending_continuation_reason=state.pending_continuation_reason,
+                    language=context.language,
+                )
+            except SageV2Error as exc:
+                if self._provider_retry_allowed(exc.info, command, state):
+                    run, state = await self._schedule_provider_retry(
+                        run, state, step_id, exc.info, command, context
                     )
-                except SageV2Error as exc:
-                    if self._provider_retry_allowed(exc.info, command, state):
-                        run, state = await self._schedule_provider_retry(
-                            run, state, step_id, exc.info, command, context
-                        )
-                        if can_defer_run(run.run_id):
-                            return run
-                        continue
-                    return await self._fail(run, state, step_id, exc.info, context)
-                except Exception as exc:
-                    return await self._fail(
+                    if can_defer_run(run.run_id):
+                        return _DriveIteration(run, state, empty_response_retries, context_overflow_retries, stop=True)
+                    return _DriveIteration(run, state, empty_response_retries, context_overflow_retries)
+                return _DriveIteration(await self._fail(run, state, step_id, exc.info, context), state, empty_response_retries, context_overflow_retries, stop=True)
+            except Exception as exc:
+                return _DriveIteration(await self._fail(run, state, step_id, RuntimeErrorInfo(code='loop.request_preparation_failed', category=ErrorCategory.PROVIDER_PERMANENT, message=exception_diagnostic_message(exc), safe_to_resume=True), context), state, empty_response_retries, context_overflow_retries, stop=True)
+            request = prepared_step.request
+            budget = await evaluate_run_budget(self.runtime.session_store, run, self.clock(), usage_cache=self._budget_usage_cache)
+            if budget.error is not None:
+                return _DriveIteration(await self._fail(run, state, step_id, budget.error, context, allow_recovery=False), state, empty_response_retries, context_overflow_retries, stop=True)
+            if budget.remaining_tokens is not None:
+                request = request.model_copy(update={"max_output_tokens": min(
+                    request.max_output_tokens or budget.remaining_tokens,
+                    budget.remaining_tokens,
+                )})
+            tools = prepared_step.tools
+            system_requirements = self._system_requirements(request.messages)
+            available_tools = tuple(tool.name for tool in tools)
+            try:
+                # Phase 3: deltas are emitted as replay-buffered events, followed
+                # by completed Items that are authoritative for final content.
+                run, response, partial_suspension = await self._stream_model(
+                    run, request, context, state, step_id
+                )
+            except SageV2Error as exc:
+                # The stream may have flushed deltas and cancelled partial
+                # Items before raising; use its latest durable revision.
+                run = await self.runtime.get_run(run.run_id)
+                if run.state == RunState.SUSPEND_REQUESTED:
+                    return _DriveIteration(await self._suspend_at_safe_point(run, state.model_copy(update={'retry_model_step': True}), context), state, empty_response_retries, context_overflow_retries, stop=True)
+                if run.state in TERMINAL_RUN_STATES:
+                    return _DriveIteration(run, state, empty_response_retries, context_overflow_retries, stop=True)
+                if self._provider_retry_allowed(exc.info, command, state):
+                    run, state = await self._schedule_provider_retry(
+                        run, state, step_id, exc.info, command, context
+                    )
+                    if can_defer_run(run.run_id):
+                        return _DriveIteration(run, state, empty_response_retries, context_overflow_retries, stop=True)
+                    return _DriveIteration(run, state, empty_response_retries, context_overflow_retries)
+                if (
+                    can_repair_model_arguments(exc.info)
+                    and state.pending_tool_call is None
+                    and state.pending_response_step_id is None
+                ):
+                    run, state = await self._recover_model_arguments(
                         run,
                         state,
                         step_id,
-                        RuntimeErrorInfo(
-                            code="loop.request_preparation_failed",
-                            category=ErrorCategory.PROVIDER_PERMANENT,
-                            message=exception_diagnostic_message(exc),
-                            safe_to_resume=True,
-                        ),
+                        exc.info,
+                        command,
                         context,
                     )
-                request = prepared_step.request
-                budget = await evaluate_run_budget(self.runtime.session_store, run, self.clock(), usage_cache=self._budget_usage_cache)
-                if budget.error is not None:
-                    return await self._fail(run, state, step_id, budget.error, context, allow_recovery=False)
-                if budget.remaining_tokens is not None:
-                    request = request.model_copy(update={"max_output_tokens": min(
-                        request.max_output_tokens or budget.remaining_tokens,
-                        budget.remaining_tokens,
-                    )})
-                tools = prepared_step.tools
-                system_requirements = self._system_requirements(request.messages)
-                available_tools = tuple(tool.name for tool in tools)
-                try:
-                    # Phase 3: deltas are emitted as replay-buffered events, followed
-                    # by completed Items that are authoritative for final content.
-                    run, response, partial_suspension = await self._stream_model(
-                        run, request, context, state, step_id
+                    if run.state != RunState.RUNNING:
+                        return _DriveIteration(run, state, empty_response_retries, context_overflow_retries, stop=True)
+                    return _DriveIteration(run, state, empty_response_retries, context_overflow_retries)
+                if (
+                    exc.info.code == "model.context_window_exceeded"
+                    and context_overflow_retries < 6
+                    and callable(
+                        getattr(self.context_assembler, "request_compression", None)
                     )
-                except SageV2Error as exc:
-                    # The stream may have flushed deltas and cancelled partial
-                    # Items before raising; use its latest durable revision.
-                    run = await self.runtime.get_run(run.run_id)
-                    if run.state == RunState.SUSPEND_REQUESTED:
-                        return await self._suspend_at_safe_point(
-                            run,
-                            state.model_copy(update={"retry_model_step": True}),
-                            context,
-                        )
-                    if run.state in TERMINAL_RUN_STATES:
-                        return run
-                    if self._provider_retry_allowed(exc.info, command, state):
-                        run, state = await self._schedule_provider_retry(
-                            run, state, step_id, exc.info, command, context
-                        )
-                        if can_defer_run(run.run_id):
-                            return run
-                        continue
-                    if (
-                        can_repair_model_arguments(exc.info)
-                        and state.pending_tool_call is None
-                        and state.pending_response_step_id is None
-                    ):
-                        run, state = await self._recover_model_arguments(
-                            run,
-                            state,
-                            step_id,
-                            exc.info,
-                            command,
-                            context,
-                        )
-                        if run.state != RunState.RUNNING:
-                            return run
-                        continue
-                    if (
-                        exc.info.code == "model.context_window_exceeded"
-                        and context_overflow_retries < 6
-                        and callable(
-                            getattr(self.context_assembler, "request_compression", None)
-                        )
-                    ):
-                        context_overflow_retries += 1
-                        self.context_assembler.request_compression(run.run_id)
-                        retry_error = exc.info.model_copy(
-                            update={
-                                "metadata": {
-                                    **exc.info.metadata,
-                                    "transparent_retry_attempt": context_overflow_retries,
-                                    "transparent_retry_limit": 6,
-                                }
+                ):
+                    context_overflow_retries += 1
+                    cast(Callable[[str], Any], getattr(self.context_assembler, "request_compression"))(run.run_id)
+                    retry_error = exc.info.model_copy(
+                        update={
+                            "metadata": {
+                                **exc.info.metadata,
+                                "transparent_retry_attempt": context_overflow_retries,
+                                "transparent_retry_limit": 6,
                             }
-                        )
-                        run = await self._commit_running(
-                            run,
-                            context,
-                            (
-                                EventDraft(
-                                    type="step.retry_scheduled",
-                                    turn_id=state.turn_id,
-                                    step_id=step_id,
-                                    data=StepEventData(
-                                        state="retry_scheduled",
-                                        attempt=context_overflow_retries,
-                                        retry_at=self.clock(),
-                                        error=retry_error,
-                                    ),
-                                ),
-                            ),
-                        )
-                        continue
-                    if (
-                        exc.info.code == "model.empty_semantic_response"
-                        and empty_response_retries
-                        < self._MAX_TRANSPARENT_EMPTY_RESPONSE_RETRIES
-                    ):
-                        empty_response_retries += 1
-                        retry_error = exc.info.model_copy(
-                            update={
-                                "retryable": True,
-                                "metadata": {
-                                    **exc.info.metadata,
-                                    "transparent_retry_attempt": empty_response_retries,
-                                    "transparent_retry_limit": (
-                                        self._MAX_TRANSPARENT_EMPTY_RESPONSE_RETRIES
-                                    ),
-                                },
-                            }
-                        )
-                        run = await self._commit_running(
-                            run,
-                            context,
-                            (
-                                EventDraft(
-                                    type="step.retry_scheduled",
-                                    turn_id=state.turn_id,
-                                    step_id=step_id,
-                                    data=StepEventData(
-                                        state="retry_scheduled",
-                                        attempt=empty_response_retries,
-                                        retry_at=self.clock(),
-                                        error=retry_error,
-                                    ),
-                                ),
-                            ),
-                        )
-                        continue
-                    error = exc.info
-                    if error.code == "model.empty_semantic_response":
-                        error = error.model_copy(
-                            update={
-                                "retryable": True,
-                                "metadata": {
-                                    **error.metadata,
-                                    "transparent_retries_exhausted": (
-                                        empty_response_retries
-                                    ),
-                                },
-                            }
-                        )
-                    return await self._fail(run, state, step_id, error, context)
-                except Exception as exc:
-                    return await self._fail(
+                        }
+                    )
+                    run = await self._commit_running(
                         run,
-                        state,
-                        step_id,
-                        RuntimeErrorInfo(
-                            code="model.provider_error",
-                            category=ErrorCategory.PROVIDER_PERMANENT,
-                            message=str(exc),
-                            safe_to_resume=True,
-                        ),
                         context,
-                    )
-                if partial_suspension is not None:
-                    return partial_suspension
-                assert response is not None
-                observe_response = getattr(
-                    self.step_request_builder, "observe_response", None
-                )
-                if observe_response is not None:
-                    observe_response(request, response)
-                empty_response_retries = 0
-                context_overflow_retries = 0
-                state = self._state_after_model_response(
-                    state, response, step_id, system_requirements, available_tools
-                )
-
-            questionnaire_completed = state.pending_questionnaire_completed
-            completed_tool_results: list[ToolExecutionResult] = []
-            read_tools: set[str] = set()
-            if response.tool_calls:
-                budget = await evaluate_run_budget(self.runtime.session_store, run, self.clock(), usage_cache=self._budget_usage_cache)
-                if budget.error is not None:
-                    return await self._fail(run, state, step_id, budget.error, context, allow_recovery=False)
-                # Phase 4: proposal and policy decision are committed before any
-                # external ToolExecutor receives the call.
-                settled = {
-                    message.tool_call_id
-                    for message in self._pending_response_results(state)
-                }
-                prepared_calls = []
-                approval_calls = []
-                crossed = await self._crossed_tool_calls(run, step_id)
-                for model_call in response.tool_calls:
-                    if model_call.tool_call_id in settled:
-                        continue
-                    if model_call.tool_call_id in crossed:
-                        prepared_calls.append(crossed[model_call.tool_call_id])
-                        continue
-                    try:
-                        definition = await self.tool_catalog.get_tool(
-                            model_call.name, run_id=run.run_id
-                        )
-                    except SageV2Error as exc:
-                        if exc.info.code == "tool.not_found":
-                            # A rejected name has never crossed the execution barrier.
-                            # Settle it as Tool feedback, then execute valid siblings.
-                            call = ToolCall(
-                                tool_call_id=model_call.tool_call_id,
-                                tool_name=model_call.name,
-                                arguments=model_call.arguments,
-                                operation_id=new_id("operation"),
-                                idempotency_key=f"{run.run_id}:{model_call.tool_call_id}",
-                                owner_run_id=run.run_id,
-                                owner_agent_id=command.agent_id,
-                                owner_session_id=run.session_id,
-                            )
-                            run = await self._record_tool_proposal(
-                                run, call, context, state.turn_id, step_id
-                            )
-                            error = RuntimeErrorInfo(
-                                code="tool.not_found",
-                                category=ErrorCategory.VALIDATION,
-                                message=f"Tool {model_call.name!r} is unavailable. Use an exact available Tool name: {', '.join(available_tools)}. No execution occurred.",
-                                safe_to_resume=True,
-                                metadata={
-                                    "side_effect_state": "not_applied",
-                                    "tool_execution_started": False,
-                                },
-                            )
-                            result = ToolExecutionResult(
-                                tool_call_id=call.tool_call_id,
-                                operation_id=call.operation_id,
-                                error=error,
-                                content=(TextBlock(text=error.message),),
-                            )
-                            run, result = await self._commit_tool_result(
-                                run,
-                                call,
-                                result,
-                                context,
-                                state.turn_id,
+                        (
+                            EventDraft(
+                                type="step.retry_scheduled",
+                                turn_id=state.turn_id,
                                 step_id=step_id,
-                            )
-                            state = state.model_copy(
-                                update={
-                                    "messages": (
-                                        *state.messages,
-                                        self._tool_result_message(result),
-                                    )
-                                }
-                            )
-                            completed_tool_results.append(result)
-                            continue
-                        return await self._fail(run, state, step_id, exc.info, context)
-                    if definition.side_effect_level.value in {"read", "none"}:
-                        read_tools.add(definition.name)
-                    tool_call = ToolCall(
-                        tool_call_id=model_call.tool_call_id,
-                        tool_name=model_call.name,
-                        arguments=apply_system_context_overrides(
-                            definition, model_call.arguments, command.config.metadata
-                        ),
-                        operation_id=new_id("operation"),
-                        idempotency_key=f"{run.run_id}:{model_call.tool_call_id}",
-                        owner_run_id=run.run_id,
-                        owner_agent_id=command.agent_id,
-                        owner_session_id=run.session_id,
-                    )
-                    run = await self._record_tool_proposal(
-                        run, tool_call, context, state.turn_id, step_id
-                    )
-                    policy = await self.tool_policy.decide(
-                        ToolPolicyContext(
-                            run_id=run.run_id,
-                            actor=context.actor,
-                            definition=definition,
-                            call=tool_call,
-                            invocation_mode=command.invocation_mode,
-                        )
-                    )
-                    policy = await self._consult_approval_memory(run, policy)
-                    run = await self._record_policy(
-                        run, tool_call, policy, context, state.turn_id, step_id
-                    )
-                    if policy.action == ToolPolicyAction.DENY:
-                        denied = localize_error(
-                            RuntimeErrorInfo(
-                                code="tool.policy_denied",
-                                category=ErrorCategory.POLICY_DENIED,
-                                message=policy.reason,
-                                safe_to_resume=True,
+                                data=StepEventData(
+                                    state="retry_scheduled",
+                                    attempt=context_overflow_retries,
+                                    retry_at=self.clock(),
+                                    error=retry_error,
+                                ),
                             ),
-                            context.language,
+                        ),
+                    )
+                    return _DriveIteration(run, state, empty_response_retries, context_overflow_retries)
+                if (
+                    exc.info.code == "model.empty_semantic_response"
+                    and empty_response_retries
+                    < self._MAX_TRANSPARENT_EMPTY_RESPONSE_RETRIES
+                ):
+                    empty_response_retries += 1
+                    retry_error = exc.info.model_copy(
+                        update={
+                            "retryable": True,
+                            "metadata": {
+                                **exc.info.metadata,
+                                "transparent_retry_attempt": empty_response_retries,
+                                "transparent_retry_limit": (
+                                    self._MAX_TRANSPARENT_EMPTY_RESPONSE_RETRIES
+                                ),
+                            },
+                        }
+                    )
+                    run = await self._commit_running(
+                        run,
+                        context,
+                        (
+                            EventDraft(
+                                type="step.retry_scheduled",
+                                turn_id=state.turn_id,
+                                step_id=step_id,
+                                data=StepEventData(
+                                    state="retry_scheduled",
+                                    attempt=empty_response_retries,
+                                    retry_at=self.clock(),
+                                    error=retry_error,
+                                ),
+                            ),
+                        ),
+                    )
+                    return _DriveIteration(run, state, empty_response_retries, context_overflow_retries)
+                error = exc.info
+                if error.code == "model.empty_semantic_response":
+                    error = error.model_copy(
+                        update={
+                            "retryable": True,
+                            "metadata": {
+                                **error.metadata,
+                                "transparent_retries_exhausted": (
+                                    empty_response_retries
+                                ),
+                            },
+                        }
+                    )
+                return _DriveIteration(await self._fail(run, state, step_id, error, context), state, empty_response_retries, context_overflow_retries, stop=True)
+            except Exception as exc:
+                return _DriveIteration(await self._fail(run, state, step_id, RuntimeErrorInfo(code='model.provider_error', category=ErrorCategory.PROVIDER_PERMANENT, message=str(exc), safe_to_resume=True), context), state, empty_response_retries, context_overflow_retries, stop=True)
+            if partial_suspension is not None:
+                return _DriveIteration(partial_suspension, state, empty_response_retries, context_overflow_retries, stop=True)
+            assert response is not None
+            observe_response = getattr(
+                self.step_request_builder, "observe_response", None
+            )
+            if observe_response is not None:
+                observe_response(request, response)
+            empty_response_retries = 0
+            context_overflow_retries = 0
+            state = self._state_after_model_response(
+                state, response, step_id, system_requirements, available_tools
+            )
+
+        questionnaire_completed = state.pending_questionnaire_completed
+        completed_tool_results: list[ToolExecutionResult] = []
+        read_tools: set[str] = set()
+        if response.tool_calls:
+            budget = await evaluate_run_budget(self.runtime.session_store, run, self.clock(), usage_cache=self._budget_usage_cache)
+            if budget.error is not None:
+                return _DriveIteration(await self._fail(run, state, step_id, budget.error, context, allow_recovery=False), state, empty_response_retries, context_overflow_retries, stop=True)
+            # Phase 4: proposal and policy decision are committed before any
+            # external ToolExecutor receives the call.
+            settled = {
+                message.tool_call_id
+                for message in self._pending_response_results(state)
+            }
+            prepared_calls: list[ToolCall] = []
+            approval_calls: list[tuple[ToolCall, ToolPolicyDecision]] = []
+            crossed = await self._crossed_tool_calls(run, step_id)
+            for model_call in response.tool_calls:
+                if model_call.tool_call_id in settled:
+                    continue
+                if model_call.tool_call_id in crossed:
+                    prepared_calls.append(crossed[model_call.tool_call_id])
+                    continue
+                try:
+                    definition = await self.tool_catalog.get_tool(
+                        model_call.name, run_id=run.run_id
+                    )
+                except SageV2Error as exc:
+                    if exc.info.code == "tool.not_found":
+                        # A rejected name has never crossed the execution barrier.
+                        # Settle it as Tool feedback, then execute valid siblings.
+                        call = ToolCall(
+                            tool_call_id=model_call.tool_call_id,
+                            tool_name=model_call.name,
+                            arguments=model_call.arguments,
+                            operation_id=new_id("operation"),
+                            idempotency_key=f"{run.run_id}:{model_call.tool_call_id}",
+                            owner_run_id=run.run_id,
+                            owner_agent_id=command.agent_id,
+                            owner_session_id=run.session_id,
+                        )
+                        run = await self._record_tool_proposal(
+                            run, call, context, state.turn_id, step_id
+                        )
+                        error = RuntimeErrorInfo(
+                            code="tool.not_found",
+                            category=ErrorCategory.VALIDATION,
+                            message=f"Tool {model_call.name!r} is unavailable. Use an exact available Tool name: {', '.join(available_tools)}. No execution occurred.",
+                            safe_to_resume=True,
+                            metadata={
+                                "side_effect_state": "not_applied",
+                                "tool_execution_started": False,
+                            },
                         )
                         result = ToolExecutionResult(
-                            tool_call_id=tool_call.tool_call_id,
-                            operation_id=tool_call.operation_id,
-                            content=(TextBlock(text=denied.message),),
-                            error=denied,
+                            tool_call_id=call.tool_call_id,
+                            operation_id=call.operation_id,
+                            error=error,
+                            content=(TextBlock(text=error.message),),
                         )
                         run, result = await self._commit_tool_result(
                             run,
-                            tool_call,
+                            call,
                             result,
                             context,
                             state.turn_id,
                             step_id=step_id,
-                            declined=True,
                         )
                         state = state.model_copy(
                             update={
@@ -1920,296 +1863,346 @@ class AgentLoopEngine:
                         )
                         completed_tool_results.append(result)
                         continue
-                    if policy.action == ToolPolicyAction.REQUIRE_INTERACTION:
-                        approval_calls.append((tool_call, policy))
-                    else:
-                        prepared_calls.append(tool_call)
-
-                run, state, batch_results = await self._execute_tool_batch(
-                    run, prepared_calls, crossed, context, state, step_id
+                    return _DriveIteration(await self._fail(run, state, step_id, exc.info, context), state, empty_response_retries, context_overflow_retries, stop=True)
+                if definition.side_effect_level.value in {"read", "none"}:
+                    read_tools.add(definition.name)
+                tool_call = ToolCall(
+                    tool_call_id=model_call.tool_call_id,
+                    tool_name=model_call.name,
+                    arguments=apply_system_context_overrides(
+                        definition, model_call.arguments, command.config.metadata
+                    ),
+                    operation_id=new_id("operation"),
+                    idempotency_key=f"{run.run_id}:{model_call.tool_call_id}",
+                    owner_run_id=run.run_id,
+                    owner_agent_id=command.agent_id,
+                    owner_session_id=run.session_id,
                 )
-                completed_tool_results.extend(batch_results.values())
-                questionnaire_completed = state.pending_questionnaire_completed
-                if run.state in TERMINAL_RUN_STATES:
-                    return run
-                for tool_call in prepared_calls:
-                    if tool_call.tool_call_id in batch_results:
-                        continue
-                    run, result = await self._dispatch_tool(
-                        run, tool_call, context, state.turn_id, step_id, state
+                run = await self._record_tool_proposal(
+                    run, tool_call, context, state.turn_id, step_id
+                )
+                policy = await self.tool_policy.decide(
+                    ToolPolicyContext(
+                        run_id=run.run_id,
+                        actor=context.actor,
+                        definition=definition,
+                        call=tool_call,
+                        invocation_mode=command.invocation_mode,
                     )
-                    if result is None:
-                        return run
-                    questionnaire_completed = (
-                        questionnaire_completed
-                        or self._validated_questionnaire_result(tool_call, result)
+                )
+                policy = await self._consult_approval_memory(run, policy)
+                run = await self._record_policy(
+                    run, tool_call, policy, context, state.turn_id, step_id
+                )
+                if policy.action == ToolPolicyAction.DENY:
+                    denied = localize_error(
+                        RuntimeErrorInfo(
+                            code="tool.policy_denied",
+                            category=ErrorCategory.POLICY_DENIED,
+                            message=policy.reason,
+                            safe_to_resume=True,
+                        ),
+                        context.language,
                     )
-                    # Persist supplemental context before a later sibling can
-                    # suspend, so resume cannot lose an already-settled result's context.
-                    run, followups = await self._persist_followup_user_messages(
-                        run, (result,), context, state.turn_id, step_id
+                    result = ToolExecutionResult(
+                        tool_call_id=tool_call.tool_call_id,
+                        operation_id=tool_call.operation_id,
+                        content=(TextBlock(text=denied.message),),
+                        error=denied,
                     )
-                    state = state.model_copy(
-                        update={
-                            "pending_questionnaire_completed": questionnaire_completed,
-                            "messages": order_tool_context(
-                                (
-                                    *state.messages,
-                                    self._tool_result_message(result),
-                                    *followups,
-                                )
-                            ),
-                            "expanded_tool_names": (
-                                self.tool_selection_policy.expanded_tools(run.run_id)
-                            ),
-                        }
-                    )
-                    completed_tool_results.append(
-                        result.model_copy(
-                            update={
-                                "metadata": {
-                                    key: value
-                                    for key, value in result.metadata.items()
-                                    if key != "followup_user_message"
-                                },
-                            }
-                        )
-                    )
-                if run.state == RunState.SUSPEND_REQUESTED:
-                    run, followups = await self._persist_followup_user_messages(
-                        run, completed_tool_results, context, state.turn_id, step_id
+                    run, result = await self._commit_tool_result(
+                        run,
+                        tool_call,
+                        result,
+                        context,
+                        state.turn_id,
+                        step_id=step_id,
+                        declined=True,
                     )
                     state = state.model_copy(
                         update={
-                            "messages": (*state.messages, *followups),
+                            "messages": (
+                                *state.messages,
+                                self._tool_result_message(result),
+                            )
                         }
                     )
-                    return await self._suspend_at_safe_point(run, state, context)
-                if approval_calls:
-                    tool_call, policy = approval_calls[0]
-                    run, followups = await self._persist_followup_user_messages(
-                        run, completed_tool_results, context, state.turn_id, step_id
-                    )
-                    state = state.model_copy(
-                        update={
-                            "messages": (*state.messages, *followups),
-                            "pending_tool_call": tool_call,
-                            "pending_tool_policy": policy,
-                            "pending_tool_phase": "approval",
-                            "pending_tool_step_id": step_id,
-                        }
-                    )
-                    return await self._suspend_for_tool_approval(
-                        run, state, policy, context, step_id
-                    )
+                    completed_tool_results.append(result)
+                    continue
+                if policy.action == ToolPolicyAction.REQUIRE_INTERACTION:
+                    approval_calls.append((tool_call, policy))
+                else:
+                    prepared_calls.append(tool_call)
+
+            run, state, batch_results = await self._execute_tool_batch(
+                run, prepared_calls, crossed, context, state, step_id
+            )
+            completed_tool_results.extend(batch_results.values())
+            questionnaire_completed = state.pending_questionnaire_completed
+            if run.state in TERMINAL_RUN_STATES:
+                return _DriveIteration(run, state, empty_response_retries, context_overflow_retries, stop=True)
+            for tool_call in prepared_calls:
+                if tool_call.tool_call_id in batch_results:
+                    continue
+                run, result = await self._dispatch_tool(
+                    run, tool_call, context, state.turn_id, step_id, state
+                )
+                if result is None:
+                    return _DriveIteration(run, state, empty_response_retries, context_overflow_retries, stop=True)
+                questionnaire_completed = (
+                    questionnaire_completed
+                    or self._validated_questionnaire_result(tool_call, result)
+                )
+                # Persist supplemental context before a later sibling can
+                # suspend, so resume cannot lose an already-settled result's context.
                 run, followups = await self._persist_followup_user_messages(
-                    run,
-                    completed_tool_results,
-                    context,
-                    state.turn_id,
-                    step_id,
+                    run, (result,), context, state.turn_id, step_id
                 )
-                if followups:
-                    state = state.model_copy(
-                        update={"messages": (*state.messages, *followups)}
-                    )
-
-            state = state.model_copy(
-                update={"messages": order_tool_context(state.messages)}
-            )
-            state = inspection_progress(
-                state, response, completed_tool_results, read_tools
-            )
-            repeated = repeated_cycles(state.response_fingerprints)
-            budget = await evaluate_run_budget(self.runtime.session_store, run, self.clock(), usage_cache=self._budget_usage_cache)
-            if budget.error is not None:
-                return await self._fail(run, state, step_id, budget.error, context, allow_recovery=False)
-            signals = await self._continuation_signals(run.run_id, state)
-            # Phase 5: completion is policy, not an implicit consequence of EOF
-            # or a provider finish_reason.
-            continuation_context = ContinuationContext(
-                run_id=run.run_id,
-                step_number=state.step_number,
-                max_steps=max_steps,
-                response=response,
-                ledger=state.messages,
-                language=run_prompt_language(command.config.metadata),
-                agent_system_requirements=system_requirements,
-                available_tools=available_tools,
-                pending_tool_calls=0,
-                repeated_fingerprint_count=repeated,
-                no_progress_steps=state.no_progress_steps,
-                explicit_status=signals.explicit_status,
-                explicit_status_note=signals.explicit_status_note,
-                requested_interaction=signals.interaction,
-                flow_boundary=signals.flow_boundary,
-                elapsed_seconds=max(
-                    0.0, (self.clock() - run.created_at).total_seconds()
-                ),
-                deadline_seconds=command.config.deadline_seconds,
-                total_tokens=state.total_input_tokens + state.total_output_tokens,
-                max_total_tokens=(
-                    command.config.max_total_tokens
-                    or command.config.metadata.get("max_total_tokens")
-                ),
-            )
-            if questionnaire_completed:
-                # Match the established questionnaire_async contract: a
-                # successfully validated result is a terminal boundary for this
-                # Run, while the answer arrives as the next user turn. The
-                # durable Tool result remains the UI's questionnaire source.
-                decision = ContinuationDecision(
-                    action=ContinuationAction.COMPLETE_RUN,
-                    reason_code="tool.questionnaire_ready",
-                    reason="validated questionnaire is awaiting the next user turn",
-                    metadata={
-                        "source": "questionnaire_async",
-                        "awaiting_user_input": True,
-                    },
-                )
-            else:
-                decision = await self.continuation_policy.decide(continuation_context)
-            if decision.usage.input_tokens or decision.usage.output_tokens:
                 state = state.model_copy(
                     update={
-                        "total_input_tokens": state.total_input_tokens
-                        + decision.usage.input_tokens,
-                        "total_output_tokens": state.total_output_tokens
-                        + decision.usage.output_tokens,
+                        "pending_questionnaire_completed": questionnaire_completed,
+                        "messages": order_tool_context(
+                            (
+                                *state.messages,
+                                self._tool_result_message(result),
+                                *followups,
+                            )
+                        ),
+                        "expanded_tool_names": (
+                            self.tool_selection_policy.expanded_tools(run.run_id)
+                        ),
                     }
                 )
-            advance_stage = (
-                decision.action == ContinuationAction.REQUEST_INTERACTION
-                and decision.reason_code in {"budget.max_steps", "status.missing_at_limit"}
-                and command.config.automatic_stage_continuation
-                and command.config.flow_boundary is None
-                and (command.config.max_stages is None or state.stage_number < command.config.max_stages)
-                and (command.config.deadline_seconds is None or continuation_context.elapsed_seconds < command.config.deadline_seconds)
-                and (continuation_context.max_total_tokens is None or state.total_input_tokens + state.total_output_tokens < continuation_context.max_total_tokens)
-            )
-            if advance_stage:
-                decision = decision.model_copy(update={
-                    "action": ContinuationAction.CONTINUE_STEP,
-                    "reason_code": "stage.continue",
-                    "reason": "continue the task in the next checkpointed execution stage",
-                    "interaction": None,
-                })
-            run = await self._record_continuation(
-                run, decision, context, state.turn_id, step_id
-            )
-            state = state.model_copy(
-                update={
-                    "pending_response_step_id": None,
-                    "pending_response_system_requirements": "",
-                    "pending_response_tool_names": (),
-                    "pending_questionnaire_completed": False,
-                }
-            )
-            if decision.reason_code in {"flow.node_complete", "flow.node_continue"}:
-                state = state.model_copy(update={"pending_flow_boundary": None})
-            if decision.action == ContinuationAction.COMPLETE_RUN:
-                return await self._complete(run, state, step_id, context)
-            if decision.action == ContinuationAction.FAIL:
-                return await self._fail(
-                    run,
-                    state,
-                    step_id,
-                    decision.error
-                    or RuntimeErrorInfo(
-                        code=decision.reason_code,
-                        category=ErrorCategory.VALIDATION,
-                        message=decision.reason,
-                        safe_to_resume=True,
-                    ),
-                    context,
+                completed_tool_results.append(
+                    result.model_copy(
+                        update={
+                            "metadata": {
+                                key: value
+                                for key, value in result.metadata.items()
+                                if key != "followup_user_message"
+                            },
+                        }
+                    )
                 )
-            if advance_stage:
-                completed_step = state.step_number
-                state = state.model_copy(update={
-                    "stage_number": state.stage_number + 1, "step_number": 1,
-                    "automatic_resume_at": self.clock(),
-                    "automatic_resume_reason": "stage.continue",
-                    "pending_continuation_reason": (
-                        "Continue the original task from the saved results. "
-                        "This is a new execution stage, not a new user request. "
-                        "Preserve completed work and verify remaining requirements."
-                    ),
-                })
-                run = await self._commit_running(
-                    run, context, (EventDraft(
-                        type="step.completed", turn_id=state.turn_id, step_id=step_id,
-                        data=StepEventData(state="completed", attempt=completed_step),
-                    ), EventDraft(
-                        type="step.retry_scheduled", turn_id=state.turn_id, step_id=step_id,
-                        data=StepEventData(state="stage_scheduled", attempt=state.stage_number, retry_at=state.automatic_resume_at),
-                    ),), recovery_state=state,
+            if run.state == RunState.SUSPEND_REQUESTED:
+                run, followups = await self._persist_followup_user_messages(
+                    run, completed_tool_results, context, state.turn_id, step_id
                 )
-                if can_defer_run(run.run_id):
-                    return run
-                continue
-            if decision.action == ContinuationAction.REQUEST_INTERACTION:
-                return await self._suspend_for_continuation_interaction(
-                    run, state, decision, context, step_id
+                state = state.model_copy(
+                    update={
+                        "messages": (*state.messages, *followups),
+                    }
                 )
-            if decision.action in {
-                ContinuationAction.COMPLETE_TURN,
-                ContinuationAction.HANDOFF,
-            }:
-                return await self._complete(run, state, step_id, context)
-            continuation_reason = None
-            if (
-                decision.action == ContinuationAction.CONTINUE_STEP
-                and decision.reason
-                and decision.reason_code
-                in {
-                    "response.output_limit",
-                    "plan.explanation_required",
-                    "plan.required",
-                    "goal.explanation_required",
-                    "goal.incomplete",
-                    "judge.continue",
-                    "judge.explanation_required",
-                    "judge.v1_must_continue",
-                    "openui.validation_retry",
-                    "output.self_check_retry",
-                }
-            ):
-                continuation_reason = self._normalized_continuation_reason(
-                    decision.reason,
-                    limit=6000
-                    if decision.reason_code
-                    in {"openui.validation_retry", "output.self_check_retry"}
-                    else 240,
+                return _DriveIteration(await self._suspend_at_safe_point(run, state, context), state, empty_response_retries, context_overflow_retries, stop=True)
+            if approval_calls:
+                tool_call, policy = approval_calls[0]
+                run, followups = await self._persist_followup_user_messages(
+                    run, completed_tool_results, context, state.turn_id, step_id
                 )
-            state = state.model_copy(
-                update={
-                    "step_number": state.step_number + 1,
-                    # Kept in the checkpoint schema only for compatibility with
-                    # runs created before Tool choice became explicitly auto.
-                    "force_tool_choice_required_next": False,
-                    "pending_continuation_reason": continuation_reason,
-                }
-            )
-            run = await self._commit_running(
+                state = state.model_copy(
+                    update={
+                        "messages": (*state.messages, *followups),
+                        "pending_tool_call": tool_call,
+                        "pending_tool_policy": policy,
+                        "pending_tool_phase": "approval",
+                        "pending_tool_step_id": step_id,
+                    }
+                )
+                return _DriveIteration(await self._suspend_for_tool_approval(run, state, policy, context, step_id), state, empty_response_retries, context_overflow_retries, stop=True)
+            run, followups = await self._persist_followup_user_messages(
                 run,
+                completed_tool_results,
                 context,
-                (
-                    EventDraft(
-                        type="step.completed",
-                        turn_id=state.turn_id,
-                        step_id=step_id,
-                        data=StepEventData(
-                            state="completed", attempt=state.step_number - 1
-                        ),
+                state.turn_id,
+                step_id,
+            )
+            if followups:
+                state = state.model_copy(
+                    update={"messages": (*state.messages, *followups)}
+                )
+
+        state = state.model_copy(
+            update={"messages": order_tool_context(state.messages)}
+        )
+        state = inspection_progress(
+            state, response, completed_tool_results, read_tools
+        )
+        repeated = repeated_cycles(state.response_fingerprints)
+        budget = await evaluate_run_budget(self.runtime.session_store, run, self.clock(), usage_cache=self._budget_usage_cache)
+        if budget.error is not None:
+            return _DriveIteration(await self._fail(run, state, step_id, budget.error, context, allow_recovery=False), state, empty_response_retries, context_overflow_retries, stop=True)
+        signals = await self._continuation_signals(run.run_id, state)
+        # Phase 5: completion is policy, not an implicit consequence of EOF
+        # or a provider finish_reason.
+        continuation_context = ContinuationContext(
+            run_id=run.run_id,
+            step_number=state.step_number,
+            max_steps=max_steps,
+            response=response,
+            ledger=state.messages,
+            language=run_prompt_language(command.config.metadata),
+            agent_system_requirements=system_requirements,
+            available_tools=available_tools,
+            pending_tool_calls=0,
+            repeated_fingerprint_count=repeated,
+            no_progress_steps=state.no_progress_steps,
+            explicit_status=signals.explicit_status,
+            explicit_status_note=signals.explicit_status_note,
+            requested_interaction=signals.interaction,
+            flow_boundary=signals.flow_boundary,
+            elapsed_seconds=max(
+                0.0, (self.clock() - run.created_at).total_seconds()
+            ),
+            deadline_seconds=command.config.deadline_seconds,
+            total_tokens=state.total_input_tokens + state.total_output_tokens,
+            max_total_tokens=(
+                command.config.max_total_tokens
+                or command.config.metadata.get("max_total_tokens")
+            ),
+        )
+        if questionnaire_completed:
+            # Match the established questionnaire_async contract: a
+            # successfully validated result is a terminal boundary for this
+            # Run, while the answer arrives as the next user turn. The
+            # durable Tool result remains the UI's questionnaire source.
+            decision = ContinuationDecision(
+                action=ContinuationAction.COMPLETE_RUN,
+                reason_code="tool.questionnaire_ready",
+                reason="validated questionnaire is awaiting the next user turn",
+                metadata={
+                    "source": "questionnaire_async",
+                    "awaiting_user_input": True,
+                },
+            )
+        else:
+            decision = await self.continuation_policy.decide(continuation_context)
+        if decision.usage.input_tokens or decision.usage.output_tokens:
+            state = state.model_copy(
+                update={
+                    "total_input_tokens": state.total_input_tokens
+                    + decision.usage.input_tokens,
+                    "total_output_tokens": state.total_output_tokens
+                    + decision.usage.output_tokens,
+                }
+            )
+        advance_stage = (
+            decision.action == ContinuationAction.REQUEST_INTERACTION
+            and decision.reason_code in {"budget.max_steps", "status.missing_at_limit"}
+            and command.config.automatic_stage_continuation
+            and command.config.flow_boundary is None
+            and (command.config.max_stages is None or state.stage_number < command.config.max_stages)
+            and (command.config.deadline_seconds is None or continuation_context.elapsed_seconds < command.config.deadline_seconds)
+            and (continuation_context.max_total_tokens is None or state.total_input_tokens + state.total_output_tokens < continuation_context.max_total_tokens)
+        )
+        if advance_stage:
+            decision = decision.model_copy(update={
+                "action": ContinuationAction.CONTINUE_STEP,
+                "reason_code": "stage.continue",
+                "reason": "continue the task in the next checkpointed execution stage",
+                "interaction": None,
+            })
+        run = await self._record_continuation(
+            run, decision, context, state.turn_id, step_id
+        )
+        state = state.model_copy(
+            update={
+                "pending_response_step_id": None,
+                "pending_response_system_requirements": "",
+                "pending_response_tool_names": (),
+                "pending_questionnaire_completed": False,
+            }
+        )
+        if decision.reason_code in {"flow.node_complete", "flow.node_continue"}:
+            state = state.model_copy(update={"pending_flow_boundary": None})
+        if decision.action == ContinuationAction.COMPLETE_RUN:
+            return _DriveIteration(await self._complete(run, state, step_id, context), state, empty_response_retries, context_overflow_retries, stop=True)
+        if decision.action == ContinuationAction.FAIL:
+            return _DriveIteration(await self._fail(run, state, step_id, decision.error or RuntimeErrorInfo(code=decision.reason_code, category=ErrorCategory.VALIDATION, message=decision.reason, safe_to_resume=True), context), state, empty_response_retries, context_overflow_retries, stop=True)
+        if advance_stage:
+            completed_step = state.step_number
+            state = state.model_copy(update={
+                "stage_number": state.stage_number + 1, "step_number": 1,
+                "automatic_resume_at": self.clock(),
+                "automatic_resume_reason": "stage.continue",
+                "pending_continuation_reason": (
+                    "Continue the original task from the saved results. "
+                    "This is a new execution stage, not a new user request. "
+                    "Preserve completed work and verify remaining requirements."
+                ),
+            })
+            run = await self._commit_running(
+                run, context, (EventDraft(
+                    type="step.completed", turn_id=state.turn_id, step_id=step_id,
+                    data=StepEventData(state="completed", attempt=completed_step),
+                ), EventDraft(
+                    type="step.retry_scheduled", turn_id=state.turn_id, step_id=step_id,
+                    data=StepEventData(state="stage_scheduled", attempt=state.stage_number, retry_at=state.automatic_resume_at),
+                ),), recovery_state=state,
+            )
+            if can_defer_run(run.run_id):
+                return _DriveIteration(run, state, empty_response_retries, context_overflow_retries, stop=True)
+            return _DriveIteration(run, state, empty_response_retries, context_overflow_retries)
+        if decision.action == ContinuationAction.REQUEST_INTERACTION:
+            return _DriveIteration(await self._suspend_for_continuation_interaction(run, state, decision, context, step_id), state, empty_response_retries, context_overflow_retries, stop=True)
+        if decision.action in {
+            ContinuationAction.COMPLETE_TURN,
+            ContinuationAction.HANDOFF,
+        }:
+            return _DriveIteration(await self._complete(run, state, step_id, context), state, empty_response_retries, context_overflow_retries, stop=True)
+        continuation_reason = None
+        if (
+            decision.action == ContinuationAction.CONTINUE_STEP
+            and decision.reason
+            and decision.reason_code
+            in {
+                "response.output_limit",
+                "plan.explanation_required",
+                "plan.required",
+                "goal.explanation_required",
+                "goal.incomplete",
+                "judge.continue",
+                "judge.explanation_required",
+                "judge.v1_must_continue",
+                "openui.validation_retry",
+                "output.self_check_retry",
+            }
+        ):
+            continuation_reason = self._normalized_continuation_reason(
+                decision.reason,
+                limit=6000
+                if decision.reason_code
+                in {"openui.validation_retry", "output.self_check_retry"}
+                else 240,
+            )
+        state = state.model_copy(
+            update={
+                "step_number": state.step_number + 1,
+                # Kept in the checkpoint schema only for compatibility with
+                # runs created before Tool choice became explicitly auto.
+                "force_tool_choice_required_next": False,
+                "pending_continuation_reason": continuation_reason,
+            }
+        )
+        run = await self._commit_running(
+            run,
+            context,
+            (
+                EventDraft(
+                    type="step.completed",
+                    turn_id=state.turn_id,
+                    step_id=step_id,
+                    data=StepEventData(
+                        state="completed", attempt=state.step_number - 1
                     ),
                 ),
-                recovery_state=state,
-            )
-        return run
+            ),
+            recovery_state=state,
+        )
+        return _DriveIteration(run, state, empty_response_retries, context_overflow_retries)
 
     def _state_after_model_response(
         self, state, response, step_id, requirements, tools
-    ):
+    ) -> AgentLoopCheckpointState:
         messages = state.messages
         if response.text or response.tool_calls or response.provider_state:
             messages = (
@@ -2363,7 +2356,7 @@ class AgentLoopEngine:
 
     async def _recover_model_arguments(
         self, run, state, step_id, error, command, context
-    ):
+    ) -> tuple[RunSnapshot, AgentLoopCheckpointState]:
         """Checkpoint a bounded inference repair; never retry a Tool execution."""
         run = await self.runtime.get_run(run.run_id)
         if run.state in TERMINAL_RUN_STATES:
@@ -2493,11 +2486,11 @@ class AgentLoopEngine:
         )
         return committed.run, state
 
-    async def _stream_model(self, run, request, context, state, step_id):
+    async def _stream_model(self, run, request, context, state, step_id) -> tuple[RunSnapshot, ModelResponse | None, RunSnapshot | None]:
         return await self.stream_model_step(run, request, context, state, step_id)
 
     @staticmethod
-    def _provider_retry_allowed(error, command, state):
+    def _provider_retry_allowed(error, command, state) -> bool:
         limit = command.config.transient_retry_limit
         return (
             error.retryable
@@ -2508,7 +2501,7 @@ class AgentLoopEngine:
             and (limit is None or state.provider_retry_attempts < limit)
         )
 
-    async def _schedule_provider_retry(self, run, state, step_id, error, command, context):
+    async def _schedule_provider_retry(self, run, state, step_id, error, command, context) -> tuple[RunSnapshot, AgentLoopCheckpointState]:
         # Only uncommitted inference/preparation is retried. Never redispatch
         # completed tools or replay a tool whose remote outcome is unknown.
         attempt = state.provider_retry_attempts + 1
@@ -2548,14 +2541,14 @@ class AgentLoopEngine:
         )
         return run, state
 
-    async def _wait_for_model_retry(self, run_id, delay):
+    async def _wait_for_model_retry(self, run_id, delay) -> None:
         until = asyncio.get_running_loop().time() + delay
         while (remaining := until - asyncio.get_running_loop().time()) > 0:
             await asyncio.sleep(min(0.1, remaining))
             if (await self.runtime.get_run(run_id)).state != RunState.RUNNING:
                 return
 
-    async def _control_aware_model_events(self, stream, run, command):
+    async def _control_aware_model_events(self, stream, run, command) -> AsyncGenerator[tuple[ModelStreamEvent | None, RunSnapshot | None], None]:
         """Poll durable control/deadline state without cancelling socket reads."""
 
         from sagents.v2.runtime.execution.budgets import evaluate_run_budget
@@ -2599,7 +2592,7 @@ class AgentLoopEngine:
                 pending.cancel()
                 await asyncio.gather(pending, return_exceptions=True)
 
-    async def stream_model_step(self, run, request, context, state, step_id):
+    async def stream_model_step(self, run, request, context, state, step_id) -> tuple[RunSnapshot, ModelResponse | None, RunSnapshot | None]:
         """Normalize one provider stream into canonical Item lifecycle events.
 
         A cooperative pause closes the provider stream, commits any visible
@@ -2762,7 +2755,7 @@ class AgentLoopEngine:
                 run = await batcher.flush()
                 current = await self.runtime.get_run(run.run_id)
                 if current.state == RunState.RUNNING:
-                    drafts = tuple(
+                    cancelled_drafts = tuple(
                         self._partial_item_draft(
                             run.run_id,
                             state.turn_id,
@@ -2778,8 +2771,8 @@ class AgentLoopEngine:
                         )
                         if started
                     )
-                    if drafts:
-                        run = await self._commit_running(current, context, drafts)
+                    if cancelled_drafts:
+                        run = await self._commit_running(current, context, cancelled_drafts)
                         await batcher.observe_run(run)
             if text_started or reasoning_started:
                 raise SageV2Error(
@@ -2890,7 +2883,7 @@ class AgentLoopEngine:
         )
         return run, response, None
 
-    async def _record_tool_proposal(self, run, call, context, turn_id, step_id):
+    async def _record_tool_proposal(self, run, call, context, turn_id, step_id) -> RunSnapshot:
         return await self._commit_running(
             run,
             context,
@@ -2911,7 +2904,7 @@ class AgentLoopEngine:
             ),
         )
 
-    async def _record_policy(self, run, call, policy, context, turn_id, step_id):
+    async def _record_policy(self, run, call, policy, context, turn_id, step_id) -> RunSnapshot:
         payload = policy.interaction_payload
         return await self._commit_running(
             run,
@@ -2933,7 +2926,7 @@ class AgentLoopEngine:
             ),
         )
 
-    async def _consult_approval_memory(self, run, policy):
+    async def _consult_approval_memory(self, run, policy) -> ToolPolicyDecision:
         """用会话内已记住的审批收敛决定；未命中则补上 approve_and_remember 选项。
 
         只收紧不放宽：只有策略已经判定 REQUIRE_INTERACTION 且允许记住的调用
@@ -2984,7 +2977,7 @@ class AgentLoopEngine:
             }
         )
 
-    async def _remember_tool_approval(self, run, state, resolution, context):
+    async def _remember_tool_approval(self, run, state, resolution, context) -> RunSnapshot:
         """approve_and_remember：把匹配器写入审批记忆并留下审计事件。"""
 
         policy = state.pending_tool_policy
@@ -3002,7 +2995,7 @@ class AgentLoopEngine:
         scope = requested if requested in supported else "session"
         approval = RememberedApproval(
             matcher=policy.approval_matcher,
-            scope=scope,
+            scope=cast(ApprovalScope, scope),
             remembered_at=self.clock(),
             remembered_by=context.actor.principal_id,
         )
@@ -3031,12 +3024,12 @@ class AgentLoopEngine:
 
     async def _dispatch_tool(
         self, run, call, context, turn_id, step_id=None, state=None
-    ):
+    ) -> tuple[RunSnapshot, ToolExecutionResult | None]:
         return await self.dispatch_tool_call(
             run, call, context, turn_id, step_id=step_id, state=state
         )
 
-    async def _execute_tool_with_control(self, run, call, context):
+    async def _execute_tool_with_control(self, run, call, context) -> tuple[RunSnapshot, ToolExecutionResult | None]:
         """Interrupt only when both Tool metadata and Executor permit it."""
 
         from sagents.v2.runtime.execution.budgets import evaluate_run_budget
@@ -3074,7 +3067,7 @@ class AgentLoopEngine:
                     and not deadline_expired
                 ):
                     continue
-                cancellation = await cancel(call.operation_id, context)
+                cancellation = await cast(Callable[..., Awaitable[ToolCancellationResult]], cancel)(call.operation_id, context)
                 if cancellation.state == ToolCancellationState.CANCELLED:
                     execution.cancel()
                     await asyncio.gather(execution, return_exceptions=True)
@@ -3122,10 +3115,10 @@ class AgentLoopEngine:
                 await asyncio.gather(execution, return_exceptions=True)
 
     @staticmethod
-    def _log_tool_exception(exc, run, call, turn_id, step_id):
+    def _log_tool_exception(exc, run, call, turn_id, step_id) -> None:
         """Optional observer hook; execution never depends on logging."""
 
-    def _apply_tool_expansion(self, call, result):
+    def _apply_tool_expansion(self, call, result) -> None:
         if result.error is None and call.tool_name == "tool_expand_tools":
             requested_names = call.arguments.get("tool_names")
             if requested_names is None:
@@ -3138,7 +3131,7 @@ class AgentLoopEngine:
                     ),
                 )
 
-    async def _crossed_tool_calls(self, run, step_id):
+    async def _crossed_tool_calls(self, run, step_id) -> dict[str, ToolCall]:
         """Original calls that crossed the durable barrier, never safe to replay."""
         events = await self.runtime.session_store.read_events(run.run_id)
         command = await self.runtime.session_store.get_start_command(run.run_id)
@@ -3151,9 +3144,10 @@ class AgentLoopEngine:
         }
         calls = {}
         for event in events:
-            if event.type != "tool.call.started" or event.step_id != step_id:
+            if event.type != "tool.call.started" or event.step_id != step_id or not isinstance(event.data, ToolEventData):
                 continue
             data = event.data
+            assert data.operation_id is not None and data.idempotency_key is not None
             proposal = proposals.get(data.operation_id)
             calls[data.tool_call_id] = ToolCall(
                 tool_call_id=data.tool_call_id,
@@ -3169,11 +3163,12 @@ class AgentLoopEngine:
             )
         return calls
 
-    async def _tool_execution_receipt(self, run, call):
+    async def _tool_execution_receipt(self, run, call) -> ToolExecutionResult | None:
         events = await self.runtime.session_store.read_events(run.run_id)
         for event in reversed(events):
             if (
                 event.type == "tool.call.received"
+                and isinstance(event.data, ToolEventData)
                 and event.data.operation_id == call.operation_id
             ):
                 result = ToolExecutionResult.model_validate(event.data.execution_result)
@@ -3181,7 +3176,7 @@ class AgentLoopEngine:
                     return result
         return None
 
-    async def _execute_tool_batch(self, run, calls, crossed, context, state, step_id):
+    async def _execute_tool_batch(self, run, calls, crossed, context, state, step_id) -> tuple[RunSnapshot, AgentLoopCheckpointState, dict[str, ToolExecutionResult]]:
         """Execute siblings concurrently; one owner serializes durable receipts.
 
         All receipts are durable before any result can suspend the whole Run.
@@ -3281,7 +3276,7 @@ class AgentLoopEngine:
                         )
         return await self.runtime.get_run(run.run_id), state, results
 
-    async def _start_tool_execution(self, run, call, context, turn_id, step_id):
+    async def _start_tool_execution(self, run, call, context, turn_id, step_id) -> RunSnapshot:
         run = await self._commit_running(
             run,
             context,
@@ -3314,7 +3309,7 @@ class AgentLoopEngine:
         )
         return run
 
-    async def _record_cancelled_execution(self, run, call, context, turn_id, step_id):
+    async def _record_cancelled_execution(self, run, call, context, turn_id, step_id) -> RunSnapshot:
         return await self._record_tool_unknown(
             run,
             call,
@@ -3336,7 +3331,7 @@ class AgentLoopEngine:
 
     async def _capture_tool_execution(
         self, run, call, context, turn_id, step_id=None, state=None
-    ):
+    ) -> tuple[RunSnapshot, ToolExecutionResult | None]:
         try:
             run, result = await self._execute_tool_with_control(run, call, context)
             if result is None:
@@ -3376,7 +3371,7 @@ class AgentLoopEngine:
 
     async def dispatch_tool_call(
         self, run, call, context, turn_id, step_id=None, state=None
-    ):
+    ) -> tuple[RunSnapshot, ToolExecutionResult | None]:
         """Cross the tool side-effect barrier and settle or reconcile its result.
 
         `dispatching` is committed before calling the provider. Once control
@@ -3529,7 +3524,7 @@ class AgentLoopEngine:
 
     async def _stop_for_unsafe_tool_error(
         self, run, call, result, context, turn_id, step_id, state
-    ):
+    ) -> tuple[RunSnapshot, ToolExecutionResult | None]:
         current = await self.runtime.get_run(run.run_id)
         if current.state in TERMINAL_RUN_STATES:
             await self._release_run_resources(run.run_id)
@@ -3602,7 +3597,7 @@ class AgentLoopEngine:
             }
         )
 
-    async def _resume_delegated_tool(self, run, state, decision, payload, context):
+    async def _resume_delegated_tool(self, run, state, decision, payload, context) -> tuple[RunSnapshot, ToolExecutionResult | None]:
         if self.delegated_run_controller is None:
             raise SageV2Error(
                 RuntimeErrorInfo(
@@ -3695,7 +3690,7 @@ class AgentLoopEngine:
 
     async def _suspend_for_delegated_interaction(
         self, run, state, call, pending, context, step_id
-    ):
+    ) -> RunSnapshot:
         raw = pending.get("interaction") if isinstance(pending, dict) else None
         child = InteractionRequest.model_validate(raw)
         interaction_id = new_id("interaction")
@@ -3733,7 +3728,7 @@ class AgentLoopEngine:
             idempotency_key=f"delegation-suspend:{interaction_id}",
         )
 
-    async def _record_tool_unknown(self, run, call, error, context, turn_id, step_id):
+    async def _record_tool_unknown(self, run, call, error, context, turn_id, step_id) -> RunSnapshot:
         return await self._commit_running(
             run,
             context,
@@ -3757,7 +3752,7 @@ class AgentLoopEngine:
 
     async def _reconcile_or_suspend_tool(
         self, run, call, context, turn_id, step_id, state, uncertainty
-    ):
+    ) -> tuple[RunSnapshot, ToolExecutionResult | None]:
         """Resolve an uncertain side effect without executing the call again."""
 
         definition = await self.tool_catalog.get_tool(call.tool_name, run_id=run.run_id)
@@ -3783,7 +3778,7 @@ class AgentLoopEngine:
             try:
                 reconcile_call = getattr(self.tool_executor, "reconcile_call", None)
                 reconciled = (
-                    await reconcile_call(call, context)
+                    await cast(Callable[..., Awaitable[ReconcileResult]], reconcile_call)(call, context)
                     if callable(reconcile_call)
                     else await self.tool_executor.reconcile(call.operation_id, context)
                 )
@@ -3946,7 +3941,7 @@ class AgentLoopEngine:
             None,
         )
 
-    async def _defer_delegation(self, run, state, result, context, step_id):
+    async def _defer_delegation(self, run, state, result, context, step_id) -> RunSnapshot:
         from datetime import datetime
 
         due = datetime.fromisoformat(result.metadata["delegation_deferred_until"])
@@ -3960,7 +3955,7 @@ class AgentLoopEngine:
             ),), recovery_state=state,
         )
 
-    async def _resume_uncertain_tool(self, run, state, decision, payload, context):
+    async def _resume_uncertain_tool(self, run, state, decision, payload, context) -> tuple[RunSnapshot, ToolExecutionResult | None]:
         call = state.pending_tool_call
         assert call is not None
         step_id = state.pending_tool_step_id
@@ -4051,7 +4046,7 @@ class AgentLoopEngine:
         declined=False,
         event_type_override=None,
         expected_states=None,
-    ):
+    ) -> tuple[RunSnapshot, ToolExecutionResult]:
         """Commit and return the same normalized result used by the model ledger."""
 
         if result.error is not None:
@@ -4158,7 +4153,7 @@ class AgentLoopEngine:
         definition=None,
         *,
         supports_reconciliation: bool | None = None,
-    ):
+    ) -> RunSnapshot:
         """Require explicit reconciliation when a Tool outcome is unknowable."""
 
         can_reconcile = (
@@ -4224,7 +4219,7 @@ class AgentLoopEngine:
             idempotency_key=f"uncertain-tool-suspend:{interaction_id}",
         )
 
-    async def _suspend_for_tool_approval(self, run, state, policy, context, step_id):
+    async def _suspend_for_tool_approval(self, run, state, policy, context, step_id) -> RunSnapshot:
         """Checkpoint before dispatch so approval cannot race the side effect."""
 
         interaction_id = new_id("interaction")
@@ -4299,7 +4294,7 @@ class AgentLoopEngine:
 
     async def _suspend_for_continuation_interaction(
         self, run, state, decision, context, step_id
-    ):
+    ) -> RunSnapshot:
         interaction_id = new_id("interaction")
         reset_budget = bool(decision.interaction.payload.get("reset_step_budget"))
         preserve_budget = bool(decision.interaction.payload.get("preserve_step_budget"))
@@ -4339,10 +4334,10 @@ class AgentLoopEngine:
             idempotency_key=f"continuation-suspend:{interaction_id}",
         )
 
-    async def _suspend_at_safe_point(self, run, state, context):
+    async def _suspend_at_safe_point(self, run, state, context) -> RunSnapshot:
         return await self.commit_safe_point_suspension(run, state, context)
 
-    async def commit_safe_point_suspension(self, run, state, context):
+    async def commit_safe_point_suspension(self, run, state, context) -> RunSnapshot:
         """Commit a manual-pause checkpoint between externally visible actions."""
 
         checkpoint, suspension = await self._checkpoint_records(
@@ -4357,7 +4352,7 @@ class AgentLoopEngine:
             idempotency_key=f"manual-suspend:{suspension.suspension_id}",
         )
 
-    async def _checkpoint_records(self, run, state, *, reason, interaction_id=None):
+    async def _checkpoint_records(self, run, state, *, reason, interaction_id=None) -> tuple[Checkpoint, Suspension]:
         """Build matching Checkpoint/Suspension records for one atomic commit."""
 
         if self.preload_skills and self.skill_loader is not None:
@@ -4399,7 +4394,7 @@ class AgentLoopEngine:
         )
         return checkpoint, suspension
 
-    async def _record_continuation(self, run, decision, context, turn_id, step_id):
+    async def _record_continuation(self, run, decision, context, turn_id, step_id) -> RunSnapshot:
         drafts = [
             EventDraft(
                 type="continuation.decided",
@@ -4532,7 +4527,7 @@ class AgentLoopEngine:
         items,
         interaction_id,
         context,
-    ):
+    ) -> RunSnapshot:
         drafts = []
         for input_item in items:
             item_id = new_id("item")
@@ -4572,7 +4567,7 @@ class AgentLoopEngine:
         )
         return result.run
 
-    async def _complete(self, run, state, step_id, context):
+    async def _complete(self, run, state, step_id, context) -> RunSnapshot:
         completed = await self.lifecycle.commit(
             run,
             new_state=RunState.COMPLETED,
@@ -4600,7 +4595,7 @@ class AgentLoopEngine:
         await self._release_run_resources(run.run_id)
         return completed
 
-    async def _fail(self, run, state, step_id, error, context, *, allow_recovery=True):
+    async def _fail(self, run, state, step_id, error, context, *, allow_recovery=True) -> RunSnapshot:
         require_execution_ownership()
         if is_lease_loss(error):
             raise SageV2Error(error)
@@ -4763,7 +4758,7 @@ class AgentLoopEngine:
 
     def _item(
         self, item_id, run_id, turn_id, step_id, data, status=ItemStatus.COMPLETED
-    ):
+    ) -> ItemSnapshot:
         now = self.clock()
         encoded = json.dumps(
             data.model_dump(mode="json"),
@@ -4793,7 +4788,7 @@ class AgentLoopEngine:
         *,
         reasoning,
         status=ItemStatus.SUSPENDED,
-    ):
+    ) -> EventDraft:
         data = (
             ReasoningItemData(content=(TextBlock(text=content),))
             if reasoning
@@ -4817,7 +4812,7 @@ class AgentLoopEngine:
 
     async def _persist_followup_user_messages(
         self, run, results, context, turn_id, step_id
-    ):
+    ) -> tuple[RunSnapshot, tuple[ModelMessage, ...]]:
         messages = tuple(
             message
             for result in results
@@ -4842,7 +4837,7 @@ class AgentLoopEngine:
             )
         return run, messages
 
-    def _followup_user_message_drafts(self, run, results, turn_id, step_id):
+    def _followup_user_message_drafts(self, run, results, turn_id, step_id) -> tuple[EventDraft, ...]:
         """Bind supplemental model context atomically to its tool result.
 
         Deterministic Item identities also make legacy deferred publication
@@ -4876,11 +4871,11 @@ class AgentLoopEngine:
         return tuple(drafts)
 
     @classmethod
-    def _ledger_messages_for_tool_result(cls, result):
+    def _ledger_messages_for_tool_result(cls, result) -> tuple[ModelMessage, ...]:
         return cls._ledger_messages_for_tool_batch((result,))
 
     @classmethod
-    def _ledger_messages_for_tool_batch(cls, results):
+    def _ledger_messages_for_tool_batch(cls, results) -> tuple[ModelMessage, ...]:
         return (
             *(cls._tool_result_message(result) for result in results),
             *(
@@ -4891,7 +4886,7 @@ class AgentLoopEngine:
         )
 
     @staticmethod
-    def _tool_result_message(result):
+    def _tool_result_message(result) -> ModelMessage:
         content = result.content
         if not content and result.error is not None:
             content = (TextBlock(text=error_diagnostic_message(result.error)),)
@@ -4905,7 +4900,7 @@ class AgentLoopEngine:
         )
 
     @staticmethod
-    def _followup_user_messages(result):
+    def _followup_user_messages(result) -> tuple[ModelMessage, ...]:
         raw = result.metadata.get("followup_user_message")
         if not isinstance(raw, dict):
             return ()
@@ -4939,7 +4934,7 @@ class AgentLoopEngine:
         )
 
     @staticmethod
-    def _response_fingerprint(response):
+    def _response_fingerprint(response) -> str:
         payload = {
             "text": response.text,
             "tools": [
@@ -4953,7 +4948,7 @@ class AgentLoopEngine:
         return hashlib.sha256(encoded).hexdigest()
 
     @staticmethod
-    def _trailing_repeat_count(values):
+    def _trailing_repeat_count(values) -> int:
         if not values:
             return 0
         latest = values[-1]
@@ -4997,7 +4992,7 @@ class AgentLoopEngine:
         )
 
     @staticmethod
-    def _conflict(code, message):
+    def _conflict(code, message) -> SageV2Error:
         return SageV2Error(
             RuntimeErrorInfo(
                 code=code,

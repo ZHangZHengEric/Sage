@@ -8,6 +8,65 @@ built-in inventory, and implementation-status boundaries.
 Requires Python 3.12 or newer. The legacy Sage runtime remains 3.10+.
 """
 
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from sagents.v2.package.manifest.runtime import RuntimeConfig as RuntimeConfig
+    from sagents.v2.package.manifest.runtime import SkillModulesConfig as SkillModulesConfig
+    from sagents.v2.package.manifest.runtime import SkillUsageConfig as SkillUsageConfig
+    from sagents.v2.composition.defaults import default_runtime as default_runtime
+    from sagents.v2.composition.loaded_agents import LoadedAgent as LoadedAgent
+    from sagents.v2.composition.loaded_agents import StartupRecoveryIssue as StartupRecoveryIssue
+    from sagents.v2.optimization import AgentPackageTestGenerator as AgentPackageTestGenerator
+    from sagents.v2.optimization import OptimizationSuiteGeneration as OptimizationSuiteGeneration
+    from sagents.v2.optimization import AgentPackageOptimizer as AgentPackageOptimizer
+    from sagents.v2.optimization import IsolatedOptimizationRunner as IsolatedOptimizationRunner
+    from sagents.v2.optimization import OptimizationAgent as OptimizationAgent
+    from sagents.v2.optimization import OptimizationConstraints as OptimizationConstraints
+    from sagents.v2.optimization import OptimizationCase as OptimizationCase
+    from sagents.v2.optimization import OptimizationCaseTrial as OptimizationCaseTrial
+    from sagents.v2.optimization import OptimizationSuiteIssue as OptimizationSuiteIssue
+    from sagents.v2.optimization import OptimizationSuiteReview as OptimizationSuiteReview
+    from sagents.v2.optimization import OptimizationSuiteReviewRejected as OptimizationSuiteReviewRejected
+    from sagents.v2.optimization import OptimizationSuite as OptimizationSuite
+    from sagents.v2.optimization import OptimizationFinalSuite as OptimizationFinalSuite
+    from sagents.v2.optimization import OptimizationFinalVerification as OptimizationFinalVerification
+    from sagents.v2.optimization import OptimizationProposalReview as OptimizationProposalReview
+    from sagents.v2.optimization import OptimizationFinalSuiteGeneration as OptimizationFinalSuiteGeneration
+    from sagents.v2.optimization import OptimizationIteration as OptimizationIteration
+    from sagents.v2.optimization import OptimizationResult as OptimizationResult
+    from sagents.v2.optimization import OptimizationReport as OptimizationReport
+    from sagents.v2.agent.self_configuration import SelfConfigurationService as SelfConfigurationService
+    from sagents.v2.agent.self_configuration import SelfConfigurationRequest as SelfConfigurationRequest
+    from sagents.v2.agent.self_configuration import SqliteSelfConfigurationStore as SqliteSelfConfigurationStore
+    from sagents.v2.agent.management import AgentManagementService as AgentManagementService
+    from sagents.v2.agent.management import AgentPackageBundle as AgentPackageBundle
+    from sagents.v2.agent.management import AgentPackageStore as AgentPackageStore
+    from sagents.v2.contracts import ActorRef as ActorRef
+    from sagents.v2.contracts import EventCursor as EventCursor
+    from sagents.v2.runtime.execution import ExecutionBindingProvider as ExecutionBindingProvider
+    from sagents.v2.runtime.execution import ExecutionBindingRequest as ExecutionBindingRequest
+    from sagents.v2.application import InterfaceRunStream as InterfaceRunStream
+    from sagents.v2.contracts import ProposeSessionCommit as ProposeSessionCommit
+    from sagents.v2.contracts import PublishSessionCommit as PublishSessionCommit
+    from sagents.v2.contracts import RejectSessionCommit as RejectSessionCommit
+    from sagents.v2.contracts import RequestContext as RequestContext
+    from sagents.v2.application import ResolvedApplicationPlan as ResolvedApplicationPlan
+    from sagents.v2.application import ResolvedProviderBinding as ResolvedProviderBinding
+    from sagents.v2.runtime.execution import RunExecutionBinding as RunExecutionBinding
+    from sagents.v2.contracts import RunHandle as RunHandle
+    from sagents.v2.contracts import RuntimeEvent as RuntimeEvent
+    from sagents.v2.sagent import SAgent as SAgent
+    from sagents.v2.application import SAgentApplication as SAgentApplication
+    from sagents.v2.model.catalog import ModelCatalogConfig as ModelCatalogConfig
+    from sagents.v2.composition.configuration import ApplicationConfiguration as ApplicationConfiguration
+    from sagents.v2.builder import SAgentBuilder as SAgentBuilder
+    from sagents.v2.sagent import SAgentRunStream as SAgentRunStream
+    from sagents.v2.contracts import SessionCommitProposal as SessionCommitProposal
+    from sagents.v2.contracts import SessionMergeStrategy as SessionMergeStrategy
+    from sagents.v2.contracts import StartRun as StartRun
+
+
 from sagents.v2._lazy import exported_names, resolve_export
 
 _EXPORTS = {
@@ -106,7 +165,62 @@ _EXPORTS = {
     "StartRun": ("sagents.v2.contracts", "StartRun"),
 }
 
-__all__ = list(_EXPORTS)
+__all__ = [
+    "RuntimeConfig",
+    "SkillModulesConfig",
+    "SkillUsageConfig",
+    "default_runtime",
+    "LoadedAgent",
+    "StartupRecoveryIssue",
+    "AgentPackageTestGenerator",
+    "OptimizationSuiteGeneration",
+    "AgentPackageOptimizer",
+    "IsolatedOptimizationRunner",
+    "OptimizationAgent",
+    "OptimizationConstraints",
+    "OptimizationCase",
+    "OptimizationCaseTrial",
+    "OptimizationSuiteIssue",
+    "OptimizationSuiteReview",
+    "OptimizationSuiteReviewRejected",
+    "OptimizationSuite",
+    "OptimizationFinalSuite",
+    "OptimizationFinalVerification",
+    "OptimizationProposalReview",
+    "OptimizationFinalSuiteGeneration",
+    "OptimizationIteration",
+    "OptimizationResult",
+    "OptimizationReport",
+    "SelfConfigurationService",
+    "SelfConfigurationRequest",
+    "SqliteSelfConfigurationStore",
+    "AgentManagementService",
+    "AgentPackageBundle",
+    "AgentPackageStore",
+    "ActorRef",
+    "EventCursor",
+    "ExecutionBindingProvider",
+    "ExecutionBindingRequest",
+    "InterfaceRunStream",
+    "ProposeSessionCommit",
+    "PublishSessionCommit",
+    "RejectSessionCommit",
+    "RequestContext",
+    "ResolvedApplicationPlan",
+    "ResolvedProviderBinding",
+    "RunExecutionBinding",
+    "RunHandle",
+    "RuntimeEvent",
+    "SAgent",
+    "SAgentApplication",
+    "ModelCatalogConfig",
+    "ApplicationConfiguration",
+    "SAgentBuilder",
+    "SAgentRunStream",
+    "SessionCommitProposal",
+    "SessionMergeStrategy",
+    "StartRun",
+]
 
 
 def __getattr__(name: str):

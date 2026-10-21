@@ -10,7 +10,7 @@ from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from starlette.background import BackgroundTask
 
-from app.v2.server.routers.deps import HostDep, ReadUser, CurrentUser
+from app.v2.server.routers.deps import HostDep, ReadUser, CurrentUser, ConversationDep
 from app.v2.server.routers.render import error_response, success
 from app.v2.server.conversations.cleanup import finish_file_operation, require_idle, reject_local_workspace_drive
 from app.v2.server.storage.downloads import SnapshotChangedError, list_directory, prepare_download
@@ -107,7 +107,7 @@ async def workspace_download(user: ReadUser, caller: CurrentUser, host: HostDep,
 
 
 @router.delete("/api/workspace/files")
-async def workspace_delete(user: CurrentUser, host: HostDep,
+async def workspace_delete(user: CurrentUser, host: HostDep, service: ConversationDep,
                            path: str = Query(min_length=1, max_length=4096),
                            recursive: bool = False,
                            thread_id: str | None = Query(default=None, min_length=1, max_length=256),
@@ -116,7 +116,6 @@ async def workspace_delete(user: CurrentUser, host: HostDep,
         workspace_parts(path)
     except ValueError:
         raise HTTPException(422, "invalid workspace path") from None
-    service = host.conversations
     owner_id, agent_id = await workspace_identity(
         host, user, user, thread_id, agent_id, writable=True)
     reject_local_workspace_drive(service, owner_id, agent_id)

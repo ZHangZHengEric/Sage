@@ -20,12 +20,13 @@ from app.v2.server.runtime.integrations.a2a import discover_a2a_skills, to_a2a_c
 from app.v2.server.runtime.integrations.mcp import discover_mcp_tools, to_mcp_config
 from sagents.v2.contracts.common import new_id
 from sagents.v2.contracts.errors import ErrorCategory, RuntimeErrorInfo, SageV2Error
+from sagents.v2.runtime.extensions import ExtensionRegistry
 
 
 class CatalogService:
     def __init__(self, store, *, mcp_plugins, a2a_plugins, skills) -> None:
         self.store = store
-        self.extensions = None
+        self.extensions: ExtensionRegistry | None = None
         self.locks = tuple(asyncio.Lock() for _ in range(64))
         self.mcp_plugins = mcp_plugins
         self.a2a_plugins = a2a_plugins

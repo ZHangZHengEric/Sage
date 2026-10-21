@@ -4,7 +4,7 @@
 from __future__ import annotations
 
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Set
 from sagents.v2.runtime.contracts import RuntimePort
 from sagents.v2.runtime.session.contracts import EventDraft
 from sagents.v2.contracts.checkpoint import Checkpoint, Suspension
@@ -25,7 +25,7 @@ class DurableRunLifecycle:
         drafts: Iterable[EventDraft],
         context: RequestContext,
         idempotency_key: str,
-        expected_states: frozenset[RunState],
+        expected_states: Set[RunState],
         checkpoint: Checkpoint | None = None,
     ) -> RunSnapshot:
         result = await self.runtime.session_store.commit_run(

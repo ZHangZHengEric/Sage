@@ -1,5 +1,12 @@
 """Searchable, derived Session history separate from long-term Memory."""
 
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from sagents.v2.session_memory.plugins.noop import NoopSessionMemoryProvider as NoopSessionMemoryProvider
+    from sagents.v2.session_memory.plugins.sqlite_bm25 import SqliteBm25SessionMemoryProvider as SqliteBm25SessionMemoryProvider
+
+
 from sagents.v2._lazy import exported_names, resolve_export
 
 from sagents.v2.session_memory.contracts import (

@@ -2,6 +2,11 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING, NoReturn, cast
+
+if TYPE_CHECKING:
+    from app.v2.desktop.backend.service import DesktopV2Service
+
 from app.v2.desktop.backend.run_environment import catalog_agent_id
 
 import asyncio
@@ -20,7 +25,8 @@ from sagents.v2.context import ContextSegment, ContextStability
 from sagents.v2.context.contracts import ContextPlacement
 from sagents.v2.contracts.common import utc_now
 from sagents.v2.contracts.run_state import RunState
-from sagents.v2.contracts.items import TextBlock
+from sagents.v2.contracts.items import MessageItemData, TextBlock
+from sagents.v2.contracts.events import ItemEventData
 from sagents.v2.contracts.errors import ErrorCategory, RuntimeErrorInfo, SageV2Error
 from sagents.v2.tool import IdempotencyStrategy, SideEffectLevel, ToolInvocation, tool
 from sagents.v2.tool.decorated import DecoratedToolProvider
@@ -102,7 +108,7 @@ class StudioSyncRequest(BaseModel):
     messages: list[StudioHistoryInput] = Field(default_factory=list, max_length=10000)
 
 
-def denied(message: str):
+def denied(message: str) -> NoReturn:
     raise SageV2Error(
         RuntimeErrorInfo(
             code="studio.access_denied",
@@ -879,7 +885,9 @@ class StudioContextProvider:
 
 class DesktopStudioMixin(StudioDeliveryMixin):
     async def sync_studio(self, studio_id, request, user_id):
+        self = cast("DesktopV2Service", self)
         await self.start()
+        assert self.session_access is not None
         for member in request.members:
             await self._agent(member.agent_id, user_id)
             try:
@@ -906,6 +914,7 @@ class DesktopStudioMixin(StudioDeliveryMixin):
         )
 
     async def read_studio(self, studio_id, user_id, **kwargs):
+        self = cast("DesktopV2Service", self)
         runs = await self.reconcile_studio_results(studio_id, user_id)
         result = await asyncio.to_thread(
             self.studio_store.read, studio_id, user_id, **kwargs
@@ -914,7 +923,9 @@ class DesktopStudioMixin(StudioDeliveryMixin):
         return result
 
     async def find_studio_run(self, studio_id, member_id, turn_id, user_id):
+        self = cast("DesktopV2Service", self)
         await self.start()
+        assert self.session_access is not None
         group = await asyncio.to_thread(self.studio_store.group, studio_id, user_id)
         member = next((m for m in group["members"] if m["id"] == member_id), None)
         if member is None:
@@ -940,6 +951,8 @@ class DesktopStudioMixin(StudioDeliveryMixin):
         return None
 
     async def publish_studio_run_result(self, run_id):
+        self = cast("DesktopV2Service", self)
+        assert self.session_access is not None
         run = await self.session_store.get_run(run_id)
         if run.state != RunState.COMPLETED or await asyncio.to_thread(
             self.studio_store.result_published, run_id
@@ -967,8 +980,14 @@ class DesktopStudioMixin(StudioDeliveryMixin):
         ):
             if event.type != "message.completed":
                 continue
+            if not isinstance(event.data, ItemEventData):
+                continue
             item = event.data.item
-            if item is not None and getattr(item.data, "role", None) == "assistant":
+            if (
+                item is not None
+                and isinstance(item.data, MessageItemData)
+                and item.data.role == "assistant"
+            ):
                 value = "".join(
                     b.text for b in item.data.content if isinstance(b, TextBlock)
                 )
@@ -979,7 +998,9 @@ class DesktopStudioMixin(StudioDeliveryMixin):
         )
 
     async def reconcile_studio_results(self, studio_id, user_id):
+        self = cast("DesktopV2Service", self)
         await self.start()
+        assert self.session_access is not None
         group = await asyncio.to_thread(self.studio_store.group, studio_id, user_id)
         member_runs = []
         for member in group["members"]:
@@ -1019,6 +1040,7 @@ class DesktopStudioMixin(StudioDeliveryMixin):
         return member_runs
 
     def studio_request_binding(self, request, user_id):
+        self = cast("DesktopV2Service", self)
         if request.studio_id is None:
             if self.studio_store.has_session(request.session_id):
                 denied("A Studio Session requires Studio mode")
@@ -1061,6 +1083,7 @@ class DesktopStudioMixin(StudioDeliveryMixin):
         return {**binding, "turn_id": request.studio_message_id}
 
     async def studio_run_binding(self, run_id, agent, session_id):
+        self = cast("DesktopV2Service", self)
         if run_id is None:
             return None
         try:
@@ -1082,6 +1105,7 @@ class DesktopStudioMixin(StudioDeliveryMixin):
         return binding
 
     def studio_tool_provider(self, run_id, owner, binding):
+        self = cast("DesktopV2Service", self)
         return StudioToolProvider(
             StudioTools(
                 self.studio_store,

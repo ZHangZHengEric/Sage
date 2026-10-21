@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import inspect
 from collections.abc import Awaitable, Callable, Mapping
+from typing import cast
 
 from sagents.v2.tool.contracts import (
     ReconcileResult,
@@ -11,6 +12,7 @@ from sagents.v2.tool.contracts import (
     ToolCall,
     ToolDefinition,
     ToolExecutionResult,
+    ToolCancellationResult,
 )
 from sagents.v2.tool.provider import ToolCatalog, ToolExecutor
 from sagents.v2.contracts.errors import (
@@ -257,7 +259,6 @@ class RoutedToolExecutor:
 
     async def cancel(self, operation_id: str, context: RequestContext):
         from sagents.v2.tool.contracts import (
-            ToolCancellationResult,
             ToolCancellationState,
         )
 
@@ -268,7 +269,7 @@ class RoutedToolExecutor:
                 operation_id=operation_id,
                 state=ToolCancellationState.NOT_SUPPORTED,
             )
-        return await cancel(operation_id, context)
+        return await cast(Callable[..., Awaitable[ToolCancellationResult]], cancel)(operation_id, context)
 
     async def reconcile(
         self, operation_id: str, context: RequestContext
@@ -296,7 +297,7 @@ class RoutedToolExecutor:
             )
         reconcile_call = getattr(executor, "reconcile_call", None)
         if callable(reconcile_call):
-            return await reconcile_call(call, context)
+            return await cast(Callable[..., Awaitable[ReconcileResult]], reconcile_call)(call, context)
         return await executor.reconcile(call.operation_id, context)
 
 
@@ -344,7 +345,6 @@ class CompositeToolExecutor:
 
     async def cancel(self, operation_id: str, context: RequestContext):
         from sagents.v2.tool.contracts import (
-            ToolCancellationResult,
             ToolCancellationState,
         )
 
@@ -355,7 +355,7 @@ class CompositeToolExecutor:
                 operation_id=operation_id,
                 state=ToolCancellationState.NOT_SUPPORTED,
             )
-        return await cancel(operation_id, context)
+        return await cast(Callable[..., Awaitable[ToolCancellationResult]], cancel)(operation_id, context)
 
     async def reconcile(self, operation_id: str, context: RequestContext):
         pending = None
@@ -376,7 +376,7 @@ class CompositeToolExecutor:
         for executor in self._executors:
             call_aware = getattr(executor, "reconcile_call", None)
             result = (
-                await call_aware(call, context)
+                await cast(Callable[..., Awaitable[ReconcileResult]], call_aware)(call, context)
                 if callable(call_aware)
                 else await executor.reconcile(call.operation_id, context)
             )

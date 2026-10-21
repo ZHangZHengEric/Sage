@@ -5,7 +5,7 @@ from __future__ import annotations
 from contextlib import asynccontextmanager
 from contextvars import ContextVar
 from collections.abc import Awaitable, Callable
-from typing import TypeVar
+from typing import TypeVar, Any
 
 from sagents.v2.runtime.execution.scheduler import Scheduler, WorkerLease
 from sagents.v2.contracts.errors import (
@@ -63,7 +63,7 @@ class LeaseFencedSessionStore:
             ),
         }
 
-    def __getattr__(self, name):
+    def __getattr__(self, name: str) -> Any:
         return getattr(self.session_store, name)
 
     @asynccontextmanager

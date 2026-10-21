@@ -74,6 +74,7 @@ async def live_execution_policy(command, *, users, keys, catalog, settings, user
     composition = load_composition(command, user_id=user_id)
     package = composition.package if composition is not None else None
     if package is not None:
+        assert composition is not None
         # Direct Packages carry an authorized immutable bundle, not a Catalog
         # Agent row. Recheck the same host Package policy used at HTTP admission
         # on every capability decision; a missing/revoked grant fails closed.

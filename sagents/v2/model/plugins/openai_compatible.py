@@ -6,7 +6,7 @@ import json
 from sagents.v2.model.wire_diagnostics import record_wire_event
 
 from collections.abc import AsyncIterator, Mapping
-from typing import Any, Literal
+from typing import cast, Any, Literal
 
 from openai import AsyncOpenAI
 from pydantic import Field
@@ -177,7 +177,7 @@ class OpenAICompatibleModelProvider:
         """Use the Chat Completions plugin probe for the legacy class name."""
 
         return await OpenAIChatCompletionsModelProvider.probe_capabilities(
-            self, request
+            cast(OpenAIChatCompletionsModelProvider, self), request
         )
 
     def diagnostic_request(self, request: ModelRequest) -> dict[str, Any]:

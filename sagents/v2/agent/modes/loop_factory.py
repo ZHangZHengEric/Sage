@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 import inspect
 from collections.abc import Awaitable, Callable
 
@@ -151,6 +153,8 @@ class ModeAwareAgentLoopFactory:
             if self.trace_sink is not None or self.log_sink is not None
             else AgentLoopEngine
         )
+        observation: dict[str, Any] = ({"trace_sink": self.trace_sink, "log_sink": self.log_sink}
+            if engine_type is ObservedRunDriver else {})
         return engine_type(
             runtime=self.runtime,
             model=self.model_factory(descriptor, run_id),
@@ -169,11 +173,7 @@ class ModeAwareAgentLoopFactory:
             ),
             delegated_run_controller=self.child_executor,
             expected_resolved_spec_hash=self.resolved_spec_hash,
-            **(
-                {"trace_sink": self.trace_sink, "log_sink": self.log_sink}
-                if engine_type is ObservedRunDriver
-                else {}
-            ),
+            **observation,
         )
 
     async def create_loop_async(

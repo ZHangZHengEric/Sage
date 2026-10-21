@@ -1,6 +1,8 @@
 """Publish instrumented model providers through their normal plugin lifecycle."""
 
 from dataclasses import replace
+from typing import Any
+from sagents.v2.runtime.extensions.contracts import CapabilityKey, ExtensionRegistration, ExtensionScopeContext, ProviderSet
 
 from sagents.v2.model import RecordingModelProvider
 from sagents.v2.runtime.extensions import ExtensionDependency, ExtensionRegistry
@@ -30,7 +32,7 @@ def observed_model_registry(
                 if dependency not in dependencies:
                     dependencies.append(dependency)
 
-            async def start(instance, context, providers, original=registration):
+            async def start(instance: Any, context: ExtensionScopeContext, providers: ProviderSet, original: ExtensionRegistration[Any] = registration) -> dict[CapabilityKey, Any]:
                 values = await _start_extension(
                     StartedExtension(original, instance), context, providers
                 )
@@ -60,14 +62,16 @@ def observed_model_registry(
                     )
                 return values
 
-            registration = replace(
+            observed_registration = replace(
                 registration,
                 start=start,
                 descriptor=descriptor.model_copy(
                     update={"dependencies": tuple(dependencies)}
                 ),
             )
-        result.register(registration)
+            result.register(observed_registration)
+        else:
+            result.register(registration)
     result.trust_builtins(
         item.descriptor.plugin_id
         for item in registry.registrations()

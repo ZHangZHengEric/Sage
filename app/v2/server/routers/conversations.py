@@ -22,6 +22,7 @@ from app.v2.server.routers.deps import (
     CurrentUser,
     HostDep,
     ReadUser,
+    PackageDep,
 )
 from app.v2.server.routers.files import download_response, file_operation
 from app.v2.server.routers.render import error_response, success
@@ -108,10 +109,10 @@ class PackageRunBody(AgentRunBody):
 
 @agent_router.post("/agent-package", response_class=StreamingResponse)
 async def run_agent_package(body: PackageRunBody, request: Request,
-                            user: CurrentUser, host: HostDep, service: ConversationDep):
+                            user: CurrentUser, host: HostDep, service: ConversationDep, management: PackageDep):
     context = host.contexts.for_user(user.user_id)
     from app.v2.server.routers.packages import result
-    await result(host.agent_management.authorize_package("run", body.agent_package, context))
+    await result(management.authorize_package("run", body.agent_package, context))
     stream = await service.start(body.to_agui(), user_id=user.user_id,
         package=body.agent_package,
         last_event_id=(request.headers.get("last-event-id") or "").strip() or None)
@@ -242,11 +243,10 @@ async def get_thread_result(
 
 
 @download_router.get("/api/threads/{thread_id}/download")
-async def session_download(thread_id: str, user: AdminUser, host: HostDep):
+async def session_download(thread_id: str, user: AdminUser, host: HostDep, service: ConversationDep):
     record = await host.threads.find(thread_id)
     if record is None:
         raise HTTPException(404, "thread not found")
-    service = host.conversations
     # Validate the persisted Session owner before resolving its storage directory.
     await service.session_access.get_session(
         thread_id, service.context_for(record.user_id)
@@ -266,9 +266,9 @@ async def session_download(thread_id: str, user: AdminUser, host: HostDep):
         ):
             raise HTTPException(404, "thread not found")
     run_ids = {run.run_id for run in runs}
-    if host.diagnostics is None:
+    source: DiagnosticEvidenceSource | None = host.observability
+    if source is None or host.diagnostics is None:
         raise HTTPException(409, "当前观测插件不支持诊断查询")
-    source: DiagnosticEvidenceSource = host.observability
     try:
         async with asyncio.timeout(30):
             evidence = await source.export_evidence(thread_id, run_ids)
@@ -386,9 +386,9 @@ class InteractionReply(BaseModel):
 
 
 @external_router.put("/workspace/files")
-async def put_workspace_files(body: WorkspaceImport, caller: CallerDep, host: HostDep):
+async def put_workspace_files(body: WorkspaceImport, caller: CallerDep, host: HostDep, service: ConversationDep):
     try:
-        async with host.conversations.runs.workspace_guard(caller.tenant_id, caller.agent_id):
+        async with service.runs.workspace_guard(caller.tenant_id, caller.agent_id):
             count = await finish_file_operation(import_workspace_files, host.paths,
                                                 caller.tenant_id, caller.agent_id,
                                                 body.directory, body.files)

@@ -136,10 +136,12 @@ class ContextReductionScope(StrictModel):
 
 
 class ContextReducer(Protocol):
+    """Project context with optional limits; None uses the reducer's defaults."""
+
     async def reduce(
         self,
         messages: tuple[ModelMessage, ...],
-        budget: ContextBudget,
+        budget: ContextBudget | None,
         *,
         scope: ContextReductionScope | None = None,
     ) -> ContextProjection: ...

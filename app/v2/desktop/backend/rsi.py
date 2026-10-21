@@ -6,6 +6,11 @@ without replay. Applying a version is a separate, confirmed compare-and-swap.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    from app.v2.desktop.backend.service import DesktopV2Service
+
 import asyncio
 import base64
 import hashlib
@@ -178,15 +183,18 @@ class RsiStore:
 
 class DesktopRsiMixin:
     def _initialize_rsi(self):
+        self = cast("DesktopV2Service", self)
         self.rsi_store = RsiStore(self.runtime_root / "rsi.sqlite3")
         self._rsi_tasks = {}
         self._rsi_cursors = {}
 
     @property
     def rsi_active(self):
+        self = cast("DesktopV2Service", self)
         return any(not task.done() for task in self._rsi_tasks.values())
 
     async def _close_rsi(self):
+        self = cast("DesktopV2Service", self)
         tasks = tuple(self._rsi_tasks.values())
         for task in tasks:
             task.cancel()
@@ -194,9 +202,11 @@ class DesktopRsiMixin:
             await asyncio.gather(*tasks, return_exceptions=True)
 
     async def _agent_bundle(self, agent):
+        self = cast("DesktopV2Service", self)
         return (await self._agent_snapshot(agent))[0]
 
     async def _agent_snapshot(self, agent):
+        self = cast("DesktopV2Service", self)
         providers = await self.catalog.list_model_providers(agent.user_id)
         provider = next(
             (p for p in providers if p.id == agent.config.get("llm_provider_id")), None
@@ -261,6 +271,7 @@ class DesktopRsiMixin:
         iteration=None,
         review=None,
     ):
+        self = cast("DesktopV2Service", self)
         snapshot, assets = await self._agent_snapshot(agent)
         package = package or snapshot
         value = {
@@ -294,6 +305,7 @@ class DesktopRsiMixin:
         return value
 
     async def rsi_history(self, agent_id, user_id):
+        self = cast("DesktopV2Service", self)
         agent = await self._agent(agent_id, user_id)
         async with self._agent_update_lock:
             agent = await self._agent(agent_id, user_id)
@@ -308,10 +320,12 @@ class DesktopRsiMixin:
         }
 
     async def rsi_version(self, agent_id, version_id, user_id):
+        self = cast("DesktopV2Service", self)
         await self._agent(agent_id, user_id)
         return self.rsi_store.get(version_id, user_id, agent_id, "version")
 
     async def rsi_run(self, agent_id, run_id, user_id, *, after_sequence=0):
+        self = cast("DesktopV2Service", self)
         await self._agent(agent_id, user_id)
         value = self.rsi_store.get(run_id, user_id, agent_id, "run")
         path = self.runtime_root / "rsi" / run_id / "audit.jsonl"
@@ -354,6 +368,7 @@ class DesktopRsiMixin:
         return value
 
     async def start_rsi(self, agent_id, request: RsiStart, user_id):
+        self = cast("DesktopV2Service", self)
         if (
             not request.goal.strip()
             or not request.optimization_scope
@@ -425,6 +440,7 @@ class DesktopRsiMixin:
     async def _execute_rsi(
         self, agent, package, provider, internal_provider, request, value, assets
     ):
+        self = cast("DesktopV2Service", self)
         root = self.runtime_root / "rsi" / value["id"]
         root.mkdir(parents=True, exist_ok=True)
         os.chmod(root, 0o700)
@@ -726,6 +742,7 @@ class DesktopRsiMixin:
             save()
 
     async def cancel_rsi(self, agent_id, run_id, user_id):
+        self = cast("DesktopV2Service", self)
         await self._agent(agent_id, user_id)
         value = self.rsi_store.get(run_id, user_id, agent_id, "run")
         task = self._rsi_tasks.get(run_id)
@@ -738,6 +755,7 @@ class DesktopRsiMixin:
         return value
 
     async def apply_rsi_version(self, agent_id, version_id, request: RsiApply, user_id):
+        self = cast("DesktopV2Service", self)
         async with self._agent_update_lock:
             agent = await self._agent(agent_id, user_id)
             if fingerprint(agent) != request.expected_fingerprint:

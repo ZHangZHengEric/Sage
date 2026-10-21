@@ -16,7 +16,7 @@ class _ExecutionBoundDriver:
         self,
         *,
         runtime,
-        provider: ExecutionBindingProvider,
+        provider: ExecutionBindingProvider | None,
         run_id: str,
         agent_id: str,
         loop_builder,

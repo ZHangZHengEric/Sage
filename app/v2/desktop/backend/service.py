@@ -7,7 +7,11 @@ import json
 import logging
 from collections.abc import AsyncIterator
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
+
+from sagents.v2 import SAgentApplication
+from sagents.v2.runtime.session.access import AuthorizedSessionAccess
+from sagents.v2.memory import MemoryProvider
 
 
 from app.v2.desktop.backend.catalog import (
@@ -140,6 +144,7 @@ class DesktopV2Service(
         self._mcp_plugin_cache: dict[tuple[str, str], Any] = {}
         self._owned_observability = create_desktop_observability(self.runtime_root) if observability is None else None
         self.observability = observability if observability is not None else self._owned_observability
+        assert self.observability is not None
         self.observability_plugin_id = self.observability.plugin_id
         self.log_sink = self.observability.logs
         self.diagnostics = self.observability.diagnostics
@@ -166,12 +171,14 @@ class DesktopV2Service(
         settings = self._read_settings_sync()
         self.session_plugin_id = _DESKTOP_COMPONENT_DEFAULTS["session.store"]
         self._owns_session_store = session_store is None
-        self.session_store = (
-            session_store
-            if session_store is not None
-            else FilesystemSessionStore(self.runtime_root)
+        self._owned_session_store = (
+            FilesystemSessionStore(self.runtime_root) if session_store is None else None
         )
-        self._owned_session_store = self.session_store if self._owns_session_store else None
+        # The composed filesystem facade publishes SessionStore dynamically.
+        self.session_store: SessionStore = (
+            session_store if session_store is not None
+            else cast(SessionStore, self._owned_session_store)
+        )
         self._derived_state_store = derived_state_store
         self._run_environments = {}
         self.runtime = HarnessRuntime(self.session_store)
@@ -192,15 +199,15 @@ class DesktopV2Service(
                 _DESKTOP_COMPONENT_DEFAULTS["session-memory.provider"],
             ),
         )
-        self.application = None
+        self.application: SAgentApplication | None = None
         self.scheduler = None
         self.dispatcher = None
-        self.session_access = None
+        self.session_access: AuthorizedSessionAccess | None = None
         self.delegation_limiter = None
         self.dynamic_agent_roster = None
         self.summary_store = None
         self.activations = None
-        self.memory_provider = None
+        self.memory_provider: MemoryProvider | None = None
         self.memory_service = None
         self.session_memory_provider = None
         self.session_memory_service = None
@@ -250,7 +257,7 @@ class DesktopV2Service(
                 derived_state_store=(
                     self._derived_state_store
                     if self._derived_state_store is not None
-                    else self.session_store
+                    else cast(DerivedStateStore, self._owned_session_store)
                     if self._owns_session_store
                     else None
                 ),
@@ -264,6 +271,7 @@ class DesktopV2Service(
             try:
                 self.application = application
                 self._bind_process_runtime()
+                assert self.dispatcher is not None
                 await self.dispatcher.start()
                 self._start_studio_delivery_worker()
             except BaseException:
@@ -273,6 +281,7 @@ class DesktopV2Service(
 
     def _bind_process_runtime(self) -> None:
         application = self.application
+        assert application is not None
         self.runtime = application.runtime
         self.session_store = application.service("session.store")
         self.scheduler = application.service("execution.scheduler")
@@ -292,6 +301,7 @@ class DesktopV2Service(
             self._session_id_for_run,
         )
         self.memory_provider = application.service("memory.provider")
+        assert self.memory_provider is not None
         self.memory_service = MemoryService(
             self.memory_provider,
             scope_mode="agent",
@@ -309,6 +319,7 @@ class DesktopV2Service(
             "session-memory.provider", self.session_memory_plugin_id
         )
         self.observability = application.service("observability.provider")
+        assert self.observability is not None
         self.observability_plugin_id = self.observability.plugin_id
         self.log_sink = self.observability.logs
         self.diagnostics = self.observability.diagnostics
@@ -388,6 +399,7 @@ class DesktopV2Service(
         skipped_unreadable_sessions: set[str] | None = None,
     ):
         await self.start()
+        assert self.session_access is not None
         context = self._context(user_id)
         visible = []
         for value in await self.session_index.list():
@@ -440,6 +452,7 @@ class DesktopV2Service(
 
     async def delete_session(self, session_id: str, user_id: str) -> None:
         await self.start()
+        assert self.session_access is not None
         context = self._context(user_id)
         deleted_session_ids = {session_id}
         try:
@@ -465,6 +478,7 @@ class DesktopV2Service(
 
     async def session_snapshot(self, session_id: str, user_id: str) -> dict[str, Any]:
         await self.start()
+        assert self.session_access is not None
         context = self._context(user_id)
         session = await self.session_access.get_session(session_id, context)
         runs = await self.session_access.list_session_runs(session_id, context)
@@ -490,6 +504,7 @@ class DesktopV2Service(
 
     async def openui_surfaces(self, session_id: str, user_id: str):
         await self.start()
+        assert self.session_access is not None
         context = self._context(user_id)
         runs = await self.session_access.list_session_runs(session_id, context)
         # Rebuild from durable completed messages if a stream had no subscriber.
@@ -514,6 +529,7 @@ class DesktopV2Service(
 
     async def session_runs(self, session_id: str, user_id: str) -> list[dict[str, Any]]:
         await self.start()
+        assert self.session_access is not None
         values = await self.session_access.list_session_runs(
             session_id, self._context(user_id)
         )
@@ -523,6 +539,7 @@ class DesktopV2Service(
         """Project the authoritative descendant tree for presentation clients."""
 
         await self.start()
+        assert self.session_access is not None
         context = self._context(user_id)
         descendants = await self.session_access.list_descendant_sessions(
             session_id, context
@@ -568,6 +585,7 @@ class DesktopV2Service(
         """
 
         await self.start()
+        assert self.session_access is not None
         context = self._context(user_id)
         async for observation in self.session_access.subscribe_session_tree(
             session_id, context, include_root=False
@@ -606,6 +624,7 @@ class DesktopV2Service(
         self, session_id: str, user_id: str
     ) -> list[dict[str, Any]]:
         await self.start()
+        assert self.session_access is not None
         values = await self.session_access.list_session_commit_proposals(
             session_id, self._context(user_id)
         )
@@ -613,6 +632,8 @@ class DesktopV2Service(
 
     async def propose_session_commit(self, run_id: str, user_id: str):
         await self.start()
+        assert self.application is not None
+        assert self.session_access is not None
         context = self._context(user_id)
         run = await self.session_access.get_run(run_id, context)
         result = await self.application.entrypoint().propose_session_commit(
@@ -633,6 +654,8 @@ class DesktopV2Service(
         user_id: str,
     ):
         await self.start()
+        assert self.application is not None
+        assert self.session_access is not None
         context = self._context(user_id)
         proposal = await self.session_access.get_session_commit_proposal(
             proposal_id, context
@@ -653,6 +676,8 @@ class DesktopV2Service(
 
     async def reject_session_commit(self, proposal_id: str, reason: str, user_id: str):
         await self.start()
+        assert self.application is not None
+        assert self.session_access is not None
         context = self._context(user_id)
         proposal = await self.session_access.get_session_commit_proposal(
             proposal_id, context
@@ -679,6 +704,7 @@ class DesktopV2Service(
         limit: int | None = None,
     ) -> list[dict[str, Any]]:
         await self.start()
+        assert self.session_access is not None
         values = await self.session_access.read_session_events(
             session_id,
             self._context(user_id),
@@ -691,6 +717,8 @@ class DesktopV2Service(
         self, session_id: str, user_id: str, run_id: str | None = None
     ) -> list[dict[str, Any]]:
         await self.start()
+        assert self.observability is not None
+        assert self.session_access is not None
         context = self._context(user_id)
         await self.session_access.get_session(session_id, context)
         if run_id is not None:
@@ -713,6 +741,8 @@ class DesktopV2Service(
         self, session_id: str, run_id: str, request_id: str, user_id: str
     ) -> dict[str, Any]:
         await self.start()
+        assert self.observability is not None
+        assert self.session_access is not None
         run = await self.session_access.get_run(run_id, self._context(user_id))
         if run.session_id != session_id:
             raise ValueError(f"run {run_id} does not belong to {session_id}")

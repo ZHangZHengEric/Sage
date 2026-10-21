@@ -85,7 +85,7 @@ async def load_catalog_agent(host, command, user_id):
     catalog = await service.catalog.editor_catalog(user_id) if frozen is not None else await service.catalog.get_for_run(user_id, command.agent_id)
     if frozen is None:
         frozen = await _composition(service, command, catalog, user_id=user_id)
-    bundle = frozen.package or frozen.agent.package
+    bundle = frozen.package or frozen.agent.package_bundle
     manifest = bundle.resolved_manifest() if frozen.package is not None else server_v2_run_manifest(
         service.settings, agent=frozen.agent, registry=getattr(service.catalog, "extensions", None),
         skills=tuple(record.name for record in frozen.skills),

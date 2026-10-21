@@ -9,6 +9,9 @@ real sandbox mount port and never falls back to writable copies or symlinks.
 from __future__ import annotations
 
 import asyncio
+from abc import ABC, abstractmethod
+from collections.abc import Awaitable, Callable
+from typing import Any, cast
 import hashlib
 import json
 import posixpath
@@ -17,7 +20,7 @@ from weakref import WeakValueDictionary
 from sagents.v2.contracts.errors import ErrorCategory
 from sagents.v2.runtime.execution.sandbox import FileOperation, OperationIntent
 from sagents.v2.skill.bundles import files_digest, skill_error
-from sagents.v2.skill.contracts import SkillBundle, SkillDescriptor
+from sagents.v2.skill.contracts import SkillBundle, SkillDescriptor, LoadedSkill
 from sagents.v2.skill.plugins._shared.workspace import SandboxSkillWorkspaceBase
 
 
@@ -31,7 +34,15 @@ def _hashes(files):
     }
 
 
-class _StableSkillWorkspace(SandboxSkillWorkspaceBase):
+class _StableSkillWorkspace(SandboxSkillWorkspaceBase, ABC):
+    @abstractmethod
+    async def resolve_bundle(self, bundle: SkillBundle, *, run_id: str, destination: str) -> SkillBundle:
+        raise NotImplementedError
+
+    @abstractmethod
+    async def materialize(self, bundle: SkillBundle, *, run_id: str, destination: str) -> LoadedSkill:
+        raise NotImplementedError
+
     refresh_on_load = True
 
     def __init__(
@@ -430,7 +441,7 @@ class ReadonlyMountSkillWorkspace(_StableSkillWorkspace):
                 intent=intent,
                 allowed_operations=frozenset({intent.operation}),
             )
-            path = await mount(
+            path = await cast(Callable[..., Awaitable[Any]], mount)(
                 bundle,
                 destination=destination,
                 run_id=run_id,

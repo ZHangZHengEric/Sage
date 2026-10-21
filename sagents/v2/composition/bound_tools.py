@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, replace
+from typing import Protocol
 
 from sagents.v2.goal import GoalStateService
 from sagents.v2.session_memory import SessionMemoryService
@@ -22,18 +23,25 @@ from sagents.v2.tool import ToolCatalog, ToolExecutor, ToolSelectionPolicy
 from sagents.v2.tool.official import OfficialToolRuntime
 
 
+class BoundToolScope(Protocol):
+    @property
+    def provider_scopes(self) -> tuple[ExtensionScopeHandle, ...]: ...
+
+    async def close(self) -> None: ...
+
+
 @dataclass(frozen=True)
 class BoundTools:
     catalog: ToolCatalog
     executor: ToolExecutor
     runtime: OfficialToolRuntime
-    scope: ExtensionScopeHandle | None
+    scope: BoundToolScope | None
 
 
 @dataclass(frozen=True)
 class BoundToolComposer:
     open_tools: Callable[
-        ..., Awaitable[tuple[ToolCatalog, ToolExecutor, ExtensionScopeHandle | None]]
+        ..., Awaitable[tuple[ToolCatalog, ToolExecutor, BoundToolScope | None, OfficialToolRuntime]]
     ]
     workspace_initializer: WorkspaceInitializer
     artifact_store: ArtifactStore

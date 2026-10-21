@@ -223,14 +223,14 @@ class DefaultAgentStepRequestBuilder:
 
 
 def tools_for_invocation_mode(
-    tools: tuple[ToolDefinition, ...], invocation_mode: str
+    tools: tuple[ToolDefinition, ...], invocation_mode: str | None
 ) -> tuple[ToolDefinition, ...]:
     """Apply the same mode gate during Run preparation and every model step."""
 
     visible_mode_tools = {
         "plan": {"goal_submit"},
         "goal": {"goal_submit", "goal_complete"},
-    }.get(invocation_mode, set())
+    }.get(invocation_mode, set()) if invocation_mode is not None else set()
     mode_tools = {"goal_submit", "goal_complete"}
     return tuple(
         tool

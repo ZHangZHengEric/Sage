@@ -10,7 +10,7 @@ from sagents.v2.package.manifest.root import (
     ManifestMetadata,
     SageManifest,
 )
-from sagents.v2.package.manifest.runtime import CapabilitySelection, RuntimeConfig
+from sagents.v2.package.manifest.runtime import CapabilityBinding, CapabilitySelection, RuntimeConfig
 
 from app.v2.server.config.settings import ServerSettings
 from app.v2.server.catalog.records import AgentRecord
@@ -48,7 +48,7 @@ def server_v2_run_manifest(
             tools = (*agent.tools, *agent.external_tools)
     selected_tools = list(tools) if agent is not None or tools else default_agent_tools()
     host = server_v2_manifest(settings)
-    base = agent.package.resolved_manifest() if agent is not None else host
+    base = agent.package_bundle.resolved_manifest() if agent is not None else host
     source = base.agents.get(agent_id) or next(iter(base.agents.values()))
     composed = source.model_copy(
         update={
@@ -57,7 +57,7 @@ def server_v2_run_manifest(
             if agent is not None
             else source.description,
             "skills": tuple(name for name in skills if name in source.skills)
-            if agent is not None and agent.package.dependencies else tuple(skills),
+            if agent is not None and agent.package_bundle.dependencies else tuple(skills),
             "tools": tuple(selected_tools),
             "tool_approval": agent.tool_approval
             if agent is not None
@@ -161,10 +161,10 @@ def _required_guarantees(
 
 def _runtime_capabilities(
     settings: ServerSettings | None,
-) -> dict[str, CapabilitySelection]:
+) -> dict[str, CapabilityBinding]:
     from app.v2.server.catalog.plugins import AGENT_DEFAULTS, DEFAULT_CONFIG
 
-    capabilities: dict[str, CapabilitySelection] = {
+    capabilities: dict[str, CapabilityBinding] = {
         **{key: CapabilitySelection(plugin=plugin, config=DEFAULT_CONFIG.get(key, {}))
            for key, plugin in AGENT_DEFAULTS.items()},
         # Pin the deployed product choices rather than inheriting SDK defaults
@@ -235,6 +235,7 @@ def _runtime_capabilities(
             for key, value in settings.plugin_overrides.items()
         })
         observation = capabilities["observability.provider"]
+        assert isinstance(observation, CapabilitySelection)
         if observation.plugin in {f"sage.observability.{backend}" for backend in ("local", "noop", "otlp", "langfuse", "phoenix")}:
             defaults = _observation_selection(settings, backend=observation.plugin.removeprefix("sage.observability."))
             capabilities["observability.provider"] = observation.model_copy(update={

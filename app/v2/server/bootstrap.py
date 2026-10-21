@@ -3,6 +3,9 @@ from __future__ import annotations
 import asyncio
 from dataclasses import replace
 from functools import cached_property
+from typing import Literal
+from sagents.v2.package.manifest.runtime import CapabilityBinding, CapabilitySelection
+from sagents.v2.runtime.extensions import ExtensionScope
 
 from sagents.v2.application import SAgentApplication
 from sagents.v2.builder import SAgentBuilder
@@ -200,15 +203,17 @@ class ServerHost:
             self.execution.model_pool = host_models
             from app.v2.server.runtime.sdk_plugins import server_registrations, service_registration, service_selection, SCHEDULER_CONFIG_SCHEMA
             builder = SAgentBuilder()
-            choices = {}
+            choices: dict[str, CapabilityBinding] = {}
             manifest = server_v2_manifest(self.settings)
-            for capability, value, ownership in (
+            services: tuple[tuple[str, object, Literal["owned", "borrowed"]], ...] = (
                 ("execution.model-budget", model_budget, "borrowed"),
                 ("execution.scheduler", scheduler, "owned"),
                 ("server.model-clients", host_models, "owned"),
-            ):
+            )
+            for capability, value, ownership in services:
                 scheduler_port = capability == "execution.scheduler"
-                if scheduler_port and manifest.runtime.capabilities[capability].plugin == "sage.scheduler.redis-distributed":
+                selection = manifest.runtime.selections(capability)[0] if scheduler_port else None
+                if selection is not None and selection.plugin == "sage.scheduler.redis-distributed":
                     # Let the registered plugin own shared scheduling and its
                     # lifecycle, rather than replacing it with a local object.
                     continue
@@ -216,7 +221,7 @@ class ServerHost:
                     dependencies=("server.model-clients",) if scheduler_port else (),
                     config_schema=SCHEDULER_CONFIG_SCHEMA if scheduler_port else None))
                 choices[capability] = service_selection(capability, config=
-                    manifest.runtime.capabilities[capability].config if scheduler_port else None)
+                    selection.config if selection is not None else None)
             for registration in (*self._registrations, *server_registrations(self)):
                 builder.register(registration)
             from app.v2.server.runtime.official import file_sandbox_registrations
@@ -224,10 +229,9 @@ class ServerHost:
                 builder.register(registration)
                 capability = registration.descriptor.provides[0].capability
                 choices[capability] = service_selection(capability)
-            from sagents.v2.package.manifest.runtime import CapabilitySelection
             choices["interface.protocol-adapter"] = (
-                CapabilitySelection(plugin="sage.protocol.ag-ui", name="ag-ui", scope="process", config={"enable_sage_extensions": True}),
-                CapabilitySelection(plugin="sage.protocol.a2a", name="a2a", scope="process"),
+                CapabilitySelection(plugin="sage.protocol.ag-ui", name="ag-ui", scope=ExtensionScope.PROCESS, config={"enable_sage_extensions": True}),
+                CapabilitySelection(plugin="sage.protocol.a2a", name="a2a", scope=ExtensionScope.PROCESS),
             )
             manifest = server_v2_manifest(self.settings)
             runtime = manifest.runtime.model_copy(update={

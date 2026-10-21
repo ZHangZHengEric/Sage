@@ -54,7 +54,7 @@ class BuiltinAgentModeFactory:
             version="2.0.0",
             start=node_id,
             nodes=(FlowNode(id=node_id, type="agent", agent=descriptor.agent_id),),
-            edges=(FlowEdge(**{"from": node_id, "to": "end"}),),
+            edges=(FlowEdge.model_validate({"from": node_id, "to": "end"}),),
         )
         runner = NativeAgentFlowNode(
             runtime=self.runtime,

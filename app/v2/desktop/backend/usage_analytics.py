@@ -52,7 +52,7 @@ async def build_usage_overview(
         }
         for key in day_keys
     }
-    totals = {
+    totals: dict[str, Any] = {
         "input_tokens": 0,
         "output_tokens": 0,
         "cached_input_tokens": 0,

@@ -4,6 +4,9 @@
 from __future__ import annotations
 
 from pathlib import Path
+from sagents.v2.runtime.extensions.pool import ApplicationScopePool
+from sagents.v2.runtime.extensions.scope import ExtensionScopeHandle
+from sagents.v2.package.manifest.resolver import CompositionResolver
 
 from sagents.v2.application import (
     SAgentApplication,
@@ -27,6 +30,10 @@ class SAgentBuilder:
     A host may supply a revision store to upgrade its own persisted snapshots.
     New package inputs always use the current manifest contract.
     """
+
+    _scope_pool: ApplicationScopePool
+    _shared_process_handles: tuple[ExtensionScopeHandle, ...]
+    _model_resolver: CompositionResolver
 
     def __init__(self, *, revision_store: AgentRevisionStore | None = None) -> None:
         self._registry = builtin_extension_registry()

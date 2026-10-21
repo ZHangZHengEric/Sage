@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Literal, cast
+
 from sagents.v2.runtime.execution.ownership import deferred_work_scope
 
 import json
@@ -58,9 +60,9 @@ class NativeAgentFlowNode:
                     task_name=str(context.config.get("task_name") or context.node_id),
                     original_task=self._input_text(command.input),
                     content=task_content,
-                    flow_boundary=str(
+                    flow_boundary=cast(Literal["complete_node", "continue_node"], str(
                         context.config.get("flow_boundary") or "complete_node"
-                    ),
+                    )),
                     invocation_mode=AgentInvocationMode.AGENT_AS_TOOL,
                 ),
                 parent_run_id=context.run_id,
@@ -75,6 +77,7 @@ class NativeAgentFlowNode:
             "content": [value.model_dump(mode="json") for value in result.content],
         }
         if result.outcome == RunState.RUNNING:
+            assert result.child_run_id is not None
             checkpoint = await self.runtime.session_store.get_latest_checkpoint(
                 result.child_run_id
             )

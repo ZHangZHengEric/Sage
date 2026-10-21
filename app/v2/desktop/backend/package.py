@@ -14,7 +14,7 @@ from sagents.v2.package.manifest.agents import (
     Instructions,
 )
 from sagents.v2.package.manifest.root import ManifestMetadata, SageManifest
-from sagents.v2.package.manifest.runtime import CapabilitySelection, RuntimeConfig
+from sagents.v2.package.manifest.runtime import CapabilityBinding, CapabilitySelection, RuntimeConfig
 
 
 DESKTOP_COMPONENTS = {
@@ -198,16 +198,17 @@ def _runtime_capabilities(
     selections: Mapping[str, str],
     configs: Mapping[str, Mapping[str, Any]],
     language: str,
-) -> dict[str, CapabilitySelection]:
+) -> dict[str, CapabilityBinding]:
     from sagents.v2.package.manifest.runtime import REMOVED_CAPABILITIES
     invalid = REMOVED_CAPABILITIES.intersection(selections) | REMOVED_CAPABILITIES.intersection(configs)
     if invalid:
         raise ValueError(f"removed capability configuration: {', '.join(sorted(invalid))}")
+    runtime = default_runtime(session_root)
     paths = {
-        key: selection.config
-        for key, selection in default_runtime(session_root).capabilities.items()
+        key: runtime.selections(key)[0].config
+        for key in runtime.capabilities
     }
-    capabilities: dict[str, CapabilitySelection] = {}
+    capabilities: dict[str, CapabilityBinding] = {}
     for capability in _MANIFEST_CAPABILITIES:
         plugin_id = stable_component_id(
             capability,

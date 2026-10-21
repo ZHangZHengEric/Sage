@@ -499,7 +499,7 @@ class GeminiGenerateContentModelProvider:
                 system.extend(self._part(block) for block in message.content)
                 continue
             if message.role == "tool":
-                original = call_map.get(message.tool_call_id)
+                original = call_map.get(message.tool_call_id) if message.tool_call_id else None
                 if original is None:
                     raise self._error(
                         "model.tool_call_missing",

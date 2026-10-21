@@ -68,8 +68,8 @@ async def initialize_process(catalog):
         only_capabilities=frozenset(services))
     if not capabilities.supports_fencing or not capabilities.supports_atomic_fenced_mutations:
         raise ValueError("execution.scheduler must support atomic fenced mutations")
-    values = (_selection(runtime, "execution.scheduler").config
-              if _selection(runtime, "execution.scheduler") is not None else {})
+    selection = _selection(runtime, "execution.scheduler")
+    values = selection.config if selection is not None else {}
     dispatcher = LocalWorkerDispatcher(scheduler,
         max_concurrent_runs=int(values.get("max_concurrent_runs", 8)),
         max_concurrent_runs_per_tenant=int(values.get("max_concurrent_runs_per_tenant", 2)),

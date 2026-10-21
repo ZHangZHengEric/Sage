@@ -156,7 +156,9 @@ def prepare_session_export(session_id: str, run_ids: set[str], evidence: dict | 
     """Package observation evidence; the Run allowlist contains no business state."""
     from sagents.v2.runtime.observability import redact_evidence as redact
 
-    evidence = redact(evidence or {"models": [], "logs": [], "unavailable": True})
+    redacted = redact(evidence or {"models": [], "logs": [], "unavailable": True})
+    assert isinstance(redacted, dict)
+    evidence = redacted
     pending_writes = bool(evidence.get("pending_writes"))
     name = quote(session_id, safe="")
     if name in {"", ".", ".."}:

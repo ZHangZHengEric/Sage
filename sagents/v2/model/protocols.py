@@ -8,7 +8,7 @@ the extension resolver has selected its stable plugin ID.
 from __future__ import annotations
 
 from enum import Enum
-from typing import Any
+from typing import Any, Literal, cast
 
 from pydantic import Field
 
@@ -221,7 +221,7 @@ def create_registered_model_provider(
         config = OpenAIChatCompletionsConfig(
             **common,
             reasoning_effort=route.request.reasoning_effort,
-            max_output_tokens_field=maximum_field,
+            max_output_tokens_field=cast(Literal["auto", "max_tokens", "max_completion_tokens"], maximum_field),
             reasoning_parameter_fallback=bool(
                 extra.pop("reasoning_parameter_fallback", False)
             ),

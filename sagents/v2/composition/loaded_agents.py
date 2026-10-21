@@ -8,7 +8,23 @@ from dataclasses import dataclass, field
 from time import monotonic
 from functools import wraps
 from contextlib import asynccontextmanager
-from typing import Any
+from pathlib import Path
+from typing import Any, TYPE_CHECKING
+from collections.abc import AsyncIterator
+
+from sagents.v2.package.manifest.resolver import ResolvedSageManifest
+from sagents.v2.package.manifest.runtime import RuntimeConfig
+from sagents.v2.model.catalog import ModelCatalogConfig
+from sagents.v2.interfaces.protocols.contracts import ProtocolAdapter
+from sagents.v2.composition.contracts import ResolvedApplicationPlan
+from sagents.v2.runtime.extensions.scope import ExtensionScopeHandle
+from sagents.v2.runtime.kernel import HarnessRuntime
+
+if TYPE_CHECKING:
+    from sagents.v2.application import SAgentApplication
+    from sagents.v2.sagent import SAgent
+    from sagents.v2.builder import SAgentBuilder
+    from sagents.v2.composition.assembler import ApplicationAssembler
 from weakref import WeakValueDictionary
 
 from sagents.v2.contracts.commands import StartRun
@@ -47,10 +63,10 @@ class LoadedAgent:
     composition_hash: str
     _application: Any = field(repr=False)
     _owner: LoadedAgents = field(repr=False)
-    _resolved: object = field(repr=False)
+    _resolved: ResolvedSageManifest = field(repr=False)
 
     @property
-    def resolved_plan(self):
+    def resolved_plan(self) -> ResolvedApplicationPlan:
         """Inspect this revision rather than the App's initial process plan."""
         return self._application.resolved_plan
 
@@ -184,7 +200,10 @@ class LoadedAgents:
     execution scopes, while subsequent revisions borrow durable process stores.
     """
 
-    def __init__(self, application, builder, runtime, tenant_id, models):
+    process_runtime: HarnessRuntime
+    process_assembler: ApplicationAssembler
+
+    def __init__(self, application: SAgentApplication, builder: SAgentBuilder, runtime: RuntimeConfig, tenant_id: str | None, models: ModelCatalogConfig):
         self.application = application
         self.builder = builder
         self.runtime = runtime
@@ -193,9 +212,9 @@ class LoadedAgents:
         self.model_resolver = CompositionResolver(models=models)
         self.sources = {}
         self.tenant_id = tenant_id
-        self.root = None
-        self.current = {}
-        self.revisions = {}
+        self.root: SAgentApplication | None = None
+        self.current: dict[str, LoadedAgent] = {}
+        self.revisions: dict[tuple[str, str], LoadedAgent] = {}
         self.lock = asyncio.Lock()
         self._load_locks = {}
         self._last_used = {}
@@ -203,7 +222,7 @@ class LoadedAgents:
         self._prune_lock = asyncio.Lock()
         self._retiring = {}
         self._reaper = None
-        self._exported_agents = WeakValueDictionary()
+        self._exported_agents: WeakValueDictionary[LoadedAgent, SAgent] = WeakValueDictionary()
         self.max_idle_revisions = 64
         self.revision_idle_seconds = 300.0
         self.entrypoint = ApplicationEntrypoint(self)
@@ -220,10 +239,56 @@ class LoadedAgents:
         self.recovery_issues: tuple[StartupRecoveryIssue, ...] = ()
         from sagents.v2.runtime.extensions.pool import ApplicationScopePool
         self.scope_pool = ApplicationScopePool()
-        self.process_handles = ()
+        self.process_handles: tuple[ExtensionScopeHandle, ...] = ()
         self.process_dispatcher = None
 
-    def exported(self, agent):
+    async def initialize_workspace(self, path: str | Path) -> Any:
+        from pathlib import Path
+        from sagents.v2.runtime.extensions import ExtensionHost
+        handles = list(self.process_handles)
+        host = ExtensionHost(self.builder._registry,
+            built_in_only=self.runtime.plugin_trust_policy == "built_in_only")
+        initializer = await self.process_assembler._create_capability(
+            host, handles[0], handles, self.runtime, (),
+            capability="workspace.initializer", default_plugin="sage.workspace.initializer.claw",
+        )
+        import inspect
+        result = initializer.initialize(Path(path).expanduser().resolve())
+        return await result if inspect.isawaitable(result) else result
+
+    def validate_runtime(self, runtime: RuntimeConfig) -> None:
+        self.builder._registry.validate_runtime(runtime)
+
+    def set_runtime(self, runtime: RuntimeConfig) -> None:
+        self.runtime = runtime
+        self.process_assembler._runtime_config = runtime
+
+    async def run_configuration(self, run_id: str, context: RequestContext) -> dict[str, Any]:
+        from dataclasses import asdict
+        from copy import deepcopy
+
+        agent = await self.application.agent_for_run(run_id, context)
+        command = await self.application.service("session.access").get_start_command(run_id, context)
+        manifest = agent._resolved
+        assert manifest.entrypoint_agent is not None
+        definition = (manifest.agents.get(command.agent_id) if command.agent_id else None) or manifest.agents[manifest.entrypoint_agent]
+        return deepcopy({
+            "run_id": run_id, "parent_run_id": command.parent_run_id,
+            "agent_id": definition.source_package_id or agent.id,
+            "execution_agent_id": command.agent_id, "agent_version": agent.version,
+            "source_agent_id": definition.source_agent_id,
+            "package_version": definition.source_package_version,
+            "package_id": definition.source_package_id or agent.package_id,
+            "graph_package_id": agent.package_id, "composition_hash": agent.composition_hash,
+            "runtime": agent._resolved.runtime.model_dump(mode="json"),
+            "plugins": [asdict(provider) for provider in agent.resolved_plan.providers],
+            "agent": definition.model_dump(mode="json"),
+            "agents": {key: value.model_dump(mode="json") for key, value in agent._resolved.agents.items()},
+            "execution": command.config.execution_snapshot.model_dump(mode="json")
+                if command.config.execution_snapshot is not None else None,
+        })
+
+    def exported(self, agent: LoadedAgent) -> SAgent:
         from sagents.v2.composition.application_agent import ApplicationAgent
         facade = self._exported_agents.get(agent)
         if facade is None:
@@ -231,7 +296,10 @@ class LoadedAgents:
             self._exported_agents[agent] = facade
         return facade
 
-    def implementation(self, agent):
+    def adapter(self, agent: LoadedAgent, interface: str) -> ProtocolAdapter | None:
+        return agent._application._adapters.get(interface)
+
+    def implementation(self, agent: LoadedAgent):
         self.application._ensure_open()
         if not isinstance(agent, LoadedAgent) or agent._owner is not self:
             raise ValueError("Agent belongs to a different application")
@@ -245,7 +313,11 @@ class LoadedAgents:
     def selected_runtime(self, runtime=None):
         from sagents.v2.composition.inputs import runtime_input
         from sagents.v2.composition.defaults import effective_runtime
-        selected = self.runtime.model_copy(deep=True) if runtime is None else effective_runtime(runtime_input(runtime))
+        selected = self.runtime.model_copy(deep=True)
+        if runtime is not None:
+            parsed = runtime_input(runtime)
+            assert parsed is not None
+            selected = effective_runtime(parsed)
         self.builder._registry.validate_runtime(selected)
         if selected.state_root != self.runtime.state_root:
             raise ValueError("state_root is an App identity; create a new App to change it")
@@ -257,7 +329,7 @@ class LoadedAgents:
             raise ValueError("security profile is an App identity; create a new App to change it")
         return selected
 
-    async def load(self, *args, **kwargs):
+    async def load(self, *args: Any, **kwargs: Any) -> LoadedAgent:
         async with self.application._assembly_operation():
             return await self._load(*args, **kwargs)
 
@@ -270,7 +342,7 @@ class LoadedAgents:
         selected_models = self.models.model_copy(deep=True) if models is None else model_catalog_input(models)
         source = None
         if historical:
-            resolved = package.model_copy(deep=True)
+            resolved = ResolvedSageManifest.model_validate(package).model_copy(deep=True)
             selected_models = model_catalog_input({"models": resolved.model_routes, "credentials": resolved.credentials})
             if (resolved.runtime.plugin_trust_policy != self.runtime.plugin_trust_policy
                     or resolved.runtime.deployment_profile != self.runtime.deployment_profile):
@@ -486,7 +558,7 @@ class LoadedAgents:
         self._retiring.pop(key, None)
 
     @asynccontextmanager
-    async def pin(self, agent):
+    async def pin(self, agent: LoadedAgent) -> AsyncIterator[LoadedAgent]:
         agent = await self.restored(agent)
         self._users[agent] = self._users.get(agent, 0) + 1
         try:
@@ -499,7 +571,7 @@ class LoadedAgents:
                 self._users.pop(agent, None)
             self._last_used[(agent.package_id, agent.version)] = monotonic()
 
-    async def restored(self, agent):
+    async def restored(self, agent: LoadedAgent) -> LoadedAgent:
         if not isinstance(agent, LoadedAgent) or agent._owner is not self:
             raise ValueError("Agent belongs to a different application")
         key = (agent.package_id, agent.version)
@@ -508,7 +580,7 @@ class LoadedAgents:
             return self.revisions[key]
         return await self.load(agent._resolved, historical=True, expected_hash=agent.composition_hash)
 
-    async def for_run(self, run_id, context):
+    async def for_run(self, run_id: str, context: RequestContext) -> LoadedAgent:
         run = await self.application.service("session.access").get_run(run_id, context)
         for handle in self.revisions.values():
             if handle.composition_hash == run.resolved_spec_hash:

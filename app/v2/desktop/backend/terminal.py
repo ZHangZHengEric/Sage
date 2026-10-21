@@ -17,7 +17,7 @@ import shutil
 import signal
 import struct
 import subprocess
-from typing import AsyncIterator, Callable
+from typing import AsyncIterator, Callable, cast
 from uuid import uuid4
 
 if os.name == "posix":
@@ -181,7 +181,7 @@ class TerminalSession:
             maxsize=_LIVE_SUBSCRIBER_EVENTS
         )
         backlog = [
-            event for event in self._history if int(event["sequence"]) > after_sequence
+            event for event in self._history if int(cast(int, event["sequence"])) > after_sequence
         ]
         terminal_in_backlog = any(
             event["type"] in {"terminal.exited", "terminal.failed"} for event in backlog

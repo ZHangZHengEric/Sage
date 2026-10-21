@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import Protocol
+from typing import Protocol, cast
 
-from sqlalchemy import select, update
+from sqlalchemy import CursorResult, select, update
 from sqlalchemy.exc import IntegrityError
 
 from app.v2.server.database import Database
@@ -120,7 +120,7 @@ class DatabaseSkillStore:
                              status="active", updated_at=now)
                     .execution_options(synchronize_session=False)
                 )
-                if changed.rowcount != 1:
+                if cast(CursorResult, changed).rowcount != 1:
                     raise import_error("技能已被其他操作更新，请重新预览", conflict=True)
                 skill_id = existing.skill_id
             else:

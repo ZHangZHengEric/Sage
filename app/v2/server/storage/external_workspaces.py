@@ -39,6 +39,7 @@ def _directory(fd: int, parts: tuple[str, ...], paths: ServerPaths) -> int:
                 pass
             child = os.open(part, flags, dir_fd=current)
             if paths.linux_execution_uid is not None and os.geteuid() == 0:
+                assert paths.linux_execution_gid is not None
                 os.fchown(child, paths.linux_execution_uid, paths.linux_execution_gid)
             os.close(current)
             current = child
@@ -102,6 +103,7 @@ def import_workspace_files(paths: ServerPaths, tenant_id: str, agent_id: str,
                     continue
                 try:
                     if paths.linux_execution_uid is not None and os.geteuid() == 0:
+                        assert paths.linux_execution_gid is not None
                         os.fchown(file_fd, paths.linux_execution_uid, paths.linux_execution_gid)
                     with os.fdopen(os.dup(file_fd), "wb") as stream:
                         stream.write(data)

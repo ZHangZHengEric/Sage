@@ -25,8 +25,8 @@ class AgentRosterContextProvider:
         self.allow_delegation = allow_delegation
         self.session_store = session_store
 
-    async def segments(self, request, *, run_id: str | None = None):
-        language = run_prompt_language(request.config.metadata)
+    async def segments(self, command, *, run_id: str | None = None):
+        language = run_prompt_language(command.config.metadata)
         if not self.allow_delegation:
             return (
                 ContextSegment(

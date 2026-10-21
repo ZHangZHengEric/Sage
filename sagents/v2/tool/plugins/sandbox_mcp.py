@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from contextlib import asynccontextmanager
+from sagents.v2.runtime.execution.sandbox.provider import SandboxHandle
 
 from sagents.v2.contracts.common import new_id
 from sagents.v2.runtime.execution.sandbox.contracts import (
@@ -14,7 +15,7 @@ from sagents.v2.tool.plugins._shared.mcp_session import sdk_session
 
 
 class SandboxMcpSessionFactory:
-    def __init__(self, sandbox, issuer, *, workspace_root="/workspace"):
+    def __init__(self, sandbox: SandboxHandle, issuer, *, workspace_root="/workspace"):
         self.sandbox = sandbox
         self.issuer = issuer
         self.workspace_root = workspace_root
@@ -58,7 +59,7 @@ class SandboxMcpSessionFactory:
             intent=intent,
             allowed_operations=frozenset({"process.run"}),
         )
-        async with opener(request, intent=intent, grant=grant) as process:
+        async with self.sandbox.process.open_process(request, intent=intent, grant=grant) as process:
             reader_send, reader = anyio.create_memory_object_stream(0)
             writer, writer_receive = anyio.create_memory_object_stream(0)
 

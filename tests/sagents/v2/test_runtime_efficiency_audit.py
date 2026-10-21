@@ -11,6 +11,8 @@ from sagents.v2.agent.stream_batcher import StreamEventBatcher
 from sagents.v2.context import ContextProjection
 from sagents.v2.contracts.events import ItemEventData
 from sagents.v2.contracts.items import TextBlock
+from sagents.v2.contracts.common import utc_now
+from sagents.v2.contracts.run_state import RunSnapshot, RunState, SessionConcurrencyMode
 from sagents.v2.model import ModelMessage
 from sagents.v2.runtime.session.contracts import EventDraft
 from sagents.v2.session_memory import (
@@ -30,6 +32,54 @@ def record(index, content="deployment canary release"):
         content=content,
         position=index,
     )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("event_type", ["message", "reasoning"])
+async def test_stream_start_without_delta_preserves_following_text(event_type):
+    now = utc_now()
+    run = RunSnapshot(
+        session_id="session",
+        run_id="run",
+        state=RunState.RUNNING,
+        revision=0,
+        last_run_sequence=0,
+        concurrency_mode=SessionConcurrencyMode.SERIAL,
+        base_session_revision=0,
+        base_session_sequence=0,
+        accepted_session_revision=1,
+        resolved_spec_hash="sha256:test",
+        created_at=now,
+        updated_at=now,
+    )
+    committed = []
+
+    async def commit(current, drafts):
+        committed.extend(drafts)
+        return current
+
+    batcher = StreamEventBatcher(run, commit, max_delay_seconds=100)
+    try:
+        await batcher.add(EventDraft(
+            type=f"{event_type}.started",
+            item_id="item",
+            data=ItemEventData(operation="started"),
+        ))
+        for delta in ("Hello", " ", "\n", "世界"):
+            await batcher.add(EventDraft(
+                type=f"{event_type}.delta",
+                item_id="item",
+                data=ItemEventData(operation="delta", delta=delta),
+            ))
+    finally:
+        await batcher.flush()
+
+    assert [draft.type for draft in committed] == [
+        f"{event_type}.started", f"{event_type}.delta",
+    ]
+    started, delta = (draft.data for draft in committed)
+    assert isinstance(started, ItemEventData) and started.delta is None
+    assert isinstance(delta, ItemEventData) and delta.delta == "Hello \n世界"
 
 
 @pytest.mark.asyncio

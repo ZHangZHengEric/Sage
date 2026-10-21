@@ -114,7 +114,7 @@ class LoopChildRunExecutor:
             parent_run_id
         )
         parent_metadata = parent_command.config.metadata
-        inherited_keys = list(_INHERITED_RUNTIME_METADATA)
+        inherited_keys: list[str] = list(_INHERITED_RUNTIME_METADATA)
         if workspace_policy == WorkspaceSharingPolicy.SHARED_PARENT:
             inherited_keys.extend(_SHARED_WORKSPACE_METADATA)
         metadata = {

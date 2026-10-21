@@ -2,6 +2,11 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    from sagents.v2.composition.loaded_agents import ApplicationEntrypoint
+
 import asyncio
 import hashlib
 import json
@@ -503,7 +508,7 @@ class AgentManagementService:
             # Recheck current host resources, even for a cached Application.
             await self._validate(bundle, context, readiness=True)
         app = await self._application(bundle, agent_id, context)
-        native = app.entrypoint()
+        native = cast("ApplicationEntrypoint", app.entrypoint())
         loaded = next(a for a in app.loaded_agents if a.package_id == bundle.manifest.metadata.id)
         # Native idempotency survives a crash between admission and handle indexing.
         key = hashlib.sha256(f"{owner}:{operation}".encode()).hexdigest()
@@ -679,7 +684,7 @@ class AgentManagementService:
         bundle = await self.get(record["ref"], context)
         await self.authorize(action, bundle, context)
         app = await self._application(bundle, record["agent"], context)
-        native = app.entrypoint()
+        native = cast("ApplicationEntrypoint", app.entrypoint())
         run = await native.runtime.get_run(record["handle"]["run_id"])
         if action == "cancel":
             receipt = await native.runtime.cancel_run(

@@ -2,9 +2,13 @@
 from __future__ import annotations
 import hashlib
 import json
+from collections.abc import Collection, Sequence
+from sagents.v2.agent.state import AgentLoopCheckpointState
+from sagents.v2.model.contracts import ModelResponse
+from sagents.v2.tool.contracts import ToolExecutionResult
 
 
-def inspection_progress(state, response, results, read_tools):
+def inspection_progress(state: AgentLoopCheckpointState, response: ModelResponse, results: Sequence[ToolExecutionResult], read_tools: Collection[str]) -> AgentLoopCheckpointState:
     if not response.tool_calls:
         return state
     seen = list(state.inspection_evidence)
@@ -39,7 +43,7 @@ def inspection_progress(state, response, results, read_tools):
     })
 
 
-def repeated_cycles(values):
+def repeated_cycles(values: Sequence[str]) -> int:
     for period in range(1, min(6, len(values) // 3) + 1):
         pattern = values[-period:]
         count = 1

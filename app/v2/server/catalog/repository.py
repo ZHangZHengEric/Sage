@@ -410,7 +410,7 @@ def _agent_record(row: AgentRow, *, package: AgentPackageBundle) -> AgentRecord:
         id=row.id,
         package=package,
         name=package.manifest.metadata.name,
-        execution_policy=row.execution_policy,
+        execution_policy=ExecutionPolicy.model_validate(row.execution_policy),
     )
 
 

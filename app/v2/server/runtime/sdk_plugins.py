@@ -1,15 +1,16 @@
 """Server capability plugins; the SDK owns all Agent execution and recovery."""
 from __future__ import annotations
+from typing import Literal
 
 from sagents.v2.package.manifest.models import ModelRoute
-from sagents.v2.package.manifest.runtime import CapabilitySelection
+from sagents.v2.package.manifest.runtime import CapabilityBinding, CapabilitySelection
 from sagents.v2.runtime.extensions import (
     CapabilityOffer, ExtensionDependency, ExtensionDescriptor,
     ExtensionRegistration, ExtensionScope,
 )
 
 
-def service_registration(capability, value, *, ownership="borrowed", dependencies=(), config_schema=None):
+def service_registration(capability, value, *, ownership: Literal["owned", "borrowed"] = "borrowed", dependencies=(), config_schema=None):
     return ExtensionRegistration(
         descriptor=ExtensionDescriptor(
             plugin_id="com.sage.server." + capability.replace(".", "-"),
@@ -23,7 +24,7 @@ def service_registration(capability, value, *, ownership="borrowed", dependencie
 
 
 def service_selection(capability, *, config=None):
-    return CapabilitySelection(plugin="com.sage.server." + capability.replace(".", "-"), scope="process", config=config or {})
+    return CapabilitySelection(plugin="com.sage.server." + capability.replace(".", "-"), scope=ExtensionScope.PROCESS, config=config or {})
 
 
 SCHEDULER_CONFIG_SCHEMA = {"type": "object", "properties": {
@@ -68,6 +69,7 @@ async def run_inputs(host, context, deps):
             "enabled_skills": tuple(item["name"] for item in raw["skills"]),
         })})
         frozen = load_composition(command, user_id=user)
+    assert frozen is not None
     return run, command, frozen, user
 
 
@@ -209,11 +211,11 @@ def run_selections(*, owner, composition=None, mcp=(), a2a=()):
               "a2a_fingerprints": {record.name: hashlib.sha256(record.model_dump_json().encode()).hexdigest() for record in a2a}}
     if composition is not None:
         config["composition"] = composition
-    choices = {name: CapabilitySelection(plugin="com.sage.server.run." + name.replace(".", "-"), scope="run", config=config)
+    choices: dict[str, CapabilityBinding] = {name: CapabilitySelection(plugin="com.sage.server.run." + name.replace(".", "-"), scope=ExtensionScope.RUN, config=config)
                for name in ("model.provider", "skill.provider", "agent.tool-policy", "agent.self-configuration")}
     choices["agent.management"] = service_selection("agent.management")
     choices["tool.provider"] = (CapabilitySelection(plugin="sage.tool.official"),
-        CapabilitySelection(plugin="com.sage.server.run.tool-provider", scope="run", config=config, grant_tools=True))
+        CapabilitySelection(plugin="com.sage.server.run.tool-provider", scope=ExtensionScope.RUN, config=config, grant_tools=True))
     return choices
 
 

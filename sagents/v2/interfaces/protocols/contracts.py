@@ -84,7 +84,7 @@ def frame(
     version: str,
     name: str,
     payload: dict[str, Any],
-    frame_kind: str = "event",
+    frame_kind: Literal["event", "request", "response", "notification"] = "event",
     frame_id: str | None = None,
 ) -> ProtocolFrame:
     return ProtocolFrame(

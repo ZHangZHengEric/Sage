@@ -98,11 +98,13 @@ class DelegationConcurrencyLimiter:
         reservation = self._reservation.get()
         yielded = reservation is not None and reservation.active
         if yielded:
+            assert reservation is not None
             self._release(reservation)
         try:
             yield
         finally:
             if yielded:
+                assert reservation is not None
                 await self._acquire(reservation)
 
 

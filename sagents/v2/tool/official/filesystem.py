@@ -8,7 +8,7 @@ import hashlib
 import posixpath
 import re
 from pathlib import PurePosixPath
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 from sagents.v2.contracts.errors import (
     ErrorCategory,
@@ -87,6 +87,7 @@ def _apply_one_line_range(
         or end < start
     ):
         raise ValueError(f"operation {index}: invalid 1-based inclusive line range")
+    assert isinstance(replacement, str)
     lines = content.splitlines(keepends=True)
     if end > len(lines):
         raise ValueError(f"operation {index}: line range is outside file")
@@ -108,6 +109,7 @@ def _apply_one_search_replace(
     replacement = operation.get("replacement")
     if not isinstance(pattern, str) or not pattern:
         raise ValueError(f"operation {index}: search_pattern is required")
+    assert isinstance(replacement, str)
     replace_all = bool(operation.get("replace_all", False))
     literal_count = content.count(pattern)
     if literal_count:
@@ -154,7 +156,7 @@ def _apply_update_operations(
     for index, operation in sorted(
         line_range_ops,
         key=lambda item: (
-            item[1].get("start_line") if type(item[1].get("start_line")) is int else 0
+            cast(int, item[1]["start_line"]) if type(item[1].get("start_line")) is int else 0
         ),
     ):
         start, end = operation.get("start_line"), operation.get("end_line")
@@ -244,7 +246,7 @@ def _update_operations_are_applied(
         for op in sorted(
             line_ops,
             key=lambda op: (
-                op.get("start_line") if type(op.get("start_line")) is int else 0
+                cast(int, op["start_line"]) if type(op.get("start_line")) is int else 0
             ),
         ):
             start, end, replacement = (

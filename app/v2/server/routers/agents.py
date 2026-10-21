@@ -1,4 +1,4 @@
-from typing import Annotated
+from typing import Annotated, Any
 
 from fastapi import APIRouter, File, Form, UploadFile, HTTPException
 from pydantic import BaseModel, ConfigDict
@@ -34,7 +34,8 @@ async def server_plugins(user: AdminUser, host: HostDep):
     manifest = server_v2_manifest(host.settings)
     providers = []
     selections = {
-        key: value.model_dump(mode="json")
+        key: ([item.model_dump(mode="json") for item in value] if isinstance(value, tuple)
+              else value.model_dump(mode="json"))
         for key, value in manifest.runtime.capabilities.items()
     }
     for provider in host.application.resolved_plan.providers:
@@ -59,9 +60,10 @@ async def server_plugins(user: AdminUser, host: HostDep):
     saved = ServerPluginConfig(host.paths.data_root, registry=host.extensions).read()
     active = host.settings.plugin_overrides
     pending = sorted(key for key in set(saved) | set(active) if saved.get(key) != active.get(key))
-    deployment_defaults = {key: {"plugin": plugin, "config": {}} for key, plugin in SERVER_DEFAULTS.items()}
+    deployment_defaults: dict[str, Any] = {key: {"plugin": plugin, "config": {}} for key, plugin in SERVER_DEFAULTS.items()}
     deployment_defaults.update({
-        key: value.model_dump(mode="json", exclude_none=True)
+        key: ([item.model_dump(mode="json", exclude_none=True) for item in value] if isinstance(value, tuple)
+              else value.model_dump(mode="json", exclude_none=True))
         for key, value in server_v2_manifest(replace(host.settings, plugin_overrides={})).runtime.capabilities.items()
         if key in SERVER_CONFIGURABLE
     })

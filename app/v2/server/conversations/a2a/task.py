@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import cast
 
 from a2a.types.a2a_pb2 import (
     Artifact,
@@ -95,10 +96,10 @@ class TaskReducer:
         self._artifacts[artifact.artifact_id] = artifact
 
 
-def _state(value: object) -> int:
+def _state(value: object) -> TaskState:
     name = str(value or "")
     if name in TaskState.keys():
-        return TaskState.Value(name)
+        return cast(TaskState, TaskState.Value(name))
     return TaskState.TASK_STATE_UNSPECIFIED
 
 

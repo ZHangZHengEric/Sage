@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from sagents.v2.agent.engine import AgentLoopEngine
 from sagents.v2.agent.observed import ObservedRunDriver
 from sagents.v2.agent.step_request import AgentStepRequestBuilder
@@ -205,6 +207,8 @@ class AgentCompositionFactory:
             if trace_sink is not None or log_sink is not None
             else AgentLoopEngine
         )
+        observation: dict[str, Any] = ({"trace_sink": trace_sink, "log_sink": log_sink}
+            if engine_type is ObservedRunDriver else {})
         return engine_type(
             runtime=self.runtime,
             model=model,
@@ -227,11 +231,7 @@ class AgentCompositionFactory:
             self_configuration=self_configuration,
             skill_loader=skill_loader,
             preload_skills=preload_skills,
-            **(
-                {"trace_sink": trace_sink, "log_sink": log_sink}
-                if engine_type is ObservedRunDriver
-                else {}
-            ),
+            **observation,
         )
 
     def create_context(
@@ -254,7 +254,7 @@ class AgentCompositionFactory:
         agent = resolved.agents[agent_id]
         ceiling = resolved.policy_ceilings[agent_id]
         route_id = agent.model_bindings.get("primary")
-        route = resolved.model_routes.get(route_id, {})
+        route = resolved.model_routes.get(route_id, {}) if route_id is not None else {}
         limits = route.get("limits", {})
         request_defaults = route.get("request", {})
         candidates = [
