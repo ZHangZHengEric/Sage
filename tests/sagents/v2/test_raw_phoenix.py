@@ -9,7 +9,7 @@ from sagents.v2.runtime.observability.plugins.phoenix import PhoenixTraceSink
 
 
 def diagnostic_payloads(spans):
-    from sagents.v2.runtime.observability.raw import reconstruct
+    from sagents.v2.runtime.observability.evidence.raw import reconstruct
     records, gaps = reconstruct([{'name':span.name, 'start_time':span.start_time / 1e9,
                                   'attributes':dict(span.attributes)} for span in spans])
     assert not gaps
@@ -54,7 +54,7 @@ def test_unbounded_wire_capture_preserves_large_event():
 
 @pytest.mark.asyncio
 async def test_phoenix_external_diagnostics_preserve_raw_records():
-    from sagents.v2.runtime.observability.performance_evidence import ExternalDiagnostics
+    from sagents.v2.runtime.observability.plugins.external.diagnostics import ExternalDiagnostics
     from sagents.v2.runtime.observability.contracts import LogRecord
     from tests.sagents.v2.test_trace_exporters import request
 
@@ -83,7 +83,7 @@ async def test_phoenix_external_diagnostics_preserve_raw_records():
 
 @pytest.mark.asyncio
 async def test_recording_roundtrip_preserves_large_wire_and_normalized_events(monkeypatch):
-    from sagents.v2.runtime.observability.performance_evidence import ExternalDiagnostics
+    from sagents.v2.runtime.observability.plugins.external.diagnostics import ExternalDiagnostics
     from sagents.v2.model import RecordingModelProvider
     from sagents.v2.model.contracts import ModelEventKind, ModelResponse, ModelStreamEvent
     from sagents.v2.model.wire_diagnostics import record_wire_event
@@ -144,7 +144,7 @@ async def test_recording_roundtrip_preserves_large_wire_and_normalized_events(mo
 async def test_raw_tool_span_keeps_complete_result_error_and_operation():
     from sagents.v2.contracts.errors import ErrorCategory, RuntimeErrorInfo
     from sagents.v2.contracts.items import TextBlock
-    from sagents.v2.runtime.observability.tool_evidence import tool_evidence
+    from sagents.v2.runtime.observability.evidence.tools import tool_evidence
     from sagents.v2.testing.plugins import ScriptedModelProvider, ScriptedModelStep
     from sagents.v2.tool.contracts import ToolExecutionResult
     from tests.sagents.v2.test_observability_matrix import _CapturingTraceSink
@@ -187,7 +187,7 @@ async def test_raw_tool_span_keeps_complete_result_error_and_operation():
 
 
 def test_historical_successful_tool_span_marks_missing_result_without_failure():
-    from sagents.v2.runtime.observability.tool_evidence import tool_evidence
+    from sagents.v2.runtime.observability.evidence.tools import tool_evidence
     evidence = tool_evidence([{
         "name": "tool.call", "status_code": "OK",
         "attributes": {"run_id": "r", "tool_call_id": "t", "tool_name": "read_value"},
@@ -197,29 +197,33 @@ def test_historical_successful_tool_span_marks_missing_result_without_failure():
     assert evidence["failures"] == []
 
 
-def test_redacted_performance_summary_keeps_timing_json_beyond_content_limit():
-    from sagents.v2.runtime.observability.performance_evidence import ExternalDiagnostics
+@pytest.mark.asyncio
+async def test_redacted_performance_summary_keeps_timing_json_beyond_content_limit():
+    from sagents.v2.runtime.observability.plugins.external.diagnostics import ExternalDiagnostics
     from tests.app.v2.server.test_external_observability import capture_sample
     exporter = InMemorySpanExporter()
     trace = PhoenixTraceSink(endpoint='http://localhost:6006/v1/traces', content_mode='redacted',
                              max_content_chars=256, exporter=exporter)
     diagnostics = ExternalDiagnostics(capture_mode="raw", backend='phoenix', query_url='http://phoenix')
     diagnostics.trace_sink = trace
-    capture_sample(diagnostics)
-    spans = exporter.get_finished_spans()
-    assert len(spans) == 1
-    assert spans[0].name == 'agent.run'
-    payload = ''.join(spans[0].attributes['sage.performance.data'])
-    assert len(payload) > 256
-    rows = json.loads(payload)
-    assert len(rows) == 8
-    assert spans[0].attributes['sage.performance.framework_ms'] == 4000
-    trace.close()
+    try:
+        capture_sample(diagnostics)
+        await diagnostics.flush_raw()
+        spans = [span for span in exporter.get_finished_spans() if span.name == 'agent.run']
+        assert len(spans) == 1
+        payload = ''.join(spans[0].attributes['sage.performance.data'])
+        assert len(payload) > 256
+        rows = json.loads(payload)
+        assert len(rows) == 8
+        assert spans[0].attributes['sage.performance.framework_ms'] == 4000
+    finally:
+        await diagnostics.close()
+        trace.close()
 
 
 @pytest.mark.asyncio
 async def test_raw_events_follow_the_active_managed_application_exporter():
-    from sagents.v2.runtime.observability.performance_evidence import ExternalDiagnostics
+    from sagents.v2.runtime.observability.plugins.external.diagnostics import ExternalDiagnostics
     from sagents.v2.runtime.observability.traces import StructuredTracer, current_trace_sink
     from tests.sagents.v2.test_trace_exporters import request
     host_exporter, managed_exporter = InMemorySpanExporter(), InMemorySpanExporter()

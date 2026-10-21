@@ -20,11 +20,8 @@ from sagents.v2.model.contracts import (
     ModelStreamEvent,
     ModelEventKind,
 )
-from sagents.v2.runtime.observability import (
-    NoopDiagnosticSink,
-    StructuredTracer,
-    TraceSpan,
-)
+from sagents.v2.runtime.observability import StructuredTracer, TraceSpan
+from sagents.v2.runtime.observability.plugins.diagnostic_noop import NoopDiagnosticSink
 from sagents.v2.runtime.observability.content import trace_content
 from sagents.v2.runtime.observability.plugins.otlp import OtlpTraceSink
 from sagents.v2.runtime.observability.plugins.langfuse import LangfuseTraceSink

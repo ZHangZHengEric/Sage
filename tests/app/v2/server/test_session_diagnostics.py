@@ -6,7 +6,8 @@ from zipfile import ZipFile
 
 import pytest
 
-from sagents.v2.runtime.observability.sqlite_evidence import REDACTED, SessionDiagnostics, redact
+from sagents.v2.runtime.observability.plugins.sqlite import SessionDiagnostics
+from sagents.v2.runtime.observability.evidence.redaction import REDACTED, redact
 from app.v2.server.storage.downloads import prepare_session_export
 from sagents.v2.runtime.observability.contracts import LogRecord
 from tests.app.v2.server.test_file_downloads import identity, _run_input

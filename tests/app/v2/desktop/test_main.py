@@ -14,7 +14,6 @@ from app.v2.desktop.backend.main import (
 )
 from app.v2.desktop.backend.observability import create_desktop_observability
 from sagents.v2.contracts.errors import ErrorCategory, RuntimeErrorInfo
-from sagents.v2.runtime.observability import FilesystemLogSink, NoopLogSink
 from sagents.v2.runtime.session import StoreInUseError
 
 

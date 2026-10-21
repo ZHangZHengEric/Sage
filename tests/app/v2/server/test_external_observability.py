@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 import httpx
 import pytest
 
-from sagents.v2.runtime.observability.performance_evidence import (
+from sagents.v2.runtime.observability.plugins.external.diagnostics import (
     ExternalDiagnostics,
 )
 from sagents.v2.runtime.observability.contracts import LogLevel, LogRecord
@@ -48,7 +48,7 @@ def capture_sample(sink):
     parent = None if current_trace_context() else StructuredTracer(sink.trace_sink, "test").start_span(
         "agent.run", session_id="s", run_id="r")
     events, models = sample()
-    sink.emit(
+    sink._timings.emit(
         "model", {**models[0], "completed_at": models[0]["ended_at"]}, at=BASE + 6
     )
     for row in sorted(events, key=lambda row:row["at"]):
@@ -299,7 +299,10 @@ def test_external_performance_api_and_failure_do_not_read_local_db(
     from tests.app.v2.server.test_admin import admin_login
 
     sink = ExternalDiagnostics(backend="phoenix", query_url="http://phoenix")
-    service.observability.diagnostics = sink
+    from sagents.v2.runtime.observability import ObservabilityProvider
+    service.observability = ObservabilityProvider(
+        plugin_id="test.external", diagnostics=sink, performance_query=sink
+    )
     calls = []
 
     async def report(**kwargs):
@@ -492,7 +495,7 @@ def test_performance_events_collapse_to_one_linked_summary_per_execution():
     assert summary.attributes["sage.performance.first_text_ms"] == 4000
     assert summary.attributes["sage.performance.framework_ms"] == 4000
     assert len(summary.events) == 8
-    assert not sink._performance
+    assert not sink._timings._performance
 
 
 @pytest.mark.asyncio
@@ -503,7 +506,7 @@ async def test_shutdown_flushes_unfinished_performance_as_incomplete():
     from sagents.v2.runtime.observability.traces import StructuredTracer
     sink.bind_trace_sink(trace)
     parent = StructuredTracer(trace, "test").start_span("agent.run", session_id="s", run_id="r")
-    sink.emit("log", {"session_id":"s", "run_id":"r", "event":"agent.run.started", "timestamp":BASE}, at=BASE)
+    sink._timings.emit("log", {"session_id":"s", "run_id":"r", "event":"agent.run.started", "timestamp":BASE}, at=BASE)
     assert trace.spans == []
     await sink.close()
     assert len(trace.spans) == 1
@@ -515,7 +518,7 @@ async def test_shutdown_flushes_unfinished_performance_as_incomplete():
 @pytest.mark.asyncio
 async def test_resume_segments_are_loaded_across_execution_traces(monkeypatch):
     from sagents.v2.runtime.observability.traces import StructuredTracer
-    from sagents.v2.runtime.observability.performance_evidence import timing_rows
+    from sagents.v2.runtime.observability.performance.trace_projection import timing_rows
     trace = TraceCapture()
     sink = ExternalDiagnostics(backend="phoenix", query_url="http://phoenix")
     sink.trace_sink = trace
@@ -529,7 +532,7 @@ async def test_resume_segments_are_loaded_across_execution_traces(monkeypatch):
         (102, "agent.run.started", {}), (109, "agent.run.completed", {}),
         (110, "server.run.performance.finished", {"run_state": "completed"}),
     ]:
-        sink.emit("log", {"session_id":"s", "run_id":"r", "event":event,
+        sink._timings.emit("log", {"session_id":"s", "run_id":"r", "event":event,
                           "timestamp":BASE + at, "attributes":attrs}, at=BASE + at)
     second.end()
     summaries = [phoenix_span(s) for s in trace.spans if s.name == "agent.run"]
@@ -611,7 +614,7 @@ async def test_agent_export_waits_for_host_cleanup_and_preserves_native_duration
         log("agent.run.started", 2)
         log("agent.run.completed", 9)
         parent.end(status=TraceStatus.OK)
-        native_end = source._performance[("s", "r")]["ended_span"].end_time
+        native_end = source._timings._performance[("s", "r")]["ended_span"].end_time
         assert not any(s.name == "agent.run" for s in exporter.get_finished_spans())
         log("server.run.performance.finished", 10, run_state="completed")
         await source.flush_raw()
@@ -623,7 +626,7 @@ async def test_agent_export_waits_for_host_cleanup_and_preserves_native_duration
         assert exported.end_time == int(native_end.timestamp() * 1e9)
         assert exported.status.status_code.name == "OK"
         assert exported.attributes["sage.performance.total_ms"] == 10000
-        from sagents.v2.runtime.observability.raw import reconstruct
+        from sagents.v2.runtime.observability.evidence.raw import reconstruct
         records, gaps = reconstruct([{"name":s.name, "attributes":dict(s.attributes), "start_time":s.start_time / 1e9} for s in spans])
         assert not gaps
         logs = [json.loads(attrs["sage.diagnostic.data"]) for _, attrs in records if attrs["sage.diagnostic.kind"] == "log"]
@@ -640,8 +643,8 @@ def test_standalone_agent_finishes_on_its_own_terminal_event():
     source.bind_trace_sink(trace)
     parent = StructuredTracer(trace, "test").start_span("agent.run", session_id="s", run_id="r")
     for event, at in [("agent.run.started", 0), ("agent.run.completed", 3)]:
-        source.emit("log", {"event":event, "timestamp":BASE + at, "session_id":"s", "run_id":"r"}, at=BASE + at)
+        source._timings.emit("log", {"event":event, "timestamp":BASE + at, "session_id":"s", "run_id":"r"}, at=BASE + at)
     parent.end()
     assert len(trace.spans) == 1
     assert trace.spans[0].attributes["sage.performance.total_ms"] == 3000
-    assert not source._performance
+    assert not source._timings._performance

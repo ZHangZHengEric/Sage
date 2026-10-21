@@ -945,7 +945,7 @@ Provides: `observability.provider:default` (API `2`); process scope; owned lifec
 | `log_backup_count` | `integer` | No | `5` |
 | `diagnostic_content_mode` | `string` | No | `"redacted"` |
 | `raw_max_bytes` | `integer` | No | `16777216` |
-| `endpoint` | `string` | Yes | `"http://127.0.0.1:4317"` |
+| `endpoint` | `string` | Yes | `"http://127.0.0.1:6006/v1/traces"` |
 | `service_name` | `string` | No | `"sage"` |
 | `environment` | `string` | No | `"production"` |
 | `project_name` | `string` | No | `"sage"` |

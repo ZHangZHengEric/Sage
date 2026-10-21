@@ -17,7 +17,8 @@ from sagents.v2.agent.multi_agent import WorkspaceSharingPolicy
 from sagents.v2.contracts.commands import RunConfig, StartRun
 from sagents.v2.contracts.principals import ActorRef, PrincipalType, RequestContext
 from sagents.v2.runtime.execution import ExecutionBindingRequest
-from sagents.v2.runtime.observability import NoopDiagnosticSink, NoopLogSink
+from sagents.v2.runtime.observability.plugins.diagnostic_noop import NoopDiagnosticSink
+from sagents.v2.runtime.observability.plugins.logging_noop import NoopLogSink
 from sagents.v2.runtime.session import EphemeralSessionStore, InMemoryDerivedStateStore
 from sagents.v2.testing.plugins.scripted_model import ScriptedModelProvider
 

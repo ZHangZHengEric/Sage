@@ -26,7 +26,11 @@ _TRACE_PREVIEW_LIMIT = 2048
 
 
 def _span_value(sink: TraceSink | None, value: Any) -> Any:
-    return trace_content(sink, value) if getattr(sink, "content_mode", None) == "raw" else redact_log_value(value)
+    return (
+        trace_content(sink, value)
+        if getattr(sink, "content_mode", None) == "raw"
+        else redact_log_value(value)
+    )
 
 
 _active_span: contextvars.ContextVar[tuple[str, str] | None] = contextvars.ContextVar(
@@ -34,7 +38,8 @@ _active_span: contextvars.ContextVar[tuple[str, str] | None] = contextvars.Conte
     default=None,
 )
 _active_sink: contextvars.ContextVar[TraceSink | None] = contextvars.ContextVar(
-    "sage_trace_sink", default=None,
+    "sage_trace_sink",
+    default=None,
 )
 
 
@@ -249,8 +254,9 @@ class StructuredTracer:
             or (active[1] if active else None),
             name=name,
             kind=TraceKind(kind),
-            attributes=_span_value(self.sink,
-                {"component": self.component, **values, **dict(attributes or {})}
+            attributes=_span_value(
+                self.sink,
+                {"component": self.component, **values, **dict(attributes or {})},
             ),
             **known,
         )

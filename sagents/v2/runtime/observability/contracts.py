@@ -18,7 +18,72 @@ if TYPE_CHECKING:
 class DiagnosticEvidenceSource(Protocol):
     """Query observation evidence within a host-authorized Run allowlist."""
 
-    async def export_evidence(self, session_id: str, run_ids: set[str]) -> dict[str, Any]: ...
+    async def export_evidence(
+        self, session_id: str, run_ids: set[str]
+    ) -> dict[str, Any]: ...
+
+
+class ModelHistoryQuery(Protocol):
+    """Local model history in a Session already authorized by its host."""
+
+    async def list_model_requests(
+        self,
+        *,
+        session_id: str,
+        run_id: str | None = None,
+    ) -> tuple[dict[str, Any], ...]: ...
+
+    async def get_model_request(
+        self,
+        *,
+        session_id: str,
+        run_id: str,
+        request_id: str,
+    ) -> dict[str, Any]: ...
+
+
+class PerformanceQuery(Protocol):
+    """Read a timing report without exposing storage paths or backend types."""
+
+    available: bool
+
+    async def report(
+        self,
+        *,
+        start: float,
+        end: float,
+        agent_id: str = "",
+        bucket: str = "hour",
+        timezone_name: str = "Asia/Shanghai",
+    ) -> dict[str, Any]: ...
+
+
+class TraceQuery(Protocol):
+    """Read normalized trace summaries, pages and details."""
+
+    async def summary(
+        self,
+        *,
+        start: str,
+        end: str,
+        agent_id: str = "",
+        session_id: str = "",
+    ) -> dict[str, Any]: ...
+
+    async def spans(
+        self,
+        *,
+        start: str | None = None,
+        end: str | None = None,
+        agent_id: str = "",
+        session_id: str = "",
+        kind: str = "AGENT",
+        status: str = "",
+        cursor: str | None = None,
+        trace_id: str | None = None,
+    ) -> dict[str, Any]: ...
+
+    async def span(self, span_id: str) -> dict[str, Any] | None: ...
 
 
 class DiagnosticSink(Protocol):
@@ -158,11 +223,17 @@ class TraceSink(Protocol):
     def close(self) -> None: ...
 
 
+class TraceExportSink(TraceSink, Protocol):
+    """Exporter that permits enrichment before final delivery of a native span."""
+
+    def export_span(self, span: TraceSpan) -> None: ...
+
+
 class TraceSpanObserver(Protocol):
     """Optional host enrichment before a span is exported; never business state."""
 
-    def span_started(self, sink: TraceSink, span: TraceSpan) -> None: ...
+    def span_started(self, sink: TraceExportSink, span: TraceSpan) -> None: ...
 
-    def defer_span_end(self, sink: TraceSink, span: TraceSpan) -> bool: ...
+    def defer_span_end(self, sink: TraceExportSink, span: TraceSpan) -> bool: ...
 
-    def flush_trace_sink(self, sink: TraceSink) -> None: ...
+    def flush_trace_sink(self, sink: TraceExportSink) -> None: ...

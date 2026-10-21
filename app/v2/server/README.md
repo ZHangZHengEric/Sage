@@ -320,7 +320,7 @@ Phoenix 性能查询按 SDK 入口时间和 Agent 在上游筛选，仅投影计
 诊断写入线程同时维护仅含身份、时间戳和分类的 SQLite 轻量投影；页面查询只读取这些索引表，不加载模型上下文、文件、工具参数或诊断导出。采集维持有界异步队列，失败与丢失数在页面提示，不阻塞首 token。已有诊断可由管理员显式执行一次时间字段回填，不在启动或页面请求中自动扫描大记录：
 
 ```sh
-python -m app.v2.server.observability.performance --backfill /app/data/runtime/diagnostics/evidence.sqlite3
+python -m sagents.v2.runtime.observability.plugins.sqlite.performance --backfill /app/data/runtime/diagnostics/evidence.sqlite3
 ```
 
 回填只提取时间字段，幂等写入；不能凭历史数据补造缺失的初始化边界。

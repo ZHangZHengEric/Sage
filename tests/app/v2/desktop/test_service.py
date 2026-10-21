@@ -703,7 +703,7 @@ async def test_usage_overview_salvages_diagnostics_when_events_are_corrupt(
             ),
         )
 
-    async def list_model_requests(*, session_id: str):
+    async def list_model_requests(*, session_id: str, run_id: str | None = None):
         if session_id == "session_corrupt":
             return (
                 {

@@ -15,7 +15,8 @@ from sagents.v2.contracts.events import ItemEventData, RunEventData
 from sagents.v2.contracts.items import TextBlock
 from sagents.v2.contracts.principals import ActorRef, PrincipalType, RequestContext
 from sagents.v2.contracts.run_state import RunState
-from sagents.v2.runtime.observability import NoopLogSink, StructuredLogger
+from sagents.v2.runtime.observability import StructuredLogger
+from sagents.v2.runtime.observability.plugins.logging_noop import NoopLogSink
 from sagents.v2.runtime.session.access import AuthorizedSessionAccess
 from sagents.v2.runtime.session.contracts import EventDraft
 from sagents.v2.runtime.session.plugins.filesystem import FilesystemSessionStore

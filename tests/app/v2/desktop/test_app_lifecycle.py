@@ -9,7 +9,8 @@ from fastapi.testclient import TestClient
 
 from app.v2.desktop.backend import app as app_module
 from app.v2.desktop.backend.service import DesktopV2Service
-from sagents.v2.runtime.observability import NoopLogSink, StructuredLogger
+from sagents.v2.runtime.observability import StructuredLogger
+from sagents.v2.runtime.observability.plugins.logging_noop import NoopLogSink
 
 AUTH_TOKEN = "test-desktop-capability"
 AUTH_HEADERS = {"Authorization": f"Bearer {AUTH_TOKEN}"}

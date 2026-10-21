@@ -1,4 +1,4 @@
-"""Read-only Phoenix queries for the embedded administrator workbench."""
+"""Phoenix adapter for normalized trace queries; independent of HTTP routes."""
 
 from __future__ import annotations
 
@@ -7,9 +7,9 @@ from urllib.parse import quote
 
 import httpx
 from pydantic import BaseModel, ConfigDict, Field
-from sagents.v2.runtime.observability.query import request
+from sagents.v2.runtime.observability.plugins._shared.query import request
 
-from sagents.v2.runtime.observability.performance_evidence import ExternalDiagnostics
+from .evidence import ExternalEvidenceSink
 
 
 class CostTotal(BaseModel):
@@ -89,13 +89,17 @@ trace {trace_id:traceId num_spans:numSpans error_count:errorCount cost_summary:c
 PAGE = "pageInfo {hasNextPage endCursor} edges {node {" + FIELDS + "}}"
 
 
-class PhoenixDashboard:
-    def __init__(self, diagnostics: ExternalDiagnostics):
+class PhoenixTraceQuery:
+    def __init__(self, diagnostics: ExternalEvidenceSink):
         self.source = diagnostics
 
     async def _graphql(self, client, query, variables):
         content, _ = await request(
-            self.source, client, "/graphql", [], method="POST",
+            self.source,
+            client,
+            "/graphql",
+            [],
+            method="POST",
             body={"query": query, "variables": variables},
         )
         result = json.loads(content)
@@ -105,30 +109,47 @@ class PhoenixDashboard:
         return result["data"]
 
     async def _project(self, client):
-        payload = json.loads(await self.source._request(
-            client, f"/v1/projects/{quote(self.source.project, safe='')}", []))
+        payload = json.loads(
+            await self.source._request(
+                client, f"/v1/projects/{quote(self.source.project, safe='')}", []
+            )
+        )
         identifier = payload["data"]["id"]
         if not isinstance(identifier, str):
             raise ValueError("Invalid Phoenix project")
         return identifier
 
     def _filter(self, agent_id="", session_id=""):
-        conditions = [f'attributes["deployment"]["environment"]["name"] == {json.dumps(self.source.environment)}']
+        conditions = [
+            f'attributes["deployment"]["environment"]["name"] == {json.dumps(self.source.environment)}'
+        ]
         if agent_id:
             conditions.append(f'attributes["agent_id"] == {json.dumps(agent_id)}')
         if session_id:
-            conditions.append(f'attributes["session"]["id"] == {json.dumps(session_id)}')
+            conditions.append(
+                f'attributes["session"]["id"] == {json.dumps(session_id)}'
+            )
         return " and ".join(conditions)
 
     async def summary(self, *, start, end, agent_id="", session_id="", client=None):
         if client is None:
             async with httpx.AsyncClient() as owned:
-                return await self.summary(start=start, end=end, agent_id=agent_id, session_id=session_id, client=owned)
+                return await self.summary(
+                    start=start,
+                    end=end,
+                    agent_id=agent_id,
+                    session_id=session_id,
+                    client=owned,
+                )
         base = self._filter(agent_id, session_id)
         roots = base + ' and name == "agent.run" and parent_span is None'
-        variables = dict(id=await self._project(client), range={"start": start, "end": end},
-                         roots=roots, errors=roots + ' and status_code == "ERROR"',
-                         models=base + ' and span_kind == "LLM"')
+        variables = dict(
+            id=await self._project(client),
+            range={"start": start, "end": end},
+            roots=roots,
+            errors=roots + ' and status_code == "ERROR"',
+            models=base + ' and span_kind == "LLM"',
+        )
         query = """query($id:ID!,$range:TimeRange!,$roots:String!,$errors:String!,$models:String!) {
           node(id:$id) {... on Project {
             requests:traceCount(timeRange:$range,filterCondition:$roots)
@@ -140,17 +161,43 @@ class PhoenixDashboard:
           }} }"""
         data = (await self._graphql(client, query, variables))["node"]
         # Explicit numeric parsing rejects unexpected upstream response shapes.
-        return dict(requests=int(data["requests"]), errors=int(data["errors"]),
-                    tokens=float(data["tokens"]), input_tokens=float(data["input_tokens"]),
-                    output_tokens=float(data["output_tokens"]),
-                    cost=float(data["cost"]["total"]["cost"]) if data["cost"]["total"]["cost"] is not None else None)
+        return dict(
+            requests=int(data["requests"]),
+            errors=int(data["errors"]),
+            tokens=float(data["tokens"]),
+            input_tokens=float(data["input_tokens"]),
+            output_tokens=float(data["output_tokens"]),
+            cost=float(data["cost"]["total"]["cost"])
+            if data["cost"]["total"]["cost"] is not None
+            else None,
+        )
 
-    async def spans(self, *, start=None, end=None, agent_id="", session_id="", kind="AGENT", status="",
-                    cursor=None, trace_id=None, client=None):
+    async def spans(
+        self,
+        *,
+        start=None,
+        end=None,
+        agent_id="",
+        session_id="",
+        kind="AGENT",
+        status="",
+        cursor=None,
+        trace_id=None,
+        client=None,
+    ):
         if client is None:
             async with httpx.AsyncClient() as owned:
-                return await self.spans(start=start, end=end, agent_id=agent_id, kind=kind,
-                                        status=status, cursor=cursor, trace_id=trace_id, session_id=session_id, client=owned)
+                return await self.spans(
+                    start=start,
+                    end=end,
+                    agent_id=agent_id,
+                    kind=kind,
+                    status=status,
+                    cursor=cursor,
+                    trace_id=trace_id,
+                    session_id=session_id,
+                    client=owned,
+                )
         variables = dict(id=await self._project(client), cursor=cursor)
         if trace_id:
             variables["trace"] = trace_id
@@ -159,7 +206,11 @@ class PhoenixDashboard:
               spans(first:100,after:$cursor) {PAGE}
               }}}}""".replace("PAGE", PAGE)
             trace = (await self._graphql(client, query, variables))["node"]["trace"]
-            connection = trace["spans"] if trace else {"edges": [], "pageInfo": {"hasNextPage": False}}
+            connection = (
+                trace["spans"]
+                if trace
+                else {"edges": [], "pageInfo": {"hasNextPage": False}}
+            )
         else:
             condition = self._filter(agent_id, session_id)
             condition += ' and name in ["agent.run", "model.request", "tool.call"]'
@@ -175,20 +226,36 @@ class PhoenixDashboard:
               spans(first:50,after:$cursor,timeRange:$range,filterCondition:$condition,
                     sort:{col:startTime,dir:desc}) {PAGE}
               }}}""".replace("PAGE", PAGE)
-            connection = (await self._graphql(client, query, variables))["node"]["spans"]
+            connection = (await self._graphql(client, query, variables))["node"][
+                "spans"
+            ]
         page = SpanPage.model_validate(connection)
-        return {"items": [{**e.node.model_dump(),
-                           "session_id": e.node.trace.session.session_id if e.node.trace.session else None}
-                          for e in page.edges],
-                "next_cursor": page.pageInfo.endCursor if page.pageInfo.hasNextPage else None}
+        return {
+            "items": [
+                {
+                    **e.node.model_dump(),
+                    "session_id": e.node.trace.session.session_id
+                    if e.node.trace.session
+                    else None,
+                }
+                for e in page.edges
+            ],
+            "next_cursor": page.pageInfo.endCursor
+            if page.pageInfo.hasNextPage
+            else None,
+        }
 
     async def span(self, span_id, *, client=None):
         if client is None:
             async with httpx.AsyncClient() as owned:
                 return await self.span(span_id, client=owned)
-        payload = json.loads(await self.source._request(
-            client, f"/v1/projects/{quote(self.source.project, safe='')}/spans",
-            [("span_id", span_id), ("limit", "1")]))
+        payload = json.loads(
+            await self.source._request(
+                client,
+                f"/v1/projects/{quote(self.source.project, safe='')}/spans",
+                [("span_id", span_id), ("limit", "1")],
+            )
+        )
         rows = payload["data"]
         if not isinstance(rows, list):
             raise ValueError("Invalid Phoenix span response")

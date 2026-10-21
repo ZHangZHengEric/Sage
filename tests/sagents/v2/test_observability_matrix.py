@@ -16,18 +16,13 @@ from sagents.v2.model.contracts import (
     ModelResponse,
     ModelStreamEvent,
 )
-from sagents.v2.runtime.observability import (
-    FilesystemDiagnosticSink,
-    FilesystemLogSink,
-    LogLevel,
-    NoopDiagnosticSink,
-    NoopLogSink,
-    NoopTraceSink,
-    OtlpTraceSink,
-    StdoutLogSink,
-    StructuredLogger,
-    structured_log_context,
-)
+from sagents.v2.runtime.observability import LogLevel, StructuredLogger, structured_log_context
+from sagents.v2.runtime.observability.plugins.filesystem import FilesystemDiagnosticSink
+from sagents.v2.runtime.observability.plugins.logging_filesystem import FilesystemLogSink
+from sagents.v2.runtime.observability.plugins.diagnostic_noop import NoopDiagnosticSink
+from sagents.v2.runtime.observability.plugins.trace_noop import NoopTraceSink
+from sagents.v2.runtime.observability.plugins.otlp import OtlpTraceSink
+from sagents.v2.runtime.observability.plugins.logging_stdout import StdoutLogSink
 from sagents.v2.runtime.extensions.official import builtin_extension_registry
 from sagents.v2.testing.plugins.scripted_model import (
     ScriptedModelProvider,
@@ -606,10 +601,8 @@ def test_structured_tracer_records_redacted_span_timing():
 
 @pytest.mark.asyncio
 async def test_recording_provider_emits_model_request_spans(tmp_path):
-    from sagents.v2.runtime.observability import (
-        FilesystemDiagnosticSink,
-        TraceStatus,
-    )
+    from sagents.v2.runtime.observability import TraceStatus
+    from sagents.v2.runtime.observability.plugins.filesystem import FilesystemDiagnosticSink
 
     sink = FilesystemDiagnosticSink(tmp_path / "diagnostics")
     traces = _CapturingTraceSink()
@@ -661,7 +654,7 @@ async def test_recording_provider_emits_model_request_spans(tmp_path):
 
 @pytest.mark.asyncio
 async def test_recording_provider_emits_model_request_logs(tmp_path):
-    from sagents.v2.runtime.observability import FilesystemDiagnosticSink
+    from sagents.v2.runtime.observability.plugins.filesystem import FilesystemDiagnosticSink
 
     sink = FilesystemDiagnosticSink(tmp_path / "diagnostics")
     logs = _CapturingLogSink()
@@ -723,7 +716,7 @@ async def test_trace_noop_plugin_is_the_default_official_sink():
         ExtensionScopeContext,
     )
     from sagents.v2.runtime.extensions.official import builtin_extension_registry
-    from sagents.v2.runtime.observability import NoopTraceSink, otel_available
+    from sagents.v2.runtime.observability.plugins.otlp import otel_available
 
     registry = builtin_extension_registry()
     otlp = registry.get("sage.observability.otlp").descriptor
@@ -749,7 +742,7 @@ async def test_trace_noop_plugin_is_the_default_official_sink():
 
 @pytest.mark.asyncio
 async def test_otlp_trace_sink_maps_spans_when_sdk_is_installed():
-    from sagents.v2.runtime.observability import otel_available
+    from sagents.v2.runtime.observability.plugins.otlp import otel_available
 
     if not otel_available():
         pytest.skip("optional opentelemetry packages are not installed")
@@ -758,12 +751,7 @@ async def test_otlp_trace_sink_maps_spans_when_sdk_is_installed():
         InMemorySpanExporter,
     )
 
-    from sagents.v2.runtime.observability import (
-        OtlpTraceSink,
-        StructuredTracer,
-        TraceKind,
-        TraceStatus,
-    )
+    from sagents.v2.runtime.observability import StructuredTracer, TraceKind, TraceStatus
 
     exporter = InMemorySpanExporter()
     sink = OtlpTraceSink(
@@ -792,9 +780,6 @@ async def test_otlp_trace_sink_maps_spans_when_sdk_is_installed():
 
 @pytest.mark.asyncio
 async def test_loop_emits_execution_scoped_run_model_and_tool_spans():
-    from sagents.v2.runtime.observability import (
-        NoopDiagnosticSink,
-    )
 
     from tests.sagents.v2.test_agent_loop_matrix import (
         CONTEXT,
@@ -851,7 +836,6 @@ async def test_loop_emits_execution_scoped_run_model_and_tool_spans():
 
 @pytest.mark.asyncio
 async def test_loop_emits_model_and_tool_logs():
-    from sagents.v2.runtime.observability import NoopDiagnosticSink
 
     from tests.sagents.v2.test_agent_loop_matrix import (
         CONTEXT,
@@ -917,7 +901,6 @@ async def test_loop_emits_model_and_tool_logs():
 
 @pytest.mark.asyncio
 async def test_tool_result_failure_is_logged_as_error_without_result_payload():
-    from sagents.v2.runtime.observability import NoopDiagnosticSink
     from sagents.v2.tool.contracts import ToolExecutionResult
     from sagents.v2.contracts.errors import ErrorCategory, RuntimeErrorInfo
 
@@ -988,7 +971,6 @@ async def test_forked_child_run_joins_parent_execution_trace():
         PrincipalType,
         RequestContext,
     )
-    from sagents.v2.runtime.observability import NoopDiagnosticSink
     from sagents.v2.testing.runtime import ephemeral_runtime
     from sagents.v2.tool import (
         InMemoryToolCatalog,

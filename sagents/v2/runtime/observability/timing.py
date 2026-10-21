@@ -20,11 +20,16 @@ def log_duration(logger, event: str, message: str, *, attributes=None, **context
         raise
     finally:
         if logger is not None:
-            logger.debug(event, message, **context, attributes={
-                **(attributes or {}),
-                "outcome": outcome,
-                "duration_ms": round((perf_counter() - started) * 1000, 3),
-            })
+            logger.debug(
+                event,
+                message,
+                **context,
+                attributes={
+                    **(attributes or {}),
+                    "outcome": outcome,
+                    "duration_ms": round((perf_counter() - started) * 1000, 3),
+                },
+            )
 
 
 def parse_iso_datetime(value: Any) -> datetime | None:

@@ -9,7 +9,7 @@ import json
 import logging
 import threading
 import time
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from datetime import datetime, timezone
 from typing import Any
 
@@ -20,7 +20,7 @@ from sagents.v2.runtime.observability.contracts import (
     TraceStatus,
     TraceSpanObserver,
 )
-from sagents.v2.runtime.observability.raw import (
+from sagents.v2.runtime.observability.evidence.raw import (
     retained_size,
     json_working_size,
     raw_trace_value,
@@ -28,7 +28,9 @@ from sagents.v2.runtime.observability.raw import (
 from sagents.v2.runtime.observability.content import safe_trace_value, trace_content
 
 _LOG = logging.getLogger(__name__)
-_IDENTITIES = contextvars.ContextVar("sage_otlp_ids", default=None)
+_IDENTITIES = contextvars.ContextVar[tuple[int, int] | None](
+    "sage_otlp_ids", default=None
+)
 _KIND_MAP = {
     TraceKind.INTERNAL: "INTERNAL",
     TraceKind.CLIENT: "CLIENT",
@@ -143,7 +145,9 @@ class OtlpTraceTransport:
                 if self._closed or len(self._spans) >= self.max_active_spans:
                     self._warn("active_span_limit", count=1)
                     return
-                attributes = self._encode_values(span.span_id, span.attributes, lambda: self._attributes(span))
+                attributes = self._encode_values(
+                    span.span_id, span.attributes, lambda: self._attributes(span)
+                )
                 if attributes is None:
                     self._warn("active_byte_limit", count=1)
                     return
@@ -194,19 +198,27 @@ class OtlpTraceTransport:
                 otel_span = self._spans.get(span_id)
                 if otel_span is None:
                     return
-                values = self._encode_values(span_id, event.attributes,
-                                             lambda: self._trace_value(event.attributes))
+                values = self._encode_values(
+                    span_id,
+                    event.attributes,
+                    lambda: self._trace_value(event.attributes),
+                )
                 if values is None:
                     self._mark_incomplete(otel_span, "event_byte_limit")
                     return
-                otel_span.add_event(event.name, attributes=_otel_attributes(values),
-                                    timestamp=_time_nanos(event.timestamp))
+                otel_span.add_event(
+                    event.name,
+                    attributes=_otel_attributes(values),
+                    timestamp=_time_nanos(event.timestamp),
+                )
         except Exception:
             self._warn("add_event")
 
     def end_span(self, span: TraceSpan) -> None:
         try:
-            if self._span_observer is not None and self._span_observer.defer_span_end(self, span):
+            if self._span_observer is not None and self._span_observer.defer_span_end(
+                self, span
+            ):
                 return
         except Exception:
             self._warn("span_enrichment")
@@ -222,24 +234,41 @@ class OtlpTraceTransport:
                 otel_span = self._spans.pop(span.span_id, None)
                 if otel_span is None:
                     return
-                attributes = self._encode_values(span.span_id, span.attributes, lambda: self._attributes(span))
+                attributes = self._encode_values(
+                    span.span_id, span.attributes, lambda: self._attributes(span)
+                )
                 if attributes is None:
                     self._mark_incomplete(otel_span, "completion_byte_limit")
                 else:
                     _set_attributes(otel_span, attributes)
                 if span.status is TraceStatus.ERROR:
-                    error = ({"exception.type": span.error.type,
-                              "exception.message": span.error.message,
-                              "exception.stacktrace": span.error.stack_trace}
-                             if span.error else {"exception.message":span.attributes.get("status_message", span.name)})
-                    error_values = self._encode_values(span.span_id, error, lambda: self._trace_value(error))
+                    error = (
+                        {
+                            "exception.type": span.error.type,
+                            "exception.message": span.error.message,
+                            "exception.stacktrace": span.error.stack_trace,
+                        }
+                        if span.error
+                        else {
+                            "exception.message": span.attributes.get(
+                                "status_message", span.name
+                            )
+                        }
+                    )
+                    error_values = self._encode_values(
+                        span.span_id, error, lambda: self._trace_value(error)
+                    )
                     if error_values is None:
                         self._mark_incomplete(otel_span, "exception_byte_limit")
                         otel_span.set_status(Status(StatusCode.ERROR))
                     else:
-                        otel_span.set_status(Status(StatusCode.ERROR, error_values["exception.message"]))
+                        otel_span.set_status(
+                            Status(StatusCode.ERROR, error_values["exception.message"])
+                        )
                         if span.error:
-                            otel_span.add_event("exception", attributes=_otel_attributes(error_values))
+                            otel_span.add_event(
+                                "exception", attributes=_otel_attributes(error_values)
+                            )
                 elif span.status is TraceStatus.OK:
                     otel_span.set_status(Status(StatusCode.OK))
         except Exception:
@@ -248,7 +277,9 @@ class OtlpTraceTransport:
             if otel_span is not None:
                 # Exporter callbacks may acquire the transport lock. All active
                 # span mutations are complete before ending/exporting it.
-                otel_span.end(end_time=_time_nanos(span.end_time) if span.end_time else None)
+                otel_span.end(
+                    end_time=_time_nanos(span.end_time) if span.end_time else None
+                )
 
     def _mark_incomplete(self, span, operation):
         span.set_attribute("sage.content.incomplete", True)
@@ -312,8 +343,11 @@ class OtlpTraceTransport:
         )
         for key in ("input", "output", "user_input", "arguments", "result"):
             if key in values:
-                values[key] = (raw_trace_value(values[key]) if self.content_mode == "raw"
-                               else trace_content(self, values[key]))
+                values[key] = (
+                    raw_trace_value(values[key])
+                    if self.content_mode == "raw"
+                    else trace_content(self, values[key])
+                )
         if span.name == "model.request":
             values.update(
                 {
@@ -349,7 +383,7 @@ class OtlpTraceTransport:
             # Each string element respects the SDK's attribute length limit;
             # an OTLP string array preserves the complete control payload.
             projected["sage.performance.data"] = tuple(
-                payload[offset:offset + self.max_content_chars]
+                payload[offset : offset + self.max_content_chars]
                 for offset in range(0, len(payload), self.max_content_chars)
             )
         return projected
@@ -361,13 +395,14 @@ class OtlpTraceTransport:
 
     def _build_tracer(self, exporter, headers, sample_rate, max_queue_size):
         from opentelemetry.sdk.resources import SERVICE_NAME, Resource
-        from opentelemetry.sdk.trace import TracerProvider, SpanLimits
+        from opentelemetry.sdk.trace import ReadableSpan, TracerProvider, SpanLimits
         from opentelemetry.sdk.trace.id_generator import RandomIdGenerator
         from opentelemetry.sdk.trace.sampling import TraceIdRatioBased
         from opentelemetry.sdk.trace.export import (
             BatchSpanProcessor,
             SimpleSpanProcessor,
             SpanExportResult,
+            SpanExporter,
         )
 
         class SageIdGenerator(RandomIdGenerator):
@@ -405,8 +440,8 @@ class OtlpTraceTransport:
         sink = self
         pending = threading.BoundedSemaphore(max_queue_size)
 
-        class MonitoredExporter:
-            def export(self, spans):
+        class MonitoredExporter(SpanExporter):
+            def export(self, spans: Sequence[ReadableSpan]) -> SpanExportResult:
                 try:
                     result = exporter.export(spans)
                 except Exception:
@@ -416,7 +451,9 @@ class OtlpTraceTransport:
                         sink.failed_exports += 1
                     sink._warn("export", count=len(spans))
                 for span in spans:
-                    sink._release_bytes(format(span.context.span_id, "016x"))
+                    context = span.context
+                    if context is not None:
+                        sink._release_bytes(format(context.span_id, "016x"))
                     if not injected:
                         pending.release()
                 return result
@@ -425,21 +462,22 @@ class OtlpTraceTransport:
                 exporter.shutdown()
 
         class BoundedBatchProcessor(BatchSpanProcessor):
-            def on_end(self, span):
-                if not span.context.trace_flags.sampled:
+            def on_end(self, span: ReadableSpan) -> None:
+                context = span.context
+                if context is None or not context.trace_flags.sampled:
                     return
                 # Bound queued + in-flight spans. Admission is nonblocking;
                 # holding permits until export also lets us count every drop
                 # without inspecting private SDK queues.
                 if not pending.acquire(blocking=False):
-                    sink._release_bytes(format(span.context.span_id, "016x"))
+                    sink._release_bytes(format(context.span_id, "016x"))
                     sink._warn("queue_full", count=1)
                     return
                 try:
                     super().on_end(span)
                 except Exception:
                     pending.release()
-                    sink._release_bytes(format(span.context.span_id, "016x"))
+                    sink._release_bytes(format(context.span_id, "016x"))
                     sink._warn("enqueue", count=1)
 
         processor = (
@@ -454,7 +492,9 @@ class OtlpTraceTransport:
             )
         )
         provider = TracerProvider(
-            resource=Resource.create({**self.resource_attributes, SERVICE_NAME: self.service_name}),
+            resource=Resource.create(
+                {**self.resource_attributes, SERVICE_NAME: self.service_name}
+            ),
             sampler=TraceIdRatioBased(sample_rate),
             id_generator=SageIdGenerator(),
             span_limits=SpanLimits(
@@ -462,8 +502,12 @@ class OtlpTraceTransport:
                 max_span_attributes=-1 if self.content_mode == "raw" else None,
                 max_events=-1 if self.content_mode == "raw" else None,
                 max_event_attributes=-1 if self.content_mode == "raw" else None,
-                max_attribute_length=-1 if self.content_mode == "raw" else self.max_content_chars + 128,
-                max_span_attribute_length=-1 if self.content_mode == "raw" else self.max_content_chars + 128,
+                max_attribute_length=-1
+                if self.content_mode == "raw"
+                else self.max_content_chars + 128,
+                max_span_attribute_length=-1
+                if self.content_mode == "raw"
+                else self.max_content_chars + 128,
             ),
             shutdown_on_exit=False,
         )
@@ -550,9 +594,8 @@ def _set_attributes(span: Any, values: Mapping[str, Any]) -> None:
 def _otel_attributes(values: Mapping[str, Any] | None) -> dict[str, Any]:
     return {
         str(key): value
-        if isinstance(value, (bool, int, float, str)) or (
-            key == "sage.performance.data" and isinstance(value, (list, tuple))
-        )
+        if isinstance(value, (bool, int, float, str))
+        or (key == "sage.performance.data" and isinstance(value, (list, tuple)))
         else json.dumps(value, ensure_ascii=False, default=str)
         for key, value in dict(values or {}).items()
         if value is not None

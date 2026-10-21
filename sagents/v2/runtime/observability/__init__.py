@@ -1,9 +1,23 @@
-"""Optional diagnostics and tracing sinks."""
+"""Public observation contracts, instrumentation and process-owned provider."""
+
+from typing import TYPE_CHECKING
 
 from sagents.v2._lazy import exported_names, resolve_export
+from .evidence.redaction import redact as redact_evidence
+
+if TYPE_CHECKING:
+    from .provider import (
+        ObservabilityConfig as ObservabilityConfig,
+        ObservabilityProvider as ObservabilityProvider,
+        create_observability_provider as create_observability_provider,
+    )
 
 from sagents.v2.runtime.observability.contracts import (
+    DiagnosticEvidenceSource,
     DiagnosticSink,
+    ModelHistoryQuery,
+    PerformanceQuery,
+    TraceQuery,
     LogError,
     LogLevel,
     LogRecord,
@@ -33,60 +47,34 @@ from sagents.v2.runtime.observability.traces import (
 )
 
 _LAZY_EXPORTS = {
-    "ObservabilityProvider": ("sagents.v2.runtime.observability.provider", "ObservabilityProvider"),
-    "create_observability_provider": ("sagents.v2.runtime.observability.provider", "create_observability_provider"),
-    "PhoenixTraceSink": ("sagents.v2.runtime.observability.plugins.phoenix", "PhoenixTraceSink"),
-    "phoenix_available": ("sagents.v2.runtime.observability.plugins.phoenix", "phoenix_available"),
-    "LangfuseTraceSink": ("sagents.v2.runtime.observability.plugins.langfuse", "LangfuseTraceSink"),
-    "langfuse_available": ("sagents.v2.runtime.observability.plugins.langfuse", "langfuse_available"),
-    "FilesystemDiagnosticSink": (
-        "sagents.v2.runtime.observability.plugins.filesystem",
-        "FilesystemDiagnosticSink",
+    "ObservabilityProvider": (
+        "sagents.v2.runtime.observability.provider",
+        "ObservabilityProvider",
     ),
-    "FilesystemLogSink": (
-        "sagents.v2.runtime.observability.plugins.logging_filesystem",
-        "FilesystemLogSink",
+    "create_observability_provider": (
+        "sagents.v2.runtime.observability.provider",
+        "create_observability_provider",
     ),
-    "NoopDiagnosticSink": (
-        "sagents.v2.runtime.observability.plugins.diagnostic_noop",
-        "NoopDiagnosticSink",
-    ),
-    "NoopLogSink": (
-        "sagents.v2.runtime.observability.plugins.logging_noop",
-        "NoopLogSink",
-    ),
-    "NoopTraceSink": (
-        "sagents.v2.runtime.observability.plugins.trace_noop",
-        "NoopTraceSink",
-    ),
-    "OtlpTraceSink": ("sagents.v2.runtime.observability.plugins.otlp", "OtlpTraceSink"),
-    "StdoutLogSink": (
-        "sagents.v2.runtime.observability.plugins.logging_stdout",
-        "StdoutLogSink",
-    ),
-    "otel_available": (
-        "sagents.v2.runtime.observability.plugins.otlp",
-        "otel_available",
+    "ObservabilityConfig": (
+        "sagents.v2.runtime.observability.provider",
+        "ObservabilityConfig",
     ),
 }
 
 __all__ = [
-    "PhoenixTraceSink",
-    "phoenix_available",
-    "LangfuseTraceSink",
-    "langfuse_available",
     "DiagnosticSink",
-    "FilesystemDiagnosticSink",
-    "FilesystemLogSink",
-    "StdoutLogSink",
+    "ModelHistoryQuery",
+    "DiagnosticEvidenceSource",
+    "PerformanceQuery",
+    "TraceQuery",
+    "ObservabilityConfig",
+    "ObservabilityProvider",
+    "create_observability_provider",
+    "redact_evidence",
     "LogError",
     "LogLevel",
     "LogRecord",
     "LogSink",
-    "NoopDiagnosticSink",
-    "NoopLogSink",
-    "NoopTraceSink",
-    "OtlpTraceSink",
     "SpanHandle",
     "StructuredLogger",
     "StructuredLoggingHandler",
@@ -103,7 +91,6 @@ __all__ = [
     "encode_log_record",
     "format_log_record",
     "install_standard_logging",
-    "otel_available",
     "redact_log_value",
     "structured_log_context",
 ]

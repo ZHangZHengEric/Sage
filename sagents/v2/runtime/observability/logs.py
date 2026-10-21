@@ -95,7 +95,9 @@ class StructuredLogger:
                     message=message,
                     component=self.component,
                     process_id=os.getpid(),
-                    error=_log_error(error, raw=getattr(self.sink, "raw_capture", False)),
+                    error=_log_error(
+                        error, raw=getattr(self.sink, "raw_capture", False)
+                    ),
                     attributes={**values, **dict(attributes or {})},
                     **known,
                 )

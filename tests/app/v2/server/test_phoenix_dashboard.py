@@ -5,8 +5,8 @@ import httpx
 import pytest
 from fastapi.testclient import TestClient
 
-from sagents.v2.runtime.observability.performance_evidence import ExternalDiagnostics
-from app.v2.server.observability.phoenix_dashboard import PhoenixDashboard
+from sagents.v2.runtime.observability.plugins.external.diagnostics import ExternalDiagnostics
+from sagents.v2.runtime.observability.plugins.external.phoenix import PhoenixTraceQuery
 from app.v2.server.main import create_app
 from tests.app.v2.server.conftest import make_test_service
 
@@ -33,7 +33,7 @@ async def test_dashboard_aggregates_without_fetching_model_payloads():
             'output_tokens': 100, 'cost': {'total': {'cost': .004}},
         }}})
     async with httpx.AsyncClient(transport=httpx.MockTransport(handle)) as client:
-        data = await PhoenixDashboard(source).summary(start='2026-10-20T00:00:00Z',
+        data = await PhoenixTraceQuery(source).summary(start='2026-10-20T00:00:00Z',
                     end='2026-10-21T00:00:00Z', agent_id='original"', session_id='session:one', client=client)
     assert data['tokens'] == 300 and data['errors'] == 1
     assert len(requests) == 2
@@ -48,13 +48,13 @@ async def test_graphql_error_is_not_presented_as_empty_data():
         return httpx.Response(200, json={'errors': [{'message': 'private upstream detail'}]})
     async with httpx.AsyncClient(transport=httpx.MockTransport(handle)) as client:
         with pytest.raises(ValueError, match='Phoenix query failed'):
-            await PhoenixDashboard(source).spans(start='a', end='b', client=client)
+            await PhoenixTraceQuery(source).spans(start='a', end='b', client=client)
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize('limit', ['encoding', 'response', 'bytes', 'requests'])
 async def test_graphql_enforces_the_shared_query_budget_before_parsing(limit):
-    from sagents.v2.runtime.observability.query import query_budget
+    from sagents.v2.runtime.observability.plugins._shared.query import query_budget
 
     source = ExternalDiagnostics(backend='phoenix', query_url='http://phoenix',
                                  headers={'Accept-Encoding': 'gzip'})
@@ -82,7 +82,7 @@ async def test_graphql_enforces_the_shared_query_budget_before_parsing(limit):
                     'bytes': 'byte budget', 'requests': 'request budget',
                 }[limit]):
                     for _ in range(2 if limit in {'bytes', 'requests'} else 1):
-                        await PhoenixDashboard(source)._graphql(client, 'query { node { id } }', {})
+                        await PhoenixTraceQuery(source)._graphql(client, 'query { node { id } }', {})
         assert all(request.headers['Accept-Encoding'] == 'identity' for request in dispatched)
         if limit == 'encoding':
             assert reads == []
@@ -100,7 +100,7 @@ def test_embedded_endpoints_require_admin_and_share_time_filter(tmp_path, monkey
         calls.append(options)
         return {'requests': 1, 'errors': 0, 'tokens': 100, 'input_tokens': 80,
                 'output_tokens': 20, 'cost': .01}
-    monkeypatch.setattr(PhoenixDashboard, 'summary', summary)
+    monkeypatch.setattr(PhoenixTraceQuery, 'summary', summary)
     with TestClient(create_app(service=service)) as client:
         for path in ['/traces/summary', '/trace-spans', '/trace-spans/'+'a'*16,
                      '/traces/'+'b'*32+'/spans']:
@@ -145,7 +145,7 @@ async def test_metadata_pagination_and_raw_span_are_separate_queries():
         return httpx.Response(200,json={'data':{'node':{'spans':{
             'edges':[{'node':row}], 'pageInfo':{'hasNextPage':True,'endCursor':'page-3'}}}}})
     async with httpx.AsyncClient(transport=httpx.MockTransport(handle)) as client:
-        dashboard = PhoenixDashboard(source)
+        dashboard = PhoenixTraceQuery(source)
         page = await dashboard.spans(start='a',end='b',kind='LLM',session_id='session:one',cursor='page-2',client=client)
         assert page['next_cursor'] == 'page-3'
         assert 'attributes' not in page['items'][0]

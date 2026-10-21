@@ -15,8 +15,14 @@ from urllib.parse import unquote
 from pydantic import Field
 
 from sagents.v2.contracts.common import StrictModel
-from .contracts import LogLevel, LogRecord
-from .plugins.diagnostic_noop import NoopDiagnosticSink
+from .contracts import (
+    LogLevel,
+    LogRecord,
+    ModelHistoryQuery,
+    PerformanceQuery,
+    TraceQuery,
+)
+from .plugins.diagnostic_noop import NoopDiagnosticSink, UnqueryableDiagnostics
 from .plugins.logging_stdout import StdoutLogSink
 from .plugins.logging_filesystem import FilesystemLogSink
 from .plugins.trace_noop import NoopTraceSink
@@ -164,8 +170,14 @@ class ObservabilityProvider:
         diagnostics=None,
         capture_traces=None,
         config=None,
+        performance_query: PerformanceQuery | None = None,
+        trace_query: TraceQuery | None = None,
+        model_history: ModelHistoryQuery | None = None,
     ):
         self.plugin_id = plugin_id
+        self._performance_query = performance_query
+        self.trace_query = trace_query
+        self._model_history = model_history
         self._capture_traces = capture_traces
         self.config = ObservabilityConfig.model_validate(config or {}).model_dump(
             mode="json"
@@ -181,36 +193,66 @@ class ObservabilityProvider:
         self.closed = False
 
     async def export_evidence(self, session_id: str, run_ids: set[str]):
-        export = getattr(self.diagnostics, "export_evidence", None)
-        if export:
-            return await export(session_id, run_ids)
-        # Filesystem evidence is addressed only by the authorized Run allowlist.
-        models = []
-        for run_id in sorted(run_ids):
-            models.extend(
-                await self.diagnostics.list_model_requests(
-                    session_id=session_id, run_id=run_id
-                )
-            )
-        return {
-            "models": models,
-            "logs": [],
-            "logs_complete": False,
-            "evidence_source": "filesystem",
-            "capture_failures_since_start": 0,
-        }
+        return await self.diagnostics.export_evidence(session_id, run_ids)
 
-    async def list_model_requests(self, *, session_id: str, run_ids: set[str]):
-        """Query only Runs already authorized by the host, on any backend."""
-        if not run_ids or not getattr(self.diagnostics, "available", True):
+    @property
+    def performance_available(self) -> bool:
+        return (
+            self._performance_query is not None
+            and self._performance_query.available
+            and not self.closed
+        )
+
+    async def report_performance(
+        self,
+        *,
+        start: float,
+        end: float,
+        agent_id: str = "",
+        bucket: str = "hour",
+        timezone_name: str = "Asia/Shanghai",
+    ):
+        query = self._performance_query
+        if not self.performance_available or query is None:
+            raise NotImplementedError(
+                "this observation provider cannot query performance"
+            )
+        return await query.report(
+            start=start,
+            end=end,
+            agent_id=agent_id,
+            bucket=bucket,
+            timezone_name=timezone_name,
+        )
+
+    async def list_model_requests(self, *, session_id: str, run_ids: set[str] | None):
+        """Query authorized Runs, or local history of a host-authorized Session.
+
+        External backends always require the authoritative Run allowlist.
+        Local Session history can remain readable when Run state is corrupt.
+        """
+        if not getattr(self.diagnostics, "available", True):
             return ()
-        return tuple((await self.export_evidence(session_id, run_ids)).get("models", ()))
+        if run_ids is None:
+            if self._model_history is None:
+                raise ValueError("this evidence backend requires a Run allowlist")
+            return await self._model_history.list_model_requests(session_id=session_id)
+        if not run_ids:
+            return ()
+        return tuple(
+            (await self.export_evidence(session_id, run_ids)).get("models", ())
+        )
 
     async def get_model_request(self, *, session_id: str, run_id: str, request_id: str):
-        read = getattr(self.diagnostics, "get_model_request", None)
-        if read is not None:
-            return await read(session_id=session_id, run_id=run_id, request_id=request_id)
-        for request in await self.list_model_requests(session_id=session_id, run_ids={run_id}):
+        if self._model_history is not None:
+            return await self._model_history.get_model_request(
+                session_id=session_id,
+                run_id=run_id,
+                request_id=request_id,
+            )
+        for request in await self.list_model_requests(
+            session_id=session_id, run_ids={run_id}
+        ):
             if request.get("request_id") == request_id:
                 return request
         raise KeyError(f"model request {request_id!r} was not observed")
@@ -248,6 +290,7 @@ def create_observability_provider(plugin_id: str, config=None) -> ObservabilityP
     if backend not in {"local", "otlp", "langfuse", "phoenix"}:
         raise ValueError(f"unknown observability provider: {plugin_id}")
     traces, evidence, capture_traces, outputs = None, None, None, []
+    performance_query, trace_query, model_history = None, None, None
     try:
         if options.log_stdout:
             outputs.append(
@@ -280,8 +323,15 @@ def create_observability_provider(plugin_id: str, config=None) -> ObservabilityP
                     ),
                 )
             evidence = _external_evidence(backend, options)
-            if capture_traces is not None:
-                evidence.capture_sink = capture_traces
+            if not isinstance(evidence, UnqueryableDiagnostics):
+                if evidence.available:
+                    performance_query = evidence
+                    if backend == "phoenix":
+                        from .plugins.external.phoenix import PhoenixTraceQuery
+
+                        trace_query = PhoenixTraceQuery(evidence)
+                if capture_traces is not None:
+                    evidence.capture_sink = capture_traces
         elif (
             options.diagnostics_root
             and options.diagnostics_storage != "none"
@@ -292,13 +342,16 @@ def create_observability_provider(plugin_id: str, config=None) -> ObservabilityP
                     "local diagnostics support redacted capture; use an external raw evidence backend"
                 )
             if options.diagnostics_storage == "sqlite":
-                from .sqlite_evidence import SessionDiagnostics
+                from .plugins.sqlite import SessionDiagnostics
 
                 evidence = SessionDiagnostics(Path(options.diagnostics_root))
+                if evidence.available:
+                    performance_query = evidence
             else:
                 from .plugins.filesystem import FilesystemDiagnosticSink
 
                 evidence = FilesystemDiagnosticSink(options.diagnostics_root)
+                model_history = evidence
         return ObservabilityProvider(
             plugin_id=plugin_id,
             outputs=outputs,
@@ -306,6 +359,9 @@ def create_observability_provider(plugin_id: str, config=None) -> ObservabilityP
             diagnostics=evidence,
             capture_traces=capture_traces,
             config=config,
+            performance_query=performance_query,
+            trace_query=trace_query,
+            model_history=model_history,
         )
     except BaseException:
         for resource in (capture_traces, traces, *outputs):
@@ -360,7 +416,7 @@ def _trace_backend(backend, options):
 
 
 def _external_evidence(backend, options):
-    from .performance_evidence import ExternalDiagnostics, UnqueryableDiagnostics
+    from .plugins.external.diagnostics import ExternalDiagnostics
 
     if backend == "phoenix":
         query_url = options.query_url or options.endpoint.rstrip("/").removesuffix(
