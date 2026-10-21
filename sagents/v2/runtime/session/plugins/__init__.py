@@ -1,5 +1,18 @@
 """Session storage plugins and their shared capability publication interface."""
 
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from sagents.v2.runtime.session.plugins._shared.storage import SESSION_STORAGE_CAPABILITIES as SESSION_STORAGE_CAPABILITIES
+    from sagents.v2.runtime.session.plugins._shared.storage import session_storage_providers as session_storage_providers
+    from sagents.v2.runtime.session.plugins.mysql.redis import RedisMysqlSessionStore as RedisMysqlSessionStore
+    from sagents.v2.runtime.session.plugins.ephemeral import EphemeralSessionStore as EphemeralSessionStore
+    from sagents.v2.runtime.session.plugins.filesystem import FilesystemSessionStore as FilesystemSessionStore
+    from sagents.v2.runtime.session.plugins.mysql import MysqlSessionStore as MysqlSessionStore
+    from sagents.v2.runtime.session.plugins.filesystem import SessionStoreCorruptionError as SessionStoreCorruptionError
+    from sagents.v2.runtime.session.plugins.filesystem import StoreInUseError as StoreInUseError
+
+
 from sagents.v2._lazy import exported_names, resolve_export
 
 
@@ -35,7 +48,16 @@ _EXPORTS = {
     ),
 }
 
-__all__ = list(_EXPORTS)
+__all__ = [
+    "SESSION_STORAGE_CAPABILITIES",
+    "session_storage_providers",
+    "RedisMysqlSessionStore",
+    "EphemeralSessionStore",
+    "FilesystemSessionStore",
+    "MysqlSessionStore",
+    "SessionStoreCorruptionError",
+    "StoreInUseError",
+]
 
 
 def __getattr__(name: str):

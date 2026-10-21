@@ -44,7 +44,7 @@ def load_installed_extension(
         )
 
     try:
-        registration = candidates[0].load()
+        registration = next(iter(candidates)).load()
     except Exception as exc:
         raise _error(
             "extension.entry_point_load_failed",

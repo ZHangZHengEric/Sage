@@ -2,6 +2,14 @@
 
 from typing import TYPE_CHECKING
 
+if TYPE_CHECKING:
+    from sagents.v2.runtime.observability.provider import ObservabilityProvider as ObservabilityProvider
+    from sagents.v2.runtime.observability.provider import create_observability_provider as create_observability_provider
+    from sagents.v2.runtime.observability.provider import ObservabilityConfig as ObservabilityConfig
+
+
+from typing import TYPE_CHECKING
+
 from sagents.v2._lazy import exported_names, resolve_export
 from .evidence.redaction import redact as redact_evidence
 

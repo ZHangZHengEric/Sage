@@ -1,5 +1,20 @@
 """Scheduler contracts and lazily loaded implementations."""
 
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from sagents.v2.runtime.execution.scheduler.plugins.redis_distributed import RedisDistributedScheduler as RedisDistributedScheduler
+    from sagents.v2.runtime.execution.scheduler.plugins.filesystem import FilesystemScheduler as FilesystemScheduler
+    from sagents.v2.runtime.execution.scheduler.plugins.ephemeral import InMemoryScheduler as InMemoryScheduler
+    from sagents.v2.runtime.execution.scheduler.contracts import LeaseReleaseReason as LeaseReleaseReason
+    from sagents.v2.runtime.execution.scheduler.provider import Scheduler as Scheduler
+    from sagents.v2.runtime.execution.scheduler.contracts import SchedulerCapabilities as SchedulerCapabilities
+    from sagents.v2.runtime.execution.scheduler.contracts import SchedulerClaimPolicy as SchedulerClaimPolicy
+    from sagents.v2.runtime.execution.scheduler.plugins.filesystem import SchedulerInUseError as SchedulerInUseError
+    from sagents.v2.runtime.execution.scheduler.contracts import WorkItem as WorkItem
+    from sagents.v2.runtime.execution.scheduler.contracts import WorkerLease as WorkerLease
+
+
 from sagents.v2._lazy import exported_names, resolve_export
 
 
@@ -36,7 +51,18 @@ _EXPORTS = {
     "WorkerLease": ("sagents.v2.runtime.execution.scheduler.contracts", "WorkerLease"),
 }
 
-__all__ = list(_EXPORTS)
+__all__ = [
+    "RedisDistributedScheduler",
+    "FilesystemScheduler",
+    "InMemoryScheduler",
+    "LeaseReleaseReason",
+    "Scheduler",
+    "SchedulerCapabilities",
+    "SchedulerClaimPolicy",
+    "SchedulerInUseError",
+    "WorkItem",
+    "WorkerLease",
+]
 
 
 def __getattr__(name: str):

@@ -104,8 +104,6 @@ async def test_large_model_stream_preserves_request_and_export_after_restart(tmp
     assert record["status"] == "completed"
     assert record["purpose"] == "agent"
     assert not record.get("truncated")
-    state = {"sessions": [{"session_id": "large"}],
-             "runs": [{"session_id": "large", "run_id": "run-large"}]}
     output, _ = prepare_session_export("large", {"run-large"}, evidence)
     with output, ZipFile(output) as archive:
         index = json.loads(archive.read("large/requests/index.json"))

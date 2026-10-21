@@ -40,9 +40,11 @@ def fixture_configuration(root, *, model=None, models=None, runtime=None, regist
                 storage_ports.pop("derived-state.store")
             names = tuple(storage_ports)
         if storage_ports is not None:
-            start = lambda instance, context, deps, ports=storage_ports: ports
+            def start(instance, context, deps, ports=storage_ports):
+                return ports
         elif capability == "derived-state.store":
-            start = lambda instance, context, deps, capability=capability: {capability: instance}
+            def start(instance, context, deps, capability=capability):
+                return {capability: instance}
         else:
             start = None
         registered.append(ExtensionRegistration(

@@ -1,6 +1,12 @@
 """Bounded read projections of existing Session rows, without execution caches."""
 from __future__ import annotations
 
+from typing import TYPE_CHECKING, Any, cast
+
+if TYPE_CHECKING:
+    from sagents.v2.runtime.session.state import SessionStoreCoordinator
+
+
 from collections.abc import Collection
 from dataclasses import dataclass
 
@@ -40,7 +46,7 @@ _COLLECTION_KEYS = {'sessions':'session_id','runs':'run_id','suspensions':'suspe
 
 def project_view_state(state, *, include_events=False, run_ids=None):
     # Ownership must use all Runs, even when the consumer selects only one Run.
-    projected = {name: [dict(row) for row in state.get(name, ())] for name in _COLLECTION_KEYS}
+    projected: dict[str, Any] = {name: [dict(row) for row in state.get(name, ())] for name in _COLLECTION_KEYS}
     projected['run_events'] = {
         rid: [event for event in values if (include_events and (run_ids is None or rid in run_ids))
               or event.get('type') == 'run.accepted']
@@ -116,32 +122,33 @@ def views_from_payload(state, *, include_events=False, run_ids=None, suspended_o
 
 class SessionReadQueries:
     async def read_session_views(self, session_ids: Collection[str], *, include_events=False, run_ids=None, suspended_only=False):
+        store = cast("SessionStoreCoordinator", self)
         ids = validate_view_ids(session_ids,run_ids)
         selected_ids = set(ids)
-        async with self._lock:
+        async with store._lock:
             result = {}
             rows = {}
-            for row in self._runs.values():
+            for row in store._runs.values():
                 if row.session_id in selected_ids:
                     rows.setdefault(row.session_id,[]).append(row)
             for sid in ids:
-                session = self._sessions.get(sid)
+                session = store._sessions.get(sid)
                 if session is None:
                     continue
-                owner = session.owner or self._derive_session_owner(sid,runs=self._runs,session_events=self._session_events)
+                owner = session.owner or store._derive_session_owner(sid,runs=store._runs,session_events=store._session_events)
                 selected = []
                 for row in sorted(rows.get(sid,()),key=lambda r:(r.created_at,r.run_id)):
                     if (run_ids is not None and row.run_id not in run_ids) or (suspended_only and row.state != RunState.SUSPENDED):
                         continue
                     if suspended_only and row.start_command is None:
                         raise _missing_reference('run.header_not_found',row.run_id)
-                    suspension = self._suspensions.get(row.suspension_id)
-                    interaction = self._interactions.get(suspension.interaction_id) if suspension else None
+                    suspension = store._suspensions.get(row.suspension_id) if row.suspension_id else None
+                    interaction = store._interactions.get(suspension.interaction_id) if suspension and suspension.interaction_id else None
                     if row.suspension_id and suspension is None:
                         raise _missing_reference('suspension.not_found',row.suspension_id)
                     if suspension and suspension.interaction_id and interaction is None:
                         raise _missing_reference('interaction.not_found',suspension.interaction_id)
-                    selected.append(RunReadView(self._run_snapshot(row),row.start_command,suspension,interaction,
-                        tuple(self._run_events.get(row.run_id,())) if include_events else ()))
+                    selected.append(RunReadView(store._run_snapshot(row),row.start_command,suspension,interaction,
+                        tuple(store._run_events.get(row.run_id,())) if include_events else ()))
                 result[sid] = SessionReadView(owner,tuple(selected))
             return result

@@ -17,7 +17,7 @@ def parent_fd(root, relative, *, create=False, uid=None, gid=None):
                 try:
                     os.mkdir(part, mode=0o700, dir_fd=fd)
                     if uid is not None and os.geteuid() == 0:
-                        os.chown(part, uid, gid, dir_fd=fd, follow_symlinks=False)
+                        os.chown(part, uid, gid if gid is not None else -1, dir_fd=fd, follow_symlinks=False)
                 except FileExistsError:
                     pass
             child = os.open(
@@ -60,7 +60,7 @@ def write(root, relative, content, *, create, uid=None, gid=None):
             os.ftruncate(stream.fileno(), 0)
             stream.write(content)
             if uid is not None and os.geteuid() == 0:
-                os.fchown(stream.fileno(), uid, gid)
+                os.fchown(stream.fileno(), uid, gid if gid is not None else -1)
 
 
 def delete(root, relative):

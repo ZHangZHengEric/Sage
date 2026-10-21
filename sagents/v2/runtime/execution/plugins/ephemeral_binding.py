@@ -191,6 +191,7 @@ class EphemeralExecutionBindingProvider:
         owner = self
 
         class Lease:
+            workspace_identity = handle.workspace_identity
             ref, filesystem, process, network = (
                 handle.ref,
                 handle.filesystem,

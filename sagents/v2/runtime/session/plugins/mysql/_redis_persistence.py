@@ -11,7 +11,11 @@ import hashlib
 import json
 import time
 import uuid
-from typing import Any
+from typing import Any, TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    from .redis import _RedisMysqlSessionState
+from sagents.v2.runtime.session.run_metadata import RunMetadata
 
 from sagents.v2.contracts.errors import ErrorCategory, RuntimeErrorInfo, SageV2Error
 from sagents.v2.contracts.run_state import RunState, TERMINAL_RUN_STATES
@@ -144,7 +148,7 @@ class _RedisMysqlPersistence(RedisManagedSessionHeads, _MysqlSessionState):
         key = self._session_key(sid)
         async def write():
             async with self._redis.pipeline() as pipe:
-                await self._owned(pipe)
+                await cast("_RedisMysqlSessionState", self)._owned(pipe)
                 await pipe.watch(key)
                 previous = await pipe.hget(key, "revision")
                 if previous != (str(expected) if expected is not None else None):
@@ -338,7 +342,7 @@ class _RedisMysqlPersistence(RedisManagedSessionHeads, _MysqlSessionState):
         snapshot_key = self._key(f"snapshot:{token}")
         async def seed():
             async with self._redis.pipeline() as pipe:
-                await self._owned(pipe)
+                await cast("_RedisMysqlSessionState", self)._owned(pipe)
                 await pipe.watch(key)
                 await pipe.watch(snapshot_key)
                 if await pipe.hlen(snapshot_key) != parts:
@@ -467,7 +471,7 @@ class _RedisMysqlPersistence(RedisManagedSessionHeads, _MysqlSessionState):
                 if hot:
                     raise self._storage_error(f'Unarchived Redis Session data is missing: {sid}')
         cold = []
-        result = list(rows)
+        result: list[RunMetadata] = list(rows)
         for sid, fields in snapshots.items():
             if fields.get('deleted') == '1':
                 continue
@@ -578,7 +582,7 @@ class _RedisMysqlPersistence(RedisManagedSessionHeads, _MysqlSessionState):
         delete_id = uuid.uuid4().hex
         async def write():
             async with self._redis.pipeline() as pipe:
-                await self._owned(pipe)
+                await cast("_RedisMysqlSessionState", self)._owned(pipe)
                 pipe.multi()
                 for deleted in deleted_session_ids:
                     pipe.hset(self._session_key(deleted), mapping={"deleted": "1", "delete_id": delete_id})
@@ -625,7 +629,7 @@ class _RedisMysqlPersistence(RedisManagedSessionHeads, _MysqlSessionState):
         async def publish():
             nonlocal published
             async with self._redis.pipeline() as pipe:
-                await self._owned(pipe)
+                await cast("_RedisMysqlSessionState", self)._owned(pipe)
                 await pipe.watch(key)
                 await pipe.watch(snapshot_key)
                 if await pipe.hlen(snapshot_key) != parts:
@@ -688,7 +692,7 @@ class _RedisMysqlPersistence(RedisManagedSessionHeads, _MysqlSessionState):
                 await self._compact_hot(sid, fields)
         try:
             async with self._redis.pipeline() as pipe:
-                await self._owned(pipe)
+                await cast("_RedisMysqlSessionState", self)._owned(pipe)
                 await pipe.watch(key)
                 revision, current_deleted, quiescent = await pipe.hmget(key, ("revision", "deleted", "quiescent"))
                 if revision != fields.get("revision") or current_deleted != fields.get("deleted"):

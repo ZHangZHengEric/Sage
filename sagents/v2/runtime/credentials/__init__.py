@@ -1,5 +1,12 @@
 """SAgents V2 module for runtime/credentials/__init__.py."""
 
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from sagents.v2.runtime.credentials.plugins.environment import EnvironmentCredentialProvider as EnvironmentCredentialProvider
+    from sagents.v2.runtime.credentials.plugins.mapping import MappingCredentialProvider as MappingCredentialProvider
+
+
 from sagents.v2._lazy import exported_names, resolve_export
 
 from sagents.v2.runtime.credentials.contracts import (

@@ -7,10 +7,11 @@ import hashlib
 import json
 import os
 import shutil
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, BinaryIO, cast
+from collections.abc import Iterable
 
 
 from sagents.v2.contracts.events import RuntimeEvent
@@ -84,11 +85,18 @@ def adopt_unowned_sessions(
             state = payload.get("state")
             if not isinstance(state, dict):
                 continue
+            state = cast(dict[str, Any], state)
             sessions = state.get("sessions")
-            if not isinstance(sessions, list) or len(sessions) != 1:
+            if not isinstance(sessions, list):
                 continue
+            if len(cast(list[Any], sessions)) != 1:
+                continue
+            sessions = cast(list[Any], sessions)
             session = sessions[0]
-            if not isinstance(session, dict) or session.get("owner") is not None:
+            if not isinstance(session, dict):
+                continue
+            session = cast(dict[str, Any], session)
+            if session.get("owner") is not None:
                 continue
 
             # Owner adoption is a one-time compatibility migration. An already
@@ -98,7 +106,7 @@ def adopt_unowned_sessions(
             # Snapshots that still require mutation must remain fully trusted.
             _verify_checksum(payload, snapshot)
 
-            owner = {
+            owner: dict[str, Any] = {
                 "principal_id": principal_id,
                 "principal_type": principal_type,
                 "tenant_id": tenant_id,
@@ -106,8 +114,11 @@ def adopt_unowned_sessions(
                 "scopes": [],
             }
             session["owner"] = owner
-            for entry in state.get("start_idempotency", ()):
-                if isinstance(entry, dict) and entry.get("principal_type") is None:
+            for entry in cast(list[Any], state.get("start_idempotency", ())):
+                if not isinstance(entry, dict):
+                    continue
+                entry = cast(dict[str, Any], entry)
+                if entry.get("principal_type") is None:
                     entry["tenant_id"] = tenant_id
                     entry["principal_id"] = principal_id
                     entry["principal_type"] = principal_type
@@ -182,7 +193,7 @@ def migrate_runtime_root(runtime_root: str | Path, *, dry_run: bool = False) -> 
                     (target_dir / "derived").mkdir(exist_ok=True)
                 target._write_snapshot(target_dir / "state.json", state)
                 target._atomic_bytes_write(target_dir / "journal.jsonl", b"")
-                for entry in state.get("start_idempotency", ()):
+                for entry in cast(list[Any], state.get("start_idempotency", ())):
                     target._write_start_idempotency(entry, session_id)
                 target._refresh_session_views(session_id, state)
         finally:
@@ -230,7 +241,7 @@ def migrate_runtime_root(runtime_root: str | Path, *, dry_run: bool = False) -> 
             backup.replace(source)
             raise
         _fsync_directory(source.parent)
-        return MigrationReport(**{**report.__dict__, "backup": backup})
+        return replace(report, backup=backup)
     finally:
         _unlock_source(lock)
         if temporary.exists():
@@ -270,7 +281,7 @@ def _read_v3_aggregate(snapshot: Path) -> dict[str, Any]:
     return state
 
 
-def _summary(states) -> dict[str, Any]:
+def _summary(states: Iterable[dict[str, Any]]) -> dict[str, Any]:
     sessions = runs = events = 0
     digest = hashlib.sha256()
     for state in sorted(states, key=_session_id):
@@ -288,11 +299,11 @@ def _summary(states) -> dict[str, Any]:
     return {"sessions": sessions, "runs": runs, "events": events, "hash": digest.hexdigest()}
 
 
-def _lineage_depth(state, aggregates) -> int:
+def _lineage_depth(state: dict[str, Any], aggregates: list[tuple[Path, dict[str, Any]]]) -> int:
     parents = {_session_id(value): value for _, value in aggregates}
     depth = 0
     current = state["sessions"][0].get("parent_session_id")
-    seen = set()
+    seen: set[str] = set()
     while current in parents:
         if current in seen:
             raise ValueError("Session parent lineage contains a cycle")
@@ -302,7 +313,7 @@ def _lineage_depth(state, aggregates) -> int:
     return depth
 
 
-def _session_id(state) -> str:
+def _session_id(state: dict[str, Any]) -> str:
     rows = state.get("sessions", ())
     if len(rows) != 1:
         raise ValueError("Session aggregate must contain exactly one Session")
@@ -361,7 +372,7 @@ def _validate_no_pending_transactions(source: Path) -> None:
             raise ValueError(f"pending recovery data must be resolved before migration: {path}")
 
 
-def _lock_source(source: Path):
+def _lock_source(source: Path) -> BinaryIO:
     if fcntl is None:
         raise RuntimeError("SessionStore migration requires advisory file locks")
     path = source / ".session-store" / ".writer.lock"
@@ -374,7 +385,7 @@ def _lock_source(source: Path):
     return handle
 
 
-def _unlock_source(handle) -> None:
+def _unlock_source(handle: BinaryIO | None) -> None:
     if handle is None or handle.closed:
         return
     if fcntl is not None:
@@ -405,7 +416,7 @@ def _read_json(path: Path) -> dict[str, Any]:
         raise ValueError(f"cannot read migration input {path}: {exc}") from exc
     if not isinstance(value, dict):
         raise ValueError(f"migration input must be a JSON object: {path}")
-    return value
+    return cast(dict[str, Any], value)
 
 
 def _adopt_projected_session_owner(path: Path, owner: dict[str, Any]) -> None:
@@ -413,7 +424,10 @@ def _adopt_projected_session_owner(path: Path, owner: dict[str, Any]) -> None:
         return
     payload = _read_json(path)
     session = payload.get("session")
-    if not isinstance(session, dict) or session.get("owner") is not None:
+    if not isinstance(session, dict):
+        return
+    session = cast(dict[str, Any], session)
+    if session.get("owner") is not None:
         return
     session["owner"] = dict(owner)
     _atomic_json_replace(path, payload)

@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+from typing import cast
+from collections.abc import Callable, Awaitable
+
 import hashlib
-from collections.abc import Callable
 from datetime import datetime, timedelta
 
 from sagents.v2.contracts.checkpoint import SuspensionReason
@@ -149,7 +151,7 @@ class ExecutionBindingLifecycleCoordinator:
         if record.state == ExecutionResourceState.ACTIVE:
             reacquire = getattr(self.sandbox_provider, "reacquire_workspace", None)
             handle = (
-                await reacquire(record.sandbox_ref, spec, context, run_id=run_id)
+                await cast(Callable[..., Awaitable[SandboxHandle]], reacquire)(record.sandbox_ref, spec, context, run_id=run_id)
                 if callable(reacquire)
                 else await self.sandbox_provider.attach(record.sandbox_ref, context)
             )

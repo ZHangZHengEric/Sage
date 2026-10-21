@@ -7,6 +7,9 @@ execution safe and must not advertise process/container/VM isolation.
 
 from __future__ import annotations
 
+from typing import AsyncContextManager
+from sagents.v2.runtime.execution.sandbox.provider import SandboxProcessStream
+
 import hashlib
 import hmac
 import asyncio
@@ -181,6 +184,13 @@ class _MemoryProcessRuntime:
     def __init__(self, provider: "InMemorySandboxProvider", sandbox_id: str) -> None:
         self._provider = provider
         self._sandbox_id = sandbox_id
+
+    def open_process(self, request, *, intent, grant) -> AsyncContextManager[SandboxProcessStream]:
+        raise self._provider._error(
+            "sandbox.interactive_process_unsupported",
+            ErrorCategory.VALIDATION,
+            "in-memory processes do not support interactive streams",
+        )
 
     async def run(self, request, *, intent, grant) -> ProcessResult:
         row = self._provider._authorize_process(

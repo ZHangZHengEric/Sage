@@ -5,6 +5,7 @@ import asyncio
 from contextlib import asynccontextmanager
 from contextvars import ContextVar
 import hashlib
+from typing import Any
 
 from sagents.v2.contracts.errors import ErrorCategory, RuntimeErrorInfo, SageV2Error
 from .archive import MysqlSessionArchive
@@ -13,7 +14,7 @@ from .archive import MysqlSessionArchive
 class DistributedMysqlSessionArchive(MysqlSessionArchive):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self._archive_connection = ContextVar("distributed_mysql_archive_connection", default=None)
+        self._archive_connection: ContextVar[tuple[asyncio.Task[Any] | None, Any] | None] = ContextVar("distributed_mysql_archive_connection", default=None)
 
     def _pinned_connection(self):
         value = self._archive_connection.get()

@@ -225,7 +225,7 @@ def _seccomp_filter(
                 != 0
             ):
                 raise RuntimeError("cannot protect XFS project inheritance")
-        fd = os.memfd_create("sage-seccomp", os.MFD_CLOEXEC)
+        fd = getattr(os, "memfd_create")("sage-seccomp", getattr(os, "MFD_CLOEXEC"))
         if library.seccomp_export_bpf(context, fd) != 0:
             raise RuntimeError("cannot export seccomp filter")
         os.lseek(fd, 0, os.SEEK_SET)

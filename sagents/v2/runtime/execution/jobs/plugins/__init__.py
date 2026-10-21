@@ -1,5 +1,12 @@
 """Job runtime contracts and lazily exported plugin implementations."""
 
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from sagents.v2.runtime.execution.jobs.plugins.ephemeral import InMemoryJobRuntime as InMemoryJobRuntime
+    from sagents.v2.runtime.execution.jobs.plugins.redis_distributed import RedisDistributedJobRuntime as RedisDistributedJobRuntime
+
+
 from sagents.v2._lazy import exported_names, resolve_export
 
 _EXPORTS = {
@@ -12,7 +19,10 @@ _EXPORTS = {
         "RedisDistributedJobRuntime",
     ),
 }
-__all__ = list(_EXPORTS)
+__all__ = [
+    "InMemoryJobRuntime",
+    "RedisDistributedJobRuntime",
+]
 
 
 def __getattr__(name):

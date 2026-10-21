@@ -106,13 +106,18 @@ class SandboxHandle(Protocol):
     independent revocation, and resource accounting shared by all live members.
     """
 
-    ref: SandboxRef
-    workspace_identity: str
+    @property
+    def ref(self) -> SandboxRef: ...
+    @property
+    def workspace_identity(self) -> str: ...
     # Equal for handles sharing backing files, even with different Run IDs or
     # virtual path aliases. Providers must include their storage namespace.
-    filesystem: SandboxFileSystem
-    process: SandboxProcessRuntime
-    network: SandboxNetworkRuntime
+    @property
+    def filesystem(self) -> SandboxFileSystem: ...
+    @property
+    def process(self) -> SandboxProcessRuntime: ...
+    @property
+    def network(self) -> SandboxNetworkRuntime: ...
 
     async def status(self) -> SandboxSnapshot: ...
     async def suspend(self) -> SandboxCheckpointRef: ...

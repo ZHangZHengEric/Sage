@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import inspect
+from typing import TypedDict
 
 from sagents.v2.runtime.extensions.contracts import (
     CapabilityOffer,
@@ -16,7 +17,13 @@ from sagents.v2.runtime.extensions.contracts import (
 from sagents.v2.runtime.extensions.registry import ExtensionRegistry
 
 
-def implementation_identity(implementation: type) -> dict[str, str]:
+class ImplementationIdentity(TypedDict):
+    plugin_id: str
+    name: str
+    description: str
+
+
+def implementation_identity(implementation: type) -> ImplementationIdentity:
     plugin_id, name, description = plugin_identity(implementation)
     return {
         "plugin_id": plugin_id,

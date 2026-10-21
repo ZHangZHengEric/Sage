@@ -1,4 +1,10 @@
 """Batch small Session read views from the existing compact state and journal."""
+
+from typing import TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    from sagents.v2.runtime.session.plugins.mysql.state import _MysqlSessionState
+
 import asyncio
 import json
 
@@ -44,27 +50,29 @@ def replay_view_rows(rows, mutations, **options):
 
 class MysqlSessionReadQueries:
     async def read_session_views(self, session_ids, **options):
+        store = cast("_MysqlSessionState", self)
         ids = validate_view_ids(session_ids,options.get('run_ids'))
         if not ids:
             return {}
-        async with self._reader_connection() as connection:
+        async with store._reader_connection() as connection:
             async with connection.cursor() as cursor:
                 await cursor.execute('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ')
             await connection.begin()
-            return await self._read_session_views_on_connection(connection,ids,**options)
+            return await store._read_session_views_on_connection(connection,ids,**options)
 
     async def _read_session_views_on_connection(self, connection, session_ids, **options):
         """Reuse the caller's read snapshot for legacy metadata authorization."""
+        store = cast("_MysqlSessionState", self)
         ids = validate_view_ids(session_ids,options.get('run_ids'))
         if not ids:
             return {}
         marks = ','.join(['%s']*len(ids))
         async with connection.cursor() as cursor:
             await cursor.execute(f"SELECT session_id,{_projection('compact_state')},revision,last_sequence "
-                f"FROM {self._table('sessions')} WHERE session_id IN ({marks})",ids)
+                f"FROM {store._table('sessions')} WHERE session_id IN ({marks})",ids)
             bases = await cursor.fetchall()
             delta = 'JSON_OBJECT(' + ','.join(f"'{op}',{_projection('mutation',op+'.')}" for op in ('upserts','patches','deletes')) + ')'
-            await cursor.execute(f"SELECT session_id,revision,{delta} FROM {self._table('session_mutations')} "
+            await cursor.execute(f"SELECT session_id,revision,{delta} FROM {store._table('session_mutations')} "
                 f"WHERE session_id IN ({marks}) ORDER BY session_id,revision",ids)
             mutations = await cursor.fetchall()
             states = await asyncio.to_thread(replay_view_rows,bases,mutations,**options)
@@ -81,7 +89,7 @@ class MysqlSessionReadQueries:
                 conditions.append('session_id IN (' + ','.join(['%s']*len(legacy)) + ") AND JSON_UNQUOTE(JSON_EXTRACT(event,'$.type')) = 'run.accepted'")
                 params.extend(legacy)
             if conditions:
-                await cursor.execute(f"SELECT session_id,run_id,event FROM {self._table('run_events')} WHERE "
+                await cursor.execute(f"SELECT session_id,run_id,event FROM {store._table('run_events')} WHERE "
                     + ' OR '.join('('+clause+')' for clause in conditions) + ' ORDER BY session_sequence,run_sequence',tuple(params))
                 for sid,rid,raw in await cursor.fetchall():
                     if sid in states:

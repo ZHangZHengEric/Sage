@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Awaitable, Callable, Iterator, Mapping
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any, ClassVar, Generic, Literal, Protocol, TypeVar
+from typing import Any, ClassVar, Generic, Literal, Protocol, TypeVar, cast
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
@@ -40,7 +40,7 @@ def plugin_identity(implementation: type[Any]) -> tuple[str, str, str]:
             f"{implementation.__qualname__} must declare non-empty "
             f"{', '.join(missing)}"
         )
-    return plugin_id, name, description
+    return cast(str, plugin_id), cast(str, name), cast(str, description)
 
 
 class ExtensionScope(str, Enum):
@@ -76,6 +76,9 @@ class CapabilityKey(StrictModel):
 
     capability: Identifier
     name: Identifier = "default"
+
+    def __hash__(self) -> int:
+        return hash((self.capability, self.name))
 
     def __str__(self) -> str:
         return f"{self.capability}:{self.name}"

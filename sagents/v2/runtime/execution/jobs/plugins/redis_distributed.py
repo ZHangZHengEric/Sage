@@ -5,6 +5,9 @@ cancel them. An expired owner fails the Job; arbitrary commands are never replay
 """
 from __future__ import annotations
 
+from typing import Any
+from collections.abc import Callable
+
 import asyncio
 import base64
 from datetime import datetime, timezone
@@ -211,7 +214,7 @@ class RedisDistributedJobRuntime(JobRuntimeState):
             row = JobSnapshot(job_id=job_id, owner_run_id=spec.owner_run_id, kind=spec.kind,
                 state=JobState.CREATED, pause_behavior=spec.pause_behavior,
                 execution_affinity=spec.execution_affinity,
-                output_cursor=JobCursor(job_id=job_id), created_at=self._date(now), updated_at=self._date(now)).model_dump(mode="json")
+                output_cursor=JobCursor(job_id=job_id), created_at=datetime.fromtimestamp(now, timezone.utc), updated_at=datetime.fromtimestamp(now, timezone.utc)).model_dump(mode="json")
             row.update(spec={"owner_run_id": spec.owner_run_id, "idempotency_key": spec.idempotency_key,
                              "fingerprint": fingerprint}, owner=token, node=self._node,
                 lease_until=now + self.lease_seconds, chunks=0)
@@ -238,7 +241,7 @@ class RedisDistributedJobRuntime(JobRuntimeState):
         cancel_event = asyncio.Event()
         stop_requested = asyncio.Event()
         runner_task = None
-        final_update = None
+        final_update: Callable[[Any], None] | None = None
         async def heartbeat():
             next_renewal = 0
             while True:
@@ -329,13 +332,15 @@ class RedisDistributedJobRuntime(JobRuntimeState):
                     usage=completion.usage.model_dump(mode="json"))
             final_update = complete
         except asyncio.CancelledError:
-            def final_update(row):
+            def killed(row):
                 row.update(state=JobState.KILLED.value)
+            final_update = killed
         except Exception as exc:
-            error = exc.info if hasattr(exc, "info") else RuntimeErrorInfo(
+            error = exc.info if isinstance(exc, SageV2Error) else RuntimeErrorInfo(
                 code="job.runner_failed", category=ErrorCategory.PROVIDER_PERMANENT, message=str(exc), safe_to_resume=False)
-            def final_update(row):
+            def failed(row):
                 row.update(state=JobState.FAILED.value, error=error.model_dump(mode="json"))
+            final_update = failed
         finally:
             cancel_event.set()
             async def cleanup():

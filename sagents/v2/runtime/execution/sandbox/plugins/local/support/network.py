@@ -199,8 +199,8 @@ class ShellNetworkBroker:
                 self._accept, path=self.socket_path, limit=_HEADER_LIMIT + 1
             )
             if uid is not None and os.geteuid() == 0:
-                os.chown(directory, uid, gid)
-                os.chown(self.socket_path, uid, gid)
+                os.chown(directory, uid, gid if gid is not None else -1)
+                os.chown(self.socket_path, uid, gid if gid is not None else -1)
             self.socket_path.chmod(0o600)
         else:
             self.server = await asyncio.start_server(
@@ -278,7 +278,7 @@ class ShellNetworkBroker:
     async def _connect(self, address: str, port: int):
         if self.policy.mode != NetworkMode.PROXY:
             return await asyncio.open_connection(address, port)
-        parsed = urlsplit(self.policy.proxy_url)
+        parsed = urlsplit(self.policy.proxy_url or "")
         reader, writer = await asyncio.open_connection(
             parsed.hostname,
             parsed.port or (443 if parsed.scheme == "https" else 80),
@@ -348,6 +348,7 @@ class ShellNetworkBroker:
             writer.transport.abort()
             return
         task = asyncio.current_task()
+        assert task is not None
         self._tasks.add(task)
         self._writers.add(writer)
         remote_writer = None

@@ -92,7 +92,7 @@ class LeaseFencedSessionStore:
     async def commit_model_stream_batch(self, *args, **kwargs):
         run = kwargs.get("run") or (args[0] if args else None)
         return await self._execute_fenced(
-            run.run_id,
+            run.run_id if run is not None else None,
             lambda: self.session_store.commit_model_stream_batch(*args, **kwargs),
         )
 
@@ -186,7 +186,7 @@ class LeaseFencedSessionStore:
 
         require_execution_ownership()
         try:
-            return await execute_fenced(lease, owned_operation)
+            return await self.scheduler.execute_fenced(lease, owned_operation)
         except SageV2Error as exc:
             if is_lease_loss(exc):
                 revoke_ownership()
@@ -261,7 +261,7 @@ class LeaseFencedSessionStore:
 
         require_execution_ownership()
         try:
-            return await execute_fenced(lease, owned_operation)
+            return await self.scheduler.execute_fenced(lease, owned_operation)
         except SageV2Error as exc:
             if is_lease_loss(exc):
                 revoke_ownership()

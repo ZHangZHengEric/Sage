@@ -8,6 +8,7 @@ Session. Product-level indexes belong to the embedding application.
 
 from __future__ import annotations
 
+from typing import cast
 import asyncio
 import errno
 import hashlib
@@ -54,7 +55,8 @@ except ImportError:  # pragma: no cover - Windows uses msvcrt below.
     fcntl = None  # type: ignore[assignment]
 
 try:
-    import msvcrt
+    import importlib
+    msvcrt = importlib.import_module("msvcrt")
 except ImportError:  # pragma: no cover - POSIX uses fcntl above.
     msvcrt = None  # type: ignore[assignment]
 
@@ -84,16 +86,17 @@ class SessionStoreCorruptionError(SageV2Error):
 class FilesystemManagedSessionHeads:
     async def _direct_child_ids_for_run(self, run_id):
         # The existing canonical topology index includes unloaded Sessions.
-        async with self._lock:
-            row = self._runs.get(run_id)
+        store = cast("_FilesystemSessionState", self)
+        async with store._lock:
+            row = store._runs.get(run_id)
             sid = row.session_id if row else None
-            live = {key: value.parent_session_id for key, value in self._sessions.items()}
-        with self._index_lock:
+            live = {key: value.parent_session_id for key, value in store._sessions.items()}
+        with store._index_lock:
             if sid is None:
-                sid = next((key for key, value in self._session_index.items() if run_id in value['run_ids']), None)
-            parents = {key: value.get('parent_session_id') for key, value in self._session_index.items()}
+                sid = next((key for key, value in store._session_index.items() if run_id in value['run_ids']), None)
+            parents = {key: value.get('parent_session_id') for key, value in store._session_index.items()}
         if sid is None:
-            raise self._not_found('run.not_found', run_id)
+            raise store._not_found('run.not_found', run_id)
         parents.update(live)
         return [key for key, parent in parents.items() if parent == sid]
 
@@ -1066,6 +1069,7 @@ class _FilesystemSessionState(FilesystemManagedSessionHeads, SessionStoreCoordin
             else:
                 # Always lock the same byte, including in a newly created file.
                 self._writer_handle.seek(0)
+                assert msvcrt is not None
                 msvcrt.locking(self._writer_handle.fileno(), msvcrt.LK_NBLCK, 1)
         except OSError as exc:
             self._writer_handle.close()
@@ -1438,7 +1442,7 @@ class _FilesystemSessionState(FilesystemManagedSessionHeads, SessionStoreCoordin
 
             journal = session_dir / "journal.jsonl"
             compacted = is_new or previous is None
-            if compacted:
+            if is_new or previous is None:
                 self._write_snapshot(snapshot, state)
                 self._atomic_bytes_write(journal, b"")
                 self._journal_commits[session_id] = 0
@@ -2074,7 +2078,7 @@ class _FilesystemSessionState(FilesystemManagedSessionHeads, SessionStoreCoordin
         }
         events = event_rows
         session_owners = [
-            value.get("owner")
+            value["owner"]
             for value in session_rows
             if isinstance(value, dict) and value.get("owner") is not None
         ]

@@ -12,11 +12,11 @@ from weakref import WeakValueDictionary
 import hashlib
 import json
 from contextlib import asynccontextmanager, nullcontext
-from collections.abc import AsyncIterator, Callable, Collection, Coroutine, Sequence
+from collections.abc import AsyncGenerator, Callable, Collection, Coroutine, Sequence
 from contextvars import ContextVar
 from dataclasses import dataclass, field, replace
 from datetime import datetime
-from typing import Any
+from typing import Literal, Any
 
 from sagents.v2.runtime.session.attachments import SessionAttachmentMixin
 from sagents.v2.runtime.session.run_metadata import RunMetadataQueries
@@ -1411,7 +1411,7 @@ class SessionStoreCoordinator(ManagedSessionHeadQueries, RunMetadataQueries, Ses
             if command.session_concurrency_mode == SessionConcurrencyMode.SERIAL:
                 session.active_serial_run_id = run_id
 
-            input_drafts = []
+            input_drafts: list[EventDraft] = []
             # Inputs are committed as normal completed message Items so replay
             # and projections do not need a second source for the opening turn.
             for input_item in command.input:
@@ -1682,6 +1682,7 @@ class SessionStoreCoordinator(ManagedSessionHeadQueries, RunMetadataQueries, Ses
             conflicts = self._session_commit_conflicts_locked(row)
             if (
                 publish
+                and isinstance(command, PublishSessionCommit)
                 and command.merge_strategy
                 == SessionMergeStrategy.REQUIRE_UNCHANGED_BASE
                 and conflicts
@@ -1960,7 +1961,7 @@ class SessionStoreCoordinator(ManagedSessionHeadQueries, RunMetadataQueries, Ses
             text = "".join(
                 event.data.delta
                 for event in events
-                if isinstance(event.data.delta, str)
+                if isinstance(event.data, ItemEventData) and isinstance(event.data.delta, str)
             )
             if not text:
                 continue
@@ -2410,7 +2411,7 @@ class SessionStoreCoordinator(ManagedSessionHeadQueries, RunMetadataQueries, Ses
                  context.actor.principal_id, idempotency_key)
         async with self._session_read(session_id):
             run_id = self._start_idempotency.get(scope)
-            row = self._runs.get(run_id)
+            row = self._runs.get(run_id) if run_id is not None else None
             if row is None or row.session_id != session_id or row.start_command is None:
                 return None
             self._authorize_session_actor_locked(session_id, context)
@@ -3298,7 +3299,7 @@ class SessionStoreCoordinator(ManagedSessionHeadQueries, RunMetadataQueries, Ses
 
     async def subscribe_events(
         self, cursor: EventCursor
-    ) -> AsyncIterator[RuntimeEvent]:
+    ) -> AsyncGenerator[RuntimeEvent, None]:
         """Replay canonical events and retained live previews, then follow.
 
         A slow observer is failed with its last delivered cursor instead of
@@ -4086,6 +4087,7 @@ class SessionStoreCoordinator(ManagedSessionHeadQueries, RunMetadataQueries, Ses
                     ),
                     key=lambda value: (value.created_at, value.run_id),
                 )
+                if row.request_context is not None
             ),
             None,
         )
@@ -4273,7 +4275,7 @@ class SessionStoreCoordinator(ManagedSessionHeadQueries, RunMetadataQueries, Ses
     @staticmethod
     def _session_commit_event_data(
         proposal: SessionCommitProposal,
-        state: str,
+        state: Literal["proposed", "published", "rejected"],
     ) -> SessionCommitEventData:
         return SessionCommitEventData(
             proposal_id=proposal.proposal_id,

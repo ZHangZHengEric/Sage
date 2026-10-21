@@ -1,5 +1,22 @@
 """Execution services exposed without eager implementation imports."""
 
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from sagents.v2.runtime.execution.environment import RunExecutionEnvironment as RunExecutionEnvironment
+    from sagents.v2.runtime.execution.configuration import LocalExecutionPolicy as LocalExecutionPolicy
+    from sagents.v2.contracts.execution import ExecutionConfigurationSnapshot as ExecutionConfigurationSnapshot
+    from sagents.v2.runtime.execution.plugins.local_binding import LocalWorkspaceExecutionBindingProvider as LocalWorkspaceExecutionBindingProvider
+    from sagents.v2.runtime.execution.lifecycle import ExecutionBindingLifecycleCoordinator as ExecutionBindingLifecycleCoordinator
+    from sagents.v2.runtime.execution.binding import ExecutionBindingProvider as ExecutionBindingProvider
+    from sagents.v2.runtime.execution.binding import ExecutionBindingRequest as ExecutionBindingRequest
+    from sagents.v2.runtime.execution.resources import ExecutionLifecycleMetrics as ExecutionLifecycleMetrics
+    from sagents.v2.runtime.execution.resources import ExecutionResourceRecord as ExecutionResourceRecord
+    from sagents.v2.runtime.execution.resources import ExecutionResourceState as ExecutionResourceState
+    from sagents.v2.runtime.execution.dispatcher import LocalWorkerDispatcher as LocalWorkerDispatcher
+    from sagents.v2.runtime.execution.binding import RunExecutionBinding as RunExecutionBinding
+
+
 from sagents.v2._lazy import exported_names, resolve_export
 
 
@@ -45,7 +62,20 @@ _EXPORTS = {
     ),
 }
 
-__all__ = list(_EXPORTS)
+__all__ = [
+    "RunExecutionEnvironment",
+    "LocalExecutionPolicy",
+    "ExecutionConfigurationSnapshot",
+    "LocalWorkspaceExecutionBindingProvider",
+    "ExecutionBindingLifecycleCoordinator",
+    "ExecutionBindingProvider",
+    "ExecutionBindingRequest",
+    "ExecutionLifecycleMetrics",
+    "ExecutionResourceRecord",
+    "ExecutionResourceState",
+    "LocalWorkerDispatcher",
+    "RunExecutionBinding",
+]
 
 
 def __getattr__(name: str):

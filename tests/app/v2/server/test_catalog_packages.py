@@ -4,7 +4,6 @@ from dataclasses import replace
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import select
 
 from app.v2.server.catalog.orm import AgentRow
 from app.v2.server.catalog.packages import package_owner
