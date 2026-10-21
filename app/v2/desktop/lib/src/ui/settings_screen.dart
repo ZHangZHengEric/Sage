@@ -2214,8 +2214,9 @@ class _ComponentSettingsCardState extends State<_ComponentSettingsCard> {
 
   ComponentSummary get component {
     final saved = widget.component;
-    if (_draftPlugin == null || _draftPlugin == saved.selectedPluginId)
+    if (_draftPlugin == null || _draftPlugin == saved.selectedPluginId) {
       return saved;
+    }
     return ComponentSummary(
       id: saved.id,
       name: saved.name,
