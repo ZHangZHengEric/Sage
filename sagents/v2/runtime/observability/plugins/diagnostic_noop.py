@@ -25,6 +25,29 @@ class NoopDiagnosticSink:
         return None
 
 
+class UnavailableEvidence(NoopDiagnosticSink):
+    available = False
+    raw_capture = False
+    capture_failures = 0
+
+    def write(self, record):
+        pass
+
+    async def list_model_requests(self, **kwargs):
+        return ()
+
+    async def get_model_request(self, **kwargs):
+        raise KeyError("model evidence is not collected by this provider")
+
+    async def export_evidence(self, session_id, run_ids):
+        return {
+            "models": [],
+            "logs": [],
+            "unavailable": True,
+            "evidence_source": "not_collected",
+        }
+
+
 class UnqueryableDiagnostics(NoopDiagnosticSink):
     """An exporter without a supported query API must not enable local capture."""
 

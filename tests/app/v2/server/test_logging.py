@@ -5,7 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from sagents.v2.runtime.observability.provider import create_observability_provider, ObservationLogs
+from sagents.v2.runtime.observability.provider import create_observability_provider
 from sagents.v2.runtime.observability.contracts import LogRecord
 
 

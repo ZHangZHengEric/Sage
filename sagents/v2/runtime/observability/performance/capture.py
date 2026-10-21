@@ -9,8 +9,7 @@ import time
 from threading import RLock
 from sagents.v2.contracts.common import utc_now
 from ..contracts import LogRecord, TraceEvent, TraceExportSink, TraceSpan, TraceStatus
-from .aggregation import EVENTS, build_run, timestamp
-from .trace_projection import timing_rows
+from .aggregation import EVENTS, build_run, normalize_timing_rows, timestamp
 
 SPAN_NAME = "agent.run"
 PAYLOAD = "sage.performance.data"
@@ -240,8 +239,17 @@ class PerformanceCapture:
             pending["finished_requested"] = True
             return
         self._performance.pop(key)
-        interrupted = incomplete
-        incomplete = incomplete or bool(pending["dropped_rows"])
+        enriched, additions = self._build_performance_span(
+            pending, interrupted=incomplete
+        )
+        sink = pending["sink"]
+        for event in additions:
+            sink.add_event(enriched.span_id, event)
+        sink.export_span(enriched)
+
+    def _build_performance_span(self, pending, *, interrupted):
+        """Project a finished timing buffer without changing capture state."""
+        incomplete = interrupted or bool(pending["dropped_rows"])
         rows = pending["rows"]
         span = pending["ended_span"] or pending["span"].model_copy(
             update={
@@ -293,17 +301,9 @@ class PerformanceCapture:
                     ).isoformat(),
                 }
             )
-        events, models = timing_rows(
-            [
-                {
-                    "name": span.name,
-                    "start_time": span.start_time,
-                    "attributes": attrs,
-                    "context": {"trace_id": span.trace_id, "span_id": span.span_id},
-                }
-            ]
-        )
-        summary = build_run(events[key[1]], models[key[1]])
+        events, models = normalize_timing_rows(rows, incomplete=incomplete)
+        run_id = span.run_id
+        summary = build_run(events[run_id], models[run_id])
         if summary is not None:
             attrs.update(
                 {
@@ -334,10 +334,7 @@ class PerformanceCapture:
         enriched = span.model_copy(
             update={"attributes": attrs, "events": [*span.events, *additions]}
         )
-        sink = pending["sink"]
-        for event in additions:
-            sink.add_event(span.span_id, event)
-        sink.export_span(enriched)
+        return enriched, additions
 
     def begin_log(self, record: LogRecord) -> None:
         if (

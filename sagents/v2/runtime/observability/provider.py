@@ -16,13 +16,12 @@ from pydantic import Field
 
 from sagents.v2.contracts.common import StrictModel
 from .contracts import (
-    LogLevel,
-    LogRecord,
     ModelHistoryQuery,
     PerformanceQuery,
     TraceQuery,
 )
-from .plugins.diagnostic_noop import NoopDiagnosticSink, UnqueryableDiagnostics
+from .plugins.diagnostic_noop import UnavailableEvidence, UnqueryableDiagnostics
+from .logs import ObservationLogs
 from .plugins.logging_stdout import StdoutLogSink
 from .plugins.logging_filesystem import FilesystemLogSink
 from .plugins.trace_noop import NoopTraceSink
@@ -61,101 +60,6 @@ class ObservabilityConfig(StrictModel):
     query_url: str = ""
     query_backend: Literal["", "jaeger"] = ""
     query_headers_env: str = "SAGE_OBSERVABILITY_QUERY_HEADERS"
-
-
-class UnavailableEvidence(NoopDiagnosticSink):
-    available = False
-    raw_capture = False
-    capture_failures = 0
-
-    def write(self, record):
-        pass
-
-    async def list_model_requests(self, **kwargs):
-        return ()
-
-    async def get_model_request(self, **kwargs):
-        raise KeyError("model evidence is not collected by this provider")
-
-    async def export_evidence(self, session_id, run_ids):
-        return {
-            "models": [],
-            "logs": [],
-            "unavailable": True,
-            "evidence_source": "not_collected",
-        }
-
-
-_ROUTINE_TIMINGS = frozenset(
-    {
-        "agent.state.commit",
-        "session.redis.commit",
-        "agent.preparation.completed",
-        "server.admission.phase",
-        "session.mysql.archived",
-    }
-)
-_SLOW_OPERATION_MS = 100
-
-
-class ObservationLogs:
-    """Capture evidence independently of output severity, then fan out safely."""
-
-    format_version = "sage.log/v1"
-
-    def __init__(self, outputs, evidence):
-        self.outputs, self.evidence = tuple(outputs), evidence
-        self.failures = 0
-        self.closed = False
-
-    @property
-    def path(self):
-        return next(
-            (output.path for output in self.outputs if hasattr(output, "path")), ""
-        )
-
-    @property
-    def raw_capture(self):
-        return getattr(self.evidence, "raw_capture", False)
-
-    def write(self, record: LogRecord):
-        if self.closed:
-            return
-        routine = (
-            record.level == LogLevel.DEBUG
-            and record.event in _ROUTINE_TIMINGS
-            and record.error is None
-            and record.attributes.get("outcome", "completed") == "completed"
-            and isinstance(record.attributes.get("duration_ms"), (int, float))
-            and 0 <= record.attributes["duration_ms"] < _SLOW_OPERATION_MS
-        )
-        if self.raw_capture or not routine:
-            writer = getattr(self.evidence, "write", None)
-            if writer:
-                try:
-                    writer(record)
-                except Exception:
-                    self.failures += 1
-        if routine:
-            return
-        for output in self.outputs:
-            try:
-                output.write(record)
-            except Exception:
-                self.failures += 1
-
-    def close(self):
-        if self.closed:
-            return
-        self.closed = True
-        errors = []
-        for output in self.outputs:
-            try:
-                output.close()
-            except BaseException as exc:
-                errors.append(exc)
-        if errors:
-            raise BaseExceptionGroup("log output shutdown failed", errors)
 
 
 class ObservabilityProvider:

@@ -86,6 +86,40 @@ def test_initialization_cleanup_parallelism_and_first_token_are_included():
     assert summarize([row])["framework_ratio"] == 0.4
 
 
+@pytest.mark.parametrize("incomplete", [False, True])
+def test_in_memory_timings_match_exported_projection(incomplete):
+    import json
+    from sagents.v2.runtime.observability.performance.aggregation import normalize_timing_rows
+    from sagents.v2.runtime.observability.performance.trace_projection import timing_rows
+
+    events, models = sample()
+    rows = [{"kind": "model", "at": BASE + 6, "data": {
+        **models[0], "completed_at": datetime.fromtimestamp(models[0]["ended_at"], timezone.utc),
+    }}]
+    for value in events:
+        rows.append({"kind": "log", "at": value["at"], "data": {
+            "session_id": value["session_id"], "run_id": value["run_id"],
+            "timestamp": datetime.fromtimestamp(value["at"], timezone.utc),
+            "event": value["event"], "request_id": value["identity"],
+            "tool_call_id": value["identity"], "attributes": {
+                "agent_id": value["agent_id"], "purpose": value["purpose"],
+                "started_at": value["started_at"], "run_state": value["state"],
+            },
+        }})
+    remote_events, remote_models = timing_rows([{
+        "name": "agent.run", "start_time": BASE,
+        "context": {"trace_id": "trace", "span_id": "span"},
+        "attributes": {"sage.performance.format": "events/v3",
+                       "sage.performance.incomplete": incomplete,
+                       "sage.performance.data": json.dumps(rows, default=str)},
+    }])
+    local_events, local_models = normalize_timing_rows(rows, incomplete=incomplete)
+    local = build_run(local_events["r"], local_models["r"])
+    assert local is not None
+    assert local == build_run(remote_events["r"], remote_models["r"])
+    assert (local["framework_ms"] is None) is incomplete
+
+
 @pytest.mark.parametrize("missing", ["model_end", "tool_end", "outer", "missing_model"])
 def test_missing_capture_is_never_mislabelled_as_framework_time(missing):
     events, models = sample(outer=missing != "outer")
