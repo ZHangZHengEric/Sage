@@ -46,8 +46,13 @@ class DesktopAgentRevisionStore(AgentRevisionStore):
             or compactor.get("config")
         ):
             raise ValueError("cannot migrate a custom archived context compactor")
-        for signal in ("log", "diagnostic", "trace"):
-            name = f"observability.{signal}-sink"
+        old_sinks = [
+            f"observability.{signal}-sink" for signal in ("log", "diagnostic", "trace")
+        ]
+        has_old_sinks = any(name in choices for name in old_sinks)
+        if has_old_sinks and "observability.provider" in choices:
+            raise ValueError("conflicting archived Desktop observation providers")
+        for name in old_sinks:
             selection = choices.pop(name, None)
             if selection is None:
                 continue
@@ -55,11 +60,12 @@ class DesktopAgentRevisionStore(AgentRevisionStore):
                 ".", "-"
             ) or selection.get("config"):
                 raise ValueError("cannot migrate a custom archived observation sink")
-        choices["observability.provider"] = {
-            "plugin": "com.sage.desktop.observability-provider",
-            "scope": "process",
-            "config": {},
-        }
+        if has_old_sinks:
+            choices["observability.provider"] = {
+                "plugin": "com.sage.desktop.observability-provider",
+                "scope": "process",
+                "config": {},
+            }
         resolved = MigratedAgentRevision.model_validate(package)
         resolved._recovery_identity = RecoveryIdentity(raw["spec_hash"])
         return resolved
