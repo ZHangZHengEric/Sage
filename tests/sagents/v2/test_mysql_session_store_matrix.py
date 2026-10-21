@@ -438,7 +438,7 @@ async def test_reload_does_not_expose_an_eviction_gap_to_lazy_readers():
             await release.wait()
         return payload
 
-    state._fetch_session = fetch
+    setattr(state, '_fetch_session', fetch)
     recovery = asyncio.create_task(state._reload_session_from_storage_locked(session_id))
     try:
         await asyncio.wait_for(fetching.wait(), timeout=1)
@@ -582,7 +582,7 @@ async def test_builder_can_select_mysql_session_store(mysql_dsn, tmp_path):
         build_registered_package(tmp_path, models=TEST_MODELS, model=ScriptedModelProvider(()), package=package)
     )
     store = application.entrypoint().runtime.session_store
-    assert store.table_prefix == prefix
+    assert getattr(store, 'table_prefix') == prefix
     assert store.capabilities["durable_across_process_restart"] is True
     assert store.capabilities["multi_process_writes"] is False
     bindings = {

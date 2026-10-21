@@ -1,3 +1,11 @@
+
+from typing import TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    from typing import Iterable
+
+from unittest.mock import _Call
+
 from copy import deepcopy
 from contextlib import asynccontextmanager
 import asyncio
@@ -307,7 +315,7 @@ async def test_batch_session_fetch_keeps_hot_authority_and_seeds_cold_before_nex
         archive._fetch_sessions = AsyncMock(wraps=archive._fetch_sessions)
         assert await value._fetch_sessions([*expected, deleted.handle.session_id, 'missing']) == expected
         archive._fetch_sessions.assert_awaited_once()
-        assert set(archive._fetch_sessions.await_args.args[0]) == {cold.handle.session_id, 'missing'}
+        assert set(cast('_Call', archive._fetch_sessions.await_args).args[0]) == {cold.handle.session_id, 'missing'}
         async with value._session_cache.operation():
             await value._ensure_sessions_loaded([*expected, deleted.handle.session_id])
             assert set(value._sessions) == set(expected)
@@ -712,7 +720,7 @@ async def test_background_snapshot_chunks_survive_resume_and_reader_compaction_r
         snapshot_key = value._key(f"snapshot:{token}")
         parts = await redis.hgetall(snapshot_key)
         assert len(parts) > 1
-        assert all(len(part.encode("utf-8")) <= 4096 for part in parts.values())
+        assert all(len(getattr(part, 'encode')("utf-8")) <= 4096 for part in parts.values())
         assert await redis.ttl(snapshot_key) > 0
         await value.create_run(command("next").model_copy(update={"session_id": sid}), CONTEXT)
         assert await redis.ttl(snapshot_key) == -1
@@ -736,7 +744,7 @@ async def test_large_initial_session_is_uploaded_as_bounded_chunks():
         assert await redis.hget(key, "base") is None
         token = await redis.hget(key, "base_snapshot")
         parts = await redis.hgetall(value._key(f"snapshot:{token}"))
-        assert all(len(part.encode("utf-8")) <= value.snapshot_chunk_chars * 4 for part in parts.values())
+        assert all(len(getattr(part, 'encode')("utf-8")) <= value.snapshot_chunk_chars * 4 for part in parts.values())
         loaded = await value._fetch_session(created.handle.session_id)
         assert loaded["runs"][0]["start_command"]["input"][0]["content"][0]["text"] == text
     finally:
@@ -760,7 +768,7 @@ async def test_snapshot_upload_batches_small_chunks_with_bounded_pipeline_bytes(
         async def counted_execute(*args, **kwargs):
             commands = [command for command, _ in pipe.command_stack if command[0] == "HSET"]
             assert len(commands) <= 32
-            pipeline_sizes.append(sum(len(command[-1].encode("utf-8")) for command in commands))
+            pipeline_sizes.append(sum(len(getattr(command[-1], 'encode')("utf-8")) for command in commands))
             return await execute(*args, **kwargs)
 
         pipe.execute = counted_execute
@@ -770,7 +778,7 @@ async def test_snapshot_upload_batches_small_chunks_with_bounded_pipeline_bytes(
     try:
         token, count = await value._stage_snapshot(encoded)
         parts = await redis.hmget(value._key(f"snapshot:{token}"), [str(i) for i in range(count)])
-        assert "".join(parts) == encoded
+        assert "".join(cast('Iterable[str]', parts)) == encoded
         assert await redis.ttl(value._key(f"snapshot:{token}")) > 0
         assert all(size <= value.archive_batch_bytes for size in pipeline_sizes)
         assert len(pipeline_sizes) <= max_batches

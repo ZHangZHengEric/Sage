@@ -6,6 +6,8 @@ activates it; sibling calls in the proposing response retain their old grants.
 
 from __future__ import annotations
 
+from typing import Literal
+
 import asyncio
 import base64
 import hashlib
@@ -14,7 +16,6 @@ import os
 import shutil
 import tempfile
 from pathlib import Path
-from typing import Literal
 from urllib.parse import urlsplit
 
 from pydantic import Field
@@ -511,7 +512,7 @@ class SelfConfigurationService:
                 f"MCP tools conflict with host tools: {sorted(duplicates)}",
             )
 
-    async def segments(self, command, *, run_id=None):
+    async def segments(self, command, *, run_id=None) -> tuple[ContextSegment, ...]:
         language = run_prompt_language(command.config.metadata if command is not None else {})
         segments = (
             ContextSegment(

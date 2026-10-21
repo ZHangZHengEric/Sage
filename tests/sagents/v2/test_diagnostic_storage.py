@@ -1,5 +1,10 @@
 """Session-local media and nested diagnostics retain the complete safe request."""
 
+from typing import TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    from sagents.v2.runtime.session.contracts import SessionStore
+
 import asyncio
 import base64
 import json
@@ -80,7 +85,7 @@ async def test_child_diagnostics_follow_store_location_after_restart_and_adopt_f
     tmp_path,
 ):
     store = FilesystemSessionStore(tmp_path)
-    runtime = HarnessRuntime(store)
+    runtime = HarnessRuntime(cast('SessionStore', store))
     parent = await runtime.start_run(command("parent", "p"), CONTEXT)
     child = await runtime.start_run(child_command(parent), CONTEXT)
     grandchild = await runtime.start_run(child_command(child, "grandchild"), CONTEXT)

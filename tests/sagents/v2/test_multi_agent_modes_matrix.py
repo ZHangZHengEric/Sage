@@ -1,5 +1,18 @@
 from __future__ import annotations
 
+from typing import Any, TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    from sagents.v2.agent.modes.loop_factory import ModelProviderFactory
+    from sagents.v2.agent.multi_agent.contracts import ChildRunExecutor
+    from sagents.v2.agent.multi_agent.executors.loop import LoopFactory
+    from sagents.v2.runtime.contracts import RuntimePort
+    from sagents.v2.runtime.session.contracts import DerivedStateStore
+
+from sagents.v2.contracts.items import JsonBlock
+
+from sagents.v2.model.provider import ModelProvider
+
 import asyncio
 
 import pytest
@@ -58,7 +71,7 @@ CONTEXT = RequestContext(
     actor=ActorRef(
         principal_id="leader",
         principal_type=PrincipalType.AGENT,
-        scopes=frozenset({"agent.delegate", "agent.spawn"}),
+        scopes=cast('tuple[str, ...]', frozenset({"agent.delegate", "agent.spawn"})),
     )
 )
 MEMBER = AgentDescriptor(
@@ -103,14 +116,14 @@ async def test_child_executor_retains_failed_resource_cleanup_for_retry():
                 raise OSError("cleanup unavailable")
 
     executor = LoopChildRunExecutor(
-        runtime=object(),
-        loop_factory=lambda descriptor, run_id: object(),
+        runtime=cast('RuntimePort', object()),
+        loop_factory=cast('LoopFactory', lambda descriptor, run_id: object()),
         resolved_spec_hash="sha256:test",
     )
     resource = Resource()
     loop = object()
     executor._resources_by_run["run_1"] = resource
-    executor._loops_by_run["run_1"] = loop
+    cast('dict[str, Any]', executor._loops_by_run)["run_1"] = loop
 
     with pytest.raises(OSError, match="cleanup unavailable"):
         await executor._release_run("run_1")
@@ -174,7 +187,7 @@ async def test_delegation_batch_preserves_successes_when_one_task_fails():
     coordinator = MultiAgentCoordinator(
         mode=AgentMode.TEAM,
         registry=AgentRegistry((MEMBER,)),
-        executor=PartiallyFailingExecutor(),
+        executor=cast('ChildRunExecutor', PartiallyFailingExecutor()),
     )
     results = await coordinator.delegate(
         DelegationBatch(tasks=(task(0), task(1), task(2))),
@@ -232,7 +245,7 @@ async def test_fibre_can_spawn_reusable_agent_but_team_cannot():
     )
     with pytest.raises(Exception) as denied:
         await team.spawn(dynamic)
-    assert denied.value.info.code == "agent.spawn_not_allowed"
+    assert getattr(denied.value, 'info').code == "agent.spawn_not_allowed"
 
 
 def test_parallel_batch_rejects_duplicate_explicit_child_session():
@@ -255,7 +268,7 @@ async def test_parent_session_and_cross_agent_child_session_reuse_are_rejected()
             parent_session_id="parent",
             context=CONTEXT,
         )
-    assert parent.value.info.code == "agent.parent_session_reuse"
+    assert getattr(parent.value, 'info').code == "agent.parent_session_reuse"
     await coordinator.delegate(
         DelegationBatch(tasks=(task(2, session_id="child"),)),
         parent_run_id="run_parent",
@@ -269,7 +282,7 @@ async def test_parent_session_and_cross_agent_child_session_reuse_are_rejected()
             parent_session_id="parent",
             context=CONTEXT,
         )
-    assert owner.value.info.code == "agent.child_session_owner_conflict"
+    assert getattr(owner.value, 'info').code == "agent.child_session_owner_conflict"
 
 
 @pytest.mark.asyncio
@@ -443,7 +456,7 @@ async def test_fibre_delegation_schema_and_optional_context_fields():
     assert first.parent_tool_call_id == "call_delegate"
     assert second.task_id == "call_delegate_2"
     assert second.task_name == "Review quicksort"
-    assert result.content[0].value["child_run_ids"] == [
+    assert cast(JsonBlock, result.content[0]).value["child_run_ids"] == [
         "run_call_delegate_1",
         "run_call_delegate_2",
     ]
@@ -491,7 +504,7 @@ async def test_fibre_spawn_inherits_parent_tools_and_skills():
         CONTEXT,
     )
 
-    spawned = await registry.get(result.content[0].value["agent_id"])
+    spawned = await registry.get(cast(JsonBlock, result.content[0]).value["agent_id"])
     assert spawned.tools == (
         "file_read",
         "file_write",
@@ -572,7 +585,7 @@ async def test_delegated_fibre_child_cannot_bypass_leaf_policy(tool_name, argume
             CONTEXT,
         )
 
-    assert denied.value.info.code == "agent.nested_delegation_not_allowed"
+    assert getattr(denied.value, 'info').code == "agent.nested_delegation_not_allowed"
     assert await registry.list() == (MEMBER,)
 
 
@@ -634,7 +647,7 @@ async def test_delegated_team_child_can_delegate_with_fixed_roster_only():
     assert names == {"sys_team_delegate_task"}
     assert "sys_spawn_agent" not in names
     assert len(executor.calls) == 1
-    assert result.content[0].value["child_run_ids"] == [
+    assert cast(JsonBlock, result.content[0]).value["child_run_ids"] == [
         "run_call_nested_team_delegate_1"
     ]
 
@@ -680,7 +693,7 @@ async def test_fibre_dynamic_agent_roster_survives_a_fresh_projection():
     )
     factory = ModeAwareAgentLoopFactory(
         runtime=runtime,
-        model_factory=lambda descriptor, run_id: provider,
+        model_factory=cast('ModelProviderFactory', lambda descriptor, run_id: provider),
         base_catalog=InMemoryToolCatalog(()),
         base_executor=InMemoryToolExecutor({}, {}),
         registry=registry,
@@ -704,7 +717,7 @@ async def test_fibre_dynamic_agent_roster_survives_a_fresh_projection():
         parent.run_id, CONTEXT
     )
     restored = await SessionDynamicAgentRoster(
-        runtime.session_store, runtime.session_store
+        runtime.session_store, cast('DerivedStateStore', runtime.session_store)
     ).load(parent.session_id)
 
     assert result.state == RunState.COMPLETED
@@ -729,7 +742,7 @@ async def test_fibre_roster_rebuilds_when_cache_sequence_is_ahead():
     )
     session = await runtime.session_store.get_session(parent.session_id)
     fabricated = MEMBER.model_copy(update={"agent_id": "fabricated", "dynamic": True})
-    roster = SessionDynamicAgentRoster(runtime.session_store, runtime.session_store)
+    roster = SessionDynamicAgentRoster(runtime.session_store, cast('DerivedStateStore', runtime.session_store))
     payload = {
         "schema_version": roster.SCHEMA_VERSION,
         "through_sequence": session.last_sequence + 10,
@@ -737,7 +750,7 @@ async def test_fibre_roster_rebuilds_when_cache_sequence_is_ahead():
         "pending_spawn_call_ids": [],
     }
     payload["checksum"] = roster._checksum(payload)
-    await runtime.session_store.put_derived_state(
+    await getattr(runtime.session_store, 'put_derived_state')(
         parent.session_id,
         roster.NAMESPACE,
         roster.KEY,
@@ -760,9 +773,9 @@ def loop_executor(runtime):
     def factory(descriptor, run_id):
         return AgentLoopEngine(
             runtime=runtime,
-            model=ScriptedModelProvider(
+            model=cast(ModelProvider, ScriptedModelProvider(
                 (ScriptedModelStep(events=(completed("child done"),)),)
-            ),
+            )),
             tool_catalog=InMemoryToolCatalog(()),
             tool_executor=InMemoryToolExecutor({}, {}),
             context_assembler=DefaultContextAssembler(
@@ -818,16 +831,16 @@ async def test_loop_child_executor_creates_independent_serial_run_with_only_task
         context=CONTEXT,
     )
     assert result.outcome == RunState.COMPLETED
-    assert result.content[0].text == "child done"
-    command = await runtime.session_store.get_start_command(result.child_run_id)
+    assert cast(TextBlock, result.content[0]).text == "child done"
+    command = await runtime.session_store.get_start_command(cast(str, result.child_run_id))
     assert command.parent_run_id == parent.run_id
     assert command.invocation_mode == "delegation"
     assert command.session_id is None
-    run = await runtime.get_run(result.child_run_id)
+    run = await runtime.get_run(cast(str, result.child_run_id))
     assert run.concurrency_mode == SessionConcurrencyMode.SERIAL
-    child = await runtime.session_store.get_session(result.child_session_id)
+    child = await runtime.session_store.get_session(cast(str, result.child_session_id))
     assert child.parent_session_id == parent.session_id
-    assert await runtime.session_store.read_fork_base_events(result.child_run_id) == ()
+    assert await runtime.session_store.read_fork_base_events(cast(str, result.child_run_id)) == ()
     from sagents.v2.context.session_history import SessionHistoryLedgerBuilder
 
     history = await SessionHistoryLedgerBuilder(runtime.session_store).rebuild(
@@ -835,8 +848,8 @@ async def test_loop_child_executor_creates_independent_serial_run_with_only_task
     )
     assert len(history) == 2  # The task followed by this child's own answer.
     assert history[0].role == "user"
-    assert history[0].content[0].text == task(1).content
-    assert history[1].content[0].text == "child done"
+    assert cast(TextBlock, history[0].content[0]).text == task(1).content
+    assert cast(TextBlock, history[1].content[0]).text == "child done"
     assert command.config.enabled_tools == ("file_write",)
     assert command.config.enabled_skills == ("python",)
     assert command.config.metadata["workspace_policy"] == "private_child"
@@ -888,9 +901,9 @@ async def test_loop_child_executor_applies_mode_specific_delegation_policy(
         observed.append(descriptor)
         return AgentLoopEngine(
             runtime=runtime,
-            model=ScriptedModelProvider(
+            model=cast(ModelProvider, ScriptedModelProvider(
                 (ScriptedModelStep(events=(completed("child done"),)),)
-            ),
+            )),
             tool_catalog=InMemoryToolCatalog(()),
             tool_executor=InMemoryToolExecutor({}, {}),
             context_assembler=DefaultContextAssembler(
@@ -1025,7 +1038,7 @@ async def test_recovered_delegated_child_remains_a_leaf_after_restart():
         descriptor_resolver=resolve_original,
     )
     completed_child = await recovered.resolve_interaction(
-        suspended.child_run_id,
+        cast(str, suspended.child_run_id),
         decision="approve_once",
         payload={},
         context=CONTEXT,
@@ -1070,7 +1083,7 @@ async def test_shared_workspace_child_inherits_parent_workspace_projection():
         workspace_policy=WorkspaceSharingPolicy.SHARED_PARENT,
         context=CONTEXT,
     )
-    command = await runtime.session_store.get_start_command(result.child_run_id)
+    command = await runtime.session_store.get_start_command(cast(str, result.child_run_id))
 
     assert command.config.metadata["working_directory"] == "/workspace"
     assert command.config.metadata["workspace_files"].endswith("README.md")
@@ -1129,7 +1142,7 @@ async def test_child_session_owner_is_recovered_by_a_fresh_coordinator():
             context=CONTEXT,
         )
 
-    assert owner.value.info.code == "agent.child_session_owner_conflict"
+    assert getattr(owner.value, 'info').code == "agent.child_session_owner_conflict"
 
 
 @pytest.mark.asyncio
@@ -1213,7 +1226,7 @@ async def test_fibre_flow_node_delegates_to_real_nested_child_run():
     empty_executor = InMemoryToolExecutor({}, {})
     loop_factory = ModeAwareAgentLoopFactory(
         runtime=runtime,
-        model_factory=model_factory,
+        model_factory=cast('ModelProviderFactory', model_factory),
         base_catalog=empty_catalog,
         base_executor=empty_executor,
         registry=registry,
@@ -1237,7 +1250,7 @@ async def test_fibre_flow_node_delegates_to_real_nested_child_run():
     assert result.state == RunState.COMPLETED, [
         (event.type, getattr(event.data, "error", None)) for event in root_events
     ]
-    state = await runtime.session_store.export_state()
+    state = await getattr(runtime.session_store, 'export_state')()
     start_commands = {
         value["run_id"]: value["start_command"] for value in state["runs"]
     }
@@ -1351,10 +1364,10 @@ async def test_child_agent_approval_suspends_parent_flow_and_resumes_same_node()
     child_run_id = parent_checkpoint.state["pending_child_run_id"]
     child = await runtime.get_run(child_run_id)
     parent_suspension = await runtime.session_store.get_suspension(
-        suspended_parent.suspension_id
+        cast(str, suspended_parent.suspension_id)
     )
     parent_interaction = await runtime.session_store.get_interaction(
-        parent_suspension.interaction_id
+        cast(str, parent_suspension.interaction_id)
     )
 
     assert child.state == RunState.SUSPENDED

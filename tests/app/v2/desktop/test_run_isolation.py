@@ -1,3 +1,11 @@
+
+from typing import TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    from app.v2.desktop.backend.catalog import DesktopAgentRecord
+    from sagents.v2.runtime.session.contracts import SessionStore
+    from typing import Any
+
 import asyncio
 import json
 from contextlib import asynccontextmanager
@@ -230,11 +238,11 @@ async def test_desktop_runs_overlap_and_keep_model_context_and_mcp_directory(
                 run = await service.session_store.get_run(run_id)
                 assert run.state.value == "suspended"
                 suspension = await service.session_store.get_suspension(
-                    run.suspension_id
+                    cast(str, run.suspension_id)
                 )
                 # Force real driver recomposition on each approval boundary.
                 await service.reply_interaction(
-                    run_id, suspension.interaction_id, "approve_once", {}, "user"
+                    run_id, cast(str, suspension.interaction_id), "approve_once", {}, "user"
                 )
 
                 async def resumed_frames():
@@ -311,16 +319,16 @@ async def test_environment_snapshot_recovery_and_child_use_original_inputs(tmp_p
     await service.close()
     service = DesktopV2Service(tmp_path / "service")
     restored = await service._environment_for_command(child, "user", "child-id")
-    assert restored.workspace == Path(projects["a"].path)
+    assert cast("Any", restored).workspace == Path(projects["a"].path)
     assert (
-        restored.agents["sage"].config["systemContext"]["project_marker"] == "session-a"
+        cast("Any", restored).agents["sage"].config["systemContext"]["project_marker"] == "session-a"
     )
     current = await service.catalog.get_agent("sage", "user")
     await service.catalog.save_agent(
-        current.model_copy(
+        cast('DesktopAgentRecord', current).model_copy(
             update={
                 "config": {
-                    **current.config,
+                    **cast('DesktopAgentRecord', current).config,
                     "approvedShellCommands": ["git status"],
                 }
             }
@@ -345,7 +353,7 @@ async def test_borrowed_store_survives_service_close(tmp_path):
     store = FilesystemSessionStore(tmp_path / "shared")
     close = store.close
     store.close = AsyncMock(wraps=close)
-    service = DesktopV2Service(tmp_path / "desktop", session_store=store)
+    service = DesktopV2Service(tmp_path / "desktop", session_store=cast('SessionStore | None', store))
     await service.start()
     await service.close()
     store.close.assert_not_awaited()

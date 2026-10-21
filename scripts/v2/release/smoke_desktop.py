@@ -1,6 +1,8 @@
 """Exercise a bundled Desktop backend outside the repository, without host Python."""
 from __future__ import annotations
 
+from typing import TextIO, cast
+
 import argparse
 from concurrent.futures import ThreadPoolExecutor
 import json
@@ -74,7 +76,7 @@ for module, name, error in (
             executor = ThreadPoolExecutor(max_workers=1)
             try:
                 def read_ready():
-                    for line in process.stdout:
+                    for line in cast(TextIO, process.stdout):
                         try:
                             value = json.loads(line)
                         except ValueError:

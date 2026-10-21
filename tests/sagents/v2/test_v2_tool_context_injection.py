@@ -1,3 +1,14 @@
+
+from typing import Any, TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    from sagents.v2.agent.management.service import AgentManagementService
+    from sagents.v2.tool.official.runtime import OfficialToolRuntime
+
+from sagents.v2.model.provider import ModelProvider
+from sagents.v2.contracts.events import RunEventData
+from sagents.v2.contracts.errors import RuntimeErrorInfo
+from sagents.v2.contracts.events import ToolEventData
 from contextlib import asynccontextmanager
 
 import pytest
@@ -131,7 +142,7 @@ async def prepare_loop(*, adapter, model_arguments, needs_approval=False, system
         resolved_spec_hash="sha256:test", idempotency_key="start",
     ), CONTEXT)
     policy = CapturingPolicy(needs_approval=needs_approval)
-    kwargs = dict(runtime=runtime, model=model, tool_catalog=catalog,
+    kwargs: dict[str, Any] = dict(runtime=runtime, model=model, tool_catalog=catalog,
                   tool_executor=executor, tool_policy=policy)
     return runtime, handle, AgentLoopEngine(**kwargs), received, policy, kwargs
 
@@ -150,7 +161,7 @@ async def test_context_binding_precedes_schema_policy_and_remote_dispatch(adapte
     proposals = [e for e in await runtime.session_store.read_events(handle.run_id)
                  if e.type == "tool.call.proposed"]
     assert len(proposals) == 1
-    assert proposals[0].data.arguments == expected
+    assert cast(ToolEventData, proposals[0].data).arguments == expected
 
 
 @pytest.mark.parametrize("adapter", ["decorated", "mcp"])
@@ -163,8 +174,8 @@ async def test_approval_and_recreated_loop_execute_the_frozen_bound_arguments_on
     assert received == []
     expected = {"query": "host-query", "user_id": "host-user"}
     assert policy.arguments == [expected]
-    suspension = await runtime.session_store.get_suspension(suspended.suspension_id)
-    interaction = await runtime.session_store.get_interaction(suspension.interaction_id)
+    suspension = await runtime.session_store.get_suspension(cast(str, suspended.suspension_id))
+    interaction = await runtime.session_store.get_interaction(cast(str, suspension.interaction_id))
     assert interaction.payload["arguments"] == expected
     await runtime.reply_interaction(ReplyInteraction(
         run_id=handle.run_id, suspension_id=suspension.suspension_id,
@@ -191,7 +202,7 @@ async def test_invalid_context_value_is_validated_before_tool_side_effect(adapte
     assert received == []
     events = await runtime.session_store.read_events(handle.run_id)
     failure = next(e for e in events if e.type == "tool.call.failed")
-    assert failure.data.error.code == "tool.arguments_invalid"
+    assert cast(RuntimeErrorInfo, cast(RunEventData, failure.data).error).code == "tool.arguments_invalid"
 
 
 @pytest.mark.parametrize("automatic", [False, True])
@@ -206,9 +217,9 @@ async def test_official_memory_tool_and_automatic_recall_bind_context(automatic)
             received.append(kwargs)
             return []
 
-    provider = DecoratedToolProvider(MemoryTools(SimpleNamespace(
+    provider = DecoratedToolProvider(MemoryTools(cast('OfficialToolRuntime', SimpleNamespace(
         memory_service=None, session_memory_service=SessionMemory(),
-    )))
+    ))))
     calls = () if automatic else (ModelToolCall(
         tool_call_id="memory", name="search_memory", arguments={},
     ),)
@@ -223,7 +234,7 @@ async def test_official_memory_tool_and_automatic_recall_bind_context(automatic)
         }}), resolved_spec_hash="sha256:test", idempotency_key="start",
     ), CONTEXT)
     loop = AgentLoopEngine(
-        runtime=runtime, model=ScriptedModelProvider(tuple(steps)),
+        runtime=runtime, model=cast(ModelProvider, ScriptedModelProvider(tuple(steps))),
         tool_catalog=provider.catalog, tool_executor=provider.executor,
         automatic_memory_recall=automatic,
     )
@@ -235,7 +246,7 @@ async def test_official_memory_tool_and_automatic_recall_bind_context(automatic)
     assert received[0]["limit"] == 3
     proposals = [e for e in await runtime.session_store.read_events(handle.run_id)
                  if e.type == "tool.call.proposed"]
-    assert proposals[0].data.arguments == {
+    assert cast(ToolEventData, proposals[0].data).arguments == {
         "query": "host-query", "session_id": handle.session_id, "top_k": 3,
     }
 
@@ -320,7 +331,7 @@ async def test_missing_session_context_uses_real_run_session_in_prompt_and_tool(
         name = (await provider.list_tools(run_id="discovery"))[0].name
         catalog = executor = provider
     else:
-        provider = DecoratedToolProvider(PlanningTools(SimpleNamespace(load_todos=load_todos)))
+        provider = DecoratedToolProvider(PlanningTools(cast('OfficialToolRuntime', SimpleNamespace(load_todos=load_todos))))
         name = "todo_read"
         catalog, executor = provider.catalog, provider.executor
     runtime = ephemeral_runtime()
@@ -344,7 +355,7 @@ async def test_missing_session_context_uses_real_run_session_in_prompt_and_tool(
         ),)),)), ScriptedModelStep(events=(completed("done"),)),
     ))
     loop = AgentLoopEngine(
-        runtime=runtime, model=model, tool_catalog=catalog, tool_executor=executor,
+        runtime=runtime, model=cast(ModelProvider, model), tool_catalog=catalog, tool_executor=executor,
         context_assembler=DefaultContextAssembler(providers=(RunMetadataContextProvider(),)),
     )
     result = await loop.execute(handle.run_id, CONTEXT)
@@ -374,7 +385,7 @@ async def test_package_run_keeps_target_session_separate_from_system_context(tar
         received.append(kwargs)
         return {"session_id": kwargs["session_id"] or "new-target-session"}
 
-    provider = DecoratedToolProvider(AgentManagementTools(SimpleNamespace(run=run)))
+    provider = DecoratedToolProvider(AgentManagementTools(cast('AgentManagementService', SimpleNamespace(run=run))))
     definition = await provider.catalog.get_tool("agent_package_run", run_id="run")
     arguments = {"ref": "pkg@1", "agent_id": "worker", "content": "task", "operation": "op"}
     if target:

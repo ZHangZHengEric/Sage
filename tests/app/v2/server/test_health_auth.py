@@ -1,5 +1,13 @@
 from __future__ import annotations
 
+from typing import TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    from app.v2.server.database.client import Database
+    from app.v2.server.packages.management import ServerAgentManagement
+    from app.v2.server.packages.queries import ServerPackageQueries
+    from app.v2.server.runtime.models import ServerModelClients
+
 from pathlib import Path
 
 import pytest
@@ -20,7 +28,7 @@ def test_server_host_requires_database(tmp_path: Path):
     from tests.app.v2.server.conftest import make_settings
 
     with pytest.raises(RuntimeError, match="database is required"):
-        ServerHost(make_settings(tmp_path), database=None)
+        ServerHost(make_settings(tmp_path), database=cast('Database', None))
 
 
 @pytest.mark.asyncio
@@ -59,11 +67,11 @@ async def test_host_and_managed_agents_share_run_limits(tmp_path: Path):
     await service.start()
     try:
         management = service.agent_management
-        assert isinstance(management.store, DatabasePackageStore)
+        assert isinstance(cast('ServerAgentManagement', management).store, DatabasePackageStore)
         scheduler = service.application.service("execution.scheduler")
-        assert management.queries.model_budget is service.application.service("execution.model-budget") is service.execution.model_budget
-        assert scheduler in service.package_queries.run_quota.members
-        assert service.package_queries.capacity_snapshot(management.capacity())[
+        assert cast('ServerAgentManagement', management).queries.model_budget is service.application.service("execution.model-budget") is service.execution.model_budget
+        assert scheduler in cast('ServerPackageQueries', service.package_queries).run_quota.members
+        assert cast('ServerPackageQueries', service.package_queries).capacity_snapshot(cast('ServerAgentManagement', management).capacity())[
             "runs"
         ] == {
             "active": 0,
@@ -88,7 +96,7 @@ async def test_host_explicitly_uses_database_package_store(tmp_path: Path):
     service = ServerHost(make_settings(tmp_path), database=database)
     try:
         await service.start()
-        assert isinstance(service.agent_management.store, DatabasePackageStore)
+        assert isinstance(cast('ServerAgentManagement', service.agent_management).store, DatabasePackageStore)
     finally:
         await service.close()
         await database.stop()
@@ -104,7 +112,7 @@ async def test_application_closes_host_scheduler_before_model_pool(
     models = service.execution.model_pool
     closed = []
     close_scheduler = scheduler.close
-    close_models = models.close
+    close_models = cast('ServerModelClients', models).close
 
     async def record_scheduler_close():
         closed.append("scheduler")

@@ -1,5 +1,13 @@
 """Lease loss continues the same durable Run and inline Team tree."""
 
+from typing import TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    from sagents.v2.contracts.run_state import RunHandle, RunSnapshot
+    from sagents.v2.runtime.execution.scheduler.contracts import WorkerLease
+    from sagents.v2.runtime.session.contracts import SessionStore
+    from sagents.v2.sagent import RecoveryAgent
+
 import asyncio
 from datetime import timedelta
 
@@ -77,8 +85,8 @@ async def test_expired_lease_recovers_same_team_and_saved_results(
     scheduler = RecordingScheduler(clock=clock)
     store = FilesystemSessionStore(tmp_path / "store")
     fenced = LeaseFencedSessionStore(store, scheduler)
-    runtime = HarnessRuntime(store)
-    executor_runtime = HarnessRuntime(fenced)
+    runtime = HarnessRuntime(cast('SessionStore', store))
+    executor_runtime = HarnessRuntime(cast('SessionStore', fenced))
     generations = []
     before = {}
     active_slow_streams = 0
@@ -269,7 +277,7 @@ async def test_default_lease_is_48_hours_and_reopen_does_not_wait_for_it(tmp_pat
     old = await scheduler.claim(
         "old", lease_duration=timedelta(hours=48), wait_timeout=0
     )
-    assert old.expires_at > utc_now() + timedelta(hours=47)
+    assert cast('WorkerLease', old).expires_at > utc_now() + timedelta(hours=47)
     await scheduler.close()
     restored = FilesystemScheduler(tmp_path)
     try:
@@ -277,11 +285,11 @@ async def test_default_lease_is_48_hours_and_reopen_does_not_wait_for_it(tmp_pat
             "new", lease_duration=timedelta(hours=48), wait_timeout=0
         )
         assert new is not None
-        assert new.work.run_id == old.work.run_id
-        assert new.work.work_id == old.work.work_id
-        assert new.fencing_token > old.fencing_token
+        assert new.work.run_id == cast('WorkerLease', old).work.run_id
+        assert new.work.work_id == cast('WorkerLease', old).work.work_id
+        assert new.fencing_token > cast('WorkerLease', old).fencing_token
         with pytest.raises(SageV2Error):
-            await restored.assert_fence(old)
+            await restored.assert_fence(cast('WorkerLease', old))
     finally:
         await restored.close()
 
@@ -304,8 +312,8 @@ async def test_lease_loss_with_remote_tool_in_flight_does_not_replay_it(
     scheduler = RecordingScheduler(clock=clock)
     store = FilesystemSessionStore(tmp_path / "store")
     fenced = LeaseFencedSessionStore(store, scheduler)
-    runtime = HarnessRuntime(store)
-    worker_runtime = HarnessRuntime(fenced)
+    runtime = HarnessRuntime(cast('SessionStore', store))
+    worker_runtime = HarnessRuntime(cast('SessionStore', fenced))
     remote_applied = asyncio.Event()
     generation = 0
     effects = []
@@ -459,8 +467,8 @@ async def test_transient_renewal_failure_retries_without_restarting_driver():
     )
     try:
         future = await dispatcher.submit(
-            FakeAgent(delay=0.35),
-            SimpleNamespace(run_id="same-run", run_revision=0),
+            cast('RecoveryAgent', FakeAgent(delay=0.35)),
+            cast('RunHandle | RunSnapshot', SimpleNamespace(run_id="same-run", run_revision=0)),
             CONTEXT,
         )
         assert (await asyncio.wait_for(future, 2)).state == RunState.COMPLETED

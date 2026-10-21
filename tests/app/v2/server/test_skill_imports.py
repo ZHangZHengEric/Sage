@@ -1,3 +1,9 @@
+
+from typing import TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    from app.v2.server.skills.records import SkillRecord
+
 import io
 import socket
 import zipfile
@@ -121,7 +127,7 @@ def test_downloader_revalidates_redirect_dns_and_bounds_stream(monkeypatch):
         download_public_https('https://public.test/file.zip', max_bytes=16)
     assert connections == [('public.test', '1.1.1.1')]
     response.status = 302
-    response.getheader = lambda name: 'https://private.test/secret' if name == 'Location' else None
+    setattr(response, 'getheader', lambda name: 'https://private.test/secret' if name == 'Location' else None)
     with pytest.raises(SageV2Error, match='私网'):
         download_public_https('https://public.test/file.zip')
     assert [host for host, _ in connections] == ['public.test', 'public.test']
@@ -221,4 +227,4 @@ async def test_store_rejects_stale_import_version(tmp_path):
     first = await service.publish_markdown(name='one', content=skill('one'), user_id='owner', role='user')
     with pytest.raises(SageV2Error):
         await store.publish(replace(first, version_id='other'), expected_version_id='stale')
-    assert (await store.get(first.skill_id)).version_id == first.version_id
+    assert (cast('SkillRecord', await store.get(first.skill_id))).version_id == first.version_id

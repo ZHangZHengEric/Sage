@@ -1,3 +1,7 @@
+
+from typing import cast
+
+from sagents.v2.contracts.items import TextBlock
 import pytest
 from fastapi.testclient import TestClient
 from sagents.v2.model.contracts import ModelEventKind, ModelResponse, ModelStreamEvent
@@ -77,7 +81,7 @@ def test_agui_run_uses_catalog_agent_instructions(tmp_path):
 
     assert provider.requests
     rendered = "\n".join(
-        block.text
+        cast(TextBlock, block).text
         for request in provider.requests
         for message in request.messages
         for block in message.content
@@ -101,7 +105,7 @@ def test_agent_external_scope_reaches_the_actual_model_request(tmp_path, monkeyp
         if user_id not in configured_users:
             catalog.mcp_servers = [McpServerRecord(name='test', url='https://mcp.invalid', tools=['mcp_read'])]
             catalog.a2a_agents = [A2AAgentRecord(name='peer', url='https://peer.invalid', skills=['a2a_peer_search'])]
-            await service.catalog_store.save(user_id, catalog)
+            await getattr(service.catalog_store, 'save')(user_id, catalog)
             configured_users.add(user_id)
         return catalog
     monkeypatch.setattr(service.catalog, 'get', catalog_with_tools)

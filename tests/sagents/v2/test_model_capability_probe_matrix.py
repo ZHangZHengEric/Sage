@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+from typing import Callable, cast
+
+from sagents.v2.model.provider import ModelProvider
+
 import asyncio
 
 import pytest
@@ -146,12 +150,12 @@ async def test_reasoning_matrix_bounds_concurrency_and_preserves_order_and_depen
     report = ModelCapabilityProbeReport(
         valid=True,
         supports_tools=supports_tools,
-        outcomes=(ModelCapabilityProbeOutcome(name="json_object", status="supported"),),
+        outcomes=(ModelCapabilityProbeOutcome(name="json_object", status=cast('ModelCapabilityProbeStatus', "supported")),),
     )
     _, metadata = await asyncio.wait_for(
         probe_model_reasoning_controls(
-            base_provider=ReasoningProvider(),
-            provider_factory=ReasoningProvider,
+            base_provider=cast(ModelProvider, ReasoningProvider()),
+            provider_factory=cast(Callable[[str, str | None], ModelProvider], ReasoningProvider),
             report=report,
             request=ModelCapabilityProbeRequest(
                 model_binding="primary",
@@ -210,12 +214,12 @@ async def test_reasoning_matrix_cancellation_drains_active_and_queued_probes():
 
     task = asyncio.create_task(
         probe_model_reasoning_controls(
-            base_provider=BlockedProvider(),
-            provider_factory=BlockedProvider,
+            base_provider=cast(ModelProvider, BlockedProvider()),
+            provider_factory=cast(Callable[[str, str | None], ModelProvider], BlockedProvider),
             report=ModelCapabilityProbeReport(
                 valid=True,
                 outcomes=(
-                    ModelCapabilityProbeOutcome(name="json_object", status="supported"),
+                    ModelCapabilityProbeOutcome(name="json_object", status=cast('ModelCapabilityProbeStatus', "supported")),
                 ),
             ),
             request=ModelCapabilityProbeRequest(
@@ -314,13 +318,13 @@ async def test_output_probe_distinguishes_format_rejections_from_errors(
                         )
                     )
                 error = RuntimeError(message)
-                error.status_code = status_code
+                setattr(error, 'status_code', status_code)
                 raise error
             async for event in super()._stream(request):
                 yield event
 
     report = await probe_model_capabilities(
-        RejectedFormatProvider(), model_binding="primary"
+        cast(ModelProvider, RejectedFormatProvider()), model_binding="primary"
     )
     outcome = report.outcome(probe)
     assert outcome.status.value == expected
@@ -338,7 +342,7 @@ async def test_probe_suite_keeps_independent_results_after_one_rejection():
     provider = ProbeProvider()
 
     report = await probe_model_capabilities(
-        provider,
+        cast(ModelProvider, provider),
         model_binding="primary",
     )
 
@@ -382,7 +386,7 @@ async def test_multimodal_probe_keeps_raw_error_without_inferring_another_protoc
                 yield event
 
     report = await probe_model_capabilities(
-        RejectedImageProvider(), model_binding="primary"
+        cast(ModelProvider, RejectedImageProvider()), model_binding="primary"
     )
 
     outcome = report.outcome("multimodal")
@@ -398,7 +402,7 @@ async def test_probe_suite_is_invalid_only_when_every_executable_probe_fails():
     provider = ProbeProvider(fail_all=True)
 
     report = await probe_model_capabilities(
-        provider,
+        cast(ModelProvider, provider),
         model_binding="primary",
     )
 
@@ -427,7 +431,7 @@ async def test_probe_suite_times_out_each_probe_without_blocking_the_report():
     provider = SlowProvider()
 
     report = await probe_model_capabilities(
-        provider,
+        cast(ModelProvider, provider),
         model_binding="primary",
         timeout_seconds=0.01,
     )
@@ -461,7 +465,7 @@ async def test_reasoning_only_connection_does_not_claim_text_support():
             )
 
     report = await probe_model_capabilities(
-        ReasoningOnlyProvider(),
+        cast(ModelProvider, ReasoningOnlyProvider()),
         model_binding="primary",
     )
 
@@ -479,5 +483,5 @@ async def test_tool_probe_does_not_require_force_or_strict_mode():
                 assert all(tool.strict is None for tool in request.tools)
             async for event in super()._stream(request):
                 yield event
-    report = await probe_model_capabilities(ThinkingToolsProvider(), model_binding='primary')
+    report = await probe_model_capabilities(cast(ModelProvider, ThinkingToolsProvider()), model_binding='primary')
     assert report.supports_tools

@@ -5,6 +5,8 @@ These cases establish shared admission, claims, quotas, expiry, and lifecycle
 semantics across instances without requiring a live Redis deployment.
 """
 
+from typing import cast
+
 import asyncio
 from datetime import timedelta
 
@@ -87,7 +89,7 @@ async def test_distinct_work_for_one_run_cannot_have_two_live_leases(scheduler_p
 async def test_expired_lease_is_reclaimed_with_higher_fence_and_rejects_old_owner(scheduler_pair):
     first, second = scheduler_pair()
     await first.submit(work("expiry"))
-    old = await claim(first, "old-worker", duration=0.08)
+    old = await claim(first, "old-worker", duration=cast('int', 0.08))
     assert old is not None
     replacement = await asyncio.wait_for(claim(second, "new-worker", wait=1), 2)
     assert replacement is not None
@@ -173,7 +175,7 @@ async def test_closing_a_node_preserves_pending_shared_work(scheduler_pair):
 async def test_fenced_callback_keeps_expired_lease_authoritative_until_callback_finishes(scheduler_pair):
     first, second = scheduler_pair()
     await first.submit(work("pinned"))
-    old = await claim(first, "old-worker", duration=0.08)
+    old = await claim(first, "old-worker", duration=cast('int', 0.08))
     assert old is not None
     entered, finish = asyncio.Event(), asyncio.Event()
 
@@ -185,7 +187,7 @@ async def test_fenced_callback_keeps_expired_lease_authoritative_until_callback_
     task = asyncio.create_task(first.execute_fenced(old, operation))
     try:
         await asyncio.wait_for(entered.wait(), 1)
-        assert await claim(second, "competing-worker", wait=0.16) is None
+        assert await claim(second, "competing-worker", wait=cast('int', 0.16)) is None
         assert utc_now() > old.expires_at
         finish.set()
         assert await asyncio.wait_for(task, 1) == "committed"

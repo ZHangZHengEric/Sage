@@ -1,5 +1,7 @@
 """Bound official tools use actual registered Run resources and SDK cleanup."""
 
+from typing import cast
+
 from sagents.v2.tool.provider import ToolProvider
 
 import pytest
@@ -34,7 +36,7 @@ def tools_registration(factory):
 def paired_runtime(root):
     selected = runtime(root)
     return selected.model_copy(update={"capabilities": {**selected.capabilities, "tool.provider": (
-        CapabilitySelection(plugin="sage.tool.official"), CapabilitySelection(plugin="test.bound.tools", scope="run"))}})
+        CapabilitySelection(plugin="sage.tool.official"), CapabilitySelection(plugin="test.bound.tools", scope=cast('ExtensionScope | None', "run")))}})
 
 
 @pytest.mark.asyncio

@@ -1,6 +1,15 @@
 """Run with python -m examples.v2.standard_host; no host execution driver."""
 from __future__ import annotations
 
+from typing import TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    from sagents.v2.contracts.principals import PrincipalType
+    from sagents.v2.model.contracts import ModelEventKind
+    from typing import Any
+
+from sagents.v2.composition.loaded_agents import ApplicationEntrypoint
+
 import argparse
 import asyncio
 import json
@@ -51,7 +60,7 @@ class DemonstrationModel:
                 if name not in names:
                     raise RuntimeError(f"standard tool is missing: {name}")
                 call = ModelToolCall(tool_call_id=prefix + f"_{len(own)}", name=name, arguments=arguments)
-        yield ModelStreamEvent(kind="completed", response=ModelResponse(
+        yield ModelStreamEvent(kind=cast('ModelEventKind', "completed"), response=ModelResponse(
             response_id=prefix + f"_{len(own)}", text="" if call else "Media checks completed.",
             tool_calls=(call,) if call else (), finish_reason="tool_calls" if call else "stop",
         ))
@@ -127,7 +136,7 @@ async def main(options):
         approval_strategy=ApprovalStrategy.AUTO_APPROVE,
     )))
     app = await builder.build(runtime=runtime, models=models)
-    context = RequestContext(actor=ActorRef(principal_id="standard-host-user", principal_type="user", tenant_id="standard-host", scopes=("tool.external_side_effect",)))
+    context = RequestContext(actor=ActorRef(principal_id="standard-host-user", principal_type=cast('PrincipalType', "user"), tenant_id="standard-host", scopes=("tool.external_side_effect",)))
     try:
         worker = await app.load_agent(package("worker"))
         group = await app.load_agent(package("group", team=True, children=("worker",)), subagents={"worker": worker})
@@ -137,7 +146,7 @@ async def main(options):
             agent = await app.agent_for_run(run_id, context)
             run = await app.service("session.access").get_run(run_id, context)
             if run.state.value == "resuming":
-                await (await app.entrypoint().continue_run(run_id, context, agent=agent))
+                await (await cast(ApplicationEntrypoint, app.entrypoint()).continue_run(run_id, context, agent=agent))
             else:
                 from sagents.v2 import EventCursor
                 async for event in app.service("session.access").subscribe_events(EventCursor(run_id=run_id), context):
@@ -148,7 +157,7 @@ async def main(options):
             command = StartRun(agent_id=agent.id, resolved_spec_hash=agent.composition_hash,
                                input=(InputItem(role="user", content=(TextBlock(text="Run all standard media checks."),)),),
                                idempotency_key=options.key)
-            stream = await app.entrypoint().run_stream(command, context, agent=agent)
+            stream = await cast(ApplicationEntrypoint, app.entrypoint()).run_stream(command, context, agent=agent)
             run_id = stream.handle.run_id
             print(json.dumps({"run_id": run_id}), flush=True)
             async for event in stream.events:
@@ -179,14 +188,14 @@ async def main(options):
             raise RuntimeError("shared sandbox acceptance failed")
         if not {"file_write", "execute_shell_command", "mcp_demo_echo", "sys_team_delegate_task"} <= successful_tools:
             raise RuntimeError(f"tool acceptance incomplete: {successful_tools}")
-        workspace = Path(configuration.workspace_root)
+        workspace = Path(cast('Any', configuration).workspace_root)
         if (workspace / "standard-host.txt").read_text() != "standard-sdk":
             raise RuntimeError("file tool acceptance failed")
         if not (workspace / "frame.png").stat().st_size:
             raise RuntimeError("Python media dependency acceptance failed")
         if not (workspace / "media.mp4").stat().st_size:
             raise RuntimeError("media acceptance failed")
-        print(json.dumps({"configuration_id": configuration.configuration_id,
+        print(json.dumps({"configuration_id": cast('Any', configuration).configuration_id,
                           "diagnostics": await app.execution_diagnostics(run_id, context)}), flush=True)
     finally:
         await app.close()

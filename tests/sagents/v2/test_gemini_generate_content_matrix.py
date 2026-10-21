@@ -1,5 +1,12 @@
 from __future__ import annotations
 
+from typing import TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    from sagents.v2.model.contracts import ModelResponse
+    from sagents.v2.runtime.session.contracts import SessionStore
+    from typing import Any, Mapping
+
 from sagents.v2.runtime.extensions import CapabilityKey, ProviderSet
 
 import json
@@ -100,25 +107,25 @@ async def test_native_parallel_calls_and_signatures_are_replayed_with_results():
     try:
         events = [value async for value in provider.stream(request())]
         response = events[-1].response
-        assert response.response_id == "google-response"
-        assert response.reasoning == "checking"
-        assert len(response.tool_calls) == 2
-        assert response.usage.output_tokens == 7
-        assert response.usage.input_tokens == 12
-        assert response.usage.cached_input_tokens == 3
-        assert response.usage.reasoning_tokens == 2
+        assert cast('ModelResponse', response).response_id == "google-response"
+        assert cast('ModelResponse', response).reasoning == "checking"
+        assert len(cast('ModelResponse', response).tool_calls) == 2
+        assert cast('ModelResponse', response).usage.output_tokens == 7
+        assert cast('ModelResponse', response).usage.input_tokens == 12
+        assert cast('ModelResponse', response).usage.cached_input_tokens == 3
+        assert cast('ModelResponse', response).usage.reasoning_tokens == 2
         assert (
             captured[0].url.path == "/v1beta/models/gemini-3-test:streamGenerateContent"
         )
         assert captured[0].url.params["alt"] == "sse"
-        state = read_provider_state(response.provider_state, "gemini_generate_content")
-        assert state["parts"] == parts
+        state = read_provider_state(cast('ModelResponse', response).provider_state, "gemini_generate_content")
+        assert cast('Mapping[str, Any]', state)["parts"] == parts
         messages = (
             *request().messages,
             ModelMessage(
                 role="assistant",
-                tool_calls=response.tool_calls,
-                provider_state=response.provider_state,
+                tool_calls=cast('ModelResponse', response).tool_calls,
+                provider_state=cast('ModelResponse', response).provider_state,
             ),
             *(
                 ModelMessage(
@@ -126,7 +133,7 @@ async def test_native_parallel_calls_and_signatures_are_replayed_with_results():
                     tool_call_id=call.tool_call_id,
                     content=(JsonBlock(value={"result": index}),),
                 )
-                for index, call in enumerate(response.tool_calls)
+                for index, call in enumerate(cast('ModelResponse', response).tool_calls)
             ),
         )
         replay = provider.diagnostic_request(request(messages=messages))["contents"]
@@ -164,12 +171,12 @@ async def test_signature_only_part_and_text_deltas_survive_json_round_trip():
     try:
         values = [value async for value in provider.stream(request())]
         response = values[-1].response
-        assert response.text == "Hello world"
+        assert cast('ModelResponse', response).text == "Hello world"
         restored = ModelMessage.model_validate_json(
             ModelMessage(
                 role="assistant",
-                content=(TextBlock(text=response.text),),
-                provider_state=response.provider_state,
+                content=(TextBlock(text=cast('ModelResponse', response).text),),
+                provider_state=cast('ModelResponse', response).provider_state,
             ).model_dump_json()
         )
         outgoing = provider.diagnostic_request(
@@ -278,7 +285,7 @@ async def test_thinking_only_token_limit_is_a_continuable_response():
     )
     try:
         values = [value async for value in provider.stream(request())]
-        assert values[-1].response.finish_reason == "max_tokens"
+        assert cast('ModelResponse', values[-1].response).finish_reason == "max_tokens"
     finally:
         await client.aclose()
 
@@ -446,7 +453,7 @@ async def test_native_tool_round_trip_survives_session_store_restart(tmp_path):
 
     path = tmp_path / "gemini.sqlite3"
     store = FilesystemSessionStore(path)
-    runtime = HarnessRuntime(store)
+    runtime = HarnessRuntime(cast('SessionStore', store))
     try:
         first = await runtime.start_run(command("look up", "gemini-first"), CONTEXT)
         await execute(
@@ -463,7 +470,7 @@ async def test_native_tool_round_trip_survives_session_store_restart(tmp_path):
         ]
         await store.close()
         store = FilesystemSessionStore(path)
-        runtime = HarnessRuntime(store)
+        runtime = HarnessRuntime(cast('SessionStore', store))
         second = await runtime.start_run(
             command("follow up", "gemini-second", session_id=first.session_id), CONTEXT
         )
@@ -573,7 +580,7 @@ def test_factory_reuses_probed_thinking_dialect_without_overriding_enabled_reaso
         ),
         client=object(),
     )
-    payload = provider.diagnostic_request(request())
+    payload = getattr(provider, 'diagnostic_request')(request())
     assert payload["generationConfig"]["maxOutputTokens"] == 4096
     assert (
         payload["generationConfig"]["thinkingConfig"]["thinkingBudget"]

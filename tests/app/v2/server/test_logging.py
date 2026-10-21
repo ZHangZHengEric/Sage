@@ -1,3 +1,9 @@
+
+from typing import TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    from sagents.v2.runtime.observability.contracts import LogLevel
+
 import json
 import subprocess
 import sys
@@ -76,7 +82,7 @@ def test_fast_performance_events_are_preserved(capsys):
     sink = create_observability_provider("sage.observability.local", {"log_level": "debug"}).logs
     for event in sorted(EVENTS):
         sink.write(LogRecord(
-            event=event, message=event, level="debug", component="sage.test",
+            event=event, message=event, level=cast('LogLevel', "debug"), component="sage.test",
             attributes={"duration_ms": 1, "outcome": "completed"},
         ))
     sink.close()

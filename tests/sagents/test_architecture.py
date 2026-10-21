@@ -1,15 +1,18 @@
 """Keep the architecture gate effective for normal and hidden import edges."""
+from typing import cast
+from importlib.machinery import ModuleSpec
+from importlib.abc import Loader
 from pathlib import Path
 import importlib.util
 
 import pytest
 
 
-spec = importlib.util.spec_from_file_location(
+spec = cast(ModuleSpec, importlib.util.spec_from_file_location(
     "check_architecture", Path(__file__).resolve().parents[2] / "scripts/shared/checks/check_architecture.py"
-)
+))
 architecture = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(architecture)
+cast(Loader, spec.loader).exec_module(architecture)
 
 
 @pytest.mark.parametrize("source, destination, code", [

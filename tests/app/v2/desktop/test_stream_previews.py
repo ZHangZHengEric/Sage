@@ -1,3 +1,10 @@
+
+from typing import TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    from app.v2.desktop.backend.service import DesktopV2Service
+    from sagents.v2.runtime.session.contracts import SessionStore
+
 import asyncio
 import json
 from types import SimpleNamespace
@@ -51,7 +58,7 @@ async def test_desktop_reconnect_replays_only_unseen_previews_and_terminal_text(
     service = SimpleNamespace(
         start=AsyncMock(),
         _context=lambda user: CONTEXT,
-        session_access=AuthorizedSessionAccess(store),
+        session_access=AuthorizedSessionAccess(cast('SessionStore', store)),
         _index_run=AsyncMock(),
     )
     try:
@@ -100,7 +107,7 @@ async def test_desktop_reconnect_replays_only_unseen_previews_and_terminal_text(
         )
         first, second = previews
         stream = DesktopRunServiceMixin.subscribe_events(
-            service,
+            cast('DesktopRunServiceMixin', service),
             run.run_id,
             run.last_run_sequence,
             "user",
@@ -165,7 +172,7 @@ async def test_preview_reads_require_the_session_owner(tmp_path):
         from sagents.v2.contracts.errors import SageV2Error
 
         with pytest.raises(SageV2Error):
-            await AuthorizedSessionAccess(store).read_stream_previews(
+            await AuthorizedSessionAccess(cast('SessionStore', store)).read_stream_previews(
                 created.handle.run_id, other
             )
     finally:
@@ -185,7 +192,7 @@ def test_desktop_events_endpoint_forwards_preview_cursor():
         logger=StructuredLogger(NoopLogSink(), "test"),
         subscribe_events=subscribe,
     )
-    app = create_app(service=service, auth_token="test-token")
+    app = create_app(service=cast('DesktopV2Service | None', service), auth_token="test-token")
     with TestClient(app) as client:
         response = client.get(
             "/api/v2/runs/run-1/events",

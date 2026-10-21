@@ -1,3 +1,10 @@
+
+from typing import TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    from sagents.v2.application import SAgentApplication
+    from sagents.v2.package.manifest.agents import AgentMemoryBehavior
+
 import asyncio
 import pytest
 from app.v2.desktop.backend.service import DesktopV2Service
@@ -24,7 +31,7 @@ async def test_clone_full_configuration_is_independent_and_invalid_create_is_ato
         agent = await service._agent(original["id"], "user_1")
         provider = await service.catalog.get_model_provider(original["llm_provider_id"], "user_1")
         manifest = service._manifest(agent, provider, (), ())
-        assert manifest.agents[manifest.entrypoint.agent].budgets.max_steps == 750
+        assert getattr(manifest.agents[cast('str', manifest.entrypoint.agent)], 'budgets').max_steps == 750
     finally:
         await service.close()
 
@@ -54,7 +61,7 @@ async def test_explicit_memory_settings_survive_clone_and_drive_runtime(tmp_path
     try:
         created = await service.create_agent(AgentCreate(name='Memory', settings=AgentSettingsPatch(
             available_tools=['search_memory'], available_skills=[],
-            memory={'recall': recall, 'auto_write': auto_write, 'scope': scope},
+            memory=cast('AgentMemoryBehavior | None', {'recall': recall, 'auto_write': auto_write, 'scope': scope}),
         )), 'user_1')
         assert created['memory'] == {'recall': recall, 'auto_write': auto_write, 'scope': scope}
         clone = await service.create_agent(AgentCreate(name='Clone', source_agent_id=created['id']), 'user_1')
@@ -64,7 +71,7 @@ async def test_explicit_memory_settings_survive_clone_and_drive_runtime(tmp_path
         provider = await service._provider(agent, 'user_1')
         run, command, _ = await execute(service, agent_id=agent.agent_id)
         assert run.state.value == "completed"
-        accepted = await service.application.run_configuration(run.run_id, service._context("user_1"))
+        accepted = await cast('SAgentApplication', service.application).run_configuration(run.run_id, service._context("user_1"))
         assert accepted["agent"]["memory"]["recall"] is recall
         assert service._memory_service_for_agent(agent).scope_mode == scope
         manifest = service._manifest(agent, provider, ('search_memory',), ())

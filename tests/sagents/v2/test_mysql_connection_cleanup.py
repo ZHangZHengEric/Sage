@@ -28,7 +28,7 @@ async def test_cancelled_query_releases_closed_connection_without_rollback(reade
     # Use the real driver with a transport double and a pending packet read.
     # This exercises aiomysql's query cancellation and socket closure directly.
     connection = aiomysql.Connection(loop=asyncio.get_running_loop())
-    connection._reader = asyncio.StreamReader()
+    setattr(connection, '_reader', asyncio.StreamReader())
     connection._writer = Mock()
     connection.rollback = AsyncMock(wraps=connection.rollback)
     _, lease, ready_pool = connection_pool(connection)

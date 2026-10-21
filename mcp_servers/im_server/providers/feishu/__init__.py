@@ -1,5 +1,10 @@
 """Feishu (Lark) provider package."""
 
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .websocket import FeishuWebSocketClient as FeishuWebSocketClient
+
 from .provider import FeishuProvider
 
 __all__ = [

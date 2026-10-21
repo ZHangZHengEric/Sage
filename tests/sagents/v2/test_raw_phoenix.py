@@ -1,3 +1,14 @@
+
+from opentelemetry.util.types import AttributeValue
+
+from typing import TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    from opentelemetry.trace import SpanContext
+    from sagents.v2.runtime.observability.contracts import LogLevel
+    from typing import Iterable, Mapping, Sequence
+
+from sagents.v2.model.provider import ModelProvider
 import json
 
 import pytest
@@ -30,22 +41,22 @@ def test_raw_phoenix_preserves_content_and_events(monkeypatch):
     sink.add_event(span.span_id, TraceEvent(name='raw.event', attributes=payload))
     sink.end_span(span)
     exported = exporter.get_finished_spans()[0]
-    assert json.loads(exported.attributes['input.value']) == payload
-    assert exported.events[0].attributes['text'] == payload['text']
-    assert exported.events[0].attributes['password'] == 'original-secret'
+    assert json.loads(cast('str | bytes | bytearray', cast('Mapping[str, str | bool | int | float | Sequence[str] | Sequence[bool] | Sequence[int] | Sequence[float]]', exported.attributes)['input.value'])) == payload
+    assert cast('Mapping[str, str | bool | int | float | Sequence[str] | Sequence[bool] | Sequence[int] | Sequence[float]]', exported.events[0].attributes)['text'] == payload['text']
+    assert cast('Mapping[str, str | bool | int | float | Sequence[str] | Sequence[bool] | Sequence[int] | Sequence[float]]', exported.events[0].attributes)['password'] == 'original-secret'
     from sagents.v2.runtime.observability.traces import StructuredTracer
     handle = StructuredTracer(sink, 'test').start_span('custom', attributes=payload)
     handle.add_event('event', payload)
     handle.end(status='error', error=RuntimeError('original-secret-' + 'x' * 20000))
     facade = exporter.get_finished_spans()[1]
-    assert facade.attributes['password'] == 'original-secret'
-    assert facade.events[0].attributes['text'] == payload['text']
-    assert len(facade.events[-1].attributes['exception.message']) > 20000
+    assert cast('Mapping[str, str | bool | int | float | Sequence[str] | Sequence[bool] | Sequence[int] | Sequence[float]]', facade.attributes)['password'] == 'original-secret'
+    assert cast('Mapping[str, str | bool | int | float | Sequence[str] | Sequence[bool] | Sequence[int] | Sequence[float]]', facade.events[0].attributes)['text'] == payload['text']
+    assert len(cast(str, cast('Mapping[str, str | bool | int | float | Sequence[str] | Sequence[bool] | Sequence[int] | Sequence[float]]', facade.events[-1].attributes)['exception.message'])) > 20000
     sink.close()
 
 
 def test_unbounded_wire_capture_preserves_large_event():
-    capture = WireCapture(max_bytes=None)
+    capture = WireCapture(max_bytes=cast('int', None))
     payload = {'delta': 'x' * (8 * 1024 * 1024 + 1)}
     capture.append(payload)
     assert capture.events == [payload]
@@ -69,7 +80,7 @@ async def test_phoenix_external_diagnostics_preserve_raw_records():
     await diagnostics.begin_model_request(session_id='s', request=model_request,
                                            provider={}, wire_request=wire)
     await diagnostics.record_model_stream(session_id='s', request=model_request, evidence=stream)
-    diagnostics.write(LogRecord(level='info', component='test', event='custom.event', message='raw log',
+    diagnostics.write(LogRecord(level=cast('LogLevel', 'info'), component='test', event='custom.event', message='raw log',
                                 session_id='s', run_id=model_request.run_id,
                                 attributes={'password': 'keep'}))
     await diagnostics.close()
@@ -111,7 +122,7 @@ async def test_recording_roundtrip_preserves_large_wire_and_normalized_events(mo
     async def session(_):
         return 's'
 
-    model = RecordingModelProvider(Provider(()), sink=diagnostics,
+    model = RecordingModelProvider(cast(ModelProvider, Provider(())), sink=diagnostics,
                                    trace_sink=trace, session_id_resolver=session)
     async for _ in model.stream(request()):
         pass
@@ -124,9 +135,9 @@ async def test_recording_roundtrip_preserves_large_wire_and_normalized_events(mo
     assert any(row.get('event', {}).get('delta') == body for row in evidence)
 
     async def query(client, **kwargs):
-        return [{'name': s.name, 'start_time': s.start_time / 1e9,
-                 'attributes': dict(s.attributes),
-                 'events': [{'name': e.name, 'timestamp': e.timestamp / 1e9, 'attributes': dict(e.attributes)} for e in s.events]} for s in spans], False
+        return [{'name': s.name, 'start_time': cast('int', s.start_time) / 1e9,
+                 'attributes': dict(cast('Mapping[str, AttributeValue]', s.attributes)),
+                 'events': [{'name': e.name, 'timestamp': e.timestamp / 1e9, 'attributes': dict(cast('Mapping[str, AttributeValue]', e.attributes))} for e in s.events]} for s in spans], False
 
     monkeypatch.setattr(diagnostics, '_query', query)
     result = await diagnostics.snapshot('s', {'run_1'})
@@ -151,7 +162,7 @@ async def test_raw_tool_span_keeps_complete_result_error_and_operation():
     from tests.sagents.v2.test_agent_loop_matrix import CONTEXT, completed, setup_loop, tool_call
 
     traces = _CapturingTraceSink()
-    traces.content_mode = "raw"
+    setattr(traces, 'content_mode', "raw")
     message = "password=original-secret " + "原始错误" * 20000
     results = []
 
@@ -211,11 +222,11 @@ async def test_redacted_performance_summary_keeps_timing_json_beyond_content_lim
         await diagnostics.flush_raw()
         spans = [span for span in exporter.get_finished_spans() if span.name == 'agent.run']
         assert len(spans) == 1
-        payload = ''.join(spans[0].attributes['sage.performance.data'])
+        payload = ''.join(cast('Iterable[str]', cast('Mapping[str, str | bool | int | float | Sequence[str] | Sequence[bool] | Sequence[int] | Sequence[float]]', spans[0].attributes)['sage.performance.data']))
         assert len(payload) > 256
         rows = json.loads(payload)
         assert len(rows) == 8
-        assert spans[0].attributes['sage.performance.framework_ms'] == 4000
+        assert cast('Mapping[str, str | bool | int | float | Sequence[str] | Sequence[bool] | Sequence[int] | Sequence[float]]', spans[0].attributes)['sage.performance.framework_ms'] == 4000
     finally:
         await diagnostics.close()
         trace.close()
@@ -243,7 +254,7 @@ async def test_raw_events_follow_the_active_managed_application_exporter():
     managed_spans = managed_exporter.get_finished_spans()
     model = next(row for row in managed_spans if row.name == 'model.request')
     chunks = [row for row in managed_spans if row.name.startswith('sage.diagnostic.')]
-    assert chunks and all(row.context.trace_id == model.context.trace_id and row.parent.span_id == model.context.span_id for row in chunks)
+    assert chunks and all(cast('SpanContext', row.context).trace_id == cast('SpanContext', model.context).trace_id and cast('SpanContext', row.parent).span_id == cast('SpanContext', model.context).span_id for row in chunks)
     assert not host_exporter.get_finished_spans()
     host.close()
     managed.close()

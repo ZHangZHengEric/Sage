@@ -1,4 +1,11 @@
 from __future__ import annotations
+
+from typing import TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    from typing import Literal
+
+from sagents.v2.model.provider import ModelProvider
 from tests.sagents.v2.model_fixture import TEST_MODELS
 
 import asyncio
@@ -15,7 +22,7 @@ from sagents.v2.model import ModelMessage
 
 
 def message(text, role="assistant", **kwargs):
-    return ModelMessage(role=role, content=(TextBlock(text=text),), **kwargs)
+    return ModelMessage(role=cast("Literal['system', 'developer', 'user', 'assistant', 'tool']", role), content=(TextBlock(text=text),), **kwargs)
 
 
 def scope(key="session"):
@@ -82,7 +89,7 @@ async def test_summary_capacity_is_shared_across_plugin_instances():
 
     request = SummarizationRequest(scope=scope(), messages=(), target_tokens=512)
     values = await asyncio.gather(
-        *(SummaryPlugin(None).summarize(request) for _ in range(16))
+        *(SummaryPlugin(cast(ModelProvider, None)).summarize(request) for _ in range(16))
     )
     assert values == ["summary"] * 16
     assert peak == 4

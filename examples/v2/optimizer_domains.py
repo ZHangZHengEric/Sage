@@ -7,6 +7,16 @@ No production agent is registered or activated. Credentials stay in memory.
 """
 
 from __future__ import annotations
+
+from typing import Any, TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    from sagents.v2.optimization.contracts import OptimizationSuiteReview
+    from sagents.v2.optimization.runner import OptimizationRunner
+    from sagents.v2.runtime.extensions.contracts import ExtensionRegistration
+    from sagents.v2.runtime.session.plugins.filesystem import FilesystemSessionStore
+    from typing import Literal
+
 from sagents.v2 import ApplicationConfiguration
 from examples.v2.host.registrations import provided, runtime_for
 from examples.v2.model_catalog import load_model_provider
@@ -107,14 +117,14 @@ class OrderTools:
             "lines": lines,
             "net": money(net) if net is not None else None,
             "tax": money(tax) if tax is not None else None,
-            "total": money(net + tax) if net is not None else None,
+            "total": money(net + cast(Decimal, tax)) if net is not None else None,
             "status": "needs_review" if missing else "ready",
             "missing_fields": missing,
         }
 
 
 def case(id, text, rubric, split="training", **kwargs):
-    return OptimizationCase(id=id, input=text, rubric=rubric, split=split, **kwargs)
+    return OptimizationCase(id=id, input=text, rubric=rubric, split=cast("Literal['training', 'validation', 'final']", split), **kwargs)
 
 
 def scenarios(revision=1):
@@ -499,20 +509,20 @@ async def run(args):
             ),
         )
         registrations = [provided("example.model", lambda context, deps: provider, "model.provider", ownership="owned")]
-        choices = {"model.provider": {"plugin": "example.model"}}
+        choices: dict[str, Any] = {"model.provider": {"plugin": "example.model"}}
         choices["execution.binding"] = {"plugin": "sage.execution.binding.local-workspace", "config": {
             "workspace": str(root / "work"), "policy": {"process": {"enabled": False}},
         }}
         if args.mode in ("skills", "joint") and bundle.manifest.metadata.id == target.manifest.metadata.id:
             skills = FilesystemSkillProvider((root / "skills",))
-            registrations.append(provided("example.skills", lambda context, deps: skills, "skill.provider"))
+            registrations.append(cast('ExtensionRegistration[FilesystemSessionStore | OpenAIResponsesModelProvider]', provided("example.skills", lambda context, deps: skills, "skill.provider")))
             choices["skill.provider"] = {"plugin": "example.skills"}
         if args.mode == "tools":
             tools = DecoratedToolProvider(OrderTools())
-            registrations.append(provided("example.tools", lambda context, deps: tools, "tool.provider"))
+            registrations.append(cast('ExtensionRegistration[FilesystemSessionStore | OpenAIResponsesModelProvider]', provided("example.tools", lambda context, deps: tools, "tool.provider")))
             choices["tool.provider"] = {"plugin": "example.tools"}
         policy = DefaultToolPolicy(approval_strategy=ApprovalStrategy.AUTO_APPROVE)
-        registrations.append(provided("example.policy", lambda context, deps: policy, "agent.tool-policy"))
+        registrations.append(cast('ExtensionRegistration[FilesystemSessionStore | OpenAIResponsesModelProvider]', provided("example.policy", lambda context, deps: policy, "agent.tool-policy")))
         choices["agent.tool-policy"] = {"plugin": "example.policy"}
         return ApplicationConfiguration(tuple(registrations), runtime_for(root / "sessions", bundle.manifest.runtime, capabilities=choices), {"models": {"primary": {
                 "provider": "openai-responses", "model": model,
@@ -566,7 +576,7 @@ async def run(args):
     (output / "sealed-final-suite.json").write_text(final.model_dump_json(indent=2))
     (output / "goal.txt").write_text(policy)
     optimizer = AgentPackageOptimizer(
-        runner=RecordedRunner(),
+        runner=cast('OptimizationRunner', RecordedRunner()),
         evaluator=agents["evaluator"],
         tuner=agents["tuner"],
         reviewer=agents["reviewer"],
@@ -636,7 +646,7 @@ async def run(args):
         "domain": args.domain,
         "revision": args.revision,
         "mode": args.mode,
-        "suite_review": result.report.suite_review.model_dump(mode="json"),
+        "suite_review": cast('OptimizationSuiteReview', result.report.suite_review).model_dump(mode="json"),
         "model": model,
         "rounds": args.rounds,
         "repeats": args.repeats,

@@ -1,9 +1,15 @@
 """Exercise image attachment wiring through the public builder and host loops."""
 
+from typing import TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    pass
+
+from sagents.v2.composition.loaded_agents import ApplicationEntrypoint
+
 from tests.sagents.v2.sdk_fixture import build_registered_package
 
 from tests.sagents.v2.model_fixture import TEST_MODELS
-
 
 from pathlib import Path
 import os
@@ -91,7 +97,7 @@ async def test_builder_wires_durable_images_from_tool_to_request_and_session(
     package = package.model_copy(
         update={
             "agents": {
-                agent_id: package.agents[agent_id].model_copy(
+                agent_id: getattr(package.agents[cast('str', agent_id)], 'model_copy')(
                     update={"tools": ("analyze_image",)}
                 )
             },
@@ -121,9 +127,9 @@ async def test_builder_wires_durable_images_from_tool_to_request_and_session(
     )
     try:
         assert isinstance(application.service("artifact.store"), SessionArtifactStore)
-        stream = await application.entrypoint().run_stream(
+        stream = await cast(ApplicationEntrypoint, application.entrypoint()).run_stream(
             (StartRun(
-                agent_id=agent_id,
+                agent_id=cast(str, agent_id),
                 input=(
                     InputItem(role="user", content=(TextBlock(text="inspect image"),)),
                 ),
@@ -204,6 +210,6 @@ async def test_builder_wires_durable_images_from_tool_to_request_and_session(
             ),)),),
             SessionArtifactStore(reopened, run.run_id),
         )
-        assert restored_messages[0].content[0].uri == images[0].uri
+        assert cast(ImageBlock, restored_messages[0].content[0]).uri == images[0].uri
     finally:
         await reopened.close()

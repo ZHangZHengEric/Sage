@@ -1,5 +1,10 @@
 """Session plugin owns attachment authorization, persistence, and lifecycle."""
 
+from typing import TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    from sagents.v2.runtime.session.state import SessionStoreCoordinator
+
 import base64
 from copy import deepcopy
 import json
@@ -366,7 +371,7 @@ async def test_read_only_history_contains_attachment_bytes_without_changing_sour
         if path.is_file()
     }
     view = await read_session_history(root, sid, CONTEXT)
-    _, data = await view.get_attachment(sid, "image", context=CONTEXT)
+    _, data = await cast('SessionStoreCoordinator', view).get_attachment(sid, "image", context=CONTEXT)
     assert b"".join([chunk async for chunk in data]) == b"image snapshot"
     assert {
         str(path.relative_to(root)): path.read_bytes()

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, NoReturn, cast
+from typing import NoReturn, TYPE_CHECKING, cast
 
 if TYPE_CHECKING:
     from app.v2.desktop.backend.service import DesktopV2Service
@@ -828,7 +828,7 @@ class StudioContextProvider:
         self.store, self.owner, self.binding = store, owner, binding
         self.refresh = refresh
 
-    async def segments(self, command, *, run_id=None):
+    async def segments(self, command, *, run_id=None) -> tuple[ContextSegment, ...]:
         if command.config.metadata.get("studio") != self.binding:
             return ()
         if self.refresh is not None:

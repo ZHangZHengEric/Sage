@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import cast
+
 from sagents.v2.runtime.execution.sandbox import ResourceLimits
 
 import asyncio
@@ -207,7 +209,7 @@ async def test_safe_approval_pause_snapshots_terminates_and_restores():
     assert (await provider.inspect(old_handle.ref)).state == SandboxState.TERMINATED
 
     run = await store.get_run(run_id)
-    suspension = await store.get_suspension(run.suspension_id)
+    suspension = await store.get_suspension(cast(str, run.suspension_id))
     resumed = await store.request_resume(
         ResumeRun(
             run_id=run_id,

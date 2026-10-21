@@ -1,5 +1,10 @@
 from __future__ import annotations
 
+from typing import TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    from sagents.v2.sagent import RecoveryAgent
+
 import asyncio
 from datetime import timedelta
 
@@ -157,7 +162,7 @@ async def test_expired_pinned_lease_keeps_quota_and_cannot_be_reclaimed(schedule
 async def test_waiting_claim_wakes_on_expiration_without_external_notification(
     scheduler,
 ):
-    await claim(scheduler, "first", seconds=0.05)
+    await claim(scheduler, "first", seconds=cast('int', 0.05))
     lease = await asyncio.wait_for(
         scheduler.claim("replacement", lease_duration=timedelta(seconds=30)), 2
     )
@@ -287,7 +292,7 @@ async def test_dispatcher_parallel_session_commits_remain_bounded_and_ordered():
     results = []
     try:
         for handle, context in runs:
-            results.append(await dispatcher.submit(Agent(), handle, context))
+            results.append(await dispatcher.submit(cast('RecoveryAgent', Agent()), handle, context))
         await asyncio.wait_for(all_slots_busy.wait(), 3)
         assert store.peak == 16
         release.set()

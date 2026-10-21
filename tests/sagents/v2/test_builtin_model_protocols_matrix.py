@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Any
+
 from sagents.v2.runtime.extensions import CapabilityKey, ProviderSet
 
 from tests.sagents.v2.model_fixture import FULL_MODEL_CAPABILITIES as CAPABILITIES
@@ -39,7 +41,7 @@ from sagents.v2.runtime.credentials import CredentialMaterial
 
 
 def request(**changes):
-    values = {
+    values: dict[str, Any] = {
         "request_id": "request_1",
         "run_id": "run_1",
         "model_binding": "primary",
@@ -455,7 +457,7 @@ def test_openai_responses_omits_output_schema_when_tool_result_is_plain_text():
 @pytest.mark.asyncio
 async def test_openai_responses_retries_rejected_reasoning_control_once():
     error = RuntimeError("reasoning is unsupported by this deployment")
-    error.status_code = 422
+    setattr(error, 'status_code', 422)
     responses = SequencedResponses(
         [
             error,
@@ -922,7 +924,7 @@ def test_model_factory_preserves_protocol_output_defaults(protocol, default, max
         ),
         client=SimpleNamespace(),
     )
-    assert provider.config.default_max_output_tokens == (
+    assert getattr(provider, 'config').default_max_output_tokens == (
         maximum if maximum is not None else default
     )
 

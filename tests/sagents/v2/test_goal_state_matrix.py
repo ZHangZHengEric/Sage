@@ -1,3 +1,11 @@
+
+from typing import TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    from sagents.v2.agent.policy.continuation import ContinuationPolicy
+    from sagents.v2.goal.state import GoalStateReader
+    from sagents.v2.tool.official.runtime import OfficialToolRuntime
+
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -109,7 +117,7 @@ async def test_approved_plan_survives_questionnaire_chain_and_ignores_future_run
         "goal",
         tool_events("future", "goal_submit", {"content": "Other task"}),
     )
-    state = await GoalStateService(journal).get("answer")
+    state = await GoalStateService(cast('GoalStateReader', journal)).get("answer")
     assert state is not None and state.content == "Ship it"
     assert state.source == "plan" and state.created_tool_call_id == "plan"
     assert not state.completed
@@ -155,7 +163,7 @@ async def test_goal_is_not_inherited_across_unrelated_boundaries(boundary):
     journal.add(
         "answer", "goal", session="other" if boundary == "different_session" else "s"
     )
-    assert await GoalStateService(journal).get("answer") is None
+    assert await GoalStateService(cast('GoalStateReader', journal)).get("answer") is None
 
 
 @pytest.mark.asyncio
@@ -173,7 +181,7 @@ async def test_exiting_goal_mode_does_not_inherit_questionnaire_goal():
     journal.read_session_events = AsyncMock(
         side_effect=AssertionError("must not inherit")
     )
-    assert await GoalStateService(journal).get("answer") is None
+    assert await GoalStateService(cast('GoalStateReader', journal)).get("answer") is None
 
 
 @pytest.mark.asyncio
@@ -202,7 +210,7 @@ async def test_completed_goal_waits_for_post_tool_summary(tool_name, text, expec
         else (),
         finish_reason="tool_calls" if tool_name else "stop",
     )
-    decision = await GoalCompletionGatePolicy(base, goals).decide(
+    decision = await GoalCompletionGatePolicy(cast('ContinuationPolicy', base), cast('GoalStateService', goals)).decide(
         ContinuationContext(
             run_id="run", step_number=2, max_steps=10, response=response
         )
@@ -229,7 +237,7 @@ async def test_goal_complete_returns_summary_guidance_including_repeated_call(
         request_context=SimpleNamespace(language="zh"),
     )
     result = await PlanningTools(
-        SimpleNamespace(goal_state_service=goals)
+        cast('OfficialToolRuntime', SimpleNamespace(goal_state_service=goals))
     ).goal_complete("Verified summary", invocation)
     assert result["summary"] == ("Saved summary" if completed else "Verified summary")
     assert result["next_step"] == tr("goal.explanation_required", "zh")
@@ -267,7 +275,7 @@ async def test_completion_gate_preserves_host_decisions_and_only_blocks_completi
         get=AsyncMock(return_value=state),
     )
     gate = GoalCompletionGatePolicy if mode == "goal" else PlanCompletionGatePolicy
-    decision = await gate(base, goals).decide(
+    decision = await gate(cast('ContinuationPolicy', base), cast('GoalStateService', goals)).decide(
         ContinuationContext(
             run_id="r",
             step_number=2,

@@ -1,5 +1,13 @@
 from __future__ import annotations
 
+from typing import TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    from sagents.v2.model.provider import ModelProvider
+    from sagents.v2.runtime.session.contracts import SessionStore
+
+from sagents.v2.package.manifest.runtime import CapabilitySelection
+
 from dataclasses import replace
 from pathlib import Path
 
@@ -53,31 +61,31 @@ def test_desktop_manifest_encodes_product_defaults(tmp_path: Path):
     assert "credentials" not in manifest.model_dump()
     assert "models" not in manifest.model_dump()
     assert (
-        capabilities["session.store"].plugin
+        cast(CapabilitySelection, capabilities["session.store"]).plugin
         == DESKTOP_COMPONENT_DEFAULTS["session.store"]
     )
     assert (
-        capabilities["memory.provider"].plugin
+        cast(CapabilitySelection, capabilities["memory.provider"]).plugin
         == (DESKTOP_COMPONENT_DEFAULTS["memory.provider"])
     )
     assert (
-        capabilities["session-memory.provider"].plugin
+        cast(CapabilitySelection, capabilities["session-memory.provider"]).plugin
         == (DESKTOP_COMPONENT_DEFAULTS["session-memory.provider"])
     )
     assert (
-        capabilities["workspace.initializer"].plugin
+        cast(CapabilitySelection, capabilities["workspace.initializer"]).plugin
         == (DESKTOP_COMPONENT_DEFAULTS["workspace.initializer"])
     )
     assert (
-        capabilities["agent.continuation-policy"].plugin
+        cast(CapabilitySelection, capabilities["agent.continuation-policy"]).plugin
         == (DESKTOP_COMPONENT_DEFAULTS["agent.continuation-policy"])
     )
     assert (
-        capabilities["memory.recall-query"].plugin
+        cast(CapabilitySelection, capabilities["memory.recall-query"]).plugin
         == (DESKTOP_COMPONENT_DEFAULTS["memory.recall-query"])
     )
     assert "execution.sandbox" not in capabilities
-    assert capabilities["memory.provider"].config["root"] == str(tmp_path / "memory")
+    assert cast(CapabilitySelection, capabilities["memory.provider"]).config["root"] == str(tmp_path / "memory")
 
 
 def test_desktop_manifest_applies_user_component_selections(tmp_path: Path):
@@ -91,7 +99,7 @@ def test_desktop_manifest_applies_user_component_selections(tmp_path: Path):
     assert "context.unit-compactor" not in capabilities
     assert "context.token-estimator" not in capabilities
     assert (
-        capabilities["agent.continuation-policy"].plugin
+        cast(CapabilitySelection, capabilities["agent.continuation-policy"]).plugin
         == "sage.agent.continuation.llm-judge"
     )
 
@@ -220,8 +228,8 @@ async def test_desktop_composition_keeps_session_and_derived_stores_separate(
     application = await build_desktop_application(
         session_root=tmp_path / "runtime",
         workspace=tmp_path / "workspace",
-        model_provider=ScriptedModelProvider(()),
-        session_store=session_store,
+        model_provider=cast('ModelProvider | None', ScriptedModelProvider(())),
+        session_store=cast('SessionStore | None', session_store),
     )
     try:
         assert application.entrypoint().runtime.session_store is session_store
@@ -243,7 +251,7 @@ async def test_desktop_builder_path_exposes_a_real_resolved_plan(tmp_path: Path)
     application = await build_desktop_application(
         session_root=tmp_path / "runtime",
         workspace=tmp_path / "workspace",
-        model_provider=ScriptedModelProvider(()),
+        model_provider=cast('ModelProvider | None', ScriptedModelProvider(())),
         observability=ObservabilityProvider(plugin_id='test.observation', outputs=(log_sink,), diagnostics=diagnostic_sink),
     )
     try:
@@ -284,10 +292,10 @@ async def test_desktop_service_process_root_uses_builder_application(tmp_path: P
     assert not hasattr(service, "_process_component")
     await service.start()
     try:
-        plan = service.application.resolved_plan
-        assert service.dispatcher is service.application.service("execution.dispatcher")
-        assert service.memory_provider is service.application.service("memory.provider")
-        assert service.diagnostics is service.application.service(
+        plan = getattr(service.application, 'resolved_plan')
+        assert service.dispatcher is getattr(service.application, 'service')("execution.dispatcher")
+        assert service.memory_provider is getattr(service.application, 'service')("memory.provider")
+        assert service.diagnostics is getattr(service.application, 'service')(
             "observability.provider"
         ).diagnostics
         assert {value.source for value in plan.providers} <= {

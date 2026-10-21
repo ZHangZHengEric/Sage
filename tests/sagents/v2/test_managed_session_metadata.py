@@ -4,6 +4,14 @@ Existing managed context tests establish delegation/restart semantics. This
 regression additionally forbids aggregate APIs and checks admitted Agent names,
 long whitespace prefixes, all direct children and the latest command/state.
 """
+
+from typing import TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    from sagents.v2.runtime.session.contracts import SessionStore
+
+from sagents.v2.composition.contracts import ApplicationResource
+
 import json
 import os
 from datetime import datetime, timedelta, timezone
@@ -51,7 +59,7 @@ async def test_managed_context_preserves_complete_output_without_aggregate_reads
     store = SessionStoreCoordinator() if backend == 'memory' else FilesystemSessionStore(tmp_path / 'state')
     request, parent, first, second, nested, flow = await populate(store)
     if backend == 'filesystem':
-        await store.close()
+        await cast(ApplicationResource, store).close()
         store = FilesystemSessionStore(tmp_path / 'state')
         store._ensure_session_loaded = AsyncMock(side_effect=AssertionError('context installed execution aggregate'))
         store._read_session_aggregate = lambda *_: (_ for _ in ()).throw(AssertionError('context decoded complete aggregate'))
@@ -59,7 +67,7 @@ async def test_managed_context_preserves_complete_output_without_aggregate_reads
         setattr(store, method, AsyncMock(side_effect=AssertionError('context used aggregate API ' + method)))
     registry = AgentRegistry((AgentDescriptor(agent_id='qualified.worker', name='Worker', description='work', instructions='work'),),
                              aliases={'worker':'qualified.worker'})
-    provider = AgentRosterContextProvider(registry, AgentMode.FIBRE, session_store=store)
+    provider = AgentRosterContextProvider(registry, AgentMode.FIBRE, session_store=cast('SessionStore | None', store))
     try:
         for _ in range(2):
             segments = await provider.segments(request, run_id=parent.run_id)
@@ -101,7 +109,7 @@ async def test_managed_context_keeps_every_direct_child_across_metadata_batches(
         child = await state.create_run(command(str(index)).model_copy(update={
             'agent_id':'worker', 'parent_run_id':parent.run_id, 'invocation_mode':'delegation'}), CONTEXT)
         expected.append(child.handle.session_id)
-    provider = AgentRosterContextProvider(AgentRegistry(), AgentMode.TEAM, session_store=state)
+    provider = AgentRosterContextProvider(AgentRegistry(), AgentMode.TEAM, session_store=cast('SessionStore | None', state))
     managed = next(segment for segment in await provider.segments(request, run_id=parent.run_id)
                    if segment.segment_id == 'managed_sessions')
     assert [row['session_id'] for row in json.loads(managed.content.splitlines()[-2])] == expected
@@ -132,7 +140,7 @@ async def test_real_mysql_managed_heads_return_only_direct_first_latest_metadata
                 sizes.append(len(result))
             return result
         monkeypatch.setattr(Cursor, 'fetchall', measured)
-        provider = AgentRosterContextProvider(AgentRegistry(), AgentMode.TEAM, session_store=value)
+        provider = AgentRosterContextProvider(AgentRegistry(), AgentMode.TEAM, session_store=cast('SessionStore | None', value))
         for _ in range(2):
             managed = next(segment for segment in await provider.segments(request, run_id=parent.run_id)
                            if segment.segment_id == 'managed_sessions')
@@ -163,7 +171,7 @@ async def test_unarchived_redis_managed_heads_do_not_install_cold_aggregates(liv
     if live and not url:
         pytest.skip('set SAGE_V2_TEST_REDIS_URL for real Redis metadata projection')
     archive = Archive()
-    archive.list_direct_child_session_ids = AsyncMock(return_value=[])
+    setattr(archive, 'list_direct_child_session_ids', AsyncMock(return_value=[]))
     prefix = 'managed-heads:' + uuid4().hex
     if live:
         value = RedisMysqlSessionStore('mysql://unused/test', redis_url=url, key_prefix=prefix)
@@ -191,7 +199,7 @@ async def test_unarchived_redis_managed_heads_do_not_install_cold_aggregates(liv
             def forbidden(*_, method=name, **kwargs):
                 raise AssertionError('heads reconstructed aggregate through ' + method)
             setattr(value, name, forbidden)
-        provider = AgentRosterContextProvider(AgentRegistry(), AgentMode.FIBRE, session_store=value)
+        provider = AgentRosterContextProvider(AgentRegistry(), AgentMode.FIBRE, session_store=cast('SessionStore | None', value))
         for _ in range(2):
             managed = next(segment for segment in await provider.segments(request, run_id=parent.run_id)
                            if segment.segment_id == 'managed_sessions')
@@ -206,7 +214,7 @@ async def test_unarchived_redis_managed_heads_do_not_install_cold_aggregates(liv
                 setattr(value, name, method)
         await value.close()
         if live:
-            redis = Redis.from_url(url, decode_responses=True)
+            redis = Redis.from_url(cast(str, url), decode_responses=True)
             try:
                 keys = [key async for key in redis.scan_iter(match=prefix + ':*')]
                 if keys:

@@ -1,5 +1,10 @@
 from __future__ import annotations
 
+from typing import TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    from typing import Any, Coroutine
+
 import asyncio
 import base64
 import os
@@ -41,7 +46,7 @@ async def test_terminal_session_streams_real_pty_output_and_exit(tmp_path: Path)
     exited = next(event for event in events if event["type"] == "terminal.exited")
     assert b"SAGE_PTY_OK" in output
     assert exited["exit_code"] == 7
-    assert [int(event["sequence"]) for event in events] == list(
+    assert [int(cast('int', event["sequence"])) for event in events] == list(
         range(1, len(events) + 1)
     )
     await manager.close()
@@ -94,7 +99,7 @@ async def test_slow_terminal_subscriber_is_bounded_and_disconnected(tmp_path: Pa
         rows=20,
     )
     stream = session.events()
-    first_event = asyncio.create_task(anext(stream))
+    first_event = asyncio.create_task(cast('Coroutine[Any, Any, Any]', anext(stream)))
     await asyncio.sleep(0)
 
     for index in range(300):
@@ -105,7 +110,7 @@ async def test_slow_terminal_subscriber_is_bounded_and_disconnected(tmp_path: Pa
         observed.append(await anext(stream))
     assert observed[-1]["type"] == "terminal.overflow"
     assert not session._subscribers
-    await stream.aclose()
+    await getattr(stream, 'aclose')()
     await manager.close()
 
 

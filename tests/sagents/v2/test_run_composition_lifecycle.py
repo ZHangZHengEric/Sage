@@ -1,4 +1,10 @@
 """Plugin ownership, assembly and shutdown through the standard SDK path."""
+
+from typing import TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    from typing import Literal
+
 import asyncio
 
 import pytest
@@ -29,7 +35,7 @@ def registration(name, factory, *, ownership="owned", dependencies=(), scope=Ext
             supported_scopes=frozenset({scope}), default_scope=scope,
             dependencies=tuple(ExtensionDependency(capability=value) for value in dependencies),
             config_schema={"type": "object", "additionalProperties": False}),
-        factory=factory, ownership=ownership,
+        factory=factory, ownership=cast("Literal['owned', 'borrowed']", ownership),
     )
 
 

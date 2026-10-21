@@ -1,5 +1,14 @@
 from __future__ import annotations
 
+from typing import cast, Mapping, Callable
+from sagents.v2.model.contracts import ModelRequest
+
+from typing import Any, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from sagents.v2.tool.provider import ToolExecutor
+    from typing import Mapping
+
 import asyncio
 
 import pytest
@@ -8,7 +17,6 @@ from pydantic import ValidationError
 from sagents.v2.model.contracts import (
     ModelEventKind,
     ModelMessage,
-    ModelRequest,
     ModelResponse,
     ModelStreamEvent,
 )
@@ -96,7 +104,7 @@ def complete(text="done", *, tool_calls=()):
     ],
 )
 def test_model_stream_event_payload_matrix(kind, delta, response, valid):
-    kwargs = {"kind": kind, "delta": delta, "response": response}
+    kwargs: dict[str, Any] = {"kind": kind, "delta": delta, "response": response}
     if valid:
         assert ModelStreamEvent(**kwargs).kind == kind
     else:
@@ -116,10 +124,10 @@ async def test_scripted_model_streams_in_order_and_records_exact_request():
                     ModelStreamEvent(kind=ModelEventKind.TEXT_DELTA, delta="do"),
                     complete("done"),
                 ),
-                assertion=lambda value: (
-                    value.messages[0].content[0].text == "hello"
+                assertion=cast('Callable[[ModelRequest], None]', lambda value: (
+                    cast(TextBlock, value.messages[0].content[0]).text == "hello"
                     or (_ for _ in ()).throw(AssertionError())
-                ),
+                )),
             ),
         )
     )
@@ -143,7 +151,7 @@ async def test_scripted_model_concurrent_requests_claim_unique_steps():
 
     async def consume(index):
         values = [value async for value in provider.stream(request(str(index)))]
-        return values[-1].response.text
+        return cast('ModelResponse', values[-1].response).text
 
     results = await asyncio.gather(*(consume(index) for index in range(20)))
     assert len(set(results)) == 20
@@ -462,11 +470,11 @@ async def test_composite_release_continues_after_one_plugin_cleanup_fails(
     failing = Releaser(fail=True)
     healthy = Releaser()
     executor = (
-        RoutedToolExecutor({"first": failing, "second": healthy})
+        RoutedToolExecutor(cast('Mapping[str, ToolExecutor]', {"first": failing, "second": healthy}))
         if executor_kind == "routed"
-        else CompositeToolExecutor((failing, healthy))
+        else CompositeToolExecutor(cast('tuple[ToolExecutor, ...]', (failing, healthy)))
     )
-    executor._operation_routes["operation_1"] = failing
+    cast('dict[str, Any]', executor._operation_routes)["operation_1"] = failing
     executor._operation_run_ids["operation_1"] = "run_1"
 
     with pytest.raises(OSError, match="cleanup unavailable"):

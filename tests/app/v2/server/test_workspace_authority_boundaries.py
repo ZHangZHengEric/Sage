@@ -1,4 +1,13 @@
 """Actual Server Package authority and workspace lifecycle boundaries."""
+
+from typing import TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    from anyio.from_thread import BlockingPortal
+    from app.v2.server.conversations.agui.service import ConversationService
+    from app.v2.server.identity.users import UserRecord
+    from app.v2.server.packages.management import ServerAgentManagement
+
 import asyncio
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -31,7 +40,7 @@ def test_independent_react_package_runs_and_owns_its_files_without_catalog_agent
         assert response.status_code == 200, response.text
         async def state():
             return (await host.application.runtime.session_store.list_session_runs("package-workspace"))[0].state.value
-        assert client.portal.call(state) == "completed", response.text
+        assert cast('BlockingPortal', client.portal).call(state) == "completed", response.text
         assert '"RUN_FINISHED"' in response.text
         thread = client.get("/api/threads/package-workspace").json()["data"]
         workspace = host.paths.workspace_path(thread["user_id"], thread["agent_id"])
@@ -49,7 +58,7 @@ def test_native_delete_cannot_cross_unfinished_completion_callback(tmp_path):
         client.headers["Authorization"] = "Bearer " + token
         async def gates():
             return asyncio.Event(), asyncio.Event()
-        entered, release = client.portal.call(gates)
+        entered, release = cast('BlockingPortal', client.portal).call(gates)
         original = host.threads.upsert
         calls = 0
         async def upsert(*args, **kwargs):
@@ -65,7 +74,7 @@ def test_native_delete_cannot_cross_unfinished_completion_callback(tmp_path):
             assert response.status_code == 200, response.text
             async def wait():
                 await asyncio.wait_for(entered.wait(), 3)
-            client.portal.call(wait)
+            cast('BlockingPortal', client.portal).call(wait)
             response = client.delete("/api/threads/delete-race")
             assert response.status_code == 409, response.text
         finally:
@@ -74,7 +83,7 @@ def test_native_delete_cannot_cross_unfinished_completion_callback(tmp_path):
                 async with asyncio.timeout(3):
                     while host.execution._drives:
                         await asyncio.sleep(.01)
-            client.portal.call(finish)
+            cast('BlockingPortal', client.portal).call(finish)
         response = client.delete("/api/threads/delete-race")
         assert response.status_code == 200, response.text
         assert client.get("/api/threads/delete-race").status_code == 404
@@ -133,13 +142,13 @@ def test_independent_package_approval_respects_current_authority_and_workspace(t
         if change == "package":
             async def reject(action, bundle, context):
                 raise PermissionError("package execution revoked")
-            host.agent_management.policy.package_authorizer = reject
+            cast('ServerAgentManagement', host.agent_management).policy.package_authorizer = reject
         elif change == "user":
             assert client.put("/api/auth/execution-policy", json={"shell": "deny", "on_approval_required": "deny"}).status_code == 200
         elif change == "server":
             from dataclasses import replace
             host.settings = replace(host.settings, execution_shell_mode="deny")
-            host.conversations.runs.settings = host.settings
+            cast('ConversationService', host.conversations).runs.settings = host.settings
         response = client.post(f"/api/approvals/{item['run_id']}/decisions", json={"decision": "approve_once", "expected": item["expected"]})
         if change == "package":
             assert response.status_code == 403, response.text
@@ -150,7 +159,7 @@ def test_independent_package_approval_respects_current_authority_and_workspace(t
             async with asyncio.timeout(3):
                 while (await host.application.runtime.get_run(item["run_id"])).state.value in {"resuming", "running", "queued"}:
                     await asyncio.sleep(.01)
-        client.portal.call(wait)
+        cast('BlockingPortal', client.portal).call(wait)
         if change:
             assert not list(tmp_path.rglob("approved.txt"))
         else:
@@ -167,8 +176,8 @@ def test_native_history_can_be_deleted_without_a_live_catalog_agent_or_session(t
         if empty_session:
             async def index_only():
                 users = await host.users.get_by_username("alice")
-                await host.threads.upsert("empty-history", users.user_id, agent_id=agent)
-            client.portal.call(index_only)
+                await host.threads.upsert("empty-history", cast('UserRecord', users).user_id, agent_id=agent)
+            cast('BlockingPortal', client.portal).call(index_only)
         else:
             response = client.post("/api/agent", json=_body("empty-history", agent=agent))
             assert response.status_code == 200, response.text
@@ -176,7 +185,7 @@ def test_native_history_can_be_deleted_without_a_live_catalog_agent_or_session(t
                 async with asyncio.timeout(3):
                     while host.execution._drives:
                         await asyncio.sleep(.01)
-            client.portal.call(settled)
+            cast('BlockingPortal', client.portal).call(settled)
         response = client.delete(f"/api/agents/{agent}")
         assert response.status_code == 200, response.text
         response = client.delete("/api/threads/empty-history")
@@ -208,7 +217,7 @@ async def test_legacy_resume_uses_claimed_workspace_and_releases_its_drive(cance
     from sagents.v2.contracts.run_state import RunState
     command = StartRun(agent_id="agent", session_id="external_" + "a" * 64, input=(),
         resolved_spec_hash="sha256:test", idempotency_key="legacy")
-    threads = SimpleNamespace(binding=AsyncMock(return_value=SessionBinding(command.session_id, "owner", "physical-tenant", "agent")))
+    threads = SimpleNamespace(binding=AsyncMock(return_value=SessionBinding(cast(str, command.session_id), "owner", "physical-tenant", "agent")))
     entered, release = asyncio.Event(), asyncio.Event()
     future = asyncio.get_running_loop().create_future()
     async def load(*args):
@@ -222,7 +231,7 @@ async def test_legacy_resume_uses_claimed_workspace_and_releases_its_drive(cance
     service = RunService(application=app, session_access=SimpleNamespace(get_start_command=AsyncMock(return_value=command)),
         execution=execution, host=SimpleNamespace(threads=threads))
     task = asyncio.create_task(service.continue_detached_run("run", RequestContexts("en").for_user("owner"),
-        user_id="owner", session_id=command.session_id, label="legacy"))
+        user_id="owner", session_id=cast(str, command.session_id), label="legacy"))
     try:
         await asyncio.wait_for(entered.wait(), 3)
         if cancel_prepare:

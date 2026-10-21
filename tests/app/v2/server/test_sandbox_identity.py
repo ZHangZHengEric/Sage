@@ -20,8 +20,8 @@ async def test_execution_identity_reaches_host_provider_and_paths(tmp_path, monk
     )
     await host.start()
     try:
-        assert host.execution.sandbox_provider._boundary_options["execution_uid"] == 10001
-        assert host.execution.sandbox_provider._boundary_options["execution_gid"] == 10002
+        assert getattr(host.execution.sandbox_provider, '_boundary_options')["execution_uid"] == 10001
+        assert getattr(host.execution.sandbox_provider, '_boundary_options')["execution_gid"] == 10002
     finally:
         await host.close()
     assert host.paths.linux_execution_uid == 10001

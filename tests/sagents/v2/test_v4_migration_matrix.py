@@ -1,3 +1,9 @@
+
+from typing import TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    from sagents.v2.runtime.session.contracts import SessionStore
+
 import json
 from pathlib import Path
 
@@ -148,7 +154,7 @@ async def test_known_legacy_store_is_readable_and_upgrades_on_write(
     assert metadata["format"] == FILESYSTEM_SESSION_STORE_FORMAT
     assert metadata["read_compatible_from"] == FILESYSTEM_SESSION_STORE_FORMAT_V2
 
-    await HarnessRuntime(reopened).cancel_run(
+    await HarnessRuntime(cast('SessionStore', reopened)).cancel_run(
         CancelRun(
             run_id=created.handle.run_id,
             expected_revision=restored.revision,

@@ -1,3 +1,10 @@
+
+from typing import TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    from typing import Any
+
+from sagents.v2.package.manifest.runtime import CapabilitySelection
 from dataclasses import replace
 
 import pytest
@@ -55,18 +62,18 @@ async def test_standard_network_policy_is_frozen_for_accepted_run(tmp_path, ceil
     expected = "unrestricted" if network == ceiling == "unrestricted" else "none"
     config = runtime(tmp_path)
     binding = config.capabilities["execution.binding"]
-    parameters = {**binding.config, "policy": {**binding.config["policy"],
+    parameters = {**cast(CapabilitySelection, binding).config, "policy": {**cast(CapabilitySelection, binding).config["policy"],
         "network": {"mode": expected, "deny_private_networks": expected != "unrestricted"}}}
     config = config.model_copy(update={"capabilities": {**config.capabilities,
-        "execution.binding": binding.model_copy(update={"config": parameters})}})
+        "execution.binding": cast(CapabilitySelection, binding).model_copy(update={"config": parameters})}})
     app = await build(tmp_path, ScriptedModelProvider((response(),)), config=config)
     try:
         loaded = await app.load_agent(package())
         result, _ = await run(app, loaded, "network")
         assert result.state.value == "completed"
         frozen = await app.execution_configuration(result.run_id, CONTEXT)
-        assert frozen.policy["network"]["mode"] == expected
-        changed = binding.model_copy(update={"config": {**parameters, "policy": {
+        assert cast('Any', frozen).policy["network"]["mode"] == expected
+        changed = cast(CapabilitySelection, binding).model_copy(update={"config": {**parameters, "policy": {
             **parameters["policy"], "network": {"mode": "none", "deny_private_networks": True}}}})
         await app.update_runtime(config.model_copy(update={"capabilities": {
             **config.capabilities, "execution.binding": changed}}))

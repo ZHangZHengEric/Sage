@@ -1,3 +1,6 @@
+
+from typing import cast
+
 import json
 import sys
 from types import SimpleNamespace
@@ -44,16 +47,16 @@ async def test_result_limit_preserves_full_content_media_status_and_identity(lim
         assert result is original
         assert writes == {}
         return
-    original_text = json.dumps(original.content[0].value, ensure_ascii=False)
-    assert result.content[0].text.startswith(original_text[:limit] + "\n\n")
-    assert len(result.content[0].text) <= limit + 1024
+    original_text = json.dumps(cast(JsonBlock, original.content[0]).value, ensure_ascii=False)
+    assert cast(TextBlock, result.content[0]).text.startswith(original_text[:limit] + "\n\n")
+    assert len(cast(TextBlock, result.content[0]).text) <= limit + 1024
     assert result.content[1] == image
     assert result.error == original.error
     assert result.operation_id == CALL.operation_id
     assert result.tool_call_id == CALL.tool_call_id
     assert result.metadata["provider_fact"] == "preserved"
     assert ToolExecutionResult.model_validate_json(next(iter(writes.values()))) == original
-    assert result.metadata["context_reference"]["path"] in result.content[0].text
+    assert result.metadata["context_reference"]["path"] in cast(TextBlock, result.content[0]).text
     assert await processor.process(result, call=CALL, context=CONTEXT) is result
 
 
@@ -83,8 +86,8 @@ async def test_registered_processor_bounds_next_model_request_and_persists_reada
     )), response()))
     selected = runtime(tmp_path)
     caps = dict(selected.capabilities)
-    caps["execution.binding"] = caps["execution.binding"].model_copy(update={"config": {
-        **caps["execution.binding"].config, "workspace_alias": alias,
+    caps["execution.binding"] = cast(CapabilitySelection, caps["execution.binding"]).model_copy(update={"config": {
+        **cast(CapabilitySelection, caps["execution.binding"]).config, "workspace_alias": alias,
     }})
     caps["tool.result-processor"] = CapabilitySelection(
         plugin="sage.tool.result-processor.file", config={"max_inline_characters": 2048},
@@ -95,7 +98,7 @@ async def test_registered_processor_bounds_next_model_request_and_persists_reada
         result, events = await run(app, agent, "offload")
         assert result.state.value == "completed", result
         message = next(m for m in model.requests[1].messages if m.role == "tool")
-        assert len(message.content[0].text) <= 2048 + 1024
+        assert len(cast(TextBlock, message.content[0]).text) <= 2048 + 1024
         assert message.metadata["result_offloaded"]
         saved = list((workspace / ".sage/tool-results").glob("*.json"))
         assert len(saved) == 1

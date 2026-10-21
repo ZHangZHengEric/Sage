@@ -1,3 +1,9 @@
+
+from typing import TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    from sagents.v2.tool.official.runtime import OfficialToolRuntime
+
 import pytest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -167,7 +173,7 @@ async def test_unchanged_update_does_not_write():
     runtime = SimpleNamespace(
         read_text=AsyncMock(return_value="a\nb\n"), write_text=AsyncMock()
     )
-    result = await FileSystemTools(runtime).file_update(
+    result = await FileSystemTools(cast('OfficialToolRuntime', runtime)).file_update(
         "notes.txt",
         None,
         [
@@ -208,7 +214,7 @@ async def test_yaml_write_reports_duplicate_keys_after_successful_write(mode):
     runtime = SimpleNamespace(
         read_text=AsyncMock(return_value="a: 1\na: 2\n"), write_text=AsyncMock()
     )
-    result = await FileSystemTools(runtime).file_write(
+    result = await FileSystemTools(cast('OfficialToolRuntime', runtime)).file_write(
         "compose.yaml", "a: 1\na: 2\n", None, mode=mode
     )
     assert result["status"] == "success"
@@ -223,7 +229,7 @@ async def test_yaml_append_validates_whole_file_not_just_fragment():
         read_text=AsyncMock(return_value="base: &base {x: 1}\ncopy: {<<: *base}\n"),
         write_text=AsyncMock(),
     )
-    result = await FileSystemTools(runtime).file_write(
+    result = await FileSystemTools(cast('OfficialToolRuntime', runtime)).file_write(
         "compose.yaml", "copy: {<<: *base}\n", None, mode="append"
     )
     assert result["validation"]["passed"] is True
@@ -235,7 +241,7 @@ async def test_post_write_read_failure_does_not_report_failed_append():
         read_text=AsyncMock(side_effect=PermissionError("read denied")),
         write_text=AsyncMock(),
     )
-    result = await FileSystemTools(runtime).file_write(
+    result = await FileSystemTools(cast('OfficialToolRuntime', runtime)).file_write(
         "compose.yaml", "a: 1\n", None, mode="append"
     )
     assert result["status"] == "success"
@@ -248,7 +254,7 @@ async def test_yaml_update_reports_validation_without_hiding_success():
     runtime = SimpleNamespace(
         read_text=AsyncMock(return_value="a: 1\nb: 2\n"), write_text=AsyncMock()
     )
-    result = await FileSystemTools(runtime).file_update(
+    result = await FileSystemTools(cast('OfficialToolRuntime', runtime)).file_update(
         "compose.yml",
         None,
         [
@@ -268,7 +274,7 @@ async def test_yaml_update_reports_validation_without_hiding_success():
 @pytest.mark.asyncio
 async def test_read_and_update_share_one_based_inclusive_ranges():
     runtime = SimpleNamespace(read_text=AsyncMock(return_value="a\nb\nc\n"))
-    tools = FileSystemTools(runtime)
+    tools = FileSystemTools(cast('OfficialToolRuntime', runtime))
     result = await tools.file_read("notes.txt", None, start_line=2, end_line=3)
     assert result["content"].splitlines() == ["     2\tb", "     3\tc"]
     assert (result["start_line"], result["end_line"]) == (2, 3)

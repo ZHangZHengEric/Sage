@@ -1,5 +1,11 @@
 """Registered plugins use the same trusted services as standard Agent execution."""
 
+from typing import TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    from sagents.v2.agent.policy.continuation import ContinuationAction
+    from sagents.v2.model.contracts import ModelEventKind
+
 from sagents.v2.tool.provider import ToolProvider
 from dataclasses import replace
 
@@ -29,7 +35,7 @@ class InspectingModel:
 
     async def stream(self, request):
         complete = any(message.role == "tool" for message in request.messages)
-        yield ModelStreamEvent(kind="completed", response=ModelResponse(
+        yield ModelStreamEvent(kind=cast('ModelEventKind', "completed"), response=ModelResponse(
             response_id="inspect", text="Done" if complete else "",
             finish_reason="stop" if complete else "tool_calls",
             tool_calls=() if complete else (ModelToolCall(
@@ -163,7 +169,7 @@ async def test_run_scoped_model_context_and_continuation_open_after_admission(tm
         async def decide(self, context):
             assert context.run_id == self.run_id
             used.append(("policy", self.run_id))
-            return ContinuationDecision(action="complete_run", reason_code="test.complete", reason="done")
+            return ContinuationDecision(action=cast('ContinuationAction', "complete_run"), reason_code="test.complete", reason="done")
 
         async def close(self):
             stopped.append(("agent.continuation-policy", self.run_id))

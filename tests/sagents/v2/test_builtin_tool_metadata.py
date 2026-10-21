@@ -1,5 +1,12 @@
 """Public settings metadata must agree with execution providers, without Run resources."""
 
+from typing import TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    from sagents.v2.agent.multi_agent.coordinator import MultiAgentCoordinator
+    from sagents.v2.runtime.contracts import RuntimePort
+    from sagents.v2.skill.provider import SkillLoader
+
 import json
 import os
 from pathlib import Path
@@ -31,12 +38,12 @@ def test_public_builtin_inventory_by_mode_matches_runtime_providers(mode, extra)
     definitions = builtin_tool_definitions(agent_mode=mode)
     expected = {value.name: value for value in official_tool_definitions()}
     expected.update(
-        {value.name: value for value in SkillToolPlugin(SimpleNamespace()).definitions}
+        {value.name: value for value in SkillToolPlugin(cast('SkillLoader', SimpleNamespace())).definitions}
     )
     for runtime_mode in (AgentMode.TEAM, AgentMode.FIBRE):
         if mode in {runtime_mode.value, "all"}:
             plugin = MultiAgentToolPlugin(
-                coordinator=SimpleNamespace(mode=runtime_mode), runtime=None
+                coordinator=cast('MultiAgentCoordinator', SimpleNamespace(mode=runtime_mode)), runtime=cast('RuntimePort', None)
             )
             expected.update({value.name: value for value in plugin.definitions})
     assert definitions == tuple(expected[name] for name in sorted(expected))
@@ -70,10 +77,10 @@ def test_metadata_snapshots_cannot_mutate_runtime_or_later_queries():
         "file_write"
     ] == originals["file_write"]
     runtime_team = MultiAgentToolPlugin(
-        coordinator=SimpleNamespace(mode=AgentMode.TEAM), runtime=None
+        coordinator=cast('MultiAgentCoordinator', SimpleNamespace(mode=AgentMode.TEAM)), runtime=cast('RuntimePort', None)
     )
     assert runtime_team.definitions == (originals["sys_team_delegate_task"],)
-    assert SkillToolPlugin(SimpleNamespace()).definitions == (originals["load_skill"],)
+    assert SkillToolPlugin(cast('SkillLoader', SimpleNamespace())).definitions == (originals["load_skill"],)
 
 
 def test_localized_settings_metadata_keeps_names_and_schema_contract():

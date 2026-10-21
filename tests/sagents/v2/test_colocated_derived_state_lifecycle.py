@@ -1,5 +1,10 @@
 """One Session storage plugin publishes three ports with one resource lifecycle."""
 
+from typing import TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    from sagents.v2.runtime.extensions.contracts import ProviderSet
+
 from dataclasses import replace
 from unittest.mock import AsyncMock
 
@@ -25,14 +30,14 @@ async def test_session_storage_publishes_all_ports_and_closes_once(tmp_path, mon
     config = {"root": str(tmp_path)} if plugin.endswith("filesystem") else config
     registration = builtin_extension_registry().get(plugin)
     if not registration.descriptor.availability.available:
-        pytest.skip(registration.descriptor.availability.reason)
+        pytest.skip(cast(str, registration.descriptor.availability.reason))
     context = ExtensionScopeContext(scope=ExtensionScope.PROCESS, scope_id="process", config=config)
-    store = registration.factory(context, None)
+    store = registration.factory(context, cast('ProviderSet', None))
     if "mysql" in plugin:
-        monkeypatch.setattr(store._coordinator, "_ensure_ready", AsyncMock())
+        monkeypatch.setattr(getattr(store, '_coordinator'), "_ensure_ready", AsyncMock())
         if plugin.endswith("redis-mysql"):
-            monkeypatch.setattr(store._coordinator, "list_dispatchable_runs", AsyncMock(return_value=[]))
-    original_start, original_close = store.start, store.close
+            monkeypatch.setattr(getattr(store, '_coordinator'), "list_dispatchable_runs", AsyncMock(return_value=[]))
+    original_start, original_close = getattr(store, 'start'), getattr(store, 'close')
     start, close = AsyncMock(wraps=original_start), AsyncMock(wraps=original_close)
     monkeypatch.setattr(type(store), "start", start)
     monkeypatch.setattr(type(store), "close", close, raising=False)

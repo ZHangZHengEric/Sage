@@ -1,5 +1,11 @@
 """Hosts query observation data without knowing its storage implementation."""
 
+from typing import TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    from datetime import datetime
+    from sagents.v2.runtime.observability.contracts import LogLevel
+
 import pytest
 
 from sagents.v2.runtime.observability import LogRecord
@@ -40,24 +46,24 @@ async def test_sqlite_performance_is_queried_through_the_provider(tmp_path):
     try:
         provider.logs.write(
             LogRecord(
-                level="info",
+                level=cast('LogLevel', "info"),
                 event="agent.run.started",
                 message="started",
                 component="test",
                 session_id="s",
                 run_id="r",
-                timestamp="2026-10-21T00:00:00Z",
+                timestamp=cast('datetime', "2026-10-21T00:00:00Z"),
             )
         )
         provider.logs.write(
             LogRecord(
-                level="info",
+                level=cast('LogLevel', "info"),
                 event="agent.run.completed",
                 message="completed",
                 component="test",
                 session_id="s",
                 run_id="r",
-                timestamp="2026-10-21T00:00:01Z",
+                timestamp=cast('datetime', "2026-10-21T00:00:01Z"),
             )
         )
         assert provider.performance_available

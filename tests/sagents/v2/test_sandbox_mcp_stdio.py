@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+from typing import cast
+
+from sagents.v2.contracts.items import TextBlock
+
 import os
 import sys
 
@@ -64,7 +68,7 @@ async def test_real_stdio_sdk_session_is_sandboxed_and_released(tmp_path):
             ) as session:
                 assert (await session.list_tools()).tools[0].name == "echo"
                 result = await session.call_tool("echo", {})
-                payload = json.loads(result.content[0].text)
+                payload = json.loads(getattr(result.content[0], 'text'))
                 assert payload["escaped"] is False
                 assert payload["echo"] == "你好"
         assert not outside.exists()
@@ -242,7 +246,7 @@ async def test_self_configuration_activates_real_sandbox_stdio_at_next_boundary(
             call({}, name="mcp_echo_echo", operation="echo"), CONTEXT
         )
         import json
-        assert json.loads(result.content[0].text)["echo"] == "你好"
+        assert json.loads(cast(TextBlock, result.content[0]).text)["echo"] == "你好"
         assert not (tmp_path / "forbidden.txt").exists()
     finally:
         await handle.destroy()

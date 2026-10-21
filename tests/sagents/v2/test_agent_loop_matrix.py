@@ -1,5 +1,25 @@
 from __future__ import annotations
 
+from typing import Any, TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    from sagents.v2.agent.policy.approval_memory import ApprovalMemory
+    from sagents.v2.tool.contracts import ToolCall
+    from sagents.v2.tool.provider import ToolExecutor
+
+from sagents.v2.contracts.items import ImageBlock
+from sagents.v2.contracts.items import ItemSnapshot
+
+from sagents.v2.contracts.events import ContinuationEventData
+from sagents.v2.contracts.events import InteractionEventData
+from sagents.v2.contracts.items import MessageItemData
+from sagents.v2.model.provider import ModelProvider
+from sagents.v2.contracts.events import PolicyEventData
+from sagents.v2.contracts.events import RunEventData
+from sagents.v2.contracts.run_state import RunSnapshot
+from sagents.v2.contracts.events import StepEventData
+from sagents.v2.contracts.events import UsageEventData
+
 import asyncio
 from datetime import datetime, timedelta, timezone
 
@@ -261,7 +281,7 @@ async def setup_loop(
             "write_value": tool_handler,
         },
     )
-    loop_kwargs = dict(
+    loop_kwargs: dict[str, Any] = dict(
         runtime=runtime,
         model=model,
         tool_catalog=catalog,
@@ -305,7 +325,7 @@ async def test_loop_rejects_run_from_a_different_resolved_spec():
     runtime, handle, _, executor = await setup_loop(model)
     loop = AgentLoopEngine(
         runtime=runtime,
-        model=model,
+        model=cast(ModelProvider, model),
         tool_catalog=InMemoryToolCatalog((READ_TOOL, WRITE_TOOL)),
         tool_executor=executor,
         expected_resolved_spec_hash="sha256:different",
@@ -361,7 +381,7 @@ async def test_worker_restart_recovers_started_tool_as_manual_resolution_barrier
 
     recovered_loop = AgentLoopEngine(
         runtime=runtime,
-        model=ScriptedModelProvider(()),
+        model=cast(ModelProvider, ScriptedModelProvider(())),
         tool_catalog=InMemoryToolCatalog((READ_TOOL,)),
         tool_executor=InMemoryToolExecutor(
             {"read_value": READ_TOOL}, {"read_value": must_not_replay}
@@ -373,8 +393,8 @@ async def test_worker_restart_recovers_started_tool_as_manual_resolution_barrier
     assert recovered is not None
     assert recovered.state == RunState.SUSPENDED
     assert unexpected_dispatches == 0
-    suspension = await runtime.session_store.get_suspension(recovered.suspension_id)
-    interaction = await runtime.session_store.get_interaction(suspension.interaction_id)
+    suspension = await runtime.session_store.get_suspension(cast(str, recovered.suspension_id))
+    interaction = await runtime.session_store.get_interaction(cast(str, suspension.interaction_id))
     assert interaction.payload["reason"] == "tool_outcome_unknown"
     assert interaction.payload["arguments"] == {"key": "answer"}
     assert interaction.payload["side_effect_level"] == "read"
@@ -415,7 +435,7 @@ async def test_worker_restart_suspends_when_started_tool_lost_its_proposal():
     assert committed.run.state == RunState.RUNNING
     recovered_loop = AgentLoopEngine(
         runtime=runtime,
-        model=ScriptedModelProvider(()),
+        model=cast(ModelProvider, ScriptedModelProvider(())),
         tool_catalog=InMemoryToolCatalog((READ_TOOL,)),
         tool_executor=InMemoryToolExecutor({"read_value": READ_TOOL}, {}),
         expected_resolved_spec_hash="sha256:agent",
@@ -425,8 +445,8 @@ async def test_worker_restart_suspends_when_started_tool_lost_its_proposal():
 
     assert recovered is not None
     assert recovered.state == RunState.SUSPENDED
-    suspension = await runtime.session_store.get_suspension(recovered.suspension_id)
-    interaction = await runtime.session_store.get_interaction(suspension.interaction_id)
+    suspension = await runtime.session_store.get_suspension(cast(str, recovered.suspension_id))
+    interaction = await runtime.session_store.get_interaction(cast(str, suspension.interaction_id))
     assert interaction.payload["error_code"] == "tool.recovery_ledger_incomplete"
     assert interaction.allowed_decisions == (
         "confirm_succeeded",
@@ -485,9 +505,9 @@ async def test_worker_restart_reconciles_supported_tool_without_replaying_it():
     recovery_executor = RecoveryExecutor()
     recovered_loop = AgentLoopEngine(
         runtime=runtime,
-        model=ScriptedModelProvider(
+        model=cast(ModelProvider, ScriptedModelProvider(
             (ScriptedModelStep(events=(completed("done after recovery"),)),)
-        ),
+        )),
         tool_catalog=InMemoryToolCatalog((reconcilable,)),
         tool_executor=recovery_executor,
         expected_resolved_spec_hash="sha256:agent",
@@ -723,7 +743,7 @@ async def test_text_reasoning_stream_completes_with_canonical_event_lifecycles()
     assert "reasoning.delta" in types
     assert types.count("message.delta") == 1
     assert (
-        next(event.data.delta for event in events if event.type == "message.delta")
+        next(cast(ItemEventData, event.data).delta for event in events if event.type == "message.delta")
         == "hello"
     )
     assert "message.completed" in types
@@ -747,8 +767,8 @@ async def test_explicit_task_done_signal_completes_and_is_recorded():
     decisions = [event for event in events if event.type == "continuation.decided"]
 
     assert result.state == RunState.COMPLETED
-    assert decisions[-1].data.action == "complete_run"
-    assert decisions[-1].data.reason_code == "status.complete"
+    assert cast(ContinuationEventData, decisions[-1].data).action == "complete_run"
+    assert cast(ContinuationEventData, decisions[-1].data).reason_code == "status.complete"
 
 
 @pytest.mark.asyncio
@@ -767,7 +787,7 @@ async def test_continue_work_signal_is_one_step_and_then_final_text_completes():
     result = await loop.execute(handle.run_id, CONTEXT)
     events = await runtime.session_store.read_events(handle.run_id)
     reasons = [
-        event.data.reason_code
+        cast(ContinuationEventData, event.data).reason_code
         for event in events
         if event.type == "continuation.decided"
     ]
@@ -796,8 +816,8 @@ async def test_need_user_input_signal_suspends_and_resumes_with_canonical_input(
     )
 
     suspended = await loop.execute(handle.run_id, CONTEXT)
-    suspension = await runtime.session_store.get_suspension(suspended.suspension_id)
-    interaction = await runtime.session_store.get_interaction(suspension.interaction_id)
+    suspension = await runtime.session_store.get_suspension(cast(str, suspended.suspension_id))
+    interaction = await runtime.session_store.get_interaction(cast(str, suspension.interaction_id))
 
     assert suspended.state == RunState.SUSPENDED
     assert interaction.allowed_decisions == ("submit", "cancel")
@@ -875,7 +895,7 @@ async def test_validated_questionnaire_result_completes_without_calling_judge(
         )
     )
     judge = ScriptedModelProvider(())
-    policy = LLMJudgeContinuationPolicy(LLMContinuationJudge(judge))
+    policy = LLMJudgeContinuationPolicy(LLMContinuationJudge(cast(ModelProvider, judge)))
     runtime, handle, loop, _ = await setup_loop(
         model,
         tools=(questionnaire_tool,),
@@ -899,7 +919,7 @@ async def test_validated_questionnaire_result_completes_without_calling_judge(
             await loop.execute(handle.run_id, CONTEXT)
         recovered_loop = AgentLoopEngine(
             runtime=runtime,
-            model=model,
+            model=cast(ModelProvider, model),
             tool_catalog=loop.tool_catalog,
             tool_executor=loop.tool_executor,
             continuation_policy=policy,
@@ -910,9 +930,9 @@ async def test_validated_questionnaire_result_completes_without_calling_judge(
     events = await runtime.session_store.read_events(handle.run_id)
     decision = next(event for event in events if event.type == "continuation.decided")
 
-    assert result.state == RunState.COMPLETED
-    assert decision.data.reason_code == "tool.questionnaire_ready"
-    assert decision.data.details["source"] == "questionnaire_async"
+    assert cast('RunSnapshot', result).state == RunState.COMPLETED
+    assert cast(ContinuationEventData, decision.data).reason_code == "tool.questionnaire_ready"
+    assert cast(ContinuationEventData, decision.data).details["source"] == "questionnaire_async"
     assert not any(event.type == "interaction.requested" for event in events)
     assert judge.requests == []
 
@@ -932,9 +952,9 @@ async def test_empty_questionnaire_reply_reasks_instead_of_failing_the_run():
         model, continuation_signal_provider=signals, response_language="zh-CN"
     )
     first = await loop.execute(handle.run_id, CONTEXT)
-    first_suspension = await runtime.session_store.get_suspension(first.suspension_id)
+    first_suspension = await runtime.session_store.get_suspension(cast(str, first.suspension_id))
     first_interaction = await runtime.session_store.get_interaction(
-        first_suspension.interaction_id
+        cast(str, first_suspension.interaction_id)
     )
     await runtime.reply_interaction(
         ReplyInteraction(
@@ -952,9 +972,9 @@ async def test_empty_questionnaire_reply_reasks_instead_of_failing_the_run():
     )
 
     second = await loop.resume(handle.run_id, CONTEXT)
-    second_suspension = await runtime.session_store.get_suspension(second.suspension_id)
+    second_suspension = await runtime.session_store.get_suspension(cast(str, second.suspension_id))
     second_interaction = await runtime.session_store.get_interaction(
-        second_suspension.interaction_id
+        cast(str, second_suspension.interaction_id)
     )
 
     assert second.state == RunState.SUSPENDED
@@ -980,8 +1000,8 @@ async def test_blocked_signal_suspends_with_recoverable_interaction():
     )
 
     suspended = await loop.execute(handle.run_id, CONTEXT)
-    suspension = await runtime.session_store.get_suspension(suspended.suspension_id)
-    interaction = await runtime.session_store.get_interaction(suspension.interaction_id)
+    suspension = await runtime.session_store.get_suspension(cast(str, suspended.suspension_id))
+    interaction = await runtime.session_store.get_interaction(cast(str, suspension.interaction_id))
     events = await runtime.session_store.read_events(handle.run_id)
     decision = next(event for event in events if event.type == "continuation.decided")
 
@@ -991,7 +1011,7 @@ async def test_blocked_signal_suspends_with_recoverable_interaction():
     assert interaction.payload["status"] == "blocked"
     assert interaction.payload["prompt"] == ("Grant repository access, then continue.")
     assert interaction.payload["questions"]
-    assert decision.data.reason_code == "status.blocked"
+    assert cast(ContinuationEventData, decision.data).reason_code == "status.blocked"
 
 
 @pytest.mark.asyncio
@@ -1009,8 +1029,8 @@ async def test_failed_explicit_status_requests_recovery_guidance():
 
     assert result.state == RunState.SUSPENDED
     assert events[-1].type == "run.suspended"
-    suspension = await runtime.session_store.get_suspension(result.suspension_id)
-    interaction = await runtime.session_store.get_interaction(suspension.interaction_id)
+    suspension = await runtime.session_store.get_suspension(cast(str, result.suspension_id))
+    interaction = await runtime.session_store.get_interaction(cast(str, suspension.interaction_id))
     assert interaction.payload["reason_code"] == "status.failed"
     assert interaction.payload["questions"]
 
@@ -1028,8 +1048,8 @@ async def test_recovery_questionnaire_uses_run_response_language():
     )
 
     result = await loop.execute(handle.run_id, CONTEXT)
-    suspension = await runtime.session_store.get_suspension(result.suspension_id)
-    interaction = await runtime.session_store.get_interaction(suspension.interaction_id)
+    suspension = await runtime.session_store.get_suspension(cast(str, result.suspension_id))
+    interaction = await runtime.session_store.get_interaction(cast(str, suspension.interaction_id))
 
     assert interaction.payload["language"] == "zh"
     assert interaction.payload["title"] == "Agent 需要你的引导"
@@ -1058,7 +1078,7 @@ async def test_judge_usage_and_metadata_are_committed_to_run_events():
             ),
         )
     )
-    policy = LLMJudgeContinuationPolicy(LLMContinuationJudge(judge))
+    policy = LLMJudgeContinuationPolicy(LLMContinuationJudge(cast(ModelProvider, judge)))
     runtime, handle, loop, _ = await setup_loop(
         model,
         continuation_policy=policy,
@@ -1067,11 +1087,11 @@ async def test_judge_usage_and_metadata_are_committed_to_run_events():
     result = await loop.execute(handle.run_id, CONTEXT)
     events = await runtime.session_store.read_events(handle.run_id)
     decision = next(event for event in events if event.type == "continuation.decided")
-    usage = [event.data.usage for event in events if event.type == "usage.recorded"]
+    usage = [cast(UsageEventData, event.data).usage for event in events if event.type == "usage.recorded"]
 
     assert result.state == RunState.COMPLETED
-    assert decision.data.reason_code == "judge.completed"
-    assert decision.data.details == {
+    assert cast(ContinuationEventData, decision.data).reason_code == "judge.completed"
+    assert cast(ContinuationEventData, decision.data).details == {
         "policy": "llm_judge",
         "implementation": "v1",
     }
@@ -1098,7 +1118,7 @@ async def test_judge_need_user_input_completes_without_suspension():
             ),
         )
     )
-    policy = LLMJudgeContinuationPolicy(LLMContinuationJudge(judge))
+    policy = LLMJudgeContinuationPolicy(LLMContinuationJudge(cast(ModelProvider, judge)))
     runtime, handle, loop, _ = await setup_loop(
         model,
         continuation_policy=policy,
@@ -1109,9 +1129,9 @@ async def test_judge_need_user_input_completes_without_suspension():
     decision = next(event for event in events if event.type == "continuation.decided")
 
     assert result.state == RunState.COMPLETED
-    assert decision.data.action == "complete_run"
-    assert decision.data.reason_code == "judge.need_user_input"
-    assert decision.data.details["completion_status"] == "need_user_input"
+    assert cast(ContinuationEventData, decision.data).action == "complete_run"
+    assert cast(ContinuationEventData, decision.data).reason_code == "judge.need_user_input"
+    assert cast(ContinuationEventData, decision.data).details["completion_status"] == "need_user_input"
     assert not any(event.type == "run.suspended" for event in events)
 
 
@@ -1211,7 +1231,7 @@ async def test_v1_judge_continue_keeps_tool_choice_auto_and_injects_guidance():
             ),
         )
     )
-    policy = LLMJudgeContinuationPolicy(LLMContinuationJudge(judge))
+    policy = LLMJudgeContinuationPolicy(LLMContinuationJudge(cast(ModelProvider, judge)))
     runtime, handle, loop, executor = await setup_loop(
         model,
         continuation_policy=policy,
@@ -1257,7 +1277,7 @@ async def test_invalid_judge_output_does_not_leak_parser_error_into_next_request
     )
     runtime, handle, loop, executor = await setup_loop(
         model,
-        continuation_policy=LLMJudgeContinuationPolicy(LLMContinuationJudge(judge)),
+        continuation_policy=LLMJudgeContinuationPolicy(LLMContinuationJudge(cast(ModelProvider, judge))),
     )
 
     result = await loop.execute(handle.run_id, CONTEXT)
@@ -1281,8 +1301,8 @@ async def test_typed_flow_boundary_completes_node_without_finish_reason_inferenc
     decision = next(event for event in events if event.type == "continuation.decided")
 
     assert result.state == RunState.COMPLETED
-    assert decision.data.action == "complete_turn"
-    assert decision.data.reason_code == "flow.node_complete"
+    assert cast(ContinuationEventData, decision.data).action == "complete_turn"
+    assert cast(ContinuationEventData, decision.data).reason_code == "flow.node_complete"
 
 
 @pytest.mark.asyncio
@@ -1301,7 +1321,7 @@ async def test_continue_node_flow_boundary_is_consumed_once():
     result = await loop.execute(handle.run_id, CONTEXT)
     events = await runtime.session_store.read_events(handle.run_id)
     reasons = [
-        event.data.reason_code
+        cast(ContinuationEventData, event.data).reason_code
         for event in events
         if event.type == "continuation.decided"
     ]
@@ -1329,7 +1349,7 @@ async def test_flow_boundary_survives_tool_dispatch_until_node_output_is_ready()
     result = await loop.execute(handle.run_id, CONTEXT)
     events = await runtime.session_store.read_events(handle.run_id)
     reasons = [
-        event.data.reason_code
+        cast(ContinuationEventData, event.data).reason_code
         for event in events
         if event.type == "continuation.decided"
     ]
@@ -1388,7 +1408,7 @@ async def test_run_config_output_and_deadline_budgets_are_enforced_by_loop():
     run = await loop.execute(handle.run_id, CONTEXT)
     assert not model.requests
     assert run.state == RunState.FAILED
-    assert (await runtime.get_run_result(run.run_id)).error.code == "budget.deadline"
+    assert cast(RuntimeErrorInfo, (await runtime.get_run_result(run.run_id)).error).code == "budget.deadline"
 
 
 @pytest.mark.asyncio
@@ -1489,7 +1509,7 @@ async def test_write_tool_suspends_before_dispatch_and_approval_resumes_once():
     ]
 
     suspension = await runtime.session_store.get_suspension(suspended.suspension_id)
-    interaction = await runtime.session_store.get_interaction(suspension.interaction_id)
+    interaction = await runtime.session_store.get_interaction(cast(str, suspension.interaction_id))
     reply = await runtime.reply_interaction(
         ReplyInteraction(
             run_id=handle.run_id,
@@ -1542,8 +1562,8 @@ async def test_declined_write_never_dispatches_and_model_receives_decline_result
     )
     runtime, handle, loop, executor = await setup_loop(model)
     suspended = await loop.execute(handle.run_id, CONTEXT)
-    suspension = await runtime.session_store.get_suspension(suspended.suspension_id)
-    interaction = await runtime.session_store.get_interaction(suspension.interaction_id)
+    suspension = await runtime.session_store.get_suspension(cast(str, suspended.suspension_id))
+    interaction = await runtime.session_store.get_interaction(cast(str, suspension.interaction_id))
     await runtime.reply_interaction(
         ReplyInteraction(
             run_id=handle.run_id,
@@ -1651,8 +1671,8 @@ async def test_model_failure_matrix_requests_typed_recovery_questionnaire(
     events = await runtime.session_store.read_events(handle.run_id)
     assert result.state == RunState.SUSPENDED
     assert events[-1].type == "run.suspended"
-    suspension = await runtime.session_store.get_suspension(result.suspension_id)
-    interaction = await runtime.session_store.get_interaction(suspension.interaction_id)
+    suspension = await runtime.session_store.get_suspension(cast(str, result.suspension_id))
+    interaction = await runtime.session_store.get_interaction(cast(str, suspension.interaction_id))
     assert interaction.payload["reason_code"] == error_code
     assert interaction.payload["questions"]
     assert interaction.allowed_decisions == ("retry", "change_direction", "cancel")
@@ -1686,7 +1706,7 @@ async def test_empty_semantic_response_retries_transparently_before_suspending()
     events = await runtime.session_store.read_events(handle.run_id)
     retries = [event for event in events if event.type == "step.retry_scheduled"]
     assert len(retries) == 1
-    assert retries[0].data.error.code == "model.empty_semantic_response"
+    assert cast(RuntimeErrorInfo, cast(RunEventData, retries[0].data).error).code == "model.empty_semantic_response"
     assert not any(event.type == "interaction.requested" for event in events)
 
 
@@ -1732,7 +1752,7 @@ async def test_pre_stream_context_overflow_compresses_from_api_feedback():
     events = await runtime.session_store.read_events(handle.run_id)
     retries = [event for event in events if event.type == "step.retry_scheduled"]
     assert len(retries) == 1
-    assert retries[0].data.error.code == "model.context_window_exceeded"
+    assert cast(RuntimeErrorInfo, cast(RunEventData, retries[0].data).error).code == "model.context_window_exceeded"
 
 
 class BlockingModelProvider:
@@ -1800,7 +1820,7 @@ async def test_deadline_interrupts_a_blocked_model_stream():
 
     assert result.state == RunState.FAILED
     assert model.closed.is_set()
-    assert (await runtime.get_run_result(result.run_id)).error.code == "budget.deadline"
+    assert cast(RuntimeErrorInfo, (await runtime.get_run_result(result.run_id)).error).code == "budget.deadline"
     assert not any(event.type == "interaction.requested" for event in await runtime.session_store.read_events(result.run_id))
 
 
@@ -1952,7 +1972,7 @@ async def test_deadline_cooperatively_cancels_a_blocked_tool():
 
     assert started.is_set() and cancelled.is_set()
     assert result.state == RunState.FAILED
-    assert (await runtime.get_run_result(result.run_id)).error.code == "budget.deadline"
+    assert cast(RuntimeErrorInfo, (await runtime.get_run_result(result.run_id)).error).code == "budget.deadline"
     assert not any(event.type == "interaction.requested" for event in await runtime.session_store.read_events(result.run_id))
 
 
@@ -1975,8 +1995,8 @@ async def test_repeated_empty_semantic_responses_explain_exhausted_retries():
 
     assert result.state == RunState.SUSPENDED
     assert len(model.requests) == 3
-    suspension = await runtime.session_store.get_suspension(result.suspension_id)
-    interaction = await runtime.session_store.get_interaction(suspension.interaction_id)
+    suspension = await runtime.session_store.get_suspension(cast(str, result.suspension_id))
+    interaction = await runtime.session_store.get_interaction(cast(str, suspension.interaction_id))
     error = interaction.payload["error"]
     assert error["code"] == "model.empty_semantic_response"
     assert error["metadata"]["transparent_retries_exhausted"] == 2
@@ -2063,8 +2083,8 @@ async def test_automatic_memory_recall_checkpoint_resumes_without_digest_mismatc
         memory_recall_query_generator=RecallQuery(),
     )
     suspended = await loop.execute(handle.run_id, CONTEXT)
-    suspension = await runtime.session_store.get_suspension(suspended.suspension_id)
-    interaction = await runtime.session_store.get_interaction(suspension.interaction_id)
+    suspension = await runtime.session_store.get_suspension(cast(str, suspended.suspension_id))
+    interaction = await runtime.session_store.get_interaction(cast(str, suspension.interaction_id))
     await runtime.reply_interaction(
         ReplyInteraction(
             run_id=handle.run_id,
@@ -2093,8 +2113,8 @@ async def test_step_budget_requests_guidance_instead_of_looping_forever():
     result = await loop.execute(handle.run_id, CONTEXT)
     assert result.state == RunState.SUSPENDED
     assert len(executor.calls) == 1
-    suspension = await runtime.session_store.get_suspension(result.suspension_id)
-    interaction = await runtime.session_store.get_interaction(suspension.interaction_id)
+    suspension = await runtime.session_store.get_suspension(cast(str, result.suspension_id))
+    interaction = await runtime.session_store.get_interaction(cast(str, suspension.interaction_id))
     assert interaction.payload["reason_code"] == "budget.max_steps"
     assert interaction.payload["reset_step_budget"] is True
 
@@ -2202,9 +2222,9 @@ async def test_pause_during_model_stream_commits_partial_as_suspended_not_final(
     assert completed_items[0].status == ItemStatus.SUSPENDED
     assert not any(
         event.type == "message.completed"
-        and event.data.item is not None
-        and event.data.item.data.kind == "message"
-        and event.data.item.data.role == "assistant"
+        and cast(ItemEventData, event.data).item is not None
+        and cast(ItemSnapshot, cast(ItemEventData, event.data).item).data.kind == "message"
+        and cast(MessageItemData, cast(ItemSnapshot, cast(ItemEventData, event.data).item).data).role == "assistant"
         for event in events
     )
     checkpoint = await runtime.session_store.get_latest_checkpoint(handle.run_id)
@@ -2244,7 +2264,7 @@ async def test_manual_pause_at_safe_point_can_resume_same_run():
     suspended = await loop._suspend_at_safe_point(
         await runtime.get_run(handle.run_id), state, CONTEXT
     )
-    suspension = await runtime.session_store.get_suspension(suspended.suspension_id)
+    suspension = await runtime.session_store.get_suspension(cast(str, suspended.suspension_id))
     receipt = await runtime.resume_run(
         ResumeRun(
             run_id=handle.run_id,
@@ -2293,7 +2313,7 @@ async def test_user_input_resume_rebuilds_ledger_from_events_not_checkpoint_mess
     )
     loop = AgentLoopEngine(
         runtime=runtime,
-        model=model,
+        model=cast(ModelProvider, model),
         tool_catalog=InMemoryToolCatalog(()),
         tool_executor=InMemoryToolExecutor({}, {}),
         continuation_policy=AskThenComplete(),
@@ -2308,8 +2328,8 @@ async def test_user_input_resume_rebuilds_ledger_from_events_not_checkpoint_mess
         CONTEXT,
     )
     suspended = await loop.execute(handle.run_id, CONTEXT)
-    suspension = await runtime.session_store.get_suspension(suspended.suspension_id)
-    interaction = await runtime.session_store.get_interaction(suspension.interaction_id)
+    suspension = await runtime.session_store.get_suspension(cast(str, suspended.suspension_id))
+    interaction = await runtime.session_store.get_interaction(cast(str, suspension.interaction_id))
     checkpoint = await runtime.session_store.get_checkpoint(suspension.checkpoint_id)
     assert checkpoint.checkpoint_codec_version == "agent-loop/3"
     assert "messages" not in checkpoint.state
@@ -2375,7 +2395,7 @@ async def test_resume_rejects_checkpoint_ledger_digest_that_disagrees_with_event
     suspended = await loop._suspend_at_safe_point(
         await runtime.get_run(handle.run_id), state, CONTEXT
     )
-    suspension = await runtime.session_store.get_suspension(suspended.suspension_id)
+    suspension = await runtime.session_store.get_suspension(cast(str, suspended.suspension_id))
     await runtime.resume_run(
         ResumeRun(
             run_id=handle.run_id,
@@ -2386,15 +2406,15 @@ async def test_resume_rejects_checkpoint_ledger_digest_that_disagrees_with_event
         ),
         CONTEXT,
     )
-    payload = await runtime.session_store.export_state()
+    payload = await getattr(runtime.session_store, 'export_state')()
     payload["checkpoints"][0]["state"]["ledger_digest"] = "sha256:tampered"
     restored_runtime = ephemeral_runtime()
-    await restored_runtime.session_store.load_state(payload)
+    await getattr(restored_runtime.session_store, 'load_state')(payload)
     restored_loop = AgentLoopEngine(
         runtime=restored_runtime,
-        model=ScriptedModelProvider(
+        model=cast(ModelProvider, ScriptedModelProvider(
             (ScriptedModelStep(events=(completed("should not run"),)),)
-        ),
+        )),
         tool_catalog=InMemoryToolCatalog(()),
         tool_executor=InMemoryToolExecutor({}, {}),
     )
@@ -2510,7 +2530,7 @@ async def test_authoritative_write_tool_error_is_failed_without_losing_content()
     assert result.state == RunState.COMPLETED
     assert "tool.call.failed" in types
     assert "tool.call.unknown" not in types
-    assert tool_message.content[0].text == "remote rejected the write: quota exceeded"
+    assert cast(TextBlock, tool_message.content[0]).text == "remote rejected the write: quota exceeded"
 
 
 @pytest.mark.asyncio
@@ -2553,8 +2573,8 @@ async def test_pending_reconciliation_suspends_and_resume_reconciles_without_ret
     loop.tool_executor = executor
 
     suspended = await loop.execute(handle.run_id, CONTEXT)
-    suspension = await runtime.session_store.get_suspension(suspended.suspension_id)
-    interaction = await runtime.session_store.get_interaction(suspension.interaction_id)
+    suspension = await runtime.session_store.get_suspension(cast(str, suspended.suspension_id))
+    interaction = await runtime.session_store.get_interaction(cast(str, suspension.interaction_id))
     checkpoint = await runtime.session_store.get_checkpoint(suspension.checkpoint_id)
     state = AgentLoopCheckpointCodec.decode(checkpoint.state)
 
@@ -2603,8 +2623,8 @@ async def test_non_reconcilable_unknown_requires_explicit_manual_resolution():
     runtime, handle, loop, _ = await setup_loop(model, tools=(READ_TOOL,))
     loop.tool_executor = executor
     suspended = await loop.execute(handle.run_id, CONTEXT)
-    suspension = await runtime.session_store.get_suspension(suspended.suspension_id)
-    interaction = await runtime.session_store.get_interaction(suspension.interaction_id)
+    suspension = await runtime.session_store.get_suspension(cast(str, suspended.suspension_id))
+    interaction = await runtime.session_store.get_interaction(cast(str, suspension.interaction_id))
 
     assert "reconcile" not in interaction.allowed_decisions
     await runtime.reply_interaction(
@@ -2692,13 +2712,13 @@ async def test_pending_approval_cannot_override_tightened_host_policy(updated_po
     assert result.state == RunState.COMPLETED
     assert len(executor.calls) == (0 if updated_policy == "deny" else 1)
     assert (
-        await loop.approval_memory.list_remembered(session_id=result.session_id) == ()
+        await cast('ApprovalMemory', loop.approval_memory).list_remembered(session_id=result.session_id) == ()
     )
     events = await runtime.session_store.read_events(handle.run_id)
     assert "policy.approval.remembered" not in [event.type for event in events]
     if updated_policy == "deny":
         assert any(
-            event.type == "policy.decision.recorded" and event.data.decision == "deny"
+            event.type == "policy.decision.recorded" and cast(InteractionEventData, event.data).decision == "deny"
             for event in events
         )
 
@@ -2779,7 +2799,7 @@ async def test_approve_and_remember_skips_approval_for_the_same_call_in_the_sess
     # call_2 参数完全相同 → 直接放行；call_3 参数不同 → 再次挂起。
     assert again.state == RunState.SUSPENDED
     assert [call.tool_call_id for call in executor.calls] == ["call_1", "call_2"]
-    remembered = await memory.list_remembered(session_id=session_id)
+    remembered = await cast('ApprovalMemory', memory).list_remembered(session_id=session_id)
     assert len(remembered) == 1
     assert remembered[0].scope == "session"
     assert remembered[0].remembered_by == "user_1"
@@ -2793,18 +2813,18 @@ async def test_approve_and_remember_skips_approval_for_the_same_call_in_the_sess
     audit = next(
         event for event in events if event.type == "policy.approval.remembered"
     )
-    assert audit.data.remembered_by == "user_1"
-    assert audit.data.remembered_scope == "session"
-    assert audit.data.decision == "approve_and_remember"
+    assert cast(PolicyEventData, audit.data).remembered_by == "user_1"
+    assert cast(PolicyEventData, audit.data).remembered_scope == "session"
+    assert cast(InteractionEventData, audit.data).decision == "approve_and_remember"
     auto_allowed = [
         event
         for event in events
         if event.type == "policy.decision.recorded"
-        and event.data.remembered_by == "user_1"
+        and cast(PolicyEventData, event.data).remembered_by == "user_1"
     ]
     assert len(auto_allowed) == 1
-    assert auto_allowed[0].data.decision == "allow"
-    assert auto_allowed[0].data.remembered_scope == "session"
+    assert cast(InteractionEventData, auto_allowed[0].data).decision == "allow"
+    assert cast(PolicyEventData, auto_allowed[0].data).remembered_scope == "session"
 
     suspension, interaction = await _pending_interaction(runtime, again)
     assert (
@@ -2822,7 +2842,7 @@ async def test_approve_and_remember_skips_approval_for_the_same_call_in_the_sess
     assert final.state == RunState.COMPLETED
     assert len(executor.calls) == 3
     # approve_once 不写记忆。
-    assert len(await memory.list_remembered(session_id=session_id)) == 1
+    assert len(await cast('ApprovalMemory', memory).list_remembered(session_id=session_id)) == 1
 
 
 @pytest.mark.asyncio
@@ -2894,7 +2914,7 @@ async def test_remembered_approval_never_overrides_a_denial():
         CONTEXT,
     )
     assert (await loop.resume(handle.run_id, CONTEXT)).state == RunState.COMPLETED
-    assert len(await loop.approval_memory.list_remembered(session_id=session_id)) == 1
+    assert len(await cast('ApprovalMemory', loop.approval_memory).list_remembered(session_id=session_id)) == 1
 
     # 同一 Session 里换一个没有 filesystem:write scope 的 actor：策略先 DENY，
     # 记忆只能收敛 REQUIRE_INTERACTION，绝不把 DENY 变成 ALLOW。
@@ -2922,8 +2942,8 @@ async def test_remembered_approval_never_overrides_a_denial():
     assert [call.tool_call_id for call in executor.calls] == ["call_1"]
     events = await runtime.session_store.read_events(second.run_id)
     decisions = [event for event in events if event.type == "policy.decision.recorded"]
-    assert [event.data.decision for event in decisions] == ["deny"]
-    assert decisions[0].data.remembered_by is None
+    assert [cast(InteractionEventData, event.data).decision for event in decisions] == ["deny"]
+    assert cast(PolicyEventData, decisions[0].data).remembered_by is None
     assert "tool.call.dispatching" not in [event.type for event in events]
 
 
@@ -2958,14 +2978,14 @@ async def test_unsupported_scope_is_tightened_to_session():
     )
     assert (await loop.resume(handle.run_id, CONTEXT)).state == RunState.COMPLETED
 
-    remembered = await loop.approval_memory.list_remembered(session_id=session_id)
+    remembered = await cast('ApprovalMemory', loop.approval_memory).list_remembered(session_id=session_id)
     assert [value.scope for value in remembered] == ["session"]
     audit = next(
         event
         for event in await runtime.session_store.read_events(handle.run_id)
         if event.type == "policy.approval.remembered"
     )
-    assert audit.data.remembered_scope == "session"
+    assert cast(PolicyEventData, audit.data).remembered_scope == "session"
 
 
 @pytest.mark.asyncio
@@ -3037,8 +3057,8 @@ async def test_approval_restores_whole_tool_batch_before_next_model_request(
         assert len(model.requests) == 1
         suspension, interaction = await _pending_interaction(runtime, run)
         if legacy_checkpoint:
-            checkpoint = await runtime.session_store.get_checkpoint(run.checkpoint_id)
-            runtime.session_store._checkpoints[checkpoint.checkpoint_id] = (
+            checkpoint = await runtime.session_store.get_checkpoint(cast(str, run.checkpoint_id))
+            getattr(runtime.session_store, '_checkpoints')[checkpoint.checkpoint_id] = (
                 checkpoint.model_copy(
                     update={
                         "state": {
@@ -3060,7 +3080,7 @@ async def test_approval_restores_whole_tool_batch_before_next_model_request(
         # and canonical ledger, without any old loop-local response object.
         loop = AgentLoopEngine(
             runtime=runtime,
-            model=model,
+            model=cast(ModelProvider, model),
             tool_catalog=InMemoryToolCatalog((READ_TOOL, WRITE_TOOL)),
             tool_executor=executor,
         )
@@ -3120,11 +3140,11 @@ async def test_pause_during_tool_preserves_remaining_batch():
     finish.set()
     run = await asyncio.wait_for(task, 1)
     assert run.state == RunState.SUSPENDED
-    suspension = await runtime.session_store.get_suspension(run.suspension_id)
+    suspension = await runtime.session_store.get_suspension(cast(str, run.suspension_id))
     await runtime.resume_run(
         ResumeRun(
             run_id=run.run_id,
-            suspension_id=run.suspension_id,
+            suspension_id=cast(str, run.suspension_id),
             expected_revision=run.revision,
             expected_suspension_revision=suspension.expected_revision,
             idempotency_key="resume-batch",
@@ -3145,7 +3165,7 @@ async def test_pause_during_tool_preserves_remaining_batch():
 async def test_worker_restart_restores_token_budget_before_continuing_model():
     started = asyncio.Event()
 
-    async def interrupted(call, context):
+    async def interrupted(call, context) -> None:
         from sagents.v2.contracts.events import UsageEventData
         current = await runtime.get_run(call.owner_run_id)
         await runtime.session_store.commit_run(
@@ -3184,20 +3204,20 @@ async def test_worker_restart_restores_token_budget_before_continuing_model():
     model = ScriptedModelProvider(())
     loop = AgentLoopEngine(
         runtime=runtime,
-        model=model,
+        model=cast(ModelProvider, model),
         tool_catalog=InMemoryToolCatalog((READ_TOOL,)),
         tool_executor=InMemoryToolExecutor(
             {"read_value": READ_TOOL}, {"read_value": tool_handler}
         ),
     )
     run = await loop.recover_interrupted(handle.run_id, CONTEXT)
-    checkpoint = await runtime.session_store.get_checkpoint(run.checkpoint_id)
+    checkpoint = await runtime.session_store.get_checkpoint(cast(str, cast('RunSnapshot', run).checkpoint_id))
     state = AgentLoopCheckpointCodec.decode(checkpoint.state)
     assert (state.total_input_tokens, state.total_output_tokens) == (900, 99)
-    assert run.state == RunState.FAILED
-    assert (await runtime.get_run_result(run.run_id)).error.code == "budget.max_tokens"
+    assert cast(RunSnapshot, run).state == RunState.FAILED
+    assert cast(RuntimeErrorInfo, (await runtime.get_run_result(cast(RunSnapshot, run).run_id)).error).code == "budget.max_tokens"
     from sagents.v2.runtime.execution.budgets import run_tree_tokens
-    assert await run_tree_tokens(runtime.session_store, run) == 1000
+    assert await run_tree_tokens(runtime.session_store, cast('RunSnapshot', run)) == 1000
     assert model.requests == []
 
 
@@ -3205,7 +3225,7 @@ async def test_worker_restart_restores_token_budget_before_continuing_model():
 async def test_worker_recovery_reconciles_each_started_parallel_call_without_replay():
     started = asyncio.Event()
 
-    async def interrupted(call, context):
+    async def interrupted(call, context) -> None:
         started.set()
         await asyncio.Event().wait()
 
@@ -3231,18 +3251,18 @@ async def test_worker_recovery_reconciles_each_started_parallel_call_without_rep
     )
     loop = AgentLoopEngine(
         runtime=runtime,
-        model=model,
+        model=cast(ModelProvider, model),
         tool_catalog=InMemoryToolCatalog((READ_TOOL,)),
         tool_executor=executor,
     )
     run = await loop.recover_interrupted(handle.run_id, CONTEXT)
     for index in range(2):
-        assert run.state == RunState.SUSPENDED
+        assert cast(RunSnapshot, run).state == RunState.SUSPENDED
         assert model.requests == []
         suspension, interaction = await _pending_interaction(runtime, run)
         await runtime.reply_interaction(
             _approval_reply(
-                run.run_id,
+                cast(RunSnapshot, run).run_id,
                 run,
                 suspension,
                 interaction,
@@ -3251,8 +3271,8 @@ async def test_worker_recovery_reconciles_each_started_parallel_call_without_rep
             ),
             CONTEXT,
         )
-        run = await loop.resume(run.run_id, CONTEXT)
-    assert run.state == RunState.COMPLETED
+        run = await loop.resume(cast(RunSnapshot, run).run_id, CONTEXT)
+    assert cast(RunSnapshot, run).state == RunState.COMPLETED
     assert executor.calls == []
     assert [
         message.tool_call_id
@@ -3294,7 +3314,7 @@ async def test_questionnaire_completion_survives_batch_approval(questionnaire_fi
         (ScriptedModelStep(events=(completed("", calls=calls),)),)
     )
     judge = ScriptedModelProvider(())
-    policy = LLMJudgeContinuationPolicy(LLMContinuationJudge(judge))
+    policy = LLMJudgeContinuationPolicy(LLMContinuationJudge(cast(ModelProvider, judge)))
     runtime, handle, loop, executor = await setup_loop(
         model,
         tools=(questionnaire, WRITE_TOOL),
@@ -3317,7 +3337,7 @@ async def test_questionnaire_completion_survives_batch_approval(questionnaire_fi
     events = await runtime.session_store.read_events(run.run_id)
     assert (
         next(
-            event.data.reason_code
+            cast(ContinuationEventData, event.data).reason_code
             for event in events
             if event.type == "continuation.decided"
         )
@@ -3478,12 +3498,12 @@ async def test_manual_reconciliation_failure_keeps_the_checkpoint_ledger_resumab
     assert (
         "tool.call.cancelled" if decision == "cancel" else "tool.call.reconciled"
     ) in types
-    assert persisted.status == (
+    assert cast("Any", persisted).status == (
         ItemStatus.DECLINED if decision == "cancel" else ItemStatus.FAILED
     )
-    assert persisted.data.error is not None
-    assert persisted.data.error.code == "tool.outcome_manually_failed"
-    assert tool_message.content == persisted.data.content
+    assert cast(ToolResultItemData, cast("Any", persisted).data).error is not None
+    assert cast(RuntimeErrorInfo, cast(ToolResultItemData, cast("Any", persisted).data).error).code == "tool.outcome_manually_failed"
+    assert tool_message.content == cast(MessageItemData, cast("Any", persisted).data).content
     assert tool_message.metadata["manually_confirmed"] is True
 
 
@@ -3537,11 +3557,11 @@ async def test_authoritative_tool_error_content_is_persisted_and_resumable(
     assert result.state == RunState.COMPLETED
     assert types.count("tool.call.failed") == 2
     assert "tool.call.unknown" not in types
-    assert persisted.status == ItemStatus.FAILED
-    assert persisted.data.content[0].text == "remote rejected the write: quota exceeded"
-    assert persisted.data.error is not None
-    assert persisted.data.error.message_key == "error.provider_permanent"
-    assert tool_message.content == persisted.data.content
+    assert cast("Any", persisted).status == ItemStatus.FAILED
+    assert cast(TextBlock, cast(MessageItemData, cast("Any", persisted).data).content[0]).text == "remote rejected the write: quota exceeded"
+    assert cast(ToolResultItemData, cast("Any", persisted).data).error is not None
+    assert cast(RuntimeErrorInfo, cast(ToolResultItemData, cast("Any", persisted).data).error).message_key == "error.provider_permanent"
+    assert tool_message.content == cast(MessageItemData, cast("Any", persisted).data).content
 
 
 @pytest.mark.asyncio
@@ -3583,8 +3603,8 @@ async def test_write_failure_marked_not_applied_is_a_known_failure():
     assert result.state == RunState.COMPLETED
     assert "tool.call.unknown" not in types
     assert "interaction.requested" not in types
-    assert failed.data.error.code == "sandbox.permission_denied"
-    assert failed.data.error.metadata["side_effect_state"] == "not_applied"
+    assert cast(RuntimeErrorInfo, cast(RunEventData, failed.data).error).code == "sandbox.permission_denied"
+    assert cast(RuntimeErrorInfo, cast(RunEventData, failed.data).error).metadata["side_effect_state"] == "not_applied"
 
 
 @pytest.mark.asyncio
@@ -3646,7 +3666,7 @@ async def test_output_limit_preserves_partial_answer_and_bounded_continuation(
     partial = completed("First, verify the input. Next,")
     partial = partial.model_copy(
         update={
-            "response": partial.response.model_copy(update={"finish_reason": "length"})
+            "response": cast('ModelResponse', partial.response).model_copy(update={"finish_reason": "length"})
         }
     )
     model = ScriptedModelProvider(
@@ -3724,7 +3744,7 @@ async def test_image_followup_survives_approval_and_engine_restart(decision, tmp
             "write_value": tool_handler,
         },
     )
-    loop.context_assembler.artifact_store = store
+    setattr(loop.context_assembler, 'artifact_store', store)
     run = await loop.execute(handle.run_id, CONTEXT)
     assert run.state == RunState.SUSPENDED
     suspension, interaction = await _pending_interaction(runtime, run)
@@ -3736,7 +3756,7 @@ async def test_image_followup_survives_approval_and_engine_restart(decision, tmp
     )
     loop = AgentLoopEngine(
         runtime=runtime,
-        model=model,
+        model=cast(ModelProvider, model),
         tool_catalog=InMemoryToolCatalog((READ_TOOL, WRITE_TOOL)),
         tool_executor=executor,
         context_assembler=DefaultContextAssembler(
@@ -3752,7 +3772,7 @@ async def test_image_followup_survives_approval_and_engine_restart(decision, tmp
         "call_1",
         "call_2",
     ]
-    assert messages[-1].content[-1].uri.startswith("data:image/jpeg;base64,")
+    assert cast(ImageBlock, messages[-1].content[-1]).uri.startswith("data:image/jpeg;base64,")
     assert len([call for call in executor.calls if call.tool_call_id == "call_1"]) == 1
 
     command = await runtime.session_store.get_start_command(run.run_id)
@@ -3768,7 +3788,7 @@ async def test_image_followup_survives_approval_and_engine_restart(decision, tmp
         "tool",
         "user",
     ]
-    assert replay[batch + 3].content[-1].uri == uri
+    assert cast(ImageBlock, replay[batch + 3].content[-1]).uri == uri
     assert all(
         not str(getattr(block, "uri", "")).startswith("data:")
         for block in replay[batch + 3].content
@@ -3780,7 +3800,7 @@ async def test_reported_usage_does_not_estimate_next_tool_step():
     first = completed("", calls=(tool_call(),))
     first = first.model_copy(
         update={
-            "response": first.response.model_copy(
+            "response": cast('ModelResponse', first.response).model_copy(
                 update={
                     "usage": UsageSummary(
                         reported=True,
@@ -3868,19 +3888,19 @@ async def test_tool_failure_details_reach_model_and_durable_history(language, fa
         if message.role == "tool"
     )
     assert result.state == RunState.COMPLETED
-    assert live.content == persisted.data.content == replay.content
-    assert path not in persisted.data.error.message
+    assert live.content == cast(MessageItemData, cast("Any", persisted).data).content == replay.content
+    assert path not in cast(RuntimeErrorInfo, cast(ToolResultItemData, cast("Any", persisted).data).error).message
     if failure == "structured":
         assert live.content == structured
     else:
-        assert path in live.content[0].text
+        assert path in cast(TextBlock, live.content[0]).text
         if failure in {"missing", "permission"}:
             assert (
                 "FileNotFoundError" if failure == "missing" else "PermissionError"
-            ) in live.content[0].text
+            ) in cast(TextBlock, live.content[0]).text
 
     if failure == "missing":
-        for legacy_content in [(), (TextBlock(text=persisted.data.error.message),)]:
+        for legacy_content in [(), (TextBlock(text=cast(RuntimeErrorInfo, cast(ToolResultItemData, cast("Any", persisted).data).error).message),)]:
             legacy_events = tuple(
                 event.model_copy(
                     update={
@@ -3899,7 +3919,7 @@ async def test_tool_failure_details_reach_model_and_durable_history(language, fa
                 )
                 if isinstance(event.data, ItemEventData)
                 and event.data.item is not None
-                and event.data.item.item_id == persisted.item_id
+                and event.data.item.item_id == cast("Any", persisted).item_id
                 else event
                 for event in events
             )
@@ -3908,8 +3928,8 @@ async def test_tool_failure_details_reach_model_and_durable_history(language, fa
                 for message in SessionEventModelProjector().project(legacy_events)
                 if message.role == "tool"
             )
-            assert path in restored.content[0].text
-            assert "FileNotFoundError" in restored.content[0].text
+            assert path in cast(TextBlock, restored.content[0]).text
+            assert "FileNotFoundError" in cast(TextBlock, restored.content[0]).text
 
 
 @pytest.mark.asyncio
@@ -4011,8 +4031,8 @@ async def test_pre_model_failure_requests_recovery_and_retry_completes(phase, ty
     assert not any(event.type in {"run.completed", "run.failed"} for event in events)
     assert model.requests == []
     assert executor.calls == []
-    suspension = await runtime.session_store.get_suspension(suspended.suspension_id)
-    interaction = await runtime.session_store.get_interaction(suspension.interaction_id)
+    suspension = await runtime.session_store.get_suspension(cast(str, suspended.suspension_id))
+    interaction = await runtime.session_store.get_interaction(cast(str, suspension.interaction_id))
     assert interaction.payload["questions"]
     assert interaction.payload["error"]["code"] == (
         failure.code
@@ -4062,9 +4082,9 @@ async def test_nonresumable_request_preparation_failure_emits_terminal_questionn
     assert result.state == RunState.FAILED
     assert events[-1].type == "run.failed"
     assert (
-        events[-1].data.error.metadata["recovery_questionnaire"]["resumable"] is False
+        cast(RuntimeErrorInfo, cast(RunEventData, events[-1].data).error).metadata["recovery_questionnaire"]["resumable"] is False
     )
-    assert events[-1].data.error.metadata["recovery_questionnaire"]["questions"]
+    assert cast(RuntimeErrorInfo, cast(RunEventData, events[-1].data).error).metadata["recovery_questionnaire"]["questions"]
 
 
 def argument_error(*, truncated=True, usage=None):
@@ -4145,11 +4165,11 @@ async def test_model_argument_repair_preserves_prior_tools_and_accounts_failed_u
     events = await runtime.session_store.read_events(handle.run_id)
     assert sum(e.type == "step.retry_scheduled" for e in events) == 1
     assert (
-        sum(e.data.usage.output_tokens for e in events if e.type == "usage.recorded")
+        sum(cast(UsageEventData, e.data).usage.output_tokens for e in events if e.type == "usage.recorded")
         == 56
     )
     assert not any(e.type == "interaction.requested" for e in events)
-    checkpoint = await runtime.session_store.get_checkpoint(result.checkpoint_id)
+    checkpoint = await runtime.session_store.get_checkpoint(cast(str, result.checkpoint_id))
     assert checkpoint.state["model_argument_recovery_attempts"] == 1
 
 
@@ -4174,10 +4194,10 @@ async def test_model_argument_repair_is_bounded_by_attempts_steps_and_tokens(
     events = await runtime.session_store.read_events(handle.run_id)
     assert not any(e.type == "tool.call.started" for e in events)
     assert (
-        sum(e.data.usage.output_tokens for e in events if e.type == "usage.recorded")
+        sum(cast(UsageEventData, e.data).usage.output_tokens for e in events if e.type == "usage.recorded")
         == expected_calls * 10
     )
-    checkpoint = await runtime.session_store.get_checkpoint(result.checkpoint_id)
+    checkpoint = await runtime.session_store.get_checkpoint(cast(str, result.checkpoint_id))
     assert checkpoint.state["total_output_tokens"] == expected_calls * 10
 
 
@@ -4204,9 +4224,9 @@ async def test_argument_recovery_budget_survives_pause_and_new_engine():
     )
     suspended = await asyncio.wait_for(task, timeout=5)
     assert suspended.state == RunState.SUSPENDED
-    checkpoint = await runtime.session_store.get_checkpoint(suspended.checkpoint_id)
+    checkpoint = await runtime.session_store.get_checkpoint(cast(str, suspended.checkpoint_id))
     assert checkpoint.state["model_argument_recovery_attempts"] == 1
-    suspension = await runtime.session_store.get_suspension(suspended.suspension_id)
+    suspension = await runtime.session_store.get_suspension(cast(str, suspended.suspension_id))
     await runtime.resume_run(
         ResumeRun(
             run_id=handle.run_id,
@@ -4222,14 +4242,14 @@ async def test_argument_recovery_budget_survives_pause_and_new_engine():
     )
     fresh = AgentLoopEngine(
         runtime=runtime,
-        model=fresh_model,
+        model=cast(ModelProvider, fresh_model),
         tool_catalog=loop.tool_catalog,
         tool_executor=executor,
     )
     result = await fresh.resume(handle.run_id, CONTEXT)
     assert result.state == RunState.SUSPENDED
     assert len(fresh_model.requests) == 2
-    final_checkpoint = await runtime.session_store.get_checkpoint(result.checkpoint_id)
+    final_checkpoint = await runtime.session_store.get_checkpoint(cast(str, result.checkpoint_id))
     assert final_checkpoint.state["model_argument_recovery_attempts"] == 2
 
 
@@ -4283,9 +4303,9 @@ async def test_repaired_step_discards_partial_stream_items_from_model_history():
     assert result.state == RunState.COMPLETED
     events = await runtime.session_store.read_events(handle.run_id)
     abandoned = [
-        e.data.item
+        cast(ItemEventData, e.data).item
         for e in events
-        if e.type == "item.completed" and e.data.item.status == ItemStatus.CANCELLED
+        if e.type == "item.completed" and cast(ItemSnapshot, cast(ItemEventData, e.data).item).status == ItemStatus.CANCELLED
     ]
     assert len(abandoned) == 2
     prompt = "\n".join(
@@ -4293,7 +4313,7 @@ async def test_repaired_step_discards_partial_stream_items_from_model_history():
     )
     assert "unfinished preview" not in prompt
     assert "abandoned reasoning" not in prompt
-    checkpoint = await runtime.session_store.get_checkpoint(result.checkpoint_id)
+    checkpoint = await runtime.session_store.get_checkpoint(cast(str, result.checkpoint_id))
     command = await runtime.session_store.get_start_command(handle.run_id)
     ledger = await loop.ledger_rebuilder.rebuild(
         command, run_id=handle.run_id, through_run_sequence=checkpoint.run_sequence
@@ -4434,7 +4454,7 @@ async def test_parallel_uncertain_results_resume_without_replaying_successful_si
         )
         loop = AgentLoopEngine(
             runtime=runtime,
-            model=model,
+            model=cast(ModelProvider, model),
             tool_catalog=InMemoryToolCatalog((WRITE_TOOL,)),
             tool_executor=executor,
             tool_policy=policy,
@@ -4477,21 +4497,21 @@ async def test_parallel_restart_consumes_saved_error_receipt_without_execution()
     model = ScriptedModelProvider((ScriptedModelStep(events=(completed("done"),)),))
     loop = AgentLoopEngine(
         runtime=runtime,
-        model=model,
+        model=cast(ModelProvider, model),
         tool_catalog=InMemoryToolCatalog((READ_TOOL,)),
         tool_executor=executor,
     )
     run = await loop.recover_interrupted(handle.run_id, CONTEXT)
-    assert run.state == RunState.SUSPENDED
+    assert cast(RunSnapshot, run).state == RunState.SUSPENDED
     suspension, interaction = await _pending_interaction(runtime, run)
-    checkpoint = await runtime.session_store.get_checkpoint(run.checkpoint_id)
+    checkpoint = await runtime.session_store.get_checkpoint(cast(str, cast('RunSnapshot', run).checkpoint_id))
     assert (
-        AgentLoopCheckpointCodec.decode(checkpoint.state).pending_tool_call.tool_call_id
+        cast('ToolCall', AgentLoopCheckpointCodec.decode(checkpoint.state).pending_tool_call).tool_call_id
         == "call_1"
     )
     await runtime.reply_interaction(
         _approval_reply(
-            run.run_id,
+            cast(RunSnapshot, run).run_id,
             run,
             suspension,
             interaction,
@@ -4500,13 +4520,13 @@ async def test_parallel_restart_consumes_saved_error_receipt_without_execution()
         ),
         CONTEXT,
     )
-    run = await loop.resume(run.run_id, CONTEXT)
+    run = await loop.resume(cast(RunSnapshot, run).run_id, CONTEXT)
     assert run.state == RunState.COMPLETED
     assert len(executor.calls) == 2
     events = await runtime.session_store.read_events(run.run_id)
     failures = [event for event in events if event.type == "tool.call.failed"]
     assert len(failures) == 1
-    assert failures[0].data.tool_call_id == "call_2"
+    assert cast(ToolEventData, failures[0].data).tool_call_id == "call_2"
 
 
 @pytest.mark.asyncio
@@ -4551,7 +4571,7 @@ async def test_parallel_parent_cancellation_drains_every_tool(pause_first):
         assert not active
         events = await runtime.session_store.read_events(handle.run_id)
         assert {
-            event.data.tool_call_id
+            cast(ToolEventData, event.data).tool_call_id
             for event in events
             if event.type == "tool.call.unknown"
         } == {"call_1", "call_2"}
@@ -4618,7 +4638,7 @@ async def test_parallel_tool_context_survives_later_uncertain_sibling():
     )
     loop = AgentLoopEngine(
         runtime=runtime,
-        model=model,
+        model=cast(ModelProvider, model),
         tool_catalog=InMemoryToolCatalog((READ_TOOL,)),
         tool_executor=executor,
     )
@@ -4631,7 +4651,7 @@ async def test_parallel_tool_context_survives_later_uncertain_sibling():
         if message.metadata.get("tool_context")
     ]
     assert len(followups) == 1
-    assert followups[0].content[0].text == "Supplemental tool context"
+    assert cast(TextBlock, followups[0].content[0]).text == "Supplemental tool context"
 
 
 @pytest.mark.asyncio
@@ -4695,9 +4715,9 @@ async def test_transient_model_failure_cancels_partial_output_before_retry(monke
     events = await runtime.session_store.read_events(handle.run_id)
     assert len([e for e in events if e.type == "step.retry_scheduled"]) == 1
     partial = [
-        e.data.item
+        cast(ItemEventData, e.data).item
         for e in events
-        if e.type == "item.completed" and e.data.item.status.value == "cancelled"
+        if e.type == "item.completed" and cast(ItemSnapshot, cast(ItemEventData, e.data).item).status.value == "cancelled"
     ]
     assert len(partial) == 1
     assert all("partial" not in str(m.content) for m in model.requests[1].messages)
@@ -4862,7 +4882,7 @@ async def test_responses_stream_failure_recovers_through_real_adapter_and_loop(
     runtime, handle, loop, _ = await setup_loop(
         model, tools=(), context_assembler=assembler
     )
-    assembler.history = SimpleNamespace(reader=runtime.session_store)
+    setattr(assembler, 'history', SimpleNamespace(reader=runtime.session_store))
     result = await loop.execute(handle.run_id, CONTEXT)
     assert result.state == (RunState.COMPLETED if recover else RunState.SUSPENDED)
     context_error = upstream_code == "context_length_exceeded"
@@ -4881,11 +4901,11 @@ async def test_responses_stream_failure_recovers_through_real_adapter_and_loop(
         assert "<conversation_summary>" in str(responses.calls[1]["input"])
         assert "current exact request" in str(responses.calls[1]["input"])
         assert "old history " * 100 not in str(responses.calls[1]["input"])
-        assert retries[0].data.error.code == "model.context_window_exceeded"
+        assert cast(RuntimeErrorInfo, cast(RunEventData, retries[0].data).error).code == "model.context_window_exceeded"
     else:
         assert not summary_requests
         assert responses.calls[0]["input"] == responses.calls[1]["input"]
-        assert retries[0].data.error.code == "model.provider_transient"
+        assert cast(RuntimeErrorInfo, cast(RunEventData, retries[0].data).error).code == "model.provider_transient"
 
 
 @pytest.mark.asyncio
@@ -4938,7 +4958,7 @@ async def test_context_recovery_stops_after_six_retries_without_executing_tools(
     assert len(model.requests) == 7
     events = await runtime.session_store.read_events(handle.run_id)
     assert len([e for e in events if e.type == "step.retry_scheduled"]) == 6
-    assert [e.data.attempt for e in events if e.type == "step.retry_scheduled"] == list(range(1, 7))
+    assert [cast(StepEventData, e.data).attempt for e in events if e.type == "step.retry_scheduled"] == list(range(1, 7))
     assert not any(e.type == "tool.call.started" for e in events)
 
 
@@ -5010,7 +5030,7 @@ async def test_mcp_unknown_returns_error_and_keeps_parallel_results(cold_restart
         with pytest.raises(asyncio.CancelledError):
             await loop.execute(handle.run_id, context)
         cold = ephemeral_runtime()
-        await cold.session_store.load_state(await runtime.session_store.export_state())
+        await getattr(cold.session_store, 'load_state')(await getattr(runtime.session_store, 'export_state')())
         runtime = cold
         model = ScriptedModelProvider((ScriptedModelStep(events=(completed("done"),)),))
 
@@ -5018,26 +5038,26 @@ async def test_mcp_unknown_returns_error_and_keeps_parallel_results(cold_restart
             async def execute(self, call, context):
                 raise AssertionError("committed sibling/error must not be replayed")
 
-        loop = AgentLoopEngine(runtime=runtime, model=model,
-                               tool_catalog=InMemoryToolCatalog(definitions), tool_executor=NeverExecute())
+        loop = AgentLoopEngine(runtime=runtime, model=cast(ModelProvider, model),
+                               tool_catalog=InMemoryToolCatalog(definitions), tool_executor=cast('ToolExecutor', NeverExecute()))
         result = await loop.recover_interrupted(handle.run_id, context)
     else:
         result = await loop.execute(handle.run_id, context)
-    assert result.state == RunState.COMPLETED
+    assert cast('RunSnapshot', result).state == RunState.COMPLETED
     events = await runtime.session_store.read_events(handle.run_id)
     assert not any(e.type == "run.failed" for e in events)
     assert (
-        persisted_tool_result(events, "call_2").data.content[0].text
+        cast(TextBlock, cast(MessageItemData, cast("Any", persisted_tool_result(events, "call_2")).data).content[0]).text
         == "saved sibling receipt"
     )
 
     assert sorted(dispatches) == ["saved", "unknown"]
     messages = [m for m in model.requests[-1].messages if m.role == "tool"]
-    assert sorted(m.tool_call_id for m in messages) == ["call_1", "call_2"]
+    assert sorted(cast(str, m.tool_call_id) for m in messages) == ["call_1", "call_2"]
     by_id = {m.tool_call_id: m for m in messages}
-    assert by_id["call_2"].content[0].text == "saved sibling receipt"
-    assert "check_status_before_retry" in by_id["call_1"].content[0].text
-    assert "ConnectionError: response lost" in by_id["call_1"].content[0].text
+    assert cast(TextBlock, by_id["call_2"].content[0]).text == "saved sibling receipt"
+    assert "check_status_before_retry" in cast(TextBlock, by_id["call_1"].content[0]).text
+    assert "ConnectionError: response lost" in cast(TextBlock, by_id["call_1"].content[0]).text
     events = await runtime.session_store.read_events(handle.run_id)
     assert sum(e.type == "tool.call.started" for e in events) == 2
     assert sum(e.type == "tool.call.failed" for e in events) == 1
@@ -5058,7 +5078,7 @@ async def test_default_outage_recovery_outlives_step_budget_without_replaying_wr
         ScriptedModelStep(events=(completed("done"),)),
     ))
     runtime, handle, loop, executor = await setup_loop(
-        model, max_steps=3, transient_retry_limit=None,
+        model, max_steps=3, transient_retry_limit=cast('int', None),
         tool_policy=DefaultToolPolicy(approval_strategy=ApprovalStrategy.AUTO_APPROVE),
     )
     result = await loop.execute(handle.run_id, CONTEXT)
@@ -5067,7 +5087,7 @@ async def test_default_outage_recovery_outlives_step_budget_without_replaying_wr
     events = await runtime.session_store.read_events(handle.run_id)
     retries = [e for e in events if e.type == "step.retry_scheduled"]
     assert len(retries) == 30
-    assert all(e.data.error.metadata["automatic_recovery"] for e in retries)
+    assert all(cast(RuntimeErrorInfo, cast(RunEventData, e.data).error).metadata["automatic_recovery"] for e in retries)
     assert not [e for e in events if e.type == "interaction.requested"]
     assert all(req.messages == model.requests[1].messages for req in model.requests[2:])
 
@@ -5076,7 +5096,7 @@ async def test_default_outage_recovery_outlives_step_budget_without_replaying_wr
 async def test_network_failure_in_request_preparation_recovers_automatically(monkeypatch):
     monkeypatch.setattr(AgentLoopEngine, "_PROVIDER_RETRY_BASE_SECONDS", 0)
     model = ScriptedModelProvider((ScriptedModelStep(events=(completed("done"),)),))
-    runtime, handle, loop, _ = await setup_loop(model, transient_retry_limit=None)
+    runtime, handle, loop, _ = await setup_loop(model, transient_retry_limit=cast('int', None))
     original = loop.step_request_builder.prepare
     attempts = 0
 
@@ -5124,7 +5144,7 @@ async def test_network_retry_checkpoint_recovers_after_worker_restart(monkeypatc
 
     recovered_model = ScriptedModelProvider((ScriptedModelStep(events=(completed("recovered"),)),))
     recovered = AgentLoopEngine(
-        runtime=runtime, model=recovered_model,
+        runtime=runtime, model=cast(ModelProvider, recovered_model),
         tool_catalog=InMemoryToolCatalog((READ_TOOL, WRITE_TOOL)),
         tool_executor=InMemoryToolExecutor(
             {"read_value": READ_TOOL, "write_value": WRITE_TOOL},
@@ -5138,7 +5158,7 @@ async def test_network_retry_checkpoint_recovers_after_worker_restart(monkeypatc
 
     monkeypatch.setattr(recovered, "_wait_for_model_retry", record_wait)
     result = await recovered.recover_interrupted(handle.run_id, CONTEXT)
-    assert result.state == RunState.COMPLETED
+    assert cast('RunSnapshot', result).state == RunState.COMPLETED
     assert len(delays) == 1 and delays[0] > 0
     assert len(recovered_model.requests) == 1
 
@@ -5150,12 +5170,12 @@ async def test_network_retry_respects_deadline_without_another_provider_request(
         message="offline", retryable=True,
     )),))
     runtime, handle, loop, _ = await setup_loop(
-        model, deadline_seconds=0.05, transient_retry_limit=None,
+        model, deadline_seconds=0.05, transient_retry_limit=cast('int', None),
     )
     result = await loop.execute(handle.run_id, CONTEXT)
     assert result.state == RunState.FAILED
     assert len(model.requests) == 1
-    assert (await runtime.get_run_result(result.run_id)).error.code == "budget.deadline"
+    assert cast(RuntimeErrorInfo, (await runtime.get_run_result(result.run_id)).error).code == "budget.deadline"
     assert not any(event.type == "interaction.requested" for event in await runtime.session_store.read_events(result.run_id))
 
 
@@ -5165,7 +5185,7 @@ async def test_network_retry_wait_honors_user_cancel():
         code="model.provider_transient", category=ErrorCategory.PROVIDER_TRANSIENT,
         message="offline", retryable=True,
     )),))
-    runtime, handle, loop, _ = await setup_loop(model, transient_retry_limit=None)
+    runtime, handle, loop, _ = await setup_loop(model, transient_retry_limit=cast('int', None))
     task = asyncio.create_task(loop.execute(handle.run_id, CONTEXT))
     for _ in range(100):
         events = await runtime.session_store.read_events(handle.run_id)
@@ -5205,16 +5225,16 @@ async def test_lost_sandbox_stops_run_before_next_model_request():
     assert result.state == RunState.FAILED
     assert len(model.requests) == 1
     assert not any(e.type == "tool.call.unknown" for e in events)
-    failure = next(e for e in events if e.type == "tool.call.failed").data.error
-    assert failure.category == ErrorCategory.RESOURCE_LOST
-    assert not failure.safe_to_resume
-    assert failure.metadata["side_effect_state"] == "not_applied"
+    failure = cast(RunEventData, next(e for e in events if e.type == "tool.call.failed").data).error
+    assert cast('RuntimeErrorInfo', failure).category == ErrorCategory.RESOURCE_LOST
+    assert not cast('RuntimeErrorInfo', failure).safe_to_resume
+    assert cast('RuntimeErrorInfo', failure).metadata["side_effect_state"] == "not_applied"
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("settled", [False, True])
 async def test_partial_sandbox_failure_reports_details_and_agent_continues(settled):
-    async def interrupted(call, context):
+    async def interrupted(call, context) -> None:
         raise SageV2Error(RuntimeErrorInfo(
             code="sandbox.lost", category=ErrorCategory.RESOURCE_LOST,
             message="memory_bytes=134217728 exceeds memory_limit_bytes=67108864; inspect partial files",

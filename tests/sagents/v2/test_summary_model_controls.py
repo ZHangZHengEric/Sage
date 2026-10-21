@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+from typing import cast
+
+from sagents.v2.model.provider import ModelProvider
+
 import json
 from types import SimpleNamespace
 
@@ -66,7 +70,7 @@ async def test_summary_uses_its_own_usage_without_a_minimum_reduction_percentage
         messages=(ModelMessage(role="assistant", content=(TextBlock(text="facts " * 1000),)),),
         target_tokens=1024,
     )
-    summarizer = ModelConversationSummarizer(model)
+    summarizer = ModelConversationSummarizer(cast(ModelProvider, model))
     if output_tokens < 1000:
         assert json.loads(await summarizer.summarize(summary_request)) == payload
     else:
@@ -211,7 +215,7 @@ async def test_summary_retries_truncation_with_larger_allowance_and_minimum_reas
         ),
         capabilities=CAPS,
     )
-    value = await ModelConversationSummarizer(model).summarize(
+    value = await ModelConversationSummarizer(cast(ModelProvider, model)).summarize(
         SummarizationRequest(
             scope=ContextReductionScope(
                 context_key="context_1",
@@ -332,7 +336,7 @@ async def test_summary_output_allowance_respects_model_limit():
         ),
         capabilities=CAPS.model_copy(update={"max_output_tokens": 2048}),
     )
-    await ModelConversationSummarizer(model).summarize(
+    await ModelConversationSummarizer(cast(ModelProvider, model)).summarize(
         SummarizationRequest(
             scope=ContextReductionScope(
                 context_key="context_1",
@@ -350,4 +354,4 @@ async def test_summary_output_allowance_respects_model_limit():
 @pytest.mark.parametrize("binding", ["summary", "fast", "another-model"])
 def test_summary_rejects_independent_model_binding(binding):
     with pytest.raises(ValueError, match="Agent primary model"):
-        ModelConversationSummarizer(object(), model_binding=binding)
+        ModelConversationSummarizer(cast(ModelProvider, object()), model_binding=binding)

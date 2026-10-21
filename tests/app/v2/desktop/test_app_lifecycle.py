@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import cast
+
 import json
 from pathlib import Path
 from unittest.mock import AsyncMock
@@ -30,7 +32,7 @@ class _Service:
 @pytest.mark.asyncio
 async def test_v2_lifespan_initializes_and_closes_only_owned_components():
     service = _Service()
-    app = app_module.create_app(service=service, auth_token=AUTH_TOKEN)
+    app = app_module.create_app(service=cast('DesktopV2Service | None', service), auth_token=AUTH_TOKEN)
 
     async with app.router.lifespan_context(app):
         pass
@@ -74,7 +76,7 @@ def test_api_validation_failures_include_details_in_structured_log(
 def test_health_identifies_the_exact_sidecar_build():
     service = _Service()
     app = app_module.create_app(
-        service=service,
+        service=cast('DesktopV2Service | None', service),
         build_id="source-test-build",
         auth_token=AUTH_TOKEN,
     )
@@ -93,22 +95,22 @@ def test_health_identifies_the_exact_sidecar_build():
 
 def test_delete_skill_route_forwards_the_authenticated_desktop_user():
     service = _Service()
-    service.delete_skill = AsyncMock(
+    setattr(service, 'delete_skill', AsyncMock(
         return_value={"deleted_name": "review"},
-    )
-    app = app_module.create_app(service=service, auth_token=AUTH_TOKEN)
+    ))
+    app = app_module.create_app(service=cast('DesktopV2Service | None', service), auth_token=AUTH_TOKEN)
 
     with TestClient(app) as client:
         response = client.delete("/api/v2/skills/review", headers=AUTH_HEADERS)
 
     assert response.status_code == 200
     assert response.json()["data"] == {"deleted_name": "review"}
-    service.delete_skill.assert_awaited_once_with("review", "default_user")
+    getattr(service, 'delete_skill').assert_awaited_once_with("review", "default_user")
 
 
 def test_sidecar_rejects_missing_or_incorrect_launch_capability():
     service = _Service()
-    app = app_module.create_app(service=service, auth_token=AUTH_TOKEN)
+    app = app_module.create_app(service=cast('DesktopV2Service | None', service), auth_token=AUTH_TOKEN)
 
     with TestClient(app) as client:
         missing = client.get("/health")
@@ -123,8 +125,8 @@ def test_sidecar_rejects_missing_or_incorrect_launch_capability():
 
 def test_sidecar_ignores_caller_supplied_user_identity():
     service = _Service()
-    service.delete_skill = AsyncMock(return_value={"deleted_name": "review"})
-    app = app_module.create_app(service=service, auth_token=AUTH_TOKEN)
+    setattr(service, 'delete_skill', AsyncMock(return_value={"deleted_name": "review"}))
+    app = app_module.create_app(service=cast('DesktopV2Service | None', service), auth_token=AUTH_TOKEN)
 
     with TestClient(app) as client:
         response = client.delete(
@@ -136,7 +138,7 @@ def test_sidecar_ignores_caller_supplied_user_identity():
         )
 
     assert response.status_code == 200
-    service.delete_skill.assert_awaited_once_with("review", "default_user")
+    getattr(service, 'delete_skill').assert_awaited_once_with("review", "default_user")
 
 
 def test_run_preflight_returns_typed_http_error_without_a_placeholder_run(tmp_path):

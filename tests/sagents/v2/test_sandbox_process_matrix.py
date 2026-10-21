@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import cast
+
 from sagents.v2.runtime.execution.sandbox import ResourceLimits
 
 import asyncio
@@ -154,7 +156,7 @@ async def test_process_grant_binds_exact_argv_and_is_single_use():
 
 @pytest.mark.asyncio
 async def test_process_timeout_and_combined_output_limit_are_enforced():
-    issuer, provider, timeout_spec = setup(allowed=("slow",), max_wall_time=0.01)
+    issuer, provider, timeout_spec = setup(allowed=("slow",), max_wall_time=cast('int', 0.01))
     handle = await provider.provision(timeout_spec, CONTEXT, run_id="run_1")
     slow = ProcessRequest(argv=("slow",))
     intent, grant = authorization(issuer, handle.ref, slow)

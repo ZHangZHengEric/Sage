@@ -1,3 +1,9 @@
+
+from typing import TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    from app.v2.server.database.client import Database
+
 from contextlib import asynccontextmanager
 
 import pytest
@@ -12,7 +18,7 @@ from app.v2.server.conversations.repository import DatabaseThreadIndex
 async def test_thread_pages_filter_in_database_with_stable_ties_and_scan_cursor():
     engine = create_async_engine('sqlite+aiosqlite://')
     async with engine.begin() as conn:
-        await conn.run_sync(ThreadRow.__table__.create)
+        await conn.run_sync(getattr(ThreadRow.__table__, 'create'))
     maker = async_sessionmaker(engine, expire_on_commit=False)
     class DB:
         @asynccontextmanager
@@ -25,7 +31,7 @@ async def test_thread_pages_filter_in_database_with_stable_ties_and_scan_cursor(
             updated_at='2026-10-20T00:00:00+00:00') for i in range(40))
     queries = []
     event.listen(engine.sync_engine, 'before_cursor_execute', lambda c, cur, stmt, p, ctx, many: queries.append(stmt))
-    index = DatabaseThreadIndex(DB())
+    index = DatabaseThreadIndex(cast('Database', DB()))
     try:
         cursor, seen = None, []
         while True:

@@ -2,6 +2,13 @@
 
 from __future__ import annotations
 
+from typing import Any, TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    from pydantic import BaseModel
+
+from sagents.v2.runtime.extensions.contracts import ProviderExports
+
 import pytest
 
 from sagents.v2.agent.policy import (
@@ -329,7 +336,7 @@ def test_every_registered_plugin_has_a_pydantic_config_boundary():
         for registration in registry.registrations()
     )
     assert all(
-        registration.config_model.model_json_schema()["type"] == "object"
+        cast('type[BaseModel]', registration.config_model).model_json_schema()["type"] == "object"
         for registration in registry.registrations()
     )
     assert all(
@@ -396,7 +403,7 @@ def test_registered_factory_creates_the_selected_instance():
             scope=ExtensionScope.PROCESS,
             scope_id="test-process",
         ),
-        {},
+        cast('ProviderSet', {}),
     )
     assert value.__class__.__name__ == "NoopMemoryProvider"
 
@@ -411,12 +418,12 @@ def test_ephemeral_tool_plugin_factory_exposes_paired_catalog_and_executor():
     plugin = registration.factory(context, ProviderSet())
 
     assert plugin.__class__.__name__ == "EphemeralToolPlugin"
-    assert plugin.plugin_id == "sage.tool.ephemeral"
+    assert getattr(plugin, 'plugin_id') == "sage.tool.ephemeral"
     assert registration.start is not None
-    providers = registration.start(plugin, context, {})
+    providers = cast(ProviderExports, registration.start(plugin, context, cast('ProviderSet', {})))
     assert set(providers) == {"tool.provider:ephemeral"}
-    assert providers["tool.provider:ephemeral"].catalog is plugin.catalog
-    assert providers["tool.provider:ephemeral"].executor is plugin.executor
+    assert cast('dict[str, Any]', providers)["tool.provider:ephemeral"].catalog is getattr(plugin, 'catalog')
+    assert cast('dict[str, Any]', providers)["tool.provider:ephemeral"].executor is getattr(plugin, 'executor')
 
 
 @pytest.mark.parametrize(
@@ -467,9 +474,9 @@ def test_local_sandbox_command_path_passes_through_plugin_config():
         ExtensionScopeContext(
             scope=ExtensionScope.PROCESS, scope_id="path-test", config=config
         ),
-        {},
+        cast('ProviderSet', {}),
     )
-    assert provider.command_path == config["command_path"]
+    assert getattr(provider, 'command_path') == config["command_path"]
 
 
 def test_local_sandbox_read_paths_pass_through_plugin_config():
@@ -491,6 +498,6 @@ def test_local_sandbox_read_paths_pass_through_plugin_config():
         ExtensionScopeContext(
             scope=ExtensionScope.PROCESS, scope_id="read-paths-test", config=config
         ),
-        {},
+        cast('ProviderSet', {}),
     )
-    assert provider.read_paths == ("/opt/host-runtime",)
+    assert getattr(provider, 'read_paths') == ("/opt/host-runtime",)

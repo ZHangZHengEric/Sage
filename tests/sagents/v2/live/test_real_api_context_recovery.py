@@ -2,6 +2,18 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    from sagents.v2.context.summary import ConversationSummary
+    from sagents.v2.runtime.session.contracts import DerivedStateStore, SessionStore
+    from typing import Literal
+
+from sagents.v2.contracts.items import MessageItemData
+from sagents.v2.model.provider import ModelProvider
+from sagents.v2.contracts.events import RunEventData
+from sagents.v2.contracts.errors import RuntimeErrorInfo
+
 import asyncio
 import hashlib
 import json
@@ -116,7 +128,7 @@ class ObservedAPI:
 
 
 def text(value, role="user"):
-    return ModelMessage(role=role, content=(TextBlock(text=value),))
+    return ModelMessage(role=cast("Literal['system', 'developer', 'user', 'assistant', 'tool']", role), content=(TextBlock(text=value),))
 
 
 def calculator():
@@ -160,7 +172,7 @@ async def test_real_upstream_overflow_splits_summary_preserves_edge_facts_and_to
         budget=ContextBudget(max_input_tokens=128000, reserve_output_tokens=512),
         reducer=PersistentSummaryContextReducer(
             store,
-            summarizer=ModelConversationSummarizer(api, timeout_seconds=180),
+            summarizer=ModelConversationSummarizer(cast(ModelProvider, api), timeout_seconds=180),
             summary_target_tokens=256,
             max_summary_calls=64,
         ),
@@ -189,7 +201,7 @@ async def test_real_upstream_overflow_splits_summary_preserves_edge_facts_and_to
 
     engine = AgentLoopEngine(
         runtime=runtime,
-        model=api,
+        model=cast(ModelProvider, api),
         context_assembler=assembler,
         tool_catalog=InMemoryToolCatalog((tool,)),
         tool_executor=InMemoryToolExecutor({tool.name: tool}, {tool.name: add}),
@@ -214,7 +226,7 @@ async def test_real_upstream_overflow_splits_summary_preserves_edge_facts_and_to
         for i in result.final_items
         if i.data.kind == "message" and i.status.value == "completed"
     ][-1]
-    assert final.data.content[0].text.strip() == "ORION-731|LIME-409|42"
+    assert cast(TextBlock, cast(MessageItemData, final.data).content[0]).text.strip() == "ORION-731|LIME-409|42"
     assert (
         hashlib.sha256(historical[0].model_dump_json().encode()).hexdigest()
         == original_digest
@@ -237,7 +249,7 @@ async def test_real_memory_query_retains_search_identity_after_compression(press
         "背景说明：本项目需要查找交付日期，项目代号必须保留。" * 350 if pressure else ""
     )
     query = await LLMMemoryRecallQueryGenerator(
-        api, language="zh", timeout_seconds=180
+        cast(ModelProvider, api), language="zh", timeout_seconds=180
     ).generate(source, run_id="live_memory")
     assert "ORION" in query.upper() and "731" in query
     purposes = [r["purpose"] for r in api.calls]
@@ -278,7 +290,7 @@ async def test_real_tool_selection_still_selects_required_tool_after_compression
             run_id="live_selection",
             tools=tools,
             messages=messages,
-            model=api,
+            model=cast('ModelProvider | None', api),
             language="zh",
         )
     )
@@ -307,7 +319,7 @@ async def test_real_completion_judge_retains_decision_contract_after_compression
         if pressure
         else ""
     )
-    decision = await LLMContinuationJudge(api, timeout_seconds=180).decide(
+    decision = await LLMContinuationJudge(cast(ModelProvider, api), timeout_seconds=180).decide(
         ContinuationContext(
             run_id="live_judge",
             step_number=1,
@@ -348,7 +360,7 @@ async def test_real_summary_output_truncation_increases_allowance_and_recovers()
             "必须保留项目代号 ORION-731、交付日期2030年5月6日、验收码 LIME-409。" * 40
         ),
     )
-    result = await ModelConversationSummarizer(api).summarize(
+    result = await ModelConversationSummarizer(cast(ModelProvider, api)).summarize(
         SummarizationRequest(
             scope=ContextReductionScope(
                 context_key="truncate", session_id="truncate", run_id="truncate"
@@ -376,7 +388,7 @@ async def test_real_stream_cancellation_preserves_previous_complete_checkpoint()
     original = ObservedAPI(real_provider())
     reducer = PersistentSummaryContextReducer(
         store,
-        summarizer=ModelConversationSummarizer(original),
+        summarizer=ModelConversationSummarizer(cast(ModelProvider, original)),
         summary_target_tokens=256,
     )
     scope = ContextReductionScope(
@@ -401,7 +413,7 @@ async def test_real_stream_cancellation_preserves_previous_complete_checkpoint()
                 await stream.aclose()
 
     api = Cancellable(real_provider())
-    reducer.summarizer = ModelConversationSummarizer(api)
+    reducer.summarizer = ModelConversationSummarizer(cast(ModelProvider, api))
     extended = (
         *seed,
         text("新增已确认项目事实。" * 200, "assistant"),
@@ -435,7 +447,7 @@ async def test_real_too_small_mandatory_judge_limit_stops_finitely_without_api_s
 
     api = ObservedAPI(real_provider(), fast_limit=2000)
     with pytest.raises(SageV2Error) as exc:
-        await LLMContinuationJudge(api, timeout_seconds=120).decide(
+        await LLMContinuationJudge(cast(ModelProvider, api), timeout_seconds=120).decide(
             ContinuationContext(
                 run_id="irreducible_judge",
                 step_number=1,
@@ -539,13 +551,13 @@ async def test_real_parallel_tool_batch_compression_keeps_receipts_and_exact_res
         budget=ContextBudget(max_input_tokens=4000),
         reducer=PersistentSummaryContextReducer(
             store,
-            summarizer=ModelConversationSummarizer(api),
+            summarizer=ModelConversationSummarizer(cast(ModelProvider, api)),
             summary_target_tokens=512,
         ),
     )
     engine = AgentLoopEngine(
         runtime=runtime,
-        model=api,
+        model=cast(ModelProvider, api),
         context_assembler=assembler,
         tool_catalog=InMemoryToolCatalog(tools),
         tool_executor=InMemoryToolExecutor(
@@ -565,7 +577,7 @@ async def test_real_parallel_tool_batch_compression_keeps_receipts_and_exact_res
         for i in result.final_items
         if i.data.kind == "message" and i.status.value == "completed"
     ][-1]
-    assert final.data.content[0].text.strip() == "ALPHA-917|BETA-462"
+    assert cast(TextBlock, cast(MessageItemData, final.data).content[0]).text.strip() == "ALPHA-917|BETA-462"
     events = await runtime.session_store.read_events(handle.run_id)
     assert sum(e.type == "tool.call.succeeded" for e in events) == 3
 
@@ -593,23 +605,23 @@ async def test_real_summary_survives_filesystem_restart_and_retains_raw_history(
     )
     command = StartRun(
         agent_id="persist_live",
-        input=tuple(InputItem(role=m.role, content=m.content) for m in source),
+        input=tuple(InputItem(role=cast("Literal['user', 'assistant', 'system', 'developer']", m.role), content=m.content) for m in source),
         config=RunConfig(max_steps=4),
         resolved_spec_hash="sha256:persist-live",
         idempotency_key="persist-live",
     )
     first = FilesystemSessionStore(tmp_path)
-    handle = await HarnessRuntime(first).start_run(command, CONTEXT)
+    handle = await HarnessRuntime(cast('SessionStore', first)).start_run(command, CONTEXT)
     scope = ContextReductionScope(
         context_key="persist_summary",
         session_id=handle.session_id,
         run_id=handle.run_id,
         force=True,
     )
-    first_summary = SessionDerivedConversationSummaryStore(first)
+    first_summary = SessionDerivedConversationSummaryStore(cast('DerivedStateStore', first))
     before = await PersistentSummaryContextReducer(
         first_summary,
-        summarizer=ModelConversationSummarizer(api),
+        summarizer=ModelConversationSummarizer(cast(ModelProvider, api)),
         summary_target_tokens=256,
     ).reduce(source, scope=scope)
     saved = await first_summary.get(scope.context_key, session_id=handle.session_id)
@@ -618,14 +630,14 @@ async def test_real_summary_survives_filesystem_restart_and_retains_raw_history(
     await first.close()
     second = FilesystemSessionStore(tmp_path)
     try:
-        restored = SessionDerivedConversationSummaryStore(second)
+        restored = SessionDerivedConversationSummaryStore(cast('DerivedStateStore', second))
         assert (
             await restored.get(scope.context_key, session_id=handle.session_id) == saved
         )
         assert await second.get_start_command(handle.run_id) == accepted_command
         calls_before = len(api.calls)
         after = await PersistentSummaryContextReducer(
-            restored, summarizer=ModelConversationSummarizer(api)
+            restored, summarizer=ModelConversationSummarizer(cast(ModelProvider, api))
         ).reduce(source, scope=scope.model_copy(update={"force": False}))
         assert after.messages == before.messages
         assert len(api.calls) == calls_before
@@ -658,7 +670,7 @@ async def test_real_recursive_summary_merge_retains_first_and_last_facts():
         + (" x" * 40000)
         + "\n交付码 LIME-409，必须保留该事实。"
     )
-    result = await ModelConversationSummarizer(api).summarize(
+    result = await ModelConversationSummarizer(cast(ModelProvider, api)).summarize(
         SummarizationRequest(
             scope=ContextReductionScope(
                 context_key="merge_edges",
@@ -871,34 +883,34 @@ async def test_http_fault_gateway_retries_real_model_after_tool_without_reexecut
         events = await runtime.session_store.read_events(handle.run_id)
         retries = [e for e in events if e.type == "step.retry_scheduled"]
         assert len(retries) <= 2 * (
-            engine._MAX_TRANSPARENT_PROVIDER_RETRIES
+            getattr(engine, '_MAX_TRANSPARENT_PROVIDER_RETRIES')
             + engine._MAX_TRANSPARENT_EMPTY_RESPONSE_RETRIES
         )
-        assert all(e.data.error.retryable for e in retries)
+        assert all(cast(RuntimeErrorInfo, cast(RunEventData, e.data).error).retryable for e in retries)
         allowed = {
             "model.provider_transient",
             "model.stream_incomplete",
             "model.empty_semantic_response",
         }
-        assert all(e.data.error.code in allowed for e in retries)
+        assert all(cast(RuntimeErrorInfo, cast(RunEventData, e.data).error).code in allowed for e in retries)
         assert all(
             0
-            < e.data.error.metadata["transparent_retry_attempt"]
-            <= e.data.error.metadata["transparent_retry_limit"]
+            < cast(RuntimeErrorInfo, cast(RunEventData, e.data).error).metadata["transparent_retry_attempt"]
+            <= cast(RuntimeErrorInfo, cast(RunEventData, e.data).error).metadata["transparent_retry_limit"]
             for e in retries
         )
         if fault == "partial_stream":
             assert (
-                sum(e.data.error.code == "model.stream_incomplete" for e in retries)
+                sum(cast(RuntimeErrorInfo, cast(RunEventData, e.data).error).code == "model.stream_incomplete" for e in retries)
                 >= desired
             )
         elif fault != 401:
             assert (
-                sum(e.data.error.provider_code == str(fault) for e in retries)
+                sum(cast(RuntimeErrorInfo, cast(RunEventData, e.data).error).provider_code == str(fault) for e in retries)
                 >= desired
             )
         else:
-            assert not any(e.data.error.provider_code == "401" for e in retries)
+            assert not any(cast(RuntimeErrorInfo, cast(RunEventData, e.data).error).provider_code == "401" for e in retries)
         report = os.environ.get("SAGE_V2_LIVE_REPORT")
         if report:
             with Path(report).open("a") as log:
@@ -912,8 +924,8 @@ async def test_http_fault_gateway_retries_real_model_after_tool_without_reexecut
                             "tool_executions": len(executions),
                             "retry_errors": [
                                 {
-                                    "code": e.data.error.code,
-                                    "provider_code": e.data.error.provider_code,
+                                    "code": cast(RuntimeErrorInfo, cast(RunEventData, e.data).error).code,
+                                    "provider_code": cast(RuntimeErrorInfo, cast(RunEventData, e.data).error).provider_code,
                                 }
                                 for e in retries
                             ],
@@ -928,7 +940,7 @@ async def test_http_fault_gateway_retries_real_model_after_tool_without_reexecut
                 for i in result.final_items
                 if i.data.kind == "message" and i.status.value == "completed"
             ][-1]
-            assert final.data.content[0].text.strip() == "42"
+            assert cast(TextBlock, cast(MessageItemData, final.data).content[0]).text.strip() == "42"
         else:
             assert len(state["calls"]) == state["failure_call_index"]
             assert any(e.type == "interaction.requested" for e in events)
@@ -1011,7 +1023,7 @@ async def test_real_multimodal_compression_preserves_current_image_and_verified_
         budget=ContextBudget(max_input_tokens=2000),
         reducer=PersistentSummaryContextReducer(
             InMemoryConversationSummaryStore(),
-            summarizer=ModelConversationSummarizer(api),
+            summarizer=ModelConversationSummarizer(cast(ModelProvider, api)),
             summary_target_tokens=512,
         ),
     )
@@ -1051,7 +1063,7 @@ async def test_real_concurrent_summaries_preserve_session_isolation_and_cas_winn
     api = ObservedAPI(real_provider())
     store = InMemoryConversationSummaryStore()
     reducer = PersistentSummaryContextReducer(
-        store, summarizer=ModelConversationSummarizer(api), summary_target_tokens=256
+        store, summarizer=ModelConversationSummarizer(cast(ModelProvider, api)), summary_target_tokens=256
     )
     first_source = (
         text("本会话的唯一项目标识为 ORION-731。" + "项目历史说明。" * 300),
@@ -1088,15 +1100,15 @@ async def test_real_concurrent_summaries_preserve_session_isolation_and_cas_winn
     )
     saved_a = await store.get(scope_a.context_key)
     saved_b = await store.get(scope_b.context_key)
-    assert saved_a.revision == saved_b.revision == 1
-    assert "ORION-731" in saved_a.text
+    assert cast('ConversationSummary', saved_a).revision == cast('ConversationSummary', saved_b).revision == 1
+    assert "ORION-731" in cast('ConversationSummary', saved_a).text
     if shared_context:
         assert first.messages == second.messages
         assert saved_a == saved_b
     else:
-        assert "LIME-409" in saved_b.text
-        assert "ORION-731" not in saved_b.text
-        assert "LIME-409" not in saved_a.text
+        assert "LIME-409" in cast('ConversationSummary', saved_b).text
+        assert "ORION-731" not in cast('ConversationSummary', saved_b).text
+        assert "LIME-409" not in cast('ConversationSummary', saved_a).text
     assert first.messages[-1] == first_source[-1]
     assert second.messages[-1] == second_source[-1]
     assert len(api.calls) == api.closed == 2

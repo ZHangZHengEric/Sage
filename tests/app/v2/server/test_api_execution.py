@@ -1,5 +1,10 @@
 """API authorization, durable approval, and per-drive resource cleanup."""
 
+from typing import TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    from anyio.from_thread import BlockingPortal
+
 from datetime import timedelta
 
 from fastapi.testclient import TestClient
@@ -58,8 +63,8 @@ def test_api_workspace_authorization_and_drive_cleanup(tmp_path, policy, waiting
                     break
                 import asyncio
                 await asyncio.sleep(0.01)
-            return host.execution.driving(task["id"]), len(host.execution.sandbox_provider._rows)
-        driving, sandboxes = client.portal.call(settled)
+            return host.execution.driving(task["id"]), len(getattr(host.execution.sandbox_provider, '_rows'))
+        driving, sandboxes = cast('BlockingPortal', client.portal).call(settled)
         assert not driving
         assert sandboxes == 0
         files = list(tmp_path.rglob("result.txt"))
@@ -102,12 +107,12 @@ def test_owner_approval_is_revision_bound_and_tenant_isolated(tmp_path):
         async def wait_for_completion():
             import asyncio
             for _ in range(200):
-                run = await client.app.state.service.application.entrypoint().runtime.get_run(task["id"])
+                run = await getattr(client.app, 'state').service.application.entrypoint().runtime.get_run(task["id"])
                 if run.state.value == "completed":
                     return
                 await asyncio.sleep(0.01)
             raise AssertionError("approved task did not finish")
-        client.portal.call(wait_for_completion)
+        cast('BlockingPortal', client.portal).call(wait_for_completion)
         assert next(tmp_path.rglob("note.txt")).read_text() == "blue"
 
 
@@ -138,7 +143,7 @@ async def test_execution_grant_persists_in_database(tmp_path):
             execution_policy=ExecutionPolicy(shell="deny", on_approval_required="deny"))
         await store.save(original)
         reloaded = await DatabaseUserStore(database).get_by_id("user")
-        assert reloaded.execution_policy == original.execution_policy
+        assert cast('UserRecord', reloaded).execution_policy == original.execution_policy
     finally:
         await database.stop()
 
@@ -180,11 +185,11 @@ def test_approval_maintenance_cancels_expired_waiters(tmp_path, monkeypatch):
         _, task = ask(client, token)
         monkeypatch.setattr("app.v2.server.conversations.runs.utc_now",
                             lambda: utc_now() + timedelta(days=2))
-        host = client.app.state.service
-        client.portal.call(host.conversations.runs.expire_approvals, host.threads, host.contexts.for_user)
+        host = getattr(client.app, 'state').service
+        cast('BlockingPortal', client.portal).call(host.conversations.runs.expire_approvals, host.threads, host.contexts.for_user)
         async def state():
             return (await host.application.entrypoint().runtime.get_run(task["id"])).state.value
-        assert client.portal.call(state) == "cancelled"
+        assert cast('BlockingPortal', client.portal).call(state) == "cancelled"
         assert not list(tmp_path.rglob("note.txt"))
 
 
@@ -260,14 +265,14 @@ def test_pending_run_cannot_gain_permission_from_user_setting_changes(tmp_path):
         _, task = ask(client, token)
         headers = {"Authorization": f"Bearer {token}"}
         client.put("/api/auth/execution-policy", headers=headers, json={"shell": "sandboxed"})
-        host = client.app.state.service
+        host = getattr(client.app, 'state').service
         user_id = client.get("/api/auth/session", headers=headers).json()["data"]["user_id"]
         async def policies():
             command = await host.application.entrypoint().runtime.session_store.get_start_command(task["id"])
             _, frozen = frozen_execution(command)
             live = await live_execution_policy(command, users=host.users, keys=host.credentials.keys,
                 catalog=host.catalog, settings=host.settings, user_id=user_id)
-            return frozen.shell, live.shell
-        assert client.portal.call(policies) == ("ask", "ask")
+            return frozen.shell, cast('ExecutionPolicy', live).shell
+        assert cast('BlockingPortal', client.portal).call(policies) == ("ask", "ask")
         client.put("/api/auth/execution-policy", headers=headers, json={"shell": "deny"})
-        assert client.portal.call(policies) == ("ask", "deny")
+        assert cast('BlockingPortal', client.portal).call(policies) == ("ask", "deny")

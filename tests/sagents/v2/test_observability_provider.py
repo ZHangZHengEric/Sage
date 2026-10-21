@@ -1,5 +1,15 @@
 """One selected provider owns collection, evidence and lifecycle."""
 
+from typing import cast
+from sagents.v2.package.manifest.runtime import CapabilityBinding
+
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from sagents.v2.runtime.observability.contracts import LogLevel
+    from sagents.v2.runtime.observability.provider import ObservabilityProvider
+    from typing import Any
+
 import json
 
 import pytest
@@ -20,7 +30,7 @@ from sagents.v2.runtime.observability import LogRecord
 )
 def test_removed_observation_capabilities_are_rejected(capability):
     with pytest.raises(ValueError, match="removed capability"):
-        RuntimeConfig(capabilities={capability: {"plugin": "custom.observer"}})
+        RuntimeConfig(capabilities=cast('dict[str, CapabilityBinding]', {capability: {"plugin": "custom.observer"}}))
 
 
 def test_inventory_only_offers_unified_observation_plugins():
@@ -58,11 +68,11 @@ async def test_provider_keeps_process_logs_without_trace_and_owns_shutdown(
         },
     )
     provider.logs.write(
-        LogRecord(level="info", event="hidden", message="info", component="test")
+        LogRecord(level=cast('LogLevel', "info"), event="hidden", message="info", component="test")
     )
     provider.logs.write(
         LogRecord(
-            level="error", event="startup.failed", message="failed", component="test"
+            level=cast('LogLevel', "error"), event="startup.failed", message="failed", component="test"
         )
     )
     await provider.close()
@@ -114,7 +124,7 @@ async def test_raw_evidence_is_independent_of_trace_sampling_and_content(monkeyp
     )
     provider.logs.write(
         LogRecord(
-            level="debug",
+            level=cast('LogLevel', "debug"),
             event="captured",
             message="raw model evidence",
             component="test",
@@ -122,7 +132,7 @@ async def test_raw_evidence_is_independent_of_trace_sampling_and_content(monkeyp
             run_id="r",
         )
     )
-    await provider.diagnostics.flush_raw()
+    await getattr(provider.diagnostics, 'flush_raw')()
     await provider.close()
     assert len(transports) == 2
     assert transports[0].options.sample_rate == 0
@@ -146,7 +156,7 @@ async def test_sqlite_evidence_retains_debug_independently_of_console_level(
     )
     provider.logs.write(
         LogRecord(
-            level="debug",
+            level=cast('LogLevel', "debug"),
             event="model.request.completed",
             message="model done",
             component="test",
@@ -156,7 +166,7 @@ async def test_sqlite_evidence_retains_debug_independently_of_console_level(
     )
     provider.logs.write(
         LogRecord(
-            level="error",
+            level=cast('LogLevel', "error"),
             event="other",
             message="other run",
             component="test",
@@ -239,7 +249,7 @@ async def test_desktop_same_provider_parameter_changes_require_restart(tmp_path)
             "owner",
         )
         assert selected["pending_restart"] is True
-        assert service.observability.config["log_level"] == "info"
+        assert cast("Any", service.observability).config["log_level"] == "info"
         entry = next(row for row in await service.component_inventory("owner")
                      if row["component"]["component_id"] == "observability.provider")
         assert entry["active"]["pending_restart"] is True
@@ -248,7 +258,7 @@ async def test_desktop_same_provider_parameter_changes_require_restart(tmp_path)
     restarted = DesktopV2Service(root=tmp_path)
     await restarted.start()
     try:
-        assert restarted.observability.config["log_level"] == "error"
+        assert cast("Any", restarted.observability).config["log_level"] == "error"
         entry = next(row for row in await restarted.component_inventory("owner")
                      if row["component"]["component_id"] == "observability.provider")
         assert entry["active"]["pending_restart"] is False

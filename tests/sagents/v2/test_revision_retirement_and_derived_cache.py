@@ -1,6 +1,13 @@
 """Cancelled retention cleanup cannot republish half-closed resources."""
 from __future__ import annotations
 
+from typing import TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    from sagents.v2.composition.loaded_agents import LoadedAgents
+
+from sagents.v2.composition.loaded_agents import ApplicationEntrypoint
+
 import asyncio
 from contextlib import asynccontextmanager
 import json
@@ -61,9 +68,9 @@ async def test_cancelled_load_keeps_retirement_isolated_and_old_handle_can_resto
         await cancel_load_during_retirement(app, gate)
         catalog = app._loaded_agents
         key = agent.package_id, agent.version
-        assert key not in catalog.revisions, 'cancelled cleanup published a half-closed revision'
-        assert key in catalog._retiring
-        waiting = asyncio.create_task(app.entrypoint().run_stream(command(agent, 'old-handle'), context(), agent=agent))
+        assert key not in cast('LoadedAgents', catalog).revisions, 'cancelled cleanup published a half-closed revision'
+        assert key in cast('LoadedAgents', catalog)._retiring
+        waiting = asyncio.create_task(cast(ApplicationEntrypoint, app.entrypoint()).run_stream(command(agent, 'old-handle'), context(), agent=agent))
         await asyncio.sleep(0)
         assert not waiting.done()
         gate.release.set()
@@ -74,7 +81,7 @@ async def test_cancelled_load_keeps_retirement_isolated_and_old_handle_can_resto
         finally:
             await stream.detach()
         assert original_application._closed and gate.closed
-        assert not catalog._retiring
+        assert not cast('LoadedAgents', catalog)._retiring
     finally:
         gate.release.set()
         if waiting is not None:
@@ -98,17 +105,17 @@ async def test_failed_retirement_stays_isolated_and_retries_before_restoring(tmp
         original_application = agent._application
         catalog = app._loaded_agents
         with pytest.raises(RuntimeError, match='failed to close'):
-            await catalog.prune_revisions()
+            await cast('LoadedAgents', catalog).prune_revisions()
         key = agent.package_id, agent.version
-        assert key not in catalog.revisions
-        assert key in catalog._retiring
-        stream = await app.entrypoint().run_stream(command(agent, 'retry-retirement'), context(), agent=agent)
+        assert key not in cast('LoadedAgents', catalog).revisions
+        assert key in cast('LoadedAgents', catalog)._retiring
+        stream = await cast(ApplicationEntrypoint, app.entrypoint()).run_stream(command(agent, 'retry-retirement'), context(), agent=agent)
         try:
             assert (await stream.wait()).state.value == 'completed'
         finally:
             await stream.detach()
         assert resource.attempts == 2 and original_application._closed
-        assert not catalog._retiring
+        assert not cast('LoadedAgents', catalog)._retiring
     finally:
         await app.close()
 
@@ -127,7 +134,7 @@ async def test_app_shutdown_joins_retirement_left_by_cancelled_loader(tmp_path):
         gate.release.set()
         await asyncio.wait_for(closing, 3)
         assert app._closed and original_application._closed and gate.closed
-        assert not app._loaded_agents._retiring
+        assert not cast('LoadedAgents', app._loaded_agents)._retiring
         assert not app._owned_resources
     finally:
         gate.release.set()
@@ -145,16 +152,16 @@ async def test_cancelled_old_handle_waiter_does_not_cancel_retirement(tmp_path):
         await cancel_load_during_retirement(app, gate)
         catalog = app._loaded_agents
         key = agent.package_id, agent.version
-        retirement = catalog._retiring[key].task
-        waiter = asyncio.create_task(catalog.restored(agent))
+        retirement = cast('LoadedAgents', catalog)._retiring[key].task
+        waiter = asyncio.create_task(cast('LoadedAgents', catalog).restored(agent))
         await asyncio.sleep(0)
         waiter.cancel()
         with pytest.raises(asyncio.CancelledError):
             await waiter
         assert not retirement.done()
-        assert key not in catalog.revisions
+        assert key not in cast('LoadedAgents', catalog).revisions
         gate.release.set()
-        restored = await asyncio.wait_for(catalog.restored(agent), 3)
+        restored = await asyncio.wait_for(cast('LoadedAgents', catalog).restored(agent), 3)
         assert restored is not agent
         assert restored.composition_hash == agent.composition_hash
         assert retirement.done() and not retirement.cancelled()
@@ -185,21 +192,21 @@ async def test_persistent_retirement_failure_is_owned_until_shutdown_retry(tmp_p
         key = agent.package_id, agent.version
         if retire_via == 'prune':
             with pytest.raises(RuntimeError, match='failed to close'):
-                await app._loaded_agents.prune_revisions()
+                await cast('LoadedAgents', app._loaded_agents).prune_revisions()
         else:
             await app.load_agent(another_package('test.healthy-trigger'))
         # The failing old revision stays owned, but unrelated new work must
         # still load and run through its own healthy resources.
         healthy = await app.load_agent(another_package('test.healthy-after-close-error'))
         assert resource.attempts == 1, 'unrelated admission retried quarantined teardown'
-        stream = await app.entrypoint().run_stream(command(healthy, 'healthy'), context(), agent=healthy)
+        stream = await cast(ApplicationEntrypoint, app.entrypoint()).run_stream(command(healthy, 'healthy'), context(), agent=healthy)
         try:
             assert (await stream.wait()).state.value == 'completed'
         finally:
             await stream.detach()
         with pytest.raises(RuntimeError, match='failed to close'):
-            await app._loaded_agents.restored(agent)
-        assert key not in app._loaded_agents.revisions
+            await cast('LoadedAgents', app._loaded_agents).restored(agent)
+        assert key not in cast('LoadedAgents', app._loaded_agents).revisions
         assert original_application in app._owned_resources
         with pytest.raises(RuntimeError, match='failed to close'):
             await app.close()
@@ -208,7 +215,7 @@ async def test_persistent_retirement_failure_is_owned_until_shutdown_retry(tmp_p
         resource.fail = False
         await app.close()
         assert app._closed and original_application._closed and resource.closed
-        assert not app._loaded_agents._retiring
+        assert not cast('LoadedAgents', app._loaded_agents)._retiring
         assert not app._owned_resources
     finally:
         resource.fail = False

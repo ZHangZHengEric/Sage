@@ -1,5 +1,11 @@
 """The public Agent Run route attaches images through a real MySQL SessionStore."""
 
+from typing import TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    from anyio.from_thread import BlockingPortal
+    from app.v2.server.conversations.agui.service import ConversationService
+
 import base64
 import hashlib
 import os
@@ -110,10 +116,10 @@ def test_public_run_analyzes_image_with_mysql_and_reads_it_after_restart(tmp_pat
                     ),
                 ),
                 SessionArtifactStore(
-                    restarted.conversations.application.entrypoint().runtime.session_store,
+                    cast('ConversationService', restarted.conversations).application.entrypoint().runtime.session_store,
                     details[1],
                 ),
             )
 
-        messages = client.portal.call(restore)
-        assert messages[0].content[0].uri == images[0].uri
+        messages = cast('BlockingPortal', client.portal).call(restore)
+        assert cast(ImageBlock, messages[0].content[0]).uri == images[0].uri

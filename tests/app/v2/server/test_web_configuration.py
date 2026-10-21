@@ -1,5 +1,10 @@
 """Web edits survive persistence and reach model construction and Run manifests."""
 
+from typing import TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    from sagents.v2.model.capability_contracts import ModelCapabilityProbeStatus
+
 from types import SimpleNamespace
 
 import pytest
@@ -23,7 +28,7 @@ def profile(record):
         route_fingerprint=record.fingerprint(),
         effective_max_output_tokens=2048,
         outcomes=tuple(
-            ModelCapabilityProbeOutcome(name=name, status="supported")
+            ModelCapabilityProbeOutcome(name=name, status=cast('ModelCapabilityProbeStatus', "supported"))
             for name in (
                 "connection",
                 "multimodal",
@@ -94,9 +99,9 @@ def test_options_and_profile_reach_provider_and_app_catalog(monkeypatch):
     )
     record.capability_profile = profile(record)
     provider = _build_catalog_provider(record)
-    assert provider.config.default_temperature == 0.4
-    assert provider.config.default_max_output_tokens == 2048
-    assert provider.config.max_output_tokens_field == "max_completion_tokens"
+    assert getattr(provider, 'config').default_temperature == 0.4
+    assert getattr(provider, 'config').default_max_output_tokens == 2048
+    assert getattr(provider, 'config').max_output_tokens_field == "max_completion_tokens"
     from app.v2.server.catalog.model_config import app_models
     from app.v2.server.catalog.records import UserCatalog
     catalog = app_models(UserCatalog(models=[record], agents=[], default_agent_id=""))
@@ -232,7 +237,7 @@ def test_stale_probe_plugin_version_is_not_advertised_or_applied(monkeypatch):
         update={"plugin_version": "obsolete"}
     )
     assert record.public_dict()["capability_profile"] is None
-    assert _build_catalog_provider(record).config.max_output_tokens_field == "auto"
+    assert getattr(_build_catalog_provider(record), 'config').max_output_tokens_field == "auto"
 
 
 @pytest.mark.asyncio

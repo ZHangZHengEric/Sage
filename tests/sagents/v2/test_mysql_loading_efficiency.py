@@ -1,4 +1,11 @@
 """Cold Session loading must not rebuild unrelated live state."""
+
+from typing import Any, TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    from asyncio import Task
+    from sagents.v2.runtime.session.contracts import SessionStore
+
 import asyncio
 from unittest.mock import AsyncMock, MagicMock
 from contextlib import asynccontextmanager
@@ -63,7 +70,7 @@ async def test_different_cold_sessions_fetch_concurrently_and_same_session_fetch
         await release.wait()
         return {first.session_id: a, second.session_id: b}[sid]
 
-    state._fetch_session = fetch
+    setattr(state, '_fetch_session', fetch)
     await asyncio.wait_for(asyncio.gather(
         state._ensure_session_loaded(first.session_id),
         state._ensure_session_loaded(second.session_id),
@@ -160,7 +167,7 @@ async def test_cancelled_bulk_load_releases_locks_and_cache_pins_for_retry():
     async def blocked_fetch(_ids):
         entered.set()
         await asyncio.Event().wait()
-    state._fetch_sessions = blocked_fetch
+    setattr(state, '_fetch_sessions', blocked_fetch)
     async def load():
         async with state._session_cache.operation():
             await state._ensure_sessions_loaded([handle.session_id])
@@ -194,7 +201,7 @@ async def test_authorized_history_page_reads_only_the_page_without_installing_se
 
     state._pool = Pool()
     state._fetch_session = AsyncMock(side_effect=AssertionError("history installed entire aggregate"))
-    page = await AuthorizedSessionAccess(state).read_session_event_page(
+    page = await AuthorizedSessionAccess(cast('SessionStore', state)).read_session_event_page(
         handle.session_id, CONTEXT, after_sequence=2, limit=1,
     )
     assert page.total == 3 and page.after_sequence == 2
@@ -243,7 +250,7 @@ async def test_real_mysql_history_pages_and_latest_journal_command(mysql_dsn):
         await store.create_run(second_command, CONTEXT)
         await store.close()
         store = MysqlSessionStore(mysql_dsn, table_prefix=prefix)
-        access = AuthorizedSessionAccess(store)
+        access = AuthorizedSessionAccess(cast('SessionStore', store))
         page = await access.read_session_event_page(created.handle.session_id, CONTEXT, limit=2)
         assert len(page.events) == 2
         assert page.events[-1].session_sequence == page.total
@@ -295,10 +302,10 @@ async def test_derived_query_keeps_session_pinned_until_database_work_finishes(o
     loaded, release = asyncio.Event(), asyncio.Event()
     async def pause_loaded(sid, **kwargs):
         await original(sid, **kwargs)
-        if sid == a.session_id and asyncio.current_task().get_name() == 'derived-query':
+        if sid == a.session_id and cast('Task[Any]', asyncio.current_task()).get_name() == 'derived-query':
             loaded.set()
             await release.wait()
-    state._ensure_session_loaded = pause_loaded
+    setattr(state, '_ensure_session_loaded', pause_loaded)
     call = getattr(state, f'{operation}_derived_state')
     args = (a.session_id, 'todo', 'plan') + (({'step': 1},) if operation == 'put' else ())
     task = asyncio.create_task(call(*args), name='derived-query')
@@ -395,7 +402,7 @@ async def test_forced_reload_eviction_preserves_in_use_lock_and_subscriber_ident
     state._install_session_locked(payload)
     lock = state._session_locks[handle.session_id] = asyncio.Lock()
     subscriber = object()
-    state._subscribers[handle.run_id] = {subscriber}
+    cast('dict[str, Any]', state._subscribers)[handle.run_id] = {subscriber}
     async with state._session_cache.operation():
         state._session_cache.pin(handle.session_id)
         async with lock:

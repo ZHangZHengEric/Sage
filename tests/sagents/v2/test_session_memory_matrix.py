@@ -1,5 +1,11 @@
 from __future__ import annotations
 
+from typing import TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    from sagents.v2.session_memory.contracts import SessionMemoryProvider
+    from sagents.v2.tool.official.runtime import OfficialToolRuntime
+
 from types import SimpleNamespace
 
 import pytest
@@ -251,10 +257,10 @@ async def test_search_memory_can_return_session_results_without_long_term_provid
         ),
     )
     result = await MemoryTools(
-        SimpleNamespace(
+        cast('OfficialToolRuntime', SimpleNamespace(
             memory_service=None,
             session_memory_service=_SessionSearch(),
-        )
+        ))
     ).search_memory("release codename", invocation=invocation)
 
     assert result["long_term_results"] == []
@@ -343,7 +349,7 @@ async def test_session_memory_does_not_revisit_an_observed_run_prefix():
             )
 
     provider = _RecordingProvider()
-    service = CountingSessionMemoryService(provider)
+    service = CountingSessionMemoryService(cast('SessionMemoryProvider', provider))
 
     def message(index: int) -> ModelMessage:
         return ModelMessage(

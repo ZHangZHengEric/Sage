@@ -5,6 +5,11 @@ the distributed plugin's shared visibility, idempotency, quotas, remote
 cancellation and refusal to publish after a local worker loses its lease.
 """
 
+from typing import TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    from sagents.v2.runtime.execution.sandbox.provider import SandboxHandle
+
 import asyncio
 import json
 from types import SimpleNamespace
@@ -521,7 +526,7 @@ async def test_shell_tools_refuse_another_runs_remote_job_before_output_or_cance
     first, second = jobs_pair(runner)
     handle = await first.submit(spec())
     await asyncio.wait_for(started.wait(), 2)
-    forbidden = OfficialToolRuntime(SimpleNamespace(ref=SimpleNamespace(owner_run_id="run-b")),
+    forbidden = OfficialToolRuntime(cast('SandboxHandle', SimpleNamespace(ref=SimpleNamespace(owner_run_id="run-b"))),
                                     SandboxGrantIssuer(), job_runtime=second)
     original_read = second._redis.lrange
     reads = []
@@ -542,7 +547,7 @@ async def test_shell_tools_refuse_another_runs_remote_job_before_output_or_cance
     second._redis.lrange = original_read
     assert not stopped.is_set()
     assert (await first.inspect(handle.job_id)).state == JobState.RUNNING
-    authorized = OfficialToolRuntime(SimpleNamespace(ref=SimpleNamespace(owner_run_id="run-a")),
+    authorized = OfficialToolRuntime(cast('SandboxHandle', SimpleNamespace(ref=SimpleNamespace(owner_run_id="run-a"))),
                                      SandboxGrantIssuer(), job_runtime=second)
     running = await authorized.await_shell(handle.job_id, block_until_ms=0)
     assert running["status"] == "running" and running["stdout"] == "private-run-output"

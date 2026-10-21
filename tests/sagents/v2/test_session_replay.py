@@ -1,3 +1,9 @@
+
+from typing import TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    from sagents.v2.runtime.session.journal import CoordinatorCommandSnapshot
+
 from copy import deepcopy
 from datetime import datetime, timezone
 import json
@@ -21,10 +27,10 @@ def replay_history():
     base = SessionAggregateSnapshotV2(sessions=(SessionRowSnapshot(
         session_id="session_1", revision=1, last_sequence=0,
         created_at=now, updated_at=now, revision_sequences={"0": 0, "1": 0},
-    ),), coordinator_command_results=(
+    ),), coordinator_command_results=cast('tuple[CoordinatorCommandSnapshot, ...]', (
         {"idempotency_key": "keep", "request_digest": "first", "result_revision": 1},
         {"idempotency_key": "remove", "request_digest": "second", "result_revision": 1},
-    ))
+    )))
 
     def head(revision):
         return {**base.sessions[0].model_dump(mode="json"), "revision": revision,

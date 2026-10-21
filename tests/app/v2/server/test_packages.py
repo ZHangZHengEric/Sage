@@ -1,3 +1,12 @@
+
+from typing import Any, TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    from app.v2.server.identity.users import UserRecord
+    from app.v2.server.packages.management import ServerAgentManagement
+    from app.v2.server.packages.queries import ServerPackageQueries
+    from sagents.v2.tool.plugins.a2a import A2ATransport
+
 import pytest
 
 from tests.app.v2.server.conftest import register_and_login
@@ -310,8 +319,8 @@ async def test_pending_package_recovers_on_server_restart(tmp_path):
     first = make_test_service(tmp_path)
     await first.start()
     user = await first.users.admin()
-    context = first.contexts.for_user(user.user_id)
-    data = await first.package_queries.template(context)
+    context = first.contexts.for_user(cast('UserRecord', user).user_id)
+    data = await cast('ServerPackageQueries', first.package_queries).template(context)
     data["manifest"]["agents"]["assistant"]["entrypoint"] = {
         "type": "flow",
         "flow": "main",
@@ -335,15 +344,15 @@ async def test_pending_package_recovers_on_server_restart(tmp_path):
         }
     }
     try:
-        saved = await first.agent_management.save(
+        saved = await cast('ServerAgentManagement', first.agent_management).save(
             AgentPackageBundle.model_validate(data), context
         )
-        await first.agent_management.run(
+        await cast('ServerAgentManagement', first.agent_management).run(
             saved["ref"], "assistant", "ask", "restart", context
         )
         async with asyncio.timeout(5):
             while True:
-                pending = await first.agent_management.status("restart", context)
+                pending = await cast('ServerAgentManagement', first.agent_management).status("restart", context)
                 if pending["needs_attention"]:
                     break
                 await asyncio.sleep(0.01)
@@ -354,23 +363,23 @@ async def test_pending_package_recovers_on_server_restart(tmp_path):
     await second.start()
     try:
         async with asyncio.timeout(5):
-            while second.agent_management.capacity()["applications"] == 0:
+            while cast('ServerAgentManagement', second.agent_management).capacity()["applications"] == 0:
                 await asyncio.sleep(0.01)
-        pending = await second.agent_management.status("restart", context)
-        await second.agent_management.control(
+        pending = await cast('ServerAgentManagement', second.agent_management).status("restart", context)
+        await cast('ServerAgentManagement', second.agent_management).control(
             "restart",
             "reply",
             context,
             decision="submit",
-            interaction_id=pending["interaction"]["interaction_id"],
+            interaction_id=cast('dict[str, Any]', pending["interaction"])["interaction_id"],
             payload={"text": "meters"},
         )
         async with asyncio.timeout(5):
-            while not (await second.agent_management.status("restart", context))[
+            while not (await cast('ServerAgentManagement', second.agent_management).status("restart", context))[
                 "terminal"
             ]:
                 await asyncio.sleep(0.01)
-        assert len(await second.agent_management.list_runs(context)) == 1
+        assert len(await cast('ServerAgentManagement', second.agent_management).list_runs(context)) == 1
     finally:
         await second.close()
 
@@ -558,7 +567,7 @@ def test_a_package_run_can_reach_the_tenant_s_own_a2a_peers(tmp_path):
         )
     )
     service = make_test_service(tmp_path, model_provider=provider)
-    service.a2a_plugins = A2APluginCache(transport=transport)
+    service.a2a_plugins = A2APluginCache(transport=cast('A2ATransport | None', transport))
 
     with TestClient(create_app(service=service)) as client:
         headers = {"Authorization": f"Bearer {register_and_login(client)}"}

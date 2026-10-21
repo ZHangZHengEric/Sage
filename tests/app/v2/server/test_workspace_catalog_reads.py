@@ -1,5 +1,7 @@
 """Workspace lists read only their catalog section, independent of user count."""
 
+from typing import cast
+
 from unittest.mock import patch
 
 import pytest
@@ -38,8 +40,8 @@ async def test_execution_policy_read_is_scoped_lightweight_and_observes_revocati
         assert await store.get_execution_policy("bob", "agent") is None
         async with database.transaction() as session:
             row = await session.get(AgentRow, "agent")
-            row.execution_policy = {"shell": "deny"}
-        assert (await store.get_execution_policy("alice", "agent")).shell == "deny"
+            cast('AgentRow', row).execution_policy = {"shell": "deny"}
+        assert (cast('ExecutionPolicy', await store.get_execution_policy("alice", "agent"))).shell == "deny"
         async with database.transaction() as session:
             await session.delete(await session.get(AgentRow, "agent"))
         assert await store.get_execution_policy("alice", "agent") is None

@@ -1,5 +1,9 @@
 """Desktop composition responsibilities can be exercised without a running host."""
 
+from typing import Any, cast
+
+from sagents.v2.package.manifest.runtime import CapabilitySelection
+
 from copy import deepcopy
 
 import pytest
@@ -57,7 +61,7 @@ def test_verified_legacy_profile_keeps_request_contract(protocol, thinking):
     assert route.request.reasoning_effort == ("high" if thinking else None)
     expected = {} if thinking else {"thinking": {"type": "disabled"}}
     if protocol == "openai-chat-completions":
-        expected["max_output_tokens_field"] = "max_completion_tokens"
+        cast('dict[str, Any]', expected)["max_output_tokens_field"] = "max_completion_tokens"
     assert route.request.extra == expected
 
 
@@ -105,7 +109,7 @@ def test_component_plan_uses_snapshot_precedence_without_mutating_inputs(tmp_pat
         summary_store_plugin_id="sage.context.summary-store.session-derived",
     )
     assert (
-        plan.manifest.runtime.capabilities["tool.selection-policy"].plugin
+        cast(CapabilitySelection, plan.manifest.runtime.capabilities["tool.selection-policy"]).plugin
         == "sage.tool-selection.lexical"
     )
     assert plan.tool_selection_config["max_visible_tools"] == 7

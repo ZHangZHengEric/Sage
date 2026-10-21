@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+from typing import cast
+
+from sagents.v2.contracts.items import JsonBlock
+
 import json
 import sys
 from types import SimpleNamespace
@@ -71,7 +75,7 @@ async def test_runtime_directories_work_through_official_file_tools_and_context(
             call("file_read", {"file_path": path}, index=index * 2 + 1), CONTEXT
         )
         assert prefix in str(result.content)
-    description = plugin.runtime.sandbox.describe_environment()
+    description = getattr(plugin.runtime.sandbox, 'describe_environment')()
     segments = await SandboxEnvironmentContextProvider(plugin.runtime.sandbox).segments(
         None
     )
@@ -112,11 +116,11 @@ print(tempfile.gettempdir())'
             ),
             CONTEXT,
         )
-        output = result.content[0].value
+        output = cast(JsonBlock, result.content[0]).value
         assert output["success"], output
         values = json.loads(output["stdout"].splitlines()[0])
         assert values == {
-            k: plugin.runtime.sandbox.describe_environment()["environment"][k]
+            k: getattr(plugin.runtime.sandbox, 'describe_environment')()["environment"][k]
             for k in values
         }
         for index, key in enumerate(("HOME", "TMPDIR", "XDG_CACHE_HOME")):
@@ -145,7 +149,7 @@ print(tempfile.gettempdir())'
             ),
             CONTEXT,
         )
-        assert cwd.content[0].value["success"]
+        assert cast(JsonBlock, cwd.content[0]).value["success"]
     finally:
         await plugin.executor.release_run("run_1")
 

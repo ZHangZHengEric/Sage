@@ -5,6 +5,10 @@ The scripted model and in-process MCP transport need no API keys or network.
 The tool router is host application code, not a Desktop service subclass.
 """
 
+from typing import cast
+
+from sagents.v2.composition.loaded_agents import ApplicationEntrypoint
+
 import asyncio
 import json
 import tempfile
@@ -254,7 +258,7 @@ async def run_example(root: Path, *, cancel_first: bool = False):
                 },
             )
             streams.append(
-                await app.entrypoint().run_stream(
+                await cast(ApplicationEntrypoint, app.entrypoint()).run_stream(
                     StartRun(
                         agent_id=agent.id,
                         session_id=session,

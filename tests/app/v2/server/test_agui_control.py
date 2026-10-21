@@ -1,5 +1,10 @@
 """Browser Run cancellation uses the existing runtime and preserves Session history."""
 
+from typing import TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    from anyio.from_thread import BlockingPortal
+
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
 
@@ -46,7 +51,7 @@ def test_browser_steering_is_delivered_once_at_the_next_model_step(tmp_path):
             "threadId": "live", "runId": "live-run",
             "messages": [{"id": "initial", "role": "user", "content": "开始检查"}],
         })
-        client.portal.call(model.started.wait)
+        cast('BlockingPortal', client.portal).call(model.started.wait)
         body = {"runId": "live-run", "messageId": "m" * 128, "text": "补充要求：使用中文"}
         try:
             accepted = client.post("/api/threads/live/steer", headers=headers, json=body)
@@ -59,7 +64,7 @@ def test_browser_steering_is_delivered_once_at_the_next_model_step(tmp_path):
             assert client.post("/api/threads/live/steer", headers=headers, json={**body, "runId": "other"}).status_code == 404
             assert client.post("/api/threads/live/steer", headers=headers, json={**body, "text": "  "}).status_code == 422
         finally:
-            client.portal.call(model.release.set)
+            cast('BlockingPortal', client.portal).call(model.release.set)
         response = running.result(timeout=15)
         assert 'sage.steer.applied' in response.text
         assert response.text.count('"delta":"补充要求：使用中文"') == 1
@@ -83,7 +88,7 @@ def test_browser_cancel_ends_a_live_stream_without_waiting_for_the_model(tmp_pat
             "threadId": "live", "runId": "live-run",
             "messages": [{"id": "initial", "role": "user", "content": "开始检查"}],
         })
-        client.portal.call(model.started.wait)
+        cast('BlockingPortal', client.portal).call(model.started.wait)
         try:
             cancelled = client.post("/api/threads/live/cancel", headers=headers, json={"runId": "live-run"})
             assert cancelled.status_code == 200, cancelled.text
@@ -91,7 +96,7 @@ def test_browser_cancel_ends_a_live_stream_without_waiting_for_the_model(tmp_pat
             assert 'sage.run.cancelled' in response.text
             assert 'RUN_FINISHED' not in response.text
         finally:
-            client.portal.call(model.release.set)
+            cast('BlockingPortal', client.portal).call(model.release.set)
 
 
 def test_browser_cancel_is_exact_owned_idempotent_and_allows_the_next_run(tmp_path):

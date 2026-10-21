@@ -1,5 +1,9 @@
 """Transport read deadlines must not reintroduce SDK limits on long tools."""
 
+from typing import cast
+
+from mcp.shared._httpx_utils import McpHttpClientFactory
+
 import asyncio
 from contextlib import asynccontextmanager
 
@@ -120,7 +124,7 @@ async def test_real_http_sdk_waits_for_long_json_tool_response(monkeypatch):
         return httpx.AsyncClient(transport=httpx.MockTransport(handle), **kwargs)
 
     def transport(*args, **kwargs):
-        return original(*args, **kwargs, httpx_client_factory=client_factory)
+        return original(*args, **kwargs, httpx_client_factory=cast(McpHttpClientFactory, client_factory))
 
     monkeypatch.setattr(mcp.client.streamable_http, "streamablehttp_client", transport)
     async with sdk_session(McpServerConfig(

@@ -5,6 +5,16 @@ These regressions protect the valid older Server composition identity, including
 cold storage replay, and the observable A2A GetTask/ListTasks agreement.
 """
 
+from typing import TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    from app.v2.server.conversations.composition import RunComposition
+    from sagents.v2.agent.management.contracts import AgentPackageBundle
+    from sagents.v2.contracts.principals import PrincipalType
+    from sagents.v2.runtime.session.contracts import SessionStore
+
+from sagents.v2.composition.contracts import ApplicationResource
+
 import asyncio
 import os
 from datetime import datetime, timezone
@@ -24,7 +34,7 @@ from sagents.v2.runtime.session.state import SessionStoreCoordinator
 
 
 CONTEXT = RequestContext(actor=ActorRef(
-    principal_id="owner", principal_type="user", tenant_id="owner",
+    principal_id="owner", principal_type=cast('PrincipalType', "user"), tenant_id="owner",
 ))
 
 
@@ -35,16 +45,16 @@ def legacy_command():
     from app.v2.server.conversations.composition import composition_metadata, load_composition
 
     agent = AgentRecord(id="catalog-a", name="Catalog Agent")
-    package = agent.package.model_dump(mode="json")
+    package = cast('AgentPackageBundle', agent.package).model_dump(mode="json")
     package["manifest"]["metadata"]["id"] = "compiled.package"
-    agent = AgentRecord(id="catalog-a", name="Catalog Agent", package=package)
+    agent = AgentRecord(id="catalog-a", name="Catalog Agent", package=cast('AgentPackageBundle | None', package))
     command = StartRun(
         agent_id="compiled.package", session_id="legacy", input=(),
         idempotency_key="legacy", resolved_spec_hash="sha256:legacy",
         config=RunConfig(enabled_skills=(), metadata=composition_metadata(agent=agent, skills=(), mcp_servers=())),
     )
     assert "server_v2.execution" not in command.config.metadata
-    assert load_composition(command, user_id="owner").agent.id == "catalog-a"
+    assert cast('RunComposition', load_composition(command, user_id="owner")).agent.id == "catalog-a"
     return command
 
 
@@ -91,7 +101,7 @@ async def identity_store(request, tmp_path):
     elif backend == "filesystem":
         store = FilesystemSessionStore(tmp_path / "state")
     elif backend == "mysql":
-        store = _MysqlSessionState(mysql_dsn, table_prefix=prefix)
+        store = _MysqlSessionState(cast(str, mysql_dsn), table_prefix=prefix)
     else:
         store = RedisMysqlSessionStore(mysql_dsn, table_prefix=prefix, redis_url=redis_url,
             key_prefix=prefix, archive_interval_seconds=3600)
@@ -104,9 +114,9 @@ async def identity_store(request, tmp_path):
         yield backend, store, tmp_path / "state"
     finally:
         if backend != "memory":
-            await store.close()
+            await cast(ApplicationResource, store).close()
         if backend in {"mysql", "redis"}:
-            cleanup = _MysqlSessionState(mysql_dsn, table_prefix=prefix)
+            cleanup = _MysqlSessionState(cast(str, mysql_dsn), table_prefix=prefix)
             try:
                 await cleanup._ensure_ready()
                 async with cleanup._writer_connection() as connection:
@@ -118,7 +128,7 @@ async def identity_store(request, tmp_path):
                 await cleanup.close()
         if backend == "redis":
             from redis.asyncio import Redis
-            client = Redis.from_url(redis_url, decode_responses=True)
+            client = Redis.from_url(cast(str, redis_url), decode_responses=True)
             try:
                 keys = [key async for key in client.scan_iter(match=f"{prefix}:*")]
                 if keys:
@@ -165,7 +175,7 @@ async def test_a2a_legacy_task_get_and_list_share_the_authorized_catalog_agent()
     threads = MemoryThreadIndex()
     await threads.upsert("legacy", "owner", agent_id="catalog-a")
     api = A2AService(threads=threads, catalog=None, admission=None, runs=None, application=None,
-        session_access=AuthorizedSessionAccess(store), context_for=lambda *_: CONTEXT,
+        session_access=AuthorizedSessionAccess(cast('SessionStore', store)), context_for=lambda *_: CONTEXT,
         language="en", public_base_url="")
     own = ApiKeyRecord(key_id="own", owner_user_id="owner", agent_id="catalog-a")
     foreign = own.model_copy(update={"key_id": "foreign", "agent_id": "other-agent"})

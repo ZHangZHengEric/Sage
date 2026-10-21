@@ -1,6 +1,19 @@
 """Scheduled recovery releases capacity and survives process resource rebuilds."""
 from __future__ import annotations
 
+from typing import TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    from sagents.v2.agent.modes.loop_factory import ModelProviderFactory
+    from sagents.v2.model.contracts import ModelEventKind
+    from sagents.v2.runtime.execution.scheduler.contracts import WorkerLease
+    from sagents.v2.runtime.session.contracts import SessionStore
+
+from datetime import datetime
+
+from sagents.v2.model.provider import ModelProvider
+from sagents.v2.contracts.events import RunEventData
+
 import asyncio
 
 import pytest
@@ -40,7 +53,7 @@ TOOL = ToolDefinition(name="save", description="Save", input_schema={"type": "ob
 
 
 def completed(text="done", calls=()):
-    return ScriptedModelStep(events=(ModelStreamEvent(kind="completed", response=ModelResponse(
+    return ScriptedModelStep(events=(ModelStreamEvent(kind=cast('ModelEventKind', "completed"), response=ModelResponse(
         response_id="response", text=text, tool_calls=calls,
         finish_reason="tool_calls" if calls else "stop",
     )),))
@@ -81,7 +94,7 @@ async def wait_for_deferred(runtime, run_id):
 @pytest.mark.asyncio
 async def test_outage_releases_the_only_worker_and_tenant_slot(monkeypatch):
     monkeypatch.setattr(AgentLoopEngine, "_PROVIDER_RETRY_BASE_SECONDS", 0.3)
-    runtime = HarnessRuntime(EphemeralSessionStore())
+    runtime = HarnessRuntime(cast('SessionStore', EphemeralSessionStore()))
     scheduler = InMemoryScheduler()
     dispatcher = LocalWorkerDispatcher(scheduler, max_concurrent_runs=1, max_concurrent_runs_per_tenant=1)
     first = await runtime.start_run(command("offline"), CONTEXT)
@@ -108,7 +121,7 @@ async def test_outage_releases_the_only_worker_and_tenant_slot(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_stage_rollover_keeps_completed_writes_and_continues_without_approval():
-    runtime = HarnessRuntime(EphemeralSessionStore())
+    runtime = HarnessRuntime(cast('SessionStore', EphemeralSessionStore()))
     scheduler = InMemoryScheduler()
     dispatcher = LocalWorkerDispatcher(scheduler, max_concurrent_runs=1)
     handle = await runtime.start_run(command("stages", max_steps=1), CONTEXT)
@@ -127,7 +140,7 @@ async def test_stage_rollover_keeps_completed_writes_and_continues_without_appro
         checkpoint = await runtime.session_store.get_latest_checkpoint(handle.run_id)
         assert AgentLoopCheckpointCodec.decode(checkpoint.state).stage_number == 3
         events = await runtime.session_store.read_events(handle.run_id)
-        assert len([e for e in events if e.type == "step.retry_scheduled" and e.data.state == "stage_scheduled"]) == 2
+        assert len([e for e in events if e.type == "step.retry_scheduled" and cast(RunEventData, e.data).state == "stage_scheduled"]) == 2
         assert not [e for e in events if e.type == "interaction.requested"]
     finally:
         await dispatcher.close()
@@ -138,7 +151,7 @@ async def test_stage_rollover_keeps_completed_writes_and_continues_without_appro
 async def test_graceful_shutdown_preserves_delayed_run_and_restart_recovers(monkeypatch, tmp_path):
     monkeypatch.setattr(AgentLoopEngine, "_PROVIDER_RETRY_BASE_SECONDS", 0.4)
     store = FilesystemSessionStore(tmp_path / "sessions")
-    runtime = HarnessRuntime(store)
+    runtime = HarnessRuntime(cast('SessionStore', store))
     scheduler = FilesystemScheduler(tmp_path / "scheduler")
     dispatcher = LocalWorkerDispatcher(scheduler, max_concurrent_runs=1)
     handle = await runtime.start_run(command("restart"), CONTEXT)
@@ -154,7 +167,7 @@ async def test_graceful_shutdown_preserves_delayed_run_and_restart_recovers(monk
     await store.close()
 
     restored_store = FilesystemSessionStore(tmp_path / "sessions")
-    restored_runtime = HarnessRuntime(restored_store)
+    restored_runtime = HarnessRuntime(cast('SessionStore', restored_store))
     restored_scheduler = FilesystemScheduler(tmp_path / "scheduler")
     restored = LocalWorkerDispatcher(restored_scheduler, max_concurrent_runs=1)
     model = ScriptedModelProvider((completed("recovered"),))
@@ -167,7 +180,7 @@ async def test_graceful_shutdown_preserves_delayed_run_and_restart_recovers(monk
                 await asyncio.sleep(0.01)
             return run
         result = await asyncio.wait_for(settled(), 2)
-        assert result.updated_at >= due
+        assert cast('datetime', result.updated_at) >= cast('datetime', due)
         assert len(model.requests) == 1
         assert not [e for e in await restored_store.read_events(handle.run_id) if e.type == "run.failed"]
     finally:
@@ -182,7 +195,7 @@ async def test_team_child_outage_releases_root_worker_and_preserves_siblings(mon
     from sagents.v2.agent.multi_agent import AgentDescriptor, AgentMode, AgentRegistry
 
     monkeypatch.setattr(AgentLoopEngine, "_PROVIDER_RETRY_BASE_SECONDS", 0.4)
-    runtime = HarnessRuntime(EphemeralSessionStore())
+    runtime = HarnessRuntime(cast('SessionStore', EphemeralSessionStore()))
     scheduler = InMemoryScheduler()
     dispatcher = LocalWorkerDispatcher(scheduler, max_concurrent_runs=1, max_concurrent_runs_per_tenant=1)
     root = await runtime.start_run(command("team"), CONTEXT)
@@ -211,11 +224,11 @@ async def test_team_child_outage_releases_root_worker_and_preserves_siblings(mon
     def build(run_id):
         def compose(descriptor, run_id, catalog, executor):
             return AgentLoopEngine(
-                runtime=runtime, model=models[descriptor.agent_id], tool_catalog=catalog, tool_executor=executor,
+                runtime=runtime, model=cast(ModelProvider, models[descriptor.agent_id]), tool_catalog=catalog, tool_executor=executor,
                 tool_policy=DefaultToolPolicy(approval_strategy=ApprovalStrategy.AUTO_APPROVE),
             )
         factory = ModeAwareAgentLoopFactory(
-            runtime=runtime, model_factory=lambda descriptor, _: models[descriptor.agent_id],
+            runtime=runtime, model_factory=cast('ModelProviderFactory', lambda descriptor, _: models[descriptor.agent_id]),
             base_catalog=InMemoryToolCatalog((TOOL,)), base_executor=InMemoryToolExecutor({"save": TOOL}, {"save": save}),
             registry=AgentRegistry(tuple(descriptors.values())), resolved_spec_hash="sha256:autonomous", loop_composer=compose,
         )
@@ -246,7 +259,7 @@ async def test_team_child_outage_releases_root_worker_and_preserves_siblings(mon
 @pytest.mark.asyncio
 async def test_cancel_during_scheduled_wait_settles_caller_without_retry(monkeypatch):
     monkeypatch.setattr(AgentLoopEngine, "_PROVIDER_RETRY_BASE_SECONDS", 60)
-    runtime = HarnessRuntime(EphemeralSessionStore())
+    runtime = HarnessRuntime(cast('SessionStore', EphemeralSessionStore()))
     scheduler = InMemoryScheduler()
     dispatcher = LocalWorkerDispatcher(scheduler, max_concurrent_runs=1)
     handle = await runtime.start_run(command("cancel"), CONTEXT)
@@ -271,7 +284,7 @@ async def test_pause_interrupts_a_scheduled_wait_without_waiting_for_retry(monke
     from sagents.v2.contracts.commands import PauseRun
 
     monkeypatch.setattr(AgentLoopEngine, "_PROVIDER_RETRY_BASE_SECONDS", 60)
-    runtime = HarnessRuntime(EphemeralSessionStore())
+    runtime = HarnessRuntime(cast('SessionStore', EphemeralSessionStore()))
     scheduler = InMemoryScheduler()
     dispatcher = LocalWorkerDispatcher(scheduler, max_concurrent_runs=1)
     handle = await runtime.start_run(command("pause"), CONTEXT)
@@ -348,7 +361,7 @@ async def test_hard_kill_after_checkpoint_before_lease_release_recovers(tmp_path
         async def ready():
             while not (tmp_path / "ready").exists():
                 if process.returncode is not None:
-                    raise AssertionError((await process.stderr.read()).decode())
+                    raise AssertionError((await cast(asyncio.StreamReader, process.stderr).read()).decode())
                 await asyncio.sleep(0.01)
         await asyncio.wait_for(ready(), 10)
         process.kill()
@@ -356,7 +369,7 @@ async def test_hard_kill_after_checkpoint_before_lease_release_recovers(tmp_path
         run_id = json.loads((tmp_path / "identity.json").read_text())["run_id"]
         store = FilesystemSessionStore(tmp_path / "sessions")
         scheduler = FilesystemScheduler(tmp_path / "scheduler")
-        runtime = HarnessRuntime(store)
+        runtime = HarnessRuntime(cast('SessionStore', store))
         dispatcher = LocalWorkerDispatcher(scheduler, max_concurrent_runs=1)
         model = ScriptedModelProvider((completed("recovered"),))
         writes = []
@@ -371,7 +384,7 @@ async def test_hard_kill_after_checkpoint_before_lease_release_recovers(tmp_path
                     await asyncio.sleep(0.01)
                 return run
             result = await asyncio.wait_for(settled(), 5)
-            assert result.updated_at >= due
+            assert cast('datetime', result.updated_at) >= cast('datetime', due)
             assert not writes
             assert len(model.requests) == 1
             if boundary == "stage":
@@ -389,7 +402,7 @@ async def test_hard_kill_after_checkpoint_before_lease_release_recovers(tmp_path
 
 @pytest.mark.asyncio
 async def test_explicit_stage_limit_still_requests_a_decision():
-    runtime = HarnessRuntime(EphemeralSessionStore())
+    runtime = HarnessRuntime(cast('SessionStore', EphemeralSessionStore()))
     scheduler = InMemoryScheduler()
     dispatcher = LocalWorkerDispatcher(scheduler, max_concurrent_runs=1)
     handle = await runtime.start_run(command("bounded-stage", max_steps=1, max_stages=1), CONTEXT)
@@ -411,7 +424,7 @@ async def test_explicit_stage_limit_still_requests_a_decision():
 @pytest.mark.asyncio
 async def test_explicit_deadline_wakes_scheduled_retry_and_is_not_bypassed(monkeypatch):
     monkeypatch.setattr(AgentLoopEngine, "_PROVIDER_RETRY_BASE_SECONDS", 60)
-    runtime = HarnessRuntime(EphemeralSessionStore())
+    runtime = HarnessRuntime(cast('SessionStore', EphemeralSessionStore()))
     scheduler = InMemoryScheduler()
     dispatcher = LocalWorkerDispatcher(scheduler, max_concurrent_runs=1)
     handle = await runtime.start_run(command("deadline", deadline_seconds=0.1), CONTEXT)
@@ -421,7 +434,7 @@ async def test_explicit_deadline_wakes_scheduled_retry_and_is_not_bypassed(monke
         future = await dispatcher.submit(agent, handle, CONTEXT)
         run = await asyncio.wait_for(future, 2)
         assert run.state == RunState.FAILED
-        assert (await runtime.get_run_result(run.run_id)).error.code == "budget.deadline"
+        assert cast(RuntimeErrorInfo, (await runtime.get_run_result(run.run_id)).error).code == "budget.deadline"
         assert len(model.requests) == 1
     finally:
         await dispatcher.close()
@@ -442,14 +455,14 @@ async def test_initial_tool_selection_outage_retries_without_user_input(monkeypa
                 raise SageV2Error(ERROR)
             await super().prepare(context)
 
-    runtime = HarnessRuntime(EphemeralSessionStore())
+    runtime = HarnessRuntime(cast('SessionStore', EphemeralSessionStore()))
     scheduler = InMemoryScheduler()
     dispatcher = LocalWorkerDispatcher(scheduler, max_concurrent_runs=1)
     handle = await runtime.start_run(command("initial-selection"), CONTEXT)
     model = ScriptedModelProvider((completed(),))
     selection = Selection()
     agent = SAgent._from_composition(runtime=runtime, driver_factory=lambda _: AgentLoopEngine(
-        runtime=runtime, model=model, tool_catalog=InMemoryToolCatalog(()),
+        runtime=runtime, model=cast(ModelProvider, model), tool_catalog=InMemoryToolCatalog(()),
         tool_executor=InMemoryToolExecutor({}, {}), tool_selection_policy=selection,
     ))
     try:
@@ -468,7 +481,7 @@ async def test_recoverable_environment_error_defers_again_instead_of_failing_run
     from sagents.v2.contracts.errors import SageV2Error
 
     monkeypatch.setattr(AgentLoopEngine, "_PROVIDER_RETRY_BASE_SECONDS", 0.01)
-    runtime = HarnessRuntime(EphemeralSessionStore())
+    runtime = HarnessRuntime(cast('SessionStore', EphemeralSessionStore()))
     scheduler = InMemoryScheduler()
     dispatcher = LocalWorkerDispatcher(scheduler, max_concurrent_runs=1)
     handle = await runtime.start_run(command("environment"), CONTEXT)
@@ -519,7 +532,7 @@ async def test_cancelling_worker_drains_atomic_scheduler_release():
     lease = await scheduler.claim("worker", lease_duration=timedelta(seconds=60), wait_timeout=0)
     dispatcher = LocalWorkerDispatcher(scheduler)
     release = asyncio.create_task(dispatcher._release_lease(
-        lease, LeaseReleaseReason.DEFERRED, requeue=True, available_at=utc_now() + timedelta(seconds=60),
+        cast('WorkerLease', lease), LeaseReleaseReason.DEFERRED, requeue=True, available_at=utc_now() + timedelta(seconds=60),
     ))
     await scheduler.entered.wait()
     release.cancel()

@@ -3,6 +3,13 @@
 Existing authority tests protect a single mixed page. These real SQLite adapter
 cases additionally protect total traversal work, index use and cross-page scope.
 """
+
+from typing import TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    from app.v2.server.database.client import Database
+    from typing import Any
+
 from contextlib import asynccontextmanager
 
 import pytest
@@ -20,8 +27,8 @@ from tests.app.v2.server.fakes import MemoryThreadIndex
 async def database_index():
     engine = create_async_engine('sqlite+aiosqlite://')
     async with engine.begin() as connection:
-        await connection.run_sync(ThreadRow.__table__.create)
-        await connection.run_sync(SessionBindingRow.__table__.create)
+        await connection.run_sync(getattr(ThreadRow.__table__, 'create'))
+        await connection.run_sync(getattr(SessionBindingRow.__table__, 'create'))
     maker = async_sessionmaker(engine, expire_on_commit=False)
     class DB:
         @asynccontextmanager
@@ -29,7 +36,7 @@ async def database_index():
             async with maker() as session:
                 yield session
     try:
-        yield DatabaseThreadIndex(DB()), engine, maker
+        yield DatabaseThreadIndex(cast('Database', DB())), engine, maker
     finally:
         await engine.dispose()
 
@@ -60,7 +67,7 @@ async def test_fully_claimed_history_does_not_rescan_empty_legacy_branch():
             steps += 100
         async with engine.connect() as connection:
             raw = await connection.get_raw_connection()
-            await raw.driver_connection.set_progress_handler(progress, 100)
+            await cast('Any', raw.driver_connection).set_progress_handler(progress, 100)
         claimed, legacy = await all_pages(index)
         assert claimed == [f's{i:04}' for i in range(2000)] and legacy == []
         assert steps < 200_000, f'empty legacy lookup repeated {steps:,} SQLite VM steps'

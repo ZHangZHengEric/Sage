@@ -1,5 +1,10 @@
 """DingTalk provider package."""
 
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .stream import DingTalkStreamClient as DingTalkStreamClient
+
 from .provider import DingTalkProvider
 
 __all__ = [

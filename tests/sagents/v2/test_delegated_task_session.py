@@ -1,5 +1,15 @@
 """Delegation passes a user task, never the parent's conversation history."""
 
+from typing import TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    from sagents.v2.runtime.session.contracts import SessionStore
+    from typing import Literal
+
+from sagents.v2.composition.contracts import ApplicationResource
+
+from sagents.v2.model.provider import ModelProvider
+
 import pytest
 from pydantic import ValidationError
 
@@ -59,7 +69,7 @@ async def test_delegation_task_only_then_own_history_survives_restart(
         if durable
         else ephemeral_runtime().session_store
     )
-    runtime = HarnessRuntime(store)
+    runtime = HarnessRuntime(cast('SessionStore', store))
     parent = await runtime.start_run(
         command("private parent question", "parent"), CONTEXT
     )
@@ -125,7 +135,7 @@ async def test_delegation_task_only_then_own_history_survives_restart(
             requests.append(model.requests)
             return AgentLoopEngine(
                 runtime=runtime,
-                model=model,
+                model=cast(ModelProvider, model),
                 context_assembler=DefaultContextAssembler(
                     developer_instructions=descriptor.instructions,
                     history_reader=runtime.session_store,
@@ -183,32 +193,32 @@ async def test_delegation_task_only_then_own_history_survives_restart(
     assert not any(m.tool_calls or m.role == "tool" for m in initial.messages)
     assert "private parent" not in str(initial.messages)
     assert task.original_task not in str(initial.messages)
-    assert child.content[0].text == "child answer"
+    assert cast(TextBlock, child.content[0]).text == "child answer"
     assert await store.get_session(parent.session_id) == parent_before
     assert await store.read_events(parent.run_id) == parent_events
-    child_session = await store.get_session(child.child_session_id)
-    child_run = await store.get_run(child.child_run_id)
+    child_session = await store.get_session(cast(str, child.child_session_id))
+    child_run = await store.get_run(cast(str, child.child_run_id))
     assert child_session.parent_session_id == parent.session_id
-    assert (await store.export_session_state(child.child_session_id))["sessions"][0][
+    assert (await getattr(store, 'export_session_state')(child.child_session_id))["sessions"][0][
         "attachments"
     ] == {}
     assert child_run.concurrency_mode == SessionConcurrencyMode.SERIAL
     assert child_run.base_session_sequence == child_run.base_session_revision == 0
-    start = await store.get_start_command(child.child_run_id)
+    start = await store.get_start_command(cast(str, child.child_run_id))
     assert (
         start.parent_run_id == parent.run_id
         and start.config.metadata["parent_tool_call_id"] == "parent-delegation"
     )
     assert start.config.metadata["original_task"] == task.original_task
-    assert await store.read_fork_base_events(child.child_run_id) == ()
+    assert await store.read_fork_base_events(cast(str, child.child_run_id)) == ()
     if durable:
-        await store.close()
+        await cast(ApplicationResource, store).close()
         store = FilesystemSessionStore(tmp_path / "store")
-        runtime = HarnessRuntime(store)
+        runtime = HarnessRuntime(cast('SessionStore', store))
     second_executor = executor("followup answer")
     assert (
         await second_executor.child_session_owner(
-            child.child_session_id, parent_session_id=parent.session_id
+            cast(str, child.child_session_id), parent_session_id=parent.session_id
         )
         == "reviewer"
     )
@@ -227,7 +237,7 @@ async def test_delegation_task_only_then_own_history_survives_restart(
         context=CONTEXT,
     )
     assert follow.child_session_id == child.child_session_id
-    assert follow.content[0].text == "followup answer"
+    assert cast(TextBlock, follow.content[0]).text == "followup answer"
     follow_request = requests[-1][0]
     assert [
         b.text for m in follow_request.messages if m.role == "user" for b in m.content
@@ -241,7 +251,7 @@ async def test_delegation_task_only_then_own_history_survives_restart(
     assert "private parent" not in str(follow_request.messages)
     assert executed == ["parent0", "parent1", "child_lookup"]
     if durable:
-        await store.close()
+        await cast(ApplicationResource, store).close()
 
 
 @pytest.mark.asyncio
@@ -272,4 +282,4 @@ def test_no_copy_flag_or_forged_tool_inputs():
     with pytest.raises(ValidationError):
         StartRun.model_validate({**payload, "copy_parent_messages": True})
     with pytest.raises(ValidationError):
-        InputItem(role="tool", content=())
+        InputItem(role=cast("Literal['user', 'assistant', 'system', 'developer']", "tool"), content=())

@@ -1,3 +1,6 @@
+
+from typing import cast
+
 import asyncio
 import json
 import os
@@ -57,7 +60,7 @@ async def test_incremental_archive_retries_after_a_committed_prefix_without_dupl
         await transition(value, created, RunState.CANCELLED, "cancel")
         expected = await value.export_session_state(sid)
         fields = await redis.hgetall(value._session_key(sid))
-        sizes = [len(encoded.encode("utf-8")) for key, encoded in fields.items() if key.startswith("d:")]
+        sizes = [len(getattr(encoded, 'encode')("utf-8")) for key, encoded in fields.items() if cast(str, key).startswith("d:")]
         value.archive_batch_rows = 2 if limit == "rows" else 32
         value.archive_batch_bytes = 1024 * 1024 if limit == "rows" else max(sizes) + 1
 

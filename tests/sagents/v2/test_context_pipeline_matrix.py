@@ -1,5 +1,12 @@
 from __future__ import annotations
 
+from typing import TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    from sagents.v2.context.session_history import SessionHistoryReader
+    from sagents.v2.context.summary import ConversationSummary
+    from sagents.v2.contracts.commands import RunConfig
+
 import pytest
 from sagents.v2.context.plugins.window import WindowContextReducer
 
@@ -23,7 +30,7 @@ def command(*, metadata=None, invocation_mode=None):
     return StartRun(
         agent_id="agent_1",
         input=(InputItem(role="user", content=(TextBlock(text="question"),)),),
-        config={"metadata": metadata or {}},
+        config=cast('RunConfig', {"metadata": metadata or {}}),
         resolved_spec_hash="sha256:spec",
         idempotency_key="start",
         invocation_mode=invocation_mode,
@@ -60,7 +67,7 @@ async def test_system_segments_are_fresh_ordered_and_never_stored_in_ledger():
     first = await assembler.prepare_messages(command(), ledger)
     second = await assembler.prepare_messages(command(), ledger)
     assert all(message.role != "system" for message in ledger)
-    assert [message.content[0].text for message in first[:-1]] == [
+    assert [cast(TextBlock, message.content[0]).text for message in first[:-1]] == [
         "<role_definition>\nrole\n</role_definition>\nidentity",
         "skills",
         "now",
@@ -104,12 +111,12 @@ async def test_volatile_context_wraps_latest_user_and_preserves_multimodal_block
         ),
     )
     prepared = await assembler.prepare_messages(command(), ledger)
-    assert prepared[0].content[0].text == "old"
-    assert "<runtime_context>\ntime=now" in prepared[-1].content[0].text
-    assert prepared[-1].content[0].text.endswith("<user_request>")
-    assert prepared[-1].content[1].text == "new"
+    assert cast(TextBlock, prepared[0].content[0]).text == "old"
+    assert "<runtime_context>\ntime=now" in cast(TextBlock, prepared[-1].content[0]).text
+    assert cast(TextBlock, prepared[-1].content[0]).text.endswith("<user_request>")
+    assert cast(TextBlock, prepared[-1].content[1]).text == "new"
     assert isinstance(prepared[-1].content[2], ImageBlock)
-    assert prepared[-1].content[3].text == "</user_request>"
+    assert cast(TextBlock, prepared[-1].content[3]).text == "</user_request>"
 
 
 @pytest.mark.asyncio
@@ -139,9 +146,9 @@ async def test_prepare_messages_inlines_image_attachment_without_changing_ledger
     prepared = await DefaultContextAssembler(artifact_store=store).prepare_messages(
         command(), ledger
     )
-    assert ledger[0].content[1].uri == uri
-    assert prepared[0].content[1].uri.startswith("data:image/jpeg;base64,")
-    assert "data:image" not in ledger[0].content[1].uri
+    assert cast(ImageBlock, ledger[0].content[1]).uri == uri
+    assert cast(ImageBlock, prepared[0].content[1]).uri.startswith("data:image/jpeg;base64,")
+    assert "data:image" not in cast(ImageBlock, ledger[0].content[1]).uri
 
 
 @pytest.mark.asyncio
@@ -221,9 +228,9 @@ async def test_legacy_inline_images_still_project_without_attachment_storage():
             role="user", content=(ImageBlock(uri=uri, mime_type="image/png"),)
         ),
     )
-    assert (await DefaultContextAssembler().prepare_messages(command(), ledger))[
+    assert cast(ImageBlock, (await DefaultContextAssembler().prepare_messages(command(), ledger))[
         0
-    ].content[0].uri == uri
+    ].content[0]).uri == uri
 
 
 @pytest.mark.asyncio
@@ -317,7 +324,7 @@ async def test_historical_memory_tool_pair_is_not_replayed_but_current_pair_is()
         "tool",
     ]
     assert prepared[-2].tool_calls == (current_call,)
-    assert prepared[-1].content[0].text == "current memory"
+    assert cast(TextBlock, prepared[-1].content[0]).text == "current memory"
 
 
 @pytest.mark.asyncio
@@ -341,7 +348,7 @@ async def test_explicit_latest_user_segment_is_injected_even_when_not_volatile()
         command(), await assembler.initial_ledger(command())
     )
     assert len(prepared) == 1
-    assert "policy-state" in prepared[0].content[0].text
+    assert "policy-state" in cast(TextBlock, prepared[0].content[0]).text
 
 
 @pytest.mark.asyncio
@@ -370,9 +377,9 @@ async def test_run_metadata_context_has_stable_prefix_and_volatile_user_state():
         "identity_user",
     )
     assert prepared[0].metadata["cache_segment"] == "stable"
-    assert "<soul>\nBe careful\n</soul>" in prepared[0].content[0].text
-    assert "<user>\nLikes detail\n</user>" in prepared[0].content[0].text
-    latest = prepared[-1].content[0].text
+    assert "<soul>\nBe careful\n</soul>" in cast(TextBlock, prepared[0].content[0]).text
+    assert "<user>\nLikes detail\n</user>" in cast(TextBlock, prepared[0].content[0]).text
+    latest = cast(TextBlock, prepared[-1].content[0]).text
     assert latest.index("<runtime_context>") < latest.index("<user_request>")
     assert "<working_directory>/workspace/project</working_directory>" in latest
     assert "question" in latest
@@ -418,8 +425,8 @@ async def test_historical_user_keeps_its_frozen_time_but_not_old_runtime_state()
 
     prepared = await assembler.prepare_messages(current, ledger)
 
-    old_user = prepared[-3].content[0].text
-    new_user = prepared[-1].content[0].text
+    old_user = cast(TextBlock, prepared[-3].content[0]).text
+    new_user = cast(TextBlock, prepared[-1].content[0]).text
     assert "Thu, 27 Aug 2026 09:00:00 +0800" in old_user
     assert "Fri, 28 Aug 2026 12:30:00 +0800" not in old_user
     assert "Fri, 28 Aug 2026 12:30:00 +0800" in new_user
@@ -461,8 +468,8 @@ async def test_historical_projected_user_is_reduced_to_v1_time_only_context():
 
     prepared = await assembler.prepare_messages(current, ledger)
 
-    old_user = prepared[-3].content[0].text
-    new_user = prepared[-1].content[0].text
+    old_user = cast(TextBlock, prepared[-3].content[0]).text
+    new_user = cast(TextBlock, prepared[-1].content[0]).text
     assert old_user == (
         "<runtime_context>\n"
         "<current_time>Thu, 27 Aug 2026 09:00:00 +0800</current_time>\n"
@@ -497,14 +504,14 @@ async def test_budget_reduction_drops_oldest_complete_units_not_half_tool_pairs(
 
     assert projection.strategy == "window"
     assert projection.dropped_message_count == 3
-    assert projection.dropped_digest.startswith("sha256:")
+    assert cast('str', projection.dropped_digest).startswith("sha256:")
     assert projection.historical_messages == ledger[:3]
     assert [message.role for message in projection.messages] == [
         "system",
         "assistant",
         "user",
     ]
-    assert projection.messages[-1].content[0].text == "latest question"
+    assert cast(TextBlock, projection.messages[-1].content[0]).text == "latest question"
 
 
 @pytest.mark.asyncio
@@ -575,7 +582,7 @@ async def test_reducer_sees_filtered_history_without_runtime_injection():
         "user",
         "user",
     ]
-    assert "workspace context" in projection.messages[-1].content[0].text
+    assert "workspace context" in cast(TextBlock, projection.messages[-1].content[0]).text
 
 
 @pytest.mark.asyncio
@@ -684,7 +691,7 @@ async def test_excluded_tool_pairs_do_not_consume_reduction_budget(
         )
         if strategy == "persistent"
         else None,
-        history_reader=Reader(),
+        history_reader=cast('SessionHistoryReader | None', Reader()),
     )
 
     projection = await assembler.prepare_projection(command(), ledger, run_id="run")
@@ -748,7 +755,7 @@ async def test_filtered_summary_hashes_canonical_history_and_reuses_checkpoint()
         reducer=PersistentSummaryContextReducer(
             store, summarizer=summarizer, summary_target_tokens=32
         ),
-        history_reader=Reader(),
+        history_reader=cast('SessionHistoryReader | None', Reader()),
     )
 
     first = await assembler.prepare_projection(command(), ledger, run_id="run")
@@ -773,7 +780,7 @@ async def test_filtered_summary_hashes_canonical_history_and_reuses_checkpoint()
     assert all(
         message.tool_call_id != "memory" for message in summarizer.requests[0].messages
     )
-    assert checkpoint.covered_message_digests == await message_digests_async(
+    assert cast('ConversationSummary', checkpoint).covered_message_digests == await message_digests_async(
         ledger[:-1]
     )
     assert first.historical_messages == ledger[:-1]
@@ -793,6 +800,6 @@ async def test_filtered_summary_hashes_canonical_history_and_reuses_checkpoint()
     )
     assert len(summarizer.requests) == 2
     assert summarizer.requests[-1].previous_summary is None
-    assert replacement.covered_message_digests == await message_digests_async(
+    assert cast('ConversationSummary', replacement).covered_message_digests == await message_digests_async(
         rewritten[:-1]
     )

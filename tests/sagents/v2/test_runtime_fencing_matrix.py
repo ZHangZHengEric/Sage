@@ -1,5 +1,11 @@
 from __future__ import annotations
 
+from typing import TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    from sagents.v2.runtime.execution.scheduler.contracts import WorkerLease
+    from sagents.v2.runtime.session.contracts import SessionStore
+
 import asyncio
 from datetime import datetime, timedelta, timezone
 
@@ -36,7 +42,7 @@ async def setup():
     scheduler = InMemoryScheduler(clock=clock)
     base = EphemeralSessionStore(clock=clock)
     fenced = LeaseFencedSessionStore(base, scheduler)
-    runtime = HarnessRuntime(fenced)
+    runtime = HarnessRuntime(cast('SessionStore', fenced))
     handle = await runtime.start_run(
         StartRun(
             agent_id="agent_1",
@@ -76,7 +82,7 @@ async def test_expired_old_worker_cannot_commit_after_new_fencing_token_exists()
     old = await scheduler.claim(
         "old", lease_duration=timedelta(seconds=5), wait_timeout=0
     )
-    scope = fenced.lease_scope(old)
+    scope = fenced.lease_scope(cast('WorkerLease', old))
     await scope.__aenter__()
     clock.now += timedelta(seconds=6)
     await scheduler.reap_expired()
@@ -93,7 +99,7 @@ async def test_expired_old_worker_cannot_commit_after_new_fencing_token_exists()
     assert stale.value.info.code == "scheduler.fence_rejected"
     await scope.__aexit__(None, None, None)
 
-    async with fenced.lease_scope(new):
+    async with fenced.lease_scope(cast('WorkerLease', new)):
         run = await runtime.start_execution(
             run_id=handle.run_id,
             expected_revision=handle.run_revision,
@@ -133,7 +139,7 @@ async def test_replacement_cannot_cross_an_inflight_fenced_commit():
     scheduler = InMemoryScheduler(clock=clock)
     base = BlockingStore()
     fenced = LeaseFencedSessionStore(base, scheduler)
-    runtime = HarnessRuntime(fenced)
+    runtime = HarnessRuntime(cast('SessionStore', fenced))
     handle = await runtime.start_run(
         StartRun(
             agent_id="agent_1",
@@ -157,7 +163,7 @@ async def test_replacement_cannot_cross_an_inflight_fenced_commit():
     base.block_commits = True
 
     async def commit_old_worker():
-        async with fenced.lease_scope(old):
+        async with fenced.lease_scope(cast('WorkerLease', old)):
             return await runtime.start_execution(
                 run_id=handle.run_id,
                 expected_revision=handle.run_revision,
@@ -186,7 +192,7 @@ async def test_replacement_cannot_cross_an_inflight_fenced_commit():
     assert (await committing).state == RunState.RUNNING
     new = await replacement
     assert new is not None
-    assert new.fencing_token > old.fencing_token
+    assert new.fencing_token > cast('WorkerLease', old).fencing_token
 
 
 @pytest.mark.asyncio
@@ -205,8 +211,8 @@ async def test_lease_for_another_run_cannot_mutate_target_run():
     second = await scheduler.claim(
         "worker", lease_duration=timedelta(seconds=5), wait_timeout=0
     )
-    wrong = second if second.work.run_id == "run_other" else first
-    async with fenced.lease_scope(wrong):
+    wrong = second if cast('WorkerLease', second).work.run_id == "run_other" else first
+    async with fenced.lease_scope(cast('WorkerLease', wrong)):
         with pytest.raises(SageV2Error) as caught:
             await runtime.start_execution(
                 run_id=handle.run_id,
@@ -223,7 +229,7 @@ async def test_root_lease_can_create_and_execute_descendant_runs_only():
     lease = await scheduler.claim(
         "worker", lease_duration=timedelta(seconds=5), wait_timeout=0
     )
-    async with fenced.lease_scope(lease):
+    async with fenced.lease_scope(cast('WorkerLease', lease)):
         child = await runtime.start_run(
             StartRun(
                 session_id=handle.session_id,
@@ -288,7 +294,7 @@ async def test_session_attachment_write_requires_current_worker_fence():
     lease = await scheduler.claim(
         "old", lease_duration=timedelta(seconds=5), wait_timeout=0
     )
-    async with fenced.lease_scope(lease):
+    async with fenced.lease_scope(cast('WorkerLease', lease)):
         await put()
         clock.now += timedelta(seconds=6)
         await scheduler.reap_expired()

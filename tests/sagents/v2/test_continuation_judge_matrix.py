@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+from typing import Any, cast
+
+from sagents.v2.model.provider import ModelProvider
+
 import asyncio
 import json
 
@@ -41,7 +45,7 @@ def _response(text: str = "Work is complete.", *, tools=()) -> ModelResponse:
 
 
 def _context(**updates) -> ContinuationContext:
-    values = {
+    values: dict[str, Any] = {
         "run_id": "run_1",
         "step_number": 1,
         "max_steps": 10,
@@ -129,7 +133,7 @@ async def test_llm_judge_uses_v1_prompt_contract_and_reports_usage():
             ),
         )
     )
-    policy = LLMJudgeContinuationPolicy(LLMContinuationJudge(model))
+    policy = LLMJudgeContinuationPolicy(LLMContinuationJudge(cast(ModelProvider, model)))
 
     decision = await policy.decide(_context())
 
@@ -143,7 +147,7 @@ async def test_llm_judge_uses_v1_prompt_contract_and_reports_usage():
 @pytest.mark.asyncio
 async def test_llm_judge_timeout_is_reported_by_selected_plugin():
     policy = LLMJudgeContinuationPolicy(
-        LLMContinuationJudge(SlowModel(), timeout_seconds=0.01)
+        LLMContinuationJudge(cast(ModelProvider, SlowModel()), timeout_seconds=0.01)
     )
 
     with pytest.raises(SageV2Error) as caught:
@@ -159,7 +163,7 @@ async def test_llm_judge_timeout_is_reported_by_selected_plugin():
 @pytest.mark.asyncio
 async def test_llm_judge_never_skips_an_unsettled_tool_result():
     model = ScriptedModelProvider(())
-    policy = LLMJudgeContinuationPolicy(LLMContinuationJudge(model))
+    policy = LLMJudgeContinuationPolicy(LLMContinuationJudge(cast(ModelProvider, model)))
     context = _context(
         response=_response(
             "",
@@ -192,7 +196,7 @@ async def test_llm_judge_preserves_all_v1_decisions(
     verdict, expected_action, expected_code
 ):
     model = ScriptedModelProvider((_judge_step(verdict, reason="v1 reason"),))
-    policy = LLMJudgeContinuationPolicy(LLMContinuationJudge(model))
+    policy = LLMJudgeContinuationPolicy(LLMContinuationJudge(cast(ModelProvider, model)))
 
     decision = await policy.decide(_context())
 
@@ -207,7 +211,7 @@ async def test_llm_judge_need_user_input_completes_without_interaction():
     model = ScriptedModelProvider(
         (_judge_step("need_user_input", reason="Choose the deployment target."),)
     )
-    policy = LLMJudgeContinuationPolicy(LLMContinuationJudge(model))
+    policy = LLMJudgeContinuationPolicy(LLMContinuationJudge(cast(ModelProvider, model)))
 
     decision = await policy.decide(
         _context(response=_response("Which deployment target should I use?"))
@@ -223,7 +227,7 @@ async def test_llm_judge_need_user_input_completes_without_interaction():
 @pytest.mark.asyncio
 async def test_llm_judge_preserves_explicit_questionnaire_interaction():
     model = ScriptedModelProvider(())
-    policy = LLMJudgeContinuationPolicy(LLMContinuationJudge(model))
+    policy = LLMJudgeContinuationPolicy(LLMContinuationJudge(cast(ModelProvider, model)))
     questionnaire = InteractionDraft(
         interaction_type="questionnaire",
         allowed_decisions=("submit", "cancel"),
@@ -280,7 +284,7 @@ async def test_llm_judge_repeated_plain_text_requests_recovery_guidance():
     model = ScriptedModelProvider(
         (_judge_step("need_user_input", reason="The questionnaire is ambiguous."),)
     )
-    policy = LLMJudgeContinuationPolicy(LLMContinuationJudge(model))
+    policy = LLMJudgeContinuationPolicy(LLMContinuationJudge(cast(ModelProvider, model)))
 
     decision = await policy.decide(
         _context(
@@ -313,7 +317,7 @@ async def test_llm_judge_invalid_output_matches_v1_and_continues_once():
         )
     )
     model = ScriptedModelProvider((invalid,))
-    policy = LLMJudgeContinuationPolicy(LLMContinuationJudge(model))
+    policy = LLMJudgeContinuationPolicy(LLMContinuationJudge(cast(ModelProvider, model)))
 
     decision = await policy.decide(_context())
 
@@ -340,7 +344,7 @@ async def test_llm_judge_empty_output_has_a_stable_non_parser_reason():
         )
     )
     policy = LLMJudgeContinuationPolicy(
-        LLMContinuationJudge(ScriptedModelProvider((empty,)))
+        LLMContinuationJudge(cast(ModelProvider, ScriptedModelProvider((empty,))))
     )
 
     decision = await policy.decide(_context())
@@ -363,7 +367,7 @@ async def test_llm_judge_propagates_permanent_provider_rejection():
         ),
     )
     model = ScriptedModelProvider((rejected,))
-    policy = LLMJudgeContinuationPolicy(LLMContinuationJudge(model))
+    policy = LLMJudgeContinuationPolicy(LLMContinuationJudge(cast(ModelProvider, model)))
 
     with pytest.raises(SageV2Error) as caught:
         await policy.decide(_context())
@@ -391,7 +395,7 @@ async def test_llm_judge_accepts_structured_verdict_from_reasoning_fallback():
         )
     )
     policy = LLMJudgeContinuationPolicy(
-        LLMContinuationJudge(ScriptedModelProvider((reasoning_only,)))
+        LLMContinuationJudge(cast(ModelProvider, ScriptedModelProvider((reasoning_only,))))
     )
 
     decision = await policy.decide(_context())
@@ -429,7 +433,7 @@ async def test_llm_judge_applies_v1_authoritative_todo_invariant():
         assert "<current_todo_plan>" in request.messages[-1].content[0].text
 
     model = ScriptedModelProvider((_judge_step("completed", assertion=assert_request),))
-    policy = LLMJudgeContinuationPolicy(LLMContinuationJudge(model))
+    policy = LLMJudgeContinuationPolicy(LLMContinuationJudge(cast(ModelProvider, model)))
 
     decision = await policy.decide(_context(ledger=ledger))
 
@@ -440,7 +444,7 @@ async def test_llm_judge_applies_v1_authoritative_todo_invariant():
 @pytest.mark.asyncio
 async def test_llm_judge_v1_continuation_punctuation_skips_judge():
     model = ScriptedModelProvider(())
-    policy = LLMJudgeContinuationPolicy(LLMContinuationJudge(model))
+    policy = LLMJudgeContinuationPolicy(LLMContinuationJudge(cast(ModelProvider, model)))
 
     decision = await policy.decide(
         _context(response=_response("Next:"), ledger=(_context().ledger[0],))
@@ -454,7 +458,7 @@ async def test_llm_judge_v1_continuation_punctuation_skips_judge():
 @pytest.mark.asyncio
 async def test_hybrid_uses_explicit_status_without_calling_judge():
     model = ScriptedModelProvider(())
-    policy = HybridContinuationPolicy(LLMContinuationJudge(model))
+    policy = HybridContinuationPolicy(LLMContinuationJudge(cast(ModelProvider, model)))
 
     decision = await policy.decide(_context(explicit_status="task_done"))
 
@@ -467,7 +471,7 @@ async def test_hybrid_accepts_v1_judge_continuation():
     model = ScriptedModelProvider(
         (_judge_step("continue", reason="A required verification remains."),)
     )
-    policy = HybridContinuationPolicy(LLMContinuationJudge(model))
+    policy = HybridContinuationPolicy(LLMContinuationJudge(cast(ModelProvider, model)))
 
     decision = await policy.decide(_context())
 
@@ -491,7 +495,7 @@ async def test_hybrid_invalid_judge_output_falls_back_to_final_text():
         )
     )
     model = ScriptedModelProvider((invalid,))
-    policy = HybridContinuationPolicy(LLMContinuationJudge(model))
+    policy = HybridContinuationPolicy(LLMContinuationJudge(cast(ModelProvider, model)))
 
     decision = await policy.decide(_context())
 
@@ -532,8 +536,8 @@ async def test_truncated_text_continues_without_spending_a_judge_call(
     policies = {
         "deterministic": CompositeContinuationPolicy(),
         "explicit": ExplicitStatusContinuationPolicy(),
-        "hybrid": HybridContinuationPolicy(UnexpectedJudge()),
-        "judge": LLMJudgeContinuationPolicy(UnexpectedJudge()),
+        "hybrid": HybridContinuationPolicy(cast('LLMContinuationJudge', UnexpectedJudge())),
+        "judge": LLMJudgeContinuationPolicy(cast('LLMContinuationJudge', UnexpectedJudge())),
     }
     context = _context(
         response=_response("The remaining steps are:").model_copy(

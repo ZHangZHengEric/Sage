@@ -1,5 +1,12 @@
 """Run with python -m examples.v2.host --offline (no API key/network)."""
 
+from typing import TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    from sagents.v2.model.provider import ModelProvider
+
+from sagents.v2.composition.loaded_agents import ApplicationEntrypoint
+
 import argparse
 import asyncio
 from dataclasses import asdict
@@ -63,7 +70,7 @@ async def main(args) -> None:
         args.manifest, args.runtime_root, args.log_level, args.environment
     )
     app = await build_application(
-        settings, model=offline_model() if args.offline else None
+        settings, model=cast('ModelProvider | None', offline_model() if args.offline else None)
     )
     try:
         if args.inspect:
@@ -90,7 +97,7 @@ async def main(args) -> None:
             resolved_spec_hash=agent.composition_hash,
             idempotency_key=args.idempotency_key or str(uuid4()),
         )
-        stream = await app.entrypoint().run_stream(command, context, agent=agent)
+        stream = await cast(ApplicationEntrypoint, app.entrypoint()).run_stream(command, context, agent=agent)
         async for event in stream.events:
             print(event.model_dump_json())
         result = await stream.wait()

@@ -1,5 +1,12 @@
 """Tracing selection, credential references and console authorization."""
 
+from typing import TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    from typing import Any
+
+from sagents.v2.package.manifest.runtime import CapabilitySelection
+
 from pathlib import Path
 
 import pytest
@@ -19,10 +26,10 @@ def test_langfuse_config_contains_only_credential_references(tmp_path, monkeypat
     )
     manifest = server_v2_manifest(settings)
     selection = manifest.runtime.capabilities["observability.provider"]
-    assert selection.plugin == "sage.observability.langfuse"
-    assert selection.config["secret_key_env"] == "LANGFUSE_SECRET_KEY"
+    assert cast(CapabilitySelection, selection).plugin == "sage.observability.langfuse"
+    assert cast(CapabilitySelection, selection).config["secret_key_env"] == "LANGFUSE_SECRET_KEY"
     assert "sk-never-in-manifest" not in manifest.model_dump_json()
-    registration = builtin_extension_registry().get(selection.plugin)
+    registration = builtin_extension_registry().get(cast(CapabilitySelection, selection).plugin)
     assert registration.descriptor.config_schema["required"] == ["base_url"]
 
 
@@ -41,7 +48,7 @@ def test_trace_env_settings_and_explicit_noop_override(tmp_path, monkeypatch):
     )
     assert disabled.effective_trace_backend == "noop"
     assert (
-        server_v2_manifest(disabled).runtime.capabilities["observability.provider"].plugin
+        cast(CapabilitySelection, server_v2_manifest(disabled).runtime.capabilities["observability.provider"]).plugin
         == "sage.observability.local"
     )
     assert not disabled.trace_console_url
@@ -73,7 +80,7 @@ def test_generic_otlp_http_configuration(tmp_path):
             trace_otlp_protocol="http",
         )
     )
-    config = manifest.runtime.capabilities["observability.provider"].config
+    config = cast(CapabilitySelection, manifest.runtime.capabilities["observability.provider"]).config
     assert config["protocol"] == "http"
     assert config["endpoint"] == "https://collector.example/v1/traces"
     assert config["insecure"] is False
@@ -132,18 +139,18 @@ def test_phoenix_environment_manifest_and_admin_selection(tmp_path, monkeypatch)
     settings = ServerSettings.from_env(data_root=tmp_path)
     manifest = server_v2_manifest(settings)
     selection = manifest.runtime.capabilities["observability.provider"]
-    assert selection.plugin == "sage.observability.phoenix"
-    assert selection.config["project_name"] == "sage-test"
-    assert selection.config["api_key_env"] == "CUSTOM_PHOENIX_KEY"
+    assert cast(CapabilitySelection, selection).plugin == "sage.observability.phoenix"
+    assert cast(CapabilitySelection, selection).config["project_name"] == "sage-test"
+    assert cast(CapabilitySelection, selection).config["api_key_env"] == "CUSTOM_PHOENIX_KEY"
     assert not settings.trace_console_url
     assert "never-save-this-key" not in manifest.model_dump_json()
     store = ServerPluginConfig(tmp_path)
     saved = store.save(
-        {"observability.provider": selection.model_dump(mode="json")}, revision({})
+        {"observability.provider": cast(CapabilitySelection, selection).model_dump(mode="json")}, revision({})
     )
     assert store.read() == saved
     assert "never-save-this-key" not in store.path.read_text()
-    assert builtin_extension_registry().get(selection.plugin).descriptor.config_schema["required"] == ["endpoint"]
+    assert builtin_extension_registry().get(cast(CapabilitySelection, selection).plugin).descriptor.config_schema["required"] == ["endpoint"]
 
 
 @pytest.mark.parametrize(
@@ -173,7 +180,7 @@ def test_observability_services_follow_active_backend(tmp_path, monkeypatch, opt
         links = response.json()["data"]
         assert links == [
             *([{"id": "performance", "label": "运行性能", "href": "/performance", "external": False}]
-              if service.diagnostics.available else []),
+              if cast('Any', service.diagnostics).available else []),
             *([{"id": "traces", "label": "调用链", "href": "/traces", "external": False}]
               if options.get("trace_backend") == "phoenix" else []),
             *([{"id": console[0], "label": console[1], "href": console[2], "external": True}]
@@ -187,7 +194,7 @@ def test_observability_services_follow_active_backend(tmp_path, monkeypatch, opt
             else:
                 assert redirect.status_code == 404
         # Availability is live; failed diagnostic capture must not be advertised.
-        service.diagnostics.available = False
+        cast('Any', service.diagnostics).available = False
         assert all(link["id"] != "performance" for link in client.get("/api/observability/services").json()["data"])
 
 
@@ -216,15 +223,15 @@ def test_observability_uses_started_plugin_and_rejects_non_admin(tmp_path):
 def test_server_phoenix_defaults_to_full_raw_capture_with_explicit_override(tmp_path, explicit, expected):
     settings = make_settings(tmp_path, trace_backend="phoenix", phoenix_endpoint="http://phoenix/v1/traces",
                              trace_content_mode=explicit)
-    assert server_v2_manifest(settings).runtime.capabilities["observability.provider"].config["content_mode"] == expected
+    assert cast(CapabilitySelection, server_v2_manifest(settings).runtime.capabilities["observability.provider"]).config["content_mode"] == expected
 
 
 def test_server_saved_phoenix_selection_inherits_server_capture_defaults(tmp_path):
     settings = make_settings(tmp_path, plugin_overrides={"observability.provider":{
         "plugin":"sage.observability.phoenix", "config":{"endpoint":"http://phoenix/v1/traces"}}})
-    assert server_v2_manifest(settings).runtime.capabilities["observability.provider"].config["content_mode"] == "raw"
+    assert cast(CapabilitySelection, server_v2_manifest(settings).runtime.capabilities["observability.provider"]).config["content_mode"] == "raw"
 
 
 def test_server_other_trace_backends_keep_redacted_default(tmp_path):
     settings = make_settings(tmp_path, trace_backend="otlp", trace_otlp_endpoint="http://collector:4317")
-    assert server_v2_manifest(settings).runtime.capabilities["observability.provider"].config["content_mode"] == "redacted"
+    assert cast(CapabilitySelection, server_v2_manifest(settings).runtime.capabilities["observability.provider"]).config["content_mode"] == "redacted"

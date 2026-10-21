@@ -1,3 +1,11 @@
+
+from typing import TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    from sagents.v2.runtime.execution.sandbox.provider import SandboxHandle
+
+from sagents.v2.composition.loaded_agents import ApplicationEntrypoint
+
 from sagents.v2.runtime.observability.provider import ObservabilityProvider
 from tests.sagents.v2.sdk_fixture import build_registered_package
 from tests.sagents.v2.sdk_fixture import fixture_configuration
@@ -480,7 +488,7 @@ async def test_standard_entrypoint_rejects_wrong_loaded_revision_identity(tmp_pa
     try:
         agent = app.loaded_agents[-1]
         with pytest.raises(ValueError, match="identity"):
-            await app.entrypoint().run_stream(StartRun(agent_id=agent.id, input=(),
+            await cast(ApplicationEntrypoint, app.entrypoint()).run_stream(StartRun(agent_id=agent.id, input=(),
                 resolved_spec_hash="sha256:wrong", idempotency_key="wrong"), _POLICY_USER, agent=agent)
     finally:
         await app.close()
@@ -519,7 +527,7 @@ async def test_search_memory_assignment_controls_real_recall(tmp_path, preset, m
     memory = Memory()
     package = BuiltinPackageFactory.create(preset, package_id="test.memory." + preset)
     agent_id = package.entrypoint.agent
-    definition = package.agents[agent_id].model_copy(update={"subagents": (),
+    definition = getattr(package.agents[cast('str', agent_id)], 'model_copy')(update={"subagents": (),
         "memory": AgentMemoryBehavior(recall=True, auto_write=True, scope="agent")})
     package = package.model_copy(update={"agents": {agent_id: definition}})
     runtime = package.runtime.model_copy(update={"capabilities": {**package.runtime.capabilities,
@@ -698,7 +706,7 @@ async def test_execution_binding_invokes_failing_close_only_once():
         agent_id="agent_1",
         workspace_root="/workspace",
         workspace_policy="shared_parent",
-        sandbox=sandbox,
+        sandbox=cast('SandboxHandle', sandbox),
         grant_issuer=SandboxGrantIssuer(),
     )
 
@@ -888,7 +896,7 @@ def _policy_package(package_id: str):
         package_id=package_id,
     )
     agent_id = package.entrypoint.agent
-    definition = package.agents[agent_id].model_copy(
+    definition = getattr(package.agents[cast('str', agent_id)], 'model_copy')(
         update={"tools": (_POLICY_READ_TOOL.name, _POLICY_WRITE_TOOL.name)}
     )
     return package.model_copy(
@@ -963,7 +971,7 @@ async def _build_with_tool_policy(session_root: Path, package, policy, model):
 
 
 async def _run_to_boundary(application: SAgentApplication, package, *, key: str):
-    stream = await application.entrypoint().run_stream(
+    stream = await cast(ApplicationEntrypoint, application.entrypoint()).run_stream(
         (StartRun(
             agent_id=package.entrypoint.agent,
             input=(InputItem(role="user", content=(TextBlock(text="go"),)),),
@@ -1153,8 +1161,8 @@ async def test_builder_remembers_approvals_in_the_session_derived_state(
         )
         assert suspended.state == RunState.SUSPENDED
         assert event_types.count("tool.call.awaiting_approval") == 1
-        suspension = await store.get_suspension(suspended.suspension_id)
-        interaction = await store.get_interaction(suspension.interaction_id)
+        suspension = await store.get_suspension(cast(str, suspended.suspension_id))
+        interaction = await store.get_interaction(cast(str, suspension.interaction_id))
         assert "approve_and_remember" in interaction.allowed_decisions
 
         await agent.runtime.reply_interaction(
@@ -1170,7 +1178,7 @@ async def test_builder_remembers_approvals_in_the_session_derived_state(
             ),
             _POLICY_USER,
         )
-        final = await (await agent.continue_run(suspended.run_id, _POLICY_USER, agent=application.loaded_agents[-1]))
+        final = await (await cast(ApplicationEntrypoint, agent).continue_run(suspended.run_id, _POLICY_USER, agent=application.loaded_agents[-1]))
 
         assert final.state == RunState.COMPLETED
         types = [event.type for event in await store.read_events(suspended.run_id)]
@@ -1181,7 +1189,7 @@ async def test_builder_remembers_approvals_in_the_session_derived_state(
         remembered = await memory.list_remembered(session_id=final.session_id)
         assert [value.matcher.tool_name for value in remembered] == ["write_value"]
         # 记忆真的落在 Session 存储的派生状态里，重开进程后同一 Session 仍可复用。
-        raw = await store.get_derived_state(
+        raw = await getattr(store, 'get_derived_state')(
             final.session_id,
             SessionApprovalMemory.NAMESPACE,
             SessionApprovalMemory.KEY,

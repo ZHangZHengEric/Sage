@@ -1,5 +1,10 @@
 """WishSeen accounts share an Agent, never its long-term Memory namespace."""
 
+from typing import TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    from anyio.from_thread import BlockingPortal
+
 import pytest
 
 from fastapi.testclient import TestClient
@@ -79,15 +84,15 @@ def test_wishseen_accounts_have_separate_durable_memory(tmp_path):
             assert not bob
             return scopes, alice[0].record.memory_id
 
-        scopes, memory_id = client.portal.call(inspect)
+        scopes, memory_id = cast('BlockingPortal', client.portal).call(inspect)
 
     # Reopen storage and verify isolation survives a Server restart.
     with TestClient(create_app(make_host(tmp_path))) as restarted:
         async def verify():
-            provider = restarted.app.state.service.application.service("memory.provider")
+            provider = getattr(restarted.app, 'state').service.application.service("memory.provider")
             service = MemoryService(provider)
             assert await provider.get(memory_id, scope=scopes[1]) is None
             assert not (await service.forget(memory_id, scope=scopes[1])).deleted
             assert await provider.get(memory_id, scope=scopes[0]) is not None
             assert (await service.forget(memory_id, scope=scopes[0])).deleted
-        restarted.portal.call(verify)
+        cast('BlockingPortal', restarted.portal).call(verify)

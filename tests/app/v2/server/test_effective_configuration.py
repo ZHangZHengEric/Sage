@@ -1,5 +1,15 @@
 """The displayed selections must be the same selections a catalog Run uses."""
 
+from typing import TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    from anyio.from_thread import BlockingPortal
+    from sagents.v2.agent.management.contracts import AgentPackageBundle
+
+from sagents.v2.contracts.errors import RuntimeErrorInfo
+
+from sagents.v2.contracts.events import RunEventData
+
 import pytest
 
 from app.v2.server.catalog.records import AgentRecord, UserCatalog, upsert_agent
@@ -23,7 +33,7 @@ def test_merge_same_plugin_inherits_and_changed_plugin_replaces():
 
 def test_persisted_forbidden_package_is_rejected_at_run_composition():
     agent = AgentRecord(id="demo", name="demo")
-    agent.package.manifest.runtime.capabilities["session.store"] = CapabilitySelection(plugin="sage.session.mysql")
+    cast('AgentPackageBundle', agent.package).manifest.runtime.capabilities["session.store"] = CapabilitySelection(plugin="sage.session.mysql")
     with pytest.raises(SageV2Error, match="session.store.*不允许"):
         server_v2_run_manifest(agent=agent)
 
@@ -149,11 +159,11 @@ def test_both_entrypoints_recover_tool_errors_and_deliver_file(
                               params={"thread_id": "thread-1", "path": "result.txt"})
         assert download.status_code == 200 and download.content == b"delivered"
         store = host.application.entrypoint().runtime.session_store
-        runs = client.portal.call(store.list_session_runs, "thread-1")
+        runs = cast('BlockingPortal', client.portal).call(store.list_session_runs, "thread-1")
         assert len(runs) == 1 and runs[0].state.value == "completed"
-        events = client.portal.call(store.read_events, runs[0].run_id)
-        assert any(event.type == "tool.call.failed" and event.data.error
-                   and event.data.error.code == error_code for event in events)
+        events = cast('BlockingPortal', client.portal).call(store.read_events, runs[0].run_id)
+        assert any(event.type == "tool.call.failed" and cast(RunEventData, event.data).error
+                   and cast(RuntimeErrorInfo, cast(RunEventData, event.data).error).code == error_code for event in events)
         assert len(provider.requests) == 3
         assert error_code in provider.requests[1].model_dump_json()
 

@@ -1,3 +1,11 @@
+
+from typing import Any, Callable, TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    from sagents.v2.model.contracts import ModelResponse
+    from sagents.v2.runtime.observability.contracts import LogLevel
+
+from sagents.v2.model.provider import ModelProvider
 from io import BytesIO
 import json
 from types import SimpleNamespace
@@ -30,15 +38,15 @@ async def test_slow_diagnostics_do_not_block_model_or_log_producers(tmp_path, mo
     monkeypatch.setattr(sink, "_update", slow_update)
     async def session_id(_):
         return "session"
-    model = RecordingModelProvider(scripted_hello(), sink=sink, session_id_resolver=session_id)
+    model = RecordingModelProvider(cast(ModelProvider, scripted_hello()), sink=sink, session_id_resolver=session_id)
     request = ModelRequest(request_id="request", run_id="run", model_binding="primary", messages=())
     try:
         async def consume():
             return [event async for event in model.stream(request)]
         events = await asyncio.wait_for(consume(), timeout=1)
-        assert events[-1].response.text == "hello"
+        assert cast('ModelResponse', events[-1].response).text == "hello"
         assert await asyncio.to_thread(entered.wait, 1)
-        sink.write(LogRecord(level="debug", event="test", message="测试", component="test",
+        sink.write(LogRecord(level=cast('LogLevel', "debug"), event="test", message="测试", component="test",
                              session_id="session", run_id="run"))
     finally:
         release.set()
@@ -69,7 +77,7 @@ async def test_diagnostic_queue_is_bounded_and_reports_overflow(tmp_path, monkey
         assert await asyncio.to_thread(entered.wait, 1)
         await sink.complete_model_request(session_id="session", request=request,
             response=SimpleNamespace(model_dump=lambda **_: {"text": "done"}))
-        sink.write(LogRecord(level="debug", event="test", message="测试", component="test",
+        sink.write(LogRecord(level=cast('LogLevel', "debug"), event="test", message="测试", component="test",
                              session_id="session", run_id="run"))
         assert sink.capture_failures == 1
     finally:
@@ -154,7 +162,7 @@ async def test_capture_survives_restart_is_scoped_and_reports_limits(tmp_path):
     for i in range(4):
         sink.write(
             LogRecord(
-                level="info",
+                level=cast('LogLevel', "info"),
                 event="test",
                 message=f"event {i} password=log-secret",
                 component="test",
@@ -164,7 +172,7 @@ async def test_capture_survives_restart_is_scoped_and_reports_limits(tmp_path):
         )
     sink.write(
         LogRecord(
-            level="info",
+            level=cast('LogLevel', "info"),
             event="test",
             message="OTHER TENANT",
             component="test",
@@ -174,7 +182,7 @@ async def test_capture_survives_restart_is_scoped_and_reports_limits(tmp_path):
     )
     sink.write(
         LogRecord(
-            level="info",
+            level=cast('LogLevel', "info"),
             event="test",
             message="UNRELATED RUN",
             component="test",
@@ -307,7 +315,7 @@ def test_web_export_captures_image_tool_exception_stack(tmp_path, monkeypatch, t
                 code="image.test_failure", category=ErrorCategory.PROVIDER_PERMANENT,
                 message="encoder failed password=diagnostic-secret",
             ))
-        callback = "encoder"
+        callback = cast("Callable[..., Any]", "encoder")
         callback()  # Reproduce the exact exception from the reported Session.
 
     monkeypatch.setattr(
@@ -380,7 +388,7 @@ def test_download_is_admin_only_and_excludes_other_sessions(client, service):
     assert client.get("/api/threads/thread-1/download", headers=bob).status_code == 403
     service.diagnostics.write(
         LogRecord(
-            level="info",
+            level=cast('LogLevel', "info"),
             event="test",
             message="BOB PRIVATE EVIDENCE",
             component="test",
@@ -447,13 +455,13 @@ async def test_diagnostic_failure_does_not_stop_model_stream(tmp_path, monkeypat
         return "session"
 
     model = RecordingModelProvider(
-        scripted_hello(), sink=sink, session_id_resolver=session_id
+        cast(ModelProvider, scripted_hello()), sink=sink, session_id_resolver=session_id
     )
     request = ModelRequest(
         request_id="r", run_id="run", model_binding="primary", messages=()
     )
     events = [event async for event in model.stream(request)]
-    assert events[-1].response.text == "hello"
+    assert cast('ModelResponse', events[-1].response).text == "hello"
     await sink.close()
     assert sink.capture_failures > 0
 

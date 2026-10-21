@@ -1,4 +1,8 @@
 """Server ownership and frozen inputs through standard registered execution."""
+
+from typing import cast
+
+from tests.app.v2.server.fakes import MemoryCatalogStore
 import asyncio
 import threading
 from types import SimpleNamespace
@@ -67,7 +71,7 @@ async def test_loading_standard_revision_does_not_open_inference_client(tmp_path
     await host.start()
     try:
         await host.users.save(UserRecord(user_id="user", username="user", password_hash="unused"))
-        await _save_demo_model(host.catalog, "user")
+        await _save_demo_model(cast(MemoryCatalogStore, host.catalog), "user")
         agent = (await host.catalog.get("user")).default_agent_id
         loaded = await load_catalog_agent(host, _command().model_copy(update={"agent_id": agent}), "user")
         assert loaded.composition_hash
@@ -103,7 +107,7 @@ async def test_registered_run_uses_original_agent_and_skill_version(tmp_path, mo
             "---\nname: demo\ndescription: Second\n---\n\n# Second\n", user_id="user", role="user")
         await host.skill_catalog.bind_agent_skills(owner_user_id="user", agent_id=admitted.id, names=[])
         catalog.agents[0] = catalog.agents[0].with_configuration(instructions="Edited afterwards")
-        await host.catalog_store.save("user", catalog)
+        await getattr(host.catalog_store, 'save')("user", catalog)
         await execute(host, command, "user")
         assert observed
         assert all(value.agent.instructions == "Admitted instructions" for value in observed)

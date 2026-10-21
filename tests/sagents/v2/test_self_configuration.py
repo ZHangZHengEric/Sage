@@ -1,3 +1,11 @@
+
+from typing import cast
+
+from sagents.v2.composition.loaded_agents import ApplicationEntrypoint
+
+from sagents.v2.contracts.items import JsonBlock
+
+from sagents.v2.model.provider import ModelProvider
 from tests.sagents.v2.sdk_fixture import build_registered_package
 from tests.sagents.v2.model_fixture import TEST_MODELS
 from contextlib import asynccontextmanager
@@ -133,7 +141,7 @@ async def test_skill_is_staged_then_usable_and_survives_source_deletion(tmp_path
     await controller.prepare("run1", CONTEXT)
     path = skill(tmp_path)
     result = await controller.execute(call({"add_skill_paths": [str(path)]}), CONTEXT)
-    assert result.content[0].value["effective"] == "next_model_step"
+    assert cast(JsonBlock, result.content[0]).value["effective"] == "next_model_step"
     assert not await skills.catalog.list_skills(run_id="run1")
     (path / "SKILL.md").unlink()
     await controller.prepare("run1", CONTEXT)
@@ -201,7 +209,7 @@ async def test_next_model_step_sees_and_loads_new_skill_with_empty_initial_grant
     )
     engine = AgentLoopEngine(
         runtime=runtime,
-        model=model,
+        model=cast(ModelProvider, model),
         tool_catalog=InMemoryToolCatalog(()),
         tool_executor=InMemoryToolExecutor({}, {}),
         self_configuration=controller,
@@ -270,7 +278,7 @@ async def test_mcp_route_is_available_only_after_safe_boundary(tmp_path):
     result = await executor.execute(
         call({}, name="mcp_docs_lookup", operation="lookup1"), CONTEXT
     )
-    assert result.content[0].text == "found"
+    assert cast(TextBlock, result.content[0]).text == "found"
 
 
 @pytest.mark.asyncio
@@ -443,7 +451,7 @@ async def test_public_builder_exposes_self_configuration_without_initial_skills(
         dependencies=(ExtensionDependency(capability="execution.environment"),), supported_scopes=frozenset({ExtensionScope.RUN})), factory=create)
     package = package.model_copy(update={"runtime": package.runtime.model_copy(update={"capabilities": {
         **package.runtime.capabilities,
-        "agent.self-configuration": CapabilitySelection(plugin="test.self-configuration", scope="run"),
+        "agent.self-configuration": CapabilitySelection(plugin="test.self-configuration", scope=cast('ExtensionScope | None', "run")),
         "execution.binding": CapabilitySelection(plugin="sage.execution.binding.local-workspace", config={
             "workspace": str(tmp_path / "workspace"), "policy": {"process": {"enabled": False}}}),
         "tool.provider": CapabilitySelection(plugin="sage.tool.official"),
@@ -454,9 +462,9 @@ async def test_public_builder_exposes_self_configuration_without_initial_skills(
         build_registered_package(tmp_path / 'sessions', models=TEST_MODELS, model=model, skills=(source, source, InMemorySkillWorkspace()), package=package, registrations=(self_registration,), providers={'agent.tool-policy': DefaultToolPolicy(approval_strategy=ApprovalStrategy.AUTO_APPROVE)})
     )
     try:
-        stream = await application.entrypoint().run_stream(
+        stream = await cast(ApplicationEntrypoint, application.entrypoint()).run_stream(
             (StartRun(
-                agent_id=package.entrypoint.agent,
+                agent_id=cast(str, package.entrypoint.agent),
                 input=(InputItem(role="user", content=(TextBlock(text="review"),)),),
                 resolved_spec_hash=application.composition_hash,
                 idempotency_key="builder-self-configure",
@@ -547,7 +555,7 @@ async def test_paused_run_restores_capabilities_with_fresh_engine_or_fails_close
     assert suspended.state == RunState.SUSPENDED
     checkpoint = await runtime.session_store.get_latest_checkpoint(handle.run_id)
     assert checkpoint.state["self_configuration_revision"] == 1
-    suspension = await runtime.session_store.get_suspension(suspended.suspension_id)
+    suspension = await runtime.session_store.get_suspension(cast(str, suspended.suspension_id))
     await runtime.resume_run(
         ResumeRun(
             run_id=handle.run_id,
@@ -656,7 +664,7 @@ async def test_next_model_step_sees_and_executes_new_mcp_tool(tmp_path):
     )
     engine = AgentLoopEngine(
         runtime=runtime,
-        model=model,
+        model=cast(ModelProvider, model),
         tool_catalog=InMemoryToolCatalog(()),
         tool_executor=InMemoryToolExecutor({}, {}),
         self_configuration=controller,
@@ -704,7 +712,7 @@ async def test_system_prompt_is_staged_replaced_cleared_and_isolated(tmp_path):
     assert other_owner.system_prompt == ""
     # Reading or adding a Skill must not clear the instructions.
     query = await executor.execute(call({}, operation="inspect"), CONTEXT)
-    assert query.content[0].value["system_prompt"] == "Use concise Chinese."
+    assert cast(JsonBlock, query.content[0]).value["system_prompt"] == "Use concise Chinese."
     skill(tmp_path)
     await executor.execute(
         call({"add_skill_paths": ["downloads/review"]}, operation="skill"), CONTEXT
@@ -786,7 +794,7 @@ async def test_system_prompt_reaches_next_model_step_without_replacing_host_rule
     )
     engine = AgentLoopEngine(
         runtime=runtime,
-        model=model,
+        model=cast(ModelProvider, model),
         tool_catalog=InMemoryToolCatalog(()),
         tool_executor=InMemoryToolExecutor({}, {}),
         self_configuration=service(tmp_path),

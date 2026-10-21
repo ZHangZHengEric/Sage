@@ -2,6 +2,17 @@
 
 from __future__ import annotations
 
+from typing import cast
+from sagents.v2.package.manifest.runtime import CapabilityBinding
+
+from typing import Any, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from sagents.v2.context.summary import ConversationSummary
+    from typing import Literal
+
+from sagents.v2.model.provider import ModelProvider
+
 import asyncio
 import json
 
@@ -37,7 +48,7 @@ from sagents.v2.context.plugins.summarizer_model.auxiliary import stream_auxilia
 
 
 def message(text, role="assistant", **kwargs):
-    return ModelMessage(role=role, content=(TextBlock(text=text),), **kwargs)
+    return ModelMessage(role=cast("Literal['system', 'developer', 'user', 'assistant', 'tool']", role), content=(TextBlock(text=text),), **kwargs)
 
 
 def scope(*, force=True, key="session"):
@@ -101,8 +112,8 @@ async def test_continuing_usage_pressure_advances_coverage_without_a_reduction_p
         assert "run" in assembler._compression_requested
         await assembler.prepare_projection(command(), source, run_id="run")
         saved = await store.get(DefaultContextAssembler._summary_context_key("run"))
-        revisions.append(saved.revision)
-        coverage.append(saved.source_message_count)
+        revisions.append(cast('ConversationSummary', saved).revision)
+        coverage.append(cast('ConversationSummary', saved).source_message_count)
     assert len(summary.requests) == 5
     assert revisions == [1, 2, 3, 4, 5]
     assert all(after > before for before, after in zip(coverage, coverage[1:]))
@@ -164,7 +175,7 @@ class FragmentModel:
             text = request.messages[-1].content[0].text
             if len(text) > self.limit:
                 raise error()
-            payload = {key: [] for key in ModelConversationSummarizer._FIELDS}
+            payload: dict[str, Any] = {key: [] for key in ModelConversationSummarizer._FIELDS}
             payload["summary"] = "facts preserved"
             yield ModelStreamEvent(
                 kind=ModelEventKind.COMPLETED,
@@ -198,7 +209,7 @@ async def test_no_input_is_locally_rejected_or_compressed(size, maximum):
     projection = await assembler.prepare_projection(command(), original, run_id="run")
     assert projection.messages == original
     assert not summary.requests
-    assert original[0].content[0].text == "界" * size
+    assert cast(TextBlock, original[0].content[0]).text == "界" * size
 
 
 @pytest.mark.asyncio
@@ -346,7 +357,7 @@ async def test_failed_summary_never_commits_even_a_partial_checkpoint(outcome):
             source, scope=scope()
         )
     assert await store.get("session") is None
-    assert source[0].content[0].text == ("facts " * 200).strip()
+    assert cast(TextBlock, source[0].content[0]).text == ("facts " * 200).strip()
 
 
 @pytest.mark.asyncio
@@ -356,7 +367,7 @@ async def test_summary_split_model_call_quota_is_strict(calls):
     with pytest.raises(SageV2Error) as exc:
         with model_call_budget() as budget:
             budget.remaining = calls
-            await ModelConversationSummarizer(model).summarize(
+            await ModelConversationSummarizer(cast(ModelProvider, model)).summarize(
                 SummarizationRequest(
                     scope=scope(),
                     messages=(message("source " * 5000),),
@@ -372,7 +383,7 @@ async def test_summary_split_model_call_quota_is_strict(calls):
 async def test_summary_tries_complete_source_then_splits_and_merges(limit):
     model = FragmentModel(limit=limit)
     source = "prefix facts " * 200 + "tail facts " * 200
-    summary = await ModelConversationSummarizer(model).summarize(
+    summary = await ModelConversationSummarizer(cast(ModelProvider, model)).summarize(
         SummarizationRequest(
             scope=scope(),
             messages=(message(source),),
@@ -445,7 +456,7 @@ async def test_irreducible_current_request_is_retained_and_stops(text):
     with pytest.raises(SageV2Error, match="no completed history"):
         await PersistentSummaryContextReducer(store).reduce(source, scope=scope())
     assert await store.get("session") is None
-    assert source[0].content[0].text == text
+    assert cast(TextBlock, source[0].content[0]).text == text
 
 
 @pytest.mark.asyncio
@@ -461,7 +472,7 @@ async def test_cancel_during_second_fragment_does_not_commit_first_fragment():
     source = (message("historical fact " * 400), message("current", "user"))
     with pytest.raises(asyncio.CancelledError):
         await PersistentSummaryContextReducer(
-            store, summarizer=ModelConversationSummarizer(model)
+            store, summarizer=ModelConversationSummarizer(cast(ModelProvider, model))
         ).reduce(source, scope=scope())
     assert await store.get("session") is None
 
@@ -523,8 +534,8 @@ async def test_auxiliary_recovery_preserves_schema_and_never_executes_tools(
         assert len(model.calls) == 1
     else:
         events = [e async for e in stream_auxiliary_model(model, request)]
-        assert len(events) == 1 and events[0].response.text == "done"
-        assert request.messages[-1].content[0].text == ("history " * 500).strip()
+        assert len(events) == 1 and cast('ModelResponse', events[0].response).text == "done"
+        assert cast(TextBlock, request.messages[-1].content[0]).text == ("history " * 500).strip()
         assert len(model.calls) == (3 if failure == "overflow" else 2)
 
 
@@ -606,7 +617,7 @@ async def test_single_oversized_current_parallel_batch_can_be_summarized_atomica
     assert projection.historical_messages == source
     assert projection.messages[-1] == source[0]
     assert summary.requests[0].messages == source
-    assert (await store.get("session")).source_message_count == len(source)
+    assert (cast('ConversationSummary', await store.get("session"))).source_message_count == len(source)
 
 
 @pytest.mark.asyncio
@@ -621,9 +632,9 @@ async def test_old_summary_can_shrink_without_claiming_additional_canonical_cove
     reducer.summarizer = Summary("shorter facts")
     projection = await reducer.reduce(source, scope=scope())
     current = await store.get("session")
-    assert current.revision == previous.revision + 1
-    assert current.covered_message_digests == previous.covered_message_digests
-    assert reducer.summarizer.requests[0].previous_summary == previous.text
+    assert cast('ConversationSummary', current).revision == cast('ConversationSummary', previous).revision + 1
+    assert cast('ConversationSummary', current).covered_message_digests == cast('ConversationSummary', previous).covered_message_digests
+    assert reducer.summarizer.requests[0].previous_summary == cast('ConversationSummary', previous).text
     assert projection.messages[-1] == source[-1]
 
 
@@ -661,14 +672,14 @@ async def test_summary_source_redacts_media_in_tool_arguments_without_changing_h
         message(data, "tool", tool_call_id="call"),
     )
     model = FragmentModel(limit=10000)
-    result = await ModelConversationSummarizer(model).summarize(
+    result = await ModelConversationSummarizer(cast(ModelProvider, model)).summarize(
         SummarizationRequest(scope=scope(), messages=source, target_tokens=64)
     )
     serialized = model.calls[0].messages[-1].content[0].text
     assert "A" * 100 not in serialized
     assert "A" * 100 not in result
     assert source[0].tool_calls[0].arguments[argument_key] == data
-    assert source[1].content[0].text == data
+    assert cast(TextBlock, source[1].content[0]).text == data
 
 
 @pytest.mark.asyncio
@@ -724,7 +735,7 @@ async def test_later_permanent_fragment_failure_keeps_previous_checkpoint():
     await reducer.reduce(source, scope=scope())
     previous = await store.get("session")
     model = FragmentModel(limit=2000, fail_at=3)
-    reducer.summarizer = ModelConversationSummarizer(model)
+    reducer.summarizer = ModelConversationSummarizer(cast(ModelProvider, model))
     extended = (
         *source,
         message("more facts " * 1000),
@@ -766,7 +777,7 @@ async def test_auxiliary_completed_event_is_authoritative_even_if_eof_stalls():
     )
     async with asyncio.timeout(0.5):
         events = [e async for e in stream_auxiliary_model(model, request)]
-    assert events[0].response.text == "done"
+    assert cast('ModelResponse', events[0].response).text == "done"
     assert model.closed
 
 
@@ -801,10 +812,10 @@ async def test_summary_transport_eof_retries_have_a_hard_limit(recover, monkeypa
         scope=scope(), messages=(message("facts"),), target_tokens=64
     )
     if recover:
-        assert await ModelConversationSummarizer(model).summarize(request)
+        assert await ModelConversationSummarizer(cast(ModelProvider, model)).summarize(request)
     else:
         with pytest.raises(SageV2Error) as exc:
-            await ModelConversationSummarizer(model).summarize(request)
+            await ModelConversationSummarizer(cast(ModelProvider, model)).summarize(request)
         assert exc.value.info.code == "model.stream_incomplete"
     assert len(model.calls) == model.closed == 4
     assert delays == [2, 4, 8]
@@ -853,9 +864,9 @@ def test_legacy_plugin_settings_do_not_resurrect_input_estimators():
     ]
     manifest = SageManifest.model_validate(data)
     assert tuple(p.id for p in manifest.plugins) == ("sage.skill.loading.lazy",)
-    runtime = RuntimeConfig(capabilities={
+    runtime = RuntimeConfig(capabilities=cast('dict[str, CapabilityBinding]', {
         "context.token-estimator": {"plugin": "sage.context.token-estimator.tiktoken"},
-    })
+    }))
     assert runtime.capabilities == {}
 
 
@@ -870,7 +881,7 @@ async def test_summary_configured_model_limit_splits_from_reported_usage_even_af
 
         async def stream(self, request):
             async for event in super().stream(request):
-                response = event.response.model_copy(
+                response = cast('ModelResponse', event.response).model_copy(
                     update={
                         "usage": UsageSummary(
                             reported=True,
@@ -881,7 +892,7 @@ async def test_summary_configured_model_limit_splits_from_reported_usage_even_af
                 yield event.model_copy(update={"response": response})
 
     model = Reported(limit=100000)
-    result = await ModelConversationSummarizer(model).summarize(
+    result = await ModelConversationSummarizer(cast(ModelProvider, model)).summarize(
         SummarizationRequest(
             scope=scope(), messages=(message("facts " * 1000),), target_tokens=64
         )
@@ -956,8 +967,8 @@ async def test_concurrent_identical_compressions_reuse_the_winning_complete_chec
     )
     assert first.messages == second.messages
     saved = await store.get("session")
-    assert saved.revision == 1
-    assert first.historical_messages == source[: saved.source_message_count]
+    assert cast('ConversationSummary', saved).revision == 1
+    assert first.historical_messages == source[: cast('ConversationSummary', saved).source_message_count]
 
 
 @pytest.mark.asyncio
@@ -995,18 +1006,18 @@ async def test_auxiliary_repeated_overflow_stops_after_six_recovery_attempts(
         _ = [e async for e in stream_auxiliary_model(model, request)]
     assert exc.value.info.code == "model.context_window_exceeded"
     assert model.calls == 7
-    assert len(request.messages[0].content[0].text) == 65536
+    assert len(cast(TextBlock, request.messages[0].content[0]).text) == 65536
 
 
 def test_structured_split_merge_preserves_both_edge_identifiers_and_full_field_lists():
-    first = {key: [] for key in ModelConversationSummarizer._FIELDS}
+    first: dict[str, Any] = {key: [] for key in ModelConversationSummarizer._FIELDS}
     first.update(
         summary="验收码 ORION-731",
         user_requirements=["保留 ORION-731"],
         tool_outcomes={"read a": {"status": "completed"}},
         todo_state_at_compaction_boundary=[{"content": "old", "status": "pending"}],
     )
-    second = {key: [] for key in ModelConversationSummarizer._FIELDS}
+    second: dict[str, Any] = {key: [] for key in ModelConversationSummarizer._FIELDS}
     second.update(
         summary="交付码 LIME-409",
         user_requirements=["保留 LIME-409"],

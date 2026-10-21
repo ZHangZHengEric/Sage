@@ -5,6 +5,9 @@ Run from the repository root:
 This measures catalog reads, not production cold-start or full chat latency.
 """
 
+from typing import cast
+from sqlalchemy.ext.asyncio import AsyncEngine
+
 import argparse
 import asyncio
 import json
@@ -41,7 +44,7 @@ async def benchmark(agent_count, sample_count):
                 samples, statements = [], []
                 def capture(connection, cursor, sql, params, context, many):
                     statements.append(sql)
-                event.listen(database._engine.sync_engine, "before_cursor_execute", capture)
+                event.listen(cast(AsyncEngine, database._engine).sync_engine, "before_cursor_execute", capture)
                 try:
                     for _ in range(sample_count):
                         statements.clear()
@@ -49,7 +52,7 @@ async def benchmark(agent_count, sample_count):
                         catalog = await read()
                         samples.append((perf_counter() - started) * 1000)
                 finally:
-                    event.remove(database._engine.sync_engine, "before_cursor_execute", capture)
+                    event.remove(cast(AsyncEngine, database._engine).sync_engine, "before_cursor_execute", capture)
                 print(json.dumps({"mode": name, "agents_loaded": len(catalog.agents),
                     "queries": len(statements), "median_ms": round(statistics.median(samples), 3),
                     "samples_ms": [round(value, 3) for value in samples]}))

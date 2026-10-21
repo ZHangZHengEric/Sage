@@ -1,5 +1,11 @@
 from __future__ import annotations
 
+from typing import TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    from app.v2.desktop.backend.service import DesktopV2Service
+    from sagents.v2.runtime.session.contracts import SessionStore
+
 from unittest.mock import AsyncMock
 
 import pytest
@@ -75,7 +81,7 @@ async def test_unclaimed_sidecar_expires_if_host_crashes_before_attach():
 def test_sidecar_api_tracks_shared_clients_and_schedules_idle_shutdown():
     shutdown_requests: list[bool] = []
     app = create_app(
-        service=_Service(),
+        service=cast('DesktopV2Service | None', _Service()),
         auth_token=AUTH_TOKEN,
         shutdown_requested=lambda: shutdown_requests.append(True),
     )
@@ -107,7 +113,7 @@ def test_sidecar_api_tracks_shared_clients_and_schedules_idle_shutdown():
 def test_shutdown_if_idle_refuses_to_interrupt_an_attached_client():
     shutdown_requests: list[bool] = []
     app = create_app(
-        service=_Service(),
+        service=cast('DesktopV2Service | None', _Service()),
         auth_token=AUTH_TOKEN,
         shutdown_requested=lambda: shutdown_requests.append(True),
     )
@@ -129,7 +135,7 @@ def test_shutdown_if_idle_refuses_to_interrupt_an_attached_client():
 
 
 def test_closing_sidecar_is_not_healthy_for_immediate_relaunch():
-    app = create_app(service=_Service(), auth_token=AUTH_TOKEN, shutdown_requested=lambda: None)
+    app = create_app(service=cast('DesktopV2Service | None', _Service()), auth_token=AUTH_TOKEN, shutdown_requested=lambda: None)
     with TestClient(app) as client:
         assert client.get("/health", headers=AUTH_HEADERS).status_code == 200
         client.put("/api/v2/runtime/clients/desktop-client-one", headers=AUTH_HEADERS)
@@ -158,10 +164,10 @@ async def test_background_run_keeps_detached_and_expired_sidecar_alive_until_fin
     from tests.sagents.v2.test_autonomous_runtime import CONTEXT
 
     store = EphemeralSessionStore()
-    runtime = HarnessRuntime(store)
+    runtime = HarnessRuntime(cast('SessionStore', store))
     service = type("Service", (), {"session_store": store, "rsi_active": False})()
     def busy():
-        return DesktopV2Service.has_background_work(service)
+        return DesktopV2Service.has_background_work(cast('DesktopV2Service', service))
     handle = await runtime.start_run(StartRun(
         agent_id="agent", input=(InputItem(role="user", content=(TextBlock(text="work"),)),),
         resolved_spec_hash="sha256:keepalive", idempotency_key="work",

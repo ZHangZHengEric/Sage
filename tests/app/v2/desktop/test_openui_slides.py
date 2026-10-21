@@ -1,3 +1,11 @@
+
+from typing import TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    from app.v2.desktop.backend.service import DesktopV2Service
+
+from pptx.shapes.autoshape import Shape
+
 import copy
 import json
 from io import BytesIO
@@ -40,11 +48,11 @@ async def test_slide_text_streams_and_export_contains_editable_objects(deck):
     for dark in (False, True):
         prs = Presentation(BytesIO(export_deck(deck, dark=dark)))
         assert len(prs.slides) == 3
-        assert prs.slide_width / prs.slide_height == pytest.approx(16 / 9)
+        assert cast('int', prs.slide_width) / cast('int', prs.slide_height) == pytest.approx(16 / 9)
         assert any(s.has_chart for slide in prs.slides for s in slide.shapes)
         assert any(s.has_table for slide in prs.slides for s in slide.shapes)
         assert any(
-            "让想法成为作品" in s.text
+            "让想法成为作品" in cast(Shape, s).text
             for slide in prs.slides
             for s in slide.shapes
             if s.has_text_frame
@@ -53,7 +61,7 @@ async def test_slide_text_streams_and_export_contains_editable_objects(deck):
             s.shape_type == 13 for slide in prs.slides for s in slide.shapes
         )  # no screenshot pictures
         chart = next(
-            s.chart for slide in prs.slides for s in slide.shapes if s.has_chart
+            getattr(s, 'chart') for slide in prs.slides for s in slide.shapes if s.has_chart
         )
         assert list(chart.series[0].values) == [72, 96, 128]
         assert chart.part.chart_workbook.xlsx_part.blob.startswith(b"PK")
@@ -85,10 +93,10 @@ def test_slide_layout_limits_prevent_forms_and_oversized_data(deck):
 
 def test_export_endpoint_auth_session_revision_and_payload(deck):
     service = _Service()
-    service.openui_surfaces = AsyncMock(
+    setattr(service, 'openui_surfaces', AsyncMock(
         return_value=[{"surface_id": "deck1", "revision": 2, "tree": deck}]
-    )
-    app = app_module.create_app(service=service, auth_token=AUTH_TOKEN)
+    ))
+    app = app_module.create_app(service=cast('DesktopV2Service | None', service), auth_token=AUTH_TOKEN)
     with TestClient(app) as client:
         path = "/api/v2/sessions/s1/openui/deck1/pptx"
         assert client.get(path + "?revision=2").status_code == 401
@@ -111,7 +119,7 @@ def test_export_endpoint_auth_session_revision_and_payload(deck):
             )
             == 3
         )
-    service.openui_surfaces.assert_awaited_with("s1", "default_user")
+    getattr(service, 'openui_surfaces').assert_awaited_with("s1", "default_user")
 
 
 @pytest.mark.parametrize("kind", ["line", "bar", "pie"])
@@ -119,5 +127,5 @@ def test_all_presentation_chart_types_export_editable(deck, kind):
     tree = copy.deepcopy(deck)
     tree["props"]["children"][1]["props"]["children"][1]["props"]["type"] = kind
     prs = Presentation(BytesIO(export_deck(tree)))
-    chart = next(s.chart for slide in prs.slides for s in slide.shapes if s.has_chart)
+    chart = next(getattr(s, 'chart') for slide in prs.slides for s in slide.shapes if s.has_chart)
     assert list(chart.series[0].values) == [72, 96, 128]

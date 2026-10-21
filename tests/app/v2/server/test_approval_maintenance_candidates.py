@@ -1,3 +1,9 @@
+
+from typing import TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    from sagents.v2.contracts.interactions import InteractionType
+
 from types import SimpleNamespace
 
 import pytest
@@ -58,8 +64,8 @@ async def test_approval_maintenance_only_loads_suspended_candidates_as_their_own
         session_access=SimpleNamespace(read_session_views=read_session_views),
         execution=None,
     )
-    service.approval_expired = approval_expired
-    service.cancel_run = cancel_run
+    setattr(service, 'approval_expired', approval_expired)
+    setattr(service, 'cancel_run', cancel_run)
 
     await service.expire_approvals(SimpleNamespace(scan=scan, scan_snapshot=scan_snapshot), contexts.__getitem__)
 
@@ -87,7 +93,7 @@ async def test_pending_approvals_read_one_batch_and_preserve_reply_revisions(cou
     for thread in threads:
         sid = thread.thread_id
         interaction = InteractionRequest(interaction_id=f"i:{sid}", run_id=f"r:{sid}",
-            interaction_type="approval", allowed_decisions=("approve", "deny"),
+            interaction_type=cast('InteractionType', "approval"), allowed_decisions=("approve", "deny"),
             payload={"tool": "shell"}, expected_revision=4, requested_at=requested_at)
         views[sid] = (SimpleNamespace(
             run=SimpleNamespace(run_id=f"r:{sid}", state=RunState.SUSPENDED, revision=7),

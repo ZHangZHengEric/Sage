@@ -1,5 +1,12 @@
 """One registration/configuration/lifecycle contract for package and host assembly."""
 
+from typing import TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    from sagents.v2.application import SAgentApplication
+
+from sagents.v2.package.manifest.runtime import CapabilitySelection
+
 from tests.sagents.v2.sdk_fixture import build_registered_package
 from tests.sagents.v2.sdk_fixture import fixture_configuration
 
@@ -140,7 +147,7 @@ async def test_desktop_uses_same_custom_plugin_registration_and_config(tmp_path)
     try:
         result, _, _ = await execute(service)
         assert result.state.value == "completed"
-        snapshot = await service.application.run_configuration(
+        snapshot = await cast('SAgentApplication', service.application).run_configuration(
             result.run_id, service._context("user_1")
         )
         assert snapshot["runtime"]["capabilities"]["context.reducer"][
@@ -283,8 +290,8 @@ def test_server_registration_and_package_runtime_parameter(tmp_path):
         assert calls == [{"minimum_characters": 8}]
         asyncio.run(standalone())
         assert calls == [{"minimum_characters": 8}, {"minimum_characters": 4}]
-        assert host.application.runtime_configuration.capabilities[
+        assert cast(CapabilitySelection, host.application.runtime_configuration.capabilities[
             "context.reducer"
-        ].config == {"minimum_characters": 8}
+        ]).config == {"minimum_characters": 8}
         assert host.execution.sandbox_provider is not None
     assert host.execution.sandbox_provider is None

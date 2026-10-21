@@ -2,6 +2,16 @@
 
 from __future__ import annotations
 
+from typing import Any, TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    from sagents.v2.agent.multi_agent.registry import AgentRegistry
+    from sagents.v2.contracts.commands import RunConfig
+    from sagents.v2.goal.state import GoalStateService
+    from sagents.v2.skill.contracts import SkillCatalog
+
+from sagents.v2.model.provider import ModelProvider
+
 import json
 from types import SimpleNamespace
 
@@ -59,9 +69,9 @@ def command(language):
         agent_id="a",
         resolved_spec_hash="sha256:a",
         idempotency_key="start",
-        config={
+        config=cast('RunConfig', {
             "metadata": {} if language is None else {"response_language": language}
-        },
+        }),
     )
 
 
@@ -109,26 +119,26 @@ async def test_runtime_and_auxiliary_requests_share_locale_and_fallback(
     assert _TEXT[expected]["reminder_hint"] in text
     # Judge must normalize regional variants instead of falling back from zh-CN to en.
     judge_model = model_with('{"decision":"completed","reason":"done"}')
-    await LLMContinuationJudge(judge_model).decide(_context(language=language or "en"))
+    await LLMContinuationJudge(cast(ModelProvider, judge_model)).decide(_context(language=language or "en"))
     judge_request = judge_model.requests[0]
     assert judge_request.metadata["response_language"] == expected
     assert tuple(m.role for m in judge_request.messages) == ("system", "user")
-    judge_text = "\n".join(m.content[0].text for m in judge_request.messages)
+    judge_text = "\n".join(cast(TextBlock, m.content[0]).text for m in judge_request.messages)
     assert (
         "先应用 Todo 硬约束" if expected == "zh" else "Apply the Todo invariant first"
     ) in judge_text
     assert _TEXT[expected]["judge_reference"] in judge_text
     # A per-request locale must override the generator's independent host setting.
     memory_model = model_with('{"query":"project file.py"}')
-    await LLMMemoryRecallQueryGenerator(memory_model, language="zh").generate(
+    await LLMMemoryRecallQueryGenerator(cast(ModelProvider, memory_model), language="zh").generate(
         "inspect file.py", run_id="run", language=expected
     )
     assert memory_model.requests[0].metadata["response_language"] == expected
     assert (
-        memory_model.requests[0].messages[0].content[0].text
+        cast(TextBlock, memory_model.requests[0].messages[0].content[0]).text
         == _TEXT[expected]["memory_system"]
     )
-    assert "inspect file.py" in memory_model.requests[0].messages[1].content[0].text
+    assert "inspect file.py" in cast(TextBlock, memory_model.requests[0].messages[1].content[0]).text
 
 
 @pytest.mark.parametrize(
@@ -165,19 +175,19 @@ async def test_summary_initial_retry_and_extractive_fallback_share_locale(
         target_tokens=512,
     )
     assert (
-        json.loads(await ModelConversationSummarizer(model).summarize(request))
+        json.loads(await ModelConversationSummarizer(cast(ModelProvider, model)).summarize(request))
         == payload
     )
     assert len(model.requests) == 2
     for model_request in model.requests:
         assert model_request.metadata["response_language"] == expected
-        system = model_request.messages[0].content[0].text
+        system = cast(TextBlock, model_request.messages[0].content[0]).text
         assert _TEXT[expected]["summary_system"] in system
         assert _TEXT[expected]["summary_language"] in system
-        assert "/project/file.py" in model_request.messages[1].content[0].text
+        assert "/project/file.py" in cast(TextBlock, model_request.messages[1].content[0]).text
     assert (
         _TEXT[expected]["summary_retry"]
-        in model.requests[1].messages[0].content[0].text
+        in cast(TextBlock, model.requests[1].messages[0].content[0]).text
     )
     value = await ExtractiveConversationSummarizer().summarize(request)
     snapshot = json.loads(value)
@@ -201,8 +211,8 @@ async def test_runtime_context_wrappers_use_run_locale_and_preserve_authored_tex
     guidance = DefaultAgentStepRequestBuilder._continuation_message(
         "KEEP exact reason", expected
     )
-    assert "KEEP exact reason" in guidance.content[0].text
-    assert _TEXT[expected]["continuation"].split("\n")[0] in guidance.content[0].text
+    assert "KEEP exact reason" in cast(TextBlock, guidance.content[0]).text
+    assert _TEXT[expected]["continuation"].split("\n")[0] in cast(TextBlock, guidance.content[0]).text
 
     class Catalog:
         async def list_skills(self, *, run_id):
@@ -212,13 +222,13 @@ async def test_runtime_context_wrappers_use_run_locale_and_preserve_authored_tex
                 ),
             )
 
-    skills = await AvailableSkillsContextProvider(Catalog()).segments(cmd)
+    skills = await AvailableSkillsContextProvider(cast('SkillCatalog', Catalog())).segments(cmd)
     assert _TEXT[expected]["skills"] in skills[0].content
     assert "KEEP authored description" in skills[0].content
     leaf = await AgentRosterContextProvider(
-        None, AgentMode.SIMPLE, allow_delegation=False
+        cast('AgentRegistry', None), AgentMode.SIMPLE, allow_delegation=False
     ).segments(cmd, run_id="r")
-    assert _TEXT[expected]["leaf"] in leaf[0].content
+    assert _TEXT[expected]["leaf"] in cast('tuple[Any, ...]', leaf)[0].content
 
 
 def test_builtin_catalog_has_exactly_two_complete_locales():
@@ -233,7 +243,7 @@ async def test_engine_overrides_memory_host_locale_per_run(language, expected):
     from tests.sagents.v2.test_agent_loop_matrix import CONTEXT, setup_loop
 
     query_model = model_with('{"query":""}')
-    generator = LLMMemoryRecallQueryGenerator(query_model, language="zh")
+    generator = LLMMemoryRecallQueryGenerator(cast(ModelProvider, query_model), language="zh")
     _, handle, loop, _ = await setup_loop(
         model_with("done"),
         response_language=language,
@@ -263,14 +273,14 @@ async def test_goal_plan_and_self_configuration_context_follow_run(
             return None
 
     cmd = command(language).model_copy(update={"invocation_mode": "goal"})
-    goal = await GoalContextProvider(Goals()).segments(cmd, run_id="r")
+    goal = await GoalContextProvider(cast('GoalStateService', Goals())).segments(cmd, run_id="r")
     assert tr("goal.create_instruction", expected) in goal[0].content
 
     class Plan:
         async def get(self, run_id):
             return SimpleNamespace(content="KEEP approved plan")
 
-    plan = await PlanContextProvider(Plan()).segments(
+    plan = await PlanContextProvider(cast('GoalStateService', Plan())).segments(
         cmd.model_copy(update={"invocation_mode": "plan"}), run_id="r"
     )
     assert tr("plan.submitted_instruction", expected) in plan[0].content
@@ -282,5 +292,5 @@ async def test_goal_plan_and_self_configuration_context_follow_run(
         _TEXT[expected]["self_configuration"].split("{revision}")[0]
         in config[0].content
     )
-    assert _TEXT[expected]["self_instructions"] in config[1].content
-    assert "KEEP authored instructions" in config[1].content
+    assert _TEXT[expected]["self_instructions"] in cast('tuple[Any, ...]', config)[1].content
+    assert "KEEP authored instructions" in cast('tuple[Any, ...]', config)[1].content

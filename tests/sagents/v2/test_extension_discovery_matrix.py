@@ -1,12 +1,13 @@
 from __future__ import annotations
+
+from typing import Any, cast
+
 from tests.sagents.v2.sdk_fixture import build_registered_package
 from tests.sagents.v2.model_fixture import TEST_MODELS
 from copy import deepcopy
 
-
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
 
 import pytest
 
@@ -103,7 +104,7 @@ async def test_declared_entry_point_is_loaded_and_configured(
     from tests.sagents.v2.test_standard_execution_configuration import response, run
     provider = ScriptedModelProvider((response(),))
     observed_configs: list[dict[str, Any]] = []
-    registration = _model_registration(provider, observed_configs=observed_configs)
+    registration = _model_registration(cast(ModelProvider, provider), observed_configs=observed_configs)
     monkeypatch.setattr(
         discovery.metadata,
         "entry_points",
@@ -144,7 +145,7 @@ async def test_manually_registered_declared_plugin_does_not_require_entry_point(
     monkeypatch.setenv("SAGE_MODEL_API_KEY", "test-key")
     from tests.sagents.v2.test_standard_execution_configuration import response, run
     provider = ScriptedModelProvider((response(),))
-    registration = _model_registration(provider)
+    registration = _model_registration(cast(ModelProvider, provider))
 
     def unexpected_discovery(**kwargs):
         raise AssertionError("manual registrations must win before discovery")
@@ -240,7 +241,7 @@ async def test_resolved_manifest_preserves_runtime_plugin_selection(
                 _FakeEntryPoint(
                     "acme.model.private-gateway",
                     _model_registration(
-                        ScriptedModelProvider(()), plugin_id="other.model"
+                        cast(ModelProvider, ScriptedModelProvider(())), plugin_id="other.model"
                     ),
                 ),
             ),
@@ -250,7 +251,7 @@ async def test_resolved_manifest_preserves_runtime_plugin_selection(
             (
                 _FakeEntryPoint(
                     "acme.model.private-gateway",
-                    _model_registration(ScriptedModelProvider(()), api_version="3"),
+                    _model_registration(cast(ModelProvider, ScriptedModelProvider(())), api_version="3"),
                 ),
             ),
             "extension.api_version_unsupported",
@@ -281,7 +282,7 @@ def test_invalid_declared_entry_points_fail_with_typed_errors(
 
 
 def test_duplicate_installed_entry_points_are_rejected(monkeypatch):
-    registration = _model_registration(ScriptedModelProvider(()))
+    registration = _model_registration(cast(ModelProvider, ScriptedModelProvider(())))
     monkeypatch.setattr(
         discovery.metadata,
         "entry_points",
@@ -298,7 +299,7 @@ def test_duplicate_installed_entry_points_are_rejected(monkeypatch):
 
 
 def test_declared_plugin_version_must_match_loaded_registration(monkeypatch):
-    registration = _model_registration(ScriptedModelProvider(()))
+    registration = _model_registration(cast(ModelProvider, ScriptedModelProvider(())))
     monkeypatch.setattr(
         discovery.metadata,
         "entry_points",
@@ -314,7 +315,7 @@ def test_declared_plugin_version_must_match_loaded_registration(monkeypatch):
 
 
 def test_empty_plugin_version_requirement_is_rejected(monkeypatch):
-    registration = _model_registration(ScriptedModelProvider(()))
+    registration = _model_registration(cast(ModelProvider, ScriptedModelProvider(())))
     monkeypatch.setattr(
         discovery.metadata,
         "entry_points",
@@ -345,7 +346,7 @@ async def test_manually_registered_plugin_still_obeys_manifest_version(tmp_path)
 
     with pytest.raises(SageV2Error) as mismatch:
         await (
-            build_registered_package(tmp_path / 'session-store', models=PLUGIN_MODELS, package=package, registrations=(_model_registration(provider),))
+            build_registered_package(tmp_path / 'session-store', models=PLUGIN_MODELS, package=package, registrations=(_model_registration(cast(ModelProvider, provider)),))
         )
 
     assert mismatch.value.info.code == "extension.version_mismatch"

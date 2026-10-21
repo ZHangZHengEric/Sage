@@ -1,4 +1,11 @@
 """Session identity survives transport, storage, tools and legacy lookup."""
+
+from typing import TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    from anyio.from_thread import BlockingPortal
+    from app.v2.server.conversations.agui.service import ConversationService
+
 import hashlib
 import json
 
@@ -80,21 +87,21 @@ def test_todo_write_uses_durable_id_instead_of_model_argument(tmp_path):
             import asyncio
             async with asyncio.timeout(5):
                 while True:
-                    current = await host.conversations.result(
+                    current = await cast('ConversationService', host.conversations).result(
                         user_id="business-user-123", agent_id=agent, session_id="Todo-ID")
                     if current["state"] == "completed":
                         return current
                     await asyncio.sleep(0.01)
-        assert client.portal.call(completed_result)["session_id"] == "Todo-ID"
+        assert cast('BlockingPortal', client.portal).call(completed_result)["session_id"] == "Todo-ID"
         path = tmp_path / "tenants" / "business-user-123" / agent / "workspace" / ".sage" / "todos"
         assert json.loads((path / "Todo-ID.json").read_text())[0]["content"] == "keep identity"
         assert not (path / "wrong-model-session.json").exists()
         store = host.application.entrypoint().runtime.session_store
-        runs = client.portal.call(store.list_session_runs, "Todo-ID")
+        runs = cast('BlockingPortal', client.portal).call(store.list_session_runs, "Todo-ID")
         assert runs and all(run.session_id == "Todo-ID" for run in runs)
-        command = client.portal.call(store.get_start_command, runs[0].run_id)
+        command = cast('BlockingPortal', client.portal).call(store.get_start_command, runs[0].run_id)
         assert command.config.metadata["system_context"]["session_id"] == "Todo-ID"
-        events = client.portal.call(store.read_events, runs[0].run_id)
+        events = cast('BlockingPortal', client.portal).call(store.read_events, runs[0].run_id)
         assert all(event.session_id == "Todo-ID" for event in events)
         assert not any(event.type == "tool.call.unknown" for event in events)
         proposals = [event.model_dump(mode="json")["data"] for event in events
@@ -131,7 +138,7 @@ def test_runtime_context_mismatch_has_no_run_or_workspace_side_effect(tmp_path):
                                json={**body(session_id="rejected"), "runtimeContext": {"session_id": "wrong"}})
         assert response.status_code == 422
         assert not (tmp_path / "tenants" / "business-user-123" / agent / "workspace" / "projects" / "new").exists()
-        assert client.portal.call(host.threads.find, "rejected") is None
+        assert cast('BlockingPortal', client.portal).call(host.threads.find, "rejected") is None
 
 
 def test_legacy_hash_lookup_reuses_history_workspace_and_todo(tmp_path, monkeypatch):
@@ -155,7 +162,7 @@ def test_legacy_hash_lookup_reuses_history_workspace_and_todo(tmp_path, monkeypa
             from app.v2.server.conversations.orm import SessionBindingRow
             async with host.database.transaction() as session:
                 await session.delete(await session.get(SessionBindingRow, legacy))
-        client.portal.call(remove_new_binding)
+        cast('BlockingPortal', client.portal).call(remove_new_binding)
         workspace = tmp_path / "tenants" / "business-user-123" / agent / "workspace"
         todos = workspace / ".sage" / "todos"
         todos.mkdir(parents=True, exist_ok=True)
@@ -165,11 +172,11 @@ def test_legacy_hash_lookup_reuses_history_workspace_and_todo(tmp_path, monkeypa
         assert old.json()["data"]["session_id"] == legacy
         assert send(client, session="old-id").status_code == 200
         store = host.application.entrypoint().runtime.session_store
-        assert len(client.portal.call(store.list_session_runs, legacy)) == 1
+        assert len(cast('BlockingPortal', client.portal).call(store.list_session_runs, legacy)) == 1
         assert send(client, session="old-id", request="edit-2").status_code == 200
         assert result(client, session="old-id").json()["data"]["session_id"] == legacy
         assert (todos / f"{legacy}.json").is_file()
-        assert client.portal.call(host.threads.find, "old-id") is None
+        assert cast('BlockingPortal', client.portal).call(host.threads.find, "old-id") is None
         assert result(client, session=legacy, user="other-tenant").status_code == 404
 
 
@@ -217,7 +224,7 @@ def test_legacy_suspended_todo_restores_after_restart(tmp_path):
             from app.v2.server.conversations.orm import SessionBindingRow
             async with host.database.transaction() as session:
                 await session.delete(await session.get(SessionBindingRow, legacy))
-        client.portal.call(remove_claim)
+        cast('BlockingPortal', client.portal).call(remove_claim)
     restarted = make_host(tmp_path, steps=8)
     with TestClient(create_app(restarted)) as client:
         client.headers["SAGE-AGENT-ID"] = agent
@@ -236,16 +243,16 @@ def test_legacy_suspended_todo_restores_after_restart(tmp_path):
             import asyncio
             async with asyncio.timeout(5):
                 while True:
-                    current = await restarted.conversations.result(
+                    current = await cast('ConversationService', restarted.conversations).result(
                         user_id="business-user-123", agent_id=agent, session_id="old-id")
                     if current["state"] == "completed":
                         return current
                     assert current["state"] not in {"failed", "cancelled"}
                     await asyncio.sleep(0.01)
-        assert client.portal.call(wait_finished)["session_id"] == legacy
+        assert cast('BlockingPortal', client.portal).call(wait_finished)["session_id"] == legacy
         tasks = json.loads((todos / f"{legacy}.json").read_text())
         assert {task["id"] for task in tasks} == {"old", "new"}
-        assert client.portal.call(restarted.threads.find, "old-id") is None
+        assert cast('BlockingPortal', client.portal).call(restarted.threads.find, "old-id") is None
 
 
 def test_questionnaire_and_followup_keep_session_identity(tmp_path):

@@ -1,4 +1,12 @@
 """Host-selected path contracts must survive admission, children and recovery."""
+
+from typing import TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    from sagents.v2.runtime.execution.sandbox.plugins.local import LocalWorkspaceSandboxProvider
+
+from sagents.v2.contracts.items import JsonBlock
+
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -46,7 +54,7 @@ async def test_mapping_is_frozen_and_children_use_host_directory(tmp_path, monke
         capabilities=AsyncMock(return_value=SimpleNamespace(model_dump=lambda **kw: {})),
     )
     provider = LocalWorkspaceExecutionBindingProvider(tmp_path / "tenant/workspace", workspace_alias="/workspace",
-                                                      sandbox_provider=sandbox, issuer=SandboxGrantIssuer())
+                                                      sandbox_provider=cast('LocalWorkspaceSandboxProvider | None', sandbox), issuer=SandboxGrantIssuer())
     command = StartRun(agent_id="agent", resolved_spec_hash="sha256:test", idempotency_key="mapping", input=())
     accepted = await provider.accept_configuration(command, context=CONTEXT)
     snapshot = accepted.config.execution_snapshot
@@ -72,7 +80,7 @@ async def test_mapping_is_frozen_and_children_use_host_directory(tmp_path, monke
             assert binding.host_workspace is None
         else:
             assert Path(spec.metadata["host_workspace"]).parent == provider.private_workspace_root
-    native = LocalWorkspaceExecutionBindingProvider(provider.workspace, sandbox_provider=sandbox)
+    native = LocalWorkspaceExecutionBindingProvider(provider.workspace, sandbox_provider=cast('LocalWorkspaceSandboxProvider | None', sandbox))
     with pytest.raises(SageV2Error, match="mapping changed"):
         await native._restore_configuration(snapshot)
     await provider.close()
@@ -90,7 +98,7 @@ async def test_shell_pipeline_failure_is_not_hidden_by_tail(tmp_path):
         result = await plugin.executor.execute(call("execute_shell_command", {
             "command": "printf 'checker failed\\n'; (exit 7) | tail -30", "block_until_ms": 5000,
         }), TOOL_CONTEXT)
-        receipt = result.content[0].value
+        receipt = cast(JsonBlock, result.content[0]).value
         assert receipt["success"] is False
         assert receipt["exit_code"] == 7
     finally:

@@ -1,4 +1,12 @@
 """Rolling task state and partial provider evidence survive repeated requests."""
+
+from typing import TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    from sagents.v2.model.contracts import ModelEventKind
+    from sagents.v2.runtime.observability.contracts import DiagnosticSink
+
+from sagents.v2.model.provider import ModelProvider
 import asyncio
 import json
 
@@ -23,10 +31,10 @@ def test_twenty_one_compactions_replace_one_snapshot_without_nested_history():
     summary = None
     for _ in range(21):
         summary = bounded_snapshot(summary_request(summary))
-    assert "Previous summary" not in summary
-    assert "New history" not in summary
-    assert len(summary) < 1536
-    state = json.loads(summary)
+    assert "Previous summary" not in cast('str', summary)
+    assert "New history" not in cast('str', summary)
+    assert len(cast(str, summary)) < 1536
+    state = json.loads(cast('str | bytes | bytearray', summary))
     assert len(state["user_requirements"]) == 1
     assert "/project/result.py" in state["user_requirements"][0]
 
@@ -62,13 +70,13 @@ async def test_concurrent_failed_streams_keep_separate_wire_and_partial_evidence
         async def stream(self, request):
             record_wire_event({"request": request.request_id, "arguments": '{"incomplete":'})
             await asyncio.sleep(0)
-            yield ModelStreamEvent(kind="text_delta", delta=request.request_id)
+            yield ModelStreamEvent(kind=cast('ModelEventKind', "text_delta"), delta=request.request_id)
             raise ValueError("invalid streamed tool arguments")
 
     sink = Sink()
     async def session_id(run_id):
         return "session"
-    provider = RecordingModelProvider(Provider(), sink=sink, session_id_resolver=session_id)
+    provider = RecordingModelProvider(cast(ModelProvider, Provider()), sink=cast('DiagnosticSink', sink), session_id_resolver=session_id)
     async def consume(identifier):
         request = ModelRequest(request_id=identifier, run_id="run", model_binding="primary", messages=())
         with pytest.raises(ValueError, match="invalid streamed"):

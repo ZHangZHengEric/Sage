@@ -1,3 +1,6 @@
+
+from typing import Any, cast
+
 from datetime import datetime, timezone
 import sqlite3
 
@@ -94,12 +97,12 @@ def test_in_memory_timings_match_exported_projection(incomplete):
 
     events, models = sample()
     rows = [{"kind": "model", "at": BASE + 6, "data": {
-        **models[0], "completed_at": datetime.fromtimestamp(models[0]["ended_at"], timezone.utc),
+        **models[0], "completed_at": datetime.fromtimestamp(cast('float', models[0]["ended_at"]), timezone.utc),
     }}]
     for value in events:
         rows.append({"kind": "log", "at": value["at"], "data": {
             "session_id": value["session_id"], "run_id": value["run_id"],
-            "timestamp": datetime.fromtimestamp(value["at"], timezone.utc),
+            "timestamp": datetime.fromtimestamp(cast('float', value["at"]), timezone.utc),
             "event": value["event"], "request_id": value["identity"],
             "tool_call_id": value["identity"], "attributes": {
                 "agent_id": value["agent_id"], "purpose": value["purpose"],
@@ -133,9 +136,9 @@ def test_missing_capture_is_never_mislabelled_as_framework_time(missing):
     assert row["framework_ms"] is None
     summary = summarize([row])
     assert summary["measured"] == 0
-    assert summary["framework_ms"]["p50"] is None
+    assert cast('dict[str, Any]', summary["framework_ms"])["p50"] is None
     if missing == "outer":
-        assert summary["first_token_ms"]["p50"] is None
+        assert cast('dict[str, Any]', summary["first_token_ms"])["p50"] is None
 
 
 def test_resumed_execution_excludes_human_wait_and_tracks_active_first_token():
@@ -161,7 +164,7 @@ def test_auxiliary_llms_are_counted_but_not_user_first_text():
         event(1, "model.first_text", purpose="conversation_summary", identity="summary")
     )
     models.append(
-        model(0, 2, identity="summary", purpose="conversation_summary", first=0.5)
+        model(0, 2, identity="summary", purpose="conversation_summary", first=cast('int', 0.5))
     )
     row = build_run(events, models)
     assert row["model_ms"] == 6000
@@ -179,14 +182,14 @@ def insert_sample(db, *, run="r", agent="agent", shift=0):
                 event=e["event"],
                 session_id="s",
                 run_id=run,
-                timestamp=e["at"] + shift,
-                tool_call_id=e["identity"] if e["event"].startswith("tool.") else None,
+                timestamp=cast('float', e["at"]) + cast('float', shift),
+                tool_call_id=e["identity"] if cast('str', e["event"]).startswith("tool.") else None,
                 request_id=e["identity"],
                 attributes={
                     "agent_id": agent,
                     "purpose": e["purpose"],
                     "run_state": e["state"],
-                    "started_at": e["started_at"] + shift if e["started_at"] else None,
+                    "started_at": cast('float', e["started_at"]) + cast('float', shift) if e["started_at"] else None,
                     "password": "MUST NOT BE STORED",
                     "arguments": {"private": "MUST NOT BE STORED"},
                 },
@@ -199,9 +202,9 @@ def insert_sample(db, *, run="r", agent="agent", shift=0):
                 run_id=run,
                 request_id=m["request_id"],
                 session_id="s",
-                started_at=m["started_at"] + shift,
-                completed_at=m["ended_at"] + shift,
-                first_token_at=m["first_token_at"] + shift,
+                started_at=cast('float', m["started_at"]) + cast('float', shift),
+                completed_at=cast('float', m["ended_at"]) + cast('float', shift),
+                first_token_at=cast('float', m["first_token_at"]) + cast('float', shift),
                 purpose=m["purpose"],
             ),
         )
@@ -245,7 +248,7 @@ def test_backfill_is_idempotent_and_preserves_partial_history(tmp_path):
         for e in [event(0, "agent.run.started"), event(10, "agent.run.completed")]:
             payload = {
                 "event": e["event"],
-                "timestamp": datetime.fromtimestamp(e["at"], timezone.utc).isoformat(),
+                "timestamp": datetime.fromtimestamp(cast('float', e["at"]), timezone.utc).isoformat(),
                 "attributes": {"agent_id": "agent", "password": "secret"},
             }
             db.execute(

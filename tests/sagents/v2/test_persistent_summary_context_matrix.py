@@ -1,5 +1,14 @@
 from __future__ import annotations
 
+from typing import TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    from sagents.v2.context.summary import ConversationSummary
+    from sagents.v2.runtime.observability.contracts import LogSink
+    from sagents.v2.runtime.session.contracts import DerivedStateStore
+
+from sagents.v2.model.provider import ModelProvider
+
 import asyncio
 import json
 
@@ -90,7 +99,7 @@ async def test_session_derived_store_upgrades_legacy_summary_on_read():
                 "updated_at": "2026-01-01T00:00:00Z",
             }
 
-    store = SessionDerivedConversationSummaryStore(LegacyDerivedState())
+    store = SessionDerivedConversationSummaryStore(cast('DerivedStateStore', LegacyDerivedState()))
     summary = await store.get("context_legacy", session_id="session_1")
 
     assert summary is not None
@@ -219,7 +228,7 @@ async def test_summary_survives_history_provenance_reconstruction(legacy):
     await reducer.reduce(source, budget, scope=scope())
     saved = await store.get("session_1")
     if legacy:
-        saved = saved.model_copy(
+        saved = cast('ConversationSummary', saved).model_copy(
             update={
                 "covered_message_digests": await message_digests_async(
                     source[1:4], include_source_metadata=True
@@ -277,7 +286,7 @@ async def test_exhausted_summary_timeout_preserves_previous_summary_and_history(
         ModelMessage(role="user", content=(TextBlock(text="new request"),)),
     )
     original = tuple(message.model_dump() for message in source)
-    summarizer = ModelConversationSummarizer(ScriptedModelProvider(()))
+    summarizer = ModelConversationSummarizer(cast(ModelProvider, ScriptedModelProvider(())))
 
     async def fail(request, progress):
         raise summarizer._timeout_error("idle", progress)
@@ -342,9 +351,9 @@ async def test_incompatible_prefix_keeps_checkpoint_when_reduction_fails():
     assert caught.value.info.code == "context.summary_no_progress"
     kept = await store.get("session_1")
     assert kept is not None
-    assert kept.summary_id == original.summary_id
-    assert kept.text == original.text
-    assert kept.revision == original.revision
+    assert kept.summary_id == cast('ConversationSummary', original).summary_id
+    assert kept.text == cast('ConversationSummary', original).text
+    assert kept.revision == cast('ConversationSummary', original).revision
 
 
 @pytest.mark.asyncio
@@ -533,7 +542,7 @@ async def test_pressure_does_not_regenerate_checkpoint_without_reducible_history
 
     assert summarizer.requests == []
     assert projection.messages[-1] == source[0]
-    assert (await store.get("session_1")).revision == 1
+    assert (cast('ConversationSummary', await store.get("session_1"))).revision == 1
 
 
 @pytest.mark.asyncio
@@ -545,7 +554,7 @@ async def test_summary_echoed_derived_fields_are_rebuilt_without_model_retry(fie
     model = ScriptedModelProvider((
         ScriptedModelStep(events=(_summary_completion(json.dumps(payload)),)),
     ))
-    value = await ModelConversationSummarizer(model).summarize(
+    value = await ModelConversationSummarizer(cast(ModelProvider, model)).summarize(
         SummarizationRequest(scope=scope(), messages=ledger()[1:4], target_tokens=512)
     )
 
@@ -587,7 +596,7 @@ async def test_model_summarizer_retries_and_returns_the_structured_contract():
             ScriptedModelStep(events=(_summary_completion(json.dumps(payload)),)),
         )
     )
-    summarizer = ModelConversationSummarizer(model)
+    summarizer = ModelConversationSummarizer(cast(ModelProvider, model))
 
     value = await summarizer.summarize(
         SummarizationRequest(
@@ -624,7 +633,7 @@ async def test_model_summarizer_does_not_copy_media_payloads_into_source_text():
     model = ScriptedModelProvider(
         (ScriptedModelStep(events=(_summary_completion(json.dumps(payload)),)),)
     )
-    summarizer = ModelConversationSummarizer(model)
+    summarizer = ModelConversationSummarizer(cast(ModelProvider, model))
     base64_payload = "A" * 20_000
     data_url = f"data:image/png;base64,{base64_payload}"
 
@@ -650,7 +659,7 @@ async def test_model_summarizer_does_not_copy_media_payloads_into_source_text():
         )
     )
 
-    source = model.requests[0].messages[1].content[0].text
+    source = cast(TextBlock, model.requests[0].messages[1].content[0]).text
     assert base64_payload not in source
     assert data_url not in source
     assert source.count("<redacted data URL; mime=image/png; base64_len=20000>") == 2
@@ -703,7 +712,7 @@ async def test_model_summarizer_propagates_chinese_response_language():
     model = ScriptedModelProvider(
         (ScriptedModelStep(events=(_summary_completion(json.dumps(payload)),)),)
     )
-    summarizer = ModelConversationSummarizer(model)
+    summarizer = ModelConversationSummarizer(cast(ModelProvider, model))
 
     await summarizer.summarize(
         SummarizationRequest(
@@ -714,7 +723,7 @@ async def test_model_summarizer_propagates_chinese_response_language():
     )
 
     assert model.requests[0].metadata["response_language"] == "zh"
-    assert "使用中文" in model.requests[0].messages[0].content[0].text
+    assert "使用中文" in cast(TextBlock, model.requests[0].messages[0].content[0]).text
 
 
 @pytest.mark.asyncio
@@ -734,8 +743,8 @@ async def test_model_summarizer_bounds_the_entire_auxiliary_stream():
 
             return events()
 
-    summarizer = ModelConversationSummarizer(SlowSummaryModel(), timeout_seconds=0.01)
-    summarizer._MAX_TIMEOUT_RETRIES = 0  # Test the deadline independently of backoff.
+    summarizer = ModelConversationSummarizer(cast(ModelProvider, SlowSummaryModel()), timeout_seconds=0.01)
+    setattr(summarizer, '_MAX_TIMEOUT_RETRIES', 0)  # Test the deadline independently of backoff.
 
     with pytest.raises(SageV2Error) as caught:
         await summarizer.summarize(
@@ -799,11 +808,11 @@ async def test_summary_stream_distinguishes_progress_stalls_and_completion(mode)
             return events()
 
     summarizer = ModelConversationSummarizer(
-        StreamingSummaryModel(),
+        cast(ModelProvider, StreamingSummaryModel()),
         timeout_seconds=0.08 if mode == "total" else 0.5,
         idle_timeout_seconds=0.06,
     )
-    summarizer._MAX_TIMEOUT_RETRIES = 0
+    setattr(summarizer, '_MAX_TIMEOUT_RETRIES', 0)
     request = SummarizationRequest(
         scope=scope(), messages=ledger()[1:4], target_tokens=512
     )
@@ -820,7 +829,7 @@ async def test_summary_stream_distinguishes_progress_stalls_and_completion(mode)
 
 
 def test_summary_has_a_separate_total_budget_from_short_auxiliary_calls():
-    summarizer = ModelConversationSummarizer(ScriptedModelProvider(()))
+    summarizer = ModelConversationSummarizer(cast(ModelProvider, ScriptedModelProvider(())))
     assert summarizer.timeout_seconds == 300
     assert summarizer.idle_timeout_seconds == 60
 
@@ -844,14 +853,14 @@ async def test_summary_timeout_retries_are_bounded_and_logged(
             self.records.append(record)
 
     sink = Sink()
-    monkeypatch.setattr(module, "LOGGER", StructuredLogger(sink, "summary-test"))
+    monkeypatch.setattr(module, "LOGGER", StructuredLogger(cast('LogSink', sink), "summary-test"))
     delays = []
 
     async def sleep(delay):
         delays.append(delay)
 
     monkeypatch.setattr(module.asyncio, "sleep", sleep)
-    summarizer = ModelConversationSummarizer(ScriptedModelProvider(()))
+    summarizer = ModelConversationSummarizer(cast(ModelProvider, ScriptedModelProvider(())))
     attempts = []
 
     async def summarize(request, progress):
@@ -904,7 +913,7 @@ async def test_summary_timeout_retries_are_bounded_and_logged(
 @pytest.mark.asyncio
 @pytest.mark.parametrize("cancel", [False, True])
 async def test_summary_does_not_retry_non_timeout_or_cancellation(monkeypatch, cancel):
-    summarizer = ModelConversationSummarizer(ScriptedModelProvider(()))
+    summarizer = ModelConversationSummarizer(cast(ModelProvider, ScriptedModelProvider(())))
     attempts = []
 
     async def summarize(request, progress):
@@ -932,8 +941,8 @@ async def test_summary_timeout_includes_capability_discovery():
         def stream(self, request):
             raise AssertionError("must time out before starting a stream")
 
-    summarizer = ModelConversationSummarizer(SlowCapabilities(), timeout_seconds=0.01)
-    summarizer._MAX_TIMEOUT_RETRIES = 0
+    summarizer = ModelConversationSummarizer(cast(ModelProvider, SlowCapabilities()), timeout_seconds=0.01)
+    setattr(summarizer, '_MAX_TIMEOUT_RETRIES', 0)
     with pytest.raises(SageV2Error) as caught:
         await summarizer.summarize(
             SummarizationRequest(
@@ -999,7 +1008,7 @@ async def test_model_summary_preserves_complete_api_output_without_local_clippin
         )
     )
     result = json.loads(
-        await ModelConversationSummarizer(model).summarize(
+        await ModelConversationSummarizer(cast(ModelProvider, model)).summarize(
             SummarizationRequest(
                 scope=scope(), messages=ledger()[1:4], target_tokens=512
             )
@@ -1023,7 +1032,7 @@ async def test_summary_transient_provider_errors_retry_without_losing_progress(
         delays.append(delay)
 
     monkeypatch.setattr(module.asyncio, "sleep", sleep)
-    summarizer = ModelConversationSummarizer(ScriptedModelProvider(()))
+    summarizer = ModelConversationSummarizer(cast(ModelProvider, ScriptedModelProvider(())))
     attempts = []
 
     async def summarize(request, progress):

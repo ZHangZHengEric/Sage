@@ -1,5 +1,10 @@
 from __future__ import annotations
 
+from typing import cast
+
+from sagents.v2.model.provider import ModelProvider
+from sagents.v2.contracts.errors import RuntimeErrorInfo
+
 import asyncio
 
 import pytest
@@ -58,7 +63,7 @@ async def test_start_idempotency_replays_identical_request_but_rejects_key_reuse
     assert replay.run_id == first.run_id
     with pytest.raises(Exception) as conflict:
         await runtime.start_run(start(text="different"), CONTEXT)
-    assert conflict.value.info.code == "idempotency.conflict"
+    assert getattr(conflict.value, 'info').code == "idempotency.conflict"
 
 
 @pytest.mark.asyncio
@@ -85,7 +90,7 @@ async def test_command_idempotency_replays_identical_request_but_rejects_key_reu
         command.model_copy(update={"reason": "different"}), CONTEXT
     )
     assert changed.decision == CommandDecision.REJECTED
-    assert changed.error.code == "idempotency.conflict"
+    assert cast(RuntimeErrorInfo, changed.error).code == "idempotency.conflict"
 
 
 @pytest.mark.asyncio
@@ -111,7 +116,7 @@ async def test_steer_inbox_orders_inputs_and_marks_them_applied_atomically():
     second = await runtime.steer_run(
         SteerRun(
             run_id=handle.run_id,
-            expected_revision=first.current_revision,
+            expected_revision=cast('int', first.current_revision),
             expected_turn_id="turn_1",
             input=(InputItem(role="user", content=(TextBlock(text="two"),)),),
             idempotency_key="steer_2",
@@ -120,11 +125,11 @@ async def test_steer_inbox_orders_inputs_and_marks_them_applied_atomically():
     )
     claimed = await runtime.session_store.claim_steers(
         run_id=handle.run_id,
-        expected_revision=second.current_revision,
+        expected_revision=cast('int', second.current_revision),
         turn_id="turn_1",
         context=CONTEXT,
     )
-    assert [entry.input[0].content[0].text for entry in claimed.entries] == [
+    assert [cast(TextBlock, entry.input[0].content[0]).text for entry in claimed.entries] == [
         "one",
         "two",
     ]
@@ -207,7 +212,7 @@ async def test_agent_loop_applies_steer_at_next_safe_model_boundary():
     model = BlockingTwoStepModel()
     loop = AgentLoopEngine(
         runtime=runtime,
-        model=model,
+        model=cast(ModelProvider, model),
         tool_catalog=InMemoryToolCatalog((TOOL,)),
         tool_executor=InMemoryToolExecutor({"lookup": TOOL}, {"lookup": lookup}),
     )
@@ -220,7 +225,7 @@ async def test_agent_loop_applies_steer_at_next_safe_model_boundary():
         SteerRun(
             run_id=handle.run_id,
             expected_revision=run.revision,
-            expected_turn_id=turn_id,
+            expected_turn_id=cast(str, turn_id),
             input=(InputItem(role="user", content=(TextBlock(text="new direction"),)),),
             idempotency_key="steer_live",
         ),
@@ -233,9 +238,9 @@ async def test_agent_loop_applies_steer_at_next_safe_model_boundary():
     assert any(
         message.role == "user"
         and message.content
-        and message.content[0].text == "new direction"
+        and cast(TextBlock, message.content[0]).text == "new direction"
         for message in model.requests[1].messages
     )
     assert [
-        entry.status for entry in await runtime.session_store.list_steers(handle.run_id)
+        entry.status for entry in await getattr(runtime.session_store, 'list_steers')(handle.run_id)
     ] == [SteerInboxStatus.APPLIED]

@@ -1,4 +1,11 @@
 """Public Run behavior replaces the retired host materializer contract."""
+
+from typing import TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    from sagents.v2.agent.policy.continuation import ContinuationAction
+    from sagents.v2.contracts.principals import PrincipalType
+
 import asyncio
 
 import pytest
@@ -56,7 +63,7 @@ async def test_registered_context_scope_isolated_by_real_tenant_agent_and_run(tm
         second = first.model_copy(update={"metadata": first.metadata.model_copy(update={"id": "test.other"})})
         agents = [await app.load_agent(value) for value in (first, second)]
         results = await asyncio.gather(*(run(app, agent, f"{tenant}-{agent.id}-{repeat}",
-            context=RequestContext(actor=ActorRef(principal_id=tenant, tenant_id=tenant, principal_type="user")))
+            context=RequestContext(actor=ActorRef(principal_id=tenant, tenant_id=tenant, principal_type=cast('PrincipalType', "user"))))
             for tenant in ("one", "two") for agent in agents for repeat in range(2)))
         assert all(result.state.value == "completed" for result, _ in results), results
         assert len(created) == instances
@@ -153,7 +160,7 @@ async def test_selected_custom_policy_parameters_control_actual_run_and_frozen_r
         def __init__(self, count):
             self.count = count
         async def decide(self, context):
-            return ContinuationDecision(action="complete_run" if context.step_number >= self.count else "continue_step",
+            return ContinuationDecision(action=cast('ContinuationAction', "complete_run" if context.step_number >= self.count else "continue_step"),
                 reason_code="test.configured", reason="Configured step count")
     def factory(scope, dependencies):
         created.append((scope.run_id, dict(scope.config)))
@@ -177,7 +184,7 @@ async def test_selected_custom_policy_parameters_control_actual_run_and_frozen_r
         assert len(model.requests) == 2
         current = app.runtime_configuration
         await app.update_runtime(current.model_copy(update={"capabilities": {**current.capabilities,
-            "agent.continuation-policy": CapabilitySelection(plugin="test.policy.steps", scope="run", config={"steps": 1})}}))
+            "agent.continuation-policy": CapabilitySelection(plugin="test.policy.steps", scope=cast('ExtensionScope | None', "run"), config={"steps": 1})}}))
         updated = await app.update_agent(agent=original, package=package())
         second, events = await run(app, updated, "one-step")
         assert second.state.value == "completed", events

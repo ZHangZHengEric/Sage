@@ -2,6 +2,14 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    from sagents.v2.application import SAgentApplication
+    from typing import Any
+
+from sagents.v2.contracts.events import ToolEventData
+
 import hashlib
 import json
 import os
@@ -19,13 +27,13 @@ from sagents.v2.testing.plugins import ScriptedModelProvider
 from tests.app.v2.desktop.sdk_fixture import completed, desktop, step
 
 
-def install_legacy_approval(root: Path, *, include_revision: bool = True):
+def install_legacy_approval(root: Path, *, include_revision: bool = True) -> dict[str, Any]:
     """Rebind only machine-local paths in a real HEAD~10 persisted Run."""
     source = Path(__file__).with_name("fixtures") / "legacy_approval_snapshot.json"
     fixture = json.loads(source.read_text(encoding="utf-8"))
     interpreter = inspect_isolation_python()
 
-    def bind(value):
+    def bind(value) -> Any:
         if isinstance(value, str):
             if value == "{CURRENT_INTERPRETER}":
                 return interpreter
@@ -119,7 +127,7 @@ async def test_legacy_desktop_approval_resumes_original_run_after_restart(tmp_pa
         before = await service.session_store.get_run(case["run_id"])
         original_context = await service.session_store.get_run_context(before.run_id)
         command = await service.session_store.get_start_command(before.run_id)
-        suspension = await service.session_store.get_suspension(before.suspension_id)
+        suspension = await service.session_store.get_suspension(cast(str, before.suspension_id))
         interaction = await service.session_store.get_interaction(
             case["interaction_id"]
         )
@@ -156,7 +164,7 @@ async def test_legacy_desktop_approval_resumes_original_run_after_restart(tmp_pa
             event
             for event in events
             if event.type == "tool.call.succeeded"
-            and event.data.tool_name == "file_write"
+            and cast(ToolEventData, event.data).tool_name == "file_write"
         ]
         assert len(writes) == 1
         assert len(model.requests) == 1
@@ -167,7 +175,7 @@ async def test_legacy_desktop_approval_resumes_original_run_after_restart(tmp_pa
     restarted, _, _ = desktop(tmp_path)
     try:
         await restarted.start()
-        loaded = await restarted.application.agent_for_run(
+        loaded = await cast('SAgentApplication', restarted.application).agent_for_run(
             case["run_id"], restarted._context("user_1")
         )
         assert loaded.composition_hash == before.resolved_spec_hash
@@ -186,7 +194,7 @@ async def test_unavailable_agent_revision_keeps_approval_pending(tmp_path, opera
     try:
         await service.start()
         before = await service.session_store.get_run(case["run_id"])
-        suspension = await service.session_store.get_suspension(before.suspension_id)
+        suspension = await service.session_store.get_suspension(cast(str, before.suspension_id))
         interaction = await service.session_store.get_interaction(
             case["interaction_id"]
         )
@@ -204,7 +212,7 @@ async def test_unavailable_agent_revision_keeps_approval_pending(tmp_path, opera
         assert after == before
         assert after.state.value == "suspended"
         assert (
-            await service.session_store.get_suspension(before.suspension_id)
+            await service.session_store.get_suspension(cast(str, before.suspension_id))
             == suspension
         )
         assert (
@@ -263,7 +271,7 @@ async def test_custom_legacy_provider_is_not_silently_replaced_during_approval(
         interaction = await service.session_store.get_interaction(
             case["interaction_id"]
         )
-        suspension = await service.session_store.get_suspension(before.suspension_id)
+        suspension = await service.session_store.get_suspension(cast(str, before.suspension_id))
 
         with pytest.raises(ValueError, match=message):
             await service.reply_interaction(
@@ -280,7 +288,7 @@ async def test_custom_legacy_provider_is_not_silently_replaced_during_approval(
             == interaction
         )
         assert (
-            await service.session_store.get_suspension(before.suspension_id)
+            await service.session_store.get_suspension(cast(str, before.suspension_id))
             == suspension
         )
         assert archive.read_bytes() == archived_before
@@ -296,7 +304,7 @@ async def test_migrated_archive_still_checks_assembly_hash_on_next_restart(tmp_p
         await service.start()
         run = await service.session_store.get_run(case["run_id"])
         command = await service.session_store.get_start_command(run.run_id)
-        loaded = await service.application.agent_for_run(
+        loaded = await cast('SAgentApplication', service.application).agent_for_run(
             run.run_id, service._context("user_1")
         )
         assert loaded.composition_hash == run.resolved_spec_hash
@@ -318,7 +326,7 @@ async def test_migrated_archive_still_checks_assembly_hash_on_next_restart(tmp_p
         with pytest.raises(
             ValueError, match="no longer matches the runtime composition"
         ):
-            await restarted.application.agent_for_run(
+            await cast('SAgentApplication', restarted.application).agent_for_run(
                 run.run_id, restarted._context("user_1")
             )
         assert await restarted.session_store.get_run(run.run_id) == run

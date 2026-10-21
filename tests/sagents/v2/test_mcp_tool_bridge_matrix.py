@@ -1,5 +1,13 @@
 from __future__ import annotations
 
+from typing import TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    from pydantic import SecretStr
+
+from sagents.v2.contracts.items import JsonBlock
+from sagents.v2.contracts.items import TextBlock
+
 import asyncio
 import json
 from contextlib import asynccontextmanager
@@ -104,8 +112,8 @@ async def test_mcp_bridge_namespaces_discovers_executes_and_deduplicates(monkeyp
 
     assert first == second
     assert session.calls == [("search files", {"query": "report"})]
-    assert first.content[0].text == "found"
-    assert first.content[1].value == {"count": 1}
+    assert cast(TextBlock, first.content[0]).text == "found"
+    assert cast(JsonBlock, first.content[1]).value == {"count": 1}
     reconciled = await bridge.reconcile("operation_1", CONTEXT)
     assert reconciled.state.value == "succeeded"
 
@@ -358,7 +366,7 @@ async def test_mcp_large_result_is_bounded_and_cached_without_replay():
     assert first == second
     assert first.error is None
     assert first.metadata["mcp_result_truncated"] is True
-    assert "exceeded" in first.content[0].text
+    assert "exceeded" in cast(TextBlock, first.content[0]).text
     assert session.calls == [("search files", {"query": "report"})]
 
 
@@ -441,9 +449,9 @@ async def test_mcp_bridge_exposes_discovery_failure_instead_of_hiding_server():
 
     with pytest.raises(Exception, match="offline") as caught:
         await bridge.list_tools(run_id="run_1")
-    assert caught.value.info.code == "mcp.discovery_failed"
-    assert caught.value.info.category == ErrorCategory.PROVIDER_TRANSIENT
-    assert caught.value.info.retryable is True
+    assert getattr(caught.value, 'info').code == "mcp.discovery_failed"
+    assert getattr(caught.value, 'info').category == ErrorCategory.PROVIDER_TRANSIENT
+    assert getattr(caught.value, 'info').retryable is True
 
 
 @pytest.mark.asyncio
@@ -635,7 +643,7 @@ async def test_mcp_concurrent_failure_is_typed_and_dispatched_once():
 
     assert session.calls == [("search files", {"query": "report"})]
     assert all(isinstance(value, SageV2Error) for value in failures)
-    assert {value.info.code for value in failures} == {"mcp.result_not_received"}
+    assert {getattr(value, 'info').code for value in failures} == {"mcp.result_not_received"}
 
 
 @pytest.mark.asyncio
@@ -688,10 +696,10 @@ async def test_mcp_invalid_received_result_wakes_all_waiters_without_redispatch(
 
     assert session.calls == [("search files", {"query": "report"})]
     assert all(isinstance(value, SageV2Error) for value in failures)
-    assert {value.info.code for value in failures} == {"mcp.result_invalid"}
+    assert {getattr(value, 'info').code for value in failures} == {"mcp.result_invalid"}
     assert all(
-        value.info.category == ErrorCategory.PROVIDER_PERMANENT
-        and value.info.metadata["mcp_result_received"] is True
+        getattr(value, 'info').category == ErrorCategory.PROVIDER_PERMANENT
+        and getattr(value, 'info').metadata["mcp_result_received"] is True
         for value in failures
     )
     with pytest.raises(SageV2Error) as replayed:
@@ -800,7 +808,7 @@ def test_mcp_api_key_is_redacted_by_the_persistable_contract():
         name="drive",
         protocol="streamable_http",
         url="https://mcp.test",
-        api_key="super-secret",
+        api_key=cast('SecretStr | None', "super-secret"),
     )
 
     assert "super-secret" not in repr(config)
@@ -812,13 +820,13 @@ def test_mcp_discovery_fingerprint_detects_secret_rotation_without_exposing_it()
         name="drive",
         protocol="streamable_http",
         url="https://mcp.test",
-        api_key="first-secret",
+        api_key=cast('SecretStr | None', "first-secret"),
     )
     second = McpServerConfig(
         name="drive",
         protocol="streamable_http",
         url="https://mcp.test",
-        api_key="second-secret",
+        api_key=cast('SecretStr | None', "second-secret"),
     )
     assert McpToolPlugin.servers_fingerprint(
         (first,)
@@ -1106,7 +1114,7 @@ async def test_mcp_failure_stage_preserves_response_and_leaf_diagnostics(
     )
     if phase == "cleanup":
         first = await bridge.execute(call, CONTEXT)
-        assert first.content[0].text == "authoritative receipt"
+        assert cast(TextBlock, first.content[0]).text == "authoritative receipt"
         assert bool(first.error) == remote_error
         assert first.metadata["mcp_result_received"] is True
         assert "ConnectionError: close offline" in first.metadata["mcp_cleanup_error"]

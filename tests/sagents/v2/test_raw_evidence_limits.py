@@ -1,3 +1,14 @@
+
+from opentelemetry.util.types import AttributeValue
+
+from typing import Any, TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    from opentelemetry.trace import SpanContext
+    from sagents.v2.model.contracts import ModelEventKind
+    from typing import Iterable, Mapping, Sequence
+
+from sagents.v2.model.provider import ModelProvider
 import asyncio
 import json
 
@@ -23,10 +34,10 @@ async def test_long_wire_stream_exports_independent_chunks_before_model_finishes
         async def stream(self, request):
             for i in range(80):
                 record_wire_event({'i': i, 'value': '中' * 2000})
-                yield ModelStreamEvent(kind='text_delta', delta=str(i))
+                yield ModelStreamEvent(kind=cast('ModelEventKind', 'text_delta'), delta=str(i))
             await gate.wait()
-            yield ModelStreamEvent(kind='completed', response=ModelResponse(response_id='response', text='done', finish_reason='stop'))
-    provider = RecordingModelProvider(Provider(), sink=source, trace_sink=trace, session_id_resolver=session)
+            yield ModelStreamEvent(kind=cast('ModelEventKind', 'completed'), response=ModelResponse(response_id='response', text='done', finish_reason='stop'))
+    provider = RecordingModelProvider(cast(ModelProvider, Provider()), sink=source, trace_sink=trace, session_id_resolver=session)
     task = asyncio.create_task(_consume(provider, ModelRequest(request_id='request', run_id='r', model_binding='main', messages=())))
     try:
         async with asyncio.timeout(3):
@@ -39,13 +50,13 @@ async def test_long_wire_stream_exports_independent_chunks_before_model_finishes
         await source.flush_raw()
         spans = exporter.get_finished_spans()
         model = next(s for s in spans if s.name == "model.request")
-        assert all(s.context.trace_id == model.context.trace_id and s.parent.span_id == model.context.span_id
-                   for s in spans if s.attributes.get("request_id") == "request" and s.name.startswith("sage.diagnostic."))
+        assert all(cast('SpanContext', s.context).trace_id == cast('SpanContext', model.context).trace_id and cast('SpanContext', s.parent).span_id == cast('SpanContext', model.context).span_id
+                   for s in spans if cast('Mapping[str, str | bool | int | float | Sequence[str] | Sequence[bool] | Sequence[int] | Sequence[float]]', s.attributes).get("request_id") == "request" and s.name.startswith("sage.diagnostic."))
         async def query(client, **options):
-            return [{'name': s.name, 'start_time': s.start_time / 1e9,
-                     'end_time': s.end_time / 1e9, 'attributes': dict(s.attributes),
-                     'events': [{'name':e.name, 'timestamp':e.timestamp/1e9, 'attributes':dict(e.attributes)} for e in s.events],
-                     'context': {'trace_id':format(s.context.trace_id,'032x'), 'span_id':format(s.context.span_id,'016x')}} for s in spans], False
+            return [{'name': s.name, 'start_time': cast('int', s.start_time) / 1e9,
+                     'end_time': cast('int', s.end_time) / 1e9, 'attributes': dict(cast('Mapping[str, AttributeValue]', s.attributes)),
+                     'events': [{'name':e.name, 'timestamp':e.timestamp/1e9, 'attributes':dict(cast('Mapping[str, AttributeValue]', e.attributes))} for e in s.events],
+                     'context': {'trace_id':format(cast('SpanContext', s.context).trace_id,'032x'), 'span_id':format(cast('SpanContext', s.context).span_id,'016x')}} for s in spans], False
         monkeypatch.setattr(source, '_query', query)
         evidence = await source.snapshot('s', {'r'})
         row = evidence['models'][0]
@@ -126,9 +137,9 @@ async def test_blocked_raw_export_drops_explicitly_without_stalling_model(monkey
         async def stream(self, request):
             for index in range(100):
                 record_wire_event({'text':'x' * 2000, 'index':index})
-                yield ModelStreamEvent(kind='text_delta', delta=str(index))
+                yield ModelStreamEvent(kind=cast('ModelEventKind', 'text_delta'), delta=str(index))
     async def session(_): return 's'
-    recording = RecordingModelProvider(Provider(), sink=source, session_id_resolver=session)
+    recording = RecordingModelProvider(cast(ModelProvider, Provider()), sink=source, session_id_resolver=session)
     # The model emits a deliberately unfinished stream; diagnostics must not
     # delay the output even while the observation exporter is stuck.
     try:
@@ -141,7 +152,7 @@ async def test_blocked_raw_export_drops_explicitly_without_stalling_model(monkey
         await source.flush_raw()
         spans = exporter.get_finished_spans()
         async def query(client, **options):
-            return [{'name':s.name, 'attributes':dict(s.attributes), 'start_time':s.start_time/1e9} for s in spans], False
+            return [{'name':s.name, 'attributes':dict(cast('Mapping[str, AttributeValue]', s.attributes)), 'start_time':cast('int', s.start_time)/1e9} for s in spans], False
         monkeypatch.setattr(source, '_query', query)
         result = await source.snapshot('s', {'r'})
         assert result['models'] and all(row['truncated'] for row in result['models'])
@@ -195,9 +206,9 @@ def test_error_content_obeys_byte_budget_and_marks_incomplete():
         trace.end_span(span)
         exported = exporter.get_finished_spans()[0]
         assert exported.status.status_code.name == 'ERROR'
-        assert exported.attributes['sage.content.incomplete'] is True
+        assert cast('Mapping[str, str | bool | int | float | Sequence[str] | Sequence[bool] | Sequence[int] | Sequence[float]]', exported.attributes)['sage.content.incomplete'] is True
         assert exported.status.description is None
-        assert not any('exception.message' in event.attributes for event in exported.events)
+        assert not any('exception.message' in cast('dict[str, Any]', event.attributes) for event in exported.events)
         assert trace.statistics()['retained_bytes'] == 0
     finally:
         trace.close()
@@ -251,7 +262,7 @@ def test_raw_json_escape_expansion_is_bounded_before_encoding(backend, operation
     from sagents.v2.runtime.observability.contracts import TraceSpan, TraceEvent
     from sagents.v2.runtime.observability.plugins._shared.otlp_transport import OtlpTraceTransport
     exporter = InMemorySpanExporter()
-    options = dict(exporter=exporter, content_mode='raw', max_retained_bytes=8 * 1024 * 1024)
+    options: dict[str, Any] = dict(exporter=exporter, content_mode='raw', max_retained_bytes=8 * 1024 * 1024)
     trace = (PhoenixTraceSink(endpoint='http://unused/v1/traces', **options) if backend == 'phoenix'
              else OtlpTraceTransport(**options))
     payload = {'input': '\0' * 2_000_000}
@@ -273,7 +284,7 @@ def test_raw_json_escape_expansion_is_bounded_before_encoding(backend, operation
         tracemalloc.stop()
         assert peak < 8 * 1024 * 1024
         spans = exporter.get_finished_spans()
-        assert trace.statistics()['dropped_spans'] or spans[0].attributes['sage.content.incomplete']
+        assert trace.statistics()['dropped_spans'] or cast('Mapping[str, str | bool | int | float | Sequence[str] | Sequence[bool] | Sequence[int] | Sequence[float]]', spans[0].attributes)['sage.content.incomplete']
         assert trace.statistics()['retained_bytes'] == 0
     finally:
         if tracemalloc.is_tracing():
@@ -318,7 +329,7 @@ def test_raw_pydantic_extensions_survive_without_custom_serializers():
         kind: str
         def model_dump(self, **options):
             raise AssertionError('admission must not execute custom serializers')
-    event = WireEvent(kind='delta', provider_extension={'text':'原文\0'})
+    event = WireEvent.model_validate(dict(kind='delta', provider_extension={'text':'原文\0'}))
     expected = {'kind':'delta', 'provider_extension':{'text':'原文\0'}}
     assert json_working_size(event, 4096) < 4096
     assert raw_trace_value(event) == expected

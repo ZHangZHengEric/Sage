@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+from typing import cast
+
+from sagents.v2.model.provider import ModelProvider
+
 import asyncio
 import json
 import threading
@@ -83,7 +87,7 @@ def test_export_preserves_root_remote_and_ended_parent_ids(kind):
     assert spans[0].context.trace_id == int(root.trace_id, 16)
     assert spans[0].context.span_id == int(root.span_id, 16)
     assert spans[1].parent.span_id == int(root.span_id, 16)
-    assert spans[2].parent.span_id == int(remote.parent_span_id, 16)
+    assert spans[2].parent.span_id == int(cast('str | bytes | bytearray', remote.parent_span_id), 16)
     sink.close()
 
 
@@ -123,7 +127,7 @@ async def test_complete_generation_contains_content_usage_and_first_token(kind):
         return "session"
 
     model = RecordingModelProvider(
-        provider,
+        cast(ModelProvider, provider),
         sink=NoopDiagnosticSink(),
         trace_sink=sink,
         session_id_resolver=session,
@@ -179,7 +183,7 @@ async def test_broken_diagnostics_does_not_break_model_or_trace():
         return "session"
 
     model = RecordingModelProvider(
-        ScriptedModelProvider(
+        cast(ModelProvider, ScriptedModelProvider(
             (
                 ScriptedModelStep(
                     events=(
@@ -192,13 +196,13 @@ async def test_broken_diagnostics_does_not_break_model_or_trace():
                     )
                 ),
             )
-        ),
+        )),
         sink=BrokenDiagnostics(),
         trace_sink=sink,
         session_id_resolver=session,
     )
     events = [event async for event in model.stream(request())]
-    assert events[-1].response.text == "ok"
+    assert cast('ModelResponse', events[-1].response).text == "ok"
     assert len(exporter.get_finished_spans()) == 1
     assert current_trace_context() is None
     sink.close()
@@ -385,8 +389,8 @@ async def test_execute_resume_and_cancel_have_distinct_traces_and_propagate_cont
         state = RunState.SUSPENDED if len(contexts) == 1 else RunState.CANCELLED
         return (await runtime.get_run(run_id)).model_copy(update={"state": state})
 
-    await loop._observe_run(handle.run_id, CONTEXT, resumed=False, body=body)
-    await loop._observe_run(handle.run_id, CONTEXT, resumed=True, body=body)
+    await getattr(loop, '_observe_run')(handle.run_id, CONTEXT, resumed=False, body=body)
+    await getattr(loop, '_observe_run')(handle.run_id, CONTEXT, resumed=True, body=body)
     spans = exporter.get_finished_spans()
     assert len(spans) == 2
     assert spans[0].context.trace_id != spans[1].context.trace_id
@@ -418,7 +422,7 @@ async def test_model_error_or_cancellation_closes_trace_and_preserves_exception(
         return "session"
 
     model = RecordingModelProvider(
-        Provider(),
+        cast(ModelProvider, Provider()),
         sink=NoopDiagnosticSink(),
         trace_sink=sink,
         session_id_resolver=session,

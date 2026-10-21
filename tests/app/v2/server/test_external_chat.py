@@ -1,3 +1,11 @@
+
+from typing import TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    from app.v2.server.conversations.agui.service import ConversationService
+
+from ag_ui.core import Message
+
 import pytest
 
 from fastapi.testclient import TestClient
@@ -174,16 +182,16 @@ async def test_disconnect_only_detaches_reader(tmp_path):
             state={},
             tools=[],
             context=[],
-            messages=[{"id": "message", "role": "user", "content": "hello"}],
+            messages=cast(list[Message], [{"id": "message", "role": "user", "content": "hello"}]),
             forwarded_props={},
         )
-        stream = await service.start(
+        stream = await cast('ConversationService', service).start(
             request, user_id="not-a-sage-user", agent_id=agent.id
         )
         first = await anext(stream)
         assert "RUN_STARTED" in first
-        await stream.aclose()
-        running = await service.result(
+        await getattr(stream, 'aclose')()
+        running = await cast('ConversationService', service).result(
             user_id="not-a-sage-user", agent_id=agent.id, session_id="session"
         )
         assert running["state"] in {"queued", "running"}
@@ -191,7 +199,7 @@ async def test_disconnect_only_detaches_reader(tmp_path):
         gate.set()
         async with asyncio.timeout(5):
             while True:
-                result = await service.result(
+                result = await cast('ConversationService', service).result(
                     user_id="not-a-sage-user",
                     agent_id=agent.id,
                     session_id="session",

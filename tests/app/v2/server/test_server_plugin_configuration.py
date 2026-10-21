@@ -1,5 +1,12 @@
 """Admin plugin changes are durable, isolated from live Runs, and validated."""
 
+from typing import TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    from sagents.v2.agent.management.contracts import AgentPackageBundle
+
+from sagents.v2.package.manifest.runtime import CapabilitySelection
+
 from dataclasses import replace
 
 import pytest
@@ -18,14 +25,14 @@ def test_fresh_deployment_pins_current_server_plugin_defaults(tmp_path):
     assert not ServerPluginConfig(tmp_path).path.exists()
     capabilities = server_v2_manifest(settings).runtime.capabilities
     for capability, plugin in SERVER_DEFAULTS.items():
-        assert capabilities[capability].plugin == plugin
-    assert capabilities["context.summarizer"].config == {"model_binding": "primary"}
-    assert capabilities["agent.continuation-policy"].config == {"model_binding": "fast"}
-    assert capabilities["memory.provider"].config == {"root": str(tmp_path / "runtime/memory")}
-    assert capabilities["session-memory.provider"].config == {"root": str(tmp_path / "runtime/session-memory")}
-    assert capabilities["workspace.initializer"].config == {"language": "zh"}
-    assert capabilities["session.store"].plugin == "sage.session.mysql"
-    assert capabilities["execution.scheduler"].config == {
+        assert cast(CapabilitySelection, capabilities[capability]).plugin == plugin
+    assert cast(CapabilitySelection, capabilities["context.summarizer"]).config == {"model_binding": "primary"}
+    assert cast(CapabilitySelection, capabilities["agent.continuation-policy"]).config == {"model_binding": "fast"}
+    assert cast(CapabilitySelection, capabilities["memory.provider"]).config == {"root": str(tmp_path / "runtime/memory")}
+    assert cast(CapabilitySelection, capabilities["session-memory.provider"]).config == {"root": str(tmp_path / "runtime/session-memory")}
+    assert cast(CapabilitySelection, capabilities["workspace.initializer"]).config == {"language": "zh"}
+    assert cast(CapabilitySelection, capabilities["session.store"]).plugin == "sage.session.mysql"
+    assert cast(CapabilitySelection, capabilities["execution.scheduler"]).config == {
         "max_concurrent_runs": 8,
         "max_concurrent_runs_per_tenant": 2,
         "max_pending_items": 1024,
@@ -48,7 +55,7 @@ def test_admin_save_pending_reset_and_conflict(client):
     assert saved["saved"]["memory.provider"]["plugin"] == selection["plugin"]
     assert next(p for p in saved["providers"] if p["capability"] == "memory.provider")["plugin_id"] == "sage.memory.filesystem-bm25"
     assert store.read() == saved["saved"]
-    assert server_v2_manifest(client.app.state.service.settings).runtime.capabilities["memory.provider"].config["root"] != selection["config"]["root"]
+    assert cast(CapabilitySelection, server_v2_manifest(client.app.state.service.settings).runtime.capabilities["memory.provider"]).config["root"] != selection["config"]["root"]
     assert client.put("/api/plugins/server", headers=admin, json=body).status_code == 409
     reset = client.put("/api/plugins/server", headers=admin, json={"revision": saved["revision"], "changes": {"memory.provider": None}})
     assert reset.status_code == 200
@@ -93,16 +100,16 @@ async def test_startup_loads_durable_memory_and_agent_inherits_server_defaults(s
         assert provider.database_path.exists()
         from app.v2.server.catalog.records import AgentRecord
         agent = AgentRecord(id="configured", name="Configured")
-        data = agent.package.model_dump(mode="json")
+        data = cast('AgentPackageBundle', agent.package).model_dump(mode="json")
         data["manifest"]["runtime"]["capabilities"] = {"context.summarizer": {"plugin": "sage.context.summarizer.model", "config": {"max_source_tokens": 12000}}}
         from sagents.v2.agent.management import AgentPackageBundle
         agent = agent.model_copy(update={"package": AgentPackageBundle.model_validate(data)})
         manifest = server_v2_run_manifest(service.settings, agent=agent)
-        assert manifest.runtime.capabilities["memory.provider"].plugin == provider.plugin_id
-        assert manifest.runtime.capabilities["context.summarizer"].config == {"timeout_seconds": 45, "model_binding": "primary", "max_source_tokens": 12000}
+        assert cast(CapabilitySelection, manifest.runtime.capabilities["memory.provider"]).plugin == provider.plugin_id
+        assert cast(CapabilitySelection, manifest.runtime.capabilities["context.summarizer"]).config == {"timeout_seconds": 45, "model_binding": "primary", "max_source_tokens": 12000}
         # A changed file cannot silently alter the running host or new Runs.
         store.save({"memory.provider": None}, revision(store.read()))
-        assert server_v2_manifest(service.settings).runtime.capabilities["memory.provider"].plugin == provider.plugin_id
+        assert cast(CapabilitySelection, server_v2_manifest(service.settings).runtime.capabilities["memory.provider"]).plugin == provider.plugin_id
     finally:
         await service.close()
 

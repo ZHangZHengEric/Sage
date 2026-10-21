@@ -1,3 +1,11 @@
+
+from typing import TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    pass
+
+from sagents.v2.composition.loaded_agents import ApplicationEntrypoint
+
 from tests.sagents.v2.sdk_fixture import build_registered_package
 from contextlib import asynccontextmanager
 
@@ -63,7 +71,7 @@ async def test_restored_package_rules_control_actual_loop_dispatch(tmp_path, kin
     package = _policy_package("test.approval-config")
     agent_id = package.entrypoint.agent
     key = definition.approval_key or definition.name
-    agent = package.agents[agent_id].model_copy(
+    agent = getattr(package.agents[cast('str', agent_id)], 'model_copy')(
         update={
             "tools": (definition.name,),
             "tool_approval": ToolApprovalConfig(
@@ -94,9 +102,9 @@ async def test_restored_package_rules_control_actual_loop_dispatch(tmp_path, kin
     )
     actor = _POLICY_USER.actor.model_copy(update={"scopes": definition.required_scopes})
     try:
-        stream = await app.entrypoint().run_stream(
+        stream = await cast(ApplicationEntrypoint, app.entrypoint()).run_stream(
             (StartRun(
-                agent_id=agent_id,
+                agent_id=cast(str, agent_id),
                 input=(InputItem(role="user", content=(TextBlock(text="go"),)),),
                 resolved_spec_hash=app.composition_hash,
                 idempotency_key="test",

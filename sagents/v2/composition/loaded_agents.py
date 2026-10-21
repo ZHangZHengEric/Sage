@@ -2,6 +2,14 @@
 
 from __future__ import annotations
 
+from typing import Any, Callable, Coroutine, ParamSpec, TYPE_CHECKING, TypeVar, cast
+
+if TYPE_CHECKING:
+    from sagents.v2.application import SAgentApplication
+    from sagents.v2.builder import SAgentBuilder
+    from sagents.v2.composition.assembler import ApplicationAssembler
+    from sagents.v2.sagent import SAgent
+
 import asyncio
 from copy import copy
 from dataclasses import dataclass, field
@@ -9,7 +17,6 @@ from time import monotonic
 from functools import wraps
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Any, TYPE_CHECKING
 from collections.abc import AsyncIterator
 
 from sagents.v2.package.manifest.resolver import ResolvedSageManifest
@@ -20,11 +27,6 @@ from sagents.v2.composition.contracts import ResolvedApplicationPlan
 from sagents.v2.runtime.extensions.scope import ExtensionScopeHandle
 from sagents.v2.runtime.kernel import HarnessRuntime
 
-if TYPE_CHECKING:
-    from sagents.v2.application import SAgentApplication
-    from sagents.v2.sagent import SAgent
-    from sagents.v2.builder import SAgentBuilder
-    from sagents.v2.composition.assembler import ApplicationAssembler
 from weakref import WeakValueDictionary
 
 from sagents.v2.contracts.commands import StartRun
@@ -92,14 +94,20 @@ class RetiringRevision:
     task: asyncio.Task | None = None
 
 
-def revision_operation(method):
+_P = ParamSpec("_P")
+_R = TypeVar("_R")
+
+
+def revision_operation(
+    method: Callable[_P, Coroutine[Any, Any, _R]],
+) -> Callable[_P, Coroutine[Any, Any, _R]]:
     """Pin a revision through admission/control; driver tasks pin execution."""
     @wraps(method)
     async def invoke(self, *args, agent, **kwargs):
         catalog = self._catalog
         async with catalog.pin(agent) as agent:
-            return await method(self, *args, agent=agent, **kwargs)
-    return invoke
+            return await cast(Callable[..., Coroutine[Any, Any, _R]], method)(self, *args, agent=agent, **kwargs)
+    return cast(Callable[_P, Coroutine[Any, Any, _R]], invoke)
 
 
 class ApplicationEntrypoint:

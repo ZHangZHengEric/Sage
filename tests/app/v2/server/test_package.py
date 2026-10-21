@@ -1,3 +1,12 @@
+
+from typing import TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    from app.v2.server.packages.management import ServerAgentManagement
+    from app.v2.server.runtime.models import ServerModelClients
+    from typing import Any
+
+from sagents.v2.package.manifest.runtime import CapabilitySelection
 import json
 import logging
 from pathlib import Path
@@ -23,14 +32,14 @@ def test_package_has_no_yaml_credentials_or_model_routes():
     assert manifest.entrypoint.agent == "main"
     assert manifest.interfaces["ag_ui"].plugin == "sage.protocol.ag-ui"
     log_sink = _stdout_log_sink(manifest)
-    assert log_sink.plugin == "sage.observability.local"
-    assert log_sink.config == {"log_level": "info", "log_format": "json", "log_filename": "sage-server.log"}
+    assert cast(CapabilitySelection, log_sink).plugin == "sage.observability.local"
+    assert cast(CapabilitySelection, log_sink).config == {"log_level": "info", "log_format": "json", "log_filename": "sage-server.log"}
     judge = manifest.runtime.capabilities["agent.continuation-policy"]
-    assert judge.plugin == "sage.agent.continuation.llm-judge"
-    assert judge.config == {"model_binding": "fast"}
+    assert cast(CapabilitySelection, judge).plugin == "sage.agent.continuation.llm-judge"
+    assert cast(CapabilitySelection, judge).config == {"model_binding": "fast"}
     summarizer = manifest.runtime.capabilities["context.summarizer"]
-    assert summarizer.plugin == "sage.context.summarizer.model"
-    assert summarizer.config == {"model_binding": "primary"}
+    assert cast(CapabilitySelection, summarizer).plugin == "sage.context.summarizer.model"
+    assert cast(CapabilitySelection, summarizer).config == {"model_binding": "primary"}
     from app.v2.server.catalog.plugins import AGENT_DEFAULTS
     assert set(manifest.runtime.capabilities) == set(AGENT_DEFAULTS) | {
         "context.summary-store",
@@ -42,8 +51,8 @@ def test_package_has_no_yaml_credentials_or_model_routes():
 
 def test_package_always_registers_stdout_log_sink(tmp_path: Path):
     log_sink = _stdout_log_sink(server_v2_manifest(make_settings(tmp_path)))
-    assert log_sink.plugin == "sage.observability.local"
-    assert log_sink.config.get("log_stdout", True) is True
+    assert cast(CapabilitySelection, log_sink).plugin == "sage.observability.local"
+    assert cast(CapabilitySelection, log_sink).config.get("log_stdout", True) is True
 
 
 def test_package_selects_mysql_and_otlp_from_host_settings(tmp_path: Path):
@@ -56,15 +65,15 @@ def test_package_selects_mysql_and_otlp_from_host_settings(tmp_path: Path):
         )
     )
     session = manifest.runtime.capabilities["session.store"]
-    assert session.plugin == "sage.session.mysql"
-    assert session.config == {
+    assert cast(CapabilitySelection, session).plugin == "sage.session.mysql"
+    assert cast(CapabilitySelection, session).config == {
         "dsn": "mysql://sage:sage@127.0.0.1:3306/sage",
         "table_prefix": "",
     }
-    assert _stdout_log_sink(manifest).plugin == manifest.runtime.capabilities["observability.provider"].plugin
+    assert cast(CapabilitySelection, _stdout_log_sink(manifest)).plugin == cast(CapabilitySelection, manifest.runtime.capabilities["observability.provider"]).plugin
     trace = manifest.runtime.capabilities["observability.provider"]
-    assert trace.plugin == "sage.observability.otlp"
-    assert {key: trace.config[key] for key in ("environment", "content_mode", "max_content_chars", "sample_rate", "timeout_seconds", "endpoint", "service_name", "protocol", "insecure")} == {
+    assert cast(CapabilitySelection, trace).plugin == "sage.observability.otlp"
+    assert {key: cast(CapabilitySelection, trace).config[key] for key in ("environment", "content_mode", "max_content_chars", "sample_rate", "timeout_seconds", "endpoint", "service_name", "protocol", "insecure")} == {
         "environment": "production",
         "content_mode": "redacted",
         "max_content_chars": 16384,
@@ -84,9 +93,9 @@ def test_package_skips_jaeger_when_endpoint_missing(tmp_path: Path):
             mysql_url="mysql://sage:sage@127.0.0.1:3306/sage",
         )
     )
-    assert manifest.runtime.capabilities["observability.provider"].plugin == "sage.observability.local"
-    assert manifest.runtime.capabilities["session.store"].plugin == "sage.session.mysql"
-    assert _stdout_log_sink(manifest).plugin == manifest.runtime.capabilities["observability.provider"].plugin
+    assert cast(CapabilitySelection, manifest.runtime.capabilities["observability.provider"]).plugin == "sage.observability.local"
+    assert cast(CapabilitySelection, manifest.runtime.capabilities["session.store"]).plugin == "sage.session.mysql"
+    assert cast(CapabilitySelection, _stdout_log_sink(manifest)).plugin == cast(CapabilitySelection, manifest.runtime.capabilities["observability.provider"]).plugin
 
 
 def test_package_requires_the_store_guarantees_the_server_depends_on(tmp_path: Path):
@@ -131,9 +140,9 @@ async def test_start_writes_sagents_registration_to_stdout(tmp_path: Path, capsy
     await service.start()
     try:
         sink = service.application.service("observability.provider").logs
-        assert sink is service.observability.logs
+        assert sink is cast('Any', service.observability).logs
         assert sink.outputs[0].stream == "stdout"
-        assert service.agent_management.package_builder_factory.observability.logs is sink
+        assert cast('ServerAgentManagement', service.agent_management).package_builder_factory.observability.logs is sink
         rows = [
             __import__("json").loads(line)
             for line in capsys.readouterr().out.splitlines()
@@ -275,7 +284,7 @@ async def test_server_concurrency_settings_reach_runtime(tmp_path, monkeypatch):
     await service.start()
     try:
         dispatcher = service.application.service("execution.dispatcher")
-        assert (await service.execution.model_pool.pool.snapshot())["max_clients"] == 16
+        assert (await cast('ServerModelClients', service.execution.model_pool).pool.snapshot())["max_clients"] == 16
         assert dispatcher.max_concurrent_runs == 24
         assert dispatcher.max_concurrent_runs_per_tenant == 6
         assert (await dispatcher.scheduler.capabilities()).max_pending_items == 128

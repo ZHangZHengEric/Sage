@@ -1,5 +1,11 @@
 from __future__ import annotations
 
+from typing import TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    from sagents.v2.agent.policy.approval_memory import ApprovalScope
+    from typing import Any
+
 from datetime import datetime, timezone
 
 import pytest
@@ -19,7 +25,7 @@ def matcher(name: str = "write_value", fingerprint: str = "sha256:a") -> Approva
 
 def approval(value: ApprovalMatcher, scope: str = "session") -> RememberedApproval:
     return RememberedApproval(
-        matcher=value, scope=scope, remembered_at=NOW, remembered_by="user_1"
+        matcher=value, scope=cast('ApprovalScope', scope), remembered_at=NOW, remembered_by="user_1"
     )
 
 
@@ -158,7 +164,7 @@ async def test_invalid_entries_are_ignored_without_losing_valid_approvals():
     assert await memory.lookup(session_id="s1", matcher=good.matcher) == good
     await memory.remember(session_id="s1", approval=good)
     raw = await store.get_derived_state("s1", memory.NAMESPACE, memory.KEY)
-    assert list(raw["entries"]) == [good.matcher.key]
+    assert list(cast('Any', raw)["entries"]) == [good.matcher.key]
 
 
 @pytest.mark.asyncio

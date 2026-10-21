@@ -59,8 +59,8 @@ class _SemanticProbeMixin:
     async def _stream(self, request):
         if "multimodal" in request.request_id:
             if (
-                hasattr(self.config, "image_detail_mode")
-                and self.config.image_detail_mode == "include"
+                hasattr(getattr(self, 'config'), "image_detail_mode")
+                and getattr(self, 'config').image_detail_mode == "include"
             ):
                 raise SageV2Error(
                     RuntimeErrorInfo(
@@ -94,7 +94,7 @@ class _SemanticProbeMixin:
                 finish_reason="tool_calls",
             )
         else:
-            reasoning_effort = getattr(self.config, "reasoning_effort", None)
+            reasoning_effort = getattr(getattr(self, 'config'), "reasoning_effort", None)
             response = ModelResponse(
                 response_id="response_text",
                 text="323" if reasoning_effort else "OK",
@@ -276,10 +276,10 @@ def test_chat_plugin_reuses_its_recorded_image_and_token_dialect():
         client=object(),
     )
 
-    assert provider.config.default_max_output_tokens == 512
-    assert provider.config.max_output_tokens_field == "max_completion_tokens"
-    assert provider.config.image_detail_mode == "omit"
-    payload = provider.diagnostic_request(
+    assert getattr(provider, 'config').default_max_output_tokens == 512
+    assert getattr(provider, 'config').max_output_tokens_field == "max_completion_tokens"
+    assert getattr(provider, 'config').image_detail_mode == "omit"
+    payload = getattr(provider, 'diagnostic_request')(
         ModelRequest(
             request_id="request_1",
             run_id="run_1",

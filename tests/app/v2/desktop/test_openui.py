@@ -1,3 +1,10 @@
+
+from typing import Any, TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    from app.v2.desktop.backend.schemas import OpenUiAction
+    from sagents.v2.application import SAgentApplication
+
 import json
 
 import pytest
@@ -55,7 +62,7 @@ async def test_store_revision_owner_validation_and_durable_duplicate_protection(
     finally:
         await parser.close()
     store = OpenUiStore(tmp_path / "ui.sqlite3")
-    params = dict(
+    params: dict[str, Any] = dict(
         owner="owner",
         session="session",
         agent="sage",
@@ -162,12 +169,12 @@ async def test_desktop_stream_and_action_replay_use_no_ui_tool(
             agent_id="sage",
             session_id=surface["session_id"],
             messages=[],
-            openui_action=dict(
+            openui_action=cast('OpenUiAction | None', dict(
                 surface_id=surface["surface_id"],
                 revision=1,
                 action="submit",
                 values={"city": "Shanghai"},
-            ),
+            )),
         )
         action_frames = [
             json.loads(line) async for line in service.run_events(request, "owner")
@@ -287,7 +294,7 @@ async def test_interactive_skill_preload_uses_frozen_installer_layout(tmp_path, 
         run, _, _ = await execute(service, request=DesktopRunRequest(agent_id="sage", messages=[RunMessage(role="user", text="Render")], ui_preference="interactive"))
         assert run.state.value == "completed"
         assert "frozen builtin skill instructions" in str(model.requests[0].messages)
-        accepted = await service.application.run_configuration(run.run_id, service._context("user_1"))
+        accepted = await cast('SAgentApplication', service.application).run_configuration(run.run_id, service._context("user_1"))
         assert accepted["agent"]["preload_skills"] == ["sage-openui"]
     finally:
         await service.close()
@@ -381,7 +388,7 @@ chart = Chart("经营测算", "bar", ["收入", "成本", "利润"], [{name: "�
         tree=tree,
         fallback="",
     )
-    assert store.get("owner", "session", surface["surface_id"])["tree"] == tree
+    assert cast('Any', store.get("owner", "session", surface["surface_id"]))["tree"] == tree
     with pytest.raises(ValueError, match="Unknown"):
         store.claim(surface, "submit", {"cups": 200})
 

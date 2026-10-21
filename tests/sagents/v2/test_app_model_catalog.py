@@ -1,5 +1,10 @@
 """Public App catalog contract and immutable revision recovery boundaries."""
 
+from typing import TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    from sagents.v2.composition.loaded_agents import LoadedAgents
+
 from tests.sagents.v2.sdk_fixture import build_registered_app
 from tests.sagents.v2.sdk_fixture import fixture_configuration
 import asyncio
@@ -99,12 +104,12 @@ async def test_invalid_catalog_update_is_atomic_and_unknown_ids_fail(tmp_path):
 async def test_old_catalog_revision_restores_from_archive(tmp_path):
     app = await build_registered_app(configuration=builder(tmp_path), models=config())
     old = await app.load_agent(package())
-    archived = app._loaded_agents.store.read(old.composition_hash)
+    archived = cast('LoadedAgents', app._loaded_agents).store.read(old.composition_hash)
     await app.close()
     app = await build_registered_app(configuration=builder(tmp_path), models=config('replacement'))
     try:
         new = await app.load_agent(package())
-        restored = await app._loaded_agents.load(archived, historical=True, expected_hash=old.composition_hash)
+        restored = await cast('LoadedAgents', app._loaded_agents).load(archived, historical=True, expected_hash=old.composition_hash)
         assert restored.composition_hash == old.composition_hash
         assert restored._resolved.model_routes["shared"]["model"] == "first"
         assert app.loaded_agents == (new,)

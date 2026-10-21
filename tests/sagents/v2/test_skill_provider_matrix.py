@@ -1,5 +1,11 @@
 from __future__ import annotations
 
+from typing import TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    from sagents.v2.package.manifest.resolver import ResolvedSageManifest
+    from sagents.v2.runtime.contracts import RuntimePort
+
 import asyncio
 import hashlib
 
@@ -113,8 +119,8 @@ async def test_user_skill_tags_activate_before_inference_and_keep_multimodal_led
     assert prepared == repeated
     assert provider.fetches == [("run_1", "beta"), ("run_1", "alpha")]
     assert len(workspace.materializations) == 2
-    assert "Follow Alpha" in prepared[0].content[0].text
-    assert "Follow Beta" in prepared[0].content[0].text
+    assert "Follow Alpha" in cast(TextBlock, prepared[0].content[0]).text
+    assert "Follow Beta" in cast(TextBlock, prepared[0].content[0]).text
     assert prepared[-1].content == (
         TextBlock(text=""),
         image,
@@ -187,7 +193,7 @@ async def test_tag_activation_does_not_reload_evicted_skills_each_step():
         bundle("alpha", "A" * 100), bundle("beta", "B" * 100)
     )
     loader.max_active_characters = 300
-    loader.token_estimator = len
+    setattr(loader, 'token_estimator', len)
     request = command().model_copy(
         update={
             "input": (
@@ -426,7 +432,7 @@ async def test_load_skill_exposes_a_strict_native_v2_schema_and_loads_lazily():
         CONTEXT,
     )
 
-    assert "alpha" in result.content[0].text
+    assert "alpha" in cast(TextBlock, result.content[0]).text
     assert result.metadata["skill_name"] == "alpha"
     assert result.metadata["active_skills"] == ["alpha"]
     assert result.metadata["content_hash"]
@@ -749,17 +755,17 @@ async def test_factory_history_requires_successful_load_result(monkeypatch):
     )
     names = ("good", "failed", "unfinished")
     factory = AgentCompositionFactory(
-        SimpleNamespace(
+        cast('RuntimePort', SimpleNamespace(
             session_store=SimpleNamespace(
                 get_start_command=AsyncMock(return_value=command()),
             )
-        )
+        ))
     )
     loader = factory.create_skill_loader(
-        SimpleNamespace(
+        cast('ResolvedSageManifest', SimpleNamespace(
             agents={"agent": SimpleNamespace(skills=names)},
             policy_ceilings={"agent": SimpleNamespace(allowed_skills=set(names))},
-        ),
+        )),
         "agent",
         catalog=provider,
         source=provider,

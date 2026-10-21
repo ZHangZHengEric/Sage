@@ -4,6 +4,11 @@ These cases protect the unified Redis/MySQL plugin: fresh reads, shared admissio
 delivery, and authoritative deletion when two coordinators share storage.
 """
 
+from typing import TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    from sagents.v2.sagent import RecoveryAgent
+
 import asyncio
 from contextlib import asynccontextmanager
 from copy import deepcopy
@@ -600,9 +605,9 @@ async def test_submitter_future_finishes_when_another_dispatcher_executes_the_ru
         scheduler, max_concurrent_runs=1, lease_seconds=30, distributed_claims=True)
         for scheduler in schedulers]
     agents = [CompletingAgent(first, "submitter-a"), CompletingAgent(second, "worker-b")]
-    dispatchers[1].attach_recovery_agent(agents[1])
+    dispatchers[1].attach_recovery_agent(cast('RecoveryAgent', agents[1]))
     try:
-        result = await dispatchers[0].submit(agents[0], created.handle, CONTEXT)
+        result = await dispatchers[0].submit(cast('RecoveryAgent', agents[0]), created.handle, CONTEXT)
         await dispatchers[1].start(recover=False)
         await asyncio.wait_for(remotely_committed.wait(), 2)
         assert (await first.get_run(created.handle.run_id)).state == RunState.COMPLETED

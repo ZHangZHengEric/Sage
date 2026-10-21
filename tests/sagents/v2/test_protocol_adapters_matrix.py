@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import cast
+
 from tests.sagents.v2.event_fixture import event_data
 
 from datetime import datetime, timezone
@@ -411,7 +413,7 @@ def test_questionnaire_survives_a2a_and_mcp_projection():
         "title": "Targets",
         "items": {"type": "string", "enum": ["staging", "production"]},
     }
-    assert mcp["sageInteraction"]["payload"] == source.data.payload
+    assert mcp["sageInteraction"]["payload"] == cast(InteractionEventData, source.data).payload
 
 
 @pytest.mark.parametrize("adapter", [AcpProtocolAdapter()])

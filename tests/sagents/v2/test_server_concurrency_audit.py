@@ -1,5 +1,12 @@
 from __future__ import annotations
 
+from typing import TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    from sagents.v2.contracts.run_state import RunHandle, RunSnapshot
+    from sagents.v2.runtime.execution.scheduler import Scheduler as SchedulerPort
+    from sagents.v2.sagent import RecoveryAgent
+
 import asyncio
 import threading
 from types import SimpleNamespace
@@ -51,10 +58,10 @@ async def test_job_admission_is_atomic_and_duplicate_is_allowed_when_full():
             and e.info.retryable
             for e in errors
         )
-        assert (await jobs.submit(spec("0"))).job_id == handles[0].job_id
-        await jobs.cancel(handles[-1].job_id)
+        assert (await jobs.submit(spec("0"))).job_id == getattr(handles[0], 'job_id')
+        await jobs.cancel(getattr(handles[-1], 'job_id'))
         replacement = await jobs.submit(spec("replacement"))
-        assert replacement.job_id != handles[-1].job_id
+        assert replacement.job_id != getattr(handles[-1], 'job_id')
         assert (await jobs.capabilities()).max_admitted_jobs == 3
     finally:
         release.set()
@@ -209,7 +216,7 @@ async def test_cancelled_scheduler_write_retains_writer_ownership(
     entered = asyncio.Event()
     loop = asyncio.get_running_loop()
     release = threading.Event()
-    original = scheduler._state_store._write
+    original = getattr(scheduler._state_store, '_write')
 
     def write(state):
         loop.call_soon_threadsafe(entered.set)
@@ -285,7 +292,7 @@ async def test_dispatcher_claim_failure_recovers_or_settles_caller(transient):
     agent = Agent()
     try:
         result = await dispatcher.submit(
-            agent, SimpleNamespace(run_id="run", revision=0), context
+            cast('RecoveryAgent', agent), cast('RunHandle | RunSnapshot', SimpleNamespace(run_id="run", revision=0)), context
         )
         if transient:
             assert (await asyncio.wait_for(result, 2)).state == RunState.COMPLETED
@@ -296,7 +303,7 @@ async def test_dispatcher_claim_failure_recovers_or_settles_caller(transient):
                 await asyncio.wait_for(result, 2)
             with pytest.raises(ValueError, match="invalid scheduler"):
                 await dispatcher.submit(
-                    agent, SimpleNamespace(run_id="next", revision=0), context
+                    cast('RecoveryAgent', agent), cast('RunHandle | RunSnapshot', SimpleNamespace(run_id="next", revision=0)), context
                 )
             assert agent.executed == 0
     finally:
@@ -378,15 +385,15 @@ async def test_bad_recovery_payload_and_release_failure_do_not_kill_worker():
             payload={"request_context": {"invalid": True}},
         )
     )
-    dispatcher = LocalWorkerDispatcher(scheduler, max_concurrent_runs=1)
+    dispatcher = LocalWorkerDispatcher(cast('SchedulerPort', scheduler), max_concurrent_runs=1)
     agent = Agent()
-    dispatcher.attach_recovery_agent(agent)
+    dispatcher.attach_recovery_agent(cast('RecoveryAgent', agent))
     context = RequestContext(
         actor=ActorRef(principal_id="test", principal_type=PrincipalType.SERVICE)
     )
     try:
         result = await dispatcher.submit(
-            agent, SimpleNamespace(run_id="normal", revision=0), context
+            cast('RecoveryAgent', agent), cast('RunHandle | RunSnapshot', SimpleNamespace(run_id="normal", revision=0)), context
         )
         assert (await asyncio.wait_for(result, 2)).state == RunState.COMPLETED
         assert scheduler.orphan_release_attempted
@@ -425,11 +432,11 @@ async def test_permanent_claim_failure_does_not_fail_already_running_work():
     )
     try:
         active = await dispatcher.submit(
-            BlockingAgent(), SimpleNamespace(run_id="active", revision=0), context
+            cast('RecoveryAgent', BlockingAgent()), cast('RunHandle | RunSnapshot', SimpleNamespace(run_id="active", revision=0)), context
         )
         await asyncio.wait_for(started.wait(), 2)
         pending = await dispatcher.submit(
-            Agent(), SimpleNamespace(run_id="pending", revision=0), context
+            cast('RecoveryAgent', Agent()), cast('RunHandle | RunSnapshot', SimpleNamespace(run_id="pending", revision=0)), context
         )
         fail_claim.set()
         with pytest.raises(ValueError, match="claim backend failed"):
