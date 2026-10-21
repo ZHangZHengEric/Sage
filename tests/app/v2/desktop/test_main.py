@@ -12,7 +12,7 @@ from app.v2.desktop.backend.main import (
     _remove_owned_sidecar_registry,
     _require_loopback_host,
 )
-from app.v2.desktop.backend.observability import create_desktop_log_sink
+from app.v2.desktop.backend.observability import create_desktop_observability
 from sagents.v2.contracts.errors import ErrorCategory, RuntimeErrorInfo
 from sagents.v2.runtime.observability import FilesystemLogSink, NoopLogSink
 from sagents.v2.runtime.session import StoreInUseError
@@ -57,34 +57,21 @@ def test_desktop_log_sink_is_resolved_from_the_component_plugin_selection(
 ):
     (tmp_path / "settings.json").write_text(
         json.dumps(
-            {"component_selections": {"observability.log-sink": "sage.logging.noop"}}
+            {"component_selections": {"observability.provider": "sage.observability.noop"}}
         ),
         encoding="utf-8",
     )
 
-    plugin_id, sink = create_desktop_log_sink(tmp_path)
+    provider = create_desktop_observability(tmp_path)
+    assert provider.plugin_id == "sage.observability.noop"
+    assert not provider.logs.outputs
 
-    assert plugin_id == "sage.logging.noop"
-    assert isinstance(sink, NoopLogSink)
 
-
-def test_desktop_log_sink_falls_back_to_the_builtin_file_plugin(tmp_path: Path):
-    (tmp_path / "settings.json").write_text(
-        json.dumps(
-            {
-                "component_selections": {
-                    "observability.log-sink": "removed.logging.plugin"
-                }
-            }
-        ),
-        encoding="utf-8",
-    )
-
-    plugin_id, sink = create_desktop_log_sink(tmp_path)
-
-    assert plugin_id == "sage.logging.filesystem"
-    assert isinstance(sink, FilesystemLogSink)
-    assert sink.path == tmp_path / "logs/sage.jsonl"
+def test_desktop_observation_selection_does_not_fall_back(tmp_path: Path):
+    (tmp_path / "settings.json").write_text(json.dumps({"component_selections": {
+        "observability.provider": "removed.observation.plugin"}}))
+    with pytest.raises(Exception, match="not registered"):
+        create_desktop_observability(tmp_path)
 
 
 def test_sidecar_waits_for_previous_writer_lock_to_be_released():

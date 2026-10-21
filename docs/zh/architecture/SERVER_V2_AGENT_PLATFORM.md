@@ -32,7 +32,7 @@ Studio 支持 JSON 定义编辑、Schema/资源检查、保存、复制、分页
 
 ## 工具、Skill 与扩展
 
-`ServerHost(package_extensions=..., package_authorizer=...)` 注册扩展并设置授权。包可选择已授权的 flow.node、tool.catalog、memory.provider，其余基础设施由宿主固定。源码扩展默认关闭；启用时执行可信宿主 Python 代码，不能视为非可信代码隔离，也不自动 pip 安装。
+`ServerHost(package_extensions=..., package_authorizer=...)` 注册扩展并设置授权。包可选择已授权的 flow.node、tool.provider、memory.provider，其余基础设施由宿主固定。源码扩展默认关闭；启用时执行可信宿主 Python 代码，不能视为非可信代码隔离，也不自动 pip 安装。
 
 页面/API Agent 也持久化为库存内的标准 `AgentPackageBundle`，`agents.package_ref` 是必需的配置引用；目录批量解析包，Skill 索引和包更新共用事务。启动只创建缺失表，现有记录缺失包引用时拒绝读取。旧 `/api/agents/{id}/runs` 受理时冻结包，执行时使用冻结定义，网络再与当前 Agent/Server 上限取交集。
 

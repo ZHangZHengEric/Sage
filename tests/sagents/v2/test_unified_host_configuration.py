@@ -12,7 +12,7 @@ from pathlib import Path
 import pytest
 
 from examples.v2.host.__main__ import offline_model
-from examples.v2.host.plugins import compactor_registration
+from examples.v2.host.plugins import reducer_registration
 from sagents.v2.contracts.errors import SageV2Error
 from sagents.v2.package.manifest import SageManifestLoader
 from sagents.v2.package.manifest.resolver import CompositionResolver
@@ -35,12 +35,12 @@ def builder(tmp_path, registration=None):
         tmp_path,
         models=TEST_MODELS,
         model=offline_model(),
-        registrations=(registration or compactor_registration(),),
+        registrations=(registration or reducer_registration(),),
     )
 
 
-def observed_compactor(calls):
-    registration = compactor_registration()
+def observed_reducer(calls):
+    registration = reducer_registration()
     original = registration.factory
 
     def factory(context, dependencies):
@@ -61,7 +61,7 @@ async def test_typed_and_serialized_runtime_have_same_run_identity(tmp_path):
         (manifest.runtime, manifest.runtime.model_dump(mode="json"))
     ):
         app = await build_registered_package(
-            configuration=builder(tmp_path, observed_compactor(calls)),
+            configuration=builder(tmp_path, observed_reducer(calls)),
             package=manifest,
             runtime=runtime,
         )
@@ -70,7 +70,7 @@ async def test_typed_and_serialized_runtime_have_same_run_identity(tmp_path):
             result, _ = await run(app, agent, f"runtime-{index}")
             assert result.state.value == "completed"
             snapshot = await app.run_configuration(result.run_id, CONTEXT)
-            assert snapshot["runtime"]["capabilities"]["context.unit-compactor"][
+            assert snapshot["runtime"]["capabilities"]["context.reducer"][
                 "config"
             ] == {"minimum_characters": 4}
             identities.append(snapshot["composition_hash"])
@@ -86,7 +86,7 @@ async def test_invalid_registered_plugin_parameters_fail_before_factory(
     tmp_path, config
 ):
     calls = []
-    registration = compactor_registration()
+    registration = reducer_registration()
     original_factory = registration.factory
 
     def factory(context, dependencies):
@@ -99,7 +99,7 @@ async def test_invalid_registered_plugin_parameters_fail_before_factory(
             package=package(),
             runtime={
                 "capabilities": {
-                    "context.unit-compactor": {
+                    "context.reducer": {
                         "plugin": registration.descriptor.plugin_id,
                         "config": config,
                     }
@@ -124,13 +124,13 @@ async def test_desktop_uses_same_custom_plugin_registration_and_config(tmp_path)
     from tests.app.v2.desktop.sdk_fixture import desktop, execute
 
     calls = []
-    registration = observed_compactor(calls)
+    registration = observed_reducer(calls)
     service, _, _ = desktop(
         tmp_path,
         registrations=(registration,),
         runtime={
             "capabilities": {
-                "context.unit-compactor": {
+                "context.reducer": {
                     "plugin": registration.descriptor.plugin_id,
                     "config": {"minimum_characters": 8},
                 }
@@ -143,7 +143,7 @@ async def test_desktop_uses_same_custom_plugin_registration_and_config(tmp_path)
         snapshot = await service.application.run_configuration(
             result.run_id, service._context("user_1")
         )
-        assert snapshot["runtime"]["capabilities"]["context.unit-compactor"][
+        assert snapshot["runtime"]["capabilities"]["context.reducer"][
             "config"
         ] == {"minimum_characters": 8}
         assert calls == [{"minimum_characters": 8}]
@@ -233,11 +233,11 @@ def test_server_registration_and_package_runtime_parameter(tmp_path):
     from tests.sagents.v2.test_standard_execution_configuration import CONTEXT, run
 
     calls = []
-    registration = observed_compactor(calls)
+    registration = observed_reducer(calls)
     settings = make_settings(
         tmp_path,
         plugin_overrides={
-            "context.unit-compactor": {
+            "context.reducer": {
                 "plugin": registration.descriptor.plugin_id,
                 "config": {"minimum_characters": 8},
             },
@@ -265,7 +265,7 @@ def test_server_registration_and_package_runtime_parameter(tmp_path):
             result, _ = await run(managed, managed.loaded_agents[0], "package")
             assert result.state.value == "completed"
             snapshot = await managed.run_configuration(result.run_id, CONTEXT)
-            assert snapshot["runtime"]["capabilities"]["context.unit-compactor"][
+            assert snapshot["runtime"]["capabilities"]["context.reducer"][
                 "config"
             ] == {"minimum_characters": 4}
         finally:
@@ -284,7 +284,7 @@ def test_server_registration_and_package_runtime_parameter(tmp_path):
         asyncio.run(standalone())
         assert calls == [{"minimum_characters": 8}, {"minimum_characters": 4}]
         assert host.application.runtime_configuration.capabilities[
-            "context.unit-compactor"
+            "context.reducer"
         ].config == {"minimum_characters": 8}
         assert host.execution.sandbox_provider is not None
     assert host.execution.sandbox_provider is None

@@ -77,7 +77,7 @@ def build_preset_package(
     )
     capabilities = {
         **manifest.runtime.capabilities,
-        "tool.catalog": CapabilitySelection(
+        "tool.provider": CapabilitySelection(
             plugin=OFFICIAL_TOOL_PLUGIN, name="official"
         ),
         "tool.selection-policy": CapabilitySelection(

@@ -9,7 +9,7 @@ import httpx
 from pydantic import BaseModel, ConfigDict, Field
 from sagents.v2.runtime.observability.query import request
 
-from .external import ExternalDiagnostics
+from sagents.v2.runtime.observability.performance_evidence import ExternalDiagnostics
 
 
 class CostTotal(BaseModel):

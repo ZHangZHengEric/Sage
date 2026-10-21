@@ -28,7 +28,8 @@ class MysqlSessionStore(metaclass=_MysqlSessionStoreMeta):
 
     async def start(self, context, dependencies):
         await self._coordinator._ensure_ready()
-        return {"session.store": self}
+        from sagents.v2.runtime.session.plugins import session_storage_providers
+        return session_storage_providers(self)
 
     def __getattr__(self, name):
         return getattr(self._coordinator, name)

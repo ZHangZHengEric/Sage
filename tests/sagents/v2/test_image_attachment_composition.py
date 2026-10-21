@@ -99,7 +99,7 @@ async def test_builder_wires_durable_images_from_tool_to_request_and_session(
                 update={
                     "capabilities": {
                         **package.runtime.capabilities,
-                        "tool.catalog": CapabilitySelection(
+                        "tool.provider": CapabilitySelection(
                             plugin="sage.tool.official", name="official"
                         ),
                         "tool.selection-policy": CapabilitySelection(plugin="sage.tool-selection.direct"),

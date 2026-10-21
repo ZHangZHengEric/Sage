@@ -12,7 +12,7 @@ ref: v2-detail-SAGENTS_V2_SESSION_ATTACHMENTS
 
 `analyze_image` reads and normalizes an image through the sandbox, then stores an immutable JPEG snapshot through the current Run's SessionStore. The ledger keeps a `sage-image:<sha256>` reference. Inference loads pixels from that snapshot; summarization uses an attachment marker. Changing the original path cannot change a stored image. Legacy data URLs remain readable, with image bytes excluded from summary projections.
 
-`SessionArtifactStore` adapts the ArtifactStore interface to session ownership. The selected session plugin controls authorization, durability, and lifecycle. Generic `artifact.store` remains available for other outputs. Custom session plugins must implement attachments; unsupported plugins return `session.attachments_unsupported` without silently selecting separate storage.
+`SessionArtifactStore` is the internal Run-bound ArtifactStore view published by the Session storage plugin alongside `session.store` and `derived-state.store`; it is not separately registered or configured. The selected session plugin controls authorization, durability, and lifecycle. Generic `artifact.store` remains available for other outputs. Custom session plugins must implement attachments; unsupported plugins return `session.attachments_unsupported` without silently selecting separate storage.
 
 - Ephemeral stores retain bytes in memory only.
 - Filesystem stores keep immutable binary files under the owning session's `attachments/` directory. Files become durable before the manifest commits. Unreferenced files left by an interrupted write are reclaimed with the session. A complete directory backup includes descendants and attachments.

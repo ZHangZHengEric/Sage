@@ -96,14 +96,14 @@ def runtime_configuration(root, *, isolation_python, command_path, resources):
         }},
         "model.provider": {"plugin": "example.standard.model"},
         "agent.tool-policy": {"plugin": "example.standard.tool-policy"},
-        "tool.catalog": [
+        "tool.provider": [
             {"plugin": "sage.tool.official"},
             {"plugin": "sage.tool.mcp", "scope": "run", "grant_tools": True, "config": {"servers": [
                 {"name": "demo", "protocol": "stdio", "command": isolation_python,
                  "args": ["-I", "-u", str(resources / "mcp_server.py")], "call_timeout_seconds": 7200},
             ]}},
         ],
-        "skill.catalog": {"plugin": "sage.skill.filesystem", "config": {"roots": [str(resources / "skills")]}},
+        "skill.provider": {"plugin": "sage.skill.filesystem", "config": {"roots": [str(resources / "skills")]}},
         "tool.selection-policy": {"plugin": "sage.tool-selection.direct"},
         "agent.continuation-policy": {"plugin": "sage.agent.continuation.deterministic"},
     }})

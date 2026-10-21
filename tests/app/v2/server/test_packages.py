@@ -444,10 +444,11 @@ def test_source_tool_plugin_uses_standard_registration(service):
         ]
         bundle["manifest"]["plugins"] = [{"id": "test.scale", "version": "1.0.0"}]
         bundle["manifest"]["runtime"]["capabilities"] = {
-            "tool.catalog": {"plugin": "test.scale", "name": "generated"}
+            "tool.provider": {"plugin": "test.scale", "name": "generated"}
         }
         bundle["manifest"]["agents"]["assistant"]["tools"] = ["scale"]
         bundle["files"]["extensions/test.scale.py"] = """
+from sagents.v2.tool.provider import ToolProvider
 from sagents.v2.runtime.extensions import ExtensionRegistration, ExtensionDescriptor, CapabilityOffer, ExtensionScope
 from sagents.v2.tool.decorated import DecoratedToolProvider
 from sagents.v2.tool.decorators import tool
@@ -457,10 +458,10 @@ class Tools:
         return {"result": value * 2}
 registration = ExtensionRegistration(
     descriptor=ExtensionDescriptor(plugin_id="test.scale", version="1.0.0", name="Scale",
-        provides=(CapabilityOffer(capability="tool.catalog", api_version="2", name="generated"), CapabilityOffer(capability="tool.executor", api_version="2", name="generated")),
+        provides=(CapabilityOffer(capability="tool.provider", api_version="2", name="generated"),),
         supported_scopes=frozenset({ExtensionScope.AGENT})),
     factory=lambda context, dependencies: DecoratedToolProvider(Tools()),
-    start=lambda provider, context, dependencies: {"tool.catalog:generated": provider.catalog, "tool.executor:generated": provider.executor})
+    start=lambda provider, context, dependencies: {"tool.provider:generated": ToolProvider(provider.catalog, provider.executor),})
 """
         response = client.post("/api/agent-packages", headers=headers, json=bundle)
         assert response.status_code == 200, response.text

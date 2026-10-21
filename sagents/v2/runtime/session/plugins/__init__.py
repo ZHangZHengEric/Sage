@@ -1,9 +1,15 @@
-"""Official SessionStore backends exposed without eager sibling imports."""
+"""Session storage plugins and their shared capability publication interface."""
 
 from sagents.v2._lazy import exported_names, resolve_export
 
 
 _EXPORTS = {
+    "SESSION_STORAGE_CAPABILITIES": (
+        "sagents.v2.runtime.session.plugins._shared.storage", "SESSION_STORAGE_CAPABILITIES",
+    ),
+    "session_storage_providers": (
+        "sagents.v2.runtime.session.plugins._shared.storage", "session_storage_providers",
+    ),
     "RedisMysqlSessionStore": (
         "sagents.v2.runtime.session.plugins.mysql.redis", "RedisMysqlSessionStore",
     ),

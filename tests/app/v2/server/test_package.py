@@ -8,12 +8,12 @@ from sagents.v2.runtime.observability import StructuredLogger, structured_log_co
 from app.v2.server.main import create_app
 from app.v2.server.config.manifest import server_v2_manifest
 from app.v2.server.observability.context import request_context
-from app.v2.server.observability.logging import ServerLogSink, get_logger
+from app.v2.server.observability.logging import get_logger
 from tests.app.v2.server.conftest import make_settings, make_test_service
 
 
 def _stdout_log_sink(manifest):
-    return manifest.runtime.capabilities["observability.log-sink"]
+    return manifest.runtime.capabilities["observability.provider"]
 
 
 def test_package_has_no_yaml_credentials_or_model_routes():
@@ -23,12 +23,8 @@ def test_package_has_no_yaml_credentials_or_model_routes():
     assert manifest.entrypoint.agent == "main"
     assert manifest.interfaces["ag_ui"].plugin == "sage.protocol.ag-ui"
     log_sink = _stdout_log_sink(manifest)
-    assert log_sink.plugin == "sage.logging.stdout"
-    assert log_sink.config == {
-        "stream": "stdout",
-        "min_level": "info",
-        "format": "json",
-    }
+    assert log_sink.plugin == "sage.observability.local"
+    assert log_sink.config == {"log_level": "info", "log_format": "json", "log_filename": "sage-server.log"}
     judge = manifest.runtime.capabilities["agent.continuation-policy"]
     assert judge.plugin == "sage.agent.continuation.llm-judge"
     assert judge.config == {"model_binding": "fast"}
@@ -37,17 +33,17 @@ def test_package_has_no_yaml_credentials_or_model_routes():
     assert summarizer.config == {"model_binding": "primary"}
     from app.v2.server.catalog.plugins import AGENT_DEFAULTS
     assert set(manifest.runtime.capabilities) == set(AGENT_DEFAULTS) | {
-        "artifact.store", "observability.log-sink", "context.summary-store",
-        "observability.trace-sink", "package.registry",
+        "context.summary-store",
+        "observability.provider", "package.registry",
     }
-    assert manifest.runtime.capabilities["artifact.store"].plugin == "sage.artifact.session"
+    assert "artifact.store" not in manifest.runtime.capabilities
 
 
 
 def test_package_always_registers_stdout_log_sink(tmp_path: Path):
     log_sink = _stdout_log_sink(server_v2_manifest(make_settings(tmp_path)))
-    assert log_sink.plugin == "sage.logging.stdout"
-    assert log_sink.config["stream"] == "stdout"
+    assert log_sink.plugin == "sage.observability.local"
+    assert log_sink.config.get("log_stdout", True) is True
 
 
 def test_package_selects_mysql_and_otlp_from_host_settings(tmp_path: Path):
@@ -65,10 +61,10 @@ def test_package_selects_mysql_and_otlp_from_host_settings(tmp_path: Path):
         "dsn": "mysql://sage:sage@127.0.0.1:3306/sage",
         "table_prefix": "",
     }
-    assert _stdout_log_sink(manifest).plugin == "sage.logging.stdout"
-    trace = manifest.runtime.capabilities["observability.trace-sink"]
-    assert trace.plugin == "sage.trace.otlp"
-    assert trace.config == {
+    assert _stdout_log_sink(manifest).plugin == manifest.runtime.capabilities["observability.provider"].plugin
+    trace = manifest.runtime.capabilities["observability.provider"]
+    assert trace.plugin == "sage.observability.otlp"
+    assert {key: trace.config[key] for key in ("environment", "content_mode", "max_content_chars", "sample_rate", "timeout_seconds", "endpoint", "service_name", "protocol", "insecure")} == {
         "environment": "production",
         "content_mode": "redacted",
         "max_content_chars": 16384,
@@ -88,9 +84,9 @@ def test_package_skips_jaeger_when_endpoint_missing(tmp_path: Path):
             mysql_url="mysql://sage:sage@127.0.0.1:3306/sage",
         )
     )
-    assert manifest.runtime.capabilities["observability.trace-sink"].plugin == "sage.trace.noop"
+    assert manifest.runtime.capabilities["observability.provider"].plugin == "sage.observability.local"
     assert manifest.runtime.capabilities["session.store"].plugin == "sage.session.mysql"
-    assert _stdout_log_sink(manifest).plugin == "sage.logging.stdout"
+    assert _stdout_log_sink(manifest).plugin == manifest.runtime.capabilities["observability.provider"].plugin
 
 
 def test_package_requires_the_store_guarantees_the_server_depends_on(tmp_path: Path):
@@ -134,10 +130,10 @@ async def test_start_writes_sagents_registration_to_stdout(tmp_path: Path, capsy
     service = make_test_service(tmp_path, log_directory=str(tmp_path / "logs"))
     await service.start()
     try:
-        sink = service.application.service("observability.log-sink")
-        assert isinstance(sink, ServerLogSink)
-        assert sink.stdout.stream == "stdout"
-        assert service.agent_management.package_builder_factory.log_sink is sink
+        sink = service.application.service("observability.provider").logs
+        assert sink is service.observability.logs
+        assert sink.outputs[0].stream == "stdout"
+        assert service.agent_management.package_builder_factory.observability.logs is sink
         rows = [
             __import__("json").loads(line)
             for line in capsys.readouterr().out.splitlines()
@@ -145,7 +141,7 @@ async def test_start_writes_sagents_registration_to_stdout(tmp_path: Path, capsy
         ]
         registered = next(row for row in rows if row["event"] == "sagents.application.configured")
         assert registered["attributes"]["plugins"]
-        assert sink.stdout.format == "json"
+        assert sink.outputs[0].format == "json"
     finally:
         await service.close()
 
@@ -154,7 +150,7 @@ async def test_host_and_sagents_logs_share_record_and_outputs(tmp_path: Path, ca
     service = make_test_service(tmp_path, log_directory=str(tmp_path / "logs"))
     await service.start()
     try:
-        sink = service.application.service("observability.log-sink")
+        sink = service.application.service("observability.provider").logs
         capsys.readouterr()
         with structured_log_context(request_id="request-123"):
             logging.getLogger("test.host").info("host message")
@@ -240,7 +236,7 @@ async def test_log_level_and_text_format_apply_to_both_outputs(tmp_path: Path, c
     )
     await service.start()
     try:
-        sink = service.application.service("observability.log-sink")
+        sink = service.application.service("observability.provider").logs
         capsys.readouterr()
         logging.getLogger("test.host").info("filtered host message")
         logging.getLogger("test.host").warning("host warning")

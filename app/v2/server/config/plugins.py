@@ -25,18 +25,16 @@ SERVER_CONFIGURABLE = frozenset(AGENT_DEFAULTS) | {
     "memory.provider",
     "session-memory.provider",
     "context.summary-store",
-    "observability.trace-sink",
+    "observability.provider",
     "workspace.initializer",
     "package.registry",
-    "artifact.store",
 }
 SERVER_DEFAULTS = {
     **AGENT_DEFAULTS,
-    "artifact.store": "sage.artifact.session",
     "memory.provider": "sage.memory.filesystem-bm25",
     "session-memory.provider": "sage.session-memory.sqlite-bm25",
     "context.summary-store": "sage.context.summary-store.session-derived",
-    "observability.trace-sink": "sage.trace.noop",
+    "observability.provider": "sage.observability.local",
     "workspace.initializer": "sage.workspace.initializer.claw",
     "package.registry": "sage.package-registry.ephemeral",
 }

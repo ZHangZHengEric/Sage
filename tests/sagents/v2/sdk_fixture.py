@@ -5,7 +5,8 @@ from types import SimpleNamespace
 from sagents.v2 import ApplicationConfiguration, SAgentBuilder
 from sagents.v2.composition.defaults import default_runtime
 from sagents.v2.package.manifest.runtime import CapabilitySelection, RuntimeConfig, merge_capability_selections
-from sagents.v2.runtime.extensions import CapabilityKey, CapabilityOffer, ExtensionDescriptor, ExtensionRegistration, ExtensionScope
+from sagents.v2.runtime.session.plugins import session_storage_providers
+from sagents.v2.runtime.extensions import CapabilityOffer, ExtensionDescriptor, ExtensionRegistration, ExtensionScope
 
 
 def fixture_configuration(root, *, model=None, models=None, runtime=None, registrations=(), resources=(), providers=None,
@@ -20,9 +21,9 @@ def fixture_configuration(root, *, model=None, models=None, runtime=None, regist
     if model is not None:
         values["model.provider"] = model
     if tools is not None:
-        values["tool.catalog"] = SimpleNamespace(catalog=tools[0], executor=tools[1])
+        values["tool.provider"] = SimpleNamespace(catalog=tools[0], executor=tools[1])
     if skills is not None:
-        values["skill.catalog"] = SimpleNamespace(catalog=skills[0], source=skills[1])
+        values["skill.provider"] = SimpleNamespace(list_skills=skills[0].list_skills, get_skill=skills[0].get_skill, fetch=skills[1].fetch, fetch_latest=getattr(skills[1], "fetch_latest", skills[1].fetch))
         if len(skills) > 2 and skills[2] is not None:
             values["skill.workspace"] = skills[2]
     registered = list(registrations)
@@ -30,19 +31,27 @@ def fixture_configuration(root, *, model=None, models=None, runtime=None, regist
         plugin_id = "test.fixture." + capability
         scope = ExtensionScope.AGENT if capability == "model.provider" else ExtensionScope.PROCESS
         names = (capability,)
-        if capability == "tool.catalog":
-            names = (capability, "tool.executor")
-        if capability == "skill.catalog":
-            names = (capability, "skill.source")
+        storage_ports = None
+        if capability == "session.store":
+            storage_ports = session_storage_providers(value)
+            if "derived-state.store" in values or not all(callable(getattr(value, key, None)) for key in (
+                "get_derived_state", "put_derived_state", "delete_derived_state",
+            )):
+                storage_ports.pop("derived-state.store")
+            names = tuple(storage_ports)
+        if storage_ports is not None:
+            start = lambda instance, context, deps, ports=storage_ports: ports
+        elif capability == "derived-state.store":
+            start = lambda instance, context, deps, capability=capability: {capability: instance}
+        else:
+            start = None
         registered.append(ExtensionRegistration(
             descriptor=ExtensionDescriptor(plugin_id=plugin_id, name=capability, version="1",
                 provides=tuple(CapabilityOffer(capability=name, api_version="2") for name in names),
                 supported_scopes=frozenset({scope}), default_scope=scope,
                 config_schema={"type": "object", "additionalProperties": False}),
             factory=lambda context, deps, value=value: value, ownership="borrowed",
-            start=(lambda instance, context, deps, names=names: {
-                CapabilityKey(capability=name): getattr(instance, name.split(".")[-1]) for name in names
-            }) if len(names) > 1 else None,
+            start=start,
         ))
         choices[capability] = CapabilitySelection(plugin=plugin_id, scope=scope)
     if model_factory is not None:
@@ -63,6 +72,7 @@ def fixture_configuration(root, *, model=None, models=None, runtime=None, regist
                 supported_scopes=frozenset({ExtensionScope.PROCESS}),
                 config_schema={"type": "object", "additionalProperties": False}),
             factory=lambda context, deps, resource=resource: resource,
+            start=lambda instance, context, deps, capability=capability: {capability: instance},
         ))
         choices[capability] = CapabilitySelection(plugin=capability)
     return ApplicationConfiguration(tuple(registered), effective.model_copy(update={

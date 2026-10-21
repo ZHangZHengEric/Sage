@@ -2,10 +2,10 @@ import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { layoutCapabilityGraph } from '../src/capability-layout.js'
 
-const ids = ['context.unit-compactor', 'context.reducer', 'context.summarizer', 'tool.selection-policy', 'model.provider', 'memory.recall-query', 'skill.loading', 'agent.continuation-policy']
+const ids = ['context.reducer', 'context.summarizer', 'tool.selection-policy', 'model.provider', 'memory.recall-query', 'skill.loading', 'agent.continuation-policy']
 const nodes = ids.map(id => ({ id, name: id }))
 const links = [
-  ['context.reducer', 'context.summarizer'], ['context.reducer', 'context.unit-compactor'],
+  ['context.reducer', 'context.summarizer'],
   ['context.summarizer', 'model.provider'], ['tool.selection-policy', 'model.provider'],
   ['memory.recall-query', 'model.provider'], ['agent.continuation-policy', 'model.provider'],
 ]
@@ -26,7 +26,7 @@ function intersects([a, b], [c, d]) {
 
 test('three-column layout shows every node and routes every dependency outside cards without crossing', () => {
   const layout = layoutCapabilityGraph(nodes, links)
-  assert.equal(layout.nodes.length, 8)
+  assert.equal(layout.nodes.length, 7)
   assert.equal(new Set(layout.nodes.map(node => node.x)).size, 3)
   assert.equal(layout.routes.length, links.length)
   for (const route of layout.routes) for (const segment of segments(route)) {
@@ -41,7 +41,7 @@ test('three-column layout shows every node and routes every dependency outside c
 test('narrow layouts and future dependencies retain all relationships in separate rows', () => {
   for (const columns of [1, 2]) {
     const layout = layoutCapabilityGraph(nodes, links, columns)
-    assert.equal(layout.nodes.length, 8)
+    assert.equal(layout.nodes.length, 7)
     assert.equal(layout.routes.length, 0)
     assert.equal(layout.relations.length, links.length)
   }

@@ -169,13 +169,12 @@ def _runtime_capabilities(
     capabilities: dict[str, CapabilitySelection] = {
         **{key: CapabilitySelection(plugin=plugin, config=DEFAULT_CONFIG.get(key, {}))
            for key, plugin in AGENT_DEFAULTS.items()},
-        "artifact.store": CapabilitySelection(plugin="sage.artifact.session"),
         # Pin the deployed product choices rather than inheriting SDK defaults
         # that may change when the SDK is upgraded.
         "context.summary-store": CapabilitySelection(
             plugin="sage.context.summary-store.session-derived",
         ),
-        "observability.trace-sink": CapabilitySelection(plugin="sage.trace.noop"),
+        "observability.provider": _observation_selection(settings),
         "package.registry": CapabilitySelection(plugin="sage.package-registry.ephemeral"),
         "context.summarizer": CapabilitySelection(
             plugin="sage.context.summarizer.model",
@@ -185,14 +184,7 @@ def _runtime_capabilities(
             plugin="sage.agent.continuation.llm-judge",
             config={"model_binding": "fast"},
         ),
-        "observability.log-sink": CapabilitySelection(
-            plugin="sage.logging.stdout",
-            config={
-                "stream": "stdout",
-                "min_level": log_level,
-                "format": log_format,
-            },
-        )
+
     }
     if settings is not None:
         capabilities.update({
@@ -239,50 +231,48 @@ def _runtime_capabilities(
                     "max_concurrent_runs_per_tenant": settings.max_concurrent_runs_per_user,
                     "max_pending_items": settings.max_pending_runs,
                 })
-    if settings is not None and settings.effective_trace_backend != "noop":
-        config = {
-            "environment": settings.trace_environment,
-            "content_mode": settings.trace_content_mode or (
-                "raw" if settings.effective_trace_backend == "phoenix" else "redacted"
-            ),
-            "max_content_chars": settings.trace_max_content_chars,
-            "sample_rate": settings.trace_sample_rate,
-            "timeout_seconds": settings.trace_timeout_seconds,
-        }
-        if settings.effective_trace_backend == "langfuse":
-            config.update({
-                "base_url": settings.langfuse_base_url,
-                "service_name": settings.trace_service_name,
-                "public_key_env": settings.langfuse_public_key_env,
-                "secret_key_env": settings.langfuse_secret_key_env,
-                "ingestion_version": settings.langfuse_ingestion_version,
-            })
-        elif settings.effective_trace_backend == "phoenix":
-            config.update({
-                "endpoint": settings.phoenix_endpoint,
-                "service_name": settings.trace_service_name,
-                "project_name": settings.phoenix_project_name,
-                "api_key_env": settings.phoenix_api_key_env,
-            })
-        else:
-            legacy_jaeger = not settings.trace_otlp_endpoint and bool(settings.jaeger_url)
-            config.update({
-                "endpoint": settings.trace_otlp_endpoint or settings.jaeger_url,
-                "service_name": settings.jaeger_service_name if legacy_jaeger else settings.trace_service_name,
-                "protocol": "grpc" if legacy_jaeger else settings.trace_otlp_protocol,
-                "insecure": True if legacy_jaeger else settings.trace_otlp_insecure,
-            })
-        capabilities["observability.trace-sink"] = CapabilitySelection(
-            plugin=f"sage.trace.{settings.effective_trace_backend}", config=config,
-        )
     if settings is not None:
         capabilities.update({
             key: CapabilitySelection.model_validate(value)
             for key, value in settings.plugin_overrides.items()
         })
-        trace = capabilities["observability.trace-sink"]
-        if trace.plugin == "sage.trace.phoenix" and "content_mode" not in trace.config:
-            capabilities["observability.trace-sink"] = trace.model_copy(update={
-                "config": {**trace.config, "content_mode": settings.trace_content_mode or "raw"},
-            })
     return capabilities
+
+
+def _observation_selection(settings):
+    """One backend selection owns logs, diagnostics, query settings and traces."""
+    config = {"log_level": settings.log_level if settings else "info",
+              "log_format": settings.log_format if settings else "json",
+              "log_filename": "sage-server.log"}
+    if settings is None:
+        return CapabilitySelection(plugin="sage.observability.local", config=config)
+    config["log_root"] = settings.log_directory or None
+    backend = settings.effective_trace_backend
+    if backend == "noop":
+        config.update(diagnostics_root=str(settings.data_root / "runtime" / "diagnostics"),
+                      diagnostics_storage="sqlite")
+        return CapabilitySelection(plugin="sage.observability.local", config=config)
+    mode = settings.trace_content_mode or ("raw" if backend == "phoenix" else "redacted")
+    config.update(environment=settings.trace_environment, content_mode=mode,
+                  diagnostic_content_mode=mode if mode != "metadata" else "off",
+                  max_content_chars=settings.trace_max_content_chars,
+                  sample_rate=settings.trace_sample_rate, timeout_seconds=settings.trace_timeout_seconds,
+                  service_name=settings.trace_service_name)
+    if backend == "langfuse":
+        config.update(base_url=settings.langfuse_base_url,
+                      public_key_env=settings.langfuse_public_key_env,
+                      secret_key_env=settings.langfuse_secret_key_env,
+                      ingestion_version=settings.langfuse_ingestion_version)
+    elif backend == "phoenix":
+        config.update(endpoint=settings.phoenix_endpoint, project_name=settings.phoenix_project_name,
+                      api_key_env=settings.phoenix_api_key_env, query_url=settings.trace_query_url or "",
+                      query_headers_env=settings.trace_query_headers_env)
+    else:
+        jaeger = not settings.trace_otlp_endpoint and bool(settings.jaeger_url)
+        config.update(endpoint=settings.trace_otlp_endpoint or settings.jaeger_url,
+                      service_name=settings.jaeger_service_name if jaeger else settings.trace_service_name,
+                      protocol="grpc" if jaeger else settings.trace_otlp_protocol,
+                      insecure=True if jaeger else settings.trace_otlp_insecure,
+                      query_backend="jaeger" if jaeger else "", query_url=settings.trace_query_url or (settings.jaeger_public_url if jaeger else ""),
+                      query_headers_env=settings.trace_query_headers_env)
+    return CapabilitySelection(plugin=f"sage.observability.{backend}", config=config)

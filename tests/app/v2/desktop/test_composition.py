@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import replace
 from pathlib import Path
 
+from sagents.v2.runtime.observability.provider import ObservabilityProvider
 import pytest
 
 from app.v2.desktop.backend.bindings import DesktopExecutionBindingProvider
@@ -82,15 +83,11 @@ def test_desktop_manifest_applies_user_component_selections(tmp_path: Path):
     manifest = desktop_v2_manifest(
         session_root=tmp_path,
         component_selections={
-            "context.unit-compactor": "sage.context.unit-compactor.reference",
             "agent.continuation-policy": "hybrid",
         },
     )
     capabilities = manifest.runtime.capabilities
-    assert (
-        capabilities["context.unit-compactor"].plugin
-        == "sage.context.unit-compactor.reference"
-    )
+    assert "context.unit-compactor" not in capabilities
     assert "context.token-estimator" not in capabilities
     assert (
         capabilities["agent.continuation-policy"].plugin
@@ -246,16 +243,15 @@ async def test_desktop_builder_path_exposes_a_real_resolved_plan(tmp_path: Path)
         session_root=tmp_path / "runtime",
         workspace=tmp_path / "workspace",
         model_provider=ScriptedModelProvider(()),
-        log_sink=log_sink,
-        diagnostic_sink=diagnostic_sink,
+        observability=ObservabilityProvider(plugin_id='test.observation', outputs=(log_sink,), diagnostics=diagnostic_sink),
     )
     try:
         plan = application.resolved_plan
         sources = {value.source for value in plan.providers}
         assert "desktop-host" not in sources
-        assert application.service("observability.log-sink") is log_sink
-        assert application.service("observability.diagnostic-sink") is diagnostic_sink
-        for capability in ("observability.log-sink", "observability.diagnostic-sink", "model.provider"):
+        assert application.service("observability.provider").logs.outputs[0] is log_sink
+        assert application.service("observability.provider").diagnostics is diagnostic_sink
+        for capability in ("observability.provider", "model.provider"):
             binding = _provider(plan, capability)
             assert binding.source == "plugin"
             assert binding.plugin_id == "com.sage.desktop." + capability.replace(".", "-")
@@ -291,8 +287,8 @@ async def test_desktop_service_process_root_uses_builder_application(tmp_path: P
         assert service.dispatcher is service.application.service("execution.dispatcher")
         assert service.memory_provider is service.application.service("memory.provider")
         assert service.diagnostics is service.application.service(
-            "observability.diagnostic-sink"
-        )
+            "observability.provider"
+        ).diagnostics
         assert {value.source for value in plan.providers} <= {
             "plugin",
             "host",
@@ -434,3 +430,15 @@ async def test_workspace_larger_than_four_gib_can_write_under_configured_quota(t
         assert (workspace / "result.txt").read_bytes() == b"done"
     finally:
         await bindings.close()
+
+def test_desktop_settings_reject_removed_component_configuration(tmp_path):
+    from app.v2.desktop.backend.package import desktop_v2_manifest
+    from app.v2.desktop.backend.schemas import DesktopV2Settings
+
+    with pytest.raises(ValueError, match="removed"):
+        DesktopV2Settings(component_configs={"context.unit-compactor": {}})
+    with pytest.raises(ValueError, match="removed"):
+        desktop_v2_manifest(
+            session_root=tmp_path,
+            component_selections={"tool.catalog": "custom.plugin"},
+        )

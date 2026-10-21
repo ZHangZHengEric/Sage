@@ -49,7 +49,7 @@ For a Bearer-authenticated server, use these values in Desktop's Settings → MC
 
 Server uses `url` in `/api/mcp` requests; Desktop's connection payload uses `streamable_http_url`. Let each host's interface construct its own payload. The current bridge accepts an API key for Bearer authentication; this is not an arbitrary-header or OAuth configuration example.
 
-Embedded hosts register a paired `tool.catalog` / `tool.executor` implementation
+Embedded hosts register a complete `tool.provider` implementation
 with `builder.register(ExtensionRegistration(...))`, then select its plugin,
 Run scope and serializable parameters in runtime configuration. The factory
 receives the authenticated Run through a declared `execution.environment`

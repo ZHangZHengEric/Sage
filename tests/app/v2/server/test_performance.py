@@ -3,7 +3,7 @@ import sqlite3
 
 import pytest
 
-from app.v2.server.observability.performance import (
+from sagents.v2.runtime.observability.performance import (
     SCHEMA,
     project_log,
     project_model,

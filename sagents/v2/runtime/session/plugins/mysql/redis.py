@@ -345,7 +345,8 @@ class RedisMysqlSessionStore:
     async def start(self, context, dependencies):
         await self._coordinator._ensure_ready()
         await self._coordinator.list_dispatchable_runs()
-        return {"session.store": self}
+        from sagents.v2.runtime.session.plugins import session_storage_providers
+        return session_storage_providers(self)
 
     def __getattr__(self, name):
         return getattr(self._coordinator, name)

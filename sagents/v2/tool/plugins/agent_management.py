@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from sagents.v2.tool.provider import ToolProvider
+
 from typing import Any
 
 from sagents.v2.agent.management import AgentManagementService, AgentPackageBundle
@@ -189,10 +191,7 @@ class AgentManagementToolPlugin:
         description=description,
         provides=(
             CapabilityOffer(
-                capability="tool.catalog", api_version="2", name="agent-management"
-            ),
-            CapabilityOffer(
-                capability="tool.executor", api_version="2", name="agent-management"
+                capability="tool.provider", api_version="2", name="agent-management"
             ),
         ),
         supported_scopes=frozenset({ExtensionScope.PROCESS}),
@@ -211,6 +210,5 @@ class AgentManagementToolPlugin:
 
     def provide(self):
         return {
-            "tool.catalog:agent-management": self.catalog,
-            "tool.executor:agent-management": self.executor,
+            "tool.provider:agent-management": ToolProvider(self.catalog, self.executor),
         }

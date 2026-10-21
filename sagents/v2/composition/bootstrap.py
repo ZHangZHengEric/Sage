@@ -34,10 +34,8 @@ async def initialize_process(catalog):
             capability=capability, default_plugin=plugin, default_config=config,
             tenant_id=catalog.tenant_id)
     store = await assembler._create_session_store(host, root, handles, runtime, ())
-    store_choice = _selection(runtime, "session.store")
-    colocated = store_choice is None or builder._registry.is_trusted_builtin(store_choice.plugin)
-    derived = await open_capability("derived-state.store",
-        "sage.derived-state.session" if colocated else "sage.derived-state.ephemeral")
+    derived = await assembler._create_storage_capability(host, root, handles, runtime, (),
+        capability="derived-state.store")
     credentials = await open_capability("credentials.provider", EnvironmentCredentialProvider.plugin_id,
                                        config={"declarations": {key: value.model_dump(mode="json") for key, value in catalog.models.credentials.items()}})
     services, adapters = await assembler._create_application_services(host, root, handles, runtime, (),
@@ -47,9 +45,9 @@ async def initialize_process(catalog):
     services["memory.provider"] = await assembler._create_memory_provider(host, root, handles, runtime, ())
     services["session-memory.provider"] = await assembler._create_session_memory_provider(host, root, handles, runtime, ())
     # These capabilities require an Agent definition or the actual Run binding.
-    agent_capabilities = {"tool.catalog", "tool.executor", "tool.selection-policy", "tool.result-processor", "skill.catalog",
+    agent_capabilities = {"tool.provider", "tool.selection-policy", "tool.result-processor", "skill.provider",
         "skill.workspace", "skill.loading", "flow.node", "context.reducer", "context.summarizer",
-        "context.unit-compactor", "context.segment-provider", "agent.continuation-policy",
+        "context.segment-provider", "agent.continuation-policy",
         "agent.self-configuration", "agent.output-checker", "memory.recall-query"}
     for capability in runtime.capabilities:
         if capability in services or capability in agent_capabilities or capability == "interface.protocol-adapter":

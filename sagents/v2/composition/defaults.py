@@ -5,10 +5,9 @@ from sagents.v2.package.manifest.runtime import CapabilitySelection, RuntimeConf
 
 DEFAULT_COMPONENTS = {
     "skill.management": "sage.skill.filesystem",
-    "skill.catalog": "sage.skill.filesystem",
+    "skill.provider": "sage.skill.filesystem",
     "skill.loading": "sage.skill.loading.lazy",
     "agent.continuation-policy": "sage.agent.continuation.llm-judge",
-    "context.unit-compactor": "sage.context.unit-compactor.reference",
     "context.reducer": "sage.context.reducer.persistent-summary",
     "context.summarizer": "sage.context.summarizer.model",
     "context.summary-store": "sage.context.summary-store.session-derived",
@@ -17,8 +16,7 @@ DEFAULT_COMPONENTS = {
     "tool.selection-policy": "sage.tool-selection.llm",
     "tool.result-processor": "sage.tool.result-processor.file",
     "session-memory.provider": "sage.session-memory.sqlite-bm25",
-    "observability.diagnostic-sink": "sage.observability.filesystem",
-    "observability.log-sink": "sage.logging.filesystem",
+    "observability.provider": "sage.observability.local",
     "execution.sandbox": "sage.sandbox.local-workspace",
     "session.store": "sage.session.filesystem",
     "workspace.initializer": "sage.workspace.initializer.claw",
@@ -29,15 +27,14 @@ def default_runtime(session_root: str | Path = ".runtime/sagents") -> RuntimeCon
     root = Path(session_root).expanduser().resolve()
     paths = {
         "skill.management": {"roots": [str(root / "skills")]},
-        "skill.catalog": {"roots": [str(root / "skills")]},
+        "skill.provider": {"roots": [str(root / "skills")]},
         "session.store": {"root": str(root)},
         "memory.provider": {"root": str(root / "memory")},
         "session-memory.provider": {"root": str(root / "session-memory")},
-        "observability.diagnostic-sink": {
-            "root": str(root / "sessions"),
-            "legacy_root": str(root / "diagnostics"),
+        "observability.provider": {
+            "diagnostics_root": str(root / "sessions"),
+            "log_root": str(root / "logs"),
         },
-        "observability.log-sink": {"root": str(root / "logs")},
         "workspace.initializer": {"language": "en"},
     }
     # Sandbox acquisition requires the host's workspace and execution binding.
@@ -71,7 +68,6 @@ def effective_runtime(runtime: RuntimeConfig) -> RuntimeConfig:
     implicit = {
         "context.summary-store": "sage.context.summary-store.session-derived",
         "context.summarizer": "sage.context.summarizer.model",
-        "context.unit-compactor": "sage.context.unit-compactor.reference",
         "context.reducer": "sage.context.reducer.persistent-summary",
         "skill.loading": "sage.skill.loading.lazy",
         "agent.continuation-policy": "sage.agent.continuation.deterministic",

@@ -40,7 +40,6 @@ def test_builtin_inventory_contains_only_real_factories():
         "sage.agent.continuation.llm-judge",
         "sage.agent.continuation.hybrid",
         "sage.agent.continuation.explicit-status",
-        "sage.artifact.session",
         "sage.artifact.ephemeral",
         "sage.artifact.filesystem",
         "sage.context.reducer.persistent-summary",
@@ -49,7 +48,6 @@ def test_builtin_inventory_contains_only_real_factories():
         "sage.context.summarizer.model",
         "sage.context.summary-store.ephemeral",
         "sage.context.summary-store.session-derived",
-        "sage.context.unit-compactor.reference",
         "sage.credentials.environment",
         "sage.credentials.mapping",
         "sage.flow.agent",
@@ -115,7 +113,6 @@ def test_builtin_inventory_contains_only_real_factories():
         "sage.execution.tool-runtime",
         "sage.agent.tool-policy.default",
         "sage.agent.approval-memory.session",
-        "sage.derived-state.session",
         "sage.derived-state.ephemeral",
         "sage.model.concurrency-budget",
     } == set(inventory)
@@ -349,7 +346,7 @@ def test_every_registered_plugin_has_a_pydantic_config_boundary():
     ("capability", "plugin_id"),
     [
         ("session-memory.provider", "sage.session-memory.sqlite-bm25"),
-        ("observability.log-sink", "sage.logging.filesystem"),
+        ("observability.provider", "sage.observability.phoenix"),
     ],
 )
 def test_official_plugin_required_config_fails_during_planning(capability, plugin_id):
@@ -421,9 +418,9 @@ def test_ephemeral_tool_plugin_factory_exposes_paired_catalog_and_executor():
     assert plugin.plugin_id == "sage.tool.ephemeral"
     assert registration.start is not None
     providers = registration.start(plugin, context, {})
-    assert set(providers) == {"tool.catalog:ephemeral", "tool.executor:ephemeral"}
-    assert providers["tool.catalog:ephemeral"] is plugin.catalog
-    assert providers["tool.executor:ephemeral"] is plugin.executor
+    assert set(providers) == {"tool.provider:ephemeral"}
+    assert providers["tool.provider:ephemeral"].catalog is plugin.catalog
+    assert providers["tool.provider:ephemeral"].executor is plugin.executor
 
 
 @pytest.mark.parametrize(

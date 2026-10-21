@@ -78,7 +78,7 @@ def runtime(root, *, file_limit=128 * 1024**2, duration=7200):
         }},
         "model.provider": {"plugin": "test.standard.model"},
         "agent.tool-policy": {"plugin": "test.standard.policy"},
-        "tool.catalog": {"plugin": "sage.tool.official"},
+        "tool.provider": {"plugin": "sage.tool.official"},
         "tool.selection-policy": {"plugin": "sage.tool-selection.direct"},
         "agent.continuation-policy": {"plugin": "sage.agent.continuation.deterministic"},
     }})

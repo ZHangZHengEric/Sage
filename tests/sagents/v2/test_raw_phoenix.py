@@ -54,14 +54,14 @@ def test_unbounded_wire_capture_preserves_large_event():
 
 @pytest.mark.asyncio
 async def test_phoenix_external_diagnostics_preserve_raw_records():
-    from app.v2.server.observability.external import ExternalDiagnostics
+    from sagents.v2.runtime.observability.performance_evidence import ExternalDiagnostics
     from sagents.v2.runtime.observability.contracts import LogRecord
     from tests.sagents.v2.test_trace_exporters import request
 
     exporter = InMemorySpanExporter()
     trace = PhoenixTraceSink(endpoint='http://localhost:6006/v1/traces',
                              content_mode='raw', exporter=exporter)
-    diagnostics = ExternalDiagnostics(backend='phoenix', query_url='http://localhost:6006')
+    diagnostics = ExternalDiagnostics(capture_mode="raw", backend='phoenix', query_url='http://localhost:6006')
     diagnostics.trace_sink = trace
     model_request = request()
     wire = {'messages': [{'content': '原始请求' * 10000}], 'password': 'keep'}
@@ -83,7 +83,7 @@ async def test_phoenix_external_diagnostics_preserve_raw_records():
 
 @pytest.mark.asyncio
 async def test_recording_roundtrip_preserves_large_wire_and_normalized_events(monkeypatch):
-    from app.v2.server.observability.external import ExternalDiagnostics
+    from sagents.v2.runtime.observability.performance_evidence import ExternalDiagnostics
     from sagents.v2.model import RecordingModelProvider
     from sagents.v2.model.contracts import ModelEventKind, ModelResponse, ModelStreamEvent
     from sagents.v2.model.wire_diagnostics import record_wire_event
@@ -94,7 +94,7 @@ async def test_recording_roundtrip_preserves_large_wire_and_normalized_events(mo
     exporter = InMemorySpanExporter()
     trace = PhoenixTraceSink(endpoint='http://localhost:6006/v1/traces',
                              content_mode='raw', exporter=exporter)
-    diagnostics = ExternalDiagnostics(backend='phoenix', query_url='http://localhost:6006',
+    diagnostics = ExternalDiagnostics(capture_mode="raw", backend='phoenix', query_url='http://localhost:6006',
                                       raw_max_bytes=128 * 1024 * 1024)
     diagnostics.trace_sink = trace
 
@@ -198,12 +198,12 @@ def test_historical_successful_tool_span_marks_missing_result_without_failure():
 
 
 def test_redacted_performance_summary_keeps_timing_json_beyond_content_limit():
-    from app.v2.server.observability.external import ExternalDiagnostics
+    from sagents.v2.runtime.observability.performance_evidence import ExternalDiagnostics
     from tests.app.v2.server.test_external_observability import capture_sample
     exporter = InMemorySpanExporter()
     trace = PhoenixTraceSink(endpoint='http://localhost:6006/v1/traces', content_mode='redacted',
                              max_content_chars=256, exporter=exporter)
-    diagnostics = ExternalDiagnostics(backend='phoenix', query_url='http://phoenix')
+    diagnostics = ExternalDiagnostics(capture_mode="raw", backend='phoenix', query_url='http://phoenix')
     diagnostics.trace_sink = trace
     capture_sample(diagnostics)
     spans = exporter.get_finished_spans()
@@ -219,13 +219,13 @@ def test_redacted_performance_summary_keeps_timing_json_beyond_content_limit():
 
 @pytest.mark.asyncio
 async def test_raw_events_follow_the_active_managed_application_exporter():
-    from app.v2.server.observability.external import ExternalDiagnostics
+    from sagents.v2.runtime.observability.performance_evidence import ExternalDiagnostics
     from sagents.v2.runtime.observability.traces import StructuredTracer, current_trace_sink
     from tests.sagents.v2.test_trace_exporters import request
     host_exporter, managed_exporter = InMemorySpanExporter(), InMemorySpanExporter()
     host = PhoenixTraceSink(endpoint='http://localhost:6006/v1/traces', content_mode='raw', exporter=host_exporter)
     managed = PhoenixTraceSink(endpoint='http://localhost:6006/v1/traces', content_mode='raw', exporter=managed_exporter)
-    diagnostics = ExternalDiagnostics(backend='phoenix', query_url='http://phoenix')
+    diagnostics = ExternalDiagnostics(capture_mode="raw", backend='phoenix', query_url='http://phoenix')
     diagnostics.trace_sink = host
     span = StructuredTracer(managed, 'test').start_span('model.request', session_id='s', run_id='run_1')
     assert current_trace_sink() is managed

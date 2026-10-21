@@ -420,23 +420,10 @@ def test_stdout_log_sink_writes_text_console_lines():
         StdoutLogSink(format="yaml")
 
 
-@pytest.mark.parametrize(
-    ("implementation", "capability"),
-    [
-        (NoopDiagnosticSink, "observability.diagnostic-sink"),
-        (FilesystemDiagnosticSink, "observability.diagnostic-sink"),
-        (NoopLogSink, "observability.log-sink"),
-        (FilesystemLogSink, "observability.log-sink"),
-        (StdoutLogSink, "observability.log-sink"),
-        (NoopTraceSink, "observability.trace-sink"),
-        (OtlpTraceSink, "observability.trace-sink"),
-    ],
-)
-def test_observability_plugin_id_matches_official_registry(implementation, capability):
-    registration = builtin_extension_registry().get(implementation.plugin_id)
-    assert capability in {
-        offer.capability for offer in registration.descriptor.provides
-    }
+@pytest.mark.parametrize("plugin", ["local", "noop", "otlp", "langfuse", "phoenix"])
+def test_observability_plugin_id_matches_official_registry(plugin):
+    descriptor = builtin_extension_registry().get(f"sage.observability.{plugin}").descriptor
+    assert {offer.capability for offer in descriptor.provides} == {"observability.provider"}
 
 
 @pytest.mark.asyncio
@@ -451,16 +438,17 @@ async def test_stdout_logging_plugin_is_selectable_from_the_official_registry():
 
     host = ExtensionHost(builtin_extension_registry())
     plan = host.plan(
-        (CapabilityRequirement(capability="observability.log-sink", api_version="2"),),
-        selections={"observability.log-sink": "sage.logging.stdout"},
-        configs={"sage.logging.stdout": {"stream": "stderr", "min_level": "warning"}},
-        scope_overrides={"sage.logging.stdout": ExtensionScope.PROCESS},
+        (CapabilityRequirement(capability="observability.provider", api_version="2"),),
+        selections={"observability.provider": "sage.observability.local"},
+        configs={"sage.observability.local": {"log_stream": "stderr", "log_level": "warning"}},
+        scope_overrides={"sage.observability.local": ExtensionScope.PROCESS},
     )
     handle = host.open_scope_sync(
         ExtensionScopeContext(scope=ExtensionScope.PROCESS, scope_id="test-stdout"),
         plan,
     )
-    sink = handle.providers.require_unique("observability.log-sink")
+    provider = handle.providers.require_unique("observability.provider")
+    sink = provider.logs.outputs[0]
     assert isinstance(sink, StdoutLogSink)
     assert sink.stream == "stderr"
     assert sink.min_level == LogLevel.WARNING
@@ -738,22 +726,22 @@ async def test_trace_noop_plugin_is_the_default_official_sink():
     from sagents.v2.runtime.observability import NoopTraceSink, otel_available
 
     registry = builtin_extension_registry()
-    otlp = registry.get("sage.trace.otlp").descriptor
+    otlp = registry.get("sage.observability.otlp").descriptor
     host = ExtensionHost(registry)
     plan = host.plan(
         (
             CapabilityRequirement(
-                capability="observability.trace-sink", api_version="2"
+                capability="observability.provider", api_version="2"
             ),
         ),
-        selections={"observability.trace-sink": "sage.trace.noop"},
-        scope_overrides={"sage.trace.noop": ExtensionScope.PROCESS},
+        selections={"observability.provider": "sage.observability.noop"},
+        scope_overrides={"sage.observability.noop": ExtensionScope.PROCESS},
     )
     handle = host.open_scope_sync(
         ExtensionScopeContext(scope=ExtensionScope.PROCESS, scope_id="test-trace"),
         plan,
     )
-    sink = handle.providers.require_unique("observability.trace-sink")
+    sink = handle.providers.require_unique("observability.provider").traces
     assert isinstance(sink, NoopTraceSink)
     assert otlp.availability.available is otel_available()
     await handle.close()

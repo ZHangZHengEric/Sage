@@ -776,52 +776,29 @@ Inspect the complete diff before reporting findings.
       ],
     ),
     ComponentSummary(
-      id: 'observability.diagnostic-sink',
-      name: 'Model diagnostics',
-      value: 'Stores model diagnostics.',
-      selectionMode: 'host',
-      applyMode: 'restart',
-      scope: 'process',
-      activePluginId: 'sage.observability.filesystem',
-      activeConfig: {'path': '/Users/test/sage/runtime/diagnostics'},
-      plugins: [
-        ComponentPluginSummary(
-          id: 'sage.observability.filesystem',
-          name: 'Filesystem diagnostics',
-          value: 'Writes model diagnostics.',
-        ),
-        ComponentPluginSummary(
-          id: 'sage.observability.noop',
-          name: 'No-op diagnostics',
-          value: 'Disables model diagnostics.',
-        ),
-      ],
-    ),
-    ComponentSummary(
-      id: 'observability.log-sink',
-      name: 'Structured logging',
-      value: 'Records operational failures.',
+      id: 'observability.provider',
+      name: 'Observability',
+      value: 'Logs, diagnostics and traces.',
       selectionMode: 'user',
       applyMode: 'restart',
       scope: 'process',
-      activePluginId: 'sage.logging.filesystem',
-      activeConfig: {
-        'format_version': 'sage.log/v1',
-        'path': '/Users/test/sage/runtime/logs/sage.jsonl',
-        'min_level': 'info',
-        'max_bytes': 10485760,
-        'backup_count': 5,
-      },
+      activePluginId: 'sage.observability.local',
+      activeConfig: {'path': '/Users/test/sage/runtime/logs'},
       plugins: [
         ComponentPluginSummary(
-          id: 'sage.logging.filesystem',
-          name: 'Rotating filesystem structured log sink',
-          value: 'Writes redacted rotating JSONL files.',
+          id: 'sage.observability.local',
+          name: 'Local observability',
+          value: 'Retains logs and diagnostics.',
         ),
         ComponentPluginSummary(
-          id: 'sage.logging.noop',
-          name: 'No-op structured log sink',
-          value: 'Disables operational log persistence.',
+          id: 'sage.observability.noop',
+          name: 'Observability off',
+          value: 'Disables observation collection.',
+        ),
+        ComponentPluginSummary(
+          id: 'sage.observability.phoenix',
+          name: 'Phoenix',
+          value: 'Logs, traces and queries.',
         ),
       ],
     ),
@@ -8041,7 +8018,9 @@ void main() {
         await tester.tap(save);
         await tester.pumpAndSettle();
         expect(api.lastSelectedComponent, 'skill.loading');
-        expect(api.lastSelectedComponentConfig, {'max_active_characters': 12000});
+        expect(api.lastSelectedComponentConfig, {
+          'max_active_characters': 12000,
+        });
         expect(find.text('12000'), findsOneWidget);
         final owner = find.byKey(
           const ValueKey(
@@ -8163,15 +8142,10 @@ void main() {
           find.text('/Users/test/sage/runtime/session-memory'),
           findsOneWidget,
         );
-        expect(find.text('模型请求记录'), findsNWidgets(2));
-        expect(find.text('文件模型请求记录'), findsWidgets);
-        expect(find.textContaining('Session → LLM 请求'), findsWidgets);
-        expect(
-          find.text('/Users/test/sage/runtime/diagnostics'),
-          findsOneWidget,
-        );
-        expect(find.text('结构化日志'), findsNWidgets(2));
-        expect(find.text('轮转文件日志'), findsWidgets);
+        expect(find.text('观测'), findsNWidgets(2));
+        expect(find.text('本地观测'), findsWidgets);
+        expect(find.text('模型请求记录'), findsNothing);
+        expect(find.text('结构化日志'), findsNothing);
         expect(find.text('执行沙箱'), findsNWidgets(2));
         expect(
           find.byKey(const ValueKey('settings-sandbox-workspace-config')),
@@ -8182,12 +8156,9 @@ void main() {
         expect(find.text('工作区初始化'), findsNWidgets(2));
         expect(find.text('Claw Mode'), findsWidgets);
         expect(find.text('空白工作区'), findsOneWidget);
+        expect(find.text('/Users/test/sage/runtime/logs'), findsOneWidget);
         expect(
-          find.text('/Users/test/sage/runtime/logs/sage.jsonl'),
-          findsOneWidget,
-        );
-        expect(
-          find.byKey(const ValueKey('settings-log-file-path')),
+          find.byKey(const ValueKey('settings-observability-path')),
           findsOneWidget,
         );
         expect(

@@ -1,4 +1,4 @@
-"""Typed facade for plugins that provide both Tool catalog and executor."""
+"""Typed facade for complete Tool provider plugins."""
 
 from sagents.v2.runtime.extensions import ExtensionRegistration, ExtensionRegistry
 
@@ -9,14 +9,14 @@ class ToolProviderRegistry:
 
     def register(self, registration: ExtensionRegistration) -> None:
         capabilities = {value.capability for value in registration.descriptor.provides}
-        if not {"tool.catalog", "tool.executor"} <= capabilities:
-            raise ValueError("Tool plugins must provide catalog and executor together")
+        if not {"tool.provider"} <= capabilities:
+            raise ValueError("Tool plugins must provide tool.provider")
         self.registry.register(registration)
 
     def get(self, plugin_id: str) -> ExtensionRegistration:
         registration = self.registry.get(plugin_id)
         capabilities = {value.capability for value in registration.descriptor.provides}
-        if not {"tool.catalog", "tool.executor"} <= capabilities:
+        if not {"tool.provider"} <= capabilities:
             raise ValueError(f"extension {plugin_id!r} is not a Tool provider")
         return registration
 
@@ -24,6 +24,6 @@ class ToolProviderRegistry:
         return tuple(
             value
             for value in self.registry.inventory()
-            if {"tool.catalog", "tool.executor"}
+            if {"tool.provider"}
             <= {offer["capability"] for offer in value["provides"]}
         )

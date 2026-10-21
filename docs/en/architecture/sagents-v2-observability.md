@@ -11,11 +11,13 @@ ref: v2-detail-sagents-v2-observability
 
 # SAgents V2 Model Observability, Langfuse and Phoenix
 
+The only observation selection is `observability.provider`. Its provider owns log outputs, spans, model diagnostics, supported evidence queries and shutdown. Select `sage.observability.local`, `sage.observability.noop`, `sage.observability.otlp`, `sage.observability.langfuse` or `sage.observability.phoenix`. Previous separate observation capability selections are rejected without compatibility. Log severity, trace sampling/content and diagnostic content are independently configured; raw evidence uses a separate unsampled transport. Existing isolated observation storage is reused; no business audit tables are added.
+
 ## Responsibilities
 
 `DiagnosticSink` saves local model requests/responses and wire requests for the Session model diagnostics view; it is not a recovery source. `TraceSink` represents Agent, model, and tool lifecycles, inputs and outputs, usage, status, and parent relationships. Each consumes execution data directly without reading the other's files or relying on the observability backend for Run recovery. Diagnostic write failures produce warnings without interrupting model calls.
 
-`ObservedRunDriver` owns Agent and tool observations; `RecordingModelProvider` owns model observations. They emit the same vendor-independent `TraceSpan`. `sage.trace.otlp` exports generic/GenAI attributes, while `sage.trace.langfuse` and `sage.trace.phoenix` add their respective platform mappings over the shared OTLP transport. No database tables or durable observability queues are added.
+`ObservedRunDriver` owns Agent and tool observations; `RecordingModelProvider` owns model observations. They emit the same vendor-independent `TraceSpan`. `sage.observability.otlp` exports generic/GenAI attributes, while `sage.observability.langfuse` and `sage.observability.phoenix` add their respective platform mappings over the shared OTLP transport. No database tables or durable observability queues are added.
 
 ## Conversation latency diagnostics
 
@@ -103,7 +105,7 @@ PHOENIX_API_KEY=your-api-key
 
 The endpoint is the complete OTLP/HTTP protobuf traces URL, including `/v1/traces`. For cloud instances, preserve the provided path prefix. Authentication uses a Bearer API key; `SAGE_SERVER_PHOENIX_API_KEY_ENV` overrides the environment variable name. Manifests store only that reference. The optional `SAGE_SERVER_PHOENIX_PUBLIC_URL` configures the browser entry separately.
 
-The SDK plugin is `sage.trace.phoenix`, with `endpoint`, `project_name`, `api_key_env`, `service_name`, and shared trace options. Select Phoenix independently in the Server trace plugin settings; saved selections take effect after restarting the Server.
+The SDK plugin is `sage.observability.phoenix`, with `endpoint`, `project_name`, `api_key_env`, `service_name`, and shared trace options. Select Phoenix independently in the Server trace plugin settings; saved selections take effect after restarting the Server.
 
 Project routing uses the `openinference.project.name` resource attribute. Agent, model, and tool spans map to `AGENT`, `LLM`, and `TOOL`. Root Sessions group child Agents through `session.id`; original Sage identities remain available. Cache and reasoning tokens are subsets of prompt/completion; total is input + output. Content policies, redaction, and first-token/first-text events use the shared transport. This plugin exports runtime data for evaluation; it does not initiate evaluations or submit scores.
 
@@ -117,7 +119,7 @@ SAGE_SERVER_TRACE_OTLP_PROTOCOL=http
 
 For gRPC, select `grpc` and use the collector's gRPC address. Set `SAGE_SERVER_TRACE_OTLP_INSECURE=true` only for plaintext gRPC. Without an explicit TRACE_BACKEND, the legacy `SAGE_SERVER_JAEGER_URL` setting continues to select OTLP. Explicit `noop` disables tracing. All backends support content limits, environment, sampling, and export timeouts. Generic collector authentication can use OTel exporter-header environment settings.
 
-Non-Server hosts select the same plugins through `observability.trace-sink`; configuration schemas are in the official plugin registry. The queue defaults to 2048 and active spans to 4096, adjustable with max_queue_size/max_active_spans. Plugins are process-scoped resources; hosts call stop/close on shutdown. The capability currently selects one backend. Use an external OTel Collector to fan out to multiple backends.
+Non-Server hosts select the same plugins through `observability.provider`; configuration schemas are in the official plugin registry. The queue defaults to 2048 and active spans to 4096, adjustable with max_queue_size/max_active_spans. Plugins are process-scoped resources; hosts call stop/close on shutdown. The capability currently selects one backend. Use an external OTel Collector to fan out to multiple backends.
 
 ## Failures and validation
 

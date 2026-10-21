@@ -44,15 +44,11 @@ from sagents.v2.skill import (
     SessionDerivedSkillActivationRepository,
 )
 from sagents.v2.runtime.extensions.official import builtin_extension_registry
-from sagents.v2.runtime.observability import (
-    FilesystemDiagnosticSink,
-    LogSink,
-    StructuredLogger,
-)
+from sagents.v2.runtime.observability import StructuredLogger
 from app.v2.desktop.backend.composition import build_desktop_application
 from app.v2.desktop.backend.rsi import DesktopRsiMixin
 from app.v2.desktop.backend.catalog_service import DesktopCatalogServiceMixin
-from app.v2.desktop.backend.observability import create_desktop_log_sink
+from app.v2.desktop.backend.observability import create_desktop_observability
 from app.v2.desktop.backend.studio import DesktopStudioMixin, StudioStore
 from app.v2.desktop.backend.openui import OpenUiParser, OpenUiStore, OpenUiProjector
 from app.v2.desktop.backend.schemas import (
@@ -95,8 +91,7 @@ class DesktopV2Service(
         catalog: DesktopCatalogStore | None = None,
         session_store: SessionStore | None = None,
         derived_state_store: DerivedStateStore | None = None,
-        log_sink: LogSink | None = None,
-        log_plugin_id: str | None = None,
+        observability=None,
         max_concurrent_model_calls: int = 8,
         max_waiting_model_calls: int = 128,
         model_queue_timeout_seconds: float = 60,
@@ -143,20 +138,16 @@ class DesktopV2Service(
         self.model_providers = DesktopModelProviders(self.model_budget)
         self._last_run_plan = None
         self._mcp_plugin_cache: dict[tuple[str, str], Any] = {}
-        if log_sink is None:
-            self._owns_log_sink = True
-            self.log_plugin_id, self.log_sink = create_desktop_log_sink(
-                self.runtime_root
-            )
-        else:
-            self._owns_log_sink = False
-            self.log_plugin_id = log_plugin_id or "injected"
-            self.log_sink = log_sink
+        self._owned_observability = create_desktop_observability(self.runtime_root) if observability is None else None
+        self.observability = observability if observability is not None else self._owned_observability
+        self.observability_plugin_id = self.observability.plugin_id
+        self.log_sink = self.observability.logs
+        self.diagnostics = self.observability.diagnostics
         self.logger = StructuredLogger(self.log_sink, "desktop.service")
         self.logger.info(
             "service.initializing",
             "Desktop v2 service is initializing",
-            attributes={"root": str(self.root), "log_plugin": self.log_plugin_id},
+            attributes={"root": str(self.root), "log_plugin": self.observability_plugin_id},
         )
         owner_adoption = (
             adopt_unowned_sessions(
@@ -184,13 +175,6 @@ class DesktopV2Service(
         self._derived_state_store = derived_state_store
         self._run_environments = {}
         self.runtime = HarnessRuntime(self.session_store)
-        self.diagnostic_plugin_id = _DESKTOP_COMPONENT_DEFAULTS[
-            "observability.diagnostic-sink"
-        ]
-        self.diagnostics = FilesystemDiagnosticSink(
-            self.runtime_root / "sessions",
-            legacy_root=self.runtime_root / "diagnostics",
-        )
         self.summary_store_plugin_id = _stable_component_id(
             "context.summary-store",
             _DESKTOP_COMPONENT_DEFAULTS["context.summary-store"],
@@ -261,8 +245,7 @@ class DesktopV2Service(
             application = await build_desktop_application(
                 session_root=self.runtime_root,
                 workspace=workspace,
-                log_sink=self.log_sink,
-                diagnostic_sink=self.diagnostics,
+                observability=self.observability,
                 session_store=self.session_store,
                 derived_state_store=(
                     self._derived_state_store
@@ -325,9 +308,11 @@ class DesktopV2Service(
         self.session_memory_plugin_id = self._plan_plugin_id(
             "session-memory.provider", self.session_memory_plugin_id
         )
-        self.diagnostic_plugin_id = self._plan_plugin_id(
-            "observability.diagnostic-sink", self.diagnostic_plugin_id
-        )
+        self.observability = application.service("observability.provider")
+        self.observability_plugin_id = self.observability.plugin_id
+        self.log_sink = self.observability.logs
+        self.diagnostics = self.observability.diagnostics
+        self.logger = StructuredLogger(self.log_sink, "desktop.service")
 
     def _plan_plugin_id(self, capability: str, fallback: str) -> str:
         if self.application is None:
@@ -393,8 +378,8 @@ class DesktopV2Service(
         self.model_providers.clear()
         self._workspace_initializations.clear()
         self.logger.info("service.closed", "Desktop v2 service closed")
-        if self._owns_log_sink:
-            self.log_sink.close()
+        if self._owned_observability is not None:
+            await self._owned_observability.close()
 
     async def _authorized_indexed_sessions(
         self,
@@ -491,13 +476,13 @@ class DesktopV2Service(
             "runs": [value.model_dump(mode="json") for value in runs],
             "commit_proposals": [value.model_dump(mode="json") for value in proposals],
             "diagnostics": {
-                "format_version": self.diagnostics.format_version,
-                "path": str(self.diagnostics.root),
+                "format_version": getattr(self.diagnostics, "format_version", ""),
+                "path": str(getattr(self.diagnostics, "root", "")),
                 "authoritative": False,
             },
             "logs": {
                 "format_version": self.log_sink.format_version,
-                "plugin_id": self.log_plugin_id,
+                "plugin_id": self.observability_plugin_id,
                 "path": str(getattr(self.log_sink, "path", "")),
                 "authoritative": False,
             },

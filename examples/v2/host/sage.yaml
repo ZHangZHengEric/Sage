@@ -9,6 +9,6 @@ agents:
 entrypoint: {agent: main}
 runtime:
   capabilities:
-    context.unit-compactor:
-      plugin: example.context.reference-compactor
+    context.reducer:
+      plugin: example.context.reference-reducer
       config: {minimum_characters: 4.0}

@@ -1,4 +1,4 @@
-const agentOrder = ['context.unit-compactor', 'context.reducer', 'context.summarizer', 'tool.selection-policy', 'model.provider', 'memory.recall-query', 'skill.loading', 'agent.continuation-policy']
+const agentOrder = ['skill.loading', 'context.reducer', 'context.summarizer', 'tool.selection-policy', 'model.provider', 'memory.recall-query', null, 'agent.continuation-policy']
 
 // The Agent dependency tree has a planar three-column embedding. Keep these
 // slots stable as implementations change; new capabilities fill unused slots.
@@ -22,7 +22,6 @@ export function layoutCapabilityGraph(nodes, links = [], columns = 3) {
     if (!a || !b) continue
     let points
     if (columns === 3) {
-      if (from === 'context.reducer' && to === 'context.unit-compactor') points = [[a.x, a.y + height / 2], [b.x + width, b.y + height / 2]]
       if ((from === 'context.reducer' && to === 'context.summarizer') || (from === 'tool.selection-policy' && to === 'model.provider')) points = [[a.x + width, a.y + height / 2], [b.x, b.y + height / 2]]
       if (from === 'memory.recall-query' && to === 'model.provider') points = [[a.x, a.y + height / 2], [b.x + width, b.y + height / 2]]
       if (from === 'context.summarizer' && to === 'model.provider') {

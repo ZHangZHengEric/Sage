@@ -29,7 +29,7 @@ async def list_plugins(user: CurrentUser, host: HostDep):
 async def server_plugins(user: AdminUser, host: HostDep):
     from dataclasses import asdict, replace
     from app.v2.server.config.manifest import server_v2_manifest
-    from app.v2.server.observability.diagnostics import redact
+    from sagents.v2.runtime.observability.sqlite_evidence import redact
 
     manifest = server_v2_manifest(host.settings)
     providers = []

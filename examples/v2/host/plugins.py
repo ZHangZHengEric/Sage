@@ -1,7 +1,8 @@
-"""Standalone compactor example using exact characters and durable references."""
+"""Standalone context reducer example using exact characters and durable references."""
 
 from pydantic import BaseModel, ConfigDict, Field
 from sagents.v2.contracts.items import TextBlock
+from sagents.v2.context.contracts import ContextProjection
 from sagents.v2.runtime.extensions import (
     CapabilityOffer,
     ExtensionDescriptor,
@@ -15,11 +16,11 @@ class ReferenceConfig(BaseModel):
     minimum_characters: int = Field(default=4, gt=0)
 
 
-class ReferenceCompactor:
+class ReferenceReducer:
     def __init__(self, *, minimum_characters=4):
         self.minimum_characters = minimum_characters
 
-    async def compact(self, messages):
+    async def reduce(self, messages, budget=None, *, scope=None):
         projected = []
         for message in messages:
             reference = message.metadata.get("context_reference", {})
@@ -38,21 +39,23 @@ class ReferenceCompactor:
                 )
             else:
                 projected.append(message)
-        return tuple(projected) if tuple(projected) != messages else None
+        return ContextProjection(
+            messages=tuple(projected),
+            source_message_count=len(messages),
+            strategy="reference",
+        )
 
 
-def compactor_registration() -> ExtensionRegistration:
+def reducer_registration() -> ExtensionRegistration:
     return ExtensionRegistration(
         descriptor=ExtensionDescriptor(
-            plugin_id="example.context.reference-compactor",
+            plugin_id="example.context.reference-reducer",
             version="2.0.0",
-            name="Example reference compactor",
-            provides=(
-                CapabilityOffer(capability="context.unit-compactor", api_version="2"),
-            ),
+            name="Example reference reducer",
+            provides=(CapabilityOffer(capability="context.reducer", api_version="2"),),
             supported_scopes=frozenset({ExtensionScope.AGENT}),
             config_schema=ReferenceConfig.model_json_schema(),
         ),
         config_model=ReferenceConfig,
-        factory=lambda context, dependencies: ReferenceCompactor(**context.config),
+        factory=lambda context, dependencies: ReferenceReducer(**context.config),
     )

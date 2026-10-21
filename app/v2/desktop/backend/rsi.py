@@ -495,7 +495,7 @@ class DesktopRsiMixin:
             value["status"] = "running"
             save()
             manifest_data = package.manifest.model_dump(mode="json")
-            manifest_data["runtime"]["capabilities"]["tool.catalog"] = {
+            manifest_data["runtime"]["capabilities"]["tool.provider"] = {
                 "plugin": OfficialToolPlugin.plugin_id
             }
             package = AgentPackageBundle(manifest=manifest_data, files=package.files)
@@ -599,7 +599,6 @@ class DesktopRsiMixin:
                 from sagents.v2 import ApplicationConfiguration
                 from sagents.v2.package.manifest.runtime import CapabilitySelection
                 from sagents.v2.runtime.extensions import (
-                    CapabilityKey,
                     CapabilityOffer,
                     ExtensionDescriptor,
                     ExtensionRegistration,
@@ -609,30 +608,26 @@ class DesktopRsiMixin:
                 choices = dict(bundle.manifest.runtime.capabilities)
                 policy = DefaultToolPolicy(operation_assessor=assess,
                     operation_assessor_id="desktop.rsi.local-workspace/v1")
-                for capability, value, extras in (
-                    ("model.provider", model, ()),
-                    ("execution.model-budget", self.model_budget, ()),
-                    ("skill.catalog", skills, ("skill.source",)),
-                    ("agent.tool-policy", policy, ()),
+                for capability, value in (
+                    ("model.provider", model),
+                    ("execution.model-budget", self.model_budget),
+                    ("skill.provider", skills),
+                    ("agent.tool-policy", policy),
                 ):
                     plugin = "com.sage.desktop.rsi." + capability.replace(".", "-")
-                    names = (capability, *extras)
                     registrations.append(ExtensionRegistration(
                         descriptor=ExtensionDescriptor(plugin_id=plugin, name=capability, version="2",
-                            provides=tuple(CapabilityOffer(capability=name, api_version="2") for name in names),
+                            provides=(CapabilityOffer(capability=capability, api_version="2"),),
                             supported_scopes=frozenset({ExtensionScope.PROCESS}),
                             config_schema={"type": "object", "additionalProperties": False}),
                         factory=lambda context, deps, value=value: value, ownership="borrowed",
-                        start=(lambda instance, context, deps, names=names: {
-                            CapabilityKey(capability=name): instance for name in names
-                        }) if extras else None,
                     ))
                     choices[capability] = CapabilitySelection(plugin=plugin)
                 choices["session.store"] = CapabilitySelection(plugin="sage.session.filesystem", config={"root": str(workspace / "sessions")})
                 choices["execution.binding"] = CapabilitySelection(plugin="sage.execution.binding.local-workspace", config={
                     "workspace": str(workspace / "work"), "policy": {"process": {"enabled": False}},
                 })
-                choices.setdefault("tool.catalog", CapabilitySelection(plugin="sage.tool.official"))
+                choices.setdefault("tool.provider", CapabilitySelection(plugin="sage.tool.official"))
                 # RSI roles have their own structured evaluator. Select tools
                 # directly unless the frozen package explicitly chooses another
                 # policy, so default discovery cannot become another model task.

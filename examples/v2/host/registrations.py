@@ -1,11 +1,11 @@
 """Small example registration constructors; selection and build remain explicit."""
 from sagents.v2.runtime.extensions import (
-    CapabilityKey, CapabilityOffer, ExtensionDescriptor, ExtensionRegistration,
+    CapabilityOffer, ExtensionDescriptor, ExtensionRegistration,
     ExtensionScope,
 )
 
 
-def provided(plugin_id, factory, *capabilities, scope=ExtensionScope.PROCESS, ownership="borrowed"):
+def provided(plugin_id, factory, *capabilities, scope=ExtensionScope.PROCESS, ownership="borrowed", start=None):
     """Register a capability factory, including already-created host resources."""
     return ExtensionRegistration(
         descriptor=ExtensionDescriptor(plugin_id=plugin_id, name=plugin_id, version="1",
@@ -13,10 +13,7 @@ def provided(plugin_id, factory, *capabilities, scope=ExtensionScope.PROCESS, ow
             supported_scopes=frozenset({scope}), default_scope=scope,
             config_schema={"type": "object", "additionalProperties": False}),
         factory=factory, ownership=ownership,
-        start=(lambda instance, context, deps: {
-            CapabilityKey(capability=name): getattr(instance, "catalog" if name == "tool.catalog" else "executor", instance)
-            if name.startswith("tool.") else instance for name in capabilities
-        }) if len(capabilities) > 1 else None,
+        start=start,
     )
 
 

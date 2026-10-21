@@ -148,7 +148,7 @@ async def open_app(tmp_path, models, *, approval=False):
         update={
             "capabilities": {
                 **runtime.capabilities,
-                "tool.catalog": CapabilitySelection(plugin="sage.tool.official"),
+                "tool.provider": CapabilitySelection(plugin="sage.tool.official"),
                 "tool.selection-policy": CapabilitySelection(
                     plugin="sage.tool-selection.direct"
                 ),

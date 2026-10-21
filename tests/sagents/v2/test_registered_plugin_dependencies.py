@@ -1,4 +1,6 @@
 """Registered plugins use the same trusted services as standard Agent execution."""
+
+from sagents.v2.tool.provider import ToolProvider
 from dataclasses import replace
 
 import asyncio
@@ -69,15 +71,13 @@ async def test_custom_tools_receive_actual_store_and_scope_identity(tmp_path, sc
     custom = ExtensionRegistration(
         descriptor=ExtensionDescriptor(
             plugin_id="test.scope.identity", name="Identity", version="1",
-            provides=(CapabilityOffer(capability="tool.catalog", api_version="2", name="identity"),
-                      CapabilityOffer(capability="tool.executor", api_version="2", name="identity")),
+            provides=(CapabilityOffer(capability="tool.provider", api_version="2", name="identity"),),
             dependencies=(ExtensionDependency(capability="session.store"),),
             supported_scopes=frozenset({scope}),
             config_schema={"type": "object", "additionalProperties": False},
         ), factory=create,
         start=lambda instance, context, dependencies: {
-            "tool.catalog:identity": instance.provider,
-            "tool.executor:identity": instance.provider,
+            "tool.provider:identity": ToolProvider(instance.provider, instance.provider),
         },
     )
     builder = SAgentBuilder()
@@ -94,7 +94,7 @@ async def test_custom_tools_receive_actual_store_and_scope_identity(tmp_path, sc
     config = runtime(tmp_path)
     config = config.model_copy(update={"capabilities": {
         **config.capabilities,
-        "tool.catalog": (CapabilitySelection(plugin="sage.tool.official"),
+        "tool.provider": (CapabilitySelection(plugin="sage.tool.official"),
                          CapabilitySelection(plugin="test.scope.identity", name="identity", scope=scope, grant_tools=True)),
     }})
     app = await builder.build(runtime=config, models=TEST_MODELS)

@@ -87,7 +87,7 @@ team = await app.load_agent(team_package, subagents={"worker": worker})
 stream = await app.entrypoint().run_stream(command, context, agent=team)
 ```
 
-Team 包配置 `mode: team`、声明 `subagents`；官方工具仍通过现有 `tool.catalog: sage.tool.official` 配置选择。模型、MCP、技能和策略继续从统一注册能力及 runtime/plugin config 接入；上面的变量由宿主配置提供。持久化的 Agent revision、模型/工具绑定和恢复配置必须保留，不应在恢复旧 Run 时替换成最新 Project 设置。
+Team 包配置 `mode: team`、声明 `subagents`；官方工具仍通过现有 `tool.provider: sage.tool.official` 配置选择。模型、MCP、技能和策略继续从统一注册能力及 runtime/plugin config 接入；上面的变量由宿主配置提供。持久化的 Agent revision、模型/工具绑定和恢复配置必须保留，不应在恢复旧 Run 时替换成最新 Project 设置。
 
 如果宿主的某项现有能力无法通过这些公开扩展点表达，应在 Sage 中补齐相应配置/插件支持并添加 Builder 回归测试，不恢复自建 loop 路线。关闭 App 后由宿主按既有资源所有权约定关闭 `bindings`；不要由子任务直接 destroy 公共沙箱。
 

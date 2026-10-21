@@ -141,7 +141,7 @@ async def main():
             "agent.tool-policy": {"plugin": "acceptance.policy"},
             "agent.continuation-policy": {"plugin": "sage.agent.continuation.deterministic"},
             "tool.selection-policy": {"plugin": "sage.tool-selection.direct"},
-            "tool.catalog": {"plugin": "sage.tool.official"},
+            "tool.provider": {"plugin": "sage.tool.official"},
             "execution.binding": {"plugin": "sage.execution.binding.local-workspace", "config": {
                 "workspace": str(workspace), "workspace_alias": "/workspace",
                 "linux_execution_uid": uid, "linux_execution_gid": gid,

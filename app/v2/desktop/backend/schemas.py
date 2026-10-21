@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from app.v2.desktop.backend.catalog import DesktopModelCompatibilityProfile
 from sagents.v2.contracts.run_state import SessionConcurrencyMode
@@ -28,6 +28,16 @@ class DesktopV2Settings(BaseModel):
     max_tree_entries: int = Field(default=6_000, ge=100, le=50_000)
     component_selections: dict[str, str] = Field(default_factory=dict)
     component_configs: dict[str, dict[str, Any]] = Field(default_factory=dict)
+
+    @field_validator("component_selections", "component_configs")
+    @classmethod
+    def reject_removed_capabilities(cls, value):
+        from sagents.v2.package.manifest.runtime import REMOVED_CAPABILITIES
+
+        removed = REMOVED_CAPABILITIES.intersection(value)
+        if removed:
+            raise ValueError(f"removed capability configuration: {', '.join(sorted(removed))}")
+        return value
 
 
 class ComponentSelectionRequest(BaseModel):

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Awaitable, Protocol
 
 from sagents.v2.tool.contracts import (
@@ -45,3 +46,11 @@ class RunScopedToolState(Protocol):
     """Optional bounded-state hook for providers shared by multiple Runs."""
 
     def release_run(self, run_id: str) -> None | Awaitable[None]: ...
+
+
+@dataclass(frozen=True)
+class ToolProvider:
+    """One selected plugin supplies discovery and execution together."""
+
+    catalog: ToolCatalog
+    executor: ToolExecutor

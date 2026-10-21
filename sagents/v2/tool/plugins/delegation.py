@@ -113,10 +113,7 @@ class MultiAgentToolPlugin:
         description=description,
         provides=(
             CapabilityOffer(
-                capability="tool.catalog", api_version="2", name="multi-agent"
-            ),
-            CapabilityOffer(
-                capability="tool.executor", api_version="2", name="multi-agent"
+                capability="tool.provider", api_version="2", name="multi-agent"
             ),
         ),
         supported_scopes=frozenset({ExtensionScope.AGENT, ExtensionScope.RUN}),

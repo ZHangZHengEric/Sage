@@ -95,7 +95,7 @@ async def load_catalog_agent(host, command, user_id):
         mcp=selected_mcp_servers(catalog, frozen.mcp_servers), a2a=selected_a2a_agents(catalog, frozen.a2a_agents))
     runtime = service.application.runtime_configuration
     identity = {"session.store", "derived-state.store", "execution.scheduler", "execution.job-runtime",
-                "observability.log-sink", "observability.diagnostic-sink"}
+                "observability.provider"}
     choices = select_run_capabilities(runtime.capabilities, manifest.runtime, selections)
     for key in identity:
         if key in runtime.capabilities:

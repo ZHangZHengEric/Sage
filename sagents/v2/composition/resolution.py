@@ -84,7 +84,7 @@ def _merge_plugin_config(
 
 def _selection(runtime: RuntimeConfig, capability: str) -> CapabilitySelection | None:
     values = runtime.selections(capability)
-    if len(values) > 1 and capability != "tool.catalog":
+    if len(values) > 1 and capability != "tool.provider":
         raise ValueError(
             f"capability {capability!r} does not allow multiple selections here"
         )

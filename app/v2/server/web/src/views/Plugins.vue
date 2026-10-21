@@ -65,6 +65,11 @@ function choosePlugin(id) {
   if (!plugin || plugin.available === false) return
   const config = parameterDefaults(plugin)
   if (plugin.schema?.properties?.root && config.root === undefined && server.value.storage_root) config.root = `${server.value.storage_root}/${editing.value}`
+  if (editing.value === 'observability.provider' && id === 'sage.observability.local' && server.value.storage_root) {
+    config.log_root = `${server.value.storage_root}/observability/logs`
+    config.diagnostics_root = `${server.value.storage_root}/observability/diagnostics`
+    config.diagnostics_storage = 'sqlite'
+  }
   draft.value = { plugin: id, config }
 }
 function selectImplementation(plugin) {

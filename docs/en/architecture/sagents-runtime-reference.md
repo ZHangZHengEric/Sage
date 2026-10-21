@@ -270,12 +270,14 @@ Identifier is 1–192 characters, starts with a letter/digit and otherwise permi
 
 <a id="capabilityselection-全部字段"></a>
 
+Select tools only through `tool.provider`, whose value is a `ToolProvider` containing `catalog` and `executor`. Select Skills through `skill.provider`; the same provider implements `list_skills`, `get_skill` and `fetch`. `skill.management` independently controls publishing. Reference compaction is internal to the context module. Former paired capability names and standalone reference-compactor configuration are rejected without translation.
+
 ## All CapabilitySelection fields
 
 ```yaml
 capabilities:
-  context.unit-compactor:
-    plugin: sage.context.unit-compactor.reference
+  context.reducer:
+    plugin: sage.context.reducer.window
     name: default
     scope: agent
     config: {}
@@ -309,11 +311,11 @@ R denotes Path(session_root).expanduser().resolve(), with session_root=.runtime/
 | `context.summary-store` | `sage.context.summary-store.session-derived` | Session-derived summary state |
 | `memory.recall-query` | `sage.memory.recall-query.llm` | Model-generated recall queries |
 | `tool.selection-policy` | `sage.tool-selection.llm` | Select visible tool schemas on demand |
-| `observability.diagnostic-sink` | `sage.observability.filesystem` | root=R/sessions, legacy_root=R/diagnostics; diagnostics |
-| `observability.log-sink` | `sage.logging.filesystem` | root=R/logs; structured runtime logs |
+| `observability.provider` | `sage.observability.local` | log_root=R/logs; diagnostics_root=R/sessions |
 | `workspace.initializer` | `sage.workspace.initializer.claw` | language=en; workspace starter material |
 
-Other services use composition fallbacks: sage.scheduler.ephemeral, sage.job.ephemeral, sage.artifact.session, sage.package-registry.ephemeral, sage.trace.noop, sage.credentials.environment and sage.context.unit-compactor.reference. App models resolve Agent model ID references.
+
+Other services use composition fallbacks: sage.scheduler.ephemeral, sage.job.ephemeral, sage.package-registry.ephemeral, sage.observability.noop and sage.credentials.environment. App models resolve Agent model ID references. Reference compaction is internal to the context module and has no separate selection.
 
 Explicit empty runtime differs: memory and Session memory are noop, recall query is direct, continuation deterministic, diagnostics/logging noop and workspace initialization bare. Session storage still falls back to filesystem. **Providing memory components does not enable Agent memory.recall/auto_write; both default to false.**
 
@@ -337,9 +339,9 @@ capabilities:
   session.store:
     plugin: sage.session.filesystem
     config: {root: /srv/my-app/runtime}
-  observability.log-sink:
-    plugin: sage.logging.stdout
-    config: {stream: stderr, min_level: debug, format: json}
+  observability.provider:
+    plugin: sage.observability.local
+    config: {log_stream: stderr, log_level: debug, log_format: json}
   context.reducer:
     plugin: sage.context.reducer.persistent-summary
     config: {summary_target_tokens: 1536, protected_recent_units: 6}
@@ -360,7 +362,7 @@ Scheduler concurrency limits App Runs rather than model-provider QPS. The runtim
 
 ```yaml
 capabilities:
-  tool.catalog:
+  tool.provider:
     plugin: sage.tool.mcp
     name: mcp
     config:
@@ -398,14 +400,14 @@ Use the same registration and configuration path as built-ins; register before b
 
 ```python
 from sagents.v2 import SAgentBuilder
-from examples.v2.host.plugins import compactor_registration
+from examples.v2.host.plugins import reducer_registration
 
 builder = SAgentBuilder()
-builder.register(compactor_registration())
+builder.register(reducer_registration())
 app = await builder.build(runtime={
     "capabilities": {
-        "context.unit-compactor": {
-            "plugin": "example.context.reference-compactor",
+        "context.reducer": {
+            "plugin": "example.context.reference-reducer",
             "config": {"minimum_characters": 4},
         },
     },
@@ -547,18 +549,6 @@ Provides: `artifact.store:default` (API `2`)。
 | --- | --- | --- | --- | --- |
 | `root` | `string` | Yes | Not declared | `{"minLength":1}` |
 
-### sage.artifact.session
-
-Artifacts retained by the owning Session store.
-
-Version: `2.0.0`; scope: process; ownership: `owned`。
-
-Provides: `artifact.store:default` (API `2`)。
-
-Dependencies: `session.store`.
-
-No fixed configuration fields; the public schema determines whether extra parameters are allowed.
-
 ### sage.context.reducer.persistent-summary
 
 Summarizes complete history only after API rejection or reported usage reaches a configured limit.
@@ -567,7 +557,6 @@ Version: `2.0.0`; scope: agent, run; ownership: `owned`。
 
 Provides: `context.reducer:default` (API `2`)。
 
-Dependencies: `context.summary-store`, `context.summarizer`, `context.unit-compactor`.
 
 | Parameter | Type | Required | Schema Default | Constraints |
 | --- | --- | --- | --- | --- |
@@ -637,15 +626,6 @@ Dependencies: `derived-state.store`.
 
 No fixed configuration fields; the public schema determines whether extra parameters are allowed.
 
-### sage.context.unit-compactor.reference
-
-Compacts oversized units into durable references instead of dropping them.
-
-Version: `2.0.0`; scope: agent, process; ownership: `owned`。
-
-Provides: `context.unit-compactor:default` (API `2`)。
-
-No fixed configuration fields; consult the public schema for additional parameters.
 
 ### sage.credentials.environment
 
@@ -680,18 +660,6 @@ Standard derived-state.store implementation with declared dependencies and lifec
 Version: `2.0.0`; scope: process; ownership: `owned`。
 
 Provides: `derived-state.store:default` (API `2`)。
-
-No fixed configuration fields; consult the public schema for additional parameters.
-
-### sage.derived-state.session
-
-Standard derived-state.store implementation with declared dependencies and lifecycle.
-
-Version: `2.0.0`; scope: process; ownership: `borrowed`。
-
-Provides: `derived-state.store:default` (API `2`)。
-
-Dependencies: `session.store` (API `>=2,<3`)。
 
 No fixed configuration fields; consult the public schema for additional parameters.
 
@@ -865,45 +833,132 @@ Provides: `execution.job-runtime:default` (API `2`)。
 | `max_retained_output_bytes` | `integer` | No | `268435456` | `{"minimum":0}` |
 | `output_reconnect_window_seconds` | `integer` | No | `300` | `{"minimum":0}` |
 
-### sage.logging.filesystem
+### sage.observability.langfuse
 
-Writes rotating structured operational logs to disk.
+Unified log, trace and model evidence collection with owned lifecycle.
 
-Version: `2.0.0`; scope: process; ownership: `owned`。
+Provides: `observability.provider:default` (API `2`); process scope; owned lifecycle.
 
-Provides: `observability.log-sink:default` (API `2`)。
+| Parameter | Type | Required | Default |
+| --- | --- | --- | --- |
+| `log_stdout` | `boolean` | No | `true` |
+| `log_stream` | `string` | No | `"stdout"` |
+| `log_root` | `string/null` | No | `null` |
+| `log_filename` | `string` | No | `"sage.jsonl"` |
+| `log_level` | `string` | No | `"info"` |
+| `log_format` | `string` | No | `"json"` |
+| `log_max_bytes` | `integer` | No | `10485760` |
+| `log_backup_count` | `integer` | No | `5` |
+| `diagnostic_content_mode` | `string` | No | `"redacted"` |
+| `raw_max_bytes` | `integer` | No | `16777216` |
+| `base_url` | `string` | Yes | `""` |
+| `service_name` | `string` | No | `"sage"` |
+| `environment` | `string` | No | `"production"` |
+| `public_key_env` | `string` | No | `"LANGFUSE_PUBLIC_KEY"` |
+| `secret_key_env` | `string` | No | `"LANGFUSE_SECRET_KEY"` |
+| `ingestion_version` | `integer` | No | `4` |
+| `content_mode` | `string` | No | `"redacted"` |
+| `max_content_chars` | `integer` | No | `16384` |
+| `sample_rate` | `number` | No | `1` |
+| `max_queue_size` | `integer` | No | `2048` |
+| `max_active_spans` | `integer` | No | `4096` |
+| `timeout_seconds` | `number` | No | `3` |
 
-| Parameter | Type | Required | Schema Default | Constraints |
-| --- | --- | --- | --- | --- |
-| `root` | `string` | Yes | Not declared | `{"minLength":1}` |
-| `filename` | `string` | No | `"sage.jsonl"` | `{"minLength":1}` |
-| `max_bytes` | `integer` | No | `10485760` | `{"minimum":1024}` |
-| `backup_count` | `integer` | No | `5` | `{"minimum":1}` |
-| `min_level` | `string` | No | `"info"` | `{"enum":["debug","info","warning","error","critical"]}` |
+### sage.observability.local
 
-### sage.logging.noop
+Unified log, trace and model evidence collection with owned lifecycle.
 
-Discards structured operational logs.
+Provides: `observability.provider:default` (API `2`); process scope; owned lifecycle.
 
-Version: `2.0.0`; scope: process; ownership: `owned`。
+| Parameter | Type | Required | Default |
+| --- | --- | --- | --- |
+| `log_stdout` | `boolean` | No | `true` |
+| `log_stream` | `string` | No | `"stdout"` |
+| `log_root` | `string/null` | No | `null` |
+| `log_filename` | `string` | No | `"sage.jsonl"` |
+| `log_level` | `string` | No | `"info"` |
+| `log_format` | `string` | No | `"json"` |
+| `log_max_bytes` | `integer` | No | `10485760` |
+| `log_backup_count` | `integer` | No | `5` |
+| `diagnostics_root` | `string/null` | No | `null` |
+| `diagnostics_storage` | `string` | No | `"files"` |
+| `diagnostic_content_mode` | `string` | No | `"redacted"` |
+| `raw_max_bytes` | `integer` | No | `16777216` |
 
-Provides: `observability.log-sink:default` (API `2`)。
+### sage.observability.noop
 
-No fixed configuration fields; consult the public schema for additional parameters.
+Unified log, trace and model evidence collection with owned lifecycle.
 
-### sage.logging.stdout
+Provides: `observability.provider:default` (API `2`); process scope; owned lifecycle.
 
-Writes one JSONL or console line per record to stdout or stderr.
+| Parameter | Type | Required | Default |
+| --- | --- | --- | --- |
 
-Version: `2.0.0`; scope: process; ownership: `owned`。
+### sage.observability.otlp
 
-Provides: `observability.log-sink:default` (API `2`)。
+Unified log, trace and model evidence collection with owned lifecycle.
 
-| Parameter | Type | Required | Schema Default | Constraints |
-| --- | --- | --- | --- | --- |
-| `stream` | `string` | No | `"stdout"` | `{"enum":["stdout","stderr"]}` |
-| `min_level` | `string` | No | `"info"` | `{"enum":["debug","info","warning","error","critical"]}` |
-| `format` | `string` | No | `"json"` | `{"enum":["json","text"]}` |
+Provides: `observability.provider:default` (API `2`); process scope; owned lifecycle.
+
+| Parameter | Type | Required | Default |
+| --- | --- | --- | --- |
+| `log_stdout` | `boolean` | No | `true` |
+| `log_stream` | `string` | No | `"stdout"` |
+| `log_root` | `string/null` | No | `null` |
+| `log_filename` | `string` | No | `"sage.jsonl"` |
+| `log_level` | `string` | No | `"info"` |
+| `log_format` | `string` | No | `"json"` |
+| `log_max_bytes` | `integer` | No | `10485760` |
+| `log_backup_count` | `integer` | No | `5` |
+| `diagnostic_content_mode` | `string` | No | `"redacted"` |
+| `raw_max_bytes` | `integer` | No | `16777216` |
+| `endpoint` | `string` | No | `"http://127.0.0.1:4317"` |
+| `service_name` | `string` | No | `"sage"` |
+| `environment` | `string` | No | `"production"` |
+| `protocol` | `string` | No | `"grpc"` |
+| `insecure` | `boolean` | No | `true` |
+| `content_mode` | `string` | No | `"redacted"` |
+| `max_content_chars` | `integer` | No | `16384` |
+| `sample_rate` | `number` | No | `1` |
+| `max_queue_size` | `integer` | No | `2048` |
+| `max_active_spans` | `integer` | No | `4096` |
+| `timeout_seconds` | `number` | No | `3` |
+| `query_url` | `string` | No | `""` |
+| `query_backend` | `string` | No | `""` |
+| `query_headers_env` | `string` | No | `"SAGE_OBSERVABILITY_QUERY_HEADERS"` |
+
+### sage.observability.phoenix
+
+Unified log, trace and model evidence collection with owned lifecycle.
+
+Provides: `observability.provider:default` (API `2`); process scope; owned lifecycle.
+
+| Parameter | Type | Required | Default |
+| --- | --- | --- | --- |
+| `log_stdout` | `boolean` | No | `true` |
+| `log_stream` | `string` | No | `"stdout"` |
+| `log_root` | `string/null` | No | `null` |
+| `log_filename` | `string` | No | `"sage.jsonl"` |
+| `log_level` | `string` | No | `"info"` |
+| `log_format` | `string` | No | `"json"` |
+| `log_max_bytes` | `integer` | No | `10485760` |
+| `log_backup_count` | `integer` | No | `5` |
+| `diagnostic_content_mode` | `string` | No | `"redacted"` |
+| `raw_max_bytes` | `integer` | No | `16777216` |
+| `endpoint` | `string` | Yes | `"http://127.0.0.1:4317"` |
+| `service_name` | `string` | No | `"sage"` |
+| `environment` | `string` | No | `"production"` |
+| `project_name` | `string` | No | `"sage"` |
+| `api_key_env` | `string` | No | `"PHOENIX_API_KEY"` |
+| `content_mode` | `string` | No | `"redacted"` |
+| `max_content_chars` | `integer` | No | `16384` |
+| `sample_rate` | `number` | No | `1` |
+| `max_queue_size` | `integer` | No | `2048` |
+| `max_active_spans` | `integer` | No | `4096` |
+| `timeout_seconds` | `number` | No | `3` |
+| `query_url` | `string` | No | `""` |
+| `query_headers_env` | `string` | No | `"SAGE_OBSERVABILITY_QUERY_HEADERS"` |
+
 
 ### sage.memory.filesystem-bm25
 
@@ -1025,29 +1080,6 @@ Dependencies: `credentials.provider`, `model.client:default` (optional).
 | --- | --- | --- | --- | --- |
 | `route` | `object` | Yes | Not declared | `{}` |
 | `provider_instance_id` | `string` | No | Not declared | `{}` |
-
-### sage.observability.filesystem
-
-Writes model diagnostics under a filesystem root.
-
-Version: `2.0.0`; scope: process; ownership: `owned`。
-
-Provides: `observability.diagnostic-sink:default` (API `2`)。
-
-| Parameter | Type | Required | Schema Default | Constraints |
-| --- | --- | --- | --- | --- |
-| `root` | `string` | Yes | Not declared | `{"minLength":1}` |
-| `legacy_root` | `['string', 'null']` | No | Not declared | `{"minLength":1}` |
-
-### sage.observability.noop
-
-Discards model diagnostics.
-
-Version: `2.0.0`; scope: process; ownership: `owned`。
-
-Provides: `observability.diagnostic-sink:default` (API `2`)。
-
-No fixed configuration fields; consult the public schema for additional parameters.
 
 ### sage.package-registry.ephemeral
 
@@ -1230,13 +1262,15 @@ Provides: `session-memory.provider:default` (API `2`)。
 | --- | --- | --- | --- | --- |
 | `root` | `string` | Yes | Not declared | `{"minLength":1}` |
 
+The selected Session storage plugin publishes `session.store`, `derived-state.store`, and `artifact.store` together. Configure its backend once under `session.store`; all three ports share one storage instance and lifecycle. Artifact access uses an internal Run-bound view. The former derived-state and artifact adapter plugin IDs have been removed; remove their selections from existing configuration. Selecting the same Session plugin on another port must reuse its configuration; selecting a second Session backend is rejected. The SDK still allows explicit independent derived-state and artifact implementations. Server displays the artifact port as host-managed storage rather than a separate editable backend.
+
 ### sage.session.ephemeral
 
 Full lifecycle semantics without restart durability.
 
 Version: `2.0.0`; scope: process; ownership: `owned`。
 
-Provides: `session.store:default` (API `2`)。
+Provides: `session.store:default`, `derived-state.store:default`, `artifact.store:default` (API `2`)。
 
 No fixed configuration fields; consult the public schema for additional parameters.
 
@@ -1246,7 +1280,7 @@ Compact authoritative checksummed state per Session.
 
 Version: `2.1.0`; scope: process; ownership: `owned`。
 
-Provides: `session.store:default` (API `2`)。
+Provides: `session.store:default`, `derived-state.store:default`, `artifact.store:default` (API `2`)。
 
 | Parameter | Type | Required | Schema Default | Constraints |
 | --- | --- | --- | --- | --- |
@@ -1258,7 +1292,7 @@ Durable per-Session MySQL store with appended Run events. No global Session inde
 
 Version: `2.0.0`; scope: process; ownership: `owned`。
 
-Provides: `session.store:default` (API `2`)。
+Provides: `session.store:default`, `derived-state.store:default`, `artifact.store:default` (API `2`)。
 
 | Parameter | Type | Required | Schema Default | Constraints |
 | --- | --- | --- | --- | --- |
@@ -1271,7 +1305,7 @@ Redis execution state shared by Sage instances, with canonical history and attac
 
 Version: `3.0.0`; scope: process; ownership: `owned`。
 
-Provides: `session.store:default` (API `2`)。
+Provides: `session.store:default`, `derived-state.store:default`, `artifact.store:default` (API `2`)。
 
 | Parameter | Type | Required | Schema Default | Constraints |
 | --- | --- | --- | --- | --- |
@@ -1293,7 +1327,7 @@ Lazy, bounded, symlink-safe Skill catalog and source.
 
 Version: `2.0.0`; scope: agent, process; ownership: `owned`。
 
-Provides: `skill.catalog:filesystem` (API `2`)、`skill.source:filesystem` (API `2`)。
+Provides: `skill.provider:filesystem` (API `2`)。
 
 | Parameter | Type | Required | Schema Default | Constraints |
 | --- | --- | --- | --- | --- |
@@ -1315,7 +1349,7 @@ Provides: `skill.loading:default` (API `2`)。
 
 ### sage.skill.repository.sqlite / sage.skill.repository.memory
 
-Version `2.0.0`; process scope. Provides `skill.management`, `skill.catalog` and `skill.source`.
+Version `2.0.0`; process scope. Provides `skill.management`, `skill.provider`.
 SQLite stores immutable packages, current versions and durable Run pins; memory
 retains them only for the process lifetime. SQLite requires `path`. Both accept
 `max_files` (default 2000) and `max_total_bytes` (default 67108864). Publishing
@@ -1388,7 +1422,7 @@ In-memory Tool catalog and executor without restart durability.
 
 Version: `2.0.0`; scope: agent, process, run; ownership: `owned`。
 
-Provides: `tool.catalog:ephemeral` (API `2`)、`tool.executor:ephemeral` (API `2`)。
+Provides: `tool.provider:ephemeral` (API `2`)。
 
 Dependencies: `tool.handlers:default` (optional).
 
@@ -1402,7 +1436,7 @@ Bridges configured MCP servers into the Sage Tool catalog and executor.
 
 Version: `2.0.0`; scope: agent, process, run; ownership: `owned`。
 
-Provides: `tool.catalog:mcp` (API `2`)、`tool.executor:mcp` (API `2`)。
+Provides: `tool.provider:mcp` (API `2`)。
 
 Dependencies: `mcp.session-factory:default` (optional).
 
@@ -1430,7 +1464,7 @@ V2-native Fibre and Team delegation tools.
 
 Version: `2.0.0`; scope: agent, run; ownership: `owned`。
 
-Provides: `tool.catalog:multi-agent` (API `2`)、`tool.executor:multi-agent` (API `2`)。
+Provides: `tool.provider:multi-agent` (API `2`)。
 
 Dependencies: `agent.coordinator`, `runtime.kernel`.
 
@@ -1442,7 +1476,7 @@ V2-native decorator-backed workspace and runtime tools.
 
 Version: `2.0.0`; scope: run; ownership: `owned`。
 
-Provides: `tool.catalog:official` (API `2`)、`tool.executor:official` (API `2`)。
+Provides: `tool.provider:official` (API `2`)。
 
 Dependencies: `execution.tool-runtime` (API `>=2,<3`)。
 
@@ -1454,68 +1488,13 @@ Decorator-backed Tool operations owned by the Skill module.
 
 Version: `2.0.0`; scope: agent, run; ownership: `owned`。
 
-Provides: `tool.catalog:skill` (API `2`)、`tool.executor:skill` (API `2`)。
+Provides: `tool.provider:skill` (API `2`)。
 
 Dependencies: `skill.loader`.
 
 | Parameter | Type | Required | Schema Default | Constraints |
 | --- | --- | --- | --- | --- |
 | `language` | `string` | No | Not declared | `{}` |
-
-### sage.trace.langfuse
-
-Exports Agent, model and tool observations to Langfuse.
-
-Version: `2.0.0`; scope: process; ownership: `owned`。
-
-Provides: `observability.trace-sink:default` (API `2`)。
-
-| Parameter | Type | Required | Schema Default | Constraints |
-| --- | --- | --- | --- | --- |
-| `base_url` | `string` | Yes | Not declared | `{"minLength":1}` |
-| `public_key_env` | `string` | No | `"LANGFUSE_PUBLIC_KEY"` | `{}` |
-| `secret_key_env` | `string` | No | `"LANGFUSE_SECRET_KEY"` | `{}` |
-| `service_name` | `string` | No | `"sage"` | `{}` |
-| `ingestion_version` | `integer` | No | `4` | `{"enum":[3,4]}` |
-| `environment` | `string` | No | `"production"` | `{}` |
-| `content_mode` | `string` | No | `"redacted"` | `{"enum":["metadata","redacted"]}` |
-| `max_content_chars` | `integer` | No | `16384` | `{"minimum":256,"maximum":65536}` |
-| `sample_rate` | `number` | No | `1.0` | `{"minimum":0,"maximum":1}` |
-| `max_queue_size` | `integer` | No | `2048` | `{"minimum":1}` |
-| `max_active_spans` | `integer` | No | `4096` | `{"minimum":1}` |
-| `timeout_seconds` | `number` | No | `3.0` | `{"maximum":30,"exclusiveMinimum":0}` |
-
-### sage.trace.noop
-
-Discards trace spans.
-
-Version: `2.0.0`; scope: process; ownership: `owned`。
-
-Provides: `observability.trace-sink:default` (API `2`)。
-
-No fixed configuration fields; consult the public schema for additional parameters.
-
-### sage.trace.otlp
-
-Exports traces over OTLP to Jaeger or a compatible collector.
-
-Version: `2.0.0`; scope: process; ownership: `owned`。
-
-Provides: `observability.trace-sink:default` (API `2`)。
-
-| Parameter | Type | Required | Schema Default | Constraints |
-| --- | --- | --- | --- | --- |
-| `endpoint` | `string` | No | `"http://127.0.0.1:4317"` | `{"minLength":1}` |
-| `service_name` | `string` | No | `"sage"` | `{"minLength":1}` |
-| `protocol` | `string` | No | `"grpc"` | `{"enum":["grpc","http"]}` |
-| `insecure` | `boolean` | No | `true` | `{}` |
-| `environment` | `string` | No | `"production"` | `{}` |
-| `content_mode` | `string` | No | `"redacted"` | `{"enum":["metadata","redacted"]}` |
-| `max_content_chars` | `integer` | No | `16384` | `{"minimum":256,"maximum":65536}` |
-| `sample_rate` | `number` | No | `1.0` | `{"minimum":0,"maximum":1}` |
-| `max_queue_size` | `integer` | No | `2048` | `{"minimum":1}` |
-| `max_active_spans` | `integer` | No | `4096` | `{"minimum":1}` |
-| `timeout_seconds` | `number` | No | `3.0` | `{"maximum":30,"exclusiveMinimum":0}` |
 
 ### sage.workspace.initializer.bare
 

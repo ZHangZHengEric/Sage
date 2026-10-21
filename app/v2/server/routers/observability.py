@@ -83,14 +83,14 @@ performance_router = APIRouter(prefix="/api/observability", tags=["observability
 
 
 def _trace_console(host):
-    sink = host.application.service("observability.trace-sink")
+    sink = host.application.service("observability.provider")
     settings = host.settings
     plugin = getattr(sink, "plugin_id", "")
-    if plugin == "sage.trace.phoenix":
+    if plugin == "sage.observability.phoenix":
         return {"id": "traces", "label": "调用链", "href": "/traces", "external": False}
-    elif plugin == "sage.trace.langfuse":
+    elif plugin == "sage.observability.langfuse":
         entry = ("langfuse", "Langfuse", settings.langfuse_public_url or settings.langfuse_base_url)
-    elif plugin == "sage.trace.otlp" and settings.jaeger_url and not settings.trace_otlp_endpoint:
+    elif plugin == "sage.observability.otlp" and settings.jaeger_url and not settings.trace_otlp_endpoint:
         entry = ("jaeger", "Jaeger", settings.jaeger_public_url)
     else:
         return None
@@ -112,7 +112,7 @@ async def observability_services(_: AdminUser, host: HostDep):
 
 
 def _phoenix_dashboard(host):
-    from app.v2.server.observability.external import ExternalDiagnostics
+    from sagents.v2.runtime.observability.performance_evidence import ExternalDiagnostics
     from app.v2.server.observability.phoenix_dashboard import PhoenixDashboard
 
     source = host.diagnostics
@@ -188,7 +188,7 @@ async def performance(
     bucket: str = Query(default="hour", pattern="^(hour|day)$"),
     timezone_name: str = Query(default="Asia/Shanghai", max_length=64),
 ):
-    from app.v2.server.observability.performance import report
+    from sagents.v2.runtime.observability.performance import report
 
     end = end or datetime.now(timezone.utc)
     start = start or end - timedelta(hours=24)
@@ -206,7 +206,7 @@ async def performance(
     if diagnostics is None or not diagnostics.available:
         raise HTTPException(503, "性能记录暂不可用")
     try:
-        from app.v2.server.observability.external import ExternalDiagnostics
+        from sagents.v2.runtime.observability.performance_evidence import ExternalDiagnostics
 
         options = dict(start=start.timestamp(), end=end.timestamp(), agent_id=agent_id,
                        bucket=bucket, timezone_name=timezone_name)

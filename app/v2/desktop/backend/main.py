@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import asyncio
 import ipaddress
 import json
 import os
@@ -15,7 +16,7 @@ from typing import TypeVar
 
 import uvicorn
 
-from app.v2.desktop.backend.observability import create_desktop_log_sink
+from app.v2.desktop.backend.observability import create_desktop_observability
 from app.v2.desktop.backend.runtime_protocol import (
     SIDECAR_PROTOCOL,
     SIDECAR_REVISION,
@@ -137,7 +138,8 @@ def main(argv: list[str] | None = None) -> int:
     listener.listen(2048)
     actual_port = int(listener.getsockname()[1])
     storage = prepare_desktop_v2_storage(data_root=args.data_root)
-    log_plugin_id, log_sink = create_desktop_log_sink(storage.runtime_root)
+    observability = create_desktop_observability(storage.runtime_root)
+    log_sink = observability.logs
     install_standard_logging(log_sink)
     runtime_logger = StructuredLogger(log_sink, "desktop.sidecar")
     runtime_logger.info(
@@ -162,8 +164,7 @@ def main(argv: list[str] | None = None) -> int:
         service = _create_after_writer_release(
             lambda: DesktopV2Service(
                 root=storage.data_root,
-                log_sink=log_sink,
-                log_plugin_id=log_plugin_id,
+                observability=observability,
                 sidecar_port=actual_port,
                 sidecar_auth_token=auth_token,
             )
@@ -227,7 +228,7 @@ def main(argv: list[str] | None = None) -> int:
             "Sage Desktop v2 sidecar stopped",
         )
         _remove_owned_sidecar_registry(registry)
-        log_sink.close()
+        asyncio.run(observability.close())
     return 0
 
 

@@ -1,77 +1,25 @@
-"""Desktop composition for the replaceable structured log sink capability."""
-
+"""Select the process observation provider once, before Desktop startup logging."""
 from __future__ import annotations
 
 import json
 from pathlib import Path
-
-from sagents.v2.runtime.extensions import (
-    CapabilityRequirement,
-    ExtensionHost,
-    ExtensionScope,
-    ExtensionScopeContext,
-)
+from jsonschema import validate
 from sagents.v2.runtime.extensions.official import builtin_extension_registry
-from sagents.v2.runtime.observability import FilesystemLogSink, LogSink
+from sagents.v2.runtime.observability.provider import create_observability_provider
 
 
-DEFAULT_LOG_PLUGIN = "sage.logging.filesystem"
-LOG_CAPABILITY = "observability.log-sink"
-
-
-def create_desktop_log_sink(runtime_root: Path) -> tuple[str, LogSink]:
-    selected = DEFAULT_LOG_PLUGIN
+def create_desktop_observability(runtime_root: Path):
+    from .package import desktop_v2_manifest
     settings_path = runtime_root / "settings.json"
-    try:
-        settings = json.loads(settings_path.read_text(encoding="utf-8"))
-        selections = settings.get("component_selections") or settings.get(
-            "componentSelections"
-        )
-        if isinstance(selections, dict):
-            candidate = selections.get(LOG_CAPABILITY)
-            if isinstance(candidate, str) and candidate.strip():
-                selected = candidate.strip()
-    except (OSError, ValueError, AttributeError):
-        pass
-
+    settings = json.loads(settings_path.read_text()) if settings_path.exists() else {}
+    selection = desktop_v2_manifest(
+        session_root=runtime_root,
+        component_selections=settings.get("component_selections", {}),
+        component_configs=settings.get("component_configs", {}),
+    ).runtime.capabilities["observability.provider"]
     registry = builtin_extension_registry()
-    try:
-        requested_config = {
-            "root": str(runtime_root / "logs"),
-            "filename": "sage.jsonl",
-            "max_bytes": 10 * 1024 * 1024,
-            "backup_count": 5,
-            "min_level": "info",
-        }
-        schema = registry.get(selected).descriptor.config_schema or {}
-        if schema.get("additionalProperties", True) is False:
-            supported = set((schema.get("properties") or {}).keys())
-            requested_config = {
-                key: value
-                for key, value in requested_config.items()
-                if key in supported
-            }
-        host = ExtensionHost(registry)
-        plan = host.plan(
-            (
-                CapabilityRequirement(
-                    capability=LOG_CAPABILITY,
-                    api_version="2",
-                ),
-            ),
-            selections={LOG_CAPABILITY: selected},
-            configs={selected: requested_config},
-            scope_overrides={selected: ExtensionScope.PROCESS},
-        )
-        handle = host.open_scope_sync(
-            ExtensionScopeContext(
-                scope=ExtensionScope.PROCESS,
-                scope_id="desktop-v2",
-            ),
-            plan,
-        )
-        return selected, handle.providers.require_unique(LOG_CAPABILITY)
-    except Exception:
-        # Startup logging must remain available even if a persisted optional
-        # plugin selection was removed or became unavailable.
-        return DEFAULT_LOG_PLUGIN, FilesystemLogSink(runtime_root / "logs")
+    descriptor = registry.get(selection.plugin).descriptor
+    if not descriptor.availability.available:
+        raise ValueError(f"Observation provider {selection.plugin} is unavailable")
+    validate(selection.config, descriptor.config_schema)
+    return create_observability_provider(selection.plugin, selection.config)

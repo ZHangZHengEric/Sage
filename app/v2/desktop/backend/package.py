@@ -30,12 +30,6 @@ DESKTOP_COMPONENTS = {
         "apply_mode": "next_run",
         "scope": "run",
     },
-    "context.unit-compactor": {
-        "default": DEFAULT_COMPONENTS["context.unit-compactor"],
-        "selection_mode": "user",
-        "apply_mode": "next_run",
-        "scope": "agent",
-    },
     "context.reducer": {
         "default": DEFAULT_COMPONENTS["context.reducer"],
         "selection_mode": "user",
@@ -78,14 +72,8 @@ DESKTOP_COMPONENTS = {
         "apply_mode": "restart",
         "scope": "process",
     },
-    "observability.diagnostic-sink": {
-        "default": DEFAULT_COMPONENTS["observability.diagnostic-sink"],
-        "selection_mode": "host",
-        "apply_mode": "restart",
-        "scope": "process",
-    },
-    "observability.log-sink": {
-        "default": DEFAULT_COMPONENTS["observability.log-sink"],
+    "observability.provider": {
+        "default": DEFAULT_COMPONENTS["observability.provider"],
         "selection_mode": "user",
         "apply_mode": "restart",
         "scope": "process",
@@ -120,9 +108,7 @@ _MANIFEST_CAPABILITIES = (
     "session.store",
     "memory.provider",
     "session-memory.provider",
-    "observability.diagnostic-sink",
-    "observability.log-sink",
-    "context.unit-compactor",
+    "observability.provider",
     "context.reducer",
     "context.summarizer",
     "context.summary-store",
@@ -157,8 +143,7 @@ def stable_component_id(capability: str, plugin_id: str) -> str:
         "memory.provider": "sage.memory.",
         "memory.recall-query": "sage.memory.recall-query.",
         "session-memory.provider": "sage.session-memory.",
-        "observability.diagnostic-sink": "sage.observability.",
-        "observability.log-sink": "sage.logging.",
+
         "execution.sandbox": "sage.sandbox.",
         "session.store": "sage.session.",
         "workspace.initializer": "sage.workspace.initializer.",
@@ -214,6 +199,10 @@ def _runtime_capabilities(
     configs: Mapping[str, Mapping[str, Any]],
     language: str,
 ) -> dict[str, CapabilitySelection]:
+    from sagents.v2.package.manifest.runtime import REMOVED_CAPABILITIES
+    invalid = REMOVED_CAPABILITIES.intersection(selections) | REMOVED_CAPABILITIES.intersection(configs)
+    if invalid:
+        raise ValueError(f"removed capability configuration: {', '.join(sorted(invalid))}")
     paths = {
         key: selection.config
         for key, selection in default_runtime(session_root).capabilities.items()
@@ -225,6 +214,11 @@ def _runtime_capabilities(
             selections.get(capability, DESKTOP_COMPONENT_DEFAULTS[capability]),
         )
         host_config = dict(paths.get(capability, {}))
+        if capability == "observability.provider":
+            from sagents.v2.runtime.extensions.official import builtin_extension_registry
+            properties = builtin_extension_registry().get(plugin_id).descriptor.config_schema["properties"]
+            host_config = {key: value for key, value in host_config.items() if key in properties}
+
         if capability == "workspace.initializer":
             host_config.pop("language", None)
         if (
@@ -252,8 +246,7 @@ _DESKTOP_HOST_CONFIG_FIELDS = {
     "memory.provider": {"root"},
     "session-memory.provider": {"root"},
     "session.store": {"root", "dsn"},
-    "observability.log-sink": {"root"},
-    "observability.diagnostic-sink": {"root", "legacy_root"},
+    "observability.provider": {"log_root", "diagnostics_root"},
     "execution.sandbox": {"verification_key"},
 }
 

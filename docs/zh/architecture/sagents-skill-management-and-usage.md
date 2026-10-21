@@ -31,8 +31,8 @@ skills:
 ```
 
 这是 RuntimeConfig 输入；包内放在 `runtime` 下。分组在解析时展开为标准
-`skill.management`、`skill.catalog`、`skill.workspace`、`skill.loading` 选择，
-管理插件同时提供 `skill.source`。序列化只保存展开后的配置；分组和显式
+`skill.management`、`skill.provider`、`skill.workspace`、`skill.loading` 选择，
+管理插件同时提供完整的 Skill 发现与内容读取接口。序列化只保存展开后的配置；分组和显式
 capabilities 为同一能力选择不同插件时拒绝配置。
 
 ## 保存管理

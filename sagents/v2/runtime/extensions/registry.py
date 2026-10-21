@@ -106,8 +106,8 @@ class ExtensionRegistry:
 
     def validate_selection(self, capability: str, selection) -> None:
         """Reject invalid registration/offer/scope choices before creating resources."""
-        if selection.grant_tools and capability != "tool.catalog":
-            raise ValueError("grant_tools is supported only for a tool.catalog selection")
+        if selection.grant_tools and capability != "tool.provider":
+            raise ValueError("grant_tools is supported only for a tool.provider selection")
         from sagents.v2.runtime.extensions.versions import version_satisfies
         descriptor = self.get(selection.plugin).descriptor
         self.validate_parameters(selection.plugin, selection.config)
@@ -161,8 +161,7 @@ class ExtensionRegistry:
             "session.store", "derived-state.store", "credentials.provider",
             "execution.scheduler", "execution.job-runtime", "execution.binding", "execution.model-budget",
             "artifact.store", "package.registry", "agent.management", "workspace.initializer",
-            "memory.provider", "session-memory.provider", "observability.log-sink",
-            "observability.diagnostic-sink", "observability.trace-sink", "interface.protocol-adapter",
+            "memory.provider", "session-memory.provider", "observability.provider", "interface.protocol-adapter",
         }
         def scope(choice):
             return choice.scope or self.get(choice.plugin).descriptor.resolved_default_scope()
@@ -170,19 +169,13 @@ class ExtensionRegistry:
             choices = runtime.selections(capability)
             if len({(choice.plugin, choice.name) for choice in choices}) != len(choices):
                 raise ValueError(f"duplicate provider selection for {capability!r}")
-            if capability != "tool.catalog" and len({choice.name for choice in choices}) != len(choices):
+            if capability != "tool.provider" and len({choice.name for choice in choices}) != len(choices):
                 raise ValueError(f"duplicate selections for {capability!r}")
             for choice in choices:
                 self.validate_selection(capability, choice)
                 if capability in process_ports and scope(choice) != ExtensionScope.PROCESS:
                     raise SageV2Error(RuntimeErrorInfo(code="extension.scope_unsupported", category=ErrorCategory.VALIDATION,
                         message=f"{capability!r} is an App process capability; select process scope"))
-        for executor in runtime.selections("tool.executor"):
-            paired = [catalog for catalog in runtime.selections("tool.catalog")
-                      if catalog.plugin == executor.plugin and catalog.name == executor.name]
-            if len(paired) != 1 or (executor.scope, executor.config) != (paired[0].scope, paired[0].config):
-                raise ValueError("tool.executor must select the same registered pair, scope and parameters as tool.catalog")
-
         # Validate every selected plugin by its declared dependencies. Resolution
         # checks missing/default providers; no built-in plugin IDs are special.
         rank = {value: index for index, value in enumerate(ExtensionScope)}

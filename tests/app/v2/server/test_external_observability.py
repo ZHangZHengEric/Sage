@@ -4,9 +4,8 @@ from datetime import datetime, timezone
 import httpx
 import pytest
 
-from app.v2.server.observability.external import (
+from sagents.v2.runtime.observability.performance_evidence import (
     ExternalDiagnostics,
-    external_diagnostics,
 )
 from sagents.v2.runtime.observability.contracts import LogLevel, LogRecord
 from tests.app.v2.server.test_performance import BASE, sample
@@ -268,7 +267,8 @@ async def test_snapshot_filters_session_and_authoritative_run_allowlist(monkeypa
     assert result["source"] == "phoenix"
 
 
-def test_effective_plugin_and_query_auth_configuration(tmp_path, monkeypatch):
+@pytest.mark.asyncio
+async def test_effective_plugin_and_query_auth_configuration(tmp_path, monkeypatch):
     from tests.app.v2.server.conftest import make_settings
     from app.v2.server.config.manifest import server_v2_manifest
 
@@ -276,20 +276,21 @@ def test_effective_plugin_and_query_auth_configuration(tmp_path, monkeypatch):
         tmp_path, trace_backend="phoenix", phoenix_endpoint="http://internal/v1/traces"
     )
     selection = server_v2_manifest(settings).runtime.capabilities[
-        "observability.trace-sink"
+        "observability.provider"
     ]
     monkeypatch.setenv(
         "OTEL_EXPORTER_OTLP_TRACES_HEADERS", "Authorization=Basic%20encoded"
     )
-    sink = external_diagnostics(settings, selection)
-    assert sink.query_url == "http://internal"
-    assert sink.headers == {"Authorization": "Basic encoded"}
-    assert (
-        external_diagnostics(
-            settings, selection.model_copy(update={"plugin": "sage.trace.noop"})
-        )
-        is None
-    )
+    from sagents.v2.runtime.observability.provider import create_observability_provider
+    provider = create_observability_provider(selection.plugin, selection.config)
+    try:
+        assert provider.diagnostics.query_url == "http://internal"
+        assert provider.diagnostics.headers == {"Authorization": "Basic encoded"}
+    finally:
+        await provider.close()
+    disabled = create_observability_provider("sage.observability.noop")
+    assert not disabled.diagnostics.available
+    await disabled.close()
 
 
 def test_external_performance_api_and_failure_do_not_read_local_db(
@@ -298,7 +299,7 @@ def test_external_performance_api_and_failure_do_not_read_local_db(
     from tests.app.v2.server.test_admin import admin_login
 
     sink = ExternalDiagnostics(backend="phoenix", query_url="http://phoenix")
-    service.diagnostics = sink
+    service.observability.diagnostics = sink
     calls = []
 
     async def report(**kwargs):
@@ -514,7 +515,7 @@ async def test_shutdown_flushes_unfinished_performance_as_incomplete():
 @pytest.mark.asyncio
 async def test_resume_segments_are_loaded_across_execution_traces(monkeypatch):
     from sagents.v2.runtime.observability.traces import StructuredTracer
-    from app.v2.server.observability.external import timing_rows
+    from sagents.v2.runtime.observability.performance_evidence import timing_rows
     trace = TraceCapture()
     sink = ExternalDiagnostics(backend="phoenix", query_url="http://phoenix")
     sink.trace_sink = trace
@@ -598,7 +599,7 @@ async def test_agent_export_waits_for_host_cleanup_and_preserves_native_duration
     from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
     exporter = InMemorySpanExporter()
     trace = PhoenixTraceSink(endpoint="http://unused/v1/traces", exporter=exporter, content_mode="raw")
-    source = ExternalDiagnostics(backend="phoenix", query_url="http://phoenix")
+    source = ExternalDiagnostics(capture_mode="raw", backend="phoenix", query_url="http://phoenix")
     source.bind_trace_sink(trace)
     def log(event, at, **attributes):
         source.write(LogRecord(timestamp=datetime.fromtimestamp(BASE + at, timezone.utc),

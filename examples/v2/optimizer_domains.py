@@ -505,12 +505,12 @@ async def run(args):
         }}
         if args.mode in ("skills", "joint") and bundle.manifest.metadata.id == target.manifest.metadata.id:
             skills = FilesystemSkillProvider((root / "skills",))
-            registrations.append(provided("example.skills", lambda context, deps: skills, "skill.catalog", "skill.source"))
-            choices["skill.catalog"] = {"plugin": "example.skills"}
+            registrations.append(provided("example.skills", lambda context, deps: skills, "skill.provider"))
+            choices["skill.provider"] = {"plugin": "example.skills"}
         if args.mode == "tools":
             tools = DecoratedToolProvider(OrderTools())
-            registrations.append(provided("example.tools", lambda context, deps: tools, "tool.catalog", "tool.executor"))
-            choices["tool.catalog"] = {"plugin": "example.tools"}
+            registrations.append(provided("example.tools", lambda context, deps: tools, "tool.provider"))
+            choices["tool.provider"] = {"plugin": "example.tools"}
         policy = DefaultToolPolicy(approval_strategy=ApprovalStrategy.AUTO_APPROVE)
         registrations.append(provided("example.policy", lambda context, deps: policy, "agent.tool-policy"))
         choices["agent.tool-policy"] = {"plugin": "example.policy"}

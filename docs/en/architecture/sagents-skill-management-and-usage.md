@@ -32,7 +32,7 @@ skills:
 
 This is RuntimeConfig input; put it under `runtime` in a package. Parsing expands
 the groups to standard capability selections. Management provides
-`skill.management`, `skill.catalog` and `skill.source`; usage chooses
+`skill.management` and `skill.provider`; usage chooses
 `skill.workspace` and `skill.loading`. Conflicting grouped and explicit selections
 are rejected. Only canonical selections are serialized.
 

@@ -23,9 +23,7 @@ def observed_model_registry(
             dependencies = list(descriptor.dependencies)
             for capability in (
                 "session.store",
-                "observability.diagnostic-sink",
-                "observability.trace-sink",
-                "observability.log-sink",
+                "observability.provider",
                 *(("execution.model-budget",) if with_budget else ()),
             ):
                 dependency = ExtensionDependency(capability=capability)
@@ -50,9 +48,9 @@ def observed_model_registry(
                         )
                     values[key] = RecordingModelProvider(
                         value,
-                        sink=providers.require_unique("observability.diagnostic-sink"),
-                        trace_sink=providers.require_unique("observability.trace-sink"),
-                        log_sink=providers.require_unique("observability.log-sink"),
+                        sink=providers.require_unique("observability.provider").diagnostics,
+                        trace_sink=providers.require_unique("observability.provider").traces,
+                        log_sink=providers.require_unique("observability.provider").logs,
                         session_id_resolver=session_id,
                         provider_metadata={
                             "agent_id": (context.agent_configuration or {}).get(

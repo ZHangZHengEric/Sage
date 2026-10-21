@@ -4,7 +4,7 @@ import json
 import pytest
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 
-from app.v2.server.observability.external import ExternalDiagnostics
+from sagents.v2.runtime.observability.performance_evidence import ExternalDiagnostics
 from sagents.v2.model.contracts import ModelRequest, ModelStreamEvent, ModelResponse
 from sagents.v2.model.middleware.recording import RecordingModelProvider
 from sagents.v2.model.wire_diagnostics import record_wire_event
@@ -15,7 +15,7 @@ from sagents.v2.runtime.observability.plugins.phoenix import PhoenixTraceSink
 async def test_long_wire_stream_exports_independent_chunks_before_model_finishes(monkeypatch):
     exporter = InMemorySpanExporter()
     trace = PhoenixTraceSink(endpoint='http://unused/v1/traces', exporter=exporter, content_mode='raw')
-    source = ExternalDiagnostics(backend='phoenix', query_url='http://phoenix')
+    source = ExternalDiagnostics(capture_mode="raw", backend='phoenix', query_url='http://phoenix')
     source.bind_trace_sink(trace)
     gate = asyncio.Event()
     async def session(_): return 's'
@@ -119,7 +119,7 @@ async def test_blocked_raw_export_drops_explicitly_without_stalling_model(monkey
             return super().export(spans)
     exporter = BlockedExporter()
     trace = PhoenixTraceSink(endpoint='http://unused/v1/traces', exporter=exporter, content_mode='raw')
-    source = ExternalDiagnostics(backend='phoenix', query_url='http://phoenix')
+    source = ExternalDiagnostics(capture_mode="raw", backend='phoenix', query_url='http://phoenix')
     source.bind_trace_sink(trace)
     source._raw_pipeline = RawEvidencePipeline(max_bytes=16 * 1024)
     class Provider:

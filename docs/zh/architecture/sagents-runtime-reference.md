@@ -258,12 +258,14 @@ finally:
 
 Identifier 长度 1–192，首字符为字母或数字，后续可用字母、数字和 `._:@/-`。保障名不是任意配置开关，需对应 provider 支持的能力报告。分布式调度要求支持共享写入与提交时执行权校验的会话存储；Redis/MySQL 与 Redis 调度器需要使用相同的 Redis 地址。仅切换到 MySQL 不代表可多进程共同执行。
 
+工具只通过 `tool.provider` 选择，插件提供一个带 `catalog`、`executor` 的 `ToolProvider`；Skill 只通过 `skill.provider` 选择，由同一提供者实现 `list_skills`、`get_skill`、`fetch`。`skill.management` 仍独立控制发布能力。引用压缩由上下文模块内部执行。旧的成对能力名和独立引用压缩器配置不接受输入，也不自动转换。
+
 ## CapabilitySelection 全部字段
 
 ```yaml
 capabilities:
-  context.unit-compactor:
-    plugin: sage.context.unit-compactor.reference
+  context.reducer:
+    plugin: sage.context.reducer.window
     name: default
     scope: agent
     config: {}
@@ -276,7 +278,7 @@ capabilities:
 | `name` | Identifier | `default` | 插件提供的能力名称；一个插件仅有一个对应 offer 时，装配器可以解析隐式 default；多 offer 时应明确指定 |
 | `scope` | `process` / `tenant` / `agent` / `run` / null | null | null 使用装配点默认生命周期；显式值必须在插件 supported_scopes 内，不应为了复用随意扩大作用域 |
 | `config` | 对象 | `{}` | 该插件的参数，按它自己的 schema/config_model 校验；不同插件的参数不能混用 |
-| `grant_tools` | boolean | `false` | 仅用于 `tool.catalog`，由可信宿主将该提供者的工具加入运行可用范围；请求身份与授权策略仍生效 |
+| `grant_tools` | boolean | `false` | 仅用于 `tool.provider`，由可信宿主将该提供者的工具加入运行可用范围；请求身份与授权策略仍生效 |
 
 scope 的含义：process 与 App 进程服务同寿命；tenant 按租户隔离；agent 关联 Agent 实例/版本的装配作用域；run 关联运行作用域。scope 不自动提供跨进程共享，也不会自动给插件加锁。process/tenant/agent 插件必须能处理重叠调用。某些装配点只支持一个 scope 或需要宿主提供相应身份。
 
@@ -296,11 +298,11 @@ scope 的含义：process 与 App 进程服务同寿命；tenant 按租户隔离
 | `context.summary-store` | `sage.context.summary-store.session-derived` | 使用会话派生状态存摘要 |
 | `memory.recall-query` | `sage.memory.recall-query.llm` | 模型生成记忆检索查询 |
 | `tool.selection-policy` | `sage.tool-selection.llm` | 按需选择给模型展示的工具 schema |
-| `observability.diagnostic-sink` | `sage.observability.filesystem` | `root=R/sessions`，`legacy_root=R/diagnostics`；模型等诊断资料 |
-| `observability.log-sink` | `sage.logging.filesystem` | `root=R/logs`；结构化运行日志 |
+| `observability.provider` | `sage.observability.local` | log_root=R/logs; diagnostics_root=R/sessions |
 | `workspace.initializer` | `sage.workspace.initializer.claw` | `language=en`；工作区引导资料 |
 
-默认运行方案未显式列出的服务仍有装配回退：调度器 `sage.scheduler.ephemeral`、后台 Job `sage.job.ephemeral`、Artifact `sage.artifact.session`、Package Registry `sage.package-registry.ephemeral`、Trace `sage.trace.noop`、凭据 `sage.credentials.environment`、上下文单元压缩 `sage.context.unit-compactor.reference`。模型实现由 App 模型目录解析 Agent 的模型 ID 引用。
+
+默认运行方案未显式列出的服务仍有装配回退：调度器 `sage.scheduler.ephemeral`、后台 Job `sage.job.ephemeral`、Package Registry `sage.package-registry.ephemeral`、Trace `sage.observability.noop`、凭据 `sage.credentials.environment`。模型实现由 App 模型目录解析 Agent 的模型 ID 引用。引用压缩由上下文模块内部执行，不单独配置。
 
 显式空 runtime 与上表的重要差异：memory/session-memory 为 noop，记忆查询为 direct，continuation 为 deterministic，diagnostic/log 为 noop，workspace initializer 为 bare；会话存储仍回退 filesystem。**提供记忆组件也不会自动打开 Agent 的 `memory.recall/auto_write`，它们默认 false。**
 
@@ -320,9 +322,9 @@ capabilities:
   session.store:
     plugin: sage.session.filesystem
     config: {root: /srv/my-app/runtime}
-  observability.log-sink:
-    plugin: sage.logging.stdout
-    config: {stream: stderr, min_level: debug, format: json}
+  observability.provider:
+    plugin: sage.observability.local
+    config: {log_stream: stderr, log_level: debug, log_format: json}
   context.reducer:
     plugin: sage.context.reducer.persistent-summary
     config: {summary_target_tokens: 1536, protected_recent_units: 6}
@@ -341,7 +343,7 @@ capabilities:
 
 ```yaml
 capabilities:
-  tool.catalog:
+  tool.provider:
     plugin: sage.tool.mcp
     name: mcp
     config:
@@ -375,14 +377,14 @@ capabilities:
 
 ```python
 from sagents.v2 import SAgentBuilder
-from examples.v2.host.plugins import compactor_registration
+from examples.v2.host.plugins import reducer_registration
 
 builder = SAgentBuilder()
-builder.register(compactor_registration())
+builder.register(reducer_registration())
 app = await builder.build(runtime={
     "capabilities": {
-        "context.unit-compactor": {
-            "plugin": "example.context.reference-compactor",
+        "context.reducer": {
+            "plugin": "example.context.reference-reducer",
             "config": {"minimum_characters": 4},
         },
     },
@@ -518,18 +520,6 @@ Immutable binary artifact files with local restart durability.
 | --- | --- | --- | --- | --- |
 | `root` | `string` | 是 | 未声明 | `{"minLength":1}` |
 
-### sage.artifact.session
-
-Artifacts retained by the owning Session store.
-
-版本：`2.0.0`；scope：process；所有权：`owned`。
-
-提供能力：`artifact.store:default` (API `2`)。
-
-依赖能力：`session.store`。
-
-没有固定配置字段；额外参数以公开 Schema 为准。
-
 ### sage.context.reducer.persistent-summary
 
 Summarizes complete history only after API rejection or reported usage reaches a configured limit.
@@ -538,7 +528,6 @@ Summarizes complete history only after API rejection or reported usage reaches a
 
 提供能力：`context.reducer:default` (API `2`)。
 
-依赖能力：`context.summary-store`、`context.summarizer`、`context.unit-compactor`。
 
 | 参数 | 类型 | 必填 | Schema 默认值 | 约束 |
 | --- | --- | --- | --- | --- |
@@ -608,15 +597,6 @@ Persists conversation summaries through the selected SessionStore.
 
 没有固定配置字段；额外参数以公开 Schema 为准。
 
-### sage.context.unit-compactor.reference
-
-Compacts oversized units into durable references instead of dropping them.
-
-版本：`2.0.0`；scope：agent, process；所有权：`owned`。
-
-提供能力：`context.unit-compactor:default` (API `2`)。
-
-没有固定配置字段；是否允许额外参数以公开 Schema 为准。
 
 ### sage.credentials.environment
 
@@ -651,18 +631,6 @@ Standard derived-state.store implementation with declared dependencies and lifec
 版本：`2.0.0`；scope：process；所有权：`owned`。
 
 提供能力：`derived-state.store:default` (API `2`)。
-
-没有固定配置字段；是否允许额外参数以公开 Schema 为准。
-
-### sage.derived-state.session
-
-Standard derived-state.store implementation with declared dependencies and lifecycle.
-
-版本：`2.0.0`；scope：process；所有权：`borrowed`。
-
-提供能力：`derived-state.store:default` (API `2`)。
-
-依赖：`session.store` (API `>=2,<3`)。
 
 没有固定配置字段；是否允许额外参数以公开 Schema 为准。
 
@@ -836,45 +804,132 @@ Process-local background Job runtime without restart durability.
 | `max_retained_output_bytes` | `integer` | 否 | `268435456` | `{"minimum":0}` |
 | `output_reconnect_window_seconds` | `integer` | 否 | `300` | `{"minimum":0}` |
 
-### sage.logging.filesystem
+### sage.observability.langfuse
 
-Writes rotating structured operational logs to disk.
+Unified log, trace and model evidence collection with owned lifecycle.
 
-版本：`2.0.0`；scope：process；所有权：`owned`。
+Provides: `observability.provider:default` (API `2`); process scope; owned lifecycle.
 
-提供能力：`observability.log-sink:default` (API `2`)。
+| Parameter | Type | Required | Default |
+| --- | --- | --- | --- |
+| `log_stdout` | `boolean` | No | `true` |
+| `log_stream` | `string` | No | `"stdout"` |
+| `log_root` | `string/null` | No | `null` |
+| `log_filename` | `string` | No | `"sage.jsonl"` |
+| `log_level` | `string` | No | `"info"` |
+| `log_format` | `string` | No | `"json"` |
+| `log_max_bytes` | `integer` | No | `10485760` |
+| `log_backup_count` | `integer` | No | `5` |
+| `diagnostic_content_mode` | `string` | No | `"redacted"` |
+| `raw_max_bytes` | `integer` | No | `16777216` |
+| `base_url` | `string` | Yes | `""` |
+| `service_name` | `string` | No | `"sage"` |
+| `environment` | `string` | No | `"production"` |
+| `public_key_env` | `string` | No | `"LANGFUSE_PUBLIC_KEY"` |
+| `secret_key_env` | `string` | No | `"LANGFUSE_SECRET_KEY"` |
+| `ingestion_version` | `integer` | No | `4` |
+| `content_mode` | `string` | No | `"redacted"` |
+| `max_content_chars` | `integer` | No | `16384` |
+| `sample_rate` | `number` | No | `1` |
+| `max_queue_size` | `integer` | No | `2048` |
+| `max_active_spans` | `integer` | No | `4096` |
+| `timeout_seconds` | `number` | No | `3` |
 
-| 参数 | 类型 | 必填 | Schema 默认值 | 约束 |
-| --- | --- | --- | --- | --- |
-| `root` | `string` | 是 | 未声明 | `{"minLength":1}` |
-| `filename` | `string` | 否 | `"sage.jsonl"` | `{"minLength":1}` |
-| `max_bytes` | `integer` | 否 | `10485760` | `{"minimum":1024}` |
-| `backup_count` | `integer` | 否 | `5` | `{"minimum":1}` |
-| `min_level` | `string` | 否 | `"info"` | `{"enum":["debug","info","warning","error","critical"]}` |
+### sage.observability.local
 
-### sage.logging.noop
+Unified log, trace and model evidence collection with owned lifecycle.
 
-Discards structured operational logs.
+Provides: `observability.provider:default` (API `2`); process scope; owned lifecycle.
 
-版本：`2.0.0`；scope：process；所有权：`owned`。
+| Parameter | Type | Required | Default |
+| --- | --- | --- | --- |
+| `log_stdout` | `boolean` | No | `true` |
+| `log_stream` | `string` | No | `"stdout"` |
+| `log_root` | `string/null` | No | `null` |
+| `log_filename` | `string` | No | `"sage.jsonl"` |
+| `log_level` | `string` | No | `"info"` |
+| `log_format` | `string` | No | `"json"` |
+| `log_max_bytes` | `integer` | No | `10485760` |
+| `log_backup_count` | `integer` | No | `5` |
+| `diagnostics_root` | `string/null` | No | `null` |
+| `diagnostics_storage` | `string` | No | `"files"` |
+| `diagnostic_content_mode` | `string` | No | `"redacted"` |
+| `raw_max_bytes` | `integer` | No | `16777216` |
 
-提供能力：`observability.log-sink:default` (API `2`)。
+### sage.observability.noop
 
-没有固定配置字段；是否允许额外参数以公开 Schema 为准。
+Unified log, trace and model evidence collection with owned lifecycle.
 
-### sage.logging.stdout
+Provides: `observability.provider:default` (API `2`); process scope; owned lifecycle.
 
-Writes one JSONL or console line per record to stdout or stderr.
+| Parameter | Type | Required | Default |
+| --- | --- | --- | --- |
 
-版本：`2.0.0`；scope：process；所有权：`owned`。
+### sage.observability.otlp
 
-提供能力：`observability.log-sink:default` (API `2`)。
+Unified log, trace and model evidence collection with owned lifecycle.
 
-| 参数 | 类型 | 必填 | Schema 默认值 | 约束 |
-| --- | --- | --- | --- | --- |
-| `stream` | `string` | 否 | `"stdout"` | `{"enum":["stdout","stderr"]}` |
-| `min_level` | `string` | 否 | `"info"` | `{"enum":["debug","info","warning","error","critical"]}` |
-| `format` | `string` | 否 | `"json"` | `{"enum":["json","text"]}` |
+Provides: `observability.provider:default` (API `2`); process scope; owned lifecycle.
+
+| Parameter | Type | Required | Default |
+| --- | --- | --- | --- |
+| `log_stdout` | `boolean` | No | `true` |
+| `log_stream` | `string` | No | `"stdout"` |
+| `log_root` | `string/null` | No | `null` |
+| `log_filename` | `string` | No | `"sage.jsonl"` |
+| `log_level` | `string` | No | `"info"` |
+| `log_format` | `string` | No | `"json"` |
+| `log_max_bytes` | `integer` | No | `10485760` |
+| `log_backup_count` | `integer` | No | `5` |
+| `diagnostic_content_mode` | `string` | No | `"redacted"` |
+| `raw_max_bytes` | `integer` | No | `16777216` |
+| `endpoint` | `string` | No | `"http://127.0.0.1:4317"` |
+| `service_name` | `string` | No | `"sage"` |
+| `environment` | `string` | No | `"production"` |
+| `protocol` | `string` | No | `"grpc"` |
+| `insecure` | `boolean` | No | `true` |
+| `content_mode` | `string` | No | `"redacted"` |
+| `max_content_chars` | `integer` | No | `16384` |
+| `sample_rate` | `number` | No | `1` |
+| `max_queue_size` | `integer` | No | `2048` |
+| `max_active_spans` | `integer` | No | `4096` |
+| `timeout_seconds` | `number` | No | `3` |
+| `query_url` | `string` | No | `""` |
+| `query_backend` | `string` | No | `""` |
+| `query_headers_env` | `string` | No | `"SAGE_OBSERVABILITY_QUERY_HEADERS"` |
+
+### sage.observability.phoenix
+
+Unified log, trace and model evidence collection with owned lifecycle.
+
+Provides: `observability.provider:default` (API `2`); process scope; owned lifecycle.
+
+| Parameter | Type | Required | Default |
+| --- | --- | --- | --- |
+| `log_stdout` | `boolean` | No | `true` |
+| `log_stream` | `string` | No | `"stdout"` |
+| `log_root` | `string/null` | No | `null` |
+| `log_filename` | `string` | No | `"sage.jsonl"` |
+| `log_level` | `string` | No | `"info"` |
+| `log_format` | `string` | No | `"json"` |
+| `log_max_bytes` | `integer` | No | `10485760` |
+| `log_backup_count` | `integer` | No | `5` |
+| `diagnostic_content_mode` | `string` | No | `"redacted"` |
+| `raw_max_bytes` | `integer` | No | `16777216` |
+| `endpoint` | `string` | Yes | `"http://127.0.0.1:4317"` |
+| `service_name` | `string` | No | `"sage"` |
+| `environment` | `string` | No | `"production"` |
+| `project_name` | `string` | No | `"sage"` |
+| `api_key_env` | `string` | No | `"PHOENIX_API_KEY"` |
+| `content_mode` | `string` | No | `"redacted"` |
+| `max_content_chars` | `integer` | No | `16384` |
+| `sample_rate` | `number` | No | `1` |
+| `max_queue_size` | `integer` | No | `2048` |
+| `max_active_spans` | `integer` | No | `4096` |
+| `timeout_seconds` | `number` | No | `3` |
+| `query_url` | `string` | No | `""` |
+| `query_headers_env` | `string` | No | `"SAGE_OBSERVABILITY_QUERY_HEADERS"` |
+
 
 ### sage.memory.filesystem-bm25
 
@@ -996,29 +1051,6 @@ Uses typed input/output items and Responses streaming events.
 | --- | --- | --- | --- | --- |
 | `route` | `object` | 是 | 未声明 | `{}` |
 | `provider_instance_id` | `string` | 否 | 未声明 | `{}` |
-
-### sage.observability.filesystem
-
-Writes model diagnostics under a filesystem root.
-
-版本：`2.0.0`；scope：process；所有权：`owned`。
-
-提供能力：`observability.diagnostic-sink:default` (API `2`)。
-
-| 参数 | 类型 | 必填 | Schema 默认值 | 约束 |
-| --- | --- | --- | --- | --- |
-| `root` | `string` | 是 | 未声明 | `{"minLength":1}` |
-| `legacy_root` | `['string', 'null']` | 否 | 未声明 | `{"minLength":1}` |
-
-### sage.observability.noop
-
-Discards model diagnostics.
-
-版本：`2.0.0`；scope：process；所有权：`owned`。
-
-提供能力：`observability.diagnostic-sink:default` (API `2`)。
-
-没有固定配置字段；是否允许额外参数以公开 Schema 为准。
 
 ### sage.package-registry.ephemeral
 
@@ -1201,13 +1233,15 @@ Durable per-session BM25 index over canonical Session history.
 | --- | --- | --- | --- | --- |
 | `root` | `string` | 是 | 未声明 | `{"minLength":1}` |
 
+选中的 Session 存储插件同时发布 `session.store`、`derived-state.store` 和 `artifact.store`。只需在 `session.store` 下配置一次后端，三个能力端口共享存储实例和生命周期；产物通过内部的 Run 绑定视图访问。旧的派生状态和产物适配插件 ID 已删除，现有配置需移除对应选择。其他端口显式选择同一 Session 插件时必须复用其配置，不能另外选择第二个 Session 后端。SDK 仍支持显式选择独立的派生状态和产物存储实现；Server 将产物端口作为宿主管理的存储能力展示，不再单独编辑后端。
+
 ### sage.session.ephemeral
 
 Full lifecycle semantics without restart durability.
 
 版本：`2.0.0`；scope：process；所有权：`owned`。
 
-提供能力：`session.store:default` (API `2`)。
+提供能力：`session.store:default`, `derived-state.store:default`, `artifact.store:default` (API `2`)。
 
 没有固定配置字段；是否允许额外参数以公开 Schema 为准。
 
@@ -1217,7 +1251,7 @@ Compact authoritative checksummed state per Session.
 
 版本：`2.1.0`；scope：process；所有权：`owned`。
 
-提供能力：`session.store:default` (API `2`)。
+提供能力：`session.store:default`, `derived-state.store:default`, `artifact.store:default` (API `2`)。
 
 | 参数 | 类型 | 必填 | Schema 默认值 | 约束 |
 | --- | --- | --- | --- | --- |
@@ -1229,7 +1263,7 @@ Durable per-Session MySQL store with appended Run events. No global Session inde
 
 版本：`2.0.0`；scope：process；所有权：`owned`。
 
-提供能力：`session.store:default` (API `2`)。
+提供能力：`session.store:default`, `derived-state.store:default`, `artifact.store:default` (API `2`)。
 
 | 参数 | 类型 | 必填 | Schema 默认值 | 约束 |
 | --- | --- | --- | --- | --- |
@@ -1242,7 +1276,7 @@ Redis execution state shared by Sage instances, with canonical history and attac
 
 Version: `3.0.0`; scope: process; ownership: `owned`。
 
-Provides: `session.store:default` (API `2`)。
+Provides: `session.store:default`, `derived-state.store:default`, `artifact.store:default` (API `2`)。
 
 | Parameter | Type | Required | Schema Default | Constraints |
 | --- | --- | --- | --- | --- |
@@ -1264,7 +1298,7 @@ Lazy, bounded, symlink-safe Skill catalog and source.
 
 版本：`2.0.0`；scope：agent, process；所有权：`owned`。
 
-提供能力：`skill.catalog:filesystem` (API `2`)、`skill.source:filesystem` (API `2`)、`skill.management:filesystem` (API `2`，只读)。
+提供能力：`skill.provider:filesystem` (API `2`)、`skill.management:filesystem` (API `2`，只读)。
 
 | 参数 | 类型 | 必填 | Schema 默认值 | 约束 |
 | --- | --- | --- | --- | --- |
@@ -1286,7 +1320,7 @@ Loads Skill material only when it is asked for, within a character storage limit
 
 ### sage.skill.repository.sqlite / sage.skill.repository.memory
 
-版本：`2.0.0`；scope：process。提供 `skill.management`、`skill.catalog`、`skill.source`。
+版本：`2.0.0`；scope：process。提供 `skill.management`、`skill.provider`。
 
 SQLite 实现保存不可变版本、当前版本和持久化 Run 版本选择；memory 实现仅在进程内保留。
 SQLite 必填 `path`；两者支持 `max_files`（默认 2000）和 `max_total_bytes`（默认 67108864）。
@@ -1359,7 +1393,7 @@ In-memory Tool catalog and executor without restart durability.
 
 版本：`2.0.0`；scope：agent, process, run；所有权：`owned`。
 
-提供能力：`tool.catalog:ephemeral` (API `2`)、`tool.executor:ephemeral` (API `2`)。
+提供能力：`tool.provider:ephemeral` (API `2`)。
 
 依赖能力：`tool.handlers:default`（可选）。
 
@@ -1373,7 +1407,7 @@ Bridges configured MCP servers into the Sage Tool catalog and executor.
 
 版本：`2.0.0`；scope：agent, process, run；所有权：`owned`。
 
-提供能力：`tool.catalog:mcp` (API `2`)、`tool.executor:mcp` (API `2`)。
+提供能力：`tool.provider:mcp` (API `2`)。
 
 依赖能力：`mcp.session-factory:default`（可选）。
 
@@ -1401,7 +1435,7 @@ V2-native Fibre and Team delegation tools.
 
 版本：`2.0.0`；scope：agent, run；所有权：`owned`。
 
-提供能力：`tool.catalog:multi-agent` (API `2`)、`tool.executor:multi-agent` (API `2`)。
+提供能力：`tool.provider:multi-agent` (API `2`)。
 
 依赖能力：`agent.coordinator`、`runtime.kernel`。
 
@@ -1413,7 +1447,7 @@ V2-native decorator-backed workspace and runtime tools.
 
 版本：`2.0.0`；scope：run；所有权：`owned`。
 
-提供能力：`tool.catalog:official` (API `2`)、`tool.executor:official` (API `2`)。
+提供能力：`tool.provider:official` (API `2`)。
 
 依赖：`execution.tool-runtime` (API `>=2,<3`)。
 
@@ -1425,68 +1459,13 @@ Decorator-backed Tool operations owned by the Skill module.
 
 版本：`2.0.0`；scope：agent, run；所有权：`owned`。
 
-提供能力：`tool.catalog:skill` (API `2`)、`tool.executor:skill` (API `2`)。
+提供能力：`tool.provider:skill` (API `2`)。
 
 依赖能力：`skill.loader`。
 
 | 参数 | 类型 | 必填 | Schema 默认值 | 约束 |
 | --- | --- | --- | --- | --- |
 | `language` | `string` | 否 | 未声明 | `{}` |
-
-### sage.trace.langfuse
-
-Exports Agent, model and tool observations to Langfuse.
-
-版本：`2.0.0`；scope：process；所有权：`owned`。
-
-提供能力：`observability.trace-sink:default` (API `2`)。
-
-| 参数 | 类型 | 必填 | Schema 默认值 | 约束 |
-| --- | --- | --- | --- | --- |
-| `base_url` | `string` | 是 | 未声明 | `{"minLength":1}` |
-| `public_key_env` | `string` | 否 | `"LANGFUSE_PUBLIC_KEY"` | `{}` |
-| `secret_key_env` | `string` | 否 | `"LANGFUSE_SECRET_KEY"` | `{}` |
-| `service_name` | `string` | 否 | `"sage"` | `{}` |
-| `ingestion_version` | `integer` | 否 | `4` | `{"enum":[3,4]}` |
-| `environment` | `string` | 否 | `"production"` | `{}` |
-| `content_mode` | `string` | 否 | `"redacted"` | `{"enum":["metadata","redacted"]}` |
-| `max_content_chars` | `integer` | 否 | `16384` | `{"minimum":256,"maximum":65536}` |
-| `sample_rate` | `number` | 否 | `1.0` | `{"minimum":0,"maximum":1}` |
-| `max_queue_size` | `integer` | 否 | `2048` | `{"minimum":1}` |
-| `max_active_spans` | `integer` | 否 | `4096` | `{"minimum":1}` |
-| `timeout_seconds` | `number` | 否 | `3.0` | `{"maximum":30,"exclusiveMinimum":0}` |
-
-### sage.trace.noop
-
-Discards trace spans.
-
-版本：`2.0.0`；scope：process；所有权：`owned`。
-
-提供能力：`observability.trace-sink:default` (API `2`)。
-
-没有固定配置字段；是否允许额外参数以公开 Schema 为准。
-
-### sage.trace.otlp
-
-Exports traces over OTLP to Jaeger or a compatible collector.
-
-版本：`2.0.0`；scope：process；所有权：`owned`。
-
-提供能力：`observability.trace-sink:default` (API `2`)。
-
-| 参数 | 类型 | 必填 | Schema 默认值 | 约束 |
-| --- | --- | --- | --- | --- |
-| `endpoint` | `string` | 否 | `"http://127.0.0.1:4317"` | `{"minLength":1}` |
-| `service_name` | `string` | 否 | `"sage"` | `{"minLength":1}` |
-| `protocol` | `string` | 否 | `"grpc"` | `{"enum":["grpc","http"]}` |
-| `insecure` | `boolean` | 否 | `true` | `{}` |
-| `environment` | `string` | 否 | `"production"` | `{}` |
-| `content_mode` | `string` | 否 | `"redacted"` | `{"enum":["metadata","redacted"]}` |
-| `max_content_chars` | `integer` | 否 | `16384` | `{"minimum":256,"maximum":65536}` |
-| `sample_rate` | `number` | 否 | `1.0` | `{"minimum":0,"maximum":1}` |
-| `max_queue_size` | `integer` | 否 | `2048` | `{"minimum":1}` |
-| `max_active_spans` | `integer` | 否 | `4096` | `{"minimum":1}` |
-| `timeout_seconds` | `number` | 否 | `3.0` | `{"maximum":30,"exclusiveMinimum":0}` |
 
 ### sage.workspace.initializer.bare
 

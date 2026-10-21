@@ -25,8 +25,7 @@ class SkillToolPlugin:
         name=name,
         description=description,
         provides=(
-            CapabilityOffer(capability="tool.catalog", api_version="2", name="skill"),
-            CapabilityOffer(capability="tool.executor", api_version="2", name="skill"),
+            CapabilityOffer(capability="tool.provider", api_version="2", name="skill"),
         ),
         supported_scopes=frozenset({ExtensionScope.AGENT, ExtensionScope.RUN}),
         dependencies=(ExtensionDependency(capability="skill.loader"),),

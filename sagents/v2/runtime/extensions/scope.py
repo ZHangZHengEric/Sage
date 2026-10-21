@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from sagents.v2.runtime.extensions.contracts import (
+    CapabilityKey,
     ExtensionRegistration,
     ExtensionScopeContext,
     ProviderSet,
@@ -27,6 +28,8 @@ class ExtensionStopError(RuntimeError):
 class StartedExtension:
     registration: ExtensionRegistration
     instance: Any
+    # Preserve all outputs even when a scope selects another plugin for one port.
+    providers: dict[CapabilityKey, Any] = field(default_factory=dict)
 
 
 @dataclass

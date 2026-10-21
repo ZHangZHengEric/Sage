@@ -4,7 +4,7 @@ from __future__ import annotations
 from sagents.v2.package.manifest.models import ModelRoute
 from sagents.v2.package.manifest.runtime import CapabilitySelection
 from sagents.v2.runtime.extensions import (
-    CapabilityKey, CapabilityOffer, ExtensionDependency, ExtensionDescriptor,
+    CapabilityOffer, ExtensionDependency, ExtensionDescriptor,
     ExtensionRegistration, ExtensionScope,
 )
 
@@ -32,12 +32,12 @@ SCHEDULER_CONFIG_SCHEMA = {"type": "object", "properties": {
 
 
 
-def run_registration(capability, factory, *, extra=(), dependencies=()):
+def run_registration(capability, factory, *, dependencies=()):
     return ExtensionRegistration(
         descriptor=ExtensionDescriptor(
             plugin_id="com.sage.server.run." + capability.replace(".", "-"),
             name="Server " + capability, version="2.0.0",
-            provides=tuple(CapabilityOffer(capability=name, api_version="2") for name in (capability, *extra)),
+            provides=(CapabilityOffer(capability=capability, api_version="2"),),
             dependencies=(ExtensionDependency(capability="execution.environment"), *dependencies),
             supported_scopes=frozenset({ExtensionScope.RUN}), default_scope=ExtensionScope.RUN,
             config_schema={"type": "object", "properties": {
@@ -45,10 +45,6 @@ def run_registration(capability, factory, *, extra=(), dependencies=()):
                 "mcp_fingerprints": {"type": "object"}, "a2a_fingerprints": {"type": "object"},
             }, "additionalProperties": False},
         ), factory=factory, ownership="borrowed",
-        start=(lambda instance, context, deps: {
-            CapabilityKey(capability=name): getattr(instance, "catalog" if name == "tool.catalog" else "executor", instance)
-            if name.startswith("tool.") else instance for name in (capability, *extra)
-        }) if extra else None,
     )
 
 
@@ -199,8 +195,8 @@ def server_registrations(host):
     return (
         management, binding,
         run_registration("model.provider", model, dependencies=dependency),
-        run_registration("skill.catalog", skills, extra=("skill.source",), dependencies=dependency),
-        run_registration("tool.catalog", tools, extra=("tool.executor",), dependencies=dependency),
+        run_registration("skill.provider", skills, dependencies=dependency),
+        run_registration("tool.provider", tools, dependencies=dependency),
         run_registration("agent.tool-policy", policy, dependencies=dependency),
         run_registration("agent.self-configuration", self_configuration, dependencies=dependency),
     )
@@ -214,10 +210,10 @@ def run_selections(*, owner, composition=None, mcp=(), a2a=()):
     if composition is not None:
         config["composition"] = composition
     choices = {name: CapabilitySelection(plugin="com.sage.server.run." + name.replace(".", "-"), scope="run", config=config)
-               for name in ("model.provider", "skill.catalog", "agent.tool-policy", "agent.self-configuration")}
+               for name in ("model.provider", "skill.provider", "agent.tool-policy", "agent.self-configuration")}
     choices["agent.management"] = service_selection("agent.management")
-    choices["tool.catalog"] = (CapabilitySelection(plugin="sage.tool.official"),
-        CapabilitySelection(plugin="com.sage.server.run.tool-catalog", scope="run", config=config, grant_tools=True))
+    choices["tool.provider"] = (CapabilitySelection(plugin="sage.tool.official"),
+        CapabilitySelection(plugin="com.sage.server.run.tool-provider", scope="run", config=config, grant_tools=True))
     return choices
 
 
@@ -266,9 +262,9 @@ def select_run_capabilities(base, package_runtime, product):
     from sagents.v2.package.manifest.runtime import merge_capability_selections
     choices = merge_capability_selections(base, package_runtime.capabilities)
     for capability, selection in product.items():
-        if capability in {"model.provider", "skill.catalog"} and package_runtime.selections(capability):
+        if capability in {"model.provider", "skill.provider"} and package_runtime.selections(capability):
             continue
-        if capability == "tool.catalog":
+        if capability == "tool.provider":
             declared = package_runtime.selections(capability)
             if declared:
                 external = selection[-1]
