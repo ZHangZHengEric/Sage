@@ -1,5 +1,8 @@
 """Public runtime configuration exposes providers, not their internal ports."""
 
+from typing import cast
+from sagents.v2.package.manifest.runtime import CapabilityBinding
+
 import json
 
 import pytest
@@ -20,7 +23,7 @@ from sagents.v2.runtime.extensions.official import builtin_extension_registry
 )
 def test_removed_capability_configuration_is_rejected(capability):
     with pytest.raises(ValueError, match="removed"):
-        RuntimeConfig(capabilities={capability: {"plugin": "custom.plugin"}})
+        RuntimeConfig(capabilities=cast('dict[str, CapabilityBinding]', {capability: {"plugin": "custom.plugin"}}))
 
 
 def test_inventory_exposes_one_provider_per_tool_and_skill_source():

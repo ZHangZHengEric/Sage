@@ -5,6 +5,8 @@ This is an explicit host-side tool call demo, without a model or agent loop.
 """
 from __future__ import annotations
 
+from typing import cast
+
 import argparse
 import asyncio
 from contextlib import asynccontextmanager
@@ -24,7 +26,7 @@ USER_AGENT = "Sage/1.1.0 (Parallel Search MCP example)"
 async def parallel_session(config: McpServerConfig):
     """Use the SDK transport with a project identity and no credentials."""
     async with streamablehttp_client(
-        config.url,
+        cast('str', config.url),
         headers={"User-Agent": USER_AGENT},
         timeout=config.timeout_seconds,
         sse_read_timeout=config.timeout_seconds,

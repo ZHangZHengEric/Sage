@@ -1,5 +1,10 @@
 """The Server filters host tools before exposing them to SAgents."""
 
+from typing import cast
+
+from sagents.v2.contracts.events import RunEventData
+from sagents.v2.contracts.errors import RuntimeErrorInfo
+
 from types import SimpleNamespace
 
 from app.v2.server.runtime.integrations.external_tools import ScopedExternalTools
@@ -157,8 +162,8 @@ async def test_external_write_denied_before_execution_does_not_request_reconcili
     assert len(model.requests) == 2
     assert not {"tool.call.unknown", "tool.call.reconciling", "interaction.requested"}.intersection(event.type for event in events)
     failure = next(event for event in events if event.type == "tool.call.failed")
-    assert failure.data.error.code == "tool.not_enabled"
-    assert failure.data.error.metadata["side_effect_state"] == "not_applied"
+    assert cast(RuntimeErrorInfo, cast(RunEventData, failure.data).error).code == "tool.not_enabled"
+    assert cast(RuntimeErrorInfo, cast(RunEventData, failure.data).error).metadata["side_effect_state"] == "not_applied"
     assert provider.executed == []
     assert provider.reconciled == []
 

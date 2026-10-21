@@ -1,3 +1,11 @@
+
+from typing import TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    from typing import Any, Literal
+
+from sagents.v2.contracts.items import TextBlock
+
 import asyncio
 import json
 
@@ -37,10 +45,10 @@ class RsiModel(ScriptedModelProvider):
         self.requests.append(request)
         if self.entered:
             self.entered.set()
-            await self.release.wait()
+            await cast('Any', self.release).wait()
         messages = [m for m in request.messages if m.role == "user"]
         raw = "".join(
-            block.text for block in messages[-1].content if hasattr(block, "text")
+            cast(TextBlock, block).text for block in messages[-1].content if hasattr(block, "text")
         )
         # Runtime context wraps the latest user request. Judge/tuner payloads
         # remain JSON inside that envelope, rather than being the entire text.
@@ -207,7 +215,7 @@ async def test_native_background_rounds_versions_confirmation_cas_and_restart(
             "package" not in v and "config" not in v for v in history["versions"]
         )
         with pytest.raises(ValidationError):
-            RsiApply(confirmed=False, expected_fingerprint=fingerprint(original))
+            RsiApply(confirmed=cast('Literal[True]', False), expected_fingerprint=fingerprint(original))
         with pytest.raises(ValueError, match="not configured"):
             await service.rsi_version(agent_id, candidates[0]["id"], "bob")
         chosen = next(v for v in candidates if v["iteration"] == 1)

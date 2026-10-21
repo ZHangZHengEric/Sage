@@ -1,5 +1,12 @@
 from __future__ import annotations
 
+from typing import Any, cast
+
+from sagents.v2.composition.loaded_agents import ApplicationEntrypoint
+
+from sagents.v2.contracts.events import RunEventData
+from sagents.v2.contracts.errors import RuntimeErrorInfo
+
 from sagents.v2.tool.provider import ToolProvider
 from tests.sagents.v2.sdk_fixture import fixture_configuration
 from tests.sagents.v2.sdk_fixture import build_registered_package
@@ -160,16 +167,16 @@ async def test_full_package_create_execute_continue_and_restart(tmp_path):
     package = bundle()
     saved = await svc.save(package, ctx)
     agent_id = package.manifest.entrypoint.agent
-    first = await svc.run(saved["ref"], agent_id, "Convert 2 km to m", "first", ctx)
+    first = await svc.run(saved["ref"], cast(str, agent_id), "Convert 2 km to m", "first", ctx)
     result = await settled(svc, "first", ctx)
     assert result["run"]["state"] == "completed", result
     assert "converted" in str(result["result"])
     assert "specialist in unit conversions" in str(models[-1].requests)
-    duplicate = await svc.run(saved["ref"], agent_id, "Convert 2 km to m", "first", ctx)
+    duplicate = await svc.run(saved["ref"], cast(str, agent_id), "Convert 2 km to m", "first", ctx)
     assert duplicate["run_id"] == first["run_id"]
     second = await svc.run(
         saved["ref"],
-        agent_id,
+        cast(str, agent_id),
         "Now use cm",
         "second",
         ctx,
@@ -182,7 +189,7 @@ async def test_full_package_create_execute_continue_and_restart(tmp_path):
     assert (await fresh.get(saved["ref"], ctx)) == package
     assert (await fresh.status("first", ctx))["terminal"]
     third = await fresh.run(
-        saved["ref"], agent_id, "Again", "third", ctx, session_id=first["session_id"]
+        saved["ref"], cast(str, agent_id), "Again", "third", ctx, session_id=first["session_id"]
     )
     assert third["session_id"] == first["session_id"]
     assert (await settled(fresh, "third", ctx))["terminal"]
@@ -337,7 +344,7 @@ async def test_parent_model_creates_and_invokes_full_agent(tmp_path):
         build_registered_package(tmp_path / 'parent', models=TEST_MODELS, model=provider, package=SageManifest.model_validate(parent), providers={'agent.tool-policy': DefaultToolPolicy(approval_strategy=ApprovalStrategy.AUTO_APPROVE), 'agent.management': svc})
     )
     try:
-        stream = await app.entrypoint().run_stream(
+        stream = await cast(ApplicationEntrypoint, app.entrypoint()).run_stream(
             (StartRun(
                 agent_id="assistant",
                 input=(
@@ -466,7 +473,7 @@ async def test_builder_executes_declared_flow_and_custom_node(tmp_path):
         assert result["flow_results"]["calculate"]["answer"] == 42
         await svc.close()
         svc = AgentManagementService(tmp_path, builder_factory=build, authorize=allow)
-        assert (await svc.status("flow", context()))["flow_results"]["calculate"][
+        assert cast('dict[str, Any]', cast('dict[str, Any]', (await svc.status("flow", context()))["flow_results"])["calculate"])[
             "answer"
         ] == 42
     finally:
@@ -925,7 +932,7 @@ async def test_reply_retries_survive_resume_failure_and_never_answer_next_questi
         )
         still_pending = await svc.status("questions", context())
         assert (
-            still_pending["interaction"]["interaction_id"]
+            cast('dict[str, Any]', still_pending["interaction"])["interaction_id"]
             == second["interaction"]["interaction_id"]
         )
         with pytest.raises(ValueError, match="stale"):
@@ -1264,7 +1271,7 @@ async def test_reply_revision_conflict_can_retry_same_answer(tmp_path, monkeypat
             return await reply(command, ctx)
 
         monkeypatch.setattr(runtime, "reply_interaction", reply_after_revision_change)
-        kwargs = {
+        kwargs: dict[str, Any] = {
             "interaction_id": pending["interaction"]["interaction_id"],
             "decision": "submit",
             "payload": {"text": "answer"},
@@ -1742,7 +1749,7 @@ async def test_capacity_pressure_archives_and_reclaims_then_reads_offline(tmp_pa
         assert svc.capacity()["applications"] == 1
         count = len(models)
         result = await svc.status("first", context())
-        assert result["terminal"] and result["run"]["run_id"] == handle["run_id"]
+        assert result["terminal"] and cast('dict[str, Any]', result["run"])["run_id"] == handle["run_id"]
         assert len(models) == count
     finally:
         await svc.close()
@@ -2035,11 +2042,11 @@ async def test_managed_run_retries_queue_failure_and_preserves_reason(
                     await asyncio.sleep(0.01)
             assert not any(event.type == "interaction.requested" for event in events)
             assert all(not provider.requests for provider in models)
-        error = retries[0].data.error
-        assert error.code == (
+        error = cast(RunEventData, retries[0].data).error
+        assert cast(RuntimeErrorInfo, error).code == (
             "model.queue_timeout" if timeout else "model.queue_full"
         )
-        assert error.retryable and error.safe_to_resume
+        assert cast('RuntimeErrorInfo', error).retryable and cast('RuntimeErrorInfo', error).safe_to_resume
         assert (await settled(svc, "overloaded", context()))["run"][
             "state"
         ] == "completed"
@@ -2078,7 +2085,7 @@ async def test_unarchived_filesystem_history_reads_without_model_or_source_write
     try:
         value = await restored.status("unobserved", context())
         assert value["terminal"]
-        assert value["run"]["run_id"] == handle["run_id"]
+        assert cast('dict[str, Any]', value["run"])["run_id"] == handle["run_id"]
         assert restored.capacity()["applications"] == 0
         after = {
             str(path): path.read_bytes() for path in root.rglob("*") if path.is_file()

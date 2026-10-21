@@ -1,4 +1,9 @@
 """Trusted workspace reclamation probes must not hydrate unrelated history."""
+
+from typing import cast
+
+from sagents.v2.composition.contracts import ApplicationResource
+
 import asyncio
 from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock, MagicMock
@@ -24,12 +29,12 @@ async def test_target_tree_probe_includes_children_but_not_unrelated_runs(tmp_pa
         assert not await state.has_nonterminal_session_trees(["missing"])
         # Exercise a cold reopened filesystem index, including parent topology.
         if durable:
-            await state.close()
+            await cast(ApplicationResource, state).close()
             state = FilesystemSessionStore(tmp_path)
             assert await state.has_nonterminal_session_trees([parent.handle.session_id])
     finally:
         if durable:
-            await state.close()
+            await cast(ApplicationResource, state).close()
 
 
 @pytest.mark.parametrize("busy", [True, False])
@@ -73,14 +78,14 @@ async def test_mysql_descendant_enumeration_uses_one_recursive_query():
 async def test_redis_probe_checks_unarchived_hot_run_before_archive():
     redis = fakeredis.aioredis.FakeRedis(decode_responses=True)
     archive = Archive()
-    archive.has_nonterminal_session_trees = AsyncMock(return_value=False)
-    archive.list_workspace_descendant_ids = AsyncMock(return_value=[])
+    setattr(archive, 'has_nonterminal_session_trees', AsyncMock(return_value=False))
+    setattr(archive, 'list_workspace_descendant_ids', AsyncMock(return_value=[]))
     state = redis_store(redis, archive)
     try:
         root = await state.create_run(command("root"), CONTEXT)
         assert archive.writes == 0
         assert await state.has_nonterminal_session_trees([root.handle.session_id])
-        archive.has_nonterminal_session_trees.assert_not_awaited()
+        getattr(archive, 'has_nonterminal_session_trees').assert_not_awaited()
     finally:
         await state.close()
 
@@ -96,11 +101,11 @@ async def test_redis_probe_does_not_revisit_hot_terminal_child_in_stale_archive(
     url = os.environ.get("SAGE_V2_TEST_REDIS_URL")
     if live and not url:
         pytest.skip("set SAGE_V2_TEST_REDIS_URL for live workspace probe")
-    redis = Redis.from_url(url, decode_responses=True) if live else fakeredis.aioredis.FakeRedis(decode_responses=True)
+    redis = Redis.from_url(cast(str, url), decode_responses=True) if live else fakeredis.aioredis.FakeRedis(decode_responses=True)
     archive = Archive()
-    archive.list_workspace_descendant_ids = AsyncMock(return_value=[])
-    archive.has_nonterminal_session_trees = AsyncMock(return_value=True)
-    archive.has_nonterminal_sessions = AsyncMock(return_value=False)
+    setattr(archive, 'list_workspace_descendant_ids', AsyncMock(return_value=[]))
+    setattr(archive, 'has_nonterminal_session_trees', AsyncMock(return_value=True))
+    setattr(archive, 'has_nonterminal_sessions', AsyncMock(return_value=False))
     prefix = "workspace-probe:" + uuid4().hex
     state = RedisMysqlSessionStore("mysql://unused/test", redis_url=url or "redis://unused/0", key_prefix=prefix)
     state._redis, state._archive = redis, archive
@@ -123,15 +128,15 @@ async def test_redis_probe_does_not_revisit_hot_terminal_child_in_stale_archive(
         # state has not yet reached MySQL. Its old archive must not win.
         await redis.srem(state._key("resident"), root.handle.session_id)
         assert not await state.has_nonterminal_session_trees([root.handle.session_id])
-        archive.has_nonterminal_sessions.assert_awaited_once_with([root.handle.session_id])
-        archive.has_nonterminal_sessions.reset_mock()
+        getattr(archive, 'has_nonterminal_sessions').assert_awaited_once_with([root.handle.session_id])
+        getattr(archive, 'has_nonterminal_sessions').reset_mock()
         await redis.sadd(state._key("suspended"), child.handle.session_id)
         assert await state.has_nonterminal_session_trees([root.handle.session_id])
-        archive.has_nonterminal_sessions.assert_not_awaited()
+        getattr(archive, 'has_nonterminal_sessions').assert_not_awaited()
     finally:
         await state.close()
         if live:
-            cleanup = Redis.from_url(url, decode_responses=True)
+            cleanup = Redis.from_url(cast(str, url), decode_responses=True)
             try:
                 keys = [key async for key in cleanup.scan_iter(match=prefix + ":*")]
                 if keys:
@@ -143,8 +148,8 @@ async def test_redis_probe_does_not_revisit_hot_terminal_child_in_stale_archive(
 async def test_redis_workspace_page_reads_global_parent_metadata_once():
     redis = fakeredis.aioredis.FakeRedis(decode_responses=True)
     archive = Archive()
-    archive.list_workspace_descendant_ids = AsyncMock(return_value=[])
-    archive.has_nonterminal_sessions = AsyncMock(return_value=False)
+    setattr(archive, 'list_workspace_descendant_ids', AsyncMock(return_value=[]))
+    setattr(archive, 'has_nonterminal_sessions', AsyncMock(return_value=False))
     state = redis_store(redis, archive)
     try:
         await state._ensure_ready()
@@ -155,7 +160,7 @@ async def test_redis_workspace_page_reads_global_parent_metadata_once():
         roots = [f"root-{number}" for number in range(200)]
         assert not await state.has_nonterminal_session_trees(roots)
         redis.hgetall.assert_awaited_once_with(state._key("parents"))
-        archive.list_workspace_descendant_ids.assert_awaited_once_with(sorted(roots))
+        getattr(archive, 'list_workspace_descendant_ids').assert_awaited_once_with(sorted(roots))
     finally:
         await state.close()
 

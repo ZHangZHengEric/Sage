@@ -1,5 +1,11 @@
 """Admission overlaps independent reads while retaining ownership and pinned configuration."""
 
+from typing import TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    from anyio.from_thread import BlockingPortal
+    from app.v2.server.identity.users import UserRecord
+
 import asyncio
 from types import SimpleNamespace
 
@@ -31,8 +37,8 @@ async def test_admission_overlaps_reads_and_uses_pinned_agent_without_full_catal
     async def full_read(_):
         raise AssertionError("admission must not load full catalog")
 
-    catalog.get_for_run = scoped
-    catalog.get = full_read
+    setattr(catalog, 'get_for_run', scoped)
+    setattr(catalog, 'get', full_read)
     admission = RunAdmission(
         threads=SimpleNamespace(
             find=lambda _: meet("scope", "thread", ThreadRecord(thread_id="thread", user_id="alice", agent_id=pinned)),
@@ -63,8 +69,8 @@ def test_real_chat_never_reloads_full_catalog_after_initialization(tmp_path):
     host = make_host(tmp_path)
     with TestClient(create_app(host)) as client:
         token = register_and_login(client)
-        user = client.portal.call(host.users.get_by_username, "alice")
-        client.portal.call(host.catalog_store.get, user.user_id)
+        user = cast('BlockingPortal', client.portal).call(host.users.get_by_username, "alice")
+        cast('BlockingPortal', client.portal).call(host.catalog_store.get, cast('UserRecord', user).user_id)
         with patch.object(host.catalog_store, "get", AsyncMock(side_effect=AssertionError("full catalog read"))) as full_read:
             response = client.post("/api/agent", json=_run_input(),
                                    headers={"Authorization": f"Bearer {token}"})

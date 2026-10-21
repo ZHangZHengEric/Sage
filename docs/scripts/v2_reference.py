@@ -59,6 +59,7 @@ def server_routes() -> list[tuple[str, str, str]]:
                 if (
                     isinstance(n.value.func, ast.Name)
                     and n.value.func.id == "APIRouter"
+                    and isinstance(n.targets[0], ast.Name)
                 ):
                     prefixes[n.targets[0].id] = next(
                         (value(k.value) for k in n.value.keywords if k.arg == "prefix"),

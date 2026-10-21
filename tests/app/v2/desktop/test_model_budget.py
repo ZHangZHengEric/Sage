@@ -1,3 +1,6 @@
+
+from typing import Any, cast
+
 import asyncio
 
 import pytest
@@ -64,8 +67,8 @@ async def test_desktop_queue_overload_is_http_429_with_retry_metadata(tmp_path):
             with pytest.raises(HTTPException) as error:
                 await _safe(request())
             assert error.value.status_code == 429
-            assert error.value.detail["code"] == "model.queue_full"
-            assert error.value.detail["retryable"] is True
+            assert cast('dict[str, Any]', error.value.detail)["code"] == "model.queue_full"
+            assert cast('dict[str, Any]', error.value.detail)["retryable"] is True
         assert service.model_budget.waiting == 0
     finally:
         await service.close()

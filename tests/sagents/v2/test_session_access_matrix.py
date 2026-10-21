@@ -1,5 +1,10 @@
 from __future__ import annotations
 
+from typing import TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    from sagents.v2.runtime.session.contracts import DerivedStateStore, SessionStore
+
 import pytest
 
 from sagents.v2.contracts.commands import InputItem, StartRun
@@ -48,7 +53,7 @@ SAME_ID_SERVICE = RequestContext(
 
 async def setup_access():
     store = EphemeralSessionStore()
-    runtime = HarnessRuntime(store)
+    runtime = HarnessRuntime(cast('SessionStore', store))
     handle = await runtime.start_run(
         StartRun(
             agent_id="agent",
@@ -63,7 +68,7 @@ async def setup_access():
         ),
         OWNER,
     )
-    return store, AuthorizedSessionAccess(store, runtime=runtime), handle
+    return store, AuthorizedSessionAccess(cast('SessionStore', store), runtime=runtime), handle
 
 
 @pytest.mark.asyncio
@@ -110,9 +115,9 @@ async def test_authorized_delete_forgets_all_independent_derived_state():
     derived_state = DerivedState()
     session_memory = DerivedState()
     access = AuthorizedSessionAccess(
-        store,
-        runtime=HarnessRuntime(store),
-        derived_state=derived_state,
+        cast('SessionStore', store),
+        runtime=HarnessRuntime(cast('SessionStore', store)),
+        derived_state=cast('DerivedStateStore | None', derived_state),
         derived_state_cleaners=(session_memory,),
     )
     run = await store.get_run(handle.run_id)
@@ -144,13 +149,13 @@ async def test_session_tree_subscription_authorizes_before_first_event():
     owner_stream = access.subscribe_session_tree(handle.session_id, OWNER)
     first = await anext(owner_stream)
     assert first.session.session_id == handle.session_id
-    await owner_stream.aclose()
+    await getattr(owner_stream, 'aclose')()
 
 
 @pytest.mark.asyncio
 async def test_principal_type_is_part_of_owner_and_start_idempotency_scope():
     store, access, first = await setup_access()
-    runtime = HarnessRuntime(store)
+    runtime = HarnessRuntime(cast('SessionStore', store))
     second = await runtime.start_run(
         StartRun(
             agent_id="agent",

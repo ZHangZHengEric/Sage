@@ -1,5 +1,9 @@
 """Unsafe Tool failures stop the Run after draining its parallel tool batch."""
 
+from typing import cast
+
+from sagents.v2.contracts.events import RunEventData
+
 import pytest
 
 from sagents.v2.agent.policy.tool_policy import ApprovalStrategy
@@ -79,8 +83,8 @@ async def test_unsafe_tool_error_stops_the_run(raised, retryable, side_effect):
     events = await runtime.session_store.read_events(handle.run_id)
     assert any(e.type == "tool.call.failed" for e in events)
     failure = next(e for e in events if e.type == "run.failed")
-    assert failure.data.error.code == error.code
-    assert failure.data.error.safe_to_resume is False
+    assert cast(RuntimeErrorInfo, cast(RunEventData, failure.data).error).code == error.code
+    assert cast(RuntimeErrorInfo, cast(RunEventData, failure.data).error).safe_to_resume is False
     assert not any(e.type in {"run.suspended", "tool.call.unknown"} for e in events)
 
 
@@ -143,7 +147,7 @@ async def test_unsafe_reconciliation_error_cannot_be_downgraded_to_retry(failure
     assert len(model.requests) == 1
     events = await runtime.session_store.read_events(handle.run_id)
     failed = next(e for e in events if e.type == "run.failed")
-    assert failed.data.error.code == error.code
+    assert cast(RuntimeErrorInfo, cast(RunEventData, failed.data).error).code == error.code
 
 
 @pytest.mark.parametrize("failure", ["raised", "unknown"])

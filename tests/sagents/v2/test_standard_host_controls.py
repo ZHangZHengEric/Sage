@@ -1,4 +1,12 @@
 """Product controls use a registered App, its original Agent, and public ports."""
+
+from typing import TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    pass
+
+from sagents.v2.composition.loaded_agents import ApplicationEntrypoint
+
 import asyncio
 import ast
 from pathlib import Path
@@ -22,13 +30,13 @@ async def test_entrypoint_snapshot_commit_uses_original_revision_and_memory(tmp_
     app = await build_registered_app(tmp_path, models=TEST_MODELS, model=model(), providers={"memory.provider": memory})
     try:
         manifest = package()
-        definition = manifest.agents[manifest.entrypoint.agent]
+        definition = manifest.agents[cast('str', manifest.entrypoint.agent)]
         manifest = manifest.model_copy(update={"agents": {
-            **manifest.agents, manifest.entrypoint.agent: definition.model_copy(update={"tools": (*definition.tools, "search_memory"), "memory": definition.memory.model_copy(update={"auto_write": True})}),
+            **manifest.agents, manifest.entrypoint.agent: getattr(definition, 'model_copy')(update={"tools": (*getattr(definition, 'tools'), "search_memory"), "memory": getattr(definition, 'memory').model_copy(update={"auto_write": True})}),
         }})
         agent = await app.load_agent(manifest)
         start = command(agent, "candidate").model_copy(update={"session_concurrency_mode": SessionConcurrencyMode.SNAPSHOT_ISOLATED})
-        stream = await app.entrypoint().run_stream(start, context(), agent=agent)
+        stream = await cast(ApplicationEntrypoint, app.entrypoint()).run_stream(start, context(), agent=agent)
         run = await stream.wait()
         assert run.state.value == "completed"
         assert memory.remembered == []
@@ -50,7 +58,7 @@ async def test_entrypoint_snapshot_commit_uses_original_revision_and_memory(tmp_
                 expected_session_revision=session.revision, idempotency_key="deny"), stranger)
         candidate = command(await app.agent_for_run(run.run_id, context()), "reject-candidate").model_copy(
             update={"session_concurrency_mode": SessionConcurrencyMode.SNAPSHOT_ISOLATED})
-        candidate_stream = await app.entrypoint().run_stream(candidate, context(), agent=agent)
+        candidate_stream = await cast(ApplicationEntrypoint, app.entrypoint()).run_stream(candidate, context(), agent=agent)
         rejected_run = await candidate_stream.wait()
         pending = await app.entrypoint().propose_session_commit(ProposeSessionCommit(
             run_id=rejected_run.run_id, expected_run_revision=rejected_run.revision, idempotency_key="propose-reject"), context())
@@ -83,15 +91,15 @@ async def test_duplicate_continuation_observes_one_execution_and_original_run(tm
     app = await build_registered_app(tmp_path, models=TEST_MODELS, model=provider)
     try:
         agent = await app.load_agent(package())
-        stream = await app.entrypoint().run_stream(command(agent, "pause"), context(), agent=agent)
+        stream = await cast(ApplicationEntrypoint, app.entrypoint()).run_stream(command(agent, "pause"), context(), agent=agent)
         await asyncio.wait_for(entered.wait(), 5)
         # Detaching an observer must not cancel the SDK-owned execution.
-        detached = await app.entrypoint().continue_run(stream.handle.run_id, context(), agent=agent)
+        detached = await cast(ApplicationEntrypoint, app.entrypoint()).continue_run(stream.handle.run_id, context(), agent=agent)
         detached.cancel()
         with pytest.raises(asyncio.CancelledError):
             await detached
         # Already running: observing must not schedule another execution.
-        observer = await app.entrypoint().continue_run(stream.handle.run_id, context(), agent=agent)
+        observer = await cast(ApplicationEntrypoint, app.entrypoint()).continue_run(stream.handle.run_id, context(), agent=agent)
         run = await app.service("session.access").get_run(stream.handle.run_id, context())
         await app.runtime.pause_run(PauseRun(run_id=run.run_id, expected_revision=run.revision, idempotency_key="pause"), context())
         suspended = await asyncio.wait_for(observer, 5)
@@ -102,15 +110,15 @@ async def test_duplicate_continuation_observes_one_execution_and_original_run(tm
             suspension_id=suspension.suspension_id, expected_suspension_revision=suspension.expected_revision,
             idempotency_key="resume"), context())
         resumed_agent = await app.agent_for_run(run.run_id, context())
-        first = await app.entrypoint().continue_run(run.run_id, context(), agent=resumed_agent)
-        second = await app.entrypoint().continue_run(run.run_id, context(), agent=resumed_agent)
+        first = await cast(ApplicationEntrypoint, app.entrypoint()).continue_run(run.run_id, context(), agent=resumed_agent)
+        second = await cast(ApplicationEntrypoint, app.entrypoint()).continue_run(run.run_id, context(), agent=resumed_agent)
         release.set()
         one, two = await asyncio.wait_for(asyncio.gather(first, second), 10)
         assert one.run_id == two.run_id == run.run_id
         assert one.state.value == two.state.value == "completed"
         assert len(attempts) == 2  # interrupted inference and its resumed generation
         assert len(provider.requests) == 1  # only the resumed inference reaches completion
-        terminal = await app.entrypoint().continue_run(run.run_id, context(), agent=resumed_agent)
+        terminal = await cast(ApplicationEntrypoint, app.entrypoint()).continue_run(run.run_id, context(), agent=resumed_agent)
         assert (await terminal).run_id == run.run_id
         assert len(attempts) == 2
         assert len(provider.requests) == 1
@@ -131,7 +139,7 @@ def test_hosts_do_not_import_private_sdk_or_assemble_execution_components():
                 modules = [node.module] if isinstance(node, ast.ImportFrom) else [a.name for a in node.names] if isinstance(node, ast.Import) else []
                 for name in modules:
                     if name and name.startswith("sagents.v2") and any(part.startswith("_") for part in name.split(".")):
-                        violations.append(f"{path}:{node.lineno}: private import {name}")
+                        violations.append(f"{path}:{getattr(node, 'lineno')}: private import {name}")
                 if isinstance(node, ast.ImportFrom) and (node.module or "").startswith("sagents.v2"):
                     for alias in node.names:
                         if alias.name.startswith("_") or alias.name in forbidden:
@@ -157,9 +165,9 @@ async def test_application_close_settles_continuation_observers(tmp_path):
     app = await build_registered_app(tmp_path, models=TEST_MODELS, model=Gated(model()._steps))
     try:
         agent = await app.load_agent(package())
-        stream = await app.entrypoint().run_stream(command(agent, "shutdown"), context(), agent=agent)
+        stream = await cast(ApplicationEntrypoint, app.entrypoint()).run_stream(command(agent, "shutdown"), context(), agent=agent)
         await asyncio.wait_for(entered.wait(), 5)
-        observer = await app.entrypoint().continue_run(stream.handle.run_id, context(), agent=agent)
+        observer = await cast(ApplicationEntrypoint, app.entrypoint()).continue_run(stream.handle.run_id, context(), agent=agent)
         await asyncio.wait_for(app.close(), 10)
         assert observer.done()
         await asyncio.gather(observer, return_exceptions=True)

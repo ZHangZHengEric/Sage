@@ -84,7 +84,7 @@ class TestVideoAnalysisServer(unittest.TestCase):
 
         self.assertIn("analyze_video", tm.tools)
         self.assertEqual(
-            tm.tools["analyze_video"].server_name,
+            getattr(tm.tools["analyze_video"], 'server_name'),
             "unified_video_analysis_server",
         )
 

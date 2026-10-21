@@ -7,6 +7,8 @@ thread says it is waiting, and what answering it does.
 
 from __future__ import annotations
 
+from typing import cast
+
 import json
 
 import pytest
@@ -43,7 +45,7 @@ def _kinds(frames: list[dict]) -> list[str]:
     """Name each frame the way a client switches on it: CUSTOM by extension."""
 
     return [
-        frame.get("name") if frame.get("type") == "CUSTOM" else frame.get("type")
+        cast(str, frame.get("name") if frame.get("type") == "CUSTOM" else frame.get("type"))
         for frame in frames
     ]
 

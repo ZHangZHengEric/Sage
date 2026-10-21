@@ -1,5 +1,15 @@
 """Ancestor deadlines and token usage remain shared across child Runs."""
 
+from typing import TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    from sagents.v2.contracts.commands import CommandDecision
+    from sagents.v2.contracts.errors import ErrorCategory
+    from sagents.v2.runtime.session.contracts import SessionStore
+
+from sagents.v2.model.provider import ModelProvider
+from sagents.v2.contracts.errors import RuntimeErrorInfo
+
 from datetime import timedelta
 
 import pytest
@@ -62,7 +72,7 @@ async def usage(runtime, run, tokens):
 @pytest.mark.asyncio
 async def test_siblings_share_parent_budget_and_survive_store_replacement(tmp_path):
     store = FilesystemSessionStore(tmp_path)
-    runtime = HarnessRuntime(store)
+    runtime = HarnessRuntime(cast('SessionStore', store))
     root = await start(runtime, "root", max_total_tokens=100)
     root = await usage(runtime, root, 20)
     first = await start(runtime, "first", parent=root.run_id)
@@ -71,19 +81,19 @@ async def test_siblings_share_parent_budget_and_survive_store_replacement(tmp_pa
     second = await usage(runtime, second, 30)
     other = await start(runtime, "unrelated")
     await usage(runtime, other, 999)
-    assert await run_tree_tokens(store, root) == 90
+    assert await run_tree_tokens(cast('SessionStore', store), root) == 90
     assert (
-        await evaluate_run_budget(store, second, second.created_at)
+        await evaluate_run_budget(cast('SessionStore', store), second, second.created_at)
     ).remaining_tokens == 10
     second = await usage(runtime, second, 10)
     await store.close()
     restored = FilesystemSessionStore(tmp_path)
     try:
         scope = await evaluate_run_budget(
-            restored, await restored.get_run(second.run_id), second.created_at
+            cast('SessionStore', restored), await restored.get_run(second.run_id), second.created_at
         )
-        assert scope.error.code == "budget.max_tokens"
-        assert scope.error.metadata["budget_run_id"] == root.run_id
+        assert cast(RuntimeErrorInfo, scope.error).code == "budget.max_tokens"
+        assert cast(RuntimeErrorInfo, scope.error).metadata["budget_run_id"] == root.run_id
     finally:
         await restored.close()
 
@@ -91,14 +101,14 @@ async def test_siblings_share_parent_budget_and_survive_store_replacement(tmp_pa
 @pytest.mark.asyncio
 async def test_child_stops_before_inference_when_ancestor_budget_is_exhausted(tmp_path):
     store = FilesystemSessionStore(tmp_path)
-    runtime = HarnessRuntime(store)
+    runtime = HarnessRuntime(cast('SessionStore', store))
     root = await start(runtime, "root", max_total_tokens=10)
     await usage(runtime, root, 10)
     child = await start(runtime, "child", parent=root.run_id, max_total_tokens=100)
     model = ScriptedModelProvider(())
     loop = AgentLoopEngine(
         runtime=runtime,
-        model=model,
+        model=cast(ModelProvider, model),
         tool_catalog=InMemoryToolCatalog(()),
         tool_executor=InMemoryToolExecutor({}, {}),
     )
@@ -107,9 +117,9 @@ async def test_child_stops_before_inference_when_ancestor_budget_is_exhausted(tm
         assert not model.requests
         events = await store.read_events(child.run_id)
         assert not any(event.type == "interaction.requested" for event in events)
-        assert (
+        assert cast(RuntimeErrorInfo, (
             await runtime.get_run_result(child.run_id)
-        ).error.code == "budget.max_tokens"
+        ).error).code == "budget.max_tokens"
     finally:
         await store.close()
 
@@ -118,14 +128,14 @@ async def test_child_stops_before_inference_when_ancestor_budget_is_exhausted(tm
 @pytest.mark.parametrize("deadline_seconds", [None, 7 * 24 * 60 * 60])
 async def test_task_tree_does_not_inherit_mcp_two_hour_timeout(tmp_path, deadline_seconds):
     store = FilesystemSessionStore(tmp_path)
-    runtime = HarnessRuntime(store)
+    runtime = HarnessRuntime(cast('SessionStore', store))
     root = await start(runtime, "multi-day-root", deadline_seconds=deadline_seconds)
     child = await start(runtime, "multi-day-child", parent=root.run_id)
     grandchild = await start(runtime, "multi-day-grandchild", parent=child.run_id)
     later = root.created_at + timedelta(days=3)
     try:
         for row in (root, child, grandchild):
-            budget = await evaluate_run_budget(store, row, later)
+            budget = await evaluate_run_budget(cast('SessionStore', store), row, later)
             assert budget.error is None
             assert budget.deadline == (
                 None if deadline_seconds is None
@@ -136,7 +146,7 @@ async def test_task_tree_does_not_inherit_mcp_two_hour_timeout(tmp_path, deadlin
     restored = FilesystemSessionStore(tmp_path)
     try:
         budget = await evaluate_run_budget(
-            restored, await restored.get_run(grandchild.run_id), later,
+            cast('SessionStore', restored), await restored.get_run(grandchild.run_id), later,
         )
         assert budget.error is None
         assert (await restored.get_start_command(child.run_id)).config.deadline_seconds is None
@@ -147,16 +157,16 @@ async def test_task_tree_does_not_inherit_mcp_two_hour_timeout(tmp_path, deadlin
 @pytest.mark.asyncio
 async def test_nested_child_uses_ancestor_absolute_deadline(tmp_path):
     store = FilesystemSessionStore(tmp_path)
-    runtime = HarnessRuntime(store)
+    runtime = HarnessRuntime(cast('SessionStore', store))
     root = await start(runtime, "root", deadline_seconds=30)
     child = await start(runtime, "child", parent=root.run_id, deadline_seconds=300)
     grandchild = await start(runtime, "grandchild", parent=child.run_id)
     try:
         scope = await evaluate_run_budget(
-            store, grandchild, root.created_at + timedelta(seconds=31)
+            cast('SessionStore', store), grandchild, root.created_at + timedelta(seconds=31)
         )
-        assert scope.error.code == "budget.deadline"
-        assert scope.error.metadata["budget_run_id"] == root.run_id
+        assert cast(RuntimeErrorInfo, scope.error).code == "budget.deadline"
+        assert cast(RuntimeErrorInfo, scope.error).metadata["budget_run_id"] == root.run_id
         assert scope.deadline == root.created_at + timedelta(seconds=30)
     finally:
         await store.close()
@@ -165,7 +175,7 @@ async def test_nested_child_uses_ancestor_absolute_deadline(tmp_path):
 @pytest.mark.asyncio
 async def test_parent_budget_failure_settles_waiting_descendants(tmp_path, monkeypatch):
     store = FilesystemSessionStore(tmp_path)
-    runtime = HarnessRuntime(store)
+    runtime = HarnessRuntime(cast('SessionStore', store))
     root = await start(runtime, "root", max_total_tokens=10)
     child = await start(runtime, "child", parent=root.run_id)
     await usage(runtime, child, 10)
@@ -181,10 +191,10 @@ async def test_parent_budget_failure_settles_waiting_descendants(tmp_path, monke
         if len(attempts) == 1:
             return CommandReceipt(
                 command_id="conflict",
-                decision="rejected",
+                decision=cast('CommandDecision', "rejected"),
                 error=RuntimeErrorInfo(
                     code="run.revision_conflict",
-                    category="conflict",
+                    category=cast('ErrorCategory', "conflict"),
                     message="revision changed",
                 ),
             )
@@ -194,7 +204,7 @@ async def test_parent_budget_failure_settles_waiting_descendants(tmp_path, monke
     model = ScriptedModelProvider(())
     loop = AgentLoopEngine(
         runtime=runtime,
-        model=model,
+        model=cast(ModelProvider, model),
         tool_catalog=InMemoryToolCatalog(()),
         tool_executor=InMemoryToolExecutor({}, {}),
     )

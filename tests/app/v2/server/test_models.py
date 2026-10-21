@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Any
+
 from types import SimpleNamespace
 
 import pytest
@@ -65,7 +67,7 @@ def test_orcarouter_api_payload_builds_openai_compatible_provider(monkeypatch, b
         "sagents.v2.model.plugins.openai_compatible.AsyncOpenAI",
         lambda **kwargs: SimpleNamespace(**kwargs),
     )
-    payload = {"protocol": "orcarouter", "model": "orcarouter/auto", "api_key": "test-key"}
+    payload: dict[str, Any] = {"protocol": "orcarouter", "model": "orcarouter/auto", "api_key": "test-key"}
     if base_url is not None:
         payload["base_url"] = base_url
     record, _ = apply_upsert(empty_catalog(), ModelBody(**payload).model_dump())
@@ -83,7 +85,7 @@ def test_orcarouter_api_payload_builds_openai_compatible_provider(monkeypatch, b
 def test_orcarouter_model_api_saves_default_or_custom_endpoint(client, base_url):
     token = register_and_login(client)
     headers = {"Authorization": f"Bearer {token}"}
-    payload = {"protocol": "orcarouter", "model": "orcarouter/auto", "api_key": "test-key"}
+    payload: dict[str, Any] = {"protocol": "orcarouter", "model": "orcarouter/auto", "api_key": "test-key"}
     if base_url is not None:
         payload["base_url"] = base_url
 

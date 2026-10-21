@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from typing import cast
 
 from sagents.v2.agent.policy.plugins.judge import LLMContinuationJudge
 from sagents.v2.context.assembler import DefaultContextAssembler
@@ -53,7 +54,7 @@ def test_tool_image_does_not_replace_real_request_or_runtime_context():
             ),
         ),
     )
-    assert "<runtime_context>" in wrapped[0].content[0].text
+    assert "<runtime_context>" in cast(TextBlock, wrapped[0].content[0]).text
     assert wrapped[-1] == messages[-1]
     next_user = ModelMessage(role="user", content=(TextBlock(text="New task"),))
     assert LLMContinuationJudge._recent_request_trace((*messages, next_user)) == (
@@ -65,7 +66,7 @@ def test_resumed_image_batch_preserves_all_tool_pairs_and_image():
     result = DefaultContextAssembler._sanitize_tool_pairs(ledger())
     assert [m.role for m in result] == ["user", "assistant", "tool", "tool", "user"]
     assert [m.tool_call_id for m in result if m.role == "tool"] == ["a", "b"]
-    assert result[-1].content[-1].uri == "data:image/png;base64,AAAA"
+    assert cast(ImageBlock, result[-1].content[-1]).uri == "data:image/png;base64,AAAA"
     assert order_tool_context(result) == result
 
 

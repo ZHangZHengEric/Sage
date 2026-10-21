@@ -1,5 +1,10 @@
 from __future__ import annotations
 
+from typing import Any, TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    from sagents.v2.agent.policy.continuation import ContinuationDecision, InteractionDraft
+
 import pytest
 
 from sagents.v2.model.contracts import ModelResponse, ModelToolCall
@@ -35,7 +40,7 @@ def response(*, text="done", tools=()):
 
 
 def continuation_context(**updates):
-    values = dict(
+    values: dict[str, Any] = dict(
         run_id="run_1",
         step_number=1,
         max_steps=10,
@@ -656,7 +661,7 @@ async def test_loop_recovery_explains_round_count_without_claiming_no_progress(
     decision = await rule.evaluate(
         context.model_copy(update={"repeated_fingerprint_count": 3})
     )
-    payload = decision.interaction.payload
+    payload = cast('InteractionDraft', cast('ContinuationDecision', decision).interaction).payload
     assert payload["repeat_count"] == 3
     assert payload["repeated_tool_names"] == (["read"] if with_tools else [])
     assert "连续 3 轮" in payload["prompt"]
@@ -665,4 +670,4 @@ async def test_loop_recovery_explains_round_count_without_claiming_no_progress(
     assert payload["title"] == (
         "操作重复，已暂停" if with_tools else "回复重复，已暂停"
     )
-    assert decision.interaction.allowed_decisions == ("submit", "cancel")
+    assert cast('InteractionDraft', cast('ContinuationDecision', decision).interaction).allowed_decisions == ("submit", "cancel")

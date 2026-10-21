@@ -1,5 +1,14 @@
 """Leaders recover delegated conversation identities without tool receipts."""
 
+from typing import TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    from sagents.v2.agent.modes.loop_factory import ModelProviderFactory
+    from sagents.v2.contracts.commands import RunConfig
+    from sagents.v2.runtime.session.contracts import SessionStore
+
+from sagents.v2.contracts.run_state import RunHandle
+
 import json
 
 import pytest
@@ -33,14 +42,14 @@ async def test_created_children_survive_cancellation_restart_and_followup(
 ):
     path = tmp_path / "store"
     store = FilesystemSessionStore(path)
-    runtime = HarnessRuntime(store)
+    runtime = HarnessRuntime(cast('SessionStore', store))
     parent_command = command("work", "parent")
     parent = await runtime.start_run(parent_command, CONTEXT)
     long_name = "检查登录页面深色模式与浅色模式下的所有交互细节以及错误信息"
 
     async def child(
         key, *, parent_run_id=parent.run_id, invocation="delegation", session_id=None
-    ):
+    ) -> RunHandle:
         return await runtime.start_run(
             StartRun(
                 agent_id="qualified.reviewer",
@@ -50,12 +59,12 @@ async def test_created_children_survive_cancellation_restart_and_followup(
                 invocation_mode=invocation,
                 resolved_spec_hash="sha256:child",
                 idempotency_key=key,
-                config={
+                config=cast('RunConfig', {
                     "metadata": {
                         "task_name": long_name + "\nextra",
                         "original_task": "PRIVATE FULL TASK",
                     }
-                },
+                }),
             ),
             CONTEXT,
         )
@@ -84,7 +93,7 @@ async def test_created_children_survive_cancellation_restart_and_followup(
     await store.close()
 
     store = FilesystemSessionStore(path)
-    runtime = HarnessRuntime(store)
+    runtime = HarnessRuntime(cast('SessionStore', store))
     registry = AgentRegistry(
         (
             AgentDescriptor(
@@ -96,7 +105,7 @@ async def test_created_children_survive_cancellation_restart_and_followup(
         ),
         aliases={"reviewer": "qualified.reviewer"},
     )
-    provider = AgentRosterContextProvider(registry, mode, session_store=store)
+    provider = AgentRosterContextProvider(registry, mode, session_store=cast('SessionStore | None', store))
     try:
         # The next leader Run must recover children from the previous Run.
         parent_command = command(
@@ -125,7 +134,7 @@ async def test_created_children_survive_cancellation_restart_and_followup(
                 invocation_mode="delegation",
                 resolved_spec_hash="sha256:child",
                 idempotency_key="follow",
-                config={"metadata": {"task_name": "repair\n  now"}},
+                config=cast('RunConfig', {"metadata": {"task_name": "repair\n  now"}}),
             ),
             CONTEXT,
         )
@@ -154,7 +163,7 @@ async def test_created_children_survive_cancellation_restart_and_followup(
             for m in messages
         )
         leaf = AgentRosterContextProvider(
-            registry, mode, allow_delegation=False, session_store=store
+            registry, mode, allow_delegation=False, session_store=cast('SessionStore | None', store)
         )
         assert [
             s.segment_id
@@ -164,7 +173,7 @@ async def test_created_children_survive_cancellation_restart_and_followup(
         factory = ModeAwareAgentLoopFactory(
             runtime=runtime,
             registry=registry,
-            model_factory=lambda *_: model,
+            model_factory=cast('ModelProviderFactory', lambda *_: model),
             base_catalog=InMemoryToolCatalog(()),
             base_executor=InMemoryToolExecutor({}, {}),
             resolved_spec_hash="sha256:agent",

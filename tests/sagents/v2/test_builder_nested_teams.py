@@ -1,6 +1,14 @@
 """Public Builder regressions: frozen, scoped nested Teams and Run leases."""
 
 from __future__ import annotations
+
+from typing import Any, TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    from sagents.v2.model.contracts import ModelEventKind
+
+from sagents.v2.composition.loaded_agents import ApplicationEntrypoint
+
 from tests.sagents.v2.sdk_fixture import build_registered_app
 
 import asyncio
@@ -100,15 +108,15 @@ class Models:
                     (
                         ModelToolCall(
                             tool_call_id=f"{request.run_id}-{stage}",
-                            name=call[0],
-                            arguments=call[1],
+                            name=cast(tuple[str, dict[str, Any]], call)[0],
+                            arguments=cast(tuple[str, dict[str, Any]], call)[1],
                         ),
                     )
                     if call
                     else ()
                 )
                 yield ModelStreamEvent(
-                    kind="completed",
+                    kind=cast('ModelEventKind', "completed"),
                     response=ModelResponse(
                         response_id=f"{request.run_id}-{stage}",
                         text="" if calls else "done",
@@ -293,7 +301,7 @@ async def test_public_builder_nested_rosters_preloads_and_shared_leases(tmp_path
 async def test_public_builder_parallel_nested_teams_do_not_exhaust_parent_slots(
     tmp_path,
 ):
-    plans = {"root": (delegate("d1", "d2"),)}
+    plans: dict[str, Any] = {"root": (delegate("d1", "d2"),)}
     for name in ("d1", "d2"):
         plans[name] = (delegate("maker"),)
         plans[name + ".maker"] = (
@@ -358,8 +366,8 @@ async def resume_nested(tmp_path):
         assert restored.composition_hash == frozen_hash != latest.composition_hash
         state = await app.runtime.get_run(run_id)
         store = app.runtime.session_store
-        suspension = await store.get_suspension(state.suspension_id)
-        interaction = await store.get_interaction(suspension.interaction_id)
+        suspension = await store.get_suspension(cast(str, state.suspension_id))
+        interaction = await store.get_interaction(cast(str, suspension.interaction_id))
         await app.runtime.reply_interaction(
             ReplyInteraction(
                 run_id=run_id,
@@ -374,7 +382,7 @@ async def resume_nested(tmp_path):
             CONTEXT,
         )
         async with asyncio.timeout(60):
-            await app.entrypoint().continue_run(run_id, CONTEXT, agent=restored)
+            await cast(ApplicationEntrypoint, app.entrypoint()).continue_run(run_id, CONTEXT, agent=restored)
             while (await app.runtime.get_run(run_id)).state.value in {
                 "created",
                 "queued",

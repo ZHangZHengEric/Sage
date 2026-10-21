@@ -1,5 +1,10 @@
 """Desktop tests exercise actual registered providers and standard Run admission."""
 
+from typing import TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    from sagents.v2.model.contracts import ModelResponse
+
 import json
 
 from app.v2.desktop.backend.service import DesktopV2Service
@@ -128,7 +133,7 @@ def step(*calls, text=None, assertion=None):
             events=(
                 event.model_copy(
                     update={
-                        "response": event.response.model_copy(update={"text": text})
+                        "response": cast('ModelResponse', event.response).model_copy(update={"text": text})
                     }
                 ),
             ),

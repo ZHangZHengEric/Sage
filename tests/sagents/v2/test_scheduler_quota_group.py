@@ -1,3 +1,9 @@
+
+from typing import TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    from sagents.v2.runtime.execution.scheduler.contracts import WorkerLease
+
 import asyncio
 from datetime import timedelta
 
@@ -47,18 +53,18 @@ async def test_shared_scheduler_limits_and_routing():
         second = await b.claim(
             "worker", lease_duration=timedelta(seconds=10), wait_timeout=0
         )
-        assert second.work.run_id == "c"
+        assert cast('WorkerLease', second).work.run_id == "c"
         waiter = asyncio.create_task(
             b.claim("worker", lease_duration=timedelta(seconds=10), wait_timeout=1)
         )
         await asyncio.sleep(0.01)
         assert not waiter.done()
-        await a.release(first, reason=LeaseReleaseReason.COMPLETED)
+        await a.release(cast('WorkerLease', first), reason=LeaseReleaseReason.COMPLETED)
         third = await waiter
-        assert third.work.run_id == "b"
+        assert cast('WorkerLease', third).work.run_id == "b"
         assert len(group.leases()) == 2
-        await b.release(second, reason=LeaseReleaseReason.COMPLETED)
-        await b.release(third, reason=LeaseReleaseReason.COMPLETED)
+        await b.release(cast('WorkerLease', second), reason=LeaseReleaseReason.COMPLETED)
+        await b.release(cast('WorkerLease', third), reason=LeaseReleaseReason.COMPLETED)
         assert not group.leases()
     finally:
         await a.close()
@@ -82,13 +88,13 @@ async def test_cancelled_waiter_and_closed_member_do_not_consume_group_capacity(
         waiter.cancel()
         with pytest.raises(asyncio.CancelledError):
             await waiter
-        await a.release(lease, reason=LeaseReleaseReason.COMPLETED)
+        await a.release(cast('WorkerLease', lease), reason=LeaseReleaseReason.COMPLETED)
         await a.close()
         claimed = await b.claim(
             "worker", lease_duration=timedelta(seconds=10), wait_timeout=0
         )
-        assert claimed.work.run_id == "b"
-        await b.release(claimed, reason=LeaseReleaseReason.COMPLETED)
+        assert cast('WorkerLease', claimed).work.run_id == "b"
+        await b.release(cast('WorkerLease', claimed), reason=LeaseReleaseReason.COMPLETED)
     finally:
         await a.close()
         await b.close()

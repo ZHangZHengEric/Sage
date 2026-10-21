@@ -5,6 +5,15 @@ request/response fixtures and an audit report to --output, never modifies settin
 The existing completion Judge is counted separately from deterministic self-check.
 """
 
+from typing import TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    from sagents.v2.model.provider import ModelProvider
+    from typing import Any
+
+from importlib.machinery import ModuleSpec
+from importlib.abc import Loader
+
 # ruff: noqa: E402 -- standalone CLI bootstraps the repository import path
 import argparse
 import asyncio
@@ -32,11 +41,11 @@ from sagents.v2.agent.policy.plugins.judge import (
 from sagents.v2.model import ModelMessage, ModelEventKind
 from sagents.v2.contracts.items import TextBlock
 
-spec = importlib.util.spec_from_file_location(
+spec = cast(ModuleSpec, importlib.util.spec_from_file_location(
     "loop_tests", REPO / "tests/sagents/v2/test_agent_loop_matrix.py"
-)
+))
 m = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(m)
+cast(Loader, spec.loader).exec_module(m)
 cli = argparse.ArgumentParser(description=__doc__)
 cli.add_argument("--output", type=Path, required=True)
 cli.add_argument(
@@ -82,7 +91,7 @@ async def main():
         wire.append({"method": request.method, "phase": "model_or_host"})
         return await original_send(client, request, *args, **kwargs)
 
-    httpx.AsyncClient.send = send
+    setattr(httpx.AsyncClient, "send", send)
 
     class Model:
         def __init__(self, role):
@@ -139,13 +148,13 @@ async def main():
             async for event in real.stream(request):
                 if event.kind == ModelEventKind.COMPLETED and self.role == "author":
                     (OUT / f"author-response-{idx + 1}.txt").write_text(
-                        event.response.text
+                        cast("Any", event.response).text
                     )
                     if idx == 0:
                         # Explicit test fault at the author-response boundary; never touches production.
                         event = event.model_copy(
                             update={
-                                "response": event.response.model_copy(
+                                "response": cast("Any", event.response).model_copy(
                                     update={"text": BAD}
                                 )
                             }
@@ -185,7 +194,7 @@ async def main():
     parser = OpenUiParser()
     try:
         policy = OutputSelfCheckPolicy(
-            LLMJudgeContinuationPolicy(LLMContinuationJudge(Model("completion_judge"))),
+            LLMJudgeContinuationPolicy(LLMContinuationJudge(cast('ModelProvider', Model("completion_judge")))),
             Checker(),
         )
         runtime, handle, loop, executor = await m.setup_loop(

@@ -1,5 +1,10 @@
 from __future__ import annotations
 
+from typing import TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    from sagents.v2.session_memory.contracts import SessionMemoryProvider
+
 import asyncio
 from contextlib import closing
 import sqlite3
@@ -97,7 +102,7 @@ async def test_batch_commit_failure_is_sticky_for_waiting_producers():
         raise failure
 
     batcher = StreamEventBatcher(
-        SimpleNamespace(revision=0), commit, max_delay_seconds=100
+        cast('RunSnapshot', SimpleNamespace(revision=0)), commit, max_delay_seconds=100
     )
     draft = EventDraft(
         type="message.delta", data=ItemEventData(operation="delta", delta="hello")
@@ -247,7 +252,7 @@ async def test_recall_cannot_reuse_a_boundary_from_a_different_session():
             queries.append(query)
             return ()
 
-    service = SessionMemoryService(Provider())
+    service = SessionMemoryService(cast('SessionMemoryProvider', Provider()))
     message = ModelMessage(role="user", content=(TextBlock(text="private record"),))
     await service.observe_projection(
         "run",
@@ -284,7 +289,7 @@ async def test_index_digest_cache_is_bounded_and_eviction_does_not_break_recall(
             queries.append(query)
             return ()
 
-    service = SessionMemoryService(Provider())
+    service = SessionMemoryService(cast('SessionMemoryProvider', Provider()))
     messages = tuple(
         ModelMessage(
             role="user",
@@ -336,7 +341,7 @@ async def test_failed_control_lookup_does_not_launch_an_unobserved_tool():
     )
     with pytest.raises(RuntimeError, match="control state unavailable"):
         await AgentLoopEngine._execute_tool_with_control(
-            engine,
+            cast('AgentLoopEngine', engine),
             SimpleNamespace(run_id="run"),
             SimpleNamespace(tool_name="write"),
             None,
@@ -353,7 +358,7 @@ async def test_memory_sync_tracks_provenance_changes_even_when_text_is_unchanged
         async def sync(self, records):
             batches.append(records)
 
-    service = SessionMemoryService(Provider())
+    service = SessionMemoryService(cast('SessionMemoryProvider', Provider()))
     for run in ("old_run", "new_run"):
         message = ModelMessage(
             role="user",

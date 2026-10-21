@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import cast
+
 import json
 from datetime import datetime, timezone
 
@@ -92,7 +94,7 @@ def test_upcaster_chain_restores_the_current_contract(schema_version, state_fiel
     payload[state_field] = payload.pop("data")["state"]
     restored = EventCodec(registry).decode(envelope_for(payload))
     assert restored.event_schema_version == "1"
-    assert restored.data.state == "running"
+    assert cast(RunEventData, restored.data).state == "running"
 
 
 @pytest.mark.parametrize(

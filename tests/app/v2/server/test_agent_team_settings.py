@@ -1,3 +1,12 @@
+
+from typing import TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    from anyio.from_thread import BlockingPortal
+    from pydantic import SecretStr
+    from sagents.v2.agent.management.contracts import AgentPackageBundle
+    from sagents.v2.model.contracts import ModelResponse
+
 import pytest
 
 from tests.app.v2.server.conftest import register_and_login
@@ -97,8 +106,8 @@ def test_catalog_run_delegates_and_freezes_latest_member_configuration(tmp_path,
         assert "latest member prompt" in provider.requests[1].model_dump_json()
         assert tool not in {item.name for item in provider.requests[1].tools}
         store = host.application.runtime.session_store
-        runs = client.portal.call(store.list_session_runs, "thread-1")
-        command = client.portal.call(store.get_start_command, runs[0].run_id)
+        runs = cast('BlockingPortal', client.portal).call(store.list_session_runs, "thread-1")
+        command = cast('BlockingPortal', client.portal).call(store.get_start_command, runs[0].run_id)
         snapshot = command.config.metadata["server_v2.composition"]["agent"]["package"]
         child = snapshot["dependencies"][member["id"]]
         assert child["manifest"]["agents"][member["id"]]["instructions"]["inline"] == "latest member prompt"
@@ -165,13 +174,13 @@ def test_member_uses_its_own_model_when_delegated():
 
     child = AgentRecord(id="writer", name="Writer", model_id="child-model")
     catalog = UserCatalog(agents=[child], models=[
-        ModelRecord(id=name, model=name, api_key="test") for name in ("parent-model", "child-model")
+        ModelRecord(id=name, model=name, api_key=cast('SecretStr', "test")) for name in ("parent-model", "child-model")
     ])
     record, catalog = upsert_agent(catalog, {
         "id": "director", "name": "Director", "model_id": "parent-model",
         "agent_mode": "team", "available_sub_agent_ids": [child.id],
     })
-    resolved = resolve_bundle(record.package, record.package.manifest.runtime, models=app_models(catalog))
+    resolved = resolve_bundle(record.package, cast('AgentPackageBundle', record.package).manifest.runtime, models=app_models(catalog))
     config = CompositionResolver().resolve_child_run_config(resolved, child.id,
         parent_config=RunConfig(model_bindings={"primary": "parent-model"}), tools=(), skills=())
     assert config.model_bindings["primary"] == "child-model"
@@ -189,7 +198,7 @@ def test_fibre_spawned_expert_can_execute_in_its_own_run(tmp_path):
     delegate = _step(2, "delegate", "sys_delegate_task", {"tasks": [{"agent_id": "pending", "content": "Answer"}]})
     def use_spawned_id(request):
         result = next(block.value for message in request.messages if message.tool_call_id == "call-1" for block in message.content)
-        delegate.events[0].response.tool_calls[0].arguments["tasks"][0]["agent_id"] = result["agent_id"]
+        cast('ModelResponse', delegate.events[0].response).tool_calls[0].arguments["tasks"][0]["agent_id"] = result["agent_id"]
     provider = ScriptedModelProvider((
         _step(1, "spawn", "sys_spawn_agent", {"name": "Expert", "description": "An expert", "system_prompt": "Act as an expert"}),
         replace(delegate, assertion=use_spawned_id), _step(3, "expert answer"), _step(4, "finished"),

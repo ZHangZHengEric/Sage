@@ -1,4 +1,12 @@
 """Admission, binding, and recovery through registered standard SDK capabilities."""
+
+from typing import TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    from sagents.v2.contracts.principals import PrincipalType
+    from sagents.v2.model.contracts import ModelEventKind
+    from typing import Any, Literal
+
 import asyncio
 import os
 import sys
@@ -24,7 +32,7 @@ from sagents.v2.testing.plugins import ScriptedModelProvider
 from sagents.v2.testing.plugins.scripted_model import ScriptedModelStep
 from tests.sagents.v2.model_fixture import TEST_MODELS
 
-CONTEXT = RequestContext(actor=ActorRef(principal_id="owner", principal_type="user", tenant_id="one"))
+CONTEXT = RequestContext(actor=ActorRef(principal_id="owner", principal_type=cast('PrincipalType', "user"), tenant_id="one"))
 
 
 @pytest.mark.parametrize(("disk_mb", "filesystem_limit", "expected_mb"), [
@@ -60,7 +68,7 @@ def registration(plugin, capability, value, *, ownership="borrowed"):
             provides=(CapabilityOffer(capability=capability, api_version="2"),),
             supported_scopes=frozenset({ExtensionScope.AGENT}),
             config_schema={"type": "object", "additionalProperties": False},
-        ), factory=lambda context, deps: value, ownership=ownership,
+        ), factory=lambda context, deps: value, ownership=cast("Literal['owned', 'borrowed']", ownership),
     )
 
 
@@ -96,7 +104,7 @@ def package():
 
 
 def response(*calls, text="Done"):
-    return ScriptedModelStep(events=(ModelStreamEvent(kind="completed", response=ModelResponse(
+    return ScriptedModelStep(events=(ModelStreamEvent(kind=cast('ModelEventKind', "completed"), response=ModelResponse(
         response_id="reply", text="" if calls else text, finish_reason="tool_calls" if calls else "stop",
         tool_calls=calls,
     )),))
@@ -146,11 +154,11 @@ async def test_registered_standard_driver_uses_accepted_policy_and_real_resource
         assert result.state.value == "completed", result
         assert (tmp_path / "workspace/result.txt").read_text() == "hello"
         snapshot = await app.execution_configuration(result.run_id, CONTEXT)
-        assert snapshot.policy["filesystem"]["max_file_bytes"] == 128 * 1024**2
-        assert snapshot.policy["process"]["max_wall_time_seconds"] == 7200
-        assert snapshot.policy["filesystem"]["max_total_bytes"] == disk_mb * 1024**2
+        assert cast('Any', snapshot).policy["filesystem"]["max_file_bytes"] == 128 * 1024**2
+        assert cast('Any', snapshot).policy["process"]["max_wall_time_seconds"] == 7200
+        assert cast('Any', snapshot).policy["filesystem"]["max_total_bytes"] == disk_mb * 1024**2
         facts = await app.execution_diagnostics(result.run_id, CONTEXT)
-        assert facts["configuration_id"] == snapshot.configuration_id
+        assert facts["configuration_id"] == cast('Any', snapshot).configuration_id
         assert facts["sandbox"]["owner_run_id"] == result.run_id
         assert facts["interpreter"]["executable"] != ""
         assert facts["capabilities"]["resources"]["memory"] is False
@@ -219,8 +227,8 @@ async def test_runtime_updates_apply_to_new_revisions_and_preserve_accepted_runs
         result, _ = await run(app, updated_agent, "after-update")
         assert result.state.value == "completed", result
         current = await app.execution_configuration(result.run_id, CONTEXT)
-        assert current.policy["filesystem"]["max_file_bytes"] == 2048
-        assert current.policy["process"]["max_wall_time_seconds"] == 12
+        assert cast('Any', current).policy["filesystem"]["max_file_bytes"] == 2048
+        assert cast('Any', current).policy["process"]["max_wall_time_seconds"] == 12
         assert (await app.agent_for_run(accepted.run_id, CONTEXT)).composition_hash == original_agent.composition_hash
         with pytest.raises(ValueError, match="App identity"):
             await app.update_runtime(runtime(tmp_path / "different-database"))
@@ -250,7 +258,7 @@ async def test_snapshot_used_after_restart_and_changed_defaults(tmp_path):
         assert result.state.value == "completed", result
         assert await reopened.execution_configuration(result.run_id, CONTEXT) == original
         facts = await reopened.execution_diagnostics(result.run_id, CONTEXT)
-        assert facts["configuration_id"] == original.configuration_id
+        assert facts["configuration_id"] == cast('Any', original).configuration_id
     finally:
         await reopened.close()
 
@@ -265,7 +273,7 @@ async def test_child_inherits_original_and_cannot_expand_authorization(tmp_path)
         )), CONTEXT)
         child = await app.runtime.start_run(command(agent, "child", parent=parent.run_id), CONTEXT)
         assert await app.execution_configuration(child.run_id, CONTEXT) == await app.execution_configuration(parent.run_id, CONTEXT)
-        stranger = RequestContext(actor=ActorRef(principal_id="stranger", principal_type="user", tenant_id="two"))
+        stranger = RequestContext(actor=ActorRef(principal_id="stranger", principal_type=cast('PrincipalType', "user"), tenant_id="two"))
         with pytest.raises(SageV2Error):
             await app.runtime.start_run(command(agent, "cross-project", parent=parent.run_id), stranger)
         with pytest.raises(SageV2Error):
@@ -300,7 +308,7 @@ async def test_registered_process_ownership_shared_across_agent_revisions(tmp_pa
     config = runtime(tmp_path)
     config = config.model_copy(update={"capabilities": {
         **config.capabilities,
-        "model.provider": config.capabilities["model.provider"].model_copy(update={"scope": ExtensionScope.PROCESS}),
+        "model.provider": cast(CapabilitySelection, config.capabilities["model.provider"]).model_copy(update={"scope": ExtensionScope.PROCESS}),
     }})
     builder = SAgentBuilder()
     builder.register(selected)

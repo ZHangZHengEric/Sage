@@ -1,5 +1,10 @@
 from __future__ import annotations
 
+from typing import TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    from sagents.v2.contracts.commands import RunConfig
+
 from tests.sagents.v2.model_fixture import FULL_MODEL_CAPABILITIES as CAPABILITIES
 
 import json
@@ -43,7 +48,7 @@ async def normalized_request() -> ModelRequest:
                 ),
             ),
         ),
-        config={
+        config=cast('RunConfig', {
             "metadata": {
                 "response_language": "zh-CN",
                 "identity_documents": {"SOUL": "Be exact."},
@@ -51,7 +56,7 @@ async def normalized_request() -> ModelRequest:
                 "working_directory": "/workspace/project",
                 "current_time": "2026-08-28T12:00:00+08:00",
             }
-        },
+        }),
         resolved_spec_hash="sha256:spec",
         idempotency_key="start_1",
     )
@@ -108,7 +113,7 @@ async def test_three_protocol_payload_golden_preserves_prompt_and_tool_semantics
     assert [value["role"] for value in chat["messages"]] == ["system", "user"]
     # This contract belongs to the protocol boundary: preserve the assembled
     # prompt exactly. Locale wording is tested by the context/locale suites.
-    expected_system = request.messages[0].content[0].text
+    expected_system = cast(TextBlock, request.messages[0].content[0]).text
     assert "Use tools only when needed." in expected_system
     assert "<soul>\nBe exact.\n</soul>" in expected_system
     assert chat["messages"][0]["content"] == expected_system

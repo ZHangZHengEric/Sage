@@ -1,5 +1,11 @@
 from __future__ import annotations
 
+from typing import TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    from sagents.v2.context.assembler import ContextAssembler
+    from sagents.v2.contracts.commands import RunConfig
+
 import pytest
 
 from sagents.v2.agent.step_request import DefaultAgentStepRequestBuilder
@@ -29,10 +35,10 @@ def _command(invocation_mode: str | None) -> StartRun:
     return StartRun(
         agent_id="agent_1",
         input=(InputItem(role="user", content=(TextBlock(text="work"),)),),
-        config={
+        config=cast('RunConfig', {
             "model_bindings": {"primary": "model.primary"},
             "max_output_tokens": 321,
-        },
+        }),
         resolved_spec_hash="sha256:spec",
         idempotency_key="start_1",
         invocation_mode=invocation_mode,
@@ -42,7 +48,7 @@ def _command(invocation_mode: str | None) -> StartRun:
 @pytest.mark.asyncio
 async def test_step_request_builder_owns_mode_projection_and_request_metadata():
     builder = DefaultAgentStepRequestBuilder(
-        context_assembler=PassthroughContextAssembler(),
+        context_assembler=cast('ContextAssembler', PassthroughContextAssembler()),
         tool_catalog=InMemoryToolCatalog(
             (_tool("read_value"), _tool("goal_submit"), _tool("goal_complete"))
         ),
@@ -75,7 +81,7 @@ async def test_step_request_builder_owns_mode_projection_and_request_metadata():
 @pytest.mark.asyncio
 async def test_step_request_builder_hides_goal_tools_outside_goal_modes():
     builder = DefaultAgentStepRequestBuilder(
-        context_assembler=PassthroughContextAssembler(),
+        context_assembler=cast('ContextAssembler', PassthroughContextAssembler()),
         tool_catalog=InMemoryToolCatalog(
             (_tool("read_value"), _tool("goal_submit"), _tool("goal_complete"))
         ),

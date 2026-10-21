@@ -1,4 +1,10 @@
 """Shared APP catalog selection and real runtime route/credential wiring."""
+
+from typing import Any, TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    pass
+
 import argparse
 import json
 import os
@@ -54,7 +60,7 @@ def test_defaults_share_app_route_and_keep_credentials_out_of_manifest(catalog):
     assert route.request.temperature == 0.2
     assert route.limits.context_window == 32000
     assert not route.capabilities.tool_calling
-    assert manifest.credentials[route.credential].key == APP_CREDENTIAL_ENV
+    assert getattr(manifest.credentials[cast('str', route.credential)], 'key') == APP_CREDENTIAL_ENV
     assert os.environ[APP_CREDENTIAL_ENV] == "app-secret"
     assert "app-secret" not in manifest.model_dump_json()
 
@@ -72,7 +78,7 @@ def test_app_default_changes_are_read_on_next_invocation(catalog):
 
 def test_user_scope_never_falls_back_to_another_users_model(catalog):
     assert config.app_default_model("missing-user") is None
-    assert config.app_default_model("another-user")["model"] == "private-model"
+    assert cast('dict[Any, Any]', config.app_default_model("another-user"))["model"] == "private-model"
 
 
 def test_explicit_environment_route_overrides_app(catalog, monkeypatch):

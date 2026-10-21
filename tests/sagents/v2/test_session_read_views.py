@@ -1,4 +1,14 @@
 """Bounded, owner-checked list views read existing state without execution hydration."""
+
+from typing import TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    from sagents.v2.contracts.checkpoint import SuspensionReason
+    from sagents.v2.contracts.principals import PrincipalType
+    from sagents.v2.runtime.session.contracts import SessionStore
+
+from sagents.v2.composition.contracts import ApplicationResource
+
 from unittest.mock import AsyncMock
 
 import pytest
@@ -12,7 +22,7 @@ from sagents.v2.runtime.session.plugins.filesystem import FilesystemSessionStore
 from sagents.v2.runtime.session.state import SessionStoreCoordinator
 
 
-OWNER = RequestContext(actor=ActorRef(principal_id='owner', principal_type='user', tenant_id='tenant'))
+OWNER = RequestContext(actor=ActorRef(principal_id='owner', principal_type=cast('PrincipalType', 'user'), tenant_id='tenant'))
 
 
 @pytest.mark.parametrize('durable', [False, True])
@@ -25,11 +35,11 @@ async def test_views_filter_runs_events_and_preserve_owner_without_loading_histo
                 resolved_spec_hash='sha256:spec', idempotency_key=sid), OWNER)
             run_ids.append(created.handle.run_id)
         if durable:
-            await store.close()
+            await cast(ApplicationResource, store).close()
             store = FilesystemSessionStore(tmp_path)
             store._ensure_session_loaded = AsyncMock(side_effect=AssertionError('execution aggregate installed'))
             store._read_session_aggregate = lambda *_: (_ for _ in ()).throw(AssertionError('entire history read'))
-        access = AuthorizedSessionAccess(store)
+        access = AuthorizedSessionAccess(cast('SessionStore', store))
         views = await access.read_session_views({'first':OWNER,'second':OWNER,'missing':OWNER}, run_ids=[run_ids[0]])
         assert list(views) == ['first', 'second']
         assert [v.run.run_id for v in views['first']] == run_ids[:1]
@@ -44,13 +54,13 @@ async def test_views_filter_runs_events_and_preserve_owner_without_loading_histo
             assert not store._sessions and not store._runs
     finally:
         if durable:
-            await store.close()
+            await cast(ApplicationResource, store).close()
 
 
 async def test_views_owner_checks_tenant_principal_type_and_skip_inaccessible():
     store = SessionStoreCoordinator()
     await store.create_run(StartRun(agent_id='a',session_id='s',input=(),resolved_spec_hash='sha256:spec',idempotency_key='s'),OWNER)
-    access = AuthorizedSessionAccess(store)
+    access = AuthorizedSessionAccess(cast('SessionStore', store))
     for actor in (OWNER.actor.model_copy(update={'tenant_id':'other'}), OWNER.actor.model_copy(update={'principal_type':'service'})):
         wrong = OWNER.model_copy(update={'actor':actor})
         with pytest.raises(SageV2Error):
@@ -64,14 +74,14 @@ async def test_hot_redis_views_preserve_events_without_hydrating_execution():
     import fakeredis.aioredis
     from tests.sagents.v2.test_redis_mysql_session_store import Archive, store as redis_store
     archive = Archive()
-    archive.read_session_views = AsyncMock(side_effect=AssertionError('hot state read stale archive'))
+    setattr(archive, 'read_session_views', AsyncMock(side_effect=AssertionError('hot state read stale archive')))
     redis = fakeredis.aioredis.FakeRedis(decode_responses=True)
     store = redis_store(redis,archive)
     try:
         result = await store.create_run(StartRun(agent_id='a',session_id='s',input=(),resolved_spec_hash='sha256:spec',idempotency_key='s'),OWNER)
         store._evict_session_locked('s')
         store._ensure_session_loaded = AsyncMock(side_effect=AssertionError('execution installed'))
-        views = await AuthorizedSessionAccess(store).read_session_views({'s':OWNER},include_events=True)
+        views = await AuthorizedSessionAccess(cast('SessionStore', store)).read_session_views({'s':OWNER},include_events=True)
         assert views['s'][0].run.run_id == result.handle.run_id
         assert views['s'][0].events[0].type == 'run.accepted'
         assert not store._sessions and not store._runs
@@ -142,10 +152,10 @@ async def test_legacy_owner_fallback_remains_secure_in_session_views(tmp_path,du
         store._sessions['s'].owner = None
         store._runs[created.handle.run_id].request_context = None
         if durable:
-            store._write_snapshot(store._session_dir('s') / 'state.json',store._dump_state_locked())
-            await store.close()
+            getattr(store, '_write_snapshot')(getattr(store, '_session_dir')('s') / 'state.json',store._dump_state_locked())
+            await cast(ApplicationResource, store).close()
             store = FilesystemSessionStore(tmp_path)
-        access = AuthorizedSessionAccess(store)
+        access = AuthorizedSessionAccess(cast('SessionStore', store))
         views = await access.read_session_views({'s':OWNER})
         assert views['s'][0].run.run_id == created.handle.run_id
         wrong = OWNER.model_copy(update={'actor':OWNER.actor.model_copy(update={'tenant_id':'other'})})
@@ -153,7 +163,7 @@ async def test_legacy_owner_fallback_remains_secure_in_session_views(tmp_path,du
             await access.read_session_views({'s':wrong})
     finally:
         if durable:
-            await store.close()
+            await cast(ApplicationResource, store).close()
 
 
 async def test_projected_replay_preserves_suspension_patches_and_rejects_revision_gaps():
@@ -188,18 +198,18 @@ async def test_redis_views_batch_cold_archive_and_respect_hot_deletion():
     from sagents.v2.runtime.session.read_views import SessionReadView
     redis = fakeredis.aioredis.FakeRedis(decode_responses=True)
     archive = Archive()
-    archive.read_session_views = AsyncMock(return_value={sid:SessionReadView(OWNER.actor,()) for sid in ['cold-a','cold-b']})
+    setattr(archive, 'read_session_views', AsyncMock(return_value={sid:SessionReadView(OWNER.actor,()) for sid in ['cold-a','cold-b']}))
     store = redis_store(redis,archive)
     try:
         await store._ensure_ready()
         await redis.hset(store._session_key('deleted'),mapping={'deleted':'1'})
-        views = await AuthorizedSessionAccess(store).read_session_views({sid:OWNER for sid in ['deleted','cold-a','cold-b']})
+        views = await AuthorizedSessionAccess(cast('SessionStore', store)).read_session_views({sid:OWNER for sid in ['deleted','cold-a','cold-b']})
         assert views == {'cold-a':(),'cold-b':()}
-        archive.read_session_views.assert_awaited_once_with(['cold-a','cold-b'])
+        getattr(archive, 'read_session_views').assert_awaited_once_with(['cold-a','cold-b'])
         await redis.sadd(store._key('resident'),'lost')
         with pytest.raises(SageV2Error,match='Unarchived Redis Session data is missing'):
             await store.read_session_views(['lost'])
-        assert archive.read_session_views.await_count == 1
+        assert getattr(archive, 'read_session_views').await_count == 1
     finally:
         await redis.srem(store._key('resident'),'lost')
         await store.close()
@@ -281,7 +291,7 @@ async def test_views_preserve_errors_for_dangling_approval_references(reference,
     row.state = RunState.SUSPENDED
     row.suspension_id = 'susp'
     if reference == 'interaction':
-        store._suspensions['susp'] = Suspension(suspension_id='susp',run_id=row.run_id,reason='approval_required',
+        store._suspensions['susp'] = Suspension(suspension_id='susp',run_id=row.run_id,reason=cast('SuspensionReason', 'approval_required'),
             blocking_scope='run',checkpoint_id='checkpoint',checkpoint_sequence=0,interaction_id='question',
             resume_policy='manual',requested_at=utc_now())
     with pytest.raises(SageV2Error) as caught:

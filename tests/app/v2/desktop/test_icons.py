@@ -1,3 +1,6 @@
+
+from typing import cast
+
 import plistlib
 from pathlib import Path
 
@@ -37,7 +40,7 @@ def test_macos_mark_stays_inside_a_centered_safe_area():
         image,
         Image.new("RGB", image.size, (0, 0, 0)),
     )
-    left, top, right, bottom = difference.getbbox()
+    left, top, right, bottom = cast(tuple[int, int, int, int], difference.getbbox())
     width = right - left
     height = bottom - top
 

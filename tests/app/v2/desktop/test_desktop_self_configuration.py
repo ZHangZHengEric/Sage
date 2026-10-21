@@ -1,3 +1,7 @@
+
+from typing import cast
+
+from sagents.v2.contracts.events import ToolEventData
 import pytest
 
 from app.v2.desktop.backend.schemas import DesktopRunRequest, RunMessage
@@ -34,7 +38,7 @@ async def test_desktop_root_exposes_live_self_configuration_only_outside_plan(tm
         if mode == "normal":
             assert run.state.value == "completed"
             events = await host.session_store.read_events(run.run_id)
-            assert {"agent_self_configure", "load_skill"} <= {event.data.tool_name for event in events if event.type == "tool.call.succeeded"}
+            assert {"agent_self_configure", "load_skill"} <= {cast(ToolEventData, event.data).tool_name for event in events if event.type == "tool.call.succeeded"}
         else:
             assert run.state.value == "suspended", (await host.session_store.get_run_result(run.run_id)).error
     finally:

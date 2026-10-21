@@ -1,5 +1,18 @@
 from __future__ import annotations
 
+from typing import Mapping
+from sagents.v2.tool.plugins.ephemeral import ToolHandler
+
+from typing import TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    from sagents.v2.contracts.run_state import RunHandle, RunSnapshot
+    from sagents.v2.runtime.execution.scheduler.provider import Scheduler
+    from sagents.v2.runtime.session.contracts import SessionStore
+    from sagents.v2.sagent import RecoveryAgent as RecoveryAgentPort
+
+from sagents.v2.model.provider import ModelProvider
+
 import asyncio
 from contextvars import ContextVar
 from types import SimpleNamespace
@@ -186,15 +199,15 @@ async def test_execution_survives_lease_renewal_and_worker_remains_available():
     )
     agent = FakeAgent(delay=0.4)
     first = await dispatcher.submit(
-        agent,
-        SimpleNamespace(run_id="run-1", run_revision=0),
+        cast('RecoveryAgentPort', agent),
+        cast('RunHandle | RunSnapshot', SimpleNamespace(run_id="run-1", run_revision=0)),
         CONTEXT,
     )
     assert (await asyncio.wait_for(first, timeout=2)).state == RunState.COMPLETED
 
     second = await dispatcher.submit(
-        agent,
-        SimpleNamespace(run_id="run-2", run_revision=0),
+        cast('RecoveryAgentPort', agent),
+        cast('RunHandle | RunSnapshot', SimpleNamespace(run_id="run-2", run_revision=0)),
         CONTEXT,
     )
     assert (await asyncio.wait_for(second, timeout=2)).state == RunState.COMPLETED
@@ -207,15 +220,15 @@ async def test_execution_survives_lease_renewal_and_worker_remains_available():
 async def test_tenant_quota_does_not_claim_and_requeue_in_a_spin_loop():
     scheduler = CountingScheduler()
     dispatcher = LocalWorkerDispatcher(
-        scheduler,
+        cast('Scheduler', scheduler),
         max_concurrent_runs=4,
         max_concurrent_runs_per_tenant=1,
     )
     agent = FakeAgent(delay=0.05)
     results = [
         await dispatcher.submit(
-            agent,
-            SimpleNamespace(run_id=f"quota-run-{index}", run_revision=0),
+            cast('RecoveryAgentPort', agent),
+            cast('RunHandle | RunSnapshot', SimpleNamespace(run_id=f"quota-run-{index}", run_revision=0)),
             CONTEXT,
         )
         for index in range(4)
@@ -265,8 +278,8 @@ async def test_dispatcher_runs_many_conversations_at_configured_parallelism():
     results = await asyncio.gather(
         *(
             dispatcher.submit(
-                agent,
-                SimpleNamespace(run_id=f"parallel-run-{index}", run_revision=0),
+                cast('RecoveryAgentPort', agent),
+                cast('RunHandle | RunSnapshot', SimpleNamespace(run_id=f"parallel-run-{index}", run_revision=0)),
                 CONTEXT,
             )
             for index in range(100)
@@ -288,8 +301,8 @@ async def test_close_waits_for_inflight_submission_without_stranding_result():
     agent = FakeAgent(delay=60)
     submitting = asyncio.create_task(
         dispatcher.submit(
-            agent,
-            SimpleNamespace(run_id="run-submit-close-race", run_revision=0),
+            cast('RecoveryAgentPort', agent),
+            cast('RunHandle | RunSnapshot', SimpleNamespace(run_id="run-submit-close-race", run_revision=0)),
             CONTEXT,
         )
     )
@@ -317,8 +330,8 @@ async def test_scheduler_submissions_are_not_serialized_by_dispatcher_lifecycle(
     submissions = [
         asyncio.create_task(
             dispatcher.submit(
-                agent,
-                SimpleNamespace(run_id=f"concurrent-submit-{index}", run_revision=0),
+                cast('RecoveryAgentPort', agent),
+                cast('RunHandle | RunSnapshot', SimpleNamespace(run_id=f"concurrent-submit-{index}", run_revision=0)),
                 CONTEXT,
             )
         )
@@ -339,15 +352,15 @@ async def test_second_resume_uses_the_new_run_revision():
     dispatcher = LocalWorkerDispatcher(scheduler, max_concurrent_runs=1)
     agent = FakeAgent()
     first = await dispatcher.submit(
-        agent,
-        SimpleNamespace(run_id="run-resume", revision=2),
+        cast('RecoveryAgentPort', agent),
+        cast('RunHandle | RunSnapshot', SimpleNamespace(run_id="run-resume", revision=2)),
         CONTEXT,
         resume=True,
     )
     await asyncio.wait_for(first, timeout=1)
     second = await dispatcher.submit(
-        agent,
-        SimpleNamespace(run_id="run-resume", revision=4),
+        cast('RecoveryAgentPort', agent),
+        cast('RunHandle | RunSnapshot', SimpleNamespace(run_id="run-resume", revision=4)),
         CONTEXT,
         resume=True,
     )
@@ -361,8 +374,8 @@ async def test_close_cancels_execution_before_requeueing_work():
     dispatcher = LocalWorkerDispatcher(scheduler, max_concurrent_runs=1)
     agent = FakeAgent(delay=60)
     result = await dispatcher.submit(
-        agent,
-        SimpleNamespace(run_id="run-close", run_revision=0),
+        cast('RecoveryAgentPort', agent),
+        cast('RunHandle | RunSnapshot', SimpleNamespace(run_id="run-close", run_revision=0)),
         CONTEXT,
     )
     await asyncio.wait_for(agent.started.wait(), timeout=1)
@@ -389,8 +402,8 @@ async def test_shutdown_failure_recording_error_still_completes_result_future():
 
     agent = UnavailableStoreAgent(delay=60)
     result = await dispatcher.submit(
-        agent,
-        SimpleNamespace(run_id="run-close-store-failure", run_revision=0),
+        cast('RecoveryAgentPort', agent),
+        cast('RunHandle | RunSnapshot', SimpleNamespace(run_id="run-close-store-failure", run_revision=0)),
         CONTEXT,
     )
     await asyncio.wait_for(agent.started.wait(), timeout=1)
@@ -422,8 +435,8 @@ async def test_execution_task_inherits_the_worker_lease_scope():
     agent = FakeAgent()
     agent.scope_active = active
     result = await dispatcher.submit(
-        agent,
-        SimpleNamespace(run_id="run-fenced", run_revision=0),
+        cast('RecoveryAgentPort', agent),
+        cast('RunHandle | RunSnapshot', SimpleNamespace(run_id="run-fenced", run_revision=0)),
         CONTEXT,
     )
     await asyncio.wait_for(result, timeout=1)
@@ -435,7 +448,7 @@ async def test_shutdown_records_a_typed_terminal_failure_instead_of_requeueing()
     scheduler = InMemoryScheduler()
     store = EphemeralSessionStore()
     fenced = LeaseFencedSessionStore(store, scheduler)
-    control_runtime = HarnessRuntime(fenced)
+    control_runtime = HarnessRuntime(cast('SessionStore', fenced))
     started = asyncio.Event()
     closed = asyncio.Event()
 
@@ -522,10 +535,10 @@ async def test_cancelled_execution_recovers_started_tool_instead_of_worker_shutd
     scheduler = InMemoryScheduler()
     store = EphemeralSessionStore()
     fenced = LeaseFencedSessionStore(store, scheduler)
-    runtime = HarnessRuntime(fenced)
+    runtime = HarnessRuntime(cast('SessionStore', fenced))
     loop = AgentLoopEngine(
         runtime=runtime,
-        model=ScriptedModelProvider(
+        model=cast(ModelProvider, ScriptedModelProvider(
             (
                 ScriptedModelStep(
                     events=(
@@ -548,10 +561,10 @@ async def test_cancelled_execution_recovers_started_tool_instead_of_worker_shutd
                     )
                 ),
             )
-        ),
+        )),
         tool_catalog=InMemoryToolCatalog((read_tool,)),
         tool_executor=InMemoryToolExecutor(
-            {"read_value": read_tool}, {"read_value": hang}
+            {"read_value": read_tool}, cast(Mapping[str, ToolHandler], {"read_value": hang})
         ),
         expected_resolved_spec_hash="sha256:test",
     )
@@ -604,14 +617,14 @@ async def test_cancelled_execution_recovers_started_tool_instead_of_worker_shutd
 
 @pytest.mark.asyncio
 async def test_dispatcher_restores_queued_work_after_process_restart(tmp_path):
-    runtime = HarnessRuntime(EphemeralSessionStore())
+    runtime = HarnessRuntime(cast('SessionStore', EphemeralSessionStore()))
     handle = await runtime.start_run(start_command("recover-queued"), CONTEXT)
     await persist_dispatch_work(tmp_path, handle)
 
     scheduler = FilesystemScheduler(tmp_path)
     agent = RecoveryAgent(runtime)
     dispatcher = LocalWorkerDispatcher(scheduler, max_concurrent_runs=1)
-    dispatcher.attach_recovery_agent(agent)
+    dispatcher.attach_recovery_agent(cast('RecoveryAgentPort', agent))
     await dispatcher.start()
 
     snapshot = await wait_for_terminal(runtime, handle.run_id)
@@ -625,18 +638,18 @@ async def test_dispatcher_restores_queued_work_after_process_restart(tmp_path):
 async def test_dispatcher_rebuilds_missing_scheduler_work_from_durable_run(tmp_path):
     store_path = tmp_path / "sessions"
     first_store = FilesystemSessionStore(store_path)
-    first_runtime = HarnessRuntime(first_store)
+    first_runtime = HarnessRuntime(cast('SessionStore', first_store))
     handle = await first_runtime.start_run(
         start_command("recover-missing-scheduler-work"), CONTEXT
     )
     await first_store.close()
 
     restored_store = FilesystemSessionStore(store_path)
-    restored_runtime = HarnessRuntime(restored_store)
+    restored_runtime = HarnessRuntime(cast('SessionStore', restored_store))
     scheduler = InMemoryScheduler()
     agent = RecoveryAgent(restored_runtime)
     dispatcher = LocalWorkerDispatcher(scheduler, max_concurrent_runs=1)
-    dispatcher.attach_recovery_agent(agent)
+    dispatcher.attach_recovery_agent(cast('RecoveryAgentPort', agent))
     await dispatcher.start()
 
     snapshot = await wait_for_terminal(restored_runtime, handle.run_id)
@@ -648,7 +661,7 @@ async def test_dispatcher_rebuilds_missing_scheduler_work_from_durable_run(tmp_p
 
 @pytest.mark.asyncio
 async def test_dispatcher_does_not_replay_uncheckpointed_running_work(tmp_path):
-    runtime = HarnessRuntime(EphemeralSessionStore())
+    runtime = HarnessRuntime(cast('SessionStore', EphemeralSessionStore()))
     handle = await runtime.start_run(start_command("recover-running"), CONTEXT)
     running = await runtime.start_execution(
         run_id=handle.run_id,
@@ -662,7 +675,7 @@ async def test_dispatcher_does_not_replay_uncheckpointed_running_work(tmp_path):
     scheduler = FilesystemScheduler(tmp_path)
     agent = RecoveryAgent(runtime)
     dispatcher = LocalWorkerDispatcher(scheduler, max_concurrent_runs=1)
-    dispatcher.attach_recovery_agent(agent)
+    dispatcher.attach_recovery_agent(cast('RecoveryAgentPort', agent))
     await dispatcher.start()
 
     snapshot = await wait_for_terminal(runtime, handle.run_id)
@@ -677,7 +690,7 @@ async def test_dispatcher_does_not_replay_uncheckpointed_running_work(tmp_path):
 
 @pytest.mark.asyncio
 async def test_recovery_fails_active_inline_child_with_parent_worker(tmp_path):
-    runtime = HarnessRuntime(EphemeralSessionStore())
+    runtime = HarnessRuntime(cast('SessionStore', EphemeralSessionStore()))
     parent = await runtime.start_run(start_command("recover-tree-parent"), CONTEXT)
     parent_running = await runtime.start_execution(
         run_id=parent.run_id,
@@ -707,7 +720,7 @@ async def test_recovery_fails_active_inline_child_with_parent_worker(tmp_path):
 
     scheduler = FilesystemScheduler(tmp_path)
     dispatcher = LocalWorkerDispatcher(scheduler, max_concurrent_runs=1)
-    dispatcher.attach_recovery_agent(RecoveryAgent(runtime))
+    dispatcher.attach_recovery_agent(cast('RecoveryAgentPort', RecoveryAgent(runtime)))
     await dispatcher.start()
 
     await wait_for_terminal(runtime, parent_running.run_id)
@@ -749,7 +762,7 @@ async def test_recovery_stops_when_lease_renewal_fails():
         scheduler, max_concurrent_runs=1, lease_seconds=0.15
     )
     result = await dispatcher.submit(
-        Agent(), SimpleNamespace(run_id="run-1", run_revision=0), CONTEXT
+        cast('RecoveryAgentPort', Agent()), cast('RunHandle | RunSnapshot', SimpleNamespace(run_id="run-1", run_revision=0)), CONTEXT
     )
     try:
         await asyncio.wait_for(renewal_failed.wait(), 1)
@@ -769,7 +782,7 @@ async def test_close_during_recovery_records_shutdown():
     recovering = asyncio.Event()
     scheduler = InMemoryScheduler()
     fenced = LeaseFencedSessionStore(EphemeralSessionStore(), scheduler)
-    runtime = HarnessRuntime(fenced)
+    runtime = HarnessRuntime(cast('SessionStore', fenced))
 
     class Driver:
         async def execute(self, run_id, context):
@@ -793,7 +806,7 @@ async def test_close_during_recovery_records_shutdown():
     result = await asyncio.wait_for(stream.wait(), 1)
     assert result.state == RunState.FAILED
     terminal = await runtime.get_run_result(result.run_id)
-    assert terminal.error.code == "scheduler.worker_shutdown"
+    assert cast(RuntimeErrorInfo, terminal.error).code == "scheduler.worker_shutdown"
     assert not dispatcher._requests
     assert (
         await scheduler.claim(

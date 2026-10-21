@@ -1,5 +1,13 @@
 from __future__ import annotations
 
+from typing import TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    from sagents.v2.runtime.session.contracts import SessionStore
+    from typing import Any, Coroutine
+
+from sagents.v2.model.provider import ModelProvider
+
 from sagents.v2.runtime.execution.sandbox import ResourceLimits
 
 import asyncio
@@ -442,7 +450,7 @@ async def test_fork_sessions_are_nested_and_parent_delete_cascades(tmp_path):
 @pytest.mark.asyncio
 async def test_runtime_session_tree_stream_keeps_parent_and_child_cursors(tmp_path):
     store = FilesystemSessionStore(tmp_path / "session-tree-stream")
-    runtime = HarnessRuntime(store)
+    runtime = HarnessRuntime(cast('SessionStore', store))
     parent = await runtime.start_run(command("tree-parent"), CONTEXT)
     child = await runtime.start_run(
         command(
@@ -468,21 +476,21 @@ async def test_runtime_session_tree_stream_keeps_parent_and_child_cursors(tmp_pa
 
     assert discovered == {parent.session_id, child.session_id}
     assert event_runs == {parent.run_id, child.run_id}
-    await stream.aclose()
+    await getattr(stream, 'aclose')()
     await store.close()
 
 
 @pytest.mark.asyncio
 async def test_descendants_only_tree_stream_waits_for_late_child(tmp_path):
     store = FilesystemSessionStore(tmp_path / "late-child-session-tree-stream")
-    runtime = HarnessRuntime(store)
+    runtime = HarnessRuntime(cast('SessionStore', store))
     parent = await runtime.start_run(command("late-tree-parent"), CONTEXT)
 
     stream = runtime.subscribe_session_tree(
         parent.session_id,
         include_root=False,
     )
-    first_observation = asyncio.create_task(anext(stream))
+    first_observation = asyncio.create_task(cast('Coroutine[Any, Any, Any]', anext(stream)))
     await asyncio.sleep(0.05)
     assert not first_observation.done()
 
@@ -510,7 +518,7 @@ async def test_descendants_only_tree_stream_waits_for_late_child(tmp_path):
     assert child_event.kind == "session.event"
     assert child_event.event is not None
     assert child_event.event.session_id == child.session_id
-    await stream.aclose()
+    await getattr(stream, 'aclose')()
     await store.close()
 
 
@@ -919,15 +927,15 @@ async def test_snapshot_publication_and_idempotency_survive_filesystem_restart(
 ):
     path = tmp_path / "runtime.db"
     repository = FilesystemSessionStore(path)
-    runtime = HarnessRuntime(repository)
+    runtime = HarnessRuntime(cast('SessionStore', repository))
     handle = await runtime.start_run(
         command("snapshot", mode=SessionConcurrencyMode.SNAPSHOT_ISOLATED), CONTEXT
     )
     completed_run = await AgentLoopEngine(
         runtime=runtime,
-        model=ScriptedModelProvider(
+        model=cast(ModelProvider, ScriptedModelProvider(
             (ScriptedModelStep(events=(completed("candidate"),)),)
-        ),
+        )),
         tool_catalog=InMemoryToolCatalog(()),
         tool_executor=InMemoryToolExecutor({}, {}),
     ).execute(handle.run_id, CONTEXT)
@@ -984,7 +992,7 @@ async def test_suspended_approval_resumes_after_store_process_reopen(
 ):
     path = tmp_path / "runtime.db"
     repository = FilesystemSessionStore(path)
-    runtime = HarnessRuntime(repository)
+    runtime = HarnessRuntime(cast('SessionStore', repository))
     handle = await runtime.start_run(command(), CONTEXT)
     first_model = ScriptedModelProvider(
         (
@@ -1017,7 +1025,7 @@ async def test_suspended_approval_resumes_after_store_process_reopen(
     await repository.close()
 
     restored_repository = FilesystemSessionStore(path)
-    restored_runtime = HarnessRuntime(restored_repository)
+    restored_runtime = HarnessRuntime(cast('SessionStore', restored_repository))
     restored_run = await restored_runtime.get_run(handle.run_id)
     suspension = await restored_repository.get_suspension(restored_run.suspension_id)
     interaction = await restored_repository.get_interaction(suspension.interaction_id)
@@ -1065,7 +1073,7 @@ async def test_suspended_approval_resumes_after_store_process_reopen(
 async def test_steer_inbox_and_claim_cursor_survive_filesystem_restarts(tmp_path):
     path = tmp_path / "runtime.db"
     repository = FilesystemSessionStore(path)
-    runtime = HarnessRuntime(repository)
+    runtime = HarnessRuntime(cast('SessionStore', repository))
     handle = await runtime.start_run(command(), CONTEXT)
     running = await runtime.start_execution(
         run_id=handle.run_id,
@@ -1119,7 +1127,7 @@ async def test_nested_flow_interaction_stack_survives_filesystem_restart(tmp_pat
             version="1",
             start="delegate",
             nodes=(FlowNode(id="delegate", type="subflow", flow="child"),),
-            edges=(FlowEdge(**{"from": "delegate", "to": "end"}),),
+            edges=(FlowEdge(**cast('dict[str, Any]', {"from": "delegate", "to": "end"})),),
         ),
         "child": FlowDefinition(
             version="1",
@@ -1134,9 +1142,9 @@ async def test_nested_flow_interaction_stack_survives_filesystem_restart(tmp_pat
                 FlowNode(id="work", type="agent", agent="worker"),
             ),
             edges=(
-                FlowEdge(**{"from": "approval", "to": "work", "when": "approved"}),
-                FlowEdge(**{"from": "approval", "to": "end", "when": "denied"}),
-                FlowEdge(**{"from": "work", "to": "end"}),
+                FlowEdge(**cast('dict[str, Any]', {"from": "approval", "to": "work", "when": "approved"})),
+                FlowEdge(**cast('dict[str, Any]', {"from": "approval", "to": "end", "when": "denied"})),
+                FlowEdge(**cast('dict[str, Any]', {"from": "work", "to": "end"})),
             ),
         ),
     }
@@ -1150,7 +1158,7 @@ async def test_nested_flow_interaction_stack_survives_filesystem_restart(tmp_pat
             return FlowNodeResult(output={"restored": True})
 
     first_repository = FilesystemSessionStore(path)
-    first_runtime = HarnessRuntime(first_repository)
+    first_runtime = HarnessRuntime(cast('SessionStore', first_repository))
     handle = await first_runtime.start_run(command(), CONTEXT)
     suspended = await FlowRuntime(
         runtime=first_runtime,
@@ -1163,7 +1171,7 @@ async def test_nested_flow_interaction_stack_survives_filesystem_restart(tmp_pat
     await first_repository.close()
 
     restored_repository = FilesystemSessionStore(path)
-    restored_runtime = HarnessRuntime(restored_repository)
+    restored_runtime = HarnessRuntime(cast('SessionStore', restored_repository))
     restored_run = await restored_runtime.get_run(handle.run_id)
     suspension = await restored_repository.get_suspension(restored_run.suspension_id)
     interaction = await restored_repository.get_interaction(suspension.interaction_id)

@@ -1,3 +1,9 @@
+
+from typing import TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    from sqlalchemy.ext.asyncio import AsyncEngine
+
 from sqlalchemy import event, inspect
 
 from app.v2.server.database import Database, DatabaseSettings
@@ -15,10 +21,10 @@ async def test_schema_creates_current_tables_and_only_checks_existence_on_restar
 
     try:
         await create_host_schema(database)
-        async with database._engine.connect() as connection:
+        async with cast('AsyncEngine', database._engine).connect() as connection:
             tables = await connection.run_sync(lambda sync: set(inspect(sync).get_table_names()))
             assert set(Base.metadata.tables) <= tables
-        engine = database._engine.sync_engine
+        engine = cast('AsyncEngine', database._engine).sync_engine
         event.listen(engine, "before_cursor_execute", capture)
         try:
             await create_host_schema(database)

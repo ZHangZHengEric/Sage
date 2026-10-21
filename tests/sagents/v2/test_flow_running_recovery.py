@@ -1,5 +1,15 @@
 """Running Flow cursors and branch receipts survive driver/store replacement."""
 
+from typing import cast, Mapping
+from sagents.v2.flow.contracts import RunnableNode
+
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from sagents.v2.flow.contracts import RunnableNode
+    from sagents.v2.runtime.session.contracts import SessionStore
+    from typing import Any, Mapping
+
 import asyncio
 
 import pytest
@@ -64,14 +74,14 @@ async def test_sequential_flow_recovers_saved_results_without_repeating_complete
     engine = CrashFlow(
         runtime=runtime,
         flows={"main": flow},
-        agent_nodes={"inspector": inspector, "verifier": WaitingNode()},
+        agent_nodes=cast('Mapping[str, RunnableNode]', {"inspector": inspector, "verifier": WaitingNode()}),
     )
     worker = asyncio.create_task(engine.execute(handle.run_id, "main", CONTEXT))
     await asyncio.wait_for(ready.wait(), 10)
     await stop_worker(worker)
     await store.close()
     restored_store = FilesystemSessionStore(tmp_path)
-    restored_runtime = HarnessRuntime(restored_store)
+    restored_runtime = HarnessRuntime(cast('SessionStore', restored_store))
     verifier = FakeNode({"verified": True})
     restored = FlowRuntime(
         runtime=restored_runtime,
@@ -111,12 +121,12 @@ async def test_parallel_flow_recovers_only_unfinished_branches(tmp_path):
             FlowNode(id="fast", type="agent", agent="fast"),
             FlowNode(id="slow", type="agent", agent="slow"),
         ),
-        edges=(FlowEdge(**{"from": "batch", "to": "end"}),),
+        edges=(FlowEdge(**cast('dict[str, Any]', {"from": "batch", "to": "end"})),),
     )
     engine = FlowRuntime(
         runtime=runtime,
         flows={"main": flow},
-        agent_nodes={"fast": fast, "slow": Slow()},
+        agent_nodes=cast('Mapping[str, RunnableNode]', {"fast": fast, "slow": Slow()}),
     )
     worker = asyncio.create_task(engine.execute(handle.run_id, "main", CONTEXT))
     await asyncio.wait_for(waiting.wait(), 10)
@@ -138,7 +148,7 @@ async def test_parallel_flow_recovers_only_unfinished_branches(tmp_path):
     restored_store = FilesystemSessionStore(tmp_path)
     slow = FakeNode({"recovered": True})
     engine = FlowRuntime(
-        runtime=HarnessRuntime(restored_store),
+        runtime=HarnessRuntime(cast('SessionStore', restored_store)),
         flows={"main": flow},
         agent_nodes={"fast": fast, "slow": slow},
     )
@@ -168,13 +178,13 @@ async def test_flow_does_not_replay_a_tool_with_unknown_side_effect(tmp_path):
         version="1",
         start="write",
         nodes=(FlowNode(id="write", type="tool", tool="write"),),
-        edges=(FlowEdge(**{"from": "write", "to": "end"}),),
+        edges=(FlowEdge(**cast('dict[str, Any]', {"from": "write", "to": "end"})),),
     )
     engine = FlowRuntime(
         runtime=runtime,
         flows={"main": flow},
         agent_nodes={},
-        tool_nodes={"write": Tool()},
+        tool_nodes=cast('Mapping[str, RunnableNode] | None', {"write": Tool()}),
     )
     worker = asyncio.create_task(engine.execute(handle.run_id, "main", CONTEXT))
     await asyncio.wait_for(applied.wait(), 10)
@@ -183,7 +193,7 @@ async def test_flow_does_not_replay_a_tool_with_unknown_side_effect(tmp_path):
         runtime=runtime,
         flows={"main": flow},
         agent_nodes={},
-        tool_nodes={"write": Tool()},
+        tool_nodes=cast('Mapping[str, RunnableNode] | None', {"write": Tool()}),
     )
     try:
         assert (
@@ -263,7 +273,7 @@ async def test_native_flow_defers_child_outage_and_releases_the_only_worker(
         version="1",
         start="work",
         nodes=(FlowNode(id="work", type="agent", agent="worker"),),
-        edges=(FlowEdge(**{"from": "work", "to": "end"}),),
+        edges=(FlowEdge(**cast('dict[str, Any]', {"from": "work", "to": "end"})),),
     )
     engine = FlowRuntime(
         runtime=runtime, flows={"main": flow}, agent_nodes={"worker": native}
@@ -395,7 +405,7 @@ async def test_hard_kill_flow_recovers_native_child_without_repeating_saved_writ
         async def ready():
             while not (tmp_path / "ready").exists():
                 if first.returncode is not None:
-                    raise AssertionError((await first.stderr.read()).decode())
+                    raise AssertionError((await cast(asyncio.StreamReader, first.stderr).read()).decode())
                 await asyncio.sleep(0.02)
 
         await asyncio.wait_for(ready(), 60)
@@ -437,8 +447,8 @@ async def test_recovery_reuses_answer_committed_before_running_cursor_checkpoint
             FlowNode(id="finish", type="agent", agent="worker"),
         ),
         edges=(
-            FlowEdge(**{"from": "approval", "to": "finish"}),
-            FlowEdge(**{"from": "finish", "to": "end"}),
+            FlowEdge(**cast('dict[str, Any]', {"from": "approval", "to": "finish"})),
+            FlowEdge(**cast('dict[str, Any]', {"from": "finish", "to": "end"})),
         ),
     )
     engine = FlowRuntime(
@@ -471,7 +481,7 @@ async def test_recovery_reuses_answer_committed_before_running_cursor_checkpoint
     restored = FilesystemSessionStore(tmp_path)
     try:
         engine = FlowRuntime(
-            runtime=HarnessRuntime(restored),
+            runtime=HarnessRuntime(cast('SessionStore', restored)),
             flows={"main": flow},
             agent_nodes={"worker": finish},
         )

@@ -8,6 +8,13 @@ happens to a delegation whose answer never arrives.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    from sagents.v2.tool.plugins.a2a import A2ATransport
+
+from sagents.v2.contracts.items import JsonBlock
+
 import asyncio
 
 import pytest
@@ -59,7 +66,7 @@ def completed(text: str = "the answer", state: str = "TASK_STATE_COMPLETED") -> 
 class FakePeer:
     """A peer that answers however the test says, and records what it was sent."""
 
-    def __init__(self, card: dict | None = None, answer: object = None) -> None:
+    def __init__(self, card: dict | Exception | None = None, answer: object = None) -> None:
         self._card = CARD if card is None else card
         self._answer = answer if answer is not None else completed()
         self.sent: list[tuple[str, dict]] = []
@@ -153,7 +160,7 @@ async def test_the_answer_and_the_ids_to_continue_it_come_back_together():
     assert result.error is None
     assert isinstance(result.content[0], TextBlock)
     assert result.content[0].text == "the answer"
-    assert result.content[1].value["contextId"] == "ctx-1"
+    assert cast(JsonBlock, result.content[1]).value["contextId"] == "ctx-1"
     assert result.metadata["a2a_context_id"] == "ctx-1"
 
 
@@ -179,8 +186,8 @@ async def test_a_peer_that_stopped_to_ask_says_so_in_the_answer():
     result = await plugin.execute(make_call(name, {"message": "hi"}), CONTEXT)
 
     assert result.error is None
-    assert "needs more information" in result.content[0].text
-    assert "which year?" in result.content[0].text
+    assert "needs more information" in cast(TextBlock, result.content[0]).text
+    assert "which year?" in cast(TextBlock, result.content[0]).text
     assert result.metadata["a2a_task_state"] == "TASK_STATE_INPUT_REQUIRED"
 
 
@@ -201,7 +208,7 @@ async def test_a_refusal_from_the_peer_is_a_tool_error_not_a_dead_run():
     assert result.error is not None
     assert result.error.code == "a2a.peer_error"
     assert result.error.safe_to_resume is True
-    assert "messageId is required" in result.content[0].text
+    assert "messageId is required" in cast(TextBlock, result.content[0]).text
 
 
 async def test_a_lost_answer_is_reported_as_an_uncertain_side_effect():
@@ -308,7 +315,7 @@ async def test_an_unreachable_optional_peer_costs_its_tools_and_nothing_else():
     """Discovery is a read, so failing it cannot have left anything behind."""
 
     plugin = A2AToolPlugin(
-        (peer(),), transport=FakePeer(card=ConnectionError("no route"))
+        (peer(),), transport=cast('A2ATransport | None', FakePeer(card=ConnectionError("no route")))
     )
 
     definitions = await plugin.list_tools(run_id="run-1")
@@ -321,7 +328,7 @@ async def test_an_unreachable_optional_peer_costs_its_tools_and_nothing_else():
 
 async def test_a_required_peer_that_cannot_be_read_fails_the_composition():
     plugin = A2AToolPlugin(
-        (peer(required=True),), transport=FakePeer(card=ConnectionError("no route"))
+        (peer(required=True),), transport=cast('A2ATransport | None', FakePeer(card=ConnectionError("no route")))
     )
 
     with pytest.raises(SageV2Error) as raised:

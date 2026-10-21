@@ -1,5 +1,12 @@
 """Management plugins and the three stable-path workspace policies."""
 
+from typing import TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    from sagents.v2.runtime.execution.sandbox.contracts import FileSystemMode
+
+from sagents.v2.package.manifest.runtime import CapabilitySelection
+
 import asyncio
 import json
 from types import SimpleNamespace
@@ -75,7 +82,7 @@ async def targets(tmp_path):
             spec_hash="sha256:test",
             policy_hash="sha256:policy",
             architecture="native" if disk else "portable",
-            filesystem_mode="workspace",
+            filesystem_mode=cast('FileSystemMode', "workspace"),
             filesystem=FileSystemPolicy(
                 allowed_operations=operations or frozenset(FileOperation)
             ),
@@ -106,8 +113,8 @@ async def test_default_filesystem_and_stable_reference_path(tmp_path, targets):
 
     for name in ("skill.management", "skill.provider"):
         selected = default_runtime(tmp_path).capabilities[name]
-        assert selected.plugin == "sage.skill.filesystem"
-        assert selected.config == {"roots": [str(tmp_path / "skills")]}
+        assert cast(CapabilitySelection, selected).plugin == "sage.skill.filesystem"
+        assert cast(CapabilitySelection, selected).config == {"roots": [str(tmp_path / "skills")]}
     root = tmp_path / "source/demo"
     (root / "references").mkdir(parents=True)
     (root / "SKILL.md").write_text(
@@ -415,7 +422,7 @@ def test_grouped_config_has_auto_sync_default_and_canonical_serialization():
         {"skills": {"management": {"plugin": "sage.skill.repository.memory"}}}
     )
     assert (
-        value.capabilities["skill.workspace"].plugin == "sage.skill.workspace.auto-sync"
+        cast(CapabilitySelection, value.capabilities["skill.workspace"]).plugin == "sage.skill.workspace.auto-sync"
     )
     assert RuntimeConfig.model_validate(value.model_dump()) == value
     with pytest.raises(ValidationError, match="both configure"):

@@ -52,7 +52,7 @@ async def test_cancelled_delete_keeps_admission_locked_until_worker_finishes():
 
     async def load_agent(*args):
         return SimpleNamespace(id="agent", composition_hash="sha256:test")
-    service._load_run_agent = load_agent
+    setattr(service, '_load_run_agent', load_agent)
 
     def delete():
         entered.set()
@@ -96,7 +96,7 @@ async def test_unrelated_workspace_admission_proceeds_while_another_workspace_is
         session_access=None, execution=SimpleNamespace(driving=lambda _: False))
     async def load_agent(command, owner):
         return SimpleNamespace(id=command.agent_id, composition_hash="sha256:test")
-    service._load_run_agent = load_agent
+    setattr(service, '_load_run_agent', load_agent)
     async with service.workspace_lock("first-tenant", "agent"):
         await asyncio.wait_for(service.start_detached_run(
             "ag-ui", StartRun(agent_id="agent", input=(), resolved_spec_hash="sha256:test", idempotency_key="other"),

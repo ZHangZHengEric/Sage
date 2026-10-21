@@ -1,3 +1,14 @@
+
+from typing import Any, TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    from sagents.v2.application import SAgentApplication
+
+from app.v2.desktop.backend.schemas import RunMessageContent
+
+from sagents.v2.contracts.items import JsonBlock
+
+from sagents.v2.contracts.events import ToolEventData
 from contextlib import asynccontextmanager
 from datetime import timedelta
 
@@ -171,7 +182,7 @@ async def test_targeted_message_keeps_parallel_addresses_and_validates_reference
     from types import SimpleNamespace
 
     service = DesktopStudioMixin()
-    service.studio_store = StudioStore(tmp_path / "studios.db")
+    setattr(service, 'studio_store', StudioStore(tmp_path / "studios.db"))
     data = group()
     data.members.append(
         StudioMemberInput(
@@ -203,11 +214,11 @@ async def test_targeted_message_keeps_parallel_addresses_and_validates_reference
             sender="user",
             kind="user",
             text=original,
-            content=[reference],
+            content=cast(list[RunMessageContent], [reference]),
             recipient_member_ids=["member_sage", "designer"],
         )
     ]
-    service.studio_store.sync("group", "owner", data)
+    getattr(service, 'studio_store').sync("group", "owner", data)
     for member_id, agent_id, session_id in [
         ("member_sage", "sage", "session_studio"),
         ("designer", "designer", "session_designer"),
@@ -219,20 +230,20 @@ async def test_targeted_message_keeps_parallel_addresses_and_validates_reference
             studio_member_id=member_id,
             studio_message_id="studio_message_parallel",
             invocation_mode="plan",
-            messages=[RunMessage(role="user", text=original, content=[reference])],
+            messages=[RunMessage(role="user", text=original, content=cast(list[RunMessageContent], [reference]))],
         )
         binding = service.studio_request_binding(request, "owner")
         command = SimpleNamespace(config=SimpleNamespace(metadata={"studio": binding}))
         segments = await StudioContextProvider(
-            service.studio_store, "owner", binding
+            getattr(service, 'studio_store'), "owner", binding
         ).segments(command)
-        assert f"You are {member_id}" in segments[0].content
-        assert "execute in parallel" in segments[0].content
+        assert f"You are {member_id}" in cast('tuple[Any, ...]', segments)[0].content
+        assert "execute in parallel" in cast('tuple[Any, ...]', segments)[0].content
         assert (
-            "member_sage" in segments[0].content and "designer" in segments[0].content
+            "member_sage" in cast('tuple[Any, ...]', segments)[0].content and "designer" in cast('tuple[Any, ...]', segments)[0].content
         )
-        assert "keep the existing layout" in segments[1].content
-        request.messages[0].content[0].quote = "forged reference"
+        assert "keep the existing layout" in cast('tuple[Any, ...]', segments)[1].content
+        setattr(request.messages[0].content[0], "quote", "forged reference")
         with pytest.raises(ValueError, match="references must match"):
             service.studio_request_binding(request, "owner")
     with pytest.raises(SageV2Error):
@@ -243,7 +254,7 @@ async def test_targeted_message_keeps_parallel_addresses_and_validates_reference
                 studio_id="group",
                 studio_member_id="observer",
                 studio_message_id="studio_message_parallel",
-                messages=[RunMessage(role="user", text=original, content=[reference])],
+                messages=[RunMessage(role="user", text=original, content=cast(list[RunMessageContent], [reference]))],
             ),
             "owner",
         )
@@ -297,7 +308,7 @@ async def test_studio_tools_are_per_run_and_recovered_without_global_configurati
             "text": "Earlier decision verified", "recipient_member_ids": ["member_sage"]}, operation_id="op_publish",
             idempotency_key="key_publish", owner_run_id=handle.run_id)
         result = await tool_provider.execute(call, service._context("owner"))
-        assert result.content[0].value["kind"] == "note"
+        assert cast(JsonBlock, result.content[0]).value["kind"] == "note"
         recovered = service.studio_tool_provider(handle.run_id, "owner", binding)
         assert (await recovered.execute(call, service._context("owner"))).content == result.content
         with pytest.raises(SageV2Error):
@@ -308,7 +319,7 @@ async def test_studio_tools_are_per_run_and_recovered_without_global_configurati
             await recovered.execute(call.model_copy(update={"tool_call_id": "bad", "idempotency_key": "bad", "arguments": {
                 "text": "bad", "recipient_member_ids": ["outsider"]}}), service._context("owner"))
         found = await service.find_studio_run("group", "member_sage", "studio_message_first", "owner")
-        assert found["run_id"] == handle.run_id
+        assert cast('dict[str, Any]', found)["run_id"] == handle.run_id
         with pytest.raises(SageV2Error):
             await service.find_studio_run("group", "member_sage", "studio_message_first", "outsider")
         public = await service.read_studio("group", "owner")
@@ -316,7 +327,7 @@ async def test_studio_tools_are_per_run_and_recovered_without_global_configurati
         await service.publish_studio_run_result(handle.run_id)
         assert sum(message["text"] == "Finished" for message in (await service.read_studio("group", "owner"))["messages"]) == 1
         events = await service.session_store.read_events(handle.run_id)
-        assert STUDIO_TOOLS <= {event.data.tool_name for event in events if event.type == "tool.call.succeeded"}
+        assert STUDIO_TOOLS <= {cast(ToolEventData, event.data).tool_name for event in events if event.type == "tool.call.succeeded"}
         assert any(message["text"] == "Published through the real tool executor" for message in service.studio_store.read("group", "owner")["messages"])
     finally:
         await service.close()
@@ -324,7 +335,7 @@ async def test_studio_tools_are_per_run_and_recovered_without_global_configurati
     try:
         await reopened.start()
         await reopened._stop_studio_delivery_worker()
-        restored = await reopened.application.agent_for_run(handle.run_id, reopened._context("owner"))
+        restored = await cast('SAgentApplication', reopened.application).agent_for_run(handle.run_id, reopened._context("owner"))
         assert restored.composition_hash == command.resolved_spec_hash
         restored_agent = await reopened._agent("sage", "owner")
         restored_binding = await reopened.studio_run_binding(handle.run_id, restored_agent, handle.session_id)
@@ -667,7 +678,7 @@ async def test_mention_delivery_executes_real_v2_run_and_reconciles_lost_receipt
         found = await service.find_studio_run(
             "group", "member_sage", "tool:wake", "owner"
         )
-        assert found["state"] == "completed"
+        assert cast('dict[str, Any]', found)["state"] == "completed"
         assert len(requests) == 1
         assert "请处理此消息" in str(requests[0].messages)
         assert "user" in str(requests[0].messages)

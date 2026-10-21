@@ -29,7 +29,12 @@ MARKER = "SAGE_SMOKE_TASK_COMPLETED"
 TASK = "Return the completion marker."
 
 
+class ModelServer(ThreadingHTTPServer):
+    requests: int
+
+
 class ModelHandler(BaseHTTPRequestHandler):
+    server: ModelServer
     def log_message(self, *_args):
         pass
 
@@ -222,7 +227,7 @@ def main():
     if parser.parse_args().app_model:
         live_app_main()
         return
-    server = ThreadingHTTPServer(("127.0.0.1", 0), ModelHandler)
+    server = ModelServer(("127.0.0.1", 0), ModelHandler)
     server.requests = 0
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()

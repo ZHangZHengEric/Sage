@@ -1,6 +1,15 @@
 """Transport failures reach the model without blocking root or delegated runs."""
 from __future__ import annotations
 
+from typing import TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    from sagents.v2.agent.modes.loop_factory import ModelProviderFactory
+    from sagents.v2.contracts.run_state import RunSnapshot
+    from sagents.v2.model.contracts import ModelEventKind
+
+from sagents.v2.model.provider import ModelProvider
+
 import asyncio
 from contextlib import asynccontextmanager
 
@@ -28,7 +37,7 @@ POLICY = DefaultToolPolicy(approval_strategy=ApprovalStrategy.AUTO_APPROVE)
 
 def step(*, tool=None, key="call", assertion=None):
     calls = (ModelToolCall(tool_call_id=key, name=f"mcp_media_{tool}", arguments={"job": "video-1"}),) if tool else ()
-    return ScriptedModelStep(events=(ModelStreamEvent(kind="completed", response=ModelResponse(
+    return ScriptedModelStep(events=(ModelStreamEvent(kind=cast('ModelEventKind', "completed"), response=ModelResponse(
         response_id=key, text="" if calls else "done", tool_calls=calls,
         finish_reason="tool_calls" if calls else "stop",
     )),), assertion=assertion)
@@ -85,7 +94,7 @@ class MediaServer:
     def bridge(self):
         return McpToolPlugin((McpServerConfig(
             name="media", protocol="streamable_http", url="https://unused.test",
-            call_timeout_seconds=0.01 if self.failure == "timeout" else None,
+            call_timeout_seconds=cast('float', 0.01 if self.failure == "timeout" else None),
         ),), session_factory=self.session)
 
 
@@ -115,7 +124,7 @@ async def test_main_agent_checks_status_then_reuses_output_or_retries(failure, a
         steps.append(step(tool="create", key="retry"))
     steps.append(step())
     model = ScriptedModelProvider(tuple(steps))
-    loop = AgentLoopEngine(runtime=runtime, model=model, tool_catalog=bridge, tool_executor=bridge, tool_policy=POLICY)
+    loop = AgentLoopEngine(runtime=runtime, model=cast(ModelProvider, model), tool_catalog=bridge, tool_executor=bridge, tool_policy=POLICY)
 
     result = await loop.execute(handle.run_id, CONTEXT)
 
@@ -137,7 +146,7 @@ async def test_parent_and_delegated_child_both_recover_without_approval(failure)
     servers = {name: MediaServer(failure) for name in ("root", "child")}
     bridges = {name: server.bridge() for name, server in servers.items()}
     definitions = await bridges["root"].list_tools(run_id=handle.run_id)
-    delegate = ScriptedModelStep(events=(ModelStreamEvent(kind="completed", response=ModelResponse(
+    delegate = ScriptedModelStep(events=(ModelStreamEvent(kind=cast('ModelEventKind', "completed"), response=ModelResponse(
         response_id="delegate", tool_calls=(ModelToolCall(
             tool_call_id="delegate", name="sys_team_delegate_task",
             arguments={"tasks": [{"agent_id": "child", "content": "make video"}]},
@@ -154,7 +163,7 @@ async def test_parent_and_delegated_child_both_recover_without_approval(failure)
     ) for name in servers}
 
     def compose(descriptor, run_id, catalog, executor):
-        return AgentLoopEngine(runtime=runtime, model=models[descriptor.agent_id],
+        return AgentLoopEngine(runtime=runtime, model=cast(ModelProvider, models[descriptor.agent_id]),
                                tool_catalog=catalog, tool_executor=executor, tool_policy=POLICY)
 
     # The production factory shares the base bridge across parent and child.
@@ -168,7 +177,7 @@ async def test_parent_and_delegated_child_both_recover_without_approval(failure)
 
     base = RoutedBridge(bridges["root"].servers, session_factory=servers["root"].session)
     factory = ModeAwareAgentLoopFactory(
-        runtime=runtime, model_factory=lambda descriptor, _: models[descriptor.agent_id],
+        runtime=runtime, model_factory=cast('ModelProviderFactory', lambda descriptor, _: models[descriptor.agent_id]),
         base_catalog=base, base_executor=base, registry=AgentRegistry(tuple(descriptors.values())),
         resolved_spec_hash="sha256:mcp-recovery", loop_composer=compose,
     )
@@ -196,7 +205,7 @@ async def test_interrupted_dispatch_recovers_with_new_bridge_without_replaying_w
     runtime = ephemeral_runtime()
     handle = await start(runtime)
     bridge = server.bridge()
-    loop = AgentLoopEngine(runtime=runtime, model=ScriptedModelProvider((step(tool="create"),)),
+    loop = AgentLoopEngine(runtime=runtime, model=cast(ModelProvider, ScriptedModelProvider((step(tool="create"),))),
                            tool_catalog=bridge, tool_executor=bridge, tool_policy=POLICY)
     task = asyncio.create_task(loop.execute(handle.run_id, CONTEXT))
     await asyncio.wait_for(server.dispatched.wait(), 2)
@@ -206,13 +215,13 @@ async def test_interrupted_dispatch_recovers_with_new_bridge_without_replaying_w
 
     fresh_bridge = server.bridge()  # No in-memory receipts survive the worker loss.
     cold = ephemeral_runtime()
-    await cold.session_store.load_state(await runtime.session_store.export_state())
+    await getattr(cold.session_store, 'load_state')(await getattr(runtime.session_store, 'export_state')())
     model = ScriptedModelProvider((step(tool="status", key="status", assertion=assert_unknown), step()))
-    recovered = AgentLoopEngine(runtime=cold, model=model, tool_catalog=fresh_bridge,
+    recovered = AgentLoopEngine(runtime=cold, model=cast(ModelProvider, model), tool_catalog=fresh_bridge,
                                 tool_executor=fresh_bridge, tool_policy=POLICY)
     result = await recovered.recover_interrupted(handle.run_id, CONTEXT)
 
-    assert result.state == RunState.COMPLETED
+    assert cast('RunSnapshot', result).state == RunState.COMPLETED
     assert server.calls == ["create", "status"]
     assert server.created == 1
     await assert_no_interactions(cold, handle.run_id)
@@ -241,7 +250,7 @@ async def test_connection_reset_before_dispatch_returns_known_failure_for_safe_r
         assert "outcome is unknown" not in message.content[0].text
 
     model = ScriptedModelProvider((step(tool="status"), step(tool="status", key="retry", assertion=assert_not_applied), step()))
-    loop = AgentLoopEngine(runtime=runtime, model=model, tool_catalog=bridge, tool_executor=bridge, tool_policy=POLICY)
+    loop = AgentLoopEngine(runtime=runtime, model=cast(ModelProvider, model), tool_catalog=bridge, tool_executor=bridge, tool_policy=POLICY)
     result = await loop.execute(handle.run_id, CONTEXT)
 
     assert result.state == RunState.COMPLETED

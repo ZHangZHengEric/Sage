@@ -1,5 +1,9 @@
 """Plugin inventory and persisted, scoped Agent overrides."""
 
+from typing import cast
+
+from sagents.v2.package.manifest.runtime import CapabilitySelection
+
 from app.v2.server.catalog.plugins import AGENT_DEFAULTS, plugin_options
 from app.v2.server.config.manifest import server_v2_run_manifest
 from tests.app.v2.server.test_file_downloads import identity
@@ -52,8 +56,8 @@ def test_agent_plugin_selection_roundtrips_and_is_used_by_run_manifest(client):
     )
     manifest = server_v2_run_manifest(agent=agent)
     actual = manifest.runtime.capabilities["context.summarizer"]
-    assert actual.config["max_source_tokens"] == 16000
-    assert actual.config["timeout_seconds"] == 30
+    assert cast(CapabilitySelection, actual).config["max_source_tokens"] == 16000
+    assert cast(CapabilitySelection, actual).config["timeout_seconds"] == 30
     # Omission preserves; an explicit empty object resets managed selections.
     updated = client.put(
         f"/api/agents/{agent_id}", headers=user, json={"name": "Renamed"}

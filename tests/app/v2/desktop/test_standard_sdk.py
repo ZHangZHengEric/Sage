@@ -1,3 +1,10 @@
+
+from typing import TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    from sagents.v2.application import SAgentApplication
+    from typing import Any
+
 import json
 
 import pytest
@@ -42,10 +49,10 @@ async def test_desktop_uses_standard_registered_execution_and_revision_recovery(
         assert any(frame.get("type") == "run.completed" for frame in frames), frames
         handle = frames[0]["handle"]
         context = service._context("user")
-        loaded = await service.application.agent_for_run(handle["run_id"], context)
+        loaded = await cast('SAgentApplication', service.application).agent_for_run(handle["run_id"], context)
         command = await service.session_store.get_start_command(handle["run_id"])
         assert command.agent_id == loaded.id
         assert command.resolved_spec_hash == loaded.composition_hash
-        assert (await service.application.execution_configuration(handle["run_id"], context)).provider_id
+        assert (cast('Any', await cast('SAgentApplication', service.application).execution_configuration(handle["run_id"], context))).provider_id
     finally:
         await service.close()

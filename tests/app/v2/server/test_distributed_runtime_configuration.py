@@ -4,6 +4,14 @@ Exercise settings, manifest selection and the real builtin plugin inventory;
 no server application or external database is needed for configuration rules.
 """
 
+from typing import Any, TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    from sagents.v2.contracts.principals import PrincipalType
+    from sagents.v2.testing.plugins.scripted_model import ScriptedModelStep
+
+from sagents.v2.package.manifest.runtime import CapabilitySelection
+
 import pytest
 
 from app.v2.server.config.manifest import server_v2_manifest
@@ -24,20 +32,20 @@ def test_distributed_selection_pairs_store_scheduler_and_required_guarantees(tmp
     store = runtime.capabilities["session.store"]
     scheduler = runtime.capabilities["execution.scheduler"]
     jobs = runtime.capabilities["execution.job-runtime"]
-    assert store.plugin == REDIS_STORE
-    assert store.config["dsn"] == settings.mysql_url
-    assert store.config["redis_url"] == settings.redis_url
-    assert scheduler.plugin == "sage.scheduler.redis-distributed"
-    assert scheduler.config["redis_url"] == settings.redis_url
-    assert scheduler.config["lease_seconds"] == 30
-    assert scheduler.config["max_concurrent_runs"] == settings.max_concurrent_runs
-    assert scheduler.config["max_concurrent_runs_per_tenant"] == settings.max_concurrent_runs_per_user
+    assert cast(CapabilitySelection, store).plugin == REDIS_STORE
+    assert cast(CapabilitySelection, store).config["dsn"] == settings.mysql_url
+    assert cast(CapabilitySelection, store).config["redis_url"] == settings.redis_url
+    assert cast(CapabilitySelection, scheduler).plugin == "sage.scheduler.redis-distributed"
+    assert cast(CapabilitySelection, scheduler).config["redis_url"] == settings.redis_url
+    assert cast(CapabilitySelection, scheduler).config["lease_seconds"] == 30
+    assert cast(CapabilitySelection, scheduler).config["max_concurrent_runs"] == settings.max_concurrent_runs
+    assert cast(CapabilitySelection, scheduler).config["max_concurrent_runs_per_tenant"] == settings.max_concurrent_runs_per_user
     assert runtime.required_guarantees["session.store"]["multi_process_writes"] is True
     assert runtime.required_guarantees["session.store"]["cross_process_subscribe"] is True
     assert runtime.required_guarantees["execution.scheduler"]["supports_distributed_claims"] is True
-    assert jobs.plugin == "sage.job.redis-distributed"
-    assert jobs.config["redis_url"] == store.config["redis_url"]
-    assert jobs.config["key_prefix"] != scheduler.config["key_prefix"]
+    assert cast(CapabilitySelection, jobs).plugin == "sage.job.redis-distributed"
+    assert cast(CapabilitySelection, jobs).config["redis_url"] == cast(CapabilitySelection, store).config["redis_url"]
+    assert cast(CapabilitySelection, jobs).config["key_prefix"] != cast(CapabilitySelection, scheduler).config["key_prefix"]
     assert runtime.required_guarantees["execution.job-runtime"] == {
         "multi_process_writes": True, "supports_remote_cancel": True}
 
@@ -56,8 +64,8 @@ def test_default_selection_preserves_existing_store_and_scheduler(tmp_path, redi
     settings = make_settings(tmp_path, mysql_url="mysql://unused/test", redis_url=redis_url)
     assert settings.session_store_plugin is None
     runtime = server_v2_manifest(settings).runtime
-    assert runtime.capabilities["session.store"].plugin == expected
-    assert runtime.capabilities["execution.scheduler"].plugin == "sage.scheduler.ephemeral"
+    assert cast(CapabilitySelection, runtime.capabilities["session.store"]).plugin == expected
+    assert cast(CapabilitySelection, runtime.capabilities["execution.scheduler"]).plugin == "sage.scheduler.ephemeral"
     assert "execution.job-runtime" not in runtime.required_guarantees
     assert runtime.required_guarantees["session.store"].get("multi_process_writes", False) is bool(redis_url)
 
@@ -72,9 +80,9 @@ def test_environment_selects_storage_and_scheduler_independently(tmp_path, monke
     settings = ServerSettings.from_env(data_root=tmp_path)
     assert settings.session_store_plugin == REDIS_STORE
     runtime = server_v2_manifest(settings).runtime
-    assert runtime.capabilities["execution.scheduler"].plugin == "sage.scheduler.redis-distributed"
-    assert runtime.capabilities["session.store"].config["key_prefix"] == "existing-session-namespace"
-    assert server_v2_manifest(settings).runtime.capabilities["session.store"].plugin == REDIS_STORE
+    assert cast(CapabilitySelection, runtime.capabilities["execution.scheduler"]).plugin == "sage.scheduler.redis-distributed"
+    assert cast(CapabilitySelection, runtime.capabilities["session.store"]).config["key_prefix"] == "existing-session-namespace"
+    assert cast(CapabilitySelection, server_v2_manifest(settings).runtime.capabilities["session.store"]).plugin == REDIS_STORE
 
 
 def test_distributed_plugins_keep_independent_public_ids_names_and_capabilities():
@@ -133,10 +141,10 @@ async def test_real_builder_selects_plugins_and_rejects_unsafe_pairs(
     })
     if expected_error:
         with pytest.raises(SageV2Error) as rejected:
-            await build_registered_app(tmp_path, runtime=runtime, model=ScriptedModelProvider([]))
+            await build_registered_app(tmp_path, runtime=runtime, model=ScriptedModelProvider(cast('tuple[ScriptedModelStep, ...]', [])))
         assert rejected.value.info.code == expected_error
     else:
-        app = await build_registered_app(tmp_path, runtime=runtime, model=ScriptedModelProvider([]))
+        app = await build_registered_app(tmp_path, runtime=runtime, model=ScriptedModelProvider(cast('tuple[ScriptedModelStep, ...]', [])))
         try:
             assert app.service("session.store").plugin_id == store_plugin
             assert app.service("execution.scheduler").plugin_id == scheduler_plugin
@@ -160,7 +168,7 @@ async def test_real_builder_selects_plugins_and_rejects_unsafe_pairs(
     {"session_store_key_prefix": "existing", "session_store_plugin": "sage.session.mysql"},
 ])
 def test_removed_or_incompatible_deployment_selections_are_rejected(tmp_path, config):
-    values = {"mysql_url": "mysql://unused/test", "redis_url": "redis://unused/0", **config}
+    values: dict[str, Any] = {"mysql_url": "mysql://unused/test", "redis_url": "redis://unused/0", **config}
     with pytest.raises(ValueError):
         make_settings(tmp_path, **values)
 
@@ -178,7 +186,7 @@ async def test_managed_apps_isolate_explicit_redis_namespaces_and_validation_sta
     try:
         user = await service.identity.register("namespace-owner", "secret1")
         context = RequestContext(actor=ActorRef(
-            principal_id=user.user_id, principal_type="user", tenant_id=user.user_id,
+            principal_id=user.user_id, principal_type=cast('PrincipalType', "user"), tenant_id=user.user_id,
         ))
         management = service.agent_management
         bundle = AgentPackageBundle.model_validate(await management.queries.template(context))

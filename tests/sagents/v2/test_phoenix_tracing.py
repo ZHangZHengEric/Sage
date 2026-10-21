@@ -1,5 +1,11 @@
 """Phoenix wire format, project routing and content policy."""
 
+from typing import Any, TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    from opentelemetry.trace import SpanContext
+    from typing import Mapping, Sequence
+
 import json
 
 import pytest
@@ -60,40 +66,40 @@ def test_phoenix_agent_model_and_tool_projection(content_mode):
     parent.end(attributes={"output": "answer"})
     model, tool, agent = exporter.get_finished_spans()
     assert model.resource.attributes["openinference.project.name"] == "sage-test"
-    assert model.attributes["openinference.span.kind"] == "LLM"
-    assert agent.attributes["openinference.span.kind"] == "AGENT"
-    assert agent.attributes["session.id"] == "root-session"
-    assert model.attributes["user.id"] == "user"
-    assert tool.attributes["openinference.span.kind"] == "TOOL"
-    assert tool.attributes["tool.name"] == "lookup"
-    assert model.parent.span_id == agent.context.span_id
-    assert model.attributes["llm.model_name"] == "actual-model"
-    assert model.attributes["llm.token_count.prompt"] == 100
-    assert model.attributes["llm.token_count.completion"] == 30
-    assert model.attributes["llm.token_count.total"] == 130
-    assert model.attributes["llm.token_count.prompt_details.cache_read"] == 40
-    assert model.attributes["llm.token_count.completion_details.reasoning"] == 10
-    assert model.attributes["llm.cost.total"] == 0.01
+    assert cast('Mapping[str, str | bool | int | float | Sequence[str] | Sequence[bool] | Sequence[int] | Sequence[float]]', model.attributes)["openinference.span.kind"] == "LLM"
+    assert cast('Mapping[str, str | bool | int | float | Sequence[str] | Sequence[bool] | Sequence[int] | Sequence[float]]', agent.attributes)["openinference.span.kind"] == "AGENT"
+    assert cast('Mapping[str, str | bool | int | float | Sequence[str] | Sequence[bool] | Sequence[int] | Sequence[float]]', agent.attributes)["session.id"] == "root-session"
+    assert cast('Mapping[str, str | bool | int | float | Sequence[str] | Sequence[bool] | Sequence[int] | Sequence[float]]', model.attributes)["user.id"] == "user"
+    assert cast('Mapping[str, str | bool | int | float | Sequence[str] | Sequence[bool] | Sequence[int] | Sequence[float]]', tool.attributes)["openinference.span.kind"] == "TOOL"
+    assert cast('Mapping[str, str | bool | int | float | Sequence[str] | Sequence[bool] | Sequence[int] | Sequence[float]]', tool.attributes)["tool.name"] == "lookup"
+    assert cast('SpanContext', model.parent).span_id == cast('SpanContext', agent.context).span_id
+    assert cast('Mapping[str, str | bool | int | float | Sequence[str] | Sequence[bool] | Sequence[int] | Sequence[float]]', model.attributes)["llm.model_name"] == "actual-model"
+    assert cast('Mapping[str, str | bool | int | float | Sequence[str] | Sequence[bool] | Sequence[int] | Sequence[float]]', model.attributes)["llm.token_count.prompt"] == 100
+    assert cast('Mapping[str, str | bool | int | float | Sequence[str] | Sequence[bool] | Sequence[int] | Sequence[float]]', model.attributes)["llm.token_count.completion"] == 30
+    assert cast('Mapping[str, str | bool | int | float | Sequence[str] | Sequence[bool] | Sequence[int] | Sequence[float]]', model.attributes)["llm.token_count.total"] == 130
+    assert cast('Mapping[str, str | bool | int | float | Sequence[str] | Sequence[bool] | Sequence[int] | Sequence[float]]', model.attributes)["llm.token_count.prompt_details.cache_read"] == 40
+    assert cast('Mapping[str, str | bool | int | float | Sequence[str] | Sequence[bool] | Sequence[int] | Sequence[float]]', model.attributes)["llm.token_count.completion_details.reasoning"] == 10
+    assert cast('Mapping[str, str | bool | int | float | Sequence[str] | Sequence[bool] | Sequence[int] | Sequence[float]]', model.attributes)["llm.cost.total"] == 0.01
     if content_mode == "metadata":
-        assert "input.value" not in agent.attributes
-        assert "output.value" not in agent.attributes
-        assert "input.value" not in model.attributes
-        assert "output.value" not in model.attributes
-        assert "tool.parameters" not in tool.attributes
+        assert "input.value" not in cast('dict[str, Any]', agent.attributes)
+        assert "output.value" not in cast('dict[str, Any]', agent.attributes)
+        assert "input.value" not in cast('dict[str, Any]', model.attributes)
+        assert "output.value" not in cast('dict[str, Any]', model.attributes)
+        assert "tool.parameters" not in cast('dict[str, Any]', tool.attributes)
     else:
-        assert json.loads(agent.attributes["input.value"]) == "hello"
-        assert json.loads(agent.attributes["output.value"]) == "answer"
-        assert json.loads(model.attributes["output.value"]) == {"text": "answer"}
-        assert model.attributes["input.mime_type"] == "application/json"
+        assert json.loads(cast('str | bytes | bytearray', cast('Mapping[str, str | bool | int | float | Sequence[str] | Sequence[bool] | Sequence[int] | Sequence[float]]', agent.attributes)["input.value"])) == "hello"
+        assert json.loads(cast('str | bytes | bytearray', cast('Mapping[str, str | bool | int | float | Sequence[str] | Sequence[bool] | Sequence[int] | Sequence[float]]', agent.attributes)["output.value"])) == "answer"
+        assert json.loads(cast('str | bytes | bytearray', cast('Mapping[str, str | bool | int | float | Sequence[str] | Sequence[bool] | Sequence[int] | Sequence[float]]', model.attributes)["output.value"])) == {"text": "answer"}
+        assert cast('Mapping[str, str | bool | int | float | Sequence[str] | Sequence[bool] | Sequence[int] | Sequence[float]]', model.attributes)["input.mime_type"] == "application/json"
         assert (
-            json.loads(tool.attributes["tool.parameters"])["secret_key"] == "[REDACTED]"
+            json.loads(cast('str | bytes | bytearray', cast('Mapping[str, str | bool | int | float | Sequence[str] | Sequence[bool] | Sequence[int] | Sequence[float]]', tool.attributes)["tool.parameters"]))["secret_key"] == "[REDACTED]"
         )
     assert "never-export-me" not in str(exporter.get_finished_spans())
     # Phoenix unflattens dotted attributes. A scalar `input`/`output` blocks
     # the corresponding OpenInference namespace, hiding content in its UI.
     for span in (model, tool, agent):
-        assert "input" not in span.attributes
-        assert "output" not in span.attributes
+        assert "input" not in cast('dict[str, Any]', span.attributes)
+        assert "output" not in cast('dict[str, Any]', span.attributes)
     sink.close()
 
 
@@ -119,6 +125,6 @@ def test_phoenix_does_not_invent_model_or_usage():
     )
     StructuredTracer(sink, "test").start_span("model.request").end()
     attrs = exporter.get_finished_spans()[0].attributes
-    assert "llm.model_name" not in attrs
-    assert not any(key.startswith("llm.token_count.") for key in attrs)
+    assert "llm.model_name" not in cast('str', attrs)
+    assert not any(key.startswith("llm.token_count.") for key in cast('dict[str, Any]', attrs))
     sink.close()

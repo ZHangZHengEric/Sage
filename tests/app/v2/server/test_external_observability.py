@@ -1,3 +1,16 @@
+
+from opentelemetry.util.types import AttributeValue
+
+from typing import Any, TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    from anyio.from_thread import BlockingPortal
+    from opentelemetry.trace import SpanContext
+    from sagents.v2.runtime.observability.contracts import TraceSink
+    from typing import Iterable, Mapping, Sequence
+
+from sagents.v2.package.manifest.runtime import CapabilitySelection
+
 import json
 from datetime import datetime, timezone
 
@@ -51,13 +64,13 @@ def capture_sample(sink):
     sink._timings.emit(
         "model", {**models[0], "completed_at": models[0]["ended_at"]}, at=BASE + 6
     )
-    for row in sorted(events, key=lambda row:row["at"]):
+    for row in sorted(events, key=lambda row:cast(str, row["at"])):
         sink.write(
             LogRecord(
-                timestamp=datetime.fromtimestamp(row["at"], timezone.utc),
+                timestamp=datetime.fromtimestamp(cast(float, row["at"]), timezone.utc),
                 level=LogLevel.INFO,
                 component="test",
-                event=row["event"],
+                event=cast(str, row["event"]),
                 message="private text",
                 session_id="s",
                 run_id="r",
@@ -105,7 +118,7 @@ async def test_external_timing_roundtrip_without_local_files(tmp_path):
     sink = ExternalDiagnostics(
         backend="phoenix", query_url="http://phoenix", project="sage"
     )
-    sink.trace_sink = capture
+    setattr(sink, 'trace_sink', capture)
     capture_sample(sink)
     assert capture.spans
     assert "private" not in json.dumps([s.attributes for s in capture.spans])
@@ -172,7 +185,7 @@ async def test_host_external_backend_does_not_create_diagnostic_database(
 async def test_jaeger_v3_stream_and_partial_model_updates_keep_timing_parity():
     capture = TraceCapture()
     sink = ExternalDiagnostics(backend="jaeger", query_url="http://jaeger")
-    sink.trace_sink = capture
+    setattr(sink, 'trace_sink', capture)
     capture_sample(sink)
 
     def handle(request):
@@ -222,7 +235,7 @@ async def test_jaeger_v3_stream_and_partial_model_updates_keep_timing_parity():
 async def test_phoenix_paginates_and_fetches_completion_outside_selected_window():
     capture = TraceCapture()
     sink = ExternalDiagnostics(backend="phoenix", query_url="http://phoenix")
-    sink.trace_sink = capture
+    setattr(sink, 'trace_sink', capture)
     capture_sample(sink)
     rows = [phoenix_span(s) for s in capture.spans]
     calls = []
@@ -282,10 +295,10 @@ async def test_effective_plugin_and_query_auth_configuration(tmp_path, monkeypat
         "OTEL_EXPORTER_OTLP_TRACES_HEADERS", "Authorization=Basic%20encoded"
     )
     from sagents.v2.runtime.observability.provider import create_observability_provider
-    provider = create_observability_provider(selection.plugin, selection.config)
+    provider = create_observability_provider(cast(CapabilitySelection, selection).plugin, cast(CapabilitySelection, selection).config)
     try:
-        assert provider.diagnostics.query_url == "http://internal"
-        assert provider.diagnostics.headers == {"Authorization": "Basic encoded"}
+        assert getattr(provider.diagnostics, 'query_url') == "http://internal"
+        assert getattr(provider.diagnostics, 'headers') == {"Authorization": "Basic encoded"}
     finally:
         await provider.close()
     disabled = create_observability_provider("sage.observability.noop")
@@ -363,15 +376,15 @@ def test_real_run_exports_remote_performance_and_download_without_local_capture(
                 while host.execution._drives:
                     await asyncio.sleep(0.01)
 
-        client.portal.call(settle)
-        client.portal.call(host.diagnostics.flush_raw)
+        cast('BlockingPortal', client.portal).call(settle)
+        cast('BlockingPortal', client.portal).call(cast('Any', host.diagnostics).flush_raw)
         spans = exporter.get_finished_spans()
         assert any(s.name == "model.request" for s in spans)
-        summaries = [s for s in spans if s.name == "agent.run" and "sage.performance.data" in s.attributes]
+        summaries = [s for s in spans if s.name == "agent.run" and "sage.performance.data" in cast('dict[str, Any]', s.attributes)]
         assert len(summaries) == 1
         agent = next(s for s in spans if s.name == "agent.run")
-        assert summaries[0].context.trace_id == agent.context.trace_id
-        assert summaries[0].context.span_id == agent.context.span_id
+        assert cast('SpanContext', summaries[0].context).trace_id == cast('SpanContext', agent.context).trace_id
+        assert cast('SpanContext', summaries[0].context).span_id == cast('SpanContext', agent.context).span_id
         assert all(s.name != "sage.performance" for s in spans)
         assert all(s.name != "sage.diagnostic" for s in spans)
 
@@ -379,12 +392,12 @@ def test_real_run_exports_remote_performance_and_download_without_local_capture(
             return [
                 {
                     "name": s.name,
-                    "start_time": s.start_time / 1e9,
-                    "attributes": dict(s.attributes),
-                    "events": [{"name": e.name, "timestamp": e.timestamp / 1e9, "attributes": dict(e.attributes)} for e in s.events],
+                    "start_time": cast('int', s.start_time) / 1e9,
+                    "attributes": dict(cast('Mapping[str, AttributeValue]', s.attributes)),
+                    "events": [{"name": e.name, "timestamp": e.timestamp / 1e9, "attributes": dict(cast('Mapping[str, AttributeValue]', e.attributes))} for e in s.events],
                     "context": {
-                        "trace_id": format(s.context.trace_id, "032x"),
-                        "span_id": format(s.context.span_id, "016x"),
+                        "trace_id": format(cast('SpanContext', s.context).trace_id, "032x"),
+                        "span_id": format(cast('SpanContext', s.context).span_id, "016x"),
                     },
                 }
                 for s in spans
@@ -429,9 +442,9 @@ async def test_export_only_backends_do_not_fallback_to_local_capture(tmp_path, m
     host = make_test_service(tmp_path, **options)
     await host.start()
     try:
-        assert host.diagnostics.available is False
+        assert cast('Any', host.diagnostics).available is False
         with pytest.raises(NotImplementedError):
-            await host.diagnostics.export_evidence("s", {"r"})
+            await cast('Any', host.diagnostics).export_evidence("s", {"r"})
         assert not (host.paths.runtime_root / "diagnostics").exists()
     finally:
         await host.close()
@@ -480,9 +493,9 @@ def test_performance_events_collapse_to_one_linked_summary_per_execution():
     from sagents.v2.runtime.observability.traces import StructuredTracer
     trace = TraceCapture()
     sink = ExternalDiagnostics(backend="phoenix", query_url="http://phoenix")
-    sink.trace_sink = trace
+    setattr(sink, 'trace_sink', trace)
     sink.bind_trace_sink(trace)
-    parent = StructuredTracer(trace, "test").start_span("agent.run", session_id="s", run_id="r")
+    parent = StructuredTracer(cast('TraceSink | None', trace), "test").start_span("agent.run", session_id="s", run_id="r")
     capture_sample(sink)
     parent.end()
     summaries = [s for s in trace.spans if s.name == "agent.run"]
@@ -502,10 +515,10 @@ def test_performance_events_collapse_to_one_linked_summary_per_execution():
 async def test_shutdown_flushes_unfinished_performance_as_incomplete():
     trace = TraceCapture()
     sink = ExternalDiagnostics(backend="phoenix", query_url="http://phoenix")
-    sink.trace_sink = trace
+    setattr(sink, 'trace_sink', trace)
     from sagents.v2.runtime.observability.traces import StructuredTracer
     sink.bind_trace_sink(trace)
-    parent = StructuredTracer(trace, "test").start_span("agent.run", session_id="s", run_id="r")
+    parent = StructuredTracer(cast('TraceSink | None', trace), "test").start_span("agent.run", session_id="s", run_id="r")
     sink._timings.emit("log", {"session_id":"s", "run_id":"r", "event":"agent.run.started", "timestamp":BASE}, at=BASE)
     assert trace.spans == []
     await sink.close()
@@ -521,12 +534,12 @@ async def test_resume_segments_are_loaded_across_execution_traces(monkeypatch):
     from sagents.v2.runtime.observability.performance.trace_projection import timing_rows
     trace = TraceCapture()
     sink = ExternalDiagnostics(backend="phoenix", query_url="http://phoenix")
-    sink.trace_sink = trace
+    setattr(sink, 'trace_sink', trace)
     sink.bind_trace_sink(trace)
-    parent = StructuredTracer(trace, "test").start_span("agent.run", session_id="s", run_id="r")
+    parent = StructuredTracer(cast('TraceSink | None', trace), "test").start_span("agent.run", session_id="s", run_id="r")
     capture_sample(sink)
     parent.end()
-    second = StructuredTracer(trace, "test").start_span("agent.run", session_id="s", run_id="r")
+    second = StructuredTracer(cast('TraceSink | None', trace), "test").start_span("agent.run", session_id="s", run_id="r")
     for at, event, attrs in [
         (100, "server.run.performance.resuming", {"started_at": BASE + 100}),
         (102, "agent.run.started", {}), (109, "agent.run.completed", {}),
@@ -621,13 +634,13 @@ async def test_agent_export_waits_for_host_cleanup_and_preserves_native_duration
         spans = exporter.get_finished_spans()
         exported = next(s for s in spans if s.name == "agent.run")
         assert sum(s.name == "agent.run" for s in spans) == 1
-        assert format(exported.context.span_id, "016x") == parent.span.span_id
+        assert format(cast('SpanContext', exported.context).span_id, "016x") == parent.span.span_id
         assert exported.start_time == int(parent.span.start_time.timestamp() * 1e9)
         assert exported.end_time == int(native_end.timestamp() * 1e9)
         assert exported.status.status_code.name == "OK"
-        assert exported.attributes["sage.performance.total_ms"] == 10000
+        assert cast('Mapping[str, str | bool | int | float | Sequence[str] | Sequence[bool] | Sequence[int] | Sequence[float]]', exported.attributes)["sage.performance.total_ms"] == 10000
         from sagents.v2.runtime.observability.evidence.raw import reconstruct
-        records, gaps = reconstruct([{"name":s.name, "attributes":dict(s.attributes), "start_time":s.start_time / 1e9} for s in spans])
+        records, gaps = reconstruct([{"name":s.name, "attributes":dict(cast('Mapping[str, AttributeValue]', s.attributes)), "start_time":cast('int', s.start_time) / 1e9} for s in spans])
         assert not gaps
         logs = [json.loads(attrs["sage.diagnostic.data"]) for _, attrs in records if attrs["sage.diagnostic.kind"] == "log"]
         assert any(row["event"] == "server.run.performance.finished" for row in logs)
@@ -641,7 +654,7 @@ def test_standalone_agent_finishes_on_its_own_terminal_event():
     trace = TraceCapture()
     source = ExternalDiagnostics(backend="phoenix", query_url="http://phoenix")
     source.bind_trace_sink(trace)
-    parent = StructuredTracer(trace, "test").start_span("agent.run", session_id="s", run_id="r")
+    parent = StructuredTracer(cast('TraceSink | None', trace), "test").start_span("agent.run", session_id="s", run_id="r")
     for event, at in [("agent.run.started", 0), ("agent.run.completed", 3)]:
         source._timings.emit("log", {"event":event, "timestamp":BASE + at, "session_id":"s", "run_id":"r"}, at=BASE + at)
     parent.end()

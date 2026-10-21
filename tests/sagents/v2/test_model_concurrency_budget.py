@@ -1,3 +1,7 @@
+
+from typing import cast
+
+from sagents.v2.model.provider import ModelProvider
 import asyncio
 
 import pytest
@@ -107,7 +111,7 @@ async def test_recording_stream_close_immediately_returns_inner_budget_slot():
     )
     await anext(stream)
     assert budget.active == 1
-    await stream.aclose()
+    await getattr(stream, 'aclose')()
     assert budget.active == 0
     assert closed == [True]
 
@@ -142,7 +146,7 @@ async def test_recording_close_after_completed_does_not_overwrite_success():
 
     sink = AsyncMock()
     provider = RecordingModelProvider(
-        Provider(), sink=sink, session_id_resolver=AsyncMock(return_value="session")
+        cast(ModelProvider, Provider()), sink=sink, session_id_resolver=AsyncMock(return_value="session")
     )
     stream = provider.stream(
         ModelRequest(
@@ -150,7 +154,7 @@ async def test_recording_close_after_completed_does_not_overwrite_success():
         )
     )
     assert (await anext(stream)).kind == ModelEventKind.COMPLETED
-    await stream.aclose()
+    await getattr(stream, 'aclose')()
     sink.complete_model_request.assert_awaited_once()
     sink.fail_model_request.assert_not_awaited()
     assert closed == [True]

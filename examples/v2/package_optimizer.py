@@ -6,6 +6,13 @@ host, configure evaluator/tuner ModelRoutes and supply sandboxed tool/Skill port
 """
 
 from __future__ import annotations
+
+from typing import TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    from sagents.v2.optimization.contracts import OptimizationFinalVerification
+    from sagents.v2.optimization.runner import OptimizationRunner
+
 from sagents.v2 import ApplicationConfiguration
 from examples.v2.host.registrations import provided, runtime_for
 
@@ -178,7 +185,7 @@ async def demo(root: Path):
             return await native.run(bundle, agent_id, content, ctx)
 
     optimizer = AgentPackageOptimizer(
-        runner=DemoRunner(),
+        runner=cast('OptimizationRunner', DemoRunner()),
         evaluator=OptimizationAgent(package=evaluator, agent_id="assistant"),
         tuner=OptimizationAgent(package=tuner, agent_id="assistant"),
     )
@@ -222,7 +229,7 @@ async def demo(root: Path):
                 "candidate_hash": result.candidate_package.content_hash,
                 "baseline_score": result.report.baseline.mean_score("validation"),
                 "selected_score": result.report.selected.mean_score("validation"),
-                "final_passed": result.report.final_verification.passed,
+                "final_passed": cast('OptimizationFinalVerification', result.report.final_verification).passed,
                 "rounds": [
                     {
                         "round": item.round,

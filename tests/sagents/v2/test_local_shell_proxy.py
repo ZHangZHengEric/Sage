@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Any
+
 import asyncio
 import base64
 import contextlib
@@ -20,7 +22,7 @@ from sagents.v2.runtime.execution.sandbox.plugins.local.support.network import (
 
 
 def policy(port, **changes):
-    values = dict(
+    values: dict[str, Any] = dict(
         mode=NetworkMode.ALLOWLIST,
         allowed_hosts=("127.0.0.1",),
         allowed_ports=(port,),

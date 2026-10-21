@@ -1,5 +1,11 @@
 from __future__ import annotations
 
+from typing import TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    from sagents.v2.runtime.session.contracts import SessionStore
+    from typing import Any, Coroutine
+
 import asyncio
 from datetime import datetime, timedelta, timezone
 
@@ -119,7 +125,7 @@ async def test_live_preview_does_not_advance_canonical_run_cursor():
     try:
         preview = await anext(observer)
     finally:
-        await observer.aclose()
+        await getattr(observer, 'aclose')()
     assert preview.type == "message.delta"
     assert preview.preview_sequence == 1
     assert preview.run_sequence == run.last_run_sequence
@@ -181,7 +187,7 @@ async def test_long_preview_remains_replayable_until_item_completion():
     try:
         assert (await anext(observer)).preview_sequence == 1
     finally:
-        await observer.aclose()
+        await getattr(observer, 'aclose')()
     await store.commit_run(
         run_id=run_id,
         expected_revision=run.revision,
@@ -731,7 +737,7 @@ async def test_pause_resume_requires_matching_suspension_and_preserves_replay_hi
     checkpoint, interaction, suspension = suspension_records(session_id, run_id)
     suspended = await runtime.commit_suspension(
         run_id=run_id,
-        expected_revision=pause.current_revision,
+        expected_revision=cast('int', pause.current_revision),
         checkpoint=checkpoint,
         suspension=suspension,
         interaction=interaction,
@@ -765,7 +771,7 @@ async def test_pause_resume_requires_matching_suspension_and_preserves_replay_hi
     assert accepted.decision == CommandDecision.ACCEPTED
     resumed = await runtime.mark_resumed(
         run_id=run_id,
-        expected_revision=accepted.current_revision,
+        expected_revision=cast('int', accepted.current_revision),
         context=CONTEXT,
         idempotency_key="resumed",
     )
@@ -822,7 +828,7 @@ async def test_interaction_reply_atomically_resolves_and_schedules_resume():
 
     accepted = await runtime.reply_interaction(command, CONTEXT)
     duplicate = await runtime.reply_interaction(command, CONTEXT)
-    updated_run = await runtime.get_run(run.run_id)
+    updated_run = await runtime.get_run(getattr(run, 'run_id'))
     updated_interaction = await runtime.session_store.get_interaction(
         interaction.interaction_id
     )
@@ -843,7 +849,7 @@ async def test_interaction_reply_atomically_resolves_and_schedules_resume():
     assert resolution.decision == "approve"
     assert [
         event.type
-        for event in (await runtime.session_store.read_events(run.run_id))[-2:]
+        for event in (await runtime.session_store.read_events(getattr(run, 'run_id')))[-2:]
     ] == ["interaction.resolved", "run.resume_requested"]
 
 
@@ -863,7 +869,7 @@ async def test_interaction_reply_rejection_matrix_has_no_partial_mutation(
         eligible_principals=eligible,
         expires_at=NOW - timedelta(seconds=1) if expired else None,
     )
-    before_events = await runtime.session_store.read_events(run.run_id)
+    before_events = await runtime.session_store.read_events(getattr(run, 'run_id'))
 
     receipt = await runtime.reply_interaction(
         reply_command(run, interaction, suspension, "reply_bad", decision), CONTEXT
@@ -871,8 +877,8 @@ async def test_interaction_reply_rejection_matrix_has_no_partial_mutation(
 
     assert receipt.decision == CommandDecision.REJECTED
     assert receipt.error is not None and receipt.error.code == error_code
-    assert (await runtime.get_run(run.run_id)).state == RunState.SUSPENDED
-    assert await runtime.session_store.read_events(run.run_id) == before_events
+    assert (await runtime.get_run(getattr(run, 'run_id'))).state == RunState.SUSPENDED
+    assert await runtime.session_store.read_events(getattr(run, 'run_id')) == before_events
     assert (
         await runtime.session_store.get_interaction(interaction.interaction_id)
     ).status.value == "pending"
@@ -897,7 +903,7 @@ async def test_concurrent_interaction_replies_have_single_winner():
         len(
             [
                 event
-                for event in await runtime.session_store.read_events(run.run_id)
+                for event in await runtime.session_store.read_events(getattr(run, 'run_id'))
                 if event.type == "interaction.resolved"
             ]
         )
@@ -914,7 +920,7 @@ async def test_replay_then_live_subscription_and_detach():
     )
     assert (await anext(stream)).event_id == replay[-1].event_id
 
-    next_event = asyncio.create_task(anext(stream))
+    next_event = asyncio.create_task(cast('Coroutine[Any, Any, Any]', anext(stream)))
     await asyncio.sleep(0)
     receipt = await runtime.steer_run(
         SteerRun(
@@ -928,18 +934,18 @@ async def test_replay_then_live_subscription_and_detach():
     )
     assert receipt.decision == CommandDecision.ACCEPTED
     assert (await next_event).type == "steer.accepted"
-    await stream.aclose()
+    await getattr(stream, 'aclose')()
 
 
 @pytest.mark.asyncio
 async def test_slow_subscriber_gets_resumable_overflow_not_silent_loss():
     repository = EphemeralSessionStore(subscriber_queue_size=1)
-    runtime = HarnessRuntime(repository)
+    runtime = HarnessRuntime(cast('SessionStore', repository))
     handle = await runtime.start_run(start_command("start"), CONTEXT)
     stream = runtime.subscribe_events(
         EventCursor(run_id=handle.run_id, run_sequence=handle.event_cursor.run_sequence)
     )
-    waiting = asyncio.create_task(anext(stream))
+    waiting = asyncio.create_task(cast('Coroutine[Any, Any, Any]', anext(stream)))
     await asyncio.sleep(0)
 
     await runtime.start_execution(
@@ -958,7 +964,7 @@ async def test_slow_subscriber_gets_resumable_overflow_not_silent_loss():
     assert overflow.value.info.code == "stream.subscriber_overflow"
     assert overflow.value.info.retryable is True
     assert overflow.value.info.safe_to_resume is True
-    await stream.aclose()
+    await getattr(stream, 'aclose')()
 
 
 @pytest.mark.asyncio

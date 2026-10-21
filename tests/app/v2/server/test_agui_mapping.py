@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+from typing import cast
+
+from sagents.v2.contracts.items import TextBlock
+
 import asyncio
 
 import pytest
@@ -61,7 +65,7 @@ def test_maps_latest_user_message_and_ids():
     assert agent_id == "main"
     assert command.session_id == "thread-1"
     assert command.idempotency_key == "run-1"
-    assert command.input[0].content[0].text == "hello"
+    assert cast(TextBlock, command.input[0].content[0]).text == "hello"
     assert command.config.enabled_skills is None
 
 
@@ -90,7 +94,7 @@ def test_maps_trusted_run_metadata_with_composition_snapshot():
         composition_hash="sha256:test",
         default_agent_id="main",
         enabled_skills=("demo",),
-        metadata=metadata,
+        metadata=cast('dict[str, object] | None', metadata),
     )
 
     assert command.config.metadata == metadata
@@ -150,4 +154,4 @@ async def test_canonical_stream_keeps_idle_connection_alive():
     )
 
     assert await anext(stream) == ": heartbeat\n\n"
-    await stream.aclose()
+    await getattr(stream, 'aclose')()

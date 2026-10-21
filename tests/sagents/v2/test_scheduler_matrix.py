@@ -1,5 +1,10 @@
 from __future__ import annotations
 
+from typing import TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    from sagents.v2.runtime.execution.scheduler.contracts import WorkerLease
+
 import asyncio
 from datetime import datetime, timedelta, timezone
 
@@ -173,7 +178,7 @@ async def test_claim_orders_all_available_work_by_priority_then_fifo():
         )
         for index in range(3)
     ]
-    assert [lease.work.work_id for lease in leases] == [
+    assert [cast('WorkerLease', lease).work.work_id for lease in leases] == [
         "work_high_first",
         "work_high_second",
         "work_low_old",
@@ -215,7 +220,7 @@ async def test_concurrent_workers_claim_each_work_item_exactly_once():
             for index in range(20)
         )
     )
-    work_ids = [lease.work.work_id for lease in leases]
+    work_ids = [cast('WorkerLease', lease).work.work_id for lease in leases]
     assert len(work_ids) == len(set(work_ids)) == 20
 
 
@@ -255,12 +260,12 @@ async def test_expired_lease_requeues_with_new_attempt_and_fencing_token():
     new = await scheduler.claim(
         "worker_new", lease_duration=timedelta(seconds=5), wait_timeout=0
     )
-    assert new.work.attempt == 2
-    assert new.fencing_token == old.fencing_token + 1
+    assert cast('WorkerLease', new).work.attempt == 2
+    assert cast('WorkerLease', new).fencing_token == cast('WorkerLease', old).fencing_token + 1
     with pytest.raises(SageV2Error) as stale:
-        await scheduler.assert_fence(old)
+        await scheduler.assert_fence(cast('WorkerLease', old))
     assert stale.value.info.code == "scheduler.fence_rejected"
-    await scheduler.assert_fence(new)
+    await scheduler.assert_fence(cast('WorkerLease', new))
 
 
 @pytest.mark.asyncio
@@ -272,17 +277,17 @@ async def test_renew_release_requeue_and_cancel_matrix():
         "worker", lease_duration=timedelta(seconds=5), wait_timeout=0
     )
     clock.advance(2)
-    renewed = await scheduler.renew(lease, lease_duration=timedelta(seconds=10))
+    renewed = await scheduler.renew(cast('WorkerLease', lease), lease_duration=timedelta(seconds=10))
     assert renewed.expires_at == clock.now + timedelta(seconds=10)
     await scheduler.release(renewed, LeaseReleaseReason.WORKER_SHUTDOWN, requeue=True)
     retried = await scheduler.claim(
         "worker_2", lease_duration=timedelta(seconds=5), wait_timeout=0
     )
-    assert retried.work.attempt == 2
-    assert await scheduler.cancel(retried.work.work_id) is True
+    assert cast('WorkerLease', retried).work.attempt == 2
+    assert await scheduler.cancel(cast('WorkerLease', retried).work.work_id) is True
     with pytest.raises(SageV2Error):
-        await scheduler.assert_fence(retried)
-    assert await scheduler.cancel(retried.work.work_id) is False
+        await scheduler.assert_fence(cast('WorkerLease', retried))
+    assert await scheduler.cancel(cast('WorkerLease', retried).work.work_id) is False
 
 
 @pytest.mark.asyncio
@@ -328,7 +333,7 @@ async def test_filesystem_scheduler_poisoned_after_persistence_failure(tmp_path)
         del state
         raise OSError("disk unavailable")
 
-    scheduler._state_store.save = fail_save
+    setattr(scheduler._state_store, "save", fail_save)
 
     with pytest.raises(SageV2Error) as failed:
         await scheduler.submit(work("uncertain", clock))
@@ -372,5 +377,5 @@ async def test_filesystem_scheduler_restores_lease_and_monotonic_fence(tmp_path)
 
     assert new is not None
     assert new.work.attempt == 2
-    assert new.fencing_token == old.fencing_token + 1
+    assert new.fencing_token == cast('WorkerLease', old).fencing_token + 1
     await restored.close()

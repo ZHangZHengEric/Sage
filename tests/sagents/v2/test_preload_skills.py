@@ -1,5 +1,15 @@
 """Preloads are per-Run initialization, never a permanent activation requirement."""
 from __future__ import annotations
+
+from typing import TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    from sagents.v2.runtime.session.contracts import SessionStore
+
+from sagents.v2.composition.loaded_agents import ApplicationEntrypoint
+
+from sagents.v2.contracts.events import RunEventData
+from sagents.v2.contracts.errors import RuntimeErrorInfo
 from tests.sagents.v2.sdk_fixture import build_registered_package
 
 import hashlib
@@ -168,13 +178,13 @@ async def test_initialization_failure_is_diagnostic_and_never_calls_model(failur
     assert result.state in {RunState.SUSPENDED, RunState.FAILED}
     assert requests.requests == []
     events = await runtime.session_store.read_events(run.run_id)
-    errors = [event.data.error for event in events if getattr(event.data, "error", None)]
-    assert errors[-1].code == "skill.preload_failed"
-    assert errors[-1].metadata["run_id"] == run.run_id
-    assert errors[-1].metadata["agent_id"] == "root"
-    assert errors[-1].metadata["skill_name"] == defaults[0]
+    errors = [cast(RunEventData, event.data).error for event in events if getattr(event.data, "error", None)]
+    assert cast(RuntimeErrorInfo, errors[-1]).code == "skill.preload_failed"
+    assert cast('RuntimeErrorInfo', errors[-1]).metadata["run_id"] == run.run_id
+    assert cast('RuntimeErrorInfo', errors[-1]).metadata["agent_id"] == "root"
+    assert cast('RuntimeErrorInfo', errors[-1]).metadata["skill_name"] == defaults[0]
     if failure != "unavailable":
-        assert errors[-1].metadata["cause_code"].startswith("skill.")
+        assert cast('RuntimeErrorInfo', errors[-1]).metadata["cause_code"].startswith("skill.")
 
 
 @pytest.mark.asyncio
@@ -198,7 +208,7 @@ async def test_defaults_can_evict_each_other_and_explicit_load_reactivates():
 @pytest.mark.parametrize("empty", [False, True])
 async def test_process_restart_restores_same_run_without_reloading_evicted_defaults(tmp_path, empty):
     store = FilesystemSessionStore(tmp_path)
-    runtime, provider = HarnessRuntime(store), source()
+    runtime, provider = HarnessRuntime(cast('SessionStore', store)), source()
     loaded = loader(provider, budget=200)
     loop = engine(runtime, model(done()), loaded)
     handle = await start(runtime)
@@ -218,7 +228,7 @@ async def test_process_restart_restores_same_run_without_reloading_evicted_defau
     # Reopen all runtime, model, loader, workspace and activation objects.
     reopened = FilesystemSessionStore(tmp_path)
     try:
-        runtime = HarnessRuntime(reopened)
+        runtime = HarnessRuntime(cast('SessionStore', reopened))
         loaded = loader(provider, budget=200)
         # A history callback must not be invoked again on recovery either.
         async def forbidden_history(run_id):
@@ -277,7 +287,7 @@ async def test_parent_children_and_grandchildren_read_their_own_configuration():
 async def test_restart_mid_initialization_skips_preloads_already_evicted(tmp_path):
     import asyncio
     store = FilesystemSessionStore(tmp_path)
-    runtime, provider = HarnessRuntime(store), source()
+    runtime, provider = HarnessRuntime(cast('SessionStore', store)), source()
     provider._bundles["gamma"] = SkillBundle(
         descriptor=SkillDescriptor(name="gamma", description="gamma", source_id="test"),
         files={"SKILL.md": b"Follow gamma"}, content_hash="hash-gamma")
@@ -299,7 +309,7 @@ async def test_restart_mid_initialization_skips_preloads_already_evicted(tmp_pat
     reopened = FilesystemSessionStore(tmp_path)
     try:
         requests = model(done())
-        result = await engine(HarnessRuntime(reopened), requests, loader(provider, budget=200),
+        result = await engine(HarnessRuntime(cast('SessionStore', reopened)), requests, loader(provider, budget=200),
                               ("alpha", "beta", "gamma")).execute(run.run_id, CONTEXT)
         assert result.state == RunState.COMPLETED
         assert "Follow gamma" in content(requests.requests[0])
@@ -324,7 +334,7 @@ async def test_unconfigured_run_preserves_lazy_loading_and_emits_no_skill_state(
 async def test_partial_failure_retry_after_restart_does_not_reinject_completed_defaults(tmp_path):
     from sagents.v2.contracts.commands import ReplyInteraction
     store = FilesystemSessionStore(tmp_path)
-    runtime, provider = HarnessRuntime(store), source()
+    runtime, provider = HarnessRuntime(cast('SessionStore', store)), source()
     run = await start(runtime)
     requests = model(done())
     result = await engine(runtime, requests, loader(provider, budget=200),
@@ -339,7 +349,7 @@ async def test_partial_failure_retry_after_restart_does_not_reinject_completed_d
         files={"SKILL.md": b"Follow gamma"}, content_hash="hash-gamma")
     reopened = FilesystemSessionStore(tmp_path)
     try:
-        runtime = HarnessRuntime(reopened)
+        runtime = HarnessRuntime(cast('SessionStore', reopened))
         await runtime.reply_interaction(ReplyInteraction(
             run_id=run.run_id, suspension_id=suspension.suspension_id,
             interaction_id=interaction.interaction_id, expected_revision=result.revision,
@@ -368,9 +378,9 @@ async def test_run_grant_can_narrow_preloads_but_never_expand_permissions():
     result = await engine(runtime, requests, loaded).execute(run.run_id, CONTEXT)
     assert result.state == RunState.SUSPENDED
     assert requests.requests == []
-    errors = [event.data.error for event in await runtime.session_store.read_events(run.run_id)
+    errors = [cast(RunEventData, event.data).error for event in await runtime.session_store.read_events(run.run_id)
               if getattr(event.data, "error", None)]
-    assert errors[-1].metadata["cause_code"] == "skill.not_enabled"
+    assert cast('RuntimeErrorInfo', errors[-1]).metadata["cause_code"] == "skill.not_enabled"
     assert provider.fetches == []
 
 
@@ -400,7 +410,7 @@ async def test_public_builder_wires_agent_package_preloads(tmp_path):
     provider, requests = source(), model(done())
     app = await (build_registered_package(tmp_path, models=TEST_MODELS, model=requests, tools=(InMemoryToolCatalog(()), InMemoryToolExecutor({}, {}),), skills=(provider, provider, InMemorySkillWorkspace(),), package=manifest))
     try:
-        stream = await app.entrypoint().run_stream((StartRun(
+        stream = await cast(ApplicationEntrypoint, app.entrypoint()).run_stream((StartRun(
             agent_id="root", input=(InputItem(role="user", content=(TextBlock(text="work"),)),),
             resolved_spec_hash=app.composition_hash, idempotency_key="builder")).model_copy(update={"agent_id": app.loaded_agents[-1].id, "resolved_spec_hash": app.loaded_agents[-1].composition_hash}), CONTEXT, agent=app.loaded_agents[-1])
         assert (await stream.wait()).state == RunState.COMPLETED
@@ -426,7 +436,7 @@ async def test_legacy_checkpoint_does_not_retroactively_initialize_defaults():
             messages=await original.context_assembler.initial_ledger(command, run_id=run.run_id)), CONTEXT)
     checkpoint = await runtime.session_store.get_latest_checkpoint(run.run_id)
     assert checkpoint.state.get("skill_state") is None
-    suspension = await runtime.session_store.get_suspension(suspended.suspension_id)
+    suspension = await runtime.session_store.get_suspension(cast(str, suspended.suspension_id))
     await runtime.resume_run(ResumeRun(run_id=run.run_id, suspension_id=suspension.suspension_id,
         expected_revision=suspended.revision, expected_suspension_revision=suspension.expected_revision,
         idempotency_key="resume"), CONTEXT)
@@ -473,7 +483,7 @@ async def test_pause_mid_initialization_resumes_remaining_preloads_only():
     assert suspended.state == RunState.SUSPENDED
     assert requests.requests == []
     assert provider.fetches == [(handle.run_id, "alpha")]
-    suspension = await runtime.session_store.get_suspension(suspended.suspension_id)
+    suspension = await runtime.session_store.get_suspension(cast(str, suspended.suspension_id))
     await runtime.resume_run(ResumeRun(run_id=handle.run_id, suspension_id=suspension.suspension_id,
         expected_revision=suspended.revision, expected_suspension_revision=suspension.expected_revision,
         idempotency_key="resume-init"), CONTEXT)

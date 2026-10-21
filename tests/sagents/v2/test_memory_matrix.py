@@ -1,5 +1,13 @@
 from __future__ import annotations
 
+from typing import TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    from sagents.v2.memory.query import MemoryRecallQueryGenerator
+    from sagents.v2.tool.official.runtime import OfficialToolRuntime
+
+from sagents.v2.model.provider import ModelProvider
+
 import asyncio
 import json
 import sqlite3
@@ -213,7 +221,7 @@ async def test_automatic_recall_is_a_real_tool_pair_not_runtime_context():
     )
     loop = AgentLoopEngine(
         runtime=runtime,
-        model=model,
+        model=cast(ModelProvider, model),
         tool_catalog=InMemoryToolCatalog((definition,)),
         tool_executor=executor,
         automatic_memory_recall=True,
@@ -230,12 +238,12 @@ async def test_automatic_recall_is_a_real_tool_pair_not_runtime_context():
     assert executor.calls[0].arguments == {"query": "remember me", "top_k": 4}
     model_messages = model.requests[0].messages
     assert model_messages[0].role == "system"
-    assert "The response language is en." in model_messages[0].content[0].text
+    assert "The response language is en." in cast(TextBlock, model_messages[0].content[0]).text
     messages = tuple(message for message in model_messages if message.role != "system")
     assert [message.role for message in messages] == ["user", "assistant", "tool"]
     assert messages[1].tool_calls[0].name == "search_memory"
-    assert "memory_1" in messages[2].content[0].text
-    user_text = messages[0].content[0].text
+    assert "memory_1" in cast(TextBlock, messages[2].content[0]).text
+    user_text = cast(TextBlock, messages[0].content[0]).text
     assert "<current_time>Sat, 29 Aug 2026 23:17:06 +0800</current_time>" in user_text
     assert "Relevant long-term memory" not in user_text
     assert "memory_1" not in user_text
@@ -259,11 +267,11 @@ async def test_automatic_recall_preserves_selected_query_failure_for_recovery():
     handle = await runtime.start_run(command(memory=True), CONTEXT)
     loop = AgentLoopEngine(
         runtime=runtime,
-        model=ScriptedModelProvider(()),
+        model=cast(ModelProvider, ScriptedModelProvider(())),
         tool_catalog=InMemoryToolCatalog(()),
         tool_executor=InMemoryToolExecutor({}, {}),
         automatic_memory_recall=True,
-        memory_recall_query_generator=FailingRecallQuery(),
+        memory_recall_query_generator=cast('MemoryRecallQueryGenerator | None', FailingRecallQuery()),
     )
 
     result = await loop.execute(handle.run_id, CONTEXT)
@@ -272,14 +280,14 @@ async def test_automatic_recall_preserves_selected_query_failure_for_recovery():
     events = await runtime.session_store.read_events(handle.run_id)
     assert events[-1].type == "run.suspended"
     assert not any(event.type == "run.failed" for event in events)
-    suspension = await runtime.session_store.get_suspension(result.suspension_id)
-    interaction = await runtime.session_store.get_interaction(suspension.interaction_id)
+    suspension = await runtime.session_store.get_suspension(cast(str, result.suspension_id))
+    interaction = await runtime.session_store.get_interaction(cast(str, suspension.interaction_id))
     error = interaction.payload["error"]
     assert error["code"] == "memory.recall_query.test_failure"
     assert error["retryable"] is True
     assert interaction.payload["resumable"] is True
     assert interaction.allowed_decisions == ("retry", "change_direction", "cancel")
-    assert loop.model.requests == []
+    assert getattr(loop.model, 'requests') == []
 
 
 @pytest.mark.asyncio
@@ -300,7 +308,7 @@ async def test_llm_memory_query_plugin_generates_keywords():
             ),
         )
     )
-    generator = LLMMemoryRecallQueryGenerator(model, language="zh")
+    generator = LLMMemoryRecallQueryGenerator(cast(ModelProvider, model), language="zh")
 
     query = await generator.generate(
         "请把 runtime context 改得和 v1 一样", run_id="run_1"
@@ -344,11 +352,11 @@ async def test_empty_llm_recall_query_skips_search_and_continues_turn(query):
     executor = InMemoryToolExecutor({"search_memory": definition}, {"search_memory": search})
     loop = AgentLoopEngine(
         runtime=runtime,
-        model=model,
+        model=cast(ModelProvider, model),
         tool_catalog=InMemoryToolCatalog((definition,)),
         tool_executor=executor,
         automatic_memory_recall=True,
-        memory_recall_query_generator=LLMMemoryRecallQueryGenerator(model),
+        memory_recall_query_generator=LLMMemoryRecallQueryGenerator(cast(ModelProvider, model)),
         context_assembler=DefaultContextAssembler(
             history_reader=runtime.session_store,
         ),
@@ -391,7 +399,7 @@ async def test_llm_recall_query_rejects_malformed_output(text):
             ),
         )
     )
-    generator = LLMMemoryRecallQueryGenerator(model)
+    generator = LLMMemoryRecallQueryGenerator(cast(ModelProvider, model))
 
     with pytest.raises(SageV2Error) as caught:
         await generator.generate("没有", run_id="run_1")
@@ -411,7 +419,7 @@ async def test_llm_memory_query_timeout_is_reported_by_selected_plugin():
             return events()
 
     generator = LLMMemoryRecallQueryGenerator(
-        SlowModel(), language="zh", timeout_seconds=0.01
+        cast(ModelProvider, SlowModel()), language="zh", timeout_seconds=0.01
     )
 
     with pytest.raises(SageV2Error) as caught:
@@ -450,7 +458,7 @@ async def test_auto_ingestion_runs_after_commit_and_failure_does_not_rollback(
     )
     loop = AgentLoopEngine(
         runtime=runtime,
-        model=model,
+        model=cast(ModelProvider, model),
         tool_catalog=InMemoryToolCatalog(()),
         tool_executor=InMemoryToolExecutor({}, {}),
         context_assembler=DefaultContextAssembler(),
@@ -614,7 +622,7 @@ async def test_search_memory_uses_the_memory_service_agent_scope(tmp_path):
         request_context=CONTEXT,
     )
 
-    result = await MemoryTools(SimpleNamespace(memory_service=service)).search_memory(
+    result = await MemoryTools(cast('OfficialToolRuntime', SimpleNamespace(memory_service=service))).search_memory(
         "blue green release", invocation=invocation
     )
 
@@ -687,7 +695,7 @@ async def test_workspace_memory_identity_survives_recovery_and_ignores_caller_me
             owner_run_id=handle.run_id, owner_agent_id="agent_1",
             owner_session_id=handle.session_id,
         ), request_context=CONTEXT)
-        results = await MemoryTools(SimpleNamespace(memory_service=service)).search_memory(
+        results = await MemoryTools(cast('OfficialToolRuntime', SimpleNamespace(memory_service=service))).search_memory(
             "cobaltcoffee", invocation=invocation,
         )
         assert bool(results["results"]) == (index in (0, 3))

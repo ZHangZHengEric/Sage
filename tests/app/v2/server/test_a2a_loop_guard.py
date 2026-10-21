@@ -10,6 +10,11 @@ both ends and the handover between them.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    from sagents.v2.tool.plugins.a2a import A2ATransport
+
 import json
 
 import pytest
@@ -43,7 +48,7 @@ def delegating_client(tmp_path, transport: FakePeer, *, steps: int = 4):
     )
     service = make_test_service(tmp_path, model_provider=provider)
     # The host owns the transport, exactly as it owns the MCP session factory.
-    service.a2a_plugins = A2APluginCache(transport=transport)
+    service.a2a_plugins = A2APluginCache(transport=cast('A2ATransport | None', transport))
     return TestClient(create_app(service=service))
 
 

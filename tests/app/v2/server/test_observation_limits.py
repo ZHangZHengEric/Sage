@@ -1,4 +1,10 @@
 """Resource and cohort contracts for external observations."""
+
+from typing import TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    from sagents.v2.runtime.observability.contracts import TraceSink
+
 import asyncio
 import json
 
@@ -25,9 +31,9 @@ def projected_response(rows):
 @pytest.mark.asyncio
 async def test_performance_pushes_entry_cohort_agent_and_projects_no_content():
     sink = ExternalDiagnostics(backend='phoenix', query_url='http://phoenix')
-    sink.trace_sink = TraceCapture()
+    setattr(sink, 'trace_sink', TraceCapture())
     capture_sample(sink)
-    rows = [phoenix_span(s) for s in sink.trace_sink.spans]
+    rows = [phoenix_span(s) for s in getattr(cast('TraceSink', sink.trace_sink), 'spans')]
     calls = []
     def handle(request):
         assert request.method == 'POST' and request.url.path == '/v1/spans'
@@ -86,9 +92,9 @@ def test_performance_timeout_is_service_unavailable(client, service, monkeypatch
 async def test_hundred_runs_are_fetched_in_one_batch_and_limits_are_explicit():
     import copy
     sink = ExternalDiagnostics(backend='phoenix', query_url='http://phoenix')
-    sink.trace_sink = TraceCapture()
+    setattr(sink, 'trace_sink', TraceCapture())
     capture_sample(sink)
-    original = phoenix_span(sink.trace_sink.spans[0])
+    original = phoenix_span(getattr(cast('TraceSink', sink.trace_sink), 'spans')[0])
     rows = []
     for index in range(100):
         row = copy.deepcopy(original)
@@ -115,7 +121,7 @@ async def test_hundred_runs_are_fetched_in_one_batch_and_limits_are_explicit():
 async def test_raw_queries_keep_byte_request_and_total_time_budgets():
     from sagents.v2.runtime.observability.plugins._shared.query import query_budget
     source = ExternalDiagnostics(backend='phoenix', query_url='http://phoenix')
-    source.trace_sink = type('Raw', (), {'content_mode':'raw'})()
+    setattr(source, 'trace_sink', type('Raw', (), {'content_mode':'raw'})())
     source.max_response_bytes = 8
     async with httpx.AsyncClient(transport=httpx.MockTransport(lambda request: httpx.Response(200, content=b'x'*9))) as client:
         with pytest.raises(ValueError, match='response exceeds'):
@@ -135,7 +141,7 @@ async def test_raw_queries_keep_byte_request_and_total_time_budgets():
         return httpx.Response(200, content=b'{}')
     async with httpx.AsyncClient(transport=httpx.MockTransport(slow)) as client:
         with pytest.raises(TimeoutError):
-            async with query_budget(seconds=.01):
+            async with query_budget(seconds=cast('int', .01)):
                 await source._request(client, '/', [])
 
 
@@ -168,8 +174,8 @@ async def test_whole_log_record_loss_is_detected_from_root_after_restart(monkeyp
     from app.v2.server.storage.downloads import prepare_session_export
     source = ExternalDiagnostics(capture_mode="raw", backend='phoenix', query_url='http://phoenix')
     trace = TraceCapture()
-    trace.content_mode = 'raw'
-    source.trace_sink = trace
+    setattr(trace, 'content_mode', 'raw')
+    setattr(source, 'trace_sink', trace)
     capture_sample(source)
     await source.flush_raw()
     rows = [phoenix_span(span) for span in trace.spans]

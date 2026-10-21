@@ -1,5 +1,10 @@
 from __future__ import annotations
 
+from typing import Any, TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    from sagents.v2.model.contracts import ModelResponse
+
 from types import SimpleNamespace
 
 import pytest
@@ -111,7 +116,7 @@ async def test_chat_probe_selects_and_reuses_the_verified_json_dialect(
                 format_type == "json_object" and object_text is None
             ):
                 error = RuntimeError(f"unsupported response_format: {format_type}")
-                error.status_code = 400
+                setattr(error, 'status_code', 400)
                 raise error
             text = object_text if format_type == "json_object" else '{"ok":true}'
             return FakeStream(
@@ -177,7 +182,7 @@ async def test_chat_probe_selects_and_reuses_the_verified_json_dialect(
         messages=(ModelMessage(role="user", content=(TextBlock(text="hi"),)),),
         response_schema=schema,
     )
-    payload = restored.diagnostic_request(schema_request)
+    payload = getattr(restored, 'diagnostic_request')(schema_request)
     assert payload["response_format"]["type"] == selected_format
     if selected_format == "json_object":
         assert payload["response_format"] == {"type": "json_object"}
@@ -185,7 +190,7 @@ async def test_chat_probe_selects_and_reuses_the_verified_json_dialect(
         assert len(schema_request.messages) == 1
     else:
         assert payload["response_format"]["json_schema"]["schema"] == schema
-    explicit_object = restored.diagnostic_request(
+    explicit_object = getattr(restored, 'diagnostic_request')(
         schema_request.model_copy(update={"response_format": "json_object"})
     )
     assert explicit_object["response_format"] == {"type": "json_object"}
@@ -221,7 +226,7 @@ async def test_openai_compatible_closes_only_the_client_it_constructed(monkeypat
 
 
 def config(**changes):
-    values = {
+    values: dict[str, Any] = {
         "base_url": "https://gateway.invalid/openai/v1",
         "model": "gpt-test",
         "capabilities": CAPABILITIES,
@@ -233,7 +238,7 @@ def config(**changes):
 
 
 def request(**changes):
-    values = {
+    values: dict[str, Any] = {
         "request_id": "request_1",
         "run_id": "run_1",
         "model_binding": "primary",
@@ -277,7 +282,7 @@ def chunk(
     finish=None,
     usage=None,
 ):
-    delta_values = {
+    delta_values: dict[str, Any] = {
         "content": content,
         "reasoning_content": reasoning,
         "tool_calls": tool_calls,
@@ -685,7 +690,7 @@ async def test_auto_token_field_negotiates_once_and_learns_route(
     model, initial, alternate
 ):
     error = RuntimeError("Provider rejected the request")
-    error.status_code = 422
+    setattr(error, 'status_code', 422)
     completions = SequencedCompletions(
         [
             error,
@@ -728,7 +733,7 @@ async def test_auto_token_field_negotiates_once_and_learns_route(
 @pytest.mark.asyncio
 async def test_explicit_token_field_does_not_negotiate():
     error = RuntimeError("Provider rejected the request")
-    error.status_code = 422
+    setattr(error, 'status_code', 422)
     completions = FakeCompletions(error=error)
     provider = OpenAICompatibleModelProvider(
         config(
@@ -814,7 +819,7 @@ async def test_invalid_tool_arguments_are_typed_and_stream_is_closed(arguments, 
 )
 async def test_provider_error_matrix(status, category, retryable):
     error = RuntimeError("credential must never be echoed")
-    error.status_code = status
+    setattr(error, 'status_code', status)
     completions = FakeCompletions(error=error)
     provider = OpenAICompatibleModelProvider(config(), client=FakeClient(completions))
     with pytest.raises(SageV2Error) as caught:
@@ -842,7 +847,7 @@ async def test_chat_compatible_rejects_stream_without_finish_reason():
 @pytest.mark.asyncio
 async def test_reasoning_control_422_retries_once_without_controls_and_learns_route():
     error = RuntimeError("reasoning_effort is unsupported by this deployment")
-    error.status_code = 422
+    setattr(error, 'status_code', 422)
     completions = SequencedCompletions(
         [error, FakeStream((chunk(content="done", finish="stop"),))]
     )
@@ -872,7 +877,7 @@ async def test_reasoning_control_422_retries_once_without_controls_and_learns_ro
 @pytest.mark.asyncio
 async def test_422_without_reasoning_controls_is_not_retried():
     error = RuntimeError("response_format is unsupported")
-    error.status_code = 422
+    setattr(error, 'status_code', 422)
     completions = FakeCompletions(error=error)
     provider = OpenAICompatibleModelProvider(
         config(reasoning_effort=None), client=FakeClient(completions)
@@ -889,7 +894,7 @@ async def test_provider_context_overflow_has_a_distinct_retryable_code():
     error = RuntimeError(
         "context_length_exceeded: maximum context length is 128000 tokens"
     )
-    error.status_code = 400
+    setattr(error, 'status_code', 400)
     provider = OpenAICompatibleModelProvider(
         config(), client=FakeClient(FakeCompletions(error=error))
     )
@@ -917,7 +922,7 @@ async def test_declared_capabilities_are_enforced_before_network_call(unsupporte
     provider = OpenAICompatibleModelProvider(
         config(capabilities=capabilities), client=FakeClient(completions)
     )
-    changed = {}
+    changed: dict[str, Any] = {}
     if unsupported == "structured_output":
         changed["tools"] = ()
         changed["response_schema"] = {"type": "object"}
@@ -974,7 +979,7 @@ async def test_explicit_reasoning_history_rejection_negotiates_empty_host_histor
     error = RuntimeError(
         "The `reasoning_content` in the thinking mode must be passed back to the API."
     )
-    error.status_code = 400
+    setattr(error, 'status_code', 400)
     completions = SequencedCompletions(
         [
             error,
@@ -1009,7 +1014,7 @@ async def test_explicit_reasoning_history_rejection_negotiates_empty_host_histor
     assert completions.calls[1]["messages"][1]["reasoning_content"] == ""
     assert completions.calls[1]["messages"][3]["reasoning_content"] == "real reasoning"
     assert (
-        events[-1].response.provider_metadata["compatibility_fallback"]["kind"]
+        cast('ModelResponse', events[-1].response).provider_metadata["compatibility_fallback"]["kind"]
         == "empty_reasoning_content_supplied"
     )
     _ = [event async for event in provider.stream(request(messages=messages))]
@@ -1024,7 +1029,7 @@ async def test_reasoning_history_negotiation_is_bounded_and_does_not_apply_to_ot
         "The reasoning_content must be passed back to the API.",
     ):
         error = RuntimeError(message)
-        error.status_code = 400
+        setattr(error, 'status_code', 400)
         completions = SequencedCompletions([error, error])
         provider = OpenAICompatibleModelProvider(
             config(), client=FakeClient(completions)

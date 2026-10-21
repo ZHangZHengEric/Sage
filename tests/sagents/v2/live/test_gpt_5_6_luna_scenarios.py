@@ -1,5 +1,13 @@
 from __future__ import annotations
 
+from typing import TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    from sagents.v2.model.contracts import ModelResponse
+
+from sagents.v2.contracts.items import MessageItemData
+from sagents.v2.model.provider import ModelProvider
+
 import json
 import os
 
@@ -218,7 +226,7 @@ async def test_live_agent_loop_calls_tool_and_completes_canonical_run():
         if item.data.kind == "message" and item.status.value == "completed"
     ]
     assert completed_messages
-    assert completed_messages[-1].data.content[0].text.strip() == "42"
+    assert cast(TextBlock, cast(MessageItemData, completed_messages[-1].data).content[0]).text.strip() == "42"
 
 
 @pytest.mark.asyncio
@@ -259,10 +267,10 @@ async def test_live_compresses_then_completes_tool_flow_without_replay(trigger):
             try:
                 async for event in stream:
                     if event.kind == ModelEventKind.COMPLETED:
-                        usages.append((purpose, event.response.usage))
+                        usages.append((purpose, cast('ModelResponse', event.response).usage))
                     yield event
             finally:
-                await stream.aclose()
+                await getattr(stream, 'aclose')()
 
     provider = ObservedProvider()
     history = (
@@ -287,7 +295,7 @@ async def test_live_compresses_then_completes_tool_flow_without_replay(trigger):
         budget=ContextBudget(max_input_tokens=2000, reserve_output_tokens=512),
         reducer=PersistentSummaryContextReducer(
             store,
-            summarizer=ModelConversationSummarizer(provider),
+            summarizer=ModelConversationSummarizer(cast(ModelProvider, provider)),
             summary_target_tokens=256,
         ),
     )
@@ -334,7 +342,7 @@ async def test_live_compresses_then_completes_tool_flow_without_replay(trigger):
 
     loop = AgentLoopEngine(
         runtime=runtime,
-        model=provider,
+        model=cast(ModelProvider, provider),
         context_assembler=assembler,
         tool_catalog=InMemoryToolCatalog((definition,)),
         tool_executor=InMemoryToolExecutor(
@@ -363,5 +371,5 @@ async def test_live_compresses_then_completes_tool_flow_without_replay(trigger):
         for i in result.final_items
         if i.data.kind == "message" and i.status.value == "completed"
     ]
-    assert messages[-1].data.content[0].text.strip() == "42"
+    assert cast(TextBlock, cast(MessageItemData, messages[-1].data).content[0]).text.strip() == "42"
     assert len(requests) <= 16

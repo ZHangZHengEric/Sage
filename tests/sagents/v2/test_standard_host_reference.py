@@ -1,4 +1,8 @@
 """Run the reference host in real fresh processes with native OS isolation."""
+
+from typing import cast
+
+from sagents.v2.package.manifest.runtime import CapabilitySelection
 import hashlib
 import json
 import os
@@ -53,8 +57,8 @@ async def test_standard_media_policy_exceeds_old_file_limit_and_enforces_new_lim
     config = runtime(tmp_path)
     binding = config.capabilities["execution.binding"]
     config = config.model_copy(update={"capabilities": {
-        **config.capabilities, "execution.binding": binding.model_copy(update={"config": {
-            **binding.config, "command_path": "/opt/homebrew/bin:/bin:/usr/bin",
+        **config.capabilities, "execution.binding": cast(CapabilitySelection, binding).model_copy(update={"config": {
+            **cast(CapabilitySelection, binding).config, "command_path": "/opt/homebrew/bin:/bin:/usr/bin",
         }}),
     }})
     script = "import pathlib; from PIL import Image; Image.new('RGB',(16,16)).save('frame.png'); p=pathlib.Path('large.bin'); p.touch(); p.open('r+b').truncate(66*1024**2); print(p.stat().st_size)"

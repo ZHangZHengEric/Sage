@@ -1,5 +1,10 @@
 """Keep the documented host entrypoints runnable without credentials or network."""
 
+from typing import TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    from sagents.v2.model.provider import ModelProvider
+
 from argparse import Namespace
 import json
 from pathlib import Path
@@ -72,6 +77,6 @@ async def test_bootstrap_rejects_missing_environment_instead_of_silent_fallback(
                 tmp_path,
                 environment="missing",
             ),
-            model=starter.offline_model(),
+            model=cast('ModelProvider | None', starter.offline_model()),
         )
     assert caught.value.info.code == "manifest.environment_not_found"

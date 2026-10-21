@@ -1,3 +1,16 @@
+
+from typing import TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    from sagents.v2.composition.loaded_agents import LoadedAgents
+    from sagents.v2.contracts.execution import ExecutionConfigurationSnapshot
+    from sagents.v2.contracts.principals import PrincipalType
+    from sagents.v2.runtime.extensions.contracts import ExtensionScope
+
+from sagents.v2.composition.loaded_agents import ApplicationEntrypoint
+
+from sagents.v2.package.manifest.runtime import CapabilitySelection
+
 from tests.sagents.v2.sdk_fixture import build_registered_app, app_configuration
 from tests.sagents.v2.model_fixture import TEST_MODELS
 import asyncio
@@ -35,9 +48,9 @@ async def test_load_reuse_update_and_close(tmp_path):
     assert updated.id == first.id
     assert updated.version != first.version
     assert app.loaded_agents == (updated,)
-    assert app._loaded_agents.implementation(
+    assert cast('LoadedAgents', app._loaded_agents).implementation(
         first
-    ) is not app._loaded_agents.implementation(updated)
+    ) is not cast('LoadedAgents', app._loaded_agents).implementation(updated)
     await app.close()
     with pytest.raises(RuntimeError, match="closed"):
         await app.load_agent(manifest)
@@ -55,7 +68,7 @@ async def test_default_runtime_matches_desktop(tmp_path):
     expected = effective_runtime(desktop_v2_manifest(session_root=tmp_path).runtime)
     for capability, selection in expected.capabilities.items():
         assert app.runtime_configuration.capabilities[capability] == selection
-    assert app.runtime_configuration.capabilities["model.provider"].plugin == "test.fixture.model.provider"
+    assert cast(CapabilitySelection, app.runtime_configuration.capabilities["model.provider"]).plugin == "test.fixture.model.provider"
     try:
         await app.load_agent(package())
     finally:
@@ -151,7 +164,7 @@ def context():
     from sagents.v2 import ActorRef, RequestContext
 
     return RequestContext(
-        actor=ActorRef(principal_id="test-user", principal_type="user")
+        actor=ActorRef(principal_id="test-user", principal_type=cast('PrincipalType', "user"))
     )
 
 
@@ -175,7 +188,7 @@ async def test_reusable_agent_runs_and_old_revision_survives_update(tmp_path):
         )
         second = await app.update_agent(agent=first, package=changed)
         for index, agent in enumerate((first, second, first)):
-            stream = await app.entrypoint().run_stream(
+            stream = await cast(ApplicationEntrypoint, app.entrypoint()).run_stream(
                 command(agent, f"run-{index}"), context(), agent=agent
             )
             assert (await stream.wait()).state.value == "completed"
@@ -273,7 +286,7 @@ async def test_startup_isolates_bad_revision_and_preserves_queued_work(tmp_path,
         update={"available_at": utc_now() + timedelta(hours=1)}
     )
     await dispatcher.scheduler.submit(work)
-    archive = app._loaded_agents.store
+    archive = cast('LoadedAgents', app._loaded_agents).store
     path = archive._path(bad.composition_hash)
     if failure == "missing":
         path.unlink()
@@ -306,7 +319,7 @@ async def test_startup_isolates_bad_revision_and_preserves_queued_work(tmp_path,
         assert [await reopened.runtime.get_run(run.run_id) for run in pending] == before
         latest = await reopened.load_agent(changed)
         assert {issue.run_id for issue in reopened.recovery_issues} == {r.run_id for r in pending}
-        stream = await reopened.entrypoint().run_stream(command(latest, "new-chat"), context(), agent=latest)
+        stream = await cast(ApplicationEntrypoint, reopened.entrypoint()).run_stream(command(latest, "new-chat"), context(), agent=latest)
         assert (await stream.wait()).state.value == "completed"
         await stream.detach()
         # A repaired archive can be restored on the next normal load pass.
@@ -375,7 +388,7 @@ def test_runtime_inputs_and_resource_base_path(tmp_path):
         package_input(raw)
     resolved = package_input(config_text=json.dumps(raw), base_path=tmp_path)
     assert (
-        next(iter(resolved.agents.values())).instructions.inline == "read from package"
+        getattr(next(iter(resolved.agents.values())).instructions, 'inline') == "read from package"
     )
     agent["instructions"] = {"path": "../outside.md"}
     with pytest.raises(ValueError, match="inside base_path"):
@@ -392,7 +405,7 @@ async def test_app_owns_resources_without_loading_and_snapshots_registration(tmp
 
     builder, runtime = app_configuration(tmp_path, resources=(Resource(),))
     app = await builder.build(runtime=runtime, models=TEST_MODELS)
-    assert app._loaded_agents.builder._registry is not builder._registry
+    assert cast('LoadedAgents', app._loaded_agents).builder._registry is not builder._registry
     await app.close()
     await app.close()
     assert closed == [True]
@@ -416,7 +429,7 @@ async def test_update_while_old_run_is_in_flight(tmp_path):
     )
     try:
         old = await app.load_agent(original)
-        stream = await app.entrypoint().run_stream(
+        stream = await cast(ApplicationEntrypoint, app.entrypoint()).run_stream(
             command(old, "in-flight"), context(), agent=old
         )
         await asyncio.wait_for(entered.wait(), 2)
@@ -431,7 +444,7 @@ async def test_update_while_old_run_is_in_flight(tmp_path):
         assert result.resolved_spec_hash == old.composition_hash
         assert await app.agent_for_run(result.run_id, context()) is old
         with pytest.raises(ValueError, match="admitted Agent revision"):
-            await app.entrypoint().continue_run(result.run_id, context(), agent=latest)
+            await cast(ApplicationEntrypoint, app.entrypoint()).continue_run(result.run_id, context(), agent=latest)
         with pytest.raises(ValueError, match="Agent was updated"):
             await app.update_agent(agent=old, package=changed)
         await stream.detach()
@@ -453,14 +466,14 @@ async def test_entrypoint_requires_owned_agent_and_matching_command(tmp_path):
         agent = await app.load_agent(manifest)
         foreign = await other.load_agent(manifest)
         with pytest.raises(TypeError):
-            await app.entrypoint().run_stream(command(agent, "missing"), context())
+            await getattr(app.entrypoint(), "run_stream")(command(agent, "missing"), context())
         with pytest.raises(ValueError, match="different application"):
-            await app.entrypoint().run_stream(
+            await cast(ApplicationEntrypoint, app.entrypoint()).run_stream(
                 command(foreign, "foreign"), context(), agent=foreign
             )
         bad = command(agent, "wrong").model_copy(update={"resolved_spec_hash": "wrong"})
         with pytest.raises(ValueError, match="identity"):
-            await app.entrypoint().run_stream(bad, context(), agent=agent)
+            await cast(ApplicationEntrypoint, app.entrypoint()).run_stream(bad, context(), agent=agent)
     finally:
         await app.close()
         await other.close()
@@ -478,7 +491,7 @@ async def test_plugin_validation_failure_keeps_loaded_revision(tmp_path):
             "capabilities": {
                 **manifest.runtime.capabilities,
                 "context.reducer": CapabilitySelection(
-                    plugin="example.context.reference-reducer", scope="agent"
+                    plugin="example.context.reference-reducer", scope=cast('ExtensionScope | None', "agent")
                 ),
             }
         }
@@ -501,7 +514,7 @@ async def test_plugin_validation_failure_keeps_loaded_revision(tmp_path):
         with pytest.raises(Exception, match="invalid configuration"):
             await app.update_agent(agent=original, package=invalid)
         assert app.loaded_agents == (original,)
-        stream = await app.entrypoint().run_stream(
+        stream = await cast(ApplicationEntrypoint, app.entrypoint()).run_stream(
             command(original, "after-failed-update"), context(), agent=original
         )
         assert (await stream.wait()).state.value == "completed"
@@ -533,7 +546,7 @@ async def test_child_revision_is_pinned_across_update_and_restart(tmp_path):
     try:
         child = await app.load_agent(child_package)
         parent = await app.load_agent(parent_package, subagents={"worker": child})
-        stream = await app.entrypoint().run_stream(
+        stream = await cast(ApplicationEntrypoint, app.entrypoint()).run_stream(
             command(parent, "pinned-child"), context(), agent=parent
         )
         assert (await stream.wait()).state.value == "completed"
@@ -613,7 +626,7 @@ async def test_atomic_load_configuration_does_not_mutate_application(tmp_path):
     selected.capabilities["agent.continuation-policy"] = CapabilitySelection(plugin="sage.agent.continuation.deterministic")
     try:
         loaded = await app.load_agent(package(), runtime=selected, models=TEST_MODELS)
-        assert loaded._resolved.runtime.capabilities["agent.continuation-policy"].plugin == "sage.agent.continuation.deterministic"
+        assert cast(CapabilitySelection, loaded._resolved.runtime.capabilities["agent.continuation-policy"]).plugin == "sage.agent.continuation.deterministic"
         assert app.runtime_configuration == baseline
         selected.capabilities.clear()
         assert loaded._resolved.runtime.capabilities
@@ -654,11 +667,11 @@ async def test_evicted_revision_restores_exact_run_configuration(tmp_path):
         middle = await app.update_agent(agent=first, package=middle_package)
         latest_package = package().model_copy(update={"metadata": package().metadata.model_copy(update={"version": "3"})})
         latest = await app.update_agent(agent=middle, package=latest_package)
-        app._loaded_agents.max_idle_revisions = 0
-        await app._loaded_agents.prune_revisions()
+        cast('LoadedAgents', app._loaded_agents).max_idle_revisions = 0
+        await cast('LoadedAgents', app._loaded_agents).prune_revisions()
         assert middle._application._closed
         assert latest._application._closed
-        run = await app.entrypoint().run_stream(command(middle, "restored"), context(), agent=middle)
+        run = await cast(ApplicationEntrypoint, app.entrypoint()).run_stream(command(middle, "restored"), context(), agent=middle)
         assert (await run.wait()).resolved_spec_hash == middle.composition_hash
         assert app.loaded_agents == (latest,)
     finally:
@@ -676,19 +689,19 @@ async def test_revision_cache_keeps_control_and_execution_references(tmp_path):
         await app.update_agent(agent=second, package=package().model_copy(
             update={"metadata": package().metadata.model_copy(update={"version": "3"})}))
         catalog = app._loaded_agents
-        catalog.max_idle_revisions = 0
-        async with catalog.pin(second):
-            await catalog.prune_revisions()
+        cast('LoadedAgents', catalog).max_idle_revisions = 0
+        async with cast('LoadedAgents', catalog).pin(second):
+            await cast('LoadedAgents', catalog).prune_revisions()
             assert not second._application._closed
-        agent = catalog.implementation(second)
+        agent = cast('LoadedAgents', catalog).implementation(second)
         task = asyncio.create_task(blocked.wait())
         agent._tasks["active"] = task
-        await catalog.prune_revisions()
+        await cast('LoadedAgents', catalog).prune_revisions()
         assert not second._application._closed
         blocked.set()
         await task
         agent._tasks.pop("active")
-        await catalog.prune_revisions()
+        await cast('LoadedAgents', catalog).prune_revisions()
         assert second._application._closed
     finally:
         if task is not None and not task.done():
@@ -764,13 +777,13 @@ async def test_idle_current_packages_release_resources_and_restore_old_handles(t
         other = package().model_copy(update={"metadata": package().metadata.model_copy(update={"id": "test.idle-current"})})
         current = await app.load_agent(other)
         catalog = app._loaded_agents
-        catalog.max_idle_revisions = 0
-        await catalog.prune_revisions()
+        cast('LoadedAgents', catalog).max_idle_revisions = 0
+        await cast('LoadedAgents', catalog).prune_revisions()
         assert current._application._closed
         assert not root._application._closed
-        assert len(catalog.revisions) == 1
+        assert len(cast('LoadedAgents', catalog).revisions) == 1
         assert app.loaded_agents == (root, current)
-        stream = await app.entrypoint().run_stream(command(current, "idle-current-restored"), context(), agent=current)
+        stream = await cast(ApplicationEntrypoint, app.entrypoint()).run_stream(command(current, "idle-current-restored"), context(), agent=current)
         assert (await stream.wait()).state.value == "completed"
         await stream.detach()
         assert app.loaded_agents == (root, current)
@@ -792,12 +805,12 @@ async def test_interface_projection_pins_revision_until_detach(tmp_path):
         assert (await stream.wait()).state.value == "completed"
         await anext(stream.results)
         catalog = app._loaded_agents
-        catalog.max_idle_revisions = 0
-        await catalog.prune_revisions()
+        cast('LoadedAgents', catalog).max_idle_revisions = 0
+        await cast('LoadedAgents', catalog).prune_revisions()
         assert not agent._application._closed
         await stream.detach()
-        assert not catalog._users
-        await catalog.prune_revisions()
+        assert not cast('LoadedAgents', catalog)._users
+        await cast('LoadedAgents', catalog).prune_revisions()
         assert agent._application._closed
     finally:
         if stream is not None:
@@ -813,8 +826,8 @@ async def test_synchronous_agent_lookup_restores_an_idle_current_revision(tmp_pa
         other = package().model_copy(update={"metadata": package().metadata.model_copy(update={"id": "test.sync-cold"})})
         loaded = await app.load_agent(other)
         catalog = app._loaded_agents
-        catalog.max_idle_revisions = 0
-        await catalog.prune_revisions()
+        cast('LoadedAgents', catalog).max_idle_revisions = 0
+        await cast('LoadedAgents', catalog).prune_revisions()
         assert loaded._application._closed
         exported = app.agent(loaded.id)
         assert isinstance(exported, SAgent)
@@ -822,7 +835,7 @@ async def test_synchronous_agent_lookup_restores_an_idle_current_revision(tmp_pa
         stream = await exported.run_stream(command(loaded, "sync-cold"), context())
         assert (await stream.wait()).state.value == "completed"
         await stream.detach()
-        await catalog.prune_revisions()
+        await cast('LoadedAgents', catalog).prune_revisions()
         stream = await exported.run_stream(command(loaded, "sync-cold-again"), context())
         assert (await stream.wait()).state.value == "completed"
         await stream.detach()
@@ -838,28 +851,28 @@ async def test_exported_agent_synchronous_drive_and_subscription_release_leases(
         other = package().model_copy(update={"metadata": package().metadata.model_copy(update={"id": "test.sync-drive"})})
         loaded = await app.load_agent(other)
         catalog = app._loaded_agents
-        catalog.max_idle_revisions = 0
-        await catalog.prune_revisions()
+        cast('LoadedAgents', catalog).max_idle_revisions = 0
+        await cast('LoadedAgents', catalog).prune_revisions()
         exported = app.agent(loaded.id)
         initial = await exported.run_stream(command(loaded, "sync-drive"), context())
         assert (await initial.wait()).state.value == "completed"
         pending = initial.handle
         await initial.detach()
-        await catalog.prune_revisions()
+        await cast('LoadedAgents', catalog).prune_revisions()
         stream = exported.drive_accepted_run(pending, context())
         assert isinstance(stream.execution, asyncio.Task)
         assert (await stream.wait()).state.value == "completed"
         await stream.detach()
-        await catalog.prune_revisions()
+        await cast('LoadedAgents', catalog).prune_revisions()
         events = exported.subscribe_events(EventCursor(run_id=pending.run_id, run_sequence=0), context())
         await anext(events)
-        assert catalog._users
-        await catalog.prune_revisions()
-        assert (loaded.package_id, loaded.version) in catalog.revisions
-        await events.aclose()
-        assert not catalog._users
-        await catalog.prune_revisions()
-        assert (loaded.package_id, loaded.version) not in catalog.revisions
+        assert cast('LoadedAgents', catalog)._users
+        await cast('LoadedAgents', catalog).prune_revisions()
+        assert (loaded.package_id, loaded.version) in cast('LoadedAgents', catalog).revisions
+        await getattr(events, 'aclose')()
+        assert not cast('LoadedAgents', catalog)._users
+        await cast('LoadedAgents', catalog).prune_revisions()
+        assert (loaded.package_id, loaded.version) not in cast('LoadedAgents', catalog).revisions
     finally:
         await app.close()
 
@@ -882,8 +895,8 @@ async def test_cold_exported_runtime_admits_with_its_original_workspace(tmp_path
         other = package().model_copy(update={"metadata": package().metadata.model_copy(update={"id": "test.runtime-cold"})})
         loaded = await app.load_agent(other, runtime=selected, models=models)
         catalog = app._loaded_agents
-        catalog.max_idle_revisions = 0
-        await catalog.prune_revisions()
+        cast('LoadedAgents', catalog).max_idle_revisions = 0
+        await cast('LoadedAgents', catalog).prune_revisions()
         assert loaded._application._closed
         exported = app.agent(loaded.id)
         for method, key in (("start_run", "cold-runtime-start"), ("stream", "cold-runtime-stream")):
@@ -892,9 +905,9 @@ async def test_cold_exported_runtime_admits_with_its_original_workspace(tmp_path
             if method == "stream":
                 streams.append(result)
             stored = await exported.runtime.session_store.get_start_command(handle.run_id)
-            assert stored.config.execution_snapshot.workspace_root == str(workspace)
+            assert cast('ExecutionConfigurationSnapshot', stored.config.execution_snapshot).workspace_root == str(workspace)
             assert stored.resolved_spec_hash == loaded.composition_hash
-            live = catalog.revisions[(loaded.package_id, loaded.version)]
+            live = cast('LoadedAgents', catalog).revisions[(loaded.package_id, loaded.version)]
             assert live._resolved.model_routes["primary"]["model"] == "frozen-original-model"
     finally:
         for stream in streams:

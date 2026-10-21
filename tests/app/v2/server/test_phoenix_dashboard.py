@@ -1,3 +1,9 @@
+
+from typing import TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    from typing import Any
+
 import gzip
 import json
 
@@ -151,4 +157,4 @@ async def test_metadata_pagination_and_raw_span_are_separate_queries():
         assert 'attributes' not in page['items'][0]
         assert page['items'][0]['session_id'] == 'session:one'
         record = await dashboard.span('a'*16,client=client)
-        assert record['attributes'] == raw['attributes']
+        assert cast("Any", record)['attributes'] == raw['attributes']

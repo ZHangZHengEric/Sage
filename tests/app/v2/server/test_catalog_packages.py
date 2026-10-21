@@ -1,5 +1,11 @@
 """Database, immutable inventory, admission and actual sandbox use one package."""
 
+from typing import TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    from anyio.from_thread import BlockingPortal
+    from sagents.v2.agent.management.contracts import AgentPackageBundle
+
 from dataclasses import replace
 
 import pytest
@@ -45,12 +51,12 @@ async def test_package_is_persistent_authority_and_old_versions_remain_readable(
         id="agent_test", name="Before", instructions="original", tools=["file_read"]
     )
     await store.create_agent("alice", agent)
-    old_ref = agent.package.content_hash
+    old_ref = cast('AgentPackageBundle', agent.package).content_hash
     edited = agent.with_configuration(name="After", sandbox={"network": "unrestricted"})
     await store.update_agent("alice", edited)
     async with store.database.transaction() as db:
         row = await db.get(AgentRow, agent.id)
-        assert row.package_ref == edited.package.content_hash
+        assert row.package_ref == cast('AgentPackageBundle', edited.package).content_hash
         row.instructions = "obsolete compatibility column"
         row.tools = ["not-a-tool"]
     reloaded = await DatabaseCatalogStore(store.database).get("alice")
@@ -152,10 +158,10 @@ def test_existing_external_runs_use_persisted_package_sandbox(
         # Corrupting the old columns must not change the configuration source.
         async def persisted():
             owner = await host.catalog.agent_owner(agent_id)
-            catalog = await DatabaseCatalogStore(host.database).get(owner)
+            catalog = await DatabaseCatalogStore(host.database).get(cast(str, owner))
             return next(a for a in catalog.agents if a.id == agent_id)
 
-        saved = client.portal.call(persisted)
+        saved = cast('BlockingPortal', client.portal).call(persisted)
         assert saved.sandbox.network == requested
 
 
@@ -336,9 +342,9 @@ async def test_external_scope_survives_database_reload_and_old_refs_remain_valid
     loaded = await DatabaseCatalogStore(store.database).get('alice')
     assert next(a for a in loaded.agents if a.id == agent.id).external_tools == []
     # Simulate the serialized bundle before external_tools existed.
-    old = disabled.package.model_dump(mode='json')
+    old = cast('AgentPackageBundle', disabled.package).model_dump(mode='json')
     for definition in old['manifest']['agents'].values():
         if not definition.get('preload_skills'):
             definition.pop('preload_skills', None)
     old_ref = hashlib.sha256(json.dumps(old, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
-    assert disabled.package.content_hash == old_ref
+    assert cast('AgentPackageBundle', disabled.package).content_hash == old_ref

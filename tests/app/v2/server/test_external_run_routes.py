@@ -1,5 +1,11 @@
 """Internal Run routes enforce persisted tenant and request identity bounds."""
 
+from typing import TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    from anyio.from_thread import BlockingPortal
+    from app.v2.server.conversations.agui.service import ConversationService
+
 import base64
 from dataclasses import replace
 from io import BytesIO
@@ -93,13 +99,13 @@ def test_external_run_passes_runtime_context_separately_from_agui(tmp_path):
         setup_agent(client)
         agent_id = client.headers["SAGE-AGENT-ID"]
         received = []
-        original = host.conversations.start
+        original = cast('ConversationService', host.conversations).start
 
         async def capture(request, **kwargs):
             received.append(kwargs["runtime_context"])
             return await original(request, **kwargs)
 
-        host.conversations.start = capture
+        cast('ConversationService', host.conversations).start = capture
         response = client.post(
             f"/api/agents/{agent_id}/runs",
             params={"workspace_path": "projects/site"},
@@ -149,7 +155,7 @@ def test_external_run_uses_effective_package_step_budget(
         async def configure(agent_limit, package_limit, entrypoint_limit):
             owner = await host.catalog.agent_owner(agent_id)
             agent = next(
-                a for a in (await host.catalog.get(owner)).agents if a.id == agent_id
+                a for a in (await host.catalog.get(cast(str, owner))).agents if a.id == agent_id
             )
             data = agent.package.model_dump(mode="json")
             definition = data["manifest"]["agents"][agent_id]
@@ -160,9 +166,9 @@ def test_external_run_uses_effective_package_step_budget(
                 f"budget-{agent_limit}-{package_limit}-{entrypoint_limit}"
             )
             updated = agent.model_copy(update={"package": AgentPackageBundle.model_validate(data)})
-            await host.catalog.store.update_agent(owner, updated)
+            await host.catalog.store.update_agent(cast(str, owner), updated)
 
-        client.portal.call(configure, agent_steps, package_steps, entrypoint_steps)
+        cast('BlockingPortal', client.portal).call(configure, agent_steps, package_steps, entrypoint_steps)
         response = _run(client, agent_id)
         assert response.status_code == 200, response.text
         assert "RUN_FINISHED" in response.text
@@ -174,15 +180,15 @@ def test_external_run_uses_effective_package_step_budget(
             )
             return selected[-1]
 
-        command = client.portal.call(stored_command)
+        command = cast('BlockingPortal', client.portal).call(stored_command)
         assert command.config.max_steps == expected
         assert observed_limits and set(observed_limits) == {expected or 24}
 
         # Retrying the same Run after a package update reuses its frozen budget.
-        client.portal.call(configure, 2, 2, None)
+        cast('BlockingPortal', client.portal).call(configure, 2, 2, None)
         replay = _run(client, agent_id)
         assert replay.status_code == 200, replay.text
-        assert client.portal.call(stored_command) == command
+        assert cast('BlockingPortal', client.portal).call(stored_command) == command
         assert set(observed_limits) == {expected or 24}
 
 
@@ -242,7 +248,7 @@ def test_workspace_cleanup_refuses_durable_unfinished_runs(tmp_path):
             command = selected[-1].model_copy(update={
                 "run_id": "unfinished", "idempotency_key": "unfinished"})
             await host.application.entrypoint().runtime.session_store.create_run(command, selected[4])
-        client.portal.call(enqueue)
+        cast('BlockingPortal', client.portal).call(enqueue)
         # Even an unrelated child path is reachable by a task in this workspace.
         response = client.delete(base + "/workspace/files", headers=_headers(),
                                  params={"path": "other", "recursive": True})

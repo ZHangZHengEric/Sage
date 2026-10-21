@@ -1,3 +1,9 @@
+
+from typing import TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    from typing import Any
+
 import json
 
 import pytest
@@ -84,8 +90,8 @@ async def test_saved_desktop_settings_upgrade_preserves_disabled_logs(tmp_path):
         assert settings.component_selections == {
             "observability.provider": "sage.observability.local"
         }
-        assert not service.observability.logs.outputs
-        assert service.observability.diagnostics.available
+        assert not cast("Any", service.observability).logs.outputs
+        assert cast("Any", service.observability).diagnostics.available
         assert "observability.log-sink" not in path.read_text()
         assert "context.unit-compactor" not in path.read_text()
     finally:

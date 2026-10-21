@@ -3,6 +3,8 @@
 This script evaluates MCP servers by running test questions against them using Claude.
 """
 
+from typing import Any, cast
+
 import argparse
 import asyncio
 import json
@@ -12,7 +14,7 @@ import time
 import traceback
 import xml.etree.ElementTree as ET
 from pathlib import Path
-from typing import Any
+from anthropic.types import MessageParam, ToolUnionParam, TextBlock
 
 from anthropic import Anthropic  # pyright: ignore[reportMissingImports]
 
@@ -93,7 +95,7 @@ async def agent_loop(
     connection: Any,
 ) -> tuple[str, dict[str, Any]]:
     """Run the agent loop with MCP tools."""
-    messages = [{"role": "user", "content": question}]
+    messages: list[MessageParam] = [{"role": "user", "content": question}]
 
     response = await asyncio.to_thread(
         client.messages.create,
@@ -101,7 +103,7 @@ async def agent_loop(
         max_tokens=4096,
         system=EVALUATION_PROMPT,
         messages=messages,
-        tools=tools,
+        tools=cast(list[ToolUnionParam], tools),
     )
 
     messages.append({"role": "assistant", "content": response.content})
@@ -150,12 +152,12 @@ async def agent_loop(
             max_tokens=4096,
             system=EVALUATION_PROMPT,
             messages=messages,
-            tools=tools,
+            tools=cast(list[ToolUnionParam], tools),
         )
         messages.append({"role": "assistant", "content": response.content})
 
     response_text = next(
-        (block.text for block in response.content if hasattr(block, "text")),
+        (cast(TextBlock, block).text for block in response.content if hasattr(block, "text")),
         None,
     )
     return response_text, tool_metrics  # pyright: ignore[reportReturnType]

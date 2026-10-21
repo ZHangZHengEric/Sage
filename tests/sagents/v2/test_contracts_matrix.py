@@ -1,5 +1,10 @@
 from __future__ import annotations
 
+from typing import Any, TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    from typing import Literal
+
 from tests.sagents.v2.event_fixture import event_data
 
 from datetime import datetime, timezone
@@ -176,7 +181,7 @@ def test_catalog_rejects_mismatched_payload_family(event_type, wrong_data):
 def test_unknown_event_requires_extension_namespace_and_ignorable(
     event_type, ignorable, valid
 ):
-    kwargs = dict(
+    kwargs: dict[str, Any] = dict(
         event_id="event_extension",
         type=event_type,
         occurred_at=NOW,
@@ -208,7 +213,7 @@ def test_unknown_event_requires_extension_namespace_and_ignorable(
     ],
 )
 def test_session_sequence_matrix(durability, session_sequence, valid):
-    kwargs = dict(
+    kwargs: dict[str, Any] = dict(
         event_id="event_extension",
         type="extension.test.event",
         occurred_at=NOW,
@@ -239,7 +244,7 @@ def test_content_block_discriminator_nested_round_trip_and_extra_rejection():
 
     item = MessageItemData(role="assistant", content=(TextBlock(text="done"),))
     restored = MessageItemData.model_validate_json(item.model_dump_json())
-    assert restored.content[0].text == "done"
+    assert cast(TextBlock, restored.content[0]).text == "done"
 
 
 def test_start_input_accepts_assistant_history_but_not_external_tool_rows():
@@ -247,7 +252,7 @@ def test_start_input_accepts_assistant_history_but_not_external_tool_rows():
     assert history.role == "assistant"
 
     with pytest.raises(ValidationError):
-        InputItem(role="tool", content=(TextBlock(text="untrusted"),))
+        InputItem(role=cast("Literal['user', 'assistant', 'system', 'developer']", "tool"), content=(TextBlock(text="untrusted"),))
 
 
 def test_run_config_preserves_legacy_skill_names_with_spaces():
@@ -266,7 +271,7 @@ def test_run_config_preserves_legacy_skill_names_with_spaces():
     ],
 )
 def test_start_run_concurrency_contract(mode, session_id, valid):
-    kwargs = dict(
+    kwargs: dict[str, Any] = dict(
         session_id=session_id,
         agent_id="agent_test",
         input=(InputItem(role="user", content=(TextBlock(text="hello"),)),),
@@ -292,7 +297,7 @@ def test_start_run_concurrency_contract(mode, session_id, valid):
     ],
 )
 def test_command_receipt_error_matrix(decision, error, valid):
-    kwargs = dict(
+    kwargs: dict[str, Any] = dict(
         command_id="command_1",
         decision=decision,
         target_id="run_1",
@@ -317,7 +322,7 @@ def test_command_receipt_error_matrix(decision, error, valid):
     ],
 )
 def test_run_result_terminal_matrix(state, error, valid):
-    kwargs = dict(
+    kwargs: dict[str, Any] = dict(
         session_id="session_1",
         run_id="run_1",
         outcome=state,
@@ -334,8 +339,4 @@ def test_run_result_terminal_matrix(state, error, valid):
 
 def test_contracts_reject_unknown_fields_at_public_boundary():
     with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
-        ActorRef(
-            principal_id="user_1",
-            principal_type=PrincipalType.USER,
-            unexpected="value",
-        )
+        ActorRef.model_validate(dict(principal_id="user_1", principal_type=PrincipalType.USER, unexpected="value"))

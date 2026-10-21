@@ -1,4 +1,7 @@
 """AnyTool runs without either Sage runtime and preserves MCP/wire contracts."""
+
+from typing import Any
+
 import json
 from pathlib import Path
 import subprocess
@@ -80,7 +83,7 @@ async def test_standalone_stdio_lists_tools(tmp_path):
             # A missing configuration is an MCP error, not a hidden v1 fallback.
             result = await client.call_tool("lookup", {})
             assert result.isError
-            assert "simulator" in result.content[0].text
+            assert "simulator" in getattr(result.content[0], 'text')
 
 
 @pytest.mark.asyncio
@@ -95,7 +98,7 @@ async def test_json_fallback_does_not_retry_auth_or_server_errors(monkeypatch, s
         return httpx.Response(200, json={"choices": [{"message": {"content": "{}"}}]})
     original = httpx.AsyncClient
     monkeypatch.setattr(model_client.httpx, "AsyncClient", lambda **kwargs: original(transport=httpx.MockTransport(handler), **kwargs))
-    kwargs = dict(server_name="demo", tool_def={"name": "lookup"}, arguments={}, server_config={"simulator": {"api_key": "key", "base_url": "https://example.com/v1", "model": "test"}})
+    kwargs: dict[str, Any] = dict(server_name="demo", tool_def={"name": "lookup"}, arguments={}, server_config={"simulator": {"api_key": "key", "base_url": "https://example.com/v1", "model": "test"}})
     if status == 400:
         assert (await generate_anytool_result(**kwargs))["parsed"] == {}
     else:

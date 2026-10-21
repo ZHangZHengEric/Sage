@@ -5,6 +5,14 @@ hold real connections to expose unbounded fan-out, admission cancellation, and
 the legacy owner fallback that previously acquired a nested reader connection.
 """
 
+from typing import TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    from pydantic import BaseModel
+    from sagents.v2.contracts.principals import PrincipalType
+    from sagents.v2.runtime.extensions.contracts import ProviderSet
+    from typing import Any
+
 import asyncio
 from contextlib import AsyncExitStack, asynccontextmanager, suppress
 import os
@@ -93,11 +101,11 @@ def test_registered_connection_budget_reaches_the_actual_mysql_pool(plugin):
     if plugin.endswith("redis-mysql"):
         config["redis_url"] = "redis://unused/0"
     registration = builtin_extension_registry().get(plugin)
-    validated = registration.config_model.model_validate(config).model_dump(exclude_unset=True)
+    validated = cast('type[BaseModel]', registration.config_model).model_validate(config).model_dump(exclude_unset=True)
     store = registration.factory(ExtensionScopeContext(
         scope=ExtensionScope.PROCESS, scope_id="budget", config=validated,
-    ), {})
-    budget = (store._archive if plugin.endswith("redis-mysql") else store)._connection_budget
+    ), cast('ProviderSet', {}))
+    budget = getattr(getattr(store, '_archive') if plugin.endswith("redis-mysql") else store, '_connection_budget')
     assert budget.max_connections == 3
     assert budget.max_pending_connections == 7
     assert budget.connection_acquire_timeout_seconds == 0.25
@@ -121,14 +129,14 @@ async def test_readers_leave_writer_capacity_and_never_exceed_physical_budget():
                             assert await connection_id(writer) not in reader_ids
                     assert not completed
                     # Pool size includes idle and leased physical connections.
-                    assert store._pool.size == 3
+                    assert cast('Any', store._pool).size == 3
                 finally:
                     waiter.cancel()
                     with suppress(asyncio.CancelledError):
                         await waiter
         async with store._reader_connection() as connection:
             assert await connection_id(connection)
-        assert store._pool.size <= 3
+        assert cast('Any', store._pool).size <= 3
 
 
 async def test_acquisition_deadline_does_not_cancel_an_admitted_transaction():
@@ -208,7 +216,7 @@ async def test_pending_deadline_or_cancellation_returns_admission_capacity(finis
             try:
                 await attempted.wait()
                 await assert_waiting(waiter)
-                assert store._pool.size <= 2
+                assert cast('Any', store._pool).size <= 2
                 if finish == "cancel":
                     waiter.cancel()
                     with pytest.raises(asyncio.CancelledError):
@@ -239,7 +247,7 @@ async def test_pending_deadline_or_cancellation_returns_admission_capacity(finis
                 raise
         await asyncio.wait_for(replacement, 1)
         assert len(completed) == 1
-        assert store._pool.size <= 2
+        assert cast('Any', store._pool).size <= 2
 
 
 @pytest.mark.parametrize("cancellation", ["asyncio", "anyio"])
@@ -292,7 +300,7 @@ async def test_cancelled_reader_keeps_capacity_until_real_rollback_finishes(canc
                 await asyncio.wait_for(task, 1)
             await asyncio.wait_for(replacement, 1)
             assert len(completed) == 1
-            assert store._pool.size <= 2
+            assert cast('Any', store._pool).size <= 2
         finally:
             finish_rollback.set()
             task.cancel()
@@ -309,7 +317,7 @@ async def test_legacy_metadata_owner_uses_one_reader_without_history_install_or_
         max_connections=2, connection_acquire_timeout_seconds=0.2
     ) as store:
         owner = RequestContext(
-            actor=ActorRef(principal_id="owner", principal_type="user", tenant_id="tenant")
+            actor=ActorRef(principal_id="owner", principal_type=cast('PrincipalType', "user"), tenant_id="tenant")
         )
         stranger = owner.model_copy(
             update={"actor": owner.actor.model_copy(update={"principal_id": "stranger"})}
@@ -337,4 +345,4 @@ async def test_legacy_metadata_owner_uses_one_reader_without_history_install_or_
             assert [row.run_id for row in rows] == [result.handle.run_id]
             assert not await store.authorized_run_metadata_page(["legacy"], stranger)
         assert not store._sessions and not store._runs
-        assert store._pool.size <= 2
+        assert cast('Any', store._pool).size <= 2

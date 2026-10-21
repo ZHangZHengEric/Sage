@@ -2,6 +2,13 @@
 
 from __future__ import annotations
 
+from typing import Any, TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    from sagents.v2.contracts.run_state import RunSnapshot
+    from sagents.v2.model.contracts import ModelEventKind
+    from sagents.v2.runtime.session.contracts import SessionStore
+
 import asyncio
 import json
 import os
@@ -60,7 +67,7 @@ DEFINITION = ToolDefinition(
 
 def completion(text="done", calls=()):
     return ModelStreamEvent(
-        kind="completed",
+        kind=cast('ModelEventKind', "completed"),
         response=ModelResponse(
             response_id="response",
             text=text,
@@ -91,6 +98,9 @@ class Model:
             supports_tools=True,
             supports_streaming=True,
             supports_parallel_tool_calls=True,
+            supports_reasoning=False,
+            supports_multimodal_input=False,
+            supports_structured_output=False,
         )
 
     async def stream(self, request):
@@ -188,7 +198,7 @@ def simple_loop(root, runtime, model, *, boundary=None, unknown=False, followup=
             else {},
         )
 
-    options = dict(
+    options: dict[str, Any] = dict(
         runtime=runtime,
         model=model,
         tool_catalog=InMemoryToolCatalog((DEFINITION,)),
@@ -305,7 +315,7 @@ async def retry_interaction(runtime, store, run_id, *, decision="retry"):
 
 async def worker(root, scenario):
     store = FilesystemSessionStore(root / "store")
-    runtime = HarnessRuntime(store)
+    runtime = HarnessRuntime(cast('SessionStore', store))
     handle = await runtime.start_run(
         StartRun(
             agent_id="root",
@@ -407,15 +417,15 @@ async def test_hard_kill_preserves_ledger_and_does_not_repeat_tools(tmp_path, sc
     identity = await kill_worker(tmp_path, scenario)
     store = FilesystemSessionStore(tmp_path / "store")
     try:
-        runtime = HarnessRuntime(store)
+        runtime = HarnessRuntime(cast('SessionStore', store))
         before = await store.read_events(identity["run"])
         model = Model(tmp_path, store)
         loop = simple_loop(tmp_path, runtime, model)
         recovered = await asyncio.wait_for(
             loop.recover_interrupted(identity["run"], CONTEXT), 10
         )
-        assert recovered.run_id == identity["run"]
-        assert recovered.state == (
+        assert cast('RunSnapshot', recovered).run_id == identity["run"]
+        assert cast('RunSnapshot', recovered).state == (
             RunState.SUSPENDED if scenario == "unknown" else RunState.COMPLETED
         )
         after = await store.read_events(identity["run"])
@@ -451,7 +461,7 @@ async def test_hard_kill_preserves_ledger_and_does_not_repeat_tools(tmp_path, sc
 async def test_dispatcher_recovers_entire_team_tree_after_hard_kill(tmp_path, scenario):
     identity = await kill_worker(tmp_path, scenario)
     store = FilesystemSessionStore(tmp_path / "store")
-    runtime = HarnessRuntime(store)
+    runtime = HarnessRuntime(cast('SessionStore', store))
     sessions = [
         identity["session"],
         *[
@@ -535,7 +545,7 @@ async def test_running_checkpoint_digest_mismatch_never_retries_a_tool(
 
         monkeypatch.setattr(store, "get_checkpoint", corrupted)
         model = Model(tmp_path, store)
-        loop = simple_loop(tmp_path, HarnessRuntime(store), model)
+        loop = simple_loop(tmp_path, HarnessRuntime(cast('SessionStore', store)), model)
         with pytest.raises(SageV2Error) as failure:
             await loop.recover_interrupted(identity["run"], CONTEXT)
         assert failure.value.info.code == (

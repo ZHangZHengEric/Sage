@@ -1,9 +1,16 @@
 from __future__ import annotations
 
+from typing import TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    from sagents.v2.contracts.errors import RuntimeErrorInfo
+    from sagents.v2.runtime.execution.sandbox.plugins.local.support.network import ShellNetworkBroker
+
+from pathlib import Path
+
 import asyncio
 import os
 import sys
-from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -599,9 +606,9 @@ def test_linux_proxy_launch_retains_network_namespace_and_delays_loader_environm
     boundary = LocalResourceBoundary(row)
     boundary.scratch.mkdir()
     boundary.paths.home.mkdir()
-    boundary.network_broker = SimpleNamespace(
+    setattr(boundary, 'network_broker', SimpleNamespace(
         socket_path=tmp_path / "broker.sock", token="run-token"
-    )
+    ))
     environment = {"LD_PRELOAD": "/workspace/injection.so", "PYTHONPATH": "/workspace"}
     command, _, fds = boundary.command(
         "/bin/sh", ("-c", "echo ok"), tmp_path, environment
@@ -609,7 +616,7 @@ def test_linux_proxy_launch_retains_network_namespace_and_delays_loader_environm
     try:
         assert "--unshare-all" in command
         assert "--share-net" not in command
-        assert str(boundary.network_broker.socket_path) in command
+        assert str(cast('ShellNetworkBroker', boundary.network_broker).socket_path) in command
         assert "/sage-egress.sock" in command
         assert filters == [
             {"network_enabled": True, "proxy_bridge": True},
@@ -651,8 +658,8 @@ async def test_linux_kernel_limits_and_escaped_descendant_cleanup():
     handle = await provider.provision(resolved, CONTEXT, run_id="kernel-test")
     row = provider._rows[handle.ref.sandbox_id]
     try:
-        assert (row.boundary.cgroup / "cpu.max").read_text().strip() == "25000 100000"
-        assert (row.boundary.cgroup / "memory.max").read_text().strip() == str(
+        assert (cast(Path, row.boundary.cgroup) / "cpu.max").read_text().strip() == "25000 100000"
+        assert (cast(Path, row.boundary.cgroup) / "memory.max").read_text().strip() == str(
             64 * 1024**2
         )
         request = ProcessRequest(
@@ -684,7 +691,7 @@ async def test_linux_kernel_limits_and_escaped_descendant_cleanup():
         await handle.process.run(request, **authorize(issuer, handle, request))
         stats = dict(
             line.split()
-            for line in (row.boundary.cgroup / "cpu.stat").read_text().splitlines()
+            for line in (cast(Path, row.boundary.cgroup) / "cpu.stat").read_text().splitlines()
         )
         assert int(stats["nr_throttled"]) > 0
         request = ProcessRequest(
@@ -809,11 +816,11 @@ async def test_monitor_failure_retains_cause_and_finish_reports_resource_loss(tm
         with pytest.raises(RuntimeError, match="resource query unavailable"):
             await boundary._monitor()
         assert row.state == SandboxState.LOST
-        assert row.failure.metadata["reason"] == "resource_monitor_failed"
-        assert "resource query unavailable" in row.failure.message
+        assert cast('RuntimeErrorInfo', row.failure).metadata["reason"] == "resource_monitor_failed"
+        assert "resource query unavailable" in cast('RuntimeErrorInfo', row.failure).message
         with pytest.raises(SageV2Error) as caught:
             await boundary.finish(SimpleNamespace(pid=123))
-        assert caught.value.info.metadata["reason"] == row.failure.metadata["reason"]
+        assert caught.value.info.metadata["reason"] == cast('RuntimeErrorInfo', row.failure).metadata["reason"]
         assert caught.value.info.safe_to_resume
         assert caught.value.info.metadata["process_settled"] is True
         assert caught.value.info.metadata["side_effect_state"] == "may_have_applied"

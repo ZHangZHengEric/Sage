@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+from typing import Any, cast
+
+from sagents.v2.model.provider import ModelProvider
+
 import asyncio
 
 import pytest
@@ -36,7 +40,7 @@ CONTEXT = RequestContext(
     actor=ActorRef(
         principal_id="user_1",
         principal_type=PrincipalType.USER,
-        scopes=frozenset({"workspace.write"}),
+        scopes=cast('tuple[str, ...]', frozenset({"workspace.write"})),
     )
 )
 
@@ -69,7 +73,7 @@ def completed(text="", *, calls=()):
 
 
 def scenario(scenario_id="scenario_1", **expected):
-    expectation = {
+    expectation: dict[str, Any] = {
         "required_event_types": (
             "interaction.requested",
             "interaction.resolved",
@@ -114,7 +118,7 @@ def driver(runtime, dispatches):
     )
     return AgentLoopEngine(
         runtime=runtime,
-        model=model,
+        model=cast(ModelProvider, model),
         tool_catalog=InMemoryToolCatalog((WRITE,)),
         tool_executor=InMemoryToolExecutor({WRITE.name: WRITE}, {WRITE.name: write}),
     )

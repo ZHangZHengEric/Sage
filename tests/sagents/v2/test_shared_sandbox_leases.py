@@ -1,4 +1,9 @@
 from __future__ import annotations
+
+from typing import Any, cast
+
+from sagents.v2.composition.loaded_agents import ApplicationEntrypoint
+
 from tests.sagents.v2.sdk_fixture import build_registered_app
 
 import asyncio
@@ -53,9 +58,9 @@ async def provision(root, *, max_processes=4):
 
 
 def authorize(issuer, handle, operation, *, path=".", request=None):
-    fields = {}
+    fields: dict[str, Any] = {}
     if request is not None:
-        fields = {
+        fields: dict[str, Any] = {
             "argv": request.argv,
             "executable": request.argv[0],
             "metadata": {"process_request_digest": request.digest()},
@@ -210,7 +215,7 @@ async def test_standard_builder_team_uses_one_sandbox_and_parent_survives_child(
         calls = (
             (
                 ModelToolCall(
-                    tool_call_id=f"call-{index}", name=tool, arguments=arguments
+                    tool_call_id=f"call-{index}", name=tool, arguments=cast('dict[str, Any]', arguments)
                 ),
             )
             if tool
@@ -332,7 +337,7 @@ async def test_standard_builder_team_uses_one_sandbox_and_parent_survives_child(
             }
         )
         team = await app.load_agent(parent_package, subagents={"worker": worker})
-        stream = await app.entrypoint().run_stream(
+        stream = await cast(ApplicationEntrypoint, app.entrypoint()).run_stream(
             StartRun(
                 agent_id=team.id,
                 resolved_spec_hash=team.composition_hash,

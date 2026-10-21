@@ -6,6 +6,14 @@ independent objective check results under --output. Makes billable model calls.
 """
 
 from __future__ import annotations
+
+from typing import TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    from sagents.v2.optimization.runner import OptimizationRunner
+    from sagents.v2.runtime.extensions.contracts import ExtensionRegistration
+    from sagents.v2.runtime.session.plugins.filesystem import FilesystemSessionStore
+
 from sagents.v2 import ApplicationConfiguration
 from examples.v2.host.registrations import provided, runtime_for
 from examples.v2.model_catalog import load_model_provider
@@ -275,9 +283,9 @@ async def main(args):
         choices = {"model.provider": {"plugin": "example.model"}}
         if args.challenge:
             tools = DecoratedToolProvider(AuditTools())
-            registrations.append(provided("example.tools", lambda context, deps: tools, "tool.provider"))
+            registrations.append(cast('ExtensionRegistration[FilesystemSessionStore | OpenAICompatibleModelProvider | OpenAIResponsesModelProvider]', provided("example.tools", lambda context, deps: tools, "tool.provider")))
             policy = DefaultToolPolicy(approval_strategy=ApprovalStrategy.AUTO_APPROVE)
-            registrations.append(provided("example.policy", lambda context, deps: policy, "agent.tool-policy"))
+            registrations.append(cast('ExtensionRegistration[FilesystemSessionStore | OpenAICompatibleModelProvider | OpenAIResponsesModelProvider]', provided("example.policy", lambda context, deps: policy, "agent.tool-policy")))
             choices.update({"tool.provider": {"plugin": "example.tools"}, "agent.tool-policy": {"plugin": "example.policy"}})
         return ApplicationConfiguration(tuple(registrations), runtime_for(root / "sessions", bundle.manifest.runtime, capabilities=choices), {"models": {"primary": {
                 "provider": config["protocol"], "model": model,
@@ -425,7 +433,7 @@ async def main(args):
 
     runner = RecordedRunner()
     optimizer = AgentPackageOptimizer(
-        runner=runner,
+        runner=cast('OptimizationRunner', runner),
         evaluator=OptimizationAgent(package=evaluator, agent_id="assistant"),
         tuner=OptimizationAgent(package=tuner, agent_id="assistant"),
         reviewer=OptimizationAgent(package=reviewer, agent_id="assistant"),
@@ -523,7 +531,7 @@ async def main(args):
         from sagents.v2 import AgentPackageTestGenerator
 
         generation = await AgentPackageTestGenerator(
-            runner=runner,
+            runner=cast('OptimizationRunner', runner),
             designer=OptimizationAgent(package=designer, agent_id="assistant"),
         ).generate_with_record(target, context=context, max_cases=8)
         (output / "generated-suite.json").write_text(

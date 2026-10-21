@@ -1,4 +1,13 @@
 """Verify the process policy actually selected by standard Server Run loading."""
+
+from typing import TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    from importlib.abc import Loader
+    from importlib.machinery import ModuleSpec
+
+from importlib.abc import Loader
+
 from types import SimpleNamespace
 
 from app.v2.server.runtime.sdk_plugins import execution_selection
@@ -43,8 +52,8 @@ async def test_image_acceptance_collects_actual_standard_tool_receipts(tmp_path,
 
     path = Path(__file__).resolve().parents[4] / "deploy/images/frontend-test/acceptance.py"
     spec = importlib.util.spec_from_file_location("frontend_acceptance", path)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
+    module = importlib.util.module_from_spec(cast('ModuleSpec', spec))
+    cast('Loader', cast('ModuleSpec', spec).loader).exec_module(module)
     monkeypatch.setattr(module.tempfile, "mkdtemp", lambda **kwargs: str(tmp_path))
     join = module.shlex.join
     def local_command(argv):

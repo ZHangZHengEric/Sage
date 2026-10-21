@@ -5,6 +5,12 @@ the router's file reads: reject an oversized file without reading it entirely,
 and finish each publication before reading the next file.
 """
 
+from typing import Any, TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    from app.v2.server.routers.deps import CurrentUser
+    from fastapi import UploadFile
+
 import io
 from types import SimpleNamespace
 import zipfile
@@ -44,17 +50,17 @@ async def test_upload_limits_each_read_and_preserves_mixed_batch_results(tmp_pat
             return self.payload[:size]
 
     response = await upload_skills(
-        SimpleNamespace(user_id="owner", role="user"), service,
-        [File("huge.zip"), File("invalid.txt"), File("bad.zip", b"bad"),
+        cast('CurrentUser', SimpleNamespace(user_id="owner", role="user")), service,
+        cast('list[UploadFile]', [File("huge.zip"), File("invalid.txt"), File("bad.zip", b"bad"),
          File("first.zip", skill_zip("first")),
-         File("second.zip", skill_zip("second"), ("first",))],
+         File("second.zip", skill_zip("second"), ("first",))]),
     )
     data = response["data"]
-    assert [item["filename"] for item in data["results"]] == [
+    assert [item["filename"] for item in cast('dict[str, Any]', data)["results"]] == [
         "huge.zip", "invalid.txt", "bad.zip", "first.zip", "second.zip",
     ]
-    assert [item["success"] for item in data["results"]] == [False, False, False, True, True]
-    assert data["results"][0]["message"] == "zip exceeds size limits"
-    assert data["success_count"] == 2 and data["failed_count"] == 3
-    assert [item["name"] for item in data["skills"]] == ["first", "second"]
+    assert [item["success"] for item in cast('dict[str, Any]', data)["results"]] == [False, False, False, True, True]
+    assert cast('dict[str, Any]', data)["results"][0]["message"] == "zip exceeds size limits"
+    assert cast('dict[str, Any]', data)["success_count"] == 2 and cast('dict[str, Any]', data)["failed_count"] == 3
+    assert [item["name"] for item in cast('dict[str, Any]', data)["skills"]] == ["first", "second"]
     assert {item.name for item in await service.list_visible(user_id="owner", role="user")} == {"first", "second"}

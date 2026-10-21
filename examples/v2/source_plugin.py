@@ -4,6 +4,8 @@ Source extensions run with host Python privileges. This demo authorizes only its
 exact fixed bundle; generated or user-supplied code needs a real host policy.
 """
 from __future__ import annotations
+
+from typing import cast
 from sagents.v2 import ApplicationConfiguration
 from examples.v2.host.registrations import provided, runtime_for
 
@@ -79,7 +81,7 @@ async def demo(root):
                 if result['terminal'] or result['needs_attention']:
                     break
                 await asyncio.sleep(.01)
-        assert result['flow_results']['calculate']['meters'] == 2000
+        assert cast(dict, result['flow_results'])['calculate']['meters'] == 2000
         print(json.dumps(result['flow_results'], indent=2))
     finally:
         await service.close()

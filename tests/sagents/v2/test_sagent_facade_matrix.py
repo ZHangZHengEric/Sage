@@ -1,5 +1,14 @@
 from __future__ import annotations
 
+from typing import TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    from sagents.v2.runtime.session.contracts import SessionStore
+
+from sagents.v2.contracts.events import InteractionEventData
+from sagents.v2.model.provider import ModelProvider
+from sagents.v2.contracts.events import RunEventData
+
 import asyncio
 
 import pytest
@@ -54,9 +63,9 @@ async def test_run_stream_returns_handle_and_individual_canonical_events_to_term
     def factory(run_id):
         return AgentLoopEngine(
             runtime=runtime,
-            model=ScriptedModelProvider(
+            model=cast(ModelProvider, ScriptedModelProvider(
                 (ScriptedModelStep(events=(completed("done"),)),)
-            ),
+            )),
             tool_catalog=InMemoryToolCatalog(()),
             tool_executor=InMemoryToolExecutor({}, {}),
         )
@@ -203,7 +212,7 @@ async def test_unhandled_driver_crash_becomes_typed_terminal_failure():
 
     assert final.state == RunState.FAILED
     assert events[-1].type == "run.failed"
-    assert events[-1].data.error.code == "agent.driver_crashed"
+    assert cast(RuntimeErrorInfo, cast(RunEventData, events[-1].data).error).code == "agent.driver_crashed"
 
 
 @pytest.mark.asyncio
@@ -226,7 +235,7 @@ async def test_scheduler_submit_failure_is_a_durable_typed_run_failure():
     with pytest.raises(RuntimeError, match="queue unavailable"):
         await agent.start_run(submitted, CONTEXT)
 
-    runs = await runtime.session_store.list_session_runs(submitted.session_id)
+    runs = await runtime.session_store.list_session_runs(cast(str, submitted.session_id))
     assert len(runs) == 1
     assert runs[0].state == RunState.FAILED
     result = await runtime.session_store.get_run_result(runs[0].run_id)
@@ -246,9 +255,9 @@ async def test_exact_terminal_start_retry_does_not_resubmit_scheduler_work():
         factory_calls += 1
         return AgentLoopEngine(
             runtime=runtime,
-            model=ScriptedModelProvider(
+            model=cast(ModelProvider, ScriptedModelProvider(
                 (ScriptedModelStep(events=(completed("done"),)),)
-            ),
+            )),
             tool_catalog=InMemoryToolCatalog(()),
             tool_executor=InMemoryToolExecutor({}, {}),
         )
@@ -278,9 +287,9 @@ async def test_completed_execution_is_removed_from_facade_task_registry():
     def factory(run_id):
         return AgentLoopEngine(
             runtime=runtime,
-            model=ScriptedModelProvider(
+            model=cast(ModelProvider, ScriptedModelProvider(
                 (ScriptedModelStep(events=(completed("done"),)),)
-            ),
+            )),
             tool_catalog=InMemoryToolCatalog(()),
             tool_executor=InMemoryToolExecutor({}, {}),
         )
@@ -468,9 +477,9 @@ async def test_driver_factory_failure_after_acceptance_is_streamed_and_replayabl
     final = await stream.wait()
     assert final.state == RunState.FAILED
     assert events[-1].type == "run.failed"
-    error = events[-1].data.error
-    assert error.metadata["recovery_questionnaire"]["questions"]
-    assert error.metadata["recovery_questionnaire"]["resumable"] is False
+    error = cast(RunEventData, events[-1].data).error
+    assert cast('RuntimeErrorInfo', error).metadata["recovery_questionnaire"]["questions"]
+    assert cast('RuntimeErrorInfo', error).metadata["recovery_questionnaire"]["resumable"] is False
     replay = await runtime.session_store.read_events(final.run_id)
     assert replay[-1] == events[-1]
     assert not any(event.type == "run.completed" for event in events)
@@ -497,7 +506,7 @@ async def test_schedule_accepted_run_submission_failure_is_durable():
     events = await runtime.session_store.read_events(handle.run_id)
     assert final.state == RunState.FAILED
     assert events[-1].type == "run.failed"
-    assert events[-1].data.error.metadata["recovery_questionnaire"]["questions"]
+    assert cast(RuntimeErrorInfo, cast(RunEventData, events[-1].data).error).metadata["recovery_questionnaire"]["questions"]
 
 
 @pytest.mark.asyncio
@@ -528,7 +537,7 @@ async def test_model_connection_failure_streams_recovery_before_suspension(
         runtime=runtime,
         driver_factory=lambda run_id: AgentLoopEngine(
             runtime=runtime,
-            model=model,
+            model=cast(ModelProvider, model),
             tool_catalog=InMemoryToolCatalog(()),
             tool_executor=InMemoryToolExecutor({}, {}),
             tool_selection_policy=Selection(),
@@ -548,9 +557,9 @@ async def test_model_connection_failure_streams_recovery_before_suspension(
     interaction = next(
         event for event in events if event.type == "interaction.requested"
     )
-    assert interaction.data.payload["reason_code"] == failure.code
-    assert interaction.data.payload["questions"]
-    assert interaction.data.allowed_decisions == ("retry", "change_direction", "cancel")
+    assert cast(InteractionEventData, interaction.data).payload["reason_code"] == failure.code
+    assert cast(InteractionEventData, interaction.data).payload["questions"]
+    assert cast(InteractionEventData, interaction.data).allowed_decisions == ("retry", "change_direction", "cancel")
     assert not any(event.type == "run.completed" for event in events)
     assert len(model.requests) == (4 if phase == "primary" else 0)
     assert len([e for e in events if e.type == "step.retry_scheduled"]) == 3
@@ -565,7 +574,7 @@ async def test_factory_failure_survives_filesystem_store_reopen(tmp_path):
     from sagents.v2.runtime.session.plugins.filesystem import FilesystemSessionStore
 
     store = FilesystemSessionStore(tmp_path / "sessions")
-    runtime = HarnessRuntime(store)
+    runtime = HarnessRuntime(cast('SessionStore', store))
 
     def factory(run_id):
         raise SageV2Error(

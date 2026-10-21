@@ -5,6 +5,11 @@ lock must remain on the same physical connection across all Session writes,
 and an uncertain lock release must never return that connection to the pool.
 """
 
+from typing import TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    from typing import Any
+
 import asyncio
 from contextlib import asynccontextmanager
 import re
@@ -108,7 +113,7 @@ async def test_guard_reuses_one_physical_connection_and_keeps_mysql_lock_across_
                 await cursor.execute("SELECT 1")
                 assert await cursor.fetchone() == (1,)
         assert connection.held
-        assert value._pool.acquisitions == 1
+        assert cast('Any', value._pool).acquisitions == 1
         assert not lock_statements(connection, "RELEASE_LOCK(")
     acquired, = lock_statements(connection, "GET_LOCK(")
     released, = lock_statements(connection, "RELEASE_LOCK(")
@@ -119,7 +124,7 @@ async def test_guard_reuses_one_physical_connection_and_keeps_mysql_lock_across_
     assert released[1][0] == acquired[1][0]
     assert connection.commits == 2
     assert not connection.held
-    assert value._pool.releases == [(False, False)]
+    assert cast('Any', value._pool).releases == [(False, False)]
 
 
 @pytest.mark.asyncio
@@ -155,7 +160,7 @@ async def test_unacquired_mysql_guard_rejects_body_and_returns_connection(result
     assert busy.value.info.code == "session_store.archive_busy"
     assert not entered
     assert not connection.held
-    assert len(value._pool.releases) == 1
+    assert len(cast('Any', value._pool).releases) == 1
 
 
 @pytest.mark.asyncio
@@ -166,7 +171,7 @@ async def test_guard_releases_the_mysql_lock_when_archive_body_raises():
             assert connection.held
             raise ValueError("archive interrupted")
     assert len(lock_statements(connection, "RELEASE_LOCK(")) == 1
-    assert value._pool.releases == [(False, False)]
+    assert cast('Any', value._pool).releases == [(False, False)]
 
 
 @pytest.mark.asyncio
@@ -185,7 +190,7 @@ async def test_guard_releases_the_mysql_lock_when_the_archiving_task_is_cancelle
     with pytest.raises(asyncio.CancelledError):
         await asyncio.wait_for(task, 1)
     assert len(lock_statements(connection, "RELEASE_LOCK(")) == 1
-    assert value._pool.releases == [(False, False)]
+    assert cast('Any', value._pool).releases == [(False, False)]
 
 
 @pytest.mark.asyncio
@@ -202,4 +207,4 @@ async def test_uncertain_mysql_unlock_closes_connection_before_returning_it_to_p
         pass
     assert entered
     assert connection.closed, "a pooled connection with uncertain named-lock ownership must be discarded"
-    assert value._pool.releases == [(False, True)]
+    assert cast('Any', value._pool).releases == [(False, True)]

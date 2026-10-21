@@ -2,6 +2,13 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    from typing import Mapping, Sequence
+
+from sagents.v2.model.provider import ModelProvider
+
 import json
 from io import StringIO
 
@@ -104,7 +111,7 @@ async def test_recording_sink_keeps_requests_and_redacts_secrets(tmp_path):
             ),
         )
     )
-    provider.diagnostic_request = lambda _request: {
+    setattr(provider, 'diagnostic_request', lambda _request: {
         "model": "model_1",
         "messages": [
             {
@@ -114,14 +121,14 @@ async def test_recording_sink_keeps_requests_and_redacts_secrets(tmp_path):
             }
         ],
         "extra_body": {"api_key": "sk-wire-secret"},
-    }
+    })
 
     async def resolve_session(run_id: str) -> str:
         assert run_id == "run_1"
         return "session_1"
 
     recording = RecordingModelProvider(
-        provider,
+        cast(ModelProvider, provider),
         sink=sink,
         session_id_resolver=resolve_session,
         provider_metadata={"api_key": "sk-provider-secret"},
@@ -627,7 +634,7 @@ async def test_recording_provider_emits_model_request_spans(tmp_path):
         return "session_1"
 
     recording = RecordingModelProvider(
-        provider,
+        cast(ModelProvider, provider),
         sink=sink,
         trace_sink=traces,
         session_id_resolver=resolve_session,
@@ -679,7 +686,7 @@ async def test_recording_provider_emits_model_request_logs(tmp_path):
         return "session_1"
 
     recording = RecordingModelProvider(
-        provider,
+        cast(ModelProvider, provider),
         sink=sink,
         log_sink=logs,
         session_id_resolver=resolve_session,
@@ -773,9 +780,9 @@ async def test_otlp_trace_sink_maps_spans_when_sdk_is_installed():
     exported = exporter.get_finished_spans()
     assert len(exported) == 1
     assert exported[0].name == "model.request"
-    assert exported[0].attributes["api_key"] == "[REDACTED]"
-    assert exported[0].attributes["duration_ms"] == 8.0
-    assert exported[0].attributes["session_id"] == "session_1"
+    assert cast('Mapping[str, str | bool | int | float | Sequence[str] | Sequence[bool] | Sequence[int] | Sequence[float]]', exported[0].attributes)["api_key"] == "[REDACTED]"
+    assert cast('Mapping[str, str | bool | int | float | Sequence[str] | Sequence[bool] | Sequence[int] | Sequence[float]]', exported[0].attributes)["duration_ms"] == 8.0
+    assert cast('Mapping[str, str | bool | int | float | Sequence[str] | Sequence[bool] | Sequence[int] | Sequence[float]]', exported[0].attributes)["session_id"] == "session_1"
 
 
 @pytest.mark.asyncio
@@ -801,7 +808,7 @@ async def test_loop_emits_execution_scoped_run_model_and_tool_spans():
         )
     )
     model = RecordingModelProvider(
-        inner,
+        cast(ModelProvider, inner),
         sink=NoopDiagnosticSink(),
         trace_sink=traces,
         session_id_resolver=resolve_session,
@@ -857,7 +864,7 @@ async def test_loop_emits_model_and_tool_logs():
         )
     )
     model = RecordingModelProvider(
-        inner,
+        cast(ModelProvider, inner),
         sink=NoopDiagnosticSink(),
         log_sink=logs,
         session_id_resolver=resolve_session,
@@ -929,12 +936,12 @@ async def test_tool_result_failure_is_logged_as_error_without_result_payload():
         )
 
     model = RecordingModelProvider(
-        ScriptedModelProvider(
+        cast(ModelProvider, ScriptedModelProvider(
             (
                 ScriptedModelStep(events=(completed("", calls=(tool_call(),)),)),
                 ScriptedModelStep(events=(completed("handled"),)),
             )
-        ),
+        )),
         sink=NoopDiagnosticSink(),
         log_sink=logs,
         session_id_resolver=resolve_session,
@@ -984,7 +991,7 @@ async def test_forked_child_run_joins_parent_execution_trace():
         actor=ActorRef(
             principal_id="leader",
             principal_type=PrincipalType.AGENT,
-            scopes=frozenset({"agent.delegate"}),
+            scopes=cast('tuple[str, ...]', frozenset({"agent.delegate"})),
         )
     )
     runtime = ephemeral_runtime()
@@ -1030,7 +1037,7 @@ async def test_forked_child_run_joins_parent_execution_trace():
         return ObservedRunDriver(
             runtime=runtime,
             model=RecordingModelProvider(
-                inner,
+                cast(ModelProvider, inner),
                 sink=NoopDiagnosticSink(),
                 trace_sink=traces,
                 session_id_resolver=resolve_session,
@@ -1083,7 +1090,7 @@ async def test_forked_child_run_joins_parent_execution_trace():
                 workspace_policy=WorkspaceSharingPolicy.SHARED_PARENT,
                 context=request_context,
             )
-            text = result.content[0].text if result.content else str(result.outcome)
+            text = cast(TextBlock, result.content[0]).text if result.content else str(result.outcome)
             return run, ToolExecutionResult(
                 tool_call_id="call_delegate",
                 operation_id="op_delegate",

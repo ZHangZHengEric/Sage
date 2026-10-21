@@ -1,4 +1,10 @@
 """An approval maintenance round must finish despite new thread arrivals."""
+
+from typing import TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    from app.v2.server.database.client import Database
+
 from types import SimpleNamespace
 from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock
@@ -100,7 +106,7 @@ async def test_maintenance_continues_a_partial_round_without_a_minute_delay(monk
     host = SimpleNamespace(threads=object(), contexts=SimpleNamespace(for_user=lambda _: None))
     runs = SimpleNamespace(expire_approvals=AsyncMock(side_effect=[True, False]))
     with pytest.raises(asyncio.CancelledError):
-        await ServerHost._expire_approvals(host, runs)
+        await ServerHost._expire_approvals(cast('ServerHost', host), runs)
     assert sleeps == [0, 60]
 
 
@@ -117,11 +123,11 @@ async def test_database_scan_fence_excludes_new_tail_and_preserves_cursor_order(
 
     try:
         async with engine.begin() as conn:
-            await conn.run_sync(ThreadRow.__table__.create)
+            await conn.run_sync(getattr(ThreadRow.__table__, 'create'))
         async with maker.begin() as session:
             session.add_all(ThreadRow(thread_id=f"t{i}", user_id="owner", title="", agent_id="a",
                                       updated_at="2026-10-20T00:00:00+00:00") for i in range(3))
-        index = DatabaseThreadIndex(DB())
+        index = DatabaseThreadIndex(cast('Database', DB()))
         fence, count = await index.scan_snapshot()
         assert count == 3
         first = await index.scan(limit=2, through=fence)

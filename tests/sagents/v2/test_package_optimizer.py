@@ -1,4 +1,11 @@
 from __future__ import annotations
+
+from typing import TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    from sagents.v2.optimization.contracts import OptimizationEvaluation, OptimizationFinalVerification, OptimizationGrade, OptimizationProposalReview, OptimizationSuiteReview
+    from sagents.v2.optimization.runner import OptimizationRunner
+
 from tests.sagents.v2.sdk_fixture import fixture_configuration
 from tests.sagents.v2.model_fixture import TEST_MODELS
 
@@ -158,7 +165,7 @@ async def test_multiple_rounds_select_best_preserve_input_and_hide_holdout():
     assert [round.accepted for round in result.report.rounds] == [True, False, True]
     assert (
         result.report.rounds[2].parent_hash
-        == result.report.rounds[0].candidate_package.content_hash
+        == cast('AgentPackageBundle', result.report.rounds[0].candidate_package).content_hash
     )
     assert result.report.selected.mean_score("validation") == 0.8
     assert result.report.baseline.mean_score("training") == 0.4
@@ -167,9 +174,9 @@ async def test_multiple_rounds_select_best_preserve_input_and_hide_holdout():
     assert len(result.report.agent_calls) == 15  # eight grades + three proposals
     candidate = result.candidate_package
     instructions = candidate.manifest.agents["assistant"].instructions.inline
-    assert instructions.startswith(target.files["prompts/base.md"])
-    assert instructions.count("Optimization guidance:") == 1
-    assert instructions.endswith("guidance-3")
+    assert cast('str', instructions).startswith(target.files["prompts/base.md"])
+    assert cast('str', instructions).count("Optimization guidance:") == 1
+    assert cast('str', instructions).endswith("guidance-3")
     assert candidate.files == target.files
     assert candidate.manifest.metadata.version != target.manifest.metadata.version
     for name, request in runner.requests:
@@ -737,7 +744,7 @@ async def test_standalone_test_generator_needs_no_target_execution_or_tuner():
 
     runner = Runner()
     generator = AgentPackageTestGenerator(
-        runner=runner,
+        runner=cast('OptimizationRunner', runner),
         designer=OptimizationAgent(package=bundle("evaluator"), agent_id="assistant"),
     )
     original = bundle()
@@ -766,16 +773,16 @@ async def test_tuner_gets_host_principles_in_system_without_changing_callers_pac
     configured = OptimizationAgent(package=bundle("tuner"), agent_id="assistant")
     before = configured.model_dump_json()
     opt = AgentPackageOptimizer(
-        runner=Runner(),
+        runner=cast('OptimizationRunner', Runner()),
         evaluator=OptimizationAgent(package=bundle("evaluator"), agent_id="assistant"),
         tuner=configured,
     )
     actual = (
         opt.tuner.package.resolved_manifest().agents["assistant"].instructions.inline
     )
-    assert TUNING_PRINCIPLES in actual
-    assert "Never copy test questions" in actual
-    assert "A no-change round is legitimate" in actual
+    assert TUNING_PRINCIPLES in cast('str', actual)
+    assert "Never copy test questions" in cast('str', actual)
+    assert "A no-change round is legitimate" in cast('str', actual)
     assert configured.model_dump_json() == before
 
 
@@ -1282,12 +1289,12 @@ async def test_repeated_trials_reject_lucky_candidate_and_retain_every_model_gra
     assert len(runner.target_hashes) == 8  # two baseline/candidate trials per case
     assert not result.report.improved
     assert result.report.evaluation_repeats == 2
-    for case in result.report.rounds[0].evaluation.cases:
+    for case in cast('OptimizationEvaluation', result.report.rounds[0].evaluation).cases:
         assert case.grade.score == 0.2 and not case.grade.passed
         assert (
             case.model_grade is None
         )  # aggregate is not an invented evaluator response
-        assert [trial.model_grade.score for trial in case.trials] == [0.8, 0.2]
+        assert [cast('OptimizationGrade', trial.model_grade).score for trial in case.trials] == [0.8, 0.2]
         assert case.observation.elapsed_seconds == 2  # average per execution
         assert case.observation.input_tokens == 20
         assert case.observation.cost == pytest.approx(0.2)  # all actual spend
@@ -1319,8 +1326,8 @@ async def test_failed_repeat_cannot_be_hidden_by_successful_representative():
         final_max_cases=0,
     )
     assert not result.report.improved
-    assert result.report.rounds[0].evaluation.cases[0].observation.state == "failed"
-    assert not result.report.rounds[0].evaluation.cases[0].grade.passed
+    assert cast('OptimizationEvaluation', result.report.rounds[0].evaluation).cases[0].observation.state == "failed"
+    assert not cast('OptimizationEvaluation', result.report.rounds[0].evaluation).cases[0].grade.passed
 
 
 @pytest.mark.asyncio
@@ -1349,22 +1356,22 @@ async def test_host_evaluation_and_design_principles_preserve_configured_package
     evaluator = OptimizationAgent(package=bundle("evaluator"), agent_id="assistant")
     before = evaluator.model_dump_json()
     opt = AgentPackageOptimizer(
-        runner=Runner(),
+        runner=cast('OptimizationRunner', Runner()),
         evaluator=evaluator,
         tuner=OptimizationAgent(package=bundle("tuner"), agent_id="assistant"),
     )
     assert (
         EVALUATION_PRINCIPLES
-        in opt.evaluator.package.resolved_manifest()
+        in cast(str, opt.evaluator.package.resolved_manifest()
         .agents["assistant"]
-        .instructions.inline
+        .instructions.inline)
     )
-    generator = AgentPackageTestGenerator(runner=Runner(), designer=evaluator)
+    generator = AgentPackageTestGenerator(runner=cast('OptimizationRunner', Runner()), designer=evaluator)
     assert (
         DESIGN_PRINCIPLES
-        in generator.designer.package.resolved_manifest()
+        in cast(str, generator.designer.package.resolved_manifest()
         .agents["assistant"]
-        .instructions.inline
+        .instructions.inline)
     )
     assert evaluator.model_dump_json() == before
 
@@ -1467,15 +1474,15 @@ async def test_default_sealed_final_stage_is_after_selection_and_hidden_from_tun
         rounds=1,
     )
     final = result.report.final_verification
-    assert final.passed and final.candidate_iteration == 1
-    assert final.candidate.package_hash == result.candidate_package.content_hash
-    assert final.baseline.package_hash == bundle().content_hash
+    assert cast('OptimizationFinalVerification', final).passed and cast('OptimizationFinalVerification', final).candidate_iteration == 1
+    assert cast('OptimizationFinalVerification', final).candidate.package_hash == result.candidate_package.content_hash
+    assert cast('OptimizationFinalVerification', final).baseline.package_hash == bundle().content_hash
     assert len(runner.target_hashes) == 6  # two baseline, two candidate, two final
     target_requests = [
         content for name, content in runner.requests if name == "test.target"
     ]
     assert target_requests[-2:] == [final_suite().cases[0].input] * 2
-    assert result.report.rounds[0].review.approved
+    assert cast('OptimizationProposalReview', result.report.rounds[0].review).approved
     for name, content in runner.requests:
         if name in {"test.tuner", "test.reviewer"}:
             assert "untouched-final" not in content
@@ -1525,13 +1532,13 @@ async def test_rejected_semantic_candidates_keep_full_packages_without_execution
     assert (
         len(runner.target_hashes) == 3
     )  # only original tuning suite and final baseline
-    assert result.report.final_verification.evaluation_reused
+    assert cast('OptimizationFinalVerification', result.report.final_verification).evaluation_reused
     assert len(result.iterations) == 3
     assert all(
         i.evaluation is None and not i.recommended for i in result.iterations[1:]
     )
-    assert result.iterations[1].review.memorization_detected
-    assert result.iterations[2].review.goal_drift_detected
+    assert cast('OptimizationProposalReview', result.iterations[1].review).memorization_detected
+    assert cast('OptimizationProposalReview', result.iterations[2].review).goal_drift_detected
     tuning = [
         json.loads(content) for name, content in runner.requests if name == "test.tuner"
     ]
@@ -1583,12 +1590,12 @@ async def test_final_failure_or_score_regression_withdraws_recommendation_withou
         final_suite=final_suite(),
     )
     assert result.report.rounds[0].accepted  # provisional selection remains auditable
-    assert not result.report.final_verification.passed
-    assert result.report.final_verification.candidate_iteration == 1
+    assert not cast('OptimizationFinalVerification', result.report.final_verification).passed
+    assert cast('OptimizationFinalVerification', result.report.final_verification).candidate_iteration == 1
     assert result.candidate_package == bundle() and not result.report.improved
     assert [i.iteration for i in result.iterations if i.recommended] == [0]
     assert len([c for c in result.report.agent_calls if c.role == "tuning"]) == 1
-    assert result.iterations[1].evaluation.mean_score("validation") == 0.6
+    assert cast('OptimizationEvaluation', result.iterations[1].evaluation).mean_score("validation") == 0.6
 
 
 @pytest.mark.asyncio
@@ -1607,9 +1614,9 @@ async def test_final_test_repeats_preserve_every_trial_and_fresh_execution():
     )
     assert len(runner.target_hashes) == 12
     final = result.report.final_verification
-    assert final.passed
+    assert cast('OptimizationFinalVerification', final).passed
     assert (
-        len(final.baseline.cases[0].trials) == len(final.candidate.cases[0].trials) == 2
+        len(cast('OptimizationFinalVerification', final).baseline.cases[0].trials) == len(cast('OptimizationFinalVerification', final).candidate.cases[0].trials) == 2
     )
     assert (
         len(
@@ -1741,16 +1748,16 @@ async def test_reviewer_host_system_principles_do_not_mutate_callers_config():
     configured = OptimizationAgent(package=bundle("reviewer"), agent_id="assistant")
     before = configured.model_dump_json()
     opt = AgentPackageOptimizer(
-        runner=Runner(),
+        runner=cast('OptimizationRunner', Runner()),
         evaluator=OptimizationAgent(package=bundle("evaluator"), agent_id="assistant"),
         tuner=OptimizationAgent(package=bundle("tuner"), agent_id="assistant"),
         reviewer=configured,
     )
     assert (
         REVIEW_PRINCIPLES
-        in opt.reviewer.package.resolved_manifest()
+        in cast(str, opt.reviewer.package.resolved_manifest()
         .agents["assistant"]
-        .instructions.inline
+        .instructions.inline)
     )
     assert configured.model_dump_json() == before
 
@@ -1760,7 +1767,7 @@ async def test_final_generator_is_standalone_and_records_final_phase():
     from sagents.v2 import AgentPackageTestGenerator
 
     generator = AgentPackageTestGenerator(
-        runner=FinalRunner(),
+        runner=cast('OptimizationRunner', FinalRunner()),
         designer=OptimizationAgent(package=bundle("evaluator"), agent_id="assistant"),
     )
     generation = await generator.generate_final_with_record(
@@ -1868,7 +1875,7 @@ async def test_individual_optimization_scopes_allow_only_granted_parts(scope, pa
         ),
     )
     assert result.report.rounds[0].candidate_package is not None
-    assert result.report.rounds[0].review.approved
+    assert cast('OptimizationProposalReview', result.report.rounds[0].review).approved
 
 
 @pytest.mark.asyncio
@@ -2070,8 +2077,8 @@ async def test_advisory_suite_review_is_retained_and_does_not_leak_final_to_tune
         final_suite=final_suite(),
         rounds=1,
     )
-    assert result.report.suite_review.approved
-    assert result.report.suite_review.issues[0].severity == "advisory"
+    assert cast('OptimizationSuiteReview', result.report.suite_review).approved
+    assert cast('OptimizationSuiteReview', result.report.suite_review).issues[0].severity == "advisory"
     assert result.report.agent_calls[0].role == "suite_review"
     for name, request in runner.requests:
         if name in ("test.tuner", "test.reviewer"):

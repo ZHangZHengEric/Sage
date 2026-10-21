@@ -1,3 +1,7 @@
+
+from typing import cast
+
+from sagents.v2.contracts.items import TextBlock
 from app.v2.server.conversations.records import (
     ThreadRecord,
     apply_thread_upsert,
@@ -58,7 +62,7 @@ def test_agui_run_pins_thread_agent_and_ignores_later_picker(tmp_path):
         assert client.post("/api/agent", json=second, headers=headers).status_code == 200
 
     rendered = "\n".join(
-        block.text
+        cast(TextBlock, block).text
         for request in provider.requests
         for message in request.messages
         for block in message.content

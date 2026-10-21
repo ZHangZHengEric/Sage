@@ -1,5 +1,11 @@
 from __future__ import annotations
 
+from typing import cast
+
+from typing import Any
+
+from sagents.v2.model.provider import ModelProvider
+
 import json
 from pathlib import Path
 
@@ -49,7 +55,7 @@ class FixtureServerHost(ServerHost):
 
 
 def make_settings(tmp_path: Path, **overrides) -> ServerSettings:
-    values = {
+    values: dict[str, Any] = {
         "host": "127.0.0.1",
         "port": 8090,
         "data_root": tmp_path,
@@ -130,11 +136,11 @@ def make_test_service(
         provider = scripted_hello()
     return FixtureServerHost(
         settings,
-        model_provider=(
+        model_provider=cast("ModelProvider | None", (
             CompletingJudgeModel(provider)
             if provider is not None and stub_judge
             else provider
-        ),
+        )),
         database=Database(
             DatabaseSettings(url=f"sqlite+aiosqlite:///{tmp_path}/host.db")
         ),

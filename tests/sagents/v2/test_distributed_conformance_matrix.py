@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from typing import cast, Callable
+from sagents.v2.runtime.session.contracts import SessionStore
+
 import pytest
 
 from sagents.v2.contracts.principals import ActorRef, PrincipalType, RequestContext
@@ -28,5 +31,5 @@ async def test_filesystem_store_passes_outbox_and_restart_cursor_harness(tmp_pat
         )
     )
     await run_session_store_recovery_conformance(
-        lambda: FilesystemSessionStore(tmp_path / "sessions"), context
+        cast(Callable[[], SessionStore], lambda: FilesystemSessionStore(tmp_path / "sessions")), context
     )

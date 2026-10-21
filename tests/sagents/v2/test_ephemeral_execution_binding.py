@@ -1,5 +1,9 @@
 """Memory sandbox execution and explicit recovery limits through the public SDK."""
 
+from typing import cast
+
+from sagents.v2.contracts.errors import RuntimeErrorInfo
+
 import asyncio
 
 import pytest
@@ -99,8 +103,8 @@ async def test_memory_binding_reports_original_process_lost_after_restart(tmp_pa
                 await asyncio.sleep(0.02)
         assert state.state.value == "failed"
         result = await reopened.runtime.session_store.get_run_result(pending.run_id)
-        assert result.error.code == "execution.configuration_incompatible"
-        assert "process-local" in result.error.message
+        assert cast(RuntimeErrorInfo, result.error).code == "execution.configuration_incompatible"
+        assert "process-local" in cast(RuntimeErrorInfo, result.error).message
         assert not model.requests
         assert (
             await reopened.execution_configuration(pending.run_id, CONTEXT) == accepted

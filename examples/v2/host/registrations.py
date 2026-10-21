@@ -1,4 +1,10 @@
 """Small example registration constructors; selection and build remain explicit."""
+
+from typing import TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    from typing import Literal
+
 from sagents.v2.runtime.extensions import (
     CapabilityOffer, ExtensionDescriptor, ExtensionRegistration,
     ExtensionScope,
@@ -12,7 +18,7 @@ def provided(plugin_id, factory, *capabilities, scope=ExtensionScope.PROCESS, ow
             provides=tuple(CapabilityOffer(capability=name, api_version="2") for name in capabilities),
             supported_scopes=frozenset({scope}), default_scope=scope,
             config_schema={"type": "object", "additionalProperties": False}),
-        factory=factory, ownership=ownership,
+        factory=factory, ownership=cast("Literal['owned', 'borrowed']", ownership),
         start=start,
     )
 

@@ -2,6 +2,11 @@
 
 from __future__ import annotations
 
+from typing import Any, cast
+
+from sagents.v2.contracts.items import ImageBlock
+from sagents.v2.contracts.items import JsonBlock
+
 from sagents.v2.runtime.execution.sandbox import ResourceLimits
 
 from datetime import datetime, timedelta, timezone
@@ -138,10 +143,7 @@ async def ephemeral_plugin_for(
             filesystem=filesystem,
             process=ProcessPolicy(),
             network=NetworkPolicy(),
-            lifecycle=LifecyclePolicy(
-                durability=SandboxDurability.SNAPSHOTABLE,
-                pause_behavior="snapshot",
-            ),
+            lifecycle=LifecyclePolicy.model_validate(dict(durability=SandboxDurability.SNAPSHOTABLE, pause_behavior="snapshot")),
             policy_hash="sha256:policy",
         ),
         CONTEXT,
@@ -288,10 +290,10 @@ async def test_questionnaire_async_returns_validated_terminal_payload(tmp_path: 
     )
     signal = plugin.runtime.consume_continuation_signals("run_1")
 
-    assert result.content[0].value["status"] == "awaiting_user_input"
-    assert result.content[0].value["validation_passed"] is True
-    assert result.content[0].value["should_end"] is True
-    assert result.content[0].value["questions"][0]["id"] == "target"
+    assert cast(JsonBlock, result.content[0]).value["status"] == "awaiting_user_input"
+    assert cast(JsonBlock, result.content[0]).value["validation_passed"] is True
+    assert cast(JsonBlock, result.content[0]).value["should_end"] is True
+    assert cast(JsonBlock, result.content[0]).value["questions"][0]["id"] == "target"
     assert signal.explicit_status is None
     assert signal.interaction is None
 
@@ -310,7 +312,7 @@ async def test_turn_status_publishes_one_shot_continuation_signals(tmp_path: Pat
     first = plugin.runtime.consume_continuation_signals("run_1")
     second = plugin.runtime.consume_continuation_signals("run_1")
 
-    assert result.content[0].value == {
+    assert cast(JsonBlock, result.content[0]).value == {
         "status": "need_user_input",
         "note": "Choose a deployment target.",
     }
@@ -331,7 +333,7 @@ class _ImageRuntime:
 
 
 async def _analyze_image(image_path: str, prompt: str | None = None, *, runtime=None):
-    return await MediaTools(runtime or _ImageRuntime()).analyze_image(
+    return await MediaTools(cast('OfficialToolRuntime', runtime or _ImageRuntime())).analyze_image(
         image_path=image_path,
         session_id="session_1",
         prompt=prompt,
@@ -381,15 +383,15 @@ async def test_analyze_image_queues_a_user_followup_and_keeps_tool_result_small(
     assert "followup_user_message" not in tool_message.metadata
     assert "base64" not in json.dumps(tool_message.model_dump(mode="json"))
     assert user_message.role == "user"
-    assert user_message.content[1].uri == uri
+    assert cast(ImageBlock, user_message.content[1]).uri == uri
     assert "data:image" not in json.dumps(user_message.model_dump(mode="json"))
 
     hydrated = await hydrate_image_blocks((user_message,), runtime.artifact_store)
-    assert hydrated[0].content[1].uri.startswith("data:image/jpeg;base64,")
+    assert cast(ImageBlock, hydrated[0].content[1]).uri.startswith("data:image/jpeg;base64,")
     import base64
     import io
 
-    encoded = hydrated[0].content[1].uri.split(",", 1)[1]
+    encoded = cast(ImageBlock, hydrated[0].content[1]).uri.split(",", 1)[1]
     with Image.open(io.BytesIO(base64.b64decode(encoded))) as normalized:
         assert normalized.format == "JPEG"
         assert max(normalized.size) <= 1536
@@ -440,7 +442,7 @@ async def test_image_snapshot_uses_sandbox_paths_and_survives_source_changes(
     command = StartRun(agent_id="agent_1", input=(), resolved_spec_hash="sha256:spec", idempotency_key="image")
     assembler = DefaultContextAssembler(artifact_store=plugin.runtime.artifact_store)
     first = await assembler.prepare_messages(command, ledger)
-    assert first[-1].content[-1].uri.startswith("data:image/jpeg;base64,")
+    assert cast(ImageBlock, first[-1].content[-1]).uri.startswith("data:image/jpeg;base64,")
     await plugin.runtime.write_bytes("frame.png", b"overwritten", invocation)
     assert await assembler.prepare_messages(command, ledger) == first
     await plugin.runtime.delete_file("frame.png", invocation)
@@ -473,7 +475,7 @@ async def test_image_snapshot_requires_configured_store(tmp_path):
     image = tmp_path / "frame.png"
     Image.new("RGB", (32, 32), "red").save(image)
     runtime = _ImageRuntime()
-    runtime.artifact_store = None
+    setattr(runtime, 'artifact_store', None)
     result = await _analyze_image(str(image), runtime=runtime)
     assert result.content[0].value["data"]["reason"] == "attachment_store_unavailable"
     assert "followup_user_message" not in result.metadata
@@ -535,8 +537,8 @@ def test_analyze_image_followups_are_grouped_after_all_tool_results():
     )
     assert [message.role for message in messages] == ["tool", "tool", "user", "user"]
     assert "base64" not in json.dumps(messages[0].model_dump(mode="json"))
-    assert messages[2].content[1].uri == "/workspace/a.png"
-    assert messages[3].content[1].uri == "https://example.invalid/b.png"
+    assert cast(ImageBlock, messages[2].content[1]).uri == "/workspace/a.png"
+    assert cast(ImageBlock, messages[3].content[1]).uri == "https://example.invalid/b.png"
     assert "data:image" not in json.dumps([m.model_dump(mode="json") for m in messages])
 
 
@@ -567,7 +569,7 @@ def test_legacy_inline_followup_is_preserved_without_reopening_source():
         },
     )
     _tool, user_message = AgentLoopEngine._ledger_messages_for_tool_result(result)
-    assert user_message.content[1].uri == "data:image/png;base64,aaa"
+    assert cast(ImageBlock, user_message.content[1]).uri == "data:image/png;base64,aaa"
 
 
 @pytest.mark.asyncio
@@ -580,7 +582,7 @@ async def test_turn_status_exposes_failed_as_a_typed_terminal_state(tmp_path: Pa
     )
     signal = plugin.runtime.consume_continuation_signals("run_1")
 
-    assert result.content[0].value["status"] == "failed"
+    assert cast(JsonBlock, result.content[0]).value["status"] == "failed"
     assert signal.explicit_status == "failed"
 
 
@@ -597,11 +599,11 @@ async def test_owned_runtime_unregisters_shell_runner_after_borrowing_plugin_sto
         CONTEXT,
     )
 
-    assert ("run_1", "official.shell") in jobs._owner_runners
+    assert ("run_1", "official.shell") in getattr(jobs, '_owner_runners')
     await plugin.stop(None)
-    assert ("run_1", "official.shell") in jobs._owner_runners
+    assert ("run_1", "official.shell") in getattr(jobs, '_owner_runners')
     await plugin.runtime.close()
-    assert ("run_1", "official.shell") not in jobs._owner_runners
+    assert ("run_1", "official.shell") not in getattr(jobs, '_owner_runners')
 
 
 @pytest.mark.asyncio
@@ -615,7 +617,7 @@ async def test_file_tools_execute_real_workspace_operations(tmp_path: Path):
         ),
         CONTEXT,
     )
-    assert written.content[0].value["status"] == "success"
+    assert cast(JsonBlock, written.content[0]).value["status"] == "success"
     assert (tmp_path / "notes" / "example.txt").read_text() == "alpha\nbeta\n"
 
     absolute = tmp_path / "notes" / "absolute.txt"
@@ -649,12 +651,12 @@ async def test_file_tools_execute_real_workspace_operations(tmp_path: Path):
     read = await plugin.executor.execute(
         call("file_read", {"file_path": "notes/example.txt"}, index=3), CONTEXT
     )
-    assert "gamma" in read.content[0].value["content"]
+    assert "gamma" in cast(JsonBlock, read.content[0]).value["content"]
 
     searched = await plugin.executor.execute(
         call("grep", {"pattern": "gamma", "path": "notes"}, index=4), CONTEXT
     )
-    assert searched.content[0].value["matches"][0]["line"] == 2
+    assert cast(JsonBlock, searched.content[0]).value["matches"][0]["line"] == 2
 
 
 @pytest.mark.asyncio
@@ -766,7 +768,7 @@ async def test_apply_patch_is_atomic_and_workspace_scoped(tmp_path: Path):
         CONTEXT,
     )
 
-    assert result.content[0].value["files_changed"] == 2
+    assert cast(JsonBlock, result.content[0]).value["files_changed"] == 2
     assert (tmp_path / "old.txt").read_text() == "one\nthree\n"
     assert (tmp_path / "new.txt").read_text() == "created\n"
 
@@ -785,7 +787,7 @@ async def test_shell_and_todo_tools_use_v2_runtime_state(tmp_path: Path):
         ),
         CONTEXT,
     )
-    assert shell.content[0].value["stdout"] == "shell-ok"
+    assert cast(JsonBlock, shell.content[0]).value["stdout"] == "shell-ok"
 
     await plugin.executor.execute(
         call(
@@ -812,7 +814,7 @@ async def test_shell_and_todo_tools_use_v2_runtime_state(tmp_path: Path):
     todos = await plugin.executor.execute(
         call("todo_read", {"session_id": "session_1"}, index=4), CONTEXT
     )
-    assert todos.content[0].value["tasks"] == [
+    assert cast(JsonBlock, todos.content[0]).value["tasks"] == [
         {"id": "t1", "content": "First", "status": "completed"}
     ]
 
@@ -829,7 +831,7 @@ async def test_todos_are_isolated_by_session_and_restored_after_runtime_restart(
             call("todo_read", {"session_id": session}, index=index), CONTEXT
         )
         assert result.error is None
-        assert result.content[0].value["tasks"] == []
+        assert cast(JsonBlock, result.content[0]).value["tasks"] == []
         result = await plugin.executor.execute(
             call(
                 "todo_write",
@@ -855,7 +857,7 @@ async def test_todos_are_isolated_by_session_and_restored_after_runtime_restart(
             call("todo_read", {"session_id": session}, index=index), CONTEXT
         )
         assert result.error is None
-        assert result.content[0].value["tasks"] == [{
+        assert cast(JsonBlock, result.content[0]).value["tasks"] == [{
             "id": "t1",
             "content": session,
             "status": "completed" if session == "session_a" else "pending",
@@ -884,7 +886,7 @@ async def test_todo_session_paths_are_encoded_and_owner_is_enforced(tmp_path: Pa
         for offset, session in enumerate(("", " ", "other_session")):
             arguments = {"session_id": session}
             if name == "todo_write":
-                arguments["tasks"] = [{"id": "t1", "content": "Wrong session"}]
+                cast('dict[str, Any]', arguments)["tasks"] = [{"id": "t1", "content": "Wrong session"}]
             request = call(name, arguments, index=index * 10 + offset).model_copy(
                 update={"owner_session_id": "current_session"}
             )
@@ -898,7 +900,7 @@ async def test_todo_session_paths_are_encoded_and_owner_is_enforced(tmp_path: Pa
     )
     result = await plugin.executor.execute(request, CONTEXT)
     assert result.error is None
-    assert result.content[0].value["tasks"][0]["content"] == "../other"
+    assert cast(JsonBlock, result.content[0]).value["tasks"][0]["content"] == "../other"
 
 
 def test_v2_tool_decorator_infers_arguments_and_hides_runtime_injection():
@@ -1212,7 +1214,7 @@ async def test_line_batch_reconciles_after_worker_restart(
     result = await recovered.executor.reconcile_call(update, CONTEXT)
     assert result.state == expected_state
     if expected_state == ReconcileState.UNKNOWN:
-        assert not result.error.safe_to_resume
+        assert not cast(RuntimeErrorInfo, result.error).safe_to_resume
     assert (tmp_path / "notes.txt").read_text() == expected
 
 
@@ -1229,8 +1231,8 @@ async def test_analyze_image_rejects_invalid_image_bytes(tmp_path):
 @pytest.mark.parametrize("resolved", [False, True])
 async def test_analyze_image_text_only_model_does_not_read_or_attach(resolved):
     runtime = _ImageRuntime()
-    runtime.supports_multimodal_input = (lambda agent_id: False) if resolved else False
-    result = await MediaTools(runtime).analyze_image(
+    setattr(runtime, 'supports_multimodal_input', (lambda agent_id: False) if resolved else False)
+    result = await MediaTools(cast('OfficialToolRuntime', runtime)).analyze_image(
         image_path="/missing.png", session_id="session_1",
         invocation=ToolInvocation(call("analyze_image", {}), CONTEXT),
     )
@@ -1290,7 +1292,7 @@ async def test_web_fetch_never_treats_failed_http_response_as_success(
         pass
 
     monkeypatch.setattr("sagents.v2.tool.official.web.asyncio.sleep", no_wait)
-    result = await WebTools(NetworkRuntime()).fetch_webpages(
+    result = await WebTools(cast('OfficialToolRuntime', NetworkRuntime())).fetch_webpages(
         ["https://example.test/resource"], None, retries=len(statuses) - 1
     )
     expected = "success" if statuses[-1] == 200 else "error"
@@ -1319,7 +1321,7 @@ async def test_web_fetch_reports_partial_batch_failure():
                 body=b"body",
             )
 
-    result = await WebTools(NetworkRuntime()).fetch_webpages(
+    result = await WebTools(cast('OfficialToolRuntime', NetworkRuntime())).fetch_webpages(
         ["https://example.test/missing", "https://example.test/ok"], None, retries=0
     )
     assert result["status"] == "partial"
@@ -1355,7 +1357,7 @@ async def test_lost_compute_preserves_file_tools(
     plugin = await plugin_for(tmp_path)
     (tmp_path / "value.txt").write_text("original")
     runtime = plugin.runtime
-    row = runtime.sandbox.filesystem.row
+    row = getattr(runtime.sandbox.filesystem, 'row')
     row.boundary._mark_lost("sandbox disk quota exceeded", reason="disk_limit_exceeded")
     assert row.state == SandboxState.LOST
     await plugin.executor.execute(call(tool_name, arguments), CONTEXT)
@@ -1369,7 +1371,7 @@ async def test_missing_workspace_and_lost_compute_is_fatal(tmp_path):
     import shutil
 
     plugin = await plugin_for(tmp_path)
-    row = plugin.runtime.sandbox.filesystem.row
+    row = getattr(plugin.runtime.sandbox.filesystem, 'row')
     row.boundary._mark_lost("resource monitor failed", reason="resource_monitor_failed")
     shutil.rmtree(tmp_path)
     with pytest.raises(SageV2Error) as caught:

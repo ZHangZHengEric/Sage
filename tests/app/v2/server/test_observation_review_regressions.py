@@ -1,4 +1,17 @@
 """Lifecycle and resource regressions found by the observation architecture review."""
+
+from opentelemetry.util.types import AttributeValue
+
+from typing import Any, TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    from anyio.from_thread import BlockingPortal
+    from opentelemetry.trace import SpanContext
+    from sagents.v2.contracts.principals import PrincipalType
+    from sagents.v2.model.provider import ModelProvider
+    from sagents.v2.runtime.observability.contracts import LogLevel
+    from typing import Iterable, Mapping, Sequence
+
 import asyncio
 import gzip
 import json
@@ -53,7 +66,7 @@ async def test_cancelled_catalog_diagnostic_preparation_releases_model_span():
     async def session(_):
         return 'session'
 
-    recording = RecordingModelProvider(adapter, sink=NoopDiagnosticSink(),
+    recording = RecordingModelProvider(cast('ModelProvider', adapter), sink=NoopDiagnosticSink(),
                                        session_id_resolver=session, trace_sink=trace)
 
     async def consume(identifier):
@@ -71,7 +84,7 @@ async def test_cancelled_catalog_diagnostic_preparation_releases_model_span():
             assert trace.statistics()['active_spans'] == 0
         release.set()
         events = await consume('success')
-        assert events[-1].response.text == 'hello'
+        assert cast('ModelResponse', events[-1].response).text == 'hello'
         assert trace.statistics()['dropped_spans'] == 0
         spans = exporter.get_finished_spans()
         assert len(spans) == 4
@@ -97,8 +110,8 @@ def test_terminal_http_replay_does_not_start_a_new_performance_segment(tmp_path,
         for _ in range(3):
             response = client.post('/api/agent', json=_run_input(), headers=headers)
             assert response.status_code == 200, response.text
-            client.portal.call(settle)
-            assert not host.diagnostics._timings._performance
+            cast('BlockingPortal', client.portal).call(settle)
+            assert not cast('Any', host.diagnostics)._timings._performance
         assert sum(span.name == 'agent.run' for span in exporter.get_finished_spans()) == 1
 
 
@@ -111,7 +124,7 @@ async def test_dropped_root_spans_do_not_retain_finished_performance_rows():
     trace.start_span(blocker)
     try:
         for index in range(10):
-            scope = {'session_id':f's{index}', 'run_id':f'r{index}'}
+            scope: dict[str, Any] = {'session_id':f's{index}', 'run_id':f'r{index}'}
             source._timings.emit('log', {**scope, 'event':'server.run.performance.accepted'})
             handle = StructuredTracer(trace, 'test').start_span('agent.run', **scope)
             source._timings.emit('log', {**scope, 'event':'agent.run.started'})
@@ -134,7 +147,7 @@ async def test_request_preflight_precedes_dump_and_keeps_rejected_input_memory_b
     request = Request(request_id='request', run_id='run', model_binding='main', messages=tuple(
         ModelMessage(role='user', content=(TextBlock(text='history'),)) for _ in range(20_000)))
     source = ExternalEvidenceSink(capture_mode=mode, backend='phoenix', query_url='http://unused', raw_max_bytes=4096)
-    source.trace_sink = type('Trace', (), {'content_mode':mode})()
+    setattr(source, 'trace_sink', type('Trace', (), {'content_mode':mode})())
     try:
         tracemalloc.start()
         await source.begin_model_request(session_id='session', request=request)
@@ -162,12 +175,12 @@ async def test_response_and_log_preserve_json_fields_without_pre_admission_seria
     source.bind_trace_sink(trace)
     request = ModelRequest(request_id='q', run_id='r', model_binding='main', messages=())
     response = Response(response_id='response', finish_reason='stop', text='original\0中')
-    record = Record(level='info', component='review', event='custom.event', message='original log', session_id='s', run_id='r')
+    record = Record(level=cast('LogLevel', 'info'), component='review', event='custom.event', message='original log', session_id='s', run_id='r')
     try:
         await source.complete_model_request(session_id='s', request=request, response=response)
         source.write(record)
         assert await source.flush_raw()
-        rows = [{'name':span.name, 'start_time':span.start_time/1e9, 'attributes':dict(span.attributes)} for span in exporter.get_finished_spans()]
+        rows = [{'name':span.name, 'start_time':cast('int', span.start_time)/1e9, 'attributes':dict(cast('Mapping[str, AttributeValue]', span.attributes))} for span in exporter.get_finished_spans()]
         records, gaps = reconstruct(rows)
         assert not gaps
         payloads = [json.loads(attrs['sage.diagnostic.data']) for _, attrs in records]
@@ -219,9 +232,9 @@ async def test_raw_flush_timeout_reaches_download_manifest_and_partial_availabil
         def end_span(self, span):
             pass
     source = ExternalEvidenceSink(capture_mode="raw", backend='phoenix', query_url='http://unused')
-    source.trace_sink = BlockedSink()
+    setattr(source, 'trace_sink', BlockedSink())
     original_flush = source._raw_pipeline.flush
-    monkeypatch.setattr(source._raw_pipeline, 'flush', lambda timeout=5: original_flush(.01))
+    monkeypatch.setattr(source._raw_pipeline, 'flush', lambda timeout=5: original_flush(cast('int', .01)))
     async def query(client, **options):
         return [], False
     monkeypatch.setattr(source, '_query', query)
@@ -264,7 +277,7 @@ async def test_resume_preparation_failure_closes_its_performance_segment(monkeyp
     service = module.RunService(application=application,
                                 session_access=SimpleNamespace(get_start_command=AsyncMock(return_value=command)),
                                 execution=SimpleNamespace(driving=lambda _:False))
-    context = RequestContext(actor=ActorRef(principal_id='owner', principal_type='user'))
+    context = RequestContext(actor=ActorRef(principal_id='owner', principal_type=cast('PrincipalType', 'user')))
     try:
         with pytest.raises(type(failure)):
             await service.continue_detached_run('r', context, user_id='owner', session_id='s', label='resume')
@@ -295,11 +308,11 @@ async def test_pending_performance_entries_and_rows_are_bounded_and_report_loss(
             source._timings.emit('log', {'session_id':'s', 'run_id':'r', 'event':event, 'timestamp':BASE+at}, at=BASE+at)
         handle.end()
         span = next(span for span in exporter.get_finished_spans() if span.name == 'agent.run')
-        assert span.attributes['sage.performance.incomplete'] is True
-        assert not span.attributes.get('sage.interrupted')
+        assert cast('Mapping[str, str | bool | int | float | Sequence[str] | Sequence[bool] | Sequence[int] | Sequence[float]]', span.attributes)['sage.performance.incomplete'] is True
+        assert not cast('Mapping[str, str | bool | int | float | Sequence[str] | Sequence[bool] | Sequence[int] | Sequence[float]]', span.attributes).get('sage.interrupted')
         assert source.capture_failures >= 3
-        rows = [{'name':span.name, 'start_time':span.start_time/1e9, 'attributes':dict(span.attributes),
-                 'context':{'trace_id':format(span.context.trace_id,'032x'), 'span_id':format(span.context.span_id,'016x')}}]
+        rows = [{'name':span.name, 'start_time':cast('int', span.start_time)/1e9, 'attributes':dict(cast('Mapping[str, AttributeValue]', span.attributes)),
+                 'context':{'trace_id':format(cast('SpanContext', span.context).trace_id,'032x'), 'span_id':format(cast('SpanContext', span.context).span_id,'016x')}}]
         events, models = timing_rows(rows)
         result = build_run(events['r'], models['r'])
         assert result['coverage'] == 'incomplete' and result['total_ms'] is None
@@ -323,8 +336,8 @@ async def test_stale_performance_expiry_exports_deferred_span_as_incomplete():
         source._timings.emit('log', {'session_id':'next', 'run_id':'next', 'event':'server.run.performance.accepted'})
         assert ('s', 'r') not in source._timings._performance
         span = exporter.get_finished_spans()[0]
-        assert span.attributes['sage.performance.incomplete'] is True
-        assert span.attributes['sage.performance.loss_reason'] == 'expired'
+        assert cast('Mapping[str, str | bool | int | float | Sequence[str] | Sequence[bool] | Sequence[int] | Sequence[float]]', span.attributes)['sage.performance.incomplete'] is True
+        assert cast('Mapping[str, str | bool | int | float | Sequence[str] | Sequence[bool] | Sequence[int] | Sequence[float]]', span.attributes)['sage.performance.loss_reason'] == 'expired'
         assert source.capture_failures == 1
     finally:
         await source.close()
@@ -348,7 +361,7 @@ async def test_query_identity_response_still_works_for_phoenix_and_jaeger():
 @pytest.mark.asyncio
 async def test_queued_transport_bytes_are_pending_even_after_raw_worker_drains(monkeypatch):
     source = ExternalEvidenceSink(backend='phoenix', query_url='http://unused')
-    source.trace_sink = type('Trace', (), {'content_mode':'raw', 'statistics': lambda _: {'retained_bytes':128}})()
+    setattr(source, 'trace_sink', type('Trace', (), {'content_mode':'raw', 'statistics': lambda _: {'retained_bytes':128}})())
     async def query(client, **options):
         return [], False
     monkeypatch.setattr(source, '_query', query)

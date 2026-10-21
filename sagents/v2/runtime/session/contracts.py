@@ -8,9 +8,12 @@ semantics for a known ``session_id``.
 
 from __future__ import annotations
 
+from typing import Any, Literal, Protocol
+
+from sagents.v2.runtime.artifact.contracts import ArtifactRef as StoredAttachmentRef
+
 from collections.abc import AsyncIterator, Collection, Mapping
 from dataclasses import dataclass
-from typing import Any, Literal, Protocol
 
 from sagents.v2.contracts.checkpoint import Checkpoint, Suspension
 from sagents.v2.contracts.commands import (
@@ -216,7 +219,7 @@ class SessionStore(Protocol):
 
     async def get_attachment(
         self, session_id: str, artifact_id: str, *, context: RequestContext
-    ): ...
+    ) -> tuple[StoredAttachmentRef, AsyncIterator[bytes]]: ...
 
     async def copy_attachment(
         self,

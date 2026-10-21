@@ -1,5 +1,15 @@
 """Public Builder/manifest/Run APIs only: no private composition patches."""
 
+from typing import TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    from sagents.v2.contracts.principals import PrincipalType
+    from sagents.v2.model.contracts import ModelEventKind
+    from sagents.v2.tool.contracts import SideEffectLevel
+    from typing import Any
+
+from sagents.v2.composition.loaded_agents import ApplicationEntrypoint
+
 from tests.sagents.v2.sdk_fixture import build_registered_app
 
 import asyncio
@@ -24,7 +34,7 @@ from sagents.v2.tool.contracts import ToolDefinition, ToolExecutionResult
 from sagents.v2.tool.plugins.ephemeral import EphemeralToolPlugin
 
 
-CONTEXT = RequestContext(actor=ActorRef(principal_id="owner", principal_type="user"))
+CONTEXT = RequestContext(actor=ActorRef(principal_id="owner", principal_type=cast('PrincipalType', "user")))
 
 
 MODELS = {"models": {name: {"provider": "openai-compatible", "model": name} for name in ("a", "b", "c")}}
@@ -78,7 +88,7 @@ class Model:
         self.store, self.mode, self.dynamic = store, mode, dynamic
         self.requests = []
         self.commands = {}
-        self.parent_gate = None
+        self.parent_gate: asyncio.Event | None = None
         self.parent_entered = asyncio.Event()
 
     async def capabilities(self, binding):
@@ -123,7 +133,7 @@ class Model:
                 if self.dynamic:
                     worker = next(
                         block.value["agent_id"]
-                        for block in spawned.content
+                        for block in cast('Any', spawned).content
                         if block.kind == "json"
                     )
                 name = (
@@ -136,7 +146,7 @@ class Model:
                     {"tasks": [{"agent_id": worker, "content": "Probe"}]},
                 )
         yield ModelStreamEvent(
-            kind="completed",
+            kind=cast('ModelEventKind', "completed"),
             response=ModelResponse(
                 response_id=request.request_id,
                 text="done" if done else "",
@@ -173,7 +183,7 @@ async def build(root, manifest, *, approval=False, dynamic=False):
                 name="probe",
                 description="Record the child's call",
                 input_schema={"type": "object", "properties": {}},
-                side_effect_level="write" if approval else "none",
+                side_effect_level=cast('SideEffectLevel', "write" if approval else "none"),
             ),
         ),
         {"probe": probe},
@@ -351,7 +361,7 @@ async def test_public_child_approval_resume_keeps_persisted_route(
             CONTEXT,
         )
         assert receipt.decision.value == "accepted"
-        execution = await app.entrypoint().continue_run(run.run_id, CONTEXT, agent=await app.agent_for_run(run.run_id, CONTEXT))
+        execution = await cast(ApplicationEntrypoint, app.entrypoint()).continue_run(run.run_id, CONTEXT, agent=await app.agent_for_run(run.run_id, CONTEXT))
         assert (await asyncio.wait_for(execution, 10)).state.value == "completed"
         assert len(calls) == 1
         assert calls[0].owner_run_id == child_id
@@ -385,12 +395,12 @@ def test_public_resolver_priority_and_rejection():
 async def test_public_package_is_snapshotted_before_delegation(tmp_path, mode):
     manifest = package(mode)
     app, store, model, calls = await build(tmp_path, manifest)
-    model.parent_gate = asyncio.Event()
+    setattr(model, 'parent_gate', asyncio.Event())
     try:
         stream = await start(app, manifest, "b", "snapshot-parent")
         await asyncio.wait_for(model.parent_entered.wait(), 10)
         manifest.agents["worker"].delegation_model_bindings["primary"] = "c"
-        model.parent_gate.set()
+        getattr(model.parent_gate, 'set')()
         assert (await asyncio.wait_for(stream.wait(), 10)).state.value == "completed"
         assert len(calls) == 1
         child_id = calls[0].owner_run_id
@@ -401,6 +411,6 @@ async def test_public_package_is_snapshotted_before_delegation(tmp_path, mode):
             "b"
         }
     finally:
-        model.parent_gate.set()
+        getattr(model.parent_gate, 'set')()
         await app.close()
         await store.close()

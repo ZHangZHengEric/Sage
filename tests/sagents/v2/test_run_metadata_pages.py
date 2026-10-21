@@ -1,4 +1,12 @@
 """Authorized small Run pages never install historical execution aggregates."""
+
+from typing import Any, TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    from sagents.v2.contracts.principals import PrincipalType
+
+from sagents.v2.composition.contracts import ApplicationResource
+
 import os
 from unittest.mock import AsyncMock
 from uuid import uuid4
@@ -18,10 +26,10 @@ async def test_metadata_pages_preserve_order_filter_owner_and_no_history_install
     dsn = os.environ.get('SAGE_V2_TEST_MYSQL_DSN')
     if backend in {'mysql'} and not dsn:
         pytest.skip('set SQL DSN for live metadata SQL')
-    store = (_MysqlSessionState(dsn, table_prefix='metadata_'+uuid4().hex[:10]) if backend == 'mysql' else
+    store = (_MysqlSessionState(cast(str, dsn), table_prefix='metadata_'+uuid4().hex[:10]) if backend == 'mysql' else
              FilesystemSessionStore(tmp_path) if backend == 'filesystem' else SessionStoreCoordinator())
-    owner = RequestContext(actor=ActorRef(principal_id='owner',principal_type='user',tenant_id='owner'))
-    other = RequestContext(actor=ActorRef(principal_id='other',principal_type='user',tenant_id='other'))
+    owner = RequestContext(actor=ActorRef(principal_id='owner',principal_type=cast('PrincipalType', 'user'),tenant_id='owner'))
+    other = RequestContext(actor=ActorRef(principal_id='other',principal_type=cast('PrincipalType', 'user'),tenant_id='other'))
     expected = []
     try:
         for sid, actor, agent in [('first',owner,'a'),('second',owner,'a'),('private',other,'a'),('foreign-agent',owner,'b')]:
@@ -35,16 +43,16 @@ async def test_metadata_pages_preserve_order_filter_owner_and_no_history_install
         await store.commit_run(run_id=before.run_id,expected_revision=before.revision,
             expected_states={before.state},new_state=RunState.CANCELLED,drafts=(),context=owner,idempotency_key='cancel-first')
         if backend == 'filesystem':
-            await store.close()
+            await cast(ApplicationResource, store).close()
             store = FilesystemSessionStore(tmp_path)
             store._read_session_aggregate = lambda *_: (_ for _ in ()).throw(AssertionError('typed entire history decoded'))
             store._ensure_session_loaded = AsyncMock(side_effect=AssertionError('aggregate installed'))
         if backend in {'mysql'}:
-            store._fetch_session = AsyncMock(side_effect=AssertionError('aggregate installed'))
+            setattr(store, '_fetch_session', AsyncMock(side_effect=AssertionError('aggregate installed')))
         ids = ['first','second','private','foreign-agent']
         page = await store.authorized_run_metadata_page(ids,owner,agent_id='a',limit=4,states=(RunState.QUEUED,))
         assert [row.run_id for row in page] == expected[1:5]
-        last = page[-1]
+        last = cast('tuple[Any, ...]', page)[-1]
         rest = await store.authorized_run_metadata_page(ids,owner,agent_id='a',limit=4,
             after=(last.session_id,last.created_at.isoformat(),last.run_id))
         assert [row.run_id for row in rest] == expected[5:]
@@ -52,14 +60,14 @@ async def test_metadata_pages_preserve_order_filter_owner_and_no_history_install
         assert [row.run_id for row in cancelled] == expected[:1]
         assert not await store.authorized_run_metadata_page(ids,owner,agent_id='a',states=(RunState.COMPLETED,))
     finally:
-        if backend == 'mysql' and store._pool is not None:
-            async with store._writer_connection() as connection:
+        if backend == 'mysql' and getattr(store, '_pool') is not None:
+            async with getattr(store, '_writer_connection')() as connection:
                 async with connection.cursor() as cursor:
                     for table in reversed(_SCHEMA_TABLES):
-                        await cursor.execute(f'DROP TABLE IF EXISTS {store._table(table)}')
+                        await cursor.execute(f'DROP TABLE IF EXISTS {getattr(store, '_table')(table)}')
                 await connection.commit()
         if backend != 'memory':
-            await store.close()
+            await cast(ApplicationResource, store).close()
 
 
 async def test_redis_uncached_large_history_metadata_is_batched_without_aggregate_replay():
@@ -69,9 +77,9 @@ async def test_redis_uncached_large_history_metadata_is_batched_without_aggregat
     from tests.sagents.v2.test_redis_mysql_session_store import Archive, store as redis_store
     redis = fakeredis.aioredis.FakeRedis(decode_responses=True)
     archive = Archive()
-    archive._run_metadata_batch = AsyncMock(side_effect=AssertionError('hot state queried stale archive'))
+    setattr(archive, '_run_metadata_batch', AsyncMock(side_effect=AssertionError('hot state queried stale archive')))
     store = redis_store(redis, archive)
-    owner = RequestContext(actor=ActorRef(principal_id='owner',principal_type='user',tenant_id='owner'))
+    owner = RequestContext(actor=ActorRef(principal_id='owner',principal_type=cast('PrincipalType', 'user'),tenant_id='owner'))
     try:
         result = await store.create_run(StartRun(agent_id='a',session_id='hot',
             input=(InputItem(role='user',content=(TextBlock(text='x'*(1024*1024)),)),),
@@ -92,16 +100,16 @@ async def test_redis_missing_resident_metadata_never_falls_back_to_stale_archive
     from tests.sagents.v2.test_redis_mysql_session_store import Archive, store as redis_store
     redis = fakeredis.aioredis.FakeRedis(decode_responses=True)
     archive = Archive()
-    archive._run_metadata_batch = AsyncMock(return_value=((),{}))
+    setattr(archive, '_run_metadata_batch', AsyncMock(return_value=((),{})))
     store = redis_store(redis, archive)
-    owner = RequestContext(actor=ActorRef(principal_id='owner',principal_type='user',tenant_id='owner'))
+    owner = RequestContext(actor=ActorRef(principal_id='owner',principal_type=cast('PrincipalType', 'user'),tenant_id='owner'))
     try:
         await store.create_run(StartRun(agent_id='a',session_id='lost',input=(),resolved_spec_hash='sha256:spec',idempotency_key='lost'),owner)
         store._evict_session_locked('lost')
         await redis.delete(store._session_key('lost'))
         with pytest.raises(SageV2Error,match='Unarchived Redis Session data is missing'):
             await store.authorized_run_metadata_page(['lost'],owner)
-        archive._run_metadata_batch.assert_not_awaited()
+        getattr(archive, '_run_metadata_batch').assert_not_awaited()
     finally:
         await store.close()
 
@@ -112,7 +120,7 @@ async def test_redis_metadata_resolves_a_committed_write_after_its_confirmation_
     redis = fakeredis.aioredis.FakeRedis(decode_responses=True)
     store = redis_store(redis, Archive())
     original_fetch = store._fetch_session
-    owner = RequestContext(actor=ActorRef(principal_id='owner',principal_type='user',tenant_id='owner'))
+    owner = RequestContext(actor=ActorRef(principal_id='owner',principal_type=cast('PrincipalType', 'user'),tenant_id='owner'))
     try:
         result = await store.create_run(StartRun(agent_id='a',session_id='uncertain',input=(),
             resolved_spec_hash='sha256:spec',idempotency_key='uncertain'),owner)
@@ -129,7 +137,7 @@ async def test_redis_metadata_resolves_a_committed_write_after_its_confirmation_
             return await original_get(key, field)
 
         store._retry_transaction = lose_response
-        redis.hget = lose_confirmation
+        setattr(redis, 'hget', lose_confirmation)
         with pytest.raises(OSError, match='confirmation unavailable'):
             await store.commit_run(run_id=before.run_id,expected_revision=before.revision,
                 expected_states={before.state},new_state=RunState.CANCELLED,drafts=(),
@@ -150,16 +158,16 @@ async def test_redis_metadata_resolves_a_committed_write_after_its_confirmation_
 @pytest.mark.parametrize('durable', [False, True])
 async def test_legacy_metadata_authorization_uses_accepted_actor_when_owner_and_context_missing(tmp_path,durable):
     store = FilesystemSessionStore(tmp_path) if durable else SessionStoreCoordinator()
-    owner = RequestContext(actor=ActorRef(principal_id='owner',principal_type='user',tenant_id='owner'))
-    stranger = RequestContext(actor=ActorRef(principal_id='stranger',principal_type='user',tenant_id='owner'))
+    owner = RequestContext(actor=ActorRef(principal_id='owner',principal_type=cast('PrincipalType', 'user'),tenant_id='owner'))
+    stranger = RequestContext(actor=ActorRef(principal_id='stranger',principal_type=cast('PrincipalType', 'user'),tenant_id='owner'))
     try:
         result = await store.create_run(StartRun(agent_id='a',session_id='legacy',input=(),resolved_spec_hash='sha256:spec',idempotency_key='legacy'),owner)
         store._sessions['legacy'].owner = None
         store._runs[result.handle.run_id].request_context = None
         if durable:
             state = store._dump_state_locked()
-            store._write_snapshot(store._session_dir('legacy') / 'state.json',state)
-            await store.close()
+            getattr(store, '_write_snapshot')(getattr(store, '_session_dir')('legacy') / 'state.json',state)
+            await cast(ApplicationResource, store).close()
             store = FilesystemSessionStore(tmp_path)
             store._ensure_session_loaded = AsyncMock(side_effect=AssertionError('legacy metadata installed aggregate'))
             store._read_session_aggregate = lambda *_: (_ for _ in ()).throw(AssertionError('typed history reader'))
@@ -168,7 +176,7 @@ async def test_legacy_metadata_authorization_uses_accepted_actor_when_owner_and_
         assert not await store.authorized_run_metadata_page(['legacy'],stranger)
     finally:
         if durable:
-            await store.close()
+            await cast(ApplicationResource, store).close()
 
 
 async def test_cold_mysql_metadata_retains_legacy_owner_for_redis_archive_reads():
@@ -177,7 +185,7 @@ async def test_cold_mysql_metadata_retains_legacy_owner_for_redis_archive_reads(
         pytest.skip('set MySQL DSN for legacy archive metadata')
     from sagents.v2.runtime.session.run_metadata import RunMetadataQueries
     store = _MysqlSessionState(dsn,table_prefix='legacy_'+uuid4().hex[:10])
-    owner = RequestContext(actor=ActorRef(principal_id='owner',principal_type='user',tenant_id='owner'))
+    owner = RequestContext(actor=ActorRef(principal_id='owner',principal_type=cast('PrincipalType', 'user'),tenant_id='owner'))
     stranger = owner.model_copy(update={'actor':owner.actor.model_copy(update={'principal_id':'stranger'})})
     try:
         result = await store.create_run(StartRun(agent_id='a',session_id='legacy',input=(),

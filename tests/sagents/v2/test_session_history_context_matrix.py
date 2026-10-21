@@ -1,5 +1,10 @@
 from __future__ import annotations
 
+from typing import TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    from sagents.v2.runtime.session.contracts import SessionStore
+
 import asyncio
 
 import pytest
@@ -115,7 +120,7 @@ async def test_user_cancel_without_tool_reply_allows_next_turn_after_restart(tmp
     from sagents.v2.context.session_history import SessionEventModelProjector
 
     store = FilesystemSessionStore(tmp_path)
-    runtime = HarnessRuntime(store)
+    runtime = HarnessRuntime(cast('SessionStore', store))
     first = await runtime.start_run(command("start tool", "cancel-first"), CONTEXT)
     started = asyncio.Event()
     definition = ToolDefinition(
@@ -148,7 +153,7 @@ async def test_user_cancel_without_tool_reply_allows_next_turn_after_restart(tmp
         await store.close()
 
     store = FilesystemSessionStore(tmp_path)
-    runtime = HarnessRuntime(store)
+    runtime = HarnessRuntime(cast('SessionStore', store))
     try:
         assert (await runtime.get_run(first.run_id)).state.value == "cancelled"
         assert await store.list_dispatchable_runs() == ()
@@ -177,7 +182,7 @@ async def test_user_cancel_without_tool_reply_allows_next_turn_after_restart(tmp
         })})
         received = [m for m in SessionEventModelProjector().project((*events, late_result)) if m.role == "tool"]
         assert len(received) == 1
-        assert received[0].content[0].text == "actual result"
+        assert cast(TextBlock, received[0].content[0]).text == "actual result"
         assert received[0].metadata["tool_result_received"] is True
         second = await runtime.start_run(
             command("new question", "after-cancel", session_id=first.session_id), CONTEXT,
@@ -186,7 +191,7 @@ async def test_user_cancel_without_tool_reply_allows_next_turn_after_restart(tmp
         result = await execute(runtime, second, provider)
         assert result.state.value == "completed"
         assert any(m.tool_call_id == "cancelled-call" for m in provider.requests[0].messages if m.role == "tool")
-        assert provider.requests[0].messages[-1].content[0].text == "new question"
+        assert cast(TextBlock, provider.requests[0].messages[-1].content[0]).text == "new question"
     finally:
         await store.close()
 
@@ -587,7 +592,7 @@ async def test_stale_snapshot_never_reads_events_committed_after_its_base():
 async def test_sqlite_restart_preserves_the_session_history_anchor(tmp_path):
     path = tmp_path / "runtime.sqlite3"
     repository = FilesystemSessionStore(path)
-    runtime = HarnessRuntime(repository)
+    runtime = HarnessRuntime(cast('SessionStore', repository))
     first = await runtime.start_run(command("before restart", "restart-first"), CONTEXT)
     await execute(
         runtime,
@@ -599,7 +604,7 @@ async def test_sqlite_restart_preserves_the_session_history_anchor(tmp_path):
     await repository.close()
 
     reopened = FilesystemSessionStore(path)
-    resumed_runtime = HarnessRuntime(reopened)
+    resumed_runtime = HarnessRuntime(cast('SessionStore', reopened))
     second = await resumed_runtime.start_run(
         command("after restart", "restart-second", session_id=first.session_id), CONTEXT
     )

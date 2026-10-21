@@ -1,3 +1,7 @@
+
+from typing import cast, Mapping
+from sagents.v2.sagent import SAgent
+
 from tests.sagents.v2.sdk_fixture import build_registered_package
 from tests.sagents.v2.model_fixture import TEST_MODELS
 from pathlib import Path
@@ -23,7 +27,7 @@ async def test_builder_returns_application_with_one_close_boundary(tmp_path):
         assert isinstance(application.service("session.store"), FilesystemSessionStore)
         assert not hasattr(application.entrypoint(), "driver_factory")
         with pytest.raises(TypeError):
-            application.subscribe_interface("native", EventCursor(run_id="missing", run_sequence=0))
+            getattr(application, "subscribe_interface")("native", EventCursor(run_id="missing", run_sequence=0))
         for capability in ("execution.scheduler", "execution.job-runtime", "execution.dispatcher", "artifact.store", "package.registry"):
             assert application.service(capability) is not None
         loaded = application.loaded_agents[0]
@@ -83,7 +87,7 @@ async def test_application_stops_execution_resources_before_closing_agents():
             order.append("agent")
 
     application = SAgentApplication._from_composition(
-        agents={"main": Agent()},
+        agents=cast('Mapping[str, SAgent]', {"main": Agent()}),
         entrypoint_agent_id="main",
         scope_handles=(),
         services={},
@@ -151,7 +155,7 @@ async def test_application_close_retries_only_transient_teardown_failures():
     transient = Resource("transient", fail_once=True)
     agent = Resource("agent")
     application = SAgentApplication._from_composition(
-        agents={"main": agent},
+        agents=cast('Mapping[str, SAgent]', {"main": agent}),
         entrypoint_agent_id="main",
         scope_handles=(),
         services={},

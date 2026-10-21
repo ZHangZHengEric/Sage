@@ -1,5 +1,9 @@
 """Resume a paused nested child through public APIs, with ancestors still paused."""
 
+from typing import cast
+
+from sagents.v2.composition.loaded_agents import ApplicationEntrypoint
+
 import asyncio
 
 import pytest
@@ -157,7 +161,7 @@ async def test_leaf_resume_rebuilds_ancestor_resources_without_running_ancestors
                 CONTEXT,
             )
             assert receipt.decision.value == "accepted"
-            future = await app.entrypoint().continue_run(target, CONTEXT, agent=agent)
+            future = await cast(ApplicationEntrypoint, app.entrypoint()).continue_run(target, CONTEXT, agent=agent)
             completed = await asyncio.wait_for(future, 15)
             assert completed.state.value == "completed", completed
             facts = await app.execution_diagnostics(target, CONTEXT)

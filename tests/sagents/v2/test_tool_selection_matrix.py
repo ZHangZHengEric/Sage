@@ -1,3 +1,9 @@
+
+from typing import TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    from sagents.v2.model.provider import ModelProvider
+
 import asyncio
 
 import pytest
@@ -142,7 +148,7 @@ async def test_llm_policy_prepares_once_and_uses_exact_valid_names():
     messages = user_message("What is the weather, then save it?")
     await policy.prepare(
         ToolSelectionPrepareContext(
-            run_id="run_1", tools=TOOLS, messages=messages, model=model
+            run_id="run_1", tools=TOOLS, messages=messages, model=cast('ModelProvider | None', model)
         )
     )
     result = policy.select(request(messages=messages))
@@ -162,7 +168,7 @@ async def test_llm_policy_reports_invalid_model_output():
     with pytest.raises(SageV2Error) as caught:
         await policy.prepare(
             ToolSelectionPrepareContext(
-                run_id="run_1", tools=TOOLS, messages=messages, model=model
+                run_id="run_1", tools=TOOLS, messages=messages, model=cast('ModelProvider | None', model)
             )
         )
 
@@ -180,7 +186,7 @@ async def test_llm_policy_accepts_an_explicit_empty_tool_selection():
 
     await policy.prepare(
         ToolSelectionPrepareContext(
-            run_id="run_1", tools=TOOLS, messages=messages, model=model
+            run_id="run_1", tools=TOOLS, messages=messages, model=cast('ModelProvider | None', model)
         )
     )
 
@@ -196,7 +202,7 @@ async def test_llm_policy_skips_model_when_the_catalog_fits_the_visible_limit():
 
     await policy.prepare(
         ToolSelectionPrepareContext(
-            run_id="run_1", tools=TOOLS, messages=messages, model=UnexpectedModel()
+            run_id="run_1", tools=TOOLS, messages=messages, model=cast('ModelProvider | None', UnexpectedModel())
         )
     )
 
@@ -215,7 +221,7 @@ async def test_llm_policy_rejects_a_nonempty_list_of_unknown_tools():
 
     with pytest.raises(SageV2Error) as caught:
         await policy.prepare(
-            ToolSelectionPrepareContext(run_id="run_1", tools=TOOLS, model=model)
+            ToolSelectionPrepareContext(run_id="run_1", tools=TOOLS, model=cast('ModelProvider | None', model))
         )
 
     assert caught.value.info.code == "tool_selection.model_output_invalid"
@@ -231,7 +237,7 @@ async def test_llm_policy_reports_timeout_without_changing_selection_strategy():
     with pytest.raises(SageV2Error) as caught:
         await policy.prepare(
             ToolSelectionPrepareContext(
-                run_id="run_1", tools=TOOLS, messages=messages, model=SlowModel()
+                run_id="run_1", tools=TOOLS, messages=messages, model=cast('ModelProvider | None', SlowModel())
             )
         )
 
@@ -257,7 +263,7 @@ async def test_llm_policy_timeout_bounds_the_entire_stream():
                 run_id="run_1",
                 tools=TOOLS,
                 messages=messages,
-                model=SlowCompletionModel(),
+                model=cast('ModelProvider | None', SlowCompletionModel()),
             )
         )
 

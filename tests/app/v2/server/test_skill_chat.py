@@ -1,3 +1,7 @@
+
+from typing import cast
+
+from sagents.v2.contracts.items import TextBlock
 from fastapi.testclient import TestClient
 
 from app.v2.server.main import create_app
@@ -7,7 +11,6 @@ from tests.app.v2.server.conftest import (
     scripted_hello,
 )
 from tests.app.v2.server.test_agui_chat import _run_input
-
 
 import pytest
 
@@ -34,7 +37,7 @@ def test_agui_run_sees_bound_skill_without_workspace_copy(tmp_path):
 
     assert provider.requests
     rendered = "\n".join(
-        block.text
+        cast(TextBlock, block).text
         for request in provider.requests
         for message in request.messages
         for block in message.content

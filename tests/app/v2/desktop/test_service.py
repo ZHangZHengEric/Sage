@@ -1,5 +1,20 @@
 from __future__ import annotations
 
+from typing import Any, TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    from sagents.v2.application import SAgentApplication
+    from typing import Literal
+
+from unittest.mock import _Call
+
+from sagents.v2.composition.loaded_agents import ApplicationEntrypoint
+
+from sagents.v2.composition.contracts import ApplicationResource
+
+from sagents.v2.contracts.events import ContinuationEventData
+from sagents.v2.contracts.events import ToolEventData
+
 import base64
 import io
 import json
@@ -77,7 +92,7 @@ from sagents.v2.runtime.execution.scheduler import LeaseReleaseReason, WorkItem
 async def desktop_execution_lease(service: DesktopV2Service, run_id: str):
     await service.start()
     work_id = new_id("test_work")
-    await service.scheduler.submit(
+    await cast('Any', service.scheduler).submit(
         WorkItem(
             work_id=work_id,
             run_id=run_id,
@@ -85,13 +100,13 @@ async def desktop_execution_lease(service: DesktopV2Service, run_id: str):
             idempotency_key=work_id,
         )
     )
-    lease = await service.scheduler.claim(
+    lease = await cast('Any', service.scheduler).claim(
         "test-worker", lease_duration=timedelta(seconds=30), wait_timeout=0
     )
     assert lease is not None
-    async with service.driver_session_store.lease_scope(lease):
+    async with getattr(service, 'driver_session_store').lease_scope(lease):
         yield
-    await service.scheduler.release(lease, LeaseReleaseReason.COMPLETED, requeue=False)
+    await cast('Any', service.scheduler).release(lease, LeaseReleaseReason.COMPLETED, requeue=False)
 
 
 def scripted_tool_selection(*tool_names: str) -> ScriptedModelProvider:
@@ -120,7 +135,7 @@ def scripted_tool_selection(*tool_names: str) -> ScriptedModelProvider:
     ["system", "zh", "en", "pt", "es", "fr", "de", "ja", "ko", "ru"],
 )
 def test_desktop_settings_accept_supported_frontend_languages(language: str):
-    assert DesktopV2Settings(language=language).language == language
+    assert DesktopV2Settings(language=cast("Literal['system', 'zh', 'en', 'pt', 'es', 'fr', 'de', 'ja', 'ko', 'ru']", language)).language == language
 
 
 def test_desktop_settings_reject_unknown_frontend_language():
@@ -212,11 +227,11 @@ async def test_rebuilt_desktop_loop_checks_current_composition_not_stored_hash(t
     service, _, _ = desktop(tmp_path)
     try:
         run, command, _ = await execute(service)
-        loaded = await service.application.agent_for_run(run.run_id, service._context("user_1"))
+        loaded = await cast('SAgentApplication', service.application).agent_for_run(run.run_id, service._context("user_1"))
         assert command.resolved_spec_hash == loaded.composition_hash
         changed = command.model_copy(update={"resolved_spec_hash": "sha256:stored-old-composition", "idempotency_key": "bad-hash"})
         with pytest.raises(ValueError, match="identity"):
-            await service.application.entrypoint().run_stream(changed, service._context("user_1"), agent=loaded)
+            await cast(ApplicationEntrypoint, cast('SAgentApplication', service.application).entrypoint()).run_stream(changed, service._context("user_1"), agent=loaded)
     finally:
         await service.close()
 
@@ -228,7 +243,7 @@ async def test_desktop_run_application_exposes_resolved_component_plan(tmp_path)
         "context.reducer": {"plugin": "sage.context.reducer.window"}}})
     try:
         run, _, _ = await execute(service)
-        plan = await service.application.run_configuration(run.run_id, service._context("user_1"))
+        plan = await cast('SAgentApplication', service.application).run_configuration(run.run_id, service._context("user_1"))
         bindings = {(value["capability"], value["plugin_id"]) for value in plan["plugins"]}
         assert ("context.reducer", "sage.context.reducer.window") in bindings
         assert ("agent.continuation-policy", "sage.agent.continuation.deterministic") in bindings
@@ -356,8 +371,8 @@ async def test_desktop_runtime_and_dispatcher_are_owned_by_standard_app(tmp_path
     service = DesktopV2Service(tmp_path)
     await service.start()
     try:
-        assert service.runtime is service.application.runtime
-        assert service.dispatcher is service.application.service("execution.dispatcher")
+        assert service.runtime is cast('SAgentApplication', service.application).runtime
+        assert service.dispatcher is cast('SAgentApplication', service.application).service("execution.dispatcher")
         assert not hasattr(service, "_drivers")
         assert not hasattr(service, "_build_loop")
     finally:
@@ -416,13 +431,13 @@ async def test_desktop_run_exposes_frozen_revision_and_binding(tmp_path):
         assert run.state.value == "completed"
         assert created and created[0].run_id == run.run_id
         context = service._context("user_1")
-        loaded = await service.application.agent_for_run(run.run_id, context)
+        loaded = await cast('SAgentApplication', service.application).agent_for_run(run.run_id, context)
         assert command.agent_id == loaded.id
         assert command.resolved_spec_hash == loaded.composition_hash
-        configuration = await service.application.run_configuration(run.run_id, context)
+        configuration = await cast('SAgentApplication', service.application).run_configuration(run.run_id, context)
         assert configuration["runtime"]["capabilities"]["model.provider"]["plugin"] == "test.desktop.model"
         assert any(item["plugin_id"] == "test.desktop.model" for item in configuration["plugins"])
-        assert await service.application.execution_diagnostics(run.run_id, context)
+        assert await cast('SAgentApplication', service.application).execution_diagnostics(run.run_id, context)
     finally:
         await service.close()
 
@@ -504,7 +519,7 @@ async def test_run_recovery_uses_its_frozen_model_route_with_current_credentials
             }
         )
     )
-    await service.session_store.close()
+    await cast(ApplicationResource, service.session_store).close()
     reopened = DesktopV2Service(tmp_path)
     persisted_command = await reopened.session_store.get_start_command(handle.run_id)
     restored_agent = await reopened._agent_for_command(persisted_command, "user_1")
@@ -521,7 +536,7 @@ async def test_run_recovery_uses_its_frozen_model_route_with_current_credentials
     assert restored.api_key == "rotated-key"
     assert "api_key" not in persisted_command.config.metadata["model_route"]
     assert "user_id" not in persisted_command.config.metadata["agent_runtime"]
-    await reopened.session_store.close()
+    await cast(ApplicationResource, reopened.session_store).close()
 
 
 @pytest.mark.asyncio
@@ -576,7 +591,7 @@ async def test_desktop_catalog_is_native_seeded_and_persistent(tmp_path: Path):
     agents = await service.list_agents("user_1")
     providers = await service.list_model_providers("user_1")
 
-    assert service.diagnostics.root == tmp_path / "sage/runtime/sessions"
+    assert getattr(service.diagnostics, 'root') == tmp_path / "sage/runtime/sessions"
     assert agents == [
         {
             "id": "sage",
@@ -593,7 +608,7 @@ async def test_desktop_catalog_is_native_seeded_and_persistent(tmp_path: Path):
     )
     assert payload["format_version"] == "sage.desktop-catalog/v2"
     assert "legacy" not in json.dumps(payload).lower()
-    await service.session_store.close()
+    await cast(ApplicationResource, service.session_store).close()
 
 
 @pytest.mark.asyncio
@@ -603,7 +618,7 @@ async def test_authorized_session_index_isolates_corrupt_entry(tmp_path: Path):
     corrupt = SimpleNamespace(session_id="session_corrupt")
     healthy = SimpleNamespace(session_id="session_healthy")
     service.session_index.list = AsyncMock(return_value=(corrupt, healthy))
-    service.session_access = SimpleNamespace(
+    setattr(service, 'session_access', SimpleNamespace(
         get_session=AsyncMock(
             side_effect=(
                 SageV2Error(
@@ -616,7 +631,7 @@ async def test_authorized_session_index_isolates_corrupt_entry(tmp_path: Path):
                 SimpleNamespace(session_id="session_healthy"),
             )
         )
-    )
+    ))
     skipped: set[str] = set()
 
     visible = await service._authorized_indexed_sessions(
@@ -626,7 +641,7 @@ async def test_authorized_session_index_isolates_corrupt_entry(tmp_path: Path):
 
     assert visible == (healthy,)
     assert skipped == {"session_corrupt"}
-    await service.session_store.close()
+    await cast(ApplicationResource, service.session_store).close()
 
 
 @pytest.mark.asyncio
@@ -654,7 +669,7 @@ async def test_usage_overview_marks_corrupt_index_entry_as_partial(tmp_path: Pat
         "skipped_event_sessions": 1,
         "skipped_diagnostic_sessions": 1,
     }
-    await service.session_store.close()
+    await cast(ApplicationResource, service.session_store).close()
 
 
 @pytest.mark.asyncio
@@ -794,7 +809,7 @@ async def test_usage_overview_salvages_diagnostics_when_events_are_corrupt(
         "skipped_event_sessions": 1,
         "skipped_diagnostic_sessions": 0,
     }
-    await service.session_store.close()
+    await cast(ApplicationResource, service.session_store).close()
 
 
 @pytest.mark.asyncio
@@ -838,7 +853,7 @@ async def test_usage_overview_keeps_events_when_diagnostics_are_unreadable(
         "skipped_event_sessions": 0,
         "skipped_diagnostic_sessions": 1,
     }
-    await service.session_store.close()
+    await cast(ApplicationResource, service.session_store).close()
 
 
 @pytest.mark.asyncio
@@ -852,7 +867,7 @@ async def test_model_patch_persists_explicit_protocol_and_secret(
     value = await service.patch_model_provider(
         "model_main",
         ModelProviderPatch(
-            protocol=protocol,
+            protocol=cast("Literal['openai-chat-completions', 'openai-responses', 'anthropic-messages', 'gemini-generate-content'] | None", protocol),
             model="claude-test",
             base_url="https://api.anthropic.test",
             api_keys=["secret"],
@@ -865,7 +880,7 @@ async def test_model_patch_persists_explicit_protocol_and_secret(
     assert await service.reveal_model_provider_api_key("model_main", "user_1") == {
         "api_key": "secret"
     }
-    await service.session_store.close()
+    await cast(ApplicationResource, service.session_store).close()
 
 
 @pytest.mark.asyncio
@@ -875,7 +890,7 @@ async def test_model_provider_can_be_created(tmp_path: Path, protocol: str):
     created = await service.create_model_provider(
         ModelProviderCreate(
             name="Secondary",
-            protocol=protocol,
+            protocol=cast("Literal['openai-chat-completions', 'openai-responses', 'anthropic-messages', 'gemini-generate-content']", protocol),
             model="claude-test",
             base_url="https://anthropic.test",
             api_keys=["secret"],
@@ -900,7 +915,7 @@ async def test_model_provider_can_be_created(tmp_path: Path, protocol: str):
     assert [value["id"] for value in providers if value["is_default"]] == [
         created["id"]
     ]
-    await service.session_store.close()
+    await cast(ApplicationResource, service.session_store).close()
 
 
 @pytest.mark.asyncio
@@ -924,7 +939,7 @@ async def test_model_manifest_omits_tools_when_probe_marked_them_unsupported(
     assert route.capabilities.tool_calling is False
     assert route.capabilities.parallel_tool_calls is False
     assert manifest.agents[agent.agent_id].tools == ()
-    await service.session_store.close()
+    await cast(ApplicationResource, service.session_store).close()
 
 
 @pytest.mark.asyncio
@@ -972,9 +987,9 @@ async def test_verified_model_compatibility_persists_and_drives_runtime_routes(
     }
     assert service._model_catalog(agent, stored).models[stored.id].request.reasoning_effort is None
     judge_provider = await service._model_provider(stored, agent, enable_thinking=False)
-    assert judge_provider.config.max_output_tokens_field == "max_tokens"
-    assert judge_provider.config.reasoning_parameter_fallback is False
-    outgoing = judge_provider.diagnostic_request(
+    assert getattr(judge_provider, 'config').max_output_tokens_field == "max_tokens"
+    assert getattr(judge_provider, 'config').reasoning_parameter_fallback is False
+    outgoing = getattr(judge_provider, 'diagnostic_request')(
         ModelRequest(
             request_id="judge_request",
             run_id="judge_run",
@@ -1070,7 +1085,7 @@ async def test_model_capability_check_uses_draft_and_does_not_persist(
         provider_id="model_main",
     )
 
-    candidate = probe.await_args.args[0]
+    candidate = cast('_Call', probe.await_args).args[0]
     assert candidate.model == "draft-model"
     assert candidate.base_url == "https://draft.test/v1"
     assert candidate.api_key == "stored-secret"
@@ -1079,7 +1094,7 @@ async def test_model_capability_check_uses_draft_and_does_not_persist(
     assert after is not None
     assert after.model == before.model
     assert after.base_url == before.base_url
-    await service.session_store.close()
+    await cast(ApplicationResource, service.session_store).close()
 
 
 @pytest.mark.asyncio
@@ -1106,7 +1121,7 @@ async def test_new_model_capability_check_does_not_create_provider(tmp_path: Pat
 
     after = await service.list_model_providers("user_1")
     assert [value["id"] for value in after] == [value["id"] for value in before]
-    await service.session_store.close()
+    await cast(ApplicationResource, service.session_store).close()
 
 
 @pytest.mark.asyncio
@@ -1193,7 +1208,7 @@ async def test_model_capability_probe_checks_connection_image_and_schema(
     }
     assert len(probe_provider.requests) == 19
     probe_provider.raw_client.aclose.assert_awaited_once()
-    await service.session_store.close()
+    await cast(ApplicationResource, service.session_store).close()
 
 
 @pytest.mark.asyncio
@@ -1245,7 +1260,7 @@ async def test_model_capability_probe_records_supported_reasoning_controls(
             self.requests.append(request)
             if self.config.reasoning_effort == "none":
                 error = RuntimeError("reasoning_effort is unsupported")
-                error.status_code = 422
+                setattr(error, 'status_code', 422)
                 raise error
             text = (
                 '{"ok":true}'
@@ -1351,11 +1366,11 @@ async def test_model_capability_probe_calibrates_luna_and_runtime_omits_rejected
         async def stream(self, request):
             if (request.max_output_tokens or 0) > 8192:
                 error = RuntimeError("configured output limit is unsupported")
-                error.status_code = 422
+                setattr(error, 'status_code', 422)
                 raise error
             if self.route.request.reasoning_effort is not None:
                 error = RuntimeError("reasoning_effort is unsupported")
-                error.status_code = 422
+                setattr(error, 'status_code', 422)
                 raise error
             extra = {
                 key: value
@@ -1364,7 +1379,7 @@ async def test_model_capability_probe_calibrates_luna_and_runtime_omits_rejected
             }
             if extra:
                 error = RuntimeError("reasoning disable control is unsupported")
-                error.status_code = 422
+                setattr(error, 'status_code', 422)
                 raise error
             if request.tools:
                 response = ModelResponse(
@@ -1479,7 +1494,7 @@ async def test_model_capability_probe_requires_reasoning_to_work_with_tools(
             effort = self.route.request.reasoning_effort
             if effort is not None and request.tools:
                 error = RuntimeError("reasoning with tools is unsupported")
-                error.status_code = 422
+                setattr(error, 'status_code', 422)
                 raise error
             if request.tools:
                 response = ModelResponse(
@@ -1586,7 +1601,7 @@ async def test_model_capability_probe_persists_nested_reasoning_effort_dialect(
                 "max",
             }:
                 error = RuntimeError("invalid template reasoning effort")
-                error.status_code = 422
+                setattr(error, 'status_code', 422)
                 raise error
             if request.tools:
                 response = ModelResponse(
@@ -1772,7 +1787,7 @@ async def test_model_capability_probe_returns_partial_results_after_probe_errors
             )
             if self.config.reasoning_effort == "none" or request.response_schema:
                 error = RuntimeError("Provider rejected this probe")
-                error.status_code = 422
+                setattr(error, 'status_code', 422)
                 raise error
             text = (
                 '{"ok":true}'
@@ -1837,7 +1852,7 @@ async def test_model_capability_probe_is_invalid_only_when_all_probes_fail(
         async def stream(self, request):
             self.requests.append(request)
             error = RuntimeError("Provider rejected this probe")
-            error.status_code = 422
+            setattr(error, 'status_code', 422)
             raise error
             yield  # pragma: no cover
 
@@ -1930,7 +1945,7 @@ async def test_v2_does_not_read_v1_model_or_mcp_settings(
     assert agent.config["llm_provider_id"] == "model_main"
     assert agent.config["fast_llm_provider_id"] == "model_main"
     assert mcp == ()
-    await service.session_store.close()
+    await cast(ApplicationResource, service.session_store).close()
 
 
 @pytest.mark.asyncio
@@ -1945,7 +1960,7 @@ async def test_model_patch_rejects_an_invalid_route_before_persisting(tmp_path: 
 
     provider = (await service.list_model_providers("user_1"))[0]
     assert provider["base_url"] == "https://api.openai.com/v1"
-    await service.session_store.close()
+    await cast(ApplicationResource, service.session_store).close()
 
 
 @pytest.mark.asyncio
@@ -1972,7 +1987,7 @@ async def test_desktop_catalog_scopes_reused_ids_by_user(tmp_path: Path):
     assert [value["id"] for value in payload["model_providers"]].count(
         "model_main"
     ) == 2
-    await service.session_store.close()
+    await cast(ApplicationResource, service.session_store).close()
 
 
 @pytest.mark.asyncio
@@ -2158,7 +2173,7 @@ async def test_component_inventory_explains_plugins_and_locks_model_protocol(
     )
     assert session_memory_selection["plugin_id"] == "sage.session-memory.noop"
     assert session_memory_selection["pending_restart"] is True
-    await service.session_store.close()
+    await cast(ApplicationResource, service.session_store).close()
 
 
 @pytest.mark.asyncio
@@ -2254,7 +2269,7 @@ async def test_extension_inventory_is_not_a_dynamic_desktop_tool_catalog(
         for component in inventory
         for plugin in component["plugins"]
     )
-    await service.session_store.close()
+    await cast(ApplicationResource, service.session_store).close()
 
 
 @pytest.mark.asyncio
@@ -2288,7 +2303,7 @@ async def test_tool_catalog_does_not_hide_in_process_sage_mcp_tools(tmp_path: Pa
     assert by_name["grep"]["source"] == "代码检索"
     assert by_name["execute_shell_command"]["category"] == "shell"
     assert by_name["execute_shell_command"]["source"] == "终端"
-    await service.session_store.close()
+    await cast(ApplicationResource, service.session_store).close()
 
 
 @pytest.mark.asyncio
@@ -2318,7 +2333,7 @@ async def test_native_tool_catalog_localizes_descriptions_and_schema(tmp_path: P
         ]
         == "Virtual path to the file"
     )
-    await service.session_store.close()
+    await cast(ApplicationResource, service.session_store).close()
 
 
 @pytest.mark.asyncio
@@ -2345,7 +2360,7 @@ async def test_user_component_selection_is_persisted_with_apply_semantics(
         if value["component"]["component_id"] == "context.reducer"
     )
     assert reducer["active"]["plugin_id"] == "sage.context.reducer.window"
-    await service.session_store.close()
+    await cast(ApplicationResource, service.session_store).close()
 
 
 @pytest.mark.asyncio
@@ -2399,7 +2414,7 @@ async def test_tool_selection_component_keeps_only_the_builtin_count_limit(
         run, _, _ = await execute(service)
         assert run.state.value == "completed"
         assert len(model.requests[0].tools) <= 20
-        accepted = await service.application.run_configuration(run.run_id, service._context("user_1"))
+        accepted = await cast('SAgentApplication', service.application).run_configuration(run.run_id, service._context("user_1"))
         selection = accepted["runtime"]["capabilities"]["tool.selection-policy"]
         assert selection["plugin"] == "sage.tool-selection.lexical"
         assert selection["config"]["max_visible_tools"] == 20
@@ -2422,7 +2437,7 @@ async def test_hybrid_is_not_selectable_and_explicit_status_builds_real_policy(t
         assert "explicit turn status is required" in str(model.requests[0].messages)
         assert "turn_status" in {tool.name for tool in model.requests[0].tools}
         events = await service.session_store.read_events(run.run_id)
-        assert any(event.type == "continuation.decided" and event.data.reason_code == "status.complete" for event in events)
+        assert any(event.type == "continuation.decided" and cast(ContinuationEventData, event.data).reason_code == "status.complete" for event in events)
     finally:
         await service.close()
 
@@ -2465,7 +2480,7 @@ async def test_llm_judge_selection_uses_v1_contract_and_hides_turn_status(tmp_pa
         assert all(route.model != "judge-fast" for route, _ in primary)
         assert all("turn_status" not in {tool.name for tool in request.tools} for _, request in primary)
         assert any("decision" in str(request.messages) and "completed" in str(request.messages) for _, request in judged)
-        accepted = await service.application.run_configuration(run.run_id, service._context("user_1"))
+        accepted = await cast('SAgentApplication', service.application).run_configuration(run.run_id, service._context("user_1"))
         assert accepted["runtime"]["capabilities"]["agent.continuation-policy"]["plugin"] == "sage.agent.continuation.llm-judge"
         component = next(value for value in await service.component_inventory("user_1") if value["component"]["component_id"] == "agent.continuation-policy")
         assert component["active"]["config"]["prompt_contract"] == "v1"
@@ -2500,11 +2515,11 @@ async def test_openai_reasoning_judge_omits_reasoning_controls(tmp_path: Path):
         messages=(ModelMessage(role="user", content=(TextBlock(text="judge"),)),),
         response_format="json_object",
     )
-    wire_request = judge_provider.diagnostic_request(request)
+    wire_request = getattr(judge_provider, 'diagnostic_request')(request)
 
-    assert judge_provider.config.reasoning_effort is None
-    assert judge_provider.config.reasoning_parameter_fallback is True
-    assert judge_provider.config.extra_body == {}
+    assert getattr(judge_provider, 'config').reasoning_effort is None
+    assert getattr(judge_provider, 'config').reasoning_parameter_fallback is True
+    assert getattr(judge_provider, 'config').extra_body == {}
     assert "extra_body" not in wire_request
     await service.close()
 
@@ -2569,7 +2584,7 @@ async def test_create_agent_uses_independent_runnable_defaults(
         "sage",
         created["id"],
     }
-    await service.session_store.close()
+    await cast(ApplicationResource, service.session_store).close()
 
 
 @pytest.mark.asyncio
@@ -2639,7 +2654,7 @@ async def test_agent_settings_patch_persists_frozen_record_and_assignments(
     assert persisted.config["availableTools"] == ["file_read", "todo_write"]
     assert persisted.config["availableSkills"] == ["review"]
     assert persisted.config["systemContext"] == updated["runtime_variables"]
-    await service.session_store.close()
+    await cast(ApplicationResource, service.session_store).close()
 
     reopened = DesktopV2Service(data_root)
     restored = await reopened.get_agent_settings("sage", "user_1")
@@ -2648,7 +2663,7 @@ async def test_agent_settings_patch_persists_frozen_record_and_assignments(
     assert restored["available_skills"] == ["review"]
     assert restored["approved_shell_commands"] == updated["approved_shell_commands"]
     assert restored["runtime_variables"] == updated["runtime_variables"]
-    await reopened.session_store.close()
+    await cast(ApplicationResource, reopened.session_store).close()
 
 
 @pytest.mark.asyncio
@@ -2699,7 +2714,7 @@ async def test_agent_settings_accepts_legacy_system_context_alias(tmp_path: Path
 
     assert updated["runtime_variables"] == {"legacy": True}
     assert updated["system_context"] == updated["runtime_variables"]
-    await service.session_store.close()
+    await cast(ApplicationResource, service.session_store).close()
 
 
 @pytest.mark.asyncio
@@ -2737,7 +2752,7 @@ async def test_shell_approval_can_be_remembered_in_agent_settings(
     assert remembered == "git reset --hard HEAD~1"
     assert settings["approved_shell_commands"] == [remembered]
     assert settings["shell_policy"]["user_approved_commands"] == [remembered]
-    await service.session_store.close()
+    await cast(ApplicationResource, service.session_store).close()
 
 
 @pytest.mark.asyncio
@@ -2768,12 +2783,12 @@ async def test_rejected_interaction_never_persists_remembered_shell_approval(
             "arguments": {"command": "git status"},
         },
     )
-    service.application = SimpleNamespace(agent_for_run=AsyncMock())
-    service.session_access = SimpleNamespace(
+    setattr(service, 'application', SimpleNamespace(agent_for_run=AsyncMock()))
+    setattr(service, 'session_access', SimpleNamespace(
         get_run=AsyncMock(return_value=run),
         get_suspension=AsyncMock(return_value=suspension),
         get_interaction=AsyncMock(return_value=interaction),
-    )
+    ))
     monkeypatch.setattr(service, "_run_context", AsyncMock(return_value=context))
     monkeypatch.setattr(
         service.runtime,
@@ -2794,9 +2809,9 @@ async def test_rejected_interaction_never_persists_remembered_shell_approval(
         "user_1",
     )
 
-    service.application.agent_for_run.assert_awaited_once_with("run_1", context)
+    getattr(cast('SAgentApplication', service.application).agent_for_run, 'assert_awaited_once_with')("run_1", context)
     remember.assert_not_awaited()
-    await service.session_store.close()
+    await cast(ApplicationResource, service.session_store).close()
 
 
 @pytest.mark.asyncio
@@ -2822,7 +2837,7 @@ async def test_agent_assignment_patch_rejects_unknown_and_blank_names(tmp_path: 
             AgentSettingsPatch(available_skills=["made-up-skill"]),
             "user_1",
         )
-    await service.session_store.close()
+    await cast(ApplicationResource, service.session_store).close()
 
 
 @pytest.mark.asyncio
@@ -2846,7 +2861,7 @@ async def test_unavailable_mcp_does_not_block_native_tool_configuration(tmp_path
         "user_1",
     )
     assert updated["available_tools"] == ["file_read", "todo_write"]
-    await service.session_store.close()
+    await cast(ApplicationResource, service.session_store).close()
 
 
 @pytest.mark.asyncio
@@ -2894,7 +2909,7 @@ async def test_skills_are_discovered_and_imported_by_native_filesystem_provider(
     ] == []
     with pytest.raises(ValueError, match="Imported Skill not found"):
         await service.delete_skill("skill-creator", "user_1")
-    await service.session_store.close()
+    await cast(ApplicationResource, service.session_store).close()
 
 
 @pytest.mark.asyncio
@@ -2909,7 +2924,7 @@ async def test_workspace_paths_remain_contained(tmp_path: Path):
     assert media_type == "text/plain; charset=utf-8"
     with pytest.raises(PermissionError):
         await service.read_file(None, "sage", "../outside.txt")
-    await service.session_store.close()
+    await cast(ApplicationResource, service.session_store).close()
 
 
 @pytest.mark.asyncio
@@ -2942,7 +2957,7 @@ async def test_standalone_workspace_tree_includes_claw_seed_and_user_content(
         value for value in by_name["projects"]["children"] if value["name"] == "demo"
     )
     assert [value["path"] for value in demo["children"]] == ["projects/demo/index.html"]
-    await service.session_store.close()
+    await cast(ApplicationResource, service.session_store).close()
 
 
 @pytest.mark.asyncio
@@ -2959,7 +2974,7 @@ async def test_agent_workspace_uses_the_selected_initializer_plugin(tmp_path: Pa
     root = await service.workspace_root(None, "sage")
 
     assert list(root.iterdir()) == []
-    await service.session_store.close()
+    await cast(ApplicationResource, service.session_store).close()
 
 
 @pytest.mark.asyncio
@@ -2973,12 +2988,12 @@ async def test_loop_composition_uses_native_model_skill_tool_and_sandbox_plugins
             "execution.sandbox": {"network": {"mode": network_mode}}}}))
         run, command, _ = await execute(service)
         assert run.state.value == "completed"
-        configuration = await service.application.execution_configuration(run.run_id, service._context("user_1"))
-        assert configuration.policy["network"]["mode"] == network_mode
+        configuration = await cast('SAgentApplication', service.application).execution_configuration(run.run_id, service._context("user_1"))
+        assert cast('Any', configuration).policy["network"]["mode"] == network_mode
         assert environments[0].sandbox.ref.provider_id == "sage.sandbox.local-workspace"
         names = {tool.name for tool in model.requests[0].tools}
         assert {"file_read", "execute_shell_command", "todo_write", "load_skill"} <= names
-        plan = await service.application.run_configuration(run.run_id, service._context("user_1"))
+        plan = await cast('SAgentApplication', service.application).run_configuration(run.run_id, service._context("user_1"))
         assert any(value["plugin_id"] == "sage.context.summarizer.model" for value in plan["plugins"])
     finally:
         await service.close()
@@ -2993,7 +3008,7 @@ async def test_desktop_search_memory_assignment_controls_automatic_recall(tmp_pa
         await service.patch_agent_settings("sage", AgentSettingsPatch(available_tools=["file_read"]), "user_1")
         run, command, _ = await execute(service)
         assert run.state.value == "completed"
-        plan = await service.application.run_configuration(run.run_id, service._context("user_1"))
+        plan = await cast('SAgentApplication', service.application).run_configuration(run.run_id, service._context("user_1"))
         assert plan["agent"]["memory"]["recall"] is False
         assert plan["agent"]["memory"]["auto_write"] is False
         assert "search_memory" not in {tool.name for tool in model.requests[0].tools}
@@ -3087,9 +3102,9 @@ async def test_plan_mode_is_a_read_only_run_contract(tmp_path):
         assert {"file_read", "todo_write", "goal_submit"} <= names
         assert names.isdisjoint({"file_write", "execute_shell_command"})
         assert command.invocation_mode == "plan"
-        snapshot = await service.application.execution_configuration(run.run_id, service._context("user_1"))
-        assert snapshot.policy["process"]["read_only"]
-        assert set(snapshot.policy["filesystem"]["allowed_operations"]) <= {"read", "list"}
+        snapshot = await cast('SAgentApplication', service.application).execution_configuration(run.run_id, service._context("user_1"))
+        assert cast('Any', snapshot).policy["process"]["read_only"]
+        assert set(cast('Any', snapshot).policy["filesystem"]["allowed_operations"]) <= {"read", "list"}
     finally:
         await service.close()
 
@@ -3206,10 +3221,10 @@ async def test_goal_mode_requires_goal_complete_after_rechecking(tmp_path):
         run, _, _ = await execute(service, request=DesktopRunRequest(agent_id="sage", messages=[RunMessage(role="user", text="Do it")], invocation_mode="goal", approval_mode="auto_approve"))
         assert run.state.value == "completed"
         events = await service.session_store.read_events(run.run_id)
-        decisions = [event.data.reason_code for event in events if event.type == "continuation.decided"]
+        decisions = [cast(ContinuationEventData, event.data).reason_code for event in events if event.type == "continuation.decided"]
         assert decisions == ["tool.pending", "goal.incomplete", "goal.explanation_required", "goal.complete"]
         assert decisions[-2:] == ["goal.explanation_required", "goal.complete"]
-        assert sum(event.type == "tool.call.succeeded" and event.data.tool_name == "goal_complete" for event in events) == 1
+        assert sum(event.type == "tool.call.succeeded" and cast(ToolEventData, event.data).tool_name == "goal_complete" for event in events) == 1
         assert len(model.requests) == 4
     finally:
         await service.close()
@@ -3250,7 +3265,7 @@ async def test_goal_survives_repeated_questionnaires_and_service_restart(tmp_pat
                 original_goal_id = state.created_tool_call_id
             assert state.created_tool_call_id == original_goal_id
             assert state.completed == (round_number == 2)
-            reasons = [event.data.reason_code for event in await service.session_store.read_events(run.run_id)
+            reasons = [cast(ContinuationEventData, event.data).reason_code for event in await service.session_store.read_events(run.run_id)
                 if event.type == "continuation.decided"]
             if round_number < 2:
                 assert reasons[-1] == "tool.questionnaire_ready"
@@ -3279,7 +3294,7 @@ async def test_confirmed_plan_becomes_the_goal_system_context(tmp_path, rebuild_
             invocation_mode="plan"))
         assert plan.state.value == "suspended"
         suspension = await service.session_store.get_suspension(plan.suspension_id)
-        interaction = await service.session_store.get_interaction(suspension.interaction_id)
+        interaction = await service.session_store.get_interaction(cast(str, suspension.interaction_id))
         assert interaction.payload["tool_name"] == "goal_submit"
         assert interaction.payload["arguments"]["content"] == content
         if rebuild_before_approval:
@@ -3291,7 +3306,7 @@ async def test_confirmed_plan_becomes_the_goal_system_context(tmp_path, rebuild_
         goal, _, _ = await execute(service, request=DesktopRunRequest(agent_id="sage", session_id=plan.session_id,
             messages=[RunMessage(role="user", text="Execute it")], invocation_mode="goal", approval_mode="auto_approve"))
         assert goal.state.value == "completed"
-        names = [event.data.tool_name for event in await service.session_store.read_events(goal.run_id) if event.type == "tool.call.succeeded"]
+        names = [cast(ToolEventData, event.data).tool_name for event in await service.session_store.read_events(goal.run_id) if event.type == "tool.call.succeeded"]
         assert "goal_complete" in names
         assert "goal_submit" not in names
     finally:
@@ -3340,7 +3355,7 @@ async def test_isolated_sandbox_rejects_host_workspace_path_mode(tmp_path: Path)
                 }
             )
         )
-    await service.session_store.close()
+    await cast(ApplicationResource, service.session_store).close()
 
 
 @pytest.mark.asyncio
@@ -3360,7 +3375,7 @@ async def test_sandbox_rejects_provider_incompatible_workspace_mapping(
                 }
             )
         )
-    await service.session_store.close()
+    await cast(ApplicationResource, service.session_store).close()
 
 
 @pytest.mark.asyncio
@@ -3402,7 +3417,7 @@ async def test_ephemeral_sandbox_keeps_an_isolated_configured_workspace(
             sandbox.filesystem.normalize_path(str(workspace / "AGENT.md"))
         assert command.config.metadata["working_directory"] == "/sandbox"
         assert command.config.metadata["workspace_files"] == "Working directory: /sandbox\n(Empty isolated sandbox)"
-        diagnostics = await service.application.execution_diagnostics(run.run_id, service._context("user_1"))
+        diagnostics = await cast('SAgentApplication', service.application).execution_diagnostics(run.run_id, service._context("user_1"))
         assert diagnostics["recovery"] == "same_process"
         assert diagnostics["interpreter"] is None
     finally:
@@ -3442,7 +3457,7 @@ async def test_desktop_turn_status_drives_the_real_continuation_policy(tmp_path)
         assert run.state.value == "completed"
         events = await service.session_store.read_events(run.run_id)
         decision = next(event for event in events if event.type == "continuation.decided")
-        assert decision.data.reason_code == "status.complete"
+        assert cast(ContinuationEventData, decision.data).reason_code == "status.complete"
         assert any(event.type == "tool.call.succeeded" for event in events)
     finally:
         await service.close()
@@ -3552,7 +3567,7 @@ async def test_desktop_team_member_executes_as_leaf(tmp_path):
         requests = [request for request in model.requests if request.run_id == child.run_id]
         assert requests
         assert all({"sys_spawn_agent", "sys_delegate_task", "sys_team_delegate_task"}.isdisjoint(tool.name for tool in request.tools) for request in requests)
-        accepted = await service.application.run_configuration(child.run_id, service._context("user_1"))
+        accepted = await cast('SAgentApplication', service.application).run_configuration(child.run_id, service._context("user_1"))
         assert accepted["parent_run_id"] == run.run_id
     finally:
         await service.close()
@@ -3691,7 +3706,7 @@ async def test_desktop_command_freezes_language_identity_time_and_workspace_cont
         is not None
     )
     assert metadata["workspace_files"].startswith(f"Working directory: {workspace.resolve().as_posix()}\n")
-    await service.session_store.close()
+    await cast(ApplicationResource, service.session_store).close()
 
 
 @pytest.mark.asyncio
@@ -3754,13 +3769,13 @@ async def test_desktop_command_inlines_workspace_images_for_multimodal_models(
     attachment = command.input[0]
     assert isinstance(attachment.content[0], TextBlock)
     assert attachment.content[0].text == "What is in"
-    assert f"![image.png](<{image_path.as_posix()}>)" in attachment.content[1].text
+    assert f"![image.png](<{image_path.as_posix()}>)" in cast(TextBlock, attachment.content[1]).text
     image = next(block for block in attachment.content if isinstance(block, ImageBlock))
     assert image.uri == "data:image/png;base64,iVBORw0KGgo="
     assert image.mime_type == "image/png"
     assert image.alt == image_path.as_posix()
-    assert attachment.content[-1].text == "this image?"
-    await service.session_store.close()
+    assert cast(TextBlock, attachment.content[-1]).text == "this image?"
+    await cast(ApplicationResource, service.session_store).close()
 
 
 @pytest.mark.asyncio
@@ -3802,11 +3817,11 @@ async def test_desktop_command_preserves_interleaved_structured_references(
 
     blocks = command.input[0].content
     assert [block.kind for block in blocks] == ["text", "text", "text"]
-    assert blocks[0].text == "请检查"
-    assert blocks[1].text == "[requirements copy.md](<docs/requirements copy.md>)"
-    assert blocks[2].text == "前后内容"
-    assert all("@" not in block.text for block in blocks)
-    await service.session_store.close()
+    assert cast(TextBlock, blocks[0]).text == "请检查"
+    assert cast(TextBlock, blocks[1]).text == "[requirements copy.md](<docs/requirements copy.md>)"
+    assert cast(TextBlock, blocks[2]).text == "前后内容"
+    assert all("@" not in cast(TextBlock, block).text for block in blocks)
+    await cast(ApplicationResource, service.session_store).close()
 
 
 @pytest.mark.asyncio
@@ -3850,7 +3865,7 @@ async def test_desktop_command_compresses_large_images_without_mutating_upload(
     assert image.mime_type == "image/jpeg"
     assert image.uri.startswith("data:image/jpeg;base64,")
     assert image_path.read_bytes() == original
-    await service.session_store.close()
+    await cast(ApplicationResource, service.session_store).close()
 
 
 @pytest.mark.asyncio
@@ -3886,9 +3901,9 @@ async def test_desktop_command_keeps_images_as_references_for_text_only_models(
     assert all(not isinstance(block, ImageBlock) for block in command.input[-1].content)
     assert (
         "![image.png](</workspace/uploads/image.png>)"
-        in command.input[-1].content[0].text
+        in cast(TextBlock, command.input[-1].content[0]).text
     )
-    await service.session_store.close()
+    await cast(ApplicationResource, service.session_store).close()
 
 
 @pytest.mark.asyncio
@@ -3918,9 +3933,9 @@ async def test_desktop_command_keeps_non_image_files_as_markdown_references(
 
     assert (
         "[requirements.md](</workspace/docs/requirements.md>)"
-        in command.input[-1].content[0].text
+        in cast(TextBlock, command.input[-1].content[0]).text
     )
-    await service.session_store.close()
+    await cast(ApplicationResource, service.session_store).close()
 
 
 @pytest.mark.asyncio
@@ -4078,7 +4093,7 @@ async def test_desktop_session_tree_exposes_child_run_routing_metadata(tmp_path:
     assert child_event["session_id"] == child.session_id
     assert child_event["parent_session_id"] == parent.session_id
     assert child_event["run_id"] == child.run_id
-    await stream.aclose()
+    await getattr(stream, 'aclose')()
     await service.close()
 
 
@@ -4148,10 +4163,10 @@ async def test_desktop_index_failure_does_not_rollback_session_commit(tmp_path: 
     async def fail(_value):
         raise OSError("index unavailable")
 
-    service.session_index.upsert = fail
+    setattr(service.session_index, 'upsert', fail)
     await service._index_session(handle.session_id)
     assert (await service.session_store.get_session(handle.session_id)).revision == 1
-    await service.session_store.close()
+    await cast(ApplicationResource, service.session_store).close()
 
 
 def test_workspace_prompt_listing_stays_within_two_levels(tmp_path: Path):
@@ -4196,7 +4211,7 @@ async def test_skill_loading_component_schema_and_validation(tmp_path):
             component_configs=settings.component_configs)
         assert manifest.runtime.selections("skill.loading")[0].config == {"max_active_characters": 48000}
     finally:
-        await service.session_store.close()
+        await cast(ApplicationResource, service.session_store).close()
 
 
 @pytest.mark.asyncio
@@ -4221,7 +4236,7 @@ async def test_summary_plugin_defaults_match_runtime_and_hide_host_binding(tmp_p
             config={"max_source_tokens": 16000, "timeout_seconds": 30},
         ), "user_1")
     finally:
-        await service.session_store.close()
+        await cast(ApplicationResource, service.session_store).close()
 
 
 @pytest.mark.asyncio
@@ -4249,7 +4264,7 @@ async def test_all_user_plugin_fields_have_defaults_or_are_host_owned(tmp_path):
                     assert "model_timeout_seconds" not in schema["properties"]
         assert checked > 0
     finally:
-        await service.session_store.close()
+        await cast(ApplicationResource, service.session_store).close()
 
 
 @pytest.fixture
@@ -4366,13 +4381,13 @@ async def test_configured_disk_quota_reaches_main_and_child_sandboxes(tmp_path):
         assert run.state.value == "completed"
         assert len(environments) == 2
         for environment in environments:
-            snapshot = await service.application.execution_configuration(environment.run_id, service._context("user_1"))
-            assert snapshot.policy["resources"]["disk_mb"] == 32768
-            assert snapshot.policy["filesystem"]["max_total_bytes"] == 32768 * 1024**2
+            snapshot = await cast('SAgentApplication', service.application).execution_configuration(environment.run_id, service._context("user_1"))
+            assert cast('Any', snapshot).policy["resources"]["disk_mb"] == 32768
+            assert cast('Any', snapshot).policy["filesystem"]["max_total_bytes"] == 32768 * 1024**2
         later, _, _ = await execute(service)
         assert later.state.value == "completed"
-        snapshot = await service.application.execution_configuration(later.run_id, service._context("user_1"))
-        assert snapshot.policy["resources"]["disk_mb"] == 1
+        snapshot = await cast('SAgentApplication', service.application).execution_configuration(later.run_id, service._context("user_1"))
+        assert cast('Any', snapshot).policy["resources"]["disk_mb"] == 1
     finally:
         await service.close()
 
@@ -4419,7 +4434,7 @@ async def test_desktop_start_automatically_recovers_delayed_run_after_restart(tm
                 if event.get("type") == "step.retry_scheduled":
                     return
         await asyncio.wait_for(until_waiting(), 5)
-        await stream.aclose()
+        await getattr(stream, 'aclose')()
         await service.close()
 
         restored_model = ScriptedModelProvider((ScriptedModelStep(events=(ModelStreamEvent(
@@ -4435,17 +4450,17 @@ async def test_desktop_start_automatically_recovers_delayed_run_after_restart(tm
         try:
             await restored.start()
             async def completed():
-                while (run := await restored.runtime.get_run(run_id)).state != RunState.COMPLETED:
+                while (run := await restored.runtime.get_run(cast(str, run_id))).state != RunState.COMPLETED:
                     assert run.state != RunState.FAILED
                     await asyncio.sleep(0.01)
                 return run
             await asyncio.wait_for(completed(), 5)
             assert len(restored_model.requests) == 1
-            assert not [e for e in await restored.session_store.read_events(run_id) if e.type == "run.failed"]
+            assert not [e for e in await restored.session_store.read_events(cast(str, run_id)) if e.type == "run.failed"]
         finally:
             await restored.close()
     finally:
-        await stream.aclose()
+        await getattr(stream, 'aclose')()
         await service.close()
 
 

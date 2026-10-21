@@ -1,5 +1,13 @@
 from __future__ import annotations
 
+from typing import TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    from typing import Any
+
+from sagents.v2.contracts.events import FlowEventData
+from sagents.v2.contracts.events import RunEventData
+
 import asyncio
 from dataclasses import dataclass, field
 
@@ -94,8 +102,8 @@ def sequential_flow():
             FlowNode(id="verify", type="agent", agent="verifier"),
         ),
         edges=(
-            FlowEdge(**{"from": "inspect", "to": "verify"}),
-            FlowEdge(**{"from": "verify", "to": "end"}),
+            FlowEdge(**cast('dict[str, Any]', {"from": "inspect", "to": "verify"})),
+            FlowEdge(**cast('dict[str, Any]', {"from": "verify", "to": "end"})),
         ),
     )
 
@@ -118,12 +126,12 @@ async def test_sequential_agent_flow_uses_same_native_run_and_event_log():
     assert types.count("flow.node.completed") == 2
     assert types[-2:] == ["flow.completed", "run.completed"]
     started = {
-        event.data.node_id: event.node_execution_id
+        cast(FlowEventData, event.data).node_id: event.node_execution_id
         for event in events
         if event.type == "flow.node.started"
     }
     completed = {
-        event.data.node_id: event.node_execution_id
+        cast(FlowEventData, event.data).node_id: event.node_execution_id
         for event in events
         if event.type == "flow.node.completed"
     }
@@ -147,10 +155,10 @@ async def test_conditional_edge_selection_matrix(changed, expected_runner):
             FlowNode(id="finish", type="agent", agent="finisher"),
         ),
         edges=(
-            FlowEdge(**{"from": "detect", "to": "change", "when": "changed == True"}),
-            FlowEdge(**{"from": "detect", "to": "finish", "when": "changed == False"}),
-            FlowEdge(**{"from": "change", "to": "end"}),
-            FlowEdge(**{"from": "finish", "to": "end"}),
+            FlowEdge(**cast('dict[str, Any]', {"from": "detect", "to": "change", "when": "changed == True"})),
+            FlowEdge(**cast('dict[str, Any]', {"from": "detect", "to": "finish", "when": "changed == False"})),
+            FlowEdge(**cast('dict[str, Any]', {"from": "change", "to": "end"})),
+            FlowEdge(**cast('dict[str, Any]', {"from": "finish", "to": "end"})),
         ),
     )
     runtime, handle, engine = await setup(
@@ -198,8 +206,8 @@ async def test_parallel_branches_actually_overlap_and_commit_deterministically()
             FlowNode(id="join", type="join"),
         ),
         edges=(
-            FlowEdge(**{"from": "parallel", "to": "join"}),
-            FlowEdge(**{"from": "join", "to": "end"}),
+            FlowEdge(**cast('dict[str, Any]', {"from": "parallel", "to": "join"})),
+            FlowEdge(**cast('dict[str, Any]', {"from": "join", "to": "end"})),
         ),
     )
     runtime, handle, engine = await setup(
@@ -208,7 +216,7 @@ async def test_parallel_branches_actually_overlap_and_commit_deterministically()
     result = await engine.execute(handle.run_id, "main", CONTEXT)
     events = await runtime.session_store.read_events(handle.run_id)
     completed_nodes = [
-        event.data.node_id for event in events if event.type == "flow.node.completed"
+        cast(FlowEventData, event.data).node_id for event in events if event.type == "flow.node.completed"
     ]
     assert result.state == RunState.COMPLETED
     assert maximum == 2
@@ -234,7 +242,7 @@ async def test_parallel_provider_exception_still_settles_every_started_branch():
             FlowNode(id="good", type="agent", agent="good"),
             FlowNode(id="bad", type="agent", agent="bad"),
         ),
-        edges=(FlowEdge(**{"from": "parallel", "to": "end"}),),
+        edges=(FlowEdge(**cast('dict[str, Any]', {"from": "parallel", "to": "end"})),),
     )
     runtime, handle, engine = await setup(
         flow,
@@ -244,10 +252,10 @@ async def test_parallel_provider_exception_still_settles_every_started_branch():
     result = await engine.execute(handle.run_id, "main", CONTEXT)
     events = await runtime.session_store.read_events(handle.run_id)
     outcomes = {
-        event.data.node_id: event.type
+        cast(FlowEventData, event.data).node_id: event.type
         for event in events
         if event.type in {"flow.node.completed", "flow.node.failed"}
-        and event.data.node_id in {"good", "bad"}
+        and cast(FlowEventData, event.data).node_id in {"good", "bad"}
     }
 
     assert result.state == RunState.FAILED
@@ -282,10 +290,10 @@ async def test_interaction_node_suspends_and_resumes_conditional_flow(
             FlowNode(id="denied", type="agent", agent="denied_agent"),
         ),
         edges=(
-            FlowEdge(**{"from": "approval", "to": "approved", "when": "approved"}),
-            FlowEdge(**{"from": "approval", "to": "denied", "when": "denied"}),
-            FlowEdge(**{"from": "approved", "to": "end"}),
-            FlowEdge(**{"from": "denied", "to": "end"}),
+            FlowEdge(**cast('dict[str, Any]', {"from": "approval", "to": "approved", "when": "approved"})),
+            FlowEdge(**cast('dict[str, Any]', {"from": "approval", "to": "denied", "when": "denied"})),
+            FlowEdge(**cast('dict[str, Any]', {"from": "approved", "to": "end"})),
+            FlowEdge(**cast('dict[str, Any]', {"from": "denied", "to": "end"})),
         ),
     )
     runtime, handle, engine = await setup(
@@ -295,8 +303,8 @@ async def test_interaction_node_suspends_and_resumes_conditional_flow(
     assert suspended.state == RunState.SUSPENDED
     checkpoint = await runtime.session_store.get_latest_checkpoint(handle.run_id)
     assert checkpoint.checkpoint_codec_version == "flow/2"
-    suspension = await runtime.session_store.get_suspension(suspended.suspension_id)
-    interaction = await runtime.session_store.get_interaction(suspension.interaction_id)
+    suspension = await runtime.session_store.get_suspension(cast(str, suspended.suspension_id))
+    interaction = await runtime.session_store.get_interaction(cast(str, suspension.interaction_id))
     await runtime.reply_interaction(
         ReplyInteraction(
             run_id=handle.run_id,
@@ -330,7 +338,7 @@ async def test_interaction_node_suspends_and_resumes_conditional_flow(
             "flow.node.resumed",
             "flow.node.completed",
         }
-        and event.data.node_id == "approval"
+        and cast(FlowEventData, event.data).node_id == "approval"
     ]
     assert [event.type for event in interaction_lifecycle] == [
         "flow.node.started",
@@ -352,7 +360,7 @@ async def test_node_failure_becomes_flow_and_run_failure():
         version="1",
         start="bad",
         nodes=(FlowNode(id="bad", type="agent", agent="bad"),),
-        edges=(FlowEdge(**{"from": "bad", "to": "end"}),),
+        edges=(FlowEdge(**cast('dict[str, Any]', {"from": "bad", "to": "end"})),),
     )
     runtime, handle, engine = await setup(flow, {"bad": FakeNode({}, error=error)})
     result = await engine.execute(handle.run_id, "main", CONTEXT)
@@ -362,8 +370,8 @@ async def test_node_failure_becomes_flow_and_run_failure():
         "flow.node.failed",
         "run.failed",
     ]
-    assert events[-1].data.error.code == "node.failed"
-    recovery = events[-1].data.error.metadata["recovery_questionnaire"]
+    assert cast(RuntimeErrorInfo, cast(RunEventData, events[-1].data).error).code == "node.failed"
+    recovery = cast(RuntimeErrorInfo, cast(RunEventData, events[-1].data).error).metadata["recovery_questionnaire"]
     assert recovery["resumable"] is False
     assert recovery["questions"][0]["options"] == [
         {"label": "Stop this run", "value": "cancel"}
@@ -395,14 +403,14 @@ async def test_resumable_node_failure_suspends_with_questionnaire_and_retries():
         version="1",
         start="work",
         nodes=(FlowNode(id="work", type="agent", agent="worker"),),
-        edges=(FlowEdge(**{"from": "work", "to": "end"}),),
+        edges=(FlowEdge(**cast('dict[str, Any]', {"from": "work", "to": "end"})),),
     )
     runtime, handle, engine = await setup(flow, {"worker": node})
 
     suspended = await engine.execute(handle.run_id, "main", CONTEXT)
-    suspension = await runtime.session_store.get_suspension(suspended.suspension_id)
+    suspension = await runtime.session_store.get_suspension(cast(str, suspended.suspension_id))
     interaction = await runtime.session_store.get_interaction(
-        suspension.interaction_id
+        cast(str, suspension.interaction_id)
     )
 
     assert suspended.state == RunState.SUSPENDED
@@ -440,8 +448,8 @@ async def test_equal_priority_matching_edges_fail_instead_of_nondeterminism():
             FlowNode(id="b", type="agent", agent="b"),
         ),
         edges=(
-            FlowEdge(**{"from": "first", "to": "a", "when": "always"}),
-            FlowEdge(**{"from": "first", "to": "b", "when": "always"}),
+            FlowEdge(**cast('dict[str, Any]', {"from": "first", "to": "a", "when": "always"})),
+            FlowEdge(**cast('dict[str, Any]', {"from": "first", "to": "b", "when": "always"})),
         ),
     )
     runtime, handle, engine = await setup(
@@ -451,7 +459,7 @@ async def test_equal_priority_matching_edges_fail_instead_of_nondeterminism():
     assert result.state == RunState.FAILED
     events = await runtime.session_store.read_events(handle.run_id)
     assert events[-1].type == "run.failed"
-    assert events[-1].data.error.code == "flow.edge_ambiguous"
+    assert cast(RuntimeErrorInfo, cast(RunEventData, events[-1].data).error).code == "flow.edge_ambiguous"
 
 
 @pytest.mark.asyncio
@@ -467,15 +475,15 @@ async def test_subflow_runs_as_a_nested_frame_and_returns_results_to_parent():
                 FlowNode(id="finish", type="agent", agent="finisher"),
             ),
             edges=(
-                FlowEdge(**{"from": "delegate", "to": "finish"}),
-                FlowEdge(**{"from": "finish", "to": "end"}),
+                FlowEdge(**cast('dict[str, Any]', {"from": "delegate", "to": "finish"})),
+                FlowEdge(**cast('dict[str, Any]', {"from": "finish", "to": "end"})),
             ),
         ),
         "child": FlowDefinition(
             version="7",
             start="work",
             nodes=(FlowNode(id="work", type="agent", agent="worker"),),
-            edges=(FlowEdge(**{"from": "work", "to": "end"}),),
+            edges=(FlowEdge(**cast('dict[str, Any]', {"from": "work", "to": "end"})),),
         ),
     }
     runtime, handle, engine = await setup_flows(
@@ -485,12 +493,12 @@ async def test_subflow_runs_as_a_nested_frame_and_returns_results_to_parent():
     result = await engine.execute(handle.run_id, "main", CONTEXT)
     events = await runtime.session_store.read_events(handle.run_id)
     started = {
-        event.data.node_id: event.node_execution_id
+        cast(FlowEventData, event.data).node_id: event.node_execution_id
         for event in events
         if event.type == "flow.node.started"
     }
     completed = {
-        event.data.node_id: event.node_execution_id
+        cast(FlowEventData, event.data).node_id: event.node_execution_id
         for event in events
         if event.type == "flow.node.completed"
     }
@@ -510,7 +518,7 @@ async def test_subflow_runs_as_a_nested_frame_and_returns_results_to_parent():
     child_execution_id = flow_events[1].flow_execution_id
     assert child_execution_id != root_execution_id
     assert [
-        (event.type, event.data.flow_id, event.flow_execution_id)
+        (event.type, cast(FlowEventData, event.data).flow_id, event.flow_execution_id)
         for event in flow_events
     ] == [
         ("flow.started", "main", root_execution_id),
@@ -528,7 +536,7 @@ async def test_nested_subflow_interaction_checkpoint_resumes_exact_active_frame(
             version="1",
             start="delegate",
             nodes=(FlowNode(id="delegate", type="subflow", flow="child"),),
-            edges=(FlowEdge(**{"from": "delegate", "to": "end"}),),
+            edges=(FlowEdge(**cast('dict[str, Any]', {"from": "delegate", "to": "end"})),),
         ),
         "child": FlowDefinition(
             version="1",
@@ -544,9 +552,9 @@ async def test_nested_subflow_interaction_checkpoint_resumes_exact_active_frame(
                 FlowNode(id="work", type="agent", agent="child_worker"),
             ),
             edges=(
-                FlowEdge(**{"from": "approval", "to": "work", "when": "approved"}),
-                FlowEdge(**{"from": "approval", "to": "end", "when": "denied"}),
-                FlowEdge(**{"from": "work", "to": "end"}),
+                FlowEdge(**cast('dict[str, Any]', {"from": "approval", "to": "work", "when": "approved"})),
+                FlowEdge(**cast('dict[str, Any]', {"from": "approval", "to": "end", "when": "denied"})),
+                FlowEdge(**cast('dict[str, Any]', {"from": "work", "to": "end"})),
             ),
         ),
     }
@@ -557,8 +565,8 @@ async def test_nested_subflow_interaction_checkpoint_resumes_exact_active_frame(
     assert suspended.state == RunState.SUSPENDED
     assert checkpoint.state["subflow_stack"][0]["flow_id"] == "child"
     assert checkpoint.state["subflow_stack"][0]["current_node_id"] == "approval"
-    suspension = await runtime.session_store.get_suspension(suspended.suspension_id)
-    interaction = await runtime.session_store.get_interaction(suspension.interaction_id)
+    suspension = await runtime.session_store.get_suspension(cast(str, suspended.suspension_id))
+    interaction = await runtime.session_store.get_interaction(cast(str, suspension.interaction_id))
     await runtime.reply_interaction(
         ReplyInteraction(
             run_id=handle.run_id,
@@ -580,7 +588,7 @@ async def test_nested_subflow_interaction_checkpoint_resumes_exact_active_frame(
     assert child_worker.calls[0].prior_results["approval"]["decision"] == "approve"
     events = await runtime.session_store.read_events(handle.run_id)
     assert [
-        event.data.node_id for event in events if event.type == "flow.node.completed"
+        cast(FlowEventData, event.data).node_id for event in events if event.type == "flow.node.completed"
     ] == ["approval", "work", "delegate"]
     child_execution_ids = {
         event.flow_execution_id
@@ -591,7 +599,7 @@ async def test_nested_subflow_interaction_checkpoint_resumes_exact_active_frame(
     assert next(iter(child_execution_ids)) != next(
         event.flow_execution_id
         for event in events
-        if event.type == "flow.started" and event.data.flow_id == "main"
+        if event.type == "flow.started" and cast(FlowEventData, event.data).flow_id == "main"
     )
 
 
@@ -604,13 +612,13 @@ async def test_double_nested_subflow_can_execute_parallel_leaf_nodes():
             version="1",
             start="middle",
             nodes=(FlowNode(id="middle", type="subflow", flow="middle_flow"),),
-            edges=(FlowEdge(**{"from": "middle", "to": "end"}),),
+            edges=(FlowEdge(**cast('dict[str, Any]', {"from": "middle", "to": "end"})),),
         ),
         "middle_flow": FlowDefinition(
             version="1",
             start="leaf",
             nodes=(FlowNode(id="leaf", type="subflow", flow="leaf_flow"),),
-            edges=(FlowEdge(**{"from": "leaf", "to": "end"}),),
+            edges=(FlowEdge(**cast('dict[str, Any]', {"from": "leaf", "to": "end"})),),
         ),
         "leaf_flow": FlowDefinition(
             version="1",
@@ -624,7 +632,7 @@ async def test_double_nested_subflow_can_execute_parallel_leaf_nodes():
                 FlowNode(id="a", type="agent", agent="a"),
                 FlowNode(id="b", type="agent", agent="b"),
             ),
-            edges=(FlowEdge(**{"from": "fanout", "to": "end"}),),
+            edges=(FlowEdge(**cast('dict[str, Any]', {"from": "fanout", "to": "end"})),),
         ),
     }
     runtime, handle, engine = await setup_flows(flows, {"a": a, "b": b})
@@ -635,7 +643,7 @@ async def test_double_nested_subflow_can_execute_parallel_leaf_nodes():
     assert len(a.calls) == len(b.calls) == 1
     events = await runtime.session_store.read_events(handle.run_id)
     assert [
-        event.data.node_id for event in events if event.type == "flow.node.completed"
+        cast(FlowEventData, event.data).node_id for event in events if event.type == "flow.node.completed"
     ] == ["a", "b", "fanout", "leaf", "middle"]
 
 
@@ -645,7 +653,7 @@ async def test_recursive_subflow_depth_budget_fails_deterministically():
         version="1",
         start="again",
         nodes=(FlowNode(id="again", type="subflow", flow="recursive"),),
-        edges=(FlowEdge(**{"from": "again", "to": "end"}),),
+        edges=(FlowEdge(**cast('dict[str, Any]', {"from": "again", "to": "end"})),),
     )
     runtime, handle, engine = await setup_flows(
         {"recursive": recursive}, {}, max_node_visits=2
@@ -656,4 +664,4 @@ async def test_recursive_subflow_depth_budget_fails_deterministically():
 
     assert result.state == RunState.FAILED
     assert events[-1].type == "run.failed"
-    assert events[-1].data.error.code == "flow.subflow_depth_exhausted"
+    assert cast(RuntimeErrorInfo, cast(RunEventData, events[-1].data).error).code == "flow.subflow_depth_exhausted"

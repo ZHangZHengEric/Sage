@@ -1,6 +1,17 @@
 """Real Goal/Plan Builder runs with a public host continuation plugin."""
 
 from __future__ import annotations
+
+from typing import TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    from sagents.v2.model.contracts import ModelEventKind
+
+from sagents.v2.composition.loaded_agents import ApplicationEntrypoint
+
+from sagents.v2.contracts.events import ContinuationEventData
+from sagents.v2.contracts.events import ToolEventData
+from sagents.v2.contracts.events import UsageEventData
 from tests.sagents.v2.sdk_fixture import build_registered_app
 
 import asyncio
@@ -164,7 +175,7 @@ class Model:
             else ()
         )
         yield ModelStreamEvent(
-            kind="completed",
+            kind=cast('ModelEventKind', "completed"),
             response=ModelResponse(
                 response_id=f"response-{stage}",
                 text="I am done"
@@ -312,7 +323,7 @@ async def test_builder_completion_gate_preserves_recovery_budget_guidance_and_us
             assert goal is not None and not goal.completed
             events = await app.runtime.session_store.read_events(result.run_id)
             assert any(
-                e.type == "tool.call.succeeded" and e.data.tool_name == "goal_submit"
+                e.type == "tool.call.succeeded" and cast(ToolEventData, e.data).tool_name == "goal_submit"
                 for e in events
             )
         else:
@@ -337,18 +348,18 @@ async def test_builder_goal_rejects_completion_until_goal_complete_and_summary(
             e
             for e in events
             if e.type == "continuation.decided"
-            and e.data.reason_code == "goal.incomplete"
+            and cast(ContinuationEventData, e.data).reason_code == "goal.incomplete"
         ]
         assert len(blocked) == 2
         assert all(
-            e.data.action == "continue_step"
-            and e.data.details["host_completion_candidate"]
+            cast(ContinuationEventData, e.data).action == "continue_step"
+            and cast(ContinuationEventData, e.data).details["host_completion_candidate"]
             for e in blocked
         )
         usage = [
             e
             for e in events
-            if e.type == "usage.recorded" and e.data.usage == POLICY_USAGE
+            if e.type == "usage.recorded" and cast(UsageEventData, e.data).usage == POLICY_USAGE
         ]
         assert len(usage) == 2
         goal = await GoalStateService(app.runtime.session_store).get(result.run_id)
@@ -385,8 +396,8 @@ async def resume_recovery(root, *, mode="goal"):
         assert loaded.composition_hash == paused["hash"]
         state = await app.runtime.get_run(run_id)
         store = app.runtime.session_store
-        suspension = await store.get_suspension(state.suspension_id)
-        interaction = await store.get_interaction(suspension.interaction_id)
+        suspension = await store.get_suspension(cast(str, state.suspension_id))
+        interaction = await store.get_interaction(cast(str, suspension.interaction_id))
         await app.runtime.reply_interaction(
             ReplyInteraction(
                 run_id=run_id,
@@ -401,7 +412,7 @@ async def resume_recovery(root, *, mode="goal"):
             CONTEXT,
         )
         async with asyncio.timeout(15):
-            await app.entrypoint().continue_run(run_id, CONTEXT, agent=loaded)
+            await cast(ApplicationEntrypoint, app.entrypoint()).continue_run(run_id, CONTEXT, agent=loaded)
             while (await app.runtime.get_run(run_id)).state.value in {
                 "queued",
                 "running",
@@ -452,17 +463,17 @@ async def test_builder_plan_completion_requires_successful_user_approved_submiss
             e
             for e in events
             if e.type == "continuation.decided"
-            and e.data.reason_code == "plan.required"
+            and cast(ContinuationEventData, e.data).reason_code == "plan.required"
         ]
         assert len(blocked) == 1
-        assert blocked[0].data.action == "continue_step"
-        assert blocked[0].data.details == {"host_completion_candidate": True}
+        assert cast(ContinuationEventData, blocked[0].data).action == "continue_step"
+        assert cast(ContinuationEventData, blocked[0].data).details == {"host_completion_candidate": True}
         assert any(
-            e.type == "usage.recorded" and e.data.usage == POLICY_USAGE for e in events
+            e.type == "usage.recorded" and cast(UsageEventData, e.data).usage == POLICY_USAGE for e in events
         )
         state = await app.runtime.get_run(run_id)
-        suspension = await store.get_suspension(state.suspension_id)
-        interaction = await store.get_interaction(suspension.interaction_id)
+        suspension = await store.get_suspension(cast(str, state.suspension_id))
+        interaction = await store.get_interaction(cast(str, suspension.interaction_id))
         assert interaction.payload["tool_name"] == "goal_submit"
         await app.runtime.reply_interaction(
             ReplyInteraction(
@@ -478,7 +489,7 @@ async def test_builder_plan_completion_requires_successful_user_approved_submiss
             CONTEXT,
         )
         async with asyncio.timeout(15):
-            await app.entrypoint().continue_run(run_id, CONTEXT, agent=loaded)
+            await cast(ApplicationEntrypoint, app.entrypoint()).continue_run(run_id, CONTEXT, agent=loaded)
             while (await app.runtime.get_run(run_id)).state.value in {
                 "queued",
                 "running",
@@ -491,11 +502,11 @@ async def test_builder_plan_completion_requires_successful_user_approved_submiss
         assert goal is not None and goal.source == "plan"
         events = await store.read_events(run_id)
         assert any(
-            e.type == "tool.call.succeeded" and e.data.tool_name == "goal_submit"
+            e.type == "tool.call.succeeded" and cast(ToolEventData, e.data).tool_name == "goal_submit"
             for e in events
         )
         assert [
-            e.data.reason_code for e in events if e.type == "continuation.decided"
+            cast(ContinuationEventData, e.data).reason_code for e in events if e.type == "continuation.decided"
         ] == [
             "plan.required",
             "plan.explanation_required",

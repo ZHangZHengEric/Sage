@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import cast
+
 import base64
 import subprocess
 from types import SimpleNamespace
@@ -73,7 +75,7 @@ class FakeClient:
 async def test_cube_provider_provisions_scoped_volume_and_verifies_grants(monkeypatch):
     issuer = SandboxGrantIssuer(b"test-key-32-bytes-minimum-length!!")
     client = FakeClient()
-    provider = CubeVolumeSandboxProvider(issuer.verification_key, client=client)
+    provider = CubeVolumeSandboxProvider(issuer.verification_key, client=cast('CubeVolumeClient | None', client))
     context = RequestContext(actor=ActorRef(
         principal_id="user_1", principal_type=PrincipalType.USER, tenant_id="user_1"
     ))

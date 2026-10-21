@@ -5,6 +5,14 @@ Uses scripted model responses to demonstrate the runtime, not model intelligence
 """
 
 from __future__ import annotations
+
+from typing import TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    from typing import Any
+
+from sagents.v2.composition.loaded_agents import ApplicationEntrypoint
+
 from sagents.v2 import ApplicationConfiguration
 from examples.v2.host.registrations import provided, runtime_for
 
@@ -41,7 +49,7 @@ def step(text="", *, name=None, arguments=None):
     calls = (
         ()
         if name is None
-        else (ModelToolCall(tool_call_id=name, name=name, arguments=arguments),)
+        else (ModelToolCall(tool_call_id=name, name=name, arguments=cast('dict[str, Any]', arguments)),)
     )
     return ScriptedModelStep(
         events=(
@@ -118,7 +126,7 @@ async def demo(root: Path):
     app = await builder.build(runtime=configuration.runtime, models=configuration.models)
     try:
         agent = await app.load_agent(SageManifest.model_validate(parent_data))
-        stream = await app.entrypoint().run_stream(
+        stream = await cast(ApplicationEntrypoint, app.entrypoint()).run_stream(
             StartRun(
                 agent_id=agent.id,
                 input=(

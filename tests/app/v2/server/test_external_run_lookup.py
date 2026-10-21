@@ -1,4 +1,13 @@
 """External Run lookup stays scoped and avoids loading every historical command."""
+
+from typing import TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    from sagents.v2.contracts.run_state import RunSnapshot
+    from sagents.v2.runtime.session.contracts import SessionStore
+
+from ag_ui.core import Message
+
 import hashlib
 from contextlib import nullcontext
 from types import SimpleNamespace
@@ -62,7 +71,7 @@ async def _seed(api, session="work", client_id="first", *, legacy=False, tenant=
 
 def _request(client_id="first", text="hello"):
     return RunAgentInput(thread_id="work", run_id=client_id, state={}, tools=[],
-        context=[], messages=[{"id": "message", "role": "user", "content": text}],
+        context=[], messages=cast(list[Message], [{"id": "message", "role": "user", "content": text}]),
         forwarded_props={})
 
 
@@ -73,7 +82,7 @@ async def test_external_start_and_retry_do_not_walk_historical_commands(client_i
     api.session_access.list_session_runs = AsyncMock(side_effect=AssertionError("loaded all historical Runs"))
     api.session_access.get_start_command = AsyncMock(side_effect=AssertionError("read historical commands individually"))
     stream = await api.start(_request(client_id), user_id="tenant", agent_id="agent")
-    await stream.aclose()
+    await getattr(stream, 'aclose')()
     dispatched = api.runs.start_detached_run.call_args.args[1]
     assert dispatched.idempotency_key == _key("work", client_id)
     if client_id == "first":
@@ -94,7 +103,7 @@ async def test_external_legacy_retry_preserves_original_key_and_admitted_configu
     _, stored = await _seed(api, legacy=True)
     api.session_access.list_session_runs = AsyncMock(side_effect=AssertionError("loaded all historical Runs"))
     stream = await api.start(_request(), user_id="tenant", agent_id="agent")
-    await stream.aclose()
+    await getattr(stream, 'aclose')()
     assert api.runs.start_detached_run.call_args.args[1] == stored
 
 
@@ -164,9 +173,9 @@ async def test_start_lookup_restores_existing_idempotency_index_after_filesystem
         await store.close()
     restored = FilesystemSessionStore(tmp_path)
     try:
-        access = AuthorizedSessionAccess(restored)
+        access = AuthorizedSessionAccess(cast('SessionStore', restored))
         found = await access.find_start_run("work", command.idempotency_key, api.context_for("owner"))
-        assert found[0].run_id == native_id and found[1] == command
+        assert cast('tuple[RunSnapshot, StartRun]', found)[0].run_id == native_id and cast('tuple[RunSnapshot, StartRun]', found)[1] == command
         assert await access.find_start_run("missing", command.idempotency_key, api.context_for("owner")) is None
     finally:
         await restored.close()

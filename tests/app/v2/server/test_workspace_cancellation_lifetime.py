@@ -29,7 +29,7 @@ async def test_cancelled_file_worker_keeps_workspace_locked_until_it_finishes(ca
     async def cancelled_scope():
         async with anyio.create_task_group() as group:
             group.start_soon(deletion)
-            await anyio.to_thread.run_sync(entered.wait)
+            await getattr(anyio.to_thread, 'run_sync')(entered.wait)
             cancelled.set()
             group.cancel_scope.cancel()
 

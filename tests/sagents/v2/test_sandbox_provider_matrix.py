@@ -78,10 +78,7 @@ def spec(
         ),
         process=ProcessPolicy(enabled=process_enabled),
         network=NetworkPolicy(mode=network_mode),
-        lifecycle=LifecyclePolicy(
-            durability=SandboxDurability.SNAPSHOTABLE,
-            pause_behavior="snapshot",
-        ),
+        lifecycle=LifecyclePolicy.model_validate(dict(durability=SandboxDurability.SNAPSHOTABLE, pause_behavior="snapshot")),
         policy_hash="sha256:policy",
     )
 

@@ -1,5 +1,7 @@
 """Workspace imports must stay within the bound Agent and tenant directory."""
 
+from typing import Literal
+
 import base64
 
 import pytest
@@ -82,7 +84,7 @@ def test_download_rejects_file_modified_during_snapshot(tmp_path, monkeypatch):
             page.write_bytes(b"after with a different size")
             return written
 
-    def open_and_mutate(archive, name, mode="r", *args, **kwargs):
+    def open_and_mutate(archive, name, mode: Literal["r", "w"] = "r", *args, **kwargs):
         opened = original_open(archive, name, mode, *args, **kwargs)
         return MutatingWriter(opened) if mode == "w" else opened
 

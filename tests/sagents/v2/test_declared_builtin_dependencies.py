@@ -246,7 +246,7 @@ def test_native_flow_factory_uses_dependency_ports_and_json_definition():
             ),
         )
     )
-    assert node.runtime is runtime
-    assert node.child_executor is executor
-    assert node.descriptor.agent_id == "child"
-    assert node.workspace_policy is WorkspaceSharingPolicy.READ_ONLY_PARENT
+    assert getattr(node, 'runtime') is runtime
+    assert getattr(node, 'child_executor') is executor
+    assert getattr(node, 'descriptor').agent_id == "child"
+    assert getattr(node, 'workspace_policy') is WorkspaceSharingPolicy.READ_ONLY_PARENT

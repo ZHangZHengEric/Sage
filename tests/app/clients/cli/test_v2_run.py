@@ -1,5 +1,20 @@
 from __future__ import annotations
 
+from typing import Any, TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    from app.v2.cli.interaction import InteractionDecider
+    from app.v2.cli.render import EventRenderer
+    from app.v2.cli.runner import CliExecution
+    from asyncio import Task
+    from sagents.v2.agent.policy.approval_memory import ApprovalScope
+    from sagents.v2.application import SAgentApplication
+    from sagents.v2.model.provider import ModelProvider
+    from sagents.v2.package.manifest.root import SageManifest
+    from sagents.v2.runtime.execution.lifecycle import ExecutionBindingLifecycleCoordinator
+
+from sagents.v2.package.manifest.runtime import CapabilitySelection
+
 import argparse
 import asyncio
 import errno
@@ -203,7 +218,7 @@ async def test_approve_once_writes_file_and_persists_session(tmp_path):
     out, err = io.StringIO(), io.StringIO()
 
     outcome = await run_task(
-        agent,
+        cast('CliExecution', agent),
         command,
         CONTEXT,
         renderer=PlainRenderer(out, err),
@@ -228,7 +243,7 @@ async def test_deny_leaves_workspace_untouched(tmp_path):
     workspace, _, agent, command = await make_agent(tmp_path, write_hello_model())
 
     outcome = await run_task(
-        agent,
+        cast('CliExecution', agent),
         command,
         CONTEXT,
         renderer=PlainRenderer(io.StringIO(), io.StringIO()),
@@ -274,7 +289,7 @@ async def test_write_outside_the_workspace_fails_cleanly_without_reconciliation(
     err = io.StringIO()
 
     outcome = await run_task(
-        agent,
+        cast('CliExecution', agent),
         command,
         CONTEXT,
         renderer=PlainRenderer(io.StringIO(), err),
@@ -311,7 +326,7 @@ async def test_json_mode_streams_native_events_and_reads_decision_line(tmp_path)
     )
 
     outcome = await run_task(
-        agent,
+        cast('CliExecution', agent),
         command,
         CONTEXT,
         renderer=renderer,
@@ -470,7 +485,7 @@ async def test_transient_provider_failure_retries_and_completes_headless(
     renderer = PlainRenderer(out, err)
 
     outcome = await run_task(
-        agent,
+        cast('CliExecution', agent),
         command,
         CONTEXT,
         renderer=renderer,
@@ -533,7 +548,7 @@ def test_available_presets_only_include_loop_entrypoints():
 
 
 def _command_args(tmp_path, **overrides):
-    values = {
+    values: dict[str, Any] = {
         "task": "create hello.txt",
         "preset": "coder",
         "package": None,
@@ -577,7 +592,7 @@ async def test_v2_run_command_end_to_end_with_injected_model(
     )
 
     async def build_agent(**kwargs):
-        return await build_cli_application(**kwargs, model_provider=write_hello_model())
+        return await build_cli_application(**kwargs, model_provider=cast('ModelProvider | None', write_hello_model()))
 
     with patch("app.v2.cli.config.configure_cli_logging", return_value=cfg):
         exit_code = await v2_command.v2_run_command(
@@ -634,7 +649,7 @@ async def test_interrupt_cancels_run_durably_and_exits_130(tmp_path):
     out, err = io.StringIO(), io.StringIO()
 
     outcome = await run_task(
-        agent,
+        cast('CliExecution', agent),
         command,
         CONTEXT,
         renderer=InterruptOnFirstDelta(interrupt, out, err),
@@ -662,14 +677,14 @@ async def test_second_run_in_same_session_sees_previous_history(tmp_path):
     decider = StaticInteractionDecider("deny")
 
     first = await run_task(
-        agent,
+        cast('CliExecution', agent),
         build_start_run(agent_id="sage.cli.coder", task="first task", resolved_spec_hash=spec_hash),
         CONTEXT,
         renderer=renderer,
         decider=decider,
     )
     second = await run_task(
-        agent,
+        cast('CliExecution', agent),
         build_start_run(
             agent_id="sage.cli.coder",
             task="second task",
@@ -721,7 +736,7 @@ async def test_chat_loop_runs_turns_in_one_session_until_exit(
     )
 
     async def build_agent(**kwargs):
-        return await build_cli_application(**kwargs, model_provider=model)
+        return await build_cli_application(**kwargs, model_provider=cast('ModelProvider | None', model))
 
     with _patched_cfg():
         exit_code = await v2_command.v2_chat_command(
@@ -748,7 +763,7 @@ async def test_resume_unknown_session_fails_before_prompting(tmp_path, monkeypat
     monkeypatch.setenv("SAGE_DEFAULT_LLM_API_KEY", "test-key")
 
     async def build_agent(**kwargs):
-        return await build_cli_application(**kwargs, model_provider=talk_model("unused"))
+        return await build_cli_application(**kwargs, model_provider=cast('ModelProvider | None', talk_model("unused")))
 
     with _patched_cfg():
         with pytest.raises(CLIError) as raised:
@@ -797,7 +812,7 @@ async def test_sessions_listing_reads_authoritative_state(tmp_path):
     renderer = PlainRenderer(io.StringIO(), io.StringIO())
     decider = StaticInteractionDecider("deny")
     first = await run_task(
-        agent,
+        cast('CliExecution', agent),
         build_start_run(
             agent_id="sage.cli.coder",
             task="first task",
@@ -809,7 +824,7 @@ async def test_sessions_listing_reads_authoritative_state(tmp_path):
         decider=decider,
     )
     second = await run_task(
-        agent,
+        cast('CliExecution', agent),
         build_start_run(
             agent_id="sage.cli.coder",
             task="second task\nwith detail",
@@ -851,7 +866,7 @@ async def test_v2_sessions_command_prints_json(tmp_path, monkeypatch, capsys):
     monkeypatch.setenv("SAGE_DEFAULT_LLM_API_KEY", "test-key")
 
     async def build_agent(**kwargs):
-        return await build_cli_application(**kwargs, model_provider=talk_model("hi"))
+        return await build_cli_application(**kwargs, model_provider=cast('ModelProvider | None', talk_model("hi")))
 
     with _patched_cfg():
         assert (
@@ -988,7 +1003,7 @@ async def test_interrupt_while_waiting_for_approval_exits_cleanly(tmp_path):
 
     err = io.StringIO()
     outcome = await run_task(
-        agent,
+        cast('CliExecution', agent),
         command,
         CONTEXT,
         renderer=PlainRenderer(io.StringIO(), err),
@@ -1024,16 +1039,16 @@ async def test_close_tolerates_only_pending_driver_errors(tmp_path):
 
     def session(error):
         return v2_command.CliSession(
-            application=FakeApplication(error),
-            agent=None,
+            application=cast('SAgentApplication', FakeApplication(error)),
+            agent=cast('CliExecution', None),
             stdin=StdinLineReader(io.StringIO("")),
-            bindings=FakeBindings(),
-            package=None,
+            bindings=cast('LocalWorkspaceBindingProvider', FakeBindings()),
+            package=cast('SageManifest', None),
             spec_hash="sha256:test",
             agent_id="sage.cli.coder",
             context=CONTEXT,
-            renderer=SimpleNamespace(notice=notices.append),
-            decider=None,
+            renderer=cast('EventRenderer', SimpleNamespace(notice=notices.append)),
+            decider=cast('InteractionDecider', None),
             workspace=tmp_path,
             session_root=tmp_path,
         )
@@ -1069,7 +1084,7 @@ async def test_interrupt_does_not_wait_for_a_blocked_prompt(tmp_path):
 
     outcome = await asyncio.wait_for(
         run_task(
-            agent,
+            cast('CliExecution', agent),
             command,
             CONTEXT,
             renderer=PlainRenderer(io.StringIO(), io.StringIO()),
@@ -1156,7 +1171,7 @@ async def test_interrupt_scope_first_sigint_signals_second_force_cancels():
             for _ in range(50):
                 await asyncio.sleep(0.01)
         assert controller.forced is True
-        asyncio.current_task().uncancel()
+        cast('Task[Any]', asyncio.current_task()).uncancel()
 
         controller.reset()
         assert controller.event.is_set() is False
@@ -1177,7 +1192,7 @@ async def test_resume_cursor_is_per_run_when_one_renderer_spans_two_runs(tmp_pat
     decider = StaticInteractionDecider("approve_once")
 
     first = await run_task(
-        agent,
+        cast('CliExecution', agent),
         build_start_run(agent_id="sage.cli.coder", task="first", resolved_spec_hash=spec_hash),
         CONTEXT,
         renderer=renderer,
@@ -1185,7 +1200,7 @@ async def test_resume_cursor_is_per_run_when_one_renderer_spans_two_runs(tmp_pat
     )
     second = await asyncio.wait_for(
         run_task(
-            agent,
+            cast('CliExecution', agent),
             build_start_run(
                 agent_id="sage.cli.coder",
                 task="second",
@@ -1220,7 +1235,7 @@ def test_preset_package_selects_filesystem_scheduler_only_when_root_given(tmp_pa
     assert SCHEDULER_CAPABILITY not in plain.runtime.capabilities
 
     durable = build_preset_package("coder", scheduler_root=tmp_path / "sched")
-    selection = durable.runtime.capabilities[SCHEDULER_CAPABILITY]
+    selection = cast(CapabilitySelection, durable.runtime.capabilities[SCHEDULER_CAPABILITY])
     assert selection.plugin == FILESYSTEM_SCHEDULER_PLUGIN
     assert selection.config["root"] == str(tmp_path / "sched")
 
@@ -1241,7 +1256,7 @@ async def test_cli_session_uses_filesystem_scheduler_and_falls_back_when_owned(
     monkeypatch.setenv("SAGE_DEFAULT_LLM_API_KEY", "test-key")
 
     async def build_agent(**kwargs):
-        return await build_cli_application(**kwargs, model_provider=talk_model("x"))
+        return await build_cli_application(**kwargs, model_provider=cast('ModelProvider | None', talk_model("x")))
 
     with _patched_cfg():
         session = await v2_command.open_cli_session(
@@ -1296,7 +1311,7 @@ async def test_run_orphaned_by_a_crash_is_settled_then_the_session_resumes(
         bindings=LocalWorkspaceBindingProvider(
             tmp_path / "workspace", settings=WorkspaceSandboxSettings(process_enabled=False)
         ),
-        model_provider=talk_model("unused"),
+        model_provider=cast('ModelProvider | None', talk_model("unused")),
     )
     admitted_agent = next(agent for agent in original.loaded_agents if agent.id == "sage.cli.coder")
     admitted_hash = admitted_agent.composition_hash
@@ -1315,7 +1330,7 @@ async def test_run_orphaned_by_a_crash_is_settled_then_the_session_resumes(
         idempotency_key="crash:start",
     )
     assert running.state == RunState.RUNNING
-    await store.close()
+    await getattr(store, 'close')()
     scheduler = FilesystemScheduler(session_root / "scheduler")
     await scheduler.submit(
         WorkItem(
@@ -1332,7 +1347,7 @@ async def test_run_orphaned_by_a_crash_is_settled_then_the_session_resumes(
     await scheduler.close()
 
     async def build_agent(**kwargs):
-        return await build_cli_application(**kwargs, model_provider=talk_model("hi there"))
+        return await build_cli_application(**kwargs, model_provider=cast('ModelProvider | None', talk_model("hi there")))
 
     with _patched_cfg():
         exit_code = await v2_command.v2_chat_command(
@@ -1354,7 +1369,7 @@ async def test_run_orphaned_by_a_crash_is_settled_then_the_session_resumes(
         runs = await store.list_session_runs(handle.session_id)
         orphan_result = await store.get_run_result(handle.run_id)
     finally:
-        await store.close()
+        await getattr(store, 'close')()
     assert summaries[0].run_count == 2
     assert [run.state for run in runs] == [RunState.FAILED, RunState.COMPLETED]
     assert orphan_result.error is not None
@@ -1385,7 +1400,7 @@ async def test_suspended_run_from_a_previous_process_is_resumed_first(
         models=cli_model_catalog(MODEL),
         session_root=session_root,
         bindings=first_bindings,
-        model_provider=write_hello_model(),
+        model_provider=cast('ModelProvider | None', write_hello_model()),
     )
     agent = ClosableAgent(first)
     stream = await agent.run_stream(
@@ -1404,7 +1419,7 @@ async def test_suspended_run_from_a_previous_process_is_resumed_first(
     assert not (workspace / "hello.txt").exists()
 
     async def build_agent(**kwargs):
-        return await build_cli_application(**kwargs, model_provider=talk_model("Done."))
+        return await build_cli_application(**kwargs, model_provider=cast('ModelProvider | None', talk_model("Done.")))
 
     with _patched_cfg():
         exit_code = await v2_command.v2_chat_command(
@@ -1430,7 +1445,7 @@ async def test_sessions_listing_is_read_only_and_sees_journal_deltas(tmp_path):
     session_root = tmp_path / "runtime"
     _, _, agent, command = await make_agent(tmp_path, write_hello_model())
     outcome = await run_task(
-        agent,
+        cast('CliExecution', agent),
         command,
         CONTEXT,
         renderer=PlainRenderer(io.StringIO(), io.StringIO()),
@@ -1442,7 +1457,7 @@ async def test_sessions_listing_is_read_only_and_sees_journal_deltas(tmp_path):
     try:
         summaries, unreadable = await list_sessions(session_root)
     finally:
-        await owner.close()
+        await getattr(owner, 'close')()
 
     assert unreadable == []
     assert [value.session_id for value in summaries] == [outcome.session_id]
@@ -1463,7 +1478,7 @@ async def test_cli_session_reports_when_the_session_root_is_owned(
             with pytest.raises(CLIError) as raised:
                 await v2_command.open_cli_session(_command_args(tmp_path))
     finally:
-        await owner.close()
+        await getattr(owner, 'close')()
     assert "another sage v2 process is using the session root" in str(raised.value)
     assert any("--session-root" in step for step in raised.value.next_steps)
 
@@ -1503,7 +1518,7 @@ async def test_plan_mode_submits_a_plan_for_approval_on_a_read_only_sandbox(
     model = plan_model()
 
     async def build_agent(**kwargs):
-        return await build_cli_application(**kwargs, model_provider=model)
+        return await build_cli_application(**kwargs, model_provider=cast('ModelProvider | None', model))
 
     with _patched_cfg():
         session = await v2_command.open_cli_session(
@@ -1540,11 +1555,11 @@ async def test_sessions_inspect_replays_the_transcript_read_only(tmp_path):
     _, _, agent, command = await make_agent(tmp_path, model)
     renderer = PlainRenderer(io.StringIO(), io.StringIO())
     first = await run_task(
-        agent, command, CONTEXT, renderer=renderer, decider=StaticInteractionDecider("approve_once")
+        cast('CliExecution', agent), command, CONTEXT, renderer=renderer, decider=StaticInteractionDecider("approve_once")
     )
     spec_hash = agent.agent.agent.composition_hash
     second = await run_task(
-        agent,
+        cast('CliExecution', agent),
         build_start_run(
             agent_id="sage.cli.coder",
             task="say bye",
@@ -1584,7 +1599,7 @@ async def test_v2_sessions_inspect_command_prints_json(tmp_path, monkeypatch, ca
     monkeypatch.setenv("SAGE_DEFAULT_LLM_API_KEY", "test-key")
 
     async def build_agent(**kwargs):
-        return await build_cli_application(**kwargs, model_provider=talk_model("hi"))
+        return await build_cli_application(**kwargs, model_provider=cast('ModelProvider | None', talk_model("hi")))
 
     with _patched_cfg():
         assert (
@@ -1715,7 +1730,7 @@ async def test_binding_forwards_the_request_lifecycle(tmp_path):
     lifecycle = RecordingLifecycle()
     coordinated = await provider.acquire(
         ExecutionBindingRequest(
-            run_id="run_2", agent_id="sage.cli.coder", context=CONTEXT, lifecycle=lifecycle,
+            run_id="run_2", agent_id="sage.cli.coder", context=CONTEXT, lifecycle=cast('ExecutionBindingLifecycleCoordinator | None', lifecycle),
             configuration=admitted.config.execution_snapshot
         )
     )
@@ -1738,7 +1753,7 @@ async def test_shell_tool_runs_inside_the_run_sandbox(tmp_path):
     model = shell_model()
     _, _, agent, command = await make_shell_agent(tmp_path, model)
     outcome = await run_task(
-        agent,
+        cast('CliExecution', agent),
         command,
         CONTEXT,
         renderer=PlainRenderer(io.StringIO(), io.StringIO()),
@@ -1760,7 +1775,7 @@ async def test_read_only_sandbox_rejects_mutating_shell_commands(tmp_path):
     _, _, agent, command = await make_shell_agent(tmp_path, model, read_only=True)
     err = io.StringIO()
     outcome = await run_task(
-        agent,
+        cast('CliExecution', agent),
         command,
         CONTEXT,
         renderer=PlainRenderer(io.StringIO(), err),
@@ -1791,7 +1806,7 @@ async def test_read_only_sandbox_runs_inspection_commands_without_a_shell(tmp_pa
     _, bindings, agent, command = await make_shell_agent(tmp_path, model, read_only=True)
     spec = bindings.sandbox_spec()
     outcome = await run_task(
-        agent,
+        cast('CliExecution', agent),
         command,
         CONTEXT,
         renderer=PlainRenderer(io.StringIO(), io.StringIO()),
@@ -1880,7 +1895,7 @@ async def test_typing_during_a_run_steers_the_next_model_step(tmp_path):
     releaser = asyncio.create_task(release_when_accepted())
     outcome = await asyncio.wait_for(
         run_task(
-            agent,
+            cast('CliExecution', agent),
             command,
             CONTEXT,
             renderer=Observer(io.StringIO(), err),
@@ -1909,14 +1924,14 @@ async def test_steerer_parses_frames_and_defers_until_the_turn_starts():
     frames: list[dict] = []
     renderer = SimpleNamespace(notice=notices.append, frame=frames.append)
 
-    json_steerer = _Steerer(None, "run_1", CONTEXT, renderer, None, json_frames=True)
+    json_steerer = _Steerer(None, "run_1", CONTEXT, cast('EventRenderer', renderer), None, json_frames=True)
     assert json_steerer.parse(json.dumps({"type": JSON_STEER_TYPE, "text": " go "})) == "go"
     assert json_steerer.parse("garbage") is None
     assert json_steerer.parse(json.dumps({"type": JSON_DECISION_TYPE, "decision": "deny"})) is None
     assert frames[-1]["status"] == "rejected"
     assert frames[-1]["detail"] == "no interaction is pending"
 
-    plain = _Steerer(None, "run_1", CONTEXT, renderer, None, json_frames=False)
+    plain = _Steerer(None, "run_1", CONTEXT, cast('EventRenderer', renderer), None, json_frames=False)
     assert plain.parse("   ") is None
     assert plain.parse("/help") is None
     assert "not available while a run is active" in notices[-1]
@@ -1930,7 +1945,7 @@ async def test_steering_is_enabled_only_for_tty_or_json_stdin(tmp_path, monkeypa
     monkeypatch.setenv("SAGE_DEFAULT_LLM_API_KEY", "test-key")
 
     async def build_agent(**kwargs):
-        return await build_cli_application(**kwargs, model_provider=talk_model("x"))
+        return await build_cli_application(**kwargs, model_provider=cast('ModelProvider | None', talk_model("x")))
 
     with _patched_cfg():
         piped = await v2_command.open_cli_session(
@@ -1990,7 +2005,7 @@ async def test_steer_accepted_after_the_last_model_step_is_reported_as_unapplied
     releaser = asyncio.create_task(release_when_accepted())
     outcome = await asyncio.wait_for(
         run_task(
-            agent,
+            cast('CliExecution', agent),
             command,
             CONTEXT,
             renderer=Observer(io.StringIO(), err),
@@ -2091,7 +2106,7 @@ async def test_approve_all_never_asks_and_always_asks_even_for_reads(tmp_path):
         tmp_path, write_hello_model(), tool_policy=build_tool_policy("approve-all")
     )
     outcome = await run_task(
-        agent,
+        cast('CliExecution', agent),
         command,
         CONTEXT,
         renderer=PlainRenderer(io.StringIO(), io.StringIO()),
@@ -2125,7 +2140,7 @@ async def test_approve_all_never_asks_and_always_asks_even_for_reads(tmp_path):
         tmp_path, listing, tool_policy=build_tool_policy("always")
     )
     outcome = await run_task(
-        agent,
+        cast('CliExecution', agent),
         command,
         CONTEXT,
         renderer=PlainRenderer(io.StringIO(), io.StringIO()),
@@ -2163,7 +2178,7 @@ async def test_remembered_approval_skips_the_second_write_to_the_same_file(tmp_p
     err = io.StringIO()
     # 只回答一次 "r"（记住）；若第二次再问，行来源已 EOF → 退化为拒绝，文件不会变成 v2。
     outcome = await run_task(
-        agent,
+        cast('CliExecution', agent),
         command,
         CONTEXT,
         renderer=PlainRenderer(io.StringIO(), err),
@@ -2198,7 +2213,7 @@ async def test_chat_lists_and_forgets_approvals_remembered_by_a_previous_process
     renderer = JsonRenderer(out)
     decision = json.dumps({"type": JSON_DECISION_TYPE, "decision": "approve_and_remember"})
     outcome = await run_task(
-        agent,
+        cast('CliExecution', agent),
         command,
         CONTEXT,
         renderer=renderer,
@@ -2220,7 +2235,7 @@ async def test_chat_lists_and_forgets_approvals_remembered_by_a_previous_process
     assert "policy.approval.remembered" in [frame["type"] for frame in frames]
 
     async def build_agent(**kwargs):
-        return await build_cli_application(**kwargs, model_provider=talk_model("unused"))
+        return await build_cli_application(**kwargs, model_provider=cast('ModelProvider | None', talk_model("unused")))
 
     stdin = StdinLineReader(io.StringIO("/approvals\n/forget 2\n/forget x\n/forget 1\n/approvals\n/exit\n"))
     with _patched_cfg():
@@ -2270,7 +2285,7 @@ async def test_git_hooks_and_config_are_protected_by_default(tmp_path):
     (workspace / ".git" / "hooks").mkdir(parents=True)
     err = io.StringIO()
     outcome = await run_task(
-        agent,
+        cast('CliExecution', agent),
         command,
         CONTEXT,
         renderer=PlainRenderer(io.StringIO(), err),
@@ -2355,7 +2370,7 @@ async def test_deny_all_rejects_a_remembered_write_after_reopening_session(tmp_p
     )
 
     first = await run_task(
-        agent,
+        cast('CliExecution', agent),
         command,
         CONTEXT,
         renderer=JsonRenderer(io.StringIO()),
@@ -2370,7 +2385,7 @@ async def test_deny_all_rejects_a_remembered_write_after_reopening_session(tmp_p
     memory = agent.application.services["agent.approval-memory"]
     assert len(await memory.list_remembered(session_id=first.session_id)) == 1
     outcome = await run_task(
-        agent,
+        cast('CliExecution', agent),
         command.model_copy(update={"session_id": first.session_id}),
         CONTEXT,
         renderer=JsonRenderer(io.StringIO()),
@@ -2434,7 +2449,7 @@ async def test_old_cli_fingerprints_require_fresh_approval(tool, kind, value, ar
         remembered_by="cli-user",
     ))
     current = cli_approval_matcher(_policy_context(tool, arguments))
-    assert await memory.lookup(session_id="s1", matcher=current) is None
+    assert await memory.lookup(session_id="s1", matcher=cast('ApprovalMatcher', current)) is None
 # ---------- workspace 作用域审批记忆 ----------
 
 
@@ -2449,7 +2464,7 @@ def _matcher(path: str) -> ApprovalMatcher:
 def _remembered(matcher: ApprovalMatcher, scope: str) -> RememberedApproval:
     return RememberedApproval(
         matcher=matcher,
-        scope=scope,
+        scope=cast('ApprovalScope', scope),
         remembered_at=datetime(2026, 9, 4, tzinfo=timezone.utc),
         remembered_by="cli-user",
     )
@@ -2470,9 +2485,9 @@ async def test_workspace_approval_memory_layers_over_the_session_memory(tmp_path
     await memory.remember(session_id="s1", approval=_remembered(b, "workspace"))
 
     # session 条目只在本会话可见；workspace 条目对同一工作区的任何会话可见。
-    assert (await memory.lookup(session_id="s1", matcher=a)).scope == "session"
+    assert (cast('RememberedApproval', await memory.lookup(session_id="s1", matcher=a))).scope == "session"
     assert await memory.lookup(session_id="s2", matcher=a) is None
-    assert (await memory.lookup(session_id="s2", matcher=b)).scope == "workspace"
+    assert (cast('RememberedApproval', await memory.lookup(session_id="s2", matcher=b))).scope == "workspace"
     assert [
         (value.matcher.summary, value.scope)
         for value in await memory.list_remembered(session_id="s1")
@@ -2527,7 +2542,7 @@ async def test_workspace_approval_memory_ignores_corrupt_or_foreign_files(tmp_pa
     assert stored["version"] == 1
     assert stored["workspace"] == workspace.as_posix()
     assert list(stored["entries"]) == [matcher.key]
-    assert (await memory.lookup(session_id="s9", matcher=matcher)).scope == "workspace"
+    assert (cast('RememberedApproval', await memory.lookup(session_id="s9", matcher=matcher))).scope == "workspace"
 
 
 async def test_prompt_decider_offers_workspace_scope_only_when_the_runtime_lists_it():
@@ -2571,7 +2586,7 @@ async def test_workspace_remembered_approval_covers_later_sessions_in_the_same_w
         }
     )
     outcome = await run_task(
-        agent,
+        cast('CliExecution', agent),
         command,
         CONTEXT,
         renderer=renderer,
@@ -2599,7 +2614,7 @@ async def test_workspace_remembered_approval_covers_later_sessions_in_the_same_w
     )
     err = io.StringIO()
     outcome = await run_task(
-        second,
+        cast('CliExecution', second),
         command,
         CONTEXT,
         renderer=PlainRenderer(io.StringIO(), err),
@@ -2616,7 +2631,7 @@ async def test_workspace_remembered_approval_covers_later_sessions_in_the_same_w
         tmp_path, write_hello_model(), tool_policy=build_tool_policy("ask"), workspace_name="other"
     )
     outcome = await run_task(
-        third,
+        cast('CliExecution', third),
         command,
         CONTEXT,
         renderer=PlainRenderer(io.StringIO(), io.StringIO()),
@@ -2710,7 +2725,7 @@ async def test_interrupt_during_a_shell_command_cancels_promptly_and_kills_the_j
     started = time.monotonic()
 
     outcome = await run_task(
-        agent,
+        cast('CliExecution', agent),
         command,
         CONTEXT,
         renderer=InterruptOnToolStart(interrupt, io.StringIO(), err),
@@ -2793,7 +2808,7 @@ async def test_partial_write_of_a_reconcilable_tool_is_verified_from_the_workspa
     err = io.StringIO()
 
     outcome = await run_task(
-        agent,
+        cast('CliExecution', agent),
         command,
         CONTEXT,
         renderer=PlainRenderer(io.StringIO(), err),
@@ -2820,7 +2835,7 @@ async def test_partial_write_without_reconciliation_asks_the_user_and_continues(
     err = io.StringIO()
 
     outcome = await run_task(
-        agent,
+        cast('CliExecution', agent),
         command,
         CONTEXT,
         renderer=PlainRenderer(io.StringIO(), err),

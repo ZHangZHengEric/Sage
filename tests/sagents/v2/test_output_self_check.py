@@ -1,3 +1,9 @@
+
+from typing import TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    from sagents.v2.agent.policy.output_self_check import OutputChecker
+
 import asyncio
 from unittest.mock import AsyncMock
 
@@ -33,8 +39,8 @@ async def test_independent_checks_run_concurrently_and_errors_keep_registration_
     result = await asyncio.wait_for(
         OutputSelfCheck([Check(0), Check(1)]).check(None), 1
     )
-    assert result.errors == ["failure-0", "failure-1"]
-    assert result.repair_instruction == "fix-0\nfix-1"
+    assert cast('OutputCheck', result).errors == ["failure-0", "failure-1"]
+    assert cast('OutputCheck', result).repair_instruction == "fix-0\nfix-1"
 
 
 @pytest.mark.asyncio
@@ -76,7 +82,7 @@ async def test_hard_runtime_decision_does_not_run_output_checks():
         reason_code="budget.max_tokens",
         reason="budget",
     )
-    result = await OutputSelfCheckPolicy(delegate, [checker]).decide(
+    result = await OutputSelfCheckPolicy(delegate, cast('OutputChecker', [checker])).decide(
         SimpleNamespace(response=SimpleNamespace(tool_calls=()))
     )
     assert result == delegate.decide.return_value
@@ -87,11 +93,11 @@ def test_repair_feedback_budget_preserves_detailed_diagnostics():
     from sagents.v2.agent.engine import AgentLoopEngine
 
     detail = "x" * 300 + " offending dependency: field_b"
-    assert "field_b" not in AgentLoopEngine._normalized_continuation_reason(detail)
-    assert "field_b" in AgentLoopEngine._normalized_continuation_reason(
+    assert "field_b" not in cast('str', AgentLoopEngine._normalized_continuation_reason(detail))
+    assert "field_b" in cast('str', AgentLoopEngine._normalized_continuation_reason(
         detail, limit=6000
-    )
+    ))
     assert (
-        len(AgentLoopEngine._normalized_continuation_reason("x" * 7000, limit=6000))
+        len(cast(str, AgentLoopEngine._normalized_continuation_reason("x" * 7000, limit=6000)))
         == 6000
     )

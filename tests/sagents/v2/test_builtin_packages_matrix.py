@@ -1,10 +1,12 @@
 """Built-in packages expose only established decorator-backed Tool names."""
 
 from __future__ import annotations
+
+from typing import cast
+
+from sagents.v2.contracts.items import TextBlock
 import ast
 from tests.sagents.v2.model_fixture import TEST_MODELS
-
-
 
 from pathlib import Path
 
@@ -151,7 +153,7 @@ def test_official_tools_use_runtime_execution_instead_of_direct_host_io():
                 )
             )
             if forbidden_import or forbidden_call:
-                offenders.append(f"{path.name}:{node.lineno}: {ast.unparse(node)}")
+                offenders.append(f"{path.name}:{getattr(node, 'lineno')}: {ast.unparse(node)}")
     assert offenders == []
 
 
@@ -191,7 +193,7 @@ async def test_decorated_provider_loads_and_executes_only_decorated_methods():
             actor=ActorRef(principal_id="user_1", principal_type=PrincipalType.USER)
         ),
     )
-    assert result.content[0].text == "hello"
+    assert cast(TextBlock, result.content[0]).text == "hello"
 
     with pytest.raises(SageV2Error) as conflict:
         await provider.execute(
