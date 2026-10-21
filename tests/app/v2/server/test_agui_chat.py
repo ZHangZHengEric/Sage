@@ -43,7 +43,7 @@ def _run_input(thread_id: str = "thread-1", run_id: str = "run-1") -> dict:
 @pytest.mark.timeout(30)
 def test_agui_run_writes_correlated_json_sagents_logs_to_stdout(tmp_path, capsys, monkeypatch):
     # Exercise correlation for every event; test_logging covers fast-timing sampling.
-    monkeypatch.setattr("app.v2.server.observability.logging._SLOW_OPERATION_MS", 0)
+    monkeypatch.setattr("sagents.v2.runtime.observability.provider._SLOW_OPERATION_MS", 0)
     service = make_test_service(tmp_path, log_level="debug")
     with TestClient(create_app(service=service)) as client:
         token = register_and_login(client)

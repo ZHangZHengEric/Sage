@@ -697,10 +697,15 @@ class DesktopV2Service(
             run = await self.session_access.get_run(run_id, context)
             if run.session_id != session_id:
                 raise ValueError(f"run {run_id} does not belong to {session_id}")
+            run_ids = {run_id}
+        else:
+            run_ids = {
+                run.run_id for run in await self.session_access.list_session_runs(session_id, context)
+            }
         return list(
-            await self.diagnostics.list_model_requests(
+            await self.observability.list_model_requests(
                 session_id=session_id,
-                run_id=run_id,
+                run_ids=run_ids,
             )
         )
 
@@ -711,7 +716,7 @@ class DesktopV2Service(
         run = await self.session_access.get_run(run_id, self._context(user_id))
         if run.session_id != session_id:
             raise ValueError(f"run {run_id} does not belong to {session_id}")
-        return await self.diagnostics.get_model_request(
+        return await self.observability.get_model_request(
             session_id=session_id,
             run_id=run_id,
             request_id=request_id,

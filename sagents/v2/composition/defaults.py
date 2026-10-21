@@ -32,6 +32,7 @@ def default_runtime(session_root: str | Path = ".runtime/sagents") -> RuntimeCon
         "memory.provider": {"root": str(root / "memory")},
         "session-memory.provider": {"root": str(root / "session-memory")},
         "observability.provider": {
+            "log_stdout": False,
             "diagnostics_root": str(root / "sessions"),
             "log_root": str(root / "logs"),
         },
