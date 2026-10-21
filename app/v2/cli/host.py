@@ -113,7 +113,7 @@ class LocalWorkspaceBindingProvider(LocalWorkspaceExecutionBindingProvider):
             max_output_bytes=settings.max_output_bytes,
         )
         mode = NetworkMode(settings.network_mode)
-        options = {"mode": mode}
+        options: dict[str, object] = {"mode": mode}
         if mode in {NetworkMode.ALLOWLIST, NetworkMode.PROXY}:
             options.update(
                 allowed_hosts=settings.network_hosts,

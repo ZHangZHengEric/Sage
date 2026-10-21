@@ -4,6 +4,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+from typing import Any
 
 from app.v2.cli.errors import CLIError
 from app.v2.cli.package import CliModelSettings
@@ -14,7 +15,7 @@ from sagents.v2.package.manifest.models import (
 
 # A process-only credential reference; never embed the APP key in a manifest.
 APP_CREDENTIAL_ENV = "SAGE_CLI_APP_MODEL_API_KEY"
-_DISABLE_REASONING = {
+_DISABLE_REASONING: dict[str | None, dict[str, Any]] = {
     "omit": {},
     "reasoning_effort_none": {"reasoning_effort": "none"},
     "thinking_type_disabled": {"thinking": {"type": "disabled"}},

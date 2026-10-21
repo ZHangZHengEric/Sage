@@ -4,9 +4,14 @@ from __future__ import annotations
 
 import json
 import sys
-from typing import Any, Protocol, TextIO
+from typing import Any, Protocol, TextIO, cast
 
-from sagents.v2.contracts.events import RuntimeEvent
+from sagents.v2.contracts.events import (
+    ItemEventData,
+    PolicyEventData,
+    RunEventData,
+    RuntimeEvent,
+)
 from sagents.v2.contracts.items import (
     JsonBlock,
     MessageItemData,
@@ -52,7 +57,10 @@ class PlainRenderer:
     def handle(self, event: RuntimeEvent) -> None:
         self.last_sequence = max(self.last_sequence, event.run_sequence)
         data = event.data
+        # RuntimeEvent validates the event type against its payload kind.
+        # These casts express that contract without adding runtime checks.
         if event.type == "item.completed":
+            data = cast(ItemEventData, data)
             item = data.item
             if item is None or item.visibility != "public":
                 return
@@ -72,12 +80,14 @@ class PlainRenderer:
                         self.notice(text)
             return
         if event.type == "message.started":
+            data = cast(ItemEventData, data)
             item = data.item
-            if isinstance(getattr(item, "data", None), MessageItemData):
+            if item is not None and isinstance(item.data, MessageItemData):
                 if item.data.role == "assistant":
                     self._assistant_items.add(item.item_id)
             return
         if event.type == "message.delta":
+            data = cast(ItemEventData, data)
             item_id = event.item_id or ""
             if item_id not in self._assistant_items:
                 return
@@ -90,8 +100,9 @@ class PlainRenderer:
                 self.out.flush()
             return
         if event.type == "message.completed":
+            data = cast(ItemEventData, data)
             item = data.item
-            if not isinstance(getattr(item, "data", None), MessageItemData):
+            if item is None or not isinstance(item.data, MessageItemData):
                 return
             if item.data.role != "assistant":
                 return
@@ -108,19 +119,25 @@ class PlainRenderer:
             self.notice(line)
             return
         if event.type == "policy.approval.remembered":
+            data = cast(PolicyEventData, data)
             self.notice(
                 f"[approval] remembered for this {data.remembered_scope}: {data.reason}"
             )
             return
-        if event.type == "policy.decision.recorded" and data.remembered_by:
-            self.notice(
-                f"[approval] auto-approved ({data.remembered_scope}): {data.reason}"
-            )
-            return
-        if event.type == "run.failed" and data.error is not None:
-            self.notice(f"[run failed] {data.error.code}: {data.error.message}")
-            return
+        if event.type == "policy.decision.recorded":
+            data = cast(PolicyEventData, data)
+            if data.remembered_by:
+                self.notice(
+                    f"[approval] auto-approved ({data.remembered_scope}): {data.reason}"
+                )
+                return
+        if event.type == "run.failed":
+            data = cast(RunEventData, data)
+            if data.error is not None:
+                self.notice(f"[run failed] {data.error.code}: {data.error.message}")
+                return
         if event.type == "run.cancelled":
+            data = cast(RunEventData, data)
             reason = f" reason={data.reason}" if data.reason else ""
             self.notice(f"[run cancelled]{reason}")
 

@@ -13,12 +13,12 @@ import json
 from dataclasses import asdict, dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from sagents.v2.contracts.commands import StartRun
-from sagents.v2.contracts.events import RuntimeEvent
+from sagents.v2.contracts.events import InteractionEventData, RuntimeEvent
 from sagents.v2.contracts.items import MessageItemData, TextBlock
-from sagents.v2.runtime.extensions import ExtensionScope, ExtensionScopeContext
+from sagents.v2.runtime.extensions import ExtensionScope, ExtensionScopeContext, ProviderSet
 from sagents.v2.runtime.extensions.official import builtin_extension_registry
 from sagents.v2.runtime.session import SessionStore
 from sagents.v2.runtime.session.aggregate import SessionAggregate
@@ -57,14 +57,16 @@ def open_session_store(session_root: str | Path) -> SessionStore:
     """用与 ``SAgentBuilder`` 相同的插件打开文件系统 SessionStore（会取写锁）。"""
 
     registration = builtin_extension_registry().get(SESSION_STORE_PLUGIN)
-    return registration.factory(
+    store = registration.factory(
         ExtensionScopeContext(
             scope=ExtensionScope.PROCESS,
             scope_id="sage-cli-v2-sessions",
             config={"root": str(Path(session_root).expanduser())},
         ),
-        {},
+        ProviderSet(),
     )
+    # The filesystem registration uses a synchronous SessionStore factory.
+    return cast(SessionStore, store)
 
 
 def discover_session_dirs(session_root: str | Path) -> list[Path]:
@@ -298,6 +300,7 @@ def transcript_entries(
             outcome = event.type.rsplit(".", 1)[-1]  # succeeded / failed / cancelled
             entries.append(TranscriptEntry("tool", f"{data.tool_name} {outcome}", detail))
         elif event.type == "interaction.resolved":
+            data = cast(InteractionEventData, data)
             entries.append(
                 TranscriptEntry(
                     "interaction",
