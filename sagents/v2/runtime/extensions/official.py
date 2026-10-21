@@ -12,7 +12,6 @@ from sagents.v2.tool.provider import ToolProvider
 
 import importlib.util
 import inspect
-import os
 
 from sagents.v2.agent.policy import (
     BudgetRule,
@@ -1518,32 +1517,3 @@ async def _model_factory(context, dependencies):
         route, credential, client=dependencies.get_provider("model.client"),
         provider_instance_id=context.config.get("provider_instance_id"),
     )
-
-
-_TRACE_PROPERTIES = {
-    "environment": {"type": "string", "default": "production"},
-    "content_mode": {
-        "type": "string",
-        "enum": ["metadata", "redacted", "raw"],
-        "default": "redacted",
-    },
-    "max_content_chars": {
-        "type": "integer",
-        "minimum": 256,
-        "maximum": 65536,
-        "default": 16384,
-    },
-    "sample_rate": {"type": "number", "minimum": 0, "maximum": 1, "default": 1.0},
-    "max_queue_size": {"type": "integer", "minimum": 1, "default": 2048},
-    "max_active_spans": {"type": "integer", "minimum": 1, "default": 4096},
-    "timeout_seconds": {
-        "type": "number",
-        "exclusiveMinimum": 0,
-        "maximum": 30,
-        "default": 3.0,
-    },
-}
-
-
-def _trace_options(config):
-    return {key: config[key] for key in _TRACE_PROPERTIES if key in config}

@@ -1,4 +1,5 @@
 """Select the process observation provider once, before Desktop startup logging."""
+
 from __future__ import annotations
 
 import json
@@ -10,6 +11,7 @@ from sagents.v2.runtime.observability.provider import create_observability_provi
 
 def create_desktop_observability(runtime_root: Path):
     from .package import desktop_v2_manifest
+
     settings_path = runtime_root / "settings.json"
     settings = json.loads(settings_path.read_text()) if settings_path.exists() else {}
     selection = desktop_v2_manifest(

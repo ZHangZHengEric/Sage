@@ -219,10 +219,10 @@ def test_server_phoenix_defaults_to_full_raw_capture_with_explicit_override(tmp_
     assert server_v2_manifest(settings).runtime.capabilities["observability.provider"].config["content_mode"] == expected
 
 
-def test_server_saved_phoenix_selection_uses_explicit_provider_defaults(tmp_path):
+def test_server_saved_phoenix_selection_inherits_server_capture_defaults(tmp_path):
     settings = make_settings(tmp_path, plugin_overrides={"observability.provider":{
         "plugin":"sage.observability.phoenix", "config":{"endpoint":"http://phoenix/v1/traces"}}})
-    assert server_v2_manifest(settings).runtime.capabilities["observability.provider"].config.get("content_mode", "redacted") == "redacted"
+    assert server_v2_manifest(settings).runtime.capabilities["observability.provider"].config["content_mode"] == "raw"
 
 
 def test_server_other_trace_backends_keep_redacted_default(tmp_path):

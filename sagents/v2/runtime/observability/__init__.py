@@ -35,8 +35,6 @@ from sagents.v2.runtime.observability.traces import (
 _LAZY_EXPORTS = {
     "ObservabilityProvider": ("sagents.v2.runtime.observability.provider", "ObservabilityProvider"),
     "create_observability_provider": ("sagents.v2.runtime.observability.provider", "create_observability_provider"),
-    "ObservabilityProvider": ("sagents.v2.runtime.observability.provider", "ObservabilityProvider"),
-    "create_observability_provider": ("sagents.v2.runtime.observability.provider", "create_observability_provider"),
     "PhoenixTraceSink": ("sagents.v2.runtime.observability.plugins.phoenix", "PhoenixTraceSink"),
     "phoenix_available": ("sagents.v2.runtime.observability.plugins.phoenix", "phoenix_available"),
     "LangfuseTraceSink": ("sagents.v2.runtime.observability.plugins.langfuse", "LangfuseTraceSink"),

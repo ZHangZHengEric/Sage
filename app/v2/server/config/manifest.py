@@ -162,8 +162,6 @@ def _required_guarantees(
 def _runtime_capabilities(
     settings: ServerSettings | None,
 ) -> dict[str, CapabilitySelection]:
-    log_level = settings.log_level if settings is not None else "info"
-    log_format = settings.log_format if settings is not None else "json"
     from app.v2.server.catalog.plugins import AGENT_DEFAULTS, DEFAULT_CONFIG
 
     capabilities: dict[str, CapabilitySelection] = {
@@ -236,10 +234,16 @@ def _runtime_capabilities(
             key: CapabilitySelection.model_validate(value)
             for key, value in settings.plugin_overrides.items()
         })
+        observation = capabilities["observability.provider"]
+        if observation.plugin in {f"sage.observability.{backend}" for backend in ("local", "noop", "otlp", "langfuse", "phoenix")}:
+            defaults = _observation_selection(settings, backend=observation.plugin.removeprefix("sage.observability."))
+            capabilities["observability.provider"] = observation.model_copy(update={
+                "config": {**defaults.config, **observation.config},
+            })
     return capabilities
 
 
-def _observation_selection(settings):
+def _observation_selection(settings, *, backend=None):
     """One backend selection owns logs, diagnostics, query settings and traces."""
     config = {"log_level": settings.log_level if settings else "info",
               "log_format": settings.log_format if settings else "json",
@@ -247,8 +251,10 @@ def _observation_selection(settings):
     if settings is None:
         return CapabilitySelection(plugin="sage.observability.local", config=config)
     config["log_root"] = settings.log_directory or None
-    backend = settings.effective_trace_backend
+    backend = backend or ("local" if settings.effective_trace_backend == "noop" else settings.effective_trace_backend)
     if backend == "noop":
+        return CapabilitySelection(plugin="sage.observability.noop")
+    if backend == "local":
         config.update(diagnostics_root=str(settings.data_root / "runtime" / "diagnostics"),
                       diagnostics_storage="sqlite")
         return CapabilitySelection(plugin="sage.observability.local", config=config)

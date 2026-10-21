@@ -6,6 +6,8 @@ from collections import Counter, defaultdict
 from datetime import datetime, time, timedelta, timezone
 from typing import Any
 
+import httpx
+
 from sagents.v2.contracts.commands import StartRun
 from sagents.v2.contracts.common import utc_now
 from sagents.v2.contracts.errors import SageV2Error
@@ -145,10 +147,10 @@ async def build_usage_overview(
                 },
             )
         try:
-            requests = await self.diagnostics.list_model_requests(
-                session_id=session_id
+            requests = await self.observability.list_model_requests(
+                session_id=session_id, run_ids={run.run_id for run in runs}
             )
-        except (OSError, ValueError, SageV2Error) as error:
+        except (OSError, ValueError, SageV2Error, httpx.HTTPError, TimeoutError, NotImplementedError) as error:
             skipped_diagnostic_sessions.add(session_id)
             self.logger.warning(
                 "usage.diagnostics_skipped",
