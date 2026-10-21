@@ -104,7 +104,7 @@ async def test_default_filesystem_and_stable_reference_path(tmp_path, targets):
     from sagents.v2.composition.defaults import default_runtime
     from sagents.v2.skill.plugins.filesystem import FilesystemSkillProvider
 
-    for name in ("skill.management", "skill.catalog"):
+    for name in ("skill.management", "skill.provider"):
         selected = default_runtime(tmp_path).capabilities[name]
         assert selected.plugin == "sage.skill.filesystem"
         assert selected.config == {"roots": [str(tmp_path / "skills")]}

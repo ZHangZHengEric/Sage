@@ -265,7 +265,7 @@ async def test_backup_cannot_overwrite_another_session_run_identity(store):
 
 @pytest.mark.asyncio
 async def test_custom_session_plugin_without_attachments_fails_with_clear_error():
-    from sagents.v2.runtime.artifact.plugins.session import SessionArtifactStore
+    from sagents.v2.runtime.artifact import SessionArtifactStore
 
     with pytest.raises(SageV2Error) as caught:
         await SessionArtifactStore(object(), "run").get("image")

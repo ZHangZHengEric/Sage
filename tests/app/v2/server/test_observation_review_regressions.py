@@ -14,7 +14,7 @@ from fastapi.testclient import TestClient
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 
 from app.v2.server.main import create_app
-from app.v2.server.observability.external import ExternalDiagnostics
+from sagents.v2.runtime.observability.performance_evidence import ExternalDiagnostics
 from app.v2.server.storage.downloads import prepare_session_export
 from sagents.v2.model.contracts import ModelMessage, ModelRequest, ModelResponse
 from sagents.v2.contracts.items import TextBlock
@@ -133,7 +133,7 @@ async def test_request_preflight_precedes_dump_and_keeps_rejected_input_memory_b
             raise AssertionError('request serializer ran before admission')
     request = Request(request_id='request', run_id='run', model_binding='main', messages=tuple(
         ModelMessage(role='user', content=(TextBlock(text='history'),)) for _ in range(20_000)))
-    source = ExternalEvidenceSink(backend='phoenix', query_url='http://unused', raw_max_bytes=4096)
+    source = ExternalEvidenceSink(capture_mode=mode, backend='phoenix', query_url='http://unused', raw_max_bytes=4096)
     source.trace_sink = type('Trace', (), {'content_mode':mode})()
     try:
         tracemalloc.start()
@@ -158,7 +158,7 @@ async def test_response_and_log_preserve_json_fields_without_pre_admission_seria
             raise AssertionError('log serializer ran before admission')
     exporter = InMemorySpanExporter()
     trace = PhoenixTraceSink(endpoint='http://unused/v1/traces', exporter=exporter, content_mode='raw')
-    source = ExternalDiagnostics(backend='phoenix', query_url='http://unused')
+    source = ExternalDiagnostics(capture_mode="raw", backend='phoenix', query_url='http://unused')
     source.bind_trace_sink(trace)
     request = ModelRequest(request_id='q', run_id='r', model_binding='main', messages=())
     response = Response(response_id='response', finish_reason='stop', text='original\0中')
@@ -218,7 +218,7 @@ async def test_raw_flush_timeout_reaches_download_manifest_and_partial_availabil
             release.wait(5)
         def end_span(self, span):
             pass
-    source = ExternalEvidenceSink(backend='phoenix', query_url='http://unused')
+    source = ExternalEvidenceSink(capture_mode="raw", backend='phoenix', query_url='http://unused')
     source.trace_sink = BlockedSink()
     original_flush = source._raw_pipeline.flush
     monkeypatch.setattr(source._raw_pipeline, 'flush', lambda timeout=5: original_flush(.01))
@@ -277,8 +277,8 @@ async def test_resume_preparation_failure_closes_its_performance_segment(monkeyp
 
 @pytest.mark.asyncio
 async def test_pending_performance_entries_and_rows_are_bounded_and_report_loss(monkeypatch):
-    from app.v2.server.observability.external import timing_rows
-    from app.v2.server.observability.performance import build_run
+    from sagents.v2.runtime.observability.performance_evidence import timing_rows
+    from sagents.v2.runtime.observability.performance import build_run
     from tests.app.v2.server.test_performance import BASE
     exporter = InMemorySpanExporter()
     trace = PhoenixTraceSink(endpoint='http://unused/v1/traces', exporter=exporter)

@@ -10,7 +10,7 @@ import json
 from sagents.v2.agent.policy import ApprovalStrategy, DefaultToolPolicy
 from sagents.v2.package.manifest.runtime import CapabilitySelection
 from sagents.v2.runtime.extensions import (
-    CapabilityKey, CapabilityOffer, ExtensionDependency, ExtensionDescriptor, ExtensionRegistration,
+    CapabilityOffer, ExtensionDependency, ExtensionDescriptor, ExtensionRegistration,
     ExtensionScope,
 )
 
@@ -70,21 +70,16 @@ async def desktop_run_inputs(service, context, dependencies):
 
 
 def desktop_registrations(service):
-    def registration(capability, factory, *, extra=(), ownership="borrowed"):
+    def registration(capability, factory, *, ownership="borrowed"):
         return ExtensionRegistration(
             descriptor=ExtensionDescriptor(
                 plugin_id="com.sage.desktop.run." + capability.replace(".", "-"),
                 name="Desktop " + capability, version="2.0.0",
-                provides=tuple(CapabilityOffer(capability=name, api_version="2")
-                               for name in (capability, *extra)),
+                provides=(CapabilityOffer(capability=capability, api_version="2"),),
                 dependencies=(ExtensionDependency(capability="execution.environment"),),
                 supported_scopes=frozenset({ExtensionScope.RUN}), default_scope=ExtensionScope.RUN,
                 config_schema={"type": "object", "additionalProperties": False},
             ), factory=factory, ownership=ownership,
-            start=(lambda instance, context, deps: {
-                CapabilityKey(capability=name): getattr(instance, "catalog" if name == "tool.catalog" else "executor", instance)
-                if name.startswith("tool.") else instance for name in (capability, *extra)
-            }) if extra else None,
         )
 
     async def model(context, deps):
@@ -178,8 +173,8 @@ def desktop_registrations(service):
     return (
         budget,
         registration("model.provider", model),
-        registration("skill.catalog", skills, extra=("skill.source",)),
-        registration("tool.catalog", tools, extra=("tool.executor",)),
+        registration("skill.provider", skills),
+        registration("tool.provider", tools),
         registration("agent.tool-policy", policy),
         registration("context.segment-provider", context_provider),
         registration("agent.output-checker", output_checker),
@@ -191,6 +186,6 @@ def desktop_run_selections():
     return {"execution.model-budget": CapabilitySelection(plugin="com.sage.desktop.model-budget"), **{capability: CapabilitySelection(
         plugin="com.sage.desktop.run." + capability.replace(".", "-"), scope=ExtensionScope.RUN,
     ) for capability in (
-        "model.provider", "skill.catalog", "agent.tool-policy", "context.segment-provider",
+        "model.provider", "skill.provider", "agent.tool-policy", "context.segment-provider",
         "agent.output-checker", "agent.self-configuration",
     )}}

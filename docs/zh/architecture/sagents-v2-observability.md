@@ -13,9 +13,22 @@ ref: v2-detail-sagents-v2-observability
 
 ## 职责
 
-`DiagnosticSink` 保存本地模型请求/响应及 wire request，供 Session 的模型诊断查看使用；它不是恢复依据。`TraceSink` 表达 Agent、模型、工具的生命周期、输入输出、用量、状态与父子关系。两者直接消费执行时的数据，互不读取对方的文件，也不依赖观测后端恢复 Run。诊断写入失败只告警，不中断模型调用。
+`observability.provider` 是唯一的观测能力配置。Provider 统一创建日志输出、调用链导出、模型诊断、证据查询及其关闭流程；日志、Span 和诊断内容仍使用各自的数据结构与采集规则。旧的三个独立能力配置已删除，不做迁移或兼容。
 
-`ObservedRunDriver` 负责 Agent 与工具，`RecordingModelProvider` 负责模型。它们产生同一份厂商无关 `TraceSpan`，`sage.trace.otlp` 导出通用/GenAI 字段，`sage.trace.langfuse` 和 `sage.trace.phoenix` 分别在公共 OTLP 传输上添加平台字段映射。没有新增数据库表或持久化观测队列。
+可选插件为 `sage.observability.local`、`sage.observability.noop`、`sage.observability.otlp`、`sage.observability.langfuse` 和 `sage.observability.phoenix`。本地插件支持控制台/轮转文件日志与文件或独立 SQLite 诊断；SQLite 使用原有观测存储，不扩展业务数据库。外部插件封装导出和受支持的证据查询，不支持的查询明确标记不可用。
+
+`log_level` 控制输出日志；`sample_rate` 和 `content_mode` 控制普通调用链；`diagnostic_content_mode` 独立控制诊断内容。外部原始诊断使用单独的采集传输，避免被普通 Trace 采样丢弃。关闭时先刷新诊断，再关闭导出器。观测写入失败不改变 Run 执行结果，查询仍需宿主先校验 Session 和 Run 归属。
+
+```yaml
+capabilities:
+  observability.provider:
+    plugin: sage.observability.local
+    config:
+      log_level: info
+      log_root: /srv/sage/runtime/logs
+      diagnostics_root: /srv/sage/runtime/sessions
+      diagnostics_storage: files
+```
 
 ## 对话耗时诊断
 
@@ -123,7 +136,7 @@ PHOENIX_API_KEY=your-api-key
 
 `endpoint` 是完整的 OTLP/HTTP protobuf 接收地址，包含 `/v1/traces`；云端实例填写提供的完整地址并保留路径前缀。API Key 使用 Bearer Auth，可通过 `SAGE_SERVER_PHOENIX_API_KEY_ENV` 更改读取的环境变量名，manifest 不保存密钥值。可选的 `SAGE_SERVER_PHOENIX_PUBLIC_URL` 单独配置浏览器入口。
 
-SDK 插件 ID 为 `sage.trace.phoenix`，配置字段为 `endpoint`、`project_name`、`api_key_env`、`service_name` 及公共 trace 选项。Server 的「链路追踪」插件中可单独选择 Phoenix；保存后重启 Server 生效。
+SDK 插件 ID 为 `sage.observability.phoenix`，配置字段为 `endpoint`、`project_name`、`api_key_env`、`service_name` 及公共 trace 选项。Server 的「观测」能力中可选择 Phoenix；保存后重启 Server 生效。
 
 Phoenix 项目使用资源字段 `openinference.project.name`；Agent、模型、工具分别映射为 OpenInference 的 `AGENT`、`LLM`、`TOOL`。`session.id` 使用根 Session 聚合子 Agent，原始 Sage 身份仍保留。缓存和推理 token 作为 prompt/completion 的子计数，total 仅计算 input + output。内容模式、脱敏和首 token/首正文事件沿用公共观测。此插件导出评测所需的运行数据，不主动发起评测或写入评分。
 
@@ -135,9 +148,9 @@ SAGE_SERVER_TRACE_OTLP_ENDPOINT=http://127.0.0.1:4318/v1/traces
 SAGE_SERVER_TRACE_OTLP_PROTOCOL=http
 ```
 
-gRPC 时选择 `grpc` 并使用 collector 的 gRPC 地址；只有明文 gRPC 才设置 `SAGE_SERVER_TRACE_OTLP_INSECURE=true`。没有显式 TRACE_BACKEND 时，旧 `SAGE_SERVER_JAEGER_URL` 配置继续选择 OTLP。显式 `noop` 关闭观测。这些后端都支持内容限制、环境、采样和导出超时。通用 collector 认证可使用 OTel 的 exporter headers 环境配置。
+gRPC 时选择 `grpc` 并使用 collector 的 gRPC 地址；只有明文 gRPC 才设置 `SAGE_SERVER_TRACE_OTLP_INSECURE=true`。没有显式 TRACE_BACKEND 时，旧 `SAGE_SERVER_JAEGER_URL` 配置继续选择 OTLP。环境变量显式 `noop` 关闭外部链路并使用本地观测；选择 `sage.observability.noop` 才会关闭全部观测。这些后端都支持内容限制、环境、采样和导出超时。通用 collector 认证可使用 OTel 的 exporter headers 环境配置。
 
-非 Server 宿主通过 `observability.trace-sink` 选择同名插件，配置 schema 见官方插件注册表；队列默认 2048、活动 span 默认 4096，可分别设置 max_queue_size/max_active_spans。插件是进程级资源，宿主关闭时调用 stop/close。当前 capability 单选；需要同时投递多个后端时可在外部 OTel Collector 分流。
+非 Server 宿主通过 `observability.provider` 选择同名插件，配置 schema 见官方插件注册表；队列默认 2048、活动 span 默认 4096，可分别设置 max_queue_size/max_active_spans。插件是进程级资源，宿主关闭时调用 stop/close。当前 capability 单选；需要同时投递多个后端时可在外部 OTel Collector 分流。
 
 ## 失败与验证
 

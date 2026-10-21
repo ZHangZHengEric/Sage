@@ -1,13 +1,9 @@
-"""Artifact port backed by the owning Run's SessionStore plugin."""
+"""Shared capability publication and artifact view for Session storage plugins."""
 
 from sagents.v2.contracts.errors import ErrorCategory, RuntimeErrorInfo, SageV2Error
 
 
 class SessionArtifactStore:
-    plugin_id = "sage.artifact.session"
-    name = "Session artifact storage"
-    description = "Artifacts retained by the owning Session store."
-
     def __init__(self, session_store, run_id=None):
         self.session_store = session_store
         self.run_id = run_id
@@ -59,3 +55,14 @@ class SessionArtifactStore:
         raise NotImplementedError(
             "Session attachments are retained until their owning session is deleted."
         )
+
+
+SESSION_STORAGE_CAPABILITIES = ("session.store", "derived-state.store", "artifact.store")
+
+
+def session_storage_providers(store):
+    return {
+        "session.store": store,
+        "derived-state.store": store,
+        "artifact.store": SessionArtifactStore(store),
+    }

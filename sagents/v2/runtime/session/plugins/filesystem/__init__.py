@@ -2409,6 +2409,10 @@ class FilesystemSessionStore(metaclass=_FilesystemSessionStoreMeta):
         await self._coordinator.get_session(session_id)
         return await asyncio.to_thread(self._coordinator._session_dir, session_id)
 
+    def start(self, context, dependencies):
+        from sagents.v2.runtime.session.plugins import session_storage_providers
+        return session_storage_providers(self)
+
     def __getattr__(self, name):
         return getattr(self._coordinator, name)
 

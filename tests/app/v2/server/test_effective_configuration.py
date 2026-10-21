@@ -39,10 +39,11 @@ def test_public_and_admin_inventory_show_session_artifact_selection(client):
     user, _ = identity(client, "artifact-config")
     public = client.get("/api/plugins", headers=user).json()["data"]
     admin = client.get("/api/plugins/server", headers=admin_headers(client)).json()["data"]
-    assert public["defaults"]["artifact.store"] == "sage.artifact.session"
+    assert public["defaults"]["artifact.store"] == "sage.session.filesystem"
     selected = next(item for item in admin["providers"] if item["capability"] == "artifact.store")
-    assert selected["plugin_id"] == "sage.artifact.session"
+    assert selected["plugin_id"] == "sage.session.filesystem"
     assert selected["implementation"] == "SessionArtifactStore"
+    assert "artifact.store" not in admin["configurable"]
 
 
 async def test_scoped_artifacts_keep_selected_backend_and_isolate_runs():

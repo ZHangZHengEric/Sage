@@ -8,6 +8,8 @@ inventory.
 
 from __future__ import annotations
 
+from sagents.v2.tool.provider import ToolProvider
+
 import importlib.util
 import inspect
 import os
@@ -29,7 +31,6 @@ from sagents.v2.context import (
     InMemoryConversationSummaryStore,
     ModelConversationSummarizer,
     PersistentSummaryContextReducer,
-    ReferenceContextUnitCompactor,
     SessionDerivedConversationSummaryStore,
     WindowContextReducer,
 )
@@ -43,7 +44,7 @@ from sagents.v2.interfaces.protocols.mcp import McpProtocolAdapter
 from sagents.v2.interfaces.protocols.native import NativeProtocolAdapter
 from sagents.v2.package.registry import InMemoryAgentPackageRegistry
 from sagents.v2.runtime.artifact import InMemoryArtifactStore
-from sagents.v2.runtime.artifact import FilesystemArtifactStore, SessionArtifactStore
+from sagents.v2.runtime.artifact import FilesystemArtifactStore
 from sagents.v2.runtime.credentials import (
     EnvironmentCredentialProvider,
     MappingCredentialProvider,
@@ -58,20 +59,6 @@ from sagents.v2.runtime.execution.sandbox import (
 from sagents.v2.runtime.execution.scheduler import (
     FilesystemScheduler,
     InMemoryScheduler,
-)
-from sagents.v2.runtime.observability import (
-    FilesystemDiagnosticSink,
-    FilesystemLogSink,
-    NoopDiagnosticSink,
-    NoopLogSink,
-    NoopTraceSink,
-    OtlpTraceSink,
-    LangfuseTraceSink,
-    langfuse_available,
-    PhoenixTraceSink,
-    phoenix_available,
-    StdoutLogSink,
-    otel_available,
 )
 from sagents.v2.session_memory import (
     NoopSessionMemoryProvider,
@@ -370,14 +357,6 @@ def _register_infrastructure(registry: ExtensionRegistry) -> None:
 
     _one(
         registry,
-        ReferenceContextUnitCompactor,
-        "context.unit-compactor",
-        lambda context, dependencies: ReferenceContextUnitCompactor(),
-        scopes={ExtensionScope.PROCESS, ExtensionScope.AGENT},
-        config_schema={"type": "object", "additionalProperties": False},
-    )
-    _one(
-        registry,
         WindowContextReducer,
         "context.reducer",
         lambda context, dependencies: WindowContextReducer(),
@@ -395,13 +374,11 @@ def _register_infrastructure(registry: ExtensionRegistry) -> None:
                 context.config.get("summary_target_tokens", 1024)
             ),
             protected_recent_units=int(context.config.get("protected_recent_units", 4)),
-            unit_compactor=dependencies.require_unique("context.unit-compactor"),
             max_summary_calls=int(context.config.get("max_summary_calls", 64)),
         ),
         dependencies=(
             ExtensionDependency(capability="context.summary-store"),
             ExtensionDependency(capability="context.summarizer"),
-            ExtensionDependency(capability="context.unit-compactor"),
         ),
         scopes={ExtensionScope.AGENT, ExtensionScope.RUN},
         config_schema={
@@ -740,221 +717,8 @@ def _register_infrastructure(registry: ExtensionRegistry) -> None:
             "additionalProperties": False,
         },
     )
-    _one(
-        registry,
-        NoopDiagnosticSink,
-        "observability.diagnostic-sink",
-        lambda context, dependencies: NoopDiagnosticSink(),
-        scopes={ExtensionScope.PROCESS},
-    )
-    _one(
-        registry,
-        FilesystemDiagnosticSink,
-        "observability.diagnostic-sink",
-        lambda context, dependencies: FilesystemDiagnosticSink(
-            context.config["root"],
-            legacy_root=context.config.get("legacy_root"),
-        ),
-        scopes={ExtensionScope.PROCESS},
-        config_schema={
-            "type": "object",
-            "properties": {
-                "root": {"type": "string", "minLength": 1},
-                "legacy_root": {"type": ["string", "null"], "minLength": 1},
-            },
-            "required": ["root"],
-            "additionalProperties": False,
-        },
-    )
-    _one(
-        registry,
-        NoopLogSink,
-        "observability.log-sink",
-        lambda context, dependencies: NoopLogSink(),
-        scopes={ExtensionScope.PROCESS},
-    )
-    _one(
-        registry,
-        FilesystemLogSink,
-        "observability.log-sink",
-        lambda context, dependencies: FilesystemLogSink(
-            context.config["root"],
-            filename=str(context.config.get("filename", "sage.jsonl")),
-            max_bytes=int(context.config.get("max_bytes", 10 * 1024 * 1024)),
-            backup_count=int(context.config.get("backup_count", 5)),
-            min_level=str(context.config.get("min_level", "info")),
-        ),
-        scopes={ExtensionScope.PROCESS},
-        config_schema={
-            "type": "object",
-            "properties": {
-                "root": {"type": "string", "minLength": 1},
-                "filename": {"type": "string", "minLength": 1},
-                "max_bytes": {"type": "integer", "minimum": 1024},
-                "backup_count": {"type": "integer", "minimum": 1},
-                "min_level": {
-                    "type": "string",
-                    "enum": ["debug", "info", "warning", "error", "critical"],
-                },
-            },
-            "required": ["root"],
-            "additionalProperties": False,
-        },
-    )
-    _one(
-        registry,
-        StdoutLogSink,
-        "observability.log-sink",
-        lambda context, dependencies: StdoutLogSink(
-            stream=str(context.config.get("stream", "stdout")),
-            min_level=str(context.config.get("min_level", "info")),
-            format=str(context.config.get("format", "json")),
-        ),
-        scopes={ExtensionScope.PROCESS},
-        config_schema={
-            "type": "object",
-            "properties": {
-                "stream": {
-                    "type": "string",
-                    "enum": ["stdout", "stderr"],
-                    "default": "stdout",
-                },
-                "min_level": {
-                    "type": "string",
-                    "enum": ["debug", "info", "warning", "error", "critical"],
-                    "default": "info",
-                },
-                "format": {
-                    "type": "string",
-                    "enum": ["json", "text"],
-                    "default": "json",
-                },
-            },
-            "additionalProperties": False,
-        },
-    )
-    _one(
-        registry,
-        NoopTraceSink,
-        "observability.trace-sink",
-        lambda context, dependencies: NoopTraceSink(),
-        scopes={ExtensionScope.PROCESS},
-    )
-    _one(
-        registry,
-        OtlpTraceSink,
-        "observability.trace-sink",
-        lambda context, dependencies: OtlpTraceSink(
-            endpoint=str(context.config.get("endpoint") or "http://127.0.0.1:4317"),
-            service_name=str(context.config.get("service_name") or "sage"),
-            protocol=str(context.config.get("protocol") or "grpc"),
-            insecure=bool(context.config.get("insecure", True)),
-            **_trace_options(context.config),
-        ),
-        scopes={ExtensionScope.PROCESS},
-        availability=ExtensionAvailability(
-            available=otel_available(),
-            reason=(
-                None
-                if otel_available()
-                else "optional opentelemetry packages are not installed"
-            ),
-        ),
-        config_schema={
-            "type": "object",
-            "properties": {
-                "endpoint": {
-                    "type": "string",
-                    "minLength": 1,
-                    "default": "http://127.0.0.1:4317",
-                },
-                "service_name": {
-                    "type": "string",
-                    "minLength": 1,
-                    "default": "sage",
-                },
-                "protocol": {
-                    "type": "string",
-                    "enum": ["grpc", "http"],
-                    "default": "grpc",
-                },
-                "insecure": {"type": "boolean", "default": True},
-                **_TRACE_PROPERTIES,
-            },
-            "additionalProperties": False,
-        },
-        capabilities={"exports_otlp": True},
-    )
-    _one(
-        registry,
-        LangfuseTraceSink,
-        "observability.trace-sink",
-        lambda context, dependencies: LangfuseTraceSink(
-            base_url=context.config["base_url"],
-            public_key=os.environ.get(
-                context.config.get("public_key_env", "LANGFUSE_PUBLIC_KEY"), ""
-            ),
-            secret_key=os.environ.get(
-                context.config.get("secret_key_env", "LANGFUSE_SECRET_KEY"), ""
-            ),
-            service_name=context.config.get("service_name", "sage"),
-            ingestion_version=context.config.get("ingestion_version", 4),
-            **_trace_options(context.config),
-        ),
-        scopes={ExtensionScope.PROCESS},
-        availability=ExtensionAvailability(
-            available=langfuse_available(),
-            reason=None
-            if langfuse_available()
-            else "optional OTLP HTTP exporter is not installed",
-        ),
-        config_schema={
-            "type": "object",
-            "required": ["base_url"],
-            "properties": {
-                "base_url": {"type": "string", "minLength": 1},
-                "public_key_env": {"type": "string", "default": "LANGFUSE_PUBLIC_KEY"},
-                "secret_key_env": {"type": "string", "default": "LANGFUSE_SECRET_KEY"},
-                "service_name": {"type": "string", "default": "sage"},
-                "ingestion_version": {"type": "integer", "enum": [3, 4], "default": 4},
-                **_TRACE_PROPERTIES,
-            },
-            "additionalProperties": False,
-        },
-        capabilities={"exports_otlp": True},
-    )
-    _one(
-        registry,
-        PhoenixTraceSink,
-        "observability.trace-sink",
-        lambda context, dependencies: PhoenixTraceSink(
-            endpoint=context.config["endpoint"],
-            project_name=context.config.get("project_name", "sage"),
-            api_key=os.environ.get(
-                context.config.get("api_key_env", "PHOENIX_API_KEY"), ""
-            ),
-            service_name=context.config.get("service_name", "sage"),
-            **_trace_options(context.config),
-        ),
-        scopes={ExtensionScope.PROCESS},
-        availability=ExtensionAvailability(
-            available=phoenix_available(),
-            reason=None if phoenix_available() else "optional OTLP HTTP exporter is not installed",
-        ),
-        config_schema={
-            "type": "object",
-            "required": ["endpoint"],
-            "properties": {
-                "endpoint": {"type": "string", "minLength": 1},
-                "project_name": {"type": "string", "minLength": 1, "default": "sage"},
-                "api_key_env": {"type": "string", "default": "PHOENIX_API_KEY"},
-                "service_name": {"type": "string", "default": "sage"},
-                **_TRACE_PROPERTIES,
-            },
-            "additionalProperties": False,
-        },
-        capabilities={"exports_otlp": True},
-    )
+    from sagents.v2.runtime.observability.registrations import register_observability_plugins
+    register_observability_plugins(registry)
     _one(
         registry,
         ClawWorkspaceInitializer,
@@ -975,20 +739,6 @@ def _register_infrastructure(registry: ExtensionRegistry) -> None:
         "workspace.initializer",
         lambda context, dependencies: BareWorkspaceInitializer(),
         scopes={ExtensionScope.PROCESS, ExtensionScope.AGENT},
-    )
-    _one(
-        registry,
-        SessionArtifactStore,
-        "artifact.store",
-        lambda context, dependencies: SessionArtifactStore(
-            dependencies.require_unique("session.store")
-        ),
-        dependencies=(ExtensionDependency(capability="session.store"),),
-        scopes={ExtensionScope.PROCESS},
-        config_schema={
-            "type": "object",
-            "additionalProperties": False,
-        },
     )
     _one(
         registry,
@@ -1068,10 +818,7 @@ def _register_infrastructure(registry: ExtensionRegistry) -> None:
                 version="2.0.0",
                 provides=(
                     CapabilityOffer(
-                        capability="tool.catalog", api_version="2", name="mcp"
-                    ),
-                    CapabilityOffer(
-                        capability="tool.executor", api_version="2", name="mcp"
+                        capability="tool.provider", api_version="2", name="mcp"
                     ),
                 ),
                 supported_scopes=frozenset(
@@ -1102,8 +849,7 @@ def _register_infrastructure(registry: ExtensionRegistry) -> None:
                 session_factory=dependencies.get_provider("mcp.session-factory"),
             ),
             start=lambda provider, context, dependencies: {
-                "tool.catalog:mcp": provider,
-                "tool.executor:mcp": provider,
+                "tool.provider:mcp": ToolProvider(provider, provider),
             },
         )
     )
@@ -1310,14 +1056,16 @@ def _bytes(value) -> bytes:
 
 
 def _register_session_and_memory(registry: ExtensionRegistry) -> None:
+    from sagents.v2.runtime.session.plugins import SESSION_STORAGE_CAPABILITIES
+
+    storage_offers = tuple(CapabilityOffer(capability=key, api_version="2")
+                           for key in SESSION_STORAGE_CAPABILITIES)
     registry.register(
         ExtensionRegistration(
             descriptor=ExtensionDescriptor(
                 **_identity(FilesystemSessionStore),
                 version="2.1.0",
-                provides=(
-                    CapabilityOffer(capability="session.store", api_version="2"),
-                ),
+                provides=storage_offers,
                 supported_scopes=frozenset({ExtensionScope.PROCESS}),
                 config_schema={
                     "type": "object",
@@ -1349,9 +1097,7 @@ def _register_session_and_memory(registry: ExtensionRegistry) -> None:
             descriptor=ExtensionDescriptor(
                 **_identity(MysqlSessionStore),
                 version="2.0.0",
-                provides=(
-                    CapabilityOffer(capability="session.store", api_version="2"),
-                ),
+                provides=storage_offers,
                 supported_scopes=frozenset({ExtensionScope.PROCESS}),
                 config_schema={
                     "type": "object",
@@ -1406,7 +1152,7 @@ def _register_session_and_memory(registry: ExtensionRegistry) -> None:
             descriptor=ExtensionDescriptor(
                 **_identity(RedisMysqlSessionStore),
                 version="3.0.0",
-                provides=(CapabilityOffer(capability="session.store", api_version="2"),),
+                provides=storage_offers,
                 supported_scopes=frozenset({ExtensionScope.PROCESS}),
                 config_schema={
                     "type": "object",
@@ -1508,9 +1254,7 @@ def _register_session_and_memory(registry: ExtensionRegistry) -> None:
             descriptor=ExtensionDescriptor(
                 **_identity(EphemeralSessionStore),
                 version="2.0.0",
-                provides=(
-                    CapabilityOffer(capability="session.store", api_version="2"),
-                ),
+                provides=storage_offers,
                 supported_scopes=frozenset({ExtensionScope.PROCESS}),
                 config_schema=_strict_empty_config_schema(),
                 capabilities={"durable": False, "testing": True},
@@ -1597,8 +1341,7 @@ def _register_tools_skills_and_flow(registry: ExtensionRegistry) -> None:
                 handlers=dependencies.get_provider("tool.handlers"),
             ),
             start=lambda plugin, context, dependencies: {
-                "tool.catalog:ephemeral": plugin.catalog,
-                "tool.executor:ephemeral": plugin.executor,
+                "tool.provider:ephemeral": ToolProvider(plugin.catalog, plugin.executor),
             },
         )
     )
@@ -1620,8 +1363,7 @@ def _register_tools_skills_and_flow(registry: ExtensionRegistry) -> None:
                 allow_editing=context.config.get("allow_editing", False),
             ),
             start=lambda plugin, context, dependencies: {
-                "tool.catalog:skill": plugin.catalog,
-                "tool.executor:skill": plugin.executor,
+                "tool.provider:skill": ToolProvider(plugin.catalog, plugin.executor),
             },
         )
     )
@@ -1633,8 +1375,7 @@ def _register_tools_skills_and_flow(registry: ExtensionRegistry) -> None:
                 runtime=dependencies.require_unique("runtime.kernel"),
             ),
             start=lambda plugin, context, dependencies: {
-                "tool.catalog:multi-agent": plugin.catalog,
-                "tool.executor:multi-agent": plugin.executor,
+                "tool.provider:multi-agent": ToolProvider(plugin.catalog, plugin.executor),
             },
         )
     )
@@ -1645,10 +1386,7 @@ def _register_tools_skills_and_flow(registry: ExtensionRegistry) -> None:
                 version="2.0.0",
                 provides=(
                     CapabilityOffer(
-                        capability="skill.catalog", api_version="2", name="filesystem"
-                    ),
-                    CapabilityOffer(
-                        capability="skill.source", api_version="2", name="filesystem"
+                        capability="skill.provider", api_version="2", name="filesystem"
                     ),
                     CapabilityOffer(capability="skill.management", api_version="2", name="filesystem"),
                 ),
@@ -1679,8 +1417,7 @@ def _register_tools_skills_and_flow(registry: ExtensionRegistry) -> None:
                 ),
             ),
             start=lambda provider, context, dependencies: {
-                "skill.catalog:filesystem": provider,
-                "skill.source:filesystem": provider,
+                "skill.provider:filesystem": provider,
                 "skill.management:filesystem": provider,
             },
         )

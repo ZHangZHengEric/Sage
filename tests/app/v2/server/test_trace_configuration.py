@@ -18,8 +18,8 @@ def test_langfuse_config_contains_only_credential_references(tmp_path, monkeypat
         tmp_path, trace_backend="langfuse", langfuse_base_url="https://lf.example"
     )
     manifest = server_v2_manifest(settings)
-    selection = manifest.runtime.capabilities["observability.trace-sink"]
-    assert selection.plugin == "sage.trace.langfuse"
+    selection = manifest.runtime.capabilities["observability.provider"]
+    assert selection.plugin == "sage.observability.langfuse"
     assert selection.config["secret_key_env"] == "LANGFUSE_SECRET_KEY"
     assert "sk-never-in-manifest" not in manifest.model_dump_json()
     registration = builtin_extension_registry().get(selection.plugin)
@@ -41,8 +41,8 @@ def test_trace_env_settings_and_explicit_noop_override(tmp_path, monkeypatch):
     )
     assert disabled.effective_trace_backend == "noop"
     assert (
-        server_v2_manifest(disabled).runtime.capabilities["observability.trace-sink"].plugin
-        == "sage.trace.noop"
+        server_v2_manifest(disabled).runtime.capabilities["observability.provider"].plugin
+        == "sage.observability.local"
     )
     assert not disabled.trace_console_url
 
@@ -73,7 +73,7 @@ def test_generic_otlp_http_configuration(tmp_path):
             trace_otlp_protocol="http",
         )
     )
-    config = manifest.runtime.capabilities["observability.trace-sink"].config
+    config = manifest.runtime.capabilities["observability.provider"].config
     assert config["protocol"] == "http"
     assert config["endpoint"] == "https://collector.example/v1/traces"
     assert config["insecure"] is False
@@ -131,15 +131,15 @@ def test_phoenix_environment_manifest_and_admin_selection(tmp_path, monkeypatch)
     monkeypatch.setenv("CUSTOM_PHOENIX_KEY", "never-save-this-key")
     settings = ServerSettings.from_env(data_root=tmp_path)
     manifest = server_v2_manifest(settings)
-    selection = manifest.runtime.capabilities["observability.trace-sink"]
-    assert selection.plugin == "sage.trace.phoenix"
+    selection = manifest.runtime.capabilities["observability.provider"]
+    assert selection.plugin == "sage.observability.phoenix"
     assert selection.config["project_name"] == "sage-test"
     assert selection.config["api_key_env"] == "CUSTOM_PHOENIX_KEY"
     assert not settings.trace_console_url
     assert "never-save-this-key" not in manifest.model_dump_json()
     store = ServerPluginConfig(tmp_path)
     saved = store.save(
-        {"observability.trace-sink": selection.model_dump(mode="json")}, revision({})
+        {"observability.provider": selection.model_dump(mode="json")}, revision({})
     )
     assert store.read() == saved
     assert "never-save-this-key" not in store.path.read_text()
@@ -199,12 +199,12 @@ def test_observability_uses_started_plugin_and_rejects_non_admin(tmp_path):
         phoenix_public_url="https://phoenix.example",
     )
     ServerPluginConfig(tmp_path).save(
-        {"observability.trace-sink": {"plugin": "sage.trace.noop"}}, revision({})
+        {"observability.provider": {"plugin": "sage.observability.noop"}}, revision({})
     )
     with TestClient(create_app(service=service)) as client:
         client.post("/api/auth/login", json={"username": "admin", "password": "admin12345"})
         links = client.get("/api/observability/services").json()["data"]
-        assert [link["id"] for link in links] == ["performance"]
+        assert links == []
         assert client.get("/api/observability/console", follow_redirects=False).status_code == 404
         client.post("/api/auth/register", json={"username": "viewer", "password": "viewer12345"})
         client.post("/api/auth/login", json={"username": "viewer", "password": "viewer12345"})
@@ -216,15 +216,15 @@ def test_observability_uses_started_plugin_and_rejects_non_admin(tmp_path):
 def test_server_phoenix_defaults_to_full_raw_capture_with_explicit_override(tmp_path, explicit, expected):
     settings = make_settings(tmp_path, trace_backend="phoenix", phoenix_endpoint="http://phoenix/v1/traces",
                              trace_content_mode=explicit)
-    assert server_v2_manifest(settings).runtime.capabilities["observability.trace-sink"].config["content_mode"] == expected
+    assert server_v2_manifest(settings).runtime.capabilities["observability.provider"].config["content_mode"] == expected
 
 
-def test_server_saved_phoenix_selection_without_content_mode_inherits_raw_default(tmp_path):
-    settings = make_settings(tmp_path, plugin_overrides={"observability.trace-sink":{
-        "plugin":"sage.trace.phoenix", "config":{"endpoint":"http://phoenix/v1/traces"}}})
-    assert server_v2_manifest(settings).runtime.capabilities["observability.trace-sink"].config["content_mode"] == "raw"
+def test_server_saved_phoenix_selection_uses_explicit_provider_defaults(tmp_path):
+    settings = make_settings(tmp_path, plugin_overrides={"observability.provider":{
+        "plugin":"sage.observability.phoenix", "config":{"endpoint":"http://phoenix/v1/traces"}}})
+    assert server_v2_manifest(settings).runtime.capabilities["observability.provider"].config.get("content_mode", "redacted") == "redacted"
 
 
 def test_server_other_trace_backends_keep_redacted_default(tmp_path):
     settings = make_settings(tmp_path, trace_backend="otlp", trace_otlp_endpoint="http://collector:4317")
-    assert server_v2_manifest(settings).runtime.capabilities["observability.trace-sink"].config["content_mode"] == "redacted"
+    assert server_v2_manifest(settings).runtime.capabilities["observability.provider"].config["content_mode"] == "redacted"

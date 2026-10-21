@@ -26,7 +26,7 @@ from sagents.v2.model.contracts import ModelToolCall
 from sagents.v2.package.manifest import SageManifestLoader
 from sagents.v2.package.manifest.resolver import CompositionResolver
 from sagents.v2.runtime.session import FilesystemSessionStore
-from sagents.v2.tool import McpServerConfig, McpToolPlugin
+from sagents.v2.tool import McpServerConfig, McpToolPlugin, ToolProvider
 
 
 MANIFEST = """
@@ -212,17 +212,19 @@ async def run_example(root: Path, *, cancel_first: bool = False):
     manifest = SageManifestLoader().loads(MANIFEST)
     resolved = CompositionResolver().resolve(manifest, models=__import__("yaml").safe_load(MODELS_YAML))
     from examples.v2.host.registrations import provided, runtime_for
+    from sagents.v2.runtime.session.plugins import SESSION_STORAGE_CAPABILITIES, session_storage_providers
     builder = SAgentBuilder()
     for registration in (
-        provided("example.store", lambda context, deps: store, "session.store"),
+        provided("example.store", lambda context, deps: store, *SESSION_STORAGE_CAPABILITIES,
+                 start=lambda instance, context, deps: session_storage_providers(instance)),
         provided("example.model", lambda context, deps: model, "model.provider"),
-        provided("example.tools", lambda context, deps: tools, "tool.catalog", "tool.executor"),
+        provided("example.tools", lambda context, deps: ToolProvider(tools, tools), "tool.provider"),
         provided("example.policy", lambda context, deps: DefaultToolPolicy(approval_strategy=ApprovalStrategy.AUTO_APPROVE), "agent.tool-policy"),
     ):
         builder.register(registration)
     runtime = runtime_for(root / "runtime", manifest.runtime, capabilities={
         "session.store": {"plugin": "example.store"}, "model.provider": {"plugin": "example.model"},
-        "tool.catalog": {"plugin": "example.tools"}, "agent.tool-policy": {"plugin": "example.policy"},
+        "tool.provider": {"plugin": "example.tools"}, "agent.tool-policy": {"plugin": "example.policy"},
     })
     app = await builder.build(runtime=runtime, models_config_text=MODELS_YAML)
     agent = await app.load_agent(manifest)

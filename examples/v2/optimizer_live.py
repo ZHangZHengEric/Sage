@@ -275,10 +275,10 @@ async def main(args):
         choices = {"model.provider": {"plugin": "example.model"}}
         if args.challenge:
             tools = DecoratedToolProvider(AuditTools())
-            registrations.append(provided("example.tools", lambda context, deps: tools, "tool.catalog", "tool.executor"))
+            registrations.append(provided("example.tools", lambda context, deps: tools, "tool.provider"))
             policy = DefaultToolPolicy(approval_strategy=ApprovalStrategy.AUTO_APPROVE)
             registrations.append(provided("example.policy", lambda context, deps: policy, "agent.tool-policy"))
-            choices.update({"tool.catalog": {"plugin": "example.tools"}, "agent.tool-policy": {"plugin": "example.policy"}})
+            choices.update({"tool.provider": {"plugin": "example.tools"}, "agent.tool-policy": {"plugin": "example.policy"}})
         return ApplicationConfiguration(tuple(registrations), runtime_for(root / "sessions", bundle.manifest.runtime, capabilities=choices), {"models": {"primary": {
                 "provider": config["protocol"], "model": model,
                 "base_url": config["base_url"],

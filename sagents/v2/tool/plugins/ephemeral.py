@@ -48,10 +48,7 @@ class EphemeralToolPlugin:
         description=description,
         provides=(
             CapabilityOffer(
-                capability="tool.catalog", api_version="2", name="ephemeral"
-            ),
-            CapabilityOffer(
-                capability="tool.executor", api_version="2", name="ephemeral"
+                capability="tool.provider", api_version="2", name="ephemeral"
             ),
         ),
         supported_scopes=frozenset(

@@ -55,6 +55,7 @@ class ExternalEvidenceSink:
         headers=None,
         timeout=10,
         raw_max_bytes=16 * 1024 * 1024,
+        capture_mode="redacted",
     ):
         self.backend, self.query_url = backend, query_url.rstrip("/")
         parsed = urlsplit(self.query_url)
@@ -71,6 +72,8 @@ class ExternalEvidenceSink:
         self.project, self.service, self.environment = project, service, environment
         self.headers, self.timeout = dict(headers or {}), timeout
         self.trace_sink = None
+        self.capture_sink = None
+        self.capture_mode = capture_mode
         self.closed = False
         self.capture_failures = 0
         self.max_spans = 100000
@@ -79,17 +82,15 @@ class ExternalEvidenceSink:
 
     @property
     def raw_capture(self):
-        return (
-            self.backend == "phoenix"
-            and getattr(self.trace_sink, "content_mode", None) == "raw"
-        )
+        return self.capture_mode == "raw" and self.backend in {"phoenix", "jaeger"}
+
 
     def _evidence(self, kind, *, session_id, run_id, _trace_context=None, _target_sink=None, _payload=None, **payload):
         if not self.raw_capture or self.closed or not session_id or not run_id:
             return False
         try:
             active = _trace_context or current_trace_context()
-            target = _target_sink or current_trace_sink() or self.trace_sink
+            target = self.capture_sink or _target_sink or current_trace_sink() or self.trace_sink
             trace_id = active[0] if active else hashlib.sha256(
                 f"diagnostic:{self.project}:{self.service}:{self.environment}:{run_id}".encode()).hexdigest()[:32]
             accepted = self._raw_pipeline.submit(target, trace_id, active[1] if active else None,

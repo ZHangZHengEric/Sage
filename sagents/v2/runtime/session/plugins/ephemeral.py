@@ -35,6 +35,10 @@ class EphemeralSessionStore:
     async def close(self) -> None:
         """Match durable stores' lifecycle without owning external resources."""
 
+    def start(self, context, dependencies):
+        from sagents.v2.runtime.session.plugins import session_storage_providers
+        return session_storage_providers(self)
+
 
 __all__ = [
     "EphemeralSessionStore",

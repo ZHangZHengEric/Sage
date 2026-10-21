@@ -6,7 +6,7 @@ from pathlib import Path
 from sagents.v2 import SAgentApplication, SAgentBuilder
 from sagents.v2.model import ModelProvider
 from sagents.v2.package.manifest.runtime import RuntimeConfig
-from .plugins import compactor_registration
+from .plugins import reducer_registration
 from sagents.v2.package.manifest import SageManifestLoader
 
 
@@ -38,10 +38,9 @@ async def build_application(
     runtime = settings.runtime if settings.runtime is not None else manifest.runtime
     capabilities = {**runtime.capabilities,
         "session.store": CapabilitySelection(plugin="sage.session.filesystem", config={"root": str(runtime_root)}),
-        "observability.log-sink": CapabilitySelection(plugin="sage.logging.stdout", config={"stream": "stderr", "min_level": settings.log_level}),
-        "observability.diagnostic-sink": CapabilitySelection(plugin="sage.observability.filesystem", config={"root": str(runtime_root / "sessions")}),
+        "observability.provider": CapabilitySelection(plugin="sage.observability.local", config={"log_stream": "stderr", "log_level": settings.log_level, "diagnostics_root": str(runtime_root / "sessions")}),
     }
-    for registration in (compactor_registration(), *extensions):
+    for registration in (reducer_registration(), *extensions):
         builder.register(registration)
     if model is not None:
         builder.register(provided("example.host.model", lambda context, deps: model, "model.provider"))

@@ -130,7 +130,7 @@ class SAgentBuilder:
                 exc.add_note(f"application rollback also failed: {close_exc}")
             raise
         from sagents.v2.runtime.observability import StructuredLogger
-        StructuredLogger(application.service("observability.log-sink"), "sagents.application").info(
+        StructuredLogger(application.service("observability.provider").logs, "sagents.application").info(
             "sagents.application.configured", "Sage Application configured",
             attributes={"composition_hash": application.composition_hash, "plugins": [
                 {"capability": item.capability, "plugin": item.plugin_id, "version": item.plugin_version}

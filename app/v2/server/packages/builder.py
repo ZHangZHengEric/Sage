@@ -79,11 +79,11 @@ class CatalogPackageModel:
 class ServerPackageBuilderFactory:
     """Describe registrations and serializable choices for managed Apps."""
     def __init__(self, *, host, settings, paths, catalog, skills, execution,
-                 mcp_plugins, a2a_plugins, extensions, run_quota, policy, log_sink, diagnostic_sink):
+                 mcp_plugins, a2a_plugins, extensions, run_quota, policy, observability):
         self.host, self.settings, self.paths = host, settings, paths
         self.catalog, self.skills, self.execution = catalog, skills, execution
         self.extensions, self.run_quota, self.policy = extensions, run_quota, policy
-        self.log_sink, self.diagnostic_sink = log_sink, diagnostic_sink
+        self.observability = observability
 
     async def build(self, bundle, root, context, management):
         await self.policy.authorize("restore", bundle, context, management)
@@ -114,8 +114,7 @@ class ServerPackageBuilderFactory:
             ("execution.scheduler", scheduler, "owned"),
             ("execution.model-budget", self.execution.model_budget, "borrowed"),
             ("server.model-clients", self.execution.model_pool, "borrowed"),
-            ("observability.log-sink", self.log_sink, "borrowed"),
-            ("observability.diagnostic-sink", self.diagnostic_sink, "borrowed"),
+            ("observability.provider", self.observability, "borrowed"),
         ):
             scheduler_port = capability == "execution.scheduler"
             if scheduler_port and self.settings.scheduler_plugin == "sage.scheduler.redis-distributed" and not root.name.startswith("validate-"):

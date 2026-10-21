@@ -60,8 +60,7 @@ def skill_registrations():
                         CapabilityOffer(capability=name, api_version="2")
                         for name in (
                             "skill.management",
-                            "skill.catalog",
-                            "skill.source",
+                            "skill.provider",
                         )
                     ),
                     supported_scopes=frozenset({ExtensionScope.PROCESS}),
@@ -80,8 +79,7 @@ def skill_registrations():
                     name: instance
                     for name in (
                         "skill.management",
-                        "skill.catalog",
-                        "skill.source",
+                        "skill.provider",
                     )
                 },
             )

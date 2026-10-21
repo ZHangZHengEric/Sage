@@ -41,7 +41,6 @@ class PersistentSummaryContextReducer:
         summary_target_tokens=1024,
         protected_recent_units=4,
         max_summary_calls=64,
-        unit_compactor=None,
         max_summary_source_tokens=None,
     ):
         # max_summary_source_tokens is accepted for existing manifests only.
@@ -57,7 +56,6 @@ class PersistentSummaryContextReducer:
         self.summary_target_tokens = summary_target_tokens
         self.max_summary_calls = max_summary_calls
         self.protected_recent_units = protected_recent_units
-        self.unit_compactor = unit_compactor
 
     async def reduce(self, messages, budget=None, *, scope=None):
         if scope is None:
@@ -180,11 +178,7 @@ class PersistentSummaryContextReducer:
         compacted = []
         changed = []
         for unit in units if scope.allow_reference_compaction else ():
-            replacement = await (
-                self.unit_compactor.compact(unit)
-                if self.unit_compactor is not None
-                else compact_unit_to_references(unit)
-            )
+            replacement = await compact_unit_to_references(unit)
             compacted.extend(replacement if replacement is not None else unit)
             if replacement is not None:
                 changed.extend(

@@ -12,8 +12,8 @@ from sagents.v2.runtime.extensions import (
 )
 from sagents.v2.package.manifest.runtime import CapabilitySelection, RuntimeConfig
 from sagents.v2.model import ModelProvider
-from sagents.v2.runtime.observability import DiagnosticSink, LogSink
 from sagents.v2.runtime.session import DerivedStateStore, SessionStore
+from sagents.v2.runtime.session.plugins import session_storage_providers
 
 from app.v2.desktop.backend.bindings import DesktopExecutionBindingProvider
 from app.v2.desktop.backend.package import desktop_v2_manifest
@@ -25,8 +25,7 @@ async def build_desktop_application(
     session_root: str | Path,
     workspace: str | Path,
     model_provider: ModelProvider | None = None,
-    log_sink: LogSink | None = None,
-    diagnostic_sink: DiagnosticSink | None = None,
+    observability=None,
     session_store: SessionStore | None = None,
     derived_state_store: DerivedStateStore | None = None,
     component_selections: Mapping[str, str] | None = None,
@@ -49,13 +48,22 @@ async def build_desktop_application(
     choices = {}
     def register_service(capability, value, *, ownership="borrowed"):
         plugin_id = "com.sage.desktop." + capability.replace(".", "-")
+        ports = {capability: value}
+        if capability == "session.store":
+            ports = session_storage_providers(value)
+            if derived_state_store is not None or not all(callable(getattr(value, key, None)) for key in (
+                "get_derived_state", "put_derived_state", "delete_derived_state",
+            )):
+                ports.pop("derived-state.store")
         builder.register(ExtensionRegistration(
             descriptor=ExtensionDescriptor(
                 plugin_id=plugin_id, name=capability, version="2.0.0",
-                provides=(CapabilityOffer(capability=capability, api_version="2"),),
+                provides=tuple(CapabilityOffer(capability=key, api_version="2") for key in ports),
                 supported_scopes=frozenset({ExtensionScope.PROCESS}),
                 config_schema={"type": "object", "additionalProperties": False},
             ), factory=lambda context, deps: value, ownership=ownership,
+            start=(lambda instance, context, deps: ports)
+            if capability in {"session.store", "derived-state.store"} else None,
         ))
         choices[capability] = CapabilitySelection(plugin=plugin_id, scope=ExtensionScope.PROCESS)
 
@@ -76,7 +84,7 @@ async def build_desktop_application(
         builder.register(registration)
     for capability, value in (
         ("session.store", session_store), ("derived-state.store", derived_state_store),
-        ("observability.log-sink", log_sink), ("observability.diagnostic-sink", diagnostic_sink),
+        ("observability.provider", observability),
     ):
         if value is not None:
             register_service(capability, value)

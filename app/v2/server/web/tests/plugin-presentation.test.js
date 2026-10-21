@@ -6,7 +6,7 @@ test('component grouping preserves every implementation including multi-capabili
   const plugins = [
     { id: 'sage.context.summarizer.model', capabilities: ['context.summarizer'] },
     { id: 'sage.context.summarizer.extractive', capabilities: ['context.summarizer'] },
-    { id: 'sage.tool.official', capabilities: ['tool.catalog', 'tool.executor'] },
+    { id: 'sage.tool.official', capabilities: ['tool.provider'] },
   ]
   const groups = componentGroups({ plugins, defaults: { 'session.store': 'injected' } }, [{ capability: 'custom.scope', plugin_id: null }])
   assert.deepEqual(new Set(groups.flatMap(g => g.plugins.map(p => p.id))), new Set(plugins.map(p => p.id)))

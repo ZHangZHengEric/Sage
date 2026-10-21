@@ -113,6 +113,8 @@ flutter test test/unified_sidecar_test.dart
 
 ## 契约边界
 
+观测设置统一为 `observability.provider`，一次选择本地、关闭、OTLP、Langfuse 或 Phoenix，并配置日志与诊断参数。启动日志和后续 Run 共用同一个 Provider，参数修改需重启；旧的独立观测配置会报错，不做兼容。
+
 - 客户端直接消费 `sage.runtime/v2` NDJSON 事件，并按 `run_sequence` 续订。
 - 关闭界面或切换会话只 detach observer，不发送 Cancel。
 - 暂停、恢复、取消、steer、审批和用户输入使用独立 v2 Command。

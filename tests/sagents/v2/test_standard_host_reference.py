@@ -93,7 +93,7 @@ async def test_standard_parallel_children_share_skill_materialization_and_keep_p
     skill.write_text("---\nname: media\ndescription: Test shared materialization.\n---\nUse the shared media skill.\n")
     config = runtime(tmp_path)
     config = config.model_copy(update={"capabilities": {
-        **config.capabilities, "skill.catalog": CapabilitySelection(plugin="sage.skill.filesystem", config={"roots": [str(skill.parent.parent)]}),
+        **config.capabilities, "skill.provider": CapabilitySelection(plugin="sage.skill.filesystem", config={"roots": [str(skill.parent.parent)]}),
     }})
     model = ScriptedModelProvider((
         response(ModelToolCall(tool_call_id="parallel", name="sys_team_delegate_task", arguments={"tasks": [

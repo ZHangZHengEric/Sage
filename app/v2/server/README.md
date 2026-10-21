@@ -82,6 +82,8 @@ DEBUG 模式下，HTTP/OpenAI/MCP/A2A 客户端仅保留 WARNING 及以上日志
 
 ## Server 插件配置
 
+观测统一通过 `observability.provider` 配置日志、模型诊断及调用链；旧的三个独立能力键不再接受。日志级别、Trace 采样及诊断内容模式分别设置，保存后重启生效。
+
 管理员可在 `/plugins` 点击“配置 Server”，选择实现并编辑 Schema 参数；普通用户只能查看插件目录。`PUT /api/plugins/server` 接收版本号 `revision` 和局部变更 `changes`，将某项设为 `null` 恢复部署默认。保存会校验插件能力、可用依赖、参数和宿主保留项；过期版本返回 409，不覆盖其他管理员的修改。
 
 配置以原子替换写入 `{data_root}/config/plugins.json`，启动时加载快照。页面分别显示当前实现和待重启配置；保存不会改变运行中的对话，也不会使后续 Run 与进程共享服务使用不同版本。重启 Server 后才统一生效。Docker 的 `/app/data` 持久化挂载会保留这些配置。
@@ -210,7 +212,7 @@ Server API 用 `external_tools` 配置外部工具，页面与内置 `tools` 分
 
 ## 模型观测
 
-支持独立选择 `sage.trace.otlp`、`sage.trace.langfuse` 或 `sage.trace.phoenix`，共用运行、工具、模型输入输出、token 与首 token 观测。配置见 [V2 观测说明](../../../docs/zh/architecture/sagents-v2-observability.md) 和根目录 [`.env.example`](../../../.env.example)。这些导出插件需要安装 `.[otel]`；配置公开访问地址后，管理页显示对应平台入口。
+支持独立选择 `sage.observability.otlp`、`sage.observability.langfuse` 或 `sage.observability.phoenix`，共用运行、工具、模型输入输出、token 与首 token 观测。配置见 [V2 观测说明](../../../docs/zh/architecture/sagents-v2-observability.md) 和根目录 [`.env.example`](../../../.env.example)。这些导出插件需要安装 `.[otel]`；配置公开访问地址后，管理页显示对应平台入口。
 
 
 ### 内网业务调用 V2 chat

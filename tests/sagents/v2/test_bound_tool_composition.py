@@ -1,5 +1,7 @@
 """Bound official tools use actual registered Run resources and SDK cleanup."""
 
+from sagents.v2.tool.provider import ToolProvider
+
 import pytest
 
 from sagents.v2.package.manifest.runtime import CapabilitySelection
@@ -23,16 +25,15 @@ from sagents.v2.agent.policy import DefaultToolPolicy
 
 def tools_registration(factory):
     return ExtensionRegistration(descriptor=ExtensionDescriptor(plugin_id="test.bound.tools", name="Bound tools", version="1",
-        provides=(CapabilityOffer(capability="tool.catalog", api_version="2"), CapabilityOffer(capability="tool.executor", api_version="2")),
+        provides=(CapabilityOffer(capability="tool.provider", api_version="2"),),
         dependencies=(ExtensionDependency(capability="execution.environment"), ExtensionDependency(capability="execution.tool-runtime")),
         supported_scopes=frozenset({ExtensionScope.RUN})), factory=factory,
-        start=lambda value, context, dependencies: {CapabilityKey(capability="tool.catalog"): value.catalog,
-            CapabilityKey(capability="tool.executor"): value.executor})
+        start=lambda value, context, dependencies: {CapabilityKey(capability="tool.provider"): ToolProvider(value.catalog, value.executor)})
 
 
 def paired_runtime(root):
     selected = runtime(root)
-    return selected.model_copy(update={"capabilities": {**selected.capabilities, "tool.catalog": (
+    return selected.model_copy(update={"capabilities": {**selected.capabilities, "tool.provider": (
         CapabilitySelection(plugin="sage.tool.official"), CapabilitySelection(plugin="test.bound.tools", scope="run"))}})
 
 

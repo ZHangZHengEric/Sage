@@ -168,13 +168,13 @@ Sage 在受理时保存有效配置，在实际 Run ID 分配后创建沙箱。�
 
 ## 工具、Skill 和自治能力
 
-工具插件声明 catalog/executor 配对能力；选择必须使用相同插件、名称、参数和作用域。
-多个工具提供者使用 `tool.catalog` 列表。`grant_tools: true` 是可信 runtime 对动态
+工具插件只声明 `tool.provider`，一次选择同一实例的工具目录和执行器。
+多个工具提供者使用 `tool.provider` 列表。`grant_tools: true` 是可信 runtime 对动态
 目录的显式授权，插件仍须按实际任务授权筛选；没有该授权时使用 Agent 和命令的工具范围。
 Run 插件可声明 `execution.environment` 依赖，以读取真实命令、请求身份和沙箱。
 Project/Session 归属不能取自模型提交的参数。
 
-Skill 使用标准 catalog/source、可选 workspace、预加载和激活恢复。上下文处理和
+Skill 使用统一的 `skill.provider`、可选 workspace、预加载和激活恢复。上下文处理和
 `agent.continuation-policy` 使用相应能力插件；不替换 loop 属性或自行组装 reducer。
 `execution.model-budget` 通过工厂注册；多个 App 可以借用同一个进程预算，由创建者
 负责关闭。持久父子任务预算与传输超时是不同约束。

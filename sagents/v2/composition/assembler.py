@@ -57,7 +57,6 @@ from sagents.v2.package.manifest.root import PluginDeclaration, SageManifest
 from sagents.v2.package.manifest.runtime import CapabilitySelection, RuntimeConfig
 from sagents.v2.package.registry import InMemoryAgentPackageRegistry
 from sagents.v2.runtime import HarnessRuntime
-from sagents.v2.runtime.artifact import SessionArtifactStore
 from sagents.v2.runtime.artifact.binding import bind_artifact_store
 from sagents.v2.runtime.credentials import EnvironmentCredentialProvider
 from sagents.v2.runtime.execution import (
@@ -76,12 +75,7 @@ from sagents.v2.runtime.extensions import (
     ExtensionScopeContext,
     validate_extension_version,
 )
-from sagents.v2.runtime.observability import (
-    NoopDiagnosticSink,
-    NoopLogSink,
-    NoopTraceSink,
-    StructuredLogger,
-)
+from sagents.v2.runtime.observability import StructuredLogger
 from sagents.v2.runtime.session import (
     AuthorizedSessionAccess,
     FilesystemSessionStore,
@@ -97,6 +91,7 @@ from sagents.v2.session_memory import (
 )
 from sagents.v2.tool import (
     ToolSelectionPolicy,
+    ToolProvider,
 )
 from sagents.v2.tool.official import OfficialToolRuntime
 from sagents.v2.tool.plugins.ephemeral import (
@@ -127,7 +122,7 @@ _DISTRIBUTED_PROFILE_GUARANTEES: dict[str, dict[str, Any]] = {
         "supports_reconnect": True,
         "supports_adoption": True,
     },
-    "tool.executor": {
+    "tool.provider": {
         "durable_operation_ledger": True,
         "supports_restart_reconciliation": True,
     },
@@ -248,32 +243,16 @@ class ApplicationAssembler:
                         "nested Flow agents must use explicit subflow nodes"
                     )
         if (any(selection.plugin == OfficialToolPlugin.plugin_id
-                for selection in runtime_config.selections("tool.catalog"))
+                for selection in runtime_config.selections("tool.provider"))
                 and self.state.execution_binding_provider is None):
             raise ValueError("sage.tool.official requires a selected execution.binding capability")
         session_store = await self._create_session_store(
             extension_host, process_root, scope_handles, runtime_config, plugin_declarations,
         )
-        derived_state = None
-        if _selection(runtime_config, "derived-state.store") is not None:
-            if derived_state is not None:
-                raise ValueError("derived-state.store has conflicting configuration sources")
-            derived_state = await self._create_capability(
-                extension_host, process_root, scope_handles, runtime_config,
-                plugin_declarations, capability="derived-state.store",
-                default_plugin="sage.derived-state.session",
-            )
-        if derived_state is None:
-            # Built-in Session stores explicitly provide colocated derived data.
-            # A host-injected authoritative store is not assumed to do so.
-            selected_store = _selection(runtime_config, "session.store")
-            builtin_colocated = selected_store is None or self.extensions.is_trusted_builtin(selected_store.plugin)
-            derived_state = await self._create_capability(
-                extension_host, process_root, scope_handles, runtime_config,
-                plugin_declarations, capability="derived-state.store",
-                default_plugin=("sage.derived-state.session" if builtin_colocated
-                                else "sage.derived-state.ephemeral"),
-            )
+        derived_state = await self._create_storage_capability(
+            extension_host, process_root, scope_handles, runtime_config,
+            plugin_declarations, capability="derived-state.store",
+        )
         # 审批记忆默认落在会话派生状态：非权威、可重建、随 Session 删除清理。
         approval_memory = await self._create_capability(
             extension_host, process_root, scope_handles, runtime_config, plugin_declarations,
@@ -402,17 +381,13 @@ class ApplicationAssembler:
         }
         memory_service = memory_services_by_agent[selected_agent]
 
-        standard_skills = _selection(runtime_config, "skill.catalog") is not None
+        standard_skills = _selection(runtime_config, "skill.provider") is not None
 
         async def resolve_session_id(run_id: str) -> str:
             return (await session_store.get_run(run_id)).session_id
 
-        diagnostic_sink = services["observability.diagnostic-sink"]
-        log_sink = services["observability.log-sink"]
-        trace_sink = services["observability.trace-sink"]
-        bind_trace_sink = getattr(diagnostic_sink, "bind_trace_sink", None)
-        if callable(bind_trace_sink):
-            bind_trace_sink(trace_sink)
+        observability = services["observability.provider"]
+        log_sink = observability.logs
         tool_selection = (
             await self._create_tool_selection(
                 extension_host,
@@ -438,23 +413,23 @@ class ApplicationAssembler:
         if self.state.check_readiness:
             from sagents.v2.agent.management.readiness import resource_readiness
 
-            selections = runtime_config.selections("tool.catalog")
+            selections = runtime_config.selections("tool.provider")
             discoverable = tuple(choice for choice in selections
                 if self._selection_scope(choice, ExtensionScope.AGENT) != ExtensionScope.RUN
                 and (tenant_id is not None or self._selection_scope(choice, ExtensionScope.AGENT) == ExtensionScope.PROCESS))
             discovery_runtime = runtime_config.model_copy(update={"capabilities": {
-                **runtime_config.capabilities, "tool.catalog": discoverable,
+                **runtime_config.capabilities, "tool.provider": discoverable,
             }})
             discovery_catalog, _ = await self._create_tools(
                 extension_host, process_root, scope_handles, discovery_runtime, plugin_declarations,
                 tenant_id=tenant_id, agent_id=selected_agent,
             )
             discovery_skills = None
-            skill_choice = _selection(runtime_config, "skill.catalog")
+            skill_choice = _selection(runtime_config, "skill.provider")
             if skill_choice is not None and self._selection_scope(skill_choice, ExtensionScope.AGENT) != ExtensionScope.RUN:
                 skill_catalog = await self._create_capability(
                     extension_host, process_root, scope_handles, runtime_config, plugin_declarations,
-                    capability="skill.catalog", default_plugin=skill_choice.plugin,
+                    capability="skill.provider", default_plugin=skill_choice.plugin,
                     default_scope=ExtensionScope.AGENT, tenant_id=tenant_id, agent_id=selected_agent,
                 )
                 from sagents.v2.composition.providers import DeferredRunCapability
@@ -531,7 +506,7 @@ class ApplicationAssembler:
         # capabilities consumed by other plugins. Never silently ignore a
         # selected service merely because the core loop has no direct consumer.
         for capability in runtime_config.capabilities:
-            if capability in {"tool.catalog", "tool.executor", "skill.catalog", "skill.workspace", "flow.node",
+            if capability in {"tool.provider", "skill.provider", "skill.workspace", "flow.node",
                               "context.segment-provider", "agent.self-configuration", "agent.output-checker", "interface.protocol-adapter"}:
                 continue
             for selection in runtime_config.selections(capability):
@@ -732,10 +707,10 @@ class ApplicationAssembler:
                     active_context_providers.append(value)
                 active_skills = None
                 if standard_skills:
-                    selection = _selection(runtime_config, "skill.catalog")
+                    selection = _selection(runtime_config, "skill.provider")
                     skill_catalog, skill_scope = await self._create_capability(
                         extension_host, process_root, scope_handles, runtime_config,
-                        plugin_declarations, capability="skill.catalog", default_plugin=selection.plugin,
+                        plugin_declarations, capability="skill.provider", default_plugin=selection.plugin,
                         default_scope=ExtensionScope.AGENT, tenant_id=active_tenant,
                         agent_id=entry_descriptor.agent_id, run_id=run_id,
                         return_handle=True, available=(*available_scopes, *owned),
@@ -755,7 +730,7 @@ class ApplicationAssembler:
                             capability="skill.workspace", default_plugin="sage.skill.workspace.auto-sync",
                             default_scope=ExtensionScope.RUN, agent_id=entry_descriptor.agent_id,
                         )
-                    active_skills = (skill_catalog, skill_scope.providers.require_unique("skill.source"), skill_workspace)
+                    active_skills = (skill_catalog, skill_catalog, skill_workspace)
                 active_continuation = active_components.continuation_policy
                 selection = _selection(runtime_config, "agent.output-checker")
                 if selection is not None:
@@ -767,7 +742,7 @@ class ApplicationAssembler:
                     active_continuation = OutputSelfCheckPolicy(active_continuation, checker)
                 active_flow_tool_nodes = dict(flow_tool_nodes)
                 for capability in runtime_config.capabilities:
-                    if capability in {"tool.catalog", "tool.executor", "skill.catalog", "skill.workspace"}:
+                    if capability in {"tool.provider", "skill.provider", "skill.workspace"}:
                         continue
                     for selection in runtime_config.selections(capability):
                         if self._selection_scope(selection, ExtensionScope.AGENT) != ExtensionScope.RUN:
@@ -957,8 +932,8 @@ class ApplicationAssembler:
                                 session_store=driver_runtime.session_store,
                             ),
                         ),
-                        trace_sink=services["observability.trace-sink"],
-                        log_sink=services["observability.log-sink"],
+                        trace_sink=services["observability.provider"].traces,
+                        log_sink=services["observability.provider"].logs,
                     )
 
                 def compose(descriptor, child_run_id, catalog, executor):
@@ -1070,8 +1045,8 @@ class ApplicationAssembler:
                             skills=descriptor.skills,
                         )
                     ),
-                    trace_sink=services["observability.trace-sink"],
-                    log_sink=services["observability.log-sink"],
+                    trace_sink=services["observability.provider"].traces,
+                    log_sink=services["observability.provider"].logs,
                 )
                 if uses_flow and entry_descriptor.agent_id == selected_agent:
                     from sagents.v2.flow import FlowRuntime
@@ -1192,8 +1167,7 @@ class ApplicationAssembler:
             "memory.provider": memory_provider,
             "session-memory.provider": session_memory_provider,
             "model.provider": models_by_agent[selected_agent],
-            "tool.catalog": tool_catalog,
-            "tool.executor": tool_executor,
+            "tool.provider": ToolProvider(tool_catalog, tool_executor),
             "tool.selection-policy": tool_selection,
             **root_components.services(),
             "agent.approval-memory": approval_memory,
@@ -1341,6 +1315,37 @@ class ApplicationAssembler:
             default_scope=ExtensionScope.PROCESS,
         )
 
+    async def _create_storage_capability(
+        self, host, parent, handles, runtime, declarations, *, capability,
+    ):
+        """Use the selected Session plugin's published ports unless overridden."""
+        store_choice = _selection(runtime, "session.store")
+        store_id = store_choice.plugin if store_choice else FilesystemSessionStore.plugin_id
+        choice = _selection(runtime, capability)
+        if choice is not None and choice.plugin != store_id and any(
+            offer.capability == "session.store"
+            for offer in self.extensions.get(choice.plugin).descriptor.provides
+        ):
+            raise ValueError(f"{capability} must use the selected session.store plugin")
+        if choice is None or choice.plugin == store_id:
+            for handle in reversed((*self._shared_handles, *handles)):
+                if any(started.registration.descriptor.plugin_id == store_id
+                       and any(offer.capability == capability
+                               for offer in started.registration.descriptor.provides)
+                       for started in handle._started):
+                    if choice is not None and any(
+                        handle.configurations[store_id].get(key) != value
+                        for key, value in choice.config.items()
+                    ):
+                        raise ValueError(f"{capability} must use the same Session storage configuration")
+                    return handle.providers.require(capability, choice.name if choice else "default")
+            if choice is None and capability != "derived-state.store":
+                raise ValueError(f"{store_id!r} does not publish {capability!r}; select an explicit provider")
+        return await self._create_capability(
+            host, parent, handles, runtime, declarations, capability=capability,
+            default_plugin="sage.derived-state.ephemeral",
+        )
+
     async def _create_memory_provider(
         self, host, parent, handles, runtime, declarations
     ) -> MemoryProvider:
@@ -1452,11 +1457,11 @@ class ApplicationAssembler:
                     agent_id=kwargs.get("agent_id"), run_id=kwargs.get("run_id"), return_handle=True,
                 )
                 owned.append(runtime_scope)
-            for selection in runtime.selections("tool.catalog"):
+            for selection in runtime.selections("tool.provider"):
                 selected = runtime.model_copy(update={"capabilities": {
-                    **runtime.capabilities, "tool.catalog": selection,
+                    **runtime.capabilities, "tool.provider": selection,
                 }})
-                pair = await self._create_tool_pair(
+                pair = await self._create_tool_provider(
                     host, parent, handles, selected, declarations, **kwargs,
                 )
                 pairs.append(pair)
@@ -1473,14 +1478,14 @@ class ApplicationAssembler:
         if include_runtime:
             catalogs = tuple(pair[0] for pair in pairs)
             executors = tuple(pair[1] for pair in pairs)
-            grants = tuple(pair[0] for pair, selection in zip(pairs, runtime.selections("tool.catalog"))
+            grants = tuple(pair[0] for pair, selection in zip(pairs, runtime.selections("tool.provider"))
                            if selection.grant_tools)
             return (CompositeToolCatalog(catalogs, runtime_grants=grants), CompositeToolExecutor(executors),
                     _CompositeRunResource(*owned), selected_runtime)
         if not pairs:
             values = (InMemoryToolCatalog(()), InMemoryToolExecutor({}, {}))
             return (*values, None) if kwargs.get("return_handle") else values
-        grants = tuple(pair[0] for pair, selection in zip(pairs, runtime.selections("tool.catalog"))
+        grants = tuple(pair[0] for pair, selection in zip(pairs, runtime.selections("tool.provider"))
                        if selection.grant_tools)
         if len(pairs) == 1 and not grants:
             if kwargs.get("return_handle"):
@@ -1493,7 +1498,7 @@ class ApplicationAssembler:
         return ((catalog, executor, _CompositeRunResource(*owned))
                 if kwargs.get("return_handle") else (catalog, executor))
 
-    async def _create_tool_pair(
+    async def _create_tool_provider(
         self,
         host,
         parent,
@@ -1507,19 +1512,19 @@ class ApplicationAssembler:
         agent_id: str | None = None,
         run_id: str | None = None,
     ):
-        selection = _selection(runtime, "tool.catalog")
+        selection = _selection(runtime, "tool.provider")
         if selection is None:
             return InMemoryToolCatalog(()), InMemoryToolExecutor({}, {})
         config = _merge_plugin_config(
             declarations, selection.plugin, dict(selection.config)
         )
-        catalog, handle = await self._instantiate(
+        provider, handle = await self._instantiate(
             host,
             parent,
             handles,
             selection.plugin,
             config,
-            "tool.catalog",
+            "tool.provider",
             scope=self._selection_scope(selection, scope_override or ExtensionScope.AGENT),
             scope_id="agent-tools",
             tenant_id=tenant_id,
@@ -1527,17 +1532,12 @@ class ApplicationAssembler:
             run_id=run_id,
             return_handle=True,
             offer_name=self._selected_offer_name(
-                selection.plugin, "tool.catalog", selection.name
+                selection.plugin, "tool.provider", selection.name
             ),
         )
-        executor = handle.providers.require(
-            "tool.executor",
-            self._paired_tool_executor_name(selection.plugin, selection.name),
-        )
-        if not hasattr(catalog, "list_tools") or not hasattr(executor, "execute"):
-            raise TypeError(
-                f"extension {selection.plugin!r} did not create a Tool provider pair"
-            )
+        catalog, executor = provider.catalog, provider.executor
+        if not callable(getattr(catalog, "list_tools", None)) or not callable(getattr(executor, "execute", None)):
+            raise TypeError(f"extension {selection.plugin!r} did not create a complete ToolProvider")
         if return_handle:
             # The Run driver owns and closes this dynamic scope. Keeping it in
             # the Application build list would retain one closed handle per Run.
@@ -1591,9 +1591,9 @@ class ApplicationAssembler:
         config = _merge_plugin_config(declarations, plugin_id, config)
         selected_scope = self._selection_scope(selection, default_scope) if selection else default_scope
         dynamic_agent_ports = {
-            "model.provider", "context.summarizer", "context.reducer", "context.unit-compactor",
+            "model.provider", "context.summarizer", "context.reducer",
             "memory.recall-query", "skill.loading", "agent.continuation-policy", "agent.tool-policy",
-            "agent.self-configuration", "agent.output-checker", "context.segment-provider", "skill.catalog",
+            "agent.self-configuration", "agent.output-checker", "context.segment-provider", "skill.provider",
             "skill.workspace", "tool.selection-policy", "tool.result-processor",
         }
         if run_id is None and (selected_scope == ExtensionScope.RUN or (
@@ -1787,19 +1787,6 @@ class ApplicationAssembler:
             f"extension {plugin_id!r} has no unambiguous {capability!r} offer {name!r}"
         )
 
-    def _paired_tool_executor_name(self, plugin_id, name):
-        names = [
-            offer.name
-            for offer in self.extensions.get(plugin_id).descriptor.provides
-            if offer.capability == "tool.executor"
-        ]
-        if name in names:
-            return name
-        if len(names) == 1:
-            return names[0]
-        raise ValueError(
-            f"extension {plugin_id!r} has no matching tool.executor for {name!r}"
-        )
 
     def _selected_plugin(self, runtime: RuntimeConfig, capability: str) -> str | None:
         selection = _selection(runtime, capability)
@@ -1857,14 +1844,13 @@ class ApplicationAssembler:
                 capability="execution.job-runtime",
                 default_plugin=InMemoryJobRuntime.plugin_id,
             ),
-            "artifact.store": await self._create_capability(
+            "artifact.store": await self._create_storage_capability(
                 host,
                 parent,
                 handles,
                 runtime,
                 declarations,
                 capability="artifact.store",
-                default_plugin=SessionArtifactStore.plugin_id,
             ),
             "package.registry": await self._create_capability(
                 host,
@@ -1875,36 +1861,9 @@ class ApplicationAssembler:
                 capability="package.registry",
                 default_plugin=InMemoryAgentPackageRegistry.plugin_id,
             ),
-            "observability.diagnostic-sink": (
-                await self._create_capability(
-                    host,
-                    parent,
-                    handles,
-                    runtime,
-                    declarations,
-                    capability="observability.diagnostic-sink",
-                    default_plugin=NoopDiagnosticSink.plugin_id,
-                )
-            ),
-            "observability.log-sink": (
-                await self._create_capability(
-                    host,
-                    parent,
-                    handles,
-                    runtime,
-                    declarations,
-                    capability="observability.log-sink",
-                    default_plugin=NoopLogSink.plugin_id,
-                )
-            ),
-            "observability.trace-sink": await self._create_capability(
-                host,
-                parent,
-                handles,
-                runtime,
-                declarations,
-                capability="observability.trace-sink",
-                default_plugin=NoopTraceSink.plugin_id,
+            "observability.provider": await self._create_capability(
+                host, parent, handles, runtime, declarations,
+                capability="observability.provider", default_plugin="sage.observability.noop",
             ),
             "workspace.initializer": await self._create_capability(
                 host,
@@ -2201,6 +2160,9 @@ class ApplicationAssembler:
             for started in handle._started:
                 descriptor = started.registration.descriptor
                 for offer in descriptor.provides:
+                    choices = self._runtime_config.selections(offer.capability)
+                    if choices and not any(choice.plugin == descriptor.plugin_id for choice in choices):
+                        continue
                     plugin_capabilities.add(offer.capability)
                     bindings.add(
                         ResolvedProviderBinding(

@@ -49,7 +49,7 @@ class ServerPackageQueries:
                 "model_routes": "Agent models map slots directly to App catalog IDs; connections and credentials are App-owned",
                 "runtime_capabilities": [
                     "flow.node",
-                    "tool.catalog",
+                    "tool.provider",
                     *AGENT_DEFAULTS,
                 ],
                 "plugin_selection": "must be declared and explicitly host-authorized",

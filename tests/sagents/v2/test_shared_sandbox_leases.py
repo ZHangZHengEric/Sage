@@ -257,7 +257,7 @@ async def test_standard_builder_team_uses_one_sandbox_and_parent_survives_child(
         update={
             "capabilities": {
                 **runtime_config.capabilities,
-                "tool.catalog": CapabilitySelection(plugin="sage.tool.official"),
+                "tool.provider": CapabilitySelection(plugin="sage.tool.official"),
                 "agent.continuation-policy": CapabilitySelection(
                     plugin="sage.agent.continuation.deterministic"
                 ),
@@ -297,7 +297,7 @@ async def test_standard_builder_team_uses_one_sandbox_and_parent_survives_child(
                 "runtime": child_package.runtime.model_copy(
                     update={
                         "capabilities": {
-                            "tool.catalog": CapabilitySelection(
+                            "tool.provider": CapabilitySelection(
                                 plugin="sage.tool.official"
                             )
                         }
@@ -323,7 +323,7 @@ async def test_standard_builder_team_uses_one_sandbox_and_parent_survives_child(
                 "runtime": parent_package.runtime.model_copy(
                     update={
                         "capabilities": {
-                            "tool.catalog": CapabilitySelection(
+                            "tool.provider": CapabilitySelection(
                                 plugin="sage.tool.official"
                             )
                         }

@@ -28,7 +28,6 @@ def context_registry():
         "sage.context.summarizer.model",
         "sage.context.summary-store.session-derived",
         "sage.derived-state.ephemeral",
-        "sage.context.unit-compactor.reference",
     ):
         registry.register(builtin.get(plugin))
     model = object()
@@ -74,9 +73,6 @@ async def test_builtin_context_uses_declared_named_providers_and_reports_complet
         assert reducer.store.derived_state is handle.providers.require(
             "derived-state.store"
         )
-        assert reducer.unit_compactor is handle.providers.require(
-            "context.unit-compactor"
-        )
         assert set(plan.graph.dependencies) == {
             (
                 "sage.context.reducer.persistent-summary",
@@ -85,10 +81,6 @@ async def test_builtin_context_uses_declared_named_providers_and_reports_complet
             (
                 "sage.context.reducer.persistent-summary",
                 "sage.context.summary-store.session-derived",
-            ),
-            (
-                "sage.context.reducer.persistent-summary",
-                "sage.context.unit-compactor.reference",
             ),
             ("sage.context.summarizer.model", "test.named-model"),
             (
@@ -128,7 +120,6 @@ def test_builtin_context_rejects_shorter_lived_dependency_during_planning():
             "context.summary-store",
             "derived-state.store",
         ),
-        ("sage.artifact.session", "artifact.store", "session.store"),
     ],
 )
 def test_builtin_missing_dependency_is_rejected_before_start(

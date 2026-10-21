@@ -28,7 +28,7 @@ def build_observability_router(
     @router.get("/metrics", include_in_schema=False)
     async def metric_snapshot() -> PlainTextResponse:
         try:
-            sink = service.application.service("observability.trace-sink")
+            sink = service.application.service("observability.provider").traces
         except (KeyError, RuntimeError):
             sink = None
         statistics = getattr(sink, "statistics", None)

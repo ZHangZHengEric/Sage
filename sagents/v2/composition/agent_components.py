@@ -15,10 +15,8 @@ from sagents.v2.agent.policy import CompositeContinuationPolicy
 from sagents.v2.agent.policy.continuation import ContinuationPolicy
 from sagents.v2.context import (
     PersistentSummaryContextReducer,
-    ReferenceContextUnitCompactor,
     SessionDerivedConversationSummaryStore,
 )
-from sagents.v2.context.contracts import ContextUnitCompactor
 from sagents.v2.context.components import ContextComponentBundle
 from sagents.v2.context.plugins.summarizer_model import ModelConversationSummarizer
 from sagents.v2.memory import (
@@ -37,14 +35,12 @@ class AgentComponents:
     skill_loading: Any
     continuation_policy: ContinuationPolicy
     memory_query_generator: MemoryRecallQueryGenerator
-    unit_compactor: ContextUnitCompactor
 
     def services(self) -> dict[str, Any]:
         """Expose the root Agent's providers for readiness and plan inspection."""
         return {
             "context.summary-store": self.context.summary_store,
             "context.summarizer": self.context.summarizer,
-            "context.unit-compactor": self.unit_compactor,
             "context.reducer": self.context.reducer,
             "skill.loading": self.skill_loading,
             "agent.continuation-policy": self.continuation_policy,
@@ -67,11 +63,6 @@ class AgentComponents:
         summarizer = await open_capability(
             capability="context.summarizer",
             default_plugin=ModelConversationSummarizer.plugin_id,
-            agent_id=agent_id,
-        )
-        unit_compactor = await open_capability(
-            capability="context.unit-compactor",
-            default_plugin=ReferenceContextUnitCompactor.plugin_id,
             agent_id=agent_id,
         )
         context_reducer = await open_capability(
@@ -113,5 +104,4 @@ class AgentComponents:
             skill_loading=skill_loading,
             continuation_policy=continuation_policy,
             memory_query_generator=memory_query_generator,
-            unit_compactor=unit_compactor,
         )

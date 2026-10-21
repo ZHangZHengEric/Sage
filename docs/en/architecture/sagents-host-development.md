@@ -184,19 +184,21 @@ See the complete configuration in the [SDK guide](../../../sagents/v2/README.md)
 
 ## Tools, Skill, continuation and budgets
 
-Select paired tool catalog/executor offers through registered plugins. Sage
+Select `tool.provider` once per registered plugin. The provider owns both
+its catalog and executor. Sage
 assembles official file, Shell, Skill and task tools using the actual execution
 environment. A Run tool plugin can declare `execution.environment` to obtain its
 trusted request context, command and sandbox. Paired ports must use the same
 registration, name, parameters and scope.
 
-`tool.catalog` may select multiple named providers. `grant_tools: true` is an
+`tool.provider` may select multiple named providers. `grant_tools: true` is an
 explicit trusted runtime grant for a dynamic catalog; a provider must still
 filter tools using the Run's accepted product authorization. Otherwise the Agent
 and command's static tool grants apply. A catalog registration alone is not a
 grant to expose every tool.
 
-Register Skill catalog/source pairs and optional workspace capability. Standard
+Register one `skill.provider` for discovery and bundle reads, with an optional
+workspace capability. Standard
 loading, preloading, activation budget and recovery remain SDK-owned. Configure
 context reducers, summarizers and `agent.continuation-policy` as corresponding
 capability plugins. Do not replace loop fields after construction.

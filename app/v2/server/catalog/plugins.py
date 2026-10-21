@@ -11,7 +11,6 @@ AGENT_DEFAULTS = {
     "agent.continuation-policy": "sage.agent.continuation.llm-judge",
     "tool.selection-policy": "sage.tool-selection.llm",
     "tool.result-processor": "sage.tool.result-processor.file",
-    "context.unit-compactor": "sage.context.unit-compactor.reference",
     "skill.loading": "sage.skill.loading.lazy",
     "memory.recall-query": "sage.memory.recall-query.llm",
 }

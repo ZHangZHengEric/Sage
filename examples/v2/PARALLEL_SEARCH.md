@@ -28,7 +28,7 @@ This is an explicit host-side catalog/executor demo; it does not run a model or
 an Agent. Running the command authorizes its search query and optional fetch URL.
 Calling the executor directly does not invoke Sage's Agent policy/approval flow.
 For an embedded Agent, register the plugin as both catalog and executor using
-registered paired `tool.catalog` / `tool.executor` capabilities selected through runtime, allowlist the discovered tool names,
+registered `tool.provider` capabilities selected through runtime, allowlist the discovered tool names,
 and supply the actor scope and approval flow described in
 [Tools, Skills and MCP](../../docs/en/MCP_SERVERS.md#discover-authorize-call-and-close).
 The example does not change any existing provider or saved connection.

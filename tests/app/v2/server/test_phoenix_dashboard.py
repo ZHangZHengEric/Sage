@@ -5,7 +5,7 @@ import httpx
 import pytest
 from fastapi.testclient import TestClient
 
-from app.v2.server.observability.external import ExternalDiagnostics
+from sagents.v2.runtime.observability.performance_evidence import ExternalDiagnostics
 from app.v2.server.observability.phoenix_dashboard import PhoenixDashboard
 from app.v2.server.main import create_app
 from tests.app.v2.server.conftest import make_test_service

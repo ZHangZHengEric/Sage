@@ -209,7 +209,6 @@ async def build_cli_application(
             store_root=Path(context.config["store_root"]), workspace=Path(context.config["workspace"]),
         ),
     ))
-    choices["derived-state.store"] = CapabilitySelection(plugin="sage.derived-state.session")
     choices["agent.approval-memory"] = CapabilitySelection(
         plugin="com.sage.cli.approval-memory.workspace",
         config={"store_root": str(store_root.resolve()), "workspace": str(bindings.workspace)},

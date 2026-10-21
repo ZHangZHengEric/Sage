@@ -5,7 +5,7 @@ import json
 import httpx
 import pytest
 
-from app.v2.server.observability.external import ExternalDiagnostics
+from sagents.v2.runtime.observability.performance_evidence import ExternalDiagnostics
 from tests.app.v2.server.test_external_observability import TraceCapture, capture_sample, phoenix_span
 from tests.app.v2.server.test_performance import BASE
 
@@ -71,7 +71,7 @@ async def test_report_coalesces_identical_requests_and_does_not_cache_errors(mon
 def test_performance_timeout_is_service_unavailable(client, service, monkeypatch):
     from tests.app.v2.server.test_admin import admin_login
     source = ExternalDiagnostics(backend='phoenix', query_url='http://phoenix')
-    service.diagnostics = source
+    service.observability.diagnostics = source
     async def fail(**options):
         raise TimeoutError()
     monkeypatch.setattr(source, 'report', fail)
@@ -163,7 +163,7 @@ async def test_whole_log_record_loss_is_detected_from_root_after_restart(monkeyp
     from io import BytesIO
     from zipfile import ZipFile
     from app.v2.server.storage.downloads import prepare_session_export
-    source = ExternalDiagnostics(backend='phoenix', query_url='http://phoenix')
+    source = ExternalDiagnostics(capture_mode="raw", backend='phoenix', query_url='http://phoenix')
     trace = TraceCapture()
     trace.content_mode = 'raw'
     source.trace_sink = trace
@@ -175,7 +175,7 @@ async def test_whole_log_record_loss_is_detected_from_root_after_restart(monkeyp
     rows = [row for row in rows if row['attributes'].get('sage.diagnostic.record_id') != lost]
     # A fresh reader has no process-local drop counters; the root observation's
     # content-free log count must still reveal a wholly missing raw record.
-    reader = ExternalDiagnostics(backend='phoenix', query_url='http://phoenix')
+    reader = ExternalDiagnostics(capture_mode="raw", backend='phoenix', query_url='http://phoenix')
     async def query(client, **options): return rows, False
     monkeypatch.setattr(reader, '_query', query)
     try:

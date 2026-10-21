@@ -11,6 +11,20 @@ from sagents.v2.contracts.common import Identifier, StrictModel
 from sagents.v2.runtime.extensions.contracts import ExtensionScope
 
 
+REMOVED_CAPABILITIES = frozenset(
+    {
+        "tool.catalog",
+        "tool.executor",
+        "skill.catalog",
+        "skill.source",
+        "context.unit-compactor",
+        "observability.log-sink",
+        "observability.diagnostic-sink",
+        "observability.trace-sink",
+    }
+)
+
+
 class CapabilitySelection(StrictModel):
     """Select one named provider implementation for a runtime capability."""
 
@@ -61,12 +75,17 @@ CapabilityBinding = CapabilitySelection | tuple[CapabilitySelection, ...]
 class SkillUsageConfig(StrictModel):
     """Workspace and activation policy, grouped separately from the repository."""
 
-    workspace: CapabilitySelection = Field(default_factory=lambda: CapabilitySelection(
-        plugin="sage.skill.workspace.auto-sync", scope="run",
-    ))
-    loading: CapabilitySelection = Field(default_factory=lambda: CapabilitySelection(
-        plugin="sage.skill.loading.lazy",
-    ))
+    workspace: CapabilitySelection = Field(
+        default_factory=lambda: CapabilitySelection(
+            plugin="sage.skill.workspace.auto-sync",
+            scope="run",
+        )
+    )
+    loading: CapabilitySelection = Field(
+        default_factory=lambda: CapabilitySelection(
+            plugin="sage.skill.loading.lazy",
+        )
+    )
 
 
 class SkillModulesConfig(StrictModel):
@@ -105,10 +124,14 @@ class RuntimeConfig(StrictModel):
             "skill.loading": modules.usage.loading,
         }
         if modules.management is not None:
-            grouped["skill.catalog"] = modules.management
+            grouped["skill.provider"] = modules.management
             grouped["skill.management"] = modules.management
         for key, selection in grouped.items():
-            if key in choices and choices[key] != selection and choices[key] != selection.model_dump(mode="python"):
+            if (
+                key in choices
+                and choices[key] != selection
+                and choices[key] != selection.model_dump(mode="python")
+            ):
                 raise ValueError(f"skills and capabilities both configure {key!r}")
             choices[key] = selection
         return {**value, "skills": None, "capabilities": choices}
@@ -119,10 +142,25 @@ class RuntimeConfig(StrictModel):
         if self.skills is None:
             data.pop("skills", None)
         # Newly introduced defaults must not invalidate stored package refs.
-        for name, default in (("start_workers", True), ("check_readiness", False), ("state_root", None)):
+        for name, default in (
+            ("start_workers", True),
+            ("check_readiness", False),
+            ("state_root", None),
+        ):
             if getattr(self, name) == default:
                 data.pop(name, None)
         return data
+
+    @model_validator(mode="after")
+    def reject_removed_capabilities(self):
+        invalid = REMOVED_CAPABILITIES.intersection(
+            self.capabilities
+        ) | REMOVED_CAPABILITIES.intersection(self.required_guarantees)
+        if invalid:
+            raise ValueError(
+                f"removed capability configuration: {', '.join(sorted(invalid))}"
+            )
+        return self
 
     @field_validator("capabilities", mode="before")
     @classmethod

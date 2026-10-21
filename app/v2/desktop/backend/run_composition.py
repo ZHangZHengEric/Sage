@@ -492,7 +492,7 @@ class DesktopRunCompositionMixin(DesktopRunEnvironmentMixin):
         process_plugins = {
             "session.store": self.session_plugin_id,
             "context.summary-store": self.summary_store_plugin_id,
-            "observability.diagnostic-sink": self.diagnostic_plugin_id,
+            "observability.provider": self.observability_plugin_id,
             "memory.provider": self.memory_plugin_id,
             "session-memory.provider": self.session_memory_plugin_id,
         }

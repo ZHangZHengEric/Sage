@@ -20,10 +20,6 @@ _EXPORTS = {
         "sagents.v2.context.plugins.persistent_reducer",
         "PersistentSummaryContextReducer",
     ),
-    "ReferenceContextUnitCompactor": (
-        "sagents.v2.context.plugins.reference",
-        "ReferenceContextUnitCompactor",
-    ),
     "SessionDerivedConversationSummaryStore": (
         "sagents.v2.context.plugins.summary_session",
         "SessionDerivedConversationSummaryStore",

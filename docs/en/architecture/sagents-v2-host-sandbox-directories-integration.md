@@ -97,7 +97,7 @@ team = await app.load_agent(team_package, subagents={"worker": worker})
 stream = await app.entrypoint().run_stream(command, context, agent=team)
 ```
 
-The complete runnable media/MCP/Skill/nested-Team/restart example is the standard host project. Registration details are in host development. Team Packages declare their members; official tools use `tool.catalog: sage.tool.official`. Preserve persisted revisions and execution snapshots rather than substituting current Project settings.
+The complete runnable media/MCP/Skill/nested-Team/restart example is the standard host project. Registration details are in host development. Team Packages declare their members; official tools use `tool.provider: sage.tool.official`. Preserve persisted revisions and execution snapshots rather than substituting current Project settings.
 
 Sage owns loop composition, sandbox provisioning and Run leases. A host never creates or installs a Driver, replaces child executors, or reconstructs execution in a plugin factory.
 

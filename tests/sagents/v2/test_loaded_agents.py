@@ -468,7 +468,7 @@ async def test_entrypoint_requires_owned_agent_and_matching_command(tmp_path):
 
 @pytest.mark.asyncio
 async def test_plugin_validation_failure_keeps_loaded_revision(tmp_path):
-    from examples.v2.host.plugins import compactor_registration
+    from examples.v2.host.plugins import reducer_registration
     from sagents.v2.package.manifest.root import PluginDeclaration
     from sagents.v2.package.manifest.runtime import CapabilitySelection
 
@@ -477,14 +477,14 @@ async def test_plugin_validation_failure_keeps_loaded_revision(tmp_path):
         update={
             "capabilities": {
                 **manifest.runtime.capabilities,
-                "context.unit-compactor": CapabilitySelection(
-                    plugin="example.context.reference-compactor", scope="agent"
+                "context.reducer": CapabilitySelection(
+                    plugin="example.context.reference-reducer", scope="agent"
                 ),
             }
         }
     )
     app = (
-        await build_registered_app(tmp_path, models=TEST_MODELS, model=model(), runtime=runtime, registrations=(compactor_registration(),))
+        await build_registered_app(tmp_path, models=TEST_MODELS, model=model(), runtime=runtime, registrations=(reducer_registration(),))
     )
     try:
         original = await app.load_agent(manifest)
@@ -492,7 +492,7 @@ async def test_plugin_validation_failure_keeps_loaded_revision(tmp_path):
             update={
                 "plugins": (
                     PluginDeclaration(
-                        id="example.context.reference-compactor",
+                        id="example.context.reference-reducer",
                         config={"minimum_characters": -1},
                     ),
                 )

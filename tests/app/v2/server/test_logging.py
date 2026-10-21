@@ -5,7 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from app.v2.server.observability.logging import LoggingSettings, ServerLogSink
+from sagents.v2.runtime.observability.provider import create_observability_provider, ObservationLogs
 from sagents.v2.runtime.observability.contracts import LogRecord
 
 
@@ -39,11 +39,11 @@ logging.getLogger('sage.test').debug('application debug')
 ])
 def test_routine_debug_keeps_slow_and_failed_operations(event, tmp_path, capsys):
     captured = []
-    sink = ServerLogSink(
-        LoggingSettings(level="debug", directory=str(tmp_path)),
-        service_name="sage-server",
-        diagnostics=SimpleNamespace(write=captured.append),
-    )
+    provider = create_observability_provider("sage.observability.local", {
+        "log_level": "debug", "log_root": str(tmp_path), "log_filename": "sage-server.log",
+    })
+    sink = provider.logs
+    sink.evidence = SimpleNamespace(write=captured.append)
     samples = [
         ("fast", "debug", {"duration_ms": 99.999, "outcome": "completed"}),
         ("fast storage", "debug", {"duration_ms": 3}),
@@ -71,9 +71,9 @@ def test_routine_debug_keeps_slow_and_failed_operations(event, tmp_path, capsys)
 
 
 def test_fast_performance_events_are_preserved(capsys):
-    from app.v2.server.observability.performance import EVENTS
+    from sagents.v2.runtime.observability.performance import EVENTS
 
-    sink = ServerLogSink(LoggingSettings(level="debug"), service_name="sage-server")
+    sink = create_observability_provider("sage.observability.local", {"log_level": "debug"}).logs
     for event in sorted(EVENTS):
         sink.write(LogRecord(
             event=event, message=event, level="debug", component="sage.test",

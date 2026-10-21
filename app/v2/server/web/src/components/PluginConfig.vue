@@ -29,7 +29,7 @@ const options = computed(() => catalog.value?.plugins?.filter(plugin => plugin.c
 const explanation = computed(() => pluginExplanation(current.value.definition || current.value.id, current.value.config))
 const links = computed(() => {
   const result = []
-  if (effective('context.reducer').id === 'sage.context.reducer.persistent-summary') result.push(['context.reducer', 'context.summarizer'], ['context.reducer', 'context.unit-compactor'])
+  if (effective('context.reducer').id === 'sage.context.reducer.persistent-summary') result.push(['context.reducer', 'context.summarizer'])
   for (const [capability, ids] of [
     ['tool.selection-policy', ['sage.tool-selection.llm']],
     ['context.summarizer', ['sage.context.summarizer.model']],

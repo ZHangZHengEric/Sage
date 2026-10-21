@@ -32,7 +32,7 @@ Studio supports JSON definition editing, Schema/resource checks, save, copy, pag
 
 ## Tools, Skills, and extensions
 
-`ServerHost(package_extensions=..., package_authorizer=...)` registers extensions and authorization. Packages can select authorized flow.node, tool.catalog, and memory.provider implementations; the host fixes other infrastructure. Source extensions are off by default and, when enabled, execute trusted host Python. This is not untrusted-code isolation and does not automatically install dependencies with pip.
+`ServerHost(package_extensions=..., package_authorizer=...)` registers extensions and authorization. Packages can select authorized flow.node, tool.provider, and memory.provider implementations; the host fixes other infrastructure. Source extensions are off by default and, when enabled, execute trusted host Python. This is not untrusted-code isolation and does not automatically install dependencies with pip.
 
 ExecutionBindingProvider binds official tools to the user's workspace and sandbox by real Run ID; child Runs get independent bindings. MCP, Skills, and models come from the caller's catalog. Models borrow host-pool leases; credentials never enter package inventory. Skill catalog descriptions are complete; loaded active content has a separate token budget.
 

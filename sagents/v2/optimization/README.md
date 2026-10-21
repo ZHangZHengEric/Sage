@@ -120,7 +120,7 @@ best retained version or a copy of the original when nothing improves.
 The native runner materializes bundled files into a fresh temporary workspace
 before calling the builder factory. Bind candidate Skill ports to that workspace,
 for example `FilesystemSkillProvider((workspace / "skills",))` together with the
-host's Skill workspace via registered `skill.catalog` / `skill.source` and `skill.workspace` capabilities selected through runtime.
+host's Skill workspace via registered `skill.provider` and `skill.workspace` capabilities selected through runtime.
 External Skills must be copied into the bundle to edit them; otherwise the host
 must provide stable versioned bindings for comparisons. Model routes, tool
 fixtures and external data must also remain stable across runs. Credentials are

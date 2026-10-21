@@ -27,6 +27,7 @@ from sagents.v2.tool.provider import (
     CancellableToolExecutor,
     RunScopedToolState,
     ToolCatalog,
+    ToolProvider,
     ToolExecutor,
 )
 from sagents.v2.tool.decorators import decorated_tool_definition, tool
@@ -97,6 +98,7 @@ __all__ = [
     "ToolCancellationResult",
     "ToolCancellationState",
     "ToolCatalog",
+    "ToolProvider",
     "ToolDefinition",
     "builtin_tool_definitions",
     "ToolExecutionResult",

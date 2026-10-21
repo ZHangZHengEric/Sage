@@ -1,4 +1,6 @@
 from __future__ import annotations
+
+from sagents.v2.tool.provider import ToolProvider
 from tests.sagents.v2.sdk_fixture import fixture_configuration
 from tests.sagents.v2.sdk_fixture import build_registered_package
 from tests.sagents.v2.model_fixture import TEST_MODELS
@@ -500,16 +502,10 @@ async def test_managed_agent_selects_standard_plugin_and_configuration(tmp_path)
             name="Scale",
             provides=(
                 CapabilityOffer(
-                    capability="tool.catalog", api_version="2", name="wrong"
+                    capability="tool.provider", api_version="2", name="wrong"
                 ),
                 CapabilityOffer(
-                    capability="tool.executor", api_version="2", name="wrong"
-                ),
-                CapabilityOffer(
-                    capability="tool.catalog", api_version="2", name="scale"
-                ),
-                CapabilityOffer(
-                    capability="tool.executor", api_version="2", name="scale"
+                    capability="tool.provider", api_version="2", name="scale"
                 ),
             ),
             supported_scopes=frozenset({ExtensionScope.AGENT}),
@@ -522,10 +518,8 @@ async def test_managed_agent_selects_standard_plugin_and_configuration(tmp_path)
         ),
         factory=lambda ctx, deps: DecoratedToolProvider(Scale(ctx.config["factor"])),
         start=lambda provider, ctx, deps: {
-            "tool.catalog:wrong": object(),
-            "tool.executor:wrong": object(),
-            "tool.catalog:scale": provider.catalog,
-            "tool.executor:scale": provider.executor,
+            "tool.provider:wrong": object(),
+            "tool.provider:scale": ToolProvider(provider.catalog, provider.executor),
         },
     )
     data = bundle().model_dump(mode="json")
@@ -534,7 +528,7 @@ async def test_managed_agent_selects_standard_plugin_and_configuration(tmp_path)
         {"id": "test.scale", "version": "1.0.0", "config": {"factor": 9}}
     ]
     data["manifest"]["runtime"]["capabilities"] = {
-        "tool.catalog": {"plugin": "test.scale", "name": "scale"}
+        "tool.provider": {"plugin": "test.scale", "name": "scale"}
     }
     package = AgentPackageBundle.model_validate(data)
 

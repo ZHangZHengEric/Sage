@@ -5,11 +5,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from app.v2.server.observability.context import get_request_id
-from sagents.v2.runtime.observability import (
-    FilesystemLogSink,
-    StdoutLogSink,
-    StructuredLogger,
-)
+from sagents.v2.runtime.observability import StructuredLogger
 from sagents.v2.runtime.observability.contracts import LogLevel, LogRecord, LogSink
 from sagents.v2.runtime.observability.logs import (
     StructuredLoggingHandler,
@@ -18,71 +14,11 @@ from sagents.v2.runtime.observability.logs import (
 )
 
 
-_ROUTINE_TIMING_EVENTS = frozenset({
-    "agent.state.commit",
-    "session.redis.commit",
-    "agent.preparation.completed",
-    "server.admission.phase",
-    "session.mysql.archived",
-})
-_SLOW_OPERATION_MS = 100
-
-
 @dataclass(frozen=True, slots=True)
 class LoggingSettings:
     level: str = "info"
     format: str = "json"
     directory: str | None = None
-
-
-class ServerLogSink:
-    """Send each operational record to every configured process output."""
-
-    format_version = "sage.log/v1"
-
-    @property
-    def raw_capture(self) -> bool:
-        return self.diagnostics is not None and getattr(self.diagnostics, "raw_capture", False)
-
-    def __init__(self, settings: LoggingSettings, *, service_name: str, diagnostics=None) -> None:
-        self.diagnostics = diagnostics
-        self.stdout = StdoutLogSink(min_level=settings.level, format=settings.format)
-        self.file = (
-            FilesystemLogSink(
-                Path(settings.directory),
-                filename=f"{service_name}.log",
-                min_level=settings.level,
-                format=settings.format,
-            )
-            if settings.directory and settings.directory.strip()
-            else None
-        )
-
-    def write(self, record: LogRecord) -> None:
-        raw_diagnostics = self.raw_capture
-        if raw_diagnostics:
-            self.diagnostics.write(record)
-        # Keep slow/failing operations and all model/tool/Run lifecycle events.
-        # Drop routine timings before serialization and diagnostic queue writes.
-        if (
-            record.level == LogLevel.DEBUG
-            and record.event in _ROUTINE_TIMING_EVENTS
-            and record.error is None
-            and record.attributes.get("outcome", "completed") == "completed"
-        ):
-            duration = record.attributes.get("duration_ms")
-            if isinstance(duration, (int, float)) and 0 <= duration < _SLOW_OPERATION_MS:
-                return
-        if self.diagnostics is not None and not raw_diagnostics:
-            self.diagnostics.write(record)
-        self.stdout.write(record)
-        if self.file is not None:
-            self.file.write(record)
-
-    def close(self) -> None:
-        self.stdout.close()
-        if self.file is not None:
-            self.file.close()
 
 
 class _HealthAccessFilter(logging.Filter):
@@ -137,8 +73,13 @@ class _AccessLoggingHandler(StructuredLoggingHandler):
             self.handleError(record)
 
 
-def init_logging(settings: LoggingSettings, *, service_name: str, diagnostics=None) -> LogSink:
-    sink = ServerLogSink(settings, service_name=service_name, diagnostics=diagnostics)
+def init_logging(settings: LoggingSettings, *, service_name: str, sink: LogSink | None = None) -> LogSink:
+    if sink is None:
+        from sagents.v2.runtime.observability.provider import create_observability_provider
+        sink = create_observability_provider("sage.observability.local", {
+            "log_level": settings.level, "log_format": settings.format,
+            "log_root": settings.directory, "log_filename": f"{service_name}.log",
+        }).logs
     set_process_log_sink(sink)
     level = getattr(logging, settings.level.upper())
     handler = StructuredLoggingHandler(StructuredLogger(sink, service_name))

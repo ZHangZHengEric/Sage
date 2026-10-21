@@ -75,13 +75,17 @@ class SkillSource(Protocol):
     async def fetch(self, name: str, *, run_id: str) -> SkillBundle: ...
 
 
+class SkillProvider(SkillCatalog, SkillSource, Protocol):
+    """One selected source owns discovery and bundle retrieval."""
+
+
 class CurrentSkillSource(SkillSource, Protocol):
     """Current manager contents for an already admitted Skill name."""
 
     async def fetch_latest(self, name: str, *, run_id: str) -> SkillBundle: ...
 
 
-class SkillManagement(SkillCatalog, SkillSource, Protocol):
+class SkillManagement(SkillProvider, Protocol):
     """Host-owned publishing port. Never implicitly granted as an Agent tool."""
 
     async def publish(
@@ -100,7 +104,9 @@ class SkillWorkspace(Protocol):
 class EditableSkillWorkspace(SkillWorkspace, Protocol):
     """Explicit editing preparation; synchronization policy owns edit retention."""
 
-    async def begin_edit(self, bundle: SkillBundle, *, run_id: str, destination: str) -> str: ...
+    async def begin_edit(
+        self, bundle: SkillBundle, *, run_id: str, destination: str
+    ) -> str: ...
 
     async def resolve_bundle(
         self, bundle: SkillBundle, *, run_id: str, destination: str
@@ -122,7 +128,13 @@ class SkillReadonlyMountProvider(Protocol):
     """
 
     async def mount_readonly(
-        self, bundle: SkillBundle, *, destination: str, run_id: str, intent: Any, grant: Any
+        self,
+        bundle: SkillBundle,
+        *,
+        destination: str,
+        run_id: str,
+        intent: Any,
+        grant: Any,
     ) -> str: ...
 
 

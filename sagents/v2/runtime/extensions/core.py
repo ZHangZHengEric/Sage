@@ -24,7 +24,7 @@ def core_registrations():
     from sagents.v2.model import ModelConcurrencyBudget
     from sagents.v2.runtime.session import InMemoryDerivedStateStore
 
-    def registration(plugin, capability, factory, *, dependencies=(), config_model=None, ownership="owned", start=None):
+    def registration(plugin, capability, factory, *, dependencies=(), config_model=None):
         return ExtensionRegistration(
             descriptor=ExtensionDescriptor(
                 plugin_id=plugin, name=capability, version="2.0.0",
@@ -35,26 +35,13 @@ def core_registrations():
                 config_schema=config_model.model_json_schema() if config_model else {
                     "type": "object", "additionalProperties": False,
                 }, built_in=True,
-            ), factory=factory, config_model=config_model, ownership=ownership, start=start,
+            ), factory=factory, config_model=config_model,
         )
-
-    def colocated(context, dependencies):
-        store = dependencies.require("session.store")
-        if not all(callable(getattr(store, method, None)) for method in (
-            "get_derived_state", "put_derived_state", "delete_derived_state",
-        )):
-            raise TypeError("session.store lacks derived state; select an explicit derived-state.store plugin")
-        return store
 
     return (
         registration(DefaultToolPolicy.plugin_id, "agent.tool-policy",
                      lambda context, deps: DefaultToolPolicy(**ToolPolicyConfig.model_validate(context.config).model_dump()),
                      config_model=ToolPolicyConfig),
-        registration("sage.derived-state.session", "derived-state.store", colocated,
-                     dependencies=("session.store",), ownership="borrowed",
-                     # Reuse the already started store through its derived-state
-                     # port; do not invoke its session plugin start hook again.
-                     start=lambda instance, context, deps: {"derived-state.store": instance}),
         registration(InMemoryDerivedStateStore.plugin_id, "derived-state.store",
                      lambda context, deps: InMemoryDerivedStateStore()),
         registration(SessionApprovalMemory.plugin_id, "agent.approval-memory",

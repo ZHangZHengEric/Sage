@@ -67,7 +67,7 @@ class ServerHost:
             raise RuntimeError("database is required")
         self.settings = settings
         self.log_sink: LogSink | None = None
-        self.diagnostics = None
+        self.observability = None
         self.contexts = RequestContexts(settings.language)
         self.package_authorizer = package_authorizer
         self._registrations = tuple(extensions)
@@ -147,6 +147,10 @@ class ServerHost:
         except TimeoutError:
             return False
 
+    @property
+    def diagnostics(self):
+        return self.observability.diagnostics if self.observability is not None else None
+
     async def start(self) -> None:
         if self._application is not None:
             return
@@ -158,14 +162,6 @@ class ServerHost:
             self.settings,
             plugin_overrides=ServerPluginConfig(self.paths.data_root, registry=self.extensions).read(),
         )
-        if self.diagnostics is None or self.diagnostics.closed:
-            from app.v2.server.observability.diagnostics import SessionDiagnostics
-            from app.v2.server.observability.external import external_diagnostics
-
-            selection = server_v2_manifest(self.settings).runtime.capabilities["observability.trace-sink"]
-            self.diagnostics = external_diagnostics(self.settings, selection)
-            if self.diagnostics is None:
-                self.diagnostics = SessionDiagnostics(self.paths.runtime_root / "diagnostics")
         if self.log_sink is None:
             from app.v2.server.observability.logging import LoggingSettings, init_logging
 
@@ -176,12 +172,7 @@ class ServerHost:
                     directory=self.settings.log_directory,
                 ),
                 service_name="sage-server",
-                diagnostics=self.diagnostics,
             )
-        from app.v2.server.observability.logging import ServerLogSink
-
-        if isinstance(self.log_sink, ServerLogSink):
-            self.log_sink.diagnostics = self.diagnostics
         from app.v2.server.database.schema import create_host_schema
 
         await create_host_schema(self.database)
@@ -212,8 +203,6 @@ class ServerHost:
             choices = {}
             manifest = server_v2_manifest(self.settings)
             for capability, value, ownership in (
-                ("observability.log-sink", self.log_sink, "borrowed"),
-                ("observability.diagnostic-sink", self.diagnostics, "borrowed"),
                 ("execution.model-budget", model_budget, "borrowed"),
                 ("execution.scheduler", scheduler, "owned"),
                 ("server.model-clients", host_models, "owned"),
@@ -246,10 +235,15 @@ class ServerHost:
                 "state_root": str(self.paths.sessions_root), "start_workers": False,
             })
             self._application = await builder.build(runtime=runtime)
-            from app.v2.server.observability.external import ExternalDiagnostics
-
-            if isinstance(self.diagnostics, ExternalDiagnostics):
-                self.diagnostics.trace_sink = self._application.service("observability.trace-sink")
+            self.observability = self._application.service("observability.provider")
+            old_logs = self.log_sink
+            from app.v2.server.observability.logging import LoggingSettings, init_logging
+            self.log_sink = init_logging(
+                LoggingSettings(level=self.settings.log_level, format=self.settings.log_format),
+                service_name="sage-server", sink=self.observability.logs,
+            )
+            if old_logs is not self.log_sink:
+                old_logs.close()
             await install_sandbox(self.execution, self._application, self.settings)
             session_access = self._application.service("session.access")
             admission = RunAdmission(
@@ -317,8 +311,7 @@ class ServerHost:
                 extensions=self._registrations,
                 run_quota=run_quota,
                 model_budget=model_budget,
-                log_sink=self.log_sink,
-                diagnostic_sink=self.diagnostics,
+                observability=self.observability,
                 job_runtime=self.application.service("execution.job-runtime"),
             )
             self.package_queries = self.agent_management.queries
@@ -366,12 +359,11 @@ class ServerHost:
         self.conversations = None
         self.admin = None
         self.a2a = None
-        # Flush grouped observation evidence while the trace exporter is alive.
-        if self.diagnostics is not None:
-            await self.diagnostics.close()
         if self._application is not None:
             await self._application.close()
         self._application = None
+        self.observability = None
+        self.log_sink = None
         self.execution.sandbox_provider = None
         self.execution.sandbox_grant_issuer = None
         self.mcp_plugins.clear()

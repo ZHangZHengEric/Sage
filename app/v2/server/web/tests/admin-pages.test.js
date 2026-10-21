@@ -912,10 +912,10 @@ test('ordinary users inspect system implementations without changing defaults or
 
 test('system plugins with fixed bindings or no editable configuration are visibly read-only and cannot save', async t => {
   const { api, Component, mount } = await setup(t, 'Plugins')
-  const fixed = 'session.store', empty = 'context.unit-compactor', injected = 'package.registry', unavailable = 'unavailable', editable = 'skill.loading'
+  const fixed = 'session.store', empty = 'context.reducer', injected = 'package.registry', unavailable = 'unavailable', editable = 'skill.loading'
   const plugins = [
     { id: 'sage.session.mysql', capabilities: [fixed], schema: { properties: { dsn: { type: 'string' } } } },
-    { id: 'sage.context.unit-compactor.reference', capabilities: [empty], schema: { properties: {} } },
+    { id: 'sage.context.reducer.window', capabilities: [empty], schema: { properties: {} } },
     { id: 'sage.package-registry.ephemeral', capabilities: [injected], schema: { properties: { resolver: {} } } },
     { id: 'missing', capabilities: [unavailable], available: false, schema: { properties: { root: { type: 'string' } } } },
     { id: 'sage.skill.loading.lazy', capabilities: [editable], schema: { properties: { max_active_characters: { type: 'integer' } } } },

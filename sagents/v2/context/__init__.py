@@ -24,7 +24,6 @@ _EXPORTS = {
         "ContextSegmentProvider",
     ),
     "ContextStability": ("sagents.v2.context.contracts", "ContextStability"),
-    "ContextUnitCompactor": ("sagents.v2.context.contracts", "ContextUnitCompactor"),
     "ConversationSummarizer": ("sagents.v2.context.summary", "ConversationSummarizer"),
     "ConversationSummary": ("sagents.v2.context.summary", "ConversationSummary"),
     "ConversationSummaryStore": (
@@ -50,10 +49,6 @@ _EXPORTS = {
     "PersistentSummaryContextReducer": (
         "sagents.v2.context.plugins.persistent_reducer",
         "PersistentSummaryContextReducer",
-    ),
-    "ReferenceContextUnitCompactor": (
-        "sagents.v2.context.plugins.reference",
-        "ReferenceContextUnitCompactor",
     ),
     "RunMetadataContextProvider": (
         "sagents.v2.context.runtime_metadata",

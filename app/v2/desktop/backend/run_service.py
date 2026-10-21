@@ -612,13 +612,13 @@ class DesktopRunServiceMixin(DesktopRunCompositionMixin):
                 language=command.config.metadata.get("response_language") or "en",
             ).runtime
             identity_caps = {"session.store", "derived-state.store", "execution.scheduler", "execution.job-runtime",
-                             "observability.log-sink", "observability.diagnostic-sink"}
+                             "observability.provider"}
             capabilities = {**runtime.capabilities, **{
                 key: value for key, value in configured.capabilities.items() if key not in identity_caps
             }, **selections}
             official = CapabilitySelection(plugin="sage.tool.official")
-            external = CapabilitySelection(plugin="com.sage.desktop.run.tool-catalog", scope="run", grant_tools=True)
-            capabilities["tool.catalog"] = (official, external)
+            external = CapabilitySelection(plugin="com.sage.desktop.run.tool-provider", scope="run", grant_tools=True)
+            capabilities["tool.provider"] = (official, external)
             from sagents.v2.package.manifest.runtime import RuntimeConfig
             supplied = RuntimeConfig.model_validate(self._host_runtime) if self._host_runtime is not None else None
             raw = snapshot["configs"].get("execution.sandbox", {})

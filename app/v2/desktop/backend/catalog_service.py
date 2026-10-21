@@ -928,8 +928,7 @@ class DesktopCatalogServiceMixin:
             "context.summary-store": self.summary_store_plugin_id,
             "memory.provider": self.memory_plugin_id,
             "session-memory.provider": self.session_memory_plugin_id,
-            "observability.diagnostic-sink": self.diagnostic_plugin_id,
-            "observability.log-sink": self.log_plugin_id,
+            "observability.provider": self.observability_plugin_id,
             "session.store": self.session_plugin_id,
         }
         for capability, component_spec in _DESKTOP_COMPONENTS.items():
@@ -1002,22 +1001,10 @@ class DesktopCatalogServiceMixin:
                             else "default"
                         ),
                         "config": (
-                            {
-                                "format_version": self.log_sink.format_version,
-                                "path": str(getattr(self.log_sink, "path", "")),
-                                "min_level": str(
-                                    getattr(
-                                        getattr(self.log_sink, "min_level", ""),
-                                        "value",
-                                        getattr(self.log_sink, "min_level", ""),
-                                    )
-                                ),
-                                "max_bytes": getattr(self.log_sink, "max_bytes", None),
-                                "backup_count": getattr(
-                                    self.log_sink, "backup_count", None
-                                ),
-                            }
-                            if capability == "observability.log-sink"
+                            {"plugin": self.observability_plugin_id, "path": str(self.runtime_root / "logs"),
+                             "log_root": str(self.runtime_root / "logs"),
+                             "diagnostics_root": str(getattr(self.diagnostics, "root", ""))}
+                            if capability == "observability.provider"
                             else {
                                 "path": str(self.runtime_root / "memory"),
                                 "recall": self.memory_plugin_id != "sage.memory.noop",
@@ -1031,13 +1018,6 @@ class DesktopCatalogServiceMixin:
                                 "derived_from": "session.events",
                             }
                             if capability == "session-memory.provider"
-                            else {
-                                "path": str(getattr(self.diagnostics, "root", "")),
-                                "format_version": getattr(
-                                    self.diagnostics, "format_version", ""
-                                ),
-                            }
-                            if capability == "observability.diagnostic-sink"
                             else {
                                 "path": str(self.runtime_root / "sessions"),
                                 "authoritative": True,
@@ -1056,12 +1036,21 @@ class DesktopCatalogServiceMixin:
                         "pending_restart": (
                             user_selectable
                             and apply_mode == "restart"
-                            and selected != active_plugin_id
+                            and (selected != active_plugin_id or (capability == "observability.provider" and self._observation_pending(settings)))
                         ),
                     },
                 }
             )
         return result
+
+    def _observation_pending(self, settings):
+        from .package import desktop_v2_manifest
+        from sagents.v2.runtime.observability.provider import ObservabilityConfig
+        choice = desktop_v2_manifest(session_root=self.runtime_root,
+            component_selections=settings.component_selections,
+            component_configs=settings.component_configs).runtime.capabilities["observability.provider"]
+        return (choice.plugin != self.observability_plugin_id or
+                ObservabilityConfig.model_validate(choice.config).model_dump(mode="json") != self.observability.config)
 
     async def select_component(
         self,
@@ -1081,6 +1070,8 @@ class DesktopCatalogServiceMixin:
                 f"completion policy {request.plugin_id!r} is not user selectable"
             )
         registration = self.extensions.get(request.plugin_id)
+        if not registration.descriptor.availability.available:
+            raise ValueError(f"extension {request.plugin_id!r} is unavailable")
         capabilities = {offer.capability for offer in registration.descriptor.provides}
         if component_id not in capabilities:
             raise ValueError(
@@ -1117,12 +1108,14 @@ class DesktopCatalogServiceMixin:
             "plugin_id": request.plugin_id,
             "config": normalized_config,
             "pending_restart": (
-                component_spec["apply_mode"] == "restart"
-                and request.plugin_id
-                != {
-                    "memory.provider": self.memory_plugin_id,
-                    "session-memory.provider": self.session_memory_plugin_id,
-                    "observability.log-sink": self.log_plugin_id,
-                }.get(component_id, request.plugin_id)
+                component_spec["apply_mode"] == "restart" and (
+                    self._observation_pending(settings.model_copy(update={
+                        "component_selections": choices, "component_configs": configs,
+                    })) if component_id == "observability.provider" else
+                    request.plugin_id != {
+                        "memory.provider": self.memory_plugin_id,
+                        "session-memory.provider": self.session_memory_plugin_id,
+                    }.get(component_id, request.plugin_id)
+                )
             ),
         }

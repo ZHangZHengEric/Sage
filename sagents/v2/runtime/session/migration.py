@@ -265,7 +265,7 @@ def migrate_manifest_v1(
         "session_store": "session.store",
         "memory_provider": "memory.provider",
         "session_memory_provider": "session-memory.provider",
-        "tool_provider": "tool.catalog",
+        "tool_provider": "tool.provider",
         "tool_selection": "tool.selection-policy",
     }
     for old_key, capability in aliases.items():

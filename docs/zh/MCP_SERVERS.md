@@ -50,7 +50,7 @@ Server MCP 只接受 `sse` 和 `streamable_http`，拒绝租户 `stdio` 命令�
 Server 的 `/api/mcp` 请求使用 `url`，Desktop 的连接载荷使用 `streamable_http_url`。让各宿主的界面生成对应载荷，不混用两套字段。当前桥接支持用 API Key 进行 Bearer 鉴权；本例不是任意 Header 或 OAuth 配置。
 
 嵌入式宿主通过 `builder.register(ExtensionRegistration(...))` 注册成对的
-`tool.catalog` / `tool.executor` 实现，在 runtime 中选择插件、Run scope 和可序列化参数。
+`tool.provider` 实现，在 runtime 中选择插件、Run scope 和可序列化参数。
 工厂声明 `execution.environment` 依赖，取得当前 Run 的可信身份后创建 `McpToolPlugin`。
 插件只实现工具协议，不组装 Agent 执行链。
 

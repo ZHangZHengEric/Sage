@@ -1993,7 +1993,6 @@ async def test_component_inventory_explains_plugins_and_locks_model_protocol(
     assert set(by_id) == {
         "skill.loading",
         "agent.continuation-policy",
-        "context.unit-compactor",
         "context.reducer",
         "context.summarizer",
         "context.summary-store",
@@ -2001,8 +2000,7 @@ async def test_component_inventory_explains_plugins_and_locks_model_protocol(
         "memory.recall-query",
         "tool.selection-policy",
         "session-memory.provider",
-        "observability.diagnostic-sink",
-        "observability.log-sink",
+        "observability.provider",
         "execution.sandbox",
         "session.store",
         "workspace.initializer",
@@ -2066,30 +2064,14 @@ async def test_component_inventory_explains_plugins_and_locks_model_protocol(
     assert set(
         tool_plugins["sage.tool-selection.llm"]["config_schema"]["properties"]
     ) == {"max_visible_tools", "model_timeout_seconds"}
-    assert {
-        value["plugin_id"] for value in by_id["context.unit-compactor"]["plugins"]
-    } == {
-        "sage.context.unit-compactor.reference",
-    }
-    assert by_id["observability.log-sink"]["active"] == {
-        "plugin_id": "sage.logging.filesystem",
-        "selected_plugin_id": "sage.logging.filesystem",
-        "source": "default",
-        "config": {
-            "format_version": "sage.log/v1",
-            "path": str(tmp_path / "runtime/logs/sage.jsonl"),
-            "min_level": "info",
-            "max_bytes": 10 * 1024 * 1024,
-            "backup_count": 5,
-        },
-        "pending_restart": False,
-    }
-    assert {
-        value["plugin_id"] for value in by_id["observability.log-sink"]["plugins"]
-    } == {
-        "sage.logging.filesystem",
-        "sage.logging.noop",
-        "sage.logging.stdout",
+    assert "context.unit-compactor" not in by_id
+    active = by_id["observability.provider"]["active"]
+    assert active["plugin_id"] == active["selected_plugin_id"] == "sage.observability.local"
+    assert active["pending_restart"] is False
+    assert active["config"]["log_root"] == str(tmp_path / "runtime/logs")
+    assert {value["plugin_id"] for value in by_id["observability.provider"]["plugins"]} == {
+        "sage.observability.local", "sage.observability.noop", "sage.observability.otlp",
+        "sage.observability.langfuse", "sage.observability.phoenix",
     }
     assert by_id["workspace.initializer"]["active"]["plugin_id"] == (
         "sage.workspace.initializer.claw"
@@ -2155,8 +2137,8 @@ async def test_component_inventory_explains_plugins_and_locks_model_protocol(
         )
     assert unavailable.value.info.code == "extension.not_found"
     logging_selection = await service.select_component(
-        "observability.log-sink",
-        ComponentSelectionRequest(plugin_id="sage.logging.noop"),
+        "observability.provider",
+        ComponentSelectionRequest(plugin_id="sage.observability.noop"),
         "user_1",
     )
     assert logging_selection["pending_restart"] is True
@@ -2164,10 +2146,10 @@ async def test_component_inventory_explains_plugins_and_locks_model_protocol(
     logging_component = next(
         value
         for value in inventory
-        if value["component"]["component_id"] == "observability.log-sink"
+        if value["component"]["component_id"] == "observability.provider"
     )
-    assert logging_component["active"]["plugin_id"] == "sage.logging.filesystem"
-    assert logging_component["active"]["selected_plugin_id"] == ("sage.logging.noop")
+    assert logging_component["active"]["plugin_id"] == "sage.observability.local"
+    assert logging_component["active"]["selected_plugin_id"] == ("sage.observability.noop")
     assert logging_component["active"]["pending_restart"] is True
     session_memory_selection = await service.select_component(
         "session-memory.provider",

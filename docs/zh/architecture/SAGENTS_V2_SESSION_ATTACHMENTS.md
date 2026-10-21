@@ -12,7 +12,7 @@ ref: v2-detail-SAGENTS_V2_SESSION_ATTACHMENTS
 
 `analyze_image` 在沙箱内读取并标准化图片，把 JPEG 快照写入当前 Run 所属的 SessionStore。消息账本保存 `sage-image:<sha256>` 引用；模型推理时从附件快照加载图片，总结时只保留附件标记。原图片路径变化不会改变已保存的快照。旧消息内的 data URL 仍可读取，总结投影会移除其中的图片字节。
 
-`SessionArtifactStore` 是 ArtifactStore 接口的 session 适配器。图片的持久性、授权和生命周期由选中的 session 插件决定，不再另选独立的 artifact 插件。通用 `artifact.store` 仍可用于其他产物。第三方 session 插件需要实现附件接口；不支持时返回 `session.attachments_unsupported`，不会隐式落到另一个存储。
+`SessionArtifactStore` 是 Session 存储插件发布的内部 Run 绑定产物视图，与 `session.store`、`derived-state.store` 共用存储实例，不再单独注册或配置。图片的持久性、授权和生命周期由选中的 session 插件决定，不再另选独立的 artifact 插件。通用 `artifact.store` 仍可用于其他产物。第三方 session 插件需要实现附件接口；不支持时返回 `session.attachments_unsupported`，不会隐式落到另一个存储。
 
 - Ephemeral 插件把字节保存在内存，关闭进程后不保留。
 - Filesystem 插件在所属 session 目录的 `attachments/` 下保存不可变二进制文件；先持久化文件，再提交附件清单。失败不会把不存在的附件写进清单；提交前留下的孤立文件随 session 删除回收。完整目录备份包含子 session 和附件。

@@ -284,12 +284,12 @@ PluginDeclaration：id 必填；version 可选字符串，默认 null；config �
 
 ```yaml
 plugins:
-  - id: example.context.reference-compactor
+  - id: example.context.reference-reducer
     config: {minimum_characters: 4}
 runtime:
   capabilities:
-    context.unit-compactor:
-      plugin: example.context.reference-compactor
+    context.reducer:
+      plugin: example.context.reference-reducer
       config: {minimum_characters: 3}
 ```
 
@@ -326,8 +326,8 @@ environments:
       budgets: {max_steps: 5}
     runtime:
       capabilities:
-        observability.log-sink:
-          plugin: sage.logging.stdout
+        observability.provider:
+          plugin: sage.observability.local
           config: {min_level: debug}
 ```
 
@@ -392,9 +392,9 @@ runtime:
     session.store:
       plugin: sage.session.filesystem
       config: {root: /srv/support/runtime}
-    observability.log-sink:
-      plugin: sage.logging.stdout
-      config: {stream: stderr, min_level: info, format: json}
+    observability.provider:
+      plugin: sage.observability.local
+      config: {log_stream: stderr, log_level: info, log_format: json}
 policies:
   budgets: {max_steps: 30, total_tokens: 100000, wall_time_seconds: 600}
 agents:

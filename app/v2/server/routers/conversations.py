@@ -268,7 +268,7 @@ async def session_download(thread_id: str, user: AdminUser, host: HostDep):
     run_ids = {run.run_id for run in runs}
     if host.diagnostics is None:
         raise HTTPException(409, "当前观测插件不支持诊断查询")
-    source: DiagnosticEvidenceSource = host.diagnostics
+    source: DiagnosticEvidenceSource = host.observability
     try:
         async with asyncio.timeout(30):
             evidence = await source.export_evidence(thread_id, run_ids)

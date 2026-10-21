@@ -143,11 +143,3 @@ class ContextReducer(Protocol):
         *,
         scope: ContextReductionScope | None = None,
     ) -> ContextProjection: ...
-
-
-class ContextUnitCompactor(Protocol):
-    """Replace one indivisible unit without changing canonical Session facts."""
-
-    async def compact(
-        self, unit: tuple[ModelMessage, ...]
-    ) -> tuple[ModelMessage, ...] | None: ...

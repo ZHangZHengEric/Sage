@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from sagents.v2.tool.provider import ToolProvider
+
 import inspect
 from collections.abc import Mapping
 from typing import Any
@@ -90,10 +92,7 @@ class OfficialToolPlugin:
         description=description,
         provides=(
             CapabilityOffer(
-                capability="tool.catalog", api_version="2", name="official"
-            ),
-            CapabilityOffer(
-                capability="tool.executor", api_version="2", name="official"
+                capability="tool.provider", api_version="2", name="official"
             ),
         ),
         supported_scopes=frozenset({ExtensionScope.RUN}), default_scope=ExtensionScope.RUN,
@@ -118,8 +117,7 @@ class OfficialToolPlugin:
         self, context: ExtensionScopeContext, dependencies: Mapping[str, Any]
     ) -> Mapping[str, Any]:
         return {
-            "tool.catalog:official": self.catalog,
-            "tool.executor:official": self.executor,
+            "tool.provider:official": ToolProvider(self.catalog, self.executor),
         }
 
     async def stop(self, reason: Any) -> None:

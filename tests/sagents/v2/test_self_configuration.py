@@ -446,7 +446,7 @@ async def test_public_builder_exposes_self_configuration_without_initial_skills(
         "agent.self-configuration": CapabilitySelection(plugin="test.self-configuration", scope="run"),
         "execution.binding": CapabilitySelection(plugin="sage.execution.binding.local-workspace", config={
             "workspace": str(tmp_path / "workspace"), "policy": {"process": {"enabled": False}}}),
-        "tool.catalog": CapabilitySelection(plugin="sage.tool.official"),
+        "tool.provider": CapabilitySelection(plugin="sage.tool.official"),
         "tool.selection-policy": CapabilitySelection(plugin="sage.tool-selection.direct"),
         "agent.continuation-policy": CapabilitySelection(plugin="sage.agent.continuation.deterministic"),
     }})})

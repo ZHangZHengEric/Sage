@@ -154,7 +154,7 @@ def _archive_directory(fd: int, archive: ZipFile, prefix: str, total: list[int],
 
 def prepare_session_export(session_id: str, run_ids: set[str], evidence: dict | None = None):
     """Package observation evidence; the Run allowlist contains no business state."""
-    from app.v2.server.observability.diagnostics import redact
+    from sagents.v2.runtime.observability.sqlite_evidence import redact
 
     evidence = redact(evidence or {"models": [], "logs": [], "unavailable": True})
     pending_writes = bool(evidence.get("pending_writes"))

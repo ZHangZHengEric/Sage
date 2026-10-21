@@ -1,3 +1,4 @@
+from sagents.v2.runtime.observability.provider import ObservabilityProvider
 from tests.sagents.v2.sdk_fixture import build_registered_package
 from tests.sagents.v2.sdk_fixture import fixture_configuration
 from tests.sagents.v2.model_fixture import TEST_MODELS
@@ -321,8 +322,8 @@ def test_distributed_profile_rejects_weaker_explicit_guarantee():
     assert effective["artifact.store"]["shared_across_processes"] is True
     assert effective["package.registry"]["supports_package_signatures"] is True
     assert effective["execution.job-runtime"]["supports_adoption"] is True
-    assert effective["tool.executor"]["durable_operation_ledger"] is True
-    assert effective["tool.executor"]["supports_restart_reconciliation"] is True
+    assert effective["tool.provider"]["durable_operation_ledger"] is True
+    assert effective["tool.provider"]["supports_restart_reconciliation"] is True
     # Workload isolation is a separate Host policy. It must not prevent a
     # server from using SAgents as an async conversation engine with its own
     # execution implementation (or no process tools at all).
@@ -521,7 +522,7 @@ async def test_search_memory_assignment_controls_real_recall(tmp_path, preset, m
         "memory": AgentMemoryBehavior(recall=True, auto_write=True, scope="agent")})
     package = package.model_copy(update={"agents": {agent_id: definition}})
     runtime = package.runtime.model_copy(update={"capabilities": {**package.runtime.capabilities,
-        "tool.catalog": CapabilitySelection(plugin="sage.tool.official"),
+        "tool.provider": CapabilitySelection(plugin="sage.tool.official"),
         "execution.binding": CapabilitySelection(plugin="sage.execution.binding.local-workspace", config={
             "workspace": str(tmp_path / "workspace"), "policy": {"process": {"enabled": False}}})}})
     app = await build_registered_package(tmp_path / "state", models=TEST_MODELS,
@@ -603,7 +604,7 @@ async def test_official_tools_are_selected_with_standard_execution_binding(tmp_p
     package = BuiltinPackageFactory.create("assistant", package_id="test.official-tools")
     config = package.runtime.model_copy(update={"capabilities": {
         **package.runtime.capabilities,
-        "tool.catalog": CapabilitySelection(plugin="sage.tool.official"),
+        "tool.provider": CapabilitySelection(plugin="sage.tool.official"),
         "execution.binding": CapabilitySelection(plugin="sage.execution.binding.local-workspace", config={
             "workspace": str(tmp_path / "workspace"), "policy": {"process": {"enabled": False}},
         }),
@@ -633,7 +634,7 @@ async def test_registered_binding_receives_accepted_actual_run_and_releases_leas
     binding = Binding()
     package = BuiltinPackageFactory.create("assistant", package_id="test.binding")
     runtime = package.runtime.model_copy(update={"capabilities": {
-        "tool.catalog": CapabilitySelection(plugin="sage.tool.official")}})
+        "tool.provider": CapabilitySelection(plugin="sage.tool.official")}})
     model = ScriptedModelProvider((response(),))
     app = await build_registered_package(tmp_path / "state", models=TEST_MODELS, model=model,
         package=package, runtime=runtime, providers={"execution.binding": binding})
@@ -722,16 +723,16 @@ async def test_builder_injects_host_log_and_diagnostic_sinks(tmp_path: Path):
     diagnostic_sink = NoopDiagnosticSink()
 
     application = await (
-        build_registered_package(tmp_path / 'session-store', models=TEST_MODELS, model=ScriptedModelProvider(()), package=package, providers={'observability.log-sink': log_sink, 'observability.diagnostic-sink': diagnostic_sink})
+        build_registered_package(tmp_path / 'session-store', models=TEST_MODELS, model=ScriptedModelProvider(()), package=package, providers={'observability.provider': ObservabilityProvider(plugin_id='test.observation', outputs=(log_sink,), diagnostics=diagnostic_sink)})
     )
 
-    assert application.service("observability.log-sink") is log_sink
-    assert application.service("observability.diagnostic-sink") is diagnostic_sink
+    assert application.service("observability.provider").logs.outputs[0] is log_sink
+    assert application.service("observability.provider").diagnostics is diagnostic_sink
     assert _host_binding(
-        application.resolved_plan, "observability.log-sink"
+        application.resolved_plan, "observability.provider"
     ).source == "plugin"
     assert (
-        _host_binding(application.resolved_plan, "observability.diagnostic-sink").source
+        _host_binding(application.resolved_plan, "observability.provider").source
         == "plugin"
     )
     await application.close()
@@ -757,7 +758,7 @@ async def test_builder_logs_resolved_application_registration(tmp_path: Path):
         package_id="test.builder-registration",
     )
     application = await (
-        build_registered_package(tmp_path / 'session-store', models=TEST_MODELS, model=ScriptedModelProvider(()), package=package, providers={'observability.log-sink': sink})
+        build_registered_package(tmp_path / 'session-store', models=TEST_MODELS, model=ScriptedModelProvider(()), package=package, providers={'observability.provider': ObservabilityProvider(plugin_id='test.observation', outputs=(sink,))})
     )
     try:
         registration = next(
@@ -788,15 +789,15 @@ async def test_builder_keeps_plugin_sinks_when_host_does_not_inject(
         build_registered_package(tmp_path / 'session-store', models=TEST_MODELS, model=ScriptedModelProvider(()), package=package)
     )
 
-    assert isinstance(application.service("observability.log-sink"), NoopLogSink)
+    assert not application.service("observability.provider").logs.outputs
     assert isinstance(
-        application.service("observability.diagnostic-sink"), NoopDiagnosticSink
+        application.service("observability.provider").diagnostics, NoopDiagnosticSink
     )
     assert _host_binding(
-        application.resolved_plan, "observability.log-sink"
+        application.resolved_plan, "observability.provider"
     ).source == ("plugin")
     assert (
-        _host_binding(application.resolved_plan, "observability.diagnostic-sink").source
+        _host_binding(application.resolved_plan, "observability.provider").source
         == "plugin"
     )
     await application.close()

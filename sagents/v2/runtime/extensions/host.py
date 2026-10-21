@@ -183,9 +183,11 @@ class ExtensionHost:
 
         providers = parent.providers.as_dict() if parent is not None else {}
         for plugin_id, source in inherited.items():
-            for offer in self.registry.get(plugin_id).descriptor.provides:
-                key = CapabilityKey(capability=offer.capability, name=offer.name)
-                value = source.providers[key]
+            started_source = next(value for value in source._started
+                                  if value.registration.descriptor.plugin_id == plugin_id)
+            for key, value in started_source.providers.items():
+                if not _provider_selected(plan.graph, plugin_id, key):
+                    continue
                 if key in providers and providers[key] is not value:
                     raise _error("extension.provider_key_conflict", ErrorCategory.CONFLICT,
                                  f"inherited provider {key} has conflicting instances")
@@ -236,7 +238,10 @@ class ExtensionHost:
                         f"{sorted(map(str, produced))}; expected "
                         f"{sorted(map(str, expected))}",
                     )
+                starting.providers = produced
                 for key, provider in produced.items():
+                    if not _provider_selected(plan.graph, plugin_id, key):
+                        continue
                     if key in providers:
                         matching = [
                             value
@@ -472,7 +477,7 @@ class ExtensionHost:
                         ErrorCategory.VALIDATION,
                         f"extension {plugin_id!r} requires open_scope()",
                     )
-                produced = dict(produced)
+                produced = _normalize_providers(produced)
                 expected = {
                     CapabilityKey(capability=offer.capability, name=offer.name)
                     for offer in descriptor.provides
@@ -483,7 +488,10 @@ class ExtensionHost:
                         ErrorCategory.PROVIDER_PERMANENT,
                         f"extension {plugin_id!r} produced an invalid provider set",
                     )
+                starting.providers = produced
                 for key, provider in produced.items():
+                    if not _provider_selected(plan.graph, plugin_id, key):
+                        continue
                     if key in providers:
                         matching = [
                             value
@@ -612,6 +620,10 @@ async def _start_extension(
             )
     if inspect.isawaitable(produced):
         produced = await produced
+    return _normalize_providers(produced)
+
+
+def _normalize_providers(produced):
     normalized: dict[CapabilityKey, Any] = {}
     for key, value in dict(produced).items():
         if isinstance(key, CapabilityKey):
@@ -653,6 +665,13 @@ def _error(code: str, category: ErrorCategory, message: str) -> SageV2Error:
             safe_to_resume=True,
         )
     )
+
+
+def _provider_selected(graph, plugin_id, key):
+    """An explicit provider selection takes precedence over sibling offers."""
+    selected = [value for value in graph.capabilities
+                if value.capability == key.capability and value.name == key.name]
+    return not selected or any(value.plugin_id == plugin_id for value in selected)
 
 
 def _normalized_scope_context(

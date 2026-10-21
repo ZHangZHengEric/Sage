@@ -9,7 +9,7 @@ from app.v2.server.catalog.records import enabled_a2a_agents, enabled_mcp_server
 from app.v2.server.catalog.plugins import AGENT_DEFAULTS, validate_agent_plugins
 from app.v2.server.catalog.packages import is_external_tool
 
-PACKAGE_COMPOSITION_CAPABILITIES = {"flow.node", "tool.catalog"}
+PACKAGE_COMPOSITION_CAPABILITIES = {"flow.node", "tool.provider"}
 
 
 class ServerPackagePolicy:
@@ -79,7 +79,7 @@ class ServerPackagePolicy:
         skills = {item.name for item in visible}
         for agent in manifest.agents.values():
             custom_tools = (
-                manifest.runtime.selections("tool.catalog")
+                manifest.runtime.selections("tool.provider")
                 and self.package_authorizer is not None
             )
             # External definitions are discovered at runtime. Missing/disabled
