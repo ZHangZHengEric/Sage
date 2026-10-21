@@ -1213,6 +1213,8 @@ class ApplicationAssembler:
             resolved.manifest_hash, scope_handles, services,
             registry=self.extensions if self.state.revision_identity else None, runtime=runtime_config,
         )
+        if self.state.recovery_identity is not None:
+            composition_hash = self.state.recovery_identity.bind(composition_hash)
         runtime_composition_hash = composition_hash
         agent.attach_dispatcher(dispatcher)
         if self.state.dispatcher is None:
@@ -1637,12 +1639,12 @@ class ApplicationAssembler:
 
     async def _instantiate(self, *args, **kwargs):
         import asyncio
-        from sagents.v2.composition.identity import _config_identity
+        from sagents.v2.runtime.extensions.identity import config_identity
         if kwargs["scope"] == ExtensionScope.RUN:
             return await self._open_instance(*args, **kwargs)
         plugin_id, config = args[3:5]
         key = (plugin_id, kwargs["scope"], kwargs.get("tenant_id"),
-               kwargs.get("agent_id"), _config_identity(config))
+               kwargs.get("agent_id"), config_identity(config))
         lock = self._provider_locks.setdefault(key, asyncio.Lock())
         async with lock:
             return await self._open_instance(*args, **kwargs)
@@ -1665,14 +1667,14 @@ class ApplicationAssembler:
         offer_name: str | None = None,
         available=(),
     ):
-        from sagents.v2.composition.identity import _config_identity
+        from sagents.v2.runtime.extensions.identity import config_identity
         agent_configuration = self._agent_configurations.get(agent_id)
         if agent_configuration is not None:
             agent_id = agent_configuration["scope_agent_id"]
         cache_key = (plugin_id, scope, tenant_id if scope != ExtensionScope.PROCESS else None,
                      agent_id if scope in {ExtensionScope.AGENT, ExtensionScope.RUN} else None,
-                     _config_identity(config),
-                     _config_identity(agent_configuration) if scope in {ExtensionScope.AGENT, ExtensionScope.RUN} else None)
+                     config_identity(config),
+                     config_identity(agent_configuration) if scope in {ExtensionScope.AGENT, ExtensionScope.RUN} else None)
         if scope != ExtensionScope.RUN and cache_key in self._provider_handles:
             handle = self._provider_handles[cache_key]
             if getattr(handle, "_released", False) or handle._closed:
@@ -1735,7 +1737,7 @@ class ApplicationAssembler:
         return (value, handle) if return_handle else value
 
     def _dependency_identity(self, plugin_id, handles, seen=frozenset()):
-        from sagents.v2.composition.identity import _config_identity
+        from sagents.v2.runtime.extensions.identity import config_identity
         from sagents.v2.composition.providers import _scope_sources
         if plugin_id in seen:
             return ()  # ExtensionHost reports the dependency cycle.
@@ -1760,7 +1762,7 @@ class ApplicationAssembler:
                 config = source.configurations.get(selected, {})
             descriptor = self.extensions.get(selected).descriptor
             result.append((dependency.capability, dependency.name, selected, descriptor.version,
-                           _config_identity(config), self._dependency_identity(
+                           config_identity(config), self._dependency_identity(
                                selected, handles, seen | {plugin_id})))
         return tuple(result)
 

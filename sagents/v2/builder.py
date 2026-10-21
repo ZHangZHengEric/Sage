@@ -10,6 +10,7 @@ from sagents.v2.application import (
 )
 from sagents.v2.composition.assembler import ApplicationAssembler
 from sagents.v2.composition.state import AssemblyState
+from sagents.v2.composition.revision_store import AgentRevisionStore
 from sagents.v2.composition.inputs import RuntimeInput
 from sagents.v2.package.manifest.resolver import ResolvedSageManifest
 from sagents.v2.package.manifest.root import SageManifest
@@ -21,11 +22,16 @@ from sagents.v2.runtime.extensions.official import builtin_extension_registry
 
 
 class SAgentBuilder:
-    """Register implementations; runtime selects providers and their parameters."""
+    """Register implementations; runtime selects providers and their parameters.
 
-    def __init__(self) -> None:
+    A host may supply a revision store to upgrade its own persisted snapshots.
+    New package inputs always use the current manifest contract.
+    """
+
+    def __init__(self, *, revision_store: AgentRevisionStore | None = None) -> None:
         self._registry = builtin_extension_registry()
         self._state = AssemblyState()
+        self._revision_store = revision_store
 
     def register(self, registration: ExtensionRegistration) -> "SAgentBuilder":
         self._registry.register(registration)

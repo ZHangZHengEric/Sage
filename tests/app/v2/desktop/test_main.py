@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -15,6 +16,33 @@ from app.v2.desktop.backend.main import (
 from app.v2.desktop.backend.observability import create_desktop_observability
 from sagents.v2.contracts.errors import ErrorCategory, RuntimeErrorInfo
 from sagents.v2.runtime.session import StoreInUseError
+
+
+def test_sidecar_main_reaches_server_and_cleans_up(tmp_path, monkeypatch, capsys):
+    from app.v2.desktop.backend import main as sidecar
+
+    listener = MagicMock()
+    listener.getsockname.return_value = ("127.0.0.1", 54321)
+    real_socket = sidecar.socket.socket
+    monkeypatch.setattr(sidecar.socket, "socket", lambda *args, **kwargs:
+                        listener if args and args[0] == sidecar.socket.AF_INET
+                        else real_socket(*args, **kwargs))
+    server = MagicMock()
+    def create_server(config):
+        from fastapi.testclient import TestClient
+        def run(**kwargs):
+            with TestClient(config.app):
+                pass
+        server.run.side_effect = run
+        return server
+    monkeypatch.setattr(sidecar.uvicorn, "Server", create_server)
+
+    assert sidecar.main(["--data-root", str(tmp_path), "--build-id", "test"]) == 0
+    ready = json.loads(capsys.readouterr().out.splitlines()[0])
+    assert ready["port"] == 54321
+    assert ready["auth_token"]
+    server.run.assert_called_once_with(sockets=[listener])
+    assert not (tmp_path / "runtime/desktop-v2-sidecar.json").exists()
 
 
 def test_sidecar_registry_is_private_and_removed_only_by_its_owner(

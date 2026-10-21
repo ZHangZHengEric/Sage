@@ -52,7 +52,7 @@ _LAZY_EXPORTS = {
         "CubeVolumeSandboxProvider",
     ),
     "SandboxGrantIssuer": (
-        "sagents.v2.runtime.execution.sandbox.plugins.ephemeral",
+        "sagents.v2.runtime.execution.sandbox.grants",
         "SandboxGrantIssuer",
     ),
 }

@@ -26,7 +26,7 @@ from sagents.v2.contracts.principals import (
     TraceContext,
 )
 from sagents.v2.contracts.run_state import EventCursor, RunState
-from sagents.v2.runtime.plugins._shared.redis_coordination import (
+from sagents.v2.runtime.distributed.redis_coordination import (
     RedisMutationFence,
     active_worker_fence,
 )

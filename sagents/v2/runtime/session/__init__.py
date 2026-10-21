@@ -55,7 +55,7 @@ _EXPORTS = {
     ),
     "SessionStore": ("sagents.v2.runtime.session.contracts", "SessionStore"),
     "SessionStoreCoordinator": (
-        "sagents.v2.runtime.session.coordinator",
+        "sagents.v2.runtime.session.state",
         "SessionStoreCoordinator",
     ),
     "SessionStoreCorruptionError": (
@@ -73,10 +73,6 @@ _EXPORTS = {
     "SubscriptionHub": (
         "sagents.v2.runtime.session.subscriptions",
         "SubscriptionHub",
-    ),
-    "migrate_manifest_v1": (
-        "sagents.v2.runtime.session.migration",
-        "migrate_manifest_v1",
     ),
     "migrate_runtime_root": (
         "sagents.v2.runtime.session.migration",

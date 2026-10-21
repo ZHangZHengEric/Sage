@@ -476,6 +476,9 @@ class DesktopRunServiceMixin(DesktopRunCompositionMixin):
         suspension = await self.session_access.get_suspension(
             run.suspension_id, context
         )
+        # Restore the admitted revision before accepting a durable transition.
+        # Missing/corrupt archives must leave the suspension answerable.
+        await self.application.agent_for_run(run_id, context)
         receipt = await self.runtime.resume_run(
             ResumeRun(
                 run_id=run_id,
@@ -510,6 +513,7 @@ class DesktopRunServiceMixin(DesktopRunCompositionMixin):
         interaction = await self.session_access.get_interaction(interaction_id, context)
         if interaction.run_id != run_id or suspension.interaction_id != interaction_id:
             raise ValueError("interaction does not belong to the active Run suspension")
+        await self.application.agent_for_run(run_id, context)
         receipt = await self.runtime.reply_interaction(
             ReplyInteraction(
                 run_id=run_id,

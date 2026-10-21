@@ -11,6 +11,10 @@ from sagents.v2.runtime.extensions import (
     ExtensionRegistration,
     ExtensionScope,
 )
+from sagents.v2.runtime.extensions.registration import implementation_identity
+from sagents.v2.runtime.extensions.registry import ExtensionRegistry
+from sagents.v2.skill.plugins.filesystem import FilesystemSkillProvider
+from sagents.v2.skill.plugins.loading import SkillLoadingConfig, SkillLoadingPlugin
 from sagents.v2.skill.plugins.repository import (
     MemorySkillRepository,
     SqliteSkillRepository,
@@ -130,3 +134,65 @@ def skill_registrations():
             )
         )
     return tuple(values)
+
+
+def register_skill_plugins(registry: ExtensionRegistry) -> None:
+    for registration in skill_registrations():
+        registry.register(registration)
+
+    registry.register(
+        ExtensionRegistration(
+            descriptor=SkillLoadingPlugin.descriptor,
+            config_model=SkillLoadingConfig,
+            factory=lambda context, dependencies: SkillLoadingPlugin(**context.config),
+            start=lambda plugin, context, dependencies: {"skill.loading": plugin},
+        )
+    )
+
+    registry.register(
+        ExtensionRegistration(
+            descriptor=ExtensionDescriptor(
+                **implementation_identity(FilesystemSkillProvider),
+                version="2.0.0",
+                provides=(
+                    CapabilityOffer(
+                        capability="skill.provider", api_version="2", name="filesystem"
+                    ),
+                    CapabilityOffer(
+                        capability="skill.management",
+                        api_version="2",
+                        name="filesystem",
+                    ),
+                ),
+                supported_scopes=frozenset(
+                    {ExtensionScope.PROCESS, ExtensionScope.AGENT}
+                ),
+                config_schema={
+                    "type": "object",
+                    "properties": {
+                        "roots": {
+                            "type": "array",
+                            "items": {"type": "string", "minLength": 1},
+                            "minItems": 1,
+                        },
+                        "max_files": {"type": "integer", "minimum": 1},
+                        "max_total_bytes": {"type": "integer", "minimum": 1},
+                    },
+                    "required": ["roots"],
+                    "additionalProperties": False,
+                },
+                built_in=True,
+            ),
+            factory=lambda context, dependencies: FilesystemSkillProvider(
+                tuple(context.config["roots"]),
+                max_files=int(context.config.get("max_files", 2_000)),
+                max_total_bytes=int(
+                    context.config.get("max_total_bytes", 64 * 1024 * 1024)
+                ),
+            ),
+            start=lambda provider, context, dependencies: {
+                "skill.provider:filesystem": provider,
+                "skill.management:filesystem": provider,
+            },
+        )
+    )

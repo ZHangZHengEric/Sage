@@ -9,7 +9,6 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import hmac
-import json
 import os
 import signal
 import shutil
@@ -29,6 +28,7 @@ from sagents.v2.runtime.execution.sandbox.plugins._shared.read_only_shell import
     parse_read_only_shell_command,
     read_only_process_command,
 )
+from sagents.v2.runtime.execution.sandbox.grants import grant_payload
 from sagents.v2.runtime.execution.sandbox.contracts import (
     MUTATING_FILE_OPERATIONS,
     FileOperation,
@@ -43,7 +43,6 @@ from sagents.v2.runtime.execution.sandbox.contracts import (
     ResourceLimitCapabilities,
     SandboxCapabilities,
     SandboxCheckpointRef,
-    SandboxGrant,
     SandboxRef,
     SandboxReleaseDisposition,
     SandboxReleaseReceipt,
@@ -52,15 +51,6 @@ from sagents.v2.runtime.execution.sandbox.contracts import (
     SandboxState,
     TerminateMode,
 )
-
-
-def _grant_payload(grant: SandboxGrant) -> bytes:
-    return json.dumps(
-        grant.model_dump(mode="json", exclude={"signature"}),
-        sort_keys=True,
-        separators=(",", ":"),
-        ensure_ascii=False,
-    ).encode()
 
 
 # 只读模式下 git 段的加固：命令行 -c 覆盖仓库/全局配置里能启动外部程序的项，
@@ -1276,7 +1266,7 @@ class LocalWorkspaceSandboxProvider:
 
     def _verify(self, row, operation, intent, grant, *, check_ready=True):
         signature = hmac.new(
-            self.verification_key, _grant_payload(grant), hashlib.sha256
+            self.verification_key, grant_payload(grant), hashlib.sha256
         ).hexdigest()
         if not hmac.compare_digest(signature, grant.signature):
             raise PermissionError("sandbox grant signature is invalid")

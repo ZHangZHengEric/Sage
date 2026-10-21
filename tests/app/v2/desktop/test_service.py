@@ -2768,7 +2768,7 @@ async def test_rejected_interaction_never_persists_remembered_shell_approval(
             "arguments": {"command": "git status"},
         },
     )
-    service.application = object()
+    service.application = SimpleNamespace(agent_for_run=AsyncMock())
     service.session_access = SimpleNamespace(
         get_run=AsyncMock(return_value=run),
         get_suspension=AsyncMock(return_value=suspension),
@@ -2794,6 +2794,7 @@ async def test_rejected_interaction_never_persists_remembered_shell_approval(
         "user_1",
     )
 
+    service.application.agent_for_run.assert_awaited_once_with("run_1", context)
     remember.assert_not_awaited()
     await service.session_store.close()
 

@@ -7,7 +7,8 @@ from app.v2.cli.commands import (
     v2_run_command as _v2_run_command, v2_chat_command as _v2_chat_command,
     v2_sessions_command as _v2_sessions_command, v2_approvals_command as _v2_approvals_command,
 )
-from sagents.v2.runtime.session.migration import migrate_manifest_v1, migrate_runtime_root
+from sagents.v2.package.manifest.migration import migrate_manifest_v1
+from sagents.v2.runtime.session.migration import migrate_runtime_root
 
 async def _main_async(args):
     try:

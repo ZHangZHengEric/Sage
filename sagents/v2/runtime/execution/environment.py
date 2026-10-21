@@ -64,35 +64,3 @@ def run_environment_registration():
             config_schema={"type": "object", "additionalProperties": False}, built_in=True,
         ), factory=create, ownership="borrowed",
     )
-
-
-def tool_runtime_registration():
-    from sagents.v2.runtime.extensions.contracts import (
-        CapabilityOffer, ExtensionDependency, ExtensionDescriptor, ExtensionRegistration, ExtensionScope,
-    )
-    from sagents.v2.tool.official import OfficialToolRuntime
-    from sagents.v2.runtime.artifact.binding import bind_artifact_store
-    def create(context, dependencies):
-        environment = dependencies.require("execution.environment")
-        if environment.sandbox is None or environment.grant_issuer is None:
-            raise RuntimeError("official tools require a Run-owned execution.binding sandbox")
-        runtime = OfficialToolRuntime(environment.sandbox, environment.grant_issuer,
-                                      job_runtime=dependencies.require("execution.job-runtime"))
-        runtime.artifact_store = bind_artifact_store(dependencies.require("artifact.store"), environment.run_id)
-        runtime.memory_service = environment.memory_service
-        runtime.session_memory_service = environment.session_memory_service
-        runtime.goal_state_service = environment.goal_state_service
-        runtime.tool_selection_policy = dependencies.require("tool.selection-policy")
-        runtime.bind_job_runtime(dependencies.require("execution.job-runtime"))
-        return runtime
-    return ExtensionRegistration(
-        descriptor=ExtensionDescriptor(
-            plugin_id=OfficialToolRuntime.plugin_id, name="Run tool environment", version="2.0.0",
-            description="Official tools bound to the accepted Run sandbox and shared services.",
-            provides=(CapabilityOffer(capability="execution.tool-runtime", api_version="2"),),
-            dependencies=tuple(ExtensionDependency(capability=capability) for capability in (
-                "execution.environment", "execution.job-runtime", "artifact.store", "tool.selection-policy")),
-            supported_scopes=frozenset({ExtensionScope.RUN}), default_scope=ExtensionScope.RUN,
-            config_schema={"type": "object", "additionalProperties": False}, built_in=True,
-        ), factory=create,
-    )

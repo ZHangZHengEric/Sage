@@ -4,7 +4,7 @@ from sagents.v2._lazy import exported_names, resolve_export
 
 _EXPORTS = {
     "SessionArtifactStore": (
-        "sagents.v2.runtime.session.plugins._shared.storage",
+        "sagents.v2.runtime.artifact.plugins.session",
         "SessionArtifactStore",
     ),
     "ArtifactRef": ("sagents.v2.runtime.artifact.contracts", "ArtifactRef"),

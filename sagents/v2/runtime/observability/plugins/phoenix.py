@@ -39,6 +39,17 @@ class PhoenixTraceSink(OtlpTraceTransport):
         api_key: str = "",
         **options: Any,
     ) -> None:
+        self.validate_configuration(endpoint, project_name)
+        super().__init__(
+            endpoint=endpoint,
+            protocol="http",
+            headers={"Authorization": f"Bearer {api_key}"} if api_key else {},
+            resource_attributes={"openinference.project.name": project_name},
+            **options,
+        )
+
+    @staticmethod
+    def validate_configuration(endpoint: str, project_name: str = "sage") -> None:
         url = urlsplit(endpoint)
         if (
             url.scheme not in {"http", "https"}
@@ -52,13 +63,6 @@ class PhoenixTraceSink(OtlpTraceTransport):
             )
         if not project_name.strip():
             raise ValueError("Phoenix project_name must be non-empty")
-        super().__init__(
-            endpoint=endpoint,
-            protocol="http",
-            headers={"Authorization": f"Bearer {api_key}"} if api_key else {},
-            resource_attributes={"openinference.project.name": project_name},
-            **options,
-        )
 
     def _attributes(self, span: TraceSpan) -> dict[str, Any]:
         values = super()._attributes(span)

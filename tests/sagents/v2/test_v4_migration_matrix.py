@@ -13,10 +13,10 @@ from sagents.v2.runtime.session.journal import (
     FILESYSTEM_SESSION_STORE_FORMAT_V2,
     FILESYSTEM_SESSION_STORE_FORMAT_V3,
 )
+from sagents.v2.package.manifest.migration import migrate_manifest_v1
 from sagents.v2.runtime.session.migration import (
     _make_writable,
     adopt_unowned_sessions,
-    migrate_manifest_v1,
     migrate_runtime_root,
 )
 

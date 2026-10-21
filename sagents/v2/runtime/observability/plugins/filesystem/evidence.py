@@ -22,7 +22,7 @@ from sagents.v2.runtime.observability.log_format import redact_log_value
 from sagents.v2.runtime.observability.plugins.filesystem.media import (
     DiagnosticMediaStore,
 )
-from sagents.v2.runtime.session.plugins._shared.filesystem_layout import (
+from sagents.v2.runtime.session.plugins.filesystem.layout import (
     resolve_session_directory,
 )
 

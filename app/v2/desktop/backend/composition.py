@@ -44,7 +44,8 @@ async def build_desktop_application(
     root = Path(session_root).expanduser().resolve()
     workspace_path = Path(workspace).expanduser().resolve()
     workspace_path.mkdir(parents=True, exist_ok=True)
-    builder = SAgentBuilder()
+    from app.v2.desktop.backend.revision_store import DesktopAgentRevisionStore
+    builder = SAgentBuilder(revision_store=DesktopAgentRevisionStore(root))
     choices = {}
     def register_service(capability, value, *, ownership="borrowed"):
         plugin_id = "com.sage.desktop." + capability.replace(".", "-")
