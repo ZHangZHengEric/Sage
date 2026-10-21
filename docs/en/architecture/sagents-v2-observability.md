@@ -19,6 +19,25 @@ The only observation selection is `observability.provider`. Its provider owns lo
 
 `ObservedRunDriver` owns Agent and tool observations; `RecordingModelProvider` owns model observations. They emit the same vendor-independent `TraceSpan`. `sage.observability.otlp` exports generic/GenAI attributes, while `sage.observability.langfuse` and `sage.observability.phoenix` add their respective platform mappings over the shared OTLP transport. No database tables or durable observability queues are added.
 
+```yaml
+capabilities:
+  observability.provider:
+    plugin: sage.observability.local
+    config:
+      log_level: info
+      log_root: /srv/sage/runtime/logs
+      diagnostics_root: /srv/sage/runtime/sessions
+      diagnostics_storage: files
+```
+
+## Module organization and query interface
+
+The `runtime/observability` root contains public contracts, Provider composition and shared logging/tracing. `evidence/` owns request conversion, redaction and evidence reconstruction. `performance/` owns bounded timing capture, trace projection and pure timing calculations. Concrete file, SQLite and external protocol adapters live in `plugins/`. Shared evidence and performance code does not depend on adapters, HTTP clients or databases.
+
+Hosts read through the Provider's `export_evidence`, model-history methods, `report_performance` and optional `trace_query`. `performance_available` reports performance-query availability; unsupported trace queries are represented by `None`. Hosts retain authorization, HTTP validation and navigation without inspecting diagnostic implementation types or storage paths. Backend differences are composed inside the module, timing calculations are shared, and existing business and diagnostic storage schemas are unchanged.
+
+See the [module guide](../../../sagents/v2/runtime/observability/README.md) for maintenance rules. Root-level concrete adapter exports and moved module import paths have been removed; callers use the unified entry point, while adapter tests import implementations under `plugins/`.
+
 ## Conversation latency diagnostics
 
 Enable `SAGE_SERVER_LOG_LEVEL=debug` to collect phase logs. Stable event names correlate through `correlation_id`, then native `run_id` and `session_id` after admission. Log messages are Chinese; fields contain identities, phases, counts and timings, without tool arguments or model bodies.
@@ -105,7 +124,7 @@ PHOENIX_API_KEY=your-api-key
 
 The endpoint is the complete OTLP/HTTP protobuf traces URL, including `/v1/traces`. For cloud instances, preserve the provided path prefix. Authentication uses a Bearer API key; `SAGE_SERVER_PHOENIX_API_KEY_ENV` overrides the environment variable name. Manifests store only that reference. The optional `SAGE_SERVER_PHOENIX_PUBLIC_URL` configures the browser entry separately.
 
-The SDK plugin is `sage.observability.phoenix`, with `endpoint`, `project_name`, `api_key_env`, `service_name`, and shared trace options. Select Phoenix independently in the Server trace plugin settings; saved selections take effect after restarting the Server.
+The SDK plugin is `sage.observability.phoenix`, with `endpoint`, `project_name`, `api_key_env`, `service_name`, and shared trace options. Select Phoenix in the Server observation settings; saved selections take effect after restarting the Server.
 
 Project routing uses the `openinference.project.name` resource attribute. Agent, model, and tool spans map to `AGENT`, `LLM`, and `TOOL`. Root Sessions group child Agents through `session.id`; original Sage identities remain available. Cache and reasoning tokens are subsets of prompt/completion; total is input + output. Content policies, redaction, and first-token/first-text events use the shared transport. This plugin exports runtime data for evaluation; it does not initiate evaluations or submit scores.
 

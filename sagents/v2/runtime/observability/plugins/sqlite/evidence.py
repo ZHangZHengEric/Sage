@@ -6,100 +6,14 @@ import asyncio
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
 from contextlib import closing
 from datetime import datetime
-from functools import lru_cache
 import json
 from pathlib import Path
-import re
 import sqlite3
 from threading import BoundedSemaphore, Lock
-from typing import Any
 
 from sagents.v2.contracts.common import utc_now
-from sagents.v2.runtime.observability.plugins.filesystem import FilesystemDiagnosticSink
-
-REDACTED = "[REDACTED]"
-_SECRET_KEY = re.compile(
-    r"authorization|api[_-]?key|access[_-]?token|refresh[_-]?token|password|passwd|"
-    r"secret|credential|cookie|private[_-]?key|^(?:token|headers|env|environment)$",
-    re.I,
-)
-_SECRET_TEXT = re.compile(
-    r"(?i)\b(?:Bearer|Basic)\s+[A-Za-z0-9._~+/=-]+|\bsk-[A-Za-z0-9_-]{6,}|"
-    r"\b(?:[A-Za-z0-9]+_)*(?:api[_-]?key|access[_-]?token|refresh[_-]?token|password|passwd|secret|token)"
-    r"\s*[=:]\s*[\"']?[^\s\"'&,;}]+"
-)
-_URL_QUERY_SECRET = re.compile(
-    r"([?&](?:key|sig|signature|auth|credential)=)[^&\s]+", re.I
-)
-_PRIVATE_KEY = re.compile(
-    r"-----BEGIN (?:[A-Z ]*PRIVATE KEY)-----.*?-----END (?:[A-Z ]*PRIVATE KEY)-----",
-    re.S,
-)
-_URL_AUTH = re.compile(r"(\b[a-z][a-z0-9+.-]*://)[^\s/@]+(?::[^\s/@]*)?@", re.I)
-
-
-def redact(value: Any) -> Any:
-    """Redact structured credentials, embedded JSON and common inline secrets.
-
-    Also remove secret values from sibling free-text fields in this snapshot.
-    Arbitrary unlabelled secrets in prose cannot be recognized reliably.
-    """
-    secrets: set[str] = set()
-
-    def collect(item):
-        if isinstance(item, dict):
-            for key, child in item.items():
-                if _SECRET_KEY.search(str(key)):
-                    if isinstance(child, str) and len(child) >= 4:
-                        secrets.add(child)
-                else:
-                    collect(child)
-        elif isinstance(item, (tuple, list)):
-            for child in item:
-                collect(child)
-        elif isinstance(item, str) and item.lstrip().startswith(("{", "[")):
-            try:
-                collect(json.loads(item))
-            except (ValueError, RecursionError):
-                pass
-
-    collect(value)
-    ordered_secrets = sorted(secrets, key=len, reverse=True)
-
-    @lru_cache(maxsize=32)
-    def clean_text(item: str) -> str:
-        # Wire and normalized streams often contain the same multi-MiB text.
-        # Reuse its sanitized value within this snapshot only: another snapshot
-        # may discover a different set of sibling secrets. Keep the cache bounded.
-        if item.lstrip().startswith(("{", "[")):
-            try:
-                return json.dumps(clean(json.loads(item)), ensure_ascii=False)
-            except (ValueError, RecursionError):
-                pass
-        for secret in ordered_secrets:
-            item = item.replace(secret, REDACTED)
-        item = _PRIVATE_KEY.sub(REDACTED, _SECRET_TEXT.sub(REDACTED, item))
-        item = _URL_QUERY_SECRET.sub(r"\1[REDACTED]", item)
-        return _URL_AUTH.sub(r"\1[REDACTED]@", item)
-
-    def clean(item):
-        if isinstance(item, dict):
-            return {
-                str(k): REDACTED if _SECRET_KEY.search(str(k)) else clean(v)
-                for k, v in item.items()
-            }
-        if isinstance(item, (tuple, list)):
-            return [clean(v) for v in item]
-        if isinstance(item, str):
-            return clean_text(item)
-        return item
-
-    try:
-        return clean(value)
-    finally:
-        # The recursive closures form a cycle; release large cached strings now
-        # rather than waiting for cyclic garbage collection.
-        clean_text.cache_clear()
+from ...evidence.redaction import redact
+from ...evidence.requests import model_request_payload
 
 
 class SessionDiagnostics:
@@ -122,7 +36,9 @@ class SessionDiagnostics:
         self.capture_failures = 0
         self.available = True
         self.closed = False
-        self._writer = ThreadPoolExecutor(max_workers=1, thread_name_prefix="sage-diagnostics")
+        self._writer = ThreadPoolExecutor(
+            max_workers=1, thread_name_prefix="sage-diagnostics"
+        )
         self._write_slots = BoundedSemaphore(self.max_pending_writes)
         self._writer_lock = Lock()
         self._last_write = None
@@ -132,7 +48,8 @@ class SessionDiagnostics:
             if self.path.is_symlink():
                 raise ValueError("diagnostic database cannot be a symlink")
             with closing(self._connect()) as db, db:
-                from sagents.v2.runtime.observability.performance import SCHEMA
+                from .performance import SCHEMA
+
                 db.executescript(SCHEMA)
                 db.executescript("""
                     PRAGMA journal_mode=WAL;
@@ -156,7 +73,11 @@ class SessionDiagnostics:
     def _enqueue(self, operation, *args):
         """Diagnostics are ordered, bounded and never hold up execution."""
         with self._writer_lock:
-            if self.closed or not self.available or not self._write_slots.acquire(blocking=False):
+            if (
+                self.closed
+                or not self.available
+                or not self._write_slots.acquire(blocking=False)
+            ):
                 self.capture_failures += 1
                 return
             try:
@@ -166,10 +87,12 @@ class SessionDiagnostics:
                 self.capture_failures += 1
                 return
             self._last_write = future
+
             def finished(done):
                 self._write_slots.release()
                 if done.cancelled():
                     self.capture_failures += 1
+
             future.add_done_callback(finished)
 
     def _flush(self):
@@ -232,7 +155,8 @@ class SessionDiagnostics:
                     run_id=request.run_id,
                     request_id=request.request_id,
                 )
-                from sagents.v2.runtime.observability.performance import project_model
+                from .performance import project_model
+
                 project_model(db, record)
                 db.execute(
                     "INSERT OR REPLACE INTO models VALUES(?,?,?,?)",
@@ -261,9 +185,7 @@ class SessionDiagnostics:
                 "request_format": "provider_wire"
                 if wire_request is not None
                 else "normalized",
-                "request": FilesystemDiagnosticSink._request_payload(
-                    request, wire_request
-                ),
+                "request": model_request_payload(request, wire_request),
                 "metadata": dict(provider),
                 "request_metadata": dict(request.metadata),
                 "step_id": request.metadata.get("step_id"),
@@ -294,8 +216,13 @@ class SessionDiagnostics:
             {
                 "status": "failed",
                 "completed_at": utc_now().isoformat(),
-                "error": {"type": type(error).__name__, "message": str(error),
-                          "info": error.info.model_dump(mode="json") if hasattr(error, "info") else None},
+                "error": {
+                    "type": type(error).__name__,
+                    "message": str(error),
+                    "info": error.info.model_dump(mode="json")
+                    if hasattr(error, "info")
+                    else None,
+                },
             },
         )
 
@@ -321,13 +248,21 @@ class SessionDiagnostics:
     def _write_log(self, record):
         try:
             with closing(self._connect()) as db, db:
-                from sagents.v2.runtime.observability.performance import project_log
-                project_log(db, {
-                    "event": record.event, "timestamp": record.timestamp,
-                    "session_id": record.session_id, "run_id": record.run_id,
-                    "turn_id": record.turn_id, "request_id": record.request_id,
-                    "tool_call_id": record.tool_call_id, "attributes": record.attributes,
-                })
+                from .performance import project_log
+
+                project_log(
+                    db,
+                    {
+                        "event": record.event,
+                        "timestamp": record.timestamp,
+                        "session_id": record.session_id,
+                        "run_id": record.run_id,
+                        "turn_id": record.turn_id,
+                        "request_id": record.request_id,
+                        "tool_call_id": record.tool_call_id,
+                        "attributes": record.attributes,
+                    },
+                )
                 scope = (record.session_id, record.run_id)
                 db.execute(
                     "INSERT INTO logs(session_id, run_id, payload) VALUES(?,?,?)",
@@ -350,11 +285,23 @@ class SessionDiagnostics:
     async def export_evidence(self, session_id: str, run_ids: set[str]):
         return await asyncio.to_thread(self.snapshot, session_id, run_ids)
 
+    async def report(self, **options):
+        from .performance import report
+
+        def read():
+            self._flush()
+            result = report(self.path, **options)
+            result.update(source="local", capture_failures=self.capture_failures)
+            return result
+
+        return await asyncio.to_thread(read)
+
     def snapshot(self, session_id: str, run_ids: set[str]):
         try:
             flushed = self._flush()
             snapshot = self._snapshot(session_id, run_ids)
-            from sagents.v2.runtime.observability.tool_evidence import tool_evidence
+            from sagents.v2.runtime.observability.evidence.tools import tool_evidence
+
             snapshot.update(tool_evidence([], snapshot["logs"]))
             if not flushed:
                 snapshot["pending_writes"] = True
@@ -391,7 +338,9 @@ class SessionDiagnostics:
                     "SELECT count FROM dropped WHERE session_id=? AND run_id=?", scope
                 ).fetchone()
                 dropped += row[0] if row else 0
-        models.sort(key=lambda row: (row.get("started_at", ""), row.get("request_id", "")))
+        models.sort(
+            key=lambda row: (row.get("started_at", ""), row.get("request_id", ""))
+        )
         for index, row in enumerate(models, 1):
             row["sequence"] = index
         return {

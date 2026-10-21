@@ -5,7 +5,7 @@ from email import policy
 from email.parser import BytesParser
 import json
 
-from sagents.v2.runtime.observability.query import request
+from sagents.v2.runtime.observability.plugins._shared.query import request
 
 
 def attribute(key):
@@ -24,7 +24,10 @@ def table_rows(content, content_type):
     parts = list(message.iter_parts())
     if len(parts) != 1 or parts[0].get_content_type() != "application/json":
         raise ValueError("Invalid Phoenix SpanQuery response")
-    table = json.loads(parts[0].get_payload(decode=True))
+    payload = parts[0].get_payload(decode=True)
+    if not isinstance(payload, (str, bytes, bytearray)):
+        raise ValueError("Invalid Phoenix SpanQuery payload")
+    table = json.loads(payload)
     # Phoenix prefixes table-schema column/index labels to preserve their names.
     return [
         {key.split("_", 1)[1]: value for key, value in row.items()}

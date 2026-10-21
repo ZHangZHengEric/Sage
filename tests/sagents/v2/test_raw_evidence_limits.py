@@ -4,7 +4,7 @@ import json
 import pytest
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 
-from sagents.v2.runtime.observability.performance_evidence import ExternalDiagnostics
+from sagents.v2.runtime.observability.plugins.external.diagnostics import ExternalDiagnostics
 from sagents.v2.model.contracts import ModelRequest, ModelStreamEvent, ModelResponse
 from sagents.v2.model.middleware.recording import RecordingModelProvider
 from sagents.v2.model.wire_diagnostics import record_wire_event
@@ -108,7 +108,7 @@ def test_transport_counts_active_queued_and_inflight_bytes():
 @pytest.mark.asyncio
 async def test_blocked_raw_export_drops_explicitly_without_stalling_model(monkeypatch):
     import threading
-    from sagents.v2.runtime.observability.raw import RawEvidencePipeline
+    from sagents.v2.runtime.observability.evidence.raw import RawEvidencePipeline
     class BlockedExporter(InMemorySpanExporter):
         def __init__(self):
             super().__init__()
@@ -152,7 +152,7 @@ async def test_blocked_raw_export_drops_explicitly_without_stalling_model(monkey
 
 
 def test_raw_encoder_preserves_escaped_unicode_in_bounded_fragments():
-    from sagents.v2.runtime.observability.raw import _json_fragments
+    from sagents.v2.runtime.observability.evidence.raw import _json_fragments
     value = {'unicode':'中🧪' * 1000, 'escaped':'\0\n"\\' * 2000, 'nested':[True, None, 1.25]}
     fragments = list(_json_fragments(value, 128))
     assert json.loads(''.join(fragments)) == value
@@ -284,7 +284,7 @@ def test_raw_json_escape_expansion_is_bounded_before_encoding(backend, operation
 def test_unknown_raw_values_are_refused_before_custom_conversion():
     from uuid import uuid4
     from sagents.v2.runtime.observability.contracts import TraceSpan
-    from sagents.v2.runtime.observability.raw import RawEvidencePipeline
+    from sagents.v2.runtime.observability.evidence.raw import RawEvidencePipeline
     from sagents.v2.contracts.common import utc_now
     class ExpandingObject:
         def __str__(self):
@@ -308,7 +308,7 @@ def test_unknown_raw_values_are_refused_before_custom_conversion():
 
 def test_raw_pydantic_extensions_survive_without_custom_serializers():
     from pydantic import BaseModel, ConfigDict
-    from sagents.v2.runtime.observability.raw import (
+    from sagents.v2.runtime.observability.evidence.raw import (
         _json_fragments,
         raw_trace_value,
         json_working_size,
@@ -327,7 +327,7 @@ def test_raw_pydantic_extensions_survive_without_custom_serializers():
 
 def test_multiple_sdk_event_objects_share_one_raw_retention_budget():
     from pydantic import BaseModel
-    from sagents.v2.runtime.observability.raw import RawEvidencePipeline
+    from sagents.v2.runtime.observability.evidence.raw import RawEvidencePipeline
     from sagents.v2.contracts.common import utc_now
     class Event(BaseModel):
         text: str
@@ -343,7 +343,7 @@ def test_multiple_sdk_event_objects_share_one_raw_retention_budget():
 def test_many_pydantic_extras_are_preflighted_without_merging(monkeypatch):
     import tracemalloc
     from pydantic import BaseModel, ConfigDict
-    import sagents.v2.runtime.observability.raw as raw
+    import sagents.v2.runtime.observability.evidence.raw as raw
     from sagents.v2.contracts.common import utc_now
     class Event(BaseModel):
         model_config = ConfigDict(extra='allow')

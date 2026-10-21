@@ -10,7 +10,7 @@ import pytest
 from sagents.v2.contracts.common import utc_now
 from sagents.v2.model import ModelRequest, ModelResponse
 from sagents.v2.runtime import HarnessRuntime
-from sagents.v2.runtime.observability import FilesystemDiagnosticSink
+from sagents.v2.runtime.observability.plugins.filesystem import FilesystemDiagnosticSink
 from sagents.v2.runtime.observability.plugins.filesystem.media import DiagnosticMediaStore
 from sagents.v2.runtime.session import FilesystemSessionStore
 from sagents.v2.runtime.session.plugins._shared.filesystem_layout import resolve_session_directory

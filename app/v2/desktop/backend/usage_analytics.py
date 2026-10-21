@@ -115,6 +115,7 @@ async def build_usage_overview(
     for session in indexed_sessions:
         session_id = session.session_id
         runs = ()
+        diagnostic_runs = None
         events = ()
         requests = ()
         # Runtime events and model diagnostics are independent best-effort
@@ -122,6 +123,7 @@ async def build_usage_overview(
         # already persisted by the other source.
         try:
             runs = await self.session_store.list_session_runs(session_id)
+            diagnostic_runs = {run.run_id for run in runs}
         except (OSError, ValueError, SageV2Error) as error:
             skipped_event_sessions.add(session_id)
             self.logger.warning(
@@ -148,7 +150,7 @@ async def build_usage_overview(
             )
         try:
             requests = await self.observability.list_model_requests(
-                session_id=session_id, run_ids={run.run_id for run in runs}
+                session_id=session_id, run_ids=diagnostic_runs
             )
         except (OSError, ValueError, SageV2Error, httpx.HTTPError, TimeoutError, NotImplementedError) as error:
             skipped_diagnostic_sessions.add(session_id)

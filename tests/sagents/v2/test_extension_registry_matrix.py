@@ -267,7 +267,7 @@ def test_external_diagnostic_sink_has_a_distinct_identity():
     from sagents.v2.runtime.observability.plugins.diagnostic_noop import (
         NoopDiagnosticSink,
     )
-    from sagents.v2.runtime.observability.plugins.external import ExternalEvidenceSink
+    from sagents.v2.runtime.observability.plugins.external.evidence import ExternalEvidenceSink
 
     assert (
         plugin_identity(ExternalEvidenceSink)[0]

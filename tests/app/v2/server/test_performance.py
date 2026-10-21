@@ -4,13 +4,11 @@ import sqlite3
 import pytest
 
 from sagents.v2.runtime.observability.performance import (
-    SCHEMA,
-    project_log,
-    project_model,
     build_run,
-    report,
     summarize,
-    backfill,
+)
+from sagents.v2.runtime.observability.plugins.sqlite.performance import (
+    SCHEMA, project_log, project_model, report, backfill,
 )
 from tests.app.v2.server.test_file_downloads import identity
 from tests.app.v2.server.test_admin import admin_login

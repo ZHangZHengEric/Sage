@@ -41,7 +41,8 @@ from sagents.v2.agent.policy import (
 )
 from sagents.v2.contracts.commands import ReplyInteraction
 from sagents.v2.runtime.execution.scheduler import InMemoryScheduler
-from sagents.v2.runtime.observability import NoopDiagnosticSink, NoopLogSink
+from sagents.v2.runtime.observability.plugins.diagnostic_noop import NoopDiagnosticSink
+from sagents.v2.runtime.observability.plugins.logging_noop import NoopLogSink
 from sagents.v2.runtime.session import EphemeralSessionStore
 from sagents.v2.runtime.session import InMemoryDerivedStateStore
 from sagents.v2.runtime.execution.sandbox import (

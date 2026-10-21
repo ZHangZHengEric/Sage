@@ -1,5 +1,5 @@
 """Diagnostic download projects existing model observations without inventing raw data."""
-from sagents.v2.runtime.observability.model_evidence import model_evidence
+from sagents.v2.runtime.observability.evidence.models import model_evidence
 
 
 def span(**attrs):

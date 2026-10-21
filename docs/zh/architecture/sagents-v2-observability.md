@@ -30,6 +30,14 @@ capabilities:
       diagnostics_storage: files
 ```
 
+## 模块组织与查询接口
+
+`runtime/observability` 根目录保留公共契约、Provider 装配及通用日志/Trace 能力。`evidence/` 负责请求转换、脱敏和证据重建；`performance/` 负责有界性能采集、Trace 投影和纯耗时计算；具体文件、SQLite 和外部协议实现在 `plugins/` 中。通用证据与性能代码不依赖后端、HTTP 客户端或数据库。
+
+宿主通过 Provider 的 `export_evidence`、模型记录查询、`report_performance` 和可选 `trace_query` 读取数据。`performance_available` 表示性能查询能力是否可用；`trace_query` 不可用时为 `None`。宿主保留鉴权、HTTP 参数校验和导航，不判断具体诊断实现、不读取存储路径。文件诊断与外部后端的差异由模块内部装配处理，性能计算口径共用，已有业务与诊断存储结构保持不变。
+
+目录职责与维护规则见[模块说明](../../../sagents/v2/runtime/observability/README.md)。旧的根目录后端实现导出及被移动文件的导入路径已移除，调用方使用统一入口，后端测试使用 `plugins/` 中的实现。
+
 ## 对话耗时诊断
 
 新增阶段日志使用 DEBUG 和中文文案，事件名保持稳定。通过

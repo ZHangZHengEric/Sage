@@ -3,6 +3,7 @@
 Only this process queue is retained. No diagnostic business storage is created.
 A record manifest and SHA256 make backend loss detectable during reconstruction.
 """
+
 from __future__ import annotations
 
 import copy
@@ -64,10 +65,12 @@ def json_working_size(value, limit, ancestors=None):
     directly; values that cannot be represented as JSON are best effort loss.
     """
     if isinstance(value, str):
-        chars = len(value) + value.count('"') + value.count('\\')
+        chars = len(value) + value.count('"') + value.count("\\")
         if not value.isprintable():
             for code in range(32):
-                chars += value.count(chr(code)) * (1 if code in {8, 9, 10, 12, 13} else 5)
+                chars += value.count(chr(code)) * (
+                    1 if code in {8, 9, 10, 12, 13} else 5
+                )
         return chars * (1 if value.isascii() else 4) + 2
     if value is None or isinstance(value, (bool, int, float)):
         return sys.getsizeof(value) * 3
@@ -86,10 +89,15 @@ def json_working_size(value, limit, ancestors=None):
         if isinstance(value, BaseModel):
             # Preflight iterates stored fields and SDK extras without merging
             # their dictionaries. Conversion is allowed only after admission.
-            pairs = chain(value.__dict__.items(), (value.__pydantic_extra__ or {}).items())
+            pairs = chain(
+                value.__dict__.items(), (value.__pydantic_extra__ or {}).items()
+            )
             items = (item for pair in pairs for item in pair)
         elif isinstance(value, Mapping):
-            if any(not isinstance(key, (str, int, float, bool, type(None))) for key in value):
+            if any(
+                not isinstance(key, (str, int, float, bool, type(None)))
+                for key in value
+            ):
                 return limit + 1
             items = (item for pair in value.items() for item in pair)
         elif isinstance(value, (list, tuple)):
@@ -115,7 +123,7 @@ def raw_trace_value(value):
     if isinstance(value, BaseModel):
         value = _model_fields(value)
     if isinstance(value, Mapping):
-        return {_json_key(key):raw_trace_value(item) for key, item in value.items()}
+        return {_json_key(key): raw_trace_value(item) for key, item in value.items()}
     if isinstance(value, (list, tuple)):
         return [raw_trace_value(item) for item in value]
     if value is None or isinstance(value, (str, bool, int, float)):
@@ -143,24 +151,26 @@ def _json_fragments(value, chunk_chars):
     if isinstance(value, str):
         yield '"'
         for offset in range(0, len(value), chunk_chars):
-            yield json.dumps(value[offset:offset + chunk_chars], ensure_ascii=False)[1:-1]
+            yield json.dumps(value[offset : offset + chunk_chars], ensure_ascii=False)[
+                1:-1
+            ]
         yield '"'
     elif isinstance(value, Mapping):
-        yield '{'
+        yield "{"
         for index, (key, item) in enumerate(value.items()):
             if index:
-                yield ','
+                yield ","
             yield from _json_fragments(_json_key(key), chunk_chars)
-            yield ':'
+            yield ":"
             yield from _json_fragments(item, chunk_chars)
-        yield '}'
+        yield "}"
     elif isinstance(value, (list, tuple)):
-        yield '['
+        yield "["
         for index, item in enumerate(value):
             if index:
-                yield ','
+                yield ","
             yield from _json_fragments(item, chunk_chars)
-        yield ']'
+        yield "]"
     elif value is None or isinstance(value, (int, float, bool)):
         yield json.dumps(value)
     elif isinstance(value, _JSON_SCALARS):
@@ -186,8 +196,11 @@ class RawEvidencePipeline:
         with self._condition:
             available = self.max_bytes - self._bytes
             size = retained_size(payload, available // 2) * 2 + 1024
-            if (self._closed or size > available or
-                    json_working_size(payload, self.max_bytes) > self.max_bytes):
+            if (
+                self._closed
+                or size > available
+                or json_working_size(payload, self.max_bytes) > self.max_bytes
+            ):
                 self.dropped_records += 1
                 return False
             self._bytes += size
@@ -197,18 +210,26 @@ class RawEvidencePipeline:
                 self._bytes -= size
                 self.failed_records += 1
                 return False
-            self._queue.append((size, sink, trace_id, parent_id, session_id, run_id, kind, payload, at))
+            self._queue.append(
+                (size, sink, trace_id, parent_id, session_id, run_id, kind, payload, at)
+            )
             if self._worker is None:
-                self._worker = threading.Thread(target=self._run, name='sage-raw-evidence', daemon=True)
+                self._worker = threading.Thread(
+                    target=self._run, name="sage-raw-evidence", daemon=True
+                )
                 self._worker.start()
             self._condition.notify_all()
             return True
 
     def statistics(self):
         with self._condition:
-            return dict(retained_bytes=self._bytes, max_bytes=self.max_bytes,
-                        dropped_records=self.dropped_records, failed_records=self.failed_records,
-                        queued_records=len(self._queue))
+            return dict(
+                retained_bytes=self._bytes,
+                max_bytes=self.max_bytes,
+                dropped_records=self.dropped_records,
+                failed_records=self.failed_records,
+                queued_records=len(self._queue),
+            )
 
     def _run(self):
         while True:
@@ -231,37 +252,75 @@ class RawEvidencePipeline:
     def _export(self, sink, trace_id, parent_id, session_id, run_id, kind, payload, at):
         record_id, digest = uuid4().hex, hashlib.sha256()
         count = 0
-        request_id = (payload.__dict__.get('request_id') if isinstance(payload, BaseModel)
-                      else payload.get('request_id'))
+        request_id = (
+            payload.__dict__.get("request_id")
+            if isinstance(payload, BaseModel)
+            else payload.get("request_id")
+        )
+
         def emit(name, values):
-            attrs = {'session_id':session_id, 'run_id':run_id, 'request_id':request_id,
-                     'sage.diagnostic.format':'chunks/v1', 'sage.diagnostic.kind':kind,
-                     'sage.diagnostic.record_id':record_id, **values}
-            span = TraceSpan(trace_id=trace_id, span_id=uuid4().hex[:16], parent_span_id=parent_id,
-                             name=name, session_id=session_id, run_id=run_id,
-                             request_id=request_id, start_time=at, end_time=utc_now(),
-                             attributes=attrs)
+            attrs = {
+                "session_id": session_id,
+                "run_id": run_id,
+                "request_id": request_id,
+                "sage.diagnostic.format": "chunks/v1",
+                "sage.diagnostic.kind": kind,
+                "sage.diagnostic.record_id": record_id,
+                **values,
+            }
+            span = TraceSpan(
+                trace_id=trace_id,
+                span_id=uuid4().hex[:16],
+                parent_span_id=parent_id,
+                name=name,
+                session_id=session_id,
+                run_id=run_id,
+                request_id=request_id,
+                start_time=at,
+                end_time=utc_now(),
+                attributes=attrs,
+            )
             sink.start_span(span)
             sink.end_span(span)
+
         # Avoid retaining a second complete serialized record. Even individual
         # oversized provider strings are split without modifying their content.
-        buffer = ''
+        buffer = ""
         for fragment in _json_fragments(payload, self.chunk_chars):
             for offset in range(0, len(fragment), self.chunk_chars):
-                buffer += fragment[offset:offset + self.chunk_chars]
+                buffer += fragment[offset : offset + self.chunk_chars]
                 while len(buffer) >= self.chunk_chars:
-                    text, buffer = buffer[:self.chunk_chars], buffer[self.chunk_chars:]
+                    text, buffer = (
+                        buffer[: self.chunk_chars],
+                        buffer[self.chunk_chars :],
+                    )
                     digest.update(text.encode())
-                    emit('sage.diagnostic.chunk', {'sage.diagnostic.sequence':count, 'sage.diagnostic.text':text})
+                    emit(
+                        "sage.diagnostic.chunk",
+                        {
+                            "sage.diagnostic.sequence": count,
+                            "sage.diagnostic.text": text,
+                        },
+                    )
                     count += 1
         if buffer:
             digest.update(buffer.encode())
-            emit('sage.diagnostic.chunk', {'sage.diagnostic.sequence':count, 'sage.diagnostic.text':buffer})
+            emit(
+                "sage.diagnostic.chunk",
+                {"sage.diagnostic.sequence": count, "sage.diagnostic.text": buffer},
+            )
             count += 1
-        emit('sage.diagnostic.record', {'sage.diagnostic.chunks':count, 'sage.diagnostic.sha256':digest.hexdigest()})
+        emit(
+            "sage.diagnostic.record",
+            {
+                "sage.diagnostic.chunks": count,
+                "sage.diagnostic.sha256": digest.hexdigest(),
+            },
+        )
 
     def flush(self, timeout=5):
         import time
+
         deadline = time.monotonic() + timeout
         with self._condition:
             while self._bytes:
@@ -273,6 +332,7 @@ class RawEvidencePipeline:
 
     def close(self, timeout=5):
         import time
+
         deadline = time.monotonic() + timeout
         with self._condition:
             self._closed = True
@@ -297,28 +357,47 @@ def reconstruct(spans):
     """Return valid records and explicit gaps, even if the manifest was lost."""
     records, gaps = {}, []
     for span in spans:
-        attrs = span.get('attributes', {})
-        if attrs.get('sage.diagnostic.format') != 'chunks/v1':
+        attrs = span.get("attributes", {})
+        if attrs.get("sage.diagnostic.format") != "chunks/v1":
             continue
-        record = records.setdefault((attrs['run_id'], attrs['sage.diagnostic.record_id']),
-                                    {'chunks':{}, 'manifest':None, 'attrs':attrs, 'at':span['start_time']})
-        if span['name'] == 'sage.diagnostic.chunk':
-            record['chunks'][int(attrs['sage.diagnostic.sequence'])] = attrs['sage.diagnostic.text']
-        elif span['name'] == 'sage.diagnostic.record':
-            record['manifest'] = attrs
+        record = records.setdefault(
+            (attrs["run_id"], attrs["sage.diagnostic.record_id"]),
+            {"chunks": {}, "manifest": None, "attrs": attrs, "at": span["start_time"]},
+        )
+        if span["name"] == "sage.diagnostic.chunk":
+            record["chunks"][int(attrs["sage.diagnostic.sequence"])] = attrs[
+                "sage.diagnostic.text"
+            ]
+        elif span["name"] == "sage.diagnostic.record":
+            record["manifest"] = attrs
     restored = []
     for record in records.values():
-        attrs, marker, chunks = record['attrs'], record['manifest'], record['chunks']
-        count = int(marker['sage.diagnostic.chunks']) if marker else -1
-        text = ''.join(chunks[key] for key in sorted(chunks))
-        complete = (len(chunks) == count and set(chunks) == set(range(count)) and
-                    hashlib.sha256(text.encode()).hexdigest() == marker['sage.diagnostic.sha256'])
+        attrs, marker, chunks = record["attrs"], record["manifest"], record["chunks"]
+        count = int(marker["sage.diagnostic.chunks"]) if marker else -1
+        text = "".join(chunks[key] for key in sorted(chunks))
+        complete = (
+            len(chunks) == count
+            and set(chunks) == set(range(count))
+            and hashlib.sha256(text.encode()).hexdigest()
+            == marker["sage.diagnostic.sha256"]
+        )
         if not complete:
-            gaps.append({'run_id':attrs['run_id'], 'request_id':attrs.get('request_id'),
-                         'record_id':attrs['sage.diagnostic.record_id'], 'kind':attrs['sage.diagnostic.kind'],
-                         'expected_chunks':count if marker else None, 'received_chunks':len(chunks)})
+            gaps.append(
+                {
+                    "run_id": attrs["run_id"],
+                    "request_id": attrs.get("request_id"),
+                    "record_id": attrs["sage.diagnostic.record_id"],
+                    "kind": attrs["sage.diagnostic.kind"],
+                    "expected_chunks": count if marker else None,
+                    "received_chunks": len(chunks),
+                }
+            )
             continue
-        event = {'sage.diagnostic.kind':attrs['sage.diagnostic.kind'], 'sage.diagnostic.data':text,
-                 'run_id':attrs['run_id'], 'session_id':attrs['session_id']}
-        restored.append((record['at'], event))
+        event = {
+            "sage.diagnostic.kind": attrs["sage.diagnostic.kind"],
+            "sage.diagnostic.data": text,
+            "run_id": attrs["run_id"],
+            "session_id": attrs["session_id"],
+        }
+        restored.append((record["at"], event))
     return restored, gaps

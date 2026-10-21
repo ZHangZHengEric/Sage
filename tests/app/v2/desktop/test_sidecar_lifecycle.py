@@ -7,7 +7,8 @@ from fastapi.testclient import TestClient
 
 from app.v2.desktop.backend.app import create_app
 from app.v2.desktop.backend.sidecar_lifecycle import SidecarClientLeases
-from sagents.v2.runtime.observability import NoopLogSink, StructuredLogger
+from sagents.v2.runtime.observability import StructuredLogger
+from sagents.v2.runtime.observability.plugins.logging_noop import NoopLogSink
 
 
 AUTH_TOKEN = "test-desktop-capability"

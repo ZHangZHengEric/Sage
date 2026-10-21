@@ -52,7 +52,9 @@ class FilesystemLogSink:
         if not record_reaches_min_level(record.level, self.min_level):
             return
         encoded = (
-            format_log_record(record) if self.format == "text" else encode_log_record(record)
+            format_log_record(record)
+            if self.format == "text"
+            else encode_log_record(record)
         ).encode("utf-8")
         with self._write_lock:
             self._rotate_if_needed(len(encoded))

@@ -74,7 +74,7 @@ class _AccessLoggingHandler(StructuredLoggingHandler):
 
 def init_logging(settings: LoggingSettings, *, service_name: str, sink: LogSink | None = None) -> LogSink:
     if sink is None:
-        from sagents.v2.runtime.observability.provider import create_observability_provider
+        from sagents.v2.runtime.observability import create_observability_provider
         sink = create_observability_provider("sage.observability.local", {
             "log_level": settings.level, "log_format": settings.format,
             "log_root": settings.directory, "log_filename": f"{service_name}.log",

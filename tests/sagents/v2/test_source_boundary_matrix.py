@@ -250,6 +250,34 @@ def test_observability_port_does_not_depend_on_sink_implementations():
     assert offenders == []
 
 
+def test_observation_evidence_and_performance_are_backend_independent():
+    """Shared capture and calculations must remain usable without storage or HTTP."""
+    root = V2_ROOT / "runtime" / "observability"
+    paths = [*root.joinpath("evidence").rglob("*.py"),
+             *root.joinpath("performance").rglob("*.py")]
+    forbidden = ("sagents.v2.runtime.observability.plugins", "app", "sqlite3", "httpx")
+    offenders = [
+        f"{path.relative_to(V2_ROOT)}:{line}: {module}"
+        for path in paths
+        for line, module in _import_targets(path)
+        if any(module == prefix or module.startswith(prefix + ".") for prefix in forbidden)
+    ]
+    assert offenders == []
+
+
+def test_server_observation_queries_do_not_depend_on_backend_implementations():
+    """Backend selection and query protocols stay inside the observation module."""
+    paths = [V2_ROOT.parents[1] / "app" / "v2" / "server" / "routers" / "observability.py"]
+    paths.extend((V2_ROOT.parents[1] / "app" / "v2" / "server" / "observability").rglob("*.py"))
+    offenders = [
+        f"{path}:{line}: {module}"
+        for path in paths
+        for line, module in _import_targets(path)
+        if module.startswith("sagents.v2.runtime.observability.plugins")
+    ]
+    assert offenders == []
+
+
 def test_observability_sinks_do_not_import_each_other():
     """Each sink plugin shares contracts, not other sink implementations."""
 
@@ -479,7 +507,7 @@ def test_domain_ports_do_not_import_their_plugin_implementations():
         (V2_ROOT / "agent" / "policy" / "approval_memory.py", "sagents.v2.agent.policy.plugins"),
         (V2_ROOT / "runtime" / "session" / "child_heads.py", "sagents.v2.runtime.session.plugins"),
         (V2_ROOT / "runtime" / "session" / "metadata_replay.py", "sagents.v2.runtime.session.plugins"),
-        (V2_ROOT / "runtime" / "observability" / "query.py", "sagents.v2.runtime.observability.plugins"),
+        (V2_ROOT / "runtime" / "observability" / "contracts.py", "sagents.v2.runtime.observability.plugins"),
         (V2_ROOT / "package" / "registry" / "contracts.py", "sagents.v2.package.registry.plugins"),
         (V2_ROOT / "context" / "summary.py", "sagents.v2.context.plugins"),
         (V2_ROOT / "tool" / "selection.py", "sagents.v2.tool.plugins"),

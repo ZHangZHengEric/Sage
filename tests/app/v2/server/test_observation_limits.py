@@ -5,7 +5,7 @@ import json
 import httpx
 import pytest
 
-from sagents.v2.runtime.observability.performance_evidence import ExternalDiagnostics
+from sagents.v2.runtime.observability.plugins.external.diagnostics import ExternalDiagnostics
 from tests.app.v2.server.test_external_observability import TraceCapture, capture_sample, phoenix_span
 from tests.app.v2.server.test_performance import BASE
 
@@ -71,7 +71,10 @@ async def test_report_coalesces_identical_requests_and_does_not_cache_errors(mon
 def test_performance_timeout_is_service_unavailable(client, service, monkeypatch):
     from tests.app.v2.server.test_admin import admin_login
     source = ExternalDiagnostics(backend='phoenix', query_url='http://phoenix')
-    service.observability.diagnostics = source
+    from sagents.v2.runtime.observability import ObservabilityProvider
+    service.observability = ObservabilityProvider(
+        plugin_id="test.external", diagnostics=source, performance_query=source
+    )
     async def fail(**options):
         raise TimeoutError()
     monkeypatch.setattr(source, 'report', fail)
@@ -110,7 +113,7 @@ async def test_hundred_runs_are_fetched_in_one_batch_and_limits_are_explicit():
 
 @pytest.mark.asyncio
 async def test_raw_queries_keep_byte_request_and_total_time_budgets():
-    from sagents.v2.runtime.observability.query import query_budget
+    from sagents.v2.runtime.observability.plugins._shared.query import query_budget
     source = ExternalDiagnostics(backend='phoenix', query_url='http://phoenix')
     source.trace_sink = type('Raw', (), {'content_mode':'raw'})()
     source.max_response_bytes = 8

@@ -9,7 +9,9 @@ from typing import Any
 from urllib.parse import urlsplit
 
 from sagents.v2.runtime.observability.contracts import TraceSpan, TraceStatus
-from sagents.v2.runtime.observability.plugins._shared.otlp_transport import OtlpTraceTransport
+from sagents.v2.runtime.observability.plugins._shared.otlp_transport import (
+    OtlpTraceTransport,
+)
 
 
 def langfuse_available() -> bool:

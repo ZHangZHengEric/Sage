@@ -14,15 +14,15 @@ from fastapi.testclient import TestClient
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 
 from app.v2.server.main import create_app
-from sagents.v2.runtime.observability.performance_evidence import ExternalDiagnostics
+from sagents.v2.runtime.observability.plugins.external.diagnostics import ExternalDiagnostics
 from app.v2.server.storage.downloads import prepare_session_export
 from sagents.v2.model.contracts import ModelMessage, ModelRequest, ModelResponse
 from sagents.v2.contracts.items import TextBlock
 from sagents.v2.runtime.observability.contracts import TraceSpan, LogRecord
-from sagents.v2.runtime.observability.plugins.external import ExternalEvidenceSink
+from sagents.v2.runtime.observability.plugins.external.evidence import ExternalEvidenceSink
 from sagents.v2.runtime.observability.plugins.phoenix import PhoenixTraceSink
-from sagents.v2.runtime.observability.query import query_budget
-from sagents.v2.runtime.observability.raw import reconstruct
+from sagents.v2.runtime.observability.plugins._shared.query import query_budget
+from sagents.v2.runtime.observability.evidence.raw import reconstruct
 from sagents.v2.runtime.observability.traces import StructuredTracer
 from tests.app.v2.server.conftest import make_test_service, register_and_login
 from tests.app.v2.server.test_agui_chat import _run_input
@@ -98,7 +98,7 @@ def test_terminal_http_replay_does_not_start_a_new_performance_segment(tmp_path,
             response = client.post('/api/agent', json=_run_input(), headers=headers)
             assert response.status_code == 200, response.text
             client.portal.call(settle)
-            assert not host.diagnostics._performance
+            assert not host.diagnostics._timings._performance
         assert sum(span.name == 'agent.run' for span in exporter.get_finished_spans()) == 1
 
 
@@ -112,12 +112,12 @@ async def test_dropped_root_spans_do_not_retain_finished_performance_rows():
     try:
         for index in range(10):
             scope = {'session_id':f's{index}', 'run_id':f'r{index}'}
-            source.emit('log', {**scope, 'event':'server.run.performance.accepted'})
+            source._timings.emit('log', {**scope, 'event':'server.run.performance.accepted'})
             handle = StructuredTracer(trace, 'test').start_span('agent.run', **scope)
-            source.emit('log', {**scope, 'event':'agent.run.started'})
+            source._timings.emit('log', {**scope, 'event':'agent.run.started'})
             handle.end()
-            source.emit('log', {**scope, 'event':'server.run.performance.finished'})
-            assert not source._performance
+            source._timings.emit('log', {**scope, 'event':'server.run.performance.finished'})
+            assert not source._timings._performance
         assert trace.statistics()['dropped_spans'] == 10
     finally:
         trace.end_span(blocker)
@@ -255,7 +255,7 @@ async def test_resume_preparation_failure_closes_its_performance_segment(monkeyp
     class Logger:
         def info(self, event, message, **fields):
             events.append((event, fields))
-            source.emit('log', {'event':event, **fields})
+            source._timings.emit('log', {'event':event, **fields})
     monkeypatch.setattr(module, 'LOGGER', Logger())
     application = SimpleNamespace(runtime=SimpleNamespace(get_run=AsyncMock(return_value=SimpleNamespace(state=RunState.RESUMING))),
                                   agent_for_run=AsyncMock(side_effect=failure))
@@ -270,14 +270,14 @@ async def test_resume_preparation_failure_closes_its_performance_segment(monkeyp
             await service.continue_detached_run('r', context, user_id='owner', session_id='s', label='resume')
         assert events[-1][0] == 'server.run.performance.finished'
         assert events[-1][1]['attributes']['run_state'] == ('cancelled' if isinstance(failure, asyncio.CancelledError) else 'failed')
-        assert not source._performance
+        assert not source._timings._performance
     finally:
         await source.close()
 
 
 @pytest.mark.asyncio
 async def test_pending_performance_entries_and_rows_are_bounded_and_report_loss(monkeypatch):
-    from sagents.v2.runtime.observability.performance_evidence import timing_rows
+    from sagents.v2.runtime.observability.performance.trace_projection import timing_rows
     from sagents.v2.runtime.observability.performance import build_run
     from tests.app.v2.server.test_performance import BASE
     exporter = InMemorySpanExporter()
@@ -286,13 +286,13 @@ async def test_pending_performance_entries_and_rows_are_bounded_and_report_loss(
     source.bind_trace_sink(trace)
     try:
         for index in range(3):
-            source.emit('log', {'session_id':f's{index}', 'run_id':f'r{index}', 'event':'server.run.performance.accepted'})
-        assert len(source._performance) == 2 and source.capture_failures == 1
-        source.emit('log', {'session_id':'s', 'run_id':'r', 'event':'server.run.performance.accepted',
+            source._timings.emit('log', {'session_id':f's{index}', 'run_id':f'r{index}', 'event':'server.run.performance.accepted'})
+        assert len(source._timings._performance) == 2 and source.capture_failures == 1
+        source._timings.emit('log', {'session_id':'s', 'run_id':'r', 'event':'server.run.performance.accepted',
                             'timestamp':BASE, 'attributes':{'started_at':BASE}}, at=BASE)
         handle = StructuredTracer(trace, 'test').start_span('agent.run', session_id='s', run_id='r')
         for event, at in [('agent.run.started', 1), ('agent.run.completed', 9), ('model.request.completed', 9.5), ('server.run.performance.finished', 10)]:
-            source.emit('log', {'session_id':'s', 'run_id':'r', 'event':event, 'timestamp':BASE+at}, at=BASE+at)
+            source._timings.emit('log', {'session_id':'s', 'run_id':'r', 'event':event, 'timestamp':BASE+at}, at=BASE+at)
         handle.end()
         span = next(span for span in exporter.get_finished_spans() if span.name == 'agent.run')
         assert span.attributes['sage.performance.incomplete'] is True
@@ -315,13 +315,13 @@ async def test_stale_performance_expiry_exports_deferred_span_as_incomplete():
     source = ExternalDiagnostics(backend='phoenix', query_url='http://unused', performance_idle_seconds=10)
     source.bind_trace_sink(trace)
     try:
-        source.emit('log', {'session_id':'s', 'run_id':'r', 'event':'server.run.performance.accepted'})
+        source._timings.emit('log', {'session_id':'s', 'run_id':'r', 'event':'server.run.performance.accepted'})
         handle = StructuredTracer(trace, 'test').start_span('agent.run', session_id='s', run_id='r')
         handle.end()
         assert not exporter.get_finished_spans()
-        source._performance[('s', 'r')]['last_seen'] -= 11
-        source.emit('log', {'session_id':'next', 'run_id':'next', 'event':'server.run.performance.accepted'})
-        assert ('s', 'r') not in source._performance
+        source._timings._performance[('s', 'r')]['last_seen'] -= 11
+        source._timings.emit('log', {'session_id':'next', 'run_id':'next', 'event':'server.run.performance.accepted'})
+        assert ('s', 'r') not in source._timings._performance
         span = exporter.get_finished_spans()[0]
         assert span.attributes['sage.performance.incomplete'] is True
         assert span.attributes['sage.performance.loss_reason'] == 'expired'

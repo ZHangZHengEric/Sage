@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 from jsonschema import validate
 from sagents.v2.runtime.extensions.official import builtin_extension_registry
-from sagents.v2.runtime.observability.provider import create_observability_provider
+from sagents.v2.runtime.observability import create_observability_provider
 
 
 def create_desktop_observability(runtime_root: Path):
