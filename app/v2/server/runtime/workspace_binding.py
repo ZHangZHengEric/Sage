@@ -4,10 +4,18 @@ from __future__ import annotations
 import asyncio
 from pathlib import Path
 
+from sagents.v2.contracts.errors import ErrorCategory, RuntimeErrorInfo, SageV2Error
 from sagents.v2.runtime.execution.plugins.local_binding.registration import LocalExecutionBindingConfig
 from sagents.v2.runtime.execution.plugins.local_binding import LocalWorkspaceExecutionBindingProvider
-from sagents.v2.runtime.execution.plugins._shared.binding import incompatible_configuration
 from sagents.v2.runtime.extensions import ExtensionScope, ExtensionScopeContext, ProviderSet
+
+
+def _incompatible_configuration(message: str) -> SageV2Error:
+    return SageV2Error(RuntimeErrorInfo(
+        code="execution.configuration_incompatible", category=ErrorCategory.VALIDATION,
+        message=message, message_key="error.execution.configuration_incompatible",
+        message_params={"reason": message}, safe_to_resume=False,
+    ))
 
 
 class ServerExecutionBindingConfig(LocalExecutionBindingConfig):
@@ -59,12 +67,12 @@ class ServerWorkspaceBindingProvider:
     async def acquire(self, request):
         self._authorize(request.context)
         if request.configuration is None:
-            raise incompatible_configuration("Run has no accepted execution configuration")
+            raise _incompatible_configuration("Run has no accepted execution configuration")
         # Only durable, authorized commands can establish the host path. The
         # caller's request snapshot alone cannot redirect execution resources.
         command = await self.access.get_start_command(request.run_id, request.context)
         if command.config.execution_snapshot != request.configuration:
-            raise incompatible_configuration("binding differs from the admitted execution configuration")
+            raise _incompatible_configuration("binding differs from the admitted execution configuration")
         workspace = Path(request.configuration.workspace_root)
         async with self._lock:
             if self._closed:
