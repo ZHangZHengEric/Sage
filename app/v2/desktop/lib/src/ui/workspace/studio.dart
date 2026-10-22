@@ -350,6 +350,28 @@ class _StudioThreadState extends State<_StudioThread> {
               ],
             ],
           ),
+          if (controller.studioAccessDenied(studio))
+            Padding(
+              padding: const EdgeInsets.all(8),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      context.l10n.languageCode == 'zh'
+                          ? '无法访问此 Studio 的会话，已暂停自动刷新。'
+                          : 'Cannot access this Studio’s sessions. Automatic refresh is paused.',
+                      style: TextStyle(color: colors.error),
+                    ),
+                  ),
+                  TextButton(
+                    onPressed: () => controller.recoverStudio(studio),
+                    child: Text(
+                      context.l10n.languageCode == 'zh' ? '重试' : 'Retry',
+                    ),
+                  ),
+                ],
+              ),
+            ),
           if (controller.error != null)
             Padding(
               padding: const EdgeInsets.all(8),

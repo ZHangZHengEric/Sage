@@ -4,10 +4,13 @@ import 'dart:io';
 import 'package:file_selector/file_selector.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
 import 'package:liquid_glass_widgets/liquid_glass_widgets.dart';
 import '../localization/app_localizations.dart';
 import 'rsi_observatory.dart';
+import 'rsi_activity.dart';
 import 'rsi_diff.dart';
+import 'rsi_scorer_guide.dart';
 import '../state/workspace_controller.dart';
 
 class RsiScreen extends StatefulWidget {
@@ -19,6 +22,7 @@ class RsiScreen extends StatefulWidget {
     this.frameBuilder,
     this.fieldBuilder,
     this.historyOnly = false,
+    this.onOpenFolder,
     super.key,
   });
   final WorkspaceController controller;
@@ -28,6 +32,7 @@ class RsiScreen extends StatefulWidget {
   final Widget Function(String, Widget, Widget)? frameBuilder;
   final Widget Function(String, Widget)? fieldBuilder;
   final bool historyOnly;
+  final Future<void> Function(String path)? onOpenFolder;
   @override
   State<RsiScreen> createState() => _RsiScreenState();
 }
@@ -35,23 +40,29 @@ class RsiScreen extends StatefulWidget {
 class _RsiScreenState extends State<RsiScreen> {
   final _goal = TextEditingController();
   final _rounds = TextEditingController(text: '8');
+  final _initialTrainingCount = TextEditingController(text: '6');
+  final _trainingIncrement = TextEditingController(text: '6');
+  final _systemPromptLimit = TextEditingController(text: '64000');
+  final _skillLengthLimit = TextEditingController(text: '32000');
+  final _skillCountLimit = TextEditingController(text: '16');
+  final _editRepairLimit = TextEditingController(text: '3');
   final _testCount = TextEditingController(text: '24');
   final _humanTestCount = TextEditingController(text: '12');
   final _concurrency = TextEditingController(text: '3');
+  final _evaluationRepeats = TextEditingController(text: '1');
   final _cases = TextEditingController();
   final _parts = <String>{'instructions', 'skills'};
   Map<String, Object?> _history = {};
   Map<String, Object?>? _run;
   Map<String, Object?>? _version;
-  String? _selectedRun,
-      _versionFingerprint,
-      _model,
-      _requestId,
-      _error,
-      _requestOptions;
+  String? _selectedVersionId;
+  bool _versionLoading = false;
+  String? _selectedRun, _model, _requestId, _error, _requestOptions;
   String? _caseFilename;
+  String? _scorerId;
   Timer? _poll;
-  bool _loading = false, _mutating = false;
+  int? _loadingRevision;
+  bool _mutating = false;
   bool _showConfiguration = false;
   bool _showRunHistory = false;
   bool _versionMode = false;
@@ -79,23 +90,33 @@ class _RsiScreenState extends State<RsiScreen> {
     _poll?.cancel();
     _goal.dispose();
     _rounds.dispose();
+    _initialTrainingCount.dispose();
+    _trainingIncrement.dispose();
+    _systemPromptLimit.dispose();
+    _skillLengthLimit.dispose();
+    _skillCountLimit.dispose();
+    _editRepairLimit.dispose();
     _testCount.dispose();
     _humanTestCount.dispose();
     _concurrency.dispose();
+    _evaluationRepeats.dispose();
     _cases.dispose();
     super.dispose();
   }
 
   Future<void> _refresh() async {
-    if (_loading || !mounted) return;
-    _loading = true;
+    if (_loadingRevision == _revision || !mounted) return;
     final revision = _revision;
+    _loadingRevision = revision;
     try {
       final history = await widget.controller.rsiHistory(widget.agentId);
       if (!mounted || revision != _revision) return;
-      if (!_versions) {
-        _selectedRun ??= rows(history['runs']).firstOrNull?['id']?.toString();
-      }
+      setState(() {
+        _history = history;
+        if (!_versions) {
+          _selectedRun ??= rows(history['runs']).firstOrNull?['id']?.toString();
+        }
+      });
       final run = _selectedRun == null
           ? null
           : await widget.controller.rsiRun(
@@ -111,12 +132,16 @@ class _RsiScreenState extends State<RsiScreen> {
         _run = run;
         _events.addAll(rows(run?['events']));
       });
+      if (_versions && _selectedVersionId == null) {
+        final latest = rows(history['versions']).firstOrNull;
+        if (latest != null) await _openVersion(latest);
+      }
     } on Object catch (e) {
       if (mounted && revision == _revision) {
         setState(() => _error = e.toString());
       }
     } finally {
-      _loading = false;
+      if (_loadingRevision == revision) _loadingRevision = null;
     }
   }
 
@@ -145,13 +170,38 @@ class _RsiScreenState extends State<RsiScreen> {
     }
     await _mutate(() async {
       final count = int.tryParse(_rounds.text);
+      final initialTrainingCount = int.tryParse(_initialTrainingCount.text);
+      final trainingIncrement = int.tryParse(_trainingIncrement.text);
+      final systemPromptLimit = int.tryParse(_systemPromptLimit.text);
+      final skillLengthLimit = int.tryParse(_skillLengthLimit.text);
+      final skillCountLimit = int.tryParse(_skillCountLimit.text);
+      final editRepairLimit = int.tryParse(_editRepairLimit.text);
       final testCount = int.tryParse(_testCount.text);
       final humanTestCount = int.tryParse(_humanTestCount.text);
       final concurrency = int.tryParse(_concurrency.text);
+      final evaluationRepeats = int.tryParse(_evaluationRepeats.text);
       if (_goal.text.trim().isEmpty ||
           count == null ||
           count < 1 ||
           count > 100 ||
+          initialTrainingCount == null ||
+          initialTrainingCount < 1 ||
+          initialTrainingCount > 100 ||
+          trainingIncrement == null ||
+          trainingIncrement < 0 ||
+          trainingIncrement > 100 ||
+          systemPromptLimit == null ||
+          systemPromptLimit < 1 ||
+          systemPromptLimit > 1000000 ||
+          skillLengthLimit == null ||
+          skillLengthLimit < 1 ||
+          skillLengthLimit > 1000000 ||
+          skillCountLimit == null ||
+          skillCountLimit < 0 ||
+          skillCountLimit > 256 ||
+          editRepairLimit == null ||
+          editRepairLimit < 0 ||
+          editRepairLimit > 10 ||
           testCount == null ||
           testCount < 1 ||
           testCount > 100 ||
@@ -161,11 +211,14 @@ class _RsiScreenState extends State<RsiScreen> {
           concurrency == null ||
           concurrency < 1 ||
           concurrency > 16 ||
+          evaluationRepeats == null ||
+          evaluationRepeats < 1 ||
+          evaluationRepeats > 10 ||
           _parts.isEmpty) {
         throw FormatException(
           t(
-            '请输入目标、1–100 轮、1–100 道验证题、0–100 道测试题、1–16 并行上限和优化范围',
-            'Enter a goal, 1–100 rounds, 1–100 validation cases, 0–100 test cases, 1–16 concurrency and optimization parts',
+            '请输入目标、1–1000000 字符的指令和 Skill 长度上限、0–256 个 Skill、1–100 道初始训练题、0–100 道每轮新增训练题、1–100 轮、1–100 道验证题、0–100 道测试题、1–16 并行上限、1–10 次评测重复和优化范围',
+            'Enter a goal, 1–1000000 character prompt and Skill limits, 0–256 Skills, 1–100 initial training cases, 0–100 new training cases per round, 1–100 rounds, 1–100 validation cases, 0–100 test cases, 1–16 concurrency, 1–10 evaluation repeats and optimization parts',
           ),
         );
       }
@@ -173,12 +226,20 @@ class _RsiScreenState extends State<RsiScreen> {
       final options = jsonEncode([
         _goal.text.trim(),
         count,
+        initialTrainingCount,
+        trainingIncrement,
+        systemPromptLimit,
+        skillLengthLimit,
+        skillCountLimit,
+        editRepairLimit,
         testCount,
         humanTestCount,
         concurrency,
+        evaluationRepeats,
         _parts.toList(),
         _model,
         suite,
+        _scorerId,
       ]);
       if (_requestOptions != options) {
         _requestId = null;
@@ -188,13 +249,25 @@ class _RsiScreenState extends State<RsiScreen> {
       final started = await widget.controller.startRsi(widget.agentId, {
         'goal': _goal.text.trim(),
         'rounds': count,
+        'max_system_prompt_chars': systemPromptLimit,
+        'max_skill_chars': skillLengthLimit,
+        'max_skill_count': skillCountLimit,
+        'max_edit_repairs': editRepairLimit,
+        'initial_training_case_count': initialTrainingCount,
+        'training_cases_per_round': trainingIncrement,
         'validation_case_count': testCount,
         'human_test_count': humanTestCount,
         'max_concurrency': concurrency,
+        'evaluation_repeats': evaluationRepeats,
         'optimization_scope': _parts.toList(),
         'model_provider_id': _model,
         'request_id': _requestId,
-        'suite': ?suite,
+        if (_scorerId != null) 'scorer_id': _scorerId,
+        if (suite != null)
+          (suite is Map && suite['format_version'] == 'sage.rsi.dataset/v1'
+                  ? 'dataset'
+                  : 'suite'):
+              suite,
       });
       _requestId = null;
       _requestOptions = null;
@@ -209,7 +282,13 @@ class _RsiScreenState extends State<RsiScreen> {
 
   Future<void> _openVersion(Map<String, Object?> item) async {
     final revision = ++_revision;
-    final expected = _history['current_fingerprint']?.toString();
+    setState(() {
+      _selectedVersionId = item['id'].toString();
+      _versionMode = true;
+      _version = null;
+      _versionLoading = true;
+      _error = null;
+    });
     try {
       final value = await widget.controller.rsiVersion(
         widget.agentId,
@@ -219,12 +298,17 @@ class _RsiScreenState extends State<RsiScreen> {
         setState(() {
           _version = value;
           _versionMode = true;
-          _versionFingerprint = expected;
           _error = null;
         });
       }
     } on Object catch (e) {
-      if (mounted) setState(() => _error = e.toString());
+      if (mounted && revision == _revision) {
+        setState(() => _error = e.toString());
+      }
+    } finally {
+      if (mounted && revision == _revision) {
+        setState(() => _versionLoading = false);
+      }
     }
   }
 
@@ -261,43 +345,6 @@ class _RsiScreenState extends State<RsiScreen> {
     }
   });
 
-  Future<void> _apply() async {
-    final version = _version;
-    final expected = _versionFingerprint;
-    if (version == null || expected == null) return;
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: Text(
-          t('确认替换 Agent 配置', 'Confirm Agent configuration replacement'),
-        ),
-        content: Text(
-          '${widget.agentName}\n${versionLabel(version)}\n${version['created_at']}',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: Text(t('取消', 'Cancel')),
-          ),
-          FilledButton(
-            key: const ValueKey('rsi-confirm-apply'),
-            onPressed: () => Navigator.pop(context, true),
-            child: Text(t('确认替换', 'Confirm replacement')),
-          ),
-        ],
-      ),
-    );
-    if (confirmed != true || !mounted) return;
-    await _mutate(() async {
-      await widget.controller.applyRsiVersion(
-        widget.agentId,
-        version['id'].toString(),
-        expected,
-      );
-      if (mounted) setState(() => _version = null);
-    });
-  }
-
   Future<void> _export(Object value, String filename) => _mutate(() async {
     final location = await getSaveLocation(suggestedName: filename);
     if (location != null) {
@@ -307,7 +354,9 @@ class _RsiScreenState extends State<RsiScreen> {
     }
   });
   String versionLabel(Map<String, Object?> v) => v['source'] == 'rsi'
-      ? '${t('迭代', 'Iteration')} ${v['iteration']}'
+      ? ((v['iteration'] as num?) == 0
+            ? t('基线', 'Baseline')
+            : '${t('迭代', 'Iteration')} ${v['iteration']}')
       : v['source'] == 'activation'
       ? t('已应用版本', 'Applied version')
       : t('配置保存', 'Configuration save');
@@ -327,50 +376,12 @@ class _RsiScreenState extends State<RsiScreen> {
     'interrupted' => t('已中断', 'Interrupted'),
     _ => v?.toString() ?? '',
   };
-  String stage(Object? v, {Object? role}) => switch (v) {
-    'training_generation_started' => t(
-      '准备训练挑战',
-      'Preparing training challenges',
-    ),
-    'human_test_pending' => t('测试测量中', 'Measuring test checkpoints'),
-    'training_cases_added' => t('训练题已补充', 'Training questions added'),
-    'training_challenge_completed' => t(
-      '训练挑战完成',
-      'Training challenge completed',
-    ),
-    'test_generation_started' ||
-    'test_generation_completed' ||
-    'test_generation_batch_completed' ||
-    'suite_fixed' => t('生成测试集', 'Designing tests'),
-    'final_test_generation_started' ||
-    'final_suite_sealed' => t('准备最终测试集', 'Preparing final tests'),
-    'suite_review_started' => t('审查测试集', 'Reviewing tests'),
-    'suite_review_completed' => t('测试集审查完成', 'Tests reviewed'),
-    'baseline_completed' => t('基线评测完成', 'Baseline evaluated'),
-    'agent_call_started' || 'agent_call_completed' => switch (role) {
-      'tuning' => t('调优 Agent', 'Tuning agent'),
-      'evaluation' => t('评价 Agent', 'Evaluation agent'),
-      'suite_review' => t('测试集审查 Agent', 'Test review agent'),
-      'semantic_review' => t('语义审查 Agent', 'Review agent'),
-      'test_design' => t('测试设计 Agent', 'Test designer'),
-      'test_dialogue' => t('对话测试 Agent', 'Dialogue agent'),
-      _ => t('内部 Agent 处理中', 'Internal agent working'),
-    },
-    'candidate_created' => t('生成候选版本', 'Candidate created'),
-    'semantic_review_completed' => t('语义审查完成', 'Semantic review completed'),
-    'stability_check_started' => t('稳定性复测中', 'Checking stability'),
-    'stability_check_completed' => t('稳定性复测完成', 'Stability check completed'),
-    'optimization_stopped' => t('迭代已停止', 'Iteration stopped'),
-    'round_completed' => t('本轮完成', 'Round completed'),
-    'final_verification_completed' ||
-    'final_evaluation_completed' => t('最终测试', 'Final tests'),
-    'result_completed' || 'operation_finished' => t('结束', 'Finished'),
-    'target_call_started' ||
-    'target_call_completed' ||
-    'case_completed' ||
-    'evaluation_completed' => t('测试与评测', 'Testing and evaluating'),
-    _ => t('内部 Agent 处理中', 'Internal agent working'),
-  };
+  String stage(Object? v, {Object? role, Object? activity}) => rsiActivityLabel(
+    v,
+    role: role,
+    activity: activity,
+    chinese: context.l10n.locale.languageCode == 'zh',
+  );
   Widget card(Widget child) => Padding(
     padding: const EdgeInsets.only(bottom: 12),
     child: GlassCard(
@@ -407,10 +418,12 @@ class _RsiScreenState extends State<RsiScreen> {
     VoidCallback? onTap, {
     Key? key,
     double width = 112,
+    bool? expanded,
   }) => Semantics(
     key: key,
     button: true,
     enabled: onTap != null,
+    toggled: expanded,
     label: label,
     onTap: onTap,
     excludeSemantics: true,
@@ -418,27 +431,78 @@ class _RsiScreenState extends State<RsiScreen> {
       ignoring: onTap == null,
       child: Opacity(
         opacity: onTap == null ? 0.45 : 1,
-        child: GlassButton.custom(
-          width: width,
-          height: 34,
-          settings: glass,
-          shape: const LiquidRoundedRectangle(borderRadius: 10),
-          onTap: onTap ?? () {},
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Icon(icon, size: 15),
-              const SizedBox(width: 7),
-              Flexible(
-                child: Text(
-                  label,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: Theme.of(context).textTheme.bodyMedium,
+        child: Stack(
+          children: [
+            GlassButton.custom(
+              width: width,
+              height: 34,
+              settings: glass,
+              shape: const LiquidRoundedRectangle(borderRadius: 10),
+              onTap: onTap ?? () {},
+              child: Padding(
+                padding: expanded == null
+                    ? EdgeInsets.zero
+                    : const EdgeInsets.symmetric(horizontal: 10),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(
+                      icon,
+                      size: 15,
+                      color: expanded == true
+                          ? Theme.of(context).colorScheme.primary
+                          : null,
+                    ),
+                    const SizedBox(width: 7),
+                    Flexible(
+                      child: Text(
+                        label,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                          color: expanded == true
+                              ? Theme.of(context).colorScheme.primary
+                              : null,
+                        ),
+                      ),
+                    ),
+                    if (expanded != null) ...[
+                      const SizedBox(width: 6),
+                      AnimatedRotation(
+                        turns: expanded ? .5 : 0,
+                        duration: const Duration(milliseconds: 180),
+                        child: Icon(
+                          CupertinoIcons.chevron_down,
+                          size: 12,
+                          color: expanded
+                              ? Theme.of(context).colorScheme.primary
+                              : null,
+                        ),
+                      ),
+                    ],
+                  ],
                 ),
               ),
-            ],
-          ),
+            ),
+            if (expanded == true)
+              Positioned.fill(
+                child: IgnorePointer(
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(
+                      color: Theme.of(
+                        context,
+                      ).colorScheme.primary.withValues(alpha: .08),
+                      border: Border.all(
+                        color: Theme.of(
+                          context,
+                        ).colorScheme.primary.withValues(alpha: .45),
+                      ),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                  ),
+                ),
+              ),
+          ],
         ),
       ),
     ),
@@ -449,7 +513,7 @@ class _RsiScreenState extends State<RsiScreen> {
       Padding(
         padding: const EdgeInsets.symmetric(vertical: 10),
         child: LayoutBuilder(
-          builder: (context, constraints) => constraints.maxWidth < 560
+          builder: (context, constraints) => constraints.maxWidth < 760
               ? Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
@@ -466,7 +530,7 @@ class _RsiScreenState extends State<RsiScreen> {
               : Row(
                   children: [
                     SizedBox(
-                      width: 150,
+                      width: 220,
                       child: Text(
                         label,
                         style: Theme.of(context).textTheme.bodyMedium?.copyWith(
@@ -474,9 +538,10 @@ class _RsiScreenState extends State<RsiScreen> {
                         ),
                       ),
                     ),
+                    const SizedBox(width: 24),
                     Expanded(
                       child: Align(
-                        alignment: Alignment.centerRight,
+                        alignment: Alignment.centerLeft,
                         child: control,
                       ),
                     ),
@@ -497,9 +562,74 @@ class _RsiScreenState extends State<RsiScreen> {
     _testCount.text = rows(
       map(jsonDecode(_cases.text))['cases'],
     ).where((c) => c['split'] == 'validation').length.toString();
+    final dataset = map(jsonDecode(_cases.text));
+    if (dataset['format_version'] == 'sage.rsi.dataset/v1') {
+      _humanTestCount.text = rows(
+        dataset['cases'],
+      ).where((c) => c['split'] == 'test').length.toString();
+    }
     _caseFilename = file.name;
     _requestId = null;
   });
+
+  void selectScorer(Map<String, Object?>? plan) {
+    setState(() {
+      _scorerId = plan?['id']?.toString();
+      _requestId = null;
+    });
+  }
+
+  Future<void> importScorer() => _mutate(() async {
+    final file = await openFile(
+      acceptedTypeGroups: [
+        const XTypeGroup(label: 'Python', extensions: ['py']),
+      ],
+    );
+    if (file == null) return;
+    final plan = await widget.controller.importRsiScorer(widget.agentId, {
+      'name': file.name,
+      'source': await file.readAsString(),
+    });
+    if (mounted) selectScorer(plan);
+  });
+
+  Future<void> chooseScorer() => showDialog<void>(
+    context: context,
+    builder: (dialogContext) => Dialog(
+      backgroundColor: Colors.transparent,
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 420, maxHeight: 480),
+        child: GlassCard(
+          settings: glass,
+          padding: const EdgeInsets.all(8),
+          child: ListView(
+            shrinkWrap: true,
+            children: [
+              ListTile(
+                key: const ValueKey('rsi-scorer-default'),
+                title: Text(t('Agent 评分', 'Agent scoring')),
+                selected: _scorerId == null,
+                onTap: () {
+                  selectScorer(null);
+                  Navigator.pop(dialogContext);
+                },
+              ),
+              for (final plan in rows(_history['scorers']))
+                ListTile(
+                  key: ValueKey('rsi-scorer-${plan['id']}'),
+                  title: Text('${plan['name']}'),
+                  selected: _scorerId == plan['id'],
+                  onTap: () {
+                    selectScorer(plan);
+                    Navigator.pop(dialogContext);
+                  },
+                ),
+            ],
+          ),
+        ),
+      ),
+    ),
+  );
 
   Future<void> chooseModel() => showDialog<void>(
     context: context,
@@ -539,7 +669,142 @@ class _RsiScreenState extends State<RsiScreen> {
     ),
   );
 
+  Widget _scorerHelp() => Tooltip(
+    message: t('如何编写评分器', 'Writing a scorer'),
+    child: GlassIconButton(
+      key: const ValueKey('rsi-scorer-help'),
+      size: 34,
+      iconSize: 18,
+      shape: GlassIconButtonShape.roundedSquare,
+      borderRadius: 10,
+      settings: glass,
+      icon: const Icon(CupertinoIcons.question_circle),
+      onPressed: () => showRsiScorerGuide(
+        context,
+        chinese: context.l10n.languageCode == 'zh',
+      ),
+    ),
+  );
+
+  Widget _readOnlyConfiguration() {
+    final historyRun =
+        rows(
+          _history['runs'],
+        ).where((r) => r['id'] == _selectedRun).firstOrNull ??
+        rows(_history['runs']).where((r) => active(r['status'])).firstOrNull ??
+        <String, Object?>{};
+    final current = map(_run);
+    final started = current.isNotEmpty
+        ? map(
+            _events
+                .where((e) => e['event'] == 'operation_started')
+                .firstOrNull?['data'],
+          )
+        : <String, Object?>{};
+    final snapshot = {
+      ...started,
+      ...map(started['constraints']),
+      ...historyRun,
+      ...current,
+    };
+    if (snapshot['initial_training_case_count'] == null) {
+      final fixed = map(
+        _events.where((e) => e['event'] == 'suite_fixed').firstOrNull?['data'],
+      );
+      final cases = rows(map(fixed['suite'] ?? started['suite'])['cases']);
+      if (cases.isNotEmpty) {
+        snapshot['initial_training_case_count'] = cases
+            .where((c) => c['split'] == 'training')
+            .length;
+      }
+    }
+    Widget value(String key, Object? content) => SelectableText(
+      content?.toString().trim().isNotEmpty == true ? content.toString() : '—',
+      key: ValueKey('rsi-readonly-$key'),
+      style: Theme.of(context).textTheme.bodyMedium?.copyWith(height: 1.5),
+    );
+    final scorer = map(snapshot['scorer']);
+    final scorerName =
+        map(scorer['descriptor'])['name'] ??
+        rows(
+          _history['scorers'],
+        ).where((r) => r['id'] == snapshot['scorer_id']).firstOrNull?['name'] ??
+        snapshot['scorer_id'] ??
+        (snapshot['external_host'] == true
+            ? '—'
+            : t('Agent 评分', 'Agent scoring'));
+    final providerId = snapshot['model_provider_id'];
+    final providerName =
+        widget.controller.modelProviders
+            .where((p) => p.id == providerId)
+            .firstOrNull
+            ?.name ??
+        providerId;
+    final partNames = <String, String>{
+      'instructions': t('指令', 'Instructions'),
+      'skills': 'Skills',
+      'tools': t('工具', 'Tools'),
+      'budgets': t('步数预算', 'Step budget'),
+    };
+    final parts = (snapshot['optimization_scope'] as List? ?? [])
+        .map((p) => partNames[p] ?? p.toString())
+        .join(' · ');
+    final fields = [
+      field(
+        t('评分器', 'Scorer'),
+        Wrap(
+          spacing: 12,
+          crossAxisAlignment: WrapCrossAlignment.center,
+          children: [value('scorer', scorerName), _scorerHelp()],
+        ),
+      ),
+      field(t('优化目标', 'Optimization goal'), value('goal', snapshot['goal'])),
+      for (final entry in <String, String>{
+        'rounds': t('优化轮数', 'Rounds'),
+        'initial_training_case_count': t(
+          '初始训练题数',
+          'Initial training questions',
+        ),
+        'training_cases_per_round': t(
+          '每轮新增训练题数',
+          'New training questions per round',
+        ),
+        'max_system_prompt_chars': t(
+          'System 指令字符上限',
+          'System prompt character limit',
+        ),
+        'max_skill_chars': t('单个 SKILL.md 字符上限', 'SKILL.md character limit'),
+        'max_skill_count': t('Skill 数量上限', 'Skill count limit'),
+        'max_edit_repairs': t('校验失败修正次数', 'Validation repair attempts'),
+        'validation_case_count': t('验证题量 dev', 'Dev questions'),
+        'human_test_count': t('测试题量 test', 'Test questions'),
+        'max_concurrency': t('并行上限', 'Concurrency limit'),
+        'evaluation_repeats': t('评测重复次数', 'Evaluation repeats'),
+      }.entries)
+        field(entry.value, value(entry.key, snapshot[entry.key])),
+      field(
+        t('内部 Agent 模型', 'Internal agent model'),
+        value('model', providerName),
+      ),
+      field(t('优化范围', 'Optimization parts'), value('parts', parts)),
+    ];
+    return Column(
+      key: const ValueKey('rsi-configuration-readonly'),
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        for (final row in fields) ...[
+          row,
+          Divider(
+            height: 1,
+            color: Theme.of(context).colorScheme.outlineVariant,
+          ),
+        ],
+      ],
+    );
+  }
+
   Widget form(bool busy) {
+    if (busy) return _readOnlyConfiguration();
     final enabled = !busy && !_mutating;
     final modelLabel =
         widget.controller.modelProviders
@@ -548,6 +813,37 @@ class _RsiScreenState extends State<RsiScreen> {
             ?.name ??
         t('目标 Agent 模型', 'Target agent model');
     final fields = [
+      field(
+        t('评分器', 'Scorer'),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            GlassPicker(
+              key: const ValueKey('rsi-scorer-picker'),
+              value:
+                  rows(_history['scorers'])
+                      .where((p) => p['id'] == _scorerId)
+                      .firstOrNull?['name']
+                      ?.toString() ??
+                  t('Agent 评分', 'Agent scoring'),
+              width: 260,
+              height: 34,
+              settings: glass,
+              textStyle: Theme.of(context).textTheme.bodyMedium,
+              onTap: enabled ? chooseScorer : null,
+            ),
+            action(
+              t('导入评分器', 'Import scorer'),
+              CupertinoIcons.folder,
+              enabled ? importScorer : null,
+              key: const ValueKey('rsi-import-scorer'),
+              width: 150,
+            ),
+            _scorerHelp(),
+          ],
+        ),
+      ),
       field(
         t('优化目标', 'Optimization goal'),
         SizedBox(
@@ -576,6 +872,36 @@ class _RsiScreenState extends State<RsiScreen> {
         ),
       ),
       for (final entry in [
+        (
+          t('初始训练题数', 'Initial training questions'),
+          _initialTrainingCount,
+          'rsi-initial-training-count',
+        ),
+        (
+          t('每轮新增训练题数', 'New training questions per round'),
+          _trainingIncrement,
+          'rsi-training-increment',
+        ),
+        (
+          t('System 指令字符上限', 'System prompt character limit'),
+          _systemPromptLimit,
+          'rsi-system-prompt-limit',
+        ),
+        (
+          t('单个 SKILL.md 字符上限', 'SKILL.md character limit'),
+          _skillLengthLimit,
+          'rsi-skill-length-limit',
+        ),
+        (
+          t('Skill 数量上限', 'Skill count limit'),
+          _skillCountLimit,
+          'rsi-skill-count-limit',
+        ),
+        (
+          t('校验失败修正次数', 'Validation repair attempts'),
+          _editRepairLimit,
+          'rsi-edit-repair-limit',
+        ),
         (t('验证题量 dev', 'Dev questions'), _testCount, 'rsi-test-count'),
         (
           t('测试题量 test', 'Test questions'),
@@ -583,6 +909,11 @@ class _RsiScreenState extends State<RsiScreen> {
           'rsi-human-test-count',
         ),
         (t('并行上限', 'Concurrency limit'), _concurrency, 'rsi-concurrency'),
+        (
+          t('评测重复次数', 'Evaluation repeats'),
+          _evaluationRepeats,
+          'rsi-evaluation-repeats',
+        ),
       ])
         field(
           entry.$1,
@@ -593,7 +924,11 @@ class _RsiScreenState extends State<RsiScreen> {
               controller: entry.$2,
               enabled:
                   enabled &&
-                  (entry.$3 != 'rsi-test-count' || _caseFilename == null),
+                  (entry.$3 != 'rsi-test-count' || _caseFilename == null) &&
+                  (entry.$3 != 'rsi-human-test-count' ||
+                      (_caseFilename == null ||
+                          map(jsonDecode(_cases.text))['format_version'] !=
+                              'sage.rsi.dataset/v1')),
               textStyle: Theme.of(context).textTheme.bodyMedium,
               settings: glass,
             ),
@@ -684,7 +1019,7 @@ class _RsiScreenState extends State<RsiScreen> {
         ),
       ),
       field(
-        t('测试集', 'Test suite'),
+        t('数据集', 'Dataset'),
         Wrap(
           spacing: 8,
           crossAxisAlignment: WrapCrossAlignment.center,
@@ -695,7 +1030,7 @@ class _RsiScreenState extends State<RsiScreen> {
                 style: Theme.of(context).textTheme.bodyMedium,
               ),
             action(
-              t('导入测试集', 'Import suite'),
+              t('导入数据集', 'Import dataset'),
               CupertinoIcons.folder,
               enabled ? importSuite : null,
               key: const ValueKey('rsi-import-suite'),
@@ -732,6 +1067,13 @@ class _RsiScreenState extends State<RsiScreen> {
   }
 
   Widget historyList() {
+    if (_history.isEmpty && _error == null) {
+      return const SizedBox(
+        key: ValueKey('rsi-history-loading'),
+        height: 80,
+        child: Center(child: CupertinoActivityIndicator()),
+      );
+    }
     final runs = rows(_history['runs']);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -772,40 +1114,116 @@ class _RsiScreenState extends State<RsiScreen> {
                   ? const CupertinoActivityIndicator(radius: 7)
                   : null,
               onTap: () {
+                if (_selectedRun == run['id']) return;
                 setState(() {
                   _selectedRun = run['id'].toString();
                   _run = null;
                   _version = null;
                   _events.clear();
+                  _error = null;
                   _revision++;
                 });
                 unawaited(_refresh());
               },
             ),
         ] else ...[
-          for (final v in rows(_history['versions']))
-            ListTile(
-              key: ValueKey('rsi-version-${v['id']}'),
-              contentPadding: const EdgeInsets.symmetric(horizontal: 12),
-              selected: _version?['id'] == v['id'],
-              selectedTileColor: Theme.of(
-                context,
-              ).colorScheme.onSurface.withValues(alpha: 0.08),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(11),
+          for (final group in versionGroups().entries) ...[
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 16, 12, 8),
+              child: Text(
+                group.key.isEmpty
+                    ? t('配置记录', 'Configuration history')
+                    : '${t('进化', 'Evolution')} · ${timestamp(runs.where((r) => r['id'] == group.key).firstOrNull?['created_at'] ?? group.value.first['created_at'])}',
+                style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
               ),
-              title: Text(
-                '${versionLabel(v)} · ${timestamp(v['created_at'])}',
-                style: Theme.of(context).textTheme.bodyMedium,
-              ),
-              trailing: map(v['review'])['approved'] == false
-                  ? const Icon(CupertinoIcons.exclamationmark_circle, size: 16)
-                  : null,
-              onTap: () => _openVersion(v),
             ),
+            for (final v in group.value)
+              ListTile(
+                key: ValueKey('rsi-version-${v['id']}'),
+                contentPadding: const EdgeInsets.symmetric(horizontal: 12),
+                selected: _selectedVersionId == v['id'],
+                selectedTileColor: Theme.of(
+                  context,
+                ).colorScheme.primary.withValues(alpha: .1),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                title: Text(
+                  versionLabel(v),
+                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                    fontWeight: _selectedVersionId == v['id']
+                        ? FontWeight.w600
+                        : FontWeight.w400,
+                  ),
+                ),
+                trailing: Text(
+                  group.key.isEmpty
+                      ? timestamp(v['created_at'])
+                      : timestamp(v['created_at']).split(' ').last,
+                  style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  ),
+                ),
+                onTap: () => _openVersion(v),
+              ),
+          ],
         ],
       ],
     );
+  }
+
+  String? get _optimizationFolder {
+    final workspace = _run?['workspace_path']?.toString();
+    if (workspace == null || workspace.isEmpty) return null;
+    return Directory(workspace).parent.path;
+  }
+
+  Future<void> _openOptimizationFolder() async {
+    final path = _optimizationFolder;
+    if (path == null) return;
+    try {
+      if (widget.onOpenFolder != null) {
+        await widget.onOpenFolder!(path);
+      } else {
+        if (!await Directory(path).exists()) {
+          throw StateError(t('优化文件夹不存在', 'Optimization folder does not exist'));
+        }
+        final result = Platform.isMacOS
+            ? await Process.run('/usr/bin/open', [path])
+            : Platform.isWindows
+            ? await Process.run('explorer.exe', [path])
+            : await Process.run('xdg-open', [path]);
+        if (result.exitCode != 0) {
+          throw StateError(
+            t('无法打开优化文件夹', 'Could not open optimization folder'),
+          );
+        }
+      }
+    } catch (error) {
+      if (mounted) setState(() => _error = error.toString());
+    }
+  }
+
+  Map<String, List<Map<String, Object?>>> versionGroups() {
+    final groups = <String, List<Map<String, Object?>>>{};
+    for (final version in rows(_history['versions'])) {
+      final run = version['source'] == 'rsi'
+          ? version['run_id']?.toString() ?? ''
+          : '';
+      (groups[run] ??= []).add(version);
+    }
+    for (final entry in groups.entries) {
+      if (entry.key.isNotEmpty) {
+        entry.value.sort(
+          (a, b) => ((b['iteration'] as num?) ?? 0).compareTo(
+            (a['iteration'] as num?) ?? 0,
+          ),
+        );
+      }
+    }
+    return groups;
   }
 
   @override
@@ -813,8 +1231,11 @@ class _RsiScreenState extends State<RsiScreen> {
     final busy = rows(_history['runs']).any((r) => active(r['status']));
     final back = _versionMode && !widget.historyOnly
         ? () => setState(() {
+            _revision++;
             _versionMode = false;
             _version = null;
+            _versionLoading = false;
+            _selectedVersionId = null;
           })
         : widget.onBack ??
               (Navigator.of(context).canPop()
@@ -835,11 +1256,14 @@ class _RsiScreenState extends State<RsiScreen> {
             width: 112,
           ),
           action(
-            t('运行设置', 'Run setup'),
+            _showConfiguration
+                ? t('收起设置', 'Hide setup')
+                : t('展开设置', 'Show setup'),
             CupertinoIcons.slider_horizontal_3,
             () => setState(() => _showConfiguration = !_showConfiguration),
             key: const ValueKey('rsi-toggle-setup'),
-            width: 124,
+            expanded: _showConfiguration,
+            width: 144,
           ),
           action(
             t('开始进化', 'Start evolution'),
@@ -858,6 +1282,32 @@ class _RsiScreenState extends State<RsiScreen> {
               _version = null;
             }),
             width: 112,
+          ),
+        if (!_versions && _optimizationFolder != null)
+          action(
+            t('打开优化文件夹', 'Open optimization folder'),
+            CupertinoIcons.folder_open,
+            _openOptimizationFolder,
+            key: const ValueKey('rsi-open-folder'),
+            width: 164,
+          ),
+        if (!_versions &&
+            _run?['resumable'] == true &&
+            _run?['external_host'] != true &&
+            {'interrupted', 'cancelled', 'failed'}.contains(_run?['status']))
+          action(
+            t('恢复进化', 'Resume evolution'),
+            CupertinoIcons.play_arrow_solid,
+            _mutating
+                ? null
+                : () => _mutate(
+                    () => widget.controller.resumeRsi(
+                      widget.agentId,
+                      _run!['id'].toString(),
+                    ),
+                  ),
+            key: const ValueKey('rsi-resume'),
+            width: 120,
           ),
         if (!_versions && active(_run?['status']))
           action(
@@ -898,7 +1348,34 @@ class _RsiScreenState extends State<RsiScreen> {
               _error!,
               style: TextStyle(color: Theme.of(context).colorScheme.error),
             ),
-          if (!_versions)
+          if (_versions &&
+              (_history.isEmpty || _versionLoading) &&
+              _error == null)
+            SizedBox(
+              key: const ValueKey('rsi-version-loading'),
+              height: 280,
+              child: Center(
+                child: Semantics(
+                  label: t('加载中', 'Loading'),
+                  child: const CupertinoActivityIndicator(),
+                ),
+              ),
+            ),
+          if (!_versions &&
+              _run == null &&
+              _selectedRun != null &&
+              _error == null)
+            SizedBox(
+              key: const ValueKey('rsi-run-loading'),
+              height: 280,
+              child: Center(
+                child: Semantics(
+                  label: t('加载中', 'Loading'),
+                  child: const CupertinoActivityIndicator(),
+                ),
+              ),
+            )
+          else if (!_versions && (_run != null || _error == null))
             RsiObservatory(
               run: _run,
               events: _events,
@@ -958,11 +1435,18 @@ class _RsiScreenState extends State<RsiScreen> {
     );
     final title =
         '${_versions ? t('版本历史', 'Version history') : t('进化', 'Evolution')} · ${widget.agentName}';
+    // Each region shares one renderer with the same settings as its children.
+    // The settings frame uses a different glass style, so keep it outside these layers.
+    final glassActions = AdaptiveLiquidGlassLayer(
+      settings: glass,
+      child: actions,
+    );
+    final glassBody = AdaptiveLiquidGlassLayer(settings: glass, child: body);
     if (widget.frameBuilder != null) {
       return widget.frameBuilder!(
         title,
-        actions,
-        Material(type: MaterialType.transparency, child: body),
+        glassActions,
+        Material(type: MaterialType.transparency, child: glassBody),
       );
     }
     return Scaffold(
@@ -983,7 +1467,7 @@ class _RsiScreenState extends State<RsiScreen> {
                                 ?.copyWith(fontWeight: FontWeight.w700),
                           ),
                           const SizedBox(height: 12),
-                          actions,
+                          glassActions,
                         ],
                       )
                     : Row(
@@ -995,12 +1479,12 @@ class _RsiScreenState extends State<RsiScreen> {
                                   ?.copyWith(fontWeight: FontWeight.w700),
                             ),
                           ),
-                          actions,
+                          glassActions,
                         ],
                       ),
               ),
               const SizedBox(height: 28),
-              Expanded(child: body),
+              Expanded(child: glassBody),
             ],
           ),
         ),
@@ -1092,7 +1576,7 @@ class _RsiScreenState extends State<RsiScreen> {
           Padding(
             padding: const EdgeInsets.only(bottom: 12),
             child: Text(
-              stage(run['stage'], role: run['role']),
+              stage(run['stage'], role: run['role'], activity: run['activity']),
               style: Theme.of(context).textTheme.bodyMedium,
             ),
           ),
@@ -1144,7 +1628,7 @@ class _RsiScreenState extends State<RsiScreen> {
                 ListTile(
                   dense: true,
                   title: Text(
-                    '${event['sequence']} · ${stage(event['event'], role: map(event['data'])['role'])} · ${event['time']}',
+                    '${event['sequence']} · ${stage(event['event'], role: map(event['data'])['role'], activity: map(event['data'])['activity'])} · ${event['time']}',
                   ),
                 ),
             ],
@@ -1217,88 +1701,278 @@ class _RsiScreenState extends State<RsiScreen> {
       text(map(turn['grade'])['rationale']?.toString() ?? ''),
     ],
   ];
+  Map<String, Object?> versionDefinition(Map<String, Object?> version) {
+    final manifest = map(map(version['package'])['manifest']);
+    final agents = map(manifest['agents']);
+    return map(
+      agents[widget.agentId] ??
+          agents[map(manifest['entrypoint'])['agent']] ??
+          (agents.length == 1 ? agents.values.first : null),
+    );
+  }
+
+  Widget versionFields(List<(String, String)> values) => LayoutBuilder(
+    builder: (context, constraints) {
+      final columns = constraints.maxWidth >= 700 ? 2 : 1;
+      final width = (constraints.maxWidth - (columns - 1) * 24) / columns;
+      return Wrap(
+        spacing: 24,
+        children: [
+          for (final value in values)
+            SizedBox(
+              width: width,
+              child: Container(
+                padding: const EdgeInsets.symmetric(vertical: 12),
+                decoration: BoxDecoration(
+                  border: Border(
+                    bottom: BorderSide(
+                      color: Theme.of(
+                        context,
+                      ).colorScheme.outlineVariant.withValues(alpha: .45),
+                    ),
+                  ),
+                ),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    SizedBox(
+                      width: 110,
+                      child: Text(
+                        value.$1,
+                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                          color: Theme.of(context).colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                    ),
+                    Expanded(
+                      child: SelectableText(
+                        value.$2.isEmpty ? '—' : value.$2,
+                        style: Theme.of(context).textTheme.bodyMedium,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+        ],
+      );
+    },
+  );
+
+  Widget versionSection(String title, Widget child, {Key? key}) => Padding(
+    padding: const EdgeInsets.only(bottom: 16),
+    child: GlassCard(
+      key: key,
+      width: double.infinity,
+      settings: glass,
+      padding: const EdgeInsets.all(18),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            title,
+            style: Theme.of(
+              context,
+            ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w600),
+          ),
+          const SizedBox(height: 12),
+          child,
+        ],
+      ),
+    ),
+  );
+
   Widget versionDetail() {
     final version = _version!;
     final package = map(version['package']);
-    final definition = map(
-      map(map(package['manifest'])['agents'])[widget.agentId],
-    );
-    final reviewed =
-        version['ready'] != false &&
-        (version['review'] == null ||
-            map(version['review'])['approved'] == true);
-    return card(
-      Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          heading(versionLabel(version)),
-          if (version['source'] == 'rsi' &&
-              ((version['iteration'] as num?)?.toInt() ?? 0) > 0)
-            TextButton.icon(
-              key: const ValueKey('rsi-version-diff'),
-              onPressed: _mutating ? null : _versionDiff,
-              icon: const Icon(CupertinoIcons.arrow_right_arrow_left, size: 18),
-              label: Text(t('查看本轮改动', 'View round changes')),
-            ),
-          savedConfiguration(version),
-          if (version['review'] != null) review(map(version['review'])),
-          if (version['source'] == 'rsi' && version.containsKey('final_test'))
-            text(
-              map(version['final_test'])['tested'] == true
-                  ? t(
-                      '此版本已执行独立最终测试',
-                      'This version received independent final tests',
-                    )
-                  : t(
-                      '此版本未执行独立最终测试',
-                      'This version has no independent final test result',
+    final definition = versionDefinition(version);
+    final instructions =
+        map(definition['instructions'])['inline']?.toString() ??
+        map(
+          package['files'],
+        )[map(definition['instructions'])['path']]?.toString() ??
+        map(version['config'])['systemPrefix']?.toString() ??
+        '';
+    final samples = rows(map(map(version['record'])['evaluation'])['cases']);
+    String mean(String split) {
+      final cohort = samples
+          .where((c) => map(c['case'])['split'] == split)
+          .toList();
+      final scores = cohort
+          .map((c) => map(c['grade'])['score'])
+          .whereType<num>()
+          .toList();
+      return scores.isEmpty || scores.length != cohort.length
+          ? '—'
+          : (scores.fold<double>(0, (sum, value) => sum + value) /
+                    scores.length)
+                .toStringAsFixed(3);
+    }
+
+    Widget tags(Object? values) {
+      final names = values is List
+          ? values.map((v) => v.toString()).toList()
+          : <String>[];
+      return names.isEmpty
+          ? const Text('—')
+          : Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                for (final name in names)
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 6,
                     ),
+                    decoration: BoxDecoration(
+                      color: Theme.of(
+                        context,
+                      ).colorScheme.onSurface.withValues(alpha: .05),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: SelectableText(
+                      name,
+                      style: Theme.of(context).textTheme.bodySmall,
+                    ),
+                  ),
+              ],
+            );
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Wrap(
+          spacing: 16,
+          runSpacing: 12,
+          crossAxisAlignment: WrapCrossAlignment.center,
+          children: [
+            Text(
+              versionLabel(version),
+              style: Theme.of(
+                context,
+              ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w600),
             ),
-          evaluation(map(map(version['record'])['evaluation'])),
-          ExpansionTile(
-            title: Text(t('指令', 'Instructions')),
+            Text(
+              timestamp(version['created_at']),
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
+            ),
+            action(
+              t('导出完整版本', 'Export full version'),
+              CupertinoIcons.square_arrow_down,
+              () => _export(version, 'agent-${version['id']}.json'),
+              key: const ValueKey('rsi-export-version'),
+              width: 136,
+            ),
+            if (version['source'] == 'rsi' &&
+                ((version['iteration'] as num?)?.toInt() ?? 0) > 0)
+              action(
+                t('查看本轮改动', 'View round changes'),
+                CupertinoIcons.arrow_right_arrow_left,
+                _mutating ? null : _versionDiff,
+                key: const ValueKey('rsi-version-diff'),
+                width: 144,
+              ),
+          ],
+        ),
+        const SizedBox(height: 20),
+        if (samples.isNotEmpty)
+          versionSection(
+            t('评测分数', 'Evaluation scores'),
+            versionFields([
+              (t('训练集', 'Training'), mean('training')),
+              (t('验证集', 'Validation'), mean('validation')),
+              (t('测试集', 'Test'), mean('test')),
+            ]),
+          ),
+        savedConfiguration(version),
+        versionSection(
+          t('指令', 'Instructions'),
+          instructions.isEmpty
+              ? const Text('—')
+              : MarkdownBody(data: instructions, selectable: true),
+        ),
+        versionSection(
+          t('工具与 Skills', 'Tools and Skills'),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              text(map(definition['instructions'])['inline']?.toString() ?? ''),
+              Text(
+                t('工具', 'Tools'),
+                style: Theme.of(context).textTheme.labelMedium,
+              ),
+              const SizedBox(height: 8),
+              tags(definition['tools']),
+              const SizedBox(height: 18),
+              Text('Skills', style: Theme.of(context).textTheme.labelMedium),
+              const SizedBox(height: 8),
+              tags(definition['skills']),
             ],
           ),
-          text(
-            '${t('工具', 'Tools')}: ${(definition['tools'] as List? ?? []).join(', ')}',
-          ),
-          text('Skills: ${(definition['skills'] as List? ?? []).join(', ')}'),
-          text(
-            '${t('步数预算', 'Step budget')}: ${map(definition['budgets'])['max_steps']}',
-          ),
-          for (final file in map(package['files']).entries)
-            ExpansionTile(
-              title: Text(file.key),
-              children: [text(file.value.toString())],
+        ),
+        if (version['review'] != null)
+          versionSection(
+            t('语义审查', 'Semantic review'),
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  map(version['review'])['approved'] == true
+                      ? t('通过', 'Approved')
+                      : t('拒绝', 'Rejected'),
+                  style: TextStyle(
+                    color: map(version['review'])['approved'] == true
+                        ? Theme.of(context).colorScheme.primary
+                        : Theme.of(context).colorScheme.error,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                text(map(version['review'])['rationale']?.toString() ?? '—'),
+              ],
             ),
-          Wrap(
-            spacing: 12,
-            runSpacing: 12,
-            children: [
-              TextButton.icon(
-                key: const ValueKey('rsi-export-version'),
-                onPressed: () =>
-                    _export(version, 'agent-${version['id']}.json'),
-                icon: const Icon(CupertinoIcons.square_arrow_down, size: 16),
-                label: Text(t('导出完整版本', 'Export full version')),
-              ),
-              FilledButton(
-                key: const ValueKey('rsi-apply-version'),
-                onPressed: _mutating || !reviewed ? null : _apply,
-                child: Text(t('使用此版本', 'Use this version')),
-              ),
-            ],
           ),
-        ],
-      ),
+        if (map(
+          package['files'],
+        ).keys.any((name) => !name.startsWith('desktop/')))
+          versionSection(
+            t('版本文件', 'Version files'),
+            Column(
+              children: [
+                for (final file in map(
+                  package['files'],
+                ).entries.where((file) => !file.key.startsWith('desktop/')))
+                  ExpansionTile(
+                    tilePadding: EdgeInsets.zero,
+                    title: Text(
+                      file.key,
+                      style: Theme.of(context).textTheme.bodyMedium,
+                    ),
+                    children: [
+                      Align(
+                        alignment: Alignment.centerLeft,
+                        child: file.key.endsWith('.md')
+                            ? MarkdownBody(
+                                data: file.value.toString(),
+                                selectable: true,
+                              )
+                            : text(file.value.toString()),
+                      ),
+                    ],
+                  ),
+              ],
+            ),
+          ),
+      ],
     );
   }
 
   Widget savedConfiguration(Map<String, Object?> version) {
     final config = map(version['config']);
     final manifest = map(map(version['package'])['manifest']);
+    final definition = versionDefinition(version);
     final primary = map(map(manifest['models'])['primary']);
     final variables = map(
       config['runtimeVariables'] ??
@@ -1310,58 +1984,49 @@ class _RsiScreenState extends State<RsiScreen> {
           .where((p) => p.id == id)
           .firstOrNull;
       return provider == null
-          ? t('默认', 'Default')
+          ? (id?.toString() ?? t('默认', 'Default'))
           : '${provider.name} · ${provider.model}';
     }
 
-    return ExpansionTile(
-      key: const ValueKey('rsi-saved-configuration'),
-      title: Text(t('保存的配置', 'Saved configuration')),
-      children: [
-        field(t('名称', 'Name'), text(version['name']?.toString() ?? '')),
+    final budget =
+        map(definition['budgets'])['max_steps'] ??
+        map(map(manifest['policies'])['budgets'])['max_steps'] ??
+        config['maxLoopCount'];
+    return versionSection(
+      t('保存的配置', 'Saved configuration'),
+      versionFields([
+        (t('名称', 'Name'), version['name']?.toString() ?? '—'),
         if (config['description']?.toString().isNotEmpty == true)
-          field(t('描述', 'Description'), text(config['description'].toString())),
-        field(
+          (t('描述', 'Description'), config['description'].toString()),
+        (
           t('主模型', 'Primary model'),
-          text(
-            primary['model']?.toString() ??
-                modelLabel(config['llm_provider_id']),
-          ),
+          primary['model']?.toString() ??
+              modelLabel(
+                map(definition['models'])['primary'] ??
+                    config['llm_provider_id'],
+              ),
         ),
-        field(
-          t('快速模型', 'Fast model'),
-          text(modelLabel(config['fast_llm_provider_id'])),
-        ),
-        field(
-          t('模式', 'Mode'),
-          text(config['agentMode']?.toString() ?? 'simple'),
-        ),
-        field(
+        (t('快速模型', 'Fast model'), modelLabel(config['fast_llm_provider_id'])),
+        (t('模式', 'Mode'), config['agentMode']?.toString() ?? 'simple'),
+        (t('步数预算', 'Step budget'), budget?.toString() ?? '—'),
+        (
           t('深度思考', 'Deep thinking'),
-          text(config['deepThinking'] == true ? t('开启', 'On') : t('关闭', 'Off')),
+          config['deepThinking'] == true ? t('开启', 'On') : t('关闭', 'Off'),
         ),
         if (config['thinkingLevel'] != null)
-          field(
-            t('思考强度', 'Reasoning effort'),
-            text(config['thinkingLevel'].toString()),
-          ),
-        field(
+          (t('思考强度', 'Reasoning effort'), config['thinkingLevel'].toString()),
+        (
           t('运行变量', 'Runtime variables'),
           variables.isEmpty
-              ? const Text('—')
-              : Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    for (final variable in variables.entries)
-                      text('${variable.key}: ${variable.value}'),
-                  ],
-                ),
+              ? '—'
+              : variables.entries.map((v) => '${v.key}: ${v.value}').join('\n'),
         ),
-        field(
+        (
           t('Shell 授权', 'Shell approvals'),
-          text((config['approvedShellCommands'] as List?)?.join('\n') ?? '—'),
+          (config['approvedShellCommands'] as List?)?.join('\n') ?? '—',
         ),
-      ],
+      ]),
+      key: const ValueKey('rsi-saved-configuration'),
     );
   }
 }

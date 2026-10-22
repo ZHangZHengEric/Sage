@@ -18,36 +18,123 @@ RSI 按设定轮数对输入的 Agent package 进行评测和调优，使用已�
 1. 提供 package、授权目标、优化范围和测试集。未提供测试集时，可由测试设计 Agent 生成。支持单轮任务与设有轮数上限的多轮对话。
 2. 独立生成并固定验证题，默认 24 道，可配置数量；训练题独立生成，并在每轮继续补充挑战当前 Agent。测试集审查 Agent 检查目标、评分标准、权限和执行条件的一致性，不判断题目泄露或背题。
 3. 目标 Agent 使用新 Session 执行基线测试。每个案例由独立的评测 Session 根据评分标准和实际执行证据判断。
-4. 调优 Agent 根据训练反馈和匿名验证分数提出范围内的修改。独立 Session 的语义审查 Agent 在执行候选前检查目标漂移及权限漂移。原始指令保持不变，可编辑的指令指导作为额外部分追加。
-5. 在同一套累计训练题和固定验证题上比较候选与当前版本。整体分为训练均分与验证均分各占 50%；达到最小整体增益即可采纳，允许局部退步。退步训练题持续反馈给调优 Agent，从更好的版本继续修复；验证仍只提供匿名分数。
+4. 调优 Agent 根据训练反馈和匿名验证分数提出范围内的修改。独立 Session 的语义审查 Agent 在执行候选前检查目标漂移及权限漂移。基线快照保持不变；候选版本直接整体改写包内系统提示词文件，可重组、去重、纠正冲突，不再强制追加 `Optimization guidance:`。语义审查检查原始业务规则、职责和权限是否完整保留，而非要求原文逐字保留。
+5. 每个新候选执行全部累计训练题和固定验证题。新增题不回测历史版本；比较进步时仅使用双方已有成绩的共同题，训练均分与验证均分各占 50%。新增题保存本轮成绩，从后续迭代参与比较，不能靠题集变化制造增益。达到最小整体增益即可采纳，允许局部退步。退步训练题持续反馈给调优 Agent，从更好的版本继续修复；验证仍只提供匿名分数。
 6. 达标后完整复测确认稳定；也可因停滞、轮数或时限退出。即使尚未稳定达标，也保留整体更好的候选和完整历史，但不标记推荐，不自动应用。人看的 test 观察独立于这些判断，不作为收敛门槛。
 
 桌面默认另设 12 道只给人看的 test；可设置 0–100 道。test 在基线及每轮保留版本上测量，展示三条分数曲线和逐题点阵。它使用独立会话、单独存储，既不进入任何调优请求，也不参与接受、选版和退出；测试故障显示为测量错误。
 
 每次内部 Agent 调用使用新 Session。调优反馈包含验证汇总与稳定匿名编号的逐题分数，不包含验证题目、原始编号、答案或评分理由。反复用于选择的验证分数不能证明未见任务质量；标准基准可在 RSI 外冻结候选后独立测量，参见 [τ-bench 实验说明](TAU_BENCH.md)。显式 `validation_case_count=None` 仅为旧 SDK 客户端保留历史固定题和可选终测路径。
 
+## 断点恢复
+
+桌面本地运行提供“恢复进化”；后端接口为 `POST /api/v2/agents/{agent_id}/rsi/runs/{run_id}/resume`，stdio MCP 同时提供 `rsi_resume`。恢复保留同一运行 ID 与版本历史。外部基准镜像由原宿主恢复，不能由缺少业务工具绑定的桌面服务代跑。
+
+SDK 可用 `resume_from=旧日志路径` 与新的 `journal_path` 恢复。首次和恢复调用都应提供相同的 `recovery_binding_id`，由可信宿主对模型路由、采样、权限及测试绑定生成稳定标识。原始 package、目标、题目配置、优化范围和停止规则必须相同。
+
+恢复保留优化版本标识及已完成 case 的原始成绩，不重新执行或重新打分；已完成的内部模型响应也会复用。目标已完成但 eval 中断的单轮案例只继续 eval。长对话未完成或工具结果未知时，默认抛出 `OptimizationRecoveryRequired`；只有能够证明环境可丢弃、不会重复真实外部副作用的可信宿主，才可传入 `restart_incomplete=True`。该参数不能由调优 Agent 自行授权。
+
+中断的内部 Agent 若有工具权限，默认同样要求先核对未知副作用。可信宿主若通过冻结的绑定强制某个角色只有受限只读操作，可显式声明 `restart_readonly_roles=("tuning",)`，并提供 `recovery_binding_id`，允许重新执行未完成的只读调优调用；这不是给 Agent 增加工具，也不能把未知写操作自行标为只读。新版 Desktop 的 tuner 是文件编辑器，使用 `file_read`、`file_write`、`file_update`，不能再声明为只读。宿主通过 `restart_package_editor=True` 与冻结绑定声明本轮目录隔离、评估文件只读、无进程权限；未完成的本地编辑先从保留版本重建，已完成编辑从日志中的实际 package 快照恢复。原目标 Agent 不因此增加工具。
+
+原生运行的 `model.provider_transient` 不作为 0 分训练样本。桌面会保存当前日志、退避等待并恢复，最多连续恢复 12 次；等待时间从 2 秒增长至 60 秒。永久配置错误保留失败记录供处理。等待期间仍能查看原有记录，手动中断后也保留恢复入口。
+
+## 独立评测诊断与同题对照
+
+没有外部评分器时，eval Agent 自己评分，并根据执行证据给出结构化诊断。有外部评分器时，可信宿主可向 `optimize()` 提供同步或异步 `authoritative_grader(case, observation)`，返回 `OptimizationGrade`；分数采用宿主结果，eval 仍独立分析执行过程，不能改写宿主成绩。
+
+诊断包含具体原因、执行记录索引、可实施的 instructions / skills / tools / procedure 建议、已证实事实与推测，以及证据覆盖范围。长记录按连续片段完整分析后再综合，不把截断记录当作完整执行。完整诊断留在报告与日志中。
+
+Desktop 的 eval 使用独立文件读写流程：会话及实际工具记录保存到只读的 `inputs/record.json`，初始 user 消息仅包含文件入口、输入哈希及输出协议；eval 用 `file_read` 完整读取，然后用 `file_write` 将 JSON 写入 `assessment.json`。框架核对完整读取覆盖、JSON 格式、字段约束和证据引用，将有效性及原因写入 `validation.json`。聊天回复不能代替输出文件。不合格时最多重评两次，并将原因及原始证据再次交给 eval；不重跑目标执行。训练、验证的评估文件与人看的 test 分开，调优方只能读分类后的训练分析。
+
+文件模式的一次完整对话使用一份评估输入，不再由框架拆成多个独立诊断；eval 可按行分段读完文件。原生消息、工具参数和结果各保留一份，去掉重复的成功生命周期、检查点及同一 item 通知，继续保留最终状态、错误、重试、未知事件及截断警告。使用外部评分器时仍逐轮保留数值评分，完整执行结束后再诊断一次，且使用该执行版本的实际指令。未配置文件工具的 SDK 调用保持原有内联协议。
+
+页面“打开优化文件夹”打开当前实验根目录，其中 `README.md` 提供导航。私有评估文件位于 `evaluations/round-NNN/<case-key>/trial-NNN/<input-hash>/`；分类训练材料及候选包位于下述 `workspace/iterations/`，test 位于 `human-test/`，不交给调优方。
+
+同一训练题重复执行出现不同结果时，eval 对照各次完整记录，找出成功步骤、最早失败分岔与可复用的干预方式。它核对实际政策和工具结果，不把一次成功的所有动作都当作必要条件。每轮调优前，eval 再将训练诊断汇总为有案例依据的优化优先级；调优 Agent 优先使用该清单，而不是自行逐题重新归因。
+
+启用日志时，在日志所在目录生成 `iterations/round-000/`（基线）、`round-001/`（第一轮）、`round-002/` 等独立目录。每轮 `input/training-evidence/` 保存调优时实际使用的父版本证据，`evaluation/training-evidence/` 保存本轮候选的真实执行结果；`proposal.json` 和 `decision.json` 保存变更与采纳结论。未执行的候选不生成执行结果，复用评估会在结论中标明。验证集单独保存匿名数字到 `validation-scores.json`，测试材料不进入这些目录。原始日志仍是审计依据，旧目录不会因升级被删除。
+
+训练证据有入口索引、`mixed/` 波动题、`failed/` 全部失败题、`passed/` 全部通过题。每组有索引，每题保存 `analysis.md` 与完整 `execution.json`，包含逐次得分、对话、工具记录、eval 诊断和已有的成败对照。优先阅读波动与失败数据，成功数据用于保留有效行为。验证题和测试题不进入训练文件夹，参考答案字段也不直接转交调优方。文件编辑模式下，调优 Agent 从 `evidence/training-evidence/index.json` 进入，索引内路径相对于 `evidence/`。
+
+Desktop 新实验将独立的 `runtime/rsi/<run-id>/workspace/` 注册为项目工作区，运行记录返回 `workspace_id` 与 `workspace_path`，可通过现有工作区文件接口浏览。每轮目录为：
+
+```text
+workspace/iterations/round-001/
+  input/training-evidence/          # 调优时的父版本执行评估
+  editor/
+    package/
+      manifest.json                # Agent 配置
+      dependencies.json
+      files/prompts/rsi-system.md  # 初始为 inline 时生成；已有路径保持
+      files/skills/<name>/SKILL.md
+      files/tools/rsi/<name>.json
+    evidence/training-evidence/    # 编辑器可读，不可写
+  version/package/                 # 校验后封存的完整候选包
+  version/package-hash.txt
+  evaluation/training-evidence/   # 该封存版本的实际执行评估
+  proposal.json                    # 框架从文件导出的差异，非第二个编辑入口
+  decision.json
+```
+
+调优 Agent 的文件工具仅绑定本轮 `editor/`，不开放进程执行，不能修改其他轮次、封存版本、原始日志或隐藏评测材料。所有修改以 package 文件为准，最终只回复修改理由；框架检查配置和资源变化，封存后由独立语义审查检查，再把同一份 bundle 加载到隔离目录推理。下一轮复制当前采纳版本，未采纳版本保留但不成为下一轮父版本。列表中的原始 Agent 仍需显式应用才改变。
+
+τ-bench 新宿主采用相同目录和文件协议。MCP 源码等普通资源可按宿主授权路径进入 package；保存文件不等于已接通运行时。当前 Desktop/τ 宿主支持新增 Skill 和受限纯工具，尚未提供任意 MCP 服务源码的构建、stdio 启动与版本绑定。它们仍须通过单独的宿主执行接入，不能伪称代码已经参与推理。旧实验不能直接改用新编辑协议恢复；保留证据，另建实验，经过核对的相同基线执行可复用。
+
+对话卡片分别跟随自己的最新消息，手动向上阅读后暂停跟随，回到底部再恢复；系统减少动画设置同样生效。宿主可用 `input_visibility=opaque_fixture` 声明输入是内部任务路由，气泡等待真实对话证据后再显示内容。前端轮询使用 `compact=true`，省略重复的底层事件、工具结果副本及内部 Agent 请求正文，保留实际对话、评分、诊断和版本差异。默认 API 仍可读取完整记录，原始日志与执行评估文件不受影响。
+
+最近被拒候选的重要训练执行另放在 `attempts/round-N/`：保留失败、波动和当前父版本尚未测过的新训练题，入口提供与保留版本的同题分析链接及训练退步列表。已在父版本通过的未变化轨迹不重复复制。拒绝理由中的 dev 细节不会进入该文件夹，不能将被拒提案当作当前版本。
+
+宿主显式给调优 Agent 配置只读 `file_read` 并绑定工作目录时，上下文只放入口索引与优先级，按需读详细记录。Desktop 与 τ-bench 宿主通过 SDK 的 `tuner_workspace` 将训练证据直接写入同一持久目录，完整记录不装入 Agent 包，因此不占用包的 256 文件 / 4 MiB 配额；宿主负责把文件工具绑定到这个目录。没有指定持久目录的 SDK 调用仍支持将小型证据随调优包提供；没有文件读取授权时继续使用有预算的内联训练反馈，不隐式增加工具权限。诊断输出格式或长度不合规时最多请求两次格式修正，保留原始响应，不重跑被测 Agent，也不借修正更改数值评分。诊断与优先级也会接收可编辑范围，区分 Agent 可修复的行为与不可修改的环境缺陷。
+
+验证题的诊断保留给人查看，调优方仍只得到匿名分数；人看的 test 由独立观察宿主控制，绝不进入训练诊断汇总。
+
 ## Python API 与可优化范围
 
 参见[完整 API 与示例](https://github.com/ZHangZHengEric/Sage/blob/main/sagents/v2/optimization/README.md)。`AgentPackageTestGenerator` 也可独立生成可审查的问题集合；用户可以直接提供 `OptimizationSuite` 与 `OptimizationFinalSuite`。
 
-`optimize(..., rounds=10, optimization_scope=("skills",), constraints=...)` 限制本次允许修改的部分。支持 `instructions`、`skills`、`tools`、`budgets`、`resources`，可以组合。范围选择不会授予文件或能力权限：constraints 仍需分别允许可编辑文件、新建路径、Tool/Skill 候选和预算字段。新增 Tool/Skill 名称需要宿主提供可用且授权的绑定。工具源码实现、模型路由、凭据、策略和执行流程仍受保护。
+`optimize(..., rounds=10, optimization_scope=("skills",), constraints=...)` 限制本次允许修改的部分。支持 `instructions`、`skills`、`tools`、`budgets`、`resources`，可以组合。范围选择不会授予文件或能力权限：constraints 仍需分别允许可编辑文件、新建路径、Tool/Skill 候选和预算字段。新增外部 Tool/Skill 名称需要宿主提供可用且授权的绑定；宿主也可显式授予下述包内 Skill 与纯工具创建权限。工具源码实现、模型路由、凭据、策略和执行流程仍受保护。
 
 设置 `suite_reviewer=OptimizationAgent(...)` 可使用专门的审查 package 和模型路由；默认使用评测 package 加宿主审查原则，并单独创建 Session。有阻断问题时，在目标或调优调用前抛出 `OptimizationSuiteReviewRejected`，其 `review` 和 `call` 保留审查证据。成功报告保留 `suite_review`。
 
 `result.iterations` 包含原版与每个有效候选的完整 package、修改、审查和已有测试记录。无效提案留在报告中，但不产生可执行 package。可选的 `journal_path` 持续保存进度和失败前的证据；中止时没有正常结果，也不会自动重放调用。提供给模型的反馈限制诊断片段和历史提案数量，调用方可见的完整记录仍保留。宿主还应配置 token、资源预算和超时；片段截断不等于完整提示词预算。
 
+## 可创建的能力与重复评测
+
+宿主可设置 `OptimizationConstraints(allow_skill_changes=True, allow_skill_creation=True, allow_tool_changes=True, allow_tool_creation=True)`，并在 `optimization_scope` 中选择 `skills` / `tools`。调优提案的 `skill_definitions` 将名称映射到完整 `SKILL.md`，内容与候选包一起版本化；`skills` 是启用名称列表。这样无需预先把新 Skill 名称逐个写死。创建权限只作用于包内 Skill；不会授予新凭据、网络或进程权限。
+
+`tool_definitions` 可创建有界的纯 JSON 表达式工具。除算术、比较和条件分支外，支持 `filter/map/sort`（`item` 表示当前元素）、`length/sum/at`。每个集合最多 256 项，每次执行最多 20000 个表达式步骤。它们可以处理检索结果、排序与检查，不执行任意代码或外部副作用。原有业务工具仍由宿主绑定。
+
+预填充 `OptimizationCase` 可带 `reference_answer`。评测方接收它和固定 rubric；目标只接收 input，模拟用户只接收用户上下文。训练参考可作为训练反馈，dev 参考和反馈仍对调优方隐藏，test 保留在人看的独立观察器中。参考答案本身应由宿主核对，不能把未经验证的模型答案自动视作真值。
+
+`evaluation_repeats=3, evaluation_aggregation="mean"` 使用三次平均评分选版，保留全部逐次执行与评测记录；`passed` 仍要求每次均通过，用于可靠性和稳定达标检查。默认 `minimum` 保留旧客户端的保守聚合行为。`refresh_incumbent=True` 在候选通过语义审查后，同时重新评测保留版本，再与候选比较，避免长期沿用历史偶然成绩。支持种子的宿主可从 `OPTIMIZATION_TRIAL` 取得同一组试验编号。
+
+对于已有完整固定训练集的场景，可传 `suite` 并设 `grow_training=False`，首轮就覆盖所有训练题；仍保留独立 dev 和整体进步接受规则。默认生成场景继续补充训练挑战。这些选项在通用 SDK 中实现，没有嵌入具体基准的业务规则。
+
+可信本地宿主可使用 `examples/v2/desktop_optimization_mirror.py` 把外部 RSI 日志镜像到现有桌面运行历史。曲线、点阵、过程和包 diff 使用同一套生产组件；外部版本保持只读，因为它可能依赖桌面未安装的业务工具。镜像是单向观察，不给调优方提供 test 分数。
+
 ## Desktop 历史与应用确认
 
 Agent 配置提供独立的 **RSI** 和 **版本历史** 入口。RSI 页面显示后台运行历史及每轮候选；Agent 层级的版本历史显示人工保存和确认应用的配置版本。尚未应用的 RSI 候选保留在对应运行记录中。
 
-离开页面不会停止 sidecar 中的后台任务。重新进入可以查看持久化进度、测试回答和审查问题。sidecar 退出后，未完成任务标为 interrupted，未知结果的模型或工具调用不会自动重放。
+离开页面不会停止 sidecar 中的后台任务。重新进入可以查看持久化进度、测试回答和审查问题。sidecar 退出后，未完成任务标为 interrupted。新建的本地 RSI 实验可点击“恢复进化”，继续同一条记录；已完成 case、eval 诊断、出题响应、调优与审查决策按原值复用，原始日志保留。
 
 调优不改变当前配置。用户需预览版本，点击“使用此版本”，再明确确认。后端检查当前配置指纹，拒绝覆盖已变化的配置，也拒绝未完成或语义审查不通过的候选。用户选择其他已完成迭代时，可以看到该版本是否接受了最终测试。
 
-Desktop 当前支持 simple Agent、原生工具、临时工作区和宿主沙箱限制。Shell 测试绑定、MCP 与非 simple Agent 尚不支持。任务由单个 sidecar 持久化，不提供分布式接管或自动断点续跑。参见[Desktop 实现指南](https://github.com/ZHangZHengEric/Sage/blob/main/app/v2/desktop/README.md#rsi-与-agent-版本)。
+Desktop 当前支持 simple Agent、原生工具、临时工作区和宿主沙箱限制。MCP 仅支持数据集通过 `sage.rsi.case/v1` 显式绑定的 stdio 隔离环境；任意外部 MCP、Shell 测试绑定与非 simple Agent 尚不支持。任务由单个 sidecar 持久化，支持用户恢复和明确临时模型故障后的自动恢复，不提供分布式接管。恢复会校验模型、Agent 配置、题目/评测参数和优化引擎指纹；更改这些条件会拒绝继续同一实验。桌面测试宿主仅允许隔离工作区写操作及无副作用/读操作，因而可以丢弃未完成的工作区并续跑；通用 SDK 对未知外部执行默认要求宿主核实。参见[Desktop 实现指南](https://github.com/ZHangZHengEric/Sage/blob/main/app/v2/desktop/README.md#rsi-与-agent-版本)。
 
 ## 真实模型实验
 
 显式启用的[垂类实验脚本](https://github.com/ZHangZHengEric/Sage/blob/main/examples/v2/optimizer_domains.py) 通过 `--catalog` 显式读取 JSON 模型目录中的 `openai-responses` 提供者，产生真实模型费用。它导出原始 package、每轮 package、测试集、模型调用与 Session 证据、评测、审查和对比摘要。凭据只在内存中解析，输出目录必须是新目录，不会激活生产 Agent。
 
 2026-10-12 的只优化 Skill 与工具选择实验分别达到最终测试 3/3。联合范围也达到 3/3，但只修改了 Skill，尚未验证指令与 Skill 同时修改。三组均执行四轮提案，第一轮接受后，后续轮次没有新修改。Skill/工具组复用了以前实验的最终题目，只能作为回归验证；明确精度约定后的联合组使用新封存题目。评估结果时应保留失败记录和审查拒绝，不能将这些小样本结果作为 RSI 普遍可靠性的证明。
+
+### 候选提示词、Skill 与工具的职责
+
+调优 Agent 收到统一编写原则：system prompt 承载常驻规则、优先级、Skill 加载条件及完成检查；Skill 承载按需使用的多步流程，明确触发条件、输入、分支、工具调用、结果校验与失败处理；工具实现可验证的计算或受控动作。失败和波动执行用于定位错误决策及其原因，成功执行用于检查修正是否保留已有能力。不得把具体 case 答案、优化过程说明或补丁历史写进生产提示词，也不能把某次成功轨迹固化为无条件流程。
+
+文件编辑模式由框架从实际文件推导 `system_prompt` 等内部差异，不要求调优 Agent 返回这些字段。旧 SDK 的 `system_prompt` 是完整替换文本，未提供则保留当前候选提示词；与旧版 `instruction_guidance` 互斥，受独立权限、长度及优化范围约束。Desktop 和 τ-bench 新实验关闭旧版追加模式；已有实验记录保留原样。改写只产生实验候选，仍需用户显式应用才改变列表中的 Agent。
+
+
+## 自定义评分器与执行诊断
+
+未选择评分器时，由内部 eval 评分并分析执行。选择自定义 Python 评分器后，所有规则判定、模型评判及数字分数由 `score(request)` 内部完成，框架仅传入标准数据与执行证据并验证返回协议，提供可直接使用的 ModelProvider 代理供评分器自主调用，底层复用 Sage 的模型适配与并发预算，但不提供模型代评通道。eval 继续分析完整执行的原因、优点、不稳定路径及改进建议，不能改变评分器的分数或通过状态。评分器的异常、超时或明确不适用均不能回退到内部评分。数字分数用于选版与收敛；test 仍仅供人观察。格式与示例见 [数据集及评分器协议](../../../evaluation_datasets/README.md)。

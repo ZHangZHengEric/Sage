@@ -134,7 +134,7 @@ Map<String, dynamic> catalogAgent(String id) {
 void main() {
   IntegrationTestWidgetsFlutterBinding.ensureInitialized();
   testWidgets(
-    'Native Desktop: configured model 3 rounds, durable history and explicit version confirmation',
+    'Native Desktop: configured model 3 rounds, durable history and read-only version previews',
     (tester) async {
       final out = Directory(outputPath);
       final setup =
@@ -467,7 +467,7 @@ void main() {
         );
         await until(
           () => find
-              .byKey(const ValueKey('rsi-apply-version'))
+              .byKey(const ValueKey('rsi-export-version'))
               .evaluate()
               .isNotEmpty,
           'full candidate preview',
@@ -487,102 +487,18 @@ void main() {
           )['package'],
           selectedVersion['package'],
         );
-        await tap(find.byKey(const ValueKey('rsi-apply-version')));
-        await until(
-          () => find
-              .byKey(const ValueKey('rsi-confirm-apply'))
-              .evaluate()
-              .isNotEmpty,
-          'confirmation dialog',
-        );
-        check('confirmation_dialog_open');
+        expect(find.byKey(const ValueKey('rsi-apply-version')), findsNothing);
+        expect(find.byKey(const ValueKey('rsi-confirm-apply')), findsNothing);
         expect(api.applyRequests, 0);
-        await capture('05-confirmation-dialog');
-        await tap(find.text('取消'));
-        check('confirmation_cancelled');
-        expect(api.applyRequests, 0);
-        await tap(find.byKey(const ValueKey('rsi-apply-version')));
-        await until(
-          () => find
-              .byKey(const ValueKey('rsi-confirm-apply'))
-              .evaluate()
-              .isNotEmpty,
-          'second confirmation dialog',
-        );
-        check('immediately_before_explicit_confirmation');
-        await tap(find.byKey(const ValueKey('rsi-confirm-apply')));
-        await until(
-          () =>
-              api.applyCompleted == 1 &&
-              !controller.settingsCatalogLoading &&
-              find
-                  .byKey(const ValueKey('rsi-apply-version'))
-                  .evaluate()
-                  .isEmpty &&
-              find
-                  .byKey(const ValueKey('rsi-confirm-apply'))
-                  .evaluate()
-                  .isEmpty,
-          'confirmed candidate activated',
-        );
-        expect(api.applyRequests, 1);
-        check('after_explicit_confirmation', unchanged: false);
-        final package = selectedVersion['package'] as Map;
-        final definition =
-            ((package['manifest'] as Map)['agents'] as Map)[agentId] as Map;
-        expect(
-          catalogAgent(agentId)['config']['systemPrefix'],
-          (definition['instructions'] as Map)['inline'],
-        );
-        expect(
-          catalogAgent(agentId)['config']['availableSkills'],
-          definition['skills'],
-        );
-        await capture('06-candidate-applied');
-        // Restore the original iteration using the same explicit frontend confirmation flow.
+        check('candidate_preview_is_read_only');
+        await capture('05-read-only-version');
         await tap(find.byKey(ValueKey('rsi-version-${original['id']}')));
-        await until(
-          () => find
-              .byKey(const ValueKey('rsi-apply-version'))
-              .evaluate()
-              .isNotEmpty,
-          'original iteration preview',
-        );
-        await tap(find.byKey(const ValueKey('rsi-apply-version')));
-        await until(
-          () => find
-              .byKey(const ValueKey('rsi-confirm-apply'))
-              .evaluate()
-              .isNotEmpty,
-          'original confirmation',
-        );
-        await tap(find.byKey(const ValueKey('rsi-confirm-apply')));
-        await until(
-          () => api.applyCompleted == 2 && !controller.settingsCatalogLoading,
-          'original iteration restored',
-        );
-        final originalVersion = await api.rsiVersion(
-          agentId,
-          original['id'].toString(),
-        );
-        final originalConfig = originalVersion['config'] as Map;
-        final restoredConfig = catalogAgent(agentId)['config'] as Map;
-        for (final field in [
-          'systemPrefix',
-          'availableTools',
-          'availableSkills',
-          'maxLoopCount',
-          'llm_provider_id',
-          'fast_llm_provider_id',
-        ]) {
-          expect(
-            restoredConfig[field],
-            originalConfig[field],
-            reason: 'restored $field',
-          );
-        }
-        audit['original_runtime_configuration_restored'] = true;
-        await tap(find.text('RSI 历史'));
+        await tester.pumpAndSettle();
+        expect(find.byKey(const ValueKey('rsi-apply-version')), findsNothing);
+        expect(api.applyRequests, 0);
+        check('baseline_preview_is_read_only');
+        audit['version_previews_leave_runtime_configuration_unchanged'] = true;
+        await tap(find.byKey(const ValueKey('rsi-back-agent')));
         await until(
           () => find
               .byKey(const ValueKey('rsi-export-report'))

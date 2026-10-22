@@ -66,11 +66,13 @@ class HarnessRuntime:
     """
 
     def __init__(self, session_store: SessionStore, *, job_runtime=None,
-                 execution_binding_provider=None, derived_state_store=None) -> None:
+                 execution_binding_provider=None, derived_state_store=None,
+                 runtime_skill_authorizations=()) -> None:
         self.session_store = session_store
         self.job_runtime = job_runtime
         self.execution_binding_provider = execution_binding_provider
         self.derived_state_store = derived_state_store
+        self.runtime_skill_authorizations = runtime_skill_authorizations
 
     async def record_execution_binding(self, binding, context):
         """Persist observational binding facts; policy authority stays in StartRun."""
@@ -93,6 +95,8 @@ class HarnessRuntime:
             if command.parent_run_id else None
         )
         command = bind_memory_identity(command, context, parent_command=parent_command)
+        from sagents.v2.skill.runtime import inherit_runtime_skills
+        command = inherit_runtime_skills(command, parent_command, self.runtime_skill_authorizations)
         accept = getattr(self.execution_binding_provider, "accept_configuration", None)
         if accept is not None:
             command = await accept(command, context=context, parent_command=parent_command)

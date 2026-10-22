@@ -58,7 +58,8 @@ async def initialize_process(catalog):
             services[capability] = await open_capability(capability, choice.plugin)
     binding = services.get("execution.binding")
     control = HarnessRuntime(store, job_runtime=services["execution.job-runtime"],
-                             execution_binding_provider=binding, derived_state_store=derived)
+                             execution_binding_provider=binding, derived_state_store=derived,
+                             runtime_skill_authorizations=runtime.runtime_skill_authorizations)
     access = AuthorizedSessionAccess(store, runtime=control, derived_state=derived if derived is not store else None)
     scheduler = services["execution.scheduler"]
     capabilities = await scheduler.capabilities()

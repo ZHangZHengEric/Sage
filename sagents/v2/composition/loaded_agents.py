@@ -335,6 +335,8 @@ class LoadedAgents:
         if (selected.plugin_trust_policy != self.runtime.plugin_trust_policy
                 or selected.deployment_profile != self.runtime.deployment_profile):
             raise ValueError("security profile is an App identity; create a new App to change it")
+        if selected.runtime_skill_authorizations != self.runtime.runtime_skill_authorizations:
+            raise ValueError("runtime Skill authorization is an App identity; configure it in build()")
         return selected
 
     async def load(self, *args: Any, **kwargs: Any) -> LoadedAgent:

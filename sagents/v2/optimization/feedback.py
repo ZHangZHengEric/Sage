@@ -5,8 +5,13 @@ from __future__ import annotations
 import json
 
 
-def training_feedback(result):
+def training_feedback(result, *, include_reference_answer=False):
     data = result.model_dump(mode="json")
+    if not include_reference_answer:
+        data["case"].pop("reference_answer", None)
+
+    trace_limit = 2048 if data.get("trials") else 8192
+    output_limit = 1024 if data.get("trials") else 4096
 
     def observation(value):
         evidence = value["evidence"]
@@ -19,8 +24,9 @@ def training_feedback(result):
         # end of long multi-turn episodes. It is still untrusted task evidence.
         trace = evidence.get("training_trace")
         if isinstance(trace, str):
-            summary["training_trace"] = trace[:8192]
-            summary["training_trace_truncated"] = len(trace) > 8192
+            summary["training_trace"] = (trace if len(trace) <= trace_limit else
+                                         trace[:trace_limit // 4] + "\n[... middle omitted ...]\n" + trace[-3 * trace_limit // 4:])
+            summary["training_trace_truncated"] = len(trace) > trace_limit
         error = evidence.get("error")
         if isinstance(error, dict):
             summary["error"] = {
@@ -77,12 +83,16 @@ def training_feedback(result):
         summary["evidence_summarized"] = True
         summary["recorded_event_count"] = len(events)
         value["evidence"] = summary
-        if len(value["output"]) > 4096:
-            value["output"] = value["output"][:2048] + "\n[... middle omitted ...]\n" + value["output"][-2048:]
+        if len(value["output"]) > output_limit:
+            value["output"] = value["output"][:output_limit // 2] + "\n[... middle omitted ...]\n" + value["output"][-output_limit // 2:]
             value["output_truncated"] = True
         return value
 
     def trial(value):
+        rationale = value.get("grade", {}).get("rationale", "")
+        if len(rationale) > 2048:
+            value["grade"]["rationale"] = excerpt(rationale, 2048)
+            value["grade"]["rationale_truncated"] = True
         value["observation"] = observation(value["observation"])
         for turn in value.get("dialogue", []):
             turn["observation"] = observation(turn["observation"])
@@ -92,3 +102,85 @@ def training_feedback(result):
     for item in data["trials"]:
         trial(item)
     return data
+
+
+def excerpt(value, limit):
+    if len(value) <= limit:
+        return value
+    marker = "\n[... omitted ...]\n"
+    room = max(0, limit - len(marker))
+    return value[:room // 3] + marker + (value[-(room - room // 3):] if room else "")
+
+
+def training_feedback_summary(result):
+    """Numeric history for file-reading tuners; full traces stay in their files."""
+    return {"case": {"id": result.case.id, "split": result.case.split},
+            "grade": {"score": result.grade.score, "passed": result.grade.passed},
+            "trials": [{"grade": {"score": t.grade.score, "passed": t.grade.passed}}
+                       for t in result.trials], "execution_omitted": True}
+
+
+def minimal_feedback(value, *, include_context=True):
+    case = {key: value["case"][key] for key in ("id", "split")}
+    grade = {key: value["grade"][key] for key in ("score", "passed")}
+    if include_context:
+        for key in ("input", "rubric"):
+            if key in value["case"]:
+                case[key] = excerpt(value["case"][key], 128)
+        grade["rationale"] = excerpt(value["grade"].get("rationale", ""), 256)
+    return {"case": case, "grade": grade,
+            "trials": [{"grade": {key: t["grade"][key] for key in ("score", "passed")}}
+                       for t in value.get("trials", [])], "feedback_truncated": True}
+
+
+def training_feedback_batch(results, *, max_chars=120000, include_reference_answer=False):
+    """Budget the entire suite, keeping every case and every numeric trial grade.
+
+    Failed cases receive more space. Truncation is explicit and affects only the
+    model-facing copy; reports and the event journal retain original evidence.
+    """
+    values = [training_feedback(result, include_reference_answer=include_reference_answer) for result in results]
+    if not values:
+        return values
+    weights = [2 if not value["grade"]["passed"] else 1 for value in values]
+    total = sum(weights)
+    for index, value in enumerate(values):
+        budget = max_chars * weights[index] // total - 2
+        if len(json.dumps(value, ensure_ascii=False)) <= budget:
+            continue
+        # The aggregate observation already represents the worst trial. Keep
+        # every trial judgment, without repeating the same execution structures.
+        for trial in value.get("trials", []):
+            trial["observation"] = {
+                "state": trial["observation"]["state"],
+                "output": excerpt(trial["observation"]["output"], 256),
+                "evidence_summarized": True,
+            }
+            trial["dialogue"] = [{"turn": turn["turn"], "grade": turn["grade"]}
+                                for turn in trial.get("dialogue", [])]
+        # Verbose event excerpts duplicate the compact host execution trace.
+        def compact(item, string_limit):
+            if isinstance(item, dict):
+                return {key: ([] if key == "tool_events" else
+                              val if key in ("id", "state", "split") else
+                              compact(val, string_limit)) for key, val in item.items()}
+            if isinstance(item, list):
+                return [compact(val, string_limit) for val in item]
+            if isinstance(item, str):
+                return excerpt(item, string_limit)
+            return item
+        for limit in (1024, 512, 256, 128, 64):
+            bounded = compact(value, limit)
+            bounded["feedback_truncated"] = True
+            if len(json.dumps(bounded, ensure_ascii=False)) <= budget:
+                break
+        else:
+            # Very large trial/event structures still retain all scores, while
+            # dropping duplicated execution structures in this model view.
+            bounded = minimal_feedback(value)
+        values[index] = bounded
+    if len(json.dumps(values, ensure_ascii=False)) > max_chars:
+        values = [minimal_feedback(value, include_context=False) for value in values]
+        if len(json.dumps(values, ensure_ascii=False)) > max_chars:
+            raise ValueError("training feedback budget cannot retain all case identities and trial grades")
+    return values

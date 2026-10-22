@@ -25,8 +25,10 @@ class RsiRoundDiff {
     required this.reused,
     required this.changes,
     this.candidateMissing = false,
+    this.rationale = '',
   });
   final int round;
+  final String rationale;
   final int? parentRound;
   final bool parentAvailable, reused, candidateMissing;
   final bool? accepted;
@@ -90,7 +92,12 @@ List<RsiChange> _changes(
     );
   }
   final oldFiles = _map(before['files']), newFiles = _map(after['files']);
+  final promptPaths = {
+    _map(oldAgent['instructions'])['path'],
+    _map(newAgent['instructions'])['path'],
+  };
   for (final path in {...oldFiles.keys, ...newFiles.keys}.toList()..sort()) {
+    if (promptPaths.contains(path)) continue;
     var old = oldFiles[path]?.toString() ?? '',
         next = newFiles[path]?.toString() ?? '';
     if (old == next) continue;
@@ -181,6 +188,7 @@ List<RsiRoundDiff> collectRsiRoundDiffs(
     output.add(
       RsiRoundDiff(
         round: index,
+        rationale: _map(item['patch'])['rationale']?.toString() ?? '',
         parentRound: parent,
         parentAvailable: available,
         accepted: item['accepted'] as bool?,
@@ -328,57 +336,7 @@ Future<void> showRsiRoundDiff(
             ),
             const SizedBox(height: 14),
             Flexible(
-              child: SingleChildScrollView(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    if (diff.candidateMissing)
-                      Padding(
-                        padding: const EdgeInsets.all(16),
-                        child: Text(
-                          chinese ? '未生成有效候选' : 'No valid candidate generated',
-                        ),
-                      ),
-                    if (diff.parentAvailable &&
-                        !diff.candidateMissing &&
-                        diff.changes.isEmpty)
-                      Padding(
-                        padding: const EdgeInsets.all(16),
-                        child: Text(
-                          chinese
-                              ? '本轮未修改 Agent 配置'
-                              : 'No Agent configuration changes',
-                        ),
-                      ),
-                    for (final change in diff.changes)
-                      ExpansionTile(
-                        initiallyExpanded: change == diff.changes.first,
-                        title: Text(
-                          '${_kind(change.kind, chinese)}${change.name.isEmpty ? '' : ' · ${change.name}'}',
-                        ),
-                        trailing: Text(
-                          change.added
-                              ? '+'
-                              : change.removed
-                              ? '−'
-                              : '±',
-                          style: TextStyle(
-                            color: change.removed
-                                ? Theme.of(context).colorScheme.error
-                                : Theme.of(context).colorScheme.primary,
-                          ),
-                        ),
-                        children: [
-                          _LineDiff(
-                            before: change.before,
-                            after: change.after,
-                            chinese: chinese,
-                          ),
-                        ],
-                      ),
-                  ],
-                ),
-              ),
+              child: _RsiDiffBrowser(diff: diff, chinese: chinese),
             ),
           ],
         ),
@@ -387,23 +345,197 @@ Future<void> showRsiRoundDiff(
   ),
 );
 
+class _RsiDiffBrowser extends StatefulWidget {
+  const _RsiDiffBrowser({required this.diff, required this.chinese});
+  final RsiRoundDiff diff;
+  final bool chinese;
+  @override
+  State<_RsiDiffBrowser> createState() => _RsiDiffBrowserState();
+}
+
+class _RsiDiffBrowserState extends State<_RsiDiffBrowser> {
+  int selected = 0;
+  final _scroll = ScrollController();
+  String title(RsiChange change) =>
+      change.name.isEmpty ? _kind(change.kind, widget.chinese) : change.name;
+  String status(RsiChange change) => change.added
+      ? (widget.chinese ? '新增' : 'Added')
+      : change.removed
+      ? (widget.chinese ? '删除' : 'Deleted')
+      : (widget.chinese ? '修改' : 'Modified');
+  Color color(RsiChange change) {
+    final dark = Theme.of(context).brightness == Brightness.dark;
+    return change.removed
+        ? (dark ? const Color(0xFFFF9AA5) : const Color(0xFFAA1430))
+        : change.added
+        ? (dark ? const Color(0xFF70DFB0) : const Color(0xFF08653C))
+        : Theme.of(context).colorScheme.primary;
+  }
+
+  void select(int index) {
+    if (_scroll.hasClients) _scroll.jumpTo(0);
+    setState(() => selected = index);
+  }
+
+  @override
+  void dispose() {
+    _scroll.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final diff = widget.diff;
+    if (diff.candidateMissing ||
+        !diff.parentAvailable ||
+        diff.changes.isEmpty) {
+      return Padding(
+        padding: const EdgeInsets.all(16),
+        child: Text(
+          diff.candidateMissing
+              ? (widget.chinese ? '未生成有效候选' : 'No valid candidate generated')
+              : !diff.parentAvailable
+              ? (widget.chinese ? '父版本尚未载入' : 'Parent version not loaded')
+              : (widget.chinese
+                    ? '本轮未修改 Agent 配置'
+                    : 'No Agent configuration changes'),
+        ),
+      );
+    }
+    final change = diff.changes[selected];
+    final colors = Theme.of(context).colorScheme;
+    final content = Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          child: Row(
+            children: [
+              Expanded(
+                child: SelectableText(
+                  title(change),
+                  style: Theme.of(context).textTheme.titleSmall,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Text(
+                status(change),
+                style: Theme.of(
+                  context,
+                ).textTheme.labelMedium?.copyWith(color: color(change)),
+              ),
+            ],
+          ),
+        ),
+        Divider(height: 1, color: colors.outlineVariant),
+        Expanded(
+          child: Scrollbar(
+            controller: _scroll,
+            child: SingleChildScrollView(
+              key: ValueKey('rsi-diff-content-$selected'),
+              controller: _scroll,
+              padding: const EdgeInsets.only(top: 8),
+              child: _LineDiff(
+                key: ValueKey(selected),
+                before: change.before,
+                after: change.after,
+                chinese: widget.chinese,
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final compact = constraints.maxWidth < 640;
+        final files = ListView.separated(
+          key: const ValueKey('rsi-diff-files'),
+          padding: const EdgeInsets.all(8),
+          scrollDirection: compact ? Axis.horizontal : Axis.vertical,
+          itemCount: diff.changes.length,
+          separatorBuilder: (_, index) =>
+              SizedBox(width: compact ? 8 : 0, height: compact ? 0 : 4),
+          itemBuilder: (context, index) {
+            final item = diff.changes[index];
+            final tile = ListTile(
+              key: ValueKey('rsi-diff-file-$index'),
+              selected: selected == index,
+              selectedTileColor: colors.primary.withValues(alpha: .1),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(8),
+              ),
+              contentPadding: const EdgeInsets.symmetric(
+                horizontal: 12,
+                vertical: 4,
+              ),
+              leading: Text(
+                item.added
+                    ? '+'
+                    : item.removed
+                    ? '−'
+                    : 'M',
+                style: TextStyle(
+                  color: color(item),
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              title: Text(
+                title(item),
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
+              onTap: () => select(index),
+            );
+            return compact ? SizedBox(width: 220, child: tile) : tile;
+          },
+        );
+        return compact
+            ? Column(
+                children: [
+                  SizedBox(height: 88, child: files),
+                  Divider(height: 1, color: colors.outlineVariant),
+                  Expanded(child: content),
+                ],
+              )
+            : Row(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  SizedBox(width: 270, child: files),
+                  VerticalDivider(width: 1, color: colors.outlineVariant),
+                  Expanded(child: content),
+                ],
+              );
+      },
+    );
+  }
+}
+
 class RsiRoundChanges extends StatelessWidget {
   const RsiRoundChanges({
     required this.run,
     required this.events,
     required this.settings,
     required this.chinese,
+    this.diffs,
+    this.selectedRound,
     super.key,
   });
   final Map<String, Object?>? run;
   final List<Map<String, Object?>> events;
   final LiquidGlassSettings settings;
   final bool chinese;
+  final List<RsiRoundDiff>? diffs;
+  final int? selectedRound;
   @override
   Widget build(BuildContext context) {
-    final rounds = collectRsiRoundDiffs(run, events);
-    if (rounds.isEmpty) return const SizedBox.shrink();
+    final rounds = (diffs ?? collectRsiRoundDiffs(run, events))
+        .where((diff) => selectedRound == null || diff.round == selectedRound)
+        .toList();
+    if (rounds.isEmpty && selectedRound == null) return const SizedBox.shrink();
     return GlassCard(
+      width: double.infinity,
       settings: settings,
       padding: const EdgeInsets.all(16),
       child: Column(
@@ -414,48 +546,93 @@ class RsiRoundChanges extends StatelessWidget {
             style: Theme.of(context).textTheme.titleMedium,
           ),
           const SizedBox(height: 12),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: [
-              for (final diff in rounds)
-                GlassButton.custom(
-                  key: ValueKey('rsi-round-diff-${diff.round}'),
-                  settings: settings,
-                  width: 240,
-                  height: 64,
-                  onTap: () =>
-                      showRsiRoundDiff(context, diff, settings, chinese),
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 12),
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text('R${diff.round} · ${_status(diff, chinese)}'),
-                        const SizedBox(height: 4),
-                        Text(
-                          !diff.parentAvailable
-                              ? (chinese ? '父版本尚未载入' : 'Parent not loaded')
-                              : diff.candidateMissing
-                              ? (chinese ? '未生成有效候选' : 'No valid candidate')
-                              : diff.changes.isEmpty
-                              ? (chinese ? '无改动' : 'No changes')
-                              : {
-                                  for (final kind in diff.changes.map(
-                                    (c) => c.kind,
-                                  ))
-                                    _kind(kind, chinese),
-                                }.join(' · '),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: Theme.of(context).textTheme.labelSmall,
-                        ),
-                      ],
+          if (rounds.isEmpty)
+            Text(
+              selectedRound == 0
+                  ? (chinese ? '基线轮，无进化改动' : 'Baseline · No evolution changes')
+                  : (chinese ? '本轮暂无改动记录' : 'No change record for this round'),
+            ),
+          LayoutBuilder(
+            builder: (context, constraints) => Column(
+              children: [
+                for (final diff in rounds) ...[
+                  if (diff != rounds.first) const SizedBox(height: 8),
+                  GlassButton.custom(
+                    key: ValueKey('rsi-round-diff-${diff.round}'),
+                    settings: settings,
+                    shape: const LiquidRoundedRectangle(borderRadius: 10),
+                    width: constraints.maxWidth,
+                    height: 48,
+                    onTap: () =>
+                        showRsiRoundDiff(context, diff, settings, chinese),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 14),
+                      child: Row(
+                        children: [
+                          Text(
+                            'R${diff.round}',
+                            style: Theme.of(context).textTheme.bodyMedium
+                                ?.copyWith(fontWeight: FontWeight.w600),
+                          ),
+                          const SizedBox(width: 16),
+                          Text(
+                            _status(diff, chinese),
+                            style: Theme.of(context).textTheme.labelMedium
+                                ?.copyWith(
+                                  color: diff.accepted == true
+                                      ? Theme.of(context).colorScheme.primary
+                                      : diff.accepted == false
+                                      ? Theme.of(context).colorScheme.error
+                                      : Theme.of(
+                                          context,
+                                        ).colorScheme.onSurfaceVariant,
+                                ),
+                          ),
+                          const SizedBox(width: 20),
+                          Expanded(
+                            child: Text(
+                              !diff.parentAvailable
+                                  ? (chinese ? '父版本尚未载入' : 'Parent not loaded')
+                                  : diff.candidateMissing
+                                  ? (chinese ? '未生成有效候选' : 'No valid candidate')
+                                  : diff.changes.isEmpty
+                                  ? (chinese ? '无改动' : 'No changes')
+                                  : {
+                                      for (final change in diff.changes)
+                                        _kind(change.kind, chinese),
+                                    }.join(' · '),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: Theme.of(context).textTheme.bodySmall
+                                  ?.copyWith(
+                                    color: Theme.of(
+                                      context,
+                                    ).colorScheme.onSurfaceVariant,
+                                  ),
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Icon(
+                            CupertinoIcons.chevron_right,
+                            size: 14,
+                            color: Theme.of(
+                              context,
+                            ).colorScheme.onSurfaceVariant,
+                          ),
+                        ],
+                      ),
                     ),
                   ),
-                ),
-            ],
+                  if (diff.rationale.isNotEmpty) ...[
+                    const SizedBox(height: 10),
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: SelectableText(diff.rationale),
+                    ),
+                  ],
+                ],
+              ],
+            ),
           ),
         ],
       ),
@@ -465,6 +642,7 @@ class RsiRoundChanges extends StatelessWidget {
 
 class _LineDiff extends StatefulWidget {
   const _LineDiff({
+    super.key,
     required this.before,
     required this.after,
     required this.chinese,
@@ -519,6 +697,8 @@ class _LineDiffState extends State<_LineDiff> {
                     ? '− '
                     : '  '}${line.text}',
                 style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  fontFamily: 'monospace',
+                  height: 1.6,
                   color: line.kind == 'add'
                       ? added
                       : line.kind == 'remove'

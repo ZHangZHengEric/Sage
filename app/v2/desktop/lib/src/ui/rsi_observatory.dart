@@ -1,3 +1,6 @@
+import 'rsi_transcript.dart';
+import 'rsi_activity.dart';
+import 'rsi_conversation_stream.dart';
 import 'dart:convert';
 import 'dart:math' as math;
 import 'rsi_diff.dart';
@@ -37,6 +40,16 @@ class _RsiObservatoryState extends State<RsiObservatory>
     duration: const Duration(seconds: 12),
   );
   String? _selectedPass;
+  String? _selectedSplit;
+  int _selectedExecution = 1;
+  int _page = 0;
+  static const _pageSize = 12;
+  _Projection? _cachedProjection;
+  Map<String, Object?>? _projectedRun;
+  int _projectedEvents = -1;
+  Object? _lastProjectedEvent;
+  List<RsiRoundDiff> _cachedDiffs = [];
+  List<Map<String, Object?>> _cachedTrend = [];
   String tr(String zh, String en) => widget.chinese ? zh : en;
   bool get running =>
       const ['queued', 'running'].contains(widget.run?['status']);
@@ -50,7 +63,12 @@ class _RsiObservatoryState extends State<RsiObservatory>
   @override
   void didUpdateWidget(covariant RsiObservatory oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.run?['id'] != widget.run?['id']) _selectedPass = null;
+    if (oldWidget.run?['id'] != widget.run?['id']) {
+      _selectedPass = null;
+      _selectedExecution = 1;
+      _selectedSplit = null;
+      _page = 0;
+    }
     _updateMotion();
   }
 
@@ -75,12 +93,100 @@ class _RsiObservatoryState extends State<RsiObservatory>
     final dark = Theme.of(context).brightness == Brightness.dark;
     final accent = dark ? const Color(0xFF64E8DD) : const Color(0xFF006C68);
     final violet = dark ? const Color(0xFFB5A5FF) : const Color(0xFF6850BB);
-    final projection = _Projection(widget.run, widget.events);
+    if (_cachedProjection == null ||
+        !identical(_projectedRun, widget.run) ||
+        _projectedEvents != widget.events.length ||
+        !identical(_lastProjectedEvent, widget.events.lastOrNull)) {
+      _cachedProjection = _Projection(widget.run, widget.events);
+      _cachedDiffs = collectRsiRoundDiffs(widget.run, widget.events);
+      _cachedTrend = _cachedProjection!.scoreTrend(
+        _rows(widget.run?['test_observations']),
+      );
+      _projectedRun = widget.run;
+      _projectedEvents = widget.events.length;
+      _lastProjectedEvent = widget.events.lastOrNull;
+    }
+    final projection = _cachedProjection!;
     final passes = projection.passes;
     final pass = passes.contains(_selectedPass)
         ? _selectedPass
         : passes.lastOrNull;
     final cases = projection.casesFor(pass);
+    final selectedCheckpoint = _rows(widget.run?['test_observations'])
+        .where((record) => record['round'] == projection.scopeRound(pass))
+        .lastOrNull;
+    final split =
+        _selectedSplit ??
+        (pass?.startsWith('final_') == true ? 'test' : 'training');
+    final questions = {
+      for (final q in [
+        ...projection.suite,
+        ...projection.finalSuite,
+        ...projection.humanTestSuite,
+      ])
+        q['id'].toString(): q,
+    };
+    final testCases = pass?.startsWith('final_') == true
+        ? cases
+        : [
+            for (final question in projection.humanTestSuite)
+              _CaseView(
+                question['id'].toString(),
+                question['input']?.toString() ?? '',
+                question['rubric']?.toString() ?? '',
+              ),
+          ];
+    if (pass?.startsWith('final_') != true) {
+      final checkpoint = _rows(
+        widget.run?['test_observations'],
+      ).where((r) => r['round'] == projection.scopeRound(pass)).lastOrNull;
+      if (checkpoint != null) {
+        for (final row in _rows(checkpoint['cases'])) {
+          final view = testCases.where((c) => c.id == row['id']).firstOrNull;
+          if (view == null || checkpoint['valid'] == false) continue;
+          if (row['score'] is num) {
+            view.grade = {'score': row['score'], 'passed': row['passed']};
+            view.state = 'graded';
+          } else if (row['status'] == 'running') {
+            view.state = 'responding';
+          }
+        }
+      }
+    }
+    final datasets = <String, List<_CaseView>>{
+      'training': pass?.startsWith('final_') == true
+          ? []
+          : cases
+                .where(
+                  (c) =>
+                      (questions[c.id]?['split'] ?? 'training') == 'training',
+                )
+                .toList(),
+      'validation': pass?.startsWith('final_') == true
+          ? []
+          : cases
+                .where((c) => questions[c.id]?['split'] == 'validation')
+                .toList(),
+      'test': testCases,
+    };
+    final filteredCases = datasets[split]!;
+    final matrixExecutions = filteredCases.fold<int>(
+      split == 'test'
+          ? 1
+          : ((widget.run?['evaluation_repeats'] as num?)?.toInt() ?? 1),
+      (count, item) =>
+          math.max(count, item.trialViews.keys.fold<int>(0, math.max)),
+    );
+    final execution = _selectedExecution.clamp(1, matrixExecutions);
+    final selectedCases = matrixExecutions > 1
+        ? [for (final item in filteredCases) item.executionView(execution)]
+        : filteredCases;
+    final pageCount = math.max(1, (filteredCases.length / _pageSize).ceil());
+    final page = _page.clamp(0, pageCount - 1);
+    final pageCases = selectedCases
+        .skip(page * _pageSize)
+        .take(_pageSize)
+        .toList();
     final graded = cases.where((c) => c.grade.isNotEmpty).length;
     final responding = running
         ? cases
@@ -90,32 +196,16 @@ class _RsiObservatoryState extends State<RsiObservatory>
               .length
         : 0;
     final run = widget.run;
-    final termination = _map(
-      run?['termination'] ??
-          _map(_map(run?['result'])['report'])['termination'],
-    );
-    final stabilityEvent = widget.events
-        .where(
-          (event) => const [
-            'stability_check_started',
-            'stability_check_completed',
-          ].contains(event['event']),
-        )
-        .lastOrNull;
-    final checkingStability =
-        stabilityEvent?['event'] == 'stability_check_started';
-    final checkingFinal = passes.lastOrNull?.startsWith('final_') == true;
     final status = switch (run?['status']) {
-      'running' =>
-        checkingStability
-            ? tr('稳定性复测中', 'Checking stability')
-            : checkingFinal
-            ? tr('独立终测中', 'Independent final test')
-            : tr('进化中', 'Evolving'),
+      'running' => rsiRunningActivity(
+        run,
+        widget.events,
+        chinese: widget.chinese,
+      ),
       'queued' => tr('排队中', 'Queued'),
       'completed' =>
         run?['goal_verified'] == false && run?['validation_case_count'] != null
-            ? tr('验证未达标', 'Validation target not reached')
+            ? tr('未达到收敛目标', 'Convergence target not reached')
             : run?['goal_verified'] == true &&
                   run?['validation_case_count'] != null
             ? tr('进化成功', 'Evolution verified')
@@ -132,125 +222,232 @@ class _RsiObservatoryState extends State<RsiObservatory>
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        GlassCard(
-          settings: widget.settings,
-          child: Container(
-            padding: const EdgeInsets.all(22),
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                colors: [
-                  accent.withValues(alpha: dark ? .12 : .07),
-                  violet.withValues(alpha: .04),
-                  Colors.transparent,
-                ],
-              ),
+        Container(
+          padding: const EdgeInsets.all(22),
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              colors: [
+                accent.withValues(alpha: dark ? .12 : .07),
+                violet.withValues(alpha: .04),
+                Colors.transparent,
+              ],
             ),
-            child: LayoutBuilder(
-              builder: (context, constraints) {
-                final core = SizedBox(
-                  width: 132,
-                  height: 132,
-                  child: RepaintBoundary(
-                    child: CustomPaint(
-                      painter: _CorePainter(_motion, accent, violet),
-                      child: Center(
-                        child: Icon(
-                          CupertinoIcons.sparkles,
-                          size: 34,
-                          color: accent,
-                        ),
+          ),
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              final core = SizedBox(
+                width: 132,
+                height: 132,
+                child: RepaintBoundary(
+                  child: CustomPaint(
+                    painter: _CorePainter(_motion, accent, violet),
+                    child: Center(
+                      child: Icon(
+                        CupertinoIcons.sparkles,
+                        size: 34,
+                        color: accent,
                       ),
                     ),
                   ),
-                );
-                final info = Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      status,
-                      style: Theme.of(context).textTheme.headlineSmall
-                          ?.copyWith(fontWeight: FontWeight.w700),
+                ),
+              );
+              final info = Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    status,
+                    key: const ValueKey('rsi-current-activity'),
+                    style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                      fontWeight: FontWeight.w700,
                     ),
-                    const SizedBox(height: 16),
-                    Wrap(
-                      spacing: 24,
-                      runSpacing: 14,
+                  ),
+                  const SizedBox(height: 16),
+                  Wrap(
+                    spacing: 24,
+                    runSpacing: 14,
+                    children: [
+                      _metric(
+                        projection.adaptive
+                            ? tr('基线整体分', 'Baseline overall')
+                            : tr('基线验证分', 'Baseline validation'),
+                        (projection.adaptive
+                                    ? projection.overallScores[0]
+                                    : projection.scores[0])
+                                ?.toStringAsFixed(3) ??
+                            '—',
+                        violet,
+                      ),
+                      _metric(
+                        projection.adaptive
+                            ? tr('当前整体分', 'Current overall')
+                            : tr('当前验证分', 'Current validation'),
+                        (projection.adaptive
+                                    ? projection.bestOverall
+                                    : projection.bestScore)
+                                ?.toStringAsFixed(3) ??
+                            '—',
+                        accent,
+                      ),
+                      _metric(
+                        tr('进化轮次', 'Round'),
+                        '${run?['iteration'] ?? 0} / ${run?['rounds'] ?? '—'}',
+                        accent,
+                      ),
+                      _metric(
+                        tr('训练 / 验证', 'Training / Validation'),
+                        '${projection.suite.where((c) => c['split'] == 'training').length} / ${projection.suite.where((c) => c['split'] == 'validation').length}',
+                        accent,
+                      ),
+                      _metric(
+                        tr('执行中', 'Active'),
+                        '$responding / ${run?['max_concurrency'] ?? 1}',
+                        violet,
+                      ),
+                      _metric(
+                        tr('已评估', 'Evaluated'),
+                        '$graded / ${cases.length}',
+                        violet,
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 20),
+                  Wrap(
+                    spacing: 20,
+                    runSpacing: 8,
+                    children: [
+                      for (final step in [
+                        (
+                          '01',
+                          tr('准备问题', 'Prepare questions'),
+                          projection.suite.isNotEmpty,
+                        ),
+                        (
+                          '02',
+                          tr('展开对话', 'Conversations'),
+                          projection.calls.isNotEmpty,
+                        ),
+                        (
+                          '03',
+                          tr('评估打标', 'Evaluate & label'),
+                          projection.hasGrades,
+                        ),
+                        ('04', tr('迭代进化', 'Evolve'), projection.hasRounds),
+                      ])
+                        Text(
+                          '${step.$1}  ${step.$2}',
+                          style: Theme.of(context).textTheme.labelSmall
+                              ?.copyWith(
+                                color: step.$3
+                                    ? accent
+                                    : Theme.of(
+                                        context,
+                                      ).colorScheme.onSurfaceVariant,
+                                fontWeight: FontWeight.w500,
+                              ),
+                        ),
+                    ],
+                  ),
+                ],
+              );
+              final overview = constraints.maxWidth < 480
+                  ? Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        _metric(
-                          projection.adaptive
-                              ? tr('基线整体分', 'Baseline overall')
-                              : tr('基线验证分', 'Baseline validation'),
-                          (projection.adaptive
-                                      ? projection.overallScores[0]
-                                      : projection.scores[0])
-                                  ?.toStringAsFixed(3) ??
-                              '—',
-                          violet,
-                        ),
-                        _metric(
-                          projection.adaptive
-                              ? tr('当前整体分', 'Current overall')
-                              : tr('当前验证分', 'Current validation'),
-                          (projection.adaptive
-                                      ? projection.bestOverall
-                                      : projection.bestScore)
-                                  ?.toStringAsFixed(3) ??
-                              '—',
-                          accent,
-                        ),
-                        _metric(
-                          tr('进化轮次', 'Round'),
-                          '${run?['iteration'] ?? 0} / ${run?['rounds'] ?? '—'}',
-                          accent,
-                        ),
-                        _metric(
-                          tr('训练 / 验证', 'Training / Validation'),
-                          '${projection.suite.where((c) => c['split'] == 'training').length} / ${projection.suite.where((c) => c['split'] == 'validation').length}',
-                          accent,
-                        ),
-                        _metric(
-                          tr('执行中', 'Active'),
-                          '$responding / ${run?['max_concurrency'] ?? 1}',
-                          violet,
-                        ),
-                        _metric(
-                          tr('已评估', 'Evaluated'),
-                          '$graded / ${cases.length}',
-                          violet,
+                        Center(child: core),
+                        info,
+                      ],
+                    )
+                  : Row(
+                      children: [
+                        core,
+                        const SizedBox(width: 24),
+                        Expanded(child: info),
+                      ],
+                    );
+              final trend = RsiScoreTrend(
+                records: _cachedTrend,
+                chinese: widget.chinese,
+              );
+              return constraints.maxWidth >= 820
+                  ? Row(
+                      crossAxisAlignment: CrossAxisAlignment.center,
+                      children: [
+                        Expanded(child: overview),
+                        const SizedBox(width: 20),
+                        SizedBox(
+                          width: (constraints.maxWidth * .3).clamp(240, 330),
+                          child: trend,
                         ),
                       ],
-                    ),
-                  ],
-                );
-                return constraints.maxWidth < 480
-                    ? Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Center(child: core),
-                          info,
-                        ],
-                      )
-                    : Row(
-                        children: [
-                          core,
-                          const SizedBox(width: 24),
-                          Expanded(child: info),
-                        ],
-                      );
-              },
-            ),
+                    )
+                  : Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [overview, const SizedBox(height: 24), trend],
+                    );
+            },
           ),
         ),
-        if (_rows(widget.run?['test_observations']).isNotEmpty) ...[
+        if (passes.isNotEmpty)
+          Padding(
+            key: const ValueKey('rsi-pass-selector'),
+            padding: const EdgeInsets.only(top: 20, bottom: 4),
+            child: Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                for (final value in passes)
+                  ChoiceChip(
+                    showCheckmark: false,
+                    materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    visualDensity: VisualDensity.compact,
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 7,
+                    ),
+                    backgroundColor: Colors.transparent,
+                    selectedColor: accent.withValues(alpha: dark ? .14 : .08),
+                    side: BorderSide(
+                      color: pass == value
+                          ? accent.withValues(alpha: .4)
+                          : Theme.of(
+                              context,
+                            ).colorScheme.outlineVariant.withValues(alpha: .5),
+                    ),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    labelStyle: Theme.of(context).textTheme.labelMedium
+                        ?.copyWith(
+                          color: pass == value
+                              ? accent
+                              : Theme.of(context).colorScheme.onSurfaceVariant,
+                          fontWeight: pass == value
+                              ? FontWeight.w600
+                              : FontWeight.w400,
+                        ),
+                    label: Text(projection.passLabel(value, widget.chinese)),
+                    selected: pass == value,
+                    onSelected: (_) => setState(() {
+                      _selectedPass = value;
+                      _selectedExecution = 1;
+                      _selectedSplit = null;
+                      _page = 0;
+                    }),
+                  ),
+              ],
+            ),
+          ),
+        if (selectedCheckpoint != null) ...[
           const SizedBox(height: 16),
           RsiScoreHistory(
             key: ValueKey('rsi-scores-${widget.run?["id"]}'),
-            records: _rows(widget.run?['test_observations']),
+            records: [selectedCheckpoint],
+            round: projection.scopeRound(pass),
             settings: widget.settings,
             chinese: widget.chinese,
           ),
         ],
-        if (_rows(widget.run?['test_observations']).isEmpty &&
+        if (selectedCheckpoint == null &&
             projection.suite.isNotEmpty &&
             pass?.startsWith('final_') != true) ...[
           const SizedBox(height: 16),
@@ -264,14 +461,38 @@ class _RsiObservatoryState extends State<RsiObservatory>
                         round,
                   )
                   .toList();
+              final sideBySide = constraints.maxWidth >= 660;
+              final columns = math.max(
+                1,
+                (((constraints.maxWidth - 12) / 2 - 32 + 6) / 20).floor(),
+              );
+              final largestSet = math.max(
+                visible.where((q) => q['split'] == 'training').length,
+                visible.where((q) => q['split'] == 'validation').length,
+              );
+              final dotHeight = sideBySide
+                  ? (math.max(1, (largestSet / columns).ceil()) * 20 - 6)
+                        .clamp(14, 180)
+                        .toDouble()
+                  : null;
               Widget matrix(String split) => _ScoreMatrix(
                 split: split,
                 questions: visible.where((q) => q['split'] == split).toList(),
                 views: {for (final item in cases) item.id: item},
+                running: running,
+                dotHeight: dotHeight,
+                onOpen: _openConversation,
+                repeatCount: cases.fold<int>(
+                  (widget.run?['evaluation_repeats'] as num?)?.toInt() ?? 1,
+                  (count, item) => math.max(
+                    count,
+                    item.trialViews.keys.fold<int>(0, math.max),
+                  ),
+                ),
                 settings: widget.settings,
                 chinese: widget.chinese,
               );
-              return constraints.maxWidth < 660
+              return !sideBySide
                   ? Column(
                       children: [
                         matrix('training'),
@@ -290,80 +511,10 @@ class _RsiObservatoryState extends State<RsiObservatory>
             },
           ),
         ],
-        const SizedBox(height: 18),
-        Wrap(
-          spacing: 8,
-          runSpacing: 8,
-          children: [
-            for (final step in [
-              (
-                '01',
-                tr('准备问题', 'Prepare questions'),
-                projection.suite.isNotEmpty,
-              ),
-              ('02', tr('展开对话', 'Conversations'), projection.calls.isNotEmpty),
-              ('03', tr('评估打标', 'Evaluate & label'), projection.hasGrades),
-              ('04', tr('迭代进化', 'Evolve'), projection.hasRounds),
-            ])
-              _badge(
-                '${step.$1}  ${step.$2}',
-                step.$3
-                    ? accent
-                    : Theme.of(context).colorScheme.onSurfaceVariant,
-              ),
-          ],
-        ),
-        if (termination.isNotEmpty || run?['exit_reason'] != null) ...[
-          const SizedBox(height: 12),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: [
-              _badge(switch (termination['reason'] ?? run?['exit_reason']) {
-                'target_reached' => tr('达标退出', 'Target reached'),
-                'stagnation' => tr('连续无提升 · 停止迭代', 'Stopped · No improvement'),
-                'round_limit' => tr('达到轮数上限', 'Round limit reached'),
-                'time_limit' => tr('时间预算耗尽', 'Time budget exhausted'),
-                'timeout' => tr('执行超时', 'Execution timed out'),
-                _ => tr('执行异常', 'Execution error'),
-              }, accent),
-              if ((termination['stability_passes'] as num? ?? 0) >= 2)
-                _badge(tr('稳定性复测通过', 'Stability verified'), violet),
-            ],
-          ),
-        ],
-        if (projection.scores.isNotEmpty) ...[
-          const SizedBox(height: 12),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: [
-              for (final entry
-                  in (projection.scores.entries.toList()
-                    ..sort((a, b) => a.key.compareTo(b.key))))
-                _badge(
-                  '${entry.key == 0 ? tr('基线', 'Baseline') : '${tr('第', 'Round')} ${entry.key}${widget.chinese ? ' 轮' : ''}'}  ${projection.scoreLabel(entry.key, widget.chinese)}${projection.reused.contains(entry.key) ? tr(' · 复用评测', ' · Reused evaluation') : ''}${projection.accepted[entry.key] == false ? tr(' · 未采纳', ' · Rejected') : ''}',
-                  projection.accepted[entry.key] == false
-                      ? Theme.of(context).colorScheme.error
-                      : accent,
-                ),
-              for (final entry in projection.stabilityScores.entries)
-                _badge(
-                  '${tr('复测', 'Stability')} ${entry.key}  ${entry.value.$1.toStringAsFixed(3)} · ${entry.value.$2 ? tr('通过', 'Passed') : tr('未通过', 'Failed')}',
-                  entry.value.$2 ? accent : Theme.of(context).colorScheme.error,
-                ),
-              if (projection.finalScore != null)
-                _badge(
-                  '${tr('独立终测', 'Final test')}  ${projection.finalScore!.toStringAsFixed(3)} · ${projection.finalPassed == true ? tr('通过', 'Passed') : tr('未通过', 'Failed')}',
-                  projection.finalPassed == true
-                      ? accent
-                      : Theme.of(context).colorScheme.error,
-                ),
-            ],
-          ),
-        ],
         const SizedBox(height: 14),
         RsiRoundChanges(
+          selectedRound: projection.scopeRound(pass),
+          diffs: _cachedDiffs,
           run: run,
           events: widget.events,
           settings: widget.settings,
@@ -493,14 +644,32 @@ class _RsiObservatoryState extends State<RsiObservatory>
                   key: const ValueKey('rsi-open-suite'),
                   width: 112,
                   height: 32,
+                  shape: const LiquidRoundedRectangle(borderRadius: 10),
                   settings: widget.settings,
                   onTap: () => showDialog<void>(
                     context: context,
                     builder: (context) => _SuiteLibrary(
+                      executedInputs: {
+                        for (final id in questions.keys)
+                          if (projection.executedInput(id)
+                              case final String value)
+                            id: value,
+                      },
                       cases: [
-                        ...projection.suite,
-                        ...projection.finalSuite,
-                        ...projection.humanTestSuite,
+                        for (final question in {
+                          for (final item in [
+                            ...projection.suite,
+                            ...projection.finalSuite,
+                            ...projection.humanTestSuite,
+                          ])
+                            item['id']: item,
+                        }.values)
+                          {
+                            ...question,
+                            'human_display': _map(
+                              _map(run?['human_case_details'])[question['id']],
+                            ),
+                          },
                       ],
                       chinese: widget.chinese,
                       settings: widget.settings,
@@ -515,23 +684,79 @@ class _RsiObservatoryState extends State<RsiObservatory>
           ],
         ),
         const SizedBox(height: 14),
-        if (passes.isNotEmpty)
-          Padding(
-            padding: const EdgeInsets.only(bottom: 16),
-            child: Wrap(
+        Wrap(
+          spacing: 16,
+          runSpacing: 12,
+          alignment: WrapAlignment.spaceBetween,
+          crossAxisAlignment: WrapCrossAlignment.center,
+          children: [
+            Wrap(
               spacing: 8,
               runSpacing: 8,
               children: [
-                for (final value in passes)
+                for (final entry in {
+                  'training': tr('训练集', 'Training'),
+                  'validation': tr('验证集', 'Validation'),
+                  'test': tr('测试集', 'Test'),
+                }.entries)
                   ChoiceChip(
-                    label: Text(projection.passLabel(value, widget.chinese)),
-                    selected: pass == value,
-                    onSelected: (_) => setState(() => _selectedPass = value),
+                    key: ValueKey('rsi-matrix-split-${entry.key}'),
+                    label: Text(
+                      '${entry.value} ${datasets[entry.key]!.length}',
+                    ),
+                    selected: split == entry.key,
+                    showCheckmark: false,
+                    selectedColor: accent.withValues(alpha: .12),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    onSelected: (_) => setState(() {
+                      _selectedSplit = entry.key;
+                      _page = 0;
+                    }),
                   ),
               ],
             ),
-          ),
-        if (cases.isEmpty)
+            if (matrixExecutions > 1)
+              GlassPicker(
+                key: const ValueKey('rsi-matrix-execution-picker'),
+                value: tr('第 $execution 次执行', 'Execution $execution'),
+                width: 156,
+                height: 34,
+                settings: widget.settings,
+                textStyle: Theme.of(context).textTheme.bodyMedium,
+                onTap: () =>
+                    _chooseMatrixExecution(matrixExecutions, execution),
+              ),
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                IconButton(
+                  key: const ValueKey('rsi-matrix-previous'),
+                  tooltip: tr('上一页', 'Previous page'),
+                  onPressed: page == 0
+                      ? null
+                      : () => setState(() => _page = page - 1),
+                  icon: const Icon(CupertinoIcons.chevron_left, size: 16),
+                ),
+                Text(
+                  '${page + 1} / $pageCount',
+                  style: Theme.of(context).textTheme.labelMedium,
+                ),
+                IconButton(
+                  key: const ValueKey('rsi-matrix-next'),
+                  tooltip: tr('下一页', 'Next page'),
+                  onPressed: page + 1 >= pageCount
+                      ? null
+                      : () => setState(() => _page = page + 1),
+                  icon: const Icon(CupertinoIcons.chevron_right, size: 16),
+                ),
+              ],
+            ),
+          ],
+        ),
+        const SizedBox(height: 14),
+        if (filteredCases.isEmpty)
           GlassCard(
             settings: widget.settings,
             child: Padding(
@@ -546,7 +771,10 @@ class _RsiObservatoryState extends State<RsiObservatory>
                           ? tr('开始进化', 'Start evolution')
                           : running
                           ? tr('正在准备问题', 'Preparing questions')
-                          : tr('暂无对话记录', 'No conversation records'),
+                          : tr(
+                              '当前数据集暂无对话记录',
+                              'No conversations in this dataset',
+                            ),
                     ),
                   ),
                 ],
@@ -563,10 +791,15 @@ class _RsiObservatoryState extends State<RsiObservatory>
                 spacing: 12,
                 runSpacing: 12,
                 children: [
-                  for (final (index, item) in cases.indexed)
+                  for (final (index, item) in pageCases.indexed)
                     SizedBox(
                       width: width,
-                      child: _conversation(item, accent, violet, index + 1),
+                      child: _conversation(
+                        item,
+                        accent,
+                        violet,
+                        page * _pageSize + index + 1,
+                      ),
                     ),
                 ],
               );
@@ -576,6 +809,50 @@ class _RsiObservatoryState extends State<RsiObservatory>
       ],
     );
   }
+
+  Future<void> _chooseMatrixExecution(int count, int selected) =>
+      showDialog<void>(
+        context: context,
+        builder: (context) => Dialog(
+          backgroundColor: Colors.transparent,
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 320, maxHeight: 480),
+            child: GlassCard(
+              useOwnLayer: true,
+              settings: widget.settings.copyWith(
+                glassColor: Theme.of(context).colorScheme.surface,
+                visibility: 1,
+                standardOpacityMultiplier: 1,
+                lightIntensity: 0,
+                glowIntensity: 0,
+                blur: 0,
+              ),
+              padding: const EdgeInsets.all(8),
+              child: ListView(
+                shrinkWrap: true,
+                children: [
+                  for (var index = 1; index <= count; index++)
+                    ListTile(
+                      key: ValueKey('rsi-matrix-execution-$index'),
+                      title: Text(tr('第 $index 次执行', 'Execution $index')),
+                      selected: index == selected,
+                      trailing: index == selected
+                          ? const Icon(CupertinoIcons.checkmark, size: 16)
+                          : null,
+                      onTap: () {
+                        setState(() {
+                          _selectedExecution = index;
+                          _page = 0;
+                        });
+                        Navigator.pop(context);
+                      },
+                    ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      );
 
   Widget _metric(String label, String value, Color color) => Column(
     crossAxisAlignment: CrossAxisAlignment.start,
@@ -671,18 +948,20 @@ class _RsiObservatoryState extends State<RsiObservatory>
             ),
             const SizedBox(height: 14),
             Expanded(
-              child: ListView(
+              child: RsiConversationStream(
                 key: PageStorageKey(
-                  'rsi-messages-${widget.run?['id']}-${item.id}-${_selectedPass ?? 'latest'}',
+                  'rsi-messages-${widget.run?['id']}-${item.id}-${_selectedPass ?? 'latest'}-${item.execution ?? 'aggregate'}',
+                ),
+                revision: Object.hash(
+                  Object.hashAll(
+                    item.turns.map(
+                      (turn) => Object.hash(turn['input'], turn['output']),
+                    ),
+                  ),
+                  item.grade['rationale'],
                 ),
                 children: [
-                  _bubble(item.input, false, accent),
-                  for (final turn in item.turns) ...[
-                    if (turn['input'] != item.input)
-                      _bubble(turn['input']?.toString() ?? '', false, accent),
-                    if (turn['output'] != null)
-                      _bubble(turn['output'].toString(), true, violet),
-                  ],
+                  ..._conversationMessages(item, accent, violet),
                   if (item.grade['rationale'] != null)
                     Padding(
                       padding: const EdgeInsets.only(top: 8),
@@ -729,7 +1008,58 @@ class _RsiObservatoryState extends State<RsiObservatory>
     );
   }
 
-  Widget _bubble(String value, bool agent, Color color) => Container(
+  List<Widget> _conversationMessages(
+    _CaseView item,
+    Color accent,
+    Color violet, {
+    bool expanded = false,
+  }) {
+    final messages = <({String role, String text})>[];
+    final structured = item.turns.any(
+      (turn) => rsiTranscript(
+        turn['output']?.toString() ?? '',
+      ).any((message) => message.role == 'user'),
+    );
+    if (!structured && widget.run?['input_visibility'] != 'opaque_fixture') {
+      messages.add((role: 'user', text: item.input));
+    }
+    for (final turn in item.turns) {
+      final output = turn['output']?.toString();
+      final transcript = output == null
+          ? <({String role, String text})>[]
+          : rsiTranscript(output);
+      if (transcript.isNotEmpty) {
+        messages.addAll(transcript);
+      } else {
+        if (turn['input'] != item.input) {
+          messages.add((role: 'user', text: turn['input']?.toString() ?? ''));
+        }
+        if (output != null) messages.add((role: 'assistant', text: output));
+      }
+    }
+    return [
+      for (final message in messages)
+        _bubble(
+          message.text,
+          message.role != 'user',
+          message.role == 'assistant' ? violet : accent,
+          label: message.role == 'tool'
+              ? tr('工具', 'Tool')
+              : message.role == 'user'
+              ? tr('用户', 'User')
+              : 'Agent',
+          expanded: expanded,
+        ),
+    ];
+  }
+
+  Widget _bubble(
+    String value,
+    bool agent,
+    Color color, {
+    String? label,
+    bool expanded = false,
+  }) => Container(
     margin: const EdgeInsets.only(bottom: 9),
     padding: const EdgeInsets.all(10),
     decoration: BoxDecoration(
@@ -740,7 +1070,7 @@ class _RsiObservatoryState extends State<RsiObservatory>
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
-          agent ? 'Agent' : tr('问题', 'Question'),
+          label ?? (agent ? 'Agent' : tr('问题', 'Question')),
           style: TextStyle(
             color: color,
             fontSize: 10,
@@ -748,23 +1078,203 @@ class _RsiObservatoryState extends State<RsiObservatory>
           ),
         ),
         const SizedBox(height: 5),
-        Text(
-          value,
-          maxLines: 5,
-          overflow: TextOverflow.ellipsis,
-          style: Theme.of(context).textTheme.bodySmall?.copyWith(height: 1.55),
-        ),
+        if (expanded)
+          SelectableText(
+            value,
+            style: Theme.of(
+              context,
+            ).textTheme.bodySmall?.copyWith(height: 1.55),
+          )
+        else
+          Text(
+            value,
+            maxLines: 5,
+            overflow: TextOverflow.ellipsis,
+            style: Theme.of(
+              context,
+            ).textTheme.bodySmall?.copyWith(height: 1.55),
+          ),
       ],
     ),
   );
 
+  List<Widget> _gradeDetails(
+    String title,
+    Map<String, Object?> grade, {
+    bool evaluator = false,
+    bool showRationale = true,
+    bool showScore = true,
+  }) {
+    final diagnosis = evaluator
+        ? _map(grade['diagnosis'])
+        : <String, Object?>{};
+    final rendered = <String>{};
+    bool first(Object? value) {
+      final normalized =
+          value?.toString().trim().replaceAll(RegExp(r'\s+'), ' ') ?? '';
+      return normalized.isNotEmpty && rendered.add(normalized);
+    }
+
+    return [
+      Text(title, style: Theme.of(context).textTheme.titleMedium),
+      const SizedBox(height: 10),
+      if (grade.isEmpty)
+        Text(
+          evaluator
+              ? tr(
+                  '暂无 Eval Agent 评价或建议记录',
+                  'No Eval Agent evaluation or recommendations recorded',
+                )
+              : tr('暂无评分记录', 'No grading record'),
+        )
+      else ...[
+        if (showScore)
+          Wrap(
+            spacing: 16,
+            runSpacing: 8,
+            children: [
+              Text(
+                '${tr('评分', 'Score')} ${(grade['score'] as num?)?.toStringAsFixed(3) ?? '—'}',
+              ),
+              if (grade['passed'] is bool)
+                Text(
+                  grade['passed'] == true
+                      ? tr('通过', 'Passed')
+                      : tr('未通过', 'Failed'),
+                ),
+            ],
+          ),
+        if (showRationale &&
+            (!evaluator || diagnosis.isEmpty) &&
+            first(grade['rationale'])) ...[
+          const SizedBox(height: 8),
+          SelectableText(grade['rationale'].toString()),
+        ],
+        if (first(diagnosis['summary'])) ...[
+          const SizedBox(height: 12),
+          SelectableText(diagnosis['summary'].toString()),
+        ],
+        for (final finding in _rows(diagnosis['findings'])) ...[
+          const SizedBox(height: 12),
+          if (first(finding['cause']))
+            SelectableText(finding['cause'].toString()),
+          if (first(finding['recommendation'])) ...[
+            const SizedBox(height: 6),
+            Text(
+              tr('建议', 'Recommendation'),
+              style: Theme.of(context).textTheme.labelMedium,
+            ),
+            SelectableText(finding['recommendation'].toString()),
+          ],
+        ],
+        if (evaluator)
+          for (final entry in <String, Object?>{
+            tr('优点', 'Strengths'): diagnosis['strengths'],
+            tr('不确定项', 'Uncertainties'): diagnosis['uncertainties'],
+            tr('评估覆盖范围', 'Evaluation coverage'): diagnosis['coverage'],
+          }.entries)
+            if (entry.value is String &&
+                    (entry.value as String).trim().isNotEmpty ||
+                entry.value is List && (entry.value as List).isNotEmpty) ...[
+              const SizedBox(height: 12),
+              Text(entry.key, style: Theme.of(context).textTheme.labelMedium),
+              const SizedBox(height: 6),
+              SelectableText(
+                entry.value is List
+                    ? (entry.value as List).join('\n')
+                    : entry.value.toString(),
+              ),
+            ],
+        if (evaluator && diagnosis.isEmpty && grade['rationale'] == null)
+          Text(tr('暂无评价或建议记录', 'No evaluation or recommendations recorded')),
+      ],
+    ];
+  }
+
+  Map<String, Object?> _evalGrade(
+    Map<String, Object?> model,
+    Map<String, Object?> grade,
+  ) => model.isNotEmpty
+      ? model
+      : _map(grade['diagnosis']).isNotEmpty
+      ? grade
+      : {};
+
+  List<Widget> _evaluationDetails(_CaseView item) {
+    final evaluation = _evalGrade(item.modelGrade, item.grade);
+    return [
+      ..._gradeDetails(
+        tr('实际评分', 'Actual grade'),
+        item.grade,
+        showRationale: evaluation.isEmpty,
+      ),
+      const Divider(height: 28),
+      ..._gradeDetails(
+        tr('Eval Agent 评价与建议', 'Eval Agent evaluation and recommendations'),
+        evaluation,
+        evaluator: true,
+        showScore:
+            evaluation['score'] != item.grade['score'] ||
+            evaluation['passed'] != item.grade['passed'],
+      ),
+    ];
+  }
+
+  List<Widget> _executionDetails(_CaseView item) => [
+    Text(
+      tr('执行过程', 'Execution'),
+      style: Theme.of(context).textTheme.titleMedium,
+    ),
+    const SizedBox(height: 10),
+    if (item.observation['state'] != null)
+      Text('${tr('执行状态', 'Execution state')} ${item.observation['state']}'),
+    if (item.observation['elapsed_seconds'] is num)
+      Text(
+        '${tr('耗时', 'Elapsed')} ${(item.observation['elapsed_seconds'] as num).toStringAsFixed(2)} s',
+      ),
+    const SizedBox(height: 12),
+    ..._conversationMessages(
+      item,
+      Theme.of(context).colorScheme.primary,
+      Theme.of(context).colorScheme.secondary,
+      expanded: true,
+    ),
+    if (!item.turns.any((t) => t['output']?.toString().isNotEmpty == true))
+      Text(tr('暂无执行对话记录', 'No execution dialogue recorded')),
+    const Divider(height: 28),
+  ];
+
   void _openConversation(_CaseView item) {
+    final projection = _cachedProjection;
+    final passes = projection?.passes ?? <String>[];
+    final pass = passes.contains(_selectedPass)
+        ? _selectedPass
+        : passes.lastOrNull;
+    final prefix = pass == null
+        ? item.id
+        : '${projection!.passLabel(pass, widget.chinese)} · ${item.id}';
+    final title = item.execution == null
+        ? prefix
+        : '$prefix · ${tr('第 ${item.execution} 次执行', 'Execution ${item.execution}')}';
+    final repeated = item.execution == null && item.trialViews.length > 1;
+    final executions = item.trialViews.entries.toList()
+      ..sort((a, b) => a.key.compareTo(b.key));
     showDialog<void>(
       context: context,
-      builder: (context) => Dialog(
+      builder: (dialogContext) => Dialog(
+        backgroundColor: Colors.transparent,
         child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 680, maxHeight: 720),
-          child: Padding(
+          constraints: const BoxConstraints(maxWidth: 820, maxHeight: 780),
+          child: GlassCard(
+            settings: widget.settings.copyWith(
+              glassColor: Theme.of(context).colorScheme.surface,
+              visibility: 1,
+              standardOpacityMultiplier: 1,
+              lightIntensity: 0,
+              glowIntensity: 0,
+              blur: 0,
+            ),
+            useOwnLayer: true,
             padding: const EdgeInsets.all(24),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -773,47 +1283,77 @@ class _RsiObservatoryState extends State<RsiObservatory>
                   children: [
                     Expanded(
                       child: Text(
-                        item.id,
+                        title,
                         style: Theme.of(context).textTheme.titleLarge,
                       ),
                     ),
                     IconButton(
                       tooltip: tr('关闭', 'Close'),
-                      onPressed: () => Navigator.pop(context),
+                      onPressed: () => Navigator.pop(dialogContext),
                       icon: const Icon(CupertinoIcons.xmark),
                     ),
                   ],
                 ),
-                const SizedBox(height: 16),
+                const SizedBox(height: 12),
                 Expanded(
                   child: SingleChildScrollView(
                     child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
-                        SelectableText(item.input),
-                        for (final turn in item.turns) ...[
-                          const Divider(height: 28),
-                          if (turn['input'] != item.input)
-                            SelectableText(turn['input']?.toString() ?? ''),
-                          const SizedBox(height: 10),
-                          SelectableText(
-                            turn['output']?.toString() ??
-                                tr('等待回答', 'Awaiting response'),
-                          ),
-                        ],
                         if (item.rubric.isNotEmpty) ...[
-                          const Divider(height: 28),
-                          Text(tr('评测标准', 'Rubric')),
+                          Text(
+                            tr('评测标准', 'Rubric'),
+                            style: Theme.of(context).textTheme.titleMedium,
+                          ),
                           const SizedBox(height: 8),
                           SelectableText(item.rubric),
-                        ],
-                        if (item.grade.isNotEmpty) ...[
                           const Divider(height: 28),
-                          Text('${tr('评分', 'Score')} ${item.grade['score']}'),
-                          const SizedBox(height: 8),
-                          SelectableText(
-                            item.grade['rationale']?.toString() ?? '',
+                        ],
+                        if (!repeated) ...[
+                          ..._executionDetails(item),
+                          ..._evaluationDetails(item),
+                        ] else ...[
+                          ..._gradeDetails(
+                            tr('汇总评分', 'Aggregate grade'),
+                            item.grade,
+                            showRationale: false,
                           ),
+                          for (final entry in executions)
+                            ExpansionTile(
+                              title: Row(
+                                children: [
+                                  Expanded(
+                                    child: Text(
+                                      tr(
+                                        '第 ${entry.key} 次执行',
+                                        'Execution ${entry.key}',
+                                      ),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 10),
+                                  Text(
+                                    (entry.value.grade['score'] as num?)
+                                            ?.toStringAsFixed(3) ??
+                                        '—',
+                                  ),
+                                ],
+                              ),
+                              children: [
+                                Padding(
+                                  padding: const EdgeInsets.symmetric(
+                                    vertical: 12,
+                                  ),
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.stretch,
+                                    children: [
+                                      ..._executionDetails(entry.value),
+                                      ..._evaluationDetails(entry.value),
+                                    ],
+                                  ),
+                                ),
+                              ],
+                            ),
                         ],
                       ],
                     ),
@@ -922,118 +1462,247 @@ class _ScoreMatrix extends StatelessWidget {
     required this.split,
     required this.questions,
     required this.views,
+    required this.running,
+    this.dotHeight,
+    this.repeatCount = 1,
+    this.trialIndex,
+    this.embedded = false,
     required this.settings,
     required this.chinese,
+    required this.onOpen,
   });
   final String split;
   final List<Map<String, Object?>> questions;
   final Map<String, _CaseView> views;
+  final bool running;
+  final double? dotHeight;
+  final int repeatCount;
+  final int? trialIndex;
+  final bool embedded;
   final LiquidGlassSettings settings;
   final bool chinese;
+  final ValueChanged<_CaseView> onOpen;
   @override
   Widget build(BuildContext context) {
     final dark = Theme.of(context).brightness == Brightness.dark;
     final title = split == 'training'
         ? (chinese ? '训练集' : 'Training set')
         : (chinese ? '验证集' : 'Validation set');
+    if (repeatCount > 1) {
+      return GlassCard(
+        key: ValueKey('rsi-score-matrix-$split'),
+        settings: settings,
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              title,
+              style: Theme.of(
+                context,
+              ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w600),
+            ),
+            for (var trial = 1; trial <= repeatCount; trial++) ...[
+              const SizedBox(height: 14),
+              if (trial > 1) const Divider(height: 16),
+              _ScoreMatrix(
+                split: split,
+                questions: questions,
+                views: {
+                  for (final q in questions)
+                    q['id'].toString():
+                        (views[q['id'].toString()] ??
+                                _CaseView(
+                                  q['id'].toString(),
+                                  q['input']?.toString() ?? '',
+                                  q['rubric']?.toString() ?? '',
+                                ))
+                            .executionView(trial),
+                },
+                running: running,
+                dotHeight: dotHeight,
+                settings: settings,
+                chinese: chinese,
+                onOpen: onOpen,
+                trialIndex: trial,
+                embedded: true,
+              ),
+            ],
+          ],
+        ),
+      );
+    }
     double? score(String id) => (views[id]?.grade['score'] as num?)?.toDouble();
     final graded = questions
         .where((q) => score(q['id'].toString()) != null)
         .length;
-    return GlassCard(
-      key: ValueKey('rsi-score-matrix-$split'),
-      settings: settings,
-      padding: const EdgeInsets.all(16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Text(
-                title,
-                style: Theme.of(
-                  context,
-                ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w600),
-              ),
-              const SizedBox(width: 10),
-              Text(
-                '$graded / ${questions.length}',
-                style: Theme.of(context).textTheme.labelSmall,
-              ),
-              const Spacer(),
-              Text('0', style: Theme.of(context).textTheme.labelSmall),
-              const SizedBox(width: 5),
-              for (final value in [0.0, .25, .5, .75, 1.0])
-                Container(
-                  width: 7,
-                  height: 7,
-                  margin: const EdgeInsets.symmetric(horizontal: 1.5),
-                  decoration: BoxDecoration(
-                    color: _scoreDotColor(value, dark),
-                    shape: BoxShape.circle,
-                  ),
+    final items = [for (final q in questions) views[q['id'].toString()]];
+    final active = items
+        .where(
+          (item) =>
+              running &&
+              (item?.state == 'responding' || item?.state == 'evaluating'),
+        )
+        .length;
+    final waiting = items
+        .where(
+          (item) => running
+              ? item == null || item.state == 'waiting'
+              : item?.grade['score'] == null,
+        )
+        .length;
+    final passed = items.where((item) => item?.grade['passed'] == true).length;
+    final failed = items.where((item) => item?.grade['passed'] == false).length;
+    final scores = [
+      for (final q in questions)
+        if (score(q['id'].toString()) case final double value) value,
+    ];
+    final average = scores.isEmpty
+        ? '—'
+        : (scores.reduce((a, b) => a + b) / scores.length).toStringAsFixed(3);
+    final content = Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Text(
+              trialIndex == null
+                  ? title
+                  : (chinese ? '第 $trialIndex 次执行' : 'Execution $trialIndex'),
+              style: Theme.of(
+                context,
+              ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w600),
+            ),
+            const SizedBox(width: 10),
+            Text(
+              '$graded / ${questions.length}',
+              style: Theme.of(context).textTheme.labelSmall,
+            ),
+            const Spacer(),
+            Text('0', style: Theme.of(context).textTheme.labelSmall),
+            const SizedBox(width: 5),
+            for (final value in [0.0, .25, .5, .75, 1.0])
+              Container(
+                width: 7,
+                height: 7,
+                margin: const EdgeInsets.symmetric(horizontal: 1.5),
+                decoration: BoxDecoration(
+                  color: _scoreDotColor(value, dark),
+                  shape: BoxShape.circle,
                 ),
-              const SizedBox(width: 5),
-              Text('1', style: Theme.of(context).textTheme.labelSmall),
-            ],
+              ),
+            const SizedBox(width: 5),
+            Text('1', style: Theme.of(context).textTheme.labelSmall),
+          ],
+        ),
+        const SizedBox(height: 14),
+        ConstrainedBox(
+          constraints: BoxConstraints(
+            minHeight: dotHeight ?? 0,
+            maxHeight: 180,
           ),
-          const SizedBox(height: 14),
-          ConstrainedBox(
-            constraints: const BoxConstraints(maxHeight: 180),
-            child: SingleChildScrollView(
-              child: Wrap(
-                spacing: 6,
-                runSpacing: 6,
-                children: [
-                  for (final (index, question) in questions.indexed)
-                    Builder(
-                      builder: (context) {
-                        final id = question['id'].toString();
-                        final value = score(id);
-                        final state = views[id]?.state;
-                        final active =
-                            state == 'responding' || state == 'evaluating';
-                        final status = value != null
-                            ? value.toStringAsFixed(3)
-                            : active
-                            ? (chinese ? '评测中' : 'Evaluating')
-                            : (chinese ? '未评估' : 'Not evaluated');
-                        final label = '$title ${index + 1} · $status';
-                        return Semantics(
-                          label: '$label · ${question['input']}',
-                          child: Tooltip(
-                            message: label,
-                            child: AnimatedContainer(
-                              key: ValueKey('rsi-score-dot-$split-$id'),
-                              duration: MediaQuery.disableAnimationsOf(context)
-                                  ? Duration.zero
-                                  : const Duration(milliseconds: 220),
-                              width: 14,
-                              height: 14,
-                              decoration: BoxDecoration(
-                                color: _scoreDotColor(value, dark),
-                                shape: BoxShape.circle,
-                                border: active
-                                    ? Border.all(
-                                        color: Theme.of(
-                                          context,
-                                        ).colorScheme.primary,
-                                        width: 2,
-                                      )
-                                    : null,
+          child: SingleChildScrollView(
+            child: Wrap(
+              spacing: 6,
+              runSpacing: 6,
+              children: [
+                for (final (index, question) in questions.indexed)
+                  Builder(
+                    builder: (context) {
+                      final id = question['id'].toString();
+                      final value = score(id);
+                      final state = views[id]?.state;
+                      final active =
+                          running &&
+                          (state == 'responding' || state == 'evaluating');
+                      final status = value != null
+                          ? value.toStringAsFixed(3)
+                          : active
+                          ? (chinese ? '评测中' : 'Evaluating')
+                          : (chinese ? '未评估' : 'Not evaluated');
+                      final label =
+                          '$title ${index + 1}${trialIndex == null ? '' : ' · ${chinese ? '第 $trialIndex 次执行' : 'Execution $trialIndex'}'} · $status';
+                      return Semantics(
+                        button: true,
+                        label: '$label · ${question['input']}',
+                        child: MouseRegion(
+                          cursor: SystemMouseCursors.click,
+                          child: GestureDetector(
+                            onTap: () => onOpen(
+                              views[id] ??
+                                  _CaseView(
+                                    id,
+                                    question['input']?.toString() ?? '',
+                                    question['rubric']?.toString() ?? '',
+                                  ),
+                            ),
+                            child: Tooltip(
+                              message: label,
+                              child: AnimatedContainer(
+                                key: ValueKey(
+                                  trialIndex == null
+                                      ? 'rsi-score-dot-$split-$id'
+                                      : 'rsi-score-dot-$split-$id-trial-$trialIndex',
+                                ),
+                                duration:
+                                    MediaQuery.disableAnimationsOf(context)
+                                    ? Duration.zero
+                                    : const Duration(milliseconds: 220),
+                                width: 14,
+                                height: 14,
+                                decoration: BoxDecoration(
+                                  color: _scoreDotColor(value, dark),
+                                  shape: BoxShape.circle,
+                                  border: active
+                                      ? Border.all(
+                                          color: Theme.of(
+                                            context,
+                                          ).colorScheme.primary,
+                                          width: 2,
+                                        )
+                                      : null,
+                                ),
                               ),
                             ),
                           ),
-                        );
-                      },
-                    ),
-                ],
-              ),
+                        ),
+                      );
+                    },
+                  ),
+              ],
             ),
           ),
-        ],
-      ),
+        ),
+        const SizedBox(height: 14),
+        Wrap(
+          spacing: 18,
+          runSpacing: 8,
+          children: [
+            for (final stat in [
+              '${chinese ? '通过' : 'Passed'} $passed',
+              '${chinese ? '未通过' : 'Failed'} $failed',
+              '${chinese ? '执行中' : 'Active'} $active',
+              '${running ? (chinese ? '待执行' : 'Pending') : (chinese ? '未评估' : 'Not evaluated')} $waiting',
+              '${chinese ? '平均分' : 'Average'} $average',
+            ])
+              Text(
+                stat,
+                style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
+              ),
+          ],
+        ),
+      ],
     );
+    return embedded
+        ? content
+        : GlassCard(
+            key: ValueKey('rsi-score-matrix-$split'),
+            settings: settings,
+            padding: const EdgeInsets.all(16),
+            child: content,
+          );
   }
 }
 
@@ -1043,6 +1712,30 @@ class _CaseView {
   String input, rubric;
   String state = 'waiting';
   Map<String, Object?> grade = {};
+  Map<String, Object?> modelGrade = {};
+  Map<String, Object?> observation = {};
+  List<Map<String, Object?>> trials = [];
+  final trialResults = <int, Map<String, Object?>>{};
+  final trialViews = <int, _CaseView>{};
+  int? execution;
+  _CaseView executionView(int index) {
+    final view = trialViews.putIfAbsent(
+      index,
+      () => _CaseView(id, input, rubric)..execution = index,
+    );
+    if (view.rubric.isEmpty) view.rubric = rubric;
+    return view;
+  }
+
+  List<double> trialScores = [];
+  final trialGrades = <int, Map<String, Object?>>{};
+  double? get meanScore {
+    if (trialScores.isNotEmpty) {
+      return trialScores.reduce((a, b) => a + b) / trialScores.length;
+    }
+    return (grade['score'] as num?)?.toDouble();
+  }
+
   final List<Map<String, Object?>> turns = [];
 }
 
@@ -1099,17 +1792,34 @@ class _Projection {
             data['input']?.toString() ?? '',
           );
           view.state = 'responding';
-          final turn = <String, Object?>{'input': data['input']};
+          final trial = (data['trial'] as num?)?.toInt() ?? 1;
+          final turn = <String, Object?>{
+            'input': data['input'],
+            'trial': trial,
+          };
           view.turns.add(turn);
+          final individual = view.executionView(trial);
+          individual.state = 'responding';
+          individual.turns.add(turn);
           calls[data['call_id'].toString()] = (view, turn);
         case 'target_call_completed':
           final call = calls[data['call_id'].toString()];
           if (call != null) {
+            call.$1.observation = _map(data['observation']);
             call.$2['output'] = _map(data['observation'])['output'];
             call.$1.state = 'evaluating';
+            final individual = call.$1.executionView(
+              (call.$2['trial'] as int?) ?? 1,
+            );
+            individual.observation = _map(data['observation']);
+            individual.state = 'evaluating';
           }
         case 'case_completed':
-          _result(_pass(data), _map(data['result']));
+          _result(
+            _pass(data),
+            _map(data['result']),
+            trial: (data['trial'] as num?)?.toInt(),
+          );
         case 'evaluation_completed':
           _score(
             (data['round'] as num?)?.toInt() ?? 0,
@@ -1208,12 +1918,6 @@ class _Projection {
     _snapshot('final_candidate:0', _map(finalCheck['candidate']));
   }
   final bool adaptive;
-  String scoreLabel(int index, bool zh) {
-    final validation = scores[index]?.toStringAsFixed(3) ?? '—';
-    if (!adaptive) return validation;
-    return '${zh ? '整体' : 'Overall'} ${overallScores[index]?.toStringAsFixed(3) ?? '—'} · ${zh ? '验证' : 'Validation'} $validation · ${zh ? '训练' : 'Training'} ${trainingScores[index]?.toStringAsFixed(3) ?? '—'}';
-  }
-
   final scores = <int, double>{};
   final trainingScores = <int, double>{};
   final overallScores = <int, double>{};
@@ -1308,7 +2012,63 @@ class _Projection {
   bool hasRounds = false;
   bool get hasGrades =>
       _views.values.any((v) => v.values.any((c) => c.grade.isNotEmpty));
-  List<String> get passes => _passes.toList();
+  List<String> get passes =>
+      _passes.where((p) => !p.startsWith('challenge:')).toList();
+  List<Map<String, Object?>> scoreTrend(
+    List<Map<String, Object?>> checkpoints,
+  ) {
+    final measured = <int, Map<String, Object?>>{};
+    Map<String, Object?> row(int round) => measured.putIfAbsent(
+      round,
+      () => {'round': round, 'scores': <String, Object?>{}},
+    );
+    final repeated = <int, Map<String, List<double>>>{};
+    // Average complete trials for display; optimizer acceptance may deliberately
+    // use minimum scores instead. Incomplete splits never contribute a point.
+    for (final pass in passes.where(
+      (p) => p.startsWith('baseline:') || p.startsWith('candidate:'),
+    )) {
+      final cases = casesFor(pass);
+      for (final split in ['training', 'validation']) {
+        final cohort = cases
+            .where(
+              (c) => suite.any((q) => q['id'] == c.id && q['split'] == split),
+            )
+            .toList();
+        final grades = cohort.map((c) => c.meanScore).whereType<num>().toList();
+        if (cohort.isNotEmpty && cohort.length == grades.length) {
+          final bySplit = repeated.putIfAbsent(scopeRound(pass), () => {});
+          (bySplit[split] ??= []).add(
+            grades.fold<double>(0, (sum, grade) => sum + grade) / grades.length,
+          );
+        }
+      }
+    }
+    for (final round in repeated.entries) {
+      for (final split in round.value.entries) {
+        _map(row(round.key)['scores'])[split.key] =
+            split.value.reduce((a, b) => a + b) / split.value.length;
+      }
+    }
+    for (final checkpoint in checkpoints) {
+      final round = (checkpoint['round'] as num?)?.toInt();
+      if (round == null) continue;
+      final target = row(round);
+      for (final split in ['training', 'validation', 'test']) {
+        final value = _map(checkpoint['scores'])[split];
+        if (value is num &&
+            !(split == 'test' && checkpoint['valid'] == false)) {
+          // Checkpoint development scores can use the optimizer's minimum
+          // aggregation; never overwrite a mean reconstructed from actual trials.
+          _map(target['scores']).putIfAbsent(split, () => value);
+        }
+      }
+    }
+    final result = measured.values.toList()
+      ..sort((a, b) => (a['round'] as num).compareTo(b['round'] as num));
+    return result;
+  }
+
   int scopeRound(String? pass) {
     final parts = pass?.split(':') ?? [];
     final round = int.tryParse(parts.elementAtOrNull(1) ?? '') ?? 0;
@@ -1330,8 +2090,7 @@ class _Projection {
         : round == 0
         ? 'baseline'
         : 'candidate';
-    final trial = data['trial'];
-    return '$phase:$round${trial is num && trial > 1 ? ':$trial' : ''}';
+    return '$phase:$round';
   }
 
   void _snapshot(String pass, Map<String, Object?> evaluation) {
@@ -1344,8 +2103,11 @@ class _Projection {
   String passLabel(String pass, bool zh) {
     final parts = pass.split(':');
     final phase = switch (parts.first) {
-      'baseline' => zh ? '基线' : 'Baseline',
-      'challenge' => '${zh ? '训练挑战' : 'Training challenge'} ${parts[1]}',
+      'baseline' => zh ? '基线轮' : 'Baseline',
+      'challenge' =>
+        zh
+            ? '第 ${parts[1]} 轮 · 新增题预评测'
+            : 'Round ${parts[1]} · New-case pre-evaluation',
       'final_baseline' => zh ? '最终测试 · 基线' : 'Final · Baseline',
       'final_candidate' => zh ? '最终测试 · 候选' : 'Final · Candidate',
       final value when value.startsWith('stability_') =>
@@ -1353,13 +2115,13 @@ class _Projection {
       _ => '${zh ? '第' : 'Round'} ${parts[1]}${zh ? ' 轮' : ''}',
     };
     return parts.length > 2
-        ? '$phase · ${zh ? '测试' : 'Trial'} ${parts[2]}'
+        ? '$phase · ${zh ? '复测' : 'Trial'} ${parts[2]}'
         : phase;
   }
 
   _CaseView _case(String pass, String id, String input) =>
       (_views[pass] ??= {})[id] ??= _CaseView(id, input, '');
-  void _result(String pass, Map<String, Object?> result) {
+  void _result(String pass, Map<String, Object?> result, {int? trial}) {
     final test = _map(result['case']);
     if (test['id'] == null) return;
     _passes.add(pass);
@@ -1370,6 +2132,36 @@ class _Projection {
     );
     view.rubric = test['rubric']?.toString() ?? '';
     view.grade = _map(result['grade']);
+    view.modelGrade = _map(result['model_grade']);
+    view.observation = _map(result['observation']);
+    view.trials = _rows(result['trials']);
+    for (final (index, record) in view.trials.indexed) {
+      _fillExecution(view.executionView(index + 1), record);
+    }
+    if (trial != null) _fillExecution(view.executionView(trial), result);
+    if (trial != null) view.trialResults[trial] = result;
+    if (view.trials.isEmpty && view.trialResults.isNotEmpty) {
+      final indexes = view.trialResults.keys.toList()..sort();
+      view.trials = [for (final index in indexes) view.trialResults[index]!];
+    }
+    if (trial != null) view.trialGrades[trial] = view.grade;
+    view.trialScores = _rows(result['trials'])
+        .map((trial) => _map(trial['grade'])['score'])
+        .whereType<num>()
+        .map((score) => score.toDouble())
+        .toList();
+    if (view.trialScores.isEmpty && view.trialGrades.isNotEmpty) {
+      view.trialScores = view.trialGrades.values
+          .map((g) => g['score'])
+          .whereType<num>()
+          .map((v) => v.toDouble())
+          .toList();
+      view.grade = {
+        ...view.grade,
+        'score': view.meanScore,
+        'passed': view.trialGrades.values.every((g) => g['passed'] == true),
+      };
+    }
     view.state = 'graded';
     view.turns.clear();
     final dialogue = _rows(result['dialogue']);
@@ -1386,6 +2178,43 @@ class _Projection {
         'output': _map(result['observation'])['output'],
       });
     }
+  }
+
+  void _fillExecution(_CaseView view, Map<String, Object?> result) {
+    view.grade = _map(result['grade']);
+    view.modelGrade = _map(result['model_grade']);
+    view.observation = _map(result['observation']);
+    view.state = view.grade.isNotEmpty ? 'graded' : 'waiting';
+    view.turns.clear();
+    final dialogue = _rows(result['dialogue']);
+    view.turns.addAll(
+      dialogue.isNotEmpty
+          ? [
+              for (final turn in dialogue)
+                {
+                  'input': turn['input'],
+                  'output': _map(turn['observation'])['output'],
+                },
+            ]
+          : [
+              {'input': view.input, 'output': view.observation['output']},
+            ],
+    );
+  }
+
+  String? executedInput(String id) {
+    for (final views in _views.values) {
+      for (final turn in views[id]?.turns ?? <Map<String, Object?>>[]) {
+        final user = rsiTranscript(turn['output']?.toString() ?? '')
+            .where(
+              (message) =>
+                  message.role == 'user' && message.text.trim().isNotEmpty,
+            )
+            .firstOrNull;
+        if (user != null) return user.text;
+      }
+    }
+    return null;
   }
 
   List<_CaseView> casesFor(String? pass) {
@@ -1418,11 +2247,13 @@ class _Projection {
 
 class _SuiteLibrary extends StatefulWidget {
   const _SuiteLibrary({
+    required this.executedInputs,
     required this.cases,
     required this.chinese,
     required this.settings,
   });
   final List<Map<String, Object?>> cases;
+  final Map<String, String> executedInputs;
   final bool chinese;
   final LiquidGlassSettings settings;
   @override
@@ -1431,13 +2262,167 @@ class _SuiteLibrary extends StatefulWidget {
 
 class _SuiteLibraryState extends State<_SuiteLibrary> {
   final _search = TextEditingController();
+  final _horizontal = ScrollController();
+  final _vertical = ScrollController();
   String _split = 'all';
+  int _page = 0;
+  static const _pageSize = 10;
   String tr(String zh, String en) => widget.chinese ? zh : en;
   @override
   void dispose() {
     _search.dispose();
+    _horizontal.dispose();
+    _vertical.dispose();
     super.dispose();
   }
+
+  Object? _decoded(Object? value) {
+    if (value is! String) return value;
+    try {
+      return jsonDecode(value);
+    } on FormatException {
+      return value;
+    }
+  }
+
+  String _readable(Object? value) {
+    if (value == null) return '';
+    if (value is List) {
+      return value.map(_readable).where((s) => s.isNotEmpty).join('\n');
+    }
+    if (value is Map) {
+      return value.entries
+          .where((e) => e.value != null)
+          .map((e) => '${_fieldName(e.key.toString())}: ${_readable(e.value)}')
+          .join('\n');
+    }
+    return value.toString();
+  }
+
+  String _question(Map<String, Object?> item) {
+    final human = _map(item['human_display'])['question'];
+    if (human != null) return _readable(human);
+    final input = item['input']?.toString() ?? '';
+    final data = _decoded(input);
+    if (data is! Map || !data.containsKey('tau_task_id')) return input;
+    final scenario = _map(_decoded(item['reference_answer']))['user_scenario'];
+    return item['display_input']?.toString() ??
+        widget.executedInputs[item['id']] ??
+        (scenario != null
+            ? _readable(scenario)
+            : tr('未保存题目正文', 'Question content was not saved'));
+  }
+
+  Object? _answer(Map<String, Object?> item) =>
+      _map(item['human_display'])['reference_answer'] ??
+      _decoded(item['reference_answer']);
+  bool _hasAnswer(Map<String, Object?> item) =>
+      _readable(_answer(item)).trim().isNotEmpty;
+
+  String _fieldName(String key) => switch (key) {
+    'instructions' => tr('任务要求', 'Instructions'),
+    'task_instructions' => tr('任务说明', 'Task instructions'),
+    'reason_for_call' => tr('用户诉求', 'User request'),
+    'known_info' => tr('已知信息', 'Known information'),
+    'unknown_info' => tr('未知信息', 'Unknown information'),
+    'persona' => tr('用户背景', 'Persona'),
+    'domain' => tr('业务领域', 'Domain'),
+    'actions' => tr('预期操作', 'Expected actions'),
+    'name' => tr('操作', 'Action'),
+    'arguments' => tr('参数', 'Arguments'),
+    'communicate_info' => tr('应告知用户的信息', 'Information to communicate'),
+    'nl_assertions' => tr('判定要求', 'Assertions'),
+    'user_scenario' => tr('题目场景', 'Scenario'),
+    'evaluation_criteria' => tr('标准答案与判定条件', 'Reference and criteria'),
+    _ => key,
+  };
+
+  String _splitName(Map<String, Object?> item) =>
+      switch (item['split'] ?? 'training') {
+        'validation' => tr('验证', 'Validation'),
+        'test' => tr('测试', 'Test'),
+        'final' => tr('最终测试', 'Final tests'),
+        _ => tr('训练', 'Training'),
+      };
+
+  void _resetPage() {
+    _page = 0;
+    if (_vertical.hasClients) _vertical.jumpTo(0);
+  }
+
+  Future<void> _openQuestion(Map<String, Object?> item) => showDialog<void>(
+    context: context,
+    builder: (context) => Dialog(
+      backgroundColor: Colors.transparent,
+      child: SizedBox(
+        width: 820,
+        height: MediaQuery.sizeOf(context).height * .84,
+        child: GlassCard(
+          settings: widget.settings.copyWith(
+            glassColor: Theme.of(context).colorScheme.surface,
+            visibility: 1,
+            standardOpacityMultiplier: 1,
+            lightIntensity: 0,
+            glowIntensity: 0,
+            blur: 0,
+          ),
+          useOwnLayer: true,
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      '${item['id']} · ${_splitName(item)}',
+                      style: Theme.of(context).textTheme.titleLarge,
+                    ),
+                  ),
+                  IconButton(
+                    key: const ValueKey('rsi-library-detail-close'),
+                    tooltip: tr('关闭', 'Close'),
+                    onPressed: () => Navigator.pop(context),
+                    icon: const Icon(CupertinoIcons.xmark, size: 18),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 16),
+              Expanded(
+                child: SingleChildScrollView(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      for (final entry in <String, String>{
+                        tr('题目内容', 'Question'): _question(item),
+                        tr('标准答案', 'Reference answer'): _hasAnswer(item)
+                            ? _readable(_answer(item))
+                            : tr('未提供', 'Not provided'),
+                        tr('评测标准', 'Rubric'): item['rubric']?.toString() ?? '—',
+                      }.entries) ...[
+                        Text(
+                          entry.key,
+                          style: Theme.of(context).textTheme.titleSmall,
+                        ),
+                        const SizedBox(height: 8),
+                        SelectableText(
+                          entry.value,
+                          style: Theme.of(
+                            context,
+                          ).textTheme.bodyMedium?.copyWith(height: 1.5),
+                        ),
+                        const SizedBox(height: 24),
+                      ],
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    ),
+  );
 
   @override
   Widget build(BuildContext context) {
@@ -1446,124 +2431,290 @@ class _SuiteLibraryState extends State<_SuiteLibrary> {
         .where(
           (c) =>
               (_split == 'all' || (c['split'] ?? 'training') == _split) &&
-              ['id', 'input', 'rubric'].any(
-                (key) =>
-                    c[key]?.toString().toLowerCase().contains(query) == true,
-              ),
+              [
+                c['id'],
+                _question(c),
+                c['rubric'],
+                _readable(_answer(c)),
+              ].any((v) => v?.toString().toLowerCase().contains(query) == true),
         )
         .toList();
+    final pages = math.max(1, (cases.length / _pageSize).ceil());
+    final page = _page.clamp(0, pages - 1);
+    final shown = cases.skip(page * _pageSize).take(_pageSize).toList();
+    Widget cell(
+      String value,
+      double width, {
+      Key? key,
+      bool question = false,
+    }) => SizedBox(
+      width: width,
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          Expanded(
+            child: Text(
+              value,
+              key: key,
+              maxLines: 3,
+              overflow: TextOverflow.ellipsis,
+              style: Theme.of(
+                context,
+              ).textTheme.bodyMedium?.copyWith(height: 1.4),
+            ),
+          ),
+          if (question) ...[
+            const SizedBox(width: 8),
+            Icon(
+              CupertinoIcons.chevron_right,
+              size: 12,
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
+            ),
+          ],
+        ],
+      ),
+    );
     return Dialog(
       backgroundColor: Colors.transparent,
       child: SizedBox(
-        width: 920,
-        height: MediaQuery.sizeOf(context).height * .82,
+        width: 1160,
+        height: MediaQuery.sizeOf(context).height * .84,
         child: GlassCard(
-          settings: widget.settings,
-          child: Padding(
-            padding: const EdgeInsets.all(12),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    Expanded(
-                      child: Text(
-                        '${tr('测试题库', 'Question library')} · ${widget.cases.length}',
-                        style: Theme.of(context).textTheme.titleLarge,
-                      ),
+          useOwnLayer: true,
+          settings: widget.settings.copyWith(
+            glassColor: Theme.of(context).colorScheme.surface,
+            visibility: 1,
+            standardOpacityMultiplier: 1,
+            lightIntensity: 0,
+            glowIntensity: 0,
+            blur: 0,
+          ),
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      '${tr('测试题库', 'Question library')} · ${widget.cases.length}',
+                      style: Theme.of(context).textTheme.titleLarge,
                     ),
-                    IconButton(
-                      tooltip: tr('关闭', 'Close'),
-                      onPressed: () => Navigator.pop(context),
-                      icon: const Icon(CupertinoIcons.xmark, size: 18),
+                  ),
+                  IconButton(
+                    tooltip: tr('关闭', 'Close'),
+                    onPressed: () => Navigator.pop(context),
+                    icon: const Icon(CupertinoIcons.xmark, size: 18),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 16),
+              GlassTextField(
+                key: const ValueKey('rsi-suite-search'),
+                controller: _search,
+                settings: widget.settings,
+                onChanged: (_) => setState(_resetPage),
+              ),
+              const SizedBox(height: 12),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  for (final split in {
+                    'all': tr('全部', 'All'),
+                    'training': tr('训练', 'Training'),
+                    'validation': tr('验证', 'Validation'),
+                    if (widget.cases.any((c) => c['split'] == 'test'))
+                      'test': tr('测试', 'Test'),
+                    if (widget.cases.any((c) => c['split'] == 'final'))
+                      'final': tr('最终测试', 'Final tests'),
+                  }.entries)
+                    ChoiceChip(
+                      label: Text(split.value),
+                      selected: _split == split.key,
+                      onSelected: (_) => setState(() {
+                        _split = split.key;
+                        _resetPage();
+                      }),
                     ),
-                  ],
-                ),
-                const SizedBox(height: 16),
-                GlassTextField(
-                  key: const ValueKey('rsi-suite-search'),
-                  controller: _search,
-                  settings: widget.settings,
-                  onChanged: (_) => setState(() {}),
-                ),
-                const SizedBox(height: 12),
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  children: [
-                    for (final split in {
-                      'all': tr('全部', 'All'),
-                      'training': tr('训练', 'Training'),
-                      'validation': tr('验证', 'Validation'),
-                      if (widget.cases.any((c) => c['split'] == 'test'))
-                        'test': tr('测试', 'Test'),
-                      if (widget.cases.any((c) => c['split'] == 'final'))
-                        'final': tr('最终测试', 'Final tests'),
-                    }.entries)
-                      ChoiceChip(
-                        label: Text(split.value),
-                        selected: _split == split.key,
-                        onSelected: (_) => setState(() => _split = split.key),
-                      ),
-                  ],
-                ),
-                const SizedBox(height: 12),
-                Expanded(
-                  child: cases.isEmpty
-                      ? Center(
-                          child: Text(tr('没有匹配的问题', 'No matching questions')),
-                        )
-                      : ListView.builder(
-                          itemCount: cases.length,
-                          itemBuilder: (context, index) {
-                            final item = cases[index];
-                            return ExpansionTile(
-                              key: ValueKey('rsi-library-case-${item['id']}'),
-                              leading: Text('${index + 1}'.padLeft(2, '0')),
-                              title: Text(
-                                item['input']?.toString() ?? '',
-                                maxLines: 3,
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                              childrenPadding: const EdgeInsets.fromLTRB(
-                                16,
-                                0,
-                                16,
-                                20,
-                              ),
-                              expandedCrossAxisAlignment:
-                                  CrossAxisAlignment.start,
-                              children: [
-                                SelectableText(item['input']?.toString() ?? ''),
-                                if ((item['coverage_tags'] as List? ?? [])
-                                    .isNotEmpty) ...[
-                                  const SizedBox(height: 12),
-                                  Wrap(
-                                    spacing: 8,
-                                    runSpacing: 8,
-                                    children: [
-                                      for (final tag
-                                          in item['coverage_tags'] as List)
-                                        Chip(label: Text(tag.toString())),
-                                    ],
+                ],
+              ),
+              const SizedBox(height: 12),
+              Expanded(
+                child: cases.isEmpty
+                    ? Center(
+                        child: Text(tr('没有匹配的问题', 'No matching questions')),
+                      )
+                    : LayoutBuilder(
+                        builder: (context, constraints) {
+                          final width = math.max(920.0, constraints.maxWidth);
+                          final available = width - 360;
+                          final widths = [
+                            90.0,
+                            70.0,
+                            available * .4,
+                            76.0,
+                            available * .35,
+                            available * .25,
+                          ];
+                          final labels = [
+                            tr('题目 ID', 'Question ID'),
+                            tr('数据集', 'Dataset'),
+                            tr('题目内容', 'Question'),
+                            tr('标准答案', 'Reference answer'),
+                            tr('答案内容', 'Answer'),
+                            tr('评测标准', 'Rubric'),
+                          ];
+                          return Scrollbar(
+                            controller: _horizontal,
+                            thumbVisibility: width > constraints.maxWidth,
+                            notificationPredicate: (n) =>
+                                n.metrics.axis == Axis.horizontal,
+                            child: SingleChildScrollView(
+                              controller: _horizontal,
+                              scrollDirection: Axis.horizontal,
+                              child: SizedBox(
+                                width: width,
+                                child: Scrollbar(
+                                  controller: _vertical,
+                                  thumbVisibility: true,
+                                  child: SingleChildScrollView(
+                                    controller: _vertical,
+                                    child: DataTable(
+                                      headingRowColor: WidgetStatePropertyAll(
+                                        Theme.of(
+                                          context,
+                                        ).colorScheme.surfaceContainerHighest,
+                                      ),
+                                      dataRowMinHeight: 104,
+                                      dataRowMaxHeight: 104,
+                                      columnSpacing: 20,
+                                      horizontalMargin: 12,
+                                      columns: [
+                                        for (var i = 0; i < labels.length; i++)
+                                          DataColumn(
+                                            label: SizedBox(
+                                              width: widths[i],
+                                              child: Text(
+                                                labels[i],
+                                                maxLines: 2,
+                                                overflow: TextOverflow.ellipsis,
+                                              ),
+                                            ),
+                                          ),
+                                      ],
+                                      rows: [
+                                        for (final item in shown)
+                                          DataRow(
+                                            cells: [
+                                              DataCell(
+                                                cell(
+                                                  item['id']?.toString() ?? '',
+                                                  widths[0],
+                                                ),
+                                                onTap: () =>
+                                                    _openQuestion(item),
+                                              ),
+                                              DataCell(
+                                                cell(
+                                                  _splitName(item),
+                                                  widths[1],
+                                                ),
+                                                onTap: () =>
+                                                    _openQuestion(item),
+                                              ),
+                                              DataCell(
+                                                Tooltip(
+                                                  message: tr(
+                                                    '查看完整题目',
+                                                    'View full question',
+                                                  ),
+                                                  child: cell(
+                                                    _question(item),
+                                                    widths[2],
+                                                    key: ValueKey(
+                                                      'rsi-library-case-${item['id']}',
+                                                    ),
+                                                    question: true,
+                                                  ),
+                                                ),
+                                                onTap: () =>
+                                                    _openQuestion(item),
+                                              ),
+                                              DataCell(
+                                                cell(
+                                                  _hasAnswer(item)
+                                                      ? tr('已提供', 'Provided')
+                                                      : tr(
+                                                          '未提供',
+                                                          'Not provided',
+                                                        ),
+                                                  widths[3],
+                                                ),
+                                                onTap: () =>
+                                                    _openQuestion(item),
+                                              ),
+                                              DataCell(
+                                                cell(
+                                                  _hasAnswer(item)
+                                                      ? _readable(_answer(item))
+                                                      : '—',
+                                                  widths[4],
+                                                ),
+                                                onTap: () =>
+                                                    _openQuestion(item),
+                                              ),
+                                              DataCell(
+                                                cell(
+                                                  item['rubric']?.toString() ??
+                                                      '—',
+                                                  widths[5],
+                                                ),
+                                                onTap: () =>
+                                                    _openQuestion(item),
+                                              ),
+                                            ],
+                                          ),
+                                      ],
+                                    ),
                                   ),
-                                ],
-                                const SizedBox(height: 16),
-                                Text(
-                                  tr('评测标准', 'Rubric'),
-                                  style: Theme.of(context).textTheme.titleSmall,
                                 ),
-                                const SizedBox(height: 8),
-                                SelectableText(
-                                  item['rubric']?.toString() ?? '',
-                                ),
-                              ],
-                            );
-                          },
-                        ),
-                ),
-              ],
-            ),
+                              ),
+                            ),
+                          );
+                        },
+                      ),
+              ),
+              const SizedBox(height: 12),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  Text('${cases.length} ${tr('题', 'questions')}'),
+                  const SizedBox(width: 16),
+                  IconButton(
+                    tooltip: tr('上一页', 'Previous page'),
+                    onPressed: page == 0
+                        ? null
+                        : () => setState(() {
+                            _page = page - 1;
+                            if (_vertical.hasClients) _vertical.jumpTo(0);
+                          }),
+                    icon: const Icon(CupertinoIcons.chevron_left),
+                  ),
+                  Text('${page + 1} / $pages'),
+                  IconButton(
+                    tooltip: tr('下一页', 'Next page'),
+                    onPressed: page + 1 >= pages
+                        ? null
+                        : () => setState(() {
+                            _page = page + 1;
+                            if (_vertical.hasClients) _vertical.jumpTo(0);
+                          }),
+                    icon: const Icon(CupertinoIcons.chevron_right),
+                  ),
+                ],
+              ),
+            ],
           ),
         ),
       ),

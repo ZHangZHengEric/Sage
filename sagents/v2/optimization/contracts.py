@@ -17,10 +17,14 @@ class OptimizationCase(StrictModel):
     id: str
     input: VerbatimText = Field(min_length=1)
     rubric: VerbatimText = Field(min_length=1)
+    # Evaluator-owned reference; never sent as target input or dialogue context.
+    reference_answer: VerbatimText | None = None
     split: Literal["training", "validation", "test", "final"] = "training"
     mode: Literal["single_turn", "dialogue"] = "single_turn"
     max_turns: int = Field(default=5, ge=1, le=20)
     user_context: VerbatimText = ""
+    # Opaque environment initialization, distinct from hidden grading references.
+    environment_context: dict[str, Any] = Field(default_factory=dict)
     coverage_tags: tuple[str, ...] = ()
 
 
@@ -74,7 +78,12 @@ class OptimizationFinalSuite(StrictModel):
 
 
 class OptimizationConstraints(StrictModel):
-    # Original instructions are preserved; only a separate guidance overlay changes.
+    # A candidate can replace its whole prompt; the baseline bundle stays immutable.
+    allow_system_prompt: bool = True
+    max_system_prompt_chars: int = Field(default=64000, ge=1, le=1000000)
+    max_skill_chars: int = Field(default=32000, ge=1, le=1000000)
+    max_skill_count: int = Field(default=16, ge=0, le=256)
+    # Compatibility for historical clients; new hosts disable overlay proposals.
     allow_instruction_guidance: bool = True
     editable_files: tuple[str, ...] = ()
     creatable_files: tuple[str, ...] = ()
@@ -82,6 +91,7 @@ class OptimizationConstraints(StrictModel):
     allow_tool_creation: bool = False
     require_clean_generated_tools: bool = False
     allow_skill_changes: bool = False
+    allow_skill_creation: bool = False
     tool_candidates: dict[ToolName, str] = Field(default_factory=dict)
     skill_candidates: dict[SkillName, str] = Field(default_factory=dict)
     max_guidance_chars: int = Field(default=16000, ge=1, le=1000000)
@@ -100,14 +110,34 @@ class OptimizationConstraints(StrictModel):
     ] = ()
 
 
+class OptimizationEditSummary(StrictModel):
+    """File authors return an explanation; files are the sole change source."""
+    rationale: str = Field(min_length=1)
+
+
 class OptimizationPatch(StrictModel):
     rationale: str = Field(min_length=1)
+    system_prompt: VerbatimText | None = Field(
+        default=None, description="Complete production system prompt replacing the current target prompt."
+    )
     tool_definitions: dict[ToolName, GeneratedTool] = Field(default_factory=dict)
-    instruction_guidance: VerbatimText | None = None
+    skill_definitions: dict[SkillName, VerbatimText] = Field(default_factory=dict)
+    instruction_guidance: VerbatimText | None = Field(
+        default=None, description="Deprecated legacy overlay; use system_prompt for whole-prompt optimization."
+    )
     files: dict[str, VerbatimText] = Field(default_factory=dict)
+    deleted_files: tuple[str, ...] = ()
     budgets: dict[str, Any] = Field(default_factory=dict)
     tools: tuple[ToolName, ...] | None = None
     skills: tuple[SkillName, ...] | None = None
+
+    @model_validator(mode="after")
+    def one_instruction_source(self):
+        if self.system_prompt is not None and self.instruction_guidance is not None:
+            raise ValueError("system_prompt and instruction_guidance are mutually exclusive")
+        if self.system_prompt is not None and not self.system_prompt.strip():
+            raise ValueError("system_prompt must not be empty")
+        return self
 
 
 class OptimizationObservation(StrictModel):
@@ -120,10 +150,43 @@ class OptimizationObservation(StrictModel):
     cost: float | None = Field(default=None, ge=0, allow_inf_nan=False)
 
 
+class OptimizationFinding(StrictModel):
+    category: str = Field(min_length=1, max_length=80)
+    cause: str = Field(min_length=1, max_length=2000)
+    evidence_indexes: tuple[int, ...] = Field(min_length=1, max_length=12)
+    recommendation: str = Field(min_length=1, max_length=2000)
+    scope: Literal["instructions", "skills", "tools", "procedure"]
+    confidence: Literal["confirmed", "hypothesis"]
+
+
+class OptimizationDiagnosis(StrictModel):
+    summary: str = Field(min_length=1, max_length=2000)
+    findings: tuple[OptimizationFinding, ...] = Field(default=(), max_length=8)
+    strengths: tuple[str, ...] = Field(default=(), max_length=4)
+    uncertainties: tuple[str, ...] = Field(default=(), max_length=4)
+    coverage: str = Field(min_length=1, max_length=1000)
+
+
+class OptimizationPriority(StrictModel):
+    title: str = Field(min_length=1, max_length=160)
+    cause: str = Field(min_length=1, max_length=2000)
+    recommendation: str = Field(min_length=1, max_length=2000)
+    scope: Literal["instructions", "skills", "tools", "procedure"]
+    supporting_case_ids: tuple[str, ...] = Field(min_length=1, max_length=100)
+
+
+class OptimizationDiagnosisSummary(StrictModel):
+    summary: str = Field(min_length=1, max_length=2000,
+        description="Brief synthesis, preferably under 600 characters. Put detailed actions in priorities, not a repeated numbered plan in summary.")
+    priorities: tuple[OptimizationPriority, ...] = Field(default=(), max_length=8)
+    uncertainties: tuple[str, ...] = Field(default=(), max_length=8)
+
+
 class OptimizationGrade(StrictModel):
     score: float = Field(ge=0, le=1, allow_inf_nan=False)
     passed: bool
     rationale: str = Field(min_length=1)
+    diagnosis: OptimizationDiagnosis | None = None
 
 
 class OptimizationDialogueReply(StrictModel):
@@ -151,6 +214,7 @@ class OptimizationCaseTrial(StrictModel):
 class OptimizationCaseResult(OptimizationCaseTrial):
     case: OptimizationCase
     trials: tuple[OptimizationCaseTrial, ...] = ()
+    contrast: OptimizationDiagnosis | None = None
 
 
 class OptimizationEvaluation(StrictModel):
@@ -318,6 +382,9 @@ class OptimizationReport(StrictModel):
     termination: OptimizationTermination | None = None
     internal_agents: dict[str, OptimizationAgent] = Field(default_factory=dict)
     evaluation_repeats: int = 1
+    evaluation_aggregation: Literal["minimum", "mean"] = "minimum"
+    grow_training: bool = True
+    refresh_incumbent: bool = False
     final_verification: OptimizationFinalVerification | None = None
     optimization_scope: tuple[OptimizationPart, ...] | None = None
 

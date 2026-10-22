@@ -37,6 +37,7 @@ OPS = {
     "in",
     "concat",
     "coalesce",
+    "filter", "map", "sort", "length", "sum", "at",
 }
 
 
@@ -65,6 +66,8 @@ def _check(value, depth=0, count=None):
                 "sub": (2, 2),
                 "div": (2, 2),
                 "in": (2, 2),
+                "filter": (2, 2), "map": (2, 2), "sort": (2, 2),
+                "length": (1, 1), "sum": (1, 1), "at": (2, 2),
             }.get(value["op"], (1, 32))
             if not arity[0] <= len(value["args"]) <= arity[1]:
                 raise ValueError("invalid generated tool operation arity")
@@ -114,34 +117,65 @@ class GeneratedTool(StrictModel):
 
 
 def evaluate(expression, arguments):
-    def walk(value):
+    steps = 0
+
+    def walk(value, environment=None):
+        nonlocal steps
+        steps += 1
+        if steps > 20000:
+            raise ValueError("generated tool execution exceeds step bound")
+        environment = arguments if environment is None else environment
         if isinstance(value, list):
-            return [walk(v) for v in value]
+            return [walk(v, environment) for v in value]
         if not isinstance(value, dict):
             return value
         if "var" in value:
-            result = arguments
+            result = environment
             for part in value["var"].split("."):
-                result = result.get(part) if isinstance(result, dict) else None
+                result = (result.get(part) if isinstance(result, dict) else
+                          result[int(part)] if isinstance(result, list) and part.isdigit() and int(part) < len(result) else None)
             return result
         if "op" not in value:
-            return {k: walk(v) for k, v in value.items()}
+            return {k: walk(v, environment) for k, v in value.items()}
         op, args = value["op"], value["args"]
+        if op in {"filter", "map", "sort"}:
+            items = walk(args[0], environment)
+            if not isinstance(items, list) or len(items) > 256:
+                raise ValueError("collection operations require an array of at most 256 items")
+            def project(item):
+                return walk(args[1], {**environment, "item": item})
+            if op == "filter":
+                return [item for item in items if project(item)]
+            if op == "map":
+                return [project(item) for item in items]
+            return sorted(items, key=project)
         if op == "if":
-            return walk(args[1] if walk(args[0]) else args[2])
+            return walk(args[1] if walk(args[0], environment) else args[2], environment)
         if op == "and":
-            return all(walk(a) for a in args)
+            return all(walk(a, environment) for a in args)
         if op == "or":
-            return any(walk(a) for a in args)
+            return any(walk(a, environment) for a in args)
         if op == "coalesce":
             for a in args:
-                result = walk(a)
+                result = walk(a, environment)
                 if result is not None:
                     return result
             return None
-        values = [walk(a) for a in args]
+        values = [walk(a, environment) for a in args]
         a = values[0]
         b = values[1] if len(values) > 1 else None
+        if op in {"length", "sum", "at"}:
+            if not isinstance(a, list) or len(a) > 256:
+                raise ValueError("collection operation requires a bounded array")
+            if op == "length":
+                return len(a)
+            if op == "at":
+                if type(b) is not int or not -len(a) <= b < len(a):
+                    raise ValueError("array index is out of range")
+                return a[b]
+            if any(type(v) not in (int, float) or not math.isfinite(v) or abs(v) > 1e15 for v in a):
+                raise ValueError("sum requires bounded finite numbers")
+            return sum(a)
         if op == "not":
             return not a
         if op == "eq":

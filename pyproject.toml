@@ -86,14 +86,15 @@ sage-rsi-mcp = "app.v2.cli.rsi_mcp:main"
 include-package-data = true
 
 [tool.setuptools.packages.find]
-include = ["sagents*", "app", "app.v1*", "app.v2", "app.v2.cli*", "app.v2.server*", "app.v2.desktop", "app.v2.desktop.backend*", "app.clients*", "mcp_servers.anytool*"]
-exclude = ["tests*", "app.v1.desktop*", "app.skills*", "app.wiki*", "assets*", "logs*"]
+include = ["sagents*", "app", "app.v1*", "app.v2", "app.v2.cli*", "app.v2.server*", "app.v2.desktop", "app.v2.desktop.backend*", "app.clients*", "mcp_servers.anytool*", "evaluation_datasets*"]
+exclude = ["tests*", "app.v1.desktop*", "app.skills*", "app.wiki*", "assets*", "logs*", "evaluation_datasets.*.vendor*", "evaluation_datasets.*.data*"]
 
 [tool.setuptools.data-files]
 "share/sage/docs/en" = ["docs/en/*.md"]
 "share/sage/docs/zh" = ["docs/zh/*.md"]
 
 [tool.setuptools.package-data]
+"evaluation_datasets" = ["**/*.json", "**/*.md", "**/*.txt", "**/*.py", "**/*.toml", "**/LICENSE"]
 "app.v1" = ["requirements*.txt"]
 "app.clients.terminal" = [
   "bin/*/run-sage-terminal.sh",

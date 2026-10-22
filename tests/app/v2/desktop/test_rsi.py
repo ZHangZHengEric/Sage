@@ -4,6 +4,7 @@ from typing import TYPE_CHECKING, cast
 if TYPE_CHECKING:
     from typing import Any, Literal
 
+from sagents.v2.agent.management import AgentPackageBundle
 from sagents.v2.contracts.items import TextBlock
 
 import asyncio
@@ -33,6 +34,48 @@ from sagents.v2.model.contracts import (
     ModelStreamEvent,
     ModelToolCall,
 )
+
+
+def authored_response(request, payload, changes):
+    """Scripted model authors real package files through the runtime file tools."""
+    if any(m.role == "tool" and str(m.tool_call_id).startswith("author-") for m in request.messages):
+        return ModelResponse(response_id="authored", text=json.dumps({"rationale": changes["rationale"]}), finish_reason="stop")
+    data = payload["data"]
+    manifest = data["package"]["manifest"]
+    identity = data["agent_id"]
+    files = {}
+    if changes.get("system_prompt"):
+        files[data["candidate_workspace"]["system_prompt"]] = changes["system_prompt"]
+    for name, spec in changes.get("tool_definitions", {}).items():
+        files[f"package/files/tools/rsi/{name}.json"] = json.dumps(spec)
+    for key in ("tools", "skills"):
+        if key in changes:
+            manifest["agents"][identity][key] = changes[key]
+    if changes.get("tool_definitions") or changes.get("skills"):
+        # Keep the prompt's staged resource reference in the authored manifest.
+        manifest["agents"][identity]["instructions"] = {"path": data["candidate_workspace"]["system_prompt"].removeprefix("package/files/")}
+        files["package/manifest.json"] = json.dumps(manifest)
+    return ModelResponse(response_id="author", finish_reason="tool_calls", tool_calls=tuple(
+        ModelToolCall(tool_call_id=f"author-{i}", name="file_write", arguments={"file_path": name, "content": content})
+        for i, (name, content) in enumerate(files.items())
+    ))
+
+
+def authored_evaluation_response(request, payload, answer):
+    if payload.get('data', {}).get('protocol') != 'sage.rsi.evaluation-files/v1':
+        return None
+    completed = {m.tool_call_id for m in request.messages if m.role == 'tool'}
+    ranges = payload['data']['read_ranges']
+    if not all(f'read-evaluation-{i}' in completed for i in range(len(ranges))):
+        return ModelResponse(response_id='read-evaluation', finish_reason='tool_calls', tool_calls=tuple(
+            ModelToolCall(tool_call_id=f'read-evaluation-{i}', name='file_read', arguments={
+                'file_path': 'inputs/record.json', 'start_line': first, 'end_line': last, 'include_line_numbers': False})
+            for i, (first, last) in enumerate(ranges)))
+    if 'write-evaluation' not in completed:
+        return ModelResponse(response_id='write-evaluation', finish_reason='tool_calls', tool_calls=(
+            ModelToolCall(tool_call_id='write-evaluation', name='file_write', arguments={
+                'file_path': 'assessment.json', 'content': json.dumps(answer)}),))
+    return ModelResponse(response_id='assessment-saved', text='Assessment file saved', finish_reason='stop')
 
 
 class RsiModel(ScriptedModelProvider):
@@ -91,10 +134,10 @@ class RsiModel(ScriptedModelProvider):
             answer = dict(
                 approved=True, rationale="Goal and suites are consistent", issues=[]
             )
-        elif "instruction_guidance" in properties:
+        elif "instruction_guidance" in properties or set(properties) == {"rationale"}:
             answer = dict(
                 rationale="Reusable arithmetic verification",
-                instruction_guidance="Verify calculations before answering.",
+                system_prompt="Answer accurately. Verify calculations before answering.",
             )
         elif "score" in properties:
             answer = dict(
@@ -123,6 +166,14 @@ class RsiModel(ScriptedModelProvider):
                 )
                 return
             answer = "42"
+        if set(properties) == {"rationale"}:
+            yield ModelStreamEvent(kind=ModelEventKind.COMPLETED,
+                response=authored_response(request, json.loads(raw), answer))
+            return
+        evaluation = authored_evaluation_response(request, json.loads(raw), answer) if properties else None
+        if evaluation is not None:
+            yield ModelStreamEvent(kind=ModelEventKind.COMPLETED, response=evaluation)
+            return
         yield ModelStreamEvent(
             kind=ModelEventKind.COMPLETED,
             response=ModelResponse(
@@ -131,6 +182,53 @@ class RsiModel(ScriptedModelProvider):
                 finish_reason="stop",
             ),
         )
+
+
+@pytest.mark.asyncio
+async def test_desktop_tuner_reads_training_evidence_without_granting_target_file_access(tmp_path, monkeypatch):
+    class EvidenceReader(RsiModel):
+        reads = 0
+        async def _stream(self, request):
+            if any(t.name == 'file_update' for t in request.tools):
+                assert {t.name for t in request.tools} == {'file_read', 'file_write', 'file_update'}
+                responses = [m for m in request.messages if m.role == 'tool']
+                if not responses:
+                    self.requests.append(request)
+                    self.reads += 1
+                    yield ModelStreamEvent(kind=ModelEventKind.COMPLETED, response=ModelResponse(
+                        response_id='read-evidence', finish_reason='tool_calls', tool_calls=(
+                            ModelToolCall(tool_call_id='read-evidence', name='file_read',
+                                arguments={'file_path': 'evidence/training-evidence/index.json', 'include_line_numbers': False}),)))
+                    return
+                rendered = '\n'.join(m.model_dump_json() for m in responses)
+                assert 'reading_order' in rendered and 'rejected_attempts' in rendered, rendered
+                assert '40 plus 2?' not in rendered
+            async for event in super()._stream(request):
+                yield event
+    model = EvidenceReader()
+    service, agent_id = await setup_service(tmp_path, monkeypatch, model)
+    try:
+        before = await service._agent(agent_id, 'alice')
+        started = await service.start_rsi(agent_id, start_request().model_copy(update={'rounds': 1}), 'alice')
+        await service._rsi_tasks[started['id']]
+        run = await service.rsi_run(agent_id, started['id'], 'alice')
+        assert run['status'] == 'completed', run
+        assert model.reads == 1
+        workspace = await service.workspace_root(run['workspace_id'], agent_id)
+        assert str(workspace) == run['workspace_path']
+        assert workspace == service.runtime_root / 'rsi' / started['id'] / 'workspace'
+        assert (workspace / 'iterations/round-001/editor/evidence/training-evidence/index.json').exists()
+        assert (workspace / 'iterations/round-000/evaluation/training-evidence/index.json').exists()
+        assert (workspace / 'iterations/round-001/input/training-evidence/index.json').exists()
+        assert not (workspace / 'audit.jsonl').exists()
+        content, _ = await service.read_file(run['workspace_id'], agent_id, 'iterations/round-001/editor/evidence/training-evidence/index.json')
+        assert json.loads(content)['reading_order'] == ['mixed', 'failed', 'passed']
+        with pytest.raises(PermissionError):
+            await service.read_file(run['workspace_id'], agent_id, '../audit.jsonl')
+        assert (await service._agent(agent_id, 'alice')).config == before.config
+        assert before.config['availableTools'] == []
+    finally:
+        await service.close()
 
 
 async def setup_service(tmp_path, monkeypatch, model):
@@ -180,6 +278,8 @@ def start_request(request_id="request-1"):
             )
         ),
         validation_case_count=1,
+        initial_training_case_count=1,
+        training_cases_per_round=1,
     )
 
 
@@ -234,9 +334,7 @@ async def test_native_background_rounds_versions_confirmation_cas_and_restart(
         assert version["review"]["approved"]
         assert (
             "Verify calculations"
-            in version["package"]["manifest"]["agents"][agent_id]["instructions"][
-                "inline"
-            ]
+            in AgentPackageBundle.model_validate(version["package"]).resolved_manifest().agents[agent_id].instructions.inline
         )
         assert "secret-test-key" not in json.dumps(run)
         await service.patch_agent_settings(
@@ -630,6 +728,10 @@ async def test_snapshot_preserves_external_tools_for_rsi_binding_rejection(
 @pytest.mark.parametrize(
     "options",
     [
+        {"initial_training_case_count": 0},
+        {"initial_training_case_count": 101},
+        {"training_cases_per_round": -1},
+        {"training_cases_per_round": 101},
         {"validation_case_count": 0},
         {"test_case_count": 101},
         {"max_concurrency": 0},
@@ -659,8 +761,8 @@ class ToolCreatingRsiModel(RsiModel):
             )
         except ValueError:
             properties = {}
-        if "instruction_guidance" in properties:
-            # Tuner returns a new implementation, not a pre-existing native tool.
+        if "instruction_guidance" in properties or set(properties) == {"rationale"}:
+            # Tuner writes a new implementation, not a pre-existing native tool.
             answer = {
                 "rationale": "Move arithmetic into a reusable pure calculator",
                 "tools": ["rsi_multiply"],
@@ -683,6 +785,10 @@ class ToolCreatingRsiModel(RsiModel):
                     }
                 },
             }
+            if set(properties) == {"rationale"}:
+                yield ModelStreamEvent(kind=ModelEventKind.COMPLETED,
+                    response=authored_response(request, json.loads(raw), answer))
+                return
             yield ModelStreamEvent(
                 kind=ModelEventKind.COMPLETED,
                 response=ModelResponse(
@@ -873,5 +979,136 @@ async def test_independent_test_generation_uses_requested_count_and_separate_sto
         assert [r['round'] for r in run['test_observations']] == [0, 1]
         assert all(len(r['cases']) == 2 and r['status'] == 'completed' for r in run['test_observations'])
         assert not any(marker in json.dumps(run['result']) for marker in ('Independent sealed probe',))
+    finally:
+        await service.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.timeout(180)
+async def test_interrupted_rsi_resumes_same_run_after_service_restart_without_repeating_cases(tmp_path, monkeypatch):
+    class CutSecondTuning(RsiModel):
+        cut = True
+        target_calls = 0
+        async def _stream(self, request):
+            messages = [m for m in request.messages if m.role == 'user']
+            raw = ''.join(block.text for block in messages[-1].content if hasattr(block, 'text'))
+            if '<user_request>' in raw:
+                raw = raw.split('<user_request>', 1)[1].rsplit('</user_request>', 1)[0].strip()
+            try:
+                data = json.loads(raw)
+            except ValueError:
+                data = {}
+            props = data.get('response_schema', {}).get('properties', {})
+            if ('instruction_guidance' in props or set(props) == {'rationale'}) and data['data']['round'] == 2 and self.cut:
+                raise ConnectionError('Simulated interruption before second proposal')
+            if not props:
+                self.target_calls += 1
+            async for event in super()._stream(request):
+                yield event
+    first = CutSecondTuning()
+    service, agent_id = await setup_service(tmp_path, monkeypatch, first)
+    run = await service.start_rsi(agent_id, start_request(), 'alice')
+    await service._rsi_tasks[run['id']]
+    old = await service.rsi_run(agent_id, run['id'], 'alice')
+    assert old['status'] == 'failed' and old['resumable']
+    original_completed = [e for e in old["events"] if e["event"] == "case_completed"]
+    assert first.target_calls == len(original_completed) >= 4
+    old_sequence = old['sequence']
+    await service.close()
+    second = CutSecondTuning()
+    second.cut = False
+    reopened = DesktopV2Service(tmp_path)
+    async def bind(*args, **kwargs):
+        return second
+    monkeypatch.setattr(reopened, '_model_provider', bind)
+    try:
+        import httpx
+        from app.v2.desktop.backend.app import create_app
+        monkeypatch.setattr('app.v2.desktop.backend.app.get_desktop_user_id', lambda request: 'alice')
+        app = create_app(service=reopened, auth_token='resume-test-token')
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url='http://desktop') as client:
+            endpoint = f"/api/v2/agents/{agent_id}/rsi/runs/{run['id']}/resume"
+            assert (await client.post(endpoint)).status_code == 401
+            response = await client.post(endpoint, headers={'Authorization': 'Bearer resume-test-token'})
+            assert response.status_code == 200, response.text
+            continuing = response.json()['data']
+        assert continuing['id'] == run['id']
+        await reopened._rsi_tasks[run['id']]
+        finished = await reopened.rsi_run(agent_id, run['id'], 'alice')
+        assert finished['status'] == 'completed', finished
+        assert finished['resume_count'] == 1
+        assert finished['workspace_id'] == old['workspace_id']
+        assert finished['workspace_path'] == old['workspace_path']
+        settings = await reopened.get_settings()
+        assert sum(p.id == finished['workspace_id'] for p in settings.projects) == 1
+        workspace = await reopened.workspace_root(finished['workspace_id'], agent_id)
+        assert (workspace / 'iterations/round-000/evaluation.json').exists()
+        assert (workspace / 'iterations/round-003/decision.json').exists()
+        recovered_cases = [e for e in finished["events"] if e["event"] == "case_completed" and e["data"].get("recovered")]
+        assert len(recovered_cases) == len(original_completed)
+        assert second.target_calls == len([e for e in finished["events"] if e["event"] == "target_call_started"])
+        assert len(finished['result']['report']['rounds']) == 3
+        assert finished['events'][0]['sequence'] > old_sequence
+        root = reopened.runtime_root / 'rsi' / run['id']
+        assert (root / 'audit.jsonl').exists()
+        assert (root / finished['journal_name']).exists()
+        assert (root / 'resume-context.json').stat().st_mode & 0o777 == 0o600
+        with pytest.raises(ValueError, match='cannot resume'):
+            await reopened.resume_rsi(agent_id, run['id'], 'alice')
+    finally:
+        await reopened.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.timeout(180)
+async def test_five_transient_gateway_failures_recover_automatically_without_repeating_completed_cases(tmp_path, monkeypatch):
+    from sagents.v2.optimization.contracts import OptimizationObservation
+    class GatewayModel(RsiModel):
+        failures = 0
+        target_calls = 0
+        async def _stream(self, request):
+            messages = [m for m in request.messages if m.role == 'user']
+            raw = ''.join(block.text for block in messages[-1].content if hasattr(block, 'text'))
+            if '<user_request>' in raw:
+                raw = raw.split('<user_request>', 1)[1].rsplit('</user_request>', 1)[0].strip()
+            try:
+                data = json.loads(raw)
+            except ValueError:
+                data = {}
+            props = data.get('response_schema', {}).get('properties', {})
+            if not props:
+                self.target_calls += 1
+            async for event in super()._stream(request):
+                yield event
+    model = GatewayModel()
+    service, agent_id = await setup_service(tmp_path, monkeypatch, model)
+    from sagents.v2 import IsolatedOptimizationRunner
+    original_run = IsolatedOptimizationRunner.run
+    failures = []
+    async def interrupted_run(runner, package, agent_id, content, context):
+        if package.manifest.metadata.id == 'desktop.rsi.tuner' and json.loads(content)['data']['round'] == 2 and len(failures) < 5:
+            failures.append(1)
+            return OptimizationObservation(state='failed', evidence={'error': {
+                'code': 'model.provider_transient', 'provider_code': '502', 'retryable': True}})
+        return await original_run(runner, package, agent_id, content, context)
+    monkeypatch.setattr(IsolatedOptimizationRunner, 'run', interrupted_run)
+    delays = []
+    async def wait(seconds):
+        delays.append(seconds)
+        stored = service.rsi_store.list('alice', agent_id, 'run')[0]
+        displayed = await service.rsi_run(agent_id, stored['id'], 'alice')
+        assert displayed['events']  # waiting retains the previous audit, not a blank page
+        assert displayed['status'] == 'running'
+    monkeypatch.setattr(service, '_rsi_retry_wait', wait)
+    try:
+        request = start_request().model_copy(update={'grow_training': False})
+        run = await service.start_rsi(agent_id, request, 'alice')
+        await service._rsi_tasks[run['id']]
+        final = await service.rsi_run(agent_id, run['id'], 'alice')
+        assert final['status'] == 'completed', final
+        assert final['automatic_recoveries'] == 5
+        assert delays == [2, 4, 8, 16, 32]
+        assert model.target_calls == 8  # baseline pair + three candidate pairs, no repeated executions
+        assert len(final['result']['report']['rounds']) == 3
     finally:
         await service.close()

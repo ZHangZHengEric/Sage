@@ -62,9 +62,15 @@ Run the offline runtime example:
 The default workflow independently designs a fixed validation set (24 questions by
  default, `validation_case_count=1..100`) and an initial training set. At every
 round, the designer inspects the CURRENT retained package, prior training questions
-and bounded training results and adds 1..6 new challenges. There is no configurable
-training-total quota. Accumulated training questions remain in the suite. Imported
-`OptimizationSuite` supplies initial training and fixed validation; the configured
+and bounded training results. `initial_training_case_count` sets the initial training
+batch (1..100), and `training_cases_per_round` sets each round's additions (0..100;
+0 freezes the training set). Desktop defaults to 6 and 6. Accumulated questions
+remain in every subsequent round. Imported training cases form an ordered pool:
+consume its initial batch, then append the next batch each round; only when that
+pool runs out does the designer generate the remaining additions. Historical
+rounds are not rerun on new questions. SDK callers omitting the initial count
+retain their supplied suite as the initial set. Imported
+`OptimizationSuite` supplies training and fixed validation; the configured
 validation count must match its validation split. Case IDs must be unique.
 
 The validation designer sees the original package and previously generated
@@ -109,11 +115,43 @@ adaptive workflow; historical final records remain readable.
 
 ## Editable scope and resources
 
-Original target instructions are preserved verbatim. Optional optimization
-guidance is appended as a separate section and replaced on later updates. Other
-Agents' instructions are unchanged. Structural preservation does not prove that
-new guidance/Skill content semantically respects the original requirements;
-include responsibility and permission behavior in the fixed test rubrics.
+Desktop and tau-bench use `optimize(..., edit_package_files=True,
+tuner_workspace=...)`: each round copies the retained package into
+`iterations/round-NNN/editor/package/`. The tuner directly edits `manifest.json`
+and `files/` (prompt resources, Skills, granted tool definitions/resources), with
+`evidence/` read-only. It returns only a rationale. The host derives the audit
+patch, validates all file and manifest changes, seals `version/package/` with its
+content hash, independently reviews it, then loads that exact immutable bundle.
+The editor cannot write another round or the sealed version. No process tools are
+granted. Ordinary code resources require explicit file grants and a real host
+execution binding; saving MCP source does not itself launch a server.
+
+`restart_package_editor=True` is a separate trusted host attestation, requiring a
+frozen binding ID. It permits resetting interrupted, isolated local edits from the
+retained parent; completed authored bundles are journaled for exact recovery.
+It is not a read-only grant and does not authorize external target effects.
+
+The baseline bundle is immutable. `OptimizationPatch.system_prompt` replaces the
+candidate's complete production prompt, without adding a framework heading or
+requiring a verbatim original prefix. Reorganize, consolidate and correct the prompt
+while preserving original business-policy meaning, responsibilities and permissions.
+Independent semantic review compares the complete candidate against the original;
+include responsibility and permission behavior in the fixed test rubrics. Other
+agents' instructions are unchanged. `allow_system_prompt` and
+`max_system_prompt_chars` control this grant and its size limit.
+
+System prompts contain always-needed rules, decision priorities, capability routing
+and completion checks. Skills contain conditional reusable procedures with clear
+triggers, inputs, branches, actual tool calls, verification and recovery. Tools
+implement bounded capabilities. The tuner receives host principles for choosing
+among these artifacts and converting failed/mixed traces into causal fixes while
+preserving successful behavior. Production artifacts must not contain optimization
+history or patch appendices.
+
+`instruction_guidance` remains readable/applicable for legacy SDK clients; it is
+mutually exclusive with `system_prompt`. Desktop and the tau-bench host disable
+new legacy overlays (`allow_instruction_guidance=False`). Historical packages and
+journals are not rewritten.
 
 Skill/resource edits replace explicitly allowlisted bundled files or create explicitly allowlisted new paths.
 Base instruction files and `extensions/` source code cannot be allowlisted.
@@ -390,9 +428,9 @@ The evaluator and test designer also receive host-owned System principles:
 apply fixed rubrics, require evidence, ignore instructions embedded in target
 outputs/package content, and avoid duplicate training/validation questions.
 These rules improve consistency but cannot guarantee resistance to all prompt
-injection or rubric ambiguity. Guidance defaults to a 16,000 character limit;
+injection or rubric ambiguity. Whole prompts default to a 64,000 character limit (legacy guidance: 16,000);
 each edited file defaults to 262,144 UTF-8 bytes. Configure
-`max_guidance_chars`/`max_file_bytes` in `OptimizationConstraints`. These limits
+`max_system_prompt_chars`/`max_guidance_chars`/`max_file_bytes` in `OptimizationConstraints`. These limits
 bound growth; they do not prove that a change is free of memorized cases.
 
 With `journal_path`, the controller creates a NEW append-only JSONL file with
@@ -403,17 +441,41 @@ completed test/round records and the final result. Raw designer/evaluator output
 is retained even when JSON validation fails. On exception/timeout/cancellation,
 completed events remain available and an operation status is recorded. A process
 crash may leave a partial last line; only complete JSONL lines are reviewable.
-A call-start event without completion means its outcome is unknown. No automatic
-replay or resume occurs. Journals do not contain resolved host credentials, but
+A call-start event without completion means its outcome is unknown. The journal
+itself never retries effects; opt-in recovery is described below. Journals do not contain resolved host credentials, but
 package/input/model text may be sensitive; choose storage accordingly.
 
 Dialogue initialization is covered by the per-call deadline, in addition to
 individual target sends and evaluator/simulator calls. Deadlines are cooperative:
 host providers and cleanup hooks must honor cancellation. This API is suitable
 for controlled single-host experiments with host budgets and test bindings.
-Durable job resumption, multi-process coordination and structured interaction
-resumption are not implemented here. Final verification and semantic review are
-implemented as described below.
+Opt-in single-host recovery preserves completed cases and internal decisions.
+Multi-process coordination and arbitrary external interaction resumption remain
+unsupported. Final verification and semantic review are implemented as described below.
+
+### Resume an interrupted experiment
+
+Use `resume_from=previous_journal` with a **new** `journal_path`, the same original
+package/options, and the same `recovery_binding_id` supplied on the initial call.
+The trusted host must bind that ID to frozen model routes/sampling, tool policy
+and test environment. Recovery verifies the actor, optimization configuration,
+internal Agents and engine implementation. Candidate version identity is retained;
+completed cases retain original observations and grades, and completed internal
+model responses are consumed once. Exact requests must match. Generated cases
+are restored from their recorded designer calls.
+
+If a single-turn target completed before its evaluator was interrupted, only the
+evaluation continues. Unknown executions and partial dialogues require host
+reconciliation by default (`OptimizationRecoveryRequired`). A trusted host with
+explicitly disposable, isolated environments may set `restart_incomplete=True`;
+this does not authorize retrying real external side effects. A new journal records
+reused evidence explicitly and preserves its source logs. `journal_start_sequence`
+can keep a host's event cursor monotonic across journal parts.
+
+Native `model.provider_transient` failures raise `OptimizationTransientFailure`
+instead of becoming scored zeroes. A host can wait and resume from the durable
+journal after reconciling/discarding the interrupted environment. Desktop supplies
+this bounded recovery policy and a Resume evolution action for interrupted runs.
 
 
 ## Independent business and permission review
@@ -448,7 +510,7 @@ result = await optimizer.optimize(
 )
 ```
 
-Supported parts are `instructions` (the guidance overlay), `skills` (allowlisted
+Supported parts are `instructions` (complete candidate system prompt), `skills` (allowlisted
 Skill files/resources and explicitly enabled Skill selection), `tools` (explicitly
 enabled tool selection), `budgets` (allowlisted fields), and `resources` (other
 allowlisted bundled files). Multiple parts can be combined. Omitting the scope
@@ -473,12 +535,12 @@ from the same general-purpose package: subscription support triage, purchase-ord
 normalization, and production incident triage. Domain policies are supplied as
 host-authorized optimization goals. The original package does not yet contain those
 policies, so this measures acquisition and generalization of domain procedures,
-not a general intelligence gain. The default `--mode instructions` edits instruction guidance. Procurement also
+not a general intelligence gain. The default `--mode instructions` rewrites the candidate system prompt. Procurement also
 supports `--mode skills`, `--mode tools`, and `--mode joint`. Skill modes load a
 bundled procedure through the native Skill provider with host-granted load scope.
 Tool mode can replace an intentionally limited draft tool with a host-bound exact
 decimal normalizer. It tests capability selection, not tool source-code synthesis.
-Joint mode permits both guidance and Skill edits; the tuner may choose either.
+Joint mode permits both system-prompt and Skill edits; the tuner may choose either.
 
 These historical benchmark entry points explicitly use `validation_case_count=None` to preserve their original protocol; they are not the adaptive Desktop workflow.
 

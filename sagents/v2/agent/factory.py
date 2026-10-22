@@ -87,8 +87,9 @@ class AgentCompositionFactory:
         enabled_skills: tuple[str, ...] | None = None,
         workspace_root: str = "/workspace",
         skill_loading=None,
+        runtime_skills=(),
     ) -> SkillLoader:
-        """Create a lazy loader restricted to the Agent's resolved Skill ceiling."""
+        """Compose the static Skill ceiling with explicitly admitted attachments."""
 
         agent = resolved.agents[agent_id]
         ceiling = resolved.policy_ceilings[agent_id]
@@ -163,11 +164,16 @@ class AgentCompositionFactory:
                 config.update(selection.config)
             skill_loading = SkillLoadingPlugin(**config)
 
+        filtered_catalog = InvocationGrantSkillCatalog(
+            FilteredSkillCatalog(catalog, selected),
+            self.runtime.session_store.get_start_command,
+        )
+        if runtime_skills:
+            from sagents.v2.skill.runtime import RuntimeSkillProvider
+            source = RuntimeSkillProvider(filtered_catalog, source, catalog, runtime_skills)
+            filtered_catalog = source
         return skill_loading.create_loader(
-            catalog=InvocationGrantSkillCatalog(
-                FilteredSkillCatalog(catalog, selected),
-                self.runtime.session_store.get_start_command,
-            ),
+            catalog=filtered_catalog,
             source=source,
             workspace=workspace,
             activations=activations,
@@ -320,6 +326,7 @@ class AgentCompositionFactory:
         memory_recall_query_generator: MemoryRecallQueryGenerator | None = None,
         goal_state_service: GoalStateService | None = None,
         additional_runtime_tools: tuple[str, ...] = (),
+        additional_preload_skills: tuple[str, ...] = (),
         granted_catalogs: tuple[ToolCatalog, ...] = (),
         fallback_invocation_mode: str | None = None,
         additional_context_providers: tuple[ContextSegmentProvider, ...] = (),
@@ -412,7 +419,7 @@ class AgentCompositionFactory:
             tool_executor=tool_executor,
             self_configuration=self_configuration,
             skill_loader=skill_loader,
-            preload_skills=agent.preload_skills,
+            preload_skills=(*agent.preload_skills, *additional_preload_skills),
             tool_policy=(tool_policy or DefaultToolPolicy()).with_approval_config(
                 agent.tool_approval
             ),

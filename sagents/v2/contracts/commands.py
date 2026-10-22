@@ -13,6 +13,7 @@ from sagents.v2.contracts.errors import RuntimeErrorInfo
 from sagents.v2.contracts.execution import ExecutionConfigurationSnapshot
 from sagents.v2.contracts.items import ContentBlock
 from sagents.v2.contracts.run_state import SessionConcurrencyMode
+from sagents.v2.contracts.runtime_skills import RuntimeSkillAttachment
 
 
 class CommandDecision(str, Enum):
@@ -39,9 +40,11 @@ class RunConfig(StrictModel):
     model_bindings: dict[str, str] = Field(default_factory=dict)
     # ``None`` means that a compatibility host did not provide a per-Run grant
     # and the resolved Agent defaults apply.  An empty tuple is an explicit
-    # least-privilege grant of no Tools/Skills.
+    # least-privilege grant of no package Tools/Skills. Runtime attachments use
+    # the independent App authorization ceiling and never grant execution tools.
     enabled_tools: tuple[ToolName, ...] | None = None
     enabled_skills: tuple[SkillName, ...] | None = None
+    skill_attachments: tuple[RuntimeSkillAttachment, ...] = ()
     max_steps: int | None = Field(default=None, gt=0)
     max_output_tokens: int | None = Field(default=None, gt=0)
     max_total_tokens: int | None = Field(default=None, gt=0)

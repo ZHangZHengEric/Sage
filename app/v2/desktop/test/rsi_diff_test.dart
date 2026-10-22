@@ -50,6 +50,74 @@ Map<String, Object?> run(List<Map<String, Object?>> records) => {
 };
 
 void main() {
+  testWidgets(
+    'round changes show only selected proposal and recorded rationale',
+    (tester) async {
+      final records = [
+        {
+          ...record(1, 'base-hash', 'first', true, package('first')),
+          'patch': {'rationale': 'Fix missing verification'},
+        },
+        {
+          ...record(2, 'first', 'second', false, package('second')),
+          'patch': {'rationale': 'Improve tool handling'},
+        },
+      ];
+      Future<void> render(int selected) async {
+        await tester.pumpWidget(
+          MaterialApp(
+            home: Scaffold(
+              body: RsiRoundChanges(
+                run: run(records),
+                events: const [],
+                settings: const LiquidGlassSettings(),
+                chinese: true,
+                selectedRound: selected,
+              ),
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+      }
+
+      await render(2);
+      expect(find.byKey(const ValueKey('rsi-round-diff-2')), findsOneWidget);
+      expect(find.byKey(const ValueKey('rsi-round-diff-1')), findsNothing);
+      expect(find.text('Improve tool handling'), findsOneWidget);
+      expect(find.text('Fix missing verification'), findsNothing);
+      await render(1);
+      expect(find.byKey(const ValueKey('rsi-round-diff-1')), findsOneWidget);
+      expect(find.byKey(const ValueKey('rsi-round-diff-2')), findsNothing);
+      expect(find.text('Fix missing verification'), findsOneWidget);
+      await render(0);
+      expect(find.text('基线轮，无进化改动'), findsOneWidget);
+      expect(find.byKey(const ValueKey('rsi-round-diff-1')), findsNothing);
+      await render(3);
+      expect(find.text('本轮暂无改动记录'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    },
+  );
+  test(
+    'file-backed system prompt appears once as instructions in the diff',
+    () {
+      final candidate = package(
+        'unused',
+        files: {'prompts/system.md': 'Rewritten prompt'},
+      );
+      final manifest = candidate['manifest'] as Map<String, Object?>;
+      final agents = manifest['agents'] as Map<String, Object?>;
+      (agents['main'] as Map<String, Object?>)['instructions'] = {
+        'path': 'prompts/system.md',
+      };
+      final diffs = collectRsiRoundDiffs(
+        run([record(1, 'base-hash', 'new', true, candidate)]),
+        [],
+      );
+      expect(diffs.single.changes, hasLength(1));
+      expect(diffs.single.changes.single.kind, 'instructions');
+      expect(diffs.single.changes.single.after, 'Rewritten prompt');
+    },
+  );
   test('diff follows actual retained parent after a rejected proposal', () {
     final records = [
       record(1, 'base-hash', 'first', true, package('base\nfirst')),
@@ -180,7 +248,13 @@ void main() {
                   'base-hash',
                   'first',
                   true,
-                  package('base\nnew guidance'),
+                  package(
+                    'base\nnew guidance',
+                    files: {
+                      'skills/check/SKILL.md':
+                          '# Verify\nVerify completed work.',
+                    },
+                  ),
                 ),
               ]),
               events: const [],
@@ -195,6 +269,22 @@ void main() {
       expect(find.text('第 1 轮改动 · 已采纳'), findsOneWidget);
       expect(find.text('基线 → R1'), findsOneWidget);
       expect(find.text('+ new guidance'), findsOneWidget);
+      expect(
+        tester.getTopLeft(find.byKey(const ValueKey('rsi-diff-content-0'))).dx,
+        greaterThanOrEqualTo(
+          tester
+              .getBottomRight(find.byKey(const ValueKey('rsi-diff-files')))
+              .dx,
+        ),
+      );
+      await tester.tap(find.byKey(const ValueKey('rsi-diff-file-1')));
+      await tester.pumpAndSettle();
+      expect(find.text('+ # Verify'), findsOneWidget);
+      expect(find.text('+ new guidance'), findsNothing);
+      expect(find.text('新增'), findsOneWidget);
+      tester.view.physicalSize = const Size(500, 900);
+      await tester.pumpAndSettle();
+      expect(find.text('+ # Verify'), findsOneWidget);
       expect(tester.takeException(), isNull);
     });
   }

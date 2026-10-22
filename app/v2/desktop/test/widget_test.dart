@@ -186,6 +186,9 @@ class _DelayedUsageApi extends _FakeApi {
 }
 
 class _FakeApi extends V2ApiClient {
+  List<McpConnectionSummary> mcpRecords = const [
+    McpConnectionSummary(name: 'filesystem', protocol: 'stdio', toolCount: 2),
+  ];
   final _sessionTreeEvents = StreamController<Map<String, Object?>>.broadcast();
   Map<String, Object?>? lastAgentPatch;
   String? lastCreatedAgentName;
@@ -601,9 +604,7 @@ Inspect the complete diff before reporting findings.
   }
 
   @override
-  Future<List<McpConnectionSummary>> listMcpConnections() async => const [
-    McpConnectionSummary(name: 'filesystem', protocol: 'stdio', toolCount: 2),
-  ];
+  Future<List<McpConnectionSummary>> listMcpConnections() async => mcpRecords;
 
   @override
   Future<List<ComponentSummary>> listComponents() async => const [
@@ -8305,6 +8306,43 @@ void main() {
       },
     );
   }
+
+  testWidgets(
+    'entering MCP settings refreshes connections added outside this window',
+    (tester) async {
+      tester.view.physicalSize = const Size(1200, 800);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final api = _FakeApi();
+      final controller = await _controller(api: api);
+      addTearDown(() => _disposeController(controller));
+      await tester.pumpWidget(SageDesktopV2App(controller: controller));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('settings-button')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('MCP').first);
+      await tester.pumpAndSettle();
+      expect(find.text('TauRetail'), findsNothing);
+      await tester.tap(find.text('通用').first);
+      await tester.pumpAndSettle();
+      api.mcpRecords = [
+        ...api.mcpRecords,
+        const McpConnectionSummary(
+          name: 'TauRetail',
+          protocol: 'stdio',
+          toolCount: 16,
+        ),
+      ];
+      await tester.tap(find.text('MCP').first);
+      await tester.pumpAndSettle();
+      expect(find.text('TauRetail'), findsOneWidget);
+      await tester.tap(find.text('TauRetail'));
+      await tester.pumpAndSettle();
+      expect(find.text('16'), findsWidgets);
+      expect(tester.takeException(), isNull);
+    },
+  );
 
   testWidgets('settings uses the two-pane shell', (tester) async {
     tester.view.physicalSize = const Size(1200, 800);
