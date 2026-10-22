@@ -17,18 +17,18 @@
 **Sage is an RSI Agent Harness** for improving agents through task feedback. RSI (Recursive Self-Improvement) starts from a goal or curated usage history, retains each version and its evidence, and leaves adoption in your hands.
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="assets/features-en-dark.svg">
-  <source media="(prefers-color-scheme: light)" srcset="assets/features-en-light.svg">
-  <img alt="Run · Evaluate · Evolve; Models and Context, Skills and MCP, Stateful Execution, Multi-agent, Sandbox and Approvals, Multiple Hosts" src="assets/features-en-light.svg" width="1200">
+  <source media="(prefers-color-scheme: dark)" srcset="assets/features-en-dark.png">
+  <source media="(prefers-color-scheme: light)" srcset="assets/features-en-light.png">
+  <img alt="Run · Evaluate · Evolve; Models and Context, Skills and MCP, Stateful Execution, Multi-agent, Sandbox and Approvals, Multiple Hosts" src="assets/features-en-light.png" width="1200">
 </picture>
 
 [Try RSI](docs/en/applications/FIRST_RSI_RUN.md) · [Download Desktop](https://github.com/ZHangZHengEric/Sage/releases/tag/v2.1.1) · [Python SDK](sagents/v2/README.md) · [Docs](docs/en/README.md)
 
 ## 🔄 How RSI works
 
-![Sage RSI: a goal or curated usage history feeds Runner execution, independent Evaluator grading, Tuner optimization, and version selection.](assets/rsi-agent-harness-en.svg)
+![Sage RSI: a goal or curated usage history feeds Runner execution, independent Evaluator grading, Tuner optimization, and version selection.](assets/rsi-agent-harness-en.png)
 
-[Workflow guide](docs/en/applications/RSI.md) · [Evaluation and selection rules](sagents/v2/optimization/README.md)
+[Workflow guide](docs/en/applications/RSI.md) · [Evaluation and selection rules](sagents/v2/optimization/README.md) · [Editable diagram (SVG)](assets/rsi-agent-harness-en.svg)
 
 ## 🚀 Get Started
 
