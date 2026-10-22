@@ -17,18 +17,18 @@
 **Sage 是一个 RSI Agent Harness**，让智能体从任务反馈中持续改进。RSI（Recursive Self-Improvement，递归自我改进）从目标或整理后的使用历史出发，保留每轮版本与证据，由你决定采用什么。
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="assets/features-zh-dark.svg">
-  <source media="(prefers-color-scheme: light)" srcset="assets/features-zh-light.svg">
-  <img alt="执行 · 评测 · 进化；模型与上下文、Skills 与 MCP、有状态执行、多智能体、沙箱与审批、多端接入" src="assets/features-zh-light.svg" width="1200">
+  <source media="(prefers-color-scheme: dark)" srcset="assets/features-zh-dark.png">
+  <source media="(prefers-color-scheme: light)" srcset="assets/features-zh-light.png">
+  <img alt="执行 · 评测 · 进化；模型与上下文、Skills 与 MCP、有状态执行、多智能体、沙箱与审批、多端接入" src="assets/features-zh-light.png" width="1200">
 </picture>
 
 [体验 RSI](docs/zh/applications/FIRST_RSI_RUN.md) · [下载 Desktop](https://github.com/ZHangZHengEric/Sage/releases/tag/v2.1.1) · [Python SDK](sagents/v2/README.md) · [文档](docs/zh/README.md)
 
 ## 🔄 RSI 如何迭代
 
-![Sage RSI：目标或整理后的使用历史进入 Runner 执行、Evaluator 独立评测、Tuner 优化及版本选择闭环。](assets/rsi-agent-harness-zh.svg)
+![Sage RSI：目标或整理后的使用历史进入 Runner 执行、Evaluator 独立评测、Tuner 优化及版本选择闭环。](assets/rsi-agent-harness-zh.png)
 
-[流程指南](docs/zh/applications/RSI.md) · [评测与版本选择规则](sagents/v2/optimization/README.md)
+[流程指南](docs/zh/applications/RSI.md) · [评测与版本选择规则](sagents/v2/optimization/README.md) · [可编辑原理图（SVG）](assets/rsi-agent-harness-zh.svg)
 
 ## 🚀 快速开始
 
