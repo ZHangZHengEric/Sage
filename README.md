@@ -304,6 +304,8 @@ Explore [`sagents/v2/`](sagents/v2/) for the runtime, [`app/v2/desktop/`](app/v2
 ## 💖 **Sponsors**
 
 <p align="center">
+  <a href="https://movoai.pro/"><img src="assets/sponsors/movo_mark.png" height="64" align="middle" alt="Movo" /></a>
+  &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
   <img src="assets/sponsors/xunhuanzhineng_logo.svg" height="40" align="middle" alt="RcrAI" />
   &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
   <img src="assets/sponsors/idata_mark.png" height="64" align="middle" alt="Data" />
