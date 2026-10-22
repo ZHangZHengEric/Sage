@@ -33,6 +33,7 @@ const defaultBaseUrls = {
   'anthropic-messages': 'https://api.anthropic.com',
   'gemini-generate-content': 'https://generativelanguage.googleapis.com/v1beta',
   orcarouter: 'https://api.orcarouter.ai/v1',
+  cheaperinference: 'https://api.cheaperinference.com/v1',
 }
 function emptyForm() { return { protocol: 'openai-chat-completions', base_url: 'https://api.openai.com/v1', model: '', api_key: '' } }
 function invalidate() { form.value.capability_profile = null }

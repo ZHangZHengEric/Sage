@@ -4,7 +4,7 @@ import { modelFieldHelp } from '../src/model-presentation.js'
 
 test('unset output budget explains the active protocol default', () => {
   assert.match(modelFieldHelp('request_max_output_tokens', { protocol: 'anthropic-messages' }), /默认使用 4,096 Token/)
-  for (const protocol of ['openai-chat-completions', 'openai-responses', 'gemini-generate-content', 'orcarouter']) {
+  for (const protocol of ['openai-chat-completions', 'openai-responses', 'gemini-generate-content', 'orcarouter', 'cheaperinference']) {
     assert.match(modelFieldHelp('request_max_output_tokens', { protocol }), /由服务商采用模型默认值/)
   }
 })

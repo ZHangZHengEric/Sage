@@ -4,6 +4,7 @@ export const protocols = {
   'anthropic-messages': 'Anthropic Messages',
   'gemini-generate-content': 'Gemini Generate Content',
   orcarouter: 'OrcaRouter',
+  cheaperinference: 'Cheaper Inference',
 }
 export const modelCapabilities = [
   ['multimodal', '多模态'], ['structured_output', 'JSON / Schema 输出'], ['tool_calling', '工具调用'],
@@ -27,6 +28,7 @@ export function providerIdentity(item) {
     'api.anthropic.com': ['Anthropic', 'A', 'clay'],
     'generativelanguage.googleapis.com': ['Google Gemini', 'G', 'blue'],
     'api.orcarouter.ai': ['OrcaRouter', 'O', 'ocean'],
+    'api.cheaperinference.com': ['Cheaper Inference', 'C', 'ocean'],
   }
   const [name, monogram, tone] = known[host] || [host || '自定义服务', host ? host[0].toUpperCase() : 'C', 'ocean']
   return { name, monogram, tone }

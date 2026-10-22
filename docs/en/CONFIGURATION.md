@@ -54,6 +54,29 @@ When `base_url` is omitted, the route uses the same OrcaRouter endpoint.
 This preset supports the existing chat protocol; it does not add image or
 video generation APIs.
 
+## Cheaper Inference models
+
+`cheaperinference` is an optional provider preset using the existing
+OpenAI-compatible Chat Completions implementation. In Server, select
+`cheaperinference` in the model form and enter your model ID (for example
+`gpt-5.4-mini`) and API key. The default endpoint is
+`https://api.cheaperinference.com/v1`; a custom Base URL is preserved.
+
+For an embedded manifest, add this model route and configure the referenced
+credential in the complete manifest:
+
+```yaml
+models:
+  primary:
+    provider: cheaperinference
+    model: gpt-5.4-mini
+    credential: cheaperinference_key
+```
+
+When `base_url` is omitted, the route uses the same Cheaper Inference endpoint.
+This preset supports the existing chat protocol; it does not add image or
+video generation APIs.
+
 ## Selecting runtime implementations
 
 Use `runtime.capabilities` for provider bindings. For example, the lazy Skill loader accepts a token budget:
