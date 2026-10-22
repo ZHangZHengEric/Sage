@@ -493,6 +493,7 @@ async def main(args):
         )
         result = await optimizer.optimize(
             target,
+        validation_case_count=None,
             context=context,
             goal="按照每个案例的原始目标完成多轮对话，尊重用户交互顺序并使用真实给出的事实。",
             rounds=1,
@@ -613,6 +614,7 @@ async def main(args):
     )
     result = await optimizer.optimize(
         target,
+        validation_case_count=None,
         context=context,
         goal=(
             "保持任务正确率，通过宿主提供的精确计算工具显著降低整数聚合任务耗时，并减少算术错误。基于训练记录耗时优化，即使答案已正确也允许提高效率。保留原始职责，不增加宿主候选之外的权限。"

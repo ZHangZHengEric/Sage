@@ -10,7 +10,6 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, cast
 
 if TYPE_CHECKING:
-    from sagents.v2.optimization.contracts import OptimizationFinalVerification
     from sagents.v2.optimization.runner import OptimizationRunner
 
 from sagents.v2 import ApplicationConfiguration
@@ -28,7 +27,6 @@ from sagents.v2 import (
     OptimizationAgent,
     OptimizationCase,
     OptimizationSuite,
-    OptimizationFinalSuite,
 )
 from sagents.v2.contracts.principals import ActorRef, PrincipalType, RequestContext
 from sagents.v2.model.contracts import ModelEventKind, ModelResponse, ModelStreamEvent
@@ -41,7 +39,8 @@ from sagents.v2.testing.plugins.scripted_model import (
 
 def package(name, instructions):
     data = BuiltinPackageFactory.create(
-        "assistant", package_id=f"demo.{name}",
+        "assistant",
+        package_id=f"demo.{name}",
     ).model_dump(mode="json")
     data["agents"]["assistant"]["instructions"] = {"inline": instructions}
     data["agents"]["assistant"]["tools"] = []
@@ -116,8 +115,24 @@ async def demo(root: Path):
                 ),
             )
         )
-        return (
-            ApplicationConfiguration((provided('example.model-provider', lambda context, deps, value=provider: value, 'model.provider'),), runtime_for(workspace / 'sessions', bundle.manifest.runtime, capabilities={'model.provider': {'plugin': 'example.model-provider'}}), {'models': {'primary': {'provider': 'openai-responses', 'model': 'scripted'}}})
+        return ApplicationConfiguration(
+            (
+                provided(
+                    "example.model-provider",
+                    lambda context, deps, value=provider: value,
+                    "model.provider",
+                ),
+            ),
+            runtime_for(
+                workspace / "sessions",
+                bundle.manifest.runtime,
+                capabilities={"model.provider": {"plugin": "example.model-provider"}},
+            ),
+            {
+                "models": {
+                    "primary": {"provider": "openai-responses", "model": "scripted"}
+                }
+            },
         )
 
     native = IsolatedOptimizationRunner(
@@ -128,7 +143,21 @@ async def demo(root: Path):
         async def run(self, bundle, agent_id, content, ctx):
             if bundle.manifest.metadata.id == "demo.evaluator":
                 request = json.loads(content)
-                if request["task"].startswith("Audit"):
+                if request["task"].startswith("Design"):
+                    offset = len(request["data"]["excluded_cases"])
+                    answer = json.dumps(
+                        {
+                            "cases": [
+                                {
+                                    "id": f"challenge-{offset}",
+                                    "input": f"Convert {offset + 3} meters to centimeters",
+                                    "rubric": "Correct units and quantity",
+                                    "split": "training",
+                                }
+                            ]
+                        }
+                    )
+                elif "issues" in request["response_schema"]["properties"]:
                     answer = json.dumps(
                         {
                             "approved": True,
@@ -174,8 +203,29 @@ async def demo(root: Path):
                             ),
                         )
                     )
-                    return (
-                        ApplicationConfiguration((provided('example.model-provider', lambda context, deps, value=provider: value, 'model.provider'),), runtime_for(workspace / 'sessions', package.manifest.runtime, capabilities={'model.provider': {'plugin': 'example.model-provider'}}), {'models': {'primary': {'provider': 'openai-responses', 'model': 'scripted'}}})
+                    return ApplicationConfiguration(
+                        (
+                            provided(
+                                "example.model-provider",
+                                lambda context, deps, value=provider: value,
+                                "model.provider",
+                            ),
+                        ),
+                        runtime_for(
+                            workspace / "sessions",
+                            package.manifest.runtime,
+                            capabilities={
+                                "model.provider": {"plugin": "example.model-provider"}
+                            },
+                        ),
+                        {
+                            "models": {
+                                "primary": {
+                                    "provider": "openai-responses",
+                                    "model": "scripted",
+                                }
+                            }
+                        },
                     )
 
                 grader = IsolatedOptimizationRunner(
@@ -211,16 +261,7 @@ async def demo(root: Path):
         goal="Improve conversion accuracy",
         rounds=3,
         suite=suite,
-        final_suite=OptimizationFinalSuite(
-            cases=(
-                OptimizationCase(
-                    id="final",
-                    input="Convert 13 meters to centimeters",
-                    rubric="Exactly 1300 cm",
-                    split="final",
-                ),
-            )
-        ),
+        validation_case_count=1,
     )
     print(
         json.dumps(
@@ -229,7 +270,10 @@ async def demo(root: Path):
                 "candidate_hash": result.candidate_package.content_hash,
                 "baseline_score": result.report.baseline.mean_score("validation"),
                 "selected_score": result.report.selected.mean_score("validation"),
-                "final_passed": cast('OptimizationFinalVerification', result.report.final_verification).passed,
+                "goal_verified": result.report.goal_verified,
+                "training_questions": sum(
+                    c.split == "training" for c in result.report.suite.cases
+                ),
                 "rounds": [
                     {
                         "round": item.round,

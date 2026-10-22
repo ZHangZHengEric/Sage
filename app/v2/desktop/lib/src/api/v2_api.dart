@@ -10,7 +10,7 @@ import '../models.dart';
 import '../usage_models.dart';
 
 const sageSidecarProtocol = 'sage.runtime/v2';
-const sageSidecarRevision = 12;
+const sageSidecarRevision = 16;
 const _maxUploadBytes = 64 * 1024 * 1024;
 
 class SageApiException implements Exception {

@@ -235,11 +235,15 @@ void main() {
         await tester.ensureVisible(find.text('迭代 1'));
         await tester.tap(find.text('迭代 1'));
         await tester.pumpAndSettle();
-        await tester.ensureVisible(
-          find.byKey(const ValueKey('rsi-open-iteration-1')),
+        await Scrollable.ensureVisible(
+          tester.element(find.byKey(const ValueKey('rsi-open-iteration-1'))),
+          alignment: .5,
         );
+        await tester.pumpAndSettle();
         await tester.tap(find.byKey(const ValueKey('rsi-open-iteration-1')));
         await tester.pumpAndSettle();
+        expect(find.text('对话矩阵'), findsNothing);
+        expect(find.text('版本历史 · Sage'), findsOneWidget);
         await tester.ensureVisible(
           find.byKey(const ValueKey('rsi-apply-version')),
         );
@@ -276,9 +280,18 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('rsi-toggle-setup')));
+    await tester.pumpAndSettle();
     await tester.enterText(
       find.byKey(const ValueKey('rsi-goal')),
       'Improve skill reuse',
+    );
+    expect(
+      tester
+          .widget<GlassTextField>(find.byKey(const ValueKey('rsi-rounds')))
+          .controller
+          ?.text,
+      '8',
     );
     await tester.enterText(find.byKey(const ValueKey('rsi-rounds')), '7');
     await tester.tap(find.byKey(const ValueKey('rsi-part-instructions')));
@@ -286,6 +299,8 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('rsi-start')));
     await tester.pumpAndSettle();
     expect(api.startOptions!['rounds'], 7);
+    expect(api.startOptions!['validation_case_count'], 24);
+    expect(api.startOptions!['max_concurrency'], 3);
     expect(api.startOptions!['optimization_scope'], ['skills']);
     expect(api.applications, 0);
     await tester.pumpWidget(const SizedBox.shrink());
@@ -324,7 +339,7 @@ void main() {
       expect(find.byKey(const ValueKey('rsi-run-run-1')), findsNothing);
       expect(
         find.byKey(const ValueKey('rsi-version-unapplied-candidate')),
-        findsNothing,
+        findsOneWidget,
       );
       expect(find.byType(GlassSegmentedControl), findsNothing);
       await tester.tap(find.textContaining('配置保存 ·'));
@@ -371,7 +386,11 @@ void main() {
           .enabled,
       isFalse,
     );
-    expect(find.textContaining('优化中'), findsWidgets);
+    expect(find.textContaining('进化中'), findsWidgets);
+    expect(find.byKey(const ValueKey('rsi-run-run-1')), findsNothing);
+    await tester.tap(find.byKey(const ValueKey('rsi-toggle-history')));
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(find.byKey(const ValueKey('rsi-run-run-1')), findsOneWidget);
     expect(find.text('取消优化'), findsOneWidget);
     expect(tester.takeException(), isNull);
     await tester.pumpWidget(const SizedBox.shrink());
@@ -406,7 +425,12 @@ void main() {
     expect(api.applications, 0);
     await tester.tap(find.byKey(const ValueKey('rsi-toggle-setup')));
     await tester.pumpAndSettle();
-    expect(find.byKey(const ValueKey('rsi-goal')), findsNothing);
+    expect(find.byKey(const ValueKey('rsi-goal')), findsOneWidget);
+    await tester.scrollUntilVisible(
+      find.byKey(const ValueKey('rsi-suite-review')),
+      200,
+      scrollable: find.byType(Scrollable).first,
+    );
     expect(find.byKey(const ValueKey('rsi-suite-review')), findsOneWidget);
     expect(tester.takeException(), isNull);
     await tester.pumpWidget(const SizedBox.shrink());

@@ -21,7 +21,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Literal
 
-from pydantic import Field
+from pydantic import AliasChoices, Field
 
 from sagents.v2 import AgentPackageOptimizer, IsolatedOptimizationRunner
 from sagents.v2.agent.management import AgentPackageBundle
@@ -30,14 +30,23 @@ from sagents.v2.contracts.principals import ActorRef, PrincipalType, RequestCont
 from sagents.v2.optimization import (
     OptimizationAgent,
     OptimizationConstraints,
-    OptimizationFinalSuite,
     OptimizationSuite,
 )
-from sagents.v2.optimization.contracts import OptimizationPart
+from sagents.v2.optimization.contracts import (
+    OptimizationPart,
+    OptimizationTestSuite,
+    OptimizationStoppingPolicy,
+)
+from sagents.v2.optimization.generator import AgentPackageTestGenerator
+from sagents.v2.optimization.observer import HumanTestObserver, IsolatedTestEvaluator, SharedCallLimitRunner
 from sagents.v2.package.manifest.agents import Instructions
 from sagents.v2.skill import FilesystemSkillProvider
 from sagents.v2.agent.policy.plugins.tool_policy import DefaultToolPolicy
-from sagents.v2.agent.policy.tool_policy import ToolOperationAssessment, ToolPolicyAction
+from sagents.v2.agent.policy.tool_policy import (
+    ToolOperationAssessment,
+    ToolPolicyAction,
+)
+from sagents.v2.tool.generated import generated_tools, generated_tool_provider
 from sagents.v2.tool import SideEffectLevel
 from sagents.v2.tool.plugins.official import (
     OfficialToolPlugin,
@@ -59,13 +68,36 @@ def fingerprint(agent):
 
 class RsiStart(StrictModel):
     goal: str = Field(min_length=1, max_length=16000)
-    rounds: int = Field(default=3, ge=1, le=100)
+    rounds: int = Field(default=8, ge=1, le=100)
     optimization_scope: tuple[OptimizationPart, ...] = ("instructions", "skills")
     model_provider_id: str | None = None
     suite: OptimizationSuite | None = None
-    final_suite: OptimizationFinalSuite | None = None
+    human_test_count: int = Field(default=0, ge=0, le=100)
+    human_test_suite: OptimizationTestSuite | None = None
     evaluation_repeats: int = Field(default=1, ge=1, le=10)
+    validation_case_count: int = Field(
+        default=24,
+        ge=1,
+        le=100,
+        validation_alias=AliasChoices("validation_case_count", "test_case_count"),
+    )
+    max_concurrency: int = Field(default=3, ge=1, le=16)
+    stopping_policy: OptimizationStoppingPolicy = Field(
+        default_factory=OptimizationStoppingPolicy
+    )
     request_id: str = Field(min_length=1, max_length=128)
+
+
+def rsi_timeout_seconds(request: RsiStart) -> int:
+    """Budget larger batches without increasing their authorized model-call count."""
+    count = request.validation_case_count + 6 * (request.rounds + 1)
+    batches = (count + request.max_concurrency - 1) // request.max_concurrency
+    # Target + evaluator can each consume the 240-second per-call budget.
+    # Include the growing training set and stability passes; retain a bounded deadline.
+    return min(
+        86400,
+        max(3600, (request.rounds + 2) * batches * 480 * request.evaluation_repeats),
+    )
 
 
 class RsiApply(StrictModel):
@@ -178,7 +210,6 @@ class RsiStore:
         if row is None:
             raise ValueError("RSI record not found")
         return json.loads(row[0])
-
 
 
 class DesktopRsiMixin:
@@ -398,6 +429,7 @@ class DesktopRsiMixin:
             native_tools = {d.name for d in official_tool_definitions()} | {
                 "load_skill"
             }
+            native_tools.update(generated_tools(package.files))
             if set(package.manifest.agents[agent_id].tools) - native_tools:
                 raise ValueError(
                     "RSI requires native tools; external MCP tools need isolated test bindings"
@@ -419,6 +451,12 @@ class DesktopRsiMixin:
                 "status": "queued",
                 "goal": request.goal,
                 "rounds": request.rounds,
+                "validation_case_count": request.validation_case_count,
+                "human_test_count": len(request.human_test_suite.cases) if request.human_test_suite else request.human_test_count,
+                "max_concurrency": request.max_concurrency,
+                "stopping_policy": request.stopping_policy.model_dump(mode="json"),
+                "generated_tool_audit_required": "tools" in request.optimization_scope,
+                "timeout_seconds": rsi_timeout_seconds(request),
                 "optimization_scope": request.optimization_scope,
                 "model_provider_id": internal_provider.id,
                 "created_at": utc_now().isoformat(),
@@ -446,6 +484,7 @@ class DesktopRsiMixin:
         os.chmod(root, 0o700)
         user, identity = agent.user_id, agent.agent_id
         value = dict(value)
+        test_observer = None
 
         def save():
             self.rsi_store.put(value, user, identity, "run")
@@ -471,6 +510,8 @@ class DesktopRsiMixin:
             self.rsi_store.put(item, user, identity, "version")
 
         def observe(event):
+            if test_observer is not None:
+                test_observer.observe(event)
             value["stage"] = event["event"]
             data = event["data"]
             record = data.get("record") or {}
@@ -481,6 +522,8 @@ class DesktopRsiMixin:
             value["sequence"] = event["sequence"]
             if "role" in data:
                 value["role"] = data["role"]
+            if event["event"] == "optimization_stopped":
+                value["termination"] = data
             if event["event"] == "operation_started":
                 version_event(0, data["package"])
             elif event["event"] == "suite_review_completed":
@@ -572,6 +615,18 @@ class DesktopRsiMixin:
                     if bundle.manifest.metadata.id == package.manifest.metadata.id
                     else set()
                 )
+                created = generated_tools(bundle.files)
+                if bundle.manifest.metadata.id == package.manifest.metadata.id:
+                    if "tools" in request.optimization_scope:
+                        permitted = permitted | set(created)
+                    else:
+                        if created != generated_tools(package.files):
+                            raise PermissionError(
+                                "Generated tools changed outside tools scope"
+                            )
+                        permitted = permitted | set(created)
+                elif created:
+                    raise PermissionError("RSI roles cannot acquire generated tools")
                 if set(bundle.manifest.agents[identity].tools) - permitted:
                     raise PermissionError("Tools exceed the frozen RSI grant")
 
@@ -620,10 +675,37 @@ class DesktopRsiMixin:
                     ExtensionRegistration,
                     ExtensionScope,
                 )
+
                 registrations = []
+                generated = generated_tool_provider(bundle.files)
+                generated_plugin = "com.sage.desktop.rsi.generated-tools"
+                if generated.definitions:
+                    registrations.append(
+                        ExtensionRegistration(
+                            descriptor=ExtensionDescriptor(
+                                plugin_id=generated_plugin,
+                                name="Generated pure tools",
+                                version="2",
+                                provides=(
+                                    CapabilityOffer(
+                                        capability="tool.provider", api_version="2"
+                                    ),
+                                ),
+                                supported_scopes=frozenset({ExtensionScope.PROCESS}),
+                                config_schema={
+                                    "type": "object",
+                                    "additionalProperties": False,
+                                },
+                            ),
+                            factory=lambda context, deps: generated,
+                            ownership="borrowed",
+                        )
+                    )
                 choices = dict(bundle.manifest.runtime.capabilities)
-                policy = DefaultToolPolicy(operation_assessor=assess,
-                    operation_assessor_id="desktop.rsi.local-workspace/v1")
+                policy = DefaultToolPolicy(
+                    operation_assessor=assess,
+                    operation_assessor_id="desktop.rsi.local-workspace/v1",
+                )
                 for capability, value in (
                     ("model.provider", model),
                     ("execution.model-budget", self.model_budget),
@@ -631,27 +713,67 @@ class DesktopRsiMixin:
                     ("agent.tool-policy", policy),
                 ):
                     plugin = "com.sage.desktop.rsi." + capability.replace(".", "-")
-                    registrations.append(ExtensionRegistration(
-                        descriptor=ExtensionDescriptor(plugin_id=plugin, name=capability, version="2",
-                            provides=(CapabilityOffer(capability=capability, api_version="2"),),
-                            supported_scopes=frozenset({ExtensionScope.PROCESS}),
-                            config_schema={"type": "object", "additionalProperties": False}),
-                        factory=lambda context, deps, value=value: value, ownership="borrowed",
-                    ))
+                    registrations.append(
+                        ExtensionRegistration(
+                            descriptor=ExtensionDescriptor(
+                                plugin_id=plugin,
+                                name=capability,
+                                version="2",
+                                provides=(
+                                    CapabilityOffer(
+                                        capability=capability, api_version="2"
+                                    ),
+                                ),
+                                supported_scopes=frozenset({ExtensionScope.PROCESS}),
+                                config_schema={
+                                    "type": "object",
+                                    "additionalProperties": False,
+                                },
+                            ),
+                            factory=lambda context, deps, value=value: value,
+                            ownership="borrowed",
+                        )
+                    )
                     choices[capability] = CapabilitySelection(plugin=plugin)
-                choices["session.store"] = CapabilitySelection(plugin="sage.session.filesystem", config={"root": str(workspace / "sessions")})
-                choices["execution.binding"] = CapabilitySelection(plugin="sage.execution.binding.local-workspace", config={
-                    "workspace": str(workspace / "work"), "policy": {"process": {"enabled": False}},
-                })
-                choices.setdefault("tool.provider", CapabilitySelection(plugin="sage.tool.official"))
+                choices["session.store"] = CapabilitySelection(
+                    plugin="sage.session.filesystem",
+                    config={"root": str(workspace / "sessions")},
+                )
+                choices["execution.binding"] = CapabilitySelection(
+                    plugin="sage.execution.binding.local-workspace",
+                    config={
+                        "workspace": str(workspace / "work"),
+                        "policy": {"process": {"enabled": False}},
+                    },
+                )
+                choices.setdefault(
+                    "tool.provider", CapabilitySelection(plugin="sage.tool.official")
+                )
+                if generated.definitions:
+                    choices["tool.provider"] = (
+                        CapabilitySelection(plugin="sage.tool.official"),
+                        CapabilitySelection(plugin=generated_plugin),
+                    )
                 # RSI roles have their own structured evaluator. Select tools
                 # directly unless the frozen package explicitly chooses another
                 # policy, so default discovery cannot become another model task.
-                choices.setdefault("tool.selection-policy", CapabilitySelection(plugin="sage.tool-selection.direct"))
-                choices.setdefault("agent.continuation-policy", CapabilitySelection(plugin="sage.agent.continuation.deterministic"))
-                runtime = bundle.manifest.runtime.model_copy(update={"capabilities": choices, "state_root": str(workspace / "sessions")})
-                return ApplicationConfiguration(tuple(registrations), runtime, self._model_catalog(agent, selected))
-
+                choices.setdefault(
+                    "tool.selection-policy",
+                    CapabilitySelection(plugin="sage.tool-selection.direct"),
+                )
+                choices.setdefault(
+                    "agent.continuation-policy",
+                    CapabilitySelection(plugin="sage.agent.continuation.deterministic"),
+                )
+                runtime = bundle.manifest.runtime.model_copy(
+                    update={
+                        "capabilities": choices,
+                        "state_root": str(workspace / "sessions"),
+                    }
+                )
+                return ApplicationConfiguration(
+                    tuple(registrations), runtime, self._model_catalog(agent, selected)
+                )
 
             constraints = OptimizationConstraints(
                 editable_files=tuple(
@@ -663,6 +785,8 @@ class DesktopRsiMixin:
                     "rsi-guidance": "Reusable methods for the original goal"
                 },
                 allow_tool_changes=True,
+                allow_tool_creation=True,
+                require_clean_generated_tools="tools" in request.optimization_scope,
                 tool_candidates={
                     **{d.name: d.description for d in definitions},
                     "load_skill": "Load an enabled skill into the isolated workspace",
@@ -686,25 +810,74 @@ class DesktopRsiMixin:
                 reviewer=roles["reviewer"],
                 suite_reviewer=roles["suite_reviewer"],
             )
+            shared_calls = asyncio.Semaphore(request.max_concurrency)
+            optimizer.runner = SharedCallLimitRunner(optimizer.runner, shared_calls)
+            context = RequestContext(actor=ActorRef(
+                principal_id=user, principal_type=PrincipalType.USER,
+                scopes=tuple(sorted(tool_scopes)),
+            ))
+            if request.human_test_count or request.human_test_suite:
+                # Separate runner, fresh Applications/Sessions and private evidence.
+                # This sink never supplies data to optimizer.optimize().
+                test_root = root / "human-test"
+                test_runner = IsolatedOptimizationRunner(
+                    builder_factory=factory, authorize=authorize, root=test_root,
+                    run_metadata=optimizer.runner.run_metadata,
+                )
+                test_runner = SharedCallLimitRunner(test_runner, shared_calls)
+                def publish_test(records):
+                    value["test_observations"] = records
+                    save()
+                try:
+                    test_suite = request.human_test_suite
+                    if test_suite is None:
+                        generation = await AgentPackageTestGenerator(
+                            runner=test_runner, designer=roles["designer"],
+                        ).generate_split_with_record(
+                            package, context=context, goal=request.goal, split="test",
+                            case_count=request.human_test_count, max_cases=request.human_test_count,
+                            timeout_seconds=240,
+                        )
+                        test_suite = OptimizationTestSuite(cases=generation.suite.cases)
+                    (test_root / "suite.json").write_text(test_suite.model_dump_json())
+                    value["human_test_suite"] = test_suite.model_dump(mode="json")
+                    test_observer = HumanTestObserver(
+                        baseline=package, suite=test_suite, publish=publish_test,
+                        concurrency=request.max_concurrency,
+                        evaluate=IsolatedTestEvaluator(
+                            runner=test_runner, evaluator=roles["evaluator"], driver=roles["designer"],
+                            context=context, goal=request.goal,
+                            require_clean_generated_tools=constraints.require_clean_generated_tools,
+                        ),
+                    )
+                except asyncio.CancelledError:
+                    raise
+                except Exception as error:
+                    value["human_test_error"] = type(error).__name__
+                    save()
             result = await optimizer.optimize(
                 package,
-                context=RequestContext(
-                    actor=ActorRef(
-                        principal_id=user,
-                        principal_type=PrincipalType.USER,
-                        scopes=tuple(sorted(tool_scopes)),
-                    )
-                ),
+                context=context,
                 goal=request.goal,
                 rounds=request.rounds,
+                stopping_policy=request.stopping_policy,
+                require_diverse_suite=request.suite is None,
                 constraints=constraints,
                 optimization_scope=request.optimization_scope,
                 suite=request.suite,
-                final_suite=request.final_suite,
+                final_max_cases=0,
                 evaluation_repeats=request.evaluation_repeats,
+                validation_case_count=request.validation_case_count,
+                max_concurrency=request.max_concurrency,
+                call_timeout_seconds=240,
+                timeout_seconds=rsi_timeout_seconds(request),
                 journal_path=root / "audit.jsonl",
                 on_event=observe,
             )
+            if test_observer is not None:
+                value["stage"] = "human_test_pending"
+                save()
+                await test_observer.finish()
             result_path = root / "result.json"
             result_path.write_text(result.model_dump_json(), encoding="utf-8")
             os.chmod(result_path, 0o600)
@@ -712,15 +885,7 @@ class DesktopRsiMixin:
                 stored = self.rsi_store.get(
                     f"{value['id']}.{item.iteration}", user, identity, "version"
                 )
-                verification = result.report.final_verification
-                stored["final_test"] = {
-                    "tested": verification is not None
-                    and item.iteration in {0, verification.candidate_iteration},
-                    "passed": verification.passed
-                    if verification
-                    and item.iteration == verification.candidate_iteration
-                    else None,
-                }
+                stored["evaluation_protocol"] = "adaptive_validation"
                 stored.update(
                     record=item.model_dump(mode="json"),
                     ready=True,
@@ -729,15 +894,29 @@ class DesktopRsiMixin:
                 self.rsi_store.put(stored, user, identity, "version")
             value.update(
                 status="completed",
-                recommended_hash=result.candidate_package.content_hash,
+                recommended_hash=(result.candidate_package.content_hash
+                                  if result.report.goal_verified else None),
+                retained_hash=result.candidate_package.content_hash,
+                termination=result.report.termination.model_dump(mode="json"),
+                goal_verified=result.report.goal_verified,
+                recommendation_block_reason=result.report.recommendation_block_reason,
             )
         except asyncio.CancelledError:
             value["status"] = "interrupted"
             raise
         except Exception as error:
             # Provider errors can contain secrets. Persist only the exception type.
-            value.update(status="failed", error_type=type(error).__name__)
+            value.update(
+                status="failed",
+                error_type=type(error).__name__,
+                exit_reason="timeout" if isinstance(error, TimeoutError) else "error",
+            )
         finally:
+            if test_observer is not None:
+                await test_observer.cancel()
+                (root / "human-test" / "evidence.json").write_text(
+                    json.dumps(test_observer.evidence, ensure_ascii=False), encoding="utf-8",
+                )
             value["finished_at"] = utc_now().isoformat()
             save()
 

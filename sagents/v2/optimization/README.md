@@ -34,14 +34,13 @@ result = await optimizer.optimize(
     agent_id="assistant",  # optional for a package with an Agent entrypoint
     context=request_context,
     goal="Improve task completion while preserving the agent's responsibilities",
-    rounds=10,  # default 5; accepts 1..100, executes all requested proposal rounds
+    rounds=10,  # default 5; accepts 1..100; maximum when stopping_policy is set
     constraints=OptimizationConstraints(
         editable_files=("skills/conversion/SKILL.md",),
         editable_budget_fields=("max_steps",),
     ),
-    # suite=fixed_suite,  # generated once when omitted
-    # final_suite=untouched_suite,  # otherwise generate 4 independent final cases
-    final_max_cases=4,  # 1..100; 0 explicitly skips automatic final verification
+    validation_case_count=24,  # 1..100, fixed independently of training
+    # suite=imported_suite,  # optional starting training and fixed validation
     min_improvement=0.01,
     call_timeout_seconds=120,
     timeout_seconds=3600,
@@ -60,46 +59,53 @@ Run the offline runtime example:
 
 ## Tests and selection
 
-Supply an `OptimizationSuite` containing unique cases with `id`, `input`,
-`rubric`, and `split` (`training` or `validation`). Both splits are required;
-there must be 2..100 cases. Alternatively, the test-design Agent generates one
-suite before baseline execution. Review generated rubrics when task success is
-ambiguous: generated tests alone are not a quality certification.
+The default workflow independently designs a fixed validation set (24 questions by
+ default, `validation_case_count=1..100`) and an initial training set. At every
+round, the designer inspects the CURRENT retained package, prior training questions
+and bounded training results and adds 1..6 new challenges. There is no configurable
+training-total quota. Accumulated training questions remain in the suite. Imported
+`OptimizationSuite` supplies initial training and fixed validation; the configured
+validation count must match its validation split. Case IDs must be unique.
 
-Before baseline execution, an independent audit Session checks the original
-responsibilities, authorized goal, constraints, and both sealed suites for
-conflicting rubrics, impossible fixtures, ambiguous requirements, and concrete
-split leakage. Blocking issues raise `OptimizationSuiteReviewRejected`, whose
-`review` and `call` retain the audit evidence; no target or tuner Session runs.
-Advisory coverage gaps are retained in `report.suite_review`. By default the
-reviewer uses the evaluator package with host audit principles; an explicit
-`suite_reviewer` can use its own package and model route. Audit findings are not
-provided to the tuner, because they can contain sealed final-case information.
+The validation designer sees the original package and previously generated
+validation questions only. The training designer sees current capabilities and
+training evidence, never validation questions or feedback. Separate fresh Sessions
+keep design requests independent. Host checks and an independent suite reviewer
+check policy/rubric consistency, authorization and executable fixtures. They do
+not judge cross-split leakage or question memorization.
 
-Model-facing training feedback bounds individual outputs and diagnostic excerpts
-and retains the latest four previous attempts. Complete observations, evaluations,
-and all iteration packages remain in the returned report and journal. These bounds
-reduce repeated error-payload growth; they are not a total prompt-token budget for
-arbitrary large suites or packages.
+New training questions first run against the incumbent package. The incumbent and
+proposal are then compared on exactly the same cumulative questions; adding hard
+questions cannot itself be misreported as a proposal regression. Overall quality
+is `0.5 * training_mean + 0.5 * validation_mean`, so growing training sets do not
+overwhelm the fixed validation signal. A candidate is retained when that overall
+score improves by at least `min_improvement`. Individual regressions are allowed,
+recorded per round, and carried forward for repair from the stronger package.
+Execution completion, enabled generated-tool integrity audits, and independent
+goal/permission reviews still gate acceptance.
 
-The baseline and every semantically approved changed candidate run against the
-same fixed suite in fresh sessions. The evaluation Agent returns a score in [0,1], pass/fail, and
-an evidence-based rationale per case. Non-completed target runs receive a zero
-and cannot be selected. Selection requires non-saturated split means to improve by at
-least `min_improvement`, with no individual score or pass/fail regression.
+Tuning receives complete bounded training evidence, previous attempts, validation
+mean/pass count, and per-question scores under stable anonymous indexes. No
+validation question text, original IDs, rubrics, answers or grading rationale is
+included. Validation score history uses the same indexes within a run. The host
+report and Desktop question library retain the full evidence for user inspection.
+The tuner additionally receives bounded unresolved training regressions with
+their prior scores and current training evidence. Validation regressions remain
+anonymous scores only. Round records include overall scores before/after and all
+observed per-case regressions for host inspection.
+These repeated validation scores guide selection and tuning; they are not an
+untouched final exam or an independent quality certification.
 
-Each round proposes changes against the current best package. Rejected proposals
-remain in the report and do not become the next round's parent. Tuning requests
-include training cases and previous training attempts, but exclude holdout cases,
-results, acceptance feedback and manifest test declarations. Validation evidence
-is available to the caller in the final report. This is a bounded heuristic;
-model grading can be noisy. Use objective rubrics, trusted evaluators and a host
-runner with deterministic artifact checks for tasks that support them. By default
-there is one execution per case per candidate. Optional repeated trials reduce the
-chance of accepting a lucky response; they do not establish statistical significance.
-Validation is used repeatedly for selection. A separate untouched final suite is
-sealed before tuning and used only after selection, as described below. Do not bundle hidden test answers in target files: the tuner needs
-package resources and those files are not automatically redacted.
+Retaining progress and verifying stable success are separate. At a round or
+patience limit, the adaptive result keeps the retained stronger package and its
+evaluation; it does not silently fall back to the original. `goal_verified=false`
+and `recommendation_block_reason` indicate that the stable-success target was not
+established, and no iteration is marked recommended. Nothing is auto-applied.
+
+No final suite is generated or executed in the default workflow. For old SDK
+clients only, explicit `validation_case_count=None` retains the legacy fixed-suite
+path and its optional final-suite arguments. Desktop and MCP always use the new
+adaptive workflow; historical final records remain readable.
 
 ## Editable scope and resources
 
@@ -135,7 +141,7 @@ context)` and must provide the same isolation/authorization guarantees.
 
 ## Reports and failure behavior
 
-`result.report` contains the goal, requested rounds, fixed suite, baseline and
+`result.report` contains the goal, requested rounds, cumulative suite, baseline and
 selected evaluations, and every round's parent hash, patch, candidate, evaluation,
 acceptance and reason. Per-case observations retain native result evidence,
 elapsed time, token usage and reported cost. Internal designer/evaluator/tuner
@@ -145,8 +151,7 @@ gate uses quality; latency improvement is separately opt-in, and cost is not a g
 may contain sensitive task evidence; storage/redaction is the caller's concern.
 
 Malformed or out-of-scope patches consume one rejected round without executing a
-candidate. Valid no-change patches retain the current version and reuse its evaluation. There is no early stop for a rejected round, and no automatic retry of
-an execution. Non-completed internal Agent runs, malformed evaluator/designer
+candidate. Valid no-change patches retain the current version and reuse its evaluation. Without a stopping policy, rejected rounds do not stop the loop. There is no automatic retry of an execution. Non-completed internal Agent runs, malformed evaluator/designer
 responses, authorization failures and other runner errors abort the operation.
 Timeouts and cancellation propagate; the native runner closes its Application
 and removes the temporary workspace. No normal result is returned on abort.
@@ -198,7 +203,7 @@ constraints = OptimizationConstraints(
 ```
 
 A patch's `tools`/`skills` replaces the target's full allowlist. `None` preserves
-it and `[]` removes all entries. New names must be host candidates. Descriptions
+it and `[]` removes all entries. New names must be host candidates, unless the host explicitly enables the generated pure-tool contract below. Descriptions
 inform the tuner; the host must bind working implementations and enforce grants
 on every invocation. Candidate names alone do not register or authorize anything.
 Creating bundled Skill files requires individually allowlisted paths; source
@@ -211,6 +216,64 @@ mechanisms, propose small generalizable changes, never copy test questions/IDs/
 answers into instructions or Skills, avoid growing case exception lists, and
 allow legitimate no-change rounds. This is a model behavior constraint, not a
 semantic guarantee. Keep validation cases hidden and inspect the returned diffs.
+
+### Generated pure tools
+
+With both `allow_tool_changes=True` and `allow_tool_creation=True`, and `tools`
+in the requested optimization scope, a tuner may return `tool_definitions`:
+
+```json
+{
+  "rationale": "Make arithmetic reproducible",
+  "tools": ["rsi_multiply"],
+  "tool_definitions": {
+    "rsi_multiply": {
+      "description": "Multiply two numbers",
+      "input_schema": {
+        "type": "object",
+        "properties": {"a": {"type": "number"}, "b": {"type": "number"}},
+        "required": ["a", "b"], "additionalProperties": false
+      },
+      "expression": {"op": "mul", "args": [{"var": "a"}, {"var": "b"}]}
+    }
+  }
+}
+```
+
+Implementations are bundled at `tools/rsi/<name>.json`. Returning a definition
+creates or revises that implementation; `tools` separately selects the enabled
+names. Names use the ASCII `rsi_` namespace and cannot shadow native tools.
+A package supports at most eight generated tools. Expressions have bounded depth,
+node count and size, with JSON literals, objects, arrays, argument paths, lazy
+conditionals, logic, comparisons, arithmetic, membership and concatenation.
+`concat` joins strings only; use literal arrays and conditional branches to construct lists.
+They cannot execute source code, access the host, resolve schema references or
+change tool permissions. Editing these files through the generic `files` patch
+is rejected. Definition creation/revision requires the explicit tool-creation grant.
+
+The host must compose `generated_tool_provider(bundle.files)` into its isolated
+runner and normal activated runtime; package metadata alone never executes a
+new tool. Desktop provides both bindings. Serialized packages retain complete
+implementations, so candidate comparison and rollback restore the actual tool
+behavior. Inspect tool-call evidence along with output grades. These tools are
+pure calculators/validators/rule processors; external actions still require
+host-provided implementations and grants.
+
+## Stopping and diversity
+
+The adaptive workflow enables `OptimizationStoppingPolicy` by default: all
+accumulated training and fixed validation cases must pass with score >= 0.95,
+followed by a fresh complete evaluation (two independent passes total). Failed
+fresh evidence replaces the measurement of that package; training details and
+anonymous validation scores reach later tuning. Reused results do not establish
+stability. Every new round first adds training challenges; the training set grows
+until the run stops. Three rounds without retained improvement stop for
+stagnation; maximum rounds and host timeouts also apply.
+
+`goal_verified` reflects stable training/validation success, with no final exam.
+Failure to converge withdraws the recommendation. Reports, journals and historical
+iterations preserve actual grades. Business-policy and permission checks remain;
+question leakage and memorization checks are not part of adaptive RSI.
 
 ## Every iteration is returned
 
@@ -229,8 +292,10 @@ reason and Agent response; they cannot produce a valid runnable Package.
 `report.internal_agents` contains the designer/evaluator/tuner/reviewer configurations.
 `report.agent_calls` contains each full request/response with its round and case
 id. Reports distinguish the evaluation Agent's `model_grade` and the grade used
-for selection (identical for single trials; repeated trials aggregate actual model
-grades conservatively and retain them all).
+for selection. With `require_clean_generated_tools=True`, a failed generated tool
+execution or incomplete trace fails the effective grade while preserving the raw
+model grade and real completed runtime state. Repeated trials aggregate grades
+conservatively and retain every raw trial.
 The native runner additionally captures bounded tool/flow/artifact runtime
 records, with an explicit truncation flag. Artifact URI references in ephemeral
 workspaces may expire; a host runner must capture artifact content if a rubric
@@ -238,7 +303,8 @@ requires it after teardown.
 
 ## Quality ceilings and efficiency
 
-A split already scoring 1.0 need not improve beyond its ceiling. Other splits
+In the legacy fixed-suite path (`validation_case_count=None`), a split already
+scoring 1.0 need not improve beyond its ceiling. Other splits
 must still improve by `min_improvement`, and individual score/pass regressions
 are rejected. Equal-quality changes alone are not recommended by default.
 For latency goals, opt in with `min_latency_improvement=0.20`; a candidate may
@@ -350,77 +416,19 @@ resumption are not implemented here. Final verification and semantic review are
 implemented as described below.
 
 
-## Independent semantic review and untouched final tests
+## Independent business and permission review
 
-Every changed, structurally valid candidate is reviewed BEFORE target execution.
-Configure `reviewer=OptimizationAgent(...)` on the optimizer; by default it uses
-an independent copy of the evaluator package with host-owned review principles.
-Each review runs through `runner.run` in a fresh Session; it shares no target,
-tuner or evaluator conversation. Internal agents should have no mutation tools.
-The reviewer sees original resolved responsibilities, original/current/cumulative
-candidate packages, the latest patch, host constraints and training evidence.
-It sees neither validation nor final cases/results; manifest test declarations
-are removed from all package views. Keep hidden answers out of bundled files.
+Every changed, structurally valid proposal is independently reviewed before target
+execution. The reviewer sees original/current/candidate packages, the authorized
+goal, host constraints and training evidence. It does not see validation questions
+or results. It checks goal drift, changed grading requirements and unauthorized
+capabilities. It does not judge memorization or question leakage. The legacy
+`memorization_detected` field remains readable in old records but is omitted from
+the adaptive review request and is not a rejection condition.
 
-`OptimizationProposalReview` contains `approved`, `memorization_detected`,
-`goal_drift_detected`, `permission_drift_detected`, `rationale` and `findings`.
-The reviewer checks copied questions/answers/IDs, answer tables and case-specific
-branches in instructions or Skills, weakening original goals, and unauthorized
-changes. General methods, legitimate reusable examples and host-approved
-capabilities are allowed. Contradictory approval with a detected violation is
-invalid. Rejection consumes the round, retains the full candidate and review,
-and prevents execution. Subsequent tuning receives that review, not hidden-test
-feedback. Invalid/incomplete review responses abort without accepting or retrying.
-This is independent model judgment, not proof against all possible memorization.
-
-Use a separate `OptimizationFinalSuite` with 1..100 cases whose `split="final"`:
-
-```python
-from sagents.v2 import OptimizationFinalSuite, OptimizationCase
-untouched_suite = OptimizationFinalSuite(cases=(
-    OptimizationCase(
-        id="unseen-unit", input="Convert 13 meters to centimeters",
-        rubric="Exactly 1300 cm", split="final",
-    ),
-))
-result = await optimizer.optimize(
-    package, context=context, goal="Accurate conversions", rounds=5,
-    suite=training_and_validation_suite, final_suite=untouched_suite,
-    evaluation_repeats=2, journal_path="run-001.jsonl",
-)
-verification = result.report.final_verification
-```
-
-If omitted, a fresh designer Session generates up to `final_max_cases` (default 4)
-from the ORIGINAL package before baseline execution. It receives excluded initial
-questions to avoid duplicates, but no tuning history or optimized version.
-Final cases are deep-copied and sealed before the loop. Duplicate IDs and literal
-questions (after whitespace normalization) across optimization/final sets are
-rejected before target execution. Material semantic independence also requires
-carefully designed or reviewed questions; this check only catches literal overlap.
-Standalone `generator.generate_final(...)` / `generate_final_with_record(...)`
-can generate the collection separately, with `excluded_cases` supplied by callers.
-
-Only after all rounds does the controller execute the ORIGINAL and provisionally
-selected package on the sealed final suite, using fresh target and independent
-evaluator Sessions and the same repeat count. Final data/results are never fed
-back to tuning/review or used to choose between provisional candidates. If the
-selected package is unchanged, the single final evaluation is explicitly reused.
-`report.final_verification` retains both evaluations, the provisional candidate's
-iteration, pass/fail, reason and suite. All candidate final cases must complete
-and pass without score/pass regression versus the original. Failure withdraws
-the provisional recommendation and returns the original as the fallback; it
-never starts another tuning round or tries other candidates on the final set.
-Provisional round acceptance and every candidate remain in the report, so users
-can inspect and select versions. `report.improved` reflects the final recommendation.
-Final verification gates quality; final latency/usage is reported but does not
-establish statistical significance or automatically certify an efficiency gain.
-
-Set `final_max_cases=0` with no supplied final suite only when intentionally
-skipping final verification; `report.final_verification` is then `None`, not an
-implicit pass. A failed original final evaluation is not a quality certification
-of the original fallback. Reusing a disclosed final suite in later optimization
-runs makes it a known suite rather than an untouched final test.
+Structural grants and generated-tool execution audits remain authoritative. A
+rejected proposal consumes a round and retains the candidate/review for inspection.
+No candidate is automatically applied or published.
 
 ## Choose which parts to optimize
 
@@ -458,7 +466,7 @@ protected manifest fields and source plugins remain protected across all scopes.
 
 optimize(..., on_event=callback) accepts a synchronous progress observer. It runs after each journal event is durably flushed when a journal path is supplied, and also works without a journal. Observers should perform only bounded work; an exception aborts the operation without activating a candidate. IsolatedOptimizationRunner(..., run_metadata=factory) lets the host inject frozen per-package Run metadata, including runtime variables; internal agent packages can receive separate metadata. Desktop uses these hooks for background progress and configuration/Skill version history.
 
-## Opt-in live domain specialization benchmark
+## Historical fixed-suite domain benchmarks
 
 `examples/v2/optimizer_domains.py` starts three independent specializations
 from the same general-purpose package: subscription support triage, purchase-order
@@ -471,6 +479,8 @@ bundled procedure through the native Skill provider with host-granted load scope
 Tool mode can replace an intentionally limited draft tool with a host-bound exact
 decimal normalizer. It tests capability selection, not tool source-code synthesis.
 Joint mode permits both guidance and Skill edits; the tuner may choose either.
+
+These historical benchmark entry points explicitly use `validation_case_count=None` to preserve their original protocol; they are not the adaptive Desktop workflow.
 
 Revision 1 has three training cases, two validation cases, and three final cases
 fixed before execution; revised procurement adds coverage as described below.
@@ -524,3 +534,36 @@ been used in an earlier study, while the clarified joint run used newly sealed
 final cases. These small results validate the exercised workflow, not general
 reliability or simultaneous instruction-and-Skill tuning. Large raw experiment
 artifacts remain local and are not distributed with the repository.
+
+
+## Adaptive Desktop framework experiments
+
+`examples.v2.optimizer_adaptive_validation` exercises the current Desktop-owned
+adaptive workflow through the real stdio MCP server. Start Desktop, then run:
+
+```sh
+.venv/bin/python -m examples.v2.optimizer_adaptive_validation --live \
+  --output /absolute/path/experiment \
+  --target-provider <configured-primary-id> \
+  --alternate-provider <configured-alternate-id> \
+  --internal-provider <configured-optimizer-id> \
+  --rounds 4 --validation-count 6
+```
+
+The scenarios cover default-agent specialization with generated tools, a baseline
+with a complete shipping policy, and expense normalization with a different target
+model. Each uses a separate persisted Agent and independently generated questions.
+An objective Python oracle checks outputs against the declared business rules,
+including actual generated-tool execution where required. It also checks fixed
+validation, anonymous per-item score disclosure, same-question parent/candidate
+comparisons and unchanged live Agent configurations. No candidate is applied.
+
+Saved request/run identities allow the command to inspect existing runs without
+starting them again; changing scenario options requires a new output directory.
+Reports preserve failed or non-converged experiments alongside successful ones.
+These small rule-based tasks do not certify arbitrary-domain generalization.
+
+
+### Human-only observation sink
+
+`HumanTestObserver` accepts an `OptimizationTestSuite` and an isolated host evaluator. Pass its synchronous `observe` method as an event sink, await `finish()` after optimization, and call `cancel()` during host cleanup. It measures the baseline and every retained round; no return value or result is supplied to the optimizer. Test evidence must stay outside tuning requests, training generation, history, selection and termination. `IsolatedTestEvaluator` supplies fresh scoring/user sessions; `SharedCallLimitRunner` can share one call ceiling across both workloads without locking an entire dialogue. Test infrastructure errors remain missing measurements, and exact split overlap invalidates observation rather than steering optimization.

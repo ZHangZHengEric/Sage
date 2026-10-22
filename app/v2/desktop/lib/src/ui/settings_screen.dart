@@ -1173,7 +1173,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                               CupertinoIcons.arrow_2_circlepath,
                               size: 15,
                             ),
-                            label: 'RSI',
+                            label: context.l10n.languageCode == 'zh'
+                                ? '进化'
+                                : 'Evolution',
                           ),
                           _SettingsActionButton(
                             key: const ValueKey('settings-agent-history'),

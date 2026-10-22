@@ -287,6 +287,7 @@ void main() {
         );
         debugPrint('RSI_STEP open_rsi');
         await tap(find.byKey(const ValueKey('settings-agent-rsi')));
+        await tap(find.byKey(const ValueKey('rsi-toggle-setup')));
         await until(
           () => find.byKey(const ValueKey('rsi-goal')).evaluate().isNotEmpty,
           'embedded RSI page',
@@ -328,6 +329,7 @@ void main() {
           );
           audit['manual_save_from_frontend'] = true;
           await tap(find.byKey(const ValueKey('settings-agent-rsi')));
+          await tap(find.byKey(const ValueKey('rsi-toggle-setup')));
           await until(
             () => find.byKey(const ValueKey('rsi-goal')).evaluate().isNotEmpty,
             'RSI from manually saved version',

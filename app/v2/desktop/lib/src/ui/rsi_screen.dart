@@ -6,6 +6,8 @@ import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:liquid_glass_widgets/liquid_glass_widgets.dart';
 import '../localization/app_localizations.dart';
+import 'rsi_observatory.dart';
+import 'rsi_diff.dart';
 import '../state/workspace_controller.dart';
 
 class RsiScreen extends StatefulWidget {
@@ -32,7 +34,10 @@ class RsiScreen extends StatefulWidget {
 
 class _RsiScreenState extends State<RsiScreen> {
   final _goal = TextEditingController();
-  final _rounds = TextEditingController(text: '3');
+  final _rounds = TextEditingController(text: '8');
+  final _testCount = TextEditingController(text: '24');
+  final _humanTestCount = TextEditingController(text: '12');
+  final _concurrency = TextEditingController(text: '3');
   final _cases = TextEditingController();
   final _parts = <String>{'instructions', 'skills'};
   Map<String, Object?> _history = {};
@@ -47,7 +52,10 @@ class _RsiScreenState extends State<RsiScreen> {
   String? _caseFilename;
   Timer? _poll;
   bool _loading = false, _mutating = false;
-  bool _showConfiguration = true;
+  bool _showConfiguration = false;
+  bool _showRunHistory = false;
+  bool _versionMode = false;
+  bool get _versions => widget.historyOnly || _versionMode;
   int _revision = 0;
   final List<Map<String, Object?>> _events = [];
   String t(String zh, String en) =>
@@ -71,6 +79,9 @@ class _RsiScreenState extends State<RsiScreen> {
     _poll?.cancel();
     _goal.dispose();
     _rounds.dispose();
+    _testCount.dispose();
+    _humanTestCount.dispose();
+    _concurrency.dispose();
     _cases.dispose();
     super.dispose();
   }
@@ -82,7 +93,7 @@ class _RsiScreenState extends State<RsiScreen> {
     try {
       final history = await widget.controller.rsiHistory(widget.agentId);
       if (!mounted || revision != _revision) return;
-      if (!widget.historyOnly) {
+      if (!_versions) {
         _selectedRun ??= rows(history['runs']).firstOrNull?['id']?.toString();
       }
       final run = _selectedRun == null
@@ -127,50 +138,75 @@ class _RsiScreenState extends State<RsiScreen> {
     }
   }
 
-  Future<void> _start() => _mutate(() async {
-    final count = int.tryParse(_rounds.text);
-    if (_goal.text.trim().isEmpty ||
-        count == null ||
-        count < 1 ||
-        count > 100 ||
-        _parts.isEmpty) {
-      throw FormatException(
-        t(
-          '请输入目标、1–100 轮和优化范围',
-          'Enter a goal, 1–100 rounds and optimization parts',
-        ),
-      );
+  Future<void> _start() async {
+    if (_goal.text.trim().isEmpty) {
+      setState(() => _showConfiguration = true);
+      return;
     }
-    final suite = _cases.text.trim().isEmpty ? null : jsonDecode(_cases.text);
-    final options = jsonEncode([
-      _goal.text.trim(),
-      count,
-      _parts.toList(),
-      _model,
-      suite,
-    ]);
-    if (_requestOptions != options) {
+    await _mutate(() async {
+      final count = int.tryParse(_rounds.text);
+      final testCount = int.tryParse(_testCount.text);
+      final humanTestCount = int.tryParse(_humanTestCount.text);
+      final concurrency = int.tryParse(_concurrency.text);
+      if (_goal.text.trim().isEmpty ||
+          count == null ||
+          count < 1 ||
+          count > 100 ||
+          testCount == null ||
+          testCount < 1 ||
+          testCount > 100 ||
+          humanTestCount == null ||
+          humanTestCount < 0 ||
+          humanTestCount > 100 ||
+          concurrency == null ||
+          concurrency < 1 ||
+          concurrency > 16 ||
+          _parts.isEmpty) {
+        throw FormatException(
+          t(
+            '请输入目标、1–100 轮、1–100 道验证题、0–100 道测试题、1–16 并行上限和优化范围',
+            'Enter a goal, 1–100 rounds, 1–100 validation cases, 0–100 test cases, 1–16 concurrency and optimization parts',
+          ),
+        );
+      }
+      final suite = _cases.text.trim().isEmpty ? null : jsonDecode(_cases.text);
+      final options = jsonEncode([
+        _goal.text.trim(),
+        count,
+        testCount,
+        humanTestCount,
+        concurrency,
+        _parts.toList(),
+        _model,
+        suite,
+      ]);
+      if (_requestOptions != options) {
+        _requestId = null;
+        _requestOptions = options;
+      }
+      _requestId ??= 'desktop-${DateTime.now().microsecondsSinceEpoch}';
+      final started = await widget.controller.startRsi(widget.agentId, {
+        'goal': _goal.text.trim(),
+        'rounds': count,
+        'validation_case_count': testCount,
+        'human_test_count': humanTestCount,
+        'max_concurrency': concurrency,
+        'optimization_scope': _parts.toList(),
+        'model_provider_id': _model,
+        'request_id': _requestId,
+        'suite': ?suite,
+      });
       _requestId = null;
-      _requestOptions = options;
-    }
-    _requestId ??= 'desktop-${DateTime.now().microsecondsSinceEpoch}';
-    await widget.controller.startRsi(widget.agentId, {
-      'goal': _goal.text.trim(),
-      'rounds': count,
-      'optimization_scope': _parts.toList(),
-      'model_provider_id': _model,
-      'request_id': _requestId,
-      'suite': ?suite,
+      _requestOptions = null;
+      _showConfiguration = false;
+      _selectedRun = started['id']?.toString();
+      _events.clear();
+      _version = null;
+      _run = null;
+      _revision++;
     });
-    _requestId = null;
-    _requestOptions = null;
-    _showConfiguration = false;
-    _selectedRun = null;
-    _events.clear();
-    _version = null;
-    _run = null;
-    _revision++;
-  });
+  }
+
   Future<void> _openVersion(Map<String, Object?> item) async {
     final revision = ++_revision;
     final expected = _history['current_fingerprint']?.toString();
@@ -182,6 +218,7 @@ class _RsiScreenState extends State<RsiScreen> {
       if (mounted && revision == _revision) {
         setState(() {
           _version = value;
+          _versionMode = true;
           _versionFingerprint = expected;
           _error = null;
         });
@@ -190,6 +227,39 @@ class _RsiScreenState extends State<RsiScreen> {
       if (mounted) setState(() => _error = e.toString());
     }
   }
+
+  Future<void> _versionDiff() => _mutate(() async {
+    final version = _version;
+    if (version == null || version['run_id'] == null) return;
+    final runId = version['run_id'].toString();
+    var detail = await widget.controller.rsiRun(widget.agentId, runId);
+    final events = rows(detail['events']);
+    while (map(detail['result']).isEmpty &&
+        events.isNotEmpty &&
+        (events.last['sequence'] as num).toInt() <
+            ((detail['sequence'] as num?)?.toInt() ?? 0)) {
+      detail = await widget.controller.rsiRun(
+        widget.agentId,
+        runId,
+        afterSequence: (events.last['sequence'] as num).toInt(),
+      );
+      final batch = rows(detail['events']);
+      if (batch.isEmpty) break;
+      events.addAll(batch);
+    }
+    final diff = collectRsiRoundDiffs(
+      detail,
+      events,
+    ).where((d) => d.round == version['iteration']).firstOrNull;
+    if (mounted && diff != null) {
+      await showRsiRoundDiff(
+        context,
+        diff,
+        glass,
+        context.l10n.languageCode == 'zh',
+      );
+    }
+  });
 
   Future<void> _apply() async {
     final version = _version;
@@ -241,6 +311,13 @@ class _RsiScreenState extends State<RsiScreen> {
       : v['source'] == 'activation'
       ? t('已应用版本', 'Applied version')
       : t('配置保存', 'Configuration save');
+  String timestamp(Object? value) {
+    final parsed = DateTime.tryParse(value?.toString() ?? '')?.toLocal();
+    if (parsed == null) return value?.toString() ?? '';
+    String two(int n) => n.toString().padLeft(2, '0');
+    return '${two(parsed.month)}-${two(parsed.day)} ${two(parsed.hour)}:${two(parsed.minute)}';
+  }
+
   String status(Object? v) => switch (v) {
     'queued' => t('排队中', 'Queued'),
     'running' => t('优化中', 'Optimizing'),
@@ -251,8 +328,19 @@ class _RsiScreenState extends State<RsiScreen> {
     _ => v?.toString() ?? '',
   };
   String stage(Object? v, {Object? role}) => switch (v) {
+    'training_generation_started' => t(
+      '准备训练挑战',
+      'Preparing training challenges',
+    ),
+    'human_test_pending' => t('测试测量中', 'Measuring test checkpoints'),
+    'training_cases_added' => t('训练题已补充', 'Training questions added'),
+    'training_challenge_completed' => t(
+      '训练挑战完成',
+      'Training challenge completed',
+    ),
     'test_generation_started' ||
     'test_generation_completed' ||
+    'test_generation_batch_completed' ||
     'suite_fixed' => t('生成测试集', 'Designing tests'),
     'final_test_generation_started' ||
     'final_suite_sealed' => t('准备最终测试集', 'Preparing final tests'),
@@ -270,6 +358,9 @@ class _RsiScreenState extends State<RsiScreen> {
     },
     'candidate_created' => t('生成候选版本', 'Candidate created'),
     'semantic_review_completed' => t('语义审查完成', 'Semantic review completed'),
+    'stability_check_started' => t('稳定性复测中', 'Checking stability'),
+    'stability_check_completed' => t('稳定性复测完成', 'Stability check completed'),
+    'optimization_stopped' => t('迭代已停止', 'Iteration stopped'),
     'round_completed' => t('本轮完成', 'Round completed'),
     'final_verification_completed' ||
     'final_evaluation_completed' => t('最终测试', 'Final tests'),
@@ -403,6 +494,9 @@ class _RsiScreenState extends State<RsiScreen> {
     if (file == null) return;
     final value = jsonDecode(await file.readAsString());
     _cases.text = jsonEncode(value is List ? {'cases': value} : value);
+    _testCount.text = rows(
+      map(jsonDecode(_cases.text))['cases'],
+    ).where((c) => c['split'] == 'validation').length.toString();
     _caseFilename = file.name;
     _requestId = null;
   });
@@ -481,11 +575,36 @@ class _RsiScreenState extends State<RsiScreen> {
           ),
         ),
       ),
+      for (final entry in [
+        (t('验证题量 dev', 'Dev questions'), _testCount, 'rsi-test-count'),
+        (
+          t('测试题量 test', 'Test questions'),
+          _humanTestCount,
+          'rsi-human-test-count',
+        ),
+        (t('并行上限', 'Concurrency limit'), _concurrency, 'rsi-concurrency'),
+      ])
+        field(
+          entry.$1,
+          SizedBox(
+            width: 88,
+            child: GlassTextField(
+              key: ValueKey(entry.$3),
+              controller: entry.$2,
+              enabled:
+                  enabled &&
+                  (entry.$3 != 'rsi-test-count' || _caseFilename == null),
+              textStyle: Theme.of(context).textTheme.bodyMedium,
+              settings: glass,
+            ),
+          ),
+        ),
       field(
         t('内部 Agent 模型', 'Internal agent model'),
         SizedBox(
           width: 260,
           child: GlassPicker(
+            key: const ValueKey('rsi-model-picker'),
             value: modelLabel,
             height: 34,
             width: 260,
@@ -617,7 +736,7 @@ class _RsiScreenState extends State<RsiScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        if (!widget.historyOnly) ...[
+        if (!_versions) ...[
           if (runs.isEmpty)
             Padding(
               padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 12),
@@ -646,7 +765,7 @@ class _RsiScreenState extends State<RsiScreen> {
                 style: Theme.of(context).textTheme.bodyMedium,
               ),
               subtitle: Text(
-                '${status(run['status'])} · ${run['iteration']}/${run['rounds']}\n${run['created_at']}',
+                '${status(run['status'])} · ${run['iteration']}/${run['rounds']}\n${timestamp(run['created_at'])}',
                 style: Theme.of(context).textTheme.bodySmall,
               ),
               trailing: active(run['status'])
@@ -664,9 +783,7 @@ class _RsiScreenState extends State<RsiScreen> {
               },
             ),
         ] else ...[
-          for (final v in rows(
-            _history['versions'],
-          ).where((v) => v['source'] != 'rsi'))
+          for (final v in rows(_history['versions']))
             ListTile(
               key: ValueKey('rsi-version-${v['id']}'),
               contentPadding: const EdgeInsets.symmetric(horizontal: 12),
@@ -678,7 +795,7 @@ class _RsiScreenState extends State<RsiScreen> {
                 borderRadius: BorderRadius.circular(11),
               ),
               title: Text(
-                '${versionLabel(v)} · ${v['created_at']}',
+                '${versionLabel(v)} · ${timestamp(v['created_at'])}',
                 style: Theme.of(context).textTheme.bodyMedium,
               ),
               trailing: map(v['review'])['approved'] == false
@@ -694,14 +811,29 @@ class _RsiScreenState extends State<RsiScreen> {
   @override
   Widget build(BuildContext context) {
     final busy = rows(_history['runs']).any((r) => active(r['status']));
-    final back =
-        widget.onBack ??
-        (Navigator.of(context).canPop() ? () => Navigator.pop(context) : null);
+    final back = _versionMode && !widget.historyOnly
+        ? () => setState(() {
+            _versionMode = false;
+            _version = null;
+          })
+        : widget.onBack ??
+              (Navigator.of(context).canPop()
+                  ? () => Navigator.pop(context)
+                  : null);
     final actions = Wrap(
       spacing: 8,
       crossAxisAlignment: WrapCrossAlignment.center,
       children: [
-        if (!widget.historyOnly) ...[
+        if (!_versions) ...[
+          action(
+            _showRunHistory
+                ? t('隐藏历史', 'Hide history')
+                : t('实验历史', 'Experiments'),
+            CupertinoIcons.list_bullet,
+            () => setState(() => _showRunHistory = !_showRunHistory),
+            key: const ValueKey('rsi-toggle-history'),
+            width: 112,
+          ),
           action(
             t('运行设置', 'Run setup'),
             CupertinoIcons.slider_horizontal_3,
@@ -710,13 +842,37 @@ class _RsiScreenState extends State<RsiScreen> {
             width: 124,
           ),
           action(
-            t('开始 RSI', 'Start RSI'),
+            t('开始进化', 'Start evolution'),
             CupertinoIcons.play_arrow_solid,
             busy || _mutating ? null : _start,
             key: const ValueKey('rsi-start'),
             width: 120,
           ),
         ],
+        if (!_versions)
+          action(
+            t('版本管理', 'Versions'),
+            CupertinoIcons.clock,
+            () => setState(() {
+              _versionMode = true;
+              _version = null;
+            }),
+            width: 112,
+          ),
+        if (!_versions && active(_run?['status']))
+          action(
+            t('取消优化', 'Cancel optimization'),
+            CupertinoIcons.stop,
+            _mutating
+                ? null
+                : () => _mutate(
+                    () => widget.controller.cancelRsi(
+                      widget.agentId,
+                      _run!['id'].toString(),
+                    ),
+                  ),
+            width: 124,
+          ),
         IconButton(
           tooltip: t('刷新', 'Refresh'),
           onPressed: _refresh,
@@ -724,7 +880,9 @@ class _RsiScreenState extends State<RsiScreen> {
         ),
         if (back != null)
           action(
-            t('返回 Agent', 'Back to agent'),
+            _versionMode && !widget.historyOnly
+                ? t('返回进化', 'Back to evolution')
+                : t('返回 Agent', 'Back to agent'),
             CupertinoIcons.chevron_left,
             back,
             key: const ValueKey('rsi-back-agent'),
@@ -740,40 +898,57 @@ class _RsiScreenState extends State<RsiScreen> {
               _error!,
               style: TextStyle(color: Theme.of(context).colorScheme.error),
             ),
+          if (!_versions)
+            RsiObservatory(
+              run: _run,
+              events: _events,
+              settings: glass,
+              chinese: context.l10n.locale.languageCode == 'zh',
+            ),
           if (_version != null)
             versionDetail()
-          else if (!widget.historyOnly && _run != null)
+          else if (!_versions && _run != null)
             runDetail(),
         ];
         if (constraints.maxWidth < 860) {
           return ListView(
             children: [
-              if (!widget.historyOnly && _showConfiguration) form(busy),
+              if (!_versions && _showConfiguration) form(busy),
               const SizedBox(height: 22),
-              historyList(),
+              if (_versions || _showRunHistory) historyList(),
               ...details,
             ],
           );
         }
         return Column(
           children: [
-            if (!widget.historyOnly && _showConfiguration) form(busy),
-            const SizedBox(height: 24),
             Expanded(
               child: Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  SizedBox(
-                    width: 280,
-                    child: ListView(children: [historyList()]),
+                  if (_versions || _showRunHistory) ...[
+                    SizedBox(
+                      width: 280,
+                      child: ListView(children: [historyList()]),
+                    ),
+                    const SizedBox(width: 20),
+                    VerticalDivider(
+                      width: 1,
+                      color: Theme.of(context).colorScheme.outlineVariant,
+                    ),
+                    const SizedBox(width: 20),
+                  ],
+                  Expanded(
+                    child: ListView(
+                      children: [
+                        if (!_versions && _showConfiguration) ...[
+                          card(form(busy)),
+                          const SizedBox(height: 12),
+                        ],
+                        ...details,
+                      ],
+                    ),
                   ),
-                  const SizedBox(width: 20),
-                  VerticalDivider(
-                    width: 1,
-                    color: Theme.of(context).colorScheme.outlineVariant,
-                  ),
-                  const SizedBox(width: 20),
-                  Expanded(child: ListView(children: details)),
                 ],
               ),
             ),
@@ -782,7 +957,7 @@ class _RsiScreenState extends State<RsiScreen> {
       },
     );
     final title =
-        '${widget.historyOnly ? t('版本历史', 'Version history') : 'RSI'} · ${widget.agentName}';
+        '${_versions ? t('版本历史', 'Version history') : t('进化', 'Evolution')} · ${widget.agentName}';
     if (widget.frameBuilder != null) {
       return widget.frameBuilder!(
         title,
@@ -921,20 +1096,6 @@ class _RsiScreenState extends State<RsiScreen> {
               style: Theme.of(context).textTheme.bodyMedium,
             ),
           ),
-          if (active(run['status'])) ...[
-            const LinearProgressIndicator(),
-            TextButton(
-              onPressed: _mutating
-                  ? null
-                  : () => _mutate(
-                      () => widget.controller.cancelRsi(
-                        widget.agentId,
-                        run['id'].toString(),
-                      ),
-                    ),
-              child: Text(t('取消优化', 'Cancel optimization')),
-            ),
-          ],
           if (suiteCheck.isNotEmpty) suiteReview(suiteCheck),
           if (run['error_type'] != null && suiteCheck['approved'] != false)
             Text('${t('运行错误', 'Run error')}: ${run['error_type']}'),
@@ -1071,9 +1232,17 @@ class _RsiScreenState extends State<RsiScreen> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           heading(versionLabel(version)),
+          if (version['source'] == 'rsi' &&
+              ((version['iteration'] as num?)?.toInt() ?? 0) > 0)
+            TextButton.icon(
+              key: const ValueKey('rsi-version-diff'),
+              onPressed: _mutating ? null : _versionDiff,
+              icon: const Icon(CupertinoIcons.arrow_right_arrow_left, size: 18),
+              label: Text(t('查看本轮改动', 'View round changes')),
+            ),
           savedConfiguration(version),
           if (version['review'] != null) review(map(version['review'])),
-          if (version['source'] == 'rsi')
+          if (version['source'] == 'rsi' && version.containsKey('final_test'))
             text(
               map(version['final_test'])['tested'] == true
                   ? t(

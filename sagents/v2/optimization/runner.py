@@ -14,7 +14,7 @@ from uuid import uuid4
 
 from sagents.v2.agent.management import AgentPackageBundle
 from sagents.v2.agent.management.service import BuilderFactory, PackageAuthorizer
-from sagents.v2.contracts.commands import InputItem, StartRun, RunConfig
+from sagents.v2.contracts.commands import InputItem, StartRun, RunConfig, ReplyInteraction
 from sagents.v2.contracts.items import TextBlock
 from sagents.v2.contracts.principals import RequestContext
 from sagents.v2.contracts.run_state import RunState
@@ -39,6 +39,9 @@ class IsolatedOptimizationRunner:
     files are materialized before the factory is called, including Skill files.
     Source plugin code is never imported automatically. The host authorizer must
     enforce credentials, tools, resource grants and total model-call budgets.
+
+    resume_user_input opts a simulated conversation host into replying to explicit
+    input-required interactions. Approval and permission suspensions remain closed.
     """
 
     def __init__(
@@ -50,6 +53,7 @@ class IsolatedOptimizationRunner:
         max_evidence_events: int = 500,
         max_evidence_bytes: int = 262144,
         run_metadata=None,
+        resume_user_input: bool = False,
     ):
         if max_evidence_events < 1 or max_evidence_bytes < 1:
             raise ValueError("evidence limits must be positive")
@@ -58,6 +62,7 @@ class IsolatedOptimizationRunner:
         self.builder_factory = builder_factory
         self.authorize = authorize
         self.run_metadata = run_metadata
+        self.resume_user_input = resume_user_input
         self.root = Path(root) if root is not None else None
         if self.root is not None:
             self.root.mkdir(parents=True, exist_ok=True)
@@ -108,27 +113,50 @@ class IsolatedOptimizationRunner:
                 await app.close()
 
     async def _send(
-        self, app, agent_id, content, context, session_id, started, package
+        self, app, agent_id, content, context, session_id, started, package,
+        resume_observation=None,
     ):
         stream = None
         try:
             agent = app.entrypoint()
             loaded = next(a for a in app.loaded_agents if a.package_id == package.manifest.metadata.id)
-            stream = await agent.run_stream(
-                StartRun(
-                    agent_id=loaded.id,
-                    config=RunConfig(
-                        metadata=self.run_metadata(package) if self.run_metadata else {}
+            after_sequence = 0
+            if resume_observation is not None:
+                previous = resume_observation.evidence
+                current = await agent.runtime.get_run(previous['run_id'])
+                suspension = await agent.runtime.session_store.get_suspension(current.suspension_id)
+                if suspension.reason.value != 'input_required' or not suspension.interaction_id:
+                    raise RuntimeError('Only explicit user-input suspensions can receive simulated replies')
+                interaction = await agent.runtime.session_store.get_interaction(suspension.interaction_id)
+                if 'submit' not in interaction.allowed_decisions:
+                    raise RuntimeError('Only explicit user-input suspensions can receive simulated replies')
+                after_sequence = previous['last_run_sequence']
+                await agent.runtime.reply_interaction(ReplyInteraction(
+                    run_id=current.run_id, suspension_id=suspension.suspension_id,
+                    interaction_id=interaction.interaction_id, expected_revision=current.revision,
+                    expected_suspension_revision=suspension.expected_revision,
+                    expected_interaction_revision=interaction.expected_revision,
+                    decision='submit', payload={'text': content},
+                    idempotency_key=f'optimization_reply_{uuid4().hex}',
+                ), context)
+                execution = await agent.continue_run(current.run_id, context, agent=loaded)
+                snapshot = await execution
+            else:
+                stream = await agent.run_stream(
+                    StartRun(
+                        agent_id=loaded.id,
+                        config=RunConfig(
+                            metadata=self.run_metadata(package) if self.run_metadata else {}
+                        ),
+                        session_id=session_id,
+                        input=(InputItem(role="user", content=(TextBlock(text=content),)),),
+                        resolved_spec_hash=loaded.composition_hash,
+                        idempotency_key=f"optimization_{uuid4().hex}",
                     ),
-                    session_id=session_id,
-                    input=(InputItem(role="user", content=(TextBlock(text=content),)),),
-                    resolved_spec_hash=loaded.composition_hash,
-                    idempotency_key=f"optimization_{uuid4().hex}",
-                ),
-                context,
-                agent=loaded,
-            )
-            snapshot = await stream.wait()
+                    context,
+                    agent=loaded,
+                )
+                snapshot = await stream.wait()
             result = (
                 await agent.runtime.session_store.get_run_result(snapshot.run_id)
                 if snapshot.state
@@ -141,10 +169,11 @@ class IsolatedOptimizationRunner:
                 else snapshot.model_dump(mode="json")
             )
             events = []
-            cursor = 0
+            cursor = after_sequence
             scanned = 0
             size = 0
             truncated = False
+            boundary_messages = []
             while (
                 cursor < snapshot.last_run_sequence
                 and scanned < self.max_evidence_events
@@ -160,6 +189,10 @@ class IsolatedOptimizationRunner:
                     cursor = event.run_sequence
                     scanned += 1
                     data = event.data
+                    if event.type == 'message.completed' and data.kind == 'item' and data.item is not None:
+                        item = data.item.data
+                        if item.kind == 'message' and item.role == 'assistant' and data.item.visibility == 'public':
+                            boundary_messages.append(''.join(b.text for b in item.content if b.kind == 'text'))
                     if data.kind not in {"tool", "flow", "artifact"} and not (
                         data.kind == "item"
                         and data.item is not None
@@ -188,6 +221,17 @@ class IsolatedOptimizationRunner:
                             if block["kind"] == "text"
                         )
                     )
+            if self.resume_user_input and snapshot.state == RunState.SUSPENDED:
+                suspension = await agent.runtime.session_store.get_suspension(snapshot.suspension_id)
+                if suspension.reason.value == 'input_required' and suspension.interaction_id:
+                    interaction = await agent.runtime.session_store.get_interaction(suspension.interaction_id)
+                    if 'submit' in interaction.allowed_decisions:
+                        payload['awaiting_user_input'] = True
+                        messages = boundary_messages
+                        if not messages and isinstance(interaction.payload.get('prompt'), str):
+                            messages = [interaction.payload['prompt']]
+            elif resume_observation is not None:
+                messages = boundary_messages
             usage = payload.get("usage", {})
             return OptimizationObservation(
                 state=snapshot.state.value,
@@ -209,6 +253,7 @@ class _NativeConversation:
         self.agent_id, self.context = agent_id, context
         self.session_id = None
         self.started = started
+        self.pending_input = None
 
     async def send(self, content: str) -> OptimizationObservation:
         if self.session_id is not None:
@@ -223,7 +268,9 @@ class _NativeConversation:
             self.session_id,
             self.started if self.session_id is None else time.monotonic(),
             self.package.model_copy(deep=True),
+            resume_observation=self.pending_input,
         )
+        self.pending_input = observed if observed.evidence.get('awaiting_user_input') else None
         self.session_id = observed.evidence["session_id"]
         self.started = time.monotonic()
         return observed
