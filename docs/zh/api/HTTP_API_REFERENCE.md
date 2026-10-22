@@ -44,6 +44,24 @@ parent: API
 
 智能体列表页使用 `GET /api/agents/summary` 获取当前用户的摘要；管理员使用 `GET /api/admin/agents` 一次获取全部用户的摘要和归属。摘要包含 `id`、`name`、`description`、`model_id`、`model_name`、`tool_count`、`skill_count`，管理员结果另外包含 `user_id`、`username`。完整配置仍通过智能体详情接口读取。
 
+## 外部运行与工作区
+
+外部接口使用绑定目标的 `Authorization: Bearer <API Key>`，并要求 `SAGE-TENANT-ID` 请求头。读取要求 `a2a:read`，写入与执行要求 `a2a:invoke`，交互回复要求 `a2a:approve`。服务端核对密钥绑定、目标归属与权限；租户、会话或运行 ID 本身不是凭据。
+
+`PUT /api/agents/{agent_id}/workspace/files` 导入 `{directory, files}`，文件内容使用 base64；只创建缺失文件，相同内容可重复导入，冲突返回 409。上限为 256 个文件、单文件 4 MiB、总计 16 MiB。删除通过同一路径的 DELETE 操作，受工作区空闲状态与路径检查约束。
+
+`POST /api/agents/{agent_id}/runs?workspace_path=...` 接收 AG-UI 请求，并可用 `runtimeContext` 为本次运行提供上下文，不改写共享配置。运行读取、回复、取消和文件下载都以准确的 `thread_id`、`run_id` 定位，并核对归属；交互回复还需匹配交互 ID 和预期修订号。
+
+文件下载读取运行绑定的工作目录快照，上限 32 MiB、512 项；旧运行目录已被同会话的新运行替代时返回 409，打包期间文件变化可能返回 503。调用方应核对产物与运行身份；Sage 不解释下游业务清单或执行客户项目构建。
+
+## 指导与 Skills 同步
+
+`PUT /api/agents/{agent_id}/guidance` 的 ZIP 上传模式使用 multipart `prompt` 与 `files`，接受 1–32 个完整 Skill ZIP，逐项校验并返回结果。该上传分支不要求用户身份，因此只能暴露给受信任的调用方；不要将它与受 Bearer Key 保护的外部 Run 接口混淆。
+
+`sync_bound=true` 用于同步既有绑定，要求已登录的配置所有者，不能同时传入 prompt 或 ZIP。同步保留模型、工具与执行策略；配置与资源实际生效方式以对应 HTTP schema 和宿主实现为准。
+
+[机器凭据校验](../../../app/v2/server/identity/external.py) · [运行与工作区路由](../../../app/v2/server/routers/conversations.py) · [同步路由](../../../app/v2/server/routers/agents.py)
+
 ## 路由清单
 
 以下清单对应当前注册的路由源码。Jaeger 路由按宿主配置启用，入站 A2A 路由取决于 SDK extra。完整 schema 请使用 OpenAPI，此清单不替代客户端 SDK。

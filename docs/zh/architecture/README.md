@@ -11,6 +11,10 @@ has_children: true
 
 # 架构
 
+Sage 的 RSI 闭环复用 SAgents 的执行、上下文、工具与会话能力。宿主负责把授权的输入和资源绑定到运行时。
+
+[RSI 流程](../applications/RSI.md) · [优化器契约](https://github.com/ZHangZHengEric/Sage/blob/main/sagents/v2/optimization/README.md)
+
 ## 应用与运行时边界
 
 ```mermaid
@@ -36,7 +40,8 @@ flowchart TB
 - [资源管理](SAGENTS_V2_RESOURCE_MANAGEMENT.md) · [单机并发](sagents-v2-single-host-concurrency.md)。
 - [上下文预算](sagents-v2-context-budget.md) · [模型池与持久化](sagents-v2-model-pool-and-persistence.md)。
 - [本机沙箱约束](sagents-v2-local-sandbox-security.md)。
-- [待实现与待验收](pending-work.md)：保留的能力缺口、提案和验证范围。
+- [当前支持范围](support-boundaries.md)：执行、隔离、恢复与部署边界。
+- [技能远程导入](skill-import.md)：已支持的来源、预览与发布。
 - [完整运行时架构](https://github.com/ZHangZHengEric/Sage/blob/main/sagents/v2/ARCHITECTURE.md)：依赖规则与契约。
 
 ## 部署边界

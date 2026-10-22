@@ -11,28 +11,30 @@ permalink: /en/
 
 # Overview
 
-This documentation covers **SAgents**, **Desktop**, and **Server**, on Python **3.12+**.
+Sage is an **RSI Agent Harness**, bringing task execution, independent evaluation, and recursive self-improvement into one runtime. These docs explain supported usage, integrations, and operating boundaries.
 
-Unversioned names refer to the current v2 implementation. Legacy installation and entry points are documented separately in the [Sage v1 guide](https://github.com/ZHangZHengEric/Sage/blob/main/app/v1/README.md).
+## Choose your entry point
 
 | Your goal | Start here |
 | --- | --- |
-| Run Sage locally | [Desktop](applications/DESKTOP.md) |
-| Use the multi-user web app | [Server](applications/WEB.md) |
-| Run an agent from Python | [Quick start](applications/GETTING_STARTED.md) |
-| Compose plugins and Agent packages | [Configuration](CONFIGURATION.md) · [Extensions](architecture/PLUGINS.md) |
-| Integrate a client | [Python API](api/API_REFERENCE.md) · [HTTP API](api/HTTP_API_REFERENCE.md) |
+| Understand how RSI improves a Package | [RSI workflow](applications/RSI.md) |
+| Inspect an iteration without a model key | [First RSI run](applications/FIRST_RSI_RUN.md) |
+| Install Desktop and use RSI | [Desktop](applications/DESKTOP.md) |
+| Embed Sage in a Python application | [Quick start](applications/GETTING_STARTED.md) · [Host development](architecture/sagents-host-development.md) |
+| Provide a multi-user web service | [Server](applications/WEB.md) |
+| Configure models, tools, and Skills | [Configuration](CONFIGURATION.md) · [Tools and MCP](MCP_SERVERS.md) |
+| Integrate an existing client | [Python API](api/API_REFERENCE.md) · [HTTP API](api/HTTP_API_REFERENCE.md) |
 
-## Understand the runtime
+## Understand and extend the Harness
 
-[Core concepts](CORE_CONCEPTS.md) → [Architecture](architecture/README.md) → [Memory](memory/README.md) → [Tools and MCP](MCP_SERVERS.md).
+[Core concepts](CORE_CONCEPTS.md) · [Architecture](architecture/README.md) · [Plugins](architecture/PLUGINS.md) · [Memory](memory/README.md) · [Support boundaries](architecture/support-boundaries.md).
 
 ## Operate and contribute
 
 [Environment variables](ENV_VARS.md) · [Troubleshooting](TROUBLESHOOTING.md) · [Development](DEVELOPMENT.md).
 
-Desktop is a local single-user host. Server is multi-user but currently runs with one worker. Persistence alone does not enable distributed execution.
+Running from source requires Python **3.12+**. Desktop installers bundle the backend; Server currently supports one worker.
 
 ## Documentation scope
 
-Legacy application guides, proposals, and historical audits are excluded from this site's navigation and search. They remain in the [repository archive](https://github.com/ZHangZHengEric/Sage/blob/main/docs/archive/README.md) for historical reference, not as v2 instructions. The separate `app/wiki` content describes the older product and is not the v2 reference.
+This site maintains Sage product, SDK, protocol, and operating references. Legacy usage is covered by [Sage v1](https://github.com/ZHangZHengEric/Sage/blob/main/app/v1/README.md) and the [legacy reference directory](https://github.com/ZHangZHengEric/Sage/blob/main/docs/archive/README.md). Customer delivery proposals, temporary audits, and phase-specific validation notes are not retained as repository documentation.

@@ -11,6 +11,10 @@ has_children: true
 
 # Architecture
 
+Sage’s RSI loop reuses SAgents execution, context, tools, and Sessions. Hosts bind authorized inputs and resources to the runtime.
+
+[RSI workflow](../applications/RSI.md) · [Optimizer contracts](https://github.com/ZHangZHengEric/Sage/blob/main/sagents/v2/optimization/README.md)
+
 ## Application and runtime boundaries
 
 ```mermaid
@@ -36,7 +40,8 @@ Hosts own authentication, credentials, UI, global conversation indexes, and tool
 - [Resource management](SAGENTS_V2_RESOURCE_MANAGEMENT.md) · [Single-host concurrency](sagents-v2-single-host-concurrency.md).
 - [Context budgets](sagents-v2-context-budget.md) · [Model pool and persistence](sagents-v2-model-pool-and-persistence.md).
 - [Local sandbox constraints](sagents-v2-local-sandbox-security.md).
-- [Pending work and validation](pending-work.md): remaining capabilities, proposals and validation scope.
+- [Current support boundaries](support-boundaries.md): execution, isolation, recovery, and deployment.
+- [Remote Skill import](skill-import.md): supported sources, previews, and publication.
 - [Full runtime architecture](https://github.com/ZHangZHengEric/Sage/blob/main/sagents/v2/ARCHITECTURE.md): dependency rules and contracts.
 
 ## Deployment boundary

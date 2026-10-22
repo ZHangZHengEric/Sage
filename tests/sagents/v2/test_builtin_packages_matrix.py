@@ -83,8 +83,9 @@ def test_tool_name_contract_rejects_dot_names():
 def test_builtin_tool_definitions_are_owned_by_decorators_or_protocol_converters():
     tool_root = Path(__file__).parents[3] / "sagents" / "v2" / "tool"
     # Constructing a ToolDefinition by hand is allowed only where the Tools are
-    # not ours to declare: these three translate a schema discovered at runtime
-    # — a decorated method, an MCP server's tool list, an A2A peer's Agent Card.
+    # not static built-ins: these converters translate runtime schemas from a
+    # decorated method, MCP tool list, A2A Agent Card, or a validated RSI-generated
+    # tool specification. Official built-ins must still use their decorators.
     allowed_converters = {
         tool_root / "decorators.py",
         tool_root / "plugins" / "mcp.py",
@@ -95,6 +96,17 @@ def test_builtin_tool_definitions_are_owned_by_decorators_or_protocol_converters
         if path in allowed_converters or path.name == "contracts.py":
             continue
         tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        # Only this converter may translate validated runtime RSI specifications;
+        # other functions in generated.py remain subject to the same guard.
+        generated_converter_calls = {
+            node
+            for function in tree.body
+            if path == tool_root / "generated.py"
+            and isinstance(function, ast.FunctionDef)
+            and function.name == "generated_tool_provider"
+            for node in ast.walk(function)
+            if isinstance(node, ast.Call)
+        }
         constructor_names = {"ToolDefinition"}
         for node in ast.walk(tree):
             if isinstance(node, ast.ImportFrom):
@@ -110,7 +122,8 @@ def test_builtin_tool_definitions_are_owned_by_decorators_or_protocol_converters
                 or isinstance(node.func, ast.Attribute)
                 and node.func.attr == "ToolDefinition"
             ):
-                offenders.append(f"{path.relative_to(tool_root)}:{node.lineno}")
+                if node not in generated_converter_calls:
+                    offenders.append(f"{path.relative_to(tool_root)}:{node.lineno}")
     assert offenders == []
 
 
