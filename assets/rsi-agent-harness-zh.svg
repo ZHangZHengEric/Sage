@@ -1,0 +1,283 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1180" viewBox="0 0 1600 1180" role="img" aria-labelledby="title description">
+<title id="title">Sage — RSI Agent Harness 原理图</title>
+<desc id="description">有用户数据时整理使用历史，没有用户数据时依据 Package 与目标设计题集。两种输入进入同一个经过题集审查和基线评测的 RSI 闭环：扩展训练、测量当前版本、Tuner 优化、候选审查、对比评测和版本选择。独立 test 仅供人类观察，版本应用需要人工确认。底层为 Agent Harness。</desc>
+
+<defs>
+ <linearGradient id="inputFill" x2="0" y2="1"><stop stop-color="#fffaf0" /><stop offset="1" stop-color="#fff2d9" /></linearGradient>
+ <linearGradient id="loopFill" x2="0" y2="1"><stop stop-color="#f1fbff" /><stop offset="1" stop-color="#e3f5ff" /></linearGradient>
+ <linearGradient id="nodeFill" x2="0" y2="1"><stop stop-color="#ffffff" /><stop offset="1" stop-color="#e9f6ff" /></linearGradient>
+ <linearGradient id="tunerFill" x2="0" y2="1"><stop stop-color="#f4fff7" /><stop offset="1" stop-color="#dff5e7" /></linearGradient>
+ <linearGradient id="baseFill" x2="0" y2="1"><stop stop-color="#f5f7fb" /><stop offset="1" stop-color="#e7edf5" /></linearGradient>
+ <marker id="blueArrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0 0 10 5 0 10Z" fill="#1f7096" /></marker>
+ <marker id="orangeArrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0 0 10 5 0 10Z" fill="#ed8b1b" /></marker>
+ <marker id="greenArrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0 0 10 5 0 10Z" fill="#258653" /></marker>
+ <marker id="grayArrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0 0 10 5 0 10Z" fill="#7c89a6" /></marker>
+</defs>
+<style>
+ text { font-family: -apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei","Noto Sans CJK SC",Arial,sans-serif; fill:#102346; }
+ .title {font-size:44px;font-weight:750;letter-spacing:-1px} .heading {font-size:29px;font-weight:700}
+ .label {font-size:22px;font-weight:650} .body {font-size:19px} .small {font-size:17px}
+ .connector {fill:none;stroke:#1f7096;stroke-width:3;stroke-linecap:round;stroke-linejoin:round;marker-end:url(#blueArrow)}
+ .input-connector {fill:none;stroke:#ed8b1b;stroke-width:3;stroke-linecap:round;stroke-linejoin:round;marker-end:url(#orangeArrow)}
+ .observation {fill:none;stroke:#7c89a6;stroke-width:2;stroke-dasharray:8 7;stroke-linecap:round;marker-end:url(#grayArrow)}
+</style>
+<rect width="1600" height="1180" rx="24" fill="#ffffff" />
+
+<text x="800" y="58" class="title" text-anchor="middle">
+<tspan x="800" dy="0">Sage — RSI Agent Harness</tspan>
+</text>
+<g id="input-with-history">
+<rect x="24" y="90" width="766" height="230" rx="18" fill="url(#inputFill)" stroke="#ed8b1b" stroke-width="1.6" />
+<text x="48" y="129" class="heading" text-anchor="start" style="fill:#a84a0a">
+<tspan x="48" dy="0">有用户数据</tspan>
+</text>
+<text x="765" y="128" class="small" text-anchor="end" style="fill:#805e32">
+<tspan x="765" dy="0">调用方 / 宿主整理输入</tspan>
+</text>
+<rect x="52" y="149" width="220" height="31" rx="7" fill="#fffaf0" stroke="#edaa61" stroke-width="1.6" />
+<text x="162" y="171" class="body" text-anchor="middle">
+<tspan x="162" dy="0">任务与结果</tspan>
+</text>
+<path d="M272 165 H300 Q312 165 312 219 H370" class="input-connector" />
+<rect x="52" y="187" width="220" height="31" rx="7" fill="#fffaf0" stroke="#edaa61" stroke-width="1.6" />
+<text x="162" y="209" class="body" text-anchor="middle">
+<tspan x="162" dy="0">失败与工具记录</tspan>
+</text>
+<path d="M272 203 H300 Q312 203 312 219 H370" class="input-connector" />
+<rect x="52" y="225" width="220" height="31" rx="7" fill="#fffaf0" stroke="#edaa61" stroke-width="1.6" />
+<text x="162" y="247" class="body" text-anchor="middle">
+<tspan x="162" dy="0">用户纠正</tspan>
+</text>
+<path d="M272 241 H300 Q312 241 312 219 H370" class="input-connector" />
+<rect x="52" y="263" width="220" height="31" rx="7" fill="#fffaf0" stroke="#edaa61" stroke-width="1.6" />
+<text x="162" y="285" class="body" text-anchor="middle">
+<tspan x="162" dy="0">用户偏好</tspan>
+</text>
+<path d="M272 279 H300 Q312 279 312 219 H370" class="input-connector" />
+<rect x="373" y="175" width="376" height="92" rx="14" fill="#fffcf4" stroke="#ed8b1b" stroke-width="1.6" />
+<text x="561" y="211" class="label" text-anchor="middle">
+<tspan x="561" dy="0">整理为改进目标</tspan>
+<tspan x="561" dy="31">与开发案例</tspan>
+</text>
+</g>
+<g id="input-without-history">
+<rect x="810" y="90" width="766" height="230" rx="18" fill="url(#inputFill)" stroke="#ed8b1b" stroke-width="1.6" />
+<text x="834" y="129" class="heading" text-anchor="start" style="fill:#a84a0a">
+<tspan x="834" dy="0">没有用户数据</tspan>
+</text>
+<rect x="840" y="175" width="278" height="92" rx="14" fill="#fffcf4" stroke="#ed8b1b" stroke-width="1.6" />
+<text x="979" y="211" class="label" text-anchor="middle">
+<tspan x="979" dy="0">Package</tspan>
+<tspan x="979" dy="31">与优化目标</tspan>
+</text>
+<rect x="1170" y="175" width="370" height="92" rx="14" fill="#fffcf4" stroke="#ed8b1b" stroke-width="1.6" />
+<text x="1355" y="211" class="label" text-anchor="middle">
+<tspan x="1355" dy="0">生成训练题集</tspan>
+<tspan x="1355" dy="31">与固定验证题集</tspan>
+</text>
+<path d="M1118 221 H1170" class="input-connector" />
+</g>
+<g id="rsi-loop">
+<rect x="24" y="346" width="1552" height="618" rx="18" fill="url(#loopFill)" stroke="#67c8eb" stroke-width="1.6" />
+<text x="48" y="385" class="heading" text-anchor="start">
+<tspan x="48" dy="0">RSI 优化闭环</tspan>
+</text>
+<rect x="48" y="402" width="1248" height="105" rx="15" fill="#eaf3fa" stroke="#8db4ca" stroke-width="1.6" />
+<g id="setup-package">
+<rect x="70" y="417" width="282" height="73" rx="14" fill="url(#nodeFill)" stroke="#2985aa" stroke-width="1.6" />
+<text x="211.0" y="450" class="label" text-anchor="middle">
+<tspan x="211.0" dy="0">Package · 目标 · 修改范围</tspan>
+</text>
+</g>
+<g id="setup-suites">
+<rect x="397" y="417" width="270" height="73" rx="14" fill="url(#nodeFill)" stroke="#2985aa" stroke-width="1.6" />
+<text x="532.0" y="450" class="label" text-anchor="middle">
+<tspan x="532.0" dy="0">设计 / 导入题集</tspan>
+</text>
+</g>
+<g id="setup-audit">
+<rect x="712" y="417" width="222" height="73" rx="14" fill="url(#nodeFill)" stroke="#2985aa" stroke-width="1.6" />
+<text x="823.0" y="450" class="label" text-anchor="middle">
+<tspan x="823.0" dy="0">独立题集审查</tspan>
+</text>
+</g>
+<g id="setup-baseline">
+<rect x="979" y="417" width="275" height="73" rx="14" fill="url(#nodeFill)" stroke="#2985aa" stroke-width="1.6" />
+<text x="1116.5" y="450" class="label" text-anchor="middle">
+<tspan x="1116.5" dy="0">基线执行与评测</tspan>
+</text>
+<text x="1116.5" y="477" text-anchor="middle" style="font-size:15px;fill:#102346">Runner → Evaluator</text></g>
+<path d="M352 454 H397" class="connector" />
+<path d="M667 454 H712" class="connector" />
+<path d="M934 454 H979" class="connector" />
+<path d="M561 267 V332 H531 V417" class="input-connector" />
+<path d="M1355 267 V332 H600 V417" class="input-connector" />
+<path d="M1116 490 V530 H207 V560" class="connector" />
+<g id="round-expand-training">
+<rect x="70" y="560" width="275" height="145" rx="14" fill="url(#nodeFill)" stroke="#2985aa" stroke-width="1.6" />
+<circle cx="98" cy="588" r="18" fill="#1f7096" />
+<text x="98" y="595" class="label" text-anchor="middle" style="fill:#ffffff">
+<tspan x="98" dy="0">1</tspan>
+</text>
+<text x="124" y="595" class="label" text-anchor="start">
+<tspan x="124" dy="0">扩展训练挑战</tspan>
+</text>
+<text x="207.5" y="630" class="body" text-anchor="middle">
+<tspan x="207.5" dy="0">根据当前版本的不足</tspan>
+<tspan x="207.5" dy="27">增加训练案例</tspan>
+</text>
+</g>
+<g id="round-incumbent">
+<rect x="380" y="560" width="275" height="145" rx="14" fill="url(#nodeFill)" stroke="#2985aa" stroke-width="1.6" />
+<circle cx="408" cy="588" r="18" fill="#1f7096" />
+<text x="408" y="595" class="label" text-anchor="middle" style="fill:#ffffff">
+<tspan x="408" dy="0">2</tspan>
+</text>
+<text x="434" y="595" class="label" text-anchor="start">
+<tspan x="434" dy="0">执行与独立评测</tspan>
+</text>
+<rect x="397" y="611" width="241" height="31" rx="7" fill="#ffffff" stroke="#99bed2" stroke-width="1" /><rect x="397" y="662" width="241" height="31" rx="7" fill="#ffffff" stroke="#99bed2" stroke-width="1" /><text x="517.5" y="633" text-anchor="middle" style="font-size:16px;fill:#102346">Runner：执行新增 train</text><path d="M517 645 V658" class="connector" style="stroke-width:1.5" /><text x="517.5" y="684" text-anchor="middle" style="font-size:16px;fill:#102346">Evaluator：独立逐题评分</text></g>
+<g id="round-tuner">
+<rect x="690" y="560" width="275" height="145" rx="14" fill="url(#tunerFill)" stroke="#258653" stroke-width="1.6" />
+<circle cx="718" cy="588" r="18" fill="#258653" />
+<text x="718" y="595" class="label" text-anchor="middle" style="fill:#ffffff">
+<tspan x="718" dy="0">3</tspan>
+</text>
+<text x="744" y="595" class="label" text-anchor="start">
+<tspan x="744" dy="0">Tuner</tspan>
+</text>
+<text x="827.5" y="630" class="body" text-anchor="middle">
+<tspan x="827.5" dy="0">训练反馈 + 匿名 dev 分数</tspan>
+<tspan x="827.5" dy="27">修改指导、Skills、工具</tspan>
+<tspan x="827.5" dy="27">预算与资源（限授权范围）</tspan>
+</text>
+</g>
+<g id="round-review">
+<rect x="1000" y="560" width="275" height="145" rx="14" fill="url(#nodeFill)" stroke="#2985aa" stroke-width="1.6" />
+<circle cx="1028" cy="588" r="18" fill="#1f7096" />
+<text x="1028" y="595" class="label" text-anchor="middle" style="fill:#ffffff">
+<tspan x="1028" dy="0">4</tspan>
+</text>
+<text x="1054" y="595" class="label" text-anchor="start">
+<tspan x="1054" dy="0">独立候选审查</tspan>
+</text>
+<text x="1137.5" y="630" class="body" text-anchor="middle">
+<tspan x="1137.5" dy="0">目标一致性</tspan>
+<tspan x="1137.5" dy="27">权限与修改范围</tspan>
+</text>
+</g>
+<path d="M345 632 H380" class="connector" />
+<path d="M655 632 H690" class="connector" />
+<path d="M965 632 H1000" class="connector" />
+<text x="1140" y="730" class="small" text-anchor="middle" style="fill:#b53937">
+<tspan x="1140" dy="0">拒绝补丁：跳过评测，下一轮</tspan>
+</text>
+<g id="round-evaluate">
+<rect x="860" y="762" width="350" height="110" rx="14" fill="url(#nodeFill)" stroke="#2985aa" stroke-width="1.6" />
+<circle cx="888" cy="790" r="18" fill="#1f7096" />
+<text x="888" y="797" class="label" text-anchor="middle" style="fill:#ffffff">
+<tspan x="888" dy="0">5</tspan>
+</text>
+<text x="914" y="797" class="label" text-anchor="start">
+<tspan x="914" dy="0">候选对比评测</tspan>
+</text>
+<text x="1035" y="827" text-anchor="middle" style="font-size:17px;fill:#102346">Runner 执行 → Evaluator 评分</text><text x="1035" y="853" text-anchor="middle" style="font-size:17px;fill:#102346">相同累计 train + 固定 dev</text></g>
+<g id="round-select">
+<rect x="350" y="762" width="435" height="110" rx="14" fill="url(#nodeFill)" stroke="#2985aa" stroke-width="1.6" />
+<circle cx="378" cy="790" r="18" fill="#1f7096" />
+<text x="378" y="797" class="label" text-anchor="middle" style="fill:#ffffff">
+<tspan x="378" dy="0">6</tspan>
+</text>
+<text x="404" y="797" class="label" text-anchor="start">
+<tspan x="404" dy="0">选择保留版本</tspan>
+</text>
+<text x="567.5" y="832" class="body" text-anchor="middle">
+<tspan x="567.5" dy="0">得分 = 0.5 × train + 0.5 × dev</tspan>
+<tspan x="567.5" dy="27">达到提升门槛才保留，逐题记录退步</tspan>
+</text>
+</g>
+<path d="M1275 675 H1298 V746 H1035 V762" class="connector" style="stroke:#258653;marker-end:url(#greenArrow)" />
+<text x="1232" y="756" class="small" text-anchor="middle" style="fill:#258653">
+<tspan x="1232" dy="0">通过</tspan>
+</text>
+<path d="M860 817 H785" class="connector" />
+<path d="M350 817 H47 V632 H70" class="connector" />
+<path d="M567 872 V896" class="connector" style="stroke:#258653;marker-end:url(#greenArrow)" />
+<g id="exit-stop">
+<rect x="370" y="896" width="260" height="48" rx="14" fill="url(#tunerFill)" stroke="#258653" stroke-width="1.6" />
+<text x="500.0" y="929" class="label" text-anchor="middle">
+<tspan x="500.0" dy="0">停止 / 验证稳定成功</tspan>
+</text>
+</g>
+<g id="exit-evidence">
+<rect x="681" y="896" width="250" height="48" rx="14" fill="url(#tunerFill)" stroke="#258653" stroke-width="1.6" />
+<text x="806.0" y="929" class="label" text-anchor="middle">
+<tspan x="806.0" dy="0">候选版本 + 证据</tspan>
+</text>
+</g>
+<g id="exit-apply">
+<rect x="982" y="896" width="300" height="48" rx="14" fill="url(#tunerFill)" stroke="#258653" stroke-width="1.6" />
+<text x="1132.0" y="929" class="label" text-anchor="middle">
+<tspan x="1132.0" dy="0">人工确认 → 应用版本</tspan>
+</text>
+</g>
+<path d="M630 920 H681" class="connector" style="stroke:#258653;marker-end:url(#greenArrow)" />
+<path d="M931 920 H982" class="connector" style="stroke:#258653;marker-end:url(#greenArrow)" />
+<g id="human-test">
+<rect x="1320" y="402" width="232" height="542" rx="16" fill="#f4f0ff" stroke="#9d87df" stroke-width="1.6" />
+<text x="1436" y="446" class="label" text-anchor="middle">
+<tspan x="1436" dy="0">独立 test 观察</tspan>
+</text>
+<text x="1436" y="534" class="label" text-anchor="middle">
+<tspan x="1436" dy="0">可选的自动测量</tspan>
+<tspan x="1436" dy="35">供人类查看</tspan>
+</text>
+<path d="M1344 603 H1528" stroke="#c9bce9" />
+<text x="1436" y="651" class="body" text-anchor="middle">
+<tspan x="1436" dy="0">不参与调优</tspan>
+<tspan x="1436" dy="38">不参与版本选择</tspan>
+<tspan x="1436" dy="38">不参与停止判断</tspan>
+</text>
+<path d="M1254 454 H1292 Q1305 454 1305 482 H1320" class="observation" />
+<path d="M785 856 H822 V884 H1298 Q1310 884 1310 821 H1320" class="observation" />
+</g>
+</g>
+<g id="harness-foundation">
+<rect x="24" y="990" width="1552" height="166" rx="18" fill="url(#baseFill)" stroke="#8a9cb6" stroke-width="1.6" />
+<text x="48" y="1029" class="heading" text-anchor="start">
+<tspan x="48" dy="0">Agent Harness 执行基础</tspan>
+</text>
+<rect x="46" y="1048" width="242" height="48" rx="10" fill="#f9fbff" stroke="#99abc1" stroke-width="1.6" />
+<text x="167" y="1079" class="body" text-anchor="middle">
+<tspan x="167" dy="0">模型与上下文</tspan>
+</text>
+<rect x="299" y="1048" width="242" height="48" rx="10" fill="#f9fbff" stroke="#99abc1" stroke-width="1.6" />
+<text x="420" y="1079" class="body" text-anchor="middle">
+<tspan x="420" dy="0">工具 · Skills · MCP</tspan>
+</text>
+<rect x="552" y="1048" width="242" height="48" rx="10" fill="#f9fbff" stroke="#99abc1" stroke-width="1.6" />
+<text x="673" y="1079" class="body" text-anchor="middle">
+<tspan x="673" dy="0">会话与状态</tspan>
+</text>
+<rect x="805" y="1048" width="242" height="48" rx="10" fill="#f9fbff" stroke="#99abc1" stroke-width="1.6" />
+<text x="926" y="1079" class="body" text-anchor="middle">
+<tspan x="926" dy="0">流式输出与审批</tspan>
+</text>
+<rect x="1058" y="1048" width="242" height="48" rx="10" fill="#f9fbff" stroke="#99abc1" stroke-width="1.6" />
+<text x="1179" y="1079" class="body" text-anchor="middle">
+<tspan x="1179" dy="0">沙箱与资源绑定</tspan>
+</text>
+<rect x="1311" y="1048" width="242" height="48" rx="10" fill="#f9fbff" stroke="#99abc1" stroke-width="1.6" />
+<text x="1432" y="1079" class="body" text-anchor="middle">
+<tspan x="1432" dy="0">多智能体工作流</tspan>
+</text>
+<rect x="46" y="1109" width="1507" height="32" rx="8" fill="#e5edf5" stroke="#b0bed0" stroke-width="1.6" />
+<text x="800" y="1132" class="body" text-anchor="middle">
+<tspan x="800" dy="0">Desktop · Server · Python SDK</tspan>
+</text>
+<path d="M300 990 V968" class="observation" />
+<path d="M610 990 V968" class="observation" />
+<path d="M920 990 V968" class="observation" />
+<path d="M1230 990 V968" class="observation" />
+</g>
+</svg>

@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="146" viewBox="0 0 1200 146" role="img" aria-labelledby="title description"><title id="title">Sage features</title><desc id="description">Run, evaluate, evolve. Models and context, Skills and MCP, stateful execution, multi-agent workflows, sandbox and approvals, multiple hosts.</desc>
+<!-- Editable text and shapes. Light/dark variants are selected with picture in the README. -->
+<rect width="1200" height="146" rx="16" fill="#ffffff"/>
+<style>text{font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",Arial,sans-serif}</style>
+<g id="verb-0"><text x="207" y="48" text-anchor="middle" font-size="34" font-weight="700" fill="#087f76">Run</text></g>
+<path d="M362 36h58m-9-7 9 7-9 7" fill="none" stroke="#e3e9f0" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+<g id="verb-1"><text x="597" y="48" text-anchor="middle" font-size="34" font-weight="700" fill="#7352bd">Evaluate</text></g>
+<path d="M752 36h58m-9-7 9 7-9 7" fill="none" stroke="#e3e9f0" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+<g id="verb-2"><text x="987" y="48" text-anchor="middle" font-size="34" font-weight="700" fill="#b86413">Evolve</text></g>
+<g id="capability-0"><rect x="8" y="82" width="189" height="43" rx="10" fill="#f6f8fb" stroke="#e3e9f0"/><text x="102.5" y="109" text-anchor="middle" font-size="16" font-weight="550" fill="#34435a">Models &amp; Context</text></g>
+<g id="capability-1"><rect x="207" y="82" width="189" height="43" rx="10" fill="#f6f8fb" stroke="#e3e9f0"/><text x="301.5" y="109" text-anchor="middle" font-size="16" font-weight="550" fill="#34435a">Skills &amp; MCP</text></g>
+<g id="capability-2"><rect x="406" y="82" width="189" height="43" rx="10" fill="#f6f8fb" stroke="#e3e9f0"/><text x="500.5" y="109" text-anchor="middle" font-size="16" font-weight="550" fill="#34435a">Stateful Execution</text></g>
+<g id="capability-3"><rect x="605" y="82" width="189" height="43" rx="10" fill="#f6f8fb" stroke="#e3e9f0"/><text x="699.5" y="109" text-anchor="middle" font-size="16" font-weight="550" fill="#34435a">Multi-agent</text></g>
+<g id="capability-4"><rect x="804" y="82" width="189" height="43" rx="10" fill="#f6f8fb" stroke="#e3e9f0"/><text x="898.5" y="109" text-anchor="middle" font-size="16" font-weight="550" fill="#34435a">Sandbox &amp; Approvals</text></g>
+<g id="capability-5"><rect x="1003" y="82" width="189" height="43" rx="10" fill="#f6f8fb" stroke="#e3e9f0"/><text x="1097.5" y="109" text-anchor="middle" font-size="16" font-weight="550" fill="#34435a">Multiple Hosts</text></g>
+</svg>
