@@ -1,6 +1,6 @@
 <div align="center">
 
-# 🌟 **体验 Sage 的强大能力**
+# **Sage — RSI Agent Harness**
 
 ![cover](assets/cover.png)
 
@@ -12,71 +12,48 @@
 [![DeepWiki](https://img.shields.io/badge/DeepWiki-查看文档-purple.svg)](https://deepwiki.com/ZHangZHengEric/Sage)
 [![Slack](https://img.shields.io/badge/Slack-加入社区-4A154B?logo=slack)](https://join.slack.com/t/sage-b021145/shared_invite/zt-3t8nabs6c-qCEDzNUYtMblPshQTKSWOA)
 
-# 🧠 **Sage · 自定义、自进化智能体**
-
-### 🎯 **定义智能体，评测能力，迭代进化**
-
-> 🌟 **构建自定义、自进化智能体的开源平台。定义 Agent package，通过 RSI 多轮评测与调优持续迭代，保留完整版本历史，由你选择采用哪个版本。**
-
 </div>
 
-首次阅读代码？从 [代码阅读指南](docs/zh/architecture/code-reading-guide.md) 开始，按运行链路定位 sagents、desktop、server 和相关测试。
+**Sage 是一个 RSI Agent Harness**，让智能体从任务反馈中持续改进。RSI（Recursive Self-Improvement，递归自我改进）从目标或整理后的使用历史出发，保留每轮版本与证据，由你决定采用什么。
 
-基于 sagents 开发新项目：[统一开发入口、配置与调试规范](docs/zh/architecture/sagents-host-development.md)，附可离线运行的参考项目。
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="assets/features-zh-dark.svg">
+  <source media="(prefers-color-scheme: light)" srcset="assets/features-zh-light.svg">
+  <img alt="执行 · 评测 · 进化；模型与上下文、Skills 与 MCP、有状态执行、多智能体、沙箱与审批、多端接入" src="assets/features-zh-light.svg" width="1200">
+</picture>
 
----
+[体验 RSI](docs/zh/applications/FIRST_RSI_RUN.md) · [下载 Desktop](https://github.com/ZHangZHengEric/Sage/releases/tag/v2.1.1) · [Python SDK](sagents/v2/README.md) · [文档](docs/zh/README.md)
 
-## ✨ **核心优势**
+## 🔄 RSI 如何迭代
 
-- 📦 **自定义 Agent 包** — 用 `sage.yaml` 定义指令、Skills、工具与运行配置，在 Desktop、Server 或自己的 Python 应用中复用。
-- 🧬 **RSI 自进化** — 通过独立 Session 的评测、调优和审查 Agent，按设定轮数测试与改进 package；保留每轮完整记录，由用户选择版本。
-- 🧩 **插件化架构** — 按需组合模型、记忆、存储、工具和调度实现，统一管理扩展契约与组件生命周期。
-- 🪟 **原生流式界面（Desktop 2.1）** — 使用 [OpenUI](https://github.com/thesysdev/openui) 官方解析器，将 Assistant 的 `openui` 代码块随输出增量渲染为 Flutter Glass 界面，支持深浅色和 31 类原生组件，含图表、指标、标签页、流程图、丰富输入及即时本地计算。纯本地交互不需要提交按钮或再次请求模型；提交按钮仅用于明确将参数交回助手。用户自然提问即可，无需提 OpenUI；可在加号菜单开启“优先交互 UI”，或在“设置 → 通用 → 默认开启交互式 UI”设置新聊天的默认值。开启后宿主自动预加载完整 Skill，无需工具调用。演示文稿支持原生 16:9 流式预览，并从同一份数据导出可编辑 PPTX。当前支持指定组件子集，使用 Sage 自己的原生渲染器；2.1.1 桌面安装包包含这些功能。[接入说明](app/v2/desktop/README.md#openui)。
-- 🔄 **有状态、可交互的执行** — 持久化 Session 历史，流式输出事件，支持暂停、恢复、人工输入与审批。
-- 🤝 **多智能体编排** — 通过定向消息协调 Studio 成员，或在运行时中组合 Agent Flow。
-- 🔌 **可扩展的工具生态** — 将内置工具、可复用 Skills 与 [MCP](https://modelcontextprotocol.io/) 服务接入同一智能体工作流程。
-- 🏗️ **统一内核，多端接入** — 通过 Desktop 和 Server 使用 SAgents，也可以嵌入自己的 Python 应用。
+![Sage RSI：目标或整理后的使用历史进入 Runner 执行、Evaluator 独立评测、Tuner 优化及版本选择闭环。](assets/rsi-agent-harness-zh.svg)
 
----
+[流程指南](docs/zh/applications/RSI.md) · [评测与版本选择规则](sagents/v2/optimization/README.md)
 
-## 🧬 **RSI：从自定义到自进化**
-
-输入 Agent package，设置优化目标、轮数和允许修改的范围，就可以启动独立的 RSI（Recursive Self-Improvement）循环。
-
-- **按需调优** — 可只优化 Skills，或开放指令指导、工具启用列表与步数预算。支持用户提供测试集，也可由测试设计 Agent 生成，支持单轮任务与设有轮数上限的多轮对话。
-- **独立评测与审查** — 运行目标 Agent 前，独立 Session 的审查 Agent 先检查测试集与授权目标的一致性。评测和候选语义审查分别检查任务完成、背题和目标漂移；独立最终测试集在基线前封存。
-- **每次迭代可追溯** — 保留原始版本、每轮完整 package、测试回答、评测及审查结果。Desktop 显示后台进度和 RSI 运行历史。Agent 配置层级单独保存人工编辑与确认应用的版本，未应用的候选保留在对应 RSI 记录中。
-- **用户决定采用版本** — 优化不会直接替换原配置。用户查看对比结果、选择版本并确认后，Desktop 才应用该版本；没有更好的候选时保留原版本。
-
-参见 [RSI 流程指南](docs/zh/applications/RSI.md)。从 [Python API](sagents/v2/optimization/README.md) 使用 `AgentPackageOptimizer`，或在 [Desktop 的 Agent 配置](app/v2/desktop/README.md#rsi-与-agent-版本)中打开 RSI。当前 Desktop RSI 支持 simple Agent 与原生工具，安装包支持范围以对应版本说明为准。
-
----
-
-## 📰 **最新动态**
-
-- **2026-10-13** — [Streaming UI：让回答直接成为原生交互界面](docs/zh/applications/STREAMING_UI.md) — 了解 Desktop 2.1 的流式生成、本地计算、过程稿收纳和可编辑 PPTX 导出。
-
----
-
-## 🚀 **快速开始**
+## 🚀 快速开始
 
 Sage、Desktop、Server 和 SAgents 默认指当前 v2 实现。旧版单独见 [Sage v1 指南](app/v1/README.md)。
 
 | 选择你的入口 | 从这里开始 |
 | --- | --- |
+| 🧬 **首次 RSI** — 无需 API Key 查看脚本闭环 | [离线流程演示](docs/zh/applications/FIRST_RSI_RUN.md) |
 | 💻 **Desktop** — 配置智能体、运行 RSI、选择版本 | [桌面端指南](app/v2/desktop/README.md) |
 | 🌐 **Server** — 多用户 Web 应用与 Agent Studio | [服务端指南](app/v2/server/README.md) |
 | 🧠 **SAgents** — 通过 Python 构建与调优智能体 | [运行时快速开始](sagents/v2/README.md#quick-start) |
 | 📦 **桌面安装包** — 已发布版本 | [下载与版本说明](https://github.com/ZHangZHengEric/Sage/releases/tag/v2.1.1) |
 
-### 📦 安装桌面端
+<details>
+<summary>📦 安装 Desktop</summary>
 
 1. 下载 [Sage 2.1.1](https://github.com/ZHangZHengEric/Sage/releases/tag/v2.1.1)：支持 macOS（arm64/x86_64）、Windows（x86_64）和 Linux（arm64/x86_64）。
 2. 安装并打开 Sage。安装包已包含 Python 和后端，无需克隆仓库、安装系统 Python 或 Flutter；Linux 仍需 GTK 和 bubblewrap。
 3. 在设置中添加模型 → 配置 Agent → 开始对话。模型服务可能收取使用费用，操作步骤见[桌面端指南](docs/zh/applications/DESKTOP.md#第一个任务)。
 4. macOS 安装包未公证，Windows 安装包未做代码签名；各类安装包详情见 [版本说明](release_notes/v2.1.1.md)。
 
-### 💻 从源码启动桌面端
+</details>
+
+<details>
+<summary>💻 从源码启动 Desktop</summary>
 
 需要 **Python 3.12+**，以及支持桌面构建、Dart 版本满足 `^3.12.2` 的 **[Flutter](https://flutter.dev/)**。macOS 下运行：
 
@@ -97,7 +74,10 @@ flutter run -d macos
 
 Windows、Linux 配置见 [桌面端指南](app/v2/desktop/README.md)。2.1 发布包与版本边界见 [v2.1.1 版本说明](release_notes/v2.1.1.md)。GitHub Actions 构建包含 Python 运行环境的 Flutter v2 安装包；旧 Tauri 安装包属于 v1。
 
-### 🌐 从源码启动服务端
+</details>
+
+<details>
+<summary>🌐 从源码启动 Server</summary>
 
 需要 **Python 3.12+**、**MySQL** 和 **Node.js 22.12+**。在仓库根目录、已激活 Python 环境的终端中执行：
 
@@ -120,7 +100,10 @@ python -m app.v2.server
 
 详细配置见 [服务端指南](app/v2/server/README.md)。Server 当前支持**单 worker**，MySQL 持久化不代表已支持横向扩容。
 
-### 🧑‍💻 用 SAgents 运行第一个 Agent
+</details>
+
+<details>
+<summary>🐍 Python SDK 完整示例</summary>
 
 **一个 Python 文件即可，无需创建 `sage.yaml`。** 完成上面的 Python 安装后，保存为 `quickstart.py`，将 `your-model` 替换为可用模型：
 
@@ -196,9 +179,51 @@ python quickstart.py
 
 `loads()` 解析 YAML 字符串，`build()` 直接接收 manifest 对象。示例输出事件和最终状态，不启用文件或 Shell 工具。[更多配置方式 →](docs/zh/applications/GETTING_STARTED.md)
 
----
+</details>
 
-## 🧠 **SAgents 内核**
+## 🛠️ Harness 能力
+
+| 能力 | 可以做什么 |
+| --- | --- |
+| 📦 **Package 与版本** | 用 `sage.yaml` 定义指令、Skills、工具与资源，保存每轮候选、差异和评测记录。 |
+| 🧠 **模型与上下文** | 接入不同模型，配置路由、记忆和上下文预算。 |
+| 🔌 **工具、Skills 与 MCP** | 组合原生工具、可复用 Skills 和 MCP 服务，由宿主管理授权。 |
+| 💾 **有状态执行** | 持久化会话、流式输出，支持人工输入、审批与暂停恢复。 |
+| 🛡️ **沙箱与资源** | 按宿主绑定执行资源、沙箱、工具策略与运行预算。 |
+| 🤝 **多智能体与扩展** | 编排工作流和成员消息，替换模型、记忆、存储、工具与调度 provider。 |
+| 🪟 **原生交互 UI** | 流式生成深浅色 Glass 界面、图表、输入与幻灯片，支持本地计算和可编辑 PPTX 导出。[了解 OpenUI](app/v2/desktop/README.md#openui)。 |
+| 🖥️ **多端接入** | 使用 Desktop、Server/Studio，或将 SAgents 嵌入自己的 Python 应用。 |
+
+<details>
+<summary>📐 支持范围与运行边界</summary>
+
+- Desktop RSI 当前支持 simple 类型与原生工具，通用 MCP 接入不代表 RSI 已支持对应绑定。
+- 内置运行配置面向单进程或单宿主，Server 支持单 worker；本机执行不等于容器隔离。
+- 使用历史由调用方整理成目标或题集；默认流程使用固定 dev 与扩展 train，dev 参与开发，独立 test 仅供观察。
+- RSI 生成候选，不自动应用；持久化状态不代表分布式任务接管或自动断点恢复。
+
+[RSI 支持范围](docs/zh/applications/RSI.md) · [运行时架构](sagents/v2/ARCHITECTURE.md)
+
+</details>
+
+<details>
+<summary>📊 实验展示（示例占位，非实测）</summary>
+
+**以下为排版示例，全部数字均为占位，非实测结果。**
+
+| 示例任务 | 基线成功率 | RSI 后 | 变化 | 提案轮数 |
+| --- | ---: | ---: | ---: | ---: |
+| 基于目标的任务 · 占位 | 52% | 71% | +19 个百分点 | 5 |
+| 整理后的历史任务 · 占位 | 58% | 79% | +21 个百分点 | 5 |
+
+正式结果需附模型、数据集划分、样本量、重复次数、成本及运行证据。
+
+实验入口：[真实模型领域实验](examples/v2/optimizer_domains.py) · [τ-bench 自定义实验](examples/v2/optimizer_tau_bench.py)。真实模型调用可能产生费用。
+
+</details>
+
+<details>
+<summary>🧠 SAgents 运行时架构</summary>
 
 ```mermaid
 flowchart TB
@@ -225,7 +250,14 @@ flowchart TB
 
 [了解运行时 →](sagents/v2/README.md) · [阅读架构设计 →](sagents/v2/ARCHITECTURE.md)
 
----
+</details>
+
+<details>
+<summary>📰 最新动态</summary>
+
+- **2026-10-13** — [Streaming UI：让回答直接成为原生交互界面](docs/zh/applications/STREAMING_UI.md) — 了解 Desktop 2.1 的流式生成、本地计算、过程稿收纳和可编辑 PPTX 导出。
+
+</details>
 
 ## 📚 **文档导航**
 

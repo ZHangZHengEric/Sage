@@ -1,6 +1,6 @@
 <div align="center">
 
-# 🌟 **Experience Sage's Power**
+# **Sage — RSI Agent Harness**
 
 ![cover](assets/cover.png)
 
@@ -12,81 +12,48 @@
 [![DeepWiki](https://img.shields.io/badge/DeepWiki-Learn%20More-purple.svg)](https://deepwiki.com/ZHangZHengEric/Sage)
 [![Slack](https://img.shields.io/badge/Slack-Join%20Community-4A154B?logo=slack)](https://join.slack.com/t/sage-b021145/shared_invite/zt-3t8nabs6c-qCEDzNUYtMblPshQTKSWOA)
 
-# 🧠 **Sage · Custom, Self-Evolving Agents**
-
-### 🎯 **Define Your Agent. Evaluate. Evolve.**
-
-> 🌟 **An open-source platform for building custom, self-evolving AI agents. Define an Agent package, evaluate it, and improve it through multiple RSI rounds — with version history and your choice of which version to adopt.**
-
 </div>
 
----
+**Sage is an RSI Agent Harness** for improving agents through task feedback. RSI (Recursive Self-Improvement) starts from a goal or curated usage history, retains each version and its evidence, and leaves adoption in your hands.
 
-New to RSI? [Inspect your first run](docs/en/applications/FIRST_RSI_RUN.md): a scripted Python walkthrough with no model API key.
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="assets/features-en-dark.svg">
+  <source media="(prefers-color-scheme: light)" srcset="assets/features-en-light.svg">
+  <img alt="Run · Evaluate · Evolve; Models and Context, Skills and MCP, Stateful Execution, Multi-agent, Sandbox and Approvals, Multiple Hosts" src="assets/features-en-light.svg" width="1200">
+</picture>
 
+[Try RSI](docs/en/applications/FIRST_RSI_RUN.md) · [Download Desktop](https://github.com/ZHangZHengEric/Sage/releases/tag/v2.1.1) · [Python SDK](sagents/v2/README.md) · [Docs](docs/en/README.md)
 
-New to the code? [Start with the code reading guide](docs/en/architecture/code-reading-guide.md): runtime, host call chains, ownership and tests.
+## 🔄 How RSI works
 
-Build your own host: [SAgents configuration and debugging guide](docs/en/architecture/sagents-host-development.md) with a runnable offline starter.
+![Sage RSI: a goal or curated usage history feeds Runner execution, independent Evaluator grading, Tuner optimization, and version selection.](assets/rsi-agent-harness-en.svg)
 
-## ✨ **Why Sage**
+[Workflow guide](docs/en/applications/RSI.md) · [Evaluation and selection rules](sagents/v2/optimization/README.md)
 
-- 📦 **Custom Agent packages** — Define your agent's instructions, Skills, tools, and runtime configuration in `sage.yaml`; reuse packages in Desktop, Server, or your Python application.
-- 🧬 **Self-evolution with RSI** — Test and refine packages over configurable rounds using evaluation, tuning, and review agents in separate Sessions. Retain every iteration and choose which version to use.
-- 🧩 **Plugin-based architecture** — Compose model, memory, storage, tool, and scheduling providers with explicit contracts and managed lifecycles.
-- 🪟 **Native streaming UI (Desktop 2.1)** — Uses the official [OpenUI](https://github.com/thesysdev/openui) parser with Sage’s Flutter Glass renderer. Assistant `openui` blocks render as output arrives, with light/dark themes and 31 native component types: charts, metrics, tabs, diagrams, rich inputs, and immediate local calculations. Local-only interfaces need no submit button or model round-trip; a submit button explicitly hands values back to the assistant. Users can ask naturally without mentioning OpenUI. Enable **Prefer interactive UI** in the composer plus menu, or set **Settings → General → Interactive UI on by default** for new chats; enabling it preloads the complete built-in Skill without a tool call. Presentations stream as native 16:9 slides and export editable PPTX from the same document. This is a supported component subset, not the upstream Web renderer; included in the 2.1.1 desktop packages. [Integration details](app/v2/desktop/README.md#openui).
-- 🔄 **Stateful, interactive execution** — Durable Session history, streamed events, and pause/resume with human input and approvals.
-- 🤝 **Multi-agent orchestration** — Coordinate Studio members through directed messages, or compose Agent Flows in the runtime.
-- 🔌 **An extensible tool ecosystem** — Bring built-in tools, reusable Skills, and [MCP](https://modelcontextprotocol.io/) services into the same agent workflow.
-- 🏗️ **One runtime, multiple hosts** — Use SAgents through Desktop and Server, or embed it in your own Python application.
-
----
-
-## 🧬 **RSI: From Custom Agents to Self-Evolution**
-
-Supply an Agent package, choose a goal, round count, and editable scope, and run an independent RSI (Recursive Self-Improvement) loop.
-
-- **Control what evolves** — Optimize only Skills, or allow instruction guidance, tool enablement, and step budgets. Supply your own test suite or generate one with a test-design agent; test single-turn tasks and conversations with bounded turn counts.
-- **Evaluate and review independently** — A separate audit Session checks test-suite alignment with the authorized goal before any target execution. Evaluation and candidate semantic review then check completion, memorization, and goal drift in separate Sessions. An independent final suite is sealed before baseline evaluation.
-- **Inspect every iteration** — Retain the original package, every iteration's complete package, test responses, evaluations, and review results. Desktop shows background progress and RSI run histories. Agent settings separately retain saved and applied configuration versions; unapplied candidates stay in their RSI runs.
-- **Choose what to adopt** — Optimization produces candidates without replacing your configuration. Inspect the comparison, select a version, and explicitly confirm before Desktop applies it. Keep the original when no better candidate emerges.
-
-See the [RSI workflow guide](docs/en/applications/RSI.md). Use `AgentPackageOptimizer` through the [Python API](sagents/v2/optimization/README.md), or open RSI from [Desktop Agent settings](app/v2/desktop/README.md#rsi-与-agent-版本). Desktop RSI currently supports simple Agents and native tools; installer availability follows each release's notes.
-
----
-
-## 📰 **Latest updates**
-
-- **2026-10-13** — [Streaming UI: from an answer to a native interactive interface](docs/en/applications/STREAMING_UI.md) — Live generation, local calculations, Process Panel revisions, and editable PPTX export in Desktop 2.1.
-- **2026-10-12** — [MCP tools are visible, but calls fail: a five-step diagnostic](knowledge/tutorials/mcp-visible-calls-fail.md)
-- **2026-10-12** — RSI: multi-round Agent package optimization, test-suite alignment audits, independent final tests and semantic review, plus Desktop progress and Agent-level version history. [Python API](sagents/v2/optimization/README.md) · [Desktop guide](app/v2/desktop/README.md#rsi-与-agent-版本)
-- **2026-10-11** — [OpenRouter free models: selection and limits](knowledge/resources/openrouter-free-models.md)
-- **2026-10-11** — [MCP engineering resources: protocols, SDKs, testing, and security](knowledge/resources/mcp-engineering-resources.md)
-- **2026-10-11** — [A read-only MCP smoke test through Sage](knowledge/tutorials/mcp-smoke-test.md)
-
-[More agent resources and tutorials →](knowledge/README.md)
-
----
-
-## 🚀 **Get Started**
+## 🚀 Get Started
 
 Sage, Desktop, Server, and SAgents refer to the current v2 implementation by default. For the legacy version, use the separate [Sage v1 guide](app/v1/README.md).
 
 | Choose your path | Start here |
 | --- | --- |
+| 🧬 **First RSI run** — Inspect a scripted loop without an API key | [Offline walkthrough](docs/en/applications/FIRST_RSI_RUN.md) |
 | 💻 **Desktop** — Configure agents, run RSI, and choose versions | [Desktop guide](app/v2/desktop/README.md) |
 | 🌐 **Server** — Multi-user web access and Agent Studio | [Server guide](app/v2/server/README.md) |
 | 🧠 **SAgents** — Build and optimize agents through Python | [Runtime quick start](sagents/v2/README.md#quick-start) |
 | 📦 **Desktop installers** — Available release builds | [Downloads & release instructions](https://github.com/ZHangZHengEric/Sage/releases/tag/v2.1.1) |
 
-### 📦 Desktop installer
+<details>
+<summary>📦 Install Desktop</summary>
 
 1. Download [Sage 2.1.1](https://github.com/ZHangZHengEric/Sage/releases/tag/v2.1.1) for macOS (arm64/x86_64), Windows (x86_64), or Linux (arm64/x86_64).
 2. Install and open Sage. Python and the backend are bundled; no repository checkout, system Python, or Flutter is needed. Linux still requires GTK and bubblewrap.
 3. Add your model in Settings → Configure an Agent → Start a conversation. Your model service may charge usage fees. See the [Desktop guide](docs/en/applications/DESKTOP.md#first-task).
 4. macOS packages are not notarized; Windows installers are not code-signed. See the [release notes](release_notes/v2.1.1.md) for package details.
 
-### 💻 Desktop from source
+</details>
+
+<details>
+<summary>💻 Run Desktop from source</summary>
 
 Requires **Python 3.12+** and **[Flutter](https://flutter.dev/)** with Dart `^3.12.2` and desktop support. On macOS:
 
@@ -107,7 +74,10 @@ The app starts its local backend automatically. Settings and session data live i
 
 For Windows and Linux setup, see the [Desktop guide](app/v2/desktop/README.md). Sage 2.1 packages and the release boundary are documented in [v2.1.1 release notes](release_notes/v2.1.1.md). GitHub Actions builds Flutter v2 installers with an embedded Python runtime; the legacy Tauri installers belong to v1.
 
-### 🌐 Server from source
+</details>
+
+<details>
+<summary>🌐 Run Server from source</summary>
 
 Requires **Python 3.12+**, **MySQL**, and **Node.js 22.12+**. From the checkout root, with the Python environment active:
 
@@ -130,7 +100,10 @@ Open **[localhost:8090](http://localhost:8090)**. Add a model and an Agent to st
 
 See the [Server guide](app/v2/server/README.md) for configuration. Server currently supports **one worker**; MySQL persistence does not enable horizontal scaling.
 
-### 🧑‍💻 Run your first SAgents agent
+</details>
+
+<details>
+<summary>🐍 Complete Python SDK example</summary>
 
 **One Python file; no `sage.yaml` required.** After the Python setup above, save as `quickstart.py` and replace `your-model` with an available model:
 
@@ -206,9 +179,51 @@ python quickstart.py
 
 `loads()` parses YAML text; `build()` accepts the manifest object directly. This prints events and the final state, without file or shell tools. [More configuration options →](docs/en/applications/GETTING_STARTED.md)
 
----
+</details>
 
-## 🧠 **Built on SAgents**
+## 🛠️ Harness capabilities
+
+| Capability | What you can do |
+| --- | --- |
+| 📦 **Packages and versions** | Define instructions, Skills, tools, and resources in `sage.yaml`; retain candidates, diffs, and evaluation records. |
+| 🧠 **Models and context** | Connect model providers and configure routes, memory, and context budgets. |
+| 🔌 **Tools, Skills, and MCP** | Compose native tools, reusable Skills, and MCP services with host-managed authorization. |
+| 💾 **Stateful execution** | Persist Sessions, stream output, and pause/resume for human input and approvals. |
+| 🛡️ **Sandbox and resources** | Bind execution resources, sandbox providers, tool policies, and runtime budgets through the host. |
+| 🤝 **Multi-agent workflows and extensions** | Orchestrate workflows and member messages; replace model, memory, storage, tool, and scheduling providers. |
+| 🪟 **Native interactive UI** | Stream light/dark Glass interfaces, charts, inputs, and slides, with local calculations and editable PPTX export. [Explore OpenUI](app/v2/desktop/README.md#openui). |
+| 🖥️ **Multiple hosts** | Use Desktop, Server/Studio, or embed SAgents in your Python application. |
+
+<details>
+<summary>📐 Support and runtime boundaries</summary>
+
+- Desktop RSI currently supports simple types and native tools; general MCP integration does not imply support in RSI bindings.
+- Built-in configurations target one process or host; Server supports one worker. Local execution is not container isolation.
+- Callers curate history into goals or suites. The default workflow uses fixed dev and expanding train; dev guides development and independent test measurements are observation-only.
+- RSI produces candidates without activating them. Persistent state does not provide distributed job takeover or automatic checkpoint resume.
+
+[RSI support boundaries](docs/en/applications/RSI.md) · [Runtime architecture](sagents/v2/ARCHITECTURE.md)
+
+</details>
+
+<details>
+<summary>📊 Experiment snapshot (placeholders, not measurements)</summary>
+
+**Layout examples only. All numbers below are placeholders, not measured results.**
+
+| Illustrative workload | Baseline success | After RSI | Change | Proposal rounds |
+| --- | ---: | ---: | ---: | ---: |
+| Goal-driven tasks · placeholder | 52% | 71% | +19 percentage points | 5 |
+| Curated history-derived tasks · placeholder | 58% | 79% | +21 percentage points | 5 |
+
+Measured results should include models, dataset splits, sample counts, repetitions, costs, and run evidence.
+
+Experiment entry points: [real-model domain experiments](examples/v2/optimizer_domains.py) · [custom τ-bench experiment](examples/v2/optimizer_tau_bench.py). Model calls may incur charges.
+
+</details>
+
+<details>
+<summary>🧠 SAgents runtime architecture</summary>
 
 ```mermaid
 flowchart TB
@@ -235,7 +250,21 @@ Your application owns the UI, authentication, and credentials. Built-in runtime 
 
 [Explore the runtime →](sagents/v2/README.md) · [Read the architecture →](sagents/v2/ARCHITECTURE.md)
 
----
+</details>
+
+<details>
+<summary>📰 Latest updates</summary>
+
+- **2026-10-13** — [Streaming UI: from an answer to a native interactive interface](docs/en/applications/STREAMING_UI.md) — Live generation, local calculations, Process Panel revisions, and editable PPTX export in Desktop 2.1.
+- **2026-10-12** — [MCP tools are visible, but calls fail: a five-step diagnostic](knowledge/tutorials/mcp-visible-calls-fail.md)
+- **2026-10-12** — RSI: multi-round Agent package optimization, suite audits, semantic review, Desktop progress, and Agent-level version history. See the workflow guide for the current evaluation protocol. [Python API](sagents/v2/optimization/README.md) · [Desktop guide](app/v2/desktop/README.md#rsi-与-agent-版本)
+- **2026-10-11** — [OpenRouter free models: selection and limits](knowledge/resources/openrouter-free-models.md)
+- **2026-10-11** — [MCP engineering resources: protocols, SDKs, testing, and security](knowledge/resources/mcp-engineering-resources.md)
+- **2026-10-11** — [A read-only MCP smoke test through Sage](knowledge/tutorials/mcp-smoke-test.md)
+
+[More agent resources and tutorials →](knowledge/README.md)
+
+</details>
 
 ## 📚 **Documentation**
 
