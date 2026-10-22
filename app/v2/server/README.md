@@ -25,7 +25,7 @@ web/            前端
 
 业务代码按能力放入对应目录，记录、规则、服务和仓储就近组织；共享的数据库连接和运行时能力分别放在 `database/`、`runtime/`。对外接口统一放在 `routers/`，配置放在 `config/`。HTTP 接口注入所属业务服务，由服务访问仓储；简单列表从服务读取目录，不暴露仓储给路由。AG-UI 与 A2A 协议实现在 `conversations/agui/`、`conversations/a2a/`，共用 `conversations/admission.py` 受理 Run。Agent 独立保存在 `agents` 表，以服务端生成的 `agent_<UUID>` 为全局主键，`owner_user_id` 限定归属。`catalogs.default_agent_id` 保存默认 Agent 引用；模型、MCP、A2A peer 仍按目录分列保存。Agent 新建接口不接受 `id`，修改使用路径中的 ID，外部调用按 Agent 主键查找归属。
 
-会话列表 `GET /api/threads` 与管理员列表返回 `{items, next_cursor}`，支持游标、搜索与 Agent 筛选，Web 按页加载；历史深链接通过单条元数据接口解析身份。[接口与既有数据库索引迁移](../../../docs/server-v2-thread-pagination.md)说明前后端一起发布的要求。
+会话列表 `GET /api/threads` 与管理员列表返回 `{items, next_cursor}`，支持游标、搜索与 Agent 筛选，Web 按页加载；历史深链接通过单条元数据接口解析身份。接口参数与返回结构见 [Server HTTP API](../../../docs/zh/api/HTTP_API_REFERENCE.md)。
 
 生产启动只强制 MySQL：`SAGE_SERVER_MYSQL_URL`。AG-UI 回放读取 Sage Session 的 canonical RuntimeEvent；模型流式 delta 是进程内预览，断线重连通过预览序号续接，进程重启后以持久事件恢复。
 
@@ -278,7 +278,7 @@ CREATE INDEX sessions_parent_id ON sessions (parent_session_id);
 - 在线 ZIP 接受公开 HTTPS 443 地址，最大压缩体积 32 MiB、展开 64 MiB、2000 个条目，一次最多 32 个技能；重定向逐次校验，DNS 解析和连接固定到公开地址。使用 fake IP 的本机代理需要为服务端配置正常 DNS，私网和保留地址不会放行。
 - Skills CLI 当前支持公开 GitHub 仓库简写、仓库或 tree 目录地址，支持 `--skill` / `-s`、`--list` / `-l` 和 `--yes` / `-y`。`--global`、指定其他 Agent 和 Shell 表达式不接受。服务器需 Node.js 22.20 以上、npx，并能访问 GitHub 与 npm registry；调用固定 `skills@1.7.2`，在隔离的临时目录中进行项目级复制安装，不执行技能脚本或 npm 安装脚本，不继承服务端凭据。
 
-导入记录和内容仍使用已有的 Skill 版本及制品目录，不新增数据库表。npm 缓存位于 `{data_root}/runtime/skill-import-npm-cache`。运行时由 SDK 将技能包物化到工作区，已有文件内容不同时拒绝覆盖；更多设计见[远程导入方案](../../../docs/zh/architecture/skill-import-proposal.md)。
+导入记录和内容仍使用已有的 Skill 版本及制品目录，不新增数据库表。npm 缓存位于 `{data_root}/runtime/skill-import-npm-cache`。运行时由 SDK 将技能包物化到工作区，已有文件内容不同时拒绝覆盖；支持范围见[技能远程导入](../../../docs/zh/architecture/skill-import.md)。
 
 智能体配置页「可用技能」中的「Agent 技能同步」调用 `PUT /api/agents/{agent_id}/guidance`，以表单字段 `sync_bound=true` 同步已保存绑定的最新技能包。此模式仅允许 Agent 所有者调用，不提交或修改提示词，不发布新技能版本；旧工作区文件按现有同步逻辑备份后完整替换，各技能独立返回成功或失败结果。未创建的工作区由首次运行按需生成。原有 `prompt` + ZIP 上传模式继续使用同一接口。
 

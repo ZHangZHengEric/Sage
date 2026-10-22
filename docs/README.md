@@ -8,7 +8,7 @@ description: "Choose a documentation language"
 
 # Sage Documentation
 
-Documentation for SAgents, Desktop, and Server. Select a language:
+Sage is an RSI Agent Harness for running, evaluating, and improving agents. Select a language for the runtime, RSI workflow, Desktop, and Server documentation:
 
 - [English]({{ '/en/' | relative_url }})
 - [简体中文]({{ '/zh/' | relative_url }})

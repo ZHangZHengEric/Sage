@@ -110,6 +110,10 @@ See the [Server guide](app/v2/server/README.md) for configuration. Server curren
 ```python
 """Set MODEL_API_KEY and replace your-model below; no sage.yaml file is needed."""
 
+from typing import cast
+
+from sagents.v2.composition.loaded_agents import ApplicationEntrypoint
+
 import asyncio
 from uuid import uuid4
 
@@ -155,7 +159,7 @@ async def main(*, runtime=None, registrations=()):
         context = RequestContext(actor=ActorRef(
             principal_id="user-1", principal_type=PrincipalType.USER,
         ))
-        stream = await app.entrypoint().run_stream(StartRun(
+        stream = await cast(ApplicationEntrypoint, app.entrypoint()).run_stream(StartRun(
             agent_id=agent.id,
             input=(InputItem(role="user", content=(TextBlock(text="Say hello!"),)),),
             resolved_spec_hash=agent.composition_hash,
@@ -207,18 +211,18 @@ python quickstart.py
 </details>
 
 <details>
-<summary>📊 Experiment snapshot (placeholders, not measurements)</summary>
+<summary>📊 Experiment snapshot</summary>
 
-**Layout examples only. All numbers below are placeholders, not measured results.**
+τ²-bench v1.0.1 retail with gpt-5.6-luna as the target model. The baseline and frozen RSI candidate each completed 40 test tasks with four trials per task, for 320 measurements.
 
-| Illustrative workload | Baseline success | After RSI | Change | Proposal rounds |
-| --- | ---: | ---: | ---: | ---: |
-| Goal-driven tasks · placeholder | 52% | 71% | +19 percentage points | 5 |
-| Curated history-derived tasks · placeholder | 58% | 79% | +21 percentage points | 5 |
+| Metric | Baseline | After RSI | Gain |
+| --- | ---: | ---: | ---: |
+| Task success pass¹ | 75.000% | 83.125% | +8.125 percentage points |
+| All-four success pass⁴ | 57.50% | 65.00% | +7.50 percentage points |
 
-Measured results should include models, dataset splits, sample counts, repetitions, costs, and run evidence.
+gpt-6.1-sol served as tuner, user simulator, and natural-language judge. Train/dev selected the candidate; test did not influence selection. Results retain 28 paired improvements and 15 regressions. This exploratory local measurement is not an official leaderboard result.
 
-Experiment entry points: [real-model domain experiments](examples/v2/optimizer_domains.py) · [custom τ-bench experiment](examples/v2/optimizer_tau_bench.py). Model calls may incur charges.
+[Experiment protocol](docs/en/applications/TAU_BENCH.md) · [Per-trial measurements and statistics](docs/assets/benchmarks/tau-retail-rsi.json)
 
 </details>
 

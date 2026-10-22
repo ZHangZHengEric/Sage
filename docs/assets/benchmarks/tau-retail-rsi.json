@@ -1,0 +1,2954 @@
+{
+  "schema": "sage-rsi-benchmark/v1",
+  "experiment": "tau-retail-rsi-selection-feedback",
+  "benchmark": {
+    "repository": "sierra-research/tau2-bench",
+    "version": "v1.0.1",
+    "commit": "fc0055dc4e0a316c3f83133267fbd6faaa770992",
+    "domain": "retail",
+    "split": "test"
+  },
+  "target_model": "gpt-5.6-luna",
+  "tuner_user_and_judge_model": "gpt-6.1-sol",
+  "source_episodes_sha256": "fee752c3db0e20fc23dde36c036d299b64048d7b829c5c39c9ecd74366580a79",
+  "frozen": {
+    "baseline": "5b3bff4f374e77e5cd4b12e3b61c65e75ea7ed63bab05758222182bd4f771cc5",
+    "candidate": "14885dd37fa4d902249cb2bbd0debe4ad402ef14b85e8603eae794c3ff5a1de9",
+    "goal_verified": false,
+    "selection_rule": "last accepted development candidate; human-only checkpoints excluded; frozen before repeated final measurement"
+  },
+  "summary": {
+    "test-baseline": {
+      "episodes": 160,
+      "tasks": 40,
+      "trials_per_task": 4,
+      "successes": 120.0,
+      "pass1": 0.75,
+      "all_trials_successful": 23,
+      "pass4": 0.575
+    },
+    "test-candidate": {
+      "episodes": 160,
+      "tasks": 40,
+      "trials_per_task": 4,
+      "successes": 133.0,
+      "pass1": 0.83125,
+      "all_trials_successful": 26,
+      "pass4": 0.65
+    }
+  },
+  "paired_outcomes": {
+    "improved": 28,
+    "regressed": 15,
+    "both_succeeded": 105,
+    "both_failed": 12
+  },
+  "audit": {
+    "tuning_calls_checked": 6,
+    "test_tasks_absent_from_rsi_execution": true,
+    "tuner_received_only_anonymous_validation": true,
+    "failed_attempts_retained": 24,
+    "implementation_adjustments": [
+      {
+        "timestamp": "2026-10-21T15:18:11.597522+00:00",
+        "reason": "Original process terminated in round 6 with RuntimeError: Sage turn ended suspended; no frozen result existed.",
+        "change": "Resume development via exact evidence replay and input_required transport restoration. Optimization identity preserved. Terminal human checkpoints retained including baseline error.",
+        "completed_rsi_episodes_preserved": 299,
+        "internal_calls_preserved": 12,
+        "offline_replay_audit": "development-replay-audit.json",
+        "selection_unchanged": true,
+        "test_feedback_used": false,
+        "limitation": "New executions use repaired transport; this is a mixed implementation run. Existing scores and failed attempts remain unchanged."
+      }
+    ]
+  },
+  "limitations": [
+    "Exploratory local retail test subset; not an official leaderboard submission.",
+    "Stronger-model-assisted tuning; not equal-compute or pure same-model self-improvement.",
+    "Development resumed across an explicitly recorded transport repair; causal attribution is limited.",
+    "Finite samples and model variance; paired regressions remain included.",
+    "goal_verified=false: the retained candidate did not meet the internal stable-success target."
+  ],
+  "measurements": [
+    {
+      "phase": "test-candidate",
+      "task": "49",
+      "trial": 0,
+      "seed": 20261021,
+      "package_hash": "14885dd37fa4d902249cb2bbd0debe4ad402ef14b85e8603eae794c3ff5a1de9",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-baseline",
+      "task": "49",
+      "trial": 0,
+      "seed": 20261021,
+      "package_hash": "5b3bff4f374e77e5cd4b12e3b61c65e75ea7ed63bab05758222182bd4f771cc5",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-baseline",
+      "task": "71",
+      "trial": 0,
+      "seed": 20261021,
+      "package_hash": "5b3bff4f374e77e5cd4b12e3b61c65e75ea7ed63bab05758222182bd4f771cc5",
+      "reward": 0.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-baseline",
+      "task": "33",
+      "trial": 0,
+      "seed": 20261021,
+      "package_hash": "5b3bff4f374e77e5cd4b12e3b61c65e75ea7ed63bab05758222182bd4f771cc5",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-candidate",
+      "task": "71",
+      "trial": 0,
+      "seed": 20261021,
+      "package_hash": "14885dd37fa4d902249cb2bbd0debe4ad402ef14b85e8603eae794c3ff5a1de9",
+      "reward": 0.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-candidate",
+      "task": "33",
+      "trial": 0,
+      "seed": 20261021,
+      "package_hash": "14885dd37fa4d902249cb2bbd0debe4ad402ef14b85e8603eae794c3ff5a1de9",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-baseline",
+      "task": "39",
+      "trial": 0,
+      "seed": 20261021,
+      "package_hash": "5b3bff4f374e77e5cd4b12e3b61c65e75ea7ed63bab05758222182bd4f771cc5",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-candidate",
+      "task": "39",
+      "trial": 0,
+      "seed": 20261021,
+      "package_hash": "14885dd37fa4d902249cb2bbd0debe4ad402ef14b85e8603eae794c3ff5a1de9",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-baseline",
+      "task": "27",
+      "trial": 0,
+      "seed": 20261021,
+      "package_hash": "5b3bff4f374e77e5cd4b12e3b61c65e75ea7ed63bab05758222182bd4f771cc5",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-candidate",
+      "task": "27",
+      "trial": 0,
+      "seed": 20261021,
+      "package_hash": "14885dd37fa4d902249cb2bbd0debe4ad402ef14b85e8603eae794c3ff5a1de9",
+      "reward": 0.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-baseline",
+      "task": "70",
+      "trial": 0,
+      "seed": 20261021,
+      "package_hash": "5b3bff4f374e77e5cd4b12e3b61c65e75ea7ed63bab05758222182bd4f771cc5",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-candidate",
+      "task": "70",
+      "trial": 0,
+      "seed": 20261021,
+      "package_hash": "14885dd37fa4d902249cb2bbd0debe4ad402ef14b85e8603eae794c3ff5a1de9",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-baseline",
+      "task": "26",
+      "trial": 0,
+      "seed": 20261021,
+      "package_hash": "5b3bff4f374e77e5cd4b12e3b61c65e75ea7ed63bab05758222182bd4f771cc5",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-candidate",
+      "task": "26",
+      "trial": 0,
+      "seed": 20261021,
+      "package_hash": "14885dd37fa4d902249cb2bbd0debe4ad402ef14b85e8603eae794c3ff5a1de9",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-candidate",
+      "task": "100",
+      "trial": 0,
+      "seed": 20261021,
+      "package_hash": "14885dd37fa4d902249cb2bbd0debe4ad402ef14b85e8603eae794c3ff5a1de9",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-baseline",
+      "task": "100",
+      "trial": 0,
+      "seed": 20261021,
+      "package_hash": "5b3bff4f374e77e5cd4b12e3b61c65e75ea7ed63bab05758222182bd4f771cc5",
+      "reward": 0.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-baseline",
+      "task": "36",
+      "trial": 0,
+      "seed": 20261021,
+      "package_hash": "5b3bff4f374e77e5cd4b12e3b61c65e75ea7ed63bab05758222182bd4f771cc5",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-candidate",
+      "task": "36",
+      "trial": 0,
+      "seed": 20261021,
+      "package_hash": "14885dd37fa4d902249cb2bbd0debe4ad402ef14b85e8603eae794c3ff5a1de9",
+      "reward": 0.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-baseline",
+      "task": "53",
+      "trial": 0,
+      "seed": 20261021,
+      "package_hash": "5b3bff4f374e77e5cd4b12e3b61c65e75ea7ed63bab05758222182bd4f771cc5",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-candidate",
+      "task": "53",
+      "trial": 0,
+      "seed": 20261021,
+      "package_hash": "14885dd37fa4d902249cb2bbd0debe4ad402ef14b85e8603eae794c3ff5a1de9",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-baseline",
+      "task": "51",
+      "trial": 0,
+      "seed": 20261021,
+      "package_hash": "5b3bff4f374e77e5cd4b12e3b61c65e75ea7ed63bab05758222182bd4f771cc5",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-candidate",
+      "task": "51",
+      "trial": 0,
+      "seed": 20261021,
+      "package_hash": "14885dd37fa4d902249cb2bbd0debe4ad402ef14b85e8603eae794c3ff5a1de9",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-baseline",
+      "task": "62",
+      "trial": 0,
+      "seed": 20261021,
+      "package_hash": "5b3bff4f374e77e5cd4b12e3b61c65e75ea7ed63bab05758222182bd4f771cc5",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-candidate",
+      "task": "62",
+      "trial": 0,
+      "seed": 20261021,
+      "package_hash": "14885dd37fa4d902249cb2bbd0debe4ad402ef14b85e8603eae794c3ff5a1de9",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-baseline",
+      "task": "38",
+      "trial": 0,
+      "seed": 20261021,
+      "package_hash": "5b3bff4f374e77e5cd4b12e3b61c65e75ea7ed63bab05758222182bd4f771cc5",
+      "reward": 0.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-baseline",
+      "task": "77",
+      "trial": 0,
+      "seed": 20261021,
+      "package_hash": "5b3bff4f374e77e5cd4b12e3b61c65e75ea7ed63bab05758222182bd4f771cc5",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-candidate",
+      "task": "77",
+      "trial": 0,
+      "seed": 20261021,
+      "package_hash": "14885dd37fa4d902249cb2bbd0debe4ad402ef14b85e8603eae794c3ff5a1de9",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-candidate",
+      "task": "38",
+      "trial": 0,
+      "seed": 20261021,
+      "package_hash": "14885dd37fa4d902249cb2bbd0debe4ad402ef14b85e8603eae794c3ff5a1de9",
+      "reward": 0.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-baseline",
+      "task": "18",
+      "trial": 0,
+      "seed": 20261021,
+      "package_hash": "5b3bff4f374e77e5cd4b12e3b61c65e75ea7ed63bab05758222182bd4f771cc5",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-candidate",
+      "task": "18",
+      "trial": 0,
+      "seed": 20261021,
+      "package_hash": "14885dd37fa4d902249cb2bbd0debe4ad402ef14b85e8603eae794c3ff5a1de9",
+      "reward": 0.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-baseline",
+      "task": "64",
+      "trial": 0,
+      "seed": 20261021,
+      "package_hash": "5b3bff4f374e77e5cd4b12e3b61c65e75ea7ed63bab05758222182bd4f771cc5",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-candidate",
+      "task": "64",
+      "trial": 0,
+      "seed": 20261021,
+      "package_hash": "14885dd37fa4d902249cb2bbd0debe4ad402ef14b85e8603eae794c3ff5a1de9",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-baseline",
+      "task": "12",
+      "trial": 0,
+      "seed": 20261021,
+      "package_hash": "5b3bff4f374e77e5cd4b12e3b61c65e75ea7ed63bab05758222182bd4f771cc5",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-candidate",
+      "task": "12",
+      "trial": 0,
+      "seed": 20261021,
+      "package_hash": "14885dd37fa4d902249cb2bbd0debe4ad402ef14b85e8603eae794c3ff5a1de9",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-baseline",
+      "task": "42",
+      "trial": 0,
+      "seed": 20261021,
+      "package_hash": "5b3bff4f374e77e5cd4b12e3b61c65e75ea7ed63bab05758222182bd4f771cc5",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-baseline",
+      "task": "90",
+      "trial": 0,
+      "seed": 20261021,
+      "package_hash": "5b3bff4f374e77e5cd4b12e3b61c65e75ea7ed63bab05758222182bd4f771cc5",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-candidate",
+      "task": "42",
+      "trial": 0,
+      "seed": 20261021,
+      "package_hash": "14885dd37fa4d902249cb2bbd0debe4ad402ef14b85e8603eae794c3ff5a1de9",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-baseline",
+      "task": "17",
+      "trial": 0,
+      "seed": 20261021,
+      "package_hash": "5b3bff4f374e77e5cd4b12e3b61c65e75ea7ed63bab05758222182bd4f771cc5",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-candidate",
+      "task": "17",
+      "trial": 0,
+      "seed": 20261021,
+      "package_hash": "14885dd37fa4d902249cb2bbd0debe4ad402ef14b85e8603eae794c3ff5a1de9",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-candidate",
+      "task": "90",
+      "trial": 0,
+      "seed": 20261021,
+      "package_hash": "14885dd37fa4d902249cb2bbd0debe4ad402ef14b85e8603eae794c3ff5a1de9",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-baseline",
+      "task": "94",
+      "trial": 0,
+      "seed": 20261021,
+      "package_hash": "5b3bff4f374e77e5cd4b12e3b61c65e75ea7ed63bab05758222182bd4f771cc5",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-baseline",
+      "task": "111",
+      "trial": 0,
+      "seed": 20261021,
+      "package_hash": "5b3bff4f374e77e5cd4b12e3b61c65e75ea7ed63bab05758222182bd4f771cc5",
+      "reward": 0.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-candidate",
+      "task": "111",
+      "trial": 0,
+      "seed": 20261021,
+      "package_hash": "14885dd37fa4d902249cb2bbd0debe4ad402ef14b85e8603eae794c3ff5a1de9",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-candidate",
+      "task": "94",
+      "trial": 0,
+      "seed": 20261021,
+      "package_hash": "14885dd37fa4d902249cb2bbd0debe4ad402ef14b85e8603eae794c3ff5a1de9",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-baseline",
+      "task": "56",
+      "trial": 0,
+      "seed": 20261021,
+      "package_hash": "5b3bff4f374e77e5cd4b12e3b61c65e75ea7ed63bab05758222182bd4f771cc5",
+      "reward": 0.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-candidate",
+      "task": "55",
+      "trial": 0,
+      "seed": 20261021,
+      "package_hash": "14885dd37fa4d902249cb2bbd0debe4ad402ef14b85e8603eae794c3ff5a1de9",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-baseline",
+      "task": "55",
+      "trial": 0,
+      "seed": 20261021,
+      "package_hash": "5b3bff4f374e77e5cd4b12e3b61c65e75ea7ed63bab05758222182bd4f771cc5",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-baseline",
+      "task": "61",
+      "trial": 0,
+      "seed": 20261021,
+      "package_hash": "5b3bff4f374e77e5cd4b12e3b61c65e75ea7ed63bab05758222182bd4f771cc5",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-candidate",
+      "task": "61",
+      "trial": 0,
+      "seed": 20261021,
+      "package_hash": "14885dd37fa4d902249cb2bbd0debe4ad402ef14b85e8603eae794c3ff5a1de9",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-baseline",
+      "task": "9",
+      "trial": 0,
+      "seed": 20261021,
+      "package_hash": "5b3bff4f374e77e5cd4b12e3b61c65e75ea7ed63bab05758222182bd4f771cc5",
+      "reward": 0.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-candidate",
+      "task": "56",
+      "trial": 0,
+      "seed": 20261021,
+      "package_hash": "14885dd37fa4d902249cb2bbd0debe4ad402ef14b85e8603eae794c3ff5a1de9",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-candidate",
+      "task": "9",
+      "trial": 0,
+      "seed": 20261021,
+      "package_hash": "14885dd37fa4d902249cb2bbd0debe4ad402ef14b85e8603eae794c3ff5a1de9",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-baseline",
+      "task": "74",
+      "trial": 0,
+      "seed": 20261021,
+      "package_hash": "5b3bff4f374e77e5cd4b12e3b61c65e75ea7ed63bab05758222182bd4f771cc5",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-candidate",
+      "task": "74",
+      "trial": 0,
+      "seed": 20261021,
+      "package_hash": "14885dd37fa4d902249cb2bbd0debe4ad402ef14b85e8603eae794c3ff5a1de9",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-baseline",
+      "task": "32",
+      "trial": 0,
+      "seed": 20261021,
+      "package_hash": "5b3bff4f374e77e5cd4b12e3b61c65e75ea7ed63bab05758222182bd4f771cc5",
+      "reward": 0.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-baseline",
+      "task": "101",
+      "trial": 0,
+      "seed": 20261021,
+      "package_hash": "5b3bff4f374e77e5cd4b12e3b61c65e75ea7ed63bab05758222182bd4f771cc5",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-candidate",
+      "task": "101",
+      "trial": 0,
+      "seed": 20261021,
+      "package_hash": "14885dd37fa4d902249cb2bbd0debe4ad402ef14b85e8603eae794c3ff5a1de9",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-candidate",
+      "task": "32",
+      "trial": 0,
+      "seed": 20261021,
+      "package_hash": "14885dd37fa4d902249cb2bbd0debe4ad402ef14b85e8603eae794c3ff5a1de9",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-baseline",
+      "task": "86",
+      "trial": 0,
+      "seed": 20261021,
+      "package_hash": "5b3bff4f374e77e5cd4b12e3b61c65e75ea7ed63bab05758222182bd4f771cc5",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-baseline",
+      "task": "40",
+      "trial": 0,
+      "seed": 20261021,
+      "package_hash": "5b3bff4f374e77e5cd4b12e3b61c65e75ea7ed63bab05758222182bd4f771cc5",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-candidate",
+      "task": "86",
+      "trial": 0,
+      "seed": 20261021,
+      "package_hash": "14885dd37fa4d902249cb2bbd0debe4ad402ef14b85e8603eae794c3ff5a1de9",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-candidate",
+      "task": "40",
+      "trial": 0,
+      "seed": 20261021,
+      "package_hash": "14885dd37fa4d902249cb2bbd0debe4ad402ef14b85e8603eae794c3ff5a1de9",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-baseline",
+      "task": "79",
+      "trial": 0,
+      "seed": 20261021,
+      "package_hash": "5b3bff4f374e77e5cd4b12e3b61c65e75ea7ed63bab05758222182bd4f771cc5",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-candidate",
+      "task": "79",
+      "trial": 0,
+      "seed": 20261021,
+      "package_hash": "14885dd37fa4d902249cb2bbd0debe4ad402ef14b85e8603eae794c3ff5a1de9",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-baseline",
+      "task": "45",
+      "trial": 0,
+      "seed": 20261021,
+      "package_hash": "5b3bff4f374e77e5cd4b12e3b61c65e75ea7ed63bab05758222182bd4f771cc5",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-baseline",
+      "task": "60",
+      "trial": 0,
+      "seed": 20261021,
+      "package_hash": "5b3bff4f374e77e5cd4b12e3b61c65e75ea7ed63bab05758222182bd4f771cc5",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-candidate",
+      "task": "45",
+      "trial": 0,
+      "seed": 20261021,
+      "package_hash": "14885dd37fa4d902249cb2bbd0debe4ad402ef14b85e8603eae794c3ff5a1de9",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-baseline",
+      "task": "68",
+      "trial": 0,
+      "seed": 20261021,
+      "package_hash": "5b3bff4f374e77e5cd4b12e3b61c65e75ea7ed63bab05758222182bd4f771cc5",
+      "reward": 0.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-candidate",
+      "task": "60",
+      "trial": 0,
+      "seed": 20261021,
+      "package_hash": "14885dd37fa4d902249cb2bbd0debe4ad402ef14b85e8603eae794c3ff5a1de9",
+      "reward": 0.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-baseline",
+      "task": "108",
+      "trial": 0,
+      "seed": 20261021,
+      "package_hash": "5b3bff4f374e77e5cd4b12e3b61c65e75ea7ed63bab05758222182bd4f771cc5",
+      "reward": 0.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-candidate",
+      "task": "68",
+      "trial": 0,
+      "seed": 20261021,
+      "package_hash": "14885dd37fa4d902249cb2bbd0debe4ad402ef14b85e8603eae794c3ff5a1de9",
+      "reward": 0.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-candidate",
+      "task": "108",
+      "trial": 0,
+      "seed": 20261021,
+      "package_hash": "14885dd37fa4d902249cb2bbd0debe4ad402ef14b85e8603eae794c3ff5a1de9",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-baseline",
+      "task": "5",
+      "trial": 0,
+      "seed": 20261021,
+      "package_hash": "5b3bff4f374e77e5cd4b12e3b61c65e75ea7ed63bab05758222182bd4f771cc5",
+      "reward": 0.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-candidate",
+      "task": "5",
+      "trial": 0,
+      "seed": 20261021,
+      "package_hash": "14885dd37fa4d902249cb2bbd0debe4ad402ef14b85e8603eae794c3ff5a1de9",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-candidate",
+      "task": "102",
+      "trial": 0,
+      "seed": 20261021,
+      "package_hash": "14885dd37fa4d902249cb2bbd0debe4ad402ef14b85e8603eae794c3ff5a1de9",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-baseline",
+      "task": "102",
+      "trial": 0,
+      "seed": 20261021,
+      "package_hash": "5b3bff4f374e77e5cd4b12e3b61c65e75ea7ed63bab05758222182bd4f771cc5",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-candidate",
+      "task": "65",
+      "trial": 0,
+      "seed": 20261021,
+      "package_hash": "14885dd37fa4d902249cb2bbd0debe4ad402ef14b85e8603eae794c3ff5a1de9",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-baseline",
+      "task": "65",
+      "trial": 0,
+      "seed": 20261021,
+      "package_hash": "5b3bff4f374e77e5cd4b12e3b61c65e75ea7ed63bab05758222182bd4f771cc5",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-baseline",
+      "task": "97",
+      "trial": 0,
+      "seed": 20261021,
+      "package_hash": "5b3bff4f374e77e5cd4b12e3b61c65e75ea7ed63bab05758222182bd4f771cc5",
+      "reward": 0.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-candidate",
+      "task": "97",
+      "trial": 0,
+      "seed": 20261021,
+      "package_hash": "14885dd37fa4d902249cb2bbd0debe4ad402ef14b85e8603eae794c3ff5a1de9",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-baseline",
+      "task": "49",
+      "trial": 1,
+      "seed": 20261022,
+      "package_hash": "5b3bff4f374e77e5cd4b12e3b61c65e75ea7ed63bab05758222182bd4f771cc5",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-candidate",
+      "task": "49",
+      "trial": 1,
+      "seed": 20261022,
+      "package_hash": "14885dd37fa4d902249cb2bbd0debe4ad402ef14b85e8603eae794c3ff5a1de9",
+      "reward": 0.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-baseline",
+      "task": "71",
+      "trial": 1,
+      "seed": 20261022,
+      "package_hash": "5b3bff4f374e77e5cd4b12e3b61c65e75ea7ed63bab05758222182bd4f771cc5",
+      "reward": 0.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-baseline",
+      "task": "33",
+      "trial": 1,
+      "seed": 20261022,
+      "package_hash": "5b3bff4f374e77e5cd4b12e3b61c65e75ea7ed63bab05758222182bd4f771cc5",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-candidate",
+      "task": "71",
+      "trial": 1,
+      "seed": 20261022,
+      "package_hash": "14885dd37fa4d902249cb2bbd0debe4ad402ef14b85e8603eae794c3ff5a1de9",
+      "reward": 0.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-candidate",
+      "task": "33",
+      "trial": 1,
+      "seed": 20261022,
+      "package_hash": "14885dd37fa4d902249cb2bbd0debe4ad402ef14b85e8603eae794c3ff5a1de9",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-baseline",
+      "task": "39",
+      "trial": 1,
+      "seed": 20261022,
+      "package_hash": "5b3bff4f374e77e5cd4b12e3b61c65e75ea7ed63bab05758222182bd4f771cc5",
+      "reward": 0.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-candidate",
+      "task": "39",
+      "trial": 1,
+      "seed": 20261022,
+      "package_hash": "14885dd37fa4d902249cb2bbd0debe4ad402ef14b85e8603eae794c3ff5a1de9",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-baseline",
+      "task": "27",
+      "trial": 1,
+      "seed": 20261022,
+      "package_hash": "5b3bff4f374e77e5cd4b12e3b61c65e75ea7ed63bab05758222182bd4f771cc5",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-candidate",
+      "task": "27",
+      "trial": 1,
+      "seed": 20261022,
+      "package_hash": "14885dd37fa4d902249cb2bbd0debe4ad402ef14b85e8603eae794c3ff5a1de9",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-baseline",
+      "task": "70",
+      "trial": 1,
+      "seed": 20261022,
+      "package_hash": "5b3bff4f374e77e5cd4b12e3b61c65e75ea7ed63bab05758222182bd4f771cc5",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-candidate",
+      "task": "70",
+      "trial": 1,
+      "seed": 20261022,
+      "package_hash": "14885dd37fa4d902249cb2bbd0debe4ad402ef14b85e8603eae794c3ff5a1de9",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-baseline",
+      "task": "26",
+      "trial": 1,
+      "seed": 20261022,
+      "package_hash": "5b3bff4f374e77e5cd4b12e3b61c65e75ea7ed63bab05758222182bd4f771cc5",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-candidate",
+      "task": "26",
+      "trial": 1,
+      "seed": 20261022,
+      "package_hash": "14885dd37fa4d902249cb2bbd0debe4ad402ef14b85e8603eae794c3ff5a1de9",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-baseline",
+      "task": "100",
+      "trial": 1,
+      "seed": 20261022,
+      "package_hash": "5b3bff4f374e77e5cd4b12e3b61c65e75ea7ed63bab05758222182bd4f771cc5",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-candidate",
+      "task": "100",
+      "trial": 1,
+      "seed": 20261022,
+      "package_hash": "14885dd37fa4d902249cb2bbd0debe4ad402ef14b85e8603eae794c3ff5a1de9",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-baseline",
+      "task": "36",
+      "trial": 1,
+      "seed": 20261022,
+      "package_hash": "5b3bff4f374e77e5cd4b12e3b61c65e75ea7ed63bab05758222182bd4f771cc5",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-baseline",
+      "task": "53",
+      "trial": 1,
+      "seed": 20261022,
+      "package_hash": "5b3bff4f374e77e5cd4b12e3b61c65e75ea7ed63bab05758222182bd4f771cc5",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-candidate",
+      "task": "53",
+      "trial": 1,
+      "seed": 20261022,
+      "package_hash": "14885dd37fa4d902249cb2bbd0debe4ad402ef14b85e8603eae794c3ff5a1de9",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-candidate",
+      "task": "36",
+      "trial": 1,
+      "seed": 20261022,
+      "package_hash": "14885dd37fa4d902249cb2bbd0debe4ad402ef14b85e8603eae794c3ff5a1de9",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-baseline",
+      "task": "51",
+      "trial": 1,
+      "seed": 20261022,
+      "package_hash": "5b3bff4f374e77e5cd4b12e3b61c65e75ea7ed63bab05758222182bd4f771cc5",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-candidate",
+      "task": "51",
+      "trial": 1,
+      "seed": 20261022,
+      "package_hash": "14885dd37fa4d902249cb2bbd0debe4ad402ef14b85e8603eae794c3ff5a1de9",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-baseline",
+      "task": "62",
+      "trial": 1,
+      "seed": 20261022,
+      "package_hash": "5b3bff4f374e77e5cd4b12e3b61c65e75ea7ed63bab05758222182bd4f771cc5",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-candidate",
+      "task": "62",
+      "trial": 1,
+      "seed": 20261022,
+      "package_hash": "14885dd37fa4d902249cb2bbd0debe4ad402ef14b85e8603eae794c3ff5a1de9",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-baseline",
+      "task": "38",
+      "trial": 1,
+      "seed": 20261022,
+      "package_hash": "5b3bff4f374e77e5cd4b12e3b61c65e75ea7ed63bab05758222182bd4f771cc5",
+      "reward": 0.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-baseline",
+      "task": "77",
+      "trial": 1,
+      "seed": 20261022,
+      "package_hash": "5b3bff4f374e77e5cd4b12e3b61c65e75ea7ed63bab05758222182bd4f771cc5",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-candidate",
+      "task": "38",
+      "trial": 1,
+      "seed": 20261022,
+      "package_hash": "14885dd37fa4d902249cb2bbd0debe4ad402ef14b85e8603eae794c3ff5a1de9",
+      "reward": 0.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-candidate",
+      "task": "77",
+      "trial": 1,
+      "seed": 20261022,
+      "package_hash": "14885dd37fa4d902249cb2bbd0debe4ad402ef14b85e8603eae794c3ff5a1de9",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-baseline",
+      "task": "18",
+      "trial": 1,
+      "seed": 20261022,
+      "package_hash": "5b3bff4f374e77e5cd4b12e3b61c65e75ea7ed63bab05758222182bd4f771cc5",
+      "reward": 0.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-candidate",
+      "task": "18",
+      "trial": 1,
+      "seed": 20261022,
+      "package_hash": "14885dd37fa4d902249cb2bbd0debe4ad402ef14b85e8603eae794c3ff5a1de9",
+      "reward": 0.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-baseline",
+      "task": "64",
+      "trial": 1,
+      "seed": 20261022,
+      "package_hash": "5b3bff4f374e77e5cd4b12e3b61c65e75ea7ed63bab05758222182bd4f771cc5",
+      "reward": 0.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-candidate",
+      "task": "64",
+      "trial": 1,
+      "seed": 20261022,
+      "package_hash": "14885dd37fa4d902249cb2bbd0debe4ad402ef14b85e8603eae794c3ff5a1de9",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-baseline",
+      "task": "12",
+      "trial": 1,
+      "seed": 20261022,
+      "package_hash": "5b3bff4f374e77e5cd4b12e3b61c65e75ea7ed63bab05758222182bd4f771cc5",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-candidate",
+      "task": "12",
+      "trial": 1,
+      "seed": 20261022,
+      "package_hash": "14885dd37fa4d902249cb2bbd0debe4ad402ef14b85e8603eae794c3ff5a1de9",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-baseline",
+      "task": "90",
+      "trial": 1,
+      "seed": 20261022,
+      "package_hash": "5b3bff4f374e77e5cd4b12e3b61c65e75ea7ed63bab05758222182bd4f771cc5",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-baseline",
+      "task": "42",
+      "trial": 1,
+      "seed": 20261022,
+      "package_hash": "5b3bff4f374e77e5cd4b12e3b61c65e75ea7ed63bab05758222182bd4f771cc5",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-candidate",
+      "task": "42",
+      "trial": 1,
+      "seed": 20261022,
+      "package_hash": "14885dd37fa4d902249cb2bbd0debe4ad402ef14b85e8603eae794c3ff5a1de9",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-baseline",
+      "task": "17",
+      "trial": 1,
+      "seed": 20261022,
+      "package_hash": "5b3bff4f374e77e5cd4b12e3b61c65e75ea7ed63bab05758222182bd4f771cc5",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-candidate",
+      "task": "90",
+      "trial": 1,
+      "seed": 20261022,
+      "package_hash": "14885dd37fa4d902249cb2bbd0debe4ad402ef14b85e8603eae794c3ff5a1de9",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-candidate",
+      "task": "17",
+      "trial": 1,
+      "seed": 20261022,
+      "package_hash": "14885dd37fa4d902249cb2bbd0debe4ad402ef14b85e8603eae794c3ff5a1de9",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-baseline",
+      "task": "94",
+      "trial": 1,
+      "seed": 20261022,
+      "package_hash": "5b3bff4f374e77e5cd4b12e3b61c65e75ea7ed63bab05758222182bd4f771cc5",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-baseline",
+      "task": "111",
+      "trial": 1,
+      "seed": 20261022,
+      "package_hash": "5b3bff4f374e77e5cd4b12e3b61c65e75ea7ed63bab05758222182bd4f771cc5",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-candidate",
+      "task": "111",
+      "trial": 1,
+      "seed": 20261022,
+      "package_hash": "14885dd37fa4d902249cb2bbd0debe4ad402ef14b85e8603eae794c3ff5a1de9",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-baseline",
+      "task": "55",
+      "trial": 1,
+      "seed": 20261022,
+      "package_hash": "5b3bff4f374e77e5cd4b12e3b61c65e75ea7ed63bab05758222182bd4f771cc5",
+      "reward": 0.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-baseline",
+      "task": "56",
+      "trial": 1,
+      "seed": 20261022,
+      "package_hash": "5b3bff4f374e77e5cd4b12e3b61c65e75ea7ed63bab05758222182bd4f771cc5",
+      "reward": 0.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-candidate",
+      "task": "94",
+      "trial": 1,
+      "seed": 20261022,
+      "package_hash": "14885dd37fa4d902249cb2bbd0debe4ad402ef14b85e8603eae794c3ff5a1de9",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-candidate",
+      "task": "55",
+      "trial": 1,
+      "seed": 20261022,
+      "package_hash": "14885dd37fa4d902249cb2bbd0debe4ad402ef14b85e8603eae794c3ff5a1de9",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-baseline",
+      "task": "61",
+      "trial": 1,
+      "seed": 20261022,
+      "package_hash": "5b3bff4f374e77e5cd4b12e3b61c65e75ea7ed63bab05758222182bd4f771cc5",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-candidate",
+      "task": "56",
+      "trial": 1,
+      "seed": 20261022,
+      "package_hash": "14885dd37fa4d902249cb2bbd0debe4ad402ef14b85e8603eae794c3ff5a1de9",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-baseline",
+      "task": "9",
+      "trial": 1,
+      "seed": 20261022,
+      "package_hash": "5b3bff4f374e77e5cd4b12e3b61c65e75ea7ed63bab05758222182bd4f771cc5",
+      "reward": 0.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-candidate",
+      "task": "61",
+      "trial": 1,
+      "seed": 20261022,
+      "package_hash": "14885dd37fa4d902249cb2bbd0debe4ad402ef14b85e8603eae794c3ff5a1de9",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-baseline",
+      "task": "74",
+      "trial": 1,
+      "seed": 20261022,
+      "package_hash": "5b3bff4f374e77e5cd4b12e3b61c65e75ea7ed63bab05758222182bd4f771cc5",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-candidate",
+      "task": "9",
+      "trial": 1,
+      "seed": 20261022,
+      "package_hash": "14885dd37fa4d902249cb2bbd0debe4ad402ef14b85e8603eae794c3ff5a1de9",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-candidate",
+      "task": "74",
+      "trial": 1,
+      "seed": 20261022,
+      "package_hash": "14885dd37fa4d902249cb2bbd0debe4ad402ef14b85e8603eae794c3ff5a1de9",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-baseline",
+      "task": "32",
+      "trial": 1,
+      "seed": 20261022,
+      "package_hash": "5b3bff4f374e77e5cd4b12e3b61c65e75ea7ed63bab05758222182bd4f771cc5",
+      "reward": 0.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-baseline",
+      "task": "101",
+      "trial": 1,
+      "seed": 20261022,
+      "package_hash": "5b3bff4f374e77e5cd4b12e3b61c65e75ea7ed63bab05758222182bd4f771cc5",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-candidate",
+      "task": "101",
+      "trial": 1,
+      "seed": 20261022,
+      "package_hash": "14885dd37fa4d902249cb2bbd0debe4ad402ef14b85e8603eae794c3ff5a1de9",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-candidate",
+      "task": "32",
+      "trial": 1,
+      "seed": 20261022,
+      "package_hash": "14885dd37fa4d902249cb2bbd0debe4ad402ef14b85e8603eae794c3ff5a1de9",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-baseline",
+      "task": "86",
+      "trial": 1,
+      "seed": 20261022,
+      "package_hash": "5b3bff4f374e77e5cd4b12e3b61c65e75ea7ed63bab05758222182bd4f771cc5",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-baseline",
+      "task": "40",
+      "trial": 1,
+      "seed": 20261022,
+      "package_hash": "5b3bff4f374e77e5cd4b12e3b61c65e75ea7ed63bab05758222182bd4f771cc5",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-candidate",
+      "task": "40",
+      "trial": 1,
+      "seed": 20261022,
+      "package_hash": "14885dd37fa4d902249cb2bbd0debe4ad402ef14b85e8603eae794c3ff5a1de9",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-candidate",
+      "task": "86",
+      "trial": 1,
+      "seed": 20261022,
+      "package_hash": "14885dd37fa4d902249cb2bbd0debe4ad402ef14b85e8603eae794c3ff5a1de9",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-baseline",
+      "task": "79",
+      "trial": 1,
+      "seed": 20261022,
+      "package_hash": "5b3bff4f374e77e5cd4b12e3b61c65e75ea7ed63bab05758222182bd4f771cc5",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-candidate",
+      "task": "79",
+      "trial": 1,
+      "seed": 20261022,
+      "package_hash": "14885dd37fa4d902249cb2bbd0debe4ad402ef14b85e8603eae794c3ff5a1de9",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-baseline",
+      "task": "45",
+      "trial": 1,
+      "seed": 20261022,
+      "package_hash": "5b3bff4f374e77e5cd4b12e3b61c65e75ea7ed63bab05758222182bd4f771cc5",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-baseline",
+      "task": "60",
+      "trial": 1,
+      "seed": 20261022,
+      "package_hash": "5b3bff4f374e77e5cd4b12e3b61c65e75ea7ed63bab05758222182bd4f771cc5",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-candidate",
+      "task": "45",
+      "trial": 1,
+      "seed": 20261022,
+      "package_hash": "14885dd37fa4d902249cb2bbd0debe4ad402ef14b85e8603eae794c3ff5a1de9",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-baseline",
+      "task": "68",
+      "trial": 1,
+      "seed": 20261022,
+      "package_hash": "5b3bff4f374e77e5cd4b12e3b61c65e75ea7ed63bab05758222182bd4f771cc5",
+      "reward": 0.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-candidate",
+      "task": "60",
+      "trial": 1,
+      "seed": 20261022,
+      "package_hash": "14885dd37fa4d902249cb2bbd0debe4ad402ef14b85e8603eae794c3ff5a1de9",
+      "reward": 0.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-baseline",
+      "task": "108",
+      "trial": 1,
+      "seed": 20261022,
+      "package_hash": "5b3bff4f374e77e5cd4b12e3b61c65e75ea7ed63bab05758222182bd4f771cc5",
+      "reward": 0.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-candidate",
+      "task": "68",
+      "trial": 1,
+      "seed": 20261022,
+      "package_hash": "14885dd37fa4d902249cb2bbd0debe4ad402ef14b85e8603eae794c3ff5a1de9",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-baseline",
+      "task": "5",
+      "trial": 1,
+      "seed": 20261022,
+      "package_hash": "5b3bff4f374e77e5cd4b12e3b61c65e75ea7ed63bab05758222182bd4f771cc5",
+      "reward": 0.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-candidate",
+      "task": "108",
+      "trial": 1,
+      "seed": 20261022,
+      "package_hash": "14885dd37fa4d902249cb2bbd0debe4ad402ef14b85e8603eae794c3ff5a1de9",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-candidate",
+      "task": "5",
+      "trial": 1,
+      "seed": 20261022,
+      "package_hash": "14885dd37fa4d902249cb2bbd0debe4ad402ef14b85e8603eae794c3ff5a1de9",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-candidate",
+      "task": "102",
+      "trial": 1,
+      "seed": 20261022,
+      "package_hash": "14885dd37fa4d902249cb2bbd0debe4ad402ef14b85e8603eae794c3ff5a1de9",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-baseline",
+      "task": "102",
+      "trial": 1,
+      "seed": 20261022,
+      "package_hash": "5b3bff4f374e77e5cd4b12e3b61c65e75ea7ed63bab05758222182bd4f771cc5",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-baseline",
+      "task": "97",
+      "trial": 1,
+      "seed": 20261022,
+      "package_hash": "5b3bff4f374e77e5cd4b12e3b61c65e75ea7ed63bab05758222182bd4f771cc5",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-candidate",
+      "task": "65",
+      "trial": 1,
+      "seed": 20261022,
+      "package_hash": "14885dd37fa4d902249cb2bbd0debe4ad402ef14b85e8603eae794c3ff5a1de9",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-candidate",
+      "task": "97",
+      "trial": 1,
+      "seed": 20261022,
+      "package_hash": "14885dd37fa4d902249cb2bbd0debe4ad402ef14b85e8603eae794c3ff5a1de9",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-baseline",
+      "task": "49",
+      "trial": 2,
+      "seed": 20261023,
+      "package_hash": "5b3bff4f374e77e5cd4b12e3b61c65e75ea7ed63bab05758222182bd4f771cc5",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-baseline",
+      "task": "65",
+      "trial": 1,
+      "seed": 20261022,
+      "package_hash": "5b3bff4f374e77e5cd4b12e3b61c65e75ea7ed63bab05758222182bd4f771cc5",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-candidate",
+      "task": "49",
+      "trial": 2,
+      "seed": 20261023,
+      "package_hash": "14885dd37fa4d902249cb2bbd0debe4ad402ef14b85e8603eae794c3ff5a1de9",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-baseline",
+      "task": "71",
+      "trial": 2,
+      "seed": 20261023,
+      "package_hash": "5b3bff4f374e77e5cd4b12e3b61c65e75ea7ed63bab05758222182bd4f771cc5",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-baseline",
+      "task": "33",
+      "trial": 2,
+      "seed": 20261023,
+      "package_hash": "5b3bff4f374e77e5cd4b12e3b61c65e75ea7ed63bab05758222182bd4f771cc5",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-candidate",
+      "task": "71",
+      "trial": 2,
+      "seed": 20261023,
+      "package_hash": "14885dd37fa4d902249cb2bbd0debe4ad402ef14b85e8603eae794c3ff5a1de9",
+      "reward": 0.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-candidate",
+      "task": "33",
+      "trial": 2,
+      "seed": 20261023,
+      "package_hash": "14885dd37fa4d902249cb2bbd0debe4ad402ef14b85e8603eae794c3ff5a1de9",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-baseline",
+      "task": "39",
+      "trial": 2,
+      "seed": 20261023,
+      "package_hash": "5b3bff4f374e77e5cd4b12e3b61c65e75ea7ed63bab05758222182bd4f771cc5",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-candidate",
+      "task": "39",
+      "trial": 2,
+      "seed": 20261023,
+      "package_hash": "14885dd37fa4d902249cb2bbd0debe4ad402ef14b85e8603eae794c3ff5a1de9",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-baseline",
+      "task": "27",
+      "trial": 2,
+      "seed": 20261023,
+      "package_hash": "5b3bff4f374e77e5cd4b12e3b61c65e75ea7ed63bab05758222182bd4f771cc5",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-candidate",
+      "task": "27",
+      "trial": 2,
+      "seed": 20261023,
+      "package_hash": "14885dd37fa4d902249cb2bbd0debe4ad402ef14b85e8603eae794c3ff5a1de9",
+      "reward": 0.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-baseline",
+      "task": "70",
+      "trial": 2,
+      "seed": 20261023,
+      "package_hash": "5b3bff4f374e77e5cd4b12e3b61c65e75ea7ed63bab05758222182bd4f771cc5",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-candidate",
+      "task": "70",
+      "trial": 2,
+      "seed": 20261023,
+      "package_hash": "14885dd37fa4d902249cb2bbd0debe4ad402ef14b85e8603eae794c3ff5a1de9",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-baseline",
+      "task": "26",
+      "trial": 2,
+      "seed": 20261023,
+      "package_hash": "5b3bff4f374e77e5cd4b12e3b61c65e75ea7ed63bab05758222182bd4f771cc5",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-candidate",
+      "task": "26",
+      "trial": 2,
+      "seed": 20261023,
+      "package_hash": "14885dd37fa4d902249cb2bbd0debe4ad402ef14b85e8603eae794c3ff5a1de9",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-baseline",
+      "task": "100",
+      "trial": 2,
+      "seed": 20261023,
+      "package_hash": "5b3bff4f374e77e5cd4b12e3b61c65e75ea7ed63bab05758222182bd4f771cc5",
+      "reward": 0.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-baseline",
+      "task": "36",
+      "trial": 2,
+      "seed": 20261023,
+      "package_hash": "5b3bff4f374e77e5cd4b12e3b61c65e75ea7ed63bab05758222182bd4f771cc5",
+      "reward": 0.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-candidate",
+      "task": "100",
+      "trial": 2,
+      "seed": 20261023,
+      "package_hash": "14885dd37fa4d902249cb2bbd0debe4ad402ef14b85e8603eae794c3ff5a1de9",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-baseline",
+      "task": "53",
+      "trial": 2,
+      "seed": 20261023,
+      "package_hash": "5b3bff4f374e77e5cd4b12e3b61c65e75ea7ed63bab05758222182bd4f771cc5",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-candidate",
+      "task": "53",
+      "trial": 2,
+      "seed": 20261023,
+      "package_hash": "14885dd37fa4d902249cb2bbd0debe4ad402ef14b85e8603eae794c3ff5a1de9",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-candidate",
+      "task": "36",
+      "trial": 2,
+      "seed": 20261023,
+      "package_hash": "14885dd37fa4d902249cb2bbd0debe4ad402ef14b85e8603eae794c3ff5a1de9",
+      "reward": 0.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-baseline",
+      "task": "51",
+      "trial": 2,
+      "seed": 20261023,
+      "package_hash": "5b3bff4f374e77e5cd4b12e3b61c65e75ea7ed63bab05758222182bd4f771cc5",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-candidate",
+      "task": "51",
+      "trial": 2,
+      "seed": 20261023,
+      "package_hash": "14885dd37fa4d902249cb2bbd0debe4ad402ef14b85e8603eae794c3ff5a1de9",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-baseline",
+      "task": "62",
+      "trial": 2,
+      "seed": 20261023,
+      "package_hash": "5b3bff4f374e77e5cd4b12e3b61c65e75ea7ed63bab05758222182bd4f771cc5",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-candidate",
+      "task": "62",
+      "trial": 2,
+      "seed": 20261023,
+      "package_hash": "14885dd37fa4d902249cb2bbd0debe4ad402ef14b85e8603eae794c3ff5a1de9",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-baseline",
+      "task": "38",
+      "trial": 2,
+      "seed": 20261023,
+      "package_hash": "5b3bff4f374e77e5cd4b12e3b61c65e75ea7ed63bab05758222182bd4f771cc5",
+      "reward": 0.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-baseline",
+      "task": "77",
+      "trial": 2,
+      "seed": 20261023,
+      "package_hash": "5b3bff4f374e77e5cd4b12e3b61c65e75ea7ed63bab05758222182bd4f771cc5",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-candidate",
+      "task": "38",
+      "trial": 2,
+      "seed": 20261023,
+      "package_hash": "14885dd37fa4d902249cb2bbd0debe4ad402ef14b85e8603eae794c3ff5a1de9",
+      "reward": 0.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-candidate",
+      "task": "77",
+      "trial": 2,
+      "seed": 20261023,
+      "package_hash": "14885dd37fa4d902249cb2bbd0debe4ad402ef14b85e8603eae794c3ff5a1de9",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-baseline",
+      "task": "18",
+      "trial": 2,
+      "seed": 20261023,
+      "package_hash": "5b3bff4f374e77e5cd4b12e3b61c65e75ea7ed63bab05758222182bd4f771cc5",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-baseline",
+      "task": "64",
+      "trial": 2,
+      "seed": 20261023,
+      "package_hash": "5b3bff4f374e77e5cd4b12e3b61c65e75ea7ed63bab05758222182bd4f771cc5",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-candidate",
+      "task": "18",
+      "trial": 2,
+      "seed": 20261023,
+      "package_hash": "14885dd37fa4d902249cb2bbd0debe4ad402ef14b85e8603eae794c3ff5a1de9",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-baseline",
+      "task": "12",
+      "trial": 2,
+      "seed": 20261023,
+      "package_hash": "5b3bff4f374e77e5cd4b12e3b61c65e75ea7ed63bab05758222182bd4f771cc5",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-candidate",
+      "task": "64",
+      "trial": 2,
+      "seed": 20261023,
+      "package_hash": "14885dd37fa4d902249cb2bbd0debe4ad402ef14b85e8603eae794c3ff5a1de9",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-candidate",
+      "task": "12",
+      "trial": 2,
+      "seed": 20261023,
+      "package_hash": "14885dd37fa4d902249cb2bbd0debe4ad402ef14b85e8603eae794c3ff5a1de9",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-baseline",
+      "task": "90",
+      "trial": 2,
+      "seed": 20261023,
+      "package_hash": "5b3bff4f374e77e5cd4b12e3b61c65e75ea7ed63bab05758222182bd4f771cc5",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-candidate",
+      "task": "42",
+      "trial": 2,
+      "seed": 20261023,
+      "package_hash": "14885dd37fa4d902249cb2bbd0debe4ad402ef14b85e8603eae794c3ff5a1de9",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-baseline",
+      "task": "42",
+      "trial": 2,
+      "seed": 20261023,
+      "package_hash": "5b3bff4f374e77e5cd4b12e3b61c65e75ea7ed63bab05758222182bd4f771cc5",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-candidate",
+      "task": "17",
+      "trial": 2,
+      "seed": 20261023,
+      "package_hash": "14885dd37fa4d902249cb2bbd0debe4ad402ef14b85e8603eae794c3ff5a1de9",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-candidate",
+      "task": "90",
+      "trial": 2,
+      "seed": 20261023,
+      "package_hash": "14885dd37fa4d902249cb2bbd0debe4ad402ef14b85e8603eae794c3ff5a1de9",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-baseline",
+      "task": "17",
+      "trial": 2,
+      "seed": 20261023,
+      "package_hash": "5b3bff4f374e77e5cd4b12e3b61c65e75ea7ed63bab05758222182bd4f771cc5",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-baseline",
+      "task": "94",
+      "trial": 2,
+      "seed": 20261023,
+      "package_hash": "5b3bff4f374e77e5cd4b12e3b61c65e75ea7ed63bab05758222182bd4f771cc5",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-baseline",
+      "task": "111",
+      "trial": 2,
+      "seed": 20261023,
+      "package_hash": "5b3bff4f374e77e5cd4b12e3b61c65e75ea7ed63bab05758222182bd4f771cc5",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-candidate",
+      "task": "111",
+      "trial": 2,
+      "seed": 20261023,
+      "package_hash": "14885dd37fa4d902249cb2bbd0debe4ad402ef14b85e8603eae794c3ff5a1de9",
+      "reward": 0.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-baseline",
+      "task": "55",
+      "trial": 2,
+      "seed": 20261023,
+      "package_hash": "5b3bff4f374e77e5cd4b12e3b61c65e75ea7ed63bab05758222182bd4f771cc5",
+      "reward": 0.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-candidate",
+      "task": "94",
+      "trial": 2,
+      "seed": 20261023,
+      "package_hash": "14885dd37fa4d902249cb2bbd0debe4ad402ef14b85e8603eae794c3ff5a1de9",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-baseline",
+      "task": "56",
+      "trial": 2,
+      "seed": 20261023,
+      "package_hash": "5b3bff4f374e77e5cd4b12e3b61c65e75ea7ed63bab05758222182bd4f771cc5",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-candidate",
+      "task": "55",
+      "trial": 2,
+      "seed": 20261023,
+      "package_hash": "14885dd37fa4d902249cb2bbd0debe4ad402ef14b85e8603eae794c3ff5a1de9",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-candidate",
+      "task": "56",
+      "trial": 2,
+      "seed": 20261023,
+      "package_hash": "14885dd37fa4d902249cb2bbd0debe4ad402ef14b85e8603eae794c3ff5a1de9",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-baseline",
+      "task": "61",
+      "trial": 2,
+      "seed": 20261023,
+      "package_hash": "5b3bff4f374e77e5cd4b12e3b61c65e75ea7ed63bab05758222182bd4f771cc5",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-baseline",
+      "task": "9",
+      "trial": 2,
+      "seed": 20261023,
+      "package_hash": "5b3bff4f374e77e5cd4b12e3b61c65e75ea7ed63bab05758222182bd4f771cc5",
+      "reward": 0.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-candidate",
+      "task": "61",
+      "trial": 2,
+      "seed": 20261023,
+      "package_hash": "14885dd37fa4d902249cb2bbd0debe4ad402ef14b85e8603eae794c3ff5a1de9",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-candidate",
+      "task": "9",
+      "trial": 2,
+      "seed": 20261023,
+      "package_hash": "14885dd37fa4d902249cb2bbd0debe4ad402ef14b85e8603eae794c3ff5a1de9",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-baseline",
+      "task": "74",
+      "trial": 2,
+      "seed": 20261023,
+      "package_hash": "5b3bff4f374e77e5cd4b12e3b61c65e75ea7ed63bab05758222182bd4f771cc5",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-candidate",
+      "task": "74",
+      "trial": 2,
+      "seed": 20261023,
+      "package_hash": "14885dd37fa4d902249cb2bbd0debe4ad402ef14b85e8603eae794c3ff5a1de9",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-baseline",
+      "task": "32",
+      "trial": 2,
+      "seed": 20261023,
+      "package_hash": "5b3bff4f374e77e5cd4b12e3b61c65e75ea7ed63bab05758222182bd4f771cc5",
+      "reward": 0.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-baseline",
+      "task": "101",
+      "trial": 2,
+      "seed": 20261023,
+      "package_hash": "5b3bff4f374e77e5cd4b12e3b61c65e75ea7ed63bab05758222182bd4f771cc5",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-candidate",
+      "task": "101",
+      "trial": 2,
+      "seed": 20261023,
+      "package_hash": "14885dd37fa4d902249cb2bbd0debe4ad402ef14b85e8603eae794c3ff5a1de9",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-candidate",
+      "task": "32",
+      "trial": 2,
+      "seed": 20261023,
+      "package_hash": "14885dd37fa4d902249cb2bbd0debe4ad402ef14b85e8603eae794c3ff5a1de9",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-candidate",
+      "task": "86",
+      "trial": 2,
+      "seed": 20261023,
+      "package_hash": "14885dd37fa4d902249cb2bbd0debe4ad402ef14b85e8603eae794c3ff5a1de9",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-baseline",
+      "task": "86",
+      "trial": 2,
+      "seed": 20261023,
+      "package_hash": "5b3bff4f374e77e5cd4b12e3b61c65e75ea7ed63bab05758222182bd4f771cc5",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-baseline",
+      "task": "40",
+      "trial": 2,
+      "seed": 20261023,
+      "package_hash": "5b3bff4f374e77e5cd4b12e3b61c65e75ea7ed63bab05758222182bd4f771cc5",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-candidate",
+      "task": "40",
+      "trial": 2,
+      "seed": 20261023,
+      "package_hash": "14885dd37fa4d902249cb2bbd0debe4ad402ef14b85e8603eae794c3ff5a1de9",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-baseline",
+      "task": "79",
+      "trial": 2,
+      "seed": 20261023,
+      "package_hash": "5b3bff4f374e77e5cd4b12e3b61c65e75ea7ed63bab05758222182bd4f771cc5",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-candidate",
+      "task": "79",
+      "trial": 2,
+      "seed": 20261023,
+      "package_hash": "14885dd37fa4d902249cb2bbd0debe4ad402ef14b85e8603eae794c3ff5a1de9",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-baseline",
+      "task": "45",
+      "trial": 2,
+      "seed": 20261023,
+      "package_hash": "5b3bff4f374e77e5cd4b12e3b61c65e75ea7ed63bab05758222182bd4f771cc5",
+      "reward": 0.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-baseline",
+      "task": "60",
+      "trial": 2,
+      "seed": 20261023,
+      "package_hash": "5b3bff4f374e77e5cd4b12e3b61c65e75ea7ed63bab05758222182bd4f771cc5",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-candidate",
+      "task": "45",
+      "trial": 2,
+      "seed": 20261023,
+      "package_hash": "14885dd37fa4d902249cb2bbd0debe4ad402ef14b85e8603eae794c3ff5a1de9",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-baseline",
+      "task": "68",
+      "trial": 2,
+      "seed": 20261023,
+      "package_hash": "5b3bff4f374e77e5cd4b12e3b61c65e75ea7ed63bab05758222182bd4f771cc5",
+      "reward": 0.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-candidate",
+      "task": "60",
+      "trial": 2,
+      "seed": 20261023,
+      "package_hash": "14885dd37fa4d902249cb2bbd0debe4ad402ef14b85e8603eae794c3ff5a1de9",
+      "reward": 0.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-candidate",
+      "task": "68",
+      "trial": 2,
+      "seed": 20261023,
+      "package_hash": "14885dd37fa4d902249cb2bbd0debe4ad402ef14b85e8603eae794c3ff5a1de9",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-candidate",
+      "task": "108",
+      "trial": 2,
+      "seed": 20261023,
+      "package_hash": "14885dd37fa4d902249cb2bbd0debe4ad402ef14b85e8603eae794c3ff5a1de9",
+      "reward": 0.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-baseline",
+      "task": "5",
+      "trial": 2,
+      "seed": 20261023,
+      "package_hash": "5b3bff4f374e77e5cd4b12e3b61c65e75ea7ed63bab05758222182bd4f771cc5",
+      "reward": 0.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-baseline",
+      "task": "108",
+      "trial": 2,
+      "seed": 20261023,
+      "package_hash": "5b3bff4f374e77e5cd4b12e3b61c65e75ea7ed63bab05758222182bd4f771cc5",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-candidate",
+      "task": "5",
+      "trial": 2,
+      "seed": 20261023,
+      "package_hash": "14885dd37fa4d902249cb2bbd0debe4ad402ef14b85e8603eae794c3ff5a1de9",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-baseline",
+      "task": "102",
+      "trial": 2,
+      "seed": 20261023,
+      "package_hash": "5b3bff4f374e77e5cd4b12e3b61c65e75ea7ed63bab05758222182bd4f771cc5",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-candidate",
+      "task": "102",
+      "trial": 2,
+      "seed": 20261023,
+      "package_hash": "14885dd37fa4d902249cb2bbd0debe4ad402ef14b85e8603eae794c3ff5a1de9",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-baseline",
+      "task": "65",
+      "trial": 2,
+      "seed": 20261023,
+      "package_hash": "5b3bff4f374e77e5cd4b12e3b61c65e75ea7ed63bab05758222182bd4f771cc5",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-candidate",
+      "task": "65",
+      "trial": 2,
+      "seed": 20261023,
+      "package_hash": "14885dd37fa4d902249cb2bbd0debe4ad402ef14b85e8603eae794c3ff5a1de9",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-baseline",
+      "task": "97",
+      "trial": 2,
+      "seed": 20261023,
+      "package_hash": "5b3bff4f374e77e5cd4b12e3b61c65e75ea7ed63bab05758222182bd4f771cc5",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-baseline",
+      "task": "49",
+      "trial": 3,
+      "seed": 20261024,
+      "package_hash": "5b3bff4f374e77e5cd4b12e3b61c65e75ea7ed63bab05758222182bd4f771cc5",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-candidate",
+      "task": "97",
+      "trial": 2,
+      "seed": 20261023,
+      "package_hash": "14885dd37fa4d902249cb2bbd0debe4ad402ef14b85e8603eae794c3ff5a1de9",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-candidate",
+      "task": "49",
+      "trial": 3,
+      "seed": 20261024,
+      "package_hash": "14885dd37fa4d902249cb2bbd0debe4ad402ef14b85e8603eae794c3ff5a1de9",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-baseline",
+      "task": "71",
+      "trial": 3,
+      "seed": 20261024,
+      "package_hash": "5b3bff4f374e77e5cd4b12e3b61c65e75ea7ed63bab05758222182bd4f771cc5",
+      "reward": 0.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-baseline",
+      "task": "33",
+      "trial": 3,
+      "seed": 20261024,
+      "package_hash": "5b3bff4f374e77e5cd4b12e3b61c65e75ea7ed63bab05758222182bd4f771cc5",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-candidate",
+      "task": "71",
+      "trial": 3,
+      "seed": 20261024,
+      "package_hash": "14885dd37fa4d902249cb2bbd0debe4ad402ef14b85e8603eae794c3ff5a1de9",
+      "reward": 0.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-baseline",
+      "task": "39",
+      "trial": 3,
+      "seed": 20261024,
+      "package_hash": "5b3bff4f374e77e5cd4b12e3b61c65e75ea7ed63bab05758222182bd4f771cc5",
+      "reward": 0.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-candidate",
+      "task": "33",
+      "trial": 3,
+      "seed": 20261024,
+      "package_hash": "14885dd37fa4d902249cb2bbd0debe4ad402ef14b85e8603eae794c3ff5a1de9",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-candidate",
+      "task": "39",
+      "trial": 3,
+      "seed": 20261024,
+      "package_hash": "14885dd37fa4d902249cb2bbd0debe4ad402ef14b85e8603eae794c3ff5a1de9",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-baseline",
+      "task": "27",
+      "trial": 3,
+      "seed": 20261024,
+      "package_hash": "5b3bff4f374e77e5cd4b12e3b61c65e75ea7ed63bab05758222182bd4f771cc5",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-candidate",
+      "task": "27",
+      "trial": 3,
+      "seed": 20261024,
+      "package_hash": "14885dd37fa4d902249cb2bbd0debe4ad402ef14b85e8603eae794c3ff5a1de9",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-baseline",
+      "task": "70",
+      "trial": 3,
+      "seed": 20261024,
+      "package_hash": "5b3bff4f374e77e5cd4b12e3b61c65e75ea7ed63bab05758222182bd4f771cc5",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-baseline",
+      "task": "26",
+      "trial": 3,
+      "seed": 20261024,
+      "package_hash": "5b3bff4f374e77e5cd4b12e3b61c65e75ea7ed63bab05758222182bd4f771cc5",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-candidate",
+      "task": "70",
+      "trial": 3,
+      "seed": 20261024,
+      "package_hash": "14885dd37fa4d902249cb2bbd0debe4ad402ef14b85e8603eae794c3ff5a1de9",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-candidate",
+      "task": "26",
+      "trial": 3,
+      "seed": 20261024,
+      "package_hash": "14885dd37fa4d902249cb2bbd0debe4ad402ef14b85e8603eae794c3ff5a1de9",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-baseline",
+      "task": "100",
+      "trial": 3,
+      "seed": 20261024,
+      "package_hash": "5b3bff4f374e77e5cd4b12e3b61c65e75ea7ed63bab05758222182bd4f771cc5",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-candidate",
+      "task": "100",
+      "trial": 3,
+      "seed": 20261024,
+      "package_hash": "14885dd37fa4d902249cb2bbd0debe4ad402ef14b85e8603eae794c3ff5a1de9",
+      "reward": 0.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-baseline",
+      "task": "36",
+      "trial": 3,
+      "seed": 20261024,
+      "package_hash": "5b3bff4f374e77e5cd4b12e3b61c65e75ea7ed63bab05758222182bd4f771cc5",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-baseline",
+      "task": "53",
+      "trial": 3,
+      "seed": 20261024,
+      "package_hash": "5b3bff4f374e77e5cd4b12e3b61c65e75ea7ed63bab05758222182bd4f771cc5",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-candidate",
+      "task": "36",
+      "trial": 3,
+      "seed": 20261024,
+      "package_hash": "14885dd37fa4d902249cb2bbd0debe4ad402ef14b85e8603eae794c3ff5a1de9",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-candidate",
+      "task": "53",
+      "trial": 3,
+      "seed": 20261024,
+      "package_hash": "14885dd37fa4d902249cb2bbd0debe4ad402ef14b85e8603eae794c3ff5a1de9",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-candidate",
+      "task": "51",
+      "trial": 3,
+      "seed": 20261024,
+      "package_hash": "14885dd37fa4d902249cb2bbd0debe4ad402ef14b85e8603eae794c3ff5a1de9",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-baseline",
+      "task": "51",
+      "trial": 3,
+      "seed": 20261024,
+      "package_hash": "5b3bff4f374e77e5cd4b12e3b61c65e75ea7ed63bab05758222182bd4f771cc5",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-baseline",
+      "task": "62",
+      "trial": 3,
+      "seed": 20261024,
+      "package_hash": "5b3bff4f374e77e5cd4b12e3b61c65e75ea7ed63bab05758222182bd4f771cc5",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-candidate",
+      "task": "62",
+      "trial": 3,
+      "seed": 20261024,
+      "package_hash": "14885dd37fa4d902249cb2bbd0debe4ad402ef14b85e8603eae794c3ff5a1de9",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-baseline",
+      "task": "38",
+      "trial": 3,
+      "seed": 20261024,
+      "package_hash": "5b3bff4f374e77e5cd4b12e3b61c65e75ea7ed63bab05758222182bd4f771cc5",
+      "reward": 0.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-candidate",
+      "task": "38",
+      "trial": 3,
+      "seed": 20261024,
+      "package_hash": "14885dd37fa4d902249cb2bbd0debe4ad402ef14b85e8603eae794c3ff5a1de9",
+      "reward": 0.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-baseline",
+      "task": "77",
+      "trial": 3,
+      "seed": 20261024,
+      "package_hash": "5b3bff4f374e77e5cd4b12e3b61c65e75ea7ed63bab05758222182bd4f771cc5",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-candidate",
+      "task": "77",
+      "trial": 3,
+      "seed": 20261024,
+      "package_hash": "14885dd37fa4d902249cb2bbd0debe4ad402ef14b85e8603eae794c3ff5a1de9",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-baseline",
+      "task": "18",
+      "trial": 3,
+      "seed": 20261024,
+      "package_hash": "5b3bff4f374e77e5cd4b12e3b61c65e75ea7ed63bab05758222182bd4f771cc5",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-candidate",
+      "task": "18",
+      "trial": 3,
+      "seed": 20261024,
+      "package_hash": "14885dd37fa4d902249cb2bbd0debe4ad402ef14b85e8603eae794c3ff5a1de9",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-baseline",
+      "task": "64",
+      "trial": 3,
+      "seed": 20261024,
+      "package_hash": "5b3bff4f374e77e5cd4b12e3b61c65e75ea7ed63bab05758222182bd4f771cc5",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-candidate",
+      "task": "64",
+      "trial": 3,
+      "seed": 20261024,
+      "package_hash": "14885dd37fa4d902249cb2bbd0debe4ad402ef14b85e8603eae794c3ff5a1de9",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-baseline",
+      "task": "12",
+      "trial": 3,
+      "seed": 20261024,
+      "package_hash": "5b3bff4f374e77e5cd4b12e3b61c65e75ea7ed63bab05758222182bd4f771cc5",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-candidate",
+      "task": "12",
+      "trial": 3,
+      "seed": 20261024,
+      "package_hash": "14885dd37fa4d902249cb2bbd0debe4ad402ef14b85e8603eae794c3ff5a1de9",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-candidate",
+      "task": "42",
+      "trial": 3,
+      "seed": 20261024,
+      "package_hash": "14885dd37fa4d902249cb2bbd0debe4ad402ef14b85e8603eae794c3ff5a1de9",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-baseline",
+      "task": "90",
+      "trial": 3,
+      "seed": 20261024,
+      "package_hash": "5b3bff4f374e77e5cd4b12e3b61c65e75ea7ed63bab05758222182bd4f771cc5",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-baseline",
+      "task": "42",
+      "trial": 3,
+      "seed": 20261024,
+      "package_hash": "5b3bff4f374e77e5cd4b12e3b61c65e75ea7ed63bab05758222182bd4f771cc5",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-baseline",
+      "task": "17",
+      "trial": 3,
+      "seed": 20261024,
+      "package_hash": "5b3bff4f374e77e5cd4b12e3b61c65e75ea7ed63bab05758222182bd4f771cc5",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-candidate",
+      "task": "17",
+      "trial": 3,
+      "seed": 20261024,
+      "package_hash": "14885dd37fa4d902249cb2bbd0debe4ad402ef14b85e8603eae794c3ff5a1de9",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-candidate",
+      "task": "90",
+      "trial": 3,
+      "seed": 20261024,
+      "package_hash": "14885dd37fa4d902249cb2bbd0debe4ad402ef14b85e8603eae794c3ff5a1de9",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-baseline",
+      "task": "111",
+      "trial": 3,
+      "seed": 20261024,
+      "package_hash": "5b3bff4f374e77e5cd4b12e3b61c65e75ea7ed63bab05758222182bd4f771cc5",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-baseline",
+      "task": "94",
+      "trial": 3,
+      "seed": 20261024,
+      "package_hash": "5b3bff4f374e77e5cd4b12e3b61c65e75ea7ed63bab05758222182bd4f771cc5",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-candidate",
+      "task": "94",
+      "trial": 3,
+      "seed": 20261024,
+      "package_hash": "14885dd37fa4d902249cb2bbd0debe4ad402ef14b85e8603eae794c3ff5a1de9",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-candidate",
+      "task": "55",
+      "trial": 3,
+      "seed": 20261024,
+      "package_hash": "14885dd37fa4d902249cb2bbd0debe4ad402ef14b85e8603eae794c3ff5a1de9",
+      "reward": 0.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-candidate",
+      "task": "111",
+      "trial": 3,
+      "seed": 20261024,
+      "package_hash": "14885dd37fa4d902249cb2bbd0debe4ad402ef14b85e8603eae794c3ff5a1de9",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-baseline",
+      "task": "55",
+      "trial": 3,
+      "seed": 20261024,
+      "package_hash": "5b3bff4f374e77e5cd4b12e3b61c65e75ea7ed63bab05758222182bd4f771cc5",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-candidate",
+      "task": "56",
+      "trial": 3,
+      "seed": 20261024,
+      "package_hash": "14885dd37fa4d902249cb2bbd0debe4ad402ef14b85e8603eae794c3ff5a1de9",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-baseline",
+      "task": "61",
+      "trial": 3,
+      "seed": 20261024,
+      "package_hash": "5b3bff4f374e77e5cd4b12e3b61c65e75ea7ed63bab05758222182bd4f771cc5",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-baseline",
+      "task": "56",
+      "trial": 3,
+      "seed": 20261024,
+      "package_hash": "5b3bff4f374e77e5cd4b12e3b61c65e75ea7ed63bab05758222182bd4f771cc5",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-candidate",
+      "task": "61",
+      "trial": 3,
+      "seed": 20261024,
+      "package_hash": "14885dd37fa4d902249cb2bbd0debe4ad402ef14b85e8603eae794c3ff5a1de9",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-baseline",
+      "task": "9",
+      "trial": 3,
+      "seed": 20261024,
+      "package_hash": "5b3bff4f374e77e5cd4b12e3b61c65e75ea7ed63bab05758222182bd4f771cc5",
+      "reward": 0.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-candidate",
+      "task": "9",
+      "trial": 3,
+      "seed": 20261024,
+      "package_hash": "14885dd37fa4d902249cb2bbd0debe4ad402ef14b85e8603eae794c3ff5a1de9",
+      "reward": 0.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-baseline",
+      "task": "74",
+      "trial": 3,
+      "seed": 20261024,
+      "package_hash": "5b3bff4f374e77e5cd4b12e3b61c65e75ea7ed63bab05758222182bd4f771cc5",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-baseline",
+      "task": "32",
+      "trial": 3,
+      "seed": 20261024,
+      "package_hash": "5b3bff4f374e77e5cd4b12e3b61c65e75ea7ed63bab05758222182bd4f771cc5",
+      "reward": 0.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-candidate",
+      "task": "74",
+      "trial": 3,
+      "seed": 20261024,
+      "package_hash": "14885dd37fa4d902249cb2bbd0debe4ad402ef14b85e8603eae794c3ff5a1de9",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-candidate",
+      "task": "32",
+      "trial": 3,
+      "seed": 20261024,
+      "package_hash": "14885dd37fa4d902249cb2bbd0debe4ad402ef14b85e8603eae794c3ff5a1de9",
+      "reward": 0.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-baseline",
+      "task": "86",
+      "trial": 3,
+      "seed": 20261024,
+      "package_hash": "5b3bff4f374e77e5cd4b12e3b61c65e75ea7ed63bab05758222182bd4f771cc5",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-baseline",
+      "task": "101",
+      "trial": 3,
+      "seed": 20261024,
+      "package_hash": "5b3bff4f374e77e5cd4b12e3b61c65e75ea7ed63bab05758222182bd4f771cc5",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-candidate",
+      "task": "101",
+      "trial": 3,
+      "seed": 20261024,
+      "package_hash": "14885dd37fa4d902249cb2bbd0debe4ad402ef14b85e8603eae794c3ff5a1de9",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-candidate",
+      "task": "86",
+      "trial": 3,
+      "seed": 20261024,
+      "package_hash": "14885dd37fa4d902249cb2bbd0debe4ad402ef14b85e8603eae794c3ff5a1de9",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-candidate",
+      "task": "40",
+      "trial": 3,
+      "seed": 20261024,
+      "package_hash": "14885dd37fa4d902249cb2bbd0debe4ad402ef14b85e8603eae794c3ff5a1de9",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-baseline",
+      "task": "40",
+      "trial": 3,
+      "seed": 20261024,
+      "package_hash": "5b3bff4f374e77e5cd4b12e3b61c65e75ea7ed63bab05758222182bd4f771cc5",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-baseline",
+      "task": "79",
+      "trial": 3,
+      "seed": 20261024,
+      "package_hash": "5b3bff4f374e77e5cd4b12e3b61c65e75ea7ed63bab05758222182bd4f771cc5",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-candidate",
+      "task": "79",
+      "trial": 3,
+      "seed": 20261024,
+      "package_hash": "14885dd37fa4d902249cb2bbd0debe4ad402ef14b85e8603eae794c3ff5a1de9",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-baseline",
+      "task": "45",
+      "trial": 3,
+      "seed": 20261024,
+      "package_hash": "5b3bff4f374e77e5cd4b12e3b61c65e75ea7ed63bab05758222182bd4f771cc5",
+      "reward": 0.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-candidate",
+      "task": "60",
+      "trial": 3,
+      "seed": 20261024,
+      "package_hash": "14885dd37fa4d902249cb2bbd0debe4ad402ef14b85e8603eae794c3ff5a1de9",
+      "reward": 0.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-baseline",
+      "task": "60",
+      "trial": 3,
+      "seed": 20261024,
+      "package_hash": "5b3bff4f374e77e5cd4b12e3b61c65e75ea7ed63bab05758222182bd4f771cc5",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-candidate",
+      "task": "45",
+      "trial": 3,
+      "seed": 20261024,
+      "package_hash": "14885dd37fa4d902249cb2bbd0debe4ad402ef14b85e8603eae794c3ff5a1de9",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-baseline",
+      "task": "68",
+      "trial": 3,
+      "seed": 20261024,
+      "package_hash": "5b3bff4f374e77e5cd4b12e3b61c65e75ea7ed63bab05758222182bd4f771cc5",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-baseline",
+      "task": "108",
+      "trial": 3,
+      "seed": 20261024,
+      "package_hash": "5b3bff4f374e77e5cd4b12e3b61c65e75ea7ed63bab05758222182bd4f771cc5",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-candidate",
+      "task": "68",
+      "trial": 3,
+      "seed": 20261024,
+      "package_hash": "14885dd37fa4d902249cb2bbd0debe4ad402ef14b85e8603eae794c3ff5a1de9",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-baseline",
+      "task": "5",
+      "trial": 3,
+      "seed": 20261024,
+      "package_hash": "5b3bff4f374e77e5cd4b12e3b61c65e75ea7ed63bab05758222182bd4f771cc5",
+      "reward": 0.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-candidate",
+      "task": "5",
+      "trial": 3,
+      "seed": 20261024,
+      "package_hash": "14885dd37fa4d902249cb2bbd0debe4ad402ef14b85e8603eae794c3ff5a1de9",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-baseline",
+      "task": "102",
+      "trial": 3,
+      "seed": 20261024,
+      "package_hash": "5b3bff4f374e77e5cd4b12e3b61c65e75ea7ed63bab05758222182bd4f771cc5",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-candidate",
+      "task": "108",
+      "trial": 3,
+      "seed": 20261024,
+      "package_hash": "14885dd37fa4d902249cb2bbd0debe4ad402ef14b85e8603eae794c3ff5a1de9",
+      "reward": 0.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-candidate",
+      "task": "102",
+      "trial": 3,
+      "seed": 20261024,
+      "package_hash": "14885dd37fa4d902249cb2bbd0debe4ad402ef14b85e8603eae794c3ff5a1de9",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-baseline",
+      "task": "65",
+      "trial": 3,
+      "seed": 20261024,
+      "package_hash": "5b3bff4f374e77e5cd4b12e3b61c65e75ea7ed63bab05758222182bd4f771cc5",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-baseline",
+      "task": "97",
+      "trial": 3,
+      "seed": 20261024,
+      "package_hash": "5b3bff4f374e77e5cd4b12e3b61c65e75ea7ed63bab05758222182bd4f771cc5",
+      "reward": 0.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-candidate",
+      "task": "65",
+      "trial": 3,
+      "seed": 20261024,
+      "package_hash": "14885dd37fa4d902249cb2bbd0debe4ad402ef14b85e8603eae794c3ff5a1de9",
+      "reward": 1.0,
+      "termination": "user_stop"
+    },
+    {
+      "phase": "test-candidate",
+      "task": "97",
+      "trial": 3,
+      "seed": 20261024,
+      "package_hash": "14885dd37fa4d902249cb2bbd0debe4ad402ef14b85e8603eae794c3ff5a1de9",
+      "reward": 1.0,
+      "termination": "user_stop"
+    }
+  ]
+}

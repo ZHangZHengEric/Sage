@@ -110,6 +110,10 @@ python -m app.v2.server
 ```python
 """Set MODEL_API_KEY and replace your-model below; no sage.yaml file is needed."""
 
+from typing import cast
+
+from sagents.v2.composition.loaded_agents import ApplicationEntrypoint
+
 import asyncio
 from uuid import uuid4
 
@@ -155,7 +159,7 @@ async def main(*, runtime=None, registrations=()):
         context = RequestContext(actor=ActorRef(
             principal_id="user-1", principal_type=PrincipalType.USER,
         ))
-        stream = await app.entrypoint().run_stream(StartRun(
+        stream = await cast(ApplicationEntrypoint, app.entrypoint()).run_stream(StartRun(
             agent_id=agent.id,
             input=(InputItem(role="user", content=(TextBlock(text="Say hello!"),)),),
             resolved_spec_hash=agent.composition_hash,
@@ -207,18 +211,18 @@ python quickstart.py
 </details>
 
 <details>
-<summary>📊 实验展示（示例占位，非实测）</summary>
+<summary>📊 实验展示</summary>
 
-**以下为排版示例，全部数字均为占位，非实测结果。**
+τ²-bench v1.0.1 retail，目标模型 gpt-5.6-luna。默认版本与冻结后的 RSI 候选各完成 40 个 test 任务、每题四次测量，共 320 次。
 
-| 示例任务 | 基线成功率 | RSI 后 | 变化 | 提案轮数 |
-| --- | ---: | ---: | ---: | ---: |
-| 基于目标的任务 · 占位 | 52% | 71% | +19 个百分点 | 5 |
-| 整理后的历史任务 · 占位 | 58% | 79% | +21 个百分点 | 5 |
+| 指标 | 默认版本 | RSI 后 | 提升 |
+| --- | ---: | ---: | ---: |
+| 任务成功率 pass¹ | 75.000% | 83.125% | +8.125 个百分点 |
+| 四次全成功率 pass⁴ | 57.50% | 65.00% | +7.50 个百分点 |
 
-正式结果需附模型、数据集划分、样本量、重复次数、成本及运行证据。
+Tuner、用户模拟与自然语言判分使用 gpt-6.1-sol。候选由 train/dev 选定，test 不参与选版；28 次失败变成功，15 次成功变失败，均计入结果。本地探索性测量不代表官方榜单成绩。
 
-实验入口：[真实模型领域实验](examples/v2/optimizer_domains.py) · [τ-bench 自定义实验](examples/v2/optimizer_tau_bench.py)。真实模型调用可能产生费用。
+[实验说明](docs/zh/applications/TAU_BENCH.md) · [逐次测量与统计证据](docs/assets/benchmarks/tau-retail-rsi.json)
 
 </details>
 

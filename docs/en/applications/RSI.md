@@ -47,6 +47,12 @@ unseen-task quality. Freeze candidates before an external benchmark measurement.
 Explicit `validation_case_count=None` preserves the historical fixed-suite and
 optional final-evaluation path for legacy SDK clients only.
 
+Desktop now defaults to 12 independently generated test cases alongside 24 fixed dev cases and expanding training cases. Configure `human_test_count` from 0 (off) to 100, or supply `human_test_suite` with `split=test`. The API defaults to 0 for existing clients.
+
+`HumanTestObserver` consumes baseline and round events, measures the retained package in fresh sessions, and stores results outside the optimizer report and Agent history. No test score reaches proposal, selection, or stopping logic. The dashboard shows train/dev/test curves and selectable per-round dot matrices; missing or failed measurements stay unscored. Both workloads share the configured call-concurrency ceiling. Human steering based on test outcomes makes that test development evidence and must be disclosed.
+
+See the [τ-bench experiment protocol](TAU_BENCH.md) for external benchmark measurement.
+
 ## Python API and editable scope
 
 See the [complete API and examples](https://github.com/ZHangZHengEric/Sage/blob/main/sagents/v2/optimization/README.md).
@@ -117,10 +123,3 @@ Skill/tool final fixtures were reused from a previous study and measure regressi
 only the clarified joint run used newly sealed final fixtures. Keep failed runs and
 audit rejections when assessing these results. They do not certify general RSI
 reliability.
-
-
-## Human-only test observations
-
-Desktop now defaults to 12 independently generated test cases alongside 24 fixed dev cases and expanding training cases. Configure `human_test_count` from 0 (off) to 100, or supply `human_test_suite` with `split=test`. The API defaults to 0 for existing clients.
-
-`HumanTestObserver` consumes baseline and round events, measures the retained package in fresh sessions, and stores results outside the optimizer report and Agent history. No test score reaches proposal, selection, or stopping logic. The dashboard shows train/dev/test curves and selectable per-round dot matrices; missing or failed measurements stay unscored. Both workloads share the configured call-concurrency ceiling. Human steering based on test outcomes makes that test development evidence and must be disclosed.

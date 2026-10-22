@@ -1,3 +1,14 @@
+---
+layout: default
+title: τ-bench 与 RSI 实验
+parent: 应用入口
+nav_order: 6
+lang: zh
+ref: v2-applications-TAU_BENCH
+---
+
+{% include lang_switcher.html %}
+
 # τ-bench 数据集与 Sage RSI 实验说明
 
 编写日期 2026 年 10 月 21 日；结果更新于 2026 年 10 月 22 日

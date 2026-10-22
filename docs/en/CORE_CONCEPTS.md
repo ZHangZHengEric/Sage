@@ -20,6 +20,20 @@ ref: v2-CORE_CONCEPTS
 | Interaction | A durable request for approval or user input. |
 | Host | Desktop, Server, or your application; owns identity, credentials, UI, and conversation indexing. |
 
+## RSI responsibilities
+
+| Role | Responsibility |
+| --- | --- |
+| Designer | Design fixed dev and training suites; extend training challenges against the current version. |
+| Runner | Execute a target version in fresh Sessions and retain actual output and tool evidence. |
+| Evaluator | Independently grade each case against its rubric in a separate Session; assemble training feedback after required evaluations finish. |
+| Tuner | Use training evidence and anonymous dev scores to propose an authorized Package patch. |
+| Reviewer | Audit suite alignment and candidate goal/permission boundaries separately; reviews do not replace execution-based evaluation. |
+
+The baseline covers the initial suite. Later rounds normally evaluate new train cases and retain existing evidence for the corresponding version; candidates are compared on the same accumulated train and fixed dev. Names identify responsibilities. Evaluation and tuning use separate Sessions; reusing a default model or Package does not imply shared conversation context.
+
+RSI does not train model weights or automatically activate candidates. See the [workflow and support boundaries](applications/RSI.md).
+
 ## Execution
 
 `StartRun → context assembly → model → authorized tools → further steps → completion or suspension`.

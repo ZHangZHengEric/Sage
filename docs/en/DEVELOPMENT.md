@@ -58,3 +58,5 @@ python3 docs/scripts/check_language_nav.py
 The Jekyll build requires Ruby and the gems in `docs/Gemfile`. Current pages must have matching language metadata, valid local links, and a v2 source reference. Historical files belong in `docs/archive/`, which is excluded from publication. Do not turn old audit pass counts into current readiness guarantees.
 
 The checks compare English/Chinese page sets, navigation metadata, heading structure, code examples, and link targets. Route and environment-variable inventories are checked against current Server source. After building, every published language page is checked for a complete, consistent sidebar and an exact language-switch counterpart.
+
+Keep docs focused on Sage usage, SDKs, protocols, architecture, and operations. Customer sales/delivery proposals, one-off audits, phase-specific validation, and temporary research notes do not belong in docs; consolidate still-valid conclusions into the corresponding reference page. Separate legacy guides from the current version and ground examples/support claims in the implementation.

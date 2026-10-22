@@ -34,6 +34,10 @@ Windows 使用 `py -3.12 -m venv .venv` 创建环境，在 PowerShell 中执行 
 ```python
 """Set MODEL_API_KEY and replace your-model below; no sage.yaml file is needed."""
 
+from typing import cast
+
+from sagents.v2.composition.loaded_agents import ApplicationEntrypoint
+
 import asyncio
 from uuid import uuid4
 
@@ -79,7 +83,7 @@ async def main(*, runtime=None, registrations=()):
         context = RequestContext(actor=ActorRef(
             principal_id="user-1", principal_type=PrincipalType.USER,
         ))
-        stream = await app.entrypoint().run_stream(StartRun(
+        stream = await cast(ApplicationEntrypoint, app.entrypoint()).run_stream(StartRun(
             agent_id=agent.id,
             input=(InputItem(role="user", content=(TextBlock(text="Say hello!"),)),),
             resolved_spec_hash=agent.composition_hash,

@@ -44,6 +44,24 @@ Replace IDs appropriately. A new logical request needs a new Run ID; reconnectio
 
 The agent list uses `GET /api/agents/summary` for the current user. Admins use `GET /api/admin/agents` to retrieve all owners in one request. Summaries contain `id`, `name`, `description`, `model_id`, `model_name`, `tool_count`, and `skill_count`; admin summaries also contain `user_id` and `username`. Fetch the agent detail endpoint for full configuration.
 
+## External runs and workspaces
+
+External routes require a target-bound `Authorization: Bearer <API Key>` and a `SAGE-TENANT-ID` header. Reads require `a2a:read`, writes/execution require `a2a:invoke`, and interaction replies require `a2a:approve`. The server verifies the key binding, ownership, and grants; tenant, Session, and Run IDs are not credentials.
+
+`PUT /api/agents/{agent_id}/workspace/files` imports `{directory, files}` with base64 file contents. It creates missing files only, accepts identical content again, and returns 409 on conflicts. Limits are 256 files, 4 MiB per file, and 16 MiB total. DELETE on the same route checks paths and workspace idleness.
+
+`POST /api/agents/{agent_id}/runs?workspace_path=...` accepts AG-UI input and optional `runtimeContext` for this Run without modifying shared configuration. Reads, replies, cancellation, and downloads identify the exact `thread_id` and `run_id` and check ownership; replies also require the expected interaction ID and revision.
+
+File downloads snapshot the Run-bound working directory, limited to 32 MiB and 512 entries. A directory superseded by a newer Run in the same Session returns 409; changes during packaging may return 503. Callers validate artifacts and Run identity. Sage does not interpret downstream business manifests or build customer projects.
+
+## Guidance and Skills sync
+
+The ZIP-upload mode of `PUT /api/agents/{agent_id}/guidance` uses multipart `prompt` and `files`, accepts 1–32 complete Skill ZIPs, and validates/reports each item. This upload branch does not require a user identity and must be exposed only to trusted callers; do not confuse it with Bearer Key-protected external Run routes.
+
+`sync_bound=true` synchronizes existing bindings, requires the authenticated configuration owner, and cannot include prompt or ZIP uploads. Sync preserves models, tools, and execution policy; consult the HTTP schema and host implementation for configuration/resource activation behavior.
+
+[Machine credential checks](../../../app/v2/server/identity/external.py) · [Run and workspace routes](../../../app/v2/server/routers/conversations.py) · [Sync routes](../../../app/v2/server/routers/agents.py)
+
 ## Route inventory
 
 The inventory below follows the registered router source. Jaeger routes depend on host configuration; inbound A2A routes depend on the SDK extra. Use OpenAPI for full schemas rather than treating this list as a client SDK.

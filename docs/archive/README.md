@@ -1,7 +1,5 @@
-# Historical documentation — not current product guidance
+# Legacy Sage reference
 
-This directory preserves v1 references, research, and proposals with remaining product work. They may describe old APIs or behavior and are not current v2 instructions. Superseded v1-to-v2 refactor plans and intermediate audit/validation records have been removed; Git history retains them.
+This directory retains Sage v1 usage, API, runtime architecture, and memory references that still help maintain the legacy source. It is excluded from the documentation site and search; use the [English](../en/README.md) or [简体中文](../zh/README.md) docs for the current runtime.
 
-These files are excluded from the published documentation and search. For supported behavior, start with [English](../en/README.md) or [简体中文](../zh/README.md). Old application sources remain in the repository; moving their documentation does not remove those applications.
-
-Remaining implementation and validation work is indexed in [English](../en/architecture/pending-work.md) and [简体中文](../zh/architecture/pending-work.md). Retained proposals describe their original targets; current product references define what is implemented.
+Customer sales/delivery proposals, phase-specific validation records, one-off diagnostics, external-project studies, and superseded design drafts are not retained here. Git history preserves removed documents. Current implementation boundaries belong in the [support reference](../en/architecture/support-boundaries.md), not historical pass counts or unfinished plans.
